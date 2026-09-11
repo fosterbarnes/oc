@@ -1,0 +1,8 @@
+{
+  "name": "@opencode-ai/cursor-runtime",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test test/main.test.mjs"
+  }
+}

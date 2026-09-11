@@ -10,7 +10,7 @@ import fsNode from "fs/promises"
 import { Flag } from "@opencode-ai/core/flag/flag"
 import { Auth } from "../auth"
 import { Env } from "../env"
-import { applyEdits, modify } from "jsonc-parser"
+import { applyEdits, modify, parse } from "jsonc-parser"
 import { InstallationLocal, InstallationVersion } from "@opencode-ai/core/installation/version"
 import { existsSync } from "fs"
 import { Account } from "@/account/account"
@@ -60,6 +60,39 @@ function normalizeLoadedConfig(data: unknown) {
   delete copy.keybinds
   delete copy.tui
   return copy
+}
+
+function isLegacyCursorPlugin(spec: ConfigPluginV1.Spec): boolean {
+  const value = ConfigPlugin.pluginSpecifier(spec).replaceAll("\\", "/").toLowerCase()
+  return value.includes("cursor-opencode-provider@0.6.2") || value.includes("opencursor/opencode-plugin.ts")
+}
+
+async function migrateLegacyCursorPlugins(filepath: string) {
+  if (!existsSync(filepath) || !path.extname(filepath)) return
+  const text = await fsNode.readFile(filepath, "utf8")
+  const data = parse(text) as { plugin?: unknown }
+  if (Array.isArray(data.plugin)) {
+    const next = data.plugin.filter((spec) => {
+      if (typeof spec !== "string" && !Array.isArray(spec)) return true
+      return !isLegacyCursorPlugin(spec as ConfigPluginV1.Spec)
+    })
+    if (next.length === data.plugin.length) return
+    await fsNode.writeFile(
+      filepath,
+      applyEdits(
+        text,
+        modify(text, ["plugin"], next.length ? next : undefined, {
+          formattingOptions: { insertSpaces: true, tabSize: 2 },
+        }),
+      ),
+    )
+    return
+  }
+  if (typeof data.plugin !== "string" || !isLegacyCursorPlugin(data.plugin)) return
+  await fsNode.writeFile(
+    filepath,
+    applyEdits(text, modify(text, ["plugin"], undefined, { formattingOptions: { insertSpaces: true, tabSize: 2 } })),
+  )
 }
 
 async function substituteWellKnownRemoteConfig(input: {
@@ -426,7 +459,6 @@ const layer = Layer.effect(
         result.agent = result.agent || {}
         result.mode = result.mode || {}
         result.plugin = result.plugin || []
-
         const directories = yield* ConfigPaths.directories(ctx.directory, ctx.worktree)
 
         if (Flag.OPENCODE_CONFIG_DIR) {
@@ -544,6 +576,22 @@ const layer = Layer.effect(
               dir: path.dirname(managed.source),
               source: managed.source,
             }),
+          )
+        }
+
+        const legacyPluginSources = (result.plugin_origins ?? [])
+          .filter((origin) => isLegacyCursorPlugin(origin.spec))
+          .map((origin) => origin.source)
+        const activePlugins = result.plugin?.filter((spec) => !isLegacyCursorPlugin(spec)) ?? []
+        if (activePlugins.length !== (result.plugin?.length ?? 0)) {
+          result.plugin = activePlugins
+          result.plugin_origins = result.plugin_origins?.filter((origin) => !isLegacyCursorPlugin(origin.spec))
+          const files = new Set([
+            ...legacyPluginSources,
+            ...["config.json", "opencode.json", "opencode.jsonc"].map((file) => path.join(Global.Path.config, file)),
+          ])
+          yield* Effect.promise(() =>
+            Promise.all([...files].filter((file) => existsSync(file)).map(migrateLegacyCursorPlugins)),
           )
         }
 

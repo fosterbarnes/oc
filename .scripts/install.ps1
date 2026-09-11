@@ -9,6 +9,7 @@ $ErrorActionPreference = 'Stop'
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $binary = Join-Path $repoRoot 'packages\opencode\dist\opencode-windows-x64\bin\opencode.exe'
 $runtime = Join-Path $repoRoot 'packages\opencode\dist\opencode-windows-x64\bin\agentify-runtime'
+$cursorRuntime = Join-Path $repoRoot 'packages\opencode\dist\opencode-windows-x64\bin\cursor-runtime'
 
 # Custom fork: installation builds the current binary by default; -NoBuild is the opt-out.
 if (-not $NoBuild) {
@@ -25,6 +26,9 @@ if (!(Test-Path -LiteralPath $binary)) {
 }
 if (!(Test-Path -LiteralPath $runtime -PathType Container)) {
     throw "Packaged Agentify runtime not found: $runtime. Run build.ps1 first."
+}
+if (!(Test-Path -LiteralPath $cursorRuntime -PathType Container)) {
+    throw "Packaged Cursor runtime not found: $cursorRuntime. Run build.ps1 first."
 }
 
 $installDir = 'C:\Users\user\Apps\opencode'
@@ -46,6 +50,7 @@ if ($running) {
 try {
     Copy-Item -LiteralPath $binary -Destination $destination -Force
     Copy-Item -LiteralPath $runtime -Destination $installDir -Recurse -Force
+    Copy-Item -LiteralPath $cursorRuntime -Destination $installDir -Recurse -Force
     foreach ($alias in $obsoleteAliases) {
         $aliasPath = Join-Path $installDir $alias
         if (Test-Path -LiteralPath $aliasPath) { Remove-Item -LiteralPath $aliasPath -Force }

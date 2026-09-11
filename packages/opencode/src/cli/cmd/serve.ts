@@ -4,6 +4,7 @@ import { withNetworkOptions, resolveNetworkOptions } from "../network"
 import { Flag } from "@opencode-ai/core/flag/flag"
 import { ServerLifecycle } from "@/server/lifecycle"
 import { stop as stopAgentify } from "@/provider/agentify"
+import { stopCursorProxy } from "@/provider/cursor/runtime"
 import { spawn } from "node:child_process"
 
 function serveArguments() {
@@ -26,6 +27,7 @@ function stopAndExit(server: { stop: (close?: boolean) => Promise<void> }, resta
   void server
     .stop(true)
     .then(() => stopAgentify())
+    .then(() => stopCursorProxy())
     .then(() => {
       if (restart) restartProcess()
       process.exit(0)

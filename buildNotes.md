@@ -260,3 +260,32 @@ Startup animation
 ### User
 Repository location
 - Active OpenCode guidance now points to the checkout under `Documents\GitHub\oc`.
+
+---
+
+## 2026-09-10 (~current) - make Cursor a native optional provider
+
+### Agent
+- Imported the Cursor 0.6.2 provider/protocol source into `packages/opencode/src/provider/cursor` and kept V2 and archive checkout code out of the runtime path.
+- Added the native provider adapter, built-in plugin, lazy Node HTTP/2 proxy, config migration, Windows tool/version fixes, and compiled-runtime packaging.
+- Added focused Cursor provider coverage and preserved the upstream license/disclaimer notices.
+- Verification: Cursor/provider tests 6 pass; OpenCode typecheck passed; Windows single-target build passed; source and packaged proxy health checks passed; `node --check` and `git diff --check` passed.
+- Remaining: live Cursor authentication/request coverage was not run; unrelated config tests observe user-level instruction pollution in the test environment.
+
+## 2026-09-10 (~current) - validate Cursor proxy startup coalescing
+
+### Agent
+- Fixed the native supervisor's unavailable-health probe and ensured failed startup cleans up its child process.
+- Verification: concurrent supervisor startup passed; provider tests 6 pass; OpenCode typecheck passed; packaged runtime syntax and `git diff --check` passed.
+
+## 2026-09-10 (~current) - confirm installed Cursor integration
+
+### User
+- Installed the rebuilt Windows executable and confirmed the native Cursor path appears to be working.
+
+## 2026-09-10 (~current) - complete Cursor lifecycle verification
+
+### Agent
+- Added Cursor proxy cleanup to managed `serve` shutdown and a built-in Node runtime forwarding test.
+- Verification: Cursor tests 3 pass; runtime test 1 pass; provider tests 102 pass; config tests 2 pass; OpenCode typecheck passed; Windows single-target build passed; packaged runtime and proxy health checks passed; `git diff --check` passed.
+- Remaining: live Cursor authentication/request coverage was not run.
