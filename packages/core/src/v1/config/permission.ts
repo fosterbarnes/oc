@@ -30,8 +30,10 @@ const InputObject = Schema.StructWithRest(
     websearch: Schema.optional(Action),
     lsp: Schema.optional(Rule),
     doom_loop: Schema.optional(Action),
-    skill: Schema.optional(Rule),
-  }),
+     skill: Schema.optional(Rule),
+     session_complete: Schema.optional(Action),
+     session_failed: Schema.optional(Action),
+   }),
   [Schema.Record(Schema.String, Rule)],
 )
 

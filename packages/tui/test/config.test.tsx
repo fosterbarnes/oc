@@ -66,6 +66,13 @@ test("resolves host-neutral defaults", () => {
   expect(config.cursor).toBeUndefined()
 })
 
+test("keeps the full and oc command palettes on separate shortcuts", () => {
+  const config = resolve({}, { terminalSuspend: true })
+
+  expect(config.keybinds.get("command.palette.show")).toMatchObject([{ key: "ctrl+p" }])
+  expect(config.keybinds.get("oc.settings_palette")).toMatchObject([{ key: "ctrl+o" }])
+})
+
 test("resolves overrides without mutating input", () => {
   const input: TuiConfigInfo = {
     theme: "custom",
@@ -99,6 +106,25 @@ test("resolves a session move keybind", () => {
   const config = resolve({ keybinds: { session_move: "ctrl+o" } }, { terminalSuspend: true })
 
   expect(config.keybinds.get("session.move")).toMatchObject([{ key: "ctrl+o" }])
+})
+
+test("resolves the session completion keybind", () => {
+  const config = resolve({}, { terminalSuspend: true })
+
+  expect(config.keybinds.get("session.complete.toggle")).toMatchObject([{ key: "ctrl+shift+return" }])
+})
+
+test("resolves the session failure keybind", () => {
+  const config = resolve({}, { terminalSuspend: true })
+
+  expect(config.keybinds.get("session.failed.toggle")).toMatchObject([{ key: "ctrl+shift+backspace" }])
+})
+
+test("keeps cursor movement available with ctrl shift arrows", () => {
+  const config = resolve({}, { terminalSuspend: true })
+
+  expect(config.keybinds.get("input.move.up")).toMatchObject([{ key: "up,ctrl+shift+up" }])
+  expect(config.keybinds.get("input.move.down")).toMatchObject([{ key: "down,ctrl+shift+down" }])
 })
 
 test("disables suspend and assigns ctrl+z to undo when unsupported", () => {

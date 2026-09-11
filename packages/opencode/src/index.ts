@@ -1,36 +1,22 @@
 import yargs from "yargs"
 import { hideBin } from "yargs/helpers"
-import { RunCommand } from "./cli/cmd/run"
-import { GenerateCommand } from "./cli/cmd/generate"
-import { ConsoleCommand } from "./cli/cmd/account"
-import { ProvidersCommand } from "./cli/cmd/providers"
-import { AgentCommand } from "./cli/cmd/agent"
-import { UpgradeCommand } from "./cli/cmd/upgrade"
-import { UninstallCommand } from "./cli/cmd/uninstall"
-import { ModelsCommand } from "./cli/cmd/models"
 import { UI } from "./cli/ui"
 import { InstallationVersion } from "@opencode-ai/core/installation/version"
 import { FormatError } from "./cli/error"
-import { ServeCommand } from "./cli/cmd/serve"
-import { DebugCommand } from "./cli/cmd/debug"
-import { StatsCommand } from "./cli/cmd/stats"
-import { McpCommand } from "./cli/cmd/mcp"
-import { GithubCommand } from "./cli/cmd/github"
-import { ExportCommand } from "./cli/cmd/export"
-import { ImportCommand } from "./cli/cmd/import"
-import { AttachCommand } from "./cli/cmd/attach"
-import { TuiThreadCommand } from "./cli/cmd/tui"
-import { AcpCommand } from "./cli/cmd/acp"
 import { EOL } from "os"
-import { WebCommand } from "./cli/cmd/web"
-import { PrCommand } from "./cli/cmd/pr"
-import { SessionCommand } from "./cli/cmd/session"
-import { DbCommand } from "./cli/cmd/db"
 import { errorMessage } from "./util/error"
-import { PluginCommand } from "./cli/cmd/plug"
 import { Heap } from "./cli/heap"
+import { resolveCommandToLoad, type CommandToLoad } from "./cli/command-loader"
 
 const args = hideBin(process.argv)
+
+function needsAllCommands(args: readonly string[]) {
+  return args.includes("-h") || args.includes("--help") || args.includes("completion")
+}
+
+function needsNoCommands(args: readonly string[]) {
+  return args.includes("-v") || args.includes("--version")
+}
 
 function show(out: string) {
   const text = out.trimStart()
@@ -78,29 +64,115 @@ const cli = yargs(args)
   })
   .usage("")
   .completion("completion", "generate shell completion script")
-  .command(AcpCommand)
-  .command(McpCommand)
-  .command(TuiThreadCommand)
-  .command(AttachCommand)
-  .command(RunCommand)
-  .command(GenerateCommand)
-  .command(DebugCommand)
-  .command(ConsoleCommand)
-  .command(ProvidersCommand)
-  .command(AgentCommand)
-  .command(UpgradeCommand)
-  .command(UninstallCommand)
-  .command(ServeCommand)
-  .command(WebCommand)
-  .command(ModelsCommand)
-  .command(StatsCommand)
-  .command(ExportCommand)
-  .command(ImportCommand)
-  .command(GithubCommand)
-  .command(PrCommand)
-  .command(SessionCommand)
-  .command(PluginCommand)
-  .command(DbCommand)
+
+const commandLoaders = {
+  acp: async () => {
+    const { AcpCommand } = await import("./cli/cmd/acp")
+    cli.command(AcpCommand)
+  },
+  mcp: async () => {
+    const { McpCommand } = await import("./cli/cmd/mcp")
+    cli.command(McpCommand)
+  },
+  tui: async () => {
+    const { TuiThreadCommand } = await import("./cli/cmd/tui")
+    cli.command(TuiThreadCommand)
+  },
+  attach: async () => {
+    const { AttachCommand } = await import("./cli/cmd/attach")
+    cli.command(AttachCommand)
+  },
+  run: async () => {
+    const { RunCommand } = await import("./cli/cmd/run")
+    cli.command(RunCommand)
+  },
+  generate: async () => {
+    const { GenerateCommand } = await import("./cli/cmd/generate")
+    cli.command(GenerateCommand)
+  },
+  debug: async () => {
+    const { DebugCommand } = await import("./cli/cmd/debug")
+    cli.command(DebugCommand)
+  },
+  console: async () => {
+    const { ConsoleCommand } = await import("./cli/cmd/account")
+    cli.command(ConsoleCommand)
+  },
+  providers: async () => {
+    const { ProvidersCommand } = await import("./cli/cmd/providers")
+    cli.command(ProvidersCommand)
+  },
+  agent: async () => {
+    const { AgentCommand } = await import("./cli/cmd/agent")
+    cli.command(AgentCommand)
+  },
+  upgrade: async () => {
+    const { UpgradeCommand } = await import("./cli/cmd/upgrade")
+    cli.command(UpgradeCommand)
+  },
+  uninstall: async () => {
+    const { UninstallCommand } = await import("./cli/cmd/uninstall")
+    cli.command(UninstallCommand)
+  },
+  serve: async () => {
+    const { ServeCommand } = await import("./cli/cmd/serve")
+    cli.command(ServeCommand)
+  },
+  web: async () => {
+    const { WebCommand } = await import("./cli/cmd/web")
+    cli.command(WebCommand)
+  },
+  models: async () => {
+    const { ModelsCommand } = await import("./cli/cmd/models")
+    cli.command(ModelsCommand)
+  },
+  stats: async () => {
+    const { StatsCommand } = await import("./cli/cmd/stats")
+    cli.command(StatsCommand)
+  },
+  export: async () => {
+    const { ExportCommand } = await import("./cli/cmd/export")
+    cli.command(ExportCommand)
+  },
+  import: async () => {
+    const { ImportCommand } = await import("./cli/cmd/import")
+    cli.command(ImportCommand)
+  },
+  github: async () => {
+    const { GithubCommand } = await import("./cli/cmd/github")
+    cli.command(GithubCommand)
+  },
+  pr: async () => {
+    const { PrCommand } = await import("./cli/cmd/pr")
+    cli.command(PrCommand)
+  },
+  session: async () => {
+    const { SessionCommand } = await import("./cli/cmd/session")
+    cli.command(SessionCommand)
+  },
+  plugin: async () => {
+    const { PluginCommand } = await import("./cli/cmd/plug")
+    cli.command(PluginCommand)
+  },
+  db: async () => {
+    const { DbCommand } = await import("./cli/cmd/db")
+    cli.command(DbCommand)
+  },
+  oc: async () => {
+    const { OcCommand } = await import("./cli/cmd/oc")
+    cli.command(OcCommand)
+  },
+} as const
+
+const allCommandNames = Object.keys(commandLoaders) as CommandToLoad[]
+const commandNames = needsAllCommands(args)
+  ? allCommandNames
+  : needsNoCommands(args)
+    ? []
+    : [resolveCommandToLoad(args)]
+for (const name of commandNames) await commandLoaders[name]()
+
+cli
   .fail((msg, err) => {
     if (
       msg?.startsWith("Unknown argument") ||

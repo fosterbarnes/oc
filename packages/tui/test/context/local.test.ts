@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import { parseModel, recentModels } from "../../src/context/local"
+import { parseModel, recentModels, resolveCurrentModel } from "../../src/context/local"
 
 test("parses model IDs containing slashes", () => {
   expect(parseModel("provider/family/model")).toEqual({
@@ -19,4 +19,20 @@ test("moves a model to the front, deduplicates, and limits recents", () => {
     ...recent.slice(0, 5),
     ...recent.slice(6, 10),
   ])
+})
+
+test("uses the explicit CLI model before agent and recent fallbacks", () => {
+  const cli = { providerID: "cli", modelID: "model" }
+  const agent = { providerID: "agent", modelID: "model" }
+  const recent = { providerID: "recent", modelID: "model" }
+
+  expect(resolveCurrentModel(undefined, cli, agent, recent)).toEqual(cli)
+  expect(resolveCurrentModel(undefined, undefined, agent, recent)).toEqual(agent)
+})
+
+test("keeps an in-session model selection ahead of the CLI seed", () => {
+  const selected = { providerID: "selected", modelID: "model" }
+  const cli = { providerID: "cli", modelID: "model" }
+
+  expect(resolveCurrentModel(selected, cli, undefined, undefined)).toEqual(selected)
 })

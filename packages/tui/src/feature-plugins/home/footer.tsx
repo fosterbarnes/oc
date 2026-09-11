@@ -43,7 +43,7 @@ function Mcp(props: { api: TuiPluginApi }) {
               <span style={{ fg: count() > 0 ? theme().success : theme().textMuted }}>⊙ </span>
             </Match>
           </Switch>
-          {count()} MCP
+          {`${count()} MCP`}
         </text>
         <text fg={theme().textMuted}>/status</text>
       </box>

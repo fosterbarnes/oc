@@ -1,0 +1,1 @@
+Mark the current session complete. This only labels the session and does not archive it or prevent future prompts.

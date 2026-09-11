@@ -23,7 +23,6 @@ Session.vim
 /opencode.json
 a.out
 target
-.scripts
 .direnv/
 
 # Local dev files
@@ -32,3 +31,4 @@ UPCOMING_CHANGELOG.md
 logs/
 *.bun-build
 tsconfig.tsbuildinfo
+UPSTREAM/opencode/

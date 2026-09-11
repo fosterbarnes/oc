@@ -21286,6 +21286,9 @@
           "default_agent": {
             "type": "string"
           },
+          "default_subagent": {
+            "type": "string"
+          },
           "subagent_depth": {
             "type": "integer",
             "minimum": 0

@@ -115,6 +115,8 @@ const scenarios: Scenario[] = [
       },
       "status",
     ),
+  http.protected.post("/global/shutdown", "global.shutdown").global().status(409, undefined, "status"),
+  http.protected.post("/global/restart", "global.restart").global().status(409, undefined, "status"),
   http.protected.get("/path", "path.get").json(200, (body, ctx) => {
     object(body)
     check(body.directory === ctx.directory, "directory should resolve from x-opencode-directory")

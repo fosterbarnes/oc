@@ -22,6 +22,7 @@ export { createPluginRoutes, createTuiApi } from "./api"
 
 type Input = {
   version: string
+  displayVersion?: string
   tuiConfig: TuiConfig.Resolved
   dialog: ReturnType<typeof useDialog>
   keymap: ReturnType<typeof useOpencodeKeymap>
@@ -35,6 +36,7 @@ type Input = {
   toast: ReturnType<typeof useToast>
   renderer: TuiPluginApi["renderer"]
   attention: TuiPluginApi["attention"]
+  currentModel: NonNullable<TuiPluginApi["state"]["currentModel"]>
   Slot: TuiPluginApi["ui"]["Slot"]
 }
 
@@ -95,7 +97,7 @@ function mapOptionCb<Value>(cb?: (item: TuiDialogSelectOption<Value>) => void) {
   return (item: SelectOption<Value>) => cb(pickOption(item))
 }
 
-function stateApi(sync: ReturnType<typeof useSync>): TuiPluginApi["state"] {
+function stateApi(sync: ReturnType<typeof useSync>, currentModel: NonNullable<TuiPluginApi["state"]["currentModel"]>): TuiPluginApi["state"] {
   return {
     get ready() {
       return sync.ready
@@ -106,6 +108,7 @@ function stateApi(sync: ReturnType<typeof useSync>): TuiPluginApi["state"] {
     get provider() {
       return sync.data.provider
     },
+    currentModel,
     get path() {
       return sync.path
     },
@@ -162,17 +165,21 @@ function stateApi(sync: ReturnType<typeof useSync>): TuiPluginApi["state"] {
   }
 }
 
-function appApi(version: string): TuiPluginApi["app"] {
+function appApi(version: string, displayVersion?: string): TuiPluginApi["app"] {
   return {
     get version() {
       return version
+    },
+    // Custom fork: preserve the upstream API version while exposing a display-only value.
+    get displayVersion() {
+      return displayVersion
     },
   }
 }
 
 export function createTuiApiAdapters(input: Input): Omit<TuiPluginApi, "lifecycle"> {
   return {
-    app: appApi(input.version),
+    app: appApi(input.version, input.displayVersion),
     attention: input.attention,
     // Keep deprecated `api.command` working for v1 plugins; remove in v2.
     command: createCommandShim(input.keymap, input.dialog, input.tuiConfig.keybinds),
@@ -297,7 +304,7 @@ export function createTuiApiAdapters(input: Input): Omit<TuiPluginApi, "lifecycl
         return input.kv.ready
       },
     },
-    state: stateApi(input.sync),
+    state: stateApi(input.sync, input.currentModel),
     get client() {
       return input.sdk.client
     },

@@ -189,6 +189,10 @@ export function createTuiPluginApi(opts: Opts = {}): HostPluginApi {
       get version() {
         return opts.app?.version ?? "0.0.0-test"
       },
+      // Custom fork: fixtures expose the display-only version field used by the sidebar.
+      get displayVersion() {
+        return opts.app?.version ?? "0.0.0-test"
+      },
     },
     attention: {
       async notify(input) {

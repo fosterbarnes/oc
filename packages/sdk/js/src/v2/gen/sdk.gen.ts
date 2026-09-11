@@ -86,6 +86,10 @@ import type {
   GlobalEventResponses,
   GlobalHealthErrors,
   GlobalHealthResponses,
+  GlobalRestartErrors,
+  GlobalRestartResponses,
+  GlobalShutdownErrors,
+  GlobalShutdownResponses,
   GlobalUpgradeErrors,
   GlobalUpgradeResponses,
   InstanceDisposeErrors,
@@ -1373,6 +1377,30 @@ export class Global extends HeyApiClient {
         ...options?.headers,
         ...params.headers,
       },
+    })
+  }
+
+  /**
+   * Shut down server
+   *
+   * Dispose OpenCode instances and stop a managed server.
+   */
+  public shutdown<ThrowOnError extends boolean = false>(options?: Options<never, ThrowOnError>) {
+    return (options?.client ?? this.client).post<GlobalShutdownResponses, GlobalShutdownErrors, ThrowOnError>({
+      url: "/global/shutdown",
+      ...options,
+    })
+  }
+
+  /**
+   * Restart server
+   *
+   * Dispose OpenCode instances and restart a managed server.
+   */
+  public restart<ThrowOnError extends boolean = false>(options?: Options<never, ThrowOnError>) {
+    return (options?.client ?? this.client).post<GlobalRestartResponses, GlobalRestartErrors, ThrowOnError>({
+      url: "/global/restart",
+      ...options,
     })
   }
 
@@ -3562,6 +3590,8 @@ export class Session2 extends HeyApiClient {
       directory?: string
       workspace?: string
       title?: string
+      sessionComplete?: boolean
+      sessionFailed?: boolean
       metadata?: {
         [key: string]: unknown
       }
@@ -3581,6 +3611,8 @@ export class Session2 extends HeyApiClient {
             { in: "query", key: "directory" },
             { in: "query", key: "workspace" },
             { in: "body", key: "title" },
+            { in: "body", key: "sessionComplete" },
+            { in: "body", key: "sessionFailed" },
             { in: "body", key: "metadata" },
             { in: "body", key: "permission" },
             { in: "body", key: "time" },

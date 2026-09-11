@@ -1,7 +1,7 @@
 /** @jsxImportSource @opentui/solid */
 import { testRender } from "@opentui/solid"
 import { onMount } from "solid-js"
-import { ArgsProvider } from "../../../../src/context/args"
+import { ArgsProvider, type Args } from "../../../../src/context/args"
 import { KVProvider, useKV } from "../../../../src/context/kv"
 import { ProjectProvider, useProject } from "../../../../src/context/project"
 import { SDKProvider } from "../../../../src/context/sdk"
@@ -22,7 +22,15 @@ export async function wait(fn: () => boolean, timeout = 2000) {
 
 type Ctx = { kv: ReturnType<typeof useKV>; project: ReturnType<typeof useProject>; sync: ReturnType<typeof useSync> }
 
-export async function mount(override?: FetchHandler, state?: string) {
+export type MountOptions = {
+  args?: Args
+  /** Default `"complete"`. Use `"partial"` to proceed before the non-blocking session list finishes. */
+  waitForStatus?: "complete" | "partial"
+}
+
+export async function mount(override?: FetchHandler, state?: string, options?: MountOptions) {
+  const waitForStatus = options?.waitForStatus ?? "complete"
+  const args = options?.args ?? {}
   const calls = createFetch(override)
   const events = createEventSource()
   let sync!: ReturnType<typeof useSync>
@@ -46,7 +54,7 @@ export async function mount(override?: FetchHandler, state?: string) {
 
   const app = await testRender(() => (
     <TestTuiContexts paths={state ? { state } : undefined}>
-      <ArgsProvider>
+      <ArgsProvider {...args}>
         <KVProvider>
           <SDKProvider url="http://test" directory={directory} fetch={calls.fetch} events={events.source}>
             <PermissionProvider>
@@ -65,6 +73,6 @@ export async function mount(override?: FetchHandler, state?: string) {
   ))
 
   await ready
-  await wait(() => sync.status === "complete")
+  await wait(() => sync.status === waitForStatus)
   return { app, emit: events.emit, kv, project, sync, session: calls.session }
 }

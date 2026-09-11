@@ -37,6 +37,8 @@ export const Info = Schema.Struct({
     updated: DateTimeUtcFromMillis,
     archived: DateTimeUtcFromMillis.pipe(optional),
   }),
+  sessionComplete: Schema.optional(Schema.Boolean),
+  sessionFailed: Schema.optional(Schema.Boolean),
   title: Schema.String,
   location: Location.Ref,
   subpath: RelativePath.pipe(optional),

@@ -1,0 +1,1 @@
+Mark the current session failed. This only labels the session and does not archive it or prevent future prompts.

@@ -1,7 +1,7 @@
 import type { Argv } from "yargs"
 import { Effect } from "effect"
 import { cmd } from "./cmd"
-import { effectCmd, fail } from "../effect-cmd"
+import { CliError, effectCmd, fail } from "../effect-cmd"
 import { Session } from "@/session/session"
 import { SessionID } from "../../session/schema"
 import { UI } from "../ui"
@@ -12,7 +12,9 @@ import { Process } from "@/util/process"
 import { NotFoundError } from "@/storage/storage"
 import { EOL } from "os"
 import path from "path"
+import fs from "fs/promises"
 import { which } from "@opencode-ai/core/util/which"
+import { SessionPrompt } from "@/session/prompt"
 
 function pagerCmd(): string[] {
   const lessOptions = ["-R", "-S"]
@@ -44,9 +46,103 @@ function pagerCmd(): string[] {
 export const SessionCommand = cmd({
   command: "session",
   describe: "manage sessions",
-  builder: (yargs: Argv) => yargs.command(SessionListCommand).command(SessionDeleteCommand).demandCommand(),
+  builder: (yargs: Argv) =>
+    yargs
+      .command(SessionBootstrapCommand)
+      .command(SessionListCommand)
+      .command(SessionPreviousCommand)
+      .command(SessionDeleteCommand)
+      .demandCommand(),
   async handler() {},
 })
+
+const SessionBootstrapCommand = effectCmd({
+  command: "bootstrap <directory>",
+  describe: "create an initialized session without running a model",
+  directory: (args) => path.resolve(String(args.directory)),
+  builder: (yargs: Argv) =>
+    yargs
+      .positional("directory", {
+        type: "string",
+        describe: "project directory",
+        demandOption: true,
+      })
+      .option("title", {
+        type: "string",
+        describe: "session title",
+      }),
+  handler: Effect.fn("Cli.session.bootstrap")(function* (args) {
+    const directory = path.resolve(String(args.directory))
+    const exists = yield* Effect.tryPromise({
+      try: async () => (await fs.stat(directory)).isDirectory(),
+      catch: () => new CliError({ message: `Directory not found: ${directory}` }),
+    })
+    if (!exists) return yield* fail(`Directory not found: ${directory}`)
+
+    yield* Effect.tryPromise({
+      try: () => writeSidebar(directory),
+      catch: (error) => new CliError({ message: `Failed to write sidebar config: ${String(error)}` }),
+    })
+
+    const title = args.title
+      ? String(args.title)
+      : yield* Session.Service.use((service) => nextProjectTitle(service, directory))
+    const session = yield* Session.Service.use((service) => service.create({ title }))
+    const prompt = yield* SessionPrompt.Service
+    yield* prompt
+      .prompt({
+        sessionID: session.id,
+        noReply: true,
+        parts: [
+          {
+            type: "text",
+            text: `Working directory initialized: ${directory}`,
+            synthetic: true,
+          },
+        ],
+      })
+      .pipe(Effect.mapError((error) => new CliError({ message: `Failed to initialize session: ${String(error)}` })))
+
+    console.log(JSON.stringify({ sessionID: session.id, directory }))
+  }),
+})
+
+function nextProjectTitle(service: Session.Interface, directory: string) {
+  const baseTitle = path.basename(directory) || directory
+  return service.listGlobal({ roots: true, limit: 500 }).pipe(
+    Effect.map((sessions) => {
+      const pattern = new RegExp(`^${baseTitle.replace(/[.*+?^${}()|[\\]\\]/g, "\\$&")}\\d*$`)
+      const numbers = sessions.flatMap((session) => {
+        if (!pattern.test(session.title)) return []
+        if (session.title === baseTitle) return [0]
+        return [Number(session.title.slice(baseTitle.length))]
+      })
+      return numbers.length === 0 ? baseTitle : `${baseTitle}${Math.max(...numbers) + 1}`
+    }),
+  )
+}
+
+async function writeSidebar(directory: string) {
+  const configDirectory = path.join(directory, ".config")
+  const sidebarPath = path.join(configDirectory, "openSidebar.json")
+  await fs.mkdir(configDirectory, { recursive: true })
+
+  const settings = (
+    (await Bun.file(sidebarPath).exists()) ? JSON.parse(await Bun.file(sidebarPath).text()) : {}
+  ) as Record<string, unknown>
+  if (settings === null || Array.isArray(settings) || typeof settings !== "object") {
+    throw new Error("sidebar config must contain a JSON object")
+  }
+  settings.projectDirectory = directory
+
+  const temporary = `${sidebarPath}.tmp-${process.pid}`
+  try {
+    await Bun.write(temporary, `${JSON.stringify(settings, null, 2)}\n`)
+    await fs.rename(temporary, sidebarPath)
+  } finally {
+    await fs.rm(temporary, { force: true })
+  }
+}
 
 export const SessionDeleteCommand = effectCmd({
   command: "delete <sessionID>",
@@ -112,6 +208,27 @@ export const SessionListCommand = effectCmd({
     } else {
       console.log(output)
     }
+  }),
+})
+
+export const SessionPreviousCommand = effectCmd({
+  command: "previous",
+  describe: "print a previous global session ID",
+  builder: (yargs) =>
+    yargs.option("depth", {
+      type: "number",
+      default: 1,
+      describe: "one-based position in the recent root-session list",
+    }),
+  handler: Effect.fn("Cli.session.previous")(function* (args) {
+    const depth = Number(args.depth)
+    if (!Number.isInteger(depth) || depth < 1 || depth > 50) {
+      return yield* fail(`Previous session depth must be between 1 and 50: ${depth}`)
+    }
+    const sessions = yield* Session.Service.use((service) => service.listGlobal({ roots: true, limit: 50 }))
+    const selected = sessions[depth - 1]
+    if (!selected) return yield* fail(`Previous session ${depth} is unavailable; only ${sessions.length} session(s) exist.`)
+    console.log(selected.id)
   }),
 })
 

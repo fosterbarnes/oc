@@ -26,12 +26,22 @@ function wordmark(pad = "") {
   })
 }
 
-export function sessionEpilogue(input: { title: string; sessionID?: string }) {
+export function sessionEpilogue(input: {
+  title: string
+  sessionID?: string
+  sessionComplete?: boolean
+  sessionFailed?: boolean
+}) {
   const weak = (text: string) => `${dim}${text.padEnd(10, " ")}${reset}`
+  const title = input.sessionFailed
+    ? `\u2717 ${input.title}`
+    : input.sessionComplete
+      ? `\u2713 ${input.title}`
+      : input.title
   return [
     ...wordmark("  "),
     "",
-    `  ${weak("Session")}${bold}${input.title}${reset}`,
+    `  ${weak("Session")}${bold}${title}${reset}`,
     `  ${weak("Continue")}${bold}opencode -s ${input.sessionID}${reset}`,
     "",
   ].join("\n")

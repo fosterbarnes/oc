@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test"
-import { normalizePromptContent, openEditor } from "../src/editor"
+import { normalizePromptContent, openEditor, openFileAtLocation, resolveFilePath } from "../src/editor"
 
 const editor = process.env.EDITOR
 const visual = process.env.VISUAL
@@ -29,4 +29,15 @@ test("normalizes a single trailing editor newline for one-line prompts", () => {
 
 test("preserves multiline prompts that end with a newline", () => {
   expect(normalizePromptContent("hello\nworld\n")).toBe("hello\nworld\n")
+})
+
+test("resolves relative file paths from the working directory", () => {
+  expect(resolveFilePath("src/app.ts", "C:\\workspace")).toBe("C:\\workspace\\src\\app.ts")
+  expect(resolveFilePath("C:\\other\\app.ts", "C:\\workspace")).toBe("C:\\other\\app.ts")
+})
+
+test("rejects missing files before starting the editor", async () => {
+  await expect(openFileAtLocation({ filePath: "missing-file.ts", cwd: import.meta.dir })).rejects.toThrow(
+    "File does not exist",
+  )
 })

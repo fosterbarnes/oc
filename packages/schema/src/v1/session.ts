@@ -563,6 +563,8 @@ export const SessionInfo = Schema.Struct({
     compacting: optional(NonNegativeInt),
     archived: optional(Schema.Finite),
   }),
+  sessionComplete: Schema.optional(Schema.Boolean),
+  sessionFailed: Schema.optional(Schema.Boolean),
   permission: optional(PermissionV1.Ruleset),
   revert: optional(SessionRevert),
 }).annotate({ identifier: "Session" })

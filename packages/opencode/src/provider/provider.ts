@@ -31,6 +31,7 @@ import { ModelV2 } from "@opencode-ai/core/model"
 import { ModelStatus } from "./model-status"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { ProviderError } from "./error"
+import { PROVIDER_ID, providerInfo, wrapFetch } from "./agentify"
 
 const OPENAI_HEADER_TIMEOUT_DEFAULT = 300_000
 
@@ -866,11 +867,11 @@ function custom(dep: CustomDep): Record<string, CustomLoader> {
           const isWorkersAi = modelID.startsWith("workers-ai/") || modelID.startsWith("@cf/")
           if (isWorkersAi) return aigateway(createUnified({ apiKey: apiToken })(modelID))
 
-          // Every other third-party provider (google, xai, alibaba, deepseek, moonshotai, …) is only
+          // Every other third-party provider (google, xai, alibaba, deepseek, moonshotai, ...) is only
           // served by Cloudflare's catalog-aware REST API. The universal/compat gateway route rejects
           // them with "Invalid provider" (the gateway's compat endpoint doesn't front those upstreams),
           // so point an OpenAI-compatible client at the REST endpoint and bind it to the gateway with
-          // cf-aig-gateway-id — that keeps requests gateway-routed (analytics/caching/BYOK), not a
+          // cf-aig-gateway-id - that keeps requests gateway-routed (analytics/caching/BYOK), not a
           // bypass. models.dev ids (provider/model, dotted) pass through unchanged.
           return createOpenAICompatible({
             name: "cloudflare-ai-gateway",
@@ -1654,6 +1655,10 @@ const layer = Layer.effect(
           mergeProvider(providerID, partial)
         }
 
+        if (isProviderAllowed(PROVIDER_ID) && !providers[PROVIDER_ID]) {
+          providers[PROVIDER_ID] = providerInfo() as Info
+        }
+
         const gitlab = ProviderV2.ID.make("gitlab")
         if (discoveryLoaders[gitlab] && providers[gitlab] && isProviderAllowed(gitlab)) {
           yield* Effect.promise(async () => {
@@ -1801,8 +1806,12 @@ const layer = Layer.effect(
         delete options["chunkTimeout"]
         delete options["headerTimeout"]
 
+        if (model.providerID === PROVIDER_ID) {
+          options["timeout"] = options["timeout"] ?? 900_000
+        }
+
         options["fetch"] = async (input: any, init?: BunFetchRequestInit) => {
-          const fetchFn = customFetch ?? fetch
+          const fetchFn = model.providerID === PROVIDER_ID ? wrapFetch(customFetch ?? fetch) : (customFetch ?? fetch)
           const opts = init ?? {}
           const chunkAbortCtl = typeof chunkTimeout === "number" && chunkTimeout > 0 ? new AbortController() : undefined
           const headerTimeoutMs = headerTimeout === false ? undefined : headerTimeout

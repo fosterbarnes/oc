@@ -1,0 +1,62 @@
+# SCRIPTS.md - OpenCode PowerShell automation
+
+Project automation lives in `.scripts/`. Scripts target PowerShell 7 and fail on command errors. They set the repository location before running relative commands, call the shared `closeOut` helper after successful standalone runs, and do not publish releases unless explicitly invoked. Help and failure paths remain open.
+
+## Files
+
+| Path | Purpose |
+|------|---------|
+| `.scripts/scriptHelper.ps1` | Shared repository paths, maintenance version validation, and native-command checks. |
+| `.scripts/build.ps1` | Builds the current-platform standalone OpenCode executable. `-Release` also creates release archives through the existing Bun build script. |
+| `.scripts/.run.ps1` | Runs the repository's normal `bun dev .` entry point and forwards arguments. |
+| `.scripts/prePush.ps1` | Runs root lint and Turbo typecheck. It does not commit or push. |
+| `.scripts/updateUpstream.ps1` | Fetches and fast-forwards the separate `UPSTREAM\opencode` checkout without modifying this customized parent checkout. |
+| `.scripts/syncAndInstall.ps1` | Fail-closed upstream sync into this custom fork, then verify, backup, stop `opencode.exe`, and install. |
+| `.scripts/push.ps1` | Commits all current changes with a supplied or prompted message, then pushes the current branch. `-Force` is explicit. |
+| `.scripts/pushRelease.ps1` | Tags and publishes archives from `packages/opencode/dist` using the separate `.version/version` maintenance version. |
+| `.install.ps1` | Installs the current Windows `opencode.exe` into `C:\Users\user\Apps\opencode`; `-b` builds it first. |
+
+## Common commands
+
+```powershell
+.\.scripts\build.ps1
+.\.scripts\build.ps1 -Release
+.\.scripts\.run.ps1
+.\.scripts\prePush.ps1
+.\.scripts\updateUpstream.ps1
+.\.scripts\syncAndInstall.ps1 -DryRun
+.\.scripts\syncAndInstall.ps1 -AllowDirtyParent -SkipFetch -SkipInstall
+.\.scripts\syncAndInstall.ps1
+.\.install.ps1 -b
+```
+
+## Upstream checkout
+
+The actual upstream OpenCode source is kept in the separate checkout at
+`C:\Users\user\Documents\GitHub\oc\UPSTREAM\opencode`. This repository is the customized parent checkout.
+
+Run `.\.scripts\updateUpstream.ps1` to fetch the nested checkout's configured
+remote and fast-forward its current tracking branch. The script refuses dirty
+or divergent upstream state and does not modify the parent source checkout.
+
+For a refresh-only sync, first verify both worktrees, run the updater, record the
+new upstream SHA, then compare the parent custom hunks against that refreshed
+checkout. Preserve dirty parent work. Do not commit, reset, stash, or merge as
+part of this operation; classify normal upstream age drift separately from
+confirmed custom behavior.
+
+`syncAndInstall.ps1` is the combined updater. Install directory, executable name, backup suffix, and the snapshot baseline live in the `CONFIG` block at the top of that script (default install `C:\Users\user\Apps\opencode\opencode.exe`). It refuses a dirty parent unless `-AllowDirtyParent` is passed after review. `Custom fork:` comments are review metadata only; overlapping hunks always stop. Text compare treats CRLF and LF as the same so Windows checkouts are not fake overlaps. `-DryRun` classifies and reports without fetch, source application, `Stop-Process`, backup, or install. `-SkipFetch` applies against the current isolated checkout. `-SkipInstall` stops after verify/build without touching the installed exe. After a clean apply it runs `git diff --check`, parses changed PowerShell files, `bun typecheck` from each affected package directory (never the repo root), then the existing Windows single-executable build. Only then (unless `-SkipInstall`) does it stop all `opencode.exe` processes, copy the current install to `opencode.exe.bak`, and install the new binary. If that `.bak` already exists, the previous backup is renamed with a timestamp unless `-OverwriteBackup` replaces it in place. Source changes stay uncommitted.
+
+The standalone build is the repository's existing `packages/opencode/script/build.ts --single` flow. The install script only supports the current Windows architecture and does not alter PATH.
+
+`build.ps1` and `.run.ps1` call `requireBunForCompile` in `scriptHelper.ps1` before invoking Bun. Stable Bun 1.4.0 (`34cbb9a40`) is rejected because it embeds the Windows TUI `bun:ffi` FTL segfault (oven-sh/bun#39829). When PATH bun is 1.4.0 or older, the script runs `bun upgrade --canary` and refuses to compile if the version is still 1.4.0. The compiled `opencode.exe` contains that Bun runtime; upgrading PATH bun after an old compile does not fix an already-installed exe.
+
+## Version and release
+
+`.version\version` is a maintenance-only semantic version for these local scripts. It is intentionally separate from OpenCode's package version. Each successful daily upstream apply that advances isolated `dev` increments the last number (`0.0.8` -> `0.0.9`). `pushRelease.ps1` uses `v<maintenance-version>` and uploads archive files under `packages/opencode/dist`.
+
+Do not run `push.ps1` or `pushRelease.ps1` during ordinary validation. They create commits, push branches or tags, and publish GitHub releases. `buildNotes.txt` is not used or modified by these scripts.
+
+## Excluded base scripts
+
+The base installer, updater, README-rewrite, and version-bump scripts were not imported because this repository has no matching artifacts or version workflow. Their .NET, Avalonia, Inno Setup, ImageMagick, and updater behavior does not apply here.

@@ -5,13 +5,14 @@ import { EventV2 } from "@opencode-ai/core/event"
 import { Installation } from "@/installation"
 import { disposeAllInstancesAndEmitGlobalDisposed } from "@/server/global-lifecycle"
 import { InstallationVersion } from "@opencode-ai/core/installation/version"
+import { ServerLifecycle } from "@/server/lifecycle"
 import { Effect, Queue } from "effect"
 import * as Stream from "effect/Stream"
 import { HttpServerResponse } from "effect/unstable/http"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import * as Sse from "effect/unstable/encoding/Sse"
 import { RootHttpApi } from "../api"
-import { GlobalUpgradeInput } from "../groups/global"
+import { GlobalUpgradeInput, ServerLifecycleUnavailable } from "../groups/global"
 
 function eventData(data: unknown): Sse.Event {
   return {
@@ -86,6 +87,32 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
       return true
     })
 
+    const shutdown = Effect.fn("GlobalHttpApi.shutdown")(function* () {
+      const controller = ServerLifecycle.getController()
+      if (!controller) {
+        return yield* new ServerLifecycleUnavailable({
+          name: "ServerLifecycleUnavailable",
+          data: { message: "Server lifecycle control is only available for a headless server." },
+        })
+      }
+      yield* disposeAllInstancesAndEmitGlobalDisposed()
+      yield* Effect.sync(() => setTimeout(controller.shutdown, 0))
+      return true
+    })
+
+    const restart = Effect.fn("GlobalHttpApi.restart")(function* () {
+      const controller = ServerLifecycle.getController()
+      if (!controller) {
+        return yield* new ServerLifecycleUnavailable({
+          name: "ServerLifecycleUnavailable",
+          data: { message: "Server lifecycle control is only available for a headless server." },
+        })
+      }
+      yield* disposeAllInstancesAndEmitGlobalDisposed()
+      yield* Effect.sync(() => setTimeout(controller.restart, 0))
+      return true
+    })
+
     const upgrade = Effect.fn("GlobalHttpApi.upgrade")(function* (ctx: { payload: typeof GlobalUpgradeInput.Type }) {
       const method = yield* installation.method()
       if (method === "unknown") {
@@ -121,6 +148,8 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
       .handle("configGet", configGet)
       .handle("configUpdate", configUpdate)
       .handle("dispose", dispose)
+      .handle("shutdown", shutdown)
+      .handle("restart", restart)
       .handle("upgrade", upgrade)
   }),
 )

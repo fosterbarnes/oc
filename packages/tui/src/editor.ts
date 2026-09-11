@@ -53,6 +53,31 @@ export async function openEditor(input: { value: string; renderer: CliRenderer; 
   }
 }
 
+export function resolveFilePath(filePath: string, cwd = process.cwd()) {
+  return path.isAbsolute(filePath) ? path.normalize(filePath) : path.resolve(cwd, filePath)
+}
+
+export async function openFileAtLocation(input: { filePath: string; cwd?: string; editor?: string }) {
+  const filePath = resolveFilePath(input.filePath, input.cwd)
+  if (!existsSync(filePath)) throw new Error(`File does not exist: ${filePath}`)
+
+  const editor = input.editor || process.env.VISUAL || process.env.EDITOR
+  if (!editor) throw new Error("No editor configured. Set openEditedWith, VISUAL, or EDITOR.")
+
+  await new Promise<void>((resolve, reject) => {
+    const child = spawn(editor, [filePath], {
+      cwd: input.cwd && existsSync(input.cwd) ? input.cwd : process.cwd(),
+      detached: true,
+      stdio: "ignore",
+    })
+    child.once("error", reject)
+    child.once("spawn", () => {
+      child.unref()
+      resolve()
+    })
+  })
+}
+
 export function discoverEditorConnection(directory: string) {
   const root = path.join(os.homedir(), ".claude", "ide")
   const contains = (parent: string) => {

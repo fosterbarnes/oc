@@ -24,6 +24,9 @@ import { disposeAllInstances } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
 import { ProviderV2 } from "@opencode-ai/core/provider"
 import { ModelV2 } from "@opencode-ai/core/model"
+import { Permission } from "../../src/permission"
+import { SessionCompleteTool } from "../../src/tool/session-complete"
+import { SessionFailedTool } from "../../src/tool/session-failed"
 
 afterEach(async () => {
   await disposeAllInstances()
@@ -42,6 +45,7 @@ const layer = (flags: Partial<RuntimeFlags.Info> = {}) =>
       EventV2Bridge.node,
       Config.node,
       CrossSpawnSpawner.node,
+      Permission.node,
       Session.node,
       SessionProjector.node,
       SessionRunState.node,
@@ -169,6 +173,129 @@ function reply(
 
 describe("tool.task", () => {
   it.instance(
+    "marks the current session complete when the agent has permission",
+    () =>
+      Effect.gen(function* () {
+        const sessions = yield* Session.Service
+        const { chat, assistant } = yield* seed()
+        const agent = yield* Agent.Service
+        const build = yield* agent.get("build")
+        const permission = yield* Permission.Service
+        const tool = yield* SessionCompleteTool
+        const def = yield* tool.init()
+
+      const before = yield* sessions.get(chat.id)
+      expect(before.sessionComplete).toBe(false)
+      expect(Permission.evaluate("session_complete", "*", build.permission).action).toBe("allow")
+
+        const result = yield* def.execute(
+          {},
+          {
+            sessionID: chat.id,
+            messageID: assistant.id,
+            agent: "build",
+            abort: new AbortController().signal,
+            messages: [],
+            metadata: () => Effect.void,
+            ask: (input) =>
+              permission.ask({ ...input, sessionID: chat.id, ruleset: build.permission }).pipe(Effect.orDie),
+          },
+        )
+
+      expect(result.output).toBe("Marked the current session complete.")
+      const after = yield* sessions.get(chat.id)
+      expect(after.sessionComplete).toBe(true)
+      expect(after.time.updated).toBe(before.time.updated)
+      }),
+    { config: { agent: { build: { permission: { session_complete: "allow" } } } } },
+  )
+
+  it.instance(
+    "marks the current session failed and clears completion when the agent has permission",
+    () =>
+      Effect.gen(function* () {
+        const sessions = yield* Session.Service
+        const { chat, assistant } = yield* seed()
+        yield* sessions.setSessionComplete({ sessionID: chat.id, sessionComplete: true })
+        const before = yield* sessions.get(chat.id)
+        const agent = yield* Agent.Service
+        const build = yield* agent.get("build")
+        const permission = yield* Permission.Service
+        const tool = yield* SessionFailedTool
+        const def = yield* tool.init()
+
+        expect(before.sessionComplete).toBe(true)
+        expect(before.sessionFailed).toBe(false)
+        expect(Permission.evaluate("session_failed", "*", build.permission).action).toBe("allow")
+
+        const result = yield* def.execute(
+          {},
+          {
+            sessionID: chat.id,
+            messageID: assistant.id,
+            agent: "build",
+            abort: new AbortController().signal,
+            messages: [],
+            metadata: () => Effect.void,
+            ask: (input) =>
+              permission.ask({ ...input, sessionID: chat.id, ruleset: build.permission }).pipe(Effect.orDie),
+          },
+        )
+
+        expect(result.output).toBe("Marked the current session failed.")
+        const after = yield* sessions.get(chat.id)
+        expect(after.sessionComplete).toBe(false)
+        expect(after.sessionFailed).toBe(true)
+        expect(after.time.updated).toBe(before.time.updated)
+      }),
+    { config: { agent: { build: { permission: { session_failed: "allow" } } } } },
+  )
+
+  it.instance("denies session completion by default", () =>
+    Effect.gen(function* () {
+      const agent = yield* Agent.Service
+      const build = yield* agent.get("build")
+      const permission = yield* Permission.Service
+
+      expect(Permission.evaluate("session_complete", "*", build.permission).action).toBe("deny")
+      expect(
+        yield* permission
+          .ask({
+            sessionID: SessionID.make("ses_permission_test"),
+            permission: "session_complete",
+            patterns: ["*"],
+            always: ["*"],
+            metadata: {},
+            ruleset: build.permission,
+          })
+          .pipe(Effect.exit),
+      ).toMatchObject({ _tag: "Failure" })
+    }),
+  )
+
+  it.instance("denies session failure by default", () =>
+    Effect.gen(function* () {
+      const agent = yield* Agent.Service
+      const build = yield* agent.get("build")
+      const permission = yield* Permission.Service
+
+      expect(Permission.evaluate("session_failed", "*", build.permission).action).toBe("deny")
+      expect(
+        yield* permission
+          .ask({
+            sessionID: SessionID.make("ses_permission_test_failed"),
+            permission: "session_failed",
+            patterns: ["*"],
+            always: ["*"],
+            metadata: {},
+            ruleset: build.permission,
+          })
+          .pipe(Effect.exit),
+      ).toMatchObject({ _tag: "Failure" })
+    }),
+  )
+
+  it.instance(
     "description sorts subagents by name and is stable across calls",
     () =>
       Effect.gen(function* () {
@@ -243,6 +370,168 @@ describe("tool.task", () => {
         },
       },
     },
+  )
+
+  it.instance(
+    "uses default_subagent when subagent_type is omitted",
+    () =>
+      Effect.gen(function* () {
+        const sessions = yield* Session.Service
+        const { chat, assistant } = yield* seed()
+        const tool = yield* TaskTool
+        const def = yield* tool.init()
+
+        const result = yield* def.execute(
+          {
+            description: "inspect bug",
+            prompt: "look into the cache key path",
+          },
+          {
+            sessionID: chat.id,
+            messageID: assistant.id,
+            agent: "build",
+            abort: new AbortController().signal,
+            extra: { promptOps: stubOps() },
+            messages: [],
+            metadata: () => Effect.void,
+            ask: () => Effect.void,
+          },
+        )
+
+        expect((yield* sessions.get(result.metadata.sessionId)).agent).toBe("general")
+      }),
+    { config: { default_subagent: "general" } },
+  )
+
+  it.instance(
+    "uses the default subagent model when subagent_type is omitted",
+    () =>
+      Effect.gen(function* () {
+        const { chat, assistant } = yield* seed()
+        let seen: SessionPrompt.PromptInput | undefined
+        const tool = yield* TaskTool
+        const def = yield* tool.init()
+
+        yield* def.execute(
+          {
+            description: "inspect bug",
+            prompt: "look into the cache key path",
+          },
+          {
+            sessionID: chat.id,
+            messageID: assistant.id,
+            agent: "build",
+            abort: new AbortController().signal,
+            extra: { promptOps: stubOps({ onPrompt: (input) => (seen = input) }) },
+            messages: [],
+            metadata: () => Effect.void,
+            ask: () => Effect.void,
+          },
+        )
+
+        expect(seen?.model).toEqual({
+          providerID: ProviderV2.ID.make("test"),
+          modelID: ModelV2.ID.make("agent-model"),
+        })
+      }),
+    { config: { default_subagent: "general", agent: { general: { model: "test/agent-model" } } } },
+  )
+
+  it.instance(
+    "explicit subagent_type overrides default_subagent",
+    () =>
+      Effect.gen(function* () {
+        const sessions = yield* Session.Service
+        const { chat, assistant } = yield* seed()
+        const tool = yield* TaskTool
+        const def = yield* tool.init()
+
+        const result = yield* def.execute(
+          {
+            description: "explore bug",
+            prompt: "look into the cache key path",
+            subagent_type: "explore",
+          },
+          {
+            sessionID: chat.id,
+            messageID: assistant.id,
+            agent: "build",
+            abort: new AbortController().signal,
+            extra: { promptOps: stubOps() },
+            messages: [],
+            metadata: () => Effect.void,
+            ask: () => Effect.void,
+          },
+        )
+
+        expect((yield* sessions.get(result.metadata.sessionId)).agent).toBe("explore")
+      }),
+    { config: { default_subagent: "general" } },
+  )
+
+  it.instance("requires a subagent_type when no default_subagent is configured", () =>
+    Effect.gen(function* () {
+      const sessions = yield* Session.Service
+      const { chat, assistant } = yield* seed()
+      const tool = yield* TaskTool
+      const def = yield* tool.init()
+
+      const exit = yield* def
+        .execute(
+          {
+            description: "inspect bug",
+            prompt: "look into the cache key path",
+          },
+          {
+            sessionID: chat.id,
+            messageID: assistant.id,
+            agent: "build",
+            abort: new AbortController().signal,
+            extra: { promptOps: stubOps() },
+            messages: [],
+            metadata: () => Effect.void,
+            ask: () => Effect.void,
+          },
+        )
+        .pipe(Effect.exit)
+
+      expect(Exit.isFailure(exit)).toBe(true)
+      expect(yield* sessions.children(chat.id)).toHaveLength(0)
+    }),
+  )
+
+  it.instance(
+    "rejects a primary default_subagent without creating a child session",
+    () =>
+      Effect.gen(function* () {
+        const sessions = yield* Session.Service
+        const { chat, assistant } = yield* seed()
+        const tool = yield* TaskTool
+        const def = yield* tool.init()
+
+        const exit = yield* def
+          .execute(
+            {
+              description: "inspect bug",
+              prompt: "look into the cache key path",
+            },
+            {
+              sessionID: chat.id,
+              messageID: assistant.id,
+              agent: "build",
+              abort: new AbortController().signal,
+              extra: { promptOps: stubOps() },
+              messages: [],
+              metadata: () => Effect.void,
+              ask: () => Effect.void,
+            },
+          )
+          .pipe(Effect.exit)
+
+        expect(Exit.isFailure(exit)).toBe(true)
+        expect(yield* sessions.children(chat.id)).toHaveLength(0)
+      }),
+    { config: { default_subagent: "build" } },
   )
 
   it.instance("execute resumes an existing task session from task_id", () =>

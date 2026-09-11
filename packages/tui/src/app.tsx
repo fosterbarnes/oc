@@ -4,7 +4,7 @@ import { createDefaultOpenTuiKeymap } from "@opentui/keymap/opentui"
 import { Deferred, Effect } from "effect"
 import { Global } from "@opencode-ai/core/global"
 import { Flag } from "@opencode-ai/core/flag/flag"
-import { InstallationVersion } from "@opencode-ai/core/installation/version"
+import { InstallationDisplayVersion, InstallationVersion } from "@opencode-ai/core/installation/version"
 import { ClipboardProvider, useClipboard } from "./context/clipboard"
 import { ExitProvider, useExit } from "./context/exit"
 import { EpilogueProvider } from "./context/epilogue"
@@ -58,7 +58,7 @@ import { FrecencyProvider } from "./component/prompt/frecency"
 import { PromptStashProvider } from "./component/prompt/stash"
 import { DialogAlert } from "./ui/dialog-alert"
 import { DialogConfirm } from "./ui/dialog-confirm"
-import { ToastProvider, useToast } from "./ui/toast"
+import { ToastProvider, useToast, type ToastContext } from "./ui/toast"
 import { isDefaultTitle } from "./util/session"
 import { KVProvider, useKV } from "./context/kv"
 import * as Model from "./util/model"
@@ -81,13 +81,166 @@ import {
 
 import type { EventSource } from "./context/sdk"
 import { DialogVariant } from "./component/dialog-variant"
+import { DialogPrompt } from "./ui/dialog-prompt"
+import { DialogSelect } from "./ui/dialog-select"
 import { createTuiAttention } from "./attention"
 import * as TuiAudio from "./audio"
-import { win32DisableProcessedInput, win32FlushInputBuffer } from "./terminal-win32"
+import { win32AssertRawMode } from "./terminal-win32"
 import { destroyRenderer } from "./util/renderer"
 import { cliErrorMessage, errorFormat } from "./util/error"
+import { spawn } from "node:child_process"
+import fs from "node:fs"
+import os from "node:os"
+import path from "node:path"
 
 registerOpencodeSpinner()
+
+function ocConfigPath(): string {
+  return path.join(os.homedir(), ".config", "opencode", "oc.json")
+}
+
+function readOcConfig(): {
+  executable: string
+  homeDir: string
+  homeDirSort: string
+  serverStartOnWindowsUserStart: boolean
+} {
+  const fallbackDir = os.homedir()
+  const fallbackSort = "name"
+  try {
+    const parse = (file: string) => {
+      const raw = fs.readFileSync(file, "utf8")
+      return JSON.parse(raw.replace(/^\s*\/\/.*$/gm, "")) as {
+        executable?: unknown
+        homeDir?: unknown
+        homeDirSort?: unknown
+        server?: { startOnWindowsUserStart?: unknown }
+      }
+    }
+    const parsed = parse(ocConfigPath())
+    const merged = {
+      ...parsed,
+    }
+    const executable = typeof merged.executable === "string" ? merged.executable.trim() : ""
+    const homeDir = typeof merged.homeDir === "string" && merged.homeDir.trim() ? merged.homeDir.trim() : fallbackDir
+    const sortRaw = typeof merged.homeDirSort === "string" ? merged.homeDirSort.trim().toLowerCase() : fallbackSort
+    const homeDirSort = sortRaw === "modified" ? "modified" : "name"
+    const serverStartOnWindowsUserStart = merged.server?.startOnWindowsUserStart === true
+    const resolved = (() => {
+      try {
+        return fs.statSync(homeDir).isDirectory() ? path.normalize(homeDir) : fallbackDir
+      } catch {
+        return fallbackDir
+      }
+    })()
+    return { executable, homeDir: resolved, homeDirSort, serverStartOnWindowsUserStart }
+  } catch {
+    return { executable: "", homeDir: fallbackDir, homeDirSort: fallbackSort, serverStartOnWindowsUserStart: false }
+  }
+}
+
+function listOcHomeDirs(): Array<{ name: string; fullPath: string; mtimeMs: number }> {
+  const { homeDir, homeDirSort } = readOcConfig()
+  let entries: fs.Dirent[]
+  try {
+    entries = fs.readdirSync(homeDir, { withFileTypes: true })
+  } catch {
+    return []
+  }
+  const dirs = entries
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => {
+      const fullPath = path.join(homeDir, entry.name)
+      let mtimeMs = 0
+      try {
+        mtimeMs = fs.statSync(fullPath).mtimeMs
+      } catch {
+        mtimeMs = 0
+      }
+      return { name: entry.name, fullPath, mtimeMs }
+    })
+  if (homeDirSort === "modified") {
+    dirs.sort((a, b) => b.mtimeMs - a.mtimeMs || a.name.localeCompare(b.name))
+  } else {
+    dirs.sort((a, b) => a.name.localeCompare(b.name))
+  }
+  return dirs
+}
+
+function runOcCommand(
+  executable: string,
+  args: string[],
+  cwd: string,
+): Promise<{ code: number; stdout: string; stderr: string }> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(executable, args, { cwd, stdio: ["ignore", "pipe", "pipe"] })
+    let stdout = ""
+    let stderr = ""
+    child.stdout?.on("data", (chunk) => (stdout += String(chunk)))
+    child.stderr?.on("data", (chunk) => (stderr += String(chunk)))
+    child.once("error", reject)
+    child.once("close", (code) => resolve({ code: code ?? 1, stdout, stderr }))
+  })
+}
+
+async function bootstrapOcSession(executable: string, directory: string, cwd: string): Promise<string> {
+  const result = await runOcCommand(executable, ["session", "bootstrap", directory], cwd)
+  if (result.code !== 0) throw new Error(result.stderr.trim() || `exit code ${result.code}`)
+  try {
+    const payload = JSON.parse(result.stdout) as { sessionID?: unknown }
+    if (typeof payload.sessionID !== "string" || !payload.sessionID) throw new Error("bootstrap returned no session ID")
+    return payload.sessionID
+  } catch (error) {
+    throw new Error(`invalid bootstrap response: ${error instanceof Error ? error.message : String(error)}`)
+  }
+}
+
+function persistOcConfig(
+  key:
+    | "homeDir"
+    | "homeDirSort"
+    | "sessionModel"
+    | "sessionAgent"
+    | "defaultSubagent"
+    | "defaultSubagentModel"
+    | "reasoningEffort"
+    | "serverStartOnWindowsUserStart",
+  value: string,
+  toast: ToastContext,
+) {
+  const config = readOcConfig()
+  if (!config.executable) {
+    toast.show({ message: "OpenCode executable is not configured", variant: "error" })
+    return Promise.resolve(false)
+  }
+  const args = ["oc", "config", "set", key, value]
+  const child = spawn(config.executable, args, { stdio: ["ignore", "ignore", "pipe"], cwd: os.homedir() })
+  let error = ""
+  return new Promise<boolean>((resolve) => {
+    let settled = false
+    const finish = (success: boolean) => {
+      if (settled) return
+      settled = true
+      resolve(success)
+    }
+    child.stderr?.on("data", (chunk) => {
+      error += String(chunk)
+    })
+    child.on("error", (cause) => {
+      toast.show({ message: `Failed to set oc setting: ${cause.message}`, variant: "error" })
+      finish(false)
+    })
+    child.on("exit", (code) => {
+      if (code === 0) {
+        toast.show({ message: `Saved oc setting ${key}: ${value}`, variant: "success" })
+        finish(true)
+        return
+      }
+      toast.show({ message: `Failed to set oc setting: ${error.trim() || `exit code ${code}`}`, variant: "error" })
+      finish(false)
+    })
+  })
+}
 
 const appGlobalBindingCommands = [
   "session.list",
@@ -101,10 +254,20 @@ const appGlobalBindingCommands = [
   "session.quick_switch.7",
   "session.quick_switch.8",
   "session.quick_switch.9",
+  "selection.copy_mode.toggle",
 ] as const
 
 const appBindingCommands = [
   "command.palette.show",
+  "oc.settings_palette",
+  "oc.new_session",
+  "model.default",
+  "oc.reasoning_effort",
+  "agent.session",
+  "agent.default_subagent",
+  "agent.default_subagent_model",
+  "oc.home_dir",
+  "oc.home_dir_sort",
   "model.list",
   "model.cycle_recent",
   "model.cycle_recent_reverse",
@@ -136,7 +299,6 @@ const appBindingCommands = [
   "app.toggle.file_context",
   "app.toggle.diffwrap",
   "app.toggle.paste_summary",
-  "app.toggle.session_directory_filter",
 ] as const
 
 export type TuiInput = {
@@ -144,6 +306,7 @@ export type TuiInput = {
   args: Args
   config: TuiConfig.Resolved
   onSnapshot?: () => Promise<string[]>
+  onSessionChange?: (sessionID: string) => void
   directory?: string
   fetch?: typeof fetch
   headers?: RequestInit["headers"]
@@ -211,7 +374,7 @@ export const run = Effect.fn("Tui.run")(function* (input: TuiInput) {
             destroyRenderer(renderer)
           }),
       )
-      win32DisableProcessedInput()
+      win32AssertRawMode()
       const keymap = createDefaultOpenTuiKeymap(renderer)
       yield* Effect.acquireRelease(
         Effect.sync(() => registerOpencodeKeymap(keymap, renderer, input.config)),
@@ -284,6 +447,7 @@ export const run = Effect.fn("Tui.run")(function* (input: TuiInput) {
                               <KVProvider>
                                 <ToastProvider>
                                   <RouteProvider
+                                    onSessionChange={input.onSessionChange}
                                     initialRoute={
                                       input.args.continue
                                         ? {
@@ -355,7 +519,6 @@ export const run = Effect.fn("Tui.run")(function* (input: TuiInput) {
     }),
   )
   yield* Effect.sync(() => {
-    win32FlushInputBuffer()
     if (result.reason !== undefined)
       process.stderr.write((cliErrorMessage(result.reason) ?? errorFormat(result.reason)) + "\n")
     if (result.epilogue) process.stdout.write(result.epilogue + "\n")
@@ -384,10 +547,51 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
   const pluginRuntime = usePluginRuntime()
   const attention = createTuiAttention({ renderer, config: tuiConfig, kv })
   const clipboard = useClipboard()
+  const copyOnSelect = () => kv.get(Selection.COPY_ON_SELECT_KEY, Selection.defaultCopyOnSelect()) as boolean
+  const controlServer = async (action: "shutdown" | "restart") => {
+    const restart = action === "restart"
+    const choice = await DialogConfirm.show(
+      dialog,
+      restart ? "Restart Server" : "Shut Down Server",
+      restart
+        ? "The current TUI will disconnect while the server restarts. Continue?"
+        : "The current TUI will disconnect when the server shuts down. Continue?",
+      "cancel",
+    )
+    if (choice !== true) return
+    dialog.clear()
+    try {
+      const result = restart ? await sdk.client.global.restart() : await sdk.client.global.shutdown()
+      if (!result.error) return
+      toast.show({
+        title: restart ? "Server Restart Failed" : "Server Shutdown Failed",
+        message: errorMessage(result.error),
+        variant: "error",
+        duration: 10000,
+      })
+    } catch (error) {
+      toast.show({
+        title: restart ? "Server Restart Failed" : "Server Shutdown Failed",
+        message: errorMessage(error),
+        variant: "error",
+        duration: 10000,
+      })
+    }
+  }
+
+  createEffect(() => {
+    if (!kv.ready) return
+    if (kv.store[Selection.COPY_ON_SELECT_KEY] !== undefined) return
+    const seeded = Selection.envCopyOnSelectSeed()
+    if (seeded === undefined) return
+    kv.set(Selection.COPY_ON_SELECT_KEY, seeded)
+  })
 
   const api = createTuiApi(
     createTuiApiAdapters({
       version: InstallationVersion,
+      // Custom fork: only the TUI presentation uses the maintenance display value.
+      displayVersion: InstallationDisplayVersion,
       tuiConfig,
       dialog,
       keymap,
@@ -401,6 +605,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
       toast,
       renderer,
       attention,
+      currentModel: local.model.current,
       Slot: pluginRuntime.Slot,
     }),
   )
@@ -423,7 +628,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
   const offSelectionKeys = keymap.intercept(
     "key",
     ({ event }) => {
-      if (!Flag.OPENCODE_EXPERIMENTAL_DISABLE_COPY_ON_SELECT) return
+      if (copyOnSelect()) return
       Selection.handleSelectionKey(renderer, toast, event, clipboard)
     },
     { priority: 1 },
@@ -490,10 +695,13 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
         local.model.set({ providerID, modelID }, { recent: true })
       }
       if (args.sessionID && !args.fork) {
-        route.navigate({
-          type: "session",
-          sessionID: args.sessionID,
-        })
+        route.navigate(
+          {
+            type: "session",
+            sessionID: args.sessionID,
+          },
+          { notify: false },
+        )
       }
     })
   })
@@ -516,7 +724,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
           }
         })
       } else {
-        route.navigate({ type: "session", sessionID: match })
+        route.navigate({ type: "session", sessionID: match }, { notify: false })
       }
     }
   })
@@ -566,6 +774,27 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
         run: () => {
           dialog.replace(() => <CommandPaletteDialog />)
         },
+      },
+      {
+        name: "oc.settings_palette",
+        title: "Show oc commands",
+        category: "oc",
+        hidden: true,
+        run: () => {
+          dialog.replace(() => <CommandPaletteDialog category="oc" />)
+        },
+      },
+      {
+        name: "server.shutdown",
+        title: "Shut down server",
+        category: "Server",
+        run: () => void controlServer("shutdown"),
+      },
+      {
+        name: "server.restart",
+        title: "Restart server",
+        category: "Server",
+        run: () => void controlServer("restart"),
       },
       {
         name: "session.list",
@@ -681,6 +910,255 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
         slashName: "agents",
         run: () => {
           dialog.replace(() => <DialogAgent />)
+        },
+      },
+      {
+        name: "oc.new_session",
+        title: "New session (oc)",
+        category: "oc",
+        slashName: "newOcSession",
+        run: () => {
+          const dirs = listOcHomeDirs()
+          if (dirs.length === 0) {
+            const { homeDir } = readOcConfig()
+            toast.show({ message: `No folders found in ${homeDir}`, variant: "error" })
+            return
+          }
+          dialog.replace(() => (
+            <DialogSelect
+              title="New session (oc)"
+              options={dirs.map((dir) => ({ value: dir.fullPath, title: dir.name }))}
+              onSelect={async (option) => {
+                const directory = path.normalize(option.value)
+                let isDir = false
+                try {
+                  isDir = fs.statSync(directory).isDirectory()
+                } catch {
+                  isDir = false
+                }
+                if (!isDir) {
+                  toast.show({ message: `Directory not found: ${directory}`, variant: "error" })
+                  return
+                }
+                const { executable } = readOcConfig()
+                if (!executable) {
+                  toast.show({ message: "OpenCode executable is not configured", variant: "error" })
+                  return
+                }
+                try {
+                  const sessionID = await bootstrapOcSession(executable, directory, os.homedir())
+                  dialog.clear()
+                  route.navigate({ type: "session", sessionID })
+                } catch (error) {
+                  toast.show({
+                    message: `Failed to create oc session: ${error instanceof Error ? error.message : String(error)}`,
+                    variant: "error",
+                  })
+                }
+              }}
+            />
+          ))
+        },
+      },
+      {
+        name: "model.default",
+        title: "Default model",
+        category: "oc",
+        slashName: "sessionModel",
+        run: () => {
+          dialog.replace(() => (
+            <DialogModel
+              onSelect={(providerID, modelID) => {
+                void persistOcConfig("sessionModel", `${providerID}/${modelID}`, toast)
+              }}
+            />
+          ))
+        },
+      },
+      {
+        name: "oc.reasoning_effort",
+        title: "Default reasoning effort",
+        category: "oc",
+        slashName: "reasoningEffort",
+        run: () => {
+          dialog.replace(() => (
+            <DialogSelect
+              title="Default reasoning effort"
+              options={[
+                { value: "low", title: "low" },
+                { value: "medium", title: "medium" },
+                { value: "high", title: "high" },
+                { value: "xhigh", title: "xhigh" },
+                { value: "max", title: "max" },
+              ]}
+              onSelect={(option) => {
+                void persistOcConfig("reasoningEffort", option.value, toast)
+                dialog.clear()
+              }}
+            />
+          ))
+        },
+      },
+      {
+        name: "agent.session",
+        title: "Default agent mode",
+        category: "oc",
+        slashName: "sessionAgent",
+        run: () => {
+          dialog.replace(() => (
+            <DialogAgent
+              onSelect={(agent) => {
+                void persistOcConfig("sessionAgent", agent, toast)
+              }}
+            />
+          ))
+        },
+      },
+      {
+        name: "agent.default_subagent_model",
+        title: "Default sub-agent model",
+        category: "oc",
+        slashName: "defaultSubagentModel",
+        run: () => {
+          const defaultSubagent = sync.data.config.default_subagent
+          if (!defaultSubagent) {
+            toast.show({ message: "No default sub-agent is configured", variant: "error" })
+            return
+          }
+          const agent = sync.data.agent.find((item) => item.name === defaultSubagent)
+          dialog.replace(() => (
+            <DialogModel
+              current={agent?.model}
+              updateCurrent={false}
+              onSelect={async (providerID, modelID) => {
+                const model = `${providerID}/${modelID}`
+                const result = await sdk.client.global.config.update({
+                  config: { agent: { [defaultSubagent]: { model } } },
+                })
+                if (result.error) {
+                  toast.show({
+                    message: `Failed to set native default sub-agent model: ${String(result.error)}`,
+                    variant: "error",
+                  })
+                  return
+                }
+                await persistOcConfig("defaultSubagentModel", model, toast)
+              }}
+            />
+          ))
+        },
+      },
+      {
+        name: "agent.default_subagent",
+        title: "Default sub-agent mode",
+        category: "oc",
+        slashName: "defaultSubagent",
+        run: () => {
+          const options = sync.data.agent
+            .filter((agent) => agent.mode !== "primary" && !agent.hidden)
+            .map((agent) => ({
+              value: agent.name,
+              title: agent.name,
+              description: agent.description,
+            }))
+          if (options.length === 0) {
+            toast.show({ message: "No delegated agents are available", variant: "error" })
+            return
+          }
+          dialog.replace(() => (
+            <DialogSelect
+              title="Default sub-agent mode"
+              current={sync.data.config.default_subagent}
+              options={options}
+              onSelect={async (option) => {
+                const result = await sdk.client.global.config.update({ config: { default_subagent: option.value } })
+                if (result.error) {
+                  toast.show({
+                    message: `Failed to set native default subagent: ${String(result.error)}`,
+                    variant: "error",
+                  })
+                  return
+                }
+                if (await persistOcConfig("defaultSubagent", option.value, toast)) dialog.clear()
+              }}
+            />
+          ))
+        },
+      },
+      {
+        name: "oc.home_dir_sort",
+        title: "Home directory sort order",
+        category: "oc",
+        slashName: "homeDirSort",
+        run: () => {
+          dialog.replace(() => (
+            <DialogSelect
+              title="Home directory sort order"
+              options={[
+                { value: "name", title: "name" },
+                { value: "modified", title: "modified" },
+              ]}
+              onSelect={(option) => {
+                void persistOcConfig("homeDirSort", option.value, toast)
+                dialog.clear()
+              }}
+            />
+          ))
+        },
+      },
+      {
+        name: "oc.home_dir",
+        title: "Home directory",
+        category: "oc",
+        slashName: "homeDir",
+        run: () => {
+          const current = readOcConfig().homeDir
+          dialog.replace(() => (
+            <DialogPrompt
+              title="Home directory"
+              placeholder={current}
+              onConfirm={(value) => {
+                const trimmed = value.trim()
+                if (!trimmed) return
+                let resolved = trimmed
+                try {
+                  resolved = path.normalize(trimmed)
+                  if (!fs.statSync(resolved).isDirectory()) {
+                    toast.show({ message: `Directory not found: ${resolved}`, variant: "error" })
+                    return
+                  }
+                } catch {
+                  toast.show({ message: `Directory not found: ${trimmed}`, variant: "error" })
+                  return
+                }
+                void persistOcConfig("homeDir", resolved, toast)
+                dialog.clear()
+              }}
+            />
+          ))
+        },
+      },
+      {
+        name: "oc.server_startup",
+        title: "Background server auto-start (Windows only)",
+        category: "oc",
+        slashName: "serverStartOnWindowsUserStart",
+        run: () => {
+          const current = readOcConfig().serverStartOnWindowsUserStart
+          dialog.replace(() => (
+            <DialogSelect
+              title="Background server auto-start (Windows only)"
+              current={current ? "true" : "false"}
+              options={[
+                { value: "true", title: "on" },
+                { value: "false", title: "off" },
+              ]}
+              onSelect={(option) => {
+                void persistOcConfig("serverStartOnWindowsUserStart", option.value, toast)
+                dialog.clear()
+              }}
+            />
+          ))
         },
       },
       {
@@ -900,6 +1378,20 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
         },
       },
       {
+        name: "selection.copy_mode.toggle",
+        title: copyOnSelect() ? "Enable Ctrl+C copy" : "Enable mouse-up copy",
+        category: "System",
+        run: () => {
+          const next = !copyOnSelect()
+          kv.set(Selection.COPY_ON_SELECT_KEY, next)
+          toast.show({
+            message: next ? "Copy on mouse up" : "Copy with Ctrl+C",
+            variant: "info",
+          })
+          dialog.clear()
+        },
+      },
+      {
         name: "app.toggle.file_context",
         title: kv.get("file_context_enabled", true) ? "Disable file context" : "Enable file context",
         category: "System",
@@ -928,18 +1420,6 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
             kv.set("paste_summary_enabled", next)
             return next
           })
-          dialog.clear()
-        },
-      },
-      {
-        name: "app.toggle.session_directory_filter",
-        title: kv.get("session_directory_filter_enabled", true)
-          ? "Disable session directory filtering"
-          : "Enable session directory filtering",
-        category: "System",
-        run: async () => {
-          kv.set("session_directory_filter_enabled", !kv.get("session_directory_filter_enabled", true))
-          await sync.session.refresh()
           dialog.clear()
         },
       },
@@ -999,10 +1479,13 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
 
   event.on("tui.session.select", (evt, { workspace }) => {
     if (workspace !== project.workspace.current()) return
-    route.navigate({
-      type: "session",
-      sessionID: evt.properties.sessionID,
-    })
+    route.navigate(
+      {
+        type: "session",
+        sessionID: evt.properties.sessionID,
+      },
+      { notify: false },
+    )
   })
 
   event.on("session.deleted", (evt) => {
@@ -1091,18 +1574,14 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
       flexDirection="column"
       backgroundColor={theme.background}
       onMouseDown={(evt) => {
-        if (!Flag.OPENCODE_EXPERIMENTAL_DISABLE_COPY_ON_SELECT) return
+        if (copyOnSelect()) return
         if (evt.button !== MouseButton.RIGHT) return
 
         if (!Selection.copy(renderer, toast, clipboard)) return
         evt.preventDefault()
         evt.stopPropagation()
       }}
-      onMouseUp={
-        !Flag.OPENCODE_EXPERIMENTAL_DISABLE_COPY_ON_SELECT
-          ? () => Selection.copy(renderer, toast, clipboard)
-          : undefined
-      }
+      onMouseUp={copyOnSelect() ? () => Selection.copy(renderer, toast, clipboard) : undefined}
     >
       <Show when={Flag.OPENCODE_SHOW_TTFD}>
         <TimeToFirstDraw />

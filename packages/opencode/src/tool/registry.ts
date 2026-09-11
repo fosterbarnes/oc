@@ -2,6 +2,8 @@ import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { httpClient } from "@opencode-ai/core/effect/app-node-platform"
 import { Ripgrep } from "@opencode-ai/core/ripgrep"
 import { PlanExitTool } from "./plan"
+import { SessionCompleteTool } from "./session-complete"
+import { SessionFailedTool } from "./session-failed"
 import { Session } from "@/session/session"
 import { QuestionTool } from "./question"
 import { ShellTool } from "./shell"
@@ -105,6 +107,8 @@ const layer = Layer.effect(
     const todo = yield* TodoWriteTool
     const lsptool = yield* LspTool
     const plan = yield* PlanExitTool
+    const sessionComplete = yield* SessionCompleteTool
+    const sessionFailed = yield* SessionFailedTool
     const webfetch = yield* WebFetchTool
     const websearch = yield* WebSearchTool
     const shell = yield* ShellTool
@@ -223,6 +227,8 @@ const layer = Layer.effect(
           question: Tool.init(question),
           lsp: Tool.init(lsptool),
           plan: Tool.init(plan),
+          sessionComplete: Tool.init(sessionComplete),
+          sessionFailed: Tool.init(sessionFailed),
           ...(codeModeTool ? { execute: Tool.init(codeModeTool) } : {}),
         })
 
@@ -238,6 +244,8 @@ const layer = Layer.effect(
             tool.edit,
             tool.write,
             tool.task,
+            tool.sessionComplete,
+            tool.sessionFailed,
             tool.fetch,
             tool.todo,
             tool.search,

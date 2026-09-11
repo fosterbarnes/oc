@@ -3,6 +3,8 @@
 - Keep runtime dependencies directed from Schema to Core and Protocol, then from Core and Protocol to Server. Client runtime code may depend on Schema and Protocol but never Core or Server; `sdk-next` composes Client, Core, and Server.
 - The default branch in this repo is `dev`.
 - Local `main` ref may not exist; use `dev` or `origin/dev` for diffs.
+- `UPSTREAM\opencode` is the separate upstream-only checkout at `C:\Users\user\Documents\GitHub\oc\UPSTREAM\opencode`. Keep custom source changes in this parent checkout; upstream synchronization must not modify parent source files.
+- Windows TUI segfaults on Bun 1.4.0 (`34cbb9a40`): `bun:ffi` FTL pointer args (oven-sh/bun#39829, #40302). `.scripts\build.ps1` and `.scripts\.run.ps1` call `requireBunForCompile` and will `bun upgrade --canary` when PATH bun is still 1.4.0. Do not ship `opencode.exe` compiled with 1.4.0. Stable 1.4.1 was not published as of 2026-08-31.
 
 ## Branch Names
 
@@ -19,6 +21,10 @@ Valid types are `feat`, `fix`, `docs`, `chore`, `refactor`, and `test`. Scopes a
 Examples: `fix(tui): simplify thinking toggle styling`, `docs: update contributing guide`, `chore(sdk): regenerate types`.
 
 ## Style Guide
+
+### Documentation and wording
+
+- Do not use the prohibited two-word test phrase in code, scripts, comments, logs, tests, or documentation. Use precise terms such as "basic check" or describe the validation directly.
 
 ### General Principles
 

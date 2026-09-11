@@ -1,0 +1,167 @@
+{
+  "projectDirectory": "C:\\Users\\user\\Documents\\GitHub\\oc",
+  "visibility": {
+    "showMcp": true,
+    "showLsp": false
+  },
+  "scripts": {
+    "shell": {
+      "executable": "pwsh",
+      "args": [
+        "-NoLogo",
+        "-NoExit",
+        "-Command"
+      ]
+    },
+    "terminal": "native",
+    "wezterm": {
+      "horizontal": {
+        "Percent": 50
+      },
+      "vertical": {
+        "Percent": 50
+      }
+    },
+    "languages": [
+      {
+        "id": "powershell",
+        "title": "PowerShell 7",
+        "enabled": true,
+        "launcher": {
+          "executable": "pwsh",
+          "args": [
+            "-NoLogo",
+            "-NoExit",
+            "-File"
+          ]
+        },
+        "extensions": [
+          ".ps1",
+          ".psm1"
+        ]
+      },
+      {
+        "id": "sh",
+        "title": "POSIX sh",
+        "enabled": true,
+        "launcher": {
+          "executable": "sh",
+          "args": []
+        },
+        "extensions": [
+          ".sh"
+        ]
+      },
+      {
+        "id": "bash",
+        "title": "Bash",
+        "enabled": true,
+        "launcher": {
+          "executable": "bash",
+          "args": []
+        },
+        "extensions": [
+          ".bash"
+        ]
+      },
+      {
+        "id": "zsh",
+        "title": "Zsh",
+        "enabled": true,
+        "launcher": {
+          "executable": "zsh",
+          "args": []
+        },
+        "extensions": [
+          ".zsh"
+        ]
+      },
+      {
+        "id": "python",
+        "title": "Python",
+        "enabled": true,
+        "launcher": {
+          "executable": "python",
+          "args": []
+        },
+        "extensions": [
+          ".py"
+        ]
+      },
+      {
+        "id": "node",
+        "title": "Node.js",
+        "enabled": true,
+        "launcher": {
+          "executable": "node",
+          "args": []
+        },
+        "extensions": [
+          ".js",
+          ".mjs",
+          ".cjs"
+        ]
+      },
+      {
+        "id": "typescript",
+        "title": "TypeScript",
+        "enabled": true,
+        "launcher": {
+          "executable": "npx",
+          "args": [
+            "tsx"
+          ]
+        },
+        "extensions": [
+          ".ts",
+          ".mts",
+          ".cts"
+        ]
+      },
+      {
+        "id": "cmd",
+        "title": "Windows cmd",
+        "enabled": true,
+        "launcher": {
+          "executable": "cmd.exe",
+          "args": [
+            "/d",
+            "/c"
+          ]
+        },
+        "extensions": [
+          ".bat",
+          ".cmd"
+        ]
+      },
+      {
+        "id": "ruby",
+        "title": "Ruby",
+        "enabled": true,
+        "launcher": {
+          "executable": "ruby",
+          "args": []
+        },
+        "extensions": [
+          ".rb"
+        ]
+      },
+      {
+        "id": "php",
+        "title": "PHP",
+        "enabled": true,
+        "launcher": {
+          "executable": "php",
+          "args": []
+        },
+        "extensions": [
+          ".php"
+        ]
+      }
+    ]
+  },
+  "scriptPins": [],
+  "favoriteFileRoots": [],
+  "recentFileRoots": [],
+  "fileRoots": {}
+}

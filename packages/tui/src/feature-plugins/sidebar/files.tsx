@@ -30,16 +30,37 @@ function View(props: { api: TuiPluginApi; session_id: string }) {
         <Show when={list().length <= 2 || open()}>
           <For each={list()}>
             {(item) => (
-              <box flexDirection="row" gap={1} justifyContent="space-between">
+              <box
+                flexDirection="row"
+                gap={1}
+                justifyContent="space-between"
+                onMouseUp={() => {
+                  if (props.api.renderer.getSelection()?.getSelectedText()) return
+                  void import("../../editor")
+                    .then(({ openFileAtLocation }) =>
+                      openFileAtLocation({
+                        filePath: item.file,
+                        cwd: props.api.state.path.worktree || props.api.state.path.directory,
+                        editor: props.api.tuiConfig.openEditedWith,
+                      }),
+                    )
+                    .catch((error) =>
+                      props.api.ui.toast({
+                        message: error instanceof Error ? error.message : String(error),
+                        variant: "error",
+                      }),
+                    )
+                }}
+              >
                 <text fg={theme().textMuted} wrapMode="none">
                   {Locale.truncateLeft(item.file, Math.max(2, 36 - changeCountWidth(item)))}
                 </text>
                 <box flexDirection="row" gap={1} flexShrink={0}>
                   <Show when={item.additions}>
-                    <text fg={theme().diffAdded}>+{item.additions}</text>
+                    <text fg={theme().diffAdded}>{`+${item.additions}`}</text>
                   </Show>
                   <Show when={item.deletions}>
-                    <text fg={theme().diffRemoved}>-{item.deletions}</text>
+                    <text fg={theme().diffRemoved}>{`-${item.deletions}`}</text>
                   </Show>
                 </box>
               </box>

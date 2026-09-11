@@ -118,6 +118,8 @@ const layer = Layer.effect(
 
         const defaults = Permission.fromConfig({
           "*": "allow",
+          session_complete: "deny",
+          session_failed: "deny",
           doom_loop: "ask",
           external_directory: {
             "*": "ask",

@@ -29,8 +29,6 @@ import { createSimpleContext } from "./helper"
 import { useExit } from "./exit"
 import { useArgs } from "./args"
 import { batch, onMount } from "solid-js"
-import path from "path"
-import { useKV } from "./kv"
 import { usePermission } from "./permission"
 
 const emptyConsoleState: ConsoleState = {
@@ -51,6 +49,25 @@ function search<T>(items: T[], target: string, key: (item: T) => string) {
   return { found: false, index: left }
 }
 
+function mergeSessionList(
+  current: Session[],
+  fetched: Session[],
+  input: { preserveSessionID?: string; hasMessages: (sessionID: string) => boolean },
+) {
+  const merged = fetched.slice()
+  const fetchedIDs = new Set(fetched.map((session) => session.id))
+  for (const session of current) {
+    if (fetchedIDs.has(session.id)) continue
+    const preserve =
+      (input.preserveSessionID !== undefined && session.id === input.preserveSessionID) ||
+      input.hasMessages(session.id)
+    if (!preserve) continue
+    const match = search(merged, session.id, (item) => item.id)
+    merged.splice(match.index, 0, session)
+  }
+  return merged
+}
+
 function compareMessage(a: Message, b: Message) {
   return a.time.created - b.time.created || a.id.localeCompare(b.id)
 }
@@ -65,7 +82,6 @@ export const {
   name: "Sync",
   init: () => {
     const startup = useTuiStartup()
-    const kv = useKV()
     const permission = usePermission()
     const [store, setStore] = createStore<{
       status: "loading" | "partial" | "complete"
@@ -157,19 +173,9 @@ export const {
       hydratingSessions.get(sessionID)?.parts.add(partID)
     }
 
-    function sessionListQuery(): { scope?: "project"; path?: string } {
-      if (!kv.get("session_directory_filter_enabled", true)) return { scope: "project" }
-      if (!project.data.instance.path.worktree || !project.data.instance.path.directory) return { scope: "project" }
-      return {
-        path: path
-          .relative(path.resolve(project.data.instance.path.worktree), project.data.instance.path.directory)
-          .replaceAll("\\", "/"),
-      }
-    }
-
     function listSessions() {
-      return sdk.client.session
-        .list({ start: Date.now() - 30 * 24 * 60 * 60 * 1000, ...sessionListQuery() })
+      return sdk.client.experimental.session
+        .list({ start: Date.now() - 30 * 24 * 60 * 60 * 1000 })
         .then((x) => (x.data ?? []).toSorted((a, b) => a.id.localeCompare(b.id)))
     }
 
@@ -448,6 +454,14 @@ export const {
     const exit = useExit()
     const args = useArgs()
 
+    function applySessionList(fetched: Session[]) {
+      const merged = mergeSessionList(store.session, fetched, {
+        preserveSessionID: args.sessionID,
+        hasMessages: (sessionID) => (store.message[sessionID]?.length ?? 0) > 0,
+      })
+      setStore("session", reconcile(merged))
+    }
+
     async function bootstrap(input: { fatal?: boolean } = {}) {
       const fatal = input.fatal ?? true
       const workspace = project.workspace.current()
@@ -510,7 +524,7 @@ export const {
               setStore("console_state", reconcile(consoleState))
               setStore("agent", reconcile(agents))
               setStore("config", reconcile(config))
-              if (sessions !== undefined) setStore("session", reconcile(sessions))
+              if (sessions !== undefined) applySessionList(sessions)
             })
           })
         })
@@ -518,7 +532,7 @@ export const {
           if (store.status !== "complete") setStore("status", "partial")
           // non-blocking
           void Promise.all([
-            ...(args.continue ? [] : [sessionListPromise.then((sessions) => setStore("session", reconcile(sessions)))]),
+            ...(args.continue ? [] : [sessionListPromise.then((sessions) => applySessionList(sessions))]),
             consoleStatePromise.then((consoleState) => setStore("console_state", reconcile(consoleState))),
             sdk.client.command.list({ workspace }).then((x) => setStore("command", reconcile(x.data ?? []))),
             sdk.client.lsp.status({ workspace }).then((x) => setStore("lsp", reconcile(x.data ?? []))),
@@ -574,12 +588,9 @@ export const {
           if (match.found) return store.session[match.index]
           return undefined
         },
-        query() {
-          return sessionListQuery()
-        },
         async refresh() {
           const list = await listSessions()
-          setStore("session", reconcile(list))
+          applySessionList(list)
         },
         status(sessionID: string) {
           const session = result.session.get(sessionID)

@@ -19,21 +19,17 @@ import { DialogSessionDeleteFailed } from "./dialog-session-delete-failed"
 import { useCommandShortcut } from "../keymap"
 import { useEvent } from "../context/event"
 
-type SessionListFilter = { scope?: "project"; path?: string }
-
-export function createDialogSessionListQuery(input: { search?: string; filter: SessionListFilter }) {
+export function createDialogSessionListQuery(input: { search?: string }) {
   const search = input.search?.trim()
   return {
     roots: true,
     limit: search ? 30 : 100,
     ...(search ? { search } : {}),
-    ...input.filter,
   }
 }
 
 export function loadDialogSessionList<T>(input: {
   search?: string
-  filter: SessionListFilter
   list: (query: ReturnType<typeof createDialogSessionListQuery>) => Promise<{ data?: T[] }>
 }) {
   return input.list(createDialogSessionListQuery(input)).then(
@@ -60,17 +56,16 @@ export function DialogSessionList() {
   const quickSwitch9 = useCommandShortcut("session.quick_switch.9")
 
   const [browseResults, { refetch: refetchBrowse }] = createResource(
-    () => sync.session.query(),
-    (filter) => loadDialogSessionList({ filter, list: (query) => sdk.client.session.list(query) }),
+    () => true,
+    () => loadDialogSessionList({ list: (query) => sdk.client.experimental.session.list(query) }),
   )
   const [searchResults, { refetch }] = createResource(
-    () => ({ query: search(), filter: sync.session.query() }),
-    (input) => {
-      if (!input.query) return undefined
+    () => search(),
+    (query) => {
+      if (!query) return undefined
       return loadDialogSessionList({
-        search: input.query,
-        filter: input.filter,
-        list: (query) => sdk.client.session.list(query),
+        search: query,
+        list: (query) => sdk.client.experimental.session.list(query),
       })
     },
   )
@@ -244,6 +239,15 @@ export function DialogSessionList() {
           : undefined
       return {
         title: isDeleting ? `Press ${deleteHint()} again to confirm` : x.title,
+        titleView:
+          !isDeleting && (x.sessionFailed || x.sessionComplete) ? (
+            <>
+              <span style={{ fg: x.sessionFailed ? theme.error : theme.success }}>
+                {x.sessionFailed ? "\u2717" : "\u2713"}
+              </span>{" "}
+              {Locale.truncate(x.title, 59)}
+            </>
+          ) : undefined,
         bg: isDeleting ? theme.error : undefined,
         value: x.id,
         category,
@@ -342,6 +346,44 @@ export function DialogSessionList() {
               return
             }
             setToDelete(option.value)
+          },
+        },
+        {
+          command: "session.complete.toggle",
+          title: "complete/incomplete",
+          onTrigger: async (option) => {
+            const session = sessions().find((item) => item.id === option.value)
+            if (!session) return
+            const result = await sdk.client.session.update({
+              sessionID: session.id,
+              sessionComplete: !session.sessionComplete,
+            })
+            if (result.error) {
+              toast.show({ message: errorMessage(result.error), variant: "error" })
+              return
+            }
+            await sync.session.refresh()
+            await refetchBrowse()
+            if (search()) await refetch()
+          },
+        },
+        {
+          command: "session.failed.toggle",
+          title: "failed/not failed",
+          onTrigger: async (option) => {
+            const session = sessions().find((item) => item.id === option.value)
+            if (!session) return
+            const result = await sdk.client.session.update({
+              sessionID: session.id,
+              sessionFailed: !session.sessionFailed,
+            })
+            if (result.error) {
+              toast.show({ message: errorMessage(result.error), variant: "error" })
+              return
+            }
+            await sync.session.refresh()
+            await refetchBrowse()
+            if (search()) await refetch()
           },
         },
         {

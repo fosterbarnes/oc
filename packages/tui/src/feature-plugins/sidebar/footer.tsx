@@ -73,7 +73,8 @@ function View(props: { api: TuiPluginApi; sessionID: string }) {
         <span style={{ fg: theme().text }}>
           <b>Code</b>
         </span>{" "}
-        <span>{props.api.app.version}</span>
+        {/* Custom fork: show the maintenance display value when this build provides one. */}
+        <span>{props.api.app.displayVersion ?? props.api.app.version}</span>
       </text>
     </box>
   )

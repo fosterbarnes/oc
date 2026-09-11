@@ -1,5 +1,20 @@
 import type { ClipboardService } from "../context/clipboard"
 
+export const COPY_ON_SELECT_KEY = "copy_on_select"
+
+export function defaultCopyOnSelect(): boolean {
+  const seeded = envCopyOnSelectSeed()
+  if (seeded !== undefined) return seeded
+  return true
+}
+
+export function envCopyOnSelectSeed(): boolean | undefined {
+  const raw = process.env["OPENCODE_EXPERIMENTAL_DISABLE_COPY_ON_SELECT"]
+  if (raw === undefined) return undefined
+  const value = raw.toLowerCase()
+  return !(value === "true" || value === "1")
+}
+
 type Toast = {
   show: (input: { message: string; variant: "info" | "success" | "warning" | "error" }) => void
   error: (err: unknown) => void

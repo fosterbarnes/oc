@@ -370,6 +370,9 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
     const visible = shownActions()
 
     return {
+      mode: "modal",
+      // Dialog actions must win over input handling while the filter is focused.
+      priority: 1,
       commands: [
         {
           name: "dialog.select.prev",

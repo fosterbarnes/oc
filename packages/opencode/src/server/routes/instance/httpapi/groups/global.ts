@@ -65,12 +65,26 @@ const GlobalUpgradeResult = Schema.Union([
   }),
 ])
 
+export class ServerLifecycleUnavailable extends Schema.ErrorClass<ServerLifecycleUnavailable>(
+  "ServerLifecycleUnavailable",
+)(
+  {
+    name: Schema.Literal("ServerLifecycleUnavailable"),
+    data: Schema.Struct({
+      message: Schema.String,
+    }),
+  },
+  { httpApiStatus: 409 },
+) {}
+
 export const GlobalPaths = {
   health: "/global/health",
   event: "/global/event",
   config: "/global/config",
   dispose: "/global/dispose",
   upgrade: "/global/upgrade",
+  shutdown: "/global/shutdown",
+  restart: "/global/restart",
 } as const
 
 export const GlobalApi = HttpApi.make("global").add(
@@ -132,6 +146,26 @@ export const GlobalApi = HttpApi.make("global").add(
           identifier: "global.upgrade",
           summary: "Upgrade opencode",
           description: "Upgrade opencode to the specified version.",
+        }),
+      ),
+      HttpApiEndpoint.post("shutdown", GlobalPaths.shutdown, {
+        success: described(Schema.Boolean, "Server shutdown scheduled"),
+        error: ServerLifecycleUnavailable,
+      }).annotateMerge(
+        OpenApi.annotations({
+          identifier: "global.shutdown",
+          summary: "Shut down server",
+          description: "Dispose OpenCode instances and stop a managed server.",
+        }),
+      ),
+      HttpApiEndpoint.post("restart", GlobalPaths.restart, {
+        success: described(Schema.Boolean, "Server restart scheduled"),
+        error: ServerLifecycleUnavailable,
+      }).annotateMerge(
+        OpenApi.annotations({
+          identifier: "global.restart",
+          summary: "Restart server",
+          description: "Dispose OpenCode instances and restart a managed server.",
         }),
       ),
     )

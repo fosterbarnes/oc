@@ -757,7 +757,7 @@ function DiffViewer(props: { api: TuiPluginApi }) {
           <text fg={theme().textMuted}>{diffSourceLabel(mode())}</text>
           <box flexGrow={1} />
           <text fg={theme().textMuted}>
-            {files().length} {files().length === 1 ? "file" : "files"}
+            {`${files().length} ${files().length === 1 ? "file" : "files"}`}
           </text>
         </Panel>
 
@@ -827,10 +827,10 @@ function DiffViewer(props: { api: TuiPluginApi }) {
                               <text fg={reviewed() ? theme().textMuted : theme().text}>{entry.file.file}</text>
                               <box flexGrow={1} />
                               <text fg={reviewed() ? theme().textMuted : theme().diffAdded}>
-                                +{entry.file.additions}
+                                {`+${entry.file.additions}`}
                               </text>
                               <text fg={reviewed() ? theme().textMuted : theme().diffRemoved}>
-                                -{entry.file.deletions}
+                                {`-${entry.file.deletions}`}
                               </text>
                             </box>
                             <Separator axis="x" start={showFileTree() ? "edge" : undefined} />

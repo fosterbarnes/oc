@@ -23,7 +23,7 @@ function isSuggestedPaletteCommand(entry: PaletteCommandEntry) {
   return false
 }
 
-export function CommandPaletteDialog() {
+export function CommandPaletteDialog(props: { category?: string } = {}) {
   const config = useTuiConfig()
   const keymap = useOpencodeKeymap()
   const entries = useKeymapSelector((keymap: OpenTuiKeymap) => {
@@ -33,7 +33,7 @@ export function CommandPaletteDialog() {
     const reachable = keymap.getCommandEntries({
       ...query,
       visibility: "reachable",
-      filter: isVisiblePaletteCommand,
+      filter: (command) => isVisiblePaletteCommand(command) && (!props.category || command.category === props.category),
     })
     const registeredBindings = keymap.getCommandBindings({
       visibility: "registered",

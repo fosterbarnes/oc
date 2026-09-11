@@ -8,6 +8,7 @@ import { createSolidTransformPlugin } from "@opentui/solid/bun-plugin"
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 const dir = path.resolve(__dirname, "..")
+const runtimeSource = path.resolve(dir, "../agentify-runtime")
 
 process.chdir(dir)
 
@@ -15,6 +16,15 @@ const generated = await import("./generate.ts")
 
 import { Script } from "@opencode-ai/script"
 import pkg from "../package.json"
+
+// Custom fork: preview binaries display the local maintenance version without changing release metadata.
+const maintenanceVersion = (await Bun.file(path.resolve(dir, "../../.version/version")).text()).trim()
+if (!/^\d+\.\d+\.\d+$/.test(maintenanceVersion)) {
+  throw new Error(`Invalid maintenance version: ${maintenanceVersion}`)
+}
+const displayVersion = Script.version.startsWith("0.0.0-")
+  ? maintenanceVersion + Script.version.slice("0.0.0".length)
+  : Script.version
 
 const singleFlag = process.argv.includes("--single")
 const baselineFlag = process.argv.includes("--baseline")
@@ -169,6 +179,7 @@ for (const item of targets) {
     minify: true,
     sourcemap: sourcemapsFlag ? "linked" : "none",
     splitting: true,
+    bytecode: true,
     compile: {
       autoloadBunfig: false,
       autoloadDotenv: false,
@@ -192,6 +203,7 @@ for (const item of targets) {
     define: {
       FFF_LIBC: JSON.stringify(item.abi === "musl" ? "musl" : "gnu"),
       OPENCODE_VERSION: `'${Script.version}'`,
+      OPENCODE_DISPLAY_VERSION: `'${displayVersion}'`,
       OPENCODE_MODELS_DEV: generated.modelsData,
       OTUI_TREE_SITTER_WORKER_PATH: bunfsRoot + treeSitterWorkerPath,
       OPENCODE_WORKER_PATH: workerPath,
@@ -201,15 +213,21 @@ for (const item of targets) {
     },
   })
 
-  // Smoke test: only run if binary is for current platform
+  const runtimeTarget = `dist/${name}/bin/agentify-runtime`
+  await $`mkdir -p ${runtimeTarget}`
+  for (const file of await Array.fromAsync(new Bun.Glob("**/*").scan({ cwd: runtimeSource, onlyFiles: true }))) {
+    await Bun.write(path.join(runtimeTarget, file), Bun.file(path.join(runtimeSource, file)))
+  }
+
+  // Basic check: only run if binary is for current platform
   if (item.os === process.platform && item.arch === process.arch && !item.abi) {
     const binaryPath = `dist/${name}/bin/opencode`
-    console.log(`Running smoke test: ${binaryPath} --version`)
+    console.log(`Running basic check: ${binaryPath} --version`)
     try {
       const versionOutput = await $`${binaryPath} --version`.text()
-      console.log(`Smoke test passed: ${versionOutput.trim()}`)
+      console.log(`Basic check passed: ${versionOutput.trim()}`)
     } catch (e) {
-      console.error(`Smoke test failed for ${name}:`, e)
+      console.error(`Basic check failed for ${name}:`, e)
       process.exit(1)
     }
   }

@@ -48,6 +48,10 @@ export function recentModels(
     .map((item) => ({ providerID: item.providerID, modelID: item.modelID }))
 }
 
+export function resolveCurrentModel<T>(selected: T | undefined, cli: T | undefined, agent: T | undefined, fallback: T | undefined) {
+  return selected ?? cli ?? agent ?? fallback
+}
+
 export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
   name: "Local",
   init: () => {
@@ -194,17 +198,14 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
           if (state.pending) save()
         })
 
-      const fallbackModel = createMemo(() => {
-        if (args.model) {
-          const { providerID, modelID } = parseModel(args.model)
-          if (isModelValid({ providerID, modelID })) {
-            return {
-              providerID,
-              modelID,
-            }
-          }
-        }
+      const cliModel = createMemo(() => {
+        if (!args.model) return undefined
+        const { providerID, modelID } = parseModel(args.model)
+        if (!isModelValid({ providerID, modelID })) return undefined
+        return { providerID, modelID }
+      })
 
+      const fallbackModel = createMemo(() => {
         if (sync.data.config.model) {
           const { providerID, modelID } = parseModel(sync.data.config.model)
           if (isModelValid({ providerID, modelID })) {
@@ -235,12 +236,12 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
 
       const currentModel = createMemo(() => {
         const a = agent.current()
-        return (
-          getFirstValidModel(
-            () => a && modelStore.model[a.name],
-            () => a && a.model,
-            fallbackModel,
-          ) ?? undefined
+        const selected = a && modelStore.model[a.name]
+        return resolveCurrentModel(
+          selected && isModelValid(selected) ? selected : undefined,
+          cliModel(),
+          getFirstValidModel(() => a && a.model),
+          fallbackModel(),
         )
       })
 

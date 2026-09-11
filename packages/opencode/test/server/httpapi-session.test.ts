@@ -739,9 +739,16 @@ describe("session HttpApi", () => {
         const updated = yield* requestJson<Session.Info>(pathFor(SessionPaths.update, { sessionID: created.id }), {
           method: "PATCH",
           headers,
-          body: JSON.stringify({ title: "updated", time: { archived: 1 } }),
+          body: JSON.stringify({ title: "updated", time: { archived: 1 }, sessionComplete: true }),
         })
-        expect(updated).toMatchObject({ id: created.id, title: "updated", time: { archived: 1 } })
+        expect(updated).toMatchObject({ id: created.id, title: "updated", sessionComplete: true, time: { archived: 1 } })
+
+        const failed = yield* requestJson<Session.Info>(pathFor(SessionPaths.update, { sessionID: created.id }), {
+          method: "PATCH",
+          headers,
+          body: JSON.stringify({ sessionFailed: true }),
+        })
+        expect(failed).toMatchObject({ id: created.id, sessionComplete: false, sessionFailed: true })
 
         const forked = yield* requestJson<Session.Info>(pathFor(SessionPaths.fork, { sessionID: created.id }), {
           method: "POST",

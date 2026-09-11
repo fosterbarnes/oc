@@ -399,6 +399,36 @@ it.effect("updates global config and omits empty shell key in jsonc", () =>
   ),
 )
 
+it.effect("updates global default_subagent in jsonc", () =>
+  withGlobalConfig({ config: { default_subagent: "general", model: "test/model" }, name: "opencode.jsonc" }, ({ dir }) =>
+    Effect.gen(function* () {
+      yield* Config.use.updateGlobal({ default_subagent: "explore" })
+
+      const file = path.join(dir, "opencode.jsonc")
+      const writtenConfig = yield* FSUtil.use.readFileString(file)
+      const parsed = ConfigParse.schema(ConfigV1.Info, ConfigParse.jsonc(writtenConfig, file), file)
+      expect(parsed.default_subagent).toBe("explore")
+      expect(parsed.model).toBe("test/model")
+    }),
+  ),
+)
+
+it.effect("updates a default subagent model in jsonc", () =>
+  withGlobalConfig(
+    { config: { agent: { general: { model: "test/old-model" } }, model: "test/parent-model" }, name: "opencode.jsonc" },
+    ({ dir }) =>
+      Effect.gen(function* () {
+        yield* Config.use.updateGlobal({ agent: { general: { model: "test/new-model" } } })
+
+        const file = path.join(dir, "opencode.jsonc")
+        const writtenConfig = yield* FSUtil.use.readFileString(file)
+        const parsed = ConfigParse.schema(ConfigV1.Info, ConfigParse.jsonc(writtenConfig, file), file)
+        expect(parsed.agent?.general?.model).toBe("test/new-model")
+        expect(parsed.model).toBe("test/parent-model")
+      }),
+  ),
+)
+
 it.effect("logs global update diagnostics once without exposing values", () =>
   withGlobalConfig(
     {

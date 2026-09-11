@@ -42,7 +42,7 @@ import { webSearchProviderLabel } from "../../util/tool-display"
 import { Dynamic, useRenderer, useTerminalDimensions, type JSX } from "@opentui/solid"
 import { useSDK } from "../../context/sdk"
 import { useEditorContext } from "../../context/editor"
-import { openEditor } from "../../editor"
+import { openEditor, openFileAtLocation } from "../../editor"
 import { useDialog } from "../../ui/dialog"
 import { DialogAlert } from "../../ui/dialog-alert"
 import { TodoItem } from "../../component/todo-item"
@@ -115,6 +115,8 @@ function goUpsellKeys(action: RetryAction) {
 const sessionBindingCommands = [
   "session.share",
   "session.rename",
+  "session.complete.toggle",
+  "session.failed.toggle",
   "session.timeline",
   "session.fork",
   "session.compact",
@@ -166,6 +168,7 @@ const context = createContext<{
   providers: () => ReadonlyMap<string, Provider>
   sync: ReturnType<typeof useSync>
   tui: ReturnType<typeof useTuiConfig>
+  openFile: (filePath: string) => void
 }>()
 
 function use() {
@@ -200,7 +203,14 @@ export function Session() {
 
   createEffect(() => {
     const title = Locale.truncate(session()?.title ?? "", 50)
-    setEpilogue(sessionEpilogue({ title, sessionID: session()?.id }))
+    setEpilogue(
+      sessionEpilogue({
+        title,
+        sessionID: session()?.id,
+        sessionComplete: session()?.sessionComplete,
+        sessionFailed: session()?.sessionFailed,
+      }),
+    )
   })
   onCleanup(() => setEpilogue())
   const children = createMemo(() => {
@@ -282,6 +292,25 @@ export function Session() {
   const toast = useToast()
   const sdk = useSDK()
   const editor = useEditorContext()
+
+  // ponytail: double-click gate, single click no-op to avoid accidental opens
+  let _lastOpenPath = ""
+  let _lastOpenAt = 0
+  const DOUBLE_CLICK_MS = 350
+  const openFile = (filePath: string) => {
+    const now = Date.now()
+    const isDouble = filePath === _lastOpenPath && now - _lastOpenAt < DOUBLE_CLICK_MS
+    _lastOpenAt = now
+    _lastOpenPath = filePath
+    if (!isDouble) return
+    void openFileAtLocation({
+      filePath,
+      cwd: session()?.directory ?? paths.cwd,
+      editor: tuiConfig.openEditedWith,
+    }).catch((error) =>
+      toast.show({ message: error instanceof Error ? error.message : String(error), variant: "error" }),
+    )
+  }
 
   createEffect(() => {
     const sessionID = route.sessionID
@@ -512,6 +541,48 @@ export function Session() {
       },
       run: () => {
         dialog.replace(() => <DialogSessionRename session={route.sessionID} />)
+      },
+    },
+    {
+      title: session()?.sessionComplete ? "Mark session incomplete" : "Mark session complete",
+      value: "session.complete.toggle",
+      category: "Session",
+      slash: {
+        name: "complete",
+      },
+      run: async () => {
+        const current = session()
+        if (!current) return
+        const result = await sdk.client.session.update({
+          sessionID: current.id,
+          sessionComplete: !current.sessionComplete,
+        })
+        if (result.error) {
+          toast.show({ message: errorMessage(result.error), variant: "error" })
+          return
+        }
+        dialog.clear()
+      },
+    },
+    {
+      title: session()?.sessionFailed ? "Mark session not failed" : "Mark session failed",
+      value: "session.failed.toggle",
+      category: "Session",
+      slash: {
+        name: "failed",
+      },
+      run: async () => {
+        const current = session()
+        if (!current) return
+        const result = await sdk.client.session.update({
+          sessionID: current.id,
+          sessionFailed: !current.sessionFailed,
+        })
+        if (result.error) {
+          toast.show({ message: errorMessage(result.error), variant: "error" })
+          return
+        }
+        dialog.clear()
       },
     },
     {
@@ -1172,6 +1243,7 @@ export function Session() {
           providers,
           sync,
           tui: tuiConfig,
+          openFile,
         }}
       >
         <box flexDirection="row" flexGrow={1} minHeight={0}>
@@ -1233,7 +1305,7 @@ export function Session() {
                                 paddingLeft={2}
                                 backgroundColor={hover() ? theme.backgroundElement : theme.backgroundPanel}
                               >
-                                <text fg={theme.textMuted}>{revert()!.reverted.length} message reverted</text>
+                                <text fg={theme.textMuted}>{`${revert()!.reverted.length} message reverted`}</text>
                                 <text fg={theme.textMuted}>
                                   <span style={{ fg: theme.text }}>{redoShortcut()}</span> or /redo to restore
                                 </text>
@@ -1244,10 +1316,10 @@ export function Session() {
                                         <text fg={theme.text}>
                                           {file.filename}
                                           <Show when={file.additions > 0}>
-                                            <span style={{ fg: theme.diffAdded }}> +{file.additions}</span>
+                                            <span style={{ fg: theme.diffAdded }}>{` +${file.additions}`}</span>
                                           </Show>
                                           <Show when={file.deletions > 0}>
-                                            <span style={{ fg: theme.diffRemoved }}> -{file.deletions}</span>
+                                            <span style={{ fg: theme.diffRemoved }}>{` -${file.deletions}`}</span>
                                           </Show>
                                         </text>
                                       )}
@@ -1845,6 +1917,7 @@ function InlineTool(props: {
   children: JSX.Element
   part: ToolPart
   onClick?: () => void
+  filePath?: string
 }) {
   const { theme } = useTheme()
   const ctx = use()
@@ -1870,12 +1943,12 @@ function InlineTool(props: {
   )
 
   const failed = createMemo(() => Boolean(error() && !denied()))
-  const clickable = createMemo(() => Boolean(props.onClick || failed()))
+  const clickable = createMemo(() => Boolean(props.onClick || props.filePath || failed()))
   const fg = createMemo(() => {
     if (props.color) return props.color
     if (permission()) return theme.warning
     if (failed()) return theme.error
-    if (hover() && props.onClick) return theme.text
+    if (hover() && (props.onClick || props.filePath)) return theme.text
     if (props.complete) return theme.textMuted
     return theme.text
   })
@@ -1903,7 +1976,8 @@ function InlineTool(props: {
           setErrorExpanded((value) => !value)
           return
         }
-        props.onClick?.()
+        if (props.onClick) props.onClick()
+        else if (props.filePath) ctx.openFile(props.filePath)
       }}
     >
       {props.children}
@@ -2103,6 +2177,7 @@ function Shell(props: ToolProps) {
 }
 
 function Write(props: ToolProps) {
+  const ctx = use()
   const { theme, syntax } = useTheme()
   const pathFormatter = usePathFormatter()
   const code = createMemo(() => {
@@ -2112,7 +2187,14 @@ function Write(props: ToolProps) {
   return (
     <Switch>
       <Match when={props.metadata.diagnostics !== undefined}>
-        <BlockTool title={"# Wrote " + pathFormatter.format(stringValue(props.input.filePath))} part={props.part}>
+        <BlockTool
+          title={"# Wrote " + pathFormatter.format(stringValue(props.input.filePath))}
+          part={props.part}
+          onClick={() => {
+            const filePath = stringValue(props.input.filePath)
+            if (filePath) ctx.openFile(filePath)
+          }}
+        >
           <line_number fg={theme.textMuted} minWidth={3} paddingRight={1}>
             <code
               conceal={false}
@@ -2126,7 +2208,16 @@ function Write(props: ToolProps) {
         </BlockTool>
       </Match>
       <Match when={true}>
-        <InlineTool icon="←" pending="Preparing write…" complete={stringValue(props.input.filePath)} part={props.part}>
+        <InlineTool
+          icon="←"
+          pending="Preparing write…"
+          complete={stringValue(props.input.filePath)}
+          part={props.part}
+          onClick={() => {
+            const filePath = stringValue(props.input.filePath)
+            if (filePath) ctx.openFile(filePath)
+          }}
+        >
           Write {pathFormatter.format(stringValue(props.input.filePath))}
         </InlineTool>
       </Match>
@@ -2135,19 +2226,30 @@ function Write(props: ToolProps) {
 }
 
 function Glob(props: ToolProps) {
+  const ctx = use()
   const pathFormatter = usePathFormatter()
   return (
-    <InlineTool icon="✱" pending="Finding files…" complete={stringValue(props.input.pattern)} part={props.part}>
+    <InlineTool
+      icon="✱"
+      pending="Finding files…"
+      complete={stringValue(props.input.pattern)}
+      part={props.part}
+      onClick={() => {
+        const filePath = stringValue(props.input.path)
+        if (filePath) ctx.openFile(filePath)
+      }}
+    >
       Glob "{stringValue(props.input.pattern)}"{" "}
       <Show when={stringValue(props.input.path)}>in {pathFormatter.format(stringValue(props.input.path))} </Show>
       <Show when={numberValue(props.metadata.count)}>
-        ({numberValue(props.metadata.count)} {numberValue(props.metadata.count) === 1 ? "match" : "matches"})
+        {`(${numberValue(props.metadata.count)} ${numberValue(props.metadata.count) === 1 ? "match" : "matches"})`}
       </Show>
     </InlineTool>
   )
 }
 
 function Read(props: ToolProps) {
+  const ctx = use()
   const { theme } = useTheme()
   const pathFormatter = usePathFormatter()
   const isRunning = createMemo(() => props.part.state.status === "running")
@@ -2166,13 +2268,17 @@ function Read(props: ToolProps) {
         complete={stringValue(props.input.filePath)}
         spinner={isRunning()}
         part={props.part}
+        onClick={() => {
+          const filePath = stringValue(props.input.filePath)
+          if (filePath) ctx.openFile(filePath)
+        }}
       >
         Read {pathFormatter.format(stringValue(props.input.filePath))} {input(props.input, ["filePath"])}
       </InlineTool>
       <For each={loaded()}>
         {(filepath) => (
           <box paddingLeft={3}>
-            <text paddingLeft={3} fg={theme.textMuted}>
+            <text paddingLeft={3} fg={theme.textMuted} onMouseUp={() => ctx.openFile(filepath)}>
               ↳ Loaded {pathFormatter.format(filepath)}
             </text>
           </box>
@@ -2183,13 +2289,23 @@ function Read(props: ToolProps) {
 }
 
 function Grep(props: ToolProps) {
+  const ctx = use()
   const pathFormatter = usePathFormatter()
   return (
-    <InlineTool icon="✱" pending="Searching content…" complete={stringValue(props.input.pattern)} part={props.part}>
+    <InlineTool
+      icon="✱"
+      pending="Searching content…"
+      complete={stringValue(props.input.pattern)}
+      part={props.part}
+      onClick={() => {
+        const filePath = stringValue(props.input.path)
+        if (filePath) ctx.openFile(filePath)
+      }}
+    >
       Grep "{stringValue(props.input.pattern)}"{" "}
       <Show when={stringValue(props.input.path)}>in {pathFormatter.format(stringValue(props.input.path))} </Show>
       <Show when={numberValue(props.metadata.matches)}>
-        ({numberValue(props.metadata.matches)} {numberValue(props.metadata.matches) === 1 ? "match" : "matches"})
+        {`(${numberValue(props.metadata.matches)} ${numberValue(props.metadata.matches) === 1 ? "match" : "matches"})`}
       </Show>
     </InlineTool>
   )
@@ -2207,7 +2323,7 @@ function WebSearch(props: ToolProps) {
   return (
     <InlineTool icon="◈" pending="Searching web…" complete={stringValue(props.input.query)} part={props.part}>
       {webSearchProviderLabel(props.metadata.provider)} "{stringValue(props.input.query)}"{" "}
-      <Show when={numberValue(props.metadata.numResults)}>({numberValue(props.metadata.numResults)} results)</Show>
+      <Show when={numberValue(props.metadata.numResults)}>{`(${numberValue(props.metadata.numResults)} results)`}</Show>
     </InlineTool>
   )
 }
@@ -2407,7 +2523,13 @@ function Edit(props: ToolProps) {
     <Switch>
       <Match when={stringValue(props.metadata.diff) !== undefined}>
         <BlockTool title={"← Edit " + pathFormatter.format(stringValue(props.input.filePath))} part={props.part}>
-          <box paddingLeft={1}>
+          <box
+            paddingLeft={1}
+            onMouseUp={() => {
+              const filePath = stringValue(props.input.filePath)
+              if (filePath) ctx.openFile(filePath)
+            }}
+          >
             <diff
               diff={diffContent()}
               view={view()}
@@ -2419,11 +2541,9 @@ function Edit(props: ToolProps) {
               fg={theme.text}
               addedBg={theme.diffAddedBg}
               removedBg={theme.diffRemovedBg}
-              contextBg={theme.diffContextBg}
               addedSignColor={theme.diffHighlightAdded}
               removedSignColor={theme.diffHighlightRemoved}
               lineNumberFg={theme.diffLineNumber}
-              lineNumberBg={theme.diffContextBg}
               addedLineNumberBg={theme.diffAddedLineNumberBg}
               removedLineNumberBg={theme.diffRemovedLineNumberBg}
             />
@@ -2432,8 +2552,17 @@ function Edit(props: ToolProps) {
         </BlockTool>
       </Match>
       <Match when={true}>
-        <InlineTool icon="←" pending="Preparing edit…" complete={stringValue(props.input.filePath)} part={props.part}>
-          Edit {pathFormatter.format(stringValue(props.input.filePath))} {input({ replaceAll: props.input.replaceAll })}
+        <InlineTool
+          icon="←"
+          pending="Preparing edit…"
+          complete={stringValue(props.input.filePath)}
+          part={props.part}
+          onClick={() => {
+            const filePath = stringValue(props.input.filePath)
+            if (filePath) ctx.openFile(filePath)
+          }}
+        >
+          {`Edit ${pathFormatter.format(stringValue(props.input.filePath))} ${input({ replaceAll: props.input.replaceAll })}`}
         </InlineTool>
       </Match>
     </Switch>
@@ -2467,11 +2596,9 @@ function ApplyPatch(props: ToolProps) {
           fg={theme.text}
           addedBg={theme.diffAddedBg}
           removedBg={theme.diffRemovedBg}
-          contextBg={theme.diffContextBg}
           addedSignColor={theme.diffHighlightAdded}
           removedSignColor={theme.diffHighlightRemoved}
           lineNumberFg={theme.diffLineNumber}
-          lineNumberBg={theme.diffContextBg}
           addedLineNumberBg={theme.diffAddedLineNumberBg}
           removedLineNumberBg={theme.diffRemovedLineNumberBg}
         />
@@ -2491,12 +2618,16 @@ function ApplyPatch(props: ToolProps) {
       <Match when={files().length > 0}>
         <For each={files()}>
           {(file) => (
-            <BlockTool title={title(file)} part={props.part}>
+            <BlockTool
+              title={title(file)}
+              part={props.part}
+              onClick={file.type === "delete" ? undefined : () => ctx.openFile(file.filePath)}
+            >
               <Show
                 when={file.type !== "delete"}
                 fallback={
                   <text fg={theme.diffRemoved}>
-                    -{file.deletions} line{file.deletions !== 1 ? "s" : ""}
+                    {`-${file.deletions} line${file.deletions !== 1 ? "s" : ""}`}
                   </text>
                 }
               >
@@ -2565,7 +2696,7 @@ function Question(props: ToolProps) {
       </Match>
       <Match when={true}>
         <InlineTool icon="→" pending="Asking questions…" complete={count()} part={props.part}>
-          Asked {count()} question{count() !== 1 ? "s" : ""}
+          {`Asked ${count()} question${count() !== 1 ? "s" : ""}`}
         </InlineTool>
       </Match>
     </Switch>
@@ -2597,7 +2728,7 @@ function Diagnostics(props: { diagnostics: unknown; filePath: string }) {
         <For each={errors()}>
           {(diagnostic) => (
             <text fg={theme.error}>
-              Error [{diagnostic.range.start.line + 1}:{diagnostic.range.start.character + 1}] {diagnostic.message}
+              {`Error [${diagnostic.range.start.line + 1}:${diagnostic.range.start.character + 1}] ${diagnostic.message}`}
             </text>
           )}
         </For>

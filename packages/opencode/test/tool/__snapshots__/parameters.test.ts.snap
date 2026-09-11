@@ -318,7 +318,7 @@ exports[`tool parameters JSON Schema (wire shape) task 1`] = `
       "type": "string",
     },
     "subagent_type": {
-      "description": "The type of specialized agent to use for this task",
+      "description": "The type of specialized agent to use for this task; uses default_subagent when omitted",
       "type": "string",
     },
     "task_id": {
@@ -329,7 +329,6 @@ exports[`tool parameters JSON Schema (wire shape) task 1`] = `
   "required": [
     "description",
     "prompt",
-    "subagent_type",
   ],
   "type": "object",
 }

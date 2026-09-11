@@ -9,6 +9,7 @@ import { SessionRevert } from "./revert"
 import { Session } from "./session"
 import { Agent } from "../agent/agent"
 import { Provider } from "@/provider/provider"
+import { PROVIDER_ID } from "@/provider/agentify"
 
 import { type Tool as AITool, tool, jsonSchema } from "ai"
 import type { JSONSchema7 } from "@ai-sdk/provider"
@@ -110,6 +111,10 @@ export interface Interface {
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/SessionPrompt") {}
 
+export function shouldSkipRemoteTitleGeneration(providerID: ProviderV2.ID) {
+  return providerID === PROVIDER_ID
+}
+
 const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
@@ -197,6 +202,7 @@ const layer = Layer.effect(
       modelID: ModelV2.ID
     }) {
       if (input.session.parentID) return
+      if (shouldSkipRemoteTitleGeneration(input.providerID)) return
       if (!Session.isDefaultTitle(input.session.title)) return
 
       const real = (m: SessionV1.WithParts) =>
@@ -1296,7 +1302,7 @@ const layer = Layer.effect(
             if (finished && !handle.message.error) {
               // Surface any content-filter finish (e.g. Anthropic stop_reason:
               // refusal) as an error. These turns may have produced no visible
-              // output at all — previously the session went idle silently — or
+              // output at all - previously the session went idle silently - or
               // partial text that was cut off by the provider's filter.
               if (handle.message.finish === "content-filter") {
                 handle.message.error = new SessionV1.ContentFilterError({
@@ -1541,7 +1547,7 @@ export const CommandInput = Schema.Struct({
   arguments: Schema.String,
   command: Schema.String,
   variant: Schema.optional(Schema.String),
-  // Inlined (no identifier annotation) to keep the original SDK output — the
+  // Inlined (no identifier annotation) to keep the original SDK output - the
   // PromptInput call site below references FilePartInput by ref via the
   // Schema export in message-v2.ts.
   parts: Schema.optional(

@@ -209,6 +209,8 @@ export default {
           \`time_updated\` integer NOT NULL,
           \`time_compacting\` integer,
           \`time_archived\` integer,
+          \`session_complete\` integer DEFAULT 0 NOT NULL,
+          \`session_failed\` integer DEFAULT 0 NOT NULL,
           CONSTRAINT \`fk_session_project_id_project_id_fk\` FOREIGN KEY (\`project_id\`) REFERENCES \`project\`(\`id\`) ON DELETE CASCADE
         );
       `)

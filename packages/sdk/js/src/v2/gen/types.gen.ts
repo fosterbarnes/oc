@@ -211,6 +211,8 @@ export type Session = {
     compacting?: number
     archived?: number
   }
+  sessionComplete?: boolean
+  sessionFailed?: boolean
   permission?: PermissionRuleset
   revert?: {
     messageID: string
@@ -1680,6 +1682,8 @@ export type PermissionConfig =
       lsp?: PermissionRuleConfig
       doom_loop?: PermissionActionConfig
       skill?: PermissionRuleConfig
+      session_complete?: PermissionActionConfig
+      session_failed?: PermissionActionConfig
       [key: string]: PermissionRuleConfig | PermissionActionConfig | undefined
     }
 
@@ -1935,6 +1939,7 @@ export type Config = {
   model?: string
   small_model?: string
   default_agent?: string
+  default_subagent?: string
   subagent_depth?: number
   username?: string
   mode?: {
@@ -2029,6 +2034,13 @@ export type Config = {
     continue_loop_on_deny?: boolean
     mcp_timeout?: number
     policies?: Array<ConfigV2ExperimentalPolicy>
+  }
+}
+
+export type ServerLifecycleUnavailable = {
+  name: "ServerLifecycleUnavailable"
+  data: {
+    message: string
   }
 }
 
@@ -2239,6 +2251,8 @@ export type GlobalSession = {
     compacting?: number
     archived?: number
   }
+  sessionComplete?: boolean
+  sessionFailed?: boolean
   permission?: PermissionRuleset
   revert?: {
     messageID: string
@@ -3926,6 +3940,8 @@ export type SessionV2Info = {
     updated: number
     archived?: number
   }
+  sessionComplete?: boolean
+  sessionFailed?: boolean
   title: string
   location: LocationRef
   subpath?: string
@@ -7389,6 +7405,64 @@ export type GlobalUpgradeResponses = {
 
 export type GlobalUpgradeResponse = GlobalUpgradeResponses[keyof GlobalUpgradeResponses]
 
+export type GlobalShutdownData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/global/shutdown"
+}
+
+export type GlobalShutdownErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * ServerLifecycleUnavailable
+   */
+  409: ServerLifecycleUnavailable
+}
+
+export type GlobalShutdownError = GlobalShutdownErrors[keyof GlobalShutdownErrors]
+
+export type GlobalShutdownResponses = {
+  /**
+   * Server shutdown scheduled
+   */
+  200: boolean
+}
+
+export type GlobalShutdownResponse = GlobalShutdownResponses[keyof GlobalShutdownResponses]
+
+export type GlobalRestartData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/global/restart"
+}
+
+export type GlobalRestartErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * ServerLifecycleUnavailable
+   */
+  409: ServerLifecycleUnavailable
+}
+
+export type GlobalRestartError = GlobalRestartErrors[keyof GlobalRestartErrors]
+
+export type GlobalRestartResponses = {
+  /**
+   * Server restart scheduled
+   */
+  200: boolean
+}
+
+export type GlobalRestartResponse = GlobalRestartResponses[keyof GlobalRestartResponses]
+
 export type EventSubscribeData = {
   body?: never
   path?: never
@@ -9616,6 +9690,8 @@ export type SessionGetResponse = SessionGetResponses[keyof SessionGetResponses]
 export type SessionUpdateData = {
   body?: {
     title?: string
+    sessionComplete?: boolean
+    sessionFailed?: boolean
     metadata?: {
       [key: string]: unknown
     }

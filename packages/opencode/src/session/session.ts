@@ -114,6 +114,8 @@ export function fromRow(row: SessionRow): Info {
       compacting: row.time_compacting ?? undefined,
       archived: row.time_archived ?? undefined,
     },
+    sessionComplete: row.session_complete === 1,
+    sessionFailed: row.session_failed === 1,
   }
 }
 
@@ -155,6 +157,8 @@ export function toRow(info: Info) {
     time_updated: info.time.updated,
     time_compacting: info.time.compacting,
     time_archived: info.time.archived,
+    session_complete: info.sessionComplete ? 1 : 0,
+    session_failed: info.sessionFailed ? 1 : 0,
   }
 }
 
@@ -239,6 +243,8 @@ export const Info = Schema.Struct({
   version: Schema.String,
   metadata: optional(Metadata),
   time: Time,
+  sessionComplete: optional(Schema.Boolean),
+  sessionFailed: optional(Schema.Boolean),
   permission: optional(PermissionV1.Ruleset),
   revert: optional(Revert),
 }).annotate({ identifier: "Session" })
@@ -427,6 +433,8 @@ export interface Interface {
   readonly get: (id: SessionID) => Effect.Effect<Info, NotFound>
   readonly setTitle: (input: { sessionID: SessionID; title: string }) => Effect.Effect<void>
   readonly setArchived: (input: { sessionID: SessionID; time?: number }) => Effect.Effect<void>
+  readonly setSessionComplete: (input: { sessionID: SessionID; sessionComplete: boolean }) => Effect.Effect<void>
+  readonly setSessionFailed: (input: { sessionID: SessionID; sessionFailed: boolean }) => Effect.Effect<void>
   readonly setMetadata: (input: typeof SetMetadataInput.Type) => Effect.Effect<void>
   readonly setAgentModel: (input: {
     sessionID: SessionID
@@ -529,6 +537,8 @@ const layer: Layer.Layer<
           created: Date.now(),
           updated: Date.now(),
         },
+        sessionComplete: false,
+        sessionFailed: false,
       }
       yield* Effect.logInfo("created", result)
 
@@ -758,6 +768,26 @@ const layer: Layer.Layer<
       yield* patch(input.sessionID, { time: { archived: input.time } }).pipe(Effect.orDie)
     })
 
+    const setSessionComplete = Effect.fn("Session.setSessionComplete")(function* (input: {
+      sessionID: SessionID
+      sessionComplete: boolean
+    }) {
+      yield* patch(input.sessionID, {
+        sessionComplete: input.sessionComplete,
+        ...(input.sessionComplete && { sessionFailed: false }),
+      }).pipe(Effect.orDie)
+    })
+
+    const setSessionFailed = Effect.fn("Session.setSessionFailed")(function* (input: {
+      sessionID: SessionID
+      sessionFailed: boolean
+    }) {
+      yield* patch(input.sessionID, {
+        sessionFailed: input.sessionFailed,
+        ...(input.sessionFailed && { sessionComplete: false }),
+      }).pipe(Effect.orDie)
+    })
+
     const setMetadata = Effect.fn("Session.setMetadata")(function* (input: typeof SetMetadataInput.Type) {
       yield* patch(input.sessionID, { metadata: input.metadata, time: { updated: Date.now() } }).pipe(Effect.orDie)
     })
@@ -912,6 +942,8 @@ const layer: Layer.Layer<
       get,
       setTitle,
       setArchived,
+      setSessionComplete,
+      setSessionFailed,
       setMetadata,
       setAgentModel,
       setPermission,

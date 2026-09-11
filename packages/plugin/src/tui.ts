@@ -376,6 +376,7 @@ export type TuiState = {
   readonly ready: boolean
   readonly config: SdkConfig
   readonly provider: ReadonlyArray<Provider>
+  readonly currentModel?: () => { providerID: string; modelID: string } | undefined
   readonly path: {
     state: string
     config: string
@@ -418,6 +419,7 @@ type TuiAttentionConfigView = {
 
 type TuiConfigView = Pick<PluginConfig, "$schema" | "theme" | "plugin"> &
   NonNullable<PluginConfig["tui"]> & {
+    openEditedWith?: string
     leader_timeout: number
     attention: TuiAttentionConfigView
     plugin_enabled?: Record<string, boolean>
@@ -426,6 +428,8 @@ type TuiConfigView = Pick<PluginConfig, "$schema" | "theme" | "plugin"> &
 
 export type TuiApp = {
   readonly version: string
+  // Custom fork: optional presentation value leaves the plugin/API version unchanged.
+  readonly displayVersion?: string
 }
 
 type Frozen<Value> = Value extends (...args: never[]) => unknown

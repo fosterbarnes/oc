@@ -43,7 +43,9 @@ const BACKGROUND_UPDATED = [
 const BaseParameterFields = {
   description: Schema.String.annotate({ description: "A short (3-5 words) description of the task" }),
   prompt: Schema.String.annotate({ description: "The task for the agent to perform" }),
-  subagent_type: Schema.String.annotate({ description: "The type of specialized agent to use for this task" }),
+  subagent_type: Schema.optional(Schema.String).annotate({
+    description: "The type of specialized agent to use for this task; uses default_subagent when omitted",
+  }),
   task_id: Schema.optional(Schema.String).annotate({
     description:
       "This should only be set if you mean to resume a previous task (you can pass a prior task_id and the task will continue the same subagent session as before instead of creating a fresh one)",
@@ -116,21 +118,29 @@ export const TaskTool = Tool.define(
         )
       }
 
+      const subagentType = params.subagent_type ?? cfg.default_subagent
+      if (!subagentType) {
+        return yield* Effect.fail(new Error("Task requires subagent_type or configured default_subagent"))
+      }
+
+      const next = yield* agent.get(subagentType)
+      if (!next) {
+        return yield* Effect.fail(new Error(`Unknown agent type: ${subagentType} is not a valid agent type`))
+      }
+      if (!params.subagent_type && next.mode === "primary") {
+        return yield* Effect.fail(new Error(`Configured default_subagent "${subagentType}" is a primary agent`))
+      }
+
       if (!ctx.extra?.bypassAgentCheck) {
         yield* ctx.ask({
           permission: id,
-          patterns: [params.subagent_type],
+          patterns: [subagentType],
           always: ["*"],
           metadata: {
             description: params.description,
-            subagent_type: params.subagent_type,
+            subagent_type: subagentType,
           },
         })
-      }
-
-      const next = yield* agent.get(params.subagent_type)
-      if (!next) {
-        return yield* Effect.fail(new Error(`Unknown agent type: ${params.subagent_type} is not a valid agent type`))
       }
 
       const session = params.task_id

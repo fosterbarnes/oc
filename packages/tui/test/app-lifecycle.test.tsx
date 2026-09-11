@@ -66,7 +66,7 @@ test("app.exit prints the session epilogue after scoped cleanup", async () => {
   mock.module("@opentui/core", () => ({ ...core, createCliRenderer: async () => setup.renderer }))
   const events = createEventSource()
   const calls = createFetch((url) => {
-    if (url.pathname === "/session")
+    if (url.pathname === "/experimental/session")
       return json([
         {
           id: "dummy",

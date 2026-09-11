@@ -3,7 +3,7 @@ import { useSync } from "../../context/sync"
 import { createMemo, Show } from "solid-js"
 import { useTheme } from "../../context/theme"
 import { useTuiConfig } from "../../config"
-import { InstallationChannel, InstallationVersion } from "@opencode-ai/core/installation/version"
+import { InstallationChannel, InstallationDisplayVersion } from "@opencode-ai/core/installation/version"
 import { usePluginRuntime } from "../../plugin/runtime"
 
 import { getScrollAcceleration } from "../../util/scroll"
@@ -50,12 +50,19 @@ export function Sidebar(props: { sessionID: string; overlay?: boolean }) {
               name="sidebar_title"
               mode="single_winner"
               session_id={props.sessionID}
-              title={session()!.title}
+                title={session()!.title}
               share_url={session()!.share?.url}
             >
               <box paddingRight={1}>
                 <text fg={theme.text}>
-                  <b>{session()!.title}</b>
+                  <b>
+                    <Show when={session()!.sessionFailed || session()!.sessionComplete}>
+                      <span style={{ fg: session()!.sessionFailed ? theme.error : theme.success }}>
+                        {session()!.sessionFailed ? "\u2717" : "\u2713"}
+                      </span>{" "}
+                    </Show>
+                    {session()!.title}
+                  </b>
                 </text>
                 <Show when={InstallationChannel !== "latest"}>
                   <text fg={theme.textMuted}>{props.sessionID}</text>
@@ -93,7 +100,8 @@ export function Sidebar(props: { sessionID: string; overlay?: boolean }) {
               <span style={{ fg: theme.text }}>
                 <b>Code</b>
               </span>{" "}
-              <span>{InstallationVersion}</span>
+              {/* Custom fork: the sidebar shows the maintenance display version. */}
+              <span>{InstallationDisplayVersion}</span>
             </text>
           </pluginRuntime.Slot>
         </box>

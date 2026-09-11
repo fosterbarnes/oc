@@ -7,6 +7,7 @@ import { setTimeout as sleep } from "node:timers/promises"
 import { Effect, Schedule, Schema } from "effect"
 import { CrossSpawnSpawner } from "@opencode-ai/core/cross-spawn-spawner"
 import { SessionRetry } from "../../src/session/retry"
+import { PROVIDER_ID } from "../../src/provider/agentify"
 import { MessageV2 } from "../../src/session/message-v2"
 import { ProviderError } from "../../src/provider/error"
 import { SessionID } from "../../src/session/schema"
@@ -146,6 +147,27 @@ describe("session.retry.delay", () => {
       expect(attempts).toStrictEqual([1, 2, 3, 4, 5])
     }),
   )
+
+  it.instance("policy does not schedule retries for agentify", () =>
+    Effect.gen(function* () {
+      const attempts: number[] = []
+      const error = apiError({ "retry-after-ms": "0" })
+      const step = yield* Schedule.toStepWithMetadata(
+        SessionRetry.policy({
+          provider: PROVIDER_ID,
+          parse: Schema.decodeUnknownSync(SessionV1.APIError.Schema),
+          set: (info) =>
+            Effect.sync(() => {
+              attempts.push(info.attempt)
+            }),
+        }),
+      )
+
+      yield* Effect.forEach(Array.from({ length: 3 }), () => Effect.ignore(step(error)))
+
+      expect(attempts).toStrictEqual([])
+    }),
+  )
 })
 
 describe("session.retry.retryable", () => {
@@ -270,6 +292,12 @@ describe("session.retry.retryable", () => {
     }).toObject()
 
     expect(SessionRetry.retryable(error, retryProvider)).toBeUndefined()
+  })
+
+  test("does not retry any errors for agentify provider", () => {
+    const message = "Internal server error"
+    expect(SessionRetry.retryable(wrap(message), PROVIDER_ID)).toBeUndefined()
+    expect(SessionRetry.retryable(apiError(), PROVIDER_ID)).toBeUndefined()
   })
 
   test("retries 500 errors even when isRetryable is false", () => {

@@ -1,0 +1,16 @@
+{
+  "vendors": [
+    {
+      "id": "chatgpt",
+      "name": "ChatGPT",
+      "url": "https://chatgpt.com/",
+      "status": "supported"
+    },
+    {
+      "id": "claude",
+      "name": "Claude",
+      "url": "https://claude.ai/new",
+      "status": "supported"
+    }
+  ]
+}

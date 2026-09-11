@@ -278,6 +278,7 @@ describe("Config", () => {
                 shell: "/bin/bash",
                 model: "anthropic/claude",
                 default_agent: "reviewer",
+                default_subagent: "reviewer",
                 autoupdate: "notify",
                 share: "disabled",
                 enterprise: { url: "https://share.example.com" },
@@ -364,6 +365,7 @@ describe("Config", () => {
             expect(documents[0]?.info.shell).toBe("/bin/bash")
             expect(documents[0]?.info.model).toBe("anthropic/claude")
             expect(documents[0]?.info.default_agent).toBe("reviewer")
+            expect(documents[0]?.info.default_subagent).toBe("reviewer")
             expect(documents[0]?.info.autoupdate).toBe("notify")
             expect(documents[0]?.info.share).toBe("disabled")
             expect(documents[0]?.info.enterprise).toEqual({ url: "https://share.example.com" })

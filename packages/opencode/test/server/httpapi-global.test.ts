@@ -87,4 +87,14 @@ describe("global HttpApi", () => {
       expect(response.status).toBe(415)
     }),
   )
+
+  it.live("rejects lifecycle controls for an unmanaged server", () =>
+    Effect.gen(function* () {
+      const shutdown = yield* HttpClientRequest.post(GlobalPaths.shutdown).pipe(HttpClient.execute)
+      const restart = yield* HttpClientRequest.post(GlobalPaths.restart).pipe(HttpClient.execute)
+
+      expect(shutdown.status).toBe(409)
+      expect(restart.status).toBe(409)
+    }),
+  )
 })

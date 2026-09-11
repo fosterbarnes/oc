@@ -237,6 +237,8 @@ const layer = Layer.effect(
           cost: 0,
           tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
           time: { created: now, updated: now },
+          sessionComplete: false,
+          sessionFailed: false,
         })
         const projected = yield* events
           .publish(SessionV1.Event.Created, { sessionID, info }, { location: input.location })

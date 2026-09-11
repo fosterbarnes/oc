@@ -28,6 +28,15 @@ export const AttachCommand = cmd({
         type: "string",
         describe: "session id to continue",
       })
+      .option("model", {
+        type: "string",
+        alias: ["m"],
+        describe: "model to use in the format of provider/model",
+      })
+      .option("agent", {
+        type: "string",
+        describe: "agent to use",
+      })
       .option("fork", {
         type: "boolean",
         describe: "fork the session when continuing (use with --continue or --session)",
@@ -88,6 +97,8 @@ export const AttachCommand = cmd({
         continue: args.continue,
         session: args.session,
         fork: args.fork,
+        model: args.model,
+        agent: args.agent,
         replay: noReplay ? false : undefined,
         replayLimit: args.replayLimit,
       })
@@ -130,6 +141,22 @@ export const AttachCommand = cmd({
     const { Effect } = await import("effect")
     const { run } = await import("../tui/layer")
     const { createLegacyTuiPluginHost } = await import("@/plugin/tui/runtime")
+    const callbackUrl = process.env.CROW_SESSION_ROUTE_URL
+    const callbackToken = process.env.CROW_SESSION_ROUTE_TOKEN
+    const callbackHandle = process.env.CROW_SESSION_HANDLE
+    const onSessionChange =
+      callbackUrl && callbackToken && callbackHandle
+        ? (sessionID: string) => {
+            void fetch(callbackUrl, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                "X-Crow-Token": callbackToken,
+              },
+              body: JSON.stringify({ handle: callbackHandle, sessionId: sessionID }),
+            }).catch(() => {})
+          }
+        : undefined
     await Effect.runPromise(
       run({
         url: args.url,
@@ -139,9 +166,12 @@ export const AttachCommand = cmd({
           continue: args.continue,
           sessionID: args.session,
           fork: args.fork,
+          model: args.model,
+          agent: args.agent,
         },
         directory,
         headers,
+        onSessionChange,
       }),
     )
   },

@@ -120,7 +120,7 @@ the application root.
 
 Status: Completed. The private `@opencode-ai/tui` workspace package now has an
 independent OpenTUI Solid JSX configuration, narrow root export, package-local
-alias, and in-memory render smoke test. Neither CLI consumes the package yet.
+alias, and in-memory render check. Neither CLI consumes the package yet.
 
 Create `packages/tui` without moving the application root yet.
 
@@ -136,7 +136,7 @@ Tasks:
   testing entrypoint needed by migrated tests.
 - Establish a package-local import convention. A local alias such as `@tui/*`
   is acceptable, but it must resolve entirely inside `packages/tui`.
-- Add a minimal package entrypoint and smoke test proving OpenTUI Solid TSX can
+- Add a minimal package entrypoint and basic test proving OpenTUI Solid TSX can
   typecheck and render.
 - Do not make either CLI consume the package yet.
 

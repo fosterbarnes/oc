@@ -5,6 +5,7 @@ Technical reference for the current TUI plugin system.
 ## Overview
 
 - TUI plugin config lives in `tui.json`.
+- Set `openEditedWith` to an editor executable, such as `"openEditedWith": "code"`, to open structured file paths from the TUI. When unset, `VISUAL` and then `EDITOR` are used.
 - Author package entrypoint is `@opencode-ai/plugin/tui`.
 - Internal plugins load inside the CLI app the same way external TUI plugins do.
 - Package plugins can be installed from CLI or TUI.

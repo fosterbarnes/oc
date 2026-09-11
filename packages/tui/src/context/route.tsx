@@ -22,9 +22,13 @@ export type PluginRoute = {
 
 export type Route = HomeRoute | SessionRoute | PluginRoute
 
+export type RouteNavigationOptions = {
+  notify?: boolean
+}
+
 export const { use: useRoute, provider: RouteProvider } = createSimpleContext({
   name: "Route",
-  init: (props: { initialRoute?: Route }) => {
+  init: (props: { initialRoute?: Route; onSessionChange?: (sessionID: string) => void }) => {
     const startup = useTuiStartup()
     const [store, setStore] = createStore<Route>(
       props.initialRoute ?? initialRoute(startup.initialRoute) ?? { type: "home" },
@@ -34,8 +38,19 @@ export const { use: useRoute, provider: RouteProvider } = createSimpleContext({
       get data() {
         return store
       },
-      navigate(route: Route) {
+      navigate(route: Route, options: RouteNavigationOptions = {}) {
+        const previousType = store.type
+        const previousSessionID = previousType === "session" ? store.sessionID : undefined
         setStore(reconcile(route))
+        if (
+          options.notify !== false &&
+          route.type === "session" &&
+          (previousType !== "session" || previousSessionID !== route.sessionID)
+        ) {
+          try {
+            props.onSessionChange?.(route.sessionID)
+          } catch {}
+        }
       },
     }
   },

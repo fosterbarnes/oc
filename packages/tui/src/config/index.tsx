@@ -60,6 +60,9 @@ export const Prompt = Schema.Struct({
 
 export const Info = Schema.Struct({
   $schema: Schema.optional(Schema.String),
+  openEditedWith: Schema.optional(Schema.String).annotate({
+    description: "Editor executable used when opening file paths from the TUI",
+  }),
   theme: Schema.optional(Schema.String),
   keybinds: Schema.optional(TuiKeybind.KeybindOverrides),
   plugin: Schema.optional(Schema.Array(PluginSpec)),

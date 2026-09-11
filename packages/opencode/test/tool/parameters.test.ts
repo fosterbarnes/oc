@@ -239,6 +239,10 @@ describe("tool parameters", () => {
       const parsed = parse(Task, { description: "d", prompt: "p", subagent_type: "general" })
       expect(parsed.subagent_type).toBe("general")
     })
+    test("accepts description + prompt without subagent_type", () => {
+      const parsed = parse(Task, { description: "d", prompt: "p" })
+      expect(parsed.subagent_type).toBeUndefined()
+    })
     test("accepts optional background flag", () => {
       const parsed = parse(Task, { description: "d", prompt: "p", subagent_type: "general", background: true })
       expect(parsed.background).toBe(true)

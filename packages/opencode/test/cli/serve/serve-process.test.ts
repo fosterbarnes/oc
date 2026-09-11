@@ -11,7 +11,7 @@ import { HttpClient } from "effect/unstable/http"
 import { cliIt } from "../../lib/cli-process"
 
 describe("opencode serve (subprocess)", () => {
-  // Smoke test: server starts, binds a port, and /global/health responds.
+  // Basic check: server starts, binds a port, and /global/health responds.
   // If this fails, all other serve tests likely will too — debug here first.
   cliIt.live(
     "starts, binds a port, and serves /global/health",
