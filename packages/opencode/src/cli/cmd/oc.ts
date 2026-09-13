@@ -135,13 +135,13 @@ const PreviousCommand = cmd({
   },
 })
 
-export const OcCommand = cmd({
-  command: "oc",
-  describe: "manage OpenCode launcher settings",
+const ConfigCommand = cmd({
+  command: "config",
+  describe: "manage OC launcher settings",
   builder: (yargs: Argv) =>
     yargs
       .command({
-        command: "config set <key> <value>",
+        command: "set <key> <value>",
         describe: "set an OC launcher setting",
         builder: (nested) =>
           nested
@@ -152,12 +152,22 @@ export const OcCommand = cmd({
         },
       })
       .command({
-        command: "config get",
+        command: "get",
         describe: "print OC launcher settings",
         handler: async () => {
           console.log(JSON.stringify(await OcConfig.read(), null, 2))
         },
       })
+      .demandCommand(),
+  handler: async () => {},
+})
+
+export const OcCommand = cmd({
+  command: "oc",
+  describe: "manage OpenCode launcher settings",
+  builder: (yargs: Argv) =>
+    yargs
+      .command(ConfigCommand)
       .command({
         command: "server start",
         describe: "start or reuse the resident OpenCode server",

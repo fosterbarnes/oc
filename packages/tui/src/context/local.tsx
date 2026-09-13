@@ -13,6 +13,7 @@ import { useTheme } from "./theme"
 import { useToast } from "../ui/toast"
 import { useRoute } from "./route"
 import { usePermission } from "./permission"
+import { Locale } from "../util/locale"
 
 export type LocalTheme = {
   secondary: RGBA
@@ -50,6 +51,28 @@ export function recentModels(
 
 export function resolveCurrentModel<T>(selected: T | undefined, cli: T | undefined, agent: T | undefined, fallback: T | undefined) {
   return selected ?? cli ?? agent ?? fallback
+}
+
+export type SessionModelOverride = {
+  providerID: string
+  modelID: string
+  variant?: string
+}
+
+export function resolveSessionModel<T>(
+  session: T | undefined,
+  selected: T | undefined,
+  cli: T | undefined,
+  agent: T | undefined,
+  fallback: T | undefined,
+) {
+  return resolveCurrentModel(session ?? selected, cli, agent, fallback)
+}
+
+export function pruneSessionModelOverrides<T>(overrides: Record<string, T>, sessionID: string) {
+  const next = { ...overrides }
+  delete next[sessionID]
+  return next
 }
 
 export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
@@ -120,6 +143,10 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
             setAgentStore("current", value.name)
           })
         },
+        label(name: string) {
+          const found = sync.data.agent.find((x) => x.name === name)
+          return found?.displayName || Locale.titlecase(name)
+        },
         color(name: string) {
           const index = visibleAgents().findIndex((x) => x.name === name)
           if (index === -1) return colors()[0]
@@ -157,12 +184,16 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
           modelID: string
         }[]
         variant: Record<string, string | undefined>
+        session: Record<string, SessionModelOverride>
+        pending: SessionModelOverride | undefined
       }>({
         ready: false,
         model: {},
         recent: [],
         favorite: [],
         variant: {},
+        session: {},
+        pending: undefined,
       })
 
       const filePath = path.join(paths.state, "model.json")
@@ -180,6 +211,7 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
           recent: modelStore.recent,
           favorite: modelStore.favorite,
           variant: modelStore.variant,
+          session: modelStore.session,
         })
       }
 
@@ -191,6 +223,27 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
           if (Array.isArray(value.favorite)) setModelStore("favorite", value.favorite)
           if (typeof value.variant === "object" && value.variant !== null)
             setModelStore("variant", value.variant as Record<string, string | undefined>)
+          if (typeof value.session === "object" && value.session !== null)
+            setModelStore(
+              "session",
+              Object.fromEntries(
+                Object.entries(value.session).flatMap(([sessionID, override]) => {
+                  if (!override || typeof override !== "object") return []
+                  const item = override as Record<string, unknown>
+                  if (typeof item.providerID !== "string" || typeof item.modelID !== "string") return []
+                  return [
+                    [
+                      sessionID,
+                      {
+                        providerID: item.providerID,
+                        modelID: item.modelID,
+                        variant: typeof item.variant === "string" ? item.variant : undefined,
+                      },
+                    ],
+                  ]
+                }),
+              ),
+            )
         })
         .catch(() => {})
         .finally(() => {
@@ -234,10 +287,18 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
         }
       })
 
+      function sessionID() {
+        if (route.data.type !== "session") return
+        return route.data.sessionID
+      }
+
       const currentModel = createMemo(() => {
         const a = agent.current()
         const selected = a && modelStore.model[a.name]
-        return resolveCurrentModel(
+        const session = sessionID()
+        const override = session && modelStore.session[session]
+        return resolveSessionModel(
+          override && isModelValid(override) ? override : undefined,
           selected && isModelValid(selected) ? selected : undefined,
           cliModel(),
           getFirstValidModel(() => a && a.model),
@@ -245,8 +306,49 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
         )
       })
 
+      function modelSelectionKey() {
+        return agent.current()?.name
+      }
+
+      function variantFor(model: { providerID: string; modelID: string }) {
+        const variant = modelStore.variant[`${model.providerID}/${model.modelID}`]
+        const provider = sync.data.provider.find((item) => item.id === model.providerID)
+        if (!variant || !provider?.models[model.modelID]?.variants?.[variant]) return undefined
+        return variant
+      }
+
+      async function persistSessionOverride(id: string, override: SessionModelOverride) {
+        const result = await sdk.client.v2.session.switchModel({
+          sessionID: id,
+          model: { id: override.modelID, providerID: override.providerID, variant: override.variant },
+        })
+        if (result.error) {
+          toast.show({ message: `Failed to persist session model: ${result.error.message}`, variant: "error" })
+          return false
+        }
+        setModelStore("session", id, override)
+        save()
+        return true
+      }
+
+      event.on("session.deleted", (evt) => {
+        if (!(evt.properties.info.id in modelStore.session)) return
+        setModelStore("session", (session) => pruneSessionModelOverrides(session, evt.properties.info.id))
+        save()
+      })
+
       return {
         current: currentModel,
+        hasSessionOverride(id = sessionID()) {
+          const override = id && modelStore.session[id]
+          return !!override && isModelValid(override)
+        },
+        async attachSessionOverride(id: string) {
+          const pending = modelStore.pending
+          if (!pending) return
+          setModelStore("pending", undefined)
+          await persistSessionOverride(id, { ...pending, variant: variantFor(pending) })
+        },
         get ready() {
           return modelStore.ready
         },
@@ -273,7 +375,7 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
             reasoning: info?.capabilities?.reasoning ?? false,
           }
         }),
-        cycle(direction: 1 | -1) {
+        async cycle(direction: 1 | -1) {
           const current = currentModel()
           if (!current) return
           const recent = modelStore.recent
@@ -284,11 +386,11 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
           if (next >= recent.length) next = 0
           const val = recent[next]
           if (!val) return
-          const a = agent.current()
-          if (!a) return
-          setModelStore("model", a.name, { ...val })
+          const key = modelSelectionKey()
+          if (!key) return
+          await this.select(val)
         },
-        cycleFavorite(direction: 1 | -1) {
+        async cycleFavorite(direction: 1 | -1) {
           const favorites = modelStore.favorite.filter((item) => isModelValid(item))
           if (!favorites.length) {
             toast.show({
@@ -312,14 +414,13 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
           }
           const next = favorites[index]
           if (!next) return
-          const a = agent.current()
-          if (!a) return
-          setModelStore("model", a.name, { ...next })
-          setModelStore("recent", recentModels(next, modelStore.recent))
-          save()
+          const key = modelSelectionKey()
+          if (!key) return
+          await this.select(next, { recent: true })
         },
         set(model: { providerID: string; modelID: string }, options?: { recent?: boolean }) {
           batch(() => {
+            setModelStore("pending", undefined)
             if (!isModelValid(model)) {
               toast.show({
                 message: `Model ${model.providerID}/${model.modelID} is not valid`,
@@ -328,14 +429,42 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
               })
               return
             }
-            const a = agent.current()
-            if (!a) return
-            setModelStore("model", a.name, model)
+            const key = modelSelectionKey()
+            if (!key) return
+            setModelStore("model", key, model)
             if (options?.recent) {
               setModelStore("recent", recentModels(model, modelStore.recent))
               save()
             }
           })
+        },
+        async select(model: { providerID: string; modelID: string }, options?: { recent?: boolean }) {
+          setModelStore("pending", undefined)
+          if (!isModelValid(model)) {
+            toast.show({
+              message: `Model ${model.providerID}/${model.modelID} is not valid`,
+              variant: "warning",
+              duration: 3000,
+            })
+            return
+          }
+          const override = { ...model, variant: variantFor(model) }
+          const id = sessionID()
+          if (!id) {
+            const key = modelSelectionKey()
+            if (!key) return
+            setModelStore("model", key, model)
+            if (options?.recent) setModelStore("recent", recentModels(model, modelStore.recent))
+            setModelStore("pending", override)
+            save()
+            return
+          }
+          if (!(await persistSessionOverride(id, override))) return
+          const key = modelSelectionKey()
+          if (!key) return
+          setModelStore("model", key, model)
+          if (options?.recent) setModelStore("recent", recentModels(model, modelStore.recent))
+          save()
         },
         toggleFavorite(model: { providerID: string; modelID: string }) {
           batch(() => {
@@ -362,6 +491,9 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
         },
         variant: {
           selected() {
+            const id = sessionID()
+            const override = id && modelStore.session[id]
+            if (override && isModelValid(override)) return override.variant ?? "default"
             const m = currentModel()
             if (!m) return undefined
             const key = `${m.providerID}/${m.modelID}`
@@ -381,27 +513,30 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
             if (!info?.variants) return []
             return Object.keys(info.variants)
           },
-          set(value: string | undefined) {
+          async set(value: string | undefined) {
             const m = currentModel()
             if (!m) return
             const key = `${m.providerID}/${m.modelID}`
             setModelStore("variant", key, value ?? "default")
             save()
+            const id = sessionID()
+            const override = id && modelStore.session[id]
+            if (id && override) await persistSessionOverride(id, { ...override, variant: value })
           },
-          cycle() {
+          async cycle() {
             const variants = this.list()
             if (variants.length === 0) return
             const current = this.current()
             if (!current) {
-              this.set(variants[0])
+              await this.set(variants[0])
               return
             }
             const index = variants.indexOf(current)
             if (index === -1 || index === variants.length - 1) {
-              this.set(undefined)
+              await this.set(undefined)
               return
             }
-            this.set(variants[index + 1])
+            await this.set(variants[index + 1])
           },
         },
       }

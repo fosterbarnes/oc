@@ -42,6 +42,7 @@ export const TuiPaths = {
   submitPrompt: `${root}/submit-prompt`,
   clearPrompt: `${root}/clear-prompt`,
   executeCommand: `${root}/execute-command`,
+  executeTargetedCommand: `${root}/execute-targeted-command`,
   showToast: `${root}/show-toast`,
   publish: `${root}/publish`,
   selectSession: `${root}/select-session`,
@@ -135,6 +136,19 @@ export const TuiApi = HttpApi.make("tui")
             identifier: "tui.executeCommand",
             summary: "Execute TUI command",
             description: "Execute a TUI command.",
+          }),
+        ),
+        HttpApiEndpoint.post("executeTargetedCommand", TuiPaths.executeTargetedCommand, {
+          query: WorkspaceRoutingQuery,
+          payload: TuiEvent.CommandExecuteTargeted.data,
+          success: described(Schema.Boolean, "Targeted command published successfully"),
+          error: [HttpApiError.BadRequest, ApiNotFoundError],
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "tui.executeTargetedCommand",
+            summary: "Execute targeted TUI command",
+            description:
+              "Publish a Crow-targeted TUI command for the session handle and expected OpenCode session ID.",
           }),
         ),
         HttpApiEndpoint.post("showToast", TuiPaths.showToast, {

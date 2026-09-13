@@ -76,6 +76,15 @@ export const tuiHandlers = HttpApiBuilder.group(InstanceHttpApi, "tui", (handler
       return true
     })
 
+    const executeTargetedCommand = Effect.fn("TuiHttpApi.executeTargetedCommand")(function* (ctx: {
+      payload: typeof TuiEvent.CommandExecuteTargeted.data.Type
+    }) {
+      if (!ctx.payload.expectedOpenCodeSessionID.startsWith("ses")) return yield* new HttpApiError.BadRequest({})
+      yield* SessionError.mapStorageNotFound(session.get(ctx.payload.expectedOpenCodeSessionID))
+      yield* events.publish(TuiEvent.CommandExecuteTargeted, ctx.payload)
+      return true
+    })
+
     const showToast = Effect.fn("TuiHttpApi.showToast")(function* (ctx: {
       payload: typeof TuiEvent.ToastShow.data.Type
     }) {
@@ -122,6 +131,7 @@ export const tuiHandlers = HttpApiBuilder.group(InstanceHttpApi, "tui", (handler
       .handle("submitPrompt", submitPrompt)
       .handle("clearPrompt", clearPrompt)
       .handle("executeCommand", executeCommand)
+      .handle("executeTargetedCommand", executeTargetedCommand)
       .handle("showToast", showToast)
       .handle("publish", publish)
       .handle("selectSession", selectSession)

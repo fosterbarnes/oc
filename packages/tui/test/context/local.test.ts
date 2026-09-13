@@ -1,5 +1,11 @@
 import { expect, test } from "bun:test"
-import { parseModel, recentModels, resolveCurrentModel } from "../../src/context/local"
+import {
+  parseModel,
+  pruneSessionModelOverrides,
+  recentModels,
+  resolveCurrentModel,
+  resolveSessionModel,
+} from "../../src/context/local"
 
 test("parses model IDs containing slashes", () => {
   expect(parseModel("provider/family/model")).toEqual({
@@ -35,4 +41,59 @@ test("keeps an in-session model selection ahead of the CLI seed", () => {
   const cli = { providerID: "cli", modelID: "model" }
 
   expect(resolveCurrentModel(selected, cli, undefined, undefined)).toEqual(selected)
+})
+
+test("matches existing resolution when no session override exists", () => {
+  const selected = { providerID: "selected", modelID: "a" }
+  const cli = { providerID: "cli", modelID: "c" }
+  const agent = { providerID: "agent", modelID: "d" }
+  const fallback = { providerID: "fallback", modelID: "e" }
+
+  expect(
+    resolveSessionModel(undefined, selected, cli, agent, fallback),
+  ).toEqual(resolveCurrentModel(selected, cli, agent, fallback))
+})
+
+test("uses an explicit session selection across agent names", () => {
+  const session = { providerID: "session", modelID: "model", variant: "high" }
+  const agentA = { providerID: "agent-a", modelID: "model" }
+  const agentB = { providerID: "agent-b", modelID: "model" }
+
+  expect(
+    resolveSessionModel(session, undefined, undefined, agentA, agentB),
+  ).toEqual(session)
+  expect(
+    resolveSessionModel(session, undefined, undefined, agentB, agentA),
+  ).toEqual(session)
+})
+
+test("keeps agent defaults for a session without an override", () => {
+  const agent = { providerID: "agent", modelID: "configured" }
+  const fallback = { providerID: "fallback", modelID: "model" }
+
+  expect(resolveSessionModel(undefined, undefined, undefined, agent, fallback)).toEqual(agent)
+})
+
+test("keeps a session override ahead of CLI and fallback choices", () => {
+  const session = { providerID: "session", modelID: "model" }
+  const cli = { providerID: "cli", modelID: "model" }
+  const agent = { providerID: "agent", modelID: "model" }
+  const fallback = { providerID: "fallback", modelID: "model" }
+
+  expect(
+    resolveSessionModel(session, undefined, cli, agent, fallback),
+  ).toEqual(session)
+  expect(resolveSessionModel(undefined, undefined, cli, agent, fallback)).toEqual(cli)
+})
+
+test("prunes only the deleted session override", () => {
+  expect(
+    pruneSessionModelOverrides(
+      {
+        first: { providerID: "provider", modelID: "first", variant: "high" },
+        second: { providerID: "provider", modelID: "second" },
+      },
+      "first",
+    ),
+  ).toEqual({ second: { providerID: "provider", modelID: "second" } })
 })

@@ -26,6 +26,7 @@ const sessionID = SessionV2.ID.make("ses_bash_tool_test")
 const assertions: PermissionV2.AssertInput[] = []
 const runs: Array<{
   readonly command: string
+  readonly args: readonly string[]
   readonly cwd?: string
   readonly shell?: string | boolean
   readonly options?: AppProcess.RunOptions
@@ -67,7 +68,13 @@ const appProcess = Layer.succeed(
     run: (command: ChildProcess.Command, options?: AppProcess.RunOptions) =>
       Effect.suspend(() => {
         if (command._tag !== "StandardCommand") throw new Error("expected standard command")
-        runs.push({ command: command.command, cwd: command.options.cwd, shell: command.options.shell, options })
+        runs.push({
+          command: command.command,
+          args: command.args,
+          cwd: command.options.cwd,
+          shell: command.options.shell,
+          options,
+        })
         return runFailure ? Effect.fail(runFailure) : Effect.succeed(result)
       }),
   } as unknown as AppProcess.Interface),
@@ -167,7 +174,14 @@ describe("BashTool", () => {
                 ],
               },
             })
-            expect(runs).toMatchObject([{ command: "pwd", cwd: realpathSync(tmp.path) }])
+            expect(runs[0]?.cwd).toBe(realpathSync(tmp.path))
+            if (process.platform === "win32") {
+              expect(runs[0]?.command).toMatch(/(?:^|[\\/])cmd(?:\.exe)?$/i)
+              expect(runs[0]?.args).toEqual(["/c", "pwd"])
+              expect(runs[0]?.shell).toBeUndefined()
+            }
+            if (process.platform !== "win32") expect(runs[0]?.command).toBe("pwd")
+            if (process.platform !== "win32") expect(runs[0]?.args).toEqual([])
             expect(runs[0]?.options).toMatchObject({
               combineOutput: true,
               maxOutputBytes: BashTool.MAX_CAPTURE_BYTES,
@@ -424,7 +438,6 @@ test("keeps locked deferred parity TODOs visible", async () => {
     "Port tree-sitter bash / PowerShell parser-based approval reduction.",
     "Port BashArity reusable command-prefix approvals.",
     "Replace token-based command-argument external-directory advisories with parser-based detection.",
-    "Restore PowerShell and cmd-specific invocation/path handling on Windows.",
     "Add plugin shell.env environment augmentation once V2 plugin hooks exist.",
     "Add durable/live progress metadata streaming for long-running commands once V2 tool invocation progress context is wired.",
     "Persist background job status and define restart recovery before exposing remote observation.",

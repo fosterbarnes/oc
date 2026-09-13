@@ -1631,8 +1631,14 @@ function AssistantMessage(props: { message: AssistantMessage; parts: Part[]; las
               >
                 ▣{" "}
               </span>{" "}
-              <span style={{ fg: theme.text }}>{Locale.titlecase(props.message.mode)}</span>
+              <span style={{ fg: theme.text }}>{local.agent.label(props.message.mode)}</span>
               <span style={{ fg: theme.textMuted }}> · {model()}</span>
+              <Show when={ctx.showTimestamps()}>
+                <span style={{ fg: theme.textMuted }}>
+                  {" \u00b7 "}
+                  {Locale.shortDateTime(props.message.time.completed ?? props.message.time.created)}
+                </span>
+              </Show>
               <Show when={duration()}>
                 <span style={{ fg: theme.textMuted }}> · {Locale.duration(duration())}</span>
               </Show>

@@ -52,6 +52,8 @@ export const Info = Schema.Struct({
   prompt: Schema.optional(Schema.String),
   options: Schema.Record(Schema.String, Schema.Unknown),
   steps: Schema.optional(Schema.Finite),
+  tabOrder: Schema.optional(Schema.Finite),
+  displayName: Schema.optional(Schema.String),
 }).annotate({ identifier: "Agent" })
 export type Info = DeepMutable<Schema.Schema.Type<typeof Info>>
 
@@ -291,6 +293,8 @@ const layer = Layer.effect(
           item.hidden = value.hidden ?? item.hidden
           item.name = value.name ?? item.name
           item.steps = value.steps ?? item.steps
+          item.tabOrder = value.tab_order ?? item.tabOrder
+          item.displayName = value.display_name ?? item.displayName
           item.options = mergeDeep(item.options, value.options ?? {})
           item.permission = Permission.merge(item.permission, Permission.fromConfig(value.permission ?? {}))
         }
@@ -322,6 +326,7 @@ const layer = Layer.effect(
             values(),
             sortBy(
               [(x) => (cfg.default_agent ? x.name === cfg.default_agent : x.name === "build"), "desc"],
+              [(x) => x.tabOrder ?? Number.MAX_SAFE_INTEGER, "asc"],
               [(x) => x.name, "asc"],
             ),
           )

@@ -35,6 +35,14 @@ const AgentSchema = Schema.StructWithRest(
       description: "Maximum number of agentic iterations before forcing text-only response",
     }),
     maxSteps: Schema.optional(PositiveInt).annotate({ description: "@deprecated Use 'steps' field instead." }),
+    tab_order: Schema.optional(Schema.Finite).annotate({
+      description:
+        "Position in the TUI Tab agent cycle. Lower comes first; agents without tab_order follow alphabetically. The default_agent is always first.",
+    }),
+    display_name: Schema.optional(Schema.String).annotate({
+      description:
+        "Label shown for this agent in the TUI (prompt footer, message headers). Defaults to the title-cased agent name.",
+    }),
     permission: Schema.optional(ConfigPermissionV1.Info),
   }),
   [Schema.Record(Schema.String, Schema.Any)],
@@ -53,6 +61,8 @@ const KNOWN_KEYS = new Set([
   "color",
   "steps",
   "maxSteps",
+  "tab_order",
+  "display_name",
   "options",
   "permission",
   "disable",

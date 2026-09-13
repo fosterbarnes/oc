@@ -342,7 +342,7 @@ export function turnSummaryWriter(input: { agent: string; model: string; duratio
           <span style={{ fg: input.theme.block.text }}>{input.agent}</span>
           <span style={{ fg: input.theme.block.muted }}>
             {" "}
-            · {input.model} · {input.duration}
+            {"\u00b7"} {input.model} {"\u00b7"} {input.duration}
           </span>
         </text>
       </box>

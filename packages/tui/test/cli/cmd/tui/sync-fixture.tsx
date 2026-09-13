@@ -8,6 +8,7 @@ import { SDKProvider } from "../../../../src/context/sdk"
 import { SyncProvider, useSync } from "../../../../src/context/sync"
 import { PermissionProvider } from "../../../../src/context/permission"
 import { ExitProvider } from "../../../../src/context/exit"
+import { RouteProvider, useRoute, type Route } from "../../../../src/context/route"
 import { createEventSource, createFetch, type FetchHandler, directory } from "../../../fixture/tui-sdk"
 import { TestTuiContexts } from "../../../fixture/tui-environment"
 export { createEventSource, createFetch, directory, eventSource, json, worktree } from "../../../fixture/tui-sdk"
@@ -20,12 +21,19 @@ export async function wait(fn: () => boolean, timeout = 2000) {
   }
 }
 
-type Ctx = { kv: ReturnType<typeof useKV>; project: ReturnType<typeof useProject>; sync: ReturnType<typeof useSync> }
+type Ctx = {
+  kv: ReturnType<typeof useKV>
+  project: ReturnType<typeof useProject>
+  sync: ReturnType<typeof useSync>
+  route: ReturnType<typeof useRoute>
+}
 
 export type MountOptions = {
   args?: Args
   /** Default `"complete"`. Use `"partial"` to proceed before the non-blocking session list finishes. */
   waitForStatus?: "complete" | "partial"
+  route?: Route
+  exit?: (reason?: unknown) => void
 }
 
 export async function mount(override?: FetchHandler, state?: string, options?: MountOptions) {
@@ -36,17 +44,19 @@ export async function mount(override?: FetchHandler, state?: string, options?: M
   let sync!: ReturnType<typeof useSync>
   let project!: ReturnType<typeof useProject>
   let kv!: ReturnType<typeof useKV>
+  let route!: ReturnType<typeof useRoute>
   let done!: () => void
   const ready = new Promise<void>((resolve) => {
     done = resolve
   })
 
   function Probe() {
-    const ctx: Ctx = { kv: useKV(), project: useProject(), sync: useSync() }
+    const ctx: Ctx = { kv: useKV(), project: useProject(), sync: useSync(), route: useRoute() }
     onMount(() => {
       sync = ctx.sync
       project = ctx.project
       kv = ctx.kv
+      route = ctx.route
       done()
     })
     return <box />
@@ -59,10 +69,12 @@ export async function mount(override?: FetchHandler, state?: string, options?: M
           <SDKProvider url="http://test" directory={directory} fetch={calls.fetch} events={events.source}>
             <PermissionProvider>
               <ProjectProvider>
-                <ExitProvider exit={() => {}}>
-                  <SyncProvider>
-                    <Probe />
-                  </SyncProvider>
+                <ExitProvider exit={options?.exit ?? (() => {})}>
+                  <RouteProvider initialRoute={options?.route}>
+                    <SyncProvider>
+                      <Probe />
+                    </SyncProvider>
+                  </RouteProvider>
                 </ExitProvider>
               </ProjectProvider>
             </PermissionProvider>
@@ -72,7 +84,12 @@ export async function mount(override?: FetchHandler, state?: string, options?: M
     </TestTuiContexts>
   ))
 
-  await ready
+  await Promise.race([
+    ready,
+    Bun.sleep(5000).then(() => {
+      throw new Error("timed out waiting for sync mount")
+    }),
+  ])
   await wait(() => sync.status === waitForStatus)
-  return { app, emit: events.emit, kv, project, sync, session: calls.session }
+  return { app, emit: events.emit, kv, project, sync, session: calls.session, route }
 }

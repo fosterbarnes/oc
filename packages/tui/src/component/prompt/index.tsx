@@ -324,7 +324,7 @@ export function Prompt(props: PromptProps) {
       if (msg.agent && isPrimaryAgent) {
         // Keep command line --agent if specified.
         if (!args.agent) local.agent.set(msg.agent)
-        if (!args.model && msg.model) {
+        if (!args.model && msg.model && !local.model.hasSessionOverride(sessionID)) {
           local.model.set(msg.model)
           local.model.variant.set(msg.model.variant)
         }
@@ -933,7 +933,7 @@ export function Prompt(props: PromptProps) {
     // input's native onSubmit racing another dispatch). Without this guard,
     // a second call slips past the empty-input check before the first call
     // clears `store.prompt.input`, then awaits its own `session.create` and
-    // ultimately reads the now-empty store — sending a phantom empty prompt
+    // ultimately reads the now-empty store - sending a phantom empty prompt
     // to a freshly created session.
     if (submitting) return false
     submitting = true
@@ -1021,6 +1021,7 @@ export function Prompt(props: PromptProps) {
       }
 
       sessionID = res.data.id
+      await local.model.attachSessionOverride(sessionID)
     }
 
     const inputText = expandTrackedPastedText(
@@ -1313,10 +1314,10 @@ export function Prompt(props: PromptProps) {
     if (store.mode === "shell") {
       if (!shell().length) return undefined
       const example = shell()[store.placeholder % shell().length]
-      return `Run a command… "${example}"`
+      return `Run a command... "${example}"`
     }
     if (!list().length) return undefined
-    return `Ask anything… "${list()[store.placeholder % list().length]}"`
+    return `Ask anything... "${list()[store.placeholder % list().length]}"`
   })
 
   const spinnerDef = createMemo(() => {
@@ -1447,14 +1448,14 @@ export function Prompt(props: PromptProps) {
                   {(agent) => (
                     <>
                       <text fg={fadeColor(highlight(), agentMetaAlpha())}>
-                        {store.mode === "shell" ? "Shell" : Locale.titlecase(agent().name)}
+                        {store.mode === "shell" ? "Shell" : local.agent.label(agent().name)}
                       </text>
                       <Show when={store.mode === "normal" && local.permission.mode === "auto"}>
                         <text fg={fadeColor(theme.textMuted, agentMetaAlpha())}>auto</text>
                       </Show>
                       <Show when={store.mode === "normal"}>
                         <box flexDirection="row" gap={1}>
-                          <text fg={fadeColor(theme.textMuted, modelMetaAlpha())}>·</text>
+                          <text fg={fadeColor(theme.textMuted, modelMetaAlpha())}>.</text>
                           <text
                             flexShrink={0}
                             fg={fadeColor(leader() ? theme.textMuted : theme.text, modelMetaAlpha())}
@@ -1463,7 +1464,7 @@ export function Prompt(props: PromptProps) {
                           </text>
                           <text fg={fadeColor(theme.textMuted, modelMetaAlpha())}>{currentProviderLabel()}</text>
                           <Show when={showVariant()}>
-                            <text fg={fadeColor(theme.textMuted, variantMetaAlpha())}>·</text>
+                            <text fg={fadeColor(theme.textMuted, variantMetaAlpha())}>.</text>
                             <text>
                               <span style={{ fg: fadeColor(theme.warning, variantMetaAlpha()), bold: true }}>
                                 {local.model.variant.current()}
@@ -1537,7 +1538,7 @@ export function Prompt(props: PromptProps) {
                         if (!r) return
                         if (r.message.includes("exceeded your current quota") && r.message.includes("gemini"))
                           return "gemini is way too hot right now"
-                        if (r.message.length > 80) return r.message.slice(0, 80) + "…"
+                        if (r.message.length > 80) return r.message.slice(0, 80) + "..."
                         return r.message
                       })
                       const isTruncated = createMemo(() => {
@@ -1665,7 +1666,7 @@ export function Prompt(props: PromptProps) {
                     <Match when={usage()}>
                       {(item) => (
                         <text fg={theme.textMuted} wrapMode="none">
-                          {[item().context, item().cost].filter(Boolean).join(" · ")}
+                          {[item().context, item().cost].filter(Boolean).join(" . ")}
                         </text>
                       )}
                     </Match>

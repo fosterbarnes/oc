@@ -72,6 +72,7 @@ export type Event =
   | EventPermissionAsked
   | EventPermissionReplied
   | EventTuiPromptAppend2
+  | EventTuiCommandExecuteTargeted
   | EventTuiCommandExecute2
   | EventTuiToastShow2
   | EventTuiSessionSelect2
@@ -1411,6 +1412,41 @@ export type GlobalEvent = {
       }
     | {
         id: string
+        type: "tui.command.execute.targeted"
+        properties: {
+          command:
+            | "session.list"
+            | "session.most_recent"
+            | "oc.new_session"
+            | "model.default"
+            | "oc.reasoning_effort"
+            | "agent.session"
+            | "agent.default_subagent"
+            | "agent.default_subagent_model"
+            | "oc.home_dir"
+            | "oc.home_dir_sort"
+            | "session.new"
+            | "session.rename"
+            | "session.compact"
+            | "session.complete.toggle"
+            | "session.failed.toggle"
+            | "model.list"
+            | "agent.list"
+            | "agent.cycle"
+            | "variant.cycle"
+            | "command.palette.show"
+            | "theme.switch"
+            | "session.sidebar.toggle"
+            | "opencode.status"
+          crowSessionHandle: string
+          /**
+           * OpenCode session ID the targeted TUI must match before executing the command
+           */
+          expectedOpenCodeSessionID: string
+        }
+      }
+    | {
+        id: string
         type: "tui.command.execute"
         properties: {
           command:
@@ -1709,6 +1745,8 @@ export type AgentConfig = {
   color?: string | "primary" | "secondary" | "accent" | "success" | "warning" | "error" | "info"
   steps?: number
   maxSteps?: number
+  tab_order?: number
+  display_name?: string
   permission?: PermissionConfig
   [key: string]:
     | unknown
@@ -2384,6 +2422,8 @@ export type Agent = {
     [key: string]: unknown
   }
   steps?: number
+  tabOrder?: number
+  displayName?: string
 }
 
 export type LspStatus = {
@@ -2937,6 +2977,7 @@ export type V2Event =
   | PermissionAsked
   | PermissionReplied
   | TuiPromptAppend
+  | TuiCommandExecuteTargeted
   | TuiCommandExecute
   | TuiToastShow
   | TuiSessionSelect
@@ -5776,6 +5817,51 @@ export type TuiPromptAppend = {
   }
 }
 
+export type TuiCommandExecuteTargeted = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "tui.command.execute.targeted"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    command:
+      | "session.list"
+      | "session.most_recent"
+      | "oc.new_session"
+      | "model.default"
+      | "oc.reasoning_effort"
+      | "agent.session"
+      | "agent.default_subagent"
+      | "agent.default_subagent_model"
+      | "oc.home_dir"
+      | "oc.home_dir_sort"
+      | "session.new"
+      | "session.rename"
+      | "session.compact"
+      | "session.complete.toggle"
+      | "session.failed.toggle"
+      | "model.list"
+      | "agent.list"
+      | "agent.cycle"
+      | "variant.cycle"
+      | "command.palette.show"
+      | "theme.switch"
+      | "session.sidebar.toggle"
+      | "opencode.status"
+    crowSessionHandle: string
+    /**
+     * OpenCode session ID the targeted TUI must match before executing the command
+     */
+    expectedOpenCodeSessionID: string
+  }
+}
+
 export type TuiCommandExecute = {
   id: string
   metadata?: {
@@ -6901,6 +6987,42 @@ export type EventPermissionReplied = {
     sessionID: string
     requestID: string
     reply: "once" | "always" | "reject"
+  }
+}
+
+export type EventTuiCommandExecuteTargeted = {
+  id: string
+  type: "tui.command.execute.targeted"
+  properties: {
+    command:
+      | "session.list"
+      | "session.most_recent"
+      | "oc.new_session"
+      | "model.default"
+      | "oc.reasoning_effort"
+      | "agent.session"
+      | "agent.default_subagent"
+      | "agent.default_subagent_model"
+      | "oc.home_dir"
+      | "oc.home_dir_sort"
+      | "session.new"
+      | "session.rename"
+      | "session.compact"
+      | "session.complete.toggle"
+      | "session.failed.toggle"
+      | "model.list"
+      | "agent.list"
+      | "agent.cycle"
+      | "variant.cycle"
+      | "command.palette.show"
+      | "theme.switch"
+      | "session.sidebar.toggle"
+      | "opencode.status"
+    crowSessionHandle: string
+    /**
+     * OpenCode session ID the targeted TUI must match before executing the command
+     */
+    expectedOpenCodeSessionID: string
   }
 }
 
@@ -10921,6 +11043,69 @@ export type TuiExecuteCommandResponses = {
 }
 
 export type TuiExecuteCommandResponse = TuiExecuteCommandResponses[keyof TuiExecuteCommandResponses]
+
+export type TuiExecuteTargetedCommandData = {
+  body?: {
+    command:
+      | "session.list"
+      | "session.most_recent"
+      | "oc.new_session"
+      | "model.default"
+      | "oc.reasoning_effort"
+      | "agent.session"
+      | "agent.default_subagent"
+      | "agent.default_subagent_model"
+      | "oc.home_dir"
+      | "oc.home_dir_sort"
+      | "session.new"
+      | "session.rename"
+      | "session.compact"
+      | "session.complete.toggle"
+      | "session.failed.toggle"
+      | "model.list"
+      | "agent.list"
+      | "agent.cycle"
+      | "variant.cycle"
+      | "command.palette.show"
+      | "theme.switch"
+      | "session.sidebar.toggle"
+      | "opencode.status"
+    crowSessionHandle: string
+    /**
+     * OpenCode session ID the targeted TUI must match before executing the command
+     */
+    expectedOpenCodeSessionID: string
+  }
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/tui/execute-targeted-command"
+}
+
+export type TuiExecuteTargetedCommandErrors = {
+  /**
+   * BadRequest | InvalidRequestError
+   */
+  400: EffectHttpApiErrorBadRequest | InvalidRequestError
+  /**
+   * NotFoundError
+   */
+  404: NotFoundError
+}
+
+export type TuiExecuteTargetedCommandError = TuiExecuteTargetedCommandErrors[keyof TuiExecuteTargetedCommandErrors]
+
+export type TuiExecuteTargetedCommandResponses = {
+  /**
+   * Targeted command published successfully
+   */
+  200: boolean
+}
+
+export type TuiExecuteTargetedCommandResponse =
+  TuiExecuteTargetedCommandResponses[keyof TuiExecuteTargetedCommandResponses]
 
 export type TuiShowToastData = {
   body?: {

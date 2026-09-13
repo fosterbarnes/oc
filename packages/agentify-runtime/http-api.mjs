@@ -143,13 +143,25 @@ function openAiMessageText(message) {
 
 export function openAiPrompt(messages) {
   if (!Array.isArray(messages) || messages.length === 0) throw new Error('invalid_messages');
+  const system = [];
+  for (const message of messages) {
+    if (message?.role !== 'system') continue;
+    const text = openAiMessageText(message);
+    if (text.trim()) system.push(text.trim());
+  }
+  let user = '';
   for (let i = messages.length - 1; i >= 0; i -= 1) {
     const message = messages[i];
     if (message?.role !== 'user') continue;
     const prompt = openAiMessageText(message);
-    if (prompt.trim()) return prompt;
+    if (prompt.trim()) {
+      user = prompt;
+      break;
+    }
   }
-  throw new Error('missing_prompt');
+  if (!user.trim()) throw new Error('missing_prompt');
+  if (system.length === 0) return user;
+  return `${system.join('\n\n')}\n\n${user}`;
 }
 
 export function openAiSessionKey(req, vendorId) {

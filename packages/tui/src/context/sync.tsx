@@ -28,8 +28,9 @@ import { useTuiStartup } from "./runtime"
 import { createSimpleContext } from "./helper"
 import { useExit } from "./exit"
 import { useArgs } from "./args"
-import { batch, onMount } from "solid-js"
+import { batch, onCleanup, onMount } from "solid-js"
 import { usePermission } from "./permission"
+import { useRoute } from "./route"
 
 const emptyConsoleState: ConsoleState = {
   consoleManagedProviders: [],
@@ -162,6 +163,14 @@ export const {
     const event = useEvent()
     const project = useProject()
     const sdk = useSDK()
+    const route = useRoute()
+
+    let restartPending = false
+    let restartSessionID: string | undefined
+    let recovering = false
+    let bootstrapInFlight: Promise<boolean> | undefined
+    const recoverRetryDelay = 50
+    const recoverAbort = new AbortController()
 
     const fullSyncedSessions = new Set<string>()
     const syncingSessions = new Map<string, Promise<void>>()
@@ -182,6 +191,10 @@ export const {
     event.subscribe((event, { directory, workspace }) => {
       switch (event.type) {
         case "server.instance.disposed":
+          if (restartPending) {
+            void recoverFromRestart()
+            break
+          }
           void bootstrap()
           break
         case "permission.replied": {
@@ -456,13 +469,75 @@ export const {
 
     function applySessionList(fetched: Session[]) {
       const merged = mergeSessionList(store.session, fetched, {
-        preserveSessionID: args.sessionID,
+        preserveSessionID: restartPending ? undefined : args.sessionID,
         hasMessages: (sessionID) => (store.message[sessionID]?.length ?? 0) > 0,
       })
       setStore("session", reconcile(merged))
     }
 
+    async function restoreCapturedRoute() {
+      const captured = restartSessionID
+      if (!captured) {
+        route.navigate({ type: "home" })
+        return
+      }
+      fullSyncedSessions.delete(captured)
+      const match = search(store.session, captured, (session) => session.id)
+      if (!match.found) {
+        route.navigate({ type: "home" })
+        return
+      }
+      await result.session.sync(captured)
+      route.navigate({ type: "session", sessionID: captured })
+    }
+
+    async function recoverFromRestart() {
+      if (!restartPending || recovering) return
+      recovering = true
+      try {
+        while (restartPending && !recoverAbort.signal.aborted) {
+          const ok = (await bootstrap({ fatal: false })) !== false
+          if (ok) {
+            await restoreCapturedRoute()
+            restartPending = false
+            restartSessionID = undefined
+            return
+          }
+          if (recoverAbort.signal.aborted || !restartPending) return
+          await new Promise<void>((resolve) => {
+            if (recoverAbort.signal.aborted) {
+              resolve()
+              return
+            }
+            const timer = setTimeout(resolve, recoverRetryDelay)
+            recoverAbort.signal.addEventListener(
+              "abort",
+              () => {
+                clearTimeout(timer)
+                resolve()
+              },
+              { once: true },
+            )
+          })
+        }
+      } finally {
+        recovering = false
+      }
+    }
+
     async function bootstrap(input: { fatal?: boolean } = {}) {
+      while (bootstrapInFlight) {
+        await bootstrapInFlight.catch(() => {})
+      }
+      const task = runBootstrap(input)
+      bootstrapInFlight = task
+      void task.finally(() => {
+        if (bootstrapInFlight === task) bootstrapInFlight = undefined
+      })
+      return task
+    }
+
+    async function runBootstrap(input: { fatal?: boolean } = {}) {
       const fatal = input.fatal ?? true
       const workspace = project.workspace.current()
       const projectPromise = project.sync()
@@ -481,7 +556,7 @@ export const {
         .catch(() => emptyConsoleState)
       const agentsPromise = sdk.client.app.agents({ workspace }, { throwOnError: true })
       const configPromise = sdk.client.config.get({ workspace }, { throwOnError: true })
-      await Promise.all([
+      return await Promise.all([
         providersPromise,
         providerListPromise,
         capabilitiesPromise,
@@ -550,6 +625,7 @@ export const {
           ]).then(() => {
             setStore("status", "complete")
           })
+          return true
         })
         .catch(async (e) => {
           console.error("tui bootstrap failed", {
@@ -559,9 +635,9 @@ export const {
           })
           if (fatal) {
             exit(e)
-          } else {
-            throw e
+            return false
           }
+          return false
         })
     }
 
@@ -569,9 +645,29 @@ export const {
       void bootstrap()
     })
 
+    onCleanup(() => {
+      restartPending = false
+      recoverAbort.abort()
+    })
+    onCleanup(
+      sdk.onReconnect(() => {
+        void recoverFromRestart()
+      }),
+    )
+
     const result = {
       data: store,
       set: setStore,
+      restart: {
+        begin() {
+          restartPending = true
+          restartSessionID = route.data.type === "session" ? route.data.sessionID : undefined
+        },
+        cancel() {
+          restartPending = false
+          restartSessionID = undefined
+        },
+      },
       get status() {
         return store.status
       },

@@ -98,7 +98,6 @@ registerOpencodeSpinner()
 function ocConfigPath(): string {
   return path.join(os.homedir(), ".config", "opencode", "oc.json")
 }
-
 function readOcConfig(): {
   executable: string
   homeDir: string
@@ -135,7 +134,12 @@ function readOcConfig(): {
     })()
     return { executable, homeDir: resolved, homeDirSort, serverStartOnWindowsUserStart }
   } catch {
-    return { executable: "", homeDir: fallbackDir, homeDirSort: fallbackSort, serverStartOnWindowsUserStart: false }
+    return {
+      executable: "",
+      homeDir: fallbackDir,
+      homeDirSort: fallbackSort,
+      serverStartOnWindowsUserStart: false,
+    }
   }
 }
 
@@ -165,6 +169,85 @@ function listOcHomeDirs(): Array<{ name: string; fullPath: string; mtimeMs: numb
     dirs.sort((a, b) => a.name.localeCompare(b.name))
   }
   return dirs
+}
+
+const CROW_SESSION_HANDLE_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+
+export function readCrowSessionHandleFromEnv(raw = process.env.CROW_SESSION_HANDLE) {
+  const value = raw?.trim()
+  if (!value || !CROW_SESSION_HANDLE_PATTERN.test(value)) return undefined
+  return value.toLowerCase()
+}
+
+const validatedCrowSessionHandle = readCrowSessionHandleFromEnv()
+
+/** Commands that require the TUI route session to match expectedOpenCodeSessionID. */
+export const crowRemoteSessionScopedCommands = new Set([
+  "session.rename",
+  "session.compact",
+  "session.complete.toggle",
+  "session.failed.toggle",
+  "agent.cycle",
+  "variant.cycle",
+  "session.sidebar.toggle",
+])
+
+export function mostRecentRootSessionID(
+  sessions: ReadonlyArray<{ id: string; parentID?: string; time: { updated: number } }>,
+) {
+  return sessions
+    .filter((session) => session.parentID === undefined)
+    .toSorted((left, right) => right.time.updated - left.time.updated)[0]?.id
+}
+
+type CrowRouteData = { type: "home" } | { type: "session"; sessionID: string } | { type: "plugin"; id: string; data?: unknown }
+
+export function acceptsCrowTargetedCommand(input: {
+  selfHandle: string | undefined
+  eventHandle: string
+  command: string
+  expectedOpenCodeSessionID: string
+  route: CrowRouteData
+}) {
+  if (!input.selfHandle) return false
+  if (input.eventHandle.toLowerCase() !== input.selfHandle) return false
+  if (input.command === "session.most_recent") return true
+  if (!crowRemoteSessionScopedCommands.has(input.command)) return true
+  if (input.route.type !== "session") return false
+  return input.route.sessionID === input.expectedOpenCodeSessionID
+}
+
+export function handleCrowTargetedCommandExecute(input: {
+  selfHandle: string | undefined
+  properties: {
+    command: string
+    crowSessionHandle: string
+    expectedOpenCodeSessionID: string
+  }
+  route: CrowRouteData
+  sessions: ReadonlyArray<{ id: string; parentID?: string; time: { updated: number } }>
+  dispatchCommand: (command: string) => void
+  navigateToSession: (sessionID: string) => void
+}) {
+  if (
+    !acceptsCrowTargetedCommand({
+      selfHandle: input.selfHandle,
+      eventHandle: input.properties.crowSessionHandle,
+      command: input.properties.command,
+      expectedOpenCodeSessionID: input.properties.expectedOpenCodeSessionID,
+      route: input.route,
+    })
+  ) {
+    return
+  }
+  if (input.properties.command === "session.most_recent") {
+    const sessionID = mostRecentRootSessionID(input.sessions)
+    if (!sessionID) return
+    input.navigateToSession(sessionID)
+    return
+  }
+  input.dispatchCommand(input.properties.command)
 }
 
 function runOcCommand(
@@ -554,15 +637,17 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
       dialog,
       restart ? "Restart Server" : "Shut Down Server",
       restart
-        ? "The current TUI will disconnect while the server restarts. Continue?"
+        ? "The TUI will reconnect after the server restarts. Continue?"
         : "The current TUI will disconnect when the server shuts down. Continue?",
       "cancel",
     )
     if (choice !== true) return
     dialog.clear()
+    if (restart) sync.restart.begin()
     try {
       const result = restart ? await sdk.client.global.restart() : await sdk.client.global.shutdown()
       if (!result.error) return
+      if (restart) sync.restart.cancel()
       toast.show({
         title: restart ? "Server Restart Failed" : "Server Shutdown Failed",
         message: errorMessage(result.error),
@@ -570,6 +655,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
         duration: 10000,
       })
     } catch (error) {
+      if (restart) sync.restart.cancel()
       toast.show({
         title: restart ? "Server Restart Failed" : "Server Shutdown Failed",
         message: errorMessage(error),
@@ -670,7 +756,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
         return
       }
 
-      const title = session.title.length > 40 ? session.title.slice(0, 37) + "…" : session.title
+      const title = session.title.length > 40 ? session.title.slice(0, 37) + "..." : session.title
       renderer.setTerminalTitle(`OC | ${title}`)
       return
     }
@@ -695,13 +781,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
         local.model.set({ providerID, modelID }, { recent: true })
       }
       if (args.sessionID && !args.fork) {
-        route.navigate(
-          {
-            type: "session",
-            sessionID: args.sessionID,
-          },
-          { notify: false },
-        )
+        route.navigate({ type: "session", sessionID: args.sessionID })
       }
     })
   })
@@ -724,7 +804,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
           }
         })
       } else {
-        route.navigate({ type: "session", sessionID: match }, { notify: false })
+        route.navigate({ type: "session", sessionID: match })
       }
     }
   })
@@ -873,7 +953,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
         category: "Agent",
         hidden: true,
         run: () => {
-          local.model.cycle(1)
+          void local.model.cycle(1)
         },
       },
       {
@@ -882,7 +962,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
         category: "Agent",
         hidden: true,
         run: () => {
-          local.model.cycle(-1)
+          void local.model.cycle(-1)
         },
       },
       {
@@ -891,7 +971,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
         category: "Agent",
         hidden: true,
         run: () => {
-          local.model.cycleFavorite(1)
+          void local.model.cycleFavorite(1)
         },
       },
       {
@@ -900,7 +980,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
         category: "Agent",
         hidden: true,
         run: () => {
-          local.model.cycleFavorite(-1)
+          void local.model.cycleFavorite(-1)
         },
       },
       {
@@ -968,6 +1048,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
         run: () => {
           dialog.replace(() => (
             <DialogModel
+              updateCurrent={false}
               onSelect={(providerID, modelID) => {
                 void persistOcConfig("sessionModel", `${providerID}/${modelID}`, toast)
               }}
@@ -1184,7 +1265,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
         title: "Variant cycle",
         category: "Agent",
         run: () => {
-          local.model.variant.cycle()
+          void local.model.variant.cycle()
         },
       },
       {
@@ -1467,6 +1548,18 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
     keymap.dispatchCommand(evt.properties.command)
   })
 
+  event.on("tui.command.execute.targeted", (evt, { workspace }) => {
+    if (workspace !== project.workspace.current()) return
+    handleCrowTargetedCommandExecute({
+      selfHandle: validatedCrowSessionHandle,
+      properties: evt.properties,
+      route: route.data,
+      sessions: sync.data.session,
+      dispatchCommand: (command) => keymap.dispatchCommand(command),
+      navigateToSession: (sessionID) => route.navigate({ type: "session", sessionID }),
+    })
+  })
+
   event.on("tui.toast.show", (evt, { workspace }) => {
     if (workspace !== project.workspace.current()) return
     toast.show({
@@ -1479,13 +1572,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
 
   event.on("tui.session.select", (evt, { workspace }) => {
     if (workspace !== project.workspace.current()) return
-    route.navigate(
-      {
-        type: "session",
-        sessionID: evt.properties.sessionID,
-      },
-      { notify: false },
-    )
+    route.navigate({ type: "session", sessionID: evt.properties.sessionID })
   })
 
   event.on("session.deleted", (evt) => {
@@ -1534,7 +1621,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
 
     toast.show({
       variant: "info",
-      message: `Updating to v${version}…`,
+      message: `Updating to v${version}...`,
       duration: 30000,
     })
 

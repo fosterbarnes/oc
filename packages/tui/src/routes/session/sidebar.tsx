@@ -1,13 +1,13 @@
+import { InstallationChannel } from "@opencode-ai/core/installation/version"
+import { createMemo, Show } from "solid-js"
+import { useTuiConfig } from "../../config"
 import { useProject } from "../../context/project"
 import { useSync } from "../../context/sync"
-import { createMemo, Show } from "solid-js"
 import { useTheme } from "../../context/theme"
-import { useTuiConfig } from "../../config"
-import { InstallationChannel, InstallationDisplayVersion } from "@opencode-ai/core/installation/version"
-import { usePluginRuntime } from "../../plugin/runtime"
-
-import { getScrollAcceleration } from "../../util/scroll"
 import { WorkspaceLabel } from "../../component/workspace-label"
+import { usePluginRuntime } from "../../plugin/runtime"
+import { getScrollAcceleration } from "../../util/scroll"
+import { SidebarTools, SidebarToolsFooter } from "./sidebar-tools/sidebar-tools"
 
 export function Sidebar(props: { sessionID: string; overlay?: boolean }) {
   const pluginRuntime = usePluginRuntime()
@@ -50,7 +50,7 @@ export function Sidebar(props: { sessionID: string; overlay?: boolean }) {
               name="sidebar_title"
               mode="single_winner"
               session_id={props.sessionID}
-                title={session()!.title}
+              title={session()!.title}
               share_url={session()!.share?.url}
             >
               <box paddingRight={1}>
@@ -89,21 +89,15 @@ export function Sidebar(props: { sessionID: string; overlay?: boolean }) {
                 </Show>
               </box>
             </pluginRuntime.Slot>
-            <pluginRuntime.Slot name="sidebar_content" session_id={props.sessionID} />
+            <SidebarTools sessionID={props.sessionID}>
+              <pluginRuntime.Slot name="sidebar_content" session_id={props.sessionID} />
+            </SidebarTools>
           </box>
         </scrollbox>
 
         <box flexShrink={0} gap={1} paddingTop={1}>
-          <pluginRuntime.Slot name="sidebar_footer" mode="single_winner" session_id={props.sessionID}>
-            <text fg={theme.textMuted}>
-              <span style={{ fg: theme.success }}>•</span> <b>Open</b>
-              <span style={{ fg: theme.text }}>
-                <b>Code</b>
-              </span>{" "}
-              {/* Custom fork: the sidebar shows the maintenance display version. */}
-              <span>{InstallationDisplayVersion}</span>
-            </text>
-          </pluginRuntime.Slot>
+          <SidebarToolsFooter sessionID={props.sessionID} />
+          <pluginRuntime.Slot name="sidebar_footer" session_id={props.sessionID} />
         </box>
       </box>
     </Show>

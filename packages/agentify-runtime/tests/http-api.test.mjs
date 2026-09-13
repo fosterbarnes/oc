@@ -6,6 +6,13 @@ test('rejects tools and unknown models', () => {
   assert.equal(resolveOpenAiModel('chatgpt-web').vendorId, 'chatgpt');
   assert.equal(resolveOpenAiModel('claude-web').vendorId, 'claude');
   assert.equal(openAiPrompt([{ role: 'user', content: 'a' }, { role: 'user', content: 'b' }]), 'b');
+  assert.equal(
+    openAiPrompt([
+      { role: 'system', content: 'You are OpenCode.' },
+      { role: 'user', content: 'hello' }
+    ]),
+    'You are OpenCode.\n\nhello'
+  );
 });
 
 test('http api lists web models and splits auth vs response clocks', async () => {

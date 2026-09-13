@@ -146,7 +146,7 @@ export function DialogModel(props: {
 
   function onSelect(providerID: string, modelID: string) {
     if (props.updateCurrent !== false) {
-      local.model.set({ providerID, modelID }, { recent: true })
+      void local.model.select({ providerID, modelID }, { recent: true })
     }
     props.onSelect?.(providerID, modelID)
     if (props.updateCurrent === false) {

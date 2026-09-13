@@ -296,9 +296,26 @@ export const make = Effect.gen(function* () {
   ) => {
     if (globalThis.process.platform === "win32") {
       return Effect.callback<void, PlatformError.PlatformError>((resume) => {
-        NodeChildProcess.exec(`taskkill /pid ${proc.pid} /T /F`, { windowsHide: true }, (err) => {
-          if (err) return resume(Effect.fail(toPlatformError("kill", toError(err), command)))
-          resume(Effect.void)
+        const killer = NodeChildProcess.spawn("taskkill", ["/pid", String(proc.pid), "/T", "/F"], {
+          stdio: "ignore",
+          windowsHide: true,
+        })
+        let settled = false
+        const finish = (result: Effect.Effect<void, PlatformError.PlatformError>) => {
+          if (settled) return
+          settled = true
+          resume(result)
+        }
+        killer.once("error", (err) => finish(Effect.fail(toPlatformError("kill", toError(err), command))))
+        killer.once("close", (code) => {
+          if (code !== 0) {
+            return finish(
+              Effect.fail(
+                toPlatformError("kill", new Error(`taskkill exited with code ${code ?? "unknown"}`), command),
+              ),
+            )
+          }
+          finish(Effect.void)
         })
       })
     }

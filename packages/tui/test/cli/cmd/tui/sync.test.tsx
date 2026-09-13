@@ -152,4 +152,176 @@ describe("tui sync", () => {
       app.renderer.destroy()
     }
   })
+
+  function disposedEvent(): GlobalEvent {
+    return {
+      directory,
+      project: "proj_test",
+      payload: {
+        id: "evt_disposed",
+        type: "server.instance.disposed",
+        properties: { directory },
+      },
+    }
+  }
+
+  test("retries bootstrap after a restart gap without exiting", async () => {
+    await using tmp = await tmpdir()
+    await Bun.write(`${tmp.path}/kv.json`, "{}")
+    let failNextProviders = false
+    let providerCalls = 0
+    let exited = false
+    const { app, emit, sync } = await mount(
+      (url) => {
+        if (url.pathname === "/config/providers") {
+          providerCalls++
+          if (failNextProviders) {
+            failNextProviders = false
+            return json({ error: "restart gap" }, { status: 500 })
+          }
+          return undefined
+        }
+        return undefined
+      },
+      tmp.path,
+      {
+        exit: () => {
+          exited = true
+        },
+      },
+    )
+
+    try {
+      const baseline = providerCalls
+      sync.restart.begin()
+      failNextProviders = true
+      emit(disposedEvent())
+      await wait(() => providerCalls >= baseline + 2)
+      expect(exited).toBe(false)
+      expect(sync.status).toBe("complete")
+    } finally {
+      app.renderer.destroy()
+    }
+  })
+
+  test("coalesces overlapping restart recovery bootstraps", async () => {
+    await using tmp = await tmpdir()
+    await Bun.write(`${tmp.path}/kv.json`, "{}")
+    let providerCalls = 0
+    const { app, emit, sync } = await mount(
+      (async (url) => {
+        if (url.pathname === "/config/providers") {
+          providerCalls++
+          if (providerCalls > 1) await Bun.sleep(50)
+          return undefined
+        }
+        return undefined
+      }) as (url: URL) => Promise<Response | undefined>,
+      tmp.path,
+    )
+
+    try {
+      const baseline = providerCalls
+      sync.restart.begin()
+      emit(disposedEvent())
+      emit(disposedEvent())
+      await wait(() => providerCalls > baseline)
+      await wait(() => sync.status === "complete")
+      expect(providerCalls).toBe(baseline + 1)
+    } finally {
+      app.renderer.destroy()
+    }
+  })
+
+  test("rehydrates the captured session after restart", async () => {
+    await using tmp = await tmpdir()
+    await Bun.write(`${tmp.path}/kv.json`, "{}")
+    let messageCalls = 0
+    const { app, emit, route, sync } = await mount(
+      (url) => {
+        if (url.pathname === "/experimental/session") return json([attachSession])
+        if (url.pathname === `/session/${attachSessionID}`) return json(attachSession)
+        if (url.pathname === `/session/${attachSessionID}/message`) {
+          messageCalls++
+          return json([{ info: attachMessage, parts: [] }])
+        }
+        if (url.pathname === `/session/${attachSessionID}/todo` || url.pathname === `/session/${attachSessionID}/diff`)
+          return json([])
+        return undefined
+      },
+      tmp.path,
+      { route: { type: "session", sessionID: attachSessionID } },
+    )
+
+    try {
+      await sync.session.sync(attachSessionID)
+      const messagesBefore = messageCalls
+      sync.restart.begin()
+      emit(disposedEvent())
+      await wait(() => messageCalls > messagesBefore)
+      expect(route.data).toEqual({ type: "session", sessionID: attachSessionID })
+      expect(sync.data.message[attachSessionID]?.[0]?.id).toBe(attachMessageID)
+    } finally {
+      app.renderer.destroy()
+    }
+  })
+
+  test("falls back to home when the captured session is gone", async () => {
+    await using tmp = await tmpdir()
+    await Bun.write(`${tmp.path}/kv.json`, "{}")
+    let listCalls = 0
+    const { app, emit, route, sync } = await mount(
+      (url) => {
+        if (url.pathname === "/experimental/session") {
+          listCalls++
+          if (listCalls > 1) return json([])
+          return json([attachSession])
+        }
+        return undefined
+      },
+      tmp.path,
+      { route: { type: "session", sessionID: attachSessionID } },
+    )
+
+    try {
+      expect(sync.session.get(attachSessionID)?.id).toBe(attachSessionID)
+      sync.restart.begin()
+      emit(disposedEvent())
+      await wait(() => route.data.type === "home")
+      expect(route.data).toEqual({ type: "home" })
+    } finally {
+      app.renderer.destroy()
+    }
+  })
+
+  test("ordinary disposal still fatally exits when bootstrap fails", async () => {
+    await using tmp = await tmpdir()
+    await Bun.write(`${tmp.path}/kv.json`, "{}")
+    let failNextProviders = false
+    let exited = false
+    const { app, emit } = await mount(
+      (url) => {
+        if (url.pathname === "/config/providers") {
+          if (failNextProviders) return json({ error: "disposed" }, { status: 500 })
+          return undefined
+        }
+        return undefined
+      },
+      tmp.path,
+      {
+        exit: () => {
+          exited = true
+        },
+      },
+    )
+
+    try {
+      failNextProviders = true
+      emit(disposedEvent())
+      await wait(() => exited)
+      expect(exited).toBe(true)
+    } finally {
+      app.renderer.destroy()
+    }
+  })
 })

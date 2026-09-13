@@ -33,6 +33,7 @@ export const { use: useSDK, provider: SDKProvider } = createSimpleContext({
     let sdk = createSDK()
 
     const handlers = new Set<(event: GlobalEvent) => void>()
+    const reconnectHandlers = new Set<() => void>()
     const emitter = {
       emit(_type: "event", event: GlobalEvent) {
         for (const handler of handlers) handler(event)
@@ -85,33 +86,56 @@ export const { use: useSDK, provider: SDKProvider } = createSimpleContext({
       sse = ctrl
       ;(async () => {
         let attempt = 0
+        let established = false
         while (true) {
           if (abort.signal.aborted || ctrl.signal.aborted) break
 
-          const events = await sdk.global.event({
-            signal: ctrl.signal,
-            sseMaxRetryAttempts: 0,
-          })
+          try {
+            const events = await sdk.global.event({
+              signal: ctrl.signal,
+              sseMaxRetryAttempts: 0,
+            })
 
-          if (Flag.OPENCODE_EXPERIMENTAL_WORKSPACES) {
-            // Start syncing workspaces, it's important to do this after
-            // we've started listening to events
-            await sdk.sync.start().catch(() => {})
+            if (established) {
+              for (const handler of reconnectHandlers) handler()
+            }
+            established = true
+            attempt = 0
+
+            if (Flag.OPENCODE_EXPERIMENTAL_WORKSPACES) {
+              // Start syncing workspaces, it's important to do this after
+              // we've started listening to events
+              await sdk.sync.start().catch(() => {})
+            }
+
+            for await (const event of events.stream) {
+              if (abort.signal.aborted || ctrl.signal.aborted) break
+              handleEvent(event)
+            }
+
+            if (timer) clearTimeout(timer)
+            if (queue.length > 0) flush()
+          } catch {
+            // Request and stream failures retry with the same backoff.
           }
 
-          for await (const event of events.stream) {
-            if (ctrl.signal.aborted) break
-            handleEvent(event)
-          }
-
-          if (timer) clearTimeout(timer)
-          if (queue.length > 0) flush()
           attempt += 1
           if (abort.signal.aborted || ctrl.signal.aborted) break
 
-          // Exponential backoff
           const backoff = Math.min(retryDelay * 2 ** (attempt - 1), maxRetryDelay)
-          await new Promise((resolve) => setTimeout(resolve, backoff))
+          await new Promise<void>((resolve) => {
+            const onAbort = () => {
+              clearTimeout(timer)
+              resolve()
+            }
+            const timer = setTimeout(() => {
+              abort.signal.removeEventListener("abort", onAbort)
+              ctrl.signal.removeEventListener("abort", onAbort)
+              resolve()
+            }, backoff)
+            abort.signal.addEventListener("abort", onAbort, { once: true })
+            ctrl.signal.addEventListener("abort", onAbort, { once: true })
+          })
         }
       })().catch(() => {})
     }
@@ -136,6 +160,7 @@ export const { use: useSDK, provider: SDKProvider } = createSimpleContext({
       sse?.abort()
       if (timer) clearTimeout(timer)
       handlers.clear()
+      reconnectHandlers.clear()
     })
 
     return {
@@ -144,6 +169,12 @@ export const { use: useSDK, provider: SDKProvider } = createSimpleContext({
       },
       directory: props.directory,
       event: emitter,
+      onReconnect(handler: () => void) {
+        reconnectHandlers.add(handler)
+        return () => {
+          reconnectHandlers.delete(handler)
+        }
+      },
       fetch: props.fetch ?? fetch,
       url: props.url,
     }

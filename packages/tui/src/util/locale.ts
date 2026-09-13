@@ -7,6 +7,12 @@ export function time(input: number): string {
   return date.toLocaleTimeString(undefined, { timeStyle: "short" })
 }
 
+export function shortDateTime(input: number): string {
+  const date = new Date(input)
+  const localDate = date.toLocaleDateString(undefined, { year: "2-digit", month: "numeric", day: "numeric" })
+  return `${localDate} ${time(input)}`
+}
+
 export function datetime(input: number): string {
   const date = new Date(input)
   const localTime = time(input)

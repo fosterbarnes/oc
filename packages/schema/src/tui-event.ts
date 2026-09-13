@@ -10,6 +10,47 @@ const DEFAULT_TOAST_DURATION = 5000
 
 export const PromptAppend = Event.define({ type: "tui.prompt.append", schema: { text: Schema.String } })
 
+export const RemoteTargetedCommandID = Schema.Literals([
+  "session.list",
+  "session.most_recent",
+  "oc.new_session",
+  "model.default",
+  "oc.reasoning_effort",
+  "agent.session",
+  "agent.default_subagent",
+  "agent.default_subagent_model",
+  "oc.home_dir",
+  "oc.home_dir_sort",
+  "session.new",
+  "session.rename",
+  "session.compact",
+  "session.complete.toggle",
+  "session.failed.toggle",
+  "model.list",
+  "agent.list",
+  "agent.cycle",
+  "variant.cycle",
+  "command.palette.show",
+  "theme.switch",
+  "session.sidebar.toggle",
+  "opencode.status",
+] as const)
+
+export const CrowSessionHandle = Schema.String.check(
+  Schema.isPattern(/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i),
+).pipe(Schema.brand("CrowSessionHandle"))
+
+export const CommandExecuteTargeted = Event.define({
+  type: "tui.command.execute.targeted",
+  schema: {
+    command: RemoteTargetedCommandID,
+    crowSessionHandle: CrowSessionHandle,
+    expectedOpenCodeSessionID: SessionID.annotate({
+      description: "OpenCode session ID the targeted TUI must match before executing the command",
+    }),
+  },
+})
+
 export const CommandExecute = Event.define({
   type: "tui.command.execute",
   schema: {
@@ -56,4 +97,10 @@ export const SessionSelect = Event.define({
   },
 })
 
-export const Definitions = Event.inventory(PromptAppend, CommandExecute, ToastShow, SessionSelect)
+export const Definitions = Event.inventory(
+  PromptAppend,
+  CommandExecuteTargeted,
+  CommandExecute,
+  ToastShow,
+  SessionSelect,
+)

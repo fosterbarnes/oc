@@ -22,10 +22,6 @@ export type PluginRoute = {
 
 export type Route = HomeRoute | SessionRoute | PluginRoute
 
-export type RouteNavigationOptions = {
-  notify?: boolean
-}
-
 export const { use: useRoute, provider: RouteProvider } = createSimpleContext({
   name: "Route",
   init: (props: { initialRoute?: Route; onSessionChange?: (sessionID: string) => void }) => {
@@ -38,15 +34,13 @@ export const { use: useRoute, provider: RouteProvider } = createSimpleContext({
       get data() {
         return store
       },
-      navigate(route: Route, options: RouteNavigationOptions = {}) {
+      // Every session route change is reported, including the initial --session attach,
+      // so an external host (Crow) always knows which session this TUI is showing.
+      navigate(route: Route) {
         const previousType = store.type
         const previousSessionID = previousType === "session" ? store.sessionID : undefined
         setStore(reconcile(route))
-        if (
-          options.notify !== false &&
-          route.type === "session" &&
-          (previousType !== "session" || previousSessionID !== route.sessionID)
-        ) {
+        if (route.type === "session" && (previousType !== "session" || previousSessionID !== route.sessionID)) {
           try {
             props.onSessionChange?.(route.sessionID)
           } catch {}
@@ -73,3 +67,4 @@ export function useRouteData<T extends Route["type"]>(type: T) {
   const route = useRoute()
   return route.data as Extract<Route, { type: typeof type }>
 }
+

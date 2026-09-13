@@ -251,6 +251,8 @@ import type {
   TuiControlResponseResponses,
   TuiExecuteCommandErrors,
   TuiExecuteCommandResponses,
+  TuiExecuteTargetedCommandErrors,
+  TuiExecuteTargetedCommandResponses,
   TuiOpenHelpErrors,
   TuiOpenHelpResponses,
   TuiOpenModelsErrors,
@@ -4920,6 +4922,74 @@ export class Tui extends HeyApiClient {
     )
     return (options?.client ?? this.client).post<TuiExecuteCommandResponses, TuiExecuteCommandErrors, ThrowOnError>({
       url: "/tui/execute-command",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Execute targeted TUI command
+   *
+   * Publish a Crow-targeted TUI command for the session handle and expected OpenCode session ID.
+   */
+  public executeTargetedCommand<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+      command?:
+        | "session.list"
+        | "session.most_recent"
+        | "oc.new_session"
+        | "model.default"
+        | "oc.reasoning_effort"
+        | "agent.session"
+        | "agent.default_subagent"
+        | "agent.default_subagent_model"
+        | "oc.home_dir"
+        | "oc.home_dir_sort"
+        | "session.new"
+        | "session.rename"
+        | "session.compact"
+        | "session.complete.toggle"
+        | "session.failed.toggle"
+        | "model.list"
+        | "agent.list"
+        | "agent.cycle"
+        | "variant.cycle"
+        | "command.palette.show"
+        | "theme.switch"
+        | "session.sidebar.toggle"
+        | "opencode.status"
+      crowSessionHandle?: string
+      expectedOpenCodeSessionID?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "body", key: "command" },
+            { in: "body", key: "crowSessionHandle" },
+            { in: "body", key: "expectedOpenCodeSessionID" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<
+      TuiExecuteTargetedCommandResponses,
+      TuiExecuteTargetedCommandErrors,
+      ThrowOnError
+    >({
+      url: "/tui/execute-targeted-command",
       ...options,
       ...params,
       headers: {
