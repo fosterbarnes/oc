@@ -75,6 +75,19 @@ export function pruneSessionModelOverrides<T>(overrides: Record<string, T>, sess
   return next
 }
 
+export function resolveSessionAgent(
+  session: string | undefined,
+  selected: string | undefined,
+  cli: string | undefined,
+  fallback: string | undefined,
+) {
+  return session ?? selected ?? cli ?? fallback
+}
+
+export function pruneSessionAgents(overrides: Record<string, string>, sessionID: string) {
+  return pruneSessionModelOverrides(overrides, sessionID)
+}
+
 export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
   name: "Local",
   init: () => {
@@ -105,7 +118,10 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
       const agents = createMemo(() => sync.data.agent.filter((agent) => agent.mode !== "subagent" && !agent.hidden))
       const visibleAgents = createMemo(() => sync.data.agent.filter((agent) => !agent.hidden))
       const [agentStore, setAgentStore] = createStore({
+        ready: false,
         current: undefined as string | undefined,
+        session: {} as Record<string, string>,
+        pending: undefined as string | undefined,
       })
       const colors = createMemo(() => [
         theme.secondary,
@@ -116,32 +132,132 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
         theme.error,
         theme.info,
       ])
+      const filePath = path.join(paths.state, "agent.json")
+      const state = { pending: false }
+
+      function save() {
+        if (!agentStore.ready) {
+          state.pending = true
+          return
+        }
+        state.pending = false
+        void writeJsonAtomic(filePath, {
+          current: agentStore.current,
+          session: agentStore.session,
+        })
+      }
+
+      readJson<unknown>(filePath)
+        .then((x) => {
+          if (!x || typeof x !== "object") return
+          const value = x as Record<string, unknown>
+          if (typeof value.current === "string") setAgentStore("current", value.current)
+          if (typeof value.session === "object" && value.session !== null)
+            setAgentStore(
+              "session",
+              Object.fromEntries(
+                Object.entries(value.session).flatMap(([sessionID, name]) =>
+                  typeof name === "string" ? [[sessionID, name]] : [],
+                ),
+              ),
+            )
+        })
+        .catch(() => {})
+        .finally(() => {
+          setAgentStore("ready", true)
+          if (state.pending) save()
+        })
+
+      function sessionID() {
+        if (route.data.type !== "session") return
+        return route.data.sessionID
+      }
+
+      function isPrimary(name: string) {
+        return agents().some((x) => x.name === name)
+      }
+
+      function pick(name: string | undefined) {
+        if (!name) return
+        return agents().find((x) => x.name === name)
+      }
+
+      async function persistSessionAgent(id: string, name: string) {
+        const result = await sdk.client.session.update({ sessionID: id, agent: name })
+        if (result.error) {
+          toast.show({ message: `Failed to persist session agent: ${result.error.message}`, variant: "error" })
+          return false
+        }
+        batch(() => {
+          setAgentStore("session", id, name)
+          setAgentStore("current", name)
+          setAgentStore("pending", undefined)
+        })
+        save()
+        return true
+      }
+
+      event.on("session.deleted", (evt) => {
+        if (!(evt.properties.info.id in agentStore.session)) return
+        setAgentStore("session", (session) => pruneSessionAgents(session, evt.properties.info.id))
+        save()
+      })
+
       return {
         list() {
           return agents()
         },
         current() {
-          return agents().find((x) => x.name === agentStore.current) ?? agents().at(0)
+          const id = sessionID()
+          const sessionName = id ? (agentStore.session[id] ?? sync.session.get(id)?.agent) : undefined
+          const name = resolveSessionAgent(pick(sessionName)?.name, pick(agentStore.current)?.name, args.agent, undefined)
+          return pick(name) ?? agents().at(0)
         },
-        set(name: string) {
-          if (!agents().some((x) => x.name === name))
+        hasSession(id = sessionID()) {
+          if (!id) return false
+          const name = agentStore.session[id] ?? sync.session.get(id)?.agent
+          return !!name && isPrimary(name)
+        },
+        remember(id: string, name: string) {
+          if (!isPrimary(name)) return
+          if (agentStore.session[id] === name) return
+          setAgentStore("session", id, name)
+          save()
+        },
+        async attachSession(id: string) {
+          const pending = agentStore.pending ?? this.current()?.name
+          if (!pending || !isPrimary(pending)) return
+          setAgentStore("pending", undefined)
+          setAgentStore("session", id, pending)
+          setAgentStore("current", pending)
+          save()
+        },
+        async set(name: string) {
+          if (!isPrimary(name))
             return toast.show({
               variant: "warning",
               message: `Agent not found: ${name}`,
               duration: 3000,
             })
-          setAgentStore("current", name)
+          const id = sessionID()
+          if (!id) {
+            batch(() => {
+              setAgentStore("current", name)
+              setAgentStore("pending", name)
+            })
+            save()
+            return
+          }
+          await persistSessionAgent(id, name)
         },
         move(direction: 1 | -1) {
-          batch(() => {
-            const current = this.current()
-            if (!current) return
-            let next = agents().findIndex((x) => x.name === current.name) + direction
-            if (next < 0) next = agents().length - 1
-            if (next >= agents().length) next = 0
-            const value = agents()[next]
-            setAgentStore("current", value.name)
-          })
+          const current = this.current()
+          if (!current) return
+          let next = agents().findIndex((x) => x.name === current.name) + direction
+          if (next < 0) next = agents().length - 1
+          if (next >= agents().length) next = 0
+          const value = agents()[next]
+          void this.set(value.name)
         },
         label(name: string) {
           const found = sync.data.agent.find((x) => x.name === name)
@@ -675,4 +791,5 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
     }
     return result
   },
+
 })

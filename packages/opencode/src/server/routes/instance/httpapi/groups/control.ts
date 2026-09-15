@@ -28,9 +28,14 @@ export const LogInput = Schema.Struct({
   }),
 })
 
+export const DebugLoggingState = Schema.Struct({
+  enabled: Schema.Boolean.annotate({ description: "Whether debug logging is persisted on for future processes" }),
+})
+
 export const ControlPaths = {
   auth: "/auth/:providerID",
   log: "/log",
+  debugLogging: "/debug-logging",
 } as const
 
 export const ControlApi = HttpApi.make("control").add(
@@ -69,6 +74,27 @@ export const ControlApi = HttpApi.make("control").add(
           identifier: "app.log",
           summary: "Write log",
           description: "Write a log entry to the server logs with specified level and metadata.",
+        }),
+      ),
+      HttpApiEndpoint.get("debugLoggingGet", ControlPaths.debugLogging, {
+        success: described(DebugLoggingState, "Current persisted debug logging state"),
+      }).annotateMerge(
+        OpenApi.annotations({
+          identifier: "app.debugLogging.get",
+          summary: "Get debug logging",
+          description: "Return whether debug logging is persisted on for this machine.",
+        }),
+      ),
+      HttpApiEndpoint.put("debugLoggingSet", ControlPaths.debugLogging, {
+        payload: DebugLoggingState,
+        success: described(DebugLoggingState, "Updated persisted debug logging state"),
+        error: HttpApiError.BadRequest,
+      }).annotateMerge(
+        OpenApi.annotations({
+          identifier: "app.debugLogging.set",
+          summary: "Set debug logging",
+          description:
+            "Enable or disable debug logging for this process and all future OpenCode processes until changed.",
         }),
       ),
     )

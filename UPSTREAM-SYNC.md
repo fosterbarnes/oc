@@ -72,5 +72,6 @@ bun typecheck
 Run `bun typecheck` from each affected package directory, never from the repo
 root. Parse any changed PowerShell scripts with PowerShell 7. Recheck both
 checkout statuses, inspect the final diff, and confirm the isolated checkout
-remains clean. Append the upstream SHA, method, checks, and remaining issues to
-`buildNotes.md` after successful verification.
+remains clean. Insert a newest-first session entry in `buildNotes.md` after
+successful verification (immediately under `# Historical entries (newest first)`).
+Record the upstream SHA, method, checks, and remaining issues.

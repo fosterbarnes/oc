@@ -1,7 +1,15 @@
 import fs from "node:fs"
 import path from "node:path"
 import { createHash } from "node:crypto"
-import type { LanguageModelV3, LanguageModelV3CallOptions, LanguageModelV3StreamResult, LanguageModelV3GenerateResult, LanguageModelV3StreamPart, LanguageModelV3Usage, LanguageModelV3FinishReason } from "@ai-sdk/provider"
+import type {
+  LanguageModelV3,
+  LanguageModelV3CallOptions,
+  LanguageModelV3StreamResult,
+  LanguageModelV3GenerateResult,
+  LanguageModelV3StreamPart,
+  LanguageModelV3Usage,
+  LanguageModelV3FinishReason,
+} from "@ai-sdk/provider"
 import type { CreateCursorOptions, CursorRetryOptions } from "./index.js"
 import {
   bidiRunStream,
@@ -93,11 +101,7 @@ import {
   queuePlanExecutionKickoff,
   takePlanExecutionKickoffWarning,
 } from "./plan-execution-kickoff.js"
-import {
-  CURSOR_IMAGE_SAVE_TOOL,
-  imageMimeForPath,
-  remapCursorImageWritePath,
-} from "./protocol/generate-image.js"
+import { CURSOR_IMAGE_SAVE_TOOL, imageMimeForPath, remapCursorImageWritePath } from "./protocol/generate-image.js"
 import { stageCursorImage } from "./image-staging.js"
 import { IMAGE_PERMISSION_DENIED_PREFIX } from "./image-save.js"
 import { clearCheckpoint, getCheckpoint, setCheckpoint } from "./protocol/checkpoint.js"
@@ -143,15 +147,20 @@ import {
   retrySuppressedError,
   toCursorProviderError,
 } from "./errors.js"
-import { readCache, cacheFilePath, resolveVariantParameters, paramsImplyMaxMode, extractCursorVariantParameters, resolveCursorWireModelId, type ModelInfo } from "./models.js"
+import {
+  readCache,
+  cacheFilePath,
+  resolveVariantParameters,
+  resolveVariantMaxMode,
+  extractCursorVariantParameters,
+  resolveCursorWireModelId,
+  type ModelInfo,
+} from "./models.js"
 import { getOrBuildRequestContext } from "./context/frozen.js"
 import { workspaceRootFromRequestContext } from "./context/env.js"
-import {
-  ensureOpencodeProjectDir,
-  opencodeGlobalCacheDir,
-  setHostCacheDirOverride,
-} from "./context/paths.js"
-import { resolveAgentUrl } from "./agent-url.js"
+import { progressOnlyContinuationPrompt, shouldContinueProgressOnlyTurn } from "./protocol/progress-continuation.js"
+import { ensureOpencodeProjectDir, opencodeGlobalCacheDir, setHostCacheDirOverride } from "./context/paths.js"
+import { invalidateAgentUrl, resolveAgentUrl } from "./agent-url.js"
 import { CURSOR_API_HOST, CURSOR_COMPACTION_OPTION } from "./shared.js"
 import { isCompactionSession } from "./compaction-marker.js"
 import { getSessionDirectory } from "./session-directory.js"
@@ -159,12 +168,10 @@ import type { SeedHistoryMessage } from "./protocol/request.js"
 import { assertCursorUserImageSupport, extractCursorPromptImages } from "./image-input.js"
 import { resolveCursorModelSupportsImages } from "./model-metadata.js"
 import { ensureCursorProxy } from "./runtime.js"
-import {
-  consumeCursorShellResult,
-  registerCursorShellCall,
-} from "./shell-timeout.js"
+import { consumeCursorShellResult, registerCursorShellCall } from "./shell-timeout.js"
 import { analyzeReplayFrame, AttemptReplaySafety } from "./replay-safety.js"
 import { readAllFieldsStrict } from "./protocol/struct.js"
+import { buildGitDiffReply, executeGitDiff } from "./protocol/git-diff.js"
 import {
   buildLanguageModelV3UsageFromCounters,
   cursorUsageCountersFromTurnEnded,
@@ -213,10 +220,7 @@ export function checkpointBlobGraphRequiresRebase(
 }
 
 type ResponseRequiredChannel = "exec" | "kv" | "interaction" | "multiple"
-const RESPONSE_REQUIRED_CHANNEL_BY_FIELD = new Map<
-  number,
-  Exclude<ResponseRequiredChannel, "multiple">
->([
+const RESPONSE_REQUIRED_CHANNEL_BY_FIELD = new Map<number, Exclude<ResponseRequiredChannel, "multiple">>([
   [2, "exec"],
   [4, "kv"],
   [7, "interaction"],
@@ -337,10 +341,7 @@ function retryInfoProtobufDelayMs(encoded: string): number | undefined {
   if (!outerKey || outerKey[0] !== 0x0an) return undefined
   const outerLength = readVarint(bytes, outerKey[1])
   if (!outerLength || outerLength[0] > BigInt(bytes.length - outerLength[1])) return undefined
-  const duration = bytes.subarray(
-    outerLength[1],
-    outerLength[1] + Number(outerLength[0]),
-  )
+  const duration = bytes.subarray(outerLength[1], outerLength[1] + Number(outerLength[0]))
   let offset = 0
   let seconds = 0n
   let nanos = 0n
@@ -369,9 +370,7 @@ export function connectFrameError(payload: string): CursorProviderError {
     if (code === "unauthenticated" || code === "permission_denied") {
       return new CursorAuthError(`Cursor authentication failed (${code}); reauthenticate with Cursor`, { code })
     }
-    let retryAfterMs = retryDelayFromValue(
-      envelope.error?.retryAfter ?? envelope.error?.retry_after,
-    )
+    let retryAfterMs = retryDelayFromValue(envelope.error?.retryAfter ?? envelope.error?.retry_after)
     let hasRetryInfo = false
     if (Array.isArray(envelope.error?.details)) {
       for (const detail of envelope.error.details) {
@@ -380,9 +379,7 @@ export function connectFrameError(payload: string): CursorProviderError {
         const type = record.type
         if (type === "google.rpc.RetryInfo" || (typeof type === "string" && type.endsWith("/google.rpc.RetryInfo"))) {
           hasRetryInfo = true
-          retryAfterMs ??= retryDelayFromValue(
-            record.retryDelay ?? record.retry_delay ?? record.value,
-          )
+          retryAfterMs ??= retryDelayFromValue(record.retryDelay ?? record.retry_delay ?? record.value)
         }
       }
     }
@@ -390,9 +387,7 @@ export function connectFrameError(payload: string): CursorProviderError {
       transient: isTransientGrpcStatus(code) || hasRetryInfo,
       replaySafe: true,
       code,
-      retryAfterMs: retryAfterMs === undefined
-        ? undefined
-        : Math.min(MAX_RETRY_DELAY_MS, retryAfterMs),
+      retryAfterMs: retryAfterMs === undefined ? undefined : Math.min(MAX_RETRY_DELAY_MS, retryAfterMs),
     })
   } catch {
     return new CursorProtocolError("Cursor returned a malformed Connect error envelope")
@@ -420,10 +415,7 @@ function publishToolCatalogWaiters(sessionKey: string, tools: OpencodeToolDef[])
   for (const waiter of waiters) waiter.resolve(tools)
 }
 
-function waitForSiblingToolCatalog(
-  sessionKey: string,
-  signal?: AbortSignal,
-): Promise<OpencodeToolDef[]> {
+function waitForSiblingToolCatalog(sessionKey: string, signal?: AbortSignal): Promise<OpencodeToolDef[]> {
   const existing = toolCatalogBySession.get(sessionKey)
   if (existing && existing.length > 0) {
     return Promise.resolve(structuredClone(existing))
@@ -444,10 +436,7 @@ function waitForSiblingToolCatalog(
       if (error) reject(error)
       else resolve(structuredClone(tools!))
     }
-    const onAbort = () => finish(
-      undefined,
-      new CursorLocalCancellationError("Cursor tool-catalog wait cancelled"),
-    )
+    const onAbort = () => finish(undefined, new CursorLocalCancellationError("Cursor tool-catalog wait cancelled"))
     const waiter: ToolCatalogWaiter = {
       resolve: (tools) => finish(tools),
       cancel: onAbort,
@@ -616,7 +605,9 @@ async function doStreamImpl(
       // completed tool result, so no result or advertised tool is lost and
       // Cursor can continue instead of deadlocking.
       const ids = trailingToolResults.map((r) => `${r.sessionId}:${r.execId}`).join(",")
-      trace(`continuation: ${trailingToolResults.length} interrupted trailing tool result(s) [${ids}] — rebasing fresh Run`)
+      trace(
+        `continuation: ${trailingToolResults.length} interrupted trailing tool result(s) [${ids}] — rebasing fresh Run`,
+      )
       session = await openSession({ recovery: { kind: "rebase" } })
     } else {
       // Fresh turn (prompt ends with user/assistant text). Historical tool
@@ -652,7 +643,15 @@ async function doStreamImpl(
             abortSignal: callOptions.abortSignal,
             retryPolicy,
             recover: (recovery) => openSession({ recovery }),
-            onSession: (next) => { activeSession = next },
+            onSession: (next) => {
+              activeSession = next
+            },
+            onRetryableFailure: () => {
+              invalidateAgentUrl(token, {
+                apiBaseURL: resolveApiBaseURL(options),
+                telemetryEnabled: resolveTelemetryEnabled(options),
+              })
+            },
           })
           try {
             controller.close()
@@ -705,6 +704,7 @@ export async function pumpWithRecovery(input: {
   recover: (recovery: CursorRunRecovery) => Promise<CursorSession>
   onSession?: (session: CursorSession) => void
   maxRecoveries?: number
+  onRetryableFailure?: (failure: CursorProviderError) => void
 }): Promise<CursorSession> {
   let session = input.initialSession
   const retryPolicy = input.retryPolicy ?? {
@@ -752,6 +752,13 @@ export async function pumpWithRecovery(input: {
           `err=${failure.message} — ${checkpoint ? `resuming ${checkpoint.length}B checkpoint` : "rebasing fresh Run"}`,
       )
       sessionManager.close(pumpedSession, "remote-error", failure)
+      if (failure.transient && (failure.origin === "transport" || failure.origin === "server")) {
+        try {
+          input.onRetryableFailure?.(failure)
+        } catch {
+          /* observer must not break retry */
+        }
+      }
       const delayMs = retryDelayMs(failure, attempt + 1, retryPolicy)
       trace(`Run retry backoff: attempt=${attempt + 1}/${maxRecoveries} delayMs=${delayMs}`)
       await sleepForRetry(delayMs, input.abortSignal)
@@ -774,9 +781,7 @@ export async function pumpWithRecovery(input: {
   }
 }
 
-export type CursorRunRecovery =
-  | { kind: "rebase" }
-  | { kind: "resume"; conversationId: string; checkpoint: Uint8Array }
+export type CursorRunRecovery = { kind: "rebase" } | { kind: "resume"; conversationId: string; checkpoint: Uint8Array }
 
 async function startSession(
   modelId: string,
@@ -803,8 +808,7 @@ async function startSession(
   // OpenCode 2.0 removed that hook, so its plugin records the same fact against
   // the session id from session.hook("context") instead; consult both.
   // Do not infer this from tools/toolChoice: standalone no-tool calls are valid.
-  const isCompaction =
-    providerOptions?.[CURSOR_COMPACTION_OPTION] === true || isCompactionSession(sessionKey)
+  const isCompaction = providerOptions?.[CURSOR_COMPACTION_OPTION] === true || isCompactionSession(sessionKey)
   const toolState = await resolveTurnToolState({
     sessionKey,
     incomingTools,
@@ -841,16 +845,16 @@ async function startSession(
     ? undefined
     : resuming
       ? resumeRecovery!.checkpoint
-      : (bound.reset ? undefined : getCheckpoint(bound.conversationId))
+      : bound.reset
+        ? undefined
+        : getCheckpoint(bound.conversationId)
   let checkpointGraph: ConversationBlobGraphStats = conversationState
     ? inspectConversationBlobGraph(bound.conversationId, conversationState)
     : { count: 0, bytes: 0, complete: true }
   let forcedResetReason: string | undefined
   if (conversationState && checkpointBlobGraphRequiresRebase(checkpointGraph)) {
     const previousConversationId = bound.conversationId
-    forcedResetReason = checkpointGraph.complete
-      ? "oversized-checkpoint-graph"
-      : "incomplete-checkpoint-graph"
+    forcedResetReason = checkpointGraph.complete ? "oversized-checkpoint-graph" : "incomplete-checkpoint-graph"
     trace(
       `checkpoint state rejected: reason=${forcedResetReason} ` +
         `conversationId=${previousConversationId} checkpointBytes=${conversationState.length} ` +
@@ -887,30 +891,29 @@ async function startSession(
   }
 
   const lastUser = [...prompt].reverse().find((message) => message.role === "user")
-  const userText = recovery?.kind === "rebase"
-    ? "Continue the interrupted turn from the conversation history above. Do not repeat completed work."
-    : (extractUserText(lastUser) || ".")
+  const userText =
+    recovery?.kind === "rebase"
+      ? "Continue the interrupted turn from the conversation history above. Do not repeat completed work."
+      : extractUserText(lastUser) || "."
   // v1 sets `options.workspaceRoot` correctly per invocation (`input.directory`,
   // one plugin instance per project). OpenCode 2.0 runs one daemon across many
   // projects, so its static `options.workspaceRoot` is only a last-resort
   // fallback; `getSessionDirectory` carries the real per-session directory
   // recorded from `session.hook("context")` in `plugin-opencode2.ts`.
-  const workspaceRoot = path.resolve(
-    getSessionDirectory(sessionKey) ?? (options.workspaceRoot || process.cwd()),
-  )
+  const workspaceRoot = path.resolve(getSessionDirectory(sessionKey) ?? (options.workspaceRoot || process.cwd()))
   const baseSystemPrompt = extractSystemPrompt(prompt)
   const interactionGuidance = buildOpenCodeInteractionGuidance(cursorTools, isCompaction, workspaceRoot)
   // After an approved SwitchMode, inject the Cursor CLI-shaped mode reminder
   // (same <system_reminder> contract the CLI uses after flipping unifiedMode).
   const startedWithCheckpoint = !!conversationState
-  const modeReminder = isCompaction || startedWithCheckpoint || lifecycle
-    ? undefined
-    : takeActiveCursorModeReminder(sessionKey, {
-        advertisedTools: cursorTools.map((tool) => tool.name),
-      })
-  const kickoffWarning = isCompaction || startedWithCheckpoint || lifecycle
-    ? undefined
-    : takePlanExecutionKickoffWarning(sessionKey)
+  const modeReminder =
+    isCompaction || startedWithCheckpoint || lifecycle
+      ? undefined
+      : takeActiveCursorModeReminder(sessionKey, {
+          advertisedTools: cursorTools.map((tool) => tool.name),
+        })
+  const kickoffWarning =
+    isCompaction || startedWithCheckpoint || lifecycle ? undefined : takePlanExecutionKickoffWarning(sessionKey)
   const systemPrompt = [
     baseSystemPrompt,
     interactionGuidance,
@@ -921,7 +924,7 @@ async function startSession(
     .join("\n\n")
   const history = extractPromptHistory(prompt, {
     preserveTrailingUser: recovery?.kind === "rebase",
-    toolResults: isCompaction ? "all" : (recovery?.kind === "rebase" ? "trailing" : "omit"),
+    toolResults: isCompaction ? "all" : recovery?.kind === "rebase" ? "trailing" : "omit",
   })
 
   await loadAvailableModels()
@@ -941,9 +944,8 @@ async function startSession(
   // payload so unrelated options never become requested_model.parameters.
   const picked = extractCursorVariantParameters(providerOptions)
   const cursorModelId = resolveCursorWireModelId(providerOptions, modelId)
-  const reasoningEffort = typeof providerOptions?.reasoningEffort === "string"
-    ? providerOptions.reasoningEffort
-    : undefined
+  const reasoningEffort =
+    typeof providerOptions?.reasoningEffort === "string" ? providerOptions.reasoningEffort : undefined
   const hintMaxMode = !!(providerOptions?.maxMode ?? false)
 
   const modelInfo = _availableModels?.find((m) => m.id === cursorModelId)
@@ -965,16 +967,14 @@ async function startSession(
           // Content hashes are retained for the OpenCode session so growing
           // history does not re-upload old screenshots. A recovery rebase opens
           // a new Cursor conversation, so it must resend the same payload.
-          seenHistoryHashes: recovery?.kind === "rebase"
-            ? undefined
-            : sentHistoryImageHashes(sessionKey),
+          seenHistoryHashes: recovery?.kind === "rebase" ? undefined : sentHistoryImageHashes(sessionKey),
           signal: callOptions.abortSignal,
         },
       )
   if (!supportsImages && imageExtraction.candidateCount > 0) {
     trace(
       `image input: dropped ${imageExtraction.candidateCount} tool/assistant history image(s); ` +
-      `model=${cursorModelId} does not support images`,
+        `model=${cursorModelId} does not support images`,
     )
   }
   if (imageExtraction.duplicateCount > 0) {
@@ -988,45 +988,64 @@ async function startSession(
   })
   // Wire max_mode from the hint *or* a 1m context pick — OpenCode's variant
   // paramMap does not include a maxMode key when the user selects 1m.
-  const maxMode = hintMaxMode || paramsImplyMaxMode(parameterValues)
+  const maxMode = resolveVariantMaxMode(parameterValues, { picked, maxMode: hintMaxMode })
 
   // Do NOT pass callOptions.abortSignal into the h2 Run stream. OpenCode aborts
   // that signal when a turn ends with tool-calls; the Cursor stream must stay
   // open until we write the exec results on the next doStream.
   await ensureCursorProxy()
-  const stream = await bidiRunStream(token, {
-    baseURL: agentBaseUrl,
-    headers: options.headers,
-  })
+  let stream: Awaited<ReturnType<typeof bidiRunStream>>
+  try {
+    stream = await bidiRunStream(token, {
+      baseURL: agentBaseUrl,
+      headers: options.headers,
+    })
+  } catch (cause) {
+    const failure = toCursorProviderError(cause, {
+      replaySafe: false,
+      fallback: "Cursor Run stream failed",
+    })
+    if (failure.transient && (failure.origin === "transport" || failure.origin === "server")) {
+      invalidateAgentUrl(token, {
+        apiBaseURL: resolveApiBaseURL(options),
+        telemetryEnabled: resolveTelemetryEnabled(options),
+      })
+    }
+    throw cause
+  }
   // Freeze RequestContext per conversation_id (CLI parity). Rebuilding every
   // Run mutates volatile slices (git porcelain, layout) and breaks prompt cache.
-  const { context: requestContext, reused: requestContextReused } = await getOrBuildRequestContext(
-    conversationId,
-    { workspaceRoot, tools: cursorTools },
-  )
+  const { context: requestContext, reused: requestContextReused } = await getOrBuildRequestContext(conversationId, {
+    workspaceRoot,
+    tools: cursorTools,
+  })
   const contextSubagents = Array.isArray(requestContext.custom_subagents)
     ? requestContext.custom_subagents
-        .map((agent) => agent && typeof agent === "object" && typeof (agent as Record<string, unknown>).name === "string"
-          ? {
-              name: (agent as Record<string, unknown>).name as string,
-              description: typeof (agent as Record<string, unknown>).description === "string"
-                ? (agent as Record<string, unknown>).description as string
-                : undefined,
-            }
-          : undefined)
+        .map((agent) =>
+          agent && typeof agent === "object" && typeof (agent as Record<string, unknown>).name === "string"
+            ? {
+                name: (agent as Record<string, unknown>).name as string,
+                description:
+                  typeof (agent as Record<string, unknown>).description === "string"
+                    ? ((agent as Record<string, unknown>).description as string)
+                    : undefined,
+              }
+            : undefined,
+        )
         .filter((agent): agent is { name: string; description: string | undefined } => !!agent)
     : []
   const subagentCatalog = {
     ...discoveredSubagentCatalog,
-    agents: [...new Map(
-      [...discoveredSubagentCatalog.agents, ...contextSubagents]
-        .map((agent) => [agent.name, agent]),
-    ).values()],
+    agents: [
+      ...new Map(
+        [...discoveredSubagentCatalog.agents, ...contextSubagents].map((agent) => [agent.name, agent]),
+      ).values(),
+    ],
   }
   // Resolve descriptors once from the merged OpenCode config so MCP identity is
   // consistent across AgentRunRequest and both request_context reply paths.
   const toolDescriptors = Array.isArray(requestContext.tools)
-    ? requestContext.tools as Array<Record<string, unknown>>
+    ? (requestContext.tools as Array<Record<string, unknown>>)
     : []
   // CLI parity: echo the last conversation_checkpoint_update as conversation_state.
   // After compaction or an unsafe checkpoint reset there is no checkpoint —
@@ -1050,17 +1069,11 @@ async function startSession(
   // Content hashes — Cursor content-addresses large payloads; logging these lets
   // us match a server get_blob_args.blob_id to what it wants served.
   const sha = (b: string | Uint8Array) => createHash("sha256").update(b).digest("hex")
-  const skillsCount = Array.isArray(requestContext.agent_skills)
-    ? requestContext.agent_skills.length
-    : 0
+  const skillsCount = Array.isArray(requestContext.agent_skills) ? requestContext.agent_skills.length : 0
   const hooksCtx =
-    typeof requestContext.hooks_additional_context === "string"
-      ? requestContext.hooks_additional_context
-      : ""
+    typeof requestContext.hooks_additional_context === "string" ? requestContext.hooks_additional_context : ""
   const historyChars = history.reduce((n, m) => n + m.content.length, 0)
-  const seedChars = conversationState
-    ? 0
-    : (systemPrompt?.length ?? 0) + userText.length + historyChars
+  const seedChars = conversationState ? 0 : (systemPrompt?.length ?? 0) + userText.length + historyChars
   const seedEstimateIn = estimateTokens(seedChars)
   const checkpointEnvelopeEstimateIn = conversationState
     ? estimateTokens(userText.length + conversationState.length)
@@ -1170,6 +1183,9 @@ async function startSession(
     semanticDeadlineAt: Date.now() + continuationPolicy.semanticIdleMs,
     closeError: null,
     closed: false,
+    progressAssistantText: "",
+    progressContinuationAttempts: 0,
+    progressEmittedHostTools: 0,
   }
   sessionManager.registerSession(session)
   let heartbeatWritePending = false
@@ -1195,18 +1211,24 @@ async function startSession(
           }),
         )
       })
-      .finally(() => { heartbeatWritePending = false })
+      .finally(() => {
+        heartbeatWritePending = false
+      })
   }, continuationPolicy.heartbeatMs)
   session.heartbeat.unref?.()
   session.heartbeatCancel = () => {
     if (session.heartbeat) clearInterval(session.heartbeat)
   }
 
-  callOptions.abortSignal?.addEventListener("abort", () => {
-    // Abort after tool-calls is normal — preserve pending sessions.
-    trace("abortSignal aborted → closeUnlessPending")
-    sessionManager.closeUnlessPending(session)
-  }, { once: true })
+  callOptions.abortSignal?.addEventListener(
+    "abort",
+    () => {
+      // Abort after tool-calls is normal — preserve pending sessions.
+      trace("abortSignal aborted → closeUnlessPending")
+      sessionManager.closeUnlessPending(session)
+    },
+    { once: true },
+  )
   return session
 }
 
@@ -1234,10 +1256,7 @@ export function findContinuationSession(
  * travels as a ConversationAction keyed by the originating tool call id, with
  * the server's own AskQuestionArgs bytes echoed back untouched.
  */
-function buildAskQuestionContinuationFrame(
-  pending: PendingExec,
-  result: ExtractedToolResult,
-): Uint8Array {
+function buildAskQuestionContinuationFrame(pending: PendingExec, result: ExtractedToolResult): Uint8Array {
   const metadata = pending.resultMetadata ?? {}
   const args = metadata.askQuestionArgs as CursorAskQuestionArgs | undefined
   if (!args) throw new CursorProtocolError("Bridged AskQuestion lost its decoded arguments")
@@ -1254,11 +1273,7 @@ function buildAskQuestionContinuationFrame(
     throw new CursorProtocolError("Bridged async AskQuestion lost its original arguments")
   }
   const toolCallId = metadata.askQuestionToolCallId
-  return buildAsyncAskQuestionCompletion(
-    typeof toolCallId === "string" ? toolCallId : "",
-    rawArgs,
-    answer,
-  )
+  return buildAsyncAskQuestionCompletion(typeof toolCallId === "string" ? toolCallId : "", rawArgs, answer)
 }
 
 /**
@@ -1288,13 +1303,14 @@ function buildCreatePlanContinuationFrame(
     throw new CursorProtocolError("Bridged CreatePlan lost its plan URI")
   }
 
-  const approved = metadata.createPlanBridgeKind === "approve"
-    ? createPlanApproved(
-        result.output,
-        result.error !== undefined,
-        typeof metadata.createPlanQuestion === "string" ? metadata.createPlanQuestion : "",
-      )
-    : result.error === undefined
+  const approved =
+    metadata.createPlanBridgeKind === "approve"
+      ? createPlanApproved(
+          result.output,
+          result.error !== undefined,
+          typeof metadata.createPlanQuestion === "string" ? metadata.createPlanQuestion : "",
+        )
+      : result.error === undefined
   if (!approved) {
     const reason = result.error?.trim()
     return buildCreatePlanInteractionReply(interactionId, {
@@ -1324,13 +1340,14 @@ function buildCreatePlanContinuationFrame(
       typeof metadata.planPath === "string" && metadata.planPath.trim()
         ? metadata.planPath.trim()
         : planPathFromUri(planUri)
-    const workspaceRoot =
-      typeof metadata.workspaceRoot === "string" ? metadata.workspaceRoot : undefined
-    if (!queuePlanExecutionKickoff({
-      sessionID: sessionKey,
-      planPath: formatPlanKickoffPath(absolute, workspaceRoot),
-      cursorSessionID,
-    })) {
+    const workspaceRoot = typeof metadata.workspaceRoot === "string" ? metadata.workspaceRoot : undefined
+    if (
+      !queuePlanExecutionKickoff({
+        sessionID: sessionKey,
+        planPath: formatPlanKickoffPath(absolute, workspaceRoot),
+        cursorSessionID,
+      })
+    ) {
       return buildCreatePlanInteractionReply(interactionId, {
         error: { error: "The plan was approved, but this host cannot start its execution turn." },
         plan_uri: planUri,
@@ -1357,9 +1374,10 @@ function buildSwitchModeContinuationFrame(
   // A question-emulated exit carries the user's Yes/No as prose, not a plan
   // tool's success/failure, so it needs the answer parser rather than the
   // error-shaped mapping.
-  const answer = metadata.switchModeBridgeKind === "question"
-    ? switchModeResultFromQuestionOutput(result.output, result.error !== undefined)
-    : switchModeResultFromToolOutput(result.output, result.error !== undefined)
+  const answer =
+    metadata.switchModeBridgeKind === "question"
+      ? switchModeResultFromQuestionOutput(result.output, result.error !== undefined)
+      : switchModeResultFromToolOutput(result.output, result.error !== undefined)
   if ("approved" in answer) {
     const target = metadata.switchModeTarget
     if (typeof target === "string" && target.trim()) {
@@ -1430,12 +1448,7 @@ export function deliverContinuationResults(
       }
     } else if (pending.resultField === CREATE_PLAN_RESULT_FIELD) {
       try {
-        frames = [buildCreatePlanContinuationFrame(
-          pending,
-          r,
-          session.openCodeSessionId,
-          session.sessionId,
-        )]
+        frames = [buildCreatePlanContinuationFrame(pending, r, session.openCodeSessionId, session.sessionId)]
       } catch (error) {
         trace(`continuation: create_plan encode FAILED execId=${r.execId} err=${(error as Error).message}`)
         sessionManager.close(session, "result-write-failed")
@@ -1444,19 +1457,18 @@ export function deliverContinuationResults(
     } else if (!pending.bridged) {
       try {
         const shellResult =
-          pending.resultField === "shell_stream"
-          || pending.resultField === "background_shell_spawn_result"
+          pending.resultField === "shell_stream" || pending.resultField === "background_shell_spawn_result"
             ? consumeCursorShellResult(r.toolCallId, r.output)
             : undefined
         const workspaceRoot = workspaceRootFromRequestContext(session.requestContext)
         const correlatedEditCallId = pending.resultMetadata?.correlatedEditCallId
         const requestedPath = pending.resultMetadata?.path
         const correlatedEdit =
-          !r.error
-          && pending.resultField === "read_result"
-          && pending.toolName === "read"
-          && typeof correlatedEditCallId === "string"
-          && typeof requestedPath === "string"
+          !r.error &&
+          pending.resultField === "read_result" &&
+          pending.toolName === "read" &&
+          typeof correlatedEditCallId === "string" &&
+          typeof requestedPath === "string"
             ? session.editToolCalls?.get(correlatedEditCallId)
             : undefined
         if (correlatedEdit) {
@@ -1477,53 +1489,54 @@ export function deliverContinuationResults(
         // marker is set by this provider's own tool, so matching it is a
         // contract rather than a guess at someone else's message text.
         if (
-          pending.toolName === CURSOR_IMAGE_SAVE_TOOL
-          && pending.resultField === "write_result"
-          && r.error?.includes(IMAGE_PERMISSION_DENIED_PREFIX)
+          pending.toolName === CURSOR_IMAGE_SAVE_TOOL &&
+          pending.resultField === "write_result" &&
+          r.error?.includes(IMAGE_PERMISSION_DENIED_PREFIX)
         ) {
-          const deniedPath = typeof pending.resultMetadata?.path === "string"
-            ? pending.resultMetadata.path
-            : ""
-          frames = [encodeMessage("AgentClientMessage", {
-            exec_client_message: {
-              id: r.execId,
-              write_result: {
-                permission_denied: {
-                  path: deniedPath,
-                  directory: deniedPath ? path.dirname(deniedPath) : "",
-                  operation: "write",
-                  error: r.error.replace(`${IMAGE_PERMISSION_DENIED_PREFIX} `, ""),
-                  is_readonly: false,
+          const deniedPath = typeof pending.resultMetadata?.path === "string" ? pending.resultMetadata.path : ""
+          frames = [
+            encodeMessage("AgentClientMessage", {
+              exec_client_message: {
+                id: r.execId,
+                write_result: {
+                  permission_denied: {
+                    path: deniedPath,
+                    directory: deniedPath ? path.dirname(deniedPath) : "",
+                    operation: "write",
+                    error: r.error.replace(`${IMAGE_PERMISSION_DENIED_PREFIX} `, ""),
+                    is_readonly: false,
+                  },
                 },
               },
-            },
-          })]
+            }),
+          ]
         }
         // A committed image reports the file Cursor asked about, not the tool's
         // prose. `buildExecClientMessages` would otherwise put the message's
         // character count in `WriteSuccess.file_size`.
         if (
-          frames.length === 0
-          && !r.error
-          && pending.toolName === CURSOR_IMAGE_SAVE_TOOL
-          && pending.resultField === "write_result"
+          frames.length === 0 &&
+          !r.error &&
+          pending.toolName === CURSOR_IMAGE_SAVE_TOOL &&
+          pending.resultField === "write_result"
         ) {
-          frames = [encodeMessage("AgentClientMessage", {
-            exec_client_message: {
-              id: r.execId,
-              write_result: {
-                success: {
-                  path: typeof pending.resultMetadata?.path === "string"
-                    ? pending.resultMetadata.path
-                    : "",
-                  lines_created: 0,
-                  file_size: typeof pending.resultMetadata?.imageByteLength === "number"
-                    ? pending.resultMetadata.imageByteLength
-                    : 0,
+          frames = [
+            encodeMessage("AgentClientMessage", {
+              exec_client_message: {
+                id: r.execId,
+                write_result: {
+                  success: {
+                    path: typeof pending.resultMetadata?.path === "string" ? pending.resultMetadata.path : "",
+                    lines_created: 0,
+                    file_size:
+                      typeof pending.resultMetadata?.imageByteLength === "number"
+                        ? pending.resultMetadata.imageByteLength
+                        : 0,
+                  },
                 },
               },
-            },
-          })]
+            }),
+          ]
         }
         if (frames.length === 0) {
           frames = buildExecClientMessages({
@@ -1589,7 +1602,9 @@ async function loadAvailableModels(): Promise<void> {
       _availableModels = cached?.models
       _availableModelsMtimeMs = mtime
     }
-  } catch { /* ignore */ }
+  } catch {
+    /* ignore */
+  }
 }
 
 function resolveApiBaseURL(options: CreateCursorOptions): string {
@@ -1605,9 +1620,7 @@ function resolveExplicitAgentBaseURL(options: CreateCursorOptions): string | und
   if (!raw) return undefined
   const normalized = normalizeAgentRunOrigin(raw)
   if (!normalized) {
-    throw new CursorProtocolError(
-      "Invalid Cursor agent base URL override: expected https://*.cursor.sh",
-    )
+    throw new CursorProtocolError("Invalid Cursor agent base URL override: expected https://*.cursor.sh")
   }
   return normalized
 }
@@ -1624,14 +1637,11 @@ const streamWriteChains = new WeakMap<BidiStream, Promise<void>>()
  * otherwise one heartbeat observes the backlog created by dozens of ignored
  * false write() results and reports the wrong operation as the failure.
  */
-async function writeWithBackpressure(
-  stream: BidiStream,
-  message: Uint8Array,
-  operation: string,
-): Promise<void> {
+async function writeWithBackpressure(stream: BidiStream, message: Uint8Array, operation: string): Promise<void> {
   const previous = streamWriteChains.get(stream)
-  const current = (previous ? previous.catch(() => undefined) : Promise.resolve())
-    .then(() => writeWithBackpressureNow(stream, message, operation))
+  const current = (previous ? previous.catch(() => undefined) : Promise.resolve()).then(() =>
+    writeWithBackpressureNow(stream, message, operation),
+  )
   streamWriteChains.set(stream, current)
   try {
     await current
@@ -1640,11 +1650,7 @@ async function writeWithBackpressure(
   }
 }
 
-async function writeWithBackpressureNow(
-  stream: BidiStream,
-  message: Uint8Array,
-  operation: string,
-): Promise<void> {
+async function writeWithBackpressureNow(stream: BidiStream, message: Uint8Array, operation: string): Promise<void> {
   let accepted: boolean | void
   try {
     accepted = stream.write(message)
@@ -1674,15 +1680,14 @@ async function writeWithBackpressureNow(
   }
 }
 
-async function nextFrameWithSemanticDeadline(
-  session: CursorSession,
-): Promise<IteratorResult<Frame>> {
+async function nextFrameWithSemanticDeadline(session: CursorSession): Promise<IteratorResult<Frame>> {
   const remainingMs = session.semanticDeadlineAt - Date.now()
   if (remainingMs <= 0) {
-    throw new CursorTransportError(
-      `Cursor semantic-progress timeout after ${session.policy.semanticIdleMs}ms`,
-      { transient: true, replaySafe: true, code: "CURSOR_SEMANTIC_IDLE_TIMEOUT" },
-    )
+    throw new CursorTransportError(`Cursor semantic-progress timeout after ${session.policy.semanticIdleMs}ms`, {
+      transient: true,
+      replaySafe: true,
+      code: "CURSOR_SEMANTIC_IDLE_TIMEOUT",
+    })
   }
   let timer: ReturnType<typeof setTimeout> | undefined
   let rejectCancelled: ((error: CursorProviderError) => void) | undefined
@@ -1690,20 +1695,22 @@ async function nextFrameWithSemanticDeadline(
     rejectCancelled = reject
     timer = setTimeout(() => {
       reject(
-        new CursorTransportError(
-          `Cursor semantic-progress timeout after ${session.policy.semanticIdleMs}ms`,
-          { transient: true, replaySafe: true, code: "CURSOR_SEMANTIC_IDLE_TIMEOUT" },
-        ),
+        new CursorTransportError(`Cursor semantic-progress timeout after ${session.policy.semanticIdleMs}ms`, {
+          transient: true,
+          replaySafe: true,
+          code: "CURSOR_SEMANTIC_IDLE_TIMEOUT",
+        }),
       )
     }, remainingMs)
     timer.unref?.()
   })
   session.semanticDeadlineCancel = () => {
     rejectCancelled?.(
-      session.closeError ?? new CursorTransportError("Cursor semantic wait cancelled locally", {
-        transient: false,
-        replaySafe: false,
-      }),
+      session.closeError ??
+        new CursorTransportError("Cursor semantic wait cancelled locally", {
+          transient: false,
+          replaySafe: false,
+        }),
     )
   }
   try {
@@ -1731,7 +1738,7 @@ export async function pump(
   abortSignal?: AbortSignal,
 ): Promise<void> {
   sessionManager.registerSession(session)
-  const cacheDiagnostics = session.cacheDiagnostics ??= {
+  const cacheDiagnostics = (session.cacheDiagnostics ??= {
     sessionKey: session.openCodeSessionId,
     conversationId: session.conversationId,
     priorTokenDetails: session.tokenDetails,
@@ -1745,7 +1752,7 @@ export async function pump(
     stepCompletes: 0,
     displayToolCalls: 0,
     execRequests: 0,
-  }
+  })
   cacheDiagnostics.pumpPasses++
   const { textId, reasoningId } = ids
   const advertisedToolNames = advertisedToolNamesFromDescriptors(session.toolDescriptors)
@@ -1807,9 +1814,7 @@ export async function pump(
       trace(`exec: REFUSED ${label} toolName=${parsed.toolName} id=${parsed.id}`)
       return true
     } catch (e) {
-      const error = new Error(
-        `Failed to reject Cursor tool request (${label}): ${(e as Error).message}`,
-      )
+      const error = new Error(`Failed to reject Cursor tool request (${label}): ${(e as Error).message}`)
       trace(`exec: REFUSED reply FAILED ${error.message}`)
       safeError(error)
       sessionManager.close(session)
@@ -1828,10 +1833,7 @@ export async function pump(
    * continue. External and otherwise ineligible reads retain OpenCode's normal
    * permission-aware path.
    */
-  const recoverCorrelatedEditRead = (
-    parsed: ParsedExecRequest,
-    displayCallId: string | undefined,
-  ): boolean => {
+  const recoverCorrelatedEditRead = (parsed: ParsedExecRequest, displayCallId: string | undefined): boolean => {
     if (
       !displayCallId ||
       parsed.resultField !== "read_result" ||
@@ -1839,7 +1841,8 @@ export async function pump(
       // `apply_patch` is the substitute this host offers when it withholds
       // `write` — the follow-up write_args is remapped onto it either way.
       !(advertisedToolNameSet.has("write") || advertisedToolNameSet.has("apply_patch"))
-    ) return false
+    )
+      return false
 
     const stored = session.displayToolCalls.get(displayCallId)
     const display = parseDisplayToolCall(displayCallId, stored)
@@ -1860,9 +1863,8 @@ export async function pump(
     try {
       fs.lstatSync(absolutePath)
     } catch (error) {
-      const code = error && typeof error === "object" && "code" in error
-        ? (error as { code?: unknown }).code
-        : undefined
+      const code =
+        error && typeof error === "object" && "code" in error ? (error as { code?: unknown }).code : undefined
       if (code !== "ENOENT") return false
       exists = false
     }
@@ -1918,9 +1920,7 @@ export async function pump(
       )
       return true
     } catch (e) {
-      const error = new Error(
-        `Failed to recover Cursor edit read: ${(e as Error).message}`,
-      )
+      const error = new Error(`Failed to recover Cursor edit read: ${(e as Error).message}`)
       trace(`exec: edit read recovery FAILED ${error.message}`)
       safeError(error)
       sessionManager.close(session)
@@ -1963,15 +1963,10 @@ export async function pump(
         session.stream.write(frame)
       }
       const kind = Object.keys(readResult)[0]
-      trace(
-        `exec: rejected missing read target id=${parsed.id} kind=${kind} ` +
-          `path=${JSON.stringify(absolutePath)}`,
-      )
+      trace(`exec: rejected missing read target id=${parsed.id} kind=${kind} ` + `path=${JSON.stringify(absolutePath)}`)
       return true
     } catch (e) {
-      const error = new Error(
-        `Failed to reject Cursor read of a missing path: ${(e as Error).message}`,
-      )
+      const error = new Error(`Failed to reject Cursor read of a missing path: ${(e as Error).message}`)
       trace(`exec: missing read rejection FAILED ${error.message}`)
       safeError(error)
       sessionManager.close(session)
@@ -1991,6 +1986,7 @@ export async function pump(
   const emitText = (text: string) => {
     if (!text) return
     replaySafety.markBarrier("visible-text")
+    session.progressAssistantText = `${session.progressAssistantText ?? ""}${text}`
     // Close reasoning before text (hosts expect reasoning-end before text-start).
     if (reasoningStarted && !textStarted) {
       safeEnqueue({ type: "reasoning-end", id: reasoningId } as V3Part)
@@ -2034,23 +2030,21 @@ export async function pump(
         : "checkpoint-previous-turn"
       : undefined
     const counters = te ? cursorUsageCountersFromTurnEnded(te) : undefined
-    const usage = settledUsage ?? (te
-      ? tokenDetails
-        ? buildLanguageModelV3UsageFromCounters(
-            counters!,
-            {
+    const usage =
+      settledUsage ??
+      (te
+        ? tokenDetails
+          ? buildLanguageModelV3UsageFromCounters(counters!, {
               contextTotalTokens: tokenDetails.usedTokens,
               priorContextTokens: session.cacheDiagnostics?.priorTokenDetails?.usedTokens,
-            },
-          )
-        : emptyLanguageModelV3Usage()
-      : emptyLanguageModelV3Usage())
-    const providerMetadata = te
-      ? cursorTurnEndedProviderMetadata(te, tokenDetails, contextSource)
-      : undefined
-    const reasonLabel = typeof reason === "object" && reason && "unified" in reason
-      ? String((reason as { unified?: string }).unified ?? "unknown")
-      : String(reason)
+            })
+          : emptyLanguageModelV3Usage()
+        : emptyLanguageModelV3Usage())
+    const providerMetadata = te ? cursorTurnEndedProviderMetadata(te, tokenDetails, contextSource) : undefined
+    const reasonLabel =
+      typeof reason === "object" && reason && "unified" in reason
+        ? String((reason as { unified?: string }).unified ?? "unknown")
+        : String(reason)
     const inTotal = usage.inputTokens?.total ?? 0
     const outTotal = usage.outputTokens?.total ?? 0
     trace(
@@ -2062,18 +2056,11 @@ export async function pump(
         `rawOut=${te ? turnEndedCounter(te, "output_tokens") : est.outputTokens} ` +
         `rawCacheRead=${te ? turnEndedCounter(te, "cache_read") : est.cacheRead} ` +
         `rawCacheWrite=${te ? turnEndedCounter(te, "cache_write") : est.cacheWrite} ` +
-        `source=${te
-          ? settledSource ?? (contextSource ?? "unavailable")
-          : "intermediate-zero"}`,
+        `source=${te ? (settledSource ?? contextSource ?? "unavailable") : "intermediate-zero"}`,
     )
     if (counters) {
       trace(formatTurnUsageValidation(counters, usage, tokenDetails, contextSource))
-      trace(formatCursorCacheDiagnostics(
-        counters,
-        tokenDetails,
-        cacheDiagnostics.priorTokenDetails,
-        cacheDiagnostics,
-      ))
+      trace(formatCursorCacheDiagnostics(counters, tokenDetails, cacheDiagnostics.priorTokenDetails, cacheDiagnostics))
     }
     safeEnqueue({
       type: "finish",
@@ -2102,17 +2089,15 @@ export async function pump(
 
     let next: IteratorResult<Frame>
     try {
-      next = session.pending.size === 0
-        ? await nextFrameWithSemanticDeadline(session)
-        : await session.frames.next()
+      next = session.pending.size === 0 ? await nextFrameWithSemanticDeadline(session) : await session.frames.next()
     } catch (error) {
       closeOpenSpans()
-      const failure = error instanceof CursorProviderError
-        ? error
-        : new CursorRunInterruptedError(
-            `Cursor Run frame stream interrupted: ${(error as Error).message}`,
-            { cause: error },
-          )
+      const failure =
+        error instanceof CursorProviderError
+          ? error
+          : new CursorRunInterruptedError(`Cursor Run frame stream interrupted: ${(error as Error).message}`, {
+              cause: error,
+            })
       throw replaySafety.applyTo(failure)
     }
     if (next.done) {
@@ -2136,9 +2121,7 @@ export async function pump(
         }
       }
       closeOpenSpans()
-      const failure = payload
-        ? connectFrameError(payload)
-        : new CursorRunInterruptedError()
+      const failure = payload ? connectFrameError(payload) : new CursorRunInterruptedError()
       throw replaySafety.applyTo(failure)
     }
 
@@ -2149,7 +2132,9 @@ export async function pump(
       payload = decodeFramePayload(frame)
     } catch (e) {
       replaySafety.markBarrier("unknown-or-malformed-frame")
-      trace(`gunzip FAILED (skipping frame): flags=0x${frame.flags.toString(16)} len=${frame.payload.length} err=${(e as Error).message}`)
+      trace(
+        `gunzip FAILED (skipping frame): flags=0x${frame.flags.toString(16)} len=${frame.payload.length} err=${(e as Error).message}`,
+      )
       continue
     }
     let asm: Record<string, unknown>
@@ -2208,609 +2193,638 @@ export async function pump(
     }
 
     try {
-    // CLI: conversationCheckpointUpdate → replace agentStore conversation state.
-    // Store opaque bytes keyed by conversation_id; next Run echoes them.
-    if (checkpointRaw != null) {
-      const bytes = normalizeCheckpointBytes(checkpointRaw)
-      if (bytes && bytes.length > 0) {
-        cacheDiagnostics.checkpointUpdates++
-        setCheckpoint(session.conversationId, bytes)
-        session.resumeCheckpoint = Uint8Array.from(bytes)
-        const tokenDetails = decodeConversationTokenDetails(bytes)
-        if (tokenDetails) {
-          cacheDiagnostics.tokenDetailUpdates++
-          session.tokenDetails = tokenDetails
-          session.tokenDetailsFresh = true
+      // CLI: conversationCheckpointUpdate → replace agentStore conversation state.
+      // Store opaque bytes keyed by conversation_id; next Run echoes them.
+      if (checkpointRaw != null) {
+        const bytes = normalizeCheckpointBytes(checkpointRaw)
+        if (bytes && bytes.length > 0) {
+          cacheDiagnostics.checkpointUpdates++
+          setCheckpoint(session.conversationId, bytes)
+          session.resumeCheckpoint = Uint8Array.from(bytes)
+          const tokenDetails = decodeConversationTokenDetails(bytes)
+          if (tokenDetails) {
+            cacheDiagnostics.tokenDetailUpdates++
+            session.tokenDetails = tokenDetails
+            session.tokenDetailsFresh = true
+          }
+          const context = tokenDetails
+            ? ` context=${tokenDetails.usedTokens}/${tokenDetails.maxTokens} ` +
+              `categories=${formatCursorTokenCategories(tokenDetails)}`
+            : " context=unavailable"
+          trace(`checkpoint: stored ${bytes.length}B for conversationId=${session.conversationId}${context}`)
         }
-        const context = tokenDetails
-          ? ` context=${tokenDetails.usedTokens}/${tokenDetails.maxTokens} ` +
-            `categories=${formatCursorTokenCategories(tokenDetails)}`
-          : " context=unavailable"
-        trace(
-          `checkpoint: stored ${bytes.length}B for conversationId=${session.conversationId}${context}`,
-        )
       }
-    }
 
-    if (iu?.text_delta) {
-      emitText(((iu.text_delta as Record<string, unknown>).text as string) ?? "")
-    } else if (iu?.thinking_delta) {
-      emitReasoning(((iu.thinking_delta as Record<string, unknown>).text as string) ?? "")
-    } else if (iu?.turn_ended) {
-      trace(`turn_ended raw wire fields: ${debugWalkTurnEnded(payload)}`)
-      const turnEnded = iu.turn_ended as Record<string, unknown>
-      if (session.openCodeSessionId) {
-        await persistConversationState(
-          session.cacheDir ?? opencodeGlobalCacheDir(),
-          {
+      if (iu?.text_delta) {
+        emitText(((iu.text_delta as Record<string, unknown>).text as string) ?? "")
+      } else if (iu?.thinking_delta) {
+        emitReasoning(((iu.thinking_delta as Record<string, unknown>).text as string) ?? "")
+      } else if (iu?.turn_ended) {
+        trace(`turn_ended raw wire fields: ${debugWalkTurnEnded(payload)}`)
+        const turnEnded = iu.turn_ended as Record<string, unknown>
+        // Progress-only continuation: before persistence/finish/close, check predicate
+        // and if true send a fresh user-action request on the same held bidi stream.
+        // This keeps pending exec claims, checkpoint, replay barriers, and stream
+        // ownership intact while resetting only turn-local text/counters.
+        const canContinue = shouldContinueProgressOnlyTurn({
+          allowTools: session.allowTools,
+          advertisedToolCount: session.toolDescriptors.length,
+          assistantText: session.progressAssistantText ?? "",
+          emittedHostTools: session.progressEmittedHostTools ?? 0,
+          continuationAttempts: session.progressContinuationAttempts ?? 0,
+          pendingExecs: session.pending.size,
+        })
+        if (canContinue) {
+          replaySafety.markBarrier("stateful-interaction")
+          const workspaceRoot = workspaceRootFromRequestContext(session.requestContext)
+          const prompt = progressOnlyContinuationPrompt(workspaceRoot)
+          session.progressContinuationAttempts = (session.progressContinuationAttempts ?? 0) + 1
+          // Mark stateful interaction for replay safety; attempt counted above.
+          try {
+            const checkpoint = session.resumeCheckpoint
+            const toolDescriptors = session.toolDescriptors
+            // Reconstruct request with same conversation/model/request-context descriptors
+            // and checkpoint, using action "user" so the prompt is not discarded
+            // (resume discards user_message).
+            const continuationBytes = buildRunRequest({
+              text: prompt,
+              modelId: session.cacheDiagnostics?.modelId ?? "cursor-default",
+              conversationId: session.conversationId,
+              conversationGroupId: session.cacheDiagnostics?.conversationGroupId,
+              conversationState: checkpoint,
+              requestContext: session.requestContext,
+              tools: session.toolCatalog ?? [],
+              toolDescriptors,
+              action: "user",
+            })
+            await writeWithBackpressure(session.stream, continuationBytes, "progress continuation")
+            trace(
+              `progress continuation: sent attempt=${session.progressContinuationAttempts} promptLen=${prompt.length}`,
+            )
+          } catch (error) {
+            trace(`progress continuation: write FAILED err=${(error as Error).message}`)
+            // Fall through to ordinary finish/close on write failure
+            if (session.openCodeSessionId) {
+              await persistConversationState(session.cacheDir ?? opencodeGlobalCacheDir(), {
+                sessionKey: session.openCodeSessionId,
+                conversationId: session.conversationId,
+                requestContext: session.requestContext,
+                toolCatalog: session.toolCatalog ?? [],
+                postCompactionRebase: session.postCompactionRebase,
+              }).catch((e) => {
+                trace(
+                  `conversation persistence: TurnEnded save failed sessionKey=${session.openCodeSessionId}: ${String(e)}`,
+                )
+              })
+            }
+            // Ensure open spans are closed before finish
+            closeOpenSpans()
+            emitFinish(turnEnded, { unified: "stop", raw: undefined })
+            sessionManager.close(session)
+            return
+          }
+          // Reset only turn-local text/counters attempt already incremented; retain
+          // pending exec claims, checkpoint, replay barriers, stream ownership, identity.
+          // Close open spans but do NOT emit finish or stream-start; continue pumping.
+          closeOpenSpans()
+          session.progressAssistantText = ""
+          session.progressEmittedHostTools = 0
+          // Do not reset attempt counter; keep 1-attempt limit
+          // Keep replaySafety barrier already marked; continue loop without finish/close
+          continue
+        }
+        if (session.openCodeSessionId) {
+          await persistConversationState(session.cacheDir ?? opencodeGlobalCacheDir(), {
             sessionKey: session.openCodeSessionId,
             conversationId: session.conversationId,
             requestContext: session.requestContext,
             toolCatalog: session.toolCatalog ?? [],
             postCompactionRebase: session.postCompactionRebase,
-          },
-        ).catch((error) => {
-          trace(
-            `conversation persistence: TurnEnded save failed ` +
-              `sessionKey=${session.openCodeSessionId}: ${String(error)}`,
-          )
-        })
-      }
-      emitFinish(
-        turnEnded,
-        { unified: "stop", raw: undefined },
-      )
-      sessionManager.close(session)
-      return
-    } else if (iu?.tool_call_started) {
-      cacheDiagnostics.displayToolCalls++
-      // Stash Cursor display ToolCall until exec claims it, or completed bridges it.
-      const started = iu.tool_call_started as Record<string, unknown>
-      const callId = typeof started.call_id === "string" ? started.call_id : ""
-      const toolCall = started.tool_call as Record<string, unknown> | undefined
-      if (callId && toolCall) {
-        session.displayToolCalls.set(callId, toolCall)
-        const variant = Object.keys(toolCall).find((k) => k.endsWith("_tool_call")) ?? "?"
-        const display = parseDisplayToolCall(callId, toolCall)
-        const editPath = display?.variant === "edit_tool_call"
-          && typeof display.args.path === "string"
-          ? display.args.path
-          : undefined
-        if (editPath) {
-          const editToolCalls = session.editToolCalls ?? (session.editToolCalls = new Map())
-          editToolCalls.set(callId, { path: editPath })
+          }).catch((error) => {
+            trace(
+              `conversation persistence: TurnEnded save failed ` +
+                `sessionKey=${session.openCodeSessionId}: ${String(error)}`,
+            )
+          })
         }
-        const callIdLog = callId.replace(/\r?\n/g, "\\n")
-        let wireFields = ""
-        if (variant === "?") {
-          const toolBytes = extractProtobufSubmessage(payload, [1, 2, 2])
-          if (toolBytes) {
-            wireFields = ` wireFields=[${listProtobufFieldNumbers(toolBytes).join(",")}]`
-          }
-        }
-        trace(`display tool_call_started: callId=${callIdLog} variant=${variant}${wireFields}`)
-      }
-    } else if (iu?.tool_call_completed) {
-      const completed = iu.tool_call_completed as Record<string, unknown>
-      const callId = typeof completed.call_id === "string" ? completed.call_id : ""
-      if (callId) session.editToolCalls?.delete(callId)
-      // If exec already claimed this call_id, display map entry is gone — skip.
-      if (!callId || !session.displayToolCalls.has(callId)) {
-        if (callId) {
-          trace(`display tool_call_completed: ignore (exec-handled or unknown) callId=${callId}`)
-        }
-      } else {
-        const stored = session.displayToolCalls.get(callId)!
-        session.displayToolCalls.delete(callId)
-        const toolCall =
-          (completed.tool_call as Record<string, unknown> | undefined) ?? stored
-        if (!session.allowTools) {
-          trace(`display tool_call_completed: SKIPPED (allowTools=false) callId=${callId}`)
-        } else {
+        emitFinish(turnEnded, { unified: "stop", raw: undefined })
+        sessionManager.close(session)
+        return
+      } else if (iu?.tool_call_started) {
+        cacheDiagnostics.displayToolCalls++
+        // Stash Cursor display ToolCall until exec claims it, or completed bridges it.
+        const started = iu.tool_call_started as Record<string, unknown>
+        const callId = typeof started.call_id === "string" ? started.call_id : ""
+        const toolCall = started.tool_call as Record<string, unknown> | undefined
+        if (callId && toolCall) {
+          session.displayToolCalls.set(callId, toolCall)
+          const variant = Object.keys(toolCall).find((k) => k.endsWith("_tool_call")) ?? "?"
           const display = parseDisplayToolCall(callId, toolCall)
-          const advertised = advertisedToolNamesFromDescriptors(session.toolDescriptors)
-          const bridged = display
-            ? resolveBridgedOpenCodeToolCall(display, advertised)
-            : undefined
-          if (!display) {
-            const callIdLog = callId.replace(/\r?\n/g, "\\n")
-            // AgentServerMessage.interaction_update(1).tool_call_completed(3).tool_call(2)
-            const toolBytes = extractProtobufSubmessage(payload, [1, 3, 2])
-            const wire = toolBytes
-              ? ` wireFields=[${listProtobufFieldNumbers(toolBytes).join(",")}]`
-              : ""
-            trace(
-              `display tool_call_completed: unparsed callId=${callIdLog} ` +
-                `keys=[${Object.keys(toolCall).join(",")}]${wire}`,
-            )
-          } else if (!bridged) {
-            trace(
-              `display tool_call_completed: no advertised OpenCode tool ` +
-                `callId=${callId} variant=${display.variant} preferred=${display.preferredToolName} ` +
-                `advertised=[${advertised.join(",")}]`,
-            )
+          const editPath =
+            display?.variant === "edit_tool_call" && typeof display.args.path === "string"
+              ? display.args.path
+              : undefined
+          if (editPath) {
+            const editToolCalls = session.editToolCalls ?? (session.editToolCalls = new Map())
+            editToolCalls.set(callId, { path: editPath })
+          }
+          const callIdLog = callId.replace(/\r?\n/g, "\\n")
+          let wireFields = ""
+          if (variant === "?") {
+            const toolBytes = extractProtobufSubmessage(payload, [1, 2, 2])
+            if (toolBytes) {
+              wireFields = ` wireFields=[${listProtobufFieldNumbers(toolBytes).join(",")}]`
+            }
+          }
+          trace(`display tool_call_started: callId=${callIdLog} variant=${variant}${wireFields}`)
+        }
+      } else if (iu?.tool_call_completed) {
+        const completed = iu.tool_call_completed as Record<string, unknown>
+        const callId = typeof completed.call_id === "string" ? completed.call_id : ""
+        if (callId) session.editToolCalls?.delete(callId)
+        // If exec already claimed this call_id, display map entry is gone — skip.
+        if (!callId || !session.displayToolCalls.has(callId)) {
+          if (callId) {
+            trace(`display tool_call_completed: ignore (exec-handled or unknown) callId=${callId}`)
+          }
+        } else {
+          const stored = session.displayToolCalls.get(callId)!
+          session.displayToolCalls.delete(callId)
+          const toolCall = (completed.tool_call as Record<string, unknown> | undefined) ?? stored
+          if (!session.allowTools) {
+            trace(`display tool_call_completed: SKIPPED (allowTools=false) callId=${callId}`)
           } else {
-            const execId = session.nextBridgedExecId++
-            sessionManager.registerPending(
-              execId,
-              session,
-              "bridged",
-              bridged.toolName,
-              true,
-            )
-            const toolCallId = `cursor_${session.sessionId}_${execId}`
-            const input = JSON.stringify(bridged.args ?? {})
+            const display = parseDisplayToolCall(callId, toolCall)
+            const advertised = advertisedToolNamesFromDescriptors(session.toolDescriptors)
+            const bridged = display ? resolveBridgedOpenCodeToolCall(display, advertised) : undefined
+            if (!display) {
+              const callIdLog = callId.replace(/\r?\n/g, "\\n")
+              // AgentServerMessage.interaction_update(1).tool_call_completed(3).tool_call(2)
+              const toolBytes = extractProtobufSubmessage(payload, [1, 3, 2])
+              const wire = toolBytes ? ` wireFields=[${listProtobufFieldNumbers(toolBytes).join(",")}]` : ""
+              trace(
+                `display tool_call_completed: unparsed callId=${callIdLog} ` +
+                  `keys=[${Object.keys(toolCall).join(",")}]${wire}`,
+              )
+            } else if (!bridged) {
+              trace(
+                `display tool_call_completed: no advertised OpenCode tool ` +
+                  `callId=${callId} variant=${display.variant} preferred=${display.preferredToolName} ` +
+                  `advertised=[${advertised.join(",")}]`,
+              )
+            } else {
+              const execId = session.nextBridgedExecId++
+              sessionManager.registerPending(execId, session, "bridged", bridged.toolName, true)
+              const toolCallId = `cursor_${session.sessionId}_${execId}`
+              const input = JSON.stringify(bridged.args ?? {})
+              trace(
+                `display BRIDGED tool-call toolCallId=${toolCallId} toolName=${bridged.toolName} ` +
+                  `variant=${bridged.variant} callId=${callId} inputLen=${input.length}`,
+              )
+              closeOpenSpans()
+              safeEnqueue({
+                type: "tool-call",
+                toolCallId,
+                toolName: bridged.toolName,
+                input,
+              } as V3Part)
+              session.progressEmittedHostTools = (session.progressEmittedHostTools ?? 0) + 1
+              emitFinish(undefined, { unified: "tool-calls", raw: undefined })
+              return
+            }
+          }
+        }
+      } else if (iu?.step_started) {
+        cacheDiagnostics.stepStarts++
+      } else if (iu?.step_completed) {
+        cacheDiagnostics.stepCompletes++
+      } else if (esm) {
+        cacheDiagnostics.execRequests++
+        const esmId = (esm.id as number) ?? 0
+        if (esm.request_context_args) {
+          // Server turn-setup probe (#10). Reply with full OpenCode-sourced context.
+          {
+            const rc = session.requestContext
+            const skills = Array.isArray(rc.agent_skills) ? rc.agent_skills.length : 0
+            const hooks = typeof rc.hooks_additional_context === "string" ? rc.hooks_additional_context : ""
             trace(
-              `display BRIDGED tool-call toolCallId=${toolCallId} toolName=${bridged.toolName} ` +
-                `variant=${bridged.variant} callId=${callId} inputLen=${input.length}`,
+              `exec request_context: id=${esmId} — replying context ` +
+                `tools=${session.toolDescriptors.length} skills=${skills} ` +
+                `hooks=${hooks ? hooks.split("\n").length : 0}`,
             )
-            closeOpenSpans()
-            safeEnqueue({
-              type: "tool-call",
-              toolCallId,
-              toolName: bridged.toolName,
-              input,
-            } as V3Part)
-            emitFinish(undefined, { unified: "tool-calls", raw: undefined })
-            return
+            if (hooks) trace(`exec request_context hooks_additional_context: ${hooks}`)
           }
-        }
-      }
-    } else if (iu?.step_started) {
-      cacheDiagnostics.stepStarts++
-    } else if (iu?.step_completed) {
-      cacheDiagnostics.stepCompletes++
-    } else if (esm) {
-      cacheDiagnostics.execRequests++
-      const esmId = (esm.id as number) ?? 0
-      if (esm.request_context_args) {
-        // Server turn-setup probe (#10). Reply with full OpenCode-sourced context.
-        {
-          const rc = session.requestContext
-          const skills = Array.isArray(rc.agent_skills) ? rc.agent_skills.length : 0
-          const hooks =
-            typeof rc.hooks_additional_context === "string" ? rc.hooks_additional_context : ""
-          trace(
-            `exec request_context: id=${esmId} — replying context ` +
-              `tools=${session.toolDescriptors.length} skills=${skills} ` +
-              `hooks=${hooks ? hooks.split("\n").length : 0}`,
-          )
-          if (hooks) trace(`exec request_context hooks_additional_context: ${hooks}`)
-        }
-        try {
-          traceRequestContextPaths(
-            `exec request_context reply id=${esmId}`,
-            session.requestContext,
-          )
-          await writeWithBackpressure(
-            session.stream,
-            buildRequestContextResult(esmId, session.requestContext),
-            `request-context reply id=${esmId}`,
-          )
-          trace(`exec request_context: replied`)
-        } catch (error) {
-          rethrowTransportWriteFailure(error)
-          failRunProtocol("Cursor request-context reply failed", RUN_REPLY_FAILED)
-        }
-      } else if (esm.mcp_state_exec_args) {
-        // MCP-backed writes/reads can be preceded by this control-plane probe.
-        // Confirm the virtual servers from the already-advertised context, then
-        // keep pumping until Cursor emits the actual mcp_args tool request.
-        const stateArgs = esm.mcp_state_exec_args as Record<string, unknown>
-        const requested = Array.isArray(stateArgs.server_identifiers)
-          ? stateArgs.server_identifiers.join(",")
-          : ""
-        try {
-          await writeWithBackpressure(
-            session.stream,
-            buildMcpStateResult(esmId, stateArgs, session.requestContext),
-            `MCP-state reply id=${esmId}`,
-          )
-          trace(`exec mcp_state: replied id=${esmId} requested=[${requested}]`)
-        } catch (error) {
-          rethrowTransportWriteFailure(error)
-          failRunProtocol("Cursor MCP-state reply failed", RUN_REPLY_FAILED)
-        }
-      } else if (esm.list_mcp_resources_exec_args) {
-        // Native Cursor exec (agent.v1 field 17), no OpenCode route under
-        // Option B — see tasks/plans/fix-cursor-mcp-resource-exec.md. Answer
-        // with Cursor's own no-client-qualifies shape and keep pumping.
-        const args = esm.list_mcp_resources_exec_args as Record<string, unknown>
-        const server = typeof args.server === "string" ? args.server : ""
-        try {
-          await writeWithBackpressure(
-            session.stream,
-            buildListMcpResourcesFallback(esmId),
-            `list-MCP-resources reply id=${esmId}`,
-          )
-          trace(`exec list_mcp_resources: replied id=${esmId} server=${server || "(all)"} success{resources:[]}`)
-        } catch (error) {
-          rethrowTransportWriteFailure(error)
-          failRunProtocol("Cursor list_mcp_resources reply failed", RUN_REPLY_FAILED)
-        }
-      } else if (esm.read_mcp_resource_exec_args) {
-        // Native Cursor exec (agent.v1 field 18) — same rationale as above.
-        const args = esm.read_mcp_resource_exec_args as Record<string, unknown>
-        const server = typeof args.server === "string" ? args.server : ""
-        const uri = typeof args.uri === "string" ? args.uri : ""
-        try {
-          await writeWithBackpressure(
-            session.stream,
-            buildReadMcpResourceFallback(esmId, server, uri),
-            `read-MCP-resource reply id=${esmId}`,
-          )
-          trace(`exec read_mcp_resource: replied id=${esmId} server=${server} uri=${uri} error{server not found}`)
-        } catch (error) {
-          rethrowTransportWriteFailure(error)
-          failRunProtocol("Cursor read_mcp_resource reply failed", RUN_REPLY_FAILED)
-        }
-      } else {
-        replaySafety.markBarrier("non-control-exec")
-        const displayCallId = extractExecDisplayCallId(esm)
-        const parsed = parseExecServerMessage(esm)
-        if (parsed) {
-          const executableToolName = resolveCustomWebToolAlias(parsed.toolName, session.toolAliases)
-          if (executableToolName !== parsed.toolName) {
-            trace(`web tool alias resolved: ${parsed.toolName} -> ${executableToolName}`)
-            parsed.toolName = executableToolName
+          try {
+            traceRequestContextPaths(`exec request_context reply id=${esmId}`, session.requestContext)
+            await writeWithBackpressure(
+              session.stream,
+              buildRequestContextResult(esmId, session.requestContext),
+              `request-context reply id=${esmId}`,
+            )
+            trace(`exec request_context: replied`)
+          } catch (error) {
+            rethrowTransportWriteFailure(error)
+            failRunProtocol("Cursor request-context reply failed", RUN_REPLY_FAILED)
           }
-          remapNativeSubagentForCatalog(parsed, advertisedToolNameSet, session.subagentCatalog)
-          const editCall = displayCallId
-            ? session.editToolCalls?.get(displayCallId)
-            : undefined
-          // A complete correlated edit read is trusted provenance: unlike an
-          // ordinary capped read it cannot have appended our warning marker,
-          // and the source itself may legitimately contain the marker text.
-          if (!editCall?.completeRead) rejectPartialReadMutation(parsed)
-          if (editCall) {
-            const remapped = remapCorrelatedEditWriteForCatalog(
+        } else if (esm.mcp_state_exec_args) {
+          // MCP-backed writes/reads can be preceded by this control-plane probe.
+          // Confirm the virtual servers from the already-advertised context, then
+          // keep pumping until Cursor emits the actual mcp_args tool request.
+          const stateArgs = esm.mcp_state_exec_args as Record<string, unknown>
+          const requested = Array.isArray(stateArgs.server_identifiers) ? stateArgs.server_identifiers.join(",") : ""
+          try {
+            await writeWithBackpressure(
+              session.stream,
+              buildMcpStateResult(esmId, stateArgs, session.requestContext),
+              `MCP-state reply id=${esmId}`,
+            )
+            trace(`exec mcp_state: replied id=${esmId} requested=[${requested}]`)
+          } catch (error) {
+            rethrowTransportWriteFailure(error)
+            failRunProtocol("Cursor MCP-state reply failed", RUN_REPLY_FAILED)
+          }
+        } else if (esm.list_mcp_resources_exec_args) {
+          // Native Cursor exec (agent.v1 field 17), no OpenCode route under
+          // Option B — see tasks/plans/fix-cursor-mcp-resource-exec.md. Answer
+          // with Cursor's own no-client-qualifies shape and keep pumping.
+          const args = esm.list_mcp_resources_exec_args as Record<string, unknown>
+          const server = typeof args.server === "string" ? args.server : ""
+          try {
+            await writeWithBackpressure(
+              session.stream,
+              buildListMcpResourcesFallback(esmId),
+              `list-MCP-resources reply id=${esmId}`,
+            )
+            trace(`exec list_mcp_resources: replied id=${esmId} server=${server || "(all)"} success{resources:[]}`)
+          } catch (error) {
+            rethrowTransportWriteFailure(error)
+            failRunProtocol("Cursor list_mcp_resources reply failed", RUN_REPLY_FAILED)
+          }
+        } else if (esm.read_mcp_resource_exec_args) {
+          // Native Cursor exec (agent.v1 field 18) — same rationale as above.
+          const args = esm.read_mcp_resource_exec_args as Record<string, unknown>
+          const server = typeof args.server === "string" ? args.server : ""
+          const uri = typeof args.uri === "string" ? args.uri : ""
+          try {
+            await writeWithBackpressure(
+              session.stream,
+              buildReadMcpResourceFallback(esmId, server, uri),
+              `read-MCP-resource reply id=${esmId}`,
+            )
+            trace(`exec read_mcp_resource: replied id=${esmId} server=${server} uri=${uri} error{server not found}`)
+          } catch (error) {
+            rethrowTransportWriteFailure(error)
+            failRunProtocol("Cursor read_mcp_resource reply failed", RUN_REPLY_FAILED)
+          }
+        } else if ((esm as Record<string, unknown>).git_diff_request) {
+          const request = (esm as Record<string, unknown>).git_diff_request as Record<string, unknown>
+          const execId = typeof esm.exec_id === "string" ? esm.exec_id : ""
+          try {
+            const response = await executeGitDiff(request, workspaceRootFromRequestContext(session.requestContext))
+            for (const [index, frame] of buildGitDiffReply({ id: esmId, execId, response }).entries()) {
+              await writeWithBackpressure(session.stream, frame, `git-diff reply id=${esmId} frame=${index + 1}`)
+            }
+            trace(`exec git_diff_request: replied id=${esmId}`)
+          } catch (error) {
+            rethrowTransportWriteFailure(error)
+            failRunProtocol("Cursor git-diff reply failed", RUN_REPLY_FAILED)
+          }
+          continue
+        } else {
+          replaySafety.markBarrier("non-control-exec")
+          const displayCallId = extractExecDisplayCallId(esm)
+          const parsed = parseExecServerMessage(esm)
+          if (parsed) {
+            const executableToolName = resolveCustomWebToolAlias(parsed.toolName, session.toolAliases)
+            if (executableToolName !== parsed.toolName) {
+              trace(`web tool alias resolved: ${parsed.toolName} -> ${executableToolName}`)
+              parsed.toolName = executableToolName
+            }
+            remapNativeSubagentForCatalog(parsed, advertisedToolNameSet, session.subagentCatalog)
+            const editCall = displayCallId ? session.editToolCalls?.get(displayCallId) : undefined
+            // A complete correlated edit read is trusted provenance: unlike an
+            // ordinary capped read it cannot have appended our warning marker,
+            // and the source itself may legitimately contain the marker text.
+            if (!editCall?.completeRead) rejectPartialReadMutation(parsed)
+            if (editCall) {
+              const remapped = remapCorrelatedEditWriteForCatalog(
+                parsed,
+                advertisedToolNameSet,
+                editCall.path,
+                workspaceRootFromRequestContext(session.requestContext),
+              )
+              if (parsed.resultField === "write_result" && displayCallId) {
+                session.editToolCalls?.delete(displayCallId)
+              }
+              if (remapped) {
+                trace(`exec: preserved edit intent callId=${displayCallId} ` + `path=${JSON.stringify(editCall.path)}`)
+              }
+            }
+            // Hosts that advertise `apply_patch` in place of `edit`/`write` (see
+            // protocol/apply-patch.ts) still receive Cursor's native write/edit
+            // exec requests. Translate before the unavailable-tool check below.
+            remapEditToolsForCatalog(
               parsed,
               advertisedToolNameSet,
-              editCall.path,
               workspaceRootFromRequestContext(session.requestContext),
             )
-            if (parsed.resultField === "write_result" && displayCallId) {
-              session.editToolCalls?.delete(displayCallId)
-            }
-            if (remapped) {
-              trace(
-                `exec: preserved edit intent callId=${displayCallId} ` +
-                  `path=${JSON.stringify(editCall.path)}`,
-              )
-            }
           }
-          // Hosts that advertise `apply_patch` in place of `edit`/`write` (see
-          // protocol/apply-patch.ts) still receive Cursor's native write/edit
-          // exec requests. Translate before the unavailable-tool check below.
-          remapEditToolsForCatalog(
-            parsed,
-            advertisedToolNameSet,
-            workspaceRootFromRequestContext(session.requestContext),
+          trace(
+            `exec: id=${parsed?.id} variant=${parsed ? Object.keys(parsed).join(",") : "none"} toolName=${parsed?.toolName} resultField=${parsed?.resultField}`,
           )
-        }
-        trace(`exec: id=${parsed?.id} variant=${parsed ? Object.keys(parsed).join(",") : "none"} toolName=${parsed?.toolName} resultField=${parsed?.resultField}`)
-        if (parsed) {
-          if (parsed.localError) {
-            if (!rejectExec(parsed, parsed.localError, "invalid mapping")) return
-            continue
-          }
-          // OpenCode throws "Tool call not allowed while generating summary"
-          // when assistantMessage.summary is set. Compaction/summary turns
-          // advertise no tools — refuse on the Cursor channel and keep
-          // pumping for text / turn_ended instead of emitting tool-call.
-          if (!session.allowTools) {
-            const reason = "Tool calls are not available during this turn (summary/compaction)."
-            if (!rejectExec(parsed, reason, "allowTools=false")) return
-            continue
-          }
-          // Cursor writes a generated image with an ordinary write exec whose
-          // `file_bytes` are binary (Cursor CLI's agent does exactly this, then
-          // reads the client's WriteResult back). OpenCode's `write` takes a
-          // string, so those bytes are staged and committed by the host tool
-          // that can raise the `edit` permission before anything hits disk.
-          const binaryWrite = binaryWritePayload(parsed)
-          if (binaryWrite) {
-            if (!advertisedToolNameSet.has(CURSOR_IMAGE_SAVE_TOOL)) {
-              const reason =
-                "This OpenCode agent cannot write binary file content. "
-                + "Do not retry this write with the same bytes."
-              if (!rejectExec(parsed, reason, "binary write unsupported")) return
+          if (parsed) {
+            if (parsed.localError) {
+              if (!rejectExec(parsed, parsed.localError, "invalid mapping")) return
               continue
             }
-            const workspaceRoot = workspaceRootFromRequestContext(session.requestContext)
-            const projectDir = ensureOpencodeProjectDir(workspaceRoot)
-            const target = remapCursorImageWritePath(binaryWrite.path, {
-              workspaceRoot,
-              projectDir,
-            })
-            let imageId: string
-            try {
-              imageId = stageCursorImage({
-                path: target,
+            // OpenCode throws "Tool call not allowed while generating summary"
+            // when assistantMessage.summary is set. Compaction/summary turns
+            // advertise no tools — refuse on the Cursor channel and keep
+            // pumping for text / turn_ended instead of emitting tool-call.
+            if (!session.allowTools) {
+              const reason = "Tool calls are not available during this turn (summary/compaction)."
+              if (!rejectExec(parsed, reason, "allowTools=false")) return
+              continue
+            }
+            // Cursor writes a generated image with an ordinary write exec whose
+            // `file_bytes` are binary (Cursor CLI's agent does exactly this, then
+            // reads the client's WriteResult back). OpenCode's `write` takes a
+            // string, so those bytes are staged and committed by the host tool
+            // that can raise the `edit` permission before anything hits disk.
+            const binaryWrite = binaryWritePayload(parsed)
+            if (binaryWrite) {
+              if (!advertisedToolNameSet.has(CURSOR_IMAGE_SAVE_TOOL)) {
+                const reason =
+                  "This OpenCode agent cannot write binary file content. " +
+                  "Do not retry this write with the same bytes."
+                if (!rejectExec(parsed, reason, "binary write unsupported")) return
+                continue
+              }
+              const workspaceRoot = workspaceRootFromRequestContext(session.requestContext)
+              const projectDir = ensureOpencodeProjectDir(workspaceRoot)
+              const target = remapCursorImageWritePath(binaryWrite.path, {
+                workspaceRoot,
                 projectDir,
-                mime: imageMimeForPath(target),
-                data: binaryWrite.data,
-                sessionId: session.openCodeSessionId,
               })
-            } catch (error) {
-              if (!rejectExec(parsed, (error as Error).message, "binary write too large")) return
-              continue
-            }
-            if (displayCallId) session.displayToolCalls.delete(displayCallId)
-            sessionManager.registerPending(
-              parsed.id,
-              session,
-              parsed.resultField,
-              CURSOR_IMAGE_SAVE_TOOL,
-              false,
-              {
+              let imageId: string
+              try {
+                imageId = stageCursorImage({
+                  path: target,
+                  projectDir,
+                  mime: imageMimeForPath(target),
+                  data: binaryWrite.data,
+                  sessionId: session.openCodeSessionId,
+                })
+              } catch (error) {
+                if (!rejectExec(parsed, (error as Error).message, "binary write too large")) return
+                continue
+              }
+              if (displayCallId) session.displayToolCalls.delete(displayCallId)
+              sessionManager.registerPending(parsed.id, session, parsed.resultField, CURSOR_IMAGE_SAVE_TOOL, false, {
                 ...parsed.resultMetadata,
                 path: target,
                 binaryWriteBytes: undefined,
                 imageByteLength: binaryWrite.data.length,
-              },
+              })
+              const toolCallId = `cursor_${session.sessionId}_${parsed.id}`
+              trace(
+                `exec: binary write STAGED toolCallId=${toolCallId} ` +
+                  `requested=${JSON.stringify(binaryWrite.path)} target=${JSON.stringify(target)} ` +
+                  `bytes=${binaryWrite.data.length}`,
+              )
+              closeOpenSpans()
+              safeEnqueue({
+                type: "tool-call",
+                toolCallId,
+                toolName: CURSOR_IMAGE_SAVE_TOOL,
+                input: JSON.stringify({ image_id: imageId }),
+              } as V3Part)
+              session.progressEmittedHostTools = (session.progressEmittedHostTools ?? 0) + 1
+              emitFinish(undefined, { unified: "tool-calls", raw: undefined })
+              return
+            }
+            // Cursor has native capabilities (Task, filesystem, shell, etc.) in
+            // addition to the MCP descriptors sent by this provider. The model
+            // can request one even when the current OpenCode agent omitted its
+            // corresponding host tool. Emitting that request makes OpenCode
+            // manufacture an `invalid` tool result. Refuse it on the held-open
+            // Cursor exec channel instead, using the request's exact typed result.
+            if (!advertisedToolNameSet.has(parsed.toolName)) {
+              const available = advertisedToolNames.length > 0 ? advertisedToolNames.join(", ") : "none"
+              const reason =
+                `OpenCode tool '${parsed.toolName}' is unavailable for the current agent. ` +
+                `Available tools: ${available}. Continue using only available tools; do not retry ` +
+                `'${parsed.toolName}'.`
+              trace(
+                `exec: unavailable catalog target toolName=${parsed.toolName} ` +
+                  `advertised=[${advertisedToolNames.join(",")}]`,
+              )
+              if (!rejectExec(parsed, reason, "unavailable tool")) return
+              continue
+            }
+            if (recoverCorrelatedEditRead(parsed, displayCallId)) continue
+            if (rejectMissingReadTarget(parsed)) {
+              if (displayCallId) session.displayToolCalls.delete(displayCallId)
+              continue
+            }
+            if (displayCallId) {
+              session.displayToolCalls.delete(displayCallId)
+              trace(`exec: claimed display callId=${displayCallId}`)
+            }
+            const tc = buildToolCallPart(parsed, session.sessionId)
+            if (
+              parsed.resultField === "shell_stream" ||
+              parsed.resultField === "shell_result" ||
+              parsed.resultField === "background_shell_spawn_result"
+            ) {
+              registerCursorShellCall(tc.toolCallId, parsed.resultMetadata)
+            }
+            // Keep the stream open; the result arrives on the next doStream call.
+            sessionManager.registerPending(
+              parsed.id,
+              session,
+              parsed.resultField,
+              parsed.toolName,
+              false,
+              parsed.resultMetadata,
             )
-            const toolCallId = `cursor_${session.sessionId}_${parsed.id}`
+            // tc.input is already a JSON string (LanguageModelV3ToolCall.input).
             trace(
-              `exec: binary write STAGED toolCallId=${toolCallId} ` +
-                `requested=${JSON.stringify(binaryWrite.path)} target=${JSON.stringify(target)} ` +
-                `bytes=${binaryWrite.data.length}`,
+              `exec: EMITTED tool-call toolCallId=${tc.toolCallId} toolName=${tc.toolName} inputLen=${tc.input.length}`,
             )
+            // Close open text/reasoning spans before tool-call (required by AI SDK V3).
             closeOpenSpans()
             safeEnqueue({
               type: "tool-call",
-              toolCallId,
-              toolName: CURSOR_IMAGE_SAVE_TOOL,
-              input: JSON.stringify({ image_id: imageId }),
+              toolCallId: tc.toolCallId,
+              toolName: tc.toolName,
+              input: tc.input,
             } as V3Part)
+            session.progressEmittedHostTools = (session.progressEmittedHostTools ?? 0) + 1
             emitFinish(undefined, { unified: "tool-calls", raw: undefined })
             return
           }
-          // Cursor has native capabilities (Task, filesystem, shell, etc.) in
-          // addition to the MCP descriptors sent by this provider. The model
-          // can request one even when the current OpenCode agent omitted its
-          // corresponding host tool. Emitting that request makes OpenCode
-          // manufacture an `invalid` tool result. Refuse it on the held-open
-          // Cursor exec channel instead, using the request's exact typed result.
-          if (!advertisedToolNameSet.has(parsed.toolName)) {
-            const available = advertisedToolNames.length > 0
-              ? advertisedToolNames.join(", ")
-              : "none"
-            const reason =
-              `OpenCode tool '${parsed.toolName}' is unavailable for the current agent. ` +
-              `Available tools: ${available}. Continue using only available tools; do not retry ` +
-              `'${parsed.toolName}'.`
-            trace(
-              `exec: unavailable catalog target toolName=${parsed.toolName} ` +
-                `advertised=[${advertisedToolNames.join(",")}]`,
-            )
-            if (!rejectExec(parsed, reason, "unavailable tool")) return
-            continue
-          }
-          if (recoverCorrelatedEditRead(parsed, displayCallId)) continue
-          if (rejectMissingReadTarget(parsed)) {
-            if (displayCallId) session.displayToolCalls.delete(displayCallId)
-            continue
-          }
-          if (displayCallId) {
-            session.displayToolCalls.delete(displayCallId)
-            trace(`exec: claimed display callId=${displayCallId}`)
-          }
-          const tc = buildToolCallPart(parsed, session.sessionId)
-          if (
-            parsed.resultField === "shell_stream"
-            || parsed.resultField === "background_shell_spawn_result"
-          ) {
-            registerCursorShellCall(tc.toolCallId, parsed.resultMetadata)
-          }
-          // Keep the stream open; the result arrives on the next doStream call.
-          sessionManager.registerPending(
-            parsed.id,
-            session,
-            parsed.resultField,
-            parsed.toolName,
-            false,
-            parsed.resultMetadata,
-          )
-          // tc.input is already a JSON string (LanguageModelV3ToolCall.input).
-          trace(`exec: EMITTED tool-call toolCallId=${tc.toolCallId} toolName=${tc.toolName} inputLen=${tc.input.length}`)
-          // Close open text/reasoning spans before tool-call (required by AI SDK V3).
-          closeOpenSpans()
-          safeEnqueue({
-            type: "tool-call",
-            toolCallId: tc.toolCallId,
-            toolName: tc.toolName,
-            input: tc.input,
-          } as V3Part)
-          emitFinish(undefined, { unified: "tool-calls", raw: undefined })
-          return
-        }
-        // Never guess a response type for an unknown exec variant. Request and
-        // result field numbers are not universally identical; a structurally
-        // wrong reply recreates the heartbeat-only deadlock. Fail promptly so
-        // schema drift is actionable.
-        const variantField = detectExecVariantField(payload)
-        const variantDescription = describeCursorExecVariant(variantField)
-        const hex = Array.from(payload.subarray(0, 48))
-          .map((x) => x.toString(16).padStart(2, "0"))
-          .join("")
-        trace(
-          `exec UNMAPPED: id=${esmId} variant=${variantDescription} keys=[${Object.keys(esm).join(",")}] hex=${hex}`,
-        )
-        failRunProtocol(
-          `Unsupported Cursor exec variant ${variantDescription} (id=${esmId})`,
-          RUN_REQUEST_UNSUPPORTED,
-        )
-      }
-    } else if (interactionQuery) {
-      // InteractionQuery is a must-reply channel, just like exec and KV. AI
-      // SDK has no Cursor-specific UI callback, so answer immediately with the
-      // policy from protocol/interactions.ts (AskQuestion bridge, CreatePlan
-      // write under OpenCode defaults, GenerateImage approve when saveable).
-      const handled = (() => {
-        try {
-          return handleInteractionQuery(interactionQuery, payload, {
-            canBridgeAskQuestion: session.allowTools && advertisedToolNameSet.has("question"),
-            allowTools: session.allowTools,
-            advertisedTools: advertisedToolNameSet,
-            canSaveGeneratedImage:
-              session.allowTools && advertisedToolNameSet.has(CURSOR_IMAGE_SAVE_TOOL),
-            canBridgeCreatePlan:
-              session.allowTools
-              && isBridgedCursorPlanModeActive(session.openCodeSessionId)
-              && advertisedToolNameSet.has(CURSOR_PLAN_STAGE_TOOL)
-              && advertisedToolNameSet.has("write"),
-            planModeActive: isCursorPlanModeActive(session.openCodeSessionId),
-            ...(getActiveCursorMode(session.openCodeSessionId)
-              ? { activeCursorModeId: getActiveCursorMode(session.openCodeSessionId)! }
-              : {}),
-            workspaceRoot: workspaceRootFromRequestContext(session.requestContext),
-          })
-        } catch {
-          return failRunProtocol("Cursor interaction request could not be handled", RUN_REQUEST_UNSUPPORTED)
-        }
-      })()
-      try {
-        if (handled.outcome === "acknowledged") {
-          replaySafety.markBarrier("stateful-interaction")
-        }
-        if (handled.reply) {
-          await writeWithBackpressure(
-            session.stream,
-            handled.reply,
-            `interaction reply id=${handled.id}`,
-          )
-        }
-        trace(
-          `interaction_query: replied id=${handled.id} variant=${handled.variantName} ` +
-            `field=${handled.variantField} outcome=${handled.outcome}` +
-            (handled.reply ? "" : " (deferred to host tool result)"),
-        )
-        if (handled.generateImage) {
+          // Never guess a response type for an unknown exec variant. Request and
+          // result field numbers are not universally identical; a structurally
+          // wrong reply recreates the heartbeat-only deadlock. Fail promptly so
+          // schema drift is actionable.
+          const variantField = detectExecVariantField(payload)
+          const variantDescription = describeCursorExecVariant(variantField)
+          const hex = Array.from(payload.subarray(0, 48))
+            .map((x) => x.toString(16).padStart(2, "0"))
+            .join("")
           trace(
-            `interaction_query: approved generate_image target=` +
-              `${JSON.stringify(handled.generateImage.filePath || "(unspecified)")} ` +
-              `refs=${handled.generateImage.referenceImagePaths.length} ` +
-              `cursorToolCallId=${handled.generateImage.toolCallId || "(none)"}`,
+            `exec UNMAPPED: id=${esmId} variant=${variantDescription} keys=[${Object.keys(esm).join(",")}] hex=${hex}`,
+          )
+          failRunProtocol(
+            `Unsupported Cursor exec variant ${variantDescription} (id=${esmId})`,
+            RUN_REQUEST_UNSUPPORTED,
           )
         }
-      } catch (error) {
-        rethrowTransportWriteFailure(error)
-        failRunProtocol("Cursor interaction reply failed", RUN_REPLY_FAILED)
-      }
-      if (handled.outcome === "bridged" && handled.askQuestion) {
-        // Cursor raised AskQuestion; OpenCode owns the tool loop, so the prompt
-        // leaves as a `question` tool call and this doStream ends. The Run stays
-        // open on the pending entry, and the answer is written back on the next
-        // continuation (InteractionResponse when Cursor is blocking on it,
-        // ConversationAction when it was already acknowledged with `async`).
-        const ask = handled.askQuestion
-        const execId = session.nextBridgedExecId++
-        sessionManager.registerPending(
-          execId,
-          session,
-          ASK_QUESTION_RESULT_FIELD,
-          "question",
-          false,
-          {
+      } else if (interactionQuery) {
+        // InteractionQuery is a must-reply channel, just like exec and KV. AI
+        // SDK has no Cursor-specific UI callback, so answer immediately with the
+        // policy from protocol/interactions.ts (AskQuestion bridge, CreatePlan
+        // write under OpenCode defaults, GenerateImage approve when saveable).
+        const handled = (() => {
+          try {
+            return handleInteractionQuery(interactionQuery, payload, {
+              canBridgeAskQuestion: session.allowTools && advertisedToolNameSet.has("question"),
+              allowTools: session.allowTools,
+              advertisedTools: advertisedToolNameSet,
+              canSaveGeneratedImage: session.allowTools && advertisedToolNameSet.has(CURSOR_IMAGE_SAVE_TOOL),
+              canBridgeCreatePlan:
+                session.allowTools &&
+                isBridgedCursorPlanModeActive(session.openCodeSessionId) &&
+                advertisedToolNameSet.has(CURSOR_PLAN_STAGE_TOOL) &&
+                advertisedToolNameSet.has("write"),
+              planModeActive: isCursorPlanModeActive(session.openCodeSessionId),
+              ...(getActiveCursorMode(session.openCodeSessionId)
+                ? { activeCursorModeId: getActiveCursorMode(session.openCodeSessionId)! }
+                : {}),
+              workspaceRoot: workspaceRootFromRequestContext(session.requestContext),
+            })
+          } catch {
+            return failRunProtocol("Cursor interaction request could not be handled", RUN_REQUEST_UNSUPPORTED)
+          }
+        })()
+        try {
+          if (handled.outcome === "acknowledged") {
+            replaySafety.markBarrier("stateful-interaction")
+          }
+          if (handled.reply) {
+            await writeWithBackpressure(session.stream, handled.reply, `interaction reply id=${handled.id}`)
+          }
+          trace(
+            `interaction_query: replied id=${handled.id} variant=${handled.variantName} ` +
+              `field=${handled.variantField} outcome=${handled.outcome}` +
+              (handled.reply ? "" : " (deferred to host tool result)"),
+          )
+          if (handled.generateImage) {
+            trace(
+              `interaction_query: approved generate_image target=` +
+                `${JSON.stringify(handled.generateImage.filePath || "(unspecified)")} ` +
+                `refs=${handled.generateImage.referenceImagePaths.length} ` +
+                `cursorToolCallId=${handled.generateImage.toolCallId || "(none)"}`,
+            )
+          }
+        } catch (error) {
+          rethrowTransportWriteFailure(error)
+          failRunProtocol("Cursor interaction reply failed", RUN_REPLY_FAILED)
+        }
+        if (handled.outcome === "bridged" && handled.askQuestion) {
+          // Cursor raised AskQuestion; OpenCode owns the tool loop, so the prompt
+          // leaves as a `question` tool call and this doStream ends. The Run stays
+          // open on the pending entry, and the answer is written back on the next
+          // continuation (InteractionResponse when Cursor is blocking on it,
+          // ConversationAction when it was already acknowledged with `async`).
+          const ask = handled.askQuestion
+          const execId = session.nextBridgedExecId++
+          sessionManager.registerPending(execId, session, ASK_QUESTION_RESULT_FIELD, "question", false, {
             interactionId: handled.id,
             askQuestionArgs: ask.args,
             askQuestionRawArgs: ask.rawArgs,
             askQuestionToolCallId: ask.toolCallId,
-          },
-        )
-        const toolCallId = `cursor_${session.sessionId}_${execId}`
-        const input = JSON.stringify(askQuestionToolInput(ask.args))
-        trace(
-          `interaction_query: BRIDGED ask_question id=${handled.id} toolCallId=${toolCallId} ` +
-            `questions=${ask.args.questions.length} runAsync=${ask.args.runAsync} ` +
-            `cursorToolCallId=${ask.toolCallId || "(none)"}`,
-        )
-        closeOpenSpans()
-        safeEnqueue({
-          type: "tool-call",
-          toolCallId,
-          toolName: "question",
-          input,
-        } as V3Part)
-        emitFinish(undefined, { unified: "tool-calls", raw: undefined })
-        return
-      }
-      if (handled.outcome === "approved" && handled.switchMode) {
-        // Entering plan mode without a host plan tool: Cursor was already
-        // released with approved{} above, and the behavioural contract travels
-        // as the <system_reminder> injected on subsequent Runs. Nothing is
-        // pending, so keep pumping this Run rather than ending doStream.
-        const sw = handled.switchMode
-        setActiveCursorMode(session.openCodeSessionId, sw.args.targetModeId, {
-          bridgedPlanEntered: false,
-        })
-        trace(
-          `interaction_query: APPROVED switch_mode id=${handled.id} ` +
-            `target=${JSON.stringify(sw.args.targetModeId)} (no host plan tool; ` +
-            `provider-owned mode) cursorToolCallId=${sw.toolCallId || "(none)"}`,
-        )
-        continue
-      }
-      if (handled.outcome === "bridged" && handled.switchMode) {
-        // Cursor raised SwitchMode; the host owns the outcome, so the switch
-        // leaves as a tool call (native plan_enter / plan_exit, or the emulated
-        // `question` approval prompt) and this doStream ends. The Run stays open
-        // on the pending entry; approved/rejected is written back on the next
-        // continuation while Cursor is still blocking on the query.
-        const sw = handled.switchMode
-        const bridgeKind = sw.bridge.kind
-        const toolName = sw.toolName ?? "plan_exit"
-        const execId = session.nextBridgedExecId++
-        sessionManager.registerPending(
-          execId,
-          session,
-          SWITCH_MODE_RESULT_FIELD,
-          toolName,
-          false,
-          {
+          })
+          const toolCallId = `cursor_${session.sessionId}_${execId}`
+          const input = JSON.stringify(askQuestionToolInput(ask.args))
+          trace(
+            `interaction_query: BRIDGED ask_question id=${handled.id} toolCallId=${toolCallId} ` +
+              `questions=${ask.args.questions.length} runAsync=${ask.args.runAsync} ` +
+              `cursorToolCallId=${ask.toolCallId || "(none)"}`,
+          )
+          closeOpenSpans()
+          safeEnqueue({
+            type: "tool-call",
+            toolCallId,
+            toolName: "question",
+            input,
+          } as V3Part)
+          session.progressEmittedHostTools = (session.progressEmittedHostTools ?? 0) + 1
+          emitFinish(undefined, { unified: "tool-calls", raw: undefined })
+          return
+        }
+        if (handled.outcome === "approved" && handled.switchMode) {
+          // Entering plan mode without a host plan tool: Cursor was already
+          // released with approved{} above, and the behavioural contract travels
+          // as the <system_reminder> injected on subsequent Runs. Nothing is
+          // pending, so keep pumping this Run rather than ending doStream.
+          const sw = handled.switchMode
+          setActiveCursorMode(session.openCodeSessionId, sw.args.targetModeId, {
+            bridgedPlanEntered: false,
+          })
+          trace(
+            `interaction_query: APPROVED switch_mode id=${handled.id} ` +
+              `target=${JSON.stringify(sw.args.targetModeId)} (no host plan tool; ` +
+              `provider-owned mode) cursorToolCallId=${sw.toolCallId || "(none)"}`,
+          )
+          continue
+        }
+        if (handled.outcome === "bridged" && handled.switchMode) {
+          // Cursor raised SwitchMode; the host owns the outcome, so the switch
+          // leaves as a tool call (native plan_enter / plan_exit, or the emulated
+          // `question` approval prompt) and this doStream ends. The Run stays open
+          // on the pending entry; approved/rejected is written back on the next
+          // continuation while Cursor is still blocking on the query.
+          const sw = handled.switchMode
+          const bridgeKind = sw.bridge.kind
+          const toolName = sw.toolName ?? "plan_exit"
+          const execId = session.nextBridgedExecId++
+          sessionManager.registerPending(execId, session, SWITCH_MODE_RESULT_FIELD, toolName, false, {
             interactionId: handled.id,
             switchModeTarget: sw.args.targetModeId,
             switchModeToolCallId: sw.toolCallId,
             switchModeBridgeKind: bridgeKind,
-          },
-        )
-        const toolCallId = `cursor_${session.sessionId}_${execId}`
-        const input = JSON.stringify(
-          sw.bridge.kind === "question" ? sw.bridge.input : switchModeToolInput(),
-        )
-        trace(
-          `interaction_query: BRIDGED switch_mode id=${handled.id} toolCallId=${toolCallId} ` +
-            `bridge=${bridgeKind} hostTool=${toolName} ` +
-            `target=${JSON.stringify(sw.args.targetModeId)} ` +
-            `cursorToolCallId=${sw.toolCallId || "(none)"}`,
-        )
-        closeOpenSpans()
-        safeEnqueue({
-          type: "tool-call",
-          toolCallId,
-          toolName,
-          input,
-        } as V3Part)
-        emitFinish(undefined, { unified: "tool-calls", raw: undefined })
-        return
-      }
-      if (handled.outcome === "bridged" && handled.createPlan) {
-        // Either a host plan-stage tool (writes the plan and runs its own
-        // approval UI) or the emulated prompt after the provider already wrote
-        // the plan. Both hold Cursor's query open until the user decides.
-        const plan = handled.createPlan
-        const staged = plan.bridge.kind === "stage" ? createPlanStageInput(plan.args) : undefined
-        const planUri = staged?.plan_uri ?? plan.planUri ?? ""
-        const input = staged ?? plan.questionInput ?? {}
-        const stageExecId = session.nextBridgedExecId++
-        sessionManager.registerPending(
-          stageExecId,
-          session,
-          CREATE_PLAN_RESULT_FIELD,
-          plan.toolName,
-          false,
-          {
+          })
+          const toolCallId = `cursor_${session.sessionId}_${execId}`
+          const input = JSON.stringify(sw.bridge.kind === "question" ? sw.bridge.input : switchModeToolInput())
+          trace(
+            `interaction_query: BRIDGED switch_mode id=${handled.id} toolCallId=${toolCallId} ` +
+              `bridge=${bridgeKind} hostTool=${toolName} ` +
+              `target=${JSON.stringify(sw.args.targetModeId)} ` +
+              `cursorToolCallId=${sw.toolCallId || "(none)"}`,
+          )
+          closeOpenSpans()
+          safeEnqueue({
+            type: "tool-call",
+            toolCallId,
+            toolName,
+            input,
+          } as V3Part)
+          session.progressEmittedHostTools = (session.progressEmittedHostTools ?? 0) + 1
+          emitFinish(undefined, { unified: "tool-calls", raw: undefined })
+          return
+        }
+        if (handled.outcome === "bridged" && handled.createPlan) {
+          // Either a host plan-stage tool (writes the plan and runs its own
+          // approval UI) or the emulated prompt after the provider already wrote
+          // the plan. Both hold Cursor's query open until the user decides.
+          const plan = handled.createPlan
+          const staged = plan.bridge.kind === "stage" ? createPlanStageInput(plan.args) : undefined
+          const planUri = staged?.plan_uri ?? plan.planUri ?? ""
+          const input = staged ?? plan.questionInput ?? {}
+          const stageExecId = session.nextBridgedExecId++
+          sessionManager.registerPending(stageExecId, session, CREATE_PLAN_RESULT_FIELD, plan.toolName, false, {
             interactionId: handled.id,
             createPlanToolCallId: plan.toolCallId,
             createPlanBridgeKind: plan.bridge.kind,
@@ -2818,64 +2832,58 @@ export async function pump(
             createPlanQuestion: plan.questionInput?.questions[0]?.question ?? "",
             planUri,
             // Absolute path for the post-Yes OpenCode kickoff (plan_exit shape).
-            ...(typeof plan.planPath === "string" && plan.planPath.trim()
-              ? { planPath: plan.planPath.trim() }
-              : {}),
+            ...(typeof plan.planPath === "string" && plan.planPath.trim() ? { planPath: plan.planPath.trim() } : {}),
             workspaceRoot: workspaceRootFromRequestContext(session.requestContext),
-          },
-        )
-        const stageToolCallId = `cursor_${session.sessionId}_${stageExecId}`
-        trace(
-          `interaction_query: BRIDGED create_plan id=${handled.id} bridge=${plan.bridge.kind} ` +
-            `hostTool=${plan.toolName} stageToolCallId=${stageToolCallId} ` +
-            `planUri=${planUri || "(none)"} cursorToolCallId=${plan.toolCallId || "(none)"}`,
-        )
-        // Cursor sends the plan body through the interaction query, not the
-        // text stream, so nothing has shown it yet. Put it in the transcript
-        // before asking — approving a plan you cannot read is not approval.
-        if (plan.planReview) emitText(plan.planReview)
-        closeOpenSpans()
-        safeEnqueue({
-          type: "tool-call",
-          toolCallId: stageToolCallId,
-          toolName: plan.toolName,
-          input: JSON.stringify(input),
-        } as V3Part)
-        emitFinish(undefined, { unified: "tool-calls", raw: undefined })
-        return
-      }
-    } else if (kv) {
-      // KV blob channel: ack set_blob / answer get_blob, then keep pumping.
-      // Not replying hangs the turn — see protocol/kv.ts.
-      trace(
-        `kv frame raw: gunzippedLen=${payload.length} id=${kv.id ?? "?"} ` +
-          `get=${!!kv.get_blob_args} set=${!!kv.set_blob_args} ` +
-          `getBlobIdLen=${(kv.get_blob_args as any)?.blob_id?.length ?? "-"} ` +
-          `setBlobIdLen=${(kv.set_blob_args as any)?.blob_id?.length ?? "-"} ` +
-          `setDataLen=${(kv.set_blob_args as any)?.blob_data?.length ?? "-"}`,
-      )
-      const handled = handleKvServerMessage(kv, session)
-      if (handled) {
-        try {
-          await writeWithBackpressure(
-            session.stream,
-            handled.reply,
-            `KV ${handled.kind}_blob reply id=${handled.id}`,
-          )
+          })
+          const stageToolCallId = `cursor_${session.sessionId}_${stageExecId}`
           trace(
-            `kv replied: kind=${handled.kind} id=${handled.id} blobId=${handled.blobIdHex.slice(0, 16)}… ` +
-              `found=${handled.found} echoed=${!!handled.echoed} ` +
-              `replyBytes=${handled.reply.length} replyBlobBytes=${handled.replyBlobBytes} ` +
-              `sessionBlobs=${session.blobs.size} convBlobs=${conversationBlobCount(session.conversationId)}`,
+            `interaction_query: BRIDGED create_plan id=${handled.id} bridge=${plan.bridge.kind} ` +
+              `hostTool=${plan.toolName} stageToolCallId=${stageToolCallId} ` +
+              `planUri=${planUri || "(none)"} cursorToolCallId=${plan.toolCallId || "(none)"}`,
           )
-        } catch (error) {
-          rethrowTransportWriteFailure(error)
-          failRunProtocol("Cursor KV reply failed", RUN_REPLY_FAILED)
+          // Cursor sends the plan body through the interaction query, not the
+          // text stream, so nothing has shown it yet. Put it in the transcript
+          // before asking — approving a plan you cannot read is not approval.
+          if (plan.planReview) emitText(plan.planReview)
+          closeOpenSpans()
+          safeEnqueue({
+            type: "tool-call",
+            toolCallId: stageToolCallId,
+            toolName: plan.toolName,
+            input: JSON.stringify(input),
+          } as V3Part)
+          session.progressEmittedHostTools = (session.progressEmittedHostTools ?? 0) + 1
+          emitFinish(undefined, { unified: "tool-calls", raw: undefined })
+          return
         }
-      } else {
-        failRunProtocol("Cursor KV request could not be handled", RUN_REQUEST_UNSUPPORTED)
+      } else if (kv) {
+        // KV blob channel: ack set_blob / answer get_blob, then keep pumping.
+        // Not replying hangs the turn — see protocol/kv.ts.
+        trace(
+          `kv frame raw: gunzippedLen=${payload.length} id=${kv.id ?? "?"} ` +
+            `get=${!!kv.get_blob_args} set=${!!kv.set_blob_args} ` +
+            `getBlobIdLen=${(kv.get_blob_args as any)?.blob_id?.length ?? "-"} ` +
+            `setBlobIdLen=${(kv.set_blob_args as any)?.blob_id?.length ?? "-"} ` +
+            `setDataLen=${(kv.set_blob_args as any)?.blob_data?.length ?? "-"}`,
+        )
+        const handled = handleKvServerMessage(kv, session)
+        if (handled) {
+          try {
+            await writeWithBackpressure(session.stream, handled.reply, `KV ${handled.kind}_blob reply id=${handled.id}`)
+            trace(
+              `kv replied: kind=${handled.kind} id=${handled.id} blobId=${handled.blobIdHex.slice(0, 16)}… ` +
+                `found=${handled.found} echoed=${!!handled.echoed} ` +
+                `replyBytes=${handled.reply.length} replyBlobBytes=${handled.replyBlobBytes} ` +
+                `sessionBlobs=${session.blobs.size} convBlobs=${conversationBlobCount(session.conversationId)}`,
+            )
+          } catch (error) {
+            rethrowTransportWriteFailure(error)
+            failRunProtocol("Cursor KV reply failed", RUN_REPLY_FAILED)
+          }
+        } else {
+          failRunProtocol("Cursor KV request could not be handled", RUN_REQUEST_UNSUPPORTED)
+        }
       }
-    }
     } catch (e) {
       if (e instanceof CursorProviderError) throw e
       if (requiredChannel) {
@@ -2944,9 +2952,7 @@ function extractToolResults(prompt: LanguageModelV3CallOptions["prompt"]): Extra
  * messages after the last non-tool message. Mid-prompt historical tool results
  * are ignored — they are conversation history, not replies for a held-open Run.
  */
-export function extractTrailingToolResults(
-  prompt: LanguageModelV3CallOptions["prompt"],
-): ExtractedToolResult[] {
+export function extractTrailingToolResults(prompt: LanguageModelV3CallOptions["prompt"]): ExtractedToolResult[] {
   if (prompt.length === 0) return []
   let i = prompt.length - 1
   while (i >= 0 && prompt[i].role === "tool") i--
@@ -3135,9 +3141,7 @@ export function cursorTurnEndedProviderMetadata(
       cacheReadRaw: turnEndedCounter(te, "cache_read"),
       cacheWriteRaw: turnEndedCounter(te, "cache_write"),
       reasoningTokensRaw: turnEndedCounter(te, "reasoning_tokens"),
-      ...(tokenDetails
-        ? { context: cursorContextUsageMetadata(tokenDetails, contextSource) }
-        : {}),
+      ...(tokenDetails ? { context: cursorContextUsageMetadata(tokenDetails, contextSource) } : {}),
     },
   }
 }
@@ -3184,10 +3188,7 @@ export function extractPromptHistory(
       continue
     }
     if (m.role === "tool" && Array.isArray(m.content)) {
-      if (
-        toolResults === "omit" ||
-        (toolResults === "trailing" && messageIndex < trailingToolStart)
-      ) continue
+      if (toolResults === "omit" || (toolResults === "trailing" && messageIndex < trailingToolStart)) continue
       const results: string[] = []
       for (const part of m.content) {
         const p = part as unknown as Record<string, unknown>
@@ -3195,12 +3196,14 @@ export function extractPromptHistory(
         const toolName = typeof p.toolName === "string" && p.toolName ? p.toolName : "tool"
         const toolCallId = typeof p.toolCallId === "string" ? p.toolCallId : ""
         const result = toolResultOutputToText(p.output)
-        results.push(formatSeedToolObservation({
-          toolName,
-          toolCallId,
-          output: result.text,
-          isError: result.isError,
-        }))
+        results.push(
+          formatSeedToolObservation({
+            toolName,
+            toolCallId,
+            output: result.text,
+            isError: result.isError,
+          }),
+        )
       }
       if (results.length > 0) appendSeedHistory(out, "user", results.join("\n\n"))
     }
@@ -3241,11 +3244,7 @@ function extractAssistantHistoryText(msg: Record<string, unknown>): string {
   return texts.join("\n")
 }
 
-function appendSeedHistory(
-  out: SeedHistoryMessage[],
-  role: SeedHistoryMessage["role"],
-  content: string,
-): void {
+function appendSeedHistory(out: SeedHistoryMessage[], role: SeedHistoryMessage["role"], content: string): void {
   if (!content) return
   const last = out[out.length - 1]
   if (last?.role === role) {
@@ -3258,11 +3257,7 @@ function appendSeedHistory(
 /** OpenCode session id header, if present. */
 export function opencodeSessionKey(callOptions: LanguageModelV3CallOptions): string | undefined {
   const h = callOptions.headers ?? {}
-  const raw =
-    h["x-session-id"] ??
-    h["X-Session-Id"] ??
-    h["x-session-affinity"] ??
-    h["x-opencode-session"]
+  const raw = h["x-session-id"] ?? h["X-Session-Id"] ?? h["x-session-affinity"] ?? h["x-opencode-session"]
   if (typeof raw === "string" && raw.trim().length > 0) return raw.trim()
   return undefined
 }
@@ -3356,8 +3351,8 @@ export async function resolveTurnToolState(input: {
   if (incomingTools.length > 0) {
     advertisedTools = toolsInFixedOrder(incomingTools)
   } else if (sessionKey) {
-    const cached = toolCatalogBySession.get(sessionKey)
-      ?? await waitForSiblingToolCatalog(sessionKey, input.abortSignal)
+    const cached =
+      toolCatalogBySession.get(sessionKey) ?? (await waitForSiblingToolCatalog(sessionKey, input.abortSignal))
     advertisedTools = toolsInFixedOrder(cached)
   } else {
     // Without a session key there is no safe sibling-correlation key. Preserve
@@ -3371,10 +3366,10 @@ export async function resolveTurnToolState(input: {
   }
 }
 
-export function resolveTurnConversationReset(input: {
-  sessionKey?: string
-  isCompaction: boolean
-}): { reset: boolean; reason?: "compaction" | "post-compaction-rebase" } {
+export function resolveTurnConversationReset(input: { sessionKey?: string; isCompaction: boolean }): {
+  reset: boolean
+  reason?: "compaction" | "post-compaction-rebase"
+} {
   const { sessionKey, isCompaction } = input
   if (isCompaction) {
     if (sessionKey) rememberPostCompactionRebase(sessionKey)

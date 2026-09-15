@@ -163,6 +163,20 @@ export const { use: useSDK, provider: SDKProvider } = createSimpleContext({
       reconnectHandlers.clear()
     })
 
+    const transport = () =>
+      (
+        sdk as unknown as {
+          client: {
+            get: (options: { url: string }) => Promise<{ data?: { enabled?: boolean }; error?: unknown }>
+            put: (options: {
+              url: string
+              body: { enabled: boolean }
+              headers?: Record<string, string>
+            }) => Promise<{ data?: { enabled?: boolean }; error?: unknown }>
+          }
+        }
+      ).client
+
     return {
       get client() {
         return sdk
@@ -177,6 +191,22 @@ export const { use: useSDK, provider: SDKProvider } = createSimpleContext({
       },
       fetch: props.fetch ?? fetch,
       url: props.url,
+      debugLogging: {
+        get: async () => {
+          const result = await transport().get({ url: "/debug-logging" })
+          if (result.error) throw result.error
+          return result.data?.enabled === true
+        },
+        set: async (enabled: boolean) => {
+          const result = await transport().put({
+            url: "/debug-logging",
+            body: { enabled },
+            headers: { "Content-Type": "application/json" },
+          })
+          if (result.error) throw result.error
+          return result.data?.enabled === true
+        },
+      },
     }
   },
 })

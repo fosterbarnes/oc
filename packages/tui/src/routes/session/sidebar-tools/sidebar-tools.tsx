@@ -41,6 +41,7 @@ import {
   sameRootPath,
   saveSidebarSettings,
   saveUserScriptSettings,
+  saveUserUsageProviders,
   sessionProjectDirectory,
   sidebarConfigPaths,
   updateLanguage,
@@ -61,10 +62,12 @@ import {
   probeOpenCodeGoUsage,
   probeOpenRouterUsage,
   shouldRefreshUsageAfterIdle,
+  USAGE_PROVIDER_OPTIONS,
   type CursorUsage,
   type OpenAIUsage,
   type OpenCodeGoUsage,
   type OpenRouterUsage,
+  type UsageProviderId,
   type UsageWindow,
 } from "./usage.js"
 import {
@@ -308,6 +311,7 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
   const [showGoRemaining, setShowGoRemaining] = createSignal(false)
   const [showOrRemaining, setShowOrRemaining] = createSignal(false)
   const [showCursorRemaining, setShowCursorRemaining] = createSignal(false)
+  const [usageProviders, setUsageProviders] = createSignal<UsageProviderId[]>([...sidebarSettings.usageProviders])
   const [model, setModel] = createSignal<SelectedModel>()
   const [variant, setVariant] = createSignal("none")
   const [expanded, setExpanded] = createSignal<Set<string>>(new Set(["."]))
@@ -326,6 +330,7 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
     const paths = sidebarConfigPaths(projectConfigRoot, os.homedir())
     const projectSettings = { ...sidebarSettings }
     delete (projectSettings as { scripts?: ScriptSettings }).scripts
+    delete (projectSettings as { usageProviders?: UsageProviderId[] }).usageProviders
     saveSidebarSettings(paths.project, projectSettings)
   }
 
@@ -420,6 +425,7 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
     }
     root = rootState.activeRoot ? normalizeRootPath(rootState.activeRoot) : project
     pins = new Set(sidebarSettings.scriptPins)
+    setUsageProviders([...sidebarSettings.usageProviders])
     void syncSidebarVisibility()
   }
 
@@ -452,14 +458,23 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
     if (usageRunning) return
     usageRunning = true
     try {
+      const selected = new Set(usageProviders())
       const [next, nextGo, nextOpenRouter, nextCursor] = await Promise.all([
-        probeOpenAIUsage({ signal: usageAbort.signal }),
-        probeOpenCodeGoUsage({ signal: usageAbort.signal }),
-        probeOpenRouterUsage({ signal: usageAbort.signal }),
-        probeCursorUsage({ signal: usageAbort.signal, cursorSessionToken }),
+        selected.has("openai")
+          ? probeOpenAIUsage({ signal: usageAbort.signal })
+          : Promise.resolve<OpenAIUsage>({ ok: false }),
+        selected.has("opencode-go")
+          ? probeOpenCodeGoUsage({ signal: usageAbort.signal })
+          : Promise.resolve<OpenCodeGoUsage>({ ok: false }),
+        selected.has("openrouter")
+          ? probeOpenRouterUsage({ signal: usageAbort.signal })
+          : Promise.resolve<OpenRouterUsage>({ ok: false }),
+        selected.has("cursor")
+          ? probeCursorUsage({ signal: usageAbort.signal, cursorSessionToken })
+          : Promise.resolve<CursorUsage>({ ok: false }),
       ])
       let cursor = nextCursor
-      if (!cursor.ok && cursor.reason === "reauthenticate" && cursorSessionToken) {
+      if (selected.has("cursor") && !cursor.ok && cursor.reason === "reauthenticate" && cursorSessionToken) {
         clearCursorSessionToken(os.homedir())
         cursorSessionToken = undefined
         cursor = await probeCursorUsage({ signal: usageAbort.signal })
@@ -645,88 +660,109 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
       !cursorSnapshot.ok && (cursorSnapshot.reason === "need-token" || cursorSnapshot.reason === "reauthenticate")
     return (
       <>
-        <box flexDirection="row" gap={1}>
-          <text fg={theme.text}>Weekly Usage:</text>
-        </box>
         <box
           flexDirection="row"
           gap={1}
-          onMouseOver={() => setHovered("usage")}
+          onMouseOver={() => setHovered("usage-settings")}
           onMouseOut={() => setHovered()}
           onMouseUp={(event) => {
-            if (event.button === 0) setShowRemaining((value) => !value)
+            if (event.button === 0) openUsageSettings()
           }}
         >
-          <text fg={theme.text}>
-            {!codex.reauthenticate && codexHasData && showRemaining() ? "Codex remaining:" : "Codex:"}
-          </text>
-          <text fg={theme.textMuted}>{codexValue}</text>
+          <text fg={hovered() === "usage-settings" ? hoverColor : theme.text}>Weekly Usage:</text>
         </box>
-        <box flexDirection="row" gap={1}>
-          <text fg={theme.textMuted}>
-            {codexDates || (codex.reauthenticate ? "OpenAI auth required" : "unavailable")}
-          </text>
-        </box>
-        <box
-          flexDirection="row"
-          gap={1}
-          onMouseOver={() => setHovered("cursor-usage")}
-          onMouseOut={() => setHovered()}
-          onMouseUp={(event) => {
-            if (event.button === 2) {
-              promptCursorToken()
-              return
-            }
-            if (event.button === 0) {
-              if (cursorNeedsToken) promptCursorToken()
-              else setShowCursorRemaining((value) => !value)
-            }
-          }}
-        >
-          <text fg={theme.text}>{showCursorRemaining() && !cursorNeedsToken ? "Cursor remaining:" : "Cursor:"}</text>
-          <text fg={theme.textMuted}>{cursorNeedsToken ? "sign in" : cursorValue}</text>
-        </box>
-        <box flexDirection="row" gap={1}>
-          <text fg={theme.textMuted}>
-            {cursorOk?.resetAt || (cursorNeedsToken ? "Cursor auth required" : "unavailable")}
-          </text>
-        </box>
-        <Show when={!cursorSnapshot.ok && cursorSnapshot.reason === "reauthenticate"}>
+        <Show when={usageProviders().length === 0}>
           <box flexDirection="row" gap={1}>
-            <text fg={theme.textMuted}>click Cursor: to paste a new cookie</text>
+            <text fg={theme.textMuted}>No usage providers selected</text>
           </box>
         </Show>
-        <box
-          flexDirection="row"
-          gap={1}
-          onMouseOver={() => setHovered("go-usage")}
-          onMouseOut={() => setHovered()}
-          onMouseUp={(event) => {
-            if (event.button === 0) setShowGoRemaining((value) => !value)
-          }}
-        >
-          <text fg={theme.text}>{showGoRemaining() ? "OpenCode Go remaining:" : "OpenCode Go:"}</text>
-          <text fg={theme.textMuted}>{goValue}</text>
-        </box>
-        <box flexDirection="row" gap={1}>
-          <text fg={theme.textMuted}>{goDates || "unavailable"}</text>
-        </box>
-        <box
-          flexDirection="row"
-          gap={1}
-          onMouseOver={() => setHovered("or-usage")}
-          onMouseOut={() => setHovered()}
-          onMouseUp={(event) => {
-            if (event.button === 0) setShowOrRemaining((value) => !value)
-          }}
-        >
-          <text fg={theme.text}>{orOk && showOrRemaining() ? "OpenRouter remaining:" : "OpenRouter:"}</text>
-          <text fg={theme.textMuted}>{orValue}</text>
-        </box>
-        <Show when={orOk}>
-          <box flexDirection="row" gap={1}>
-            <text fg={theme.textMuted}>{`$${orOk?.usedUsd.toFixed(2)} / $${orOk?.limitUsd.toFixed(2)}`}</text>
+        <Show when={usageProviders().includes("openai")}>
+          <box
+            flexDirection="row"
+            gap={1}
+            onMouseOver={() => setHovered("usage")}
+            onMouseOut={() => setHovered()}
+            onMouseUp={(event) => {
+              if (event.button === 0) setShowRemaining((value) => !value)
+            }}
+          >
+            <text fg={theme.text}>
+              {!codex.reauthenticate && codexHasData && showRemaining() ? "Codex remaining:" : "Codex:"}
+            </text>
+            <text fg={theme.textMuted}>{codexValue}</text>
           </box>
+          <box flexDirection="row" gap={1}>
+            <text fg={theme.textMuted}>
+              {codexDates || (codex.reauthenticate ? "OpenAI auth required" : "unavailable")}
+            </text>
+          </box>
+        </Show>
+        <Show when={usageProviders().includes("cursor")}>
+          <box
+            flexDirection="row"
+            gap={1}
+            onMouseOver={() => setHovered("cursor-usage")}
+            onMouseOut={() => setHovered()}
+            onMouseUp={(event) => {
+              if (event.button === 2) {
+                promptCursorToken()
+                return
+              }
+              if (event.button === 0) {
+                if (cursorNeedsToken) promptCursorToken()
+                else setShowCursorRemaining((value) => !value)
+              }
+            }}
+          >
+            <text fg={theme.text}>{showCursorRemaining() && !cursorNeedsToken ? "Cursor remaining:" : "Cursor:"}</text>
+            <text fg={theme.textMuted}>{cursorNeedsToken ? "sign in" : cursorValue}</text>
+          </box>
+          <box flexDirection="row" gap={1}>
+            <text fg={theme.textMuted}>
+              {cursorOk?.resetAt || (cursorNeedsToken ? "Cursor auth required" : "unavailable")}
+            </text>
+          </box>
+          <Show when={!cursorSnapshot.ok && cursorSnapshot.reason === "reauthenticate"}>
+            <box flexDirection="row" gap={1}>
+              <text fg={theme.textMuted}>click Cursor: to paste a new cookie</text>
+            </box>
+          </Show>
+        </Show>
+        <Show when={usageProviders().includes("opencode-go")}>
+          <box
+            flexDirection="row"
+            gap={1}
+            onMouseOver={() => setHovered("go-usage")}
+            onMouseOut={() => setHovered()}
+            onMouseUp={(event) => {
+              if (event.button === 0) setShowGoRemaining((value) => !value)
+            }}
+          >
+            <text fg={theme.text}>{showGoRemaining() ? "OpenCode Go remaining:" : "OpenCode Go:"}</text>
+            <text fg={theme.textMuted}>{goValue}</text>
+          </box>
+          <box flexDirection="row" gap={1}>
+            <text fg={theme.textMuted}>{goDates || "unavailable"}</text>
+          </box>
+        </Show>
+        <Show when={usageProviders().includes("openrouter")}>
+          <box
+            flexDirection="row"
+            gap={1}
+            onMouseOver={() => setHovered("or-usage")}
+            onMouseOut={() => setHovered()}
+            onMouseUp={(event) => {
+              if (event.button === 0) setShowOrRemaining((value) => !value)
+            }}
+          >
+            <text fg={theme.text}>{orOk && showOrRemaining() ? "OpenRouter remaining:" : "OpenRouter:"}</text>
+            <text fg={theme.textMuted}>{orValue}</text>
+          </box>
+          <Show when={orOk}>
+            <box flexDirection="row" gap={1}>
+              <text fg={theme.textMuted}>{`$${orOk?.usedUsd.toFixed(2)} / $${orOk?.limitUsd.toFixed(2)}`}</text>
+            </box>
+          </Show>
         </Show>
       </>
     )
@@ -1344,6 +1380,35 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
   }
   const openScriptSettings = () => setTimeout(selectScriptSettings, 100)
 
+  const selectUsageSettings = () => {
+    const selected = new Set(usageProviders())
+    const dialogProps = {
+      title: "Weekly usage providers",
+      options: USAGE_PROVIDER_OPTIONS.map((provider) => ({
+        title: provider.title,
+        value: provider.id,
+        footer: selected.has(provider.id) ? "visible" : "hidden",
+        gutter: selected.has(provider.id) ? () => <text fg={theme.success}>:white_check_mark:</text> : undefined,
+      })),
+      onSelect: (option: { value: UsageProviderId }) => {
+        const next = selected.has(option.value)
+          ? usageProviders().filter((id) => id !== option.value)
+          : [
+              ...USAGE_PROVIDER_OPTIONS.map((provider) => provider.id).filter(
+                (id) => selected.has(id) || id === option.value,
+              ),
+            ]
+        sidebarSettings.usageProviders = next
+        saveUserUsageProviders(os.homedir(), next)
+        setUsageProviders(next)
+        usageScheduler.request()
+        selectUsageSettings()
+      },
+    } as unknown as DialogSelectProps<UsageProviderId>
+    dialog.replace(() => <DialogSelect {...dialogProps} />)
+  }
+  const openUsageSettings = () => setTimeout(selectUsageSettings, 100)
+
   const sidebarCommands = createMemo(() => {
     const rootCommands = rootSections(sidebarSettings.recentFileRoots, [...favorites])
     const commands = [
@@ -1360,6 +1425,13 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
         category: "Project scripts",
         namespace: "sidebar",
         run: selectScriptSettings,
+      },
+      {
+        name: "sidebar.usage-settings",
+        title: "Configure weekly usage providers",
+        category: "Sidebar",
+        namespace: "sidebar",
+        run: selectUsageSettings,
       },
       {
         name: "sidebar.file-root.set",

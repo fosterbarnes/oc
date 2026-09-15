@@ -7,7 +7,21 @@ import { Flock } from "./util/flock"
 import { Flag } from "./flag/flag"
 import { makeGlobalNode } from "./effect/app-node"
 
-const app = "opencode"
+export function isDebugExecutable(execPath = process.execPath) {
+  const base = path.basename(execPath, path.extname(execPath)).toLowerCase()
+  return base === "ocdebug" || base === "oc-debug" || base === "opencode-debug"
+}
+
+export function resolveAppName(input: { instance?: string; execPath?: string } = {}) {
+  const env = (input.instance ?? process.env.OPENCODE_INSTANCE)?.trim().toLowerCase()
+  const execPath = input.execPath ?? process.execPath
+  if (env === "debug" || env === "opencode-debug" || env === "ocdebug" || isDebugExecutable(execPath)) {
+    return "opencode-debug"
+  }
+  return "opencode"
+}
+
+const app = resolveAppName()
 const data = path.join(xdgData!, app)
 const cache = path.join(xdgCache!, app)
 const config = path.join(xdgConfig!, app)
@@ -18,6 +32,8 @@ const paths = {
   get home() {
     return process.env.OPENCODE_TEST_HOME ?? os.homedir()
   },
+  app,
+  debug: app === "opencode-debug",
   data,
   bin: path.join(cache, "bin"),
   log: path.join(data, "log"),

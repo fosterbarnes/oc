@@ -13,15 +13,21 @@ const originalClaudePort = process.env.CLAUDE_CODE_SSE_PORT
 const originalOpencodePort = process.env.OPENCODE_EDITOR_SSE_PORT
 
 afterEach(() => {
-  process.env.CLAUDE_CODE_SSE_PORT = originalClaudePort
-  process.env.OPENCODE_EDITOR_SSE_PORT = originalOpencodePort
+  if (originalClaudePort === undefined) delete process.env.CLAUDE_CODE_SSE_PORT
+  else process.env.CLAUDE_CODE_SSE_PORT = originalClaudePort
+  if (originalOpencodePort === undefined) delete process.env.OPENCODE_EDITOR_SSE_PORT
+  else process.env.OPENCODE_EDITOR_SSE_PORT = originalOpencodePort
 })
 
-function nextTick() {
-  return new Promise<void>((resolve) => queueMicrotask(resolve))
+async function waitUntil(fn: () => boolean, message = "timed out") {
+  const start = Date.now()
+  while (!fn()) {
+    if (Date.now() - start > 2000) throw new Error(message)
+    await Bun.sleep(5)
+  }
 }
 
-function mountEditorContext(WebSocketImpl?: typeof WebSocket) {
+function mountEditorContext(WebSocketImpl?: typeof WebSocket, integration: EditorIntegration = editorService) {
   let editor!: ReturnType<typeof useEditorContext>
   let dispose!: () => void
 
@@ -33,10 +39,9 @@ function mountEditorContext(WebSocketImpl?: typeof WebSocket) {
       return null
     }
 
-    const value = process.env.CLAUDE_CODE_SSE_PORT || process.env.OPENCODE_EDITOR_SSE_PORT
     return (
       <TestTuiContexts cwd={process.cwd()} paths={{ home: os.homedir() }}>
-        <EditorContextProvider integration={editorService} WebSocketImpl={WebSocketImpl}>
+        <EditorContextProvider integration={integration} WebSocketImpl={WebSocketImpl}>
           <Consumer />
         </EditorContextProvider>
       </TestTuiContexts>
@@ -50,7 +55,7 @@ function mountEditorContext(WebSocketImpl?: typeof WebSocket) {
 }
 
 const editorService: EditorIntegration = {
-  connection: discoverEditorConnection,
+  connection: (directory) => discoverEditorConnection(directory, { isPortOpen: () => true }),
 }
 
 function createWebSocketImpl(...sockets: FakeWebSocket[]) {
@@ -124,15 +129,15 @@ test("useEditorContext reconnect switches editor server by session directory", a
     }),
   )
 
-  process.env.CLAUDE_CODE_SSE_PORT = undefined
-  process.env.OPENCODE_EDITOR_SSE_PORT = undefined
+  delete process.env.CLAUDE_CODE_SSE_PORT
+  delete process.env.OPENCODE_EDITOR_SSE_PORT
   spyOn(process, "cwd").mockImplementation(() => startupDirectory)
   spyOn(os, "homedir").mockImplementation(() => tmp.path)
   const firstSocket = new FakeWebSocket("ws://127.0.0.1:3001")
   const secondSocket = new FakeWebSocket("ws://127.0.0.1:3002")
 
   const mounted = mountEditorContext(createWebSocketImpl(firstSocket, secondSocket))
-  await nextTick()
+  await waitUntil(() => firstSocket.listeners.has("message"), "timed out waiting for first editor socket")
 
   expect(firstSocket.closed).toBeFalse()
   sendSelection(firstSocket, path.join(startupDirectory, "file.ts"))
@@ -141,7 +146,7 @@ test("useEditorContext reconnect switches editor server by session directory", a
   expect(mounted.editor.labelState()).toBe("pending")
 
   mounted.editor.reconnect(sessionDirectory)
-  await nextTick()
+  await waitUntil(() => firstSocket.closed && secondSocket.listeners.has("message"), "timed out waiting for editor reconnect")
 
   expect(firstSocket.closed).toBeTrue()
   expect(secondSocket.closed).toBeFalse()
@@ -166,13 +171,13 @@ test("useEditorContext favors configured port over lock files", async () => {
   )
 
   process.env.CLAUDE_CODE_SSE_PORT = "4010"
-  process.env.OPENCODE_EDITOR_SSE_PORT = undefined
+  delete process.env.OPENCODE_EDITOR_SSE_PORT
   spyOn(process, "cwd").mockImplementation(() => startupDirectory)
   spyOn(os, "homedir").mockImplementation(() => tmp.path)
   const socket = new FakeWebSocket("ws://127.0.0.1:4010")
 
   const mounted = mountEditorContext(createWebSocketImpl(socket))
-  await nextTick()
+  await waitUntil(() => socket.listeners.has("message"), "timed out waiting for configured editor port")
 
   expect(socket.closed).toBeFalse()
 
@@ -193,14 +198,14 @@ test("useEditorContext clears selection when reconnecting", async () => {
     }),
   )
 
-  process.env.CLAUDE_CODE_SSE_PORT = undefined
-  process.env.OPENCODE_EDITOR_SSE_PORT = undefined
+  delete process.env.CLAUDE_CODE_SSE_PORT
+  delete process.env.OPENCODE_EDITOR_SSE_PORT
   spyOn(process, "cwd").mockImplementation(() => startupDirectory)
   spyOn(os, "homedir").mockImplementation(() => tmp.path)
   const socket = new FakeWebSocket("ws://127.0.0.1:3001")
 
   const mounted = mountEditorContext(createWebSocketImpl(socket))
-  await nextTick()
+  await waitUntil(() => socket.listeners.has("message"), "timed out waiting for editor socket")
 
   expect(socket.closed).toBeFalse()
   expect(mounted.editor.selection()).toBeUndefined()
@@ -253,14 +258,14 @@ test("useEditorContext preserves selection for the next reconnect when requested
     }),
   )
 
-  process.env.CLAUDE_CODE_SSE_PORT = undefined
-  process.env.OPENCODE_EDITOR_SSE_PORT = undefined
+  delete process.env.CLAUDE_CODE_SSE_PORT
+  delete process.env.OPENCODE_EDITOR_SSE_PORT
   spyOn(process, "cwd").mockImplementation(() => startupDirectory)
   spyOn(os, "homedir").mockImplementation(() => tmp.path)
   const socket = new FakeWebSocket("ws://127.0.0.1:3001")
 
   const mounted = mountEditorContext(createWebSocketImpl(socket))
-  await nextTick()
+  await waitUntil(() => socket.listeners.has("message"), "timed out waiting for editor socket")
 
   sendSelection(socket, path.join(startupDirectory, "file.ts"))
   expect(mounted.editor.selection()).toEqual(expectedSelection(path.join(startupDirectory, "file.ts")))
@@ -283,15 +288,50 @@ test("useEditorContext preserves selection for the next reconnect when requested
 
 test("useEditorContext connects with OPENCODE_EDITOR_SSE_PORT", async () => {
   await using tmp = await tmpdir()
-  process.env.CLAUDE_CODE_SSE_PORT = undefined
+  delete process.env.CLAUDE_CODE_SSE_PORT
   process.env.OPENCODE_EDITOR_SSE_PORT = "4020"
   spyOn(process, "cwd").mockImplementation(() => tmp.path)
   const socket = new FakeWebSocket("ws://127.0.0.1:4020")
 
   const mounted = mountEditorContext(createWebSocketImpl(socket))
-  await nextTick()
+  await waitUntil(() => socket.listeners.has("message"), "timed out waiting for OPENCODE_EDITOR_SSE_PORT")
 
   expect(socket.closed).toBeFalse()
 
+  mounted.dispose()
+})
+
+test("useEditorContext does not open a websocket when no editor connection exists", async () => {
+  delete process.env.CLAUDE_CODE_SSE_PORT
+  delete process.env.OPENCODE_EDITOR_SSE_PORT
+  let constructed = 0
+  const mounted = mountEditorContext(
+    class {
+      constructor() {
+        constructed += 1
+      }
+    } as unknown as typeof WebSocket,
+    { connection: () => undefined },
+  )
+
+  await Bun.sleep(30)
+  expect(constructed).toBe(0)
+  expect(mounted.editor.connected()).toBeFalse()
+  mounted.dispose()
+})
+
+test("useEditorContext does not immediately reopen a failed editor websocket", async () => {
+  process.env.CLAUDE_CODE_SSE_PORT = "4091"
+  delete process.env.OPENCODE_EDITOR_SSE_PORT
+  const first = new FakeWebSocket("ws://127.0.0.1:4091")
+  const second = new FakeWebSocket("ws://127.0.0.1:4091")
+  const mounted = mountEditorContext(createWebSocketImpl(first, second))
+  await waitUntil(() => first.listeners.has("error"), "timed out waiting for editor socket listeners")
+
+  first.emit("error", {})
+  first.close()
+  await Bun.sleep(30)
+
+  expect(second.listeners.size).toBe(0)
   mounted.dispose()
 })

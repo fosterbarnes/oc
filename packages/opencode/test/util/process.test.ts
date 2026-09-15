@@ -68,6 +68,12 @@ describe("util.process", () => {
     expect(out.stdout.toString()).toBe(tmp.path)
   })
 
+  test("supports detached process launches", async () => {
+    const proc = Process.spawn(node("process.exit(0)"), { detached: true })
+    proc.unref()
+    expect(await proc.exited).toBe(0)
+  })
+
   test("merges environment overrides", async () => {
     const out = await Process.run(node('process.stdout.write(process.env.OPENCODE_TEST ?? "")'), {
       env: {

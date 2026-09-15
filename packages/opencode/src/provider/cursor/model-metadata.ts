@@ -9,10 +9,6 @@ export type CursorModelCapabilities = {
   supportsImages: boolean
 }
 
-function grokForcedImageSupport(modelId: string): boolean {
-  return modelId.toLowerCase().startsWith("grok")
-}
-
 export function getDocumentedCursorModelContext(modelId: string): CursorModelContext | undefined {
   const context = (CURSOR_MODEL_CONTEXTS as Record<string, CursorModelContext>)[modelId]
   return context ? { ...context } : undefined
@@ -24,9 +20,5 @@ export function getDocumentedCursorModelCapabilities(modelId: string): CursorMod
 }
 
 export function resolveCursorModelSupportsImages(modelId: string, availableModelsValue?: boolean): boolean {
-  return (
-    availableModelsValue ??
-    getDocumentedCursorModelCapabilities(modelId)?.supportsImages ??
-    grokForcedImageSupport(modelId)
-  )
+  return availableModelsValue ?? getDocumentedCursorModelCapabilities(modelId)?.supportsImages ?? false
 }

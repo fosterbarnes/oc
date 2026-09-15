@@ -27,6 +27,23 @@ function mcpTool() {
 }
 
 describe("McpCatalog.convertTool", () => {
+  test("runs the pre-call hook before the MCP request", async () => {
+    const events: string[] = []
+    const client = {
+      callTool: async () => {
+        events.push("call")
+        return { content: [] }
+      },
+    } as unknown as Client
+    const converted = McpCatalog.convertTool(mcpTool(), client, undefined, () =>
+      Effect.sync(() => void events.push("before")),
+    )
+
+    await converted.execute?.({}, options)
+
+    expect(events).toEqual(["before", "call"])
+  })
+
   test("preserves content when structuredContent is also present", async () => {
     const content = [{ type: "image" as const, mimeType: "image/png", data: "AAAA" }]
     const structuredContent = { image: { mimeType: "image/png", data: "AAAA" } }

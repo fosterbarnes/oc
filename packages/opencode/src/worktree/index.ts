@@ -237,7 +237,9 @@ const layer: Layer.Layer<
       const populated = yield* git(["reset", "--hard"], { cwd: info.directory })
       if (populated.code !== 0) {
         const message = populated.stderr || populated.text || "Failed to populate worktree"
-        yield* Effect.logError("worktree checkout failed", { directory: info.directory, message })
+        yield* Effect.logError("worktree checkout failed", { directory: info.directory, message }).pipe(
+          Effect.annotateLogs({ channel: "worktree" }),
+        )
         GlobalBus.emit("event", {
           directory: info.directory,
           project: ctx.project.id,
@@ -252,7 +254,9 @@ const layer: Layer.Layer<
         Effect.catch((error) =>
           Effect.gen(function* () {
             const message = errorMessage(error)
-            yield* Effect.logError("worktree bootstrap failed", { directory: info.directory, message })
+            yield* Effect.logError("worktree bootstrap failed", { directory: info.directory, message }).pipe(
+              Effect.annotateLogs({ channel: "worktree" }),
+            )
             GlobalBus.emit("event", {
               directory: info.directory,
               project: ctx.project.id,
@@ -281,7 +285,9 @@ const layer: Layer.Layer<
     const createFromInfo = Effect.fn("Worktree.createFromInfo")(function* (info: Info, startCommand?: string) {
       yield* setup(info)
       yield* boot(info, startCommand).pipe(
-        Effect.catchCause((cause) => Effect.logError("worktree bootstrap failed", { cause })),
+        Effect.catchCause((cause) =>
+          Effect.logError("worktree bootstrap failed", { cause }).pipe(Effect.annotateLogs({ channel: "worktree" })),
+        ),
         Effect.forkIn(scope),
       )
     })
@@ -474,7 +480,9 @@ const layer: Layer.Layer<
       if (!text) return true
       const result = yield* runStartCommand(directory, text)
       if (result.code === 0) return true
-      yield* Effect.logError("worktree start command failed", { kind, directory, message: result.stderr })
+      yield* Effect.logError("worktree start command failed", { kind, directory, message: result.stderr }).pipe(
+        Effect.annotateLogs({ channel: "worktree" }),
+      )
       return false
     })
 
@@ -603,7 +611,9 @@ const layer: Layer.Layer<
       }
 
       yield* runStartScripts(worktreePath, { projectID: ctx.project.id }).pipe(
-        Effect.catchCause((cause) => Effect.logError("worktree start task failed", { cause })),
+        Effect.catchCause((cause) =>
+          Effect.logError("worktree start task failed", { cause }).pipe(Effect.annotateLogs({ channel: "worktree" })),
+        ),
         Effect.forkIn(scope),
       )
 

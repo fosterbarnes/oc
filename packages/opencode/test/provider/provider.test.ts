@@ -333,7 +333,7 @@ it.instance("getModel throws ModelNotFoundError for invalid provider", () =>
   }),
 )
 
-// Pure synchronous unit tests — no Effect runtime needed.
+// Pure synchronous unit tests - no Effect runtime needed.
 
 test("parseModel correctly parses provider/model string", () => {
   const result = Provider.parseModel("anthropic/claude-sonnet-4")
@@ -384,6 +384,9 @@ it.instance(
     const error = yield* Provider.use.defaultModel().pipe(Effect.flip)
     expect(error).toBeInstanceOf(Provider.NoProvidersError)
     expect(error._tag).toBe("ProviderNoProvidersError")
+    const providers = yield* list
+    expect(providers[ProviderV2.ID.make("cursor")]).toBeUndefined()
+    expect(Object.keys(providers).length).toBe(0)
   }),
   { config: { enabled_providers: [] } },
 )
@@ -621,6 +624,7 @@ it.instance(
     yield* set("ANTHROPIC_API_KEY", "test-api-key")
     yield* set("OPENAI_API_KEY", "test-openai-key")
     const providers = yield* list
+    expect(providers[ProviderV2.ID.make("cursor")]).toBeUndefined()
     expect(Object.keys(providers).length).toBe(0)
   }),
   { config: { enabled_providers: [] } },
@@ -1030,7 +1034,7 @@ it.instance(
     expect(providers[ProviderV2.ID.google]).toBeUndefined()
   }),
   {
-    // enabled_providers takes precedence — only these are considered
+    // enabled_providers takes precedence - only these are considered
     // Then disabled_providers filters from the enabled set
     config: { enabled_providers: ["anthropic", "openai"], disabled_providers: ["openai"] },
   },

@@ -14,6 +14,7 @@
  * Never pause the h2c readable: that withholds WINDOW_UPDATE and the vendor
  * waitForDrain (5s) kills the Run even when Cursor is only slow to accept.
  */
+import crypto from "node:crypto";
 import fs from "node:fs";
 import http from "node:http";
 import http2 from "node:http2";
@@ -26,8 +27,18 @@ const HOST = "127.0.0.1";
 const ALLOWED_ORIGIN = /^https:\/\/([a-z0-9-]+\.)+cursor\.sh$/i;
 export const FLOW_WINDOW = 4 * 1024 * 1024;
 export const MAX_FORWARD_QUEUE_BYTES = FLOW_WINDOW;
+export const CONTROL_TOKEN_HEADER = "x-opencursor-control-token";
+export const CONTROL_TOKEN = (() => {
+  const t = process.env.CURSOR_H2_CONTROL_TOKEN?.trim();
+  if (t) return t;
+  try {
+    return crypto.randomUUID();
+  } catch {
+    return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  }
+})();
 const PROXY_FILE = fileURLToPath(import.meta.url);
-const SOURCE_STAMP = String(fs.statSync(PROXY_FILE).mtimeMs);
+export const SOURCE_STAMP = String(fs.statSync(PROXY_FILE).mtimeMs);
 const H2_SETTINGS = { initialWindowSize: FLOW_WINDOW };
 
 const upstreamSessions = new Map();
@@ -181,11 +192,21 @@ function healthHeaders() {
   };
 }
 
-const healthServer = http.createServer((req, res) => {
+export function isAuthorized(req) {
+  const token = req.headers[CONTROL_TOKEN_HEADER];
+  return typeof token === "string" && token === CONTROL_TOKEN;
+}
+
+export const healthServer = http.createServer((req, res) => {
   const pathname = requestPath(req.url);
   if (pathname === "/shutdown") {
     if (req.method !== "GET") {
       res.writeHead(405);
+      res.end();
+      return;
+    }
+    if (!isAuthorized(req)) {
+      res.writeHead(401, { "x-opencursor-proxy-stamp": SOURCE_STAMP });
       res.end();
       return;
     }
@@ -195,6 +216,11 @@ const healthServer = http.createServer((req, res) => {
     return;
   }
   if (pathname === "/health" || pathname === "/") {
+    if (!isAuthorized(req)) {
+      res.writeHead(401, { "x-opencursor-proxy-stamp": SOURCE_STAMP });
+      res.end();
+      return;
+    }
     res.writeHead(200, healthHeaders());
     res.end("ok\n");
     return;
@@ -203,7 +229,7 @@ const healthServer = http.createServer((req, res) => {
   res.end();
 });
 
-const h2Server = http2.createServer({ settings: H2_SETTINGS });
+export const h2Server = http2.createServer({ settings: H2_SETTINGS });
 h2Server.on("session", (session) => {
   applyFlowWindow(session);
   session.on("error", () => {});

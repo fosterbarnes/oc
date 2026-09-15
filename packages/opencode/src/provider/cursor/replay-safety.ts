@@ -54,32 +54,28 @@ function nestedFields(topLevel: StrictRawField | undefined, field: number): Stri
 }
 
 function analyzeExecWire(topLevel: StrictRawField | undefined) {
-  const variants = nestedFields(topLevel, 2)
-    .filter((field) => ![1, 15, 19].includes(field.fn))
+  const variants = nestedFields(topLevel, 2).filter((field) => ![1, 15, 19].includes(field.fn))
   const exactVariant = (field: number): boolean =>
     variants.length === 1 && variants[0]!.fn === field && variants[0]!.wt === 2
   return {
     exactRequestContext: exactVariant(10),
     exactMcpState: exactVariant(36),
+    exactGitDiffRequest: exactVariant(44),
   }
 }
 
 function validKvWire(topLevel: StrictRawField | undefined): boolean {
   const variants = nestedFields(topLevel, 4).filter((field) => field.fn !== 1)
   const variant = variants.length === 1 ? variants[0] : undefined
-  const args = variant?.wt === 2 && variant.bytes
-    ? (readAllFieldsStrict(variant.bytes) ?? [])
-    : []
-  const blobIds = args.filter(
-    (field) => field.fn === 1 && field.wt === 2 && (field.bytes?.length ?? 0) > 0,
+  const args = variant?.wt === 2 && variant.bytes ? (readAllFieldsStrict(variant.bytes) ?? []) : []
+  const blobIds = args.filter((field) => field.fn === 1 && field.wt === 2 && (field.bytes?.length ?? 0) > 0)
+  return (
+    !!variant &&
+    [2, 3].includes(variant.fn) &&
+    variant.wt === 2 &&
+    blobIds.length === 1 &&
+    args.every((field) => field.wt === 2 && (field.fn === 1 || (variant.fn === 3 && field.fn === 2)))
   )
-  return !!variant
-    && [2, 3].includes(variant.fn)
-    && variant.wt === 2
-    && blobIds.length === 1
-    && args.every(
-      (field) => field.wt === 2 && (field.fn === 1 || (variant.fn === 3 && field.fn === 2)),
-    )
 }
 
 function validInteractionUpdateWire(
@@ -103,20 +99,22 @@ function validInteractionQueryWire(
   const fields = nestedFields(topLevel, 7)
   const ids = fields.filter((field) => field.fn === 1)
   const variants = fields.filter((field) => field.fn !== 1)
-  return ids.length <= 1
-    && ids.every((field) => field.wt === 0)
-    && variants.length === 1
-    && variants[0]!.wt === 2
-    && INTERACTION_QUERY_FIELDS.has(variants[0]!.fn)
+  return (
+    ids.length <= 1 &&
+    ids.every((field) => field.wt === 0) &&
+    variants.length === 1 &&
+    variants[0]!.wt === 2 &&
+    INTERACTION_QUERY_FIELDS.has(variants[0]!.fn)
+  )
 }
 
 function decodedMatchesWire(topLevel: StrictRawField | undefined, decoded: DecodedReplayFrame): boolean {
   return !(
-    (topLevel?.fn === 1 && !decoded.interactionUpdate)
-    || (topLevel?.fn === 2 && !decoded.exec)
-    || (topLevel?.fn === 4 && !decoded.kv)
-    || (topLevel?.fn === 5 && !decoded.execControl)
-    || (topLevel?.fn === 7 && !decoded.interactionQuery)
+    (topLevel?.fn === 1 && !decoded.interactionUpdate) ||
+    (topLevel?.fn === 2 && !decoded.exec) ||
+    (topLevel?.fn === 4 && !decoded.kv) ||
+    (topLevel?.fn === 5 && !decoded.execControl) ||
+    (topLevel?.fn === 7 && !decoded.interactionQuery)
   )
 }
 
@@ -124,41 +122,41 @@ function hasSemanticProgress(decoded: DecodedReplayFrame): boolean {
   const update = decoded.interactionUpdate
   const text = (update?.text_delta as Record<string, unknown> | undefined)?.text
   const thinking = (update?.thinking_delta as Record<string, unknown> | undefined)?.text
-  return (typeof text === "string" && text.length > 0)
-    || (typeof thinking === "string" && thinking.length > 0)
-    || !!update?.turn_ended
-    || !!update?.tool_call_started
-    || !!update?.tool_call_completed
-    || !!decoded.exec
-    || !!decoded.kv
-    || !!decoded.execControl
-    || !!decoded.interactionQuery
-    || !!decoded.checkpointBytes?.length
+  return (
+    (typeof text === "string" && text.length > 0) ||
+    (typeof thinking === "string" && thinking.length > 0) ||
+    !!update?.turn_ended ||
+    !!update?.tool_call_started ||
+    !!update?.tool_call_completed ||
+    !!decoded.exec ||
+    !!decoded.kv ||
+    !!decoded.execControl ||
+    !!decoded.interactionQuery ||
+    !!decoded.checkpointBytes?.length
+  )
 }
 
 /** Classify one decoded server frame without performing any protocol side effects. */
-export function analyzeReplayFrame(
-  payload: Uint8Array,
-  decoded: DecodedReplayFrame,
-): ReplayFrameAnalysis {
+export function analyzeReplayFrame(payload: Uint8Array, decoded: DecodedReplayFrame): ReplayFrameAnalysis {
   const topLevelFields = readAllFieldsStrict(payload) ?? []
   const topLevel = topLevelFields.length === 1 ? topLevelFields[0] : undefined
   const exec = analyzeExecWire(topLevel)
   const validKv = validKvWire(topLevel)
-  const malformed = !topLevel
-    || topLevel.wt !== 2
-    || !TOP_LEVEL_FIELDS.has(topLevel.fn)
-    || !validInteractionUpdateWire(topLevel, decoded.interactionUpdate)
-    || !validInteractionQueryWire(topLevel, decoded.interactionQuery)
-    || !decodedMatchesWire(topLevel, decoded)
-    || !!decoded.execControl
+  const malformed =
+    !topLevel ||
+    topLevel.wt !== 2 ||
+    !TOP_LEVEL_FIELDS.has(topLevel.fn) ||
+    !validInteractionUpdateWire(topLevel, decoded.interactionUpdate) ||
+    !validInteractionQueryWire(topLevel, decoded.interactionQuery) ||
+    !decodedMatchesWire(topLevel, decoded) ||
+    !!decoded.execControl
 
   let barrier: ReplayBarrierReason | undefined
   if (decoded.interactionUpdate?.tool_call_started || decoded.interactionUpdate?.tool_call_completed) {
     barrier = "display-tool-lifecycle"
   } else if (malformed || (topLevel.fn === 4 && !validKv)) {
     barrier = "unknown-or-malformed-frame"
-  } else if (topLevel.fn === 2 && !exec.exactRequestContext && !exec.exactMcpState) {
+  } else if (topLevel.fn === 2 && !exec.exactRequestContext && !exec.exactMcpState && !exec.exactGitDiffRequest) {
     barrier = "non-control-exec"
   }
 

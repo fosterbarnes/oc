@@ -104,8 +104,12 @@ type EditorConnection = {
   source: string
 }
 
+export const EDITOR_DISCOVERY_POLL_MS = 10_000
+export const EDITOR_SOCKET_FAILURE_CAP = 5
+export const EDITOR_SOCKET_COOLDOWN_MS = 30_000
+
 export type EditorIntegration = Readonly<{
-  connection?(directory: string): EditorConnection | undefined
+  connection?(directory: string): EditorConnection | undefined | Promise<EditorConnection | undefined>
   selection?(directory: string): Promise<unknown>
 }>
 
@@ -135,6 +139,7 @@ export const { use: useEditorContext, provider: EditorContextProvider } = create
 
     let socket: WebSocket | undefined
     let closed = false
+    let connecting = false
     let reconnect: ReturnType<typeof setTimeout> | undefined
     let attempt = 0
     let requestID = 0
@@ -171,18 +176,26 @@ export const { use: useEditorContext, provider: EditorContextProvider } = create
     }
 
     const connect = () => {
+      if (closed || connecting) return
+      connecting = true
+      void runConnect().finally(() => {
+        connecting = false
+      })
+    }
+
+    const runConnect = async () => {
       if (closed) return
 
-      const connection = resolveEditorConnection(directory, port, editor.connection)
+      const connection = await resolveEditorConnection(directory, port, editor.connection)
       if (!connection) {
         if (!zedTerminal) {
           setStore("status", "disabled")
-          scheduleReconnect()
+          scheduleDiscoveryPoll()
           return
         }
         if (!editor.selection) {
           setStore("status", "disabled")
-          scheduleReconnect()
+          scheduleDiscoveryPoll()
           return
         }
 
@@ -213,6 +226,7 @@ export const { use: useEditorContext, provider: EditorContextProvider } = create
       setStore("status", "connecting")
       const current = openEditorSocket(connection, WebSocketImpl)
       socket = current
+      let failed = false
 
       current.addEventListener("open", () => {
         if (socket !== current) {
@@ -261,6 +275,12 @@ export const { use: useEditorContext, provider: EditorContextProvider } = create
         }
       })
 
+      current.addEventListener("error", () => {
+        failed = true
+        if (socket !== current) return
+        setStore("status", "disabled")
+      })
+
       current.addEventListener("close", () => {
         if (socket !== current) return
 
@@ -268,16 +288,25 @@ export const { use: useEditorContext, provider: EditorContextProvider } = create
         pending.clear()
         if (closed) return
 
-        setStore("status", "connecting")
-        scheduleReconnect()
+        setStore("status", failed ? "disabled" : "connecting")
+        scheduleSocketReconnect()
       })
     }
 
-    const scheduleReconnect = () => {
+    const scheduleDiscoveryPoll = () => {
+      if (closed) return
+      if (reconnect) clearTimeout(reconnect)
+      reconnect = setTimeout(connect, EDITOR_DISCOVERY_POLL_MS)
+    }
+
+    const scheduleSocketReconnect = () => {
       if (closed) return
       if (reconnect) clearTimeout(reconnect)
       attempt += 1
-      const delay = Math.min(1000 * 2 ** (attempt - 1), 10_000)
+      const delay =
+        attempt > EDITOR_SOCKET_FAILURE_CAP
+          ? EDITOR_SOCKET_COOLDOWN_MS
+          : Math.min(1000 * 2 ** (attempt - 1), 10_000)
       reconnect = setTimeout(connect, delay)
     }
 
@@ -320,7 +349,7 @@ export const { use: useEditorContext, provider: EditorContextProvider } = create
 
     return {
       enabled() {
-        return Boolean(resolveEditorConnection(directory, port, editor.connection) || (zedTerminal && editor.selection))
+        return store.status !== "disabled" || Boolean(port) || Boolean(zedTerminal && editor.selection)
       },
       connected() {
         return store.status === "connected"
@@ -358,11 +387,11 @@ export const { use: useEditorContext, provider: EditorContextProvider } = create
   },
 })
 
-function resolveEditorConnection(
+async function resolveEditorConnection(
   directory: string,
   port: number | undefined,
-  discover: ((directory: string) => EditorConnection | undefined) | undefined,
-): EditorConnection | undefined {
+  discover: ((directory: string) => EditorConnection | undefined | Promise<EditorConnection | undefined>) | undefined,
+): Promise<EditorConnection | undefined> {
   if (port) {
     return {
       url: `ws://127.0.0.1:${port}`,

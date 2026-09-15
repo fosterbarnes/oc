@@ -2,14 +2,38 @@ export * as ConfigAgent from "./agent"
 
 import path from "path"
 import os from "os"
+import matter from "gray-matter"
 import { Exit, Schema } from "effect"
 import { Glob } from "@opencode-ai/core/util/glob"
+import { ConfigMarkdown as ConfigMarkdownCore } from "@opencode-ai/core/config/markdown"
 import { ConfigAgentV1 } from "@opencode-ai/core/v1/config/agent"
-import { InvalidError } from "@opencode-ai/core/v1/config/error"
+import { FrontmatterError, InvalidError } from "@opencode-ai/core/v1/config/error"
 import { Filesystem } from "@/util/filesystem"
 import { configEntryNameFromPath } from "./entry-name"
 import * as ConfigMarkdown from "./markdown"
 import { ConfigParse } from "./parse"
+
+async function parseAgentMarkdown(filePath: string) {
+  const text = await Filesystem.readText(filePath)
+  try {
+    return (matter as unknown as (input: string, opts: object) => ReturnType<typeof matter>)(text, {})
+  } catch (err) {
+    try {
+      return (matter as unknown as (input: string, opts: object) => ReturnType<typeof matter>)(
+        ConfigMarkdownCore.sanitize(text),
+        {},
+      )
+    } catch (err2) {
+      throw new FrontmatterError(
+        {
+          path: filePath,
+          message: `${filePath}: Failed to parse YAML frontmatter: ${err2 instanceof Error ? err2.message : String(err2)}`,
+        },
+        { cause: err2 },
+      )
+    }
+  }
+}
 
 /**
  * Resolve `{file:path}` tokens in a markdown agent's frontmatter `prompt`.
@@ -39,22 +63,77 @@ async function resolvePromptFiles(text: string, mdPath: string) {
   return out
 }
 
-export async function load(dir: string) {
-  const result: Record<string, ConfigAgentV1.Info> = {}
-  for (const item of await Glob.scan("{agent,agents}/**/*.md", {
+export interface AgentDiagnostic {
+  path: string
+  message: string
+  issues?: { path: string[]; message: string }[]
+}
+
+function agentDiagnosticMessage(error: unknown): string {
+  if (error && typeof error === "object" && "data" in error) {
+    const data = (error as { data?: { message?: string; issues?: { path?: unknown[]; message?: string }[] } }).data
+    if (typeof data?.message === "string" && data.message.trim()) return data.message
+    if (Array.isArray(data?.issues) && data.issues.length) {
+      return data.issues.map((issue) => `${issue.path?.join(".") || ""}: ${issue.message ?? ""}`.trim()).join("; ")
+    }
+  }
+  if (error instanceof Error) return error.message
+  return String(error)
+}
+
+function agentDiagnosticIssues(error: unknown): { path: string[]; message: string }[] | undefined {
+  if (error && typeof error === "object" && "data" in error) {
+    const data = (error as { data?: { issues?: { path?: unknown[]; message?: string }[] } }).data
+    if (Array.isArray(data?.issues) && data.issues.length) {
+      return data.issues.map((issue) => ({
+        path: Array.isArray(issue.path) ? issue.path.map(String) : [],
+        message: String(issue.message ?? ""),
+      }))
+    }
+  }
+  return undefined
+}
+
+export async function scan(dir: string): Promise<{
+  agents: Record<string, ConfigAgentV1.Info>
+  diagnostics: AgentDiagnostic[]
+  files: number
+}> {
+  const agents: Record<string, ConfigAgentV1.Info> = {}
+  const diagnostics: AgentDiagnostic[] = []
+  const items = await Glob.scan("{agent,agents}/**/*.md", {
     cwd: dir,
     absolute: true,
     dot: true,
     symlink: true,
-  })) {
-    const md = await ConfigMarkdown.parse(item).catch(() => undefined)
-    if (!md) continue
+  })
+  items.sort()
+  for (const item of items) {
+    let md: Awaited<ReturnType<typeof parseAgentMarkdown>>
+    try {
+      md = await parseAgentMarkdown(item)
+    } catch (error) {
+      diagnostics.push({
+        path: item,
+        message: agentDiagnosticMessage(error),
+        issues: agentDiagnosticIssues(error),
+      })
+      continue
+    }
 
     const name = configEntryNameFromPath(path.relative(dir, item), ["agent/", "agents/"])
 
-    // Frontmatter `prompt` (with optional {file:...} includes) comes first; the
-    // markdown body is appended so a file can share a base prompt and add to it.
-    const head = typeof md.data.prompt === "string" ? await resolvePromptFiles(md.data.prompt, item) : ""
+    let head = ""
+    try {
+      head = typeof md.data.prompt === "string" ? await resolvePromptFiles(md.data.prompt, item) : ""
+    } catch (error) {
+      diagnostics.push({
+        path: item,
+        message: agentDiagnosticMessage(error),
+        issues: agentDiagnosticIssues(error),
+      })
+      continue
+    }
     const body = md.content.trim()
     const prompt = [head.trim(), body].filter(Boolean).join("\n\n")
 
@@ -63,9 +142,21 @@ export async function load(dir: string) {
       ...md.data,
       prompt,
     }
-    result[config.name] = ConfigParse.schema(ConfigAgentV1.Info, config, item)
+    try {
+      agents[config.name] = ConfigParse.schema(ConfigAgentV1.Info, config, item)
+    } catch (error) {
+      diagnostics.push({
+        path: item,
+        message: agentDiagnosticMessage(error),
+        issues: agentDiagnosticIssues(error),
+      })
+    }
   }
-  return result
+  return { agents, diagnostics, files: items.length }
+}
+
+export async function load(dir: string) {
+  return (await scan(dir)).agents
 }
 
 export async function loadMode(dir: string) {

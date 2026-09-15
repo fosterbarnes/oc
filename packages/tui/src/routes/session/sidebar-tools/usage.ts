@@ -8,6 +8,32 @@ const OPENROUTER_URL = "https://openrouter.ai/api/v1/key"
 const CURSOR_USAGE_URL = "https://cursor.com/api/usage-summary"
 const REQUEST_TIMEOUT_MS = 15_000
 
+export const USAGE_PROVIDER_IDS = ["openai", "cursor", "opencode-go", "openrouter"] as const
+export type UsageProviderId = (typeof USAGE_PROVIDER_IDS)[number]
+
+export const DEFAULT_USAGE_PROVIDERS: UsageProviderId[] = [...USAGE_PROVIDER_IDS]
+
+export const USAGE_PROVIDER_OPTIONS: { id: UsageProviderId; title: string }[] = [
+  { id: "openai", title: "Codex / OpenAI" },
+  { id: "cursor", title: "Cursor" },
+  { id: "opencode-go", title: "OpenCode Go" },
+  { id: "openrouter", title: "OpenRouter" },
+]
+
+export function isUsageProviderId(value: string): value is UsageProviderId {
+  return (USAGE_PROVIDER_IDS as readonly string[]).includes(value)
+}
+
+export function normalizeUsageProviders(value: unknown, fallback = DEFAULT_USAGE_PROVIDERS): UsageProviderId[] {
+  if (!Array.isArray(value)) return [...fallback]
+  const providers: UsageProviderId[] = []
+  for (const item of value) {
+    if (typeof item !== "string" || !isUsageProviderId(item) || providers.includes(item)) continue
+    providers.push(item)
+  }
+  return providers
+}
+
 export type UsageWindow = {
   usedPercent: number | null
   resetAt: string | null

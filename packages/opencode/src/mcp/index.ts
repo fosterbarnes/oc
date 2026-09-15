@@ -34,8 +34,11 @@ import { CrossSpawnSpawner } from "@opencode-ai/core/cross-spawn-spawner"
 import { McpCatalog } from "./catalog"
 import { McpEvent } from "@opencode-ai/schema/mcp-event"
 import { McpBrowser } from "./browser"
+import { Everything } from "./everything"
 
 const DEFAULT_TIMEOUT = 30_000
+const MAX_RECONNECT_ATTEMPTS = 3
+const RECONNECT_DELAY = "100 millis"
 const CLIENT_OPTIONS = {
   capabilities: {
     // https://github.com/anomalyco/opencode/issues/11948
@@ -145,6 +148,7 @@ interface State {
   clients: Record<string, MCPClient>
   defs: Record<string, MCPToolDef[]>
   instructions: Record<string, string>
+  reconnecting: Set<string>
 }
 
 export interface ServerInstructions {
@@ -159,6 +163,7 @@ export interface McpTool {
   readonly def: MCPToolDef
   readonly client: MCPClient
   readonly timeout?: number
+  readonly beforeCall?: () => Effect.Effect<void, Error>
 }
 
 export interface Interface {
@@ -341,6 +346,7 @@ const layer = Layer.effect(
       key: string,
       mcp: ConfigMCPV1.Info & { type: "local" },
     ) {
+      if (key === Everything.NAME) yield* Everything.ensureRunning(mcp.environment)
       const [cmd, ...args] = mcp.command
       const baseDir = yield* InstanceState.directory
       const cwd = mcp.cwd ? path.resolve(baseDir, mcp.cwd) : baseDir
@@ -382,7 +388,9 @@ const layer = Layer.effect(
 
         if (!mcpClient) {
           if (status.status !== "connected" && status.status !== "disabled") {
-            yield* Effect.logWarning("server unavailable", { key, type: mcp.type, status: status.status })
+            yield* Effect.logWarning("server unavailable", { key, type: mcp.type, status: status.status }).pipe(
+              Effect.annotateLogs({ channel: "mcp" }),
+            )
           }
           return { status } satisfies CreateResult
         }
@@ -439,7 +447,14 @@ const layer = Layer.effect(
       Effect.catch(() => Effect.succeed([] as number[])),
     )
 
-    function watch(s: State, name: string, client: MCPClient, bridge: EffectBridge.Shape, timeout?: number) {
+    function watch(
+      s: State,
+      name: string,
+      client: MCPClient,
+      bridge: EffectBridge.Shape,
+      timeout: number | undefined,
+      mcp: ConfigMCPV1.Info,
+    ) {
       client.onclose = () => {
         if (s.clients[name] !== client) return
         delete s.clients[name]
@@ -448,7 +463,9 @@ const layer = Layer.effect(
         s.status[name] = { status: "failed", error: "Connection closed" }
         bridge.fork(
           Effect.logWarning("MCP connection closed", { server: name }).pipe(
+            Effect.annotateLogs({ channel: "mcp" }),
             Effect.andThen(events.publish(ToolsChanged, { server: name })),
+            Effect.andThen(name === Everything.NAME && mcp.type === "local" ? reconnect(s, name, mcp) : Effect.void),
             Effect.ignore,
           ),
         )
@@ -473,19 +490,20 @@ const layer = Layer.effect(
 
     function serverLog(name: string, params: LoggingMessageNotification["params"]) {
       const fields = { server: name, logger: params.logger, level: params.level, data: params.data }
+      const annotate = Effect.annotateLogs({ channel: "mcp" })
       switch (params.level) {
         case "debug":
-          return Effect.logDebug("MCP server log", fields)
+          return Effect.logDebug("MCP server log", fields).pipe(annotate)
         case "info":
         case "notice":
-          return Effect.logInfo("MCP server log", fields)
+          return Effect.logInfo("MCP server log", fields).pipe(annotate)
         case "warning":
-          return Effect.logWarning("MCP server log", fields)
+          return Effect.logWarning("MCP server log", fields).pipe(annotate)
         case "error":
         case "critical":
         case "alert":
         case "emergency":
-          return Effect.logError("MCP server log", fields)
+          return Effect.logError("MCP server log", fields).pipe(annotate)
       }
     }
 
@@ -500,6 +518,7 @@ const layer = Layer.effect(
           clients: {},
           defs: {},
           instructions: {},
+          reconnecting: new Set(),
         }
 
         yield* Effect.forEach(
@@ -507,7 +526,9 @@ const layer = Layer.effect(
           ([key, mcp]) =>
             Effect.gen(function* () {
               if (!isMcpConfigured(mcp)) {
-                yield* Effect.logError("Ignoring MCP config entry without type", { key })
+                yield* Effect.logError("Ignoring MCP config entry without type", { key }).pipe(
+                  Effect.annotateLogs({ channel: "mcp" }),
+                )
                 return
               }
 
@@ -522,7 +543,7 @@ const layer = Layer.effect(
                 s.clients[key] = result.mcpClient
                 s.defs[key] = result.defs!
                 if (result.instructions) s.instructions[key] = result.instructions
-                watch(s, key, result.mcpClient, bridge, mcp.timeout)
+                watch(s, key, result.mcpClient, bridge, mcp.timeout, mcp)
               }
             }),
           { concurrency: "unbounded" },
@@ -574,6 +595,7 @@ const layer = Layer.effect(
       client: MCPClient,
       listed: MCPToolDef[],
       instructions: string | undefined,
+      mcp: ConfigMCPV1.Info,
       timeout?: number,
     ) {
       const bridge = yield* EffectBridge.make()
@@ -583,7 +605,7 @@ const layer = Layer.effect(
       s.defs[name] = listed
       if (instructions) s.instructions[name] = instructions
       else delete s.instructions[name]
-      watch(s, name, client, bridge, timeout)
+      watch(s, name, client, bridge, timeout, mcp)
       if (previous) yield* Effect.tryPromise(() => previous.close()).pipe(Effect.ignore)
       return s.status[name]
     })
@@ -635,8 +657,28 @@ const layer = Layer.effect(
         return result.status
       }
 
-      return yield* storeClient(s, name, result.mcpClient, result.defs!, result.instructions, mcp.timeout)
+      return yield* storeClient(s, name, result.mcpClient, result.defs!, result.instructions, mcp, mcp.timeout)
     })
+
+    function reconnect(s: State, name: string, mcp: ConfigMCPV1.Info) {
+      if (s.reconnecting.has(name)) return Effect.void
+      s.reconnecting.add(name)
+      return Effect.gen(function* () {
+        for (let attempt = 1; attempt <= MAX_RECONNECT_ATTEMPTS; attempt++) {
+          const result = yield* createAndStore(name, mcp)
+          if (result.status === "connected") {
+            yield* events.publish(ToolsChanged, { server: name })
+            return
+          }
+          yield* Effect.logWarning("MCP automatic reconnect attempt failed", {
+            server: name,
+            attempt,
+            error: result.status === "failed" ? result.error : result.status,
+          }).pipe(Effect.annotateLogs({ channel: "mcp" }))
+          if (attempt < MAX_RECONNECT_ATTEMPTS) yield* Effect.sleep(RECONNECT_DELAY)
+        }
+      }).pipe(Effect.ensuring(Effect.sync(() => s.reconnecting.delete(name))))
+    }
 
     const add = Effect.fn("MCP.add")(function* (name: string, mcp: ConfigMCPV1.Info) {
       const s = yield* InstanceState.get(state)
@@ -676,12 +718,19 @@ const layer = Layer.effect(
         const mcpConfig = config[clientName]
         const listed = s.defs[clientName]
         if (!listed) {
-          yield* Effect.logWarning("missing cached tools for connected server", { clientName })
+          yield* Effect.logWarning("missing cached tools for connected server", { clientName }).pipe(
+            Effect.annotateLogs({ channel: "mcp" }),
+          )
           continue
         }
         const timeout = requestTimeout(s, clientName, mcpConfig, defaultTimeout)
+        const configured = s.config[clientName] ?? (isMcpConfigured(mcpConfig) ? mcpConfig : undefined)
+        const beforeCall =
+          clientName === Everything.NAME && configured?.type === "local"
+            ? () => Everything.ensureRunning(configured.environment)
+            : undefined
         for (const def of listed) {
-          result[McpCatalog.toolName(clientName, def.name)] = { def, client, timeout }
+          result[McpCatalog.toolName(clientName, def.name)] = { def, client, timeout, beforeCall }
         }
       }
       return result
@@ -746,7 +795,9 @@ const layer = Layer.effect(
       const s = yield* InstanceState.get(state)
       const client = s.clients[clientName]
       if (!client) {
-        yield* Effect.logWarning(`client not found for ${label}`, { clientName })
+        yield* Effect.logWarning(`client not found for ${label}`, { clientName }).pipe(
+          Effect.annotateLogs({ channel: "mcp" }),
+        )
         return undefined
       }
       const cfg = yield* cfgSvc.get()
@@ -759,7 +810,7 @@ const layer = Layer.effect(
             clientName,
             ...meta,
             error: error instanceof Error ? error.message : String(error),
-          }),
+          }).pipe(Effect.annotateLogs({ channel: "mcp" })),
         ),
         Effect.orElseSucceed(() => undefined),
       )
@@ -892,7 +943,15 @@ const layer = Layer.effect(
 
         const s = yield* InstanceState.get(state)
         yield* auth.clearOAuthState(mcpName)
-        return yield* storeClient(s, mcpName, client, listed, client.getInstructions()?.trim(), mcpConfig.timeout)
+        return yield* storeClient(
+          s,
+          mcpName,
+          client,
+          listed,
+          client.getInstructions()?.trim(),
+          mcpConfig,
+          mcpConfig.timeout,
+        )
       }
 
       const callbackPromise = McpOAuthCallback.waitForCallback(result.oauthState, mcpName)

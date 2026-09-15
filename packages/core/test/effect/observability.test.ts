@@ -1,14 +1,25 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import { NodeFileSystem } from "@effect/platform-node"
-import { Effect, Layer, Logger } from "effect"
+import { Effect, Layer, Logger, References } from "effect"
 import fs from "fs/promises"
 import os from "os"
 import path from "path"
-import { fileLogger } from "../../src/observability/logging"
+import nodeFs from "fs"
+import {
+  debug,
+  fileLogger,
+  loadPersistedDebug,
+  persistFile,
+  rotateLogFile,
+  setPersistedDebug,
+} from "../../src/observability/logging"
 import { resource } from "../../src/observability/otlp"
 
 const otelResourceAttributes = process.env.OTEL_RESOURCE_ATTRIBUTES
 const opencodeClient = process.env.OPENCODE_CLIENT
+const logChannels = process.env.OPENCODE_LOG_CHANNELS
+const logLevel = process.env.OPENCODE_LOG_LEVEL
+const debugLoggingPath = process.env.OPENCODE_DEBUG_LOGGING_PATH
 
 afterEach(() => {
   if (otelResourceAttributes === undefined) delete process.env.OTEL_RESOURCE_ATTRIBUTES
@@ -16,6 +27,16 @@ afterEach(() => {
 
   if (opencodeClient === undefined) delete process.env.OPENCODE_CLIENT
   else process.env.OPENCODE_CLIENT = opencodeClient
+
+  if (logChannels === undefined) delete process.env.OPENCODE_LOG_CHANNELS
+  else process.env.OPENCODE_LOG_CHANNELS = logChannels
+
+  if (logLevel === undefined) delete process.env.OPENCODE_LOG_LEVEL
+  else process.env.OPENCODE_LOG_LEVEL = logLevel
+
+  if (debugLoggingPath === undefined) delete process.env.OPENCODE_DEBUG_LOGGING_PATH
+  else process.env.OPENCODE_DEBUG_LOGGING_PATH = debugLoggingPath
+  loadPersistedDebug()
 })
 
 describe("resource", () => {
@@ -106,4 +127,80 @@ test("file logger flattens nested objects", async () => {
   expect(line).toContain('tags="[\\\"api\\\",\\\"test\\\"]"')
   expect(line).toContain("session.id=session-1")
   expect(line).not.toContain("request={")
+})
+
+test("channel filter keeps matching debug and all info", async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "opencode-log-test-"))
+  await using _ = {
+    async [Symbol.asyncDispose]() {
+      await fs.rm(dir, { recursive: true, force: true })
+    },
+  }
+  const file = path.join(dir, "opencode.log")
+  process.env.OPENCODE_LOG_CHANNELS = "session"
+
+  const layer = Logger.layer([fileLogger(file, "run-a")]).pipe(
+    Layer.provide(NodeFileSystem.layer),
+    Layer.orDie,
+    Layer.merge(Layer.succeed(References.MinimumLogLevel, "Debug")),
+  )
+
+  await Effect.gen(function* () {
+    yield* debug("session", "session.turn", { step: 1 })
+    yield* debug("mcp", "mcp.connect", { server: "x" })
+    yield* Effect.logInfo("always")
+  }).pipe(Effect.provide(layer), Effect.scoped, Effect.runPromise)
+
+  const text = (await Bun.file(file).text()).trim()
+  expect(text).toContain("message=session.turn")
+  expect(text).toContain("channel=session")
+  expect(text).toContain("message=always")
+  expect(text).not.toContain("mcp.connect")
+})
+
+test("persisted debug logging survives reload until disabled", async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "opencode-log-test-"))
+  await using _ = {
+    async [Symbol.asyncDispose]() {
+      await fs.rm(dir, { recursive: true, force: true })
+    },
+  }
+  process.env.OPENCODE_DEBUG_LOGGING_PATH = path.join(dir, "debug-logging.json")
+  setPersistedDebug(true)
+  expect(nodeFs.readFileSync(persistFile(), "utf8")).toContain('"enabled": true')
+  expect(loadPersistedDebug()).toBe(true)
+
+  const file = path.join(dir, "opencode.log")
+  const layer = Logger.layer([fileLogger(file, "run-a")]).pipe(
+    Layer.provide(NodeFileSystem.layer),
+    Layer.orDie,
+    Layer.merge(Layer.succeed(References.MinimumLogLevel, "Debug")),
+  )
+  await debug("session", "session.turn").pipe(Effect.provide(layer), Effect.scoped, Effect.runPromise)
+  expect((await Bun.file(file).text()).trim()).toContain("message=session.turn")
+
+  setPersistedDebug(false)
+  const off = path.join(dir, "opencode-off.log")
+  const offLayer = Logger.layer([fileLogger(off, "run-a")]).pipe(
+    Layer.provide(NodeFileSystem.layer),
+    Layer.orDie,
+    Layer.merge(Layer.succeed(References.MinimumLogLevel, "Debug")),
+  )
+  await debug("session", "session.turn").pipe(Effect.provide(offLayer), Effect.scoped, Effect.runPromise)
+  const offText = (await Bun.file(off).exists()) ? (await Bun.file(off).text()).trim() : ""
+  expect(offText).toBe("")
+})
+
+test("rotateLogFile renames oversized logs", async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "opencode-log-test-"))
+  await using _ = {
+    async [Symbol.asyncDispose]() {
+      await fs.rm(dir, { recursive: true, force: true })
+    },
+  }
+  const file = path.join(dir, "opencode.log")
+  nodeFs.writeFileSync(file, "x".repeat(64))
+  expect(rotateLogFile(file, 32)).toBe(true)
+  expect(nodeFs.existsSync(file)).toBe(false)
+  expect(nodeFs.readFileSync(`${file}.1`, "utf8").length).toBe(64)
 })

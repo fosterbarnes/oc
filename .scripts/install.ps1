@@ -8,6 +8,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $binary = Join-Path $repoRoot 'packages\opencode\dist\opencode-windows-x64\bin\opencode.exe'
+$helper = Join-Path $repoRoot 'packages\opencode\dist\opencode-windows-x64\bin\opencode-process-tree.exe'
 $runtime = Join-Path $repoRoot 'packages\opencode\dist\opencode-windows-x64\bin\agentify-runtime'
 $cursorRuntime = Join-Path $repoRoot 'packages\opencode\dist\opencode-windows-x64\bin\cursor-runtime'
 
@@ -24,6 +25,9 @@ if (-not $NoBuild) {
 if (!(Test-Path -LiteralPath $binary)) {
     throw "Built binary not found: $binary. Run build.ps1 first."
 }
+if (!(Test-Path -LiteralPath $helper -PathType Leaf)) {
+    throw "Built helper not found: $helper. Run build.ps1 first. Helper is produced by packages/core/native/windows/build.ps1 -Architecture x64 -Output <path> and must sit beside opencode.exe."
+}
 if (!(Test-Path -LiteralPath $runtime -PathType Container)) {
     throw "Packaged Agentify runtime not found: $runtime. Run build.ps1 first."
 }
@@ -35,20 +39,24 @@ $installDir = 'C:\Users\user\Apps\opencode'
 New-Item -ItemType Directory -Path $installDir -Force | Out-Null
 
 $destination = Join-Path $installDir 'opencode.exe'
-$obsoleteAliases = @('oc.exe', 'occ.exe')
-$processNames = @('opencode', 'oc', 'occ')
+$debugDestination = Join-Path $installDir 'ocdebug.exe'
+$helperDestination = Join-Path $installDir 'opencode-process-tree.exe'
+$obsoleteAliases = @('oc.exe', 'occ.exe', 'ocbug.exe', 'oc-debug.exe')
+$processNames = @('opencode', 'oc', 'occ', 'ocdebug', 'ocbug', 'opencode-process-tree')
 $running = @($processNames | ForEach-Object { Get-Process -Name $_ -ErrorAction SilentlyContinue })
 if ($running) {
-    Write-Host 'Stopping running opencode.exe processes...'
+    Write-Host 'Stopping running opencode.exe and ocdebug.exe processes...'
     $running | Stop-Process -Force
     $deadline = (Get-Date).AddSeconds(30)
     while (@($processNames | ForEach-Object { Get-Process -Name $_ -ErrorAction SilentlyContinue })) {
-        if ((Get-Date) -gt $deadline) { throw 'opencode.exe is still running after Stop-Process.' }
+        if ((Get-Date) -gt $deadline) { throw 'opencode.exe or ocdebug.exe is still running after Stop-Process.' }
         Start-Sleep -Milliseconds 200
     }
 }
 try {
     Copy-Item -LiteralPath $binary -Destination $destination -Force
+    Copy-Item -LiteralPath $binary -Destination $debugDestination -Force
+    Copy-Item -LiteralPath $helper -Destination $helperDestination -Force
     Copy-Item -LiteralPath $runtime -Destination $installDir -Recurse -Force
     Copy-Item -LiteralPath $cursorRuntime -Destination $installDir -Recurse -Force
     foreach ($alias in $obsoleteAliases) {
@@ -57,11 +65,26 @@ try {
     }
 } catch {
     if ($_.Exception.Message -match 'being used by another process|cannot access') {
-        Write-Host 'Install failed. Target OpenCode.exe is in use.' -ForegroundColor Red
+        Write-Host 'Install failed. Target opencode.exe or ocdebug.exe is in use.' -ForegroundColor Red
         exit 1
     }
     throw
 }
 
+if (!(Test-Path -LiteralPath $helperDestination -PathType Leaf)) {
+    throw "Installed helper not found: $helperDestination"
+}
+
+if (!(Test-Path -LiteralPath $debugDestination -PathType Leaf)) {
+    throw "Installed debug executable not found: $debugDestination"
+}
+
 & (Join-Path $installDir 'opencode.exe') --version
+& (Join-Path $installDir 'ocdebug.exe') --version
+try {
+    & (Join-Path $installDir 'opencode-process-tree.exe') --version | Out-Null
+} catch {
+    throw "Installed helper version check failed: $helperDestination"
+}
 & (Join-Path $installDir 'opencode.exe') oc config get | Out-Null
+& (Join-Path $installDir 'ocdebug.exe') oc config get | Out-Null

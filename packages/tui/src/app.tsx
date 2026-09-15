@@ -142,7 +142,6 @@ function readOcConfig(): {
     }
   }
 }
-
 function listOcHomeDirs(): Array<{ name: string; fullPath: string; mtimeMs: number }> {
   const { homeDir, homeDirSort } = readOcConfig()
   let entries: fs.Dirent[]
@@ -171,8 +170,7 @@ function listOcHomeDirs(): Array<{ name: string; fullPath: string; mtimeMs: numb
   return dirs
 }
 
-const CROW_SESSION_HANDLE_PATTERN =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+const CROW_SESSION_HANDLE_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
 export function readCrowSessionHandleFromEnv(raw = process.env.CROW_SESSION_HANDLE) {
   const value = raw?.trim()
@@ -201,7 +199,10 @@ export function mostRecentRootSessionID(
     .toSorted((left, right) => right.time.updated - left.time.updated)[0]?.id
 }
 
-type CrowRouteData = { type: "home" } | { type: "session"; sessionID: string } | { type: "plugin"; id: string; data?: unknown }
+type CrowRouteData =
+  | { type: "home" }
+  | { type: "session"; sessionID: string }
+  | { type: "plugin"; id: string; data?: unknown }
 
 export function acceptsCrowTargetedCommand(input: {
   selfHandle: string | undefined
@@ -366,6 +367,7 @@ const appBindingCommands = [
   "console.org.switch",
   "opencode.status",
   "opencode.debug",
+  "opencode.debug_logging",
   "theme.switch",
   "theme.switch_mode",
   "theme.mode.lock",
@@ -631,6 +633,12 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
   const attention = createTuiAttention({ renderer, config: tuiConfig, kv })
   const clipboard = useClipboard()
   const copyOnSelect = () => kv.get(Selection.COPY_ON_SELECT_KEY, Selection.defaultCopyOnSelect()) as boolean
+  onMount(() => {
+    void sdk.debugLogging
+      .get()
+      .then((enabled) => kv.set("debug_logging", enabled))
+      .catch(() => {})
+  })
   const controlServer = async (action: "shutdown" | "restart") => {
     const restart = action === "restart"
     const choice = await DialogConfirm.show(
@@ -1336,6 +1344,29 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
           dialog.replace(() => <DialogDebug />)
         },
         category: "System",
+      },
+      {
+        name: "opencode.debug_logging",
+        title: kv.get("debug_logging") ? "Disable debug logging" : "Enable debug logging",
+        desc: "Persist debug logs for this and all future sessions until turned off",
+        slashName: "debug-logging",
+        category: "System",
+        run: async () => {
+          const enabled = !kv.get("debug_logging")
+          try {
+            kv.set("debug_logging", await sdk.debugLogging.set(enabled))
+            toast.show({
+              message: enabled ? "Debug logging on for this and future sessions" : "Debug logging off",
+              variant: "info",
+            })
+          } catch (error) {
+            toast.show({
+              message: `Failed to toggle debug logging: ${error instanceof Error ? error.message : String(error)}`,
+              variant: "error",
+            })
+          }
+          dialog.clear()
+        },
       },
       {
         name: "theme.switch",

@@ -15,9 +15,13 @@ const cli = yargs(hideBin(process.argv))
     type: "boolean",
   })
   .option("log-level", {
-    describe: "log level",
+    describe: "log level (default INFO; DEBUG for full debug)",
     type: "string",
     choices: ["DEBUG", "INFO", "WARN", "ERROR"],
+  })
+  .option("log-channels", {
+    describe: "debug log channels (comma-separated: session,config,mcp,tool,provider,plugin,server,worktree,lsp,tui)",
+    type: "string",
   })
   .option("pure", {
     describe: "run without external plugins",
@@ -26,6 +30,7 @@ const cli = yargs(hideBin(process.argv))
   .middleware((opts) => {
     if (opts.printLogs) process.env.OPENCODE_PRINT_LOGS = "1"
     if (opts.logLevel) process.env.OPENCODE_LOG_LEVEL = opts.logLevel
+    if (opts.logChannels) process.env.OPENCODE_LOG_CHANNELS = opts.logChannels
   })
   .command(TuiThreadCommand)
   .parse()

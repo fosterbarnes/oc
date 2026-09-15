@@ -1,9 +1,11 @@
 import { expect, test } from "bun:test"
 import {
   parseModel,
+  pruneSessionAgents,
   pruneSessionModelOverrides,
   recentModels,
   resolveCurrentModel,
+  resolveSessionAgent,
   resolveSessionModel,
 } from "../../src/context/local"
 
@@ -81,6 +83,7 @@ test("keeps a session override ahead of CLI and fallback choices", () => {
   const fallback = { providerID: "fallback", modelID: "model" }
 
   expect(
+
     resolveSessionModel(session, undefined, cli, agent, fallback),
   ).toEqual(session)
   expect(resolveSessionModel(undefined, undefined, cli, agent, fallback)).toEqual(cli)
@@ -96,4 +99,16 @@ test("prunes only the deleted session override", () => {
       "first",
     ),
   ).toEqual({ second: { providerID: "provider", modelID: "second" } })
+})
+
+test("uses the session agent ahead of the last selected and CLI agents", () => {
+  expect(resolveSessionAgent("plan", "build", "explore", "build")).toBe("plan")
+  expect(resolveSessionAgent(undefined, "plan", "explore", "build")).toBe("plan")
+  expect(resolveSessionAgent(undefined, undefined, "explore", "build")).toBe("explore")
+  expect(resolveSessionAgent(undefined, undefined, undefined, "build")).toBe("build")
+})
+
+test("prunes only the deleted session agent", () => {
+  expect(pruneSessionAgents({ first: "plan", second: "build" }, "first")).toEqual({ second: "build" })
+
 })

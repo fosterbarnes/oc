@@ -50,10 +50,7 @@ const _inflight = new Map<string, Promise<string>>()
  *
  * Concurrent callers share a single in-flight fetch.
  */
-export async function resolveAgentUrl(
-  token: string,
-  options: AgentUrlOptions = {},
-): Promise<string> {
+export async function resolveAgentUrl(token: string, options: AgentUrlOptions = {}): Promise<string> {
   const cacheKey = resolveCacheKey(token, options)
   const memo = _resolved.get(cacheKey)
   if (memo) {
@@ -82,6 +79,14 @@ export async function resolveAgentUrl(
   })()
   _inflight.set(cacheKey, promise)
   return promise
+}
+
+/** Invalidate the memo for one key. Call on retryable agent endpoint failures. */
+export function invalidateAgentUrl(token: string, options: AgentUrlOptions = {}): void {
+  const key = resolveCacheKey(token, options)
+  if (_resolved.delete(key)) {
+    trace(`agent-url: invalidated memo -> ${key}`)
+  }
 }
 
 /** Reset the in-process memo. Tests only. */

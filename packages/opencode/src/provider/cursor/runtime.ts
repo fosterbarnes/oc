@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process"
+import crypto from "node:crypto"
 import fs from "node:fs/promises"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
@@ -7,6 +8,7 @@ const MODULE_PATH = fileURLToPath(import.meta.url)
 const STARTUP_TIMEOUT_MS = 15_000
 const HEALTH_PORT = () => Number(process.env.CURSOR_H2_HEALTH_PORT ?? 9418)
 const H2_PORT = () => Number(process.env.CURSOR_H2_PROXY_PORT ?? 9419)
+const CONTROL_TOKEN_HEADER = "x-opencursor-control-token"
 
 type Child = {
   proc: ReturnType<typeof spawn>
@@ -15,6 +17,23 @@ type Child = {
 
 let starting: Promise<string> | undefined
 let child: Child | undefined
+let controlToken: string | undefined
+
+function getControlToken(): string {
+  if (controlToken) return controlToken
+  const env = process.env.CURSOR_H2_CONTROL_TOKEN?.trim()
+  if (env) {
+    controlToken = env
+    return controlToken
+  }
+  controlToken = crypto.randomUUID()
+  process.env.CURSOR_H2_CONTROL_TOKEN = controlToken
+  return controlToken
+}
+
+function controlHeaders(): Record<string, string> {
+  return { [CONTROL_TOKEN_HEADER]: getControlToken() }
+}
 
 function runtimeEntry() {
   const override = process.env.OPENCODE_CURSOR_RUNTIME_ENTRY?.trim()
@@ -33,8 +52,10 @@ function nodeRuntime() {
 
 async function health(expectedStamp?: string) {
   const response = await fetch(`http://127.0.0.1:${HEALTH_PORT()}/health`, {
+    headers: controlHeaders(),
     signal: AbortSignal.timeout(1000),
   })
+  if (response.status === 401) return false
   if (!response.ok) return false
   if (expectedStamp && response.headers.get("x-opencursor-proxy-stamp") !== expectedStamp) return false
   return response.headers.get("x-opencursor-flow-window") === String(4 * 1024 * 1024)
@@ -42,6 +63,7 @@ async function health(expectedStamp?: string) {
 
 async function stopExisting() {
   await fetch(`http://127.0.0.1:${HEALTH_PORT()}/shutdown`, {
+    headers: controlHeaders(),
     signal: AbortSignal.timeout(1000),
   }).catch(() => {})
 }
@@ -72,9 +94,11 @@ async function start() {
   }
   await stopExisting()
 
+  const token = getControlToken()
   const proc = spawn(nodeRuntime(), [entry], {
     env: {
       ...process.env,
+      CURSOR_H2_CONTROL_TOKEN: token,
       CURSOR_H2_HEALTH_PORT: String(HEALTH_PORT()),
       CURSOR_H2_PROXY_PORT: String(H2_PORT()),
     },
@@ -108,6 +132,7 @@ export async function stopCursorProxy() {
   starting = undefined
   if (!current) return
   await fetch(`http://127.0.0.1:${HEALTH_PORT()}/shutdown`, {
+    headers: controlHeaders(),
     signal: AbortSignal.timeout(1000),
   }).catch(() => {})
   current.proc.kill()
@@ -117,7 +142,14 @@ export async function stopCursorProxy() {
 export function resetCursorProxyForTests() {
   child = undefined
   starting = undefined
+  controlToken = undefined
 }
+
+export function getControlTokenForTests(): string {
+  return getControlToken()
+}
+
+export const __testControlTokenHeader = CONTROL_TOKEN_HEADER
 
 process.on("exit", () => {
   child?.proc.kill()

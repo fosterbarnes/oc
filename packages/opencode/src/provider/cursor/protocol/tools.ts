@@ -11,7 +11,7 @@ import { APPLY_PATCH_TOOL, buildAddFilePatch, buildUpdateFilePatch, planSubstrin
 import { BACKGROUND_SHELL_MARKER, buildBackgroundShellCommand, type CursorShellOutcome } from "../shell-timeout.js"
 
 // Exec variant field number whose reply is the server-initiated request_context
-// probe (ExecServerMessage #10 → ExecClientMessage #10). request/result share a
+// probe (ExecServerMessage #10 -> ExecClientMessage #10). request/result share a
 // field number for every exec variant, so this is also the result field.
 export const REQUEST_CONTEXT_RESULT_FIELD = 10
 
@@ -313,6 +313,8 @@ export function buildLiveRequestContext(
 const cursorToolToOpencode: Record<string, string> = {
   read_args: "read",
   write_args: "write",
+  grep_args: "grep",
+  ls_args: "read",
   pi_read_args: "read",
   pi_bash_args: "bash",
   pi_edit_args: "edit",
@@ -320,9 +322,8 @@ const cursorToolToOpencode: Record<string, string> = {
   pi_grep_args: "grep",
   pi_find_args: "glob",
   pi_ls_args: "read",
-  grep_args: "grep",
-  ls_args: "read",
   delete_args: "bash",
+  shell_args: "bash",
   shell_stream_args: "bash",
   background_shell_spawn_args: "bash",
   subagent_args: "task",
@@ -929,6 +930,7 @@ export function parseExecServerMessage(msg: Record<string, unknown>): ParsedExec
     "grep_args",
     "ls_args",
     "delete_args",
+    "shell_args",
     "shell_stream_args",
     "background_shell_spawn_args",
     "mcp_args",
@@ -1049,7 +1051,7 @@ export function parseExecServerMessage(msg: Record<string, unknown>): ParsedExec
   const mapped = mapCursorArgsToOpencode(toolName, (msg[execVariant] as Record<string, unknown>) ?? {}, execVariant)
   const rawArgs = (msg[execVariant] as Record<string, unknown>) ?? {}
   const resultMetadata =
-    execVariant === "shell_stream_args"
+    execVariant === "shell_stream_args" || execVariant === "shell_args"
       ? shellStreamResultMetadata(rawArgs)
       : execVariant === "read_args"
         ? {
@@ -1564,6 +1566,7 @@ export function buildExecClientMessages(input: ToolResultInput): Uint8Array[] {
       input.resultMetadata,
       input.shellOutcome,
       input.workspaceRoot,
+      input.executionTimeMs,
     )
     frames.push(
       encodeMessage("AgentClientMessage", {
@@ -1662,6 +1665,7 @@ export function buildTypedExecResult(
   resultMetadata?: Record<string, unknown>,
   shellOutcome?: CursorShellOutcome,
   workspaceRoot?: string,
+  executionTimeMs?: number,
 ): Record<string, unknown> {
   // Prefer the session workspace; never advertise the host process cwd (daemon
   // often starts in $HOME) as the path Cursor shows the model for glob/ls.
@@ -1829,6 +1833,39 @@ export function buildTypedExecResult(
         success: {
           content: [{ text: { text: unwrapReadOutput(output) } }, ...(notice ? [{ text: { text: notice } }] : [])],
           is_error: false,
+        },
+      }
+    }
+    case "shell_result": {
+      const command = str(resultMetadata?.command) ?? ""
+      const workingDirectory = str(resultMetadata?.working_directory) ?? ""
+      const executionTime = Math.max(0, executionTimeMs ?? 0)
+      if (shellOutcome?.kind === "timeout") {
+        return { timeout: { command, working_directory: workingDirectory, timeout_ms: shellOutcome.timeoutMs } }
+      }
+      if (error) {
+        return {
+          failure: {
+            command,
+            working_directory: workingDirectory,
+            exit_code: shellOutcome?.kind === "exit" ? shellOutcome.code : 1,
+            stdout: output,
+            stderr: error,
+            execution_time: executionTime,
+            local_execution_time_ms: executionTime,
+            aborted: false,
+          },
+        }
+      }
+      return {
+        success: {
+          command,
+          working_directory: workingDirectory,
+          exit_code: shellOutcome?.kind === "exit" ? shellOutcome.code : 0,
+          stdout: output,
+          stderr: "",
+          execution_time: executionTime,
+          local_execution_time_ms: executionTime,
         },
       }
     }

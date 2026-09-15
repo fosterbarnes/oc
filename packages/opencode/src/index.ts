@@ -6,9 +6,10 @@ import { FormatError } from "./cli/error"
 import { EOL } from "os"
 import { errorMessage } from "./util/error"
 import { Heap } from "./cli/heap"
-import { resolveCommandToLoad, type CommandToLoad } from "./cli/command-loader"
+import { isDebugExecutable, resolveAppName } from "@opencode-ai/core/global"
+import { resolveCommandToLoad, withOcLaunchDefault, type CommandToLoad } from "./cli/command-loader"
 
-const args = hideBin(process.argv)
+const args = withOcLaunchDefault(hideBin(process.argv), isDebugExecutable())
 
 function needsAllCommands(args: readonly string[]) {
   return args.includes("-h") || args.includes("--help") || args.includes("completion")
@@ -41,17 +42,23 @@ const cli = yargs(args)
     type: "boolean",
   })
   .option("log-level", {
-    describe: "log level",
+    describe: "log level (default INFO; DEBUG for full debug)",
     type: "string",
     choices: ["DEBUG", "INFO", "WARN", "ERROR"],
+  })
+  .option("log-channels", {
+    describe: "debug log channels (comma-separated: session,config,mcp,tool,provider,plugin,server,worktree,lsp,tui)",
+    type: "string",
   })
   .option("pure", {
     describe: "run without external plugins",
     type: "boolean",
   })
   .middleware(async (opts) => {
+    if (resolveAppName() === "opencode-debug" && !process.env.OPENCODE_LOG_LEVEL) process.env.OPENCODE_LOG_LEVEL = "DEBUG"
     if (opts.printLogs) process.env.OPENCODE_PRINT_LOGS = "1"
     if (opts.logLevel) process.env.OPENCODE_LOG_LEVEL = opts.logLevel
+    if (opts.logChannels) process.env.OPENCODE_LOG_CHANNELS = opts.logChannels
     if (opts.pure) {
       process.env.OPENCODE_PURE = "1"
     }

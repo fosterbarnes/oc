@@ -5,6 +5,7 @@ import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { RootHttpApi } from "../api"
 import { LogInput } from "../groups/control"
 import { ProviderV2 } from "@opencode-ai/core/provider"
+import { loadPersistedDebug, persistedDebug, setPersistedDebug } from "@opencode-ai/core/observability/logging"
 
 export const controlHandlers = HttpApiBuilder.group(RootHttpApi, "control", (handlers) =>
   Effect.gen(function* () {
@@ -34,10 +35,31 @@ export const controlHandlers = HttpApiBuilder.group(RootHttpApi, "control", (han
             : ctx.payload.level === "warn"
               ? Effect.logWarning
               : Effect.logError
-      yield* write(ctx.payload.message).pipe(Effect.annotateLogs(ctx.payload.extra ?? {}))
+      const extra = ctx.payload.extra ?? {}
+      yield* write(ctx.payload.message).pipe(
+        Effect.annotateLogs({
+          ...extra,
+          channel: typeof extra.channel === "string" ? extra.channel : "tui",
+        }),
+      )
       return true
     })
 
-    return handlers.handle("authSet", authSet).handle("authRemove", authRemove).handle("log", log)
+    const debugLoggingGet = Effect.fn("ControlHttpApi.debugLoggingGet")(function* () {
+      return { enabled: persistedDebug() || loadPersistedDebug() }
+    })
+
+    const debugLoggingSet = Effect.fn("ControlHttpApi.debugLoggingSet")(function* (ctx: {
+      payload: { enabled: boolean }
+    }) {
+      return { enabled: setPersistedDebug(ctx.payload.enabled) }
+    })
+
+    return handlers
+      .handle("authSet", authSet)
+      .handle("authRemove", authRemove)
+      .handle("log", log)
+      .handle("debugLoggingGet", debugLoggingGet)
+      .handle("debugLoggingSet", debugLoggingSet)
   }),
 )

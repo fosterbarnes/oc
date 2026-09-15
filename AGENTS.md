@@ -6,6 +6,13 @@
 - `UPSTREAM\opencode` is the separate upstream-only checkout at `C:\Users\user\Documents\GitHub\oc\UPSTREAM\opencode`. Keep custom source changes in this parent checkout; upstream synchronization must not modify parent source files.
 - Windows TUI segfaults on Bun 1.4.0 (`34cbb9a40`): `bun:ffi` FTL pointer args (oven-sh/bun#39829, #40302). `.scripts\build.ps1` and `.scripts\.run.ps1` call `requireBunForCompile` and will `bun upgrade --canary` when PATH bun is still 1.4.0. Do not ship `opencode.exe` compiled with 1.4.0. Stable 1.4.1 was not published as of 2026-08-31.
 
+## Build notes
+
+- Session history lives in root `buildNotes.md`. Layout is rules/summaries, then `# Historical entries (newest first)`.
+- Insert each new session entry immediately under that heading. Do not append at EOF. Newest entries stay on top so agents start reading and writing at the same line.
+- Do not truncate, overwrite, rewrite, or compact existing entries. Do not use the Write tool on an existing `buildNotes.md` except user-ordered migration or the documented archive rotation.
+- Do not edit `buildNotes.txt`. Do not create notes under `.md/`.
+
 ## Branch Names
 
 Use a short branch name of at most three words, separated by hyphens. Do not use slashes or type prefixes such as `feat/` or `fix/`.
@@ -165,3 +172,4 @@ const table = sqliteTable("session", {
 - Keep delivery vocabulary explicit. Prompts steer by default and promote at the next safe provider-turn boundary while the current drain requires continuation. An explicit `queue` input remains pending until the Session would otherwise become idle; promote one queued input at that boundary, then reevaluate continuation before promoting another. Promoting any new user input resets the selected agent's provider-turn allowance; a batch of steers resets it once.
 - Keep EventV2 replay owner claims separate from clustered Session execution ownership.
 - Keep the System Context algebra, registry, and built-ins in `src/system-context`; keep Context Source producers with their observed domains, and keep Session History selection plus Context Epoch persistence Session-owned.
+

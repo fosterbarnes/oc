@@ -26,8 +26,54 @@ export type Settings = Partial<Record<Key, Value>> & {
   server?: { hostname?: string; port?: number; startOnWindowsUserStart?: boolean }
 }
 
+export function defaultServerPort() {
+  return Global.Path.debug ? 4097 : 4096
+}
+
 function filePath() {
   return path.join(Global.Path.config, "oc.json")
+}
+
+function productionTwin(target: string) {
+  return target.replaceAll("opencode-debug", "opencode")
+}
+
+async function copyIfMissing(source: string, destination: string) {
+  try {
+    await fs.stat(destination)
+    return
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error
+  }
+  try {
+    await fs.copyFile(source, destination)
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error
+  }
+}
+
+async function seedDebugFromProduction() {
+  if (!Global.Path.debug) return
+  await fs.mkdir(Global.Path.data, { recursive: true })
+  await fs.mkdir(Global.Path.config, { recursive: true })
+  await copyIfMissing(path.join(productionTwin(Global.Path.data), "auth.json"), path.join(Global.Path.data, "auth.json"))
+  await copyIfMissing(
+    path.join(productionTwin(Global.Path.config), "config.json"),
+    path.join(Global.Path.config, "config.json"),
+  )
+  const destination = filePath()
+  try {
+    await fs.stat(destination)
+    return
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error
+  }
+  const settings = await readFile(path.join(productionTwin(Global.Path.config), "oc.json"))
+  await fs.writeFile(
+    destination,
+    `${JSON.stringify({ ...settings, server: { ...settings.server, port: defaultServerPort() } }, null, 2)}\n`,
+    "utf8",
+  )
 }
 
 async function readFile(file: string) {
@@ -41,6 +87,7 @@ async function readFile(file: string) {
 }
 
 export async function read() {
+  await seedDebugFromProduction()
   const file = filePath()
   try {
     return await readFile(file)
@@ -77,8 +124,7 @@ export function executablePath() {
 }
 
 function serverStateDirectory() {
-  const stateHome = process.env.XDG_STATE_HOME || path.join(os.homedir(), ".local", "state")
-  return path.join(stateHome, "opencode")
+  return Global.Path.state
 }
 
 function serverStatePath() {
@@ -129,7 +175,7 @@ async function serverHealthy(url: string, secret: string) {
 async function startServerUnlocked() {
   const settings = await read()
   const hostname = settings.server?.hostname || "127.0.0.1"
-  const port = settings.server?.port || 4096
+  const port = settings.server?.port || defaultServerPort()
   if (!["127.0.0.1", "localhost", "::1"].includes(hostname)) {
     throw new Error(`Resident OpenCode server must use a loopback hostname: ${hostname}`)
   }
@@ -159,7 +205,12 @@ async function startServerUnlocked() {
     detached: true,
     stdio: "ignore",
     windowsHide: true,
-    env: { ...process.env, OPENCODE_SERVER_PASSWORD: secret, OPENCODE_SERVER_USERNAME: "opencode" },
+    env: {
+      ...process.env,
+      OPENCODE_SERVER_PASSWORD: secret,
+      OPENCODE_SERVER_USERNAME: "opencode",
+      ...(Global.Path.debug ? { OPENCODE_LOG_LEVEL: process.env.OPENCODE_LOG_LEVEL || "DEBUG" } : {}),
+    },
   })
   child.unref()
   for (let attempt = 0; attempt < 100; attempt++) {

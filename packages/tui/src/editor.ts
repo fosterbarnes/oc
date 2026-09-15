@@ -1,6 +1,7 @@
 import type { CliRenderer } from "@opentui/core"
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs"
 import { readFile, rm, writeFile } from "node:fs/promises"
+import net from "node:net"
 import os from "node:os"
 import path from "node:path"
 import { spawn } from "node:child_process"
@@ -23,6 +24,24 @@ export function normalizePromptContent(content: string) {
   return content
 }
 
+export function parseEditorCommand(editor: string) {
+  const parts = editor.split(" ").filter((part) => part.length > 0)
+  return { command: parts[0]!, args: parts.slice(1) }
+}
+
+export function editorLaunchSpec(editor: string, filePath: string) {
+  const parsed = parseEditorCommand(editor)
+  return {
+    command: parsed.command,
+    args: [...parsed.args, filePath],
+    options: {
+      detached: true as const,
+      stdio: "ignore" as const,
+      shell: process.platform === "win32",
+    },
+  }
+}
+
 export async function openEditor(input: { value: string; renderer: CliRenderer; cwd?: string; stdin?: EditorStdio }) {
   const editor = process.env.VISUAL || process.env.EDITOR
   if (!editor) return
@@ -32,8 +51,8 @@ export async function openEditor(input: { value: string; renderer: CliRenderer; 
   input.renderer.currentRenderBuffer.clear()
   try {
     await new Promise<void>((resolve, reject) => {
-      const parts = editor.split(" ")
-      const child = spawn(parts[0]!, [...parts.slice(1), file], {
+      const parsed = parseEditorCommand(editor)
+      const child = spawn(parsed.command, [...parsed.args, file], {
         cwd: input.cwd && existsSync(input.cwd) ? input.cwd : process.cwd(),
         stdio: [input.stdin ?? "inherit", "inherit", "inherit"],
         shell: process.platform === "win32",
@@ -65,10 +84,12 @@ export async function openFileAtLocation(input: { filePath: string; cwd?: string
   if (!editor) throw new Error("No editor configured. Set openEditedWith, VISUAL, or EDITOR.")
 
   await new Promise<void>((resolve, reject) => {
-    const child = spawn(editor, [filePath], {
+    const launch = editorLaunchSpec(editor, filePath)
+    const child = spawn(launch.command, launch.args, {
       cwd: input.cwd && existsSync(input.cwd) ? input.cwd : process.cwd(),
-      detached: true,
-      stdio: "ignore",
+      detached: launch.options.detached,
+      stdio: launch.options.stdio,
+      shell: launch.options.shell,
     })
     child.once("error", reject)
     child.once("spawn", () => {
@@ -78,15 +99,33 @@ export async function openFileAtLocation(input: { filePath: string; cwd?: string
   })
 }
 
-export function discoverEditorConnection(directory: string) {
-  const root = path.join(os.homedir(), ".claude", "ide")
+export function editorPortListening(port: number, timeoutMs = 200) {
+  return new Promise<boolean>((resolve) => {
+    const socket = net.connect({ port, host: "127.0.0.1" })
+    const done = (open: boolean) => {
+      socket.removeAllListeners()
+      socket.destroy()
+      resolve(open)
+    }
+    socket.setTimeout(timeoutMs)
+    socket.once("connect", () => done(true))
+    socket.once("timeout", () => done(false))
+    socket.once("error", () => done(false))
+  })
+}
+
+export async function discoverEditorConnection(
+  directory: string,
+  options?: { lockDir?: string; isPortOpen?: (port: number) => boolean | Promise<boolean> },
+) {
+  const root = options?.lockDir ?? path.join(os.homedir(), ".claude", "ide")
   const contains = (parent: string) => {
     const resolved = path.resolve(parent)
     const relative = path.relative(resolved, path.resolve(directory))
     return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative)) ? resolved.length : 0
   }
   try {
-    return readdirSync(root)
+    const candidates = readdirSync(root)
       .filter((entry) => entry.endsWith(".lock"))
       .flatMap((entry) => {
         const file = path.join(root, entry)
@@ -105,6 +144,7 @@ export function discoverEditorConnection(directory: string) {
               url: `ws://127.0.0.1:${port}`,
               authToken: typeof value.authToken === "string" ? value.authToken : undefined,
               source: `lock:${port}`,
+              port,
               score,
               mtime: statSync(file).mtimeMs,
             },
@@ -114,7 +154,13 @@ export function discoverEditorConnection(directory: string) {
         }
       })
       .sort((left, right) => right.score - left.score || right.mtime - left.mtime)
-      .map(({ url, authToken, source }) => ({ url, authToken, source }))[0]
+
+    const isPortOpen = options?.isPortOpen ?? editorPortListening
+    for (const candidate of candidates) {
+      if (!(await isPortOpen(candidate.port))) continue
+      return { url: candidate.url, authToken: candidate.authToken, source: candidate.source }
+    }
+    return undefined
   } catch {
     return undefined
   }

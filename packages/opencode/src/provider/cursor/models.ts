@@ -59,10 +59,7 @@ function isNonEmptyString(value: unknown): value is string {
   return typeof value === "string" && value.trim().length > 0
 }
 
-function optionalString(
-  record: Record<string, unknown>,
-  names: readonly string[],
-): string | undefined | null {
+function optionalString(record: Record<string, unknown>, names: readonly string[]): string | undefined | null {
   for (const name of names) {
     if (!Object.hasOwn(record, name)) continue
     if (record[name] === undefined) return undefined
@@ -71,10 +68,7 @@ function optionalString(
   return undefined
 }
 
-function optionalBoolean(
-  record: Record<string, unknown>,
-  names: readonly string[],
-): boolean | undefined | null {
+function optionalBoolean(record: Record<string, unknown>, names: readonly string[]): boolean | undefined | null {
   for (const name of names) {
     if (!Object.hasOwn(record, name)) continue
     if (record[name] === undefined) return undefined
@@ -83,17 +77,12 @@ function optionalBoolean(
   return undefined
 }
 
-function optionalPositiveNumber(
-  record: Record<string, unknown>,
-  names: readonly string[],
-): number | undefined | null {
+function optionalPositiveNumber(record: Record<string, unknown>, names: readonly string[]): number | undefined | null {
   for (const name of names) {
     if (!Object.hasOwn(record, name)) continue
     const value = record[name]
     if (value === undefined) return undefined
-    return typeof value === "number" && Number.isFinite(value) && value > 0
-      ? value
-      : null
+    return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : null
   }
   return undefined
 }
@@ -111,32 +100,20 @@ export function normalizeModelParameterValues(value: unknown): ModelParameterVal
 
 function normalizeVariant(value: unknown, fallbackName: string): ModelVariant | null {
   if (!isPlainRecord(value)) return null
-  const parameters = normalizeModelParameterValues(
-    value.parameterValues ?? value.parameter_values ?? [],
-  )
+  const parameters = normalizeModelParameterValues(value.parameterValues ?? value.parameter_values ?? [])
   if (!parameters) return null
   const key = optionalString(value, ["key"])
   const displayName = optionalString(value, ["displayName", "display_name"])
-  const isDefaultNonMax = optionalBoolean(
-    value,
-    ["isDefaultNonMax", "isDefaultNonMaxConfig", "is_default_non_max_config"],
-  )
-  const isDefaultMax = optionalBoolean(
-    value,
-    ["isDefaultMax", "isDefaultMaxConfig", "is_default_max_config"],
-  )
-  if (
-    key === null ||
-    displayName === null ||
-    isDefaultNonMax === null ||
-    isDefaultMax === null
-  ) {
+  const isDefaultNonMax = optionalBoolean(value, [
+    "isDefaultNonMax",
+    "isDefaultNonMaxConfig",
+    "is_default_non_max_config",
+  ])
+  const isDefaultMax = optionalBoolean(value, ["isDefaultMax", "isDefaultMaxConfig", "is_default_max_config"])
+  if (key === null || displayName === null || isDefaultNonMax === null || isDefaultMax === null) {
     return null
   }
-  if (
-    (key !== undefined && !isNonEmptyString(key)) ||
-    (displayName !== undefined && !isNonEmptyString(displayName))
-  ) {
+  if ((key !== undefined && !isNonEmptyString(key)) || (displayName !== undefined && !isNonEmptyString(displayName))) {
     return null
   }
   return {
@@ -161,14 +138,12 @@ function normalizeModelInfo(value: unknown): ModelInfo | null {
   const supportsAgent = optionalBoolean(value, ["supportsAgent", "supports_agent"])
   const supportsImages = optionalBoolean(value, ["supportsImages", "supports_images"])
   const supportsMaxMode = optionalBoolean(value, ["supportsMaxMode", "supports_max_mode"])
-  const maxContext = optionalPositiveNumber(
-    value,
-    ["maxContext", "contextTokenLimit", "context_token_limit"],
-  )
-  const maxContextForMaxMode = optionalPositiveNumber(
-    value,
-    ["maxContextForMaxMode", "contextTokenLimitForMaxMode", "context_token_limit_for_max_mode"],
-  )
+  const maxContext = optionalPositiveNumber(value, ["maxContext", "contextTokenLimit", "context_token_limit"])
+  const maxContextForMaxMode = optionalPositiveNumber(value, [
+    "maxContextForMaxMode",
+    "contextTokenLimitForMaxMode",
+    "context_token_limit_for_max_mode",
+  ])
   if (
     displayName === null ||
     family === null ||
@@ -209,9 +184,7 @@ export function normalizeModelCache(value: unknown): ModelCache | null {
   return {
     models: models as ModelInfo[],
     fetchedAt: value.fetchedAt,
-    ...(value.schemaVersion === undefined
-      ? {}
-      : { schemaVersion: value.schemaVersion as number }),
+    ...(value.schemaVersion === undefined ? {} : { schemaVersion: value.schemaVersion as number }),
   }
 }
 
@@ -227,13 +200,9 @@ export function extractCursorVariantParameters(
   if (!providerOptions || !Object.hasOwn(providerOptions, CURSOR_VARIANT_PARAMETERS_KEY)) {
     return undefined
   }
-  const params = normalizeModelParameterValues(
-    providerOptions[CURSOR_VARIANT_PARAMETERS_KEY],
-  )
+  const params = normalizeModelParameterValues(providerOptions[CURSOR_VARIANT_PARAMETERS_KEY])
   if (!params) {
-    throw new CursorVariantSelectionError(
-      "is malformed: cursorVariantParameters must be a parameter array",
-    )
+    throw new CursorVariantSelectionError("is malformed: cursorVariantParameters must be a parameter array")
   }
   return params
 }
@@ -249,10 +218,19 @@ export function resolveCursorWireModelId(
 /** True when resolved params select the long-context (1m) tier. */
 export function paramsImplyMaxMode(params: ModelParameterValue[]): boolean {
   return params.some(
-    (parameter) =>
-      parameter.id === "context" &&
-      parseCursorContextLimit(parameter.value) === 1_000_000,
+    (parameter) => parameter.id === "context" && parseCursorContextLimit(parameter.value) === 1_000_000,
   )
+}
+
+/**
+ * Resolve the request-level max_mode bit. An explicit variant pick owns the
+ * context tier; otherwise a standalone maxMode hint may select max mode.
+ */
+export function resolveVariantMaxMode(
+  params: ModelParameterValue[],
+  opts: { picked?: ModelParameterValue[]; maxMode?: boolean } = {},
+): boolean {
+  return paramsImplyMaxMode(params) || (opts.picked === undefined && opts.maxMode === true)
 }
 
 // Cursor encodes a model's context window as a variant parameter `id: "context"`
@@ -285,9 +263,7 @@ function isLongContextVariant(v: ModelVariant): boolean {
 }
 
 function positiveNumber(value: unknown): number | undefined {
-  return typeof value === "number" && Number.isFinite(value) && value > 0
-    ? value
-    : undefined
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : undefined
 }
 
 // ── Cache helpers ──
@@ -316,10 +292,7 @@ export async function writeCache(cacheDir: string, cache: ModelCache): Promise<v
   if (!normalized) throw new Error("Refusing to write an invalid Cursor model cache")
   const filePath = cacheFilePath(cacheDir)
   const directory = path.dirname(filePath)
-  const tempPath = path.join(
-    directory,
-    `.${MODEL_CACHE_FILE}.${process.pid}.${crypto.randomUUID()}.tmp`,
-  )
+  const tempPath = path.join(directory, `.${MODEL_CACHE_FILE}.${process.pid}.${crypto.randomUUID()}.tmp`)
   await mkdir(directory, { recursive: true })
   try {
     await writeFile(tempPath, JSON.stringify(normalized, null, 2), "utf-8")
@@ -337,9 +310,7 @@ function apiBoolean(record: Record<string, unknown>, names: readonly string[]): 
   return value ?? false
 }
 
-export function mapAvailableModelsResponse(
-  raw: Record<string, unknown>,
-): ModelInfo[] {
+export function mapAvailableModelsResponse(raw: Record<string, unknown>): ModelInfo[] {
   const entries = (raw as { models?: unknown[] }).models ?? []
   const models: ModelInfo[] = []
 
@@ -379,11 +350,7 @@ export function mapAvailableModelsResponse(
     // max-mode variant cannot inflate the base window.
     const variantBaseContext =
       variantContextTokens(variants.find((v) => v.isDefaultNonMax)) ??
-      variantContextTokens(
-        variants.find((v) =>
-          variantContextTokens(v) !== 1_000_000,
-        ),
-      ) ??
+      variantContextTokens(variants.find((v) => variantContextTokens(v) !== 1_000_000)) ??
       variantContextTokens(variants.find((v) => v.parameterValues.some((p) => p.id === "context")))
     const variantMaxContext = variantContextTokens(variants.find((v) => v.isDefaultMax))
     const supportsImages = optionalBoolean(e, ["supportsImages", "supports_images"])
@@ -399,8 +366,7 @@ export function mapAvailableModelsResponse(
       ...(supportsImages === undefined ? {} : { supportsImages }),
       maxContext: variantBaseContext ?? positiveNumber(e.contextTokenLimit ?? e.context_token_limit),
       maxContextForMaxMode:
-        variantMaxContext ??
-        positiveNumber(e.contextTokenLimitForMaxMode ?? e.context_token_limit_for_max_mode),
+        variantMaxContext ?? positiveNumber(e.contextTokenLimitForMaxMode ?? e.context_token_limit_for_max_mode),
       supportsMaxMode: apiBoolean(e, ["supportsMaxMode", "supports_max_mode"]),
       variants,
     })
@@ -445,10 +411,8 @@ export function resolveVariantParameters(
 
   const effortOf = (v: ModelVariant): string | undefined =>
     v.parameterValues.find((p) => p.id === "effort" || p.id === "reasoning")?.value
-  const isFast = (v: ModelVariant): boolean =>
-    v.parameterValues.find((p) => p.id === "fast")?.value === "true"
-  const isMaxVariant = (v: ModelVariant): boolean =>
-    v.isDefaultMax || isLongContextVariant(v)
+  const isFast = (v: ModelVariant): boolean => v.parameterValues.find((p) => p.id === "fast")?.value === "true"
+  const isMaxVariant = (v: ModelVariant): boolean => v.isDefaultMax || isLongContextVariant(v)
 
   const wantMax = opts.maxMode ?? false
   // Non-fast pool for hint-based resolution only. Exact `picked` matching
@@ -466,10 +430,7 @@ export function resolveVariantParameters(
         v.parameterValues.every((parameter) => pickedById.get(parameter.id) === parameter.value),
     )
     if (exact) {
-      return buildRequestedModelParams(exact.parameterValues, {
-        reasoningEffort: opts.reasoningEffort,
-        maxMode: wantMax,
-      })
+      return buildRequestedModelParams(exact.parameterValues)
     }
     throw new CursorVariantSelectionError(
       `is stale for model ${JSON.stringify(model.id)}: its exact parameter tuple is unavailable`,
@@ -518,10 +479,7 @@ export async function fetchModels(
 
 const refreshesByDirectory = new Map<string, Promise<ModelInfo[]>>()
 
-export async function refreshModelCache(
-  cacheDir: string,
-  fetcher: () => Promise<ModelInfo[]>,
-): Promise<ModelInfo[]> {
+export async function refreshModelCache(cacheDir: string, fetcher: () => Promise<ModelInfo[]>): Promise<ModelInfo[]> {
   const key = path.resolve(cacheDir)
   const existing = refreshesByDirectory.get(key)
   if (existing) return existing
@@ -548,16 +506,14 @@ export async function discoverModels(
   options: { baseURL?: string; headers?: Record<string, string>; timeoutMs?: number } = {},
 ): Promise<ModelInfo[]> {
   const cached = await readCache(cacheDir)
-  const refresh = () =>
-    refreshModelCache(cacheDir, () => fetchModels(token, options))
+  const refresh = () => refreshModelCache(cacheDir, () => fetchModels(token, options))
 
   // Cache is fresh → return it; refresh in background
   if (cached && isCacheFresh(cached)) {
     // Background refresh (fire and forget)
-    void refresh()
-      .catch(() => {
-        /* background refresh failure is non-fatal */
-      })
+    void refresh().catch(() => {
+      /* background refresh failure is non-fatal */
+    })
     return cached.models
   }
 

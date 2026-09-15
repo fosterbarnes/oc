@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test"
 import fs from "fs/promises"
 import os from "os"
 import path from "path"
-import { Global } from "@opencode-ai/core/global"
+import { Global, resolveAppName } from "@opencode-ai/core/global"
 import * as OcConfig from "@/config/oc"
 
 const originalConfigPath = Global.Path.config
@@ -16,6 +16,16 @@ afterEach(async () => {
   await Promise.all(
     temporaryDirectories.splice(0).map((directory) => fs.rm(directory, { recursive: true, force: true })),
   )
+})
+
+describe("debug instance identity", () => {
+  test("treats oc-debug executable and OPENCODE_INSTANCE as the debug app", () => {
+    expect(resolveAppName({ execPath: "C:\\Apps\\opencode\\opencode.exe" })).toBe("opencode")
+    expect(resolveAppName({ execPath: "C:\\Apps\\opencode\\ocdebug.exe" })).toBe("opencode-debug")
+    expect(resolveAppName({ execPath: "C:\\Apps\\opencode\\oc-debug.exe" })).toBe("opencode-debug")
+    expect(resolveAppName({ instance: "debug", execPath: "C:\\Apps\\opencode\\opencode.exe" })).toBe("opencode-debug")
+    expect(OcConfig.defaultServerPort()).toBe(Global.Path.debug ? 4097 : 4096)
+  })
 })
 
 describe("OC config", () => {

@@ -9812,6 +9812,7 @@ export type SessionGetResponse = SessionGetResponses[keyof SessionGetResponses]
 export type SessionUpdateData = {
   body?: {
     title?: string
+    agent?: string
     sessionComplete?: boolean
     sessionFailed?: boolean
     metadata?: {

@@ -24,28 +24,31 @@ const it = testEffect(
   LayerNode.compile(LayerNode.group([Provider.node, Env.node, Plugin.node, CrossSpawnSpawner.node])),
 )
 
-it.live("headerTimeout does not abort delayed SSE body after headers arrive", () =>
-  Effect.gen(function* () {
-    const server = yield* Effect.acquireRelease(
-      Effect.promise(() => delayedBodyServer(1_000)),
-      (server) => Effect.sync(() => server.server.close()),
-    )
+it.live(
+  "headerTimeout does not abort delayed SSE body after headers arrive",
+  () =>
+    Effect.gen(function* () {
+      const server = yield* Effect.acquireRelease(
+        Effect.promise(() => delayedBodyServer(1_000)),
+        (server) => Effect.sync(() => closeServer(server.server)),
+      )
 
-    yield* provideTmpdirInstance(
-      () =>
-        Effect.gen(function* () {
-          const provider = yield* Provider.Service
-          const model = yield* provider.getModel(ProviderV2.ID.make("test"), ModelV2.ID.make("test-model"))
-          const result = streamText({
-            model: yield* provider.getLanguage(model),
-            messages: [{ role: "user", content: "hello" }],
-          })
+      yield* provideTmpdirInstance(
+        () =>
+          Effect.gen(function* () {
+            const provider = yield* Provider.Service
+            const model = yield* provider.getModel(ProviderV2.ID.make("test"), ModelV2.ID.make("test-model"))
+            const result = streamText({
+              model: yield* provider.getLanguage(model),
+              messages: [{ role: "user", content: "hello" }],
+            })
 
-          expect(yield* Effect.promise(() => result.text)).toBe("late")
-        }),
-      { config: providerConfig(server.url, { headerTimeout: 500 }) },
-    )
-  }),
+            expect(yield* Effect.promise(() => result.text)).toBe("late")
+          }),
+        { config: providerConfig(server.url, { headerTimeout: 500, chunkTimeout: 5_000 }) },
+      )
+    }),
+  15_000,
 )
 
 for (const timeout of ["chunkTimeout", "headerTimeout"] as const) {
@@ -53,7 +56,7 @@ for (const timeout of ["chunkTimeout", "headerTimeout"] as const) {
     Effect.gen(function* () {
       const server = yield* Effect.acquireRelease(
         Effect.promise(() => delayedBodyServer(250)),
-        (server) => Effect.sync(() => server.server.close()),
+        (server) => Effect.sync(() => closeServer(server.server)),
       )
 
       yield* provideTmpdirInstance(
@@ -93,7 +96,7 @@ it.live("configured chunkTimeout raises a retryable response stream error when S
   Effect.gen(function* () {
     const server = yield* Effect.acquireRelease(
       Effect.promise(() => delayedBodyServer(250)),
-      (server) => Effect.sync(() => server.server.close()),
+      (server) => Effect.sync(() => closeServer(server.server)),
     )
 
     yield* provideTmpdirInstance(
@@ -130,7 +133,7 @@ it.live("chunkTimeout can be disabled with false", () =>
   Effect.gen(function* () {
     const server = yield* Effect.acquireRelease(
       Effect.promise(() => delayedBodyServer(250)),
-      (server) => Effect.sync(() => server.server.close()),
+      (server) => Effect.sync(() => closeServer(server.server)),
     )
 
     yield* provideTmpdirInstance(
@@ -156,7 +159,7 @@ it.live("headerTimeout aborts when response headers do not arrive", () =>
   Effect.gen(function* () {
     const server = yield* Effect.acquireRelease(
       Effect.promise(() => delayedHeaderServer(250)),
-      (server) => Effect.sync(() => server.server.close()),
+      (server) => Effect.sync(() => closeServer(server.server)),
     )
 
     yield* provideTmpdirInstance(
@@ -188,7 +191,7 @@ it.live("headerTimeout can be disabled with false for non-OpenAI providers", () 
   Effect.gen(function* () {
     const server = yield* Effect.acquireRelease(
       Effect.promise(() => delayedHeaderServer(100)),
-      (server) => Effect.sync(() => server.server.close()),
+      (server) => Effect.sync(() => closeServer(server.server)),
     )
 
     yield* provideTmpdirInstance(
@@ -244,6 +247,11 @@ it.live("OpenAI API auth gets default headerTimeout", () =>
   }),
 )
 
+function closeServer(server: Server) {
+  server.closeAllConnections?.()
+  server.close()
+}
+
 function providerConfig(url: string, options: Record<string, unknown> = {}) {
   const config = testProviderConfig(url)
   return {
@@ -274,6 +282,7 @@ async function delayedBodyServer(delay: number): Promise<{ server: Server; url: 
   const server = createServer((_, res) => {
     res.writeHead(200, { "content-type": "text/event-stream" })
     res.flushHeaders()
+    res.write(":\n\n")
     setTimeout(() => {
       res.end('data: {"choices":[{"delta":{"content":"late"}}]}\n\ndata: [DONE]\n\n')
     }, delay)

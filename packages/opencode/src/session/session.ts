@@ -432,6 +432,7 @@ export interface Interface {
   readonly touch: (sessionID: SessionID) => Effect.Effect<void>
   readonly get: (id: SessionID) => Effect.Effect<Info, NotFound>
   readonly setTitle: (input: { sessionID: SessionID; title: string }) => Effect.Effect<void>
+  readonly setAgent: (input: { sessionID: SessionID; agent: string }) => Effect.Effect<void>
   readonly setArchived: (input: { sessionID: SessionID; time?: number }) => Effect.Effect<void>
   readonly setSessionComplete: (input: { sessionID: SessionID; sessionComplete: boolean }) => Effect.Effect<void>
   readonly setSessionFailed: (input: { sessionID: SessionID; sessionFailed: boolean }) => Effect.Effect<void>
@@ -764,6 +765,10 @@ const layer: Layer.Layer<
       yield* patch(input.sessionID, { title: input.title }).pipe(Effect.orDie)
     })
 
+    const setAgent = Effect.fn("Session.setAgent")(function* (input: { sessionID: SessionID; agent: string }) {
+      yield* patch(input.sessionID, { agent: input.agent, time: { updated: Date.now() } }).pipe(Effect.orDie)
+    })
+
     const setArchived = Effect.fn("Session.setArchived")(function* (input: { sessionID: SessionID; time?: number }) {
       yield* patch(input.sessionID, { time: { archived: input.time } }).pipe(Effect.orDie)
     })
@@ -941,6 +946,7 @@ const layer: Layer.Layer<
       touch,
       get,
       setTitle,
+      setAgent,
       setArchived,
       setSessionComplete,
       setSessionFailed,

@@ -77,6 +77,9 @@ it.instance("plan agent denies edits except .opencode/plans/*", () =>
     expect(evalPerm(plan, "edit")).toBe("deny")
     // But specific path is allowed
     expect(Permission.evaluate("edit", ".opencode/plans/foo.md", plan!.permission).action).toBe("allow")
+    expect(
+      Permission.evaluate("edit", path.join(Global.Path.data, "plans", "foo.md"), plan!.permission).action,
+    ).toBe("allow")
   }),
 )
 

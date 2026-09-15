@@ -29,6 +29,7 @@ import {
   sameRootPath,
   saveSidebarSettings,
   saveUserScriptSettings,
+  saveUserUsageProviders,
   sessionProjectDirectory,
   sidebarConfigPaths,
   writeCursorSessionToken,
@@ -39,6 +40,8 @@ import {
   cursorSessionCookie,
   cursorDbPath,
   createUsageRefreshScheduler,
+  DEFAULT_USAGE_PROVIDERS,
+  normalizeUsageProviders,
   orderUsageWindows,
   probeCursorUsage,
   probeOpenAIUsage,
@@ -46,6 +49,7 @@ import {
   probeOpenRouterUsage,
   resolveAuthPath,
   shouldRefreshUsageAfterIdle,
+  USAGE_PROVIDER_IDS,
 } from "../../src/routes/session/sidebar-tools/usage.ts"
 import {
   commandArgs,
@@ -1019,6 +1023,51 @@ test("saveUserScriptSettings persists a global default applied when the project 
     assert.equal(settings.scripts.terminal, "wezterm-vertical")
     assert.deepEqual(settings.scripts.wezterm.vertical, { Cells: 20 })
     assert.equal(settings.visibility.showMcp, true)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test("weekly usage defaults include every supported provider", () => {
+  const settings = normalizeSidebarSettings({})
+  assert.deepEqual(settings.usageProviders, ["openai", "cursor", "opencode-go", "openrouter"])
+  assert.deepEqual(DEFAULT_USAGE_PROVIDERS, ["openai", "cursor", "opencode-go", "openrouter"])
+  assert.deepEqual([...USAGE_PROVIDER_IDS], ["openai", "cursor", "opencode-go", "openrouter"])
+})
+
+test("normalizes usage providers by filtering, deduplicating, and preserving an empty list", () => {
+  assert.deepEqual(normalizeUsageProviders(["cursor", "openai", "cursor", "unknown", 4]), ["cursor", "openai"])
+  assert.deepEqual(normalizeUsageProviders([]), [])
+  assert.deepEqual(normalizeUsageProviders("openai"), [...DEFAULT_USAGE_PROVIDERS])
+  assert.deepEqual(normalizeSidebarSettings({ usageProviders: [] }).usageProviders, [])
+  assert.deepEqual(normalizeSidebarSettings({ usageProviders: ["openrouter", "openrouter", "nope"] }).usageProviders, [
+    "openrouter",
+  ])
+})
+
+test("saveUserUsageProviders persists the selection without overwriting other sidebar settings", () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "sidebar-user-usage-"))
+  try {
+    const home = path.join(root, "home")
+    const userPath = path.join(home, ".config", "openSidebar", "config.json")
+    mkdirSync(path.dirname(userPath), { recursive: true })
+    writeFileSync(userPath, JSON.stringify({ showMcp: false, scripts: { terminal: "wezterm-tab" }, extra: "keep" }))
+    saveUserUsageProviders(home, ["opencode-go", "openrouter"])
+    const stored = JSON.parse(readFileSync(userPath, "utf8")) as {
+      extra?: string
+      scripts?: { terminal?: string }
+      showMcp?: boolean
+      usageProviders?: string[]
+    }
+    assert.equal(stored.extra, "keep")
+    assert.equal(stored.showMcp, false)
+    assert.equal(stored.scripts?.terminal, "wezterm-tab")
+    assert.deepEqual(stored.usageProviders, ["opencode-go", "openrouter"])
+    const projectPath = path.join(root, "project", ".config", "openSidebar.json")
+    const settings = loadSidebarSettings(path.join(root, "project"), home, userPath, projectPath)
+    assert.deepEqual(settings.usageProviders, ["opencode-go", "openrouter"])
+    assert.equal(settings.scripts.terminal, "wezterm-tab")
+    assert.equal(settings.visibility.showMcp, false)
   } finally {
     rmSync(root, { recursive: true, force: true })
   }

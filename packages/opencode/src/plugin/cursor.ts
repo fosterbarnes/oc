@@ -13,6 +13,7 @@ import {
   pollForTokens,
   exchangeApiKey,
   refreshAccessToken,
+  type TokenPair,
   isExpiringSoon,
   generatePkceParams,
   generatePkceChallenge,
@@ -114,6 +115,7 @@ export async function CursorPlugin(input: PluginInput): Promise<Hooks> {
   // getAuth() may still see the old credentials while we already hold a usable
   // token here — keep it so the loader can still discover models.
   let sessionAccessToken: string | undefined
+  const refreshesByToken = new Map<string, Promise<TokenPair>>()
 
   async function persistAuth(body: Auth): Promise<void> {
     await input.client.auth.set({
@@ -128,6 +130,19 @@ export async function CursorPlugin(input: PluginInput): Promise<Hooks> {
       await persistAuth(body)
     } catch {
       // ignore — token is still usable for this process
+    }
+  }
+
+  async function refreshCursorToken(refreshToken: string): Promise<TokenPair> {
+    const key = `${apiBaseURL}|${refreshToken}`
+    const existing = refreshesByToken.get(key)
+    if (existing) return existing
+    const refresh = refreshAccessToken(refreshToken, apiBaseURL)
+    refreshesByToken.set(key, refresh)
+    try {
+      return await refresh
+    } finally {
+      if (refreshesByToken.get(key) === refresh) refreshesByToken.delete(key)
     }
   }
 
@@ -155,7 +170,7 @@ export async function CursorPlugin(input: PluginInput): Promise<Hooks> {
       // it the same way as OAuth when it is expiring / already expired.
       if (refreshToken && isExpiringSoon(auth.key)) {
         try {
-          const newTokens = await refreshAccessToken(refreshToken, apiBaseURL)
+          const newTokens = await refreshCursorToken(refreshToken)
           accessToken = newTokens.accessToken
           await persistAuthBestEffort({
             type: "api",
@@ -180,7 +195,7 @@ export async function CursorPlugin(input: PluginInput): Promise<Hooks> {
       }
       if (!auth.refresh) return undefined
       try {
-        const newTokens = await refreshAccessToken(auth.refresh, apiBaseURL)
+        const newTokens = await refreshCursorToken(auth.refresh)
         // Preserve optional OAuth fields (v2 Auth / plugin may carry these).
         const extras = auth as { accountId?: string; enterpriseUrl?: string }
         // Use the new token even if persisting back to OpenCode fails.
@@ -309,6 +324,8 @@ export async function CursorPlugin(input: PluginInput): Promise<Hooks> {
 
     async config(cfg: Config) {
       setCursorShellPath((cfg as Config & { shell?: string }).shell)
+      const enabled = (cfg as Config & { enabled_providers?: string[] }).enabled_providers
+      if (enabled !== undefined && !enabled.includes(CURSOR_PROVIDER_ID)) return
       cfg.provider ??= {}
       const models = await loadModels()
       const existing = cfg.provider[CURSOR_PROVIDER_ID]

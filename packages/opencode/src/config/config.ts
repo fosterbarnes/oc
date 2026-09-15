@@ -503,7 +503,15 @@ const layer = Layer.effect(
           deps.push(dep)
 
           result.command = mergeDeep(result.command ?? {}, yield* Effect.promise(() => ConfigCommand.load(dir)))
-          result.agent = mergeDeep(result.agent ?? {}, yield* Effect.promise(() => ConfigAgent.load(dir)))
+          const scanned = yield* Effect.promise(() => ConfigAgent.scan(dir))
+          for (const diag of scanned.diagnostics) {
+            yield* Effect.logWarning("invalid agent file", {
+              path: diag.path,
+              message: diag.message,
+              issues: diag.issues,
+            })
+          }
+          result.agent = mergeDeep(result.agent ?? {}, scanned.agents)
           result.agent = mergeDeep(result.agent ?? {}, yield* Effect.promise(() => ConfigAgent.loadMode(dir)))
           // Auto-discovered plugins under `.opencode/plugin(s)` are already local files, so ConfigPlugin.load
           // returns normalized Specs and we only need to attach origin metadata here.
@@ -661,7 +669,7 @@ const layer = Layer.effect(
 
     const state = yield* InstanceState.make<State>(
       Effect.fn("Config.state")(function* (ctx) {
-        return yield* loadInstanceState(ctx).pipe(Effect.orDie)
+        return yield* loadInstanceState(ctx).pipe(Effect.orDie, Effect.annotateLogs({ channel: "config" }))
       }),
     )
 

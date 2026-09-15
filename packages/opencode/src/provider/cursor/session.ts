@@ -2,11 +2,7 @@ import type { BidiStream, BidiTerminalEvent } from "./transport/connect.js"
 import { trace } from "./debug.js"
 import { CursorProtocolError, type CursorProviderError } from "./errors.js"
 import { sessionActivity, type SessionActivitySource } from "./activity.js"
-import type {
-  HostSubagentCatalog,
-  OpencodeToolDef,
-  ToolAliasRegistry,
-} from "./protocol/tools.js"
+import type { HostSubagentCatalog, OpencodeToolDef, ToolAliasRegistry } from "./protocol/tools.js"
 import type { CursorConversationTokenDetails } from "./protocol/token-details.js"
 
 export type Frame = { flags: number; payload: Uint8Array }
@@ -43,12 +39,7 @@ const DEFAULT_MAX_OPEN_SESSIONS = 24
 
 function positiveInteger(name: string, value: unknown, fallback: number): number {
   const resolved = value === undefined ? fallback : value
-  if (
-    typeof resolved !== "number" ||
-    !Number.isSafeInteger(resolved) ||
-    resolved <= 0 ||
-    resolved > MAX_TIMER_MS
-  ) {
+  if (typeof resolved !== "number" || !Number.isSafeInteger(resolved) || resolved <= 0 || resolved > MAX_TIMER_MS) {
     throw new CursorProtocolError(
       `Cursor continuation ${name} must be a positive integer no greater than ${MAX_TIMER_MS}`,
     )
@@ -56,9 +47,7 @@ function positiveInteger(name: string, value: unknown, fallback: number): number
   return resolved
 }
 
-export function resolveContinuationPolicy(
-  options: CursorContinuationOptions | undefined,
-): CursorContinuationPolicy {
+export function resolveContinuationPolicy(options: CursorContinuationOptions | undefined): CursorContinuationPolicy {
   if (options !== undefined && (options === null || typeof options !== "object" || Array.isArray(options))) {
     throw new CursorProtocolError("Cursor continuation options must be an object")
   }
@@ -76,21 +65,13 @@ export function resolveContinuationPolicy(
       "Cursor continuation semanticIdleMs and deprecated softHealthMs must match when both are set",
     )
   }
-  const heartbeatMs = positiveInteger(
-    "heartbeatMs",
-    options?.heartbeatMs,
-    DEFAULT_CONTINUATION_POLICY.heartbeatMs,
-  )
+  const heartbeatMs = positiveInteger("heartbeatMs", options?.heartbeatMs, DEFAULT_CONTINUATION_POLICY.heartbeatMs)
   const semanticIdleMs = positiveInteger(
     "semanticIdleMs",
     options?.semanticIdleMs ?? options?.softHealthMs,
     DEFAULT_CONTINUATION_POLICY.semanticIdleMs,
   )
-  const hardCapMs = positiveInteger(
-    "hardCapMs",
-    options?.hardCapMs,
-    DEFAULT_CONTINUATION_POLICY.hardCapMs,
-  )
+  const hardCapMs = positiveInteger("hardCapMs", options?.hardCapMs, DEFAULT_CONTINUATION_POLICY.hardCapMs)
   if (heartbeatMs >= semanticIdleMs) {
     throw new CursorProtocolError("Cursor continuation heartbeatMs must be less than semanticIdleMs")
   }
@@ -143,11 +124,7 @@ export type ContinuationTerminalReason =
   | "superseded-by-new-run"
   | "open-session-cap-exceeded"
 
-export type SessionCloseReason =
-  | ContinuationTerminalReason
-  | "ordinary-cleanup"
-  | "turn-ended"
-  | "initial-write-failed"
+export type SessionCloseReason = ContinuationTerminalReason | "ordinary-cleanup" | "turn-ended" | "initial-write-failed"
 
 export type ContinuationClaim = {
   session: CursorSession
@@ -177,7 +154,7 @@ export type CursorSession = {
   /**
    * Cursor conversation_id for this Run — used to store/echo
    * conversation_checkpoint_update (CLI parity).
-  */
+   */
   conversationId: string
   /** Cache root owning this conversation's durable restart state. */
   cacheDir?: string
@@ -266,7 +243,7 @@ export type CursorSession = {
    * Prevents a late cancel/abort from a prior ReadableStream from destroying
    * the Run connection after tool results were delivered (pending cleared) but
    * Cursor is still generating.
-  */
+   */
   pumpActive: boolean
   /** The active pull owner; stale cancel callbacks cannot affect a newer pump. */
   pumpOwner: symbol | null
@@ -283,6 +260,12 @@ export type CursorSession = {
   semanticDeadlineAt: number
   closeError: CursorProviderError | null
   closed: boolean
+  /** Turn-local assistant text for progress-only continuation. */
+  progressAssistantText?: string
+  /** Continuation attempts this turn (max 1). */
+  progressContinuationAttempts?: number
+  /** Host tool calls emitted this turn. */
+  progressEmittedHostTools?: number
 }
 
 type Tombstone = {
@@ -324,21 +307,9 @@ export class SessionManager {
     this.setTimer = options.setTimer ?? ((callback, delayMs) => setTimeout(callback, delayMs))
     this.clearTimer = options.clearTimer ?? ((timer) => clearTimeout(timer))
     this.activitySource = options.activitySource ?? sessionActivity
-    this.tombstoneTtlMs = positiveInteger(
-      "tombstoneTtlMs",
-      options.tombstoneTtlMs,
-      DEFAULT_TOMBSTONE_TTL_MS,
-    )
-    this.tombstoneLimit = positiveInteger(
-      "tombstoneLimit",
-      options.tombstoneLimit,
-      DEFAULT_TOMBSTONE_LIMIT,
-    )
-    this.maxOpenSessions = positiveInteger(
-      "maxOpenSessions",
-      options.maxOpenSessions,
-      DEFAULT_MAX_OPEN_SESSIONS,
-    )
+    this.tombstoneTtlMs = positiveInteger("tombstoneTtlMs", options.tombstoneTtlMs, DEFAULT_TOMBSTONE_TTL_MS)
+    this.tombstoneLimit = positiveInteger("tombstoneLimit", options.tombstoneLimit, DEFAULT_TOMBSTONE_LIMIT)
+    this.maxOpenSessions = positiveInteger("maxOpenSessions", options.maxOpenSessions, DEFAULT_MAX_OPEN_SESSIONS)
   }
 
   registerSession(session: CursorSession): void {
@@ -384,9 +355,7 @@ export class SessionManager {
       this.byOpenCodeSessionId.set(session.openCodeSessionId, session)
     }
     this.enforceOpenSessionCap(session)
-    const unsubscribe = session.stream.onTerminal?.(
-      (event) => this.onStreamTerminal(session, event),
-    ) ?? (() => {})
+    const unsubscribe = session.stream.onTerminal?.((event) => this.onStreamTerminal(session, event)) ?? (() => {})
     if (session.closed) unsubscribe()
     else session.terminalUnsubscribe = unsubscribe
   }
@@ -514,11 +483,7 @@ export class SessionManager {
   deliverClaim(claim: ContinuationClaim, frames: readonly Uint8Array[]): DeliveryOutcome {
     const { session, execId, pending } = claim
     const key = this.key(session.sessionId, execId)
-    if (
-      session.closed ||
-      this.byExecId.get(key) !== session ||
-      session.pending.get(execId) !== pending
-    ) {
+    if (session.closed || this.byExecId.get(key) !== session || session.pending.get(execId) !== pending) {
       const current = this.classify(session.sessionId, execId)
       if (current.kind === "duplicate") return { ...current, framesWritten: 0 }
       if (current.kind === "terminal") return { ...current, framesWritten: 0 }
@@ -546,8 +511,7 @@ export class SessionManager {
         framesWritten++
       }
     } catch {
-      const reason: ContinuationTerminalReason =
-        framesWritten === 0 ? "result-write-failed" : "ambiguous-partial-write"
+      const reason: ContinuationTerminalReason = framesWritten === 0 ? "result-write-failed" : "ambiguous-partial-write"
       this.close(session, reason)
       return { kind: "terminal", reason, framesWritten }
     }
@@ -609,11 +573,7 @@ export class SessionManager {
     return `${sessionId}:${execId}`
   }
 
-  close(
-    session: CursorSession,
-    reason: SessionCloseReason = "ordinary-cleanup",
-    error?: CursorProviderError,
-  ): void {
+  close(session: CursorSession, reason: SessionCloseReason = "ordinary-cleanup", error?: CursorProviderError): void {
     if (session.closed) return
     session.closed = true
     session.closeError = error ?? session.closeError ?? null
@@ -640,13 +600,14 @@ export class SessionManager {
     session.displayToolCalls?.clear()
     session.blobs?.clear()
     this.sessions.delete(session)
-    if (
-      session.openCodeSessionId &&
-      this.byOpenCodeSessionId.get(session.openCodeSessionId) === session
-    ) {
+    if (session.openCodeSessionId && this.byOpenCodeSessionId.get(session.openCodeSessionId) === session) {
       this.byOpenCodeSessionId.delete(session.openCodeSessionId)
     }
-    try { session.stream.destroy() } catch { /* already closed */ }
+    try {
+      session.stream.destroy()
+    } catch {
+      /* already closed */
+    }
   }
 
   /**
@@ -724,9 +685,7 @@ export class SessionManager {
     const timer = this.setTimer(() => {
       session.hardDeadlineTimer = null
       if (session.closed) return
-      if (
-        [...session.pending.values()].some((pending) => this.hardDeadlineExpired(session, pending))
-      ) {
+      if ([...session.pending.values()].some((pending) => this.hardDeadlineExpired(session, pending))) {
         this.close(session, "hard-cap-expired")
       } else {
         this.scheduleHardDeadline(session)
@@ -747,10 +706,7 @@ export class SessionManager {
     return tombstone
   }
 
-  private putTombstone(
-    key: string,
-    reason: ContinuationTerminalReason | "delivered",
-  ): void {
+  private putTombstone(key: string, reason: ContinuationTerminalReason | "delivered"): void {
     this.tombstones.delete(key)
     this.tombstones.set(key, {
       reason,

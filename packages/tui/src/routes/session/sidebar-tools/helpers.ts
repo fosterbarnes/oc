@@ -2,6 +2,7 @@ import { spawn } from "node:child_process"
 import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
+import { DEFAULT_USAGE_PROVIDERS, normalizeUsageProviders, type UsageProviderId } from "./usage.js"
 
 const IGNORED_DIRECTORIES = new Set([".git", "node_modules", "dist", "build", "coverage"])
 const MAX_TREE_ITEMS = 80
@@ -47,6 +48,7 @@ export type SidebarSettings = {
   favoriteFileRoots: string[]
   recentFileRoots: string[]
   fileRoots: Record<string, { customRoots: string[]; activeRoot?: string }>
+  usageProviders: UsageProviderId[]
 }
 
 const DEFAULT_SCRIPT_SETTINGS: ScriptSettings = {
@@ -215,6 +217,7 @@ export function defaultSidebarSettings(): SidebarSettings {
     favoriteFileRoots: [],
     recentFileRoots: [],
     fileRoots: {},
+    usageProviders: [...DEFAULT_USAGE_PROVIDERS],
   }
 }
 
@@ -264,6 +267,7 @@ export function normalizeSidebarSettings(value: unknown, base = defaultSidebarSe
       favoriteFileRoots: [...base.favoriteFileRoots],
       recentFileRoots: [...base.recentFileRoots],
       fileRoots: structuredClone(base.fileRoots),
+      usageProviders: [...base.usageProviders],
     }
   const input = value as {
     projectDirectory?: unknown
@@ -275,6 +279,7 @@ export function normalizeSidebarSettings(value: unknown, base = defaultSidebarSe
     fileRootPins?: unknown
     recentFileRoots?: unknown
     fileRoots?: unknown
+    usageProviders?: unknown
   }
   const fileRoots: SidebarSettings["fileRoots"] = { ...base.fileRoots }
   const migratedRecentRoots: string[] = []
@@ -321,6 +326,10 @@ export function normalizeSidebarSettings(value: unknown, base = defaultSidebarSe
     favoriteFileRoots: normalizedFavorites,
     recentFileRoots,
     fileRoots,
+    usageProviders:
+      "usageProviders" in input
+        ? normalizeUsageProviders(input.usageProviders, base.usageProviders)
+        : [...base.usageProviders],
   }
 }
 
@@ -405,6 +414,13 @@ export function saveUserScriptSettings(homeDirectory: string, scripts: ScriptSet
   const existing = readJsonFile(filePath)
   const base = existing && typeof existing === "object" ? (existing as Record<string, unknown>) : {}
   writeJsonObject(filePath, { ...base, scripts })
+}
+
+export function saveUserUsageProviders(homeDirectory: string, usageProviders: UsageProviderId[]): void {
+  const filePath = path.join(homeDirectory, ".config", "openSidebar", "config.json")
+  const existing = readJsonFile(filePath)
+  const base = existing && typeof existing === "object" ? (existing as Record<string, unknown>) : {}
+  writeJsonObject(filePath, { ...base, usageProviders: [...usageProviders] })
 }
 
 function cursorSettingsPath(homeDirectory: string): string {

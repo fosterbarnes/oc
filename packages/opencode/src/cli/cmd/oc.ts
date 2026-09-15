@@ -55,10 +55,9 @@ const DiagnosticsCommand = cmd({
   describe: "run OpenCode with captured diagnostics",
   builder: (yargs: Argv) => yargs.positional("args", { type: "string", array: true }),
   handler: async (args) => {
-    const stateHome = process.env.XDG_STATE_HOME || path.join(os.homedir(), ".local", "state")
+    const { Global } = await import("@opencode-ai/core/global")
     const runDirectory = path.join(
-      stateHome,
-      "opencode",
+      Global.Path.state,
       "oc-diagnostics",
       `interactive-${new Date().toISOString().replace(/[:.]/g, "-")}`,
     )

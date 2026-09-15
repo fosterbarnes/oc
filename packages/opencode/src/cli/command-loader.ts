@@ -70,6 +70,15 @@ export type CommandToLoad =
   | "db"
   | "oc"
 
+export function withOcLaunchDefault(args: readonly string[], debug: boolean) {
+  if (!debug) return [...args]
+  const helpOrVersion =
+    args.includes("-h") || args.includes("--help") || args.includes("-v") || args.includes("--version")
+  if (helpOrVersion) return [...args]
+  if (resolveCommandToLoad(args) !== "tui") return [...args]
+  return ["oc", "launch", ...args]
+}
+
 export function resolveCommandToLoad(args: readonly string[]): CommandToLoad {
   for (let index = 0; index < args.length; index++) {
     const arg = args[index]

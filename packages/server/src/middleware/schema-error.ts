@@ -14,7 +14,7 @@ function truncateReason(reason: string) {
 export const schemaErrorLayer = HttpApiMiddleware.layerSchemaErrorTransform(SchemaErrorMiddleware, (error) => {
   const reason = truncateReason(error.cause.message)
   return Effect.logWarning("schema rejection").pipe(
-    Effect.annotateLogs({ kind: error.kind, reason }),
+    Effect.annotateLogs({ channel: "server", kind: error.kind, reason }),
     Effect.andThen(Effect.fail(new InvalidRequestError({ message: reason, kind: error.kind }))),
   )
 })

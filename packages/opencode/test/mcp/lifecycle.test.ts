@@ -216,6 +216,73 @@ it.instance(
   { init: (directory) => Effect.promise(() => Bun.$`mkdir -p ${path.join(directory, "plugins/sub")}`.quiet()) },
 )
 
+it.instance("automatically reconnects an unexpectedly closed Everything MCP server", () =>
+  Effect.gen(function* () {
+    const test = yield* TestInstance
+    const readyFile = path.join(test.directory, "mcp-ready.pid")
+    const triggerFile = path.join(test.directory, "mcp-exit.trigger")
+    const exitFile = path.join(test.directory, "mcp-exited.pid")
+    const mcp = yield* MCP.Service
+    yield* mcp.add("everything-search", {
+      type: "local",
+      command: [process.execPath, stdioFixture, "--exit-once"],
+      environment: {
+        EVERYTHING_EXE_PATH: process.execPath,
+        MCP_LIFECYCLE_READY_FILE: readyFile,
+        MCP_LIFECYCLE_TRIGGER_FILE: triggerFile,
+        MCP_LIFECYCLE_EXIT_FILE: exitFile,
+      },
+    })
+
+    const firstPid = yield* Effect.promise(() => Bun.file(readyFile).text())
+    yield* Effect.promise(() => Bun.write(triggerFile, "exit"))
+    yield* pollWithTimeout(
+      Effect.promise(async () => ((await Bun.file(exitFile).exists()) ? Bun.file(exitFile).text() : undefined)),
+      "stdio fixture did not exit",
+    )
+    yield* pollWithTimeout(
+      Effect.promise(async () => {
+        const pid = await Bun.file(readyFile).text()
+        return pid !== firstPid ? pid : undefined
+      }),
+      "Everything MCP server did not reconnect",
+    )
+    yield* pollWithTimeout(
+      Effect.gen(function* () {
+        const status = (yield* mcp.status())["everything-search"]?.status
+        const tools = yield* mcp.tools()
+        return status === "connected" && tools["everything-search_current_directory"] ? true : undefined
+      }),
+      "reconnected Everything MCP server did not become ready",
+    )
+  }),
+)
+
+it.instance("explicitly disconnected Everything MCP remains disabled", () =>
+  Effect.gen(function* () {
+    const test = yield* TestInstance
+    const readyFile = path.join(test.directory, "mcp-ready.pid")
+    const mcp = yield* MCP.Service
+    yield* mcp.add("everything-search", {
+      type: "local",
+      command: [process.execPath, stdioFixture, "--exit-once"],
+      environment: {
+        EVERYTHING_EXE_PATH: process.execPath,
+        MCP_LIFECYCLE_READY_FILE: readyFile,
+        MCP_LIFECYCLE_TRIGGER_FILE: path.join(test.directory, "mcp-exit.trigger"),
+        MCP_LIFECYCLE_EXIT_FILE: path.join(test.directory, "mcp-exited.pid"),
+      },
+    })
+    const pid = yield* Effect.promise(() => Bun.file(readyFile).text())
+
+    yield* mcp.disconnect("everything-search")
+
+    expect((yield* mcp.status())["everything-search"]?.status).toBe("disabled")
+    expect(yield* mcp.tools()).toEqual({})
+    expect(yield* Effect.promise(() => Bun.file(readyFile).text())).toBe(pid)
+  }),
+)
+
 it.instance("tools() reuses cached definitions until a protocol notification", () =>
   Effect.gen(function* () {
     const server = yield* lifecycleServer({ capabilities: { tools: { listChanged: true } } })

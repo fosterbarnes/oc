@@ -9,7 +9,18 @@ import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { AppProcess } from "@opencode-ai/core/process"
 import { testEffect } from "../lib/effect"
 
-const it = testEffect(LayerNode.compile(AppProcess.node))
+const it = testEffect(
+  LayerNode.compile(
+    process.platform === "win32"
+      ? AppProcess.nodeWithOptions({
+          windowsSupervisorPath: path.join(
+            import.meta.dir,
+            `../../native/windows/dist/${process.arch}/opencode-process-tree.exe`,
+          ),
+        })
+      : AppProcess.node,
+  ),
+)
 
 const NODE = process.execPath
 const cmd = (...args: string[]) => ChildProcess.make(NODE, args)
@@ -24,6 +35,22 @@ const waitForFile = (file: string) =>
         await new Promise<void>((resolve) => setTimeout(resolve, 10))
       }
     }
+  })
+
+const alive = (pid: number) => {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch {
+    return false
+  }
+}
+
+const waitForGone = (pid: number) =>
+  Effect.promise(async () => {
+    const deadline = Date.now() + 5_000
+    while (Date.now() < deadline && alive(pid)) await new Promise((resolve) => setTimeout(resolve, 25))
+    return !alive(pid)
   })
 
 describe("AppProcess", () => {
@@ -151,49 +178,51 @@ describe("AppProcess", () => {
       }),
     )
 
-    if (process.platform !== "win32") {
-      it.live(
-        "timeout cleans up the scoped child process",
-        Effect.acquireUseRelease(
-          Effect.promise(() => fs.mkdtemp(path.join(tmpdir(), "opencode-process-timeout-"))),
-          (directory) => {
-            const ready = path.join(directory, "ready")
-            const settled = path.join(directory, "settled")
-            const script = `const fs=require('fs');fs.writeFileSync(${JSON.stringify(ready)},String(process.pid));process.on('SIGTERM',()=>{fs.writeFileSync(${JSON.stringify(settled)},'settled');process.exit(0)});setInterval(()=>{},60000)`
-            return Effect.gen(function* () {
-              const svc = yield* AppProcess.Service
-              const exit = yield* Effect.exit(svc.run(cmd("-e", script), { timeout: "250 millis" }))
-              expect(Exit.isFailure(exit)).toBe(true)
-              expect(yield* waitForFile(ready)).toMatch(/^\d+$/)
-              expect(yield* waitForFile(settled)).toBe("settled")
-            })
-          },
-          (directory) => Effect.promise(() => fs.rm(directory, { recursive: true, force: true })),
-        ),
-        5_000,
-      )
+    it.live(
+      "timeout cleans up the scoped child process",
+      Effect.acquireUseRelease(
+        Effect.promise(() => fs.mkdtemp(path.join(tmpdir(), "opencode-process-timeout-"))),
+        (directory) => {
+          const ready = path.join(directory, "ready")
+          const settled = path.join(directory, "settled")
+          const script = `const fs=require('fs'),cp=require('child_process');const child=cp.spawn(process.execPath,['-e','setInterval(()=>{},60000)'],{stdio:'ignore'});fs.writeFileSync(${JSON.stringify(ready)},process.pid+','+child.pid);process.on('SIGTERM',()=>{fs.writeFileSync(${JSON.stringify(settled)},'settled');process.exit(0)});setInterval(()=>{},60000)`
+          return Effect.gen(function* () {
+            const svc = yield* AppProcess.Service
+            const exit = yield* Effect.exit(svc.run(cmd("-e", script), { timeout: "250 millis" }))
+            expect(Exit.isFailure(exit)).toBe(true)
+            const [root, child] = (yield* waitForFile(ready)).split(",").map(Number)
+            expect(yield* waitForGone(root)).toBe(true)
+            expect(yield* waitForGone(child)).toBe(true)
+            if (process.platform !== "win32") expect(yield* waitForFile(settled)).toBe("settled")
+          })
+        },
+        (directory) => Effect.promise(() => fs.rm(directory, { recursive: true, force: true })),
+      ),
+      5_000,
+    )
 
-      it.live(
-        "fiber interruption cleans up the scoped child process after readiness",
-        Effect.acquireUseRelease(
-          Effect.promise(() => fs.mkdtemp(path.join(tmpdir(), "opencode-process-interrupt-"))),
-          (directory) => {
-            const ready = path.join(directory, "ready")
-            const settled = path.join(directory, "settled")
-            const script = `const fs=require('fs');fs.writeFileSync(${JSON.stringify(ready)},String(process.pid));process.on('SIGTERM',()=>{fs.writeFileSync(${JSON.stringify(settled)},'settled');process.exit(0)});setInterval(()=>{},60000)`
-            return Effect.gen(function* () {
-              const svc = yield* AppProcess.Service
-              const fiber = yield* svc.run(cmd("-e", script)).pipe(Effect.forkChild)
-              expect(yield* waitForFile(ready)).toMatch(/^\d+$/)
-              yield* Fiber.interrupt(fiber)
-              expect(yield* waitForFile(settled)).toBe("settled")
-            })
-          },
-          (directory) => Effect.promise(() => fs.rm(directory, { recursive: true, force: true })),
-        ),
-        5_000,
-      )
-    }
+    it.live(
+      "fiber interruption cleans up the scoped child process after readiness",
+      Effect.acquireUseRelease(
+        Effect.promise(() => fs.mkdtemp(path.join(tmpdir(), "opencode-process-interrupt-"))),
+        (directory) => {
+          const ready = path.join(directory, "ready")
+          const settled = path.join(directory, "settled")
+          const script = `const fs=require('fs'),cp=require('child_process');const child=cp.spawn(process.execPath,['-e','setInterval(()=>{},60000)'],{stdio:'ignore'});fs.writeFileSync(${JSON.stringify(ready)},process.pid+','+child.pid);process.on('SIGTERM',()=>{fs.writeFileSync(${JSON.stringify(settled)},'settled');process.exit(0)});setInterval(()=>{},60000)`
+          return Effect.gen(function* () {
+            const svc = yield* AppProcess.Service
+            const fiber = yield* svc.run(cmd("-e", script)).pipe(Effect.forkChild)
+            const [root, child] = (yield* waitForFile(ready)).split(",").map(Number)
+            yield* Fiber.interrupt(fiber)
+            expect(yield* waitForGone(root)).toBe(true)
+            expect(yield* waitForGone(child)).toBe(true)
+            if (process.platform !== "win32") expect(yield* waitForFile(settled)).toBe("settled")
+          })
+        },
+        (directory) => Effect.promise(() => fs.rm(directory, { recursive: true, force: true })),
+      ),
+      5_000,
+    )
   })
 
   describe("inherited platform methods", () => {

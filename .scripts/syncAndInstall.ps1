@@ -49,6 +49,9 @@ $upstreamRepo = Join-Path $repoRoot $CONFIG.UpstreamRel
 $installPath = Join-Path $CONFIG.InstallDir $CONFIG.ExeName
 $backupPath = $installPath + $CONFIG.BackupSuffix
 $binary = Join-Path $repoRoot 'packages\opencode\dist\opencode-windows-x64\bin\opencode.exe'
+$helper = Join-Path $repoRoot 'packages\opencode\dist\opencode-windows-x64\bin\opencode-process-tree.exe'
+$helperInstallPath = Join-Path $CONFIG.InstallDir 'opencode-process-tree.exe'
+$helperBackupPath = $helperInstallPath + $CONFIG.BackupSuffix
 $skipPathPrefixes = @('UPSTREAM/', '.git/', 'node_modules/', '.opencode/')
 
 function Normalize-Rel {
@@ -572,10 +575,13 @@ if ($LASTEXITCODE) { throw "build.ps1 failed (exit $LASTEXITCODE)." }
 if (-not (Test-Path -LiteralPath $binary -PathType Leaf)) {
     throw "Built executable not found: $binary"
 }
+if (-not (Test-Path -LiteralPath $helper -PathType Leaf)) {
+    throw "Built helper not found: $helper. Helper is produced by packages/core/native/windows/build.ps1 -Architecture x64 -Output <path> and must sit beside opencode.exe."
+}
 
 if ($SkipInstall) {
     Write-State -Sha $newUpSha -SnapshotSha $state.snapshotSha
-    Write-Host "SkipInstall: source applied from upstream $newUpSha. Built $binary. Did not stop processes, backup, or copy the exe. Source changes remain uncommitted."
+    Write-Host "SkipInstall: source applied from upstream $newUpSha. Built $binary and $helper. Did not stop processes, backup, or copy the exe/helper. Source changes remain uncommitted."
     return
 }
 
@@ -584,9 +590,14 @@ if (-not (Test-Path -LiteralPath $installPath -PathType Leaf)) {
 } else {
     Write-Host "Stopping system-wide opencode.exe processes..."
     Get-Process -Name 'opencode' -ErrorAction SilentlyContinue | Stop-Process -Force
+    Get-Process -Name 'opencode-process-tree' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
     $deadline = (Get-Date).AddSeconds(30)
     while (Get-Process -Name 'opencode' -ErrorAction SilentlyContinue) {
         if ((Get-Date) -gt $deadline) { throw 'opencode.exe is still running after Stop-Process.' }
+        Start-Sleep -Milliseconds 200
+    }
+    while (Get-Process -Name 'opencode-process-tree' -ErrorAction SilentlyContinue) {
+        if ((Get-Date) -gt $deadline) { throw 'opencode-process-tree.exe is still running after Stop-Process.' }
         Start-Sleep -Milliseconds 200
     }
     $lockDeadline = (Get-Date).AddSeconds(30)
@@ -600,6 +611,19 @@ if (-not (Test-Path -LiteralPath $installPath -PathType Leaf)) {
             Start-Sleep -Milliseconds 200
         }
     }
+    if (Test-Path -LiteralPath $helperInstallPath -PathType Leaf) {
+        $helperLockDeadline = (Get-Date).AddSeconds(30)
+        while ($true) {
+            try {
+                $hfs = [IO.File]::Open($helperInstallPath, 'Open', 'ReadWrite', 'None')
+                $hfs.Dispose()
+                break
+            } catch {
+                if ((Get-Date) -gt $helperLockDeadline) { throw "Install helper target is still locked: $helperInstallPath" }
+                Start-Sleep -Milliseconds 200
+            }
+        }
+    }
     if ((Test-Path -LiteralPath $backupPath -PathType Leaf) -and -not $OverwriteBackup) {
         $rotated = $backupPath + '.' + (Get-Date -Format 'yyyyMMdd-HHmmss')
         Move-Item -LiteralPath $backupPath -Destination $rotated
@@ -607,6 +631,17 @@ if (-not (Test-Path -LiteralPath $installPath -PathType Leaf)) {
     }
     Copy-Item -LiteralPath $installPath -Destination $backupPath -Force
     Write-Host "Backup written: $backupPath"
+    if (Test-Path -LiteralPath $helperInstallPath -PathType Leaf) {
+        if ((Test-Path -LiteralPath $helperBackupPath -PathType Leaf) -and -not $OverwriteBackup) {
+            $rotatedHelper = $helperBackupPath + '.' + (Get-Date -Format 'yyyyMMdd-HHmmss')
+            Move-Item -LiteralPath $helperBackupPath -Destination $rotatedHelper
+            Write-Host "Kept previous helper backup as $rotatedHelper"
+        }
+        Copy-Item -LiteralPath $helperInstallPath -Destination $helperBackupPath -Force
+        Write-Host "Helper backup written: $helperBackupPath"
+    } else {
+        Write-Host "No existing helper at $helperInstallPath; helper backup will be skipped."
+    }
 }
 
 New-Item -ItemType Directory -Path $CONFIG.InstallDir -Force | Out-Null
@@ -616,8 +651,18 @@ try {
     Write-Host "Install failed. Backup retained at $backupPath (if created)."
     throw
 }
+try {
+    Copy-Item -LiteralPath $helper -Destination $helperInstallPath -Force
+} catch {
+    Write-Host "Helper install failed. Backup retained at $helperBackupPath (if created)."
+    throw
+}
+if (-not (Test-Path -LiteralPath $helperInstallPath -PathType Leaf)) {
+    throw "Installed helper not found: $helperInstallPath"
+}
 
 runNativeCommand $installPath @('--version') 'installed opencode --version'
+runNativeCommand $helperInstallPath @('--version') 'installed helper --version'
 Write-State -Sha $newUpSha -SnapshotSha $state.snapshotSha
 Write-Host "Installed $installPath from upstream $newUpSha. Source changes remain uncommitted."
 closeOut 3

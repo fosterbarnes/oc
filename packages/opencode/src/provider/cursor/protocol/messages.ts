@@ -5,12 +5,7 @@ import protobuf from "protobufjs"
 type FieldDef = { id: number; name: string; type: string; repeated?: boolean }
 type OneofDef = { name: string; fields: string[] }
 
-function addType(
-  root: protobuf.Root,
-  name: string,
-  fields: FieldDef[],
-  oneofs?: OneofDef[],
-): protobuf.Type {
+function addType(root: protobuf.Root, name: string, fields: FieldDef[], oneofs?: OneofDef[]): protobuf.Type {
   const t = new protobuf.Type(name)
   for (const f of fields) {
     t.add(new protobuf.Field(f.name, f.id, f.type, f.repeated ? "repeated" : undefined))
@@ -27,13 +22,9 @@ function addType(
 export function createMessageTypes(): protobuf.Root {
   const root = new protobuf.Root()
 
-  addType(root, "TextDeltaUpdate", [
-    { id: 1, name: "text", type: "string" },
-  ])
+  addType(root, "TextDeltaUpdate", [{ id: 1, name: "text", type: "string" }])
 
-  addType(root, "ThinkingDeltaUpdate", [
-    { id: 1, name: "text", type: "string" },
-  ])
+  addType(root, "ThinkingDeltaUpdate", [{ id: 1, name: "text", type: "string" }])
 
   addType(root, "TurnEnded", [
     { id: 1, name: "input_tokens", type: "uint32" },
@@ -48,13 +39,15 @@ export function createMessageTypes(): protobuf.Root {
   // Display ToolCall (interaction_update.tool_call_*) — agent.v1 oneof, not
   // {tool_name,args} strings. Args-only wrappers are enough to bridge into
   // OpenCode; result payloads are ignored on decode.
-  root.add(new protobuf.Enum("TodoStatus", {
-    TODO_STATUS_UNSPECIFIED: 0,
-    TODO_STATUS_PENDING: 1,
-    TODO_STATUS_IN_PROGRESS: 2,
-    TODO_STATUS_COMPLETED: 3,
-    TODO_STATUS_CANCELLED: 4,
-  }))
+  root.add(
+    new protobuf.Enum("TodoStatus", {
+      TODO_STATUS_UNSPECIFIED: 0,
+      TODO_STATUS_PENDING: 1,
+      TODO_STATUS_IN_PROGRESS: 2,
+      TODO_STATUS_COMPLETED: 3,
+      TODO_STATUS_CANCELLED: 4,
+    }),
+  )
   addType(root, "TodoItem", [
     { id: 1, name: "id", type: "string" },
     { id: 2, name: "content", type: "string" },
@@ -145,13 +138,25 @@ export function createMessageTypes(): protobuf.Root {
       { id: 11, name: "cursor_guide", type: "SubagentTypeCursorGuide" },
       { id: 12, name: "watch_video", type: "SubagentTypeWatchVideo" },
     ],
-    [{
-      name: "type",
-      fields: [
-        "unspecified", "computer_use", "custom", "explore", "media_review", "bash",
-        "browser_use", "shell", "vm_setup_helper", "debug", "cursor_guide", "watch_video",
-      ],
-    }],
+    [
+      {
+        name: "type",
+        fields: [
+          "unspecified",
+          "computer_use",
+          "custom",
+          "explore",
+          "media_review",
+          "bash",
+          "browser_use",
+          "shell",
+          "vm_setup_helper",
+          "debug",
+          "cursor_guide",
+          "watch_video",
+        ],
+      },
+    ],
   )
   addType(root, "TaskToolArgs", [
     { id: 1, name: "description", type: "string" },
@@ -235,11 +240,16 @@ export function createMessageTypes(): protobuf.Root {
   ])
   addType(root, "SwitchModeError", [{ id: 1, name: "error", type: "string" }])
   addType(root, "SwitchModeRejected", [{ id: 1, name: "reason", type: "string" }])
-  addType(root, "SwitchModeResult", [
-    { id: 1, name: "success", type: "SwitchModeSuccess" },
-    { id: 2, name: "error", type: "SwitchModeError" },
-    { id: 3, name: "rejected", type: "SwitchModeRejected" },
-  ], [{ name: "result", fields: ["success", "error", "rejected"] }])
+  addType(
+    root,
+    "SwitchModeResult",
+    [
+      { id: 1, name: "success", type: "SwitchModeSuccess" },
+      { id: 2, name: "error", type: "SwitchModeError" },
+      { id: 3, name: "rejected", type: "SwitchModeRejected" },
+    ],
+    [{ name: "result", fields: ["success", "error", "rejected"] }],
+  )
   addType(root, "SwitchModeToolCall", [
     { id: 1, name: "args", type: "SwitchModeToolArgs" },
     { id: 2, name: "result", type: "SwitchModeResult" },
@@ -322,10 +332,15 @@ export function createMessageTypes(): protobuf.Root {
     { id: 2, name: "image_data", type: "string" },
   ])
   addType(root, "GenerateImageError", [{ id: 1, name: "error", type: "string" }])
-  addType(root, "GenerateImageResult", [
-    { id: 1, name: "success", type: "GenerateImageSuccess" },
-    { id: 2, name: "error", type: "GenerateImageError" },
-  ], [{ name: "result", fields: ["success", "error"] }])
+  addType(
+    root,
+    "GenerateImageResult",
+    [
+      { id: 1, name: "success", type: "GenerateImageSuccess" },
+      { id: 2, name: "error", type: "GenerateImageError" },
+    ],
+    [{ name: "result", fields: ["success", "error"] }],
+  )
   addType(root, "GenerateImageToolCall", [
     { id: 1, name: "args", type: "GenerateImageToolArgs" },
     { id: 2, name: "result", type: "GenerateImageResult" },
@@ -370,19 +385,40 @@ export function createMessageTypes(): protobuf.Root {
       { id: 66, name: "pi_find_tool_call", type: "PiFindToolCall" },
       { id: 67, name: "pi_ls_tool_call", type: "PiLsToolCall" },
     ],
-    [{
-      name: "tool",
-      fields: [
-        "shell_tool_call", "delete_tool_call", "glob_tool_call", "grep_tool_call",
-        "read_tool_call", "update_todos_tool_call", "read_todos_tool_call",
-        "edit_tool_call", "ls_tool_call",
-        "mcp_tool_call", "create_plan_tool_call", "web_search_tool_call", "task_tool_call",
-        "ask_question_tool_call", "fetch_tool_call", "switch_mode_tool_call",
-        "generate_image_tool_call", "web_fetch_tool_call", "await_tool_call", "get_mcp_tools_tool_call",
-        "pi_read_tool_call", "pi_bash_tool_call", "pi_edit_tool_call",
-        "pi_write_tool_call", "pi_grep_tool_call", "pi_find_tool_call", "pi_ls_tool_call",
-      ],
-    }],
+    [
+      {
+        name: "tool",
+        fields: [
+          "shell_tool_call",
+          "delete_tool_call",
+          "glob_tool_call",
+          "grep_tool_call",
+          "read_tool_call",
+          "update_todos_tool_call",
+          "read_todos_tool_call",
+          "edit_tool_call",
+          "ls_tool_call",
+          "mcp_tool_call",
+          "create_plan_tool_call",
+          "web_search_tool_call",
+          "task_tool_call",
+          "ask_question_tool_call",
+          "fetch_tool_call",
+          "switch_mode_tool_call",
+          "generate_image_tool_call",
+          "web_fetch_tool_call",
+          "await_tool_call",
+          "get_mcp_tools_tool_call",
+          "pi_read_tool_call",
+          "pi_bash_tool_call",
+          "pi_edit_tool_call",
+          "pi_write_tool_call",
+          "pi_grep_tool_call",
+          "pi_find_tool_call",
+          "pi_ls_tool_call",
+        ],
+      },
+    ],
   )
 
   addType(root, "ToolCallStarted", [
@@ -409,9 +445,7 @@ export function createMessageTypes(): protobuf.Root {
   // agent.v1 StepStartedUpdate / StepCompletedUpdate: step_id is uint64 (T:4),
   // not string — wrong type made every step_completed frame throw
   // "index out of range" in decodeMessage.
-  addType(root, "StepStarted", [
-    { id: 1, name: "step_id", type: "uint64" },
-  ])
+  addType(root, "StepStarted", [{ id: 1, name: "step_id", type: "uint64" }])
 
   addType(root, "StepCompleted", [
     { id: 1, name: "step_id", type: "uint64" },
@@ -433,7 +467,22 @@ export function createMessageTypes(): protobuf.Root {
       { id: 16, name: "step_started", type: "StepStarted" },
       { id: 17, name: "step_completed", type: "StepCompleted" },
     ],
-    [{ name: "update", fields: ["text_delta", "tool_call_started", "tool_call_completed", "thinking_delta", "partial_tool_call", "heartbeat", "turn_ended", "step_started", "step_completed"] }],
+    [
+      {
+        name: "update",
+        fields: [
+          "text_delta",
+          "tool_call_started",
+          "tool_call_completed",
+          "thinking_delta",
+          "partial_tool_call",
+          "heartbeat",
+          "turn_ended",
+          "step_started",
+          "step_completed",
+        ],
+      },
+    ],
   )
 
   // ── Exec channel ──
@@ -606,15 +655,9 @@ export function createMessageTypes(): protobuf.Root {
     { id: 1, name: "path", type: "string" },
     { id: 2, name: "content", type: "string" },
   ])
-  addType(root, "PiWriteSuccess", [
-    { id: 1, name: "output", type: "string" },
-  ])
-  addType(root, "PiWriteError", [
-    { id: 1, name: "error", type: "string" },
-  ])
-  addType(root, "PiWriteRejected", [
-    { id: 1, name: "reason", type: "string" },
-  ])
+  addType(root, "PiWriteSuccess", [{ id: 1, name: "output", type: "string" }])
+  addType(root, "PiWriteError", [{ id: 1, name: "error", type: "string" }])
+  addType(root, "PiWriteRejected", [{ id: 1, name: "reason", type: "string" }])
   addType(
     root,
     "PiWriteResult",
@@ -711,9 +754,7 @@ export function createMessageTypes(): protobuf.Root {
     { id: 3, name: "children_files", type: "LsDirectoryTreeFile", repeated: true },
     { id: 6, name: "num_files", type: "int32" },
   ])
-  addType(root, "LsSuccess", [
-    { id: 1, name: "directory_tree_root", type: "LsDirectoryTreeNode" },
-  ])
+  addType(root, "LsSuccess", [{ id: 1, name: "directory_tree_root", type: "LsDirectoryTreeNode" }])
   addType(root, "LsError", [
     { id: 1, name: "path", type: "string" },
     { id: 2, name: "error", type: "string" },
@@ -758,16 +799,167 @@ export function createMessageTypes(): protobuf.Root {
     { id: 5, name: "ms_to_wait", type: "uint32" },
     { id: 6, name: "reason", type: "uint32" },
   ])
-  // ShellRejected / ShellPermissionDenied (shared with ShellResult) — reason/error at #3.
+  // ShellRejected / ShellPermissionDenied (shared with ShellResult) - reason/error at #3.
   addType(root, "ShellRejected", [
     { id: 1, name: "command", type: "string" },
     { id: 2, name: "working_directory", type: "string" },
     { id: 3, name: "reason", type: "string" },
+    { id: 4, name: "is_readonly", type: "bool" },
   ])
   addType(root, "ShellPermissionDenied", [
     { id: 1, name: "command", type: "string" },
     { id: 2, name: "working_directory", type: "string" },
     { id: 3, name: "error", type: "string" },
+    { id: 4, name: "is_readonly", type: "bool" },
+  ])
+
+  root.add(
+    new protobuf.Enum("ShellBackgroundReason", {
+      SHELL_BACKGROUND_REASON_UNSPECIFIED: 0,
+      SHELL_BACKGROUND_REASON_TIMEOUT: 1,
+      SHELL_BACKGROUND_REASON_USER_REQUEST: 2,
+    }),
+  )
+  root.add(
+    new protobuf.Enum("GitDiff_DiffType", {
+      DIFF_TYPE_UNSPECIFIED: 0,
+      DIFF_TYPE_DIFF_TO_HEAD: 1,
+      DIFF_TYPE_DIFF_FROM_BRANCH_TO_MAIN: 2,
+    }),
+  )
+  root.add(
+    new protobuf.Enum("GetDiffRequest_OutputFormat", {
+      OUTPUT_FORMAT_UNSPECIFIED: 0,
+      OUTPUT_FORMAT_NAME_STATUS: 1,
+      OUTPUT_FORMAT_NAME_STATUS_AND_NUMSTAT: 2,
+      OUTPUT_FORMAT_FILE_DIFFS: 3,
+      OUTPUT_FORMAT_DIFFS_WITH_BEFORE_AND_AFTER: 4,
+    }),
+  )
+
+  addType(root, "SandboxPolicy", [
+    { id: 1, name: "type", type: "int32" },
+    { id: 2, name: "network_access", type: "bool" },
+    { id: 3, name: "additional_readwrite_paths", type: "string", repeated: true },
+    { id: 4, name: "additional_readonly_paths", type: "string", repeated: true },
+    { id: 5, name: "debug_output_dir", type: "string" },
+    { id: 6, name: "block_git_writes", type: "bool" },
+    { id: 7, name: "disable_tmp_write", type: "bool" },
+  ])
+
+  addType(root, "ShellSuccess", [
+    { id: 1, name: "command", type: "string" },
+    { id: 2, name: "working_directory", type: "string" },
+    { id: 3, name: "exit_code", type: "int32" },
+    { id: 4, name: "signal", type: "string" },
+    { id: 5, name: "stdout", type: "string" },
+    { id: 6, name: "stderr", type: "string" },
+    { id: 7, name: "execution_time", type: "int32" },
+    { id: 8, name: "output_location", type: "OutputLocation" },
+    { id: 9, name: "shell_id", type: "uint32" },
+    { id: 10, name: "interleaved_output", type: "string" },
+    { id: 11, name: "pid", type: "uint32" },
+    { id: 12, name: "ms_to_wait", type: "int32" },
+    { id: 13, name: "local_execution_time_ms", type: "int32" },
+    { id: 14, name: "background_reason", type: "ShellBackgroundReason" },
+    { id: 15, name: "output_head", type: "string" },
+    { id: 16, name: "output_tail", type: "string" },
+    { id: 17, name: "elided_chars", type: "uint32" },
+  ])
+  addType(root, "ShellFailure", [
+    { id: 1, name: "command", type: "string" },
+    { id: 2, name: "working_directory", type: "string" },
+    { id: 3, name: "exit_code", type: "int32" },
+    { id: 4, name: "signal", type: "string" },
+    { id: 5, name: "stdout", type: "string" },
+    { id: 6, name: "stderr", type: "string" },
+    { id: 7, name: "execution_time", type: "int32" },
+    { id: 8, name: "output_location", type: "OutputLocation" },
+    { id: 9, name: "interleaved_output", type: "string" },
+    { id: 10, name: "abort_reason", type: "int32" },
+    { id: 11, name: "aborted", type: "bool" },
+    { id: 12, name: "local_execution_time_ms", type: "int32" },
+    { id: 13, name: "output_head", type: "string" },
+    { id: 14, name: "output_tail", type: "string" },
+    { id: 15, name: "elided_chars", type: "uint32" },
+  ])
+  addType(root, "ShellTimeout", [
+    { id: 1, name: "command", type: "string" },
+    { id: 2, name: "working_directory", type: "string" },
+    { id: 3, name: "timeout_ms", type: "int32" },
+  ])
+  addType(root, "ShellSpawnError", [
+    { id: 1, name: "command", type: "string" },
+    { id: 2, name: "working_directory", type: "string" },
+    { id: 3, name: "error", type: "string" },
+  ])
+  addType(
+    root,
+    "ShellResult",
+    [
+      { id: 101, name: "sandbox_policy", type: "SandboxPolicy" },
+      { id: 102, name: "is_background", type: "bool" },
+      { id: 103, name: "terminals_folder", type: "string" },
+      { id: 104, name: "pid", type: "uint32" },
+      { id: 1, name: "success", type: "ShellSuccess" },
+      { id: 2, name: "failure", type: "ShellFailure" },
+      { id: 3, name: "timeout", type: "ShellTimeout" },
+      { id: 4, name: "rejected", type: "ShellRejected" },
+      { id: 5, name: "spawn_error", type: "ShellSpawnError" },
+      { id: 7, name: "permission_denied", type: "ShellPermissionDenied" },
+    ],
+    [{ name: "result", fields: ["success", "failure", "timeout", "rejected", "spawn_error", "permission_denied"] }],
+  )
+
+  addType(root, "Chunk", [
+    { id: 1, name: "content", type: "string" },
+    { id: 2, name: "lines", type: "string", repeated: true },
+    { id: 3, name: "old_start", type: "int32" },
+    { id: 4, name: "old_lines", type: "int32" },
+    { id: 5, name: "new_start", type: "int32" },
+    { id: 6, name: "new_lines", type: "int32" },
+  ])
+  addType(root, "FileDiff", [
+    { id: 1, name: "from", type: "string" },
+    { id: 2, name: "to", type: "string" },
+    { id: 3, name: "chunks", type: "Chunk", repeated: true },
+    { id: 4, name: "added", type: "int32" },
+    { id: 5, name: "removed", type: "int32" },
+    { id: 6, name: "before_file_contents", type: "string" },
+    { id: 7, name: "after_file_contents", type: "string" },
+    { id: 8, name: "is_generated", type: "bool" },
+  ])
+  addType(root, "GitDiff", [
+    { id: 1, name: "diffs", type: "FileDiff", repeated: true },
+    { id: 2, name: "diff_type", type: "GitDiff_DiffType" },
+  ])
+  addType(root, "SubmoduleDiff", [
+    { id: 1, name: "relative_path", type: "string" },
+    { id: 2, name: "diff", type: "GitDiff" },
+    { id: 3, name: "errored", type: "bool" },
+  ])
+  addType(root, "GetDiffRequest", [
+    { id: 1, name: "cwd", type: "string" },
+    { id: 2, name: "ref", type: "string" },
+    { id: 3, name: "base_ref", type: "string" },
+    { id: 4, name: "merge_base", type: "bool" },
+    { id: 5, name: "target_paths", type: "string", repeated: true },
+    { id: 6, name: "unified_context_lines", type: "int32" },
+    { id: 7, name: "max_untracked_files", type: "int32" },
+    { id: 8, name: "output_format", type: "GetDiffRequest_OutputFormat" },
+    { id: 9, name: "submodule_recurse_depth", type: "int32" },
+    { id: 10, name: "include_space_changes", type: "bool" },
+    { id: 11, name: "committed_only", type: "bool" },
+    { id: 12, name: "compute_patch_id", type: "bool" },
+    { id: 13, name: "return_head_sha", type: "bool" },
+    { id: 14, name: "max_response_bytes", type: "int32" },
+  ])
+  addType(root, "GetDiffResponse", [
+    { id: 1, name: "diff", type: "GitDiff" },
+    { id: 2, name: "submodule_diffs", type: "SubmoduleDiff", repeated: true },
+    { id: 3, name: "patch_id", type: "string" },
+    { id: 4, name: "head_sha", type: "string" },
+    { id: 5, name: "has_uncommitted_changes", type: "bool" },
   ])
 
   // Cursor's non-blocking shell path is a separate exec variant from the
@@ -893,9 +1085,7 @@ export function createMessageTypes(): protobuf.Root {
     { id: 3, name: "line_count", type: "int64" },
   ])
 
-  addType(root, "ListMcpResourcesExecArgs", [
-    { id: 1, name: "server", type: "string" },
-  ])
+  addType(root, "ListMcpResourcesExecArgs", [{ id: 1, name: "server", type: "string" }])
   {
     const t = new protobuf.Type("ListMcpResourcesExecResult_McpResource")
     t.add(new protobuf.Field("uri", 1, "string"))
@@ -1091,13 +1281,9 @@ export function createMessageTypes(): protobuf.Root {
     { id: 47, name: "project_permissions_auto_run", type: "PermissionsAutoRunInstructions" },
   ])
 
-  addType(root, "RequestContextSuccess", [
-    { id: 1, name: "request_context", type: "RequestContextPayload" },
-  ])
+  addType(root, "RequestContextSuccess", [{ id: 1, name: "request_context", type: "RequestContextPayload" }])
 
-  addType(root, "RequestContextResult", [
-    { id: 1, name: "success", type: "RequestContextSuccess" },
-  ])
+  addType(root, "RequestContextResult", [{ id: 1, name: "success", type: "RequestContextSuccess" }])
 
   // Cursor probes MCP server availability before emitting an MCP-backed tool
   // call. OpenCode owns those servers, so answer from the descriptors already
@@ -1122,9 +1308,7 @@ export function createMessageTypes(): protobuf.Root {
     { id: 6, name: "instructions", type: "McpInstructions", repeated: true },
     { id: 7, name: "status", type: "string" },
   ])
-  addType(root, "McpStateSuccess", [
-    { id: 1, name: "servers", type: "McpStateServer", repeated: true },
-  ])
+  addType(root, "McpStateSuccess", [{ id: 1, name: "servers", type: "McpStateServer", repeated: true }])
   addType(root, "McpStateError", [{ id: 1, name: "error", type: "string" }])
   addType(root, "McpStateRejected", [{ id: 1, name: "reason", type: "string" }])
   addType(
@@ -1138,7 +1322,7 @@ export function createMessageTypes(): protobuf.Root {
     [{ name: "result", fields: ["success", "error", "rejected"] }],
   )
 
-  // ExecServerMessage — server asks us to execute a tool
+  // ExecServerMessage - server asks us to execute a tool
   addType(
     root,
     "ExecServerMessage",
@@ -1146,6 +1330,7 @@ export function createMessageTypes(): protobuf.Root {
       { id: 1, name: "id", type: "uint32" },
       { id: 15, name: "exec_id", type: "string" },
       { id: 19, name: "span", type: "string" },
+      { id: 2, name: "shell_args", type: "ShellArgs" },
       { id: 3, name: "write_args", type: "WriteArgs" },
       { id: 4, name: "delete_args", type: "DeleteArgs" },
       { id: 5, name: "grep_args", type: "GrepArgs" },
@@ -1159,6 +1344,7 @@ export function createMessageTypes(): protobuf.Root {
       { id: 18, name: "read_mcp_resource_exec_args", type: "ReadMcpResourceExecArgs" },
       { id: 28, name: "subagent_args", type: "SubagentArgs" },
       { id: 36, name: "mcp_state_exec_args", type: "McpStateExecArgs" },
+      { id: 44, name: "git_diff_request", type: "GetDiffRequest" },
       { id: 45, name: "pi_read_args", type: "PiReadToolArgs" },
       { id: 46, name: "pi_bash_args", type: "PiBashToolArgs" },
       { id: 47, name: "pi_edit_args", type: "PiEditToolArgs" },
@@ -1167,17 +1353,38 @@ export function createMessageTypes(): protobuf.Root {
       { id: 50, name: "pi_find_args", type: "PiFindToolArgs" },
       { id: 51, name: "pi_ls_args", type: "PiLsToolArgs" },
     ],
-    [{ name: "args", fields: [
-      "write_args", "delete_args", "grep_args", "read_args", "ls_args",
-      "request_context_args", "mcp_args", "shell_stream_args", "background_shell_spawn_args",
-      "list_mcp_resources_exec_args", "read_mcp_resource_exec_args", "mcp_state_exec_args",
-      "subagent_args",
-      "pi_read_args", "pi_bash_args", "pi_edit_args", "pi_write_args",
-      "pi_grep_args", "pi_find_args", "pi_ls_args",
-    ] }],
+    [
+      {
+        name: "args",
+        fields: [
+          "shell_args",
+          "write_args",
+          "delete_args",
+          "grep_args",
+          "read_args",
+          "ls_args",
+          "request_context_args",
+          "mcp_args",
+          "shell_stream_args",
+          "background_shell_spawn_args",
+          "list_mcp_resources_exec_args",
+          "read_mcp_resource_exec_args",
+          "mcp_state_exec_args",
+          "subagent_args",
+          "git_diff_request",
+          "pi_read_args",
+          "pi_bash_args",
+          "pi_edit_args",
+          "pi_write_args",
+          "pi_grep_args",
+          "pi_find_args",
+          "pi_ls_args",
+        ],
+      },
+    ],
   )
 
-  // ExecClientMessage — client sends tool result back
+  // ExecClientMessage - client sends tool result back
   addType(
     root,
     "ExecClientMessage",
@@ -1185,6 +1392,7 @@ export function createMessageTypes(): protobuf.Root {
       { id: 1, name: "id", type: "uint32" },
       { id: 15, name: "exec_id", type: "string" },
       { id: 39, name: "local_execution_time_ms", type: "uint64" },
+      { id: 2, name: "shell_result", type: "ShellResult" },
       { id: 3, name: "write_result", type: "WriteResult" },
       { id: 4, name: "delete_result", type: "DeleteResult" },
       { id: 5, name: "grep_result", type: "GrepResult" },
@@ -1198,6 +1406,7 @@ export function createMessageTypes(): protobuf.Root {
       { id: 18, name: "read_mcp_resource_exec_result", type: "ReadMcpResourceExecResult" },
       { id: 28, name: "subagent_result", type: "SubagentResult" },
       { id: 36, name: "mcp_state_exec_result", type: "McpStateExecResult" },
+      { id: 44, name: "git_diff_response", type: "GetDiffResponse" },
       { id: 46, name: "pi_read_result", type: "PiReadExecResult" },
       { id: 47, name: "pi_bash_result", type: "PiBashExecResult" },
       { id: 48, name: "pi_edit_result", type: "PiEditExecResult" },
@@ -1206,23 +1415,40 @@ export function createMessageTypes(): protobuf.Root {
       { id: 51, name: "pi_find_result", type: "PiFindExecResult" },
       { id: 52, name: "pi_ls_result", type: "PiLsExecResult" },
     ],
-    [{ name: "result", fields: [
-      "write_result", "delete_result", "grep_result", "read_result", "ls_result",
-      "request_context_result", "mcp_result", "shell_stream", "background_shell_spawn_result",
-      "list_mcp_resources_exec_result", "read_mcp_resource_exec_result", "mcp_state_exec_result",
-      "subagent_result",
-      "pi_read_result", "pi_bash_result", "pi_edit_result", "pi_write_result",
-      "pi_grep_result", "pi_find_result", "pi_ls_result",
-    ] }],
+    [
+      {
+        name: "result",
+        fields: [
+          "shell_result",
+          "write_result",
+          "delete_result",
+          "grep_result",
+          "read_result",
+          "ls_result",
+          "request_context_result",
+          "mcp_result",
+          "shell_stream",
+          "background_shell_spawn_result",
+          "list_mcp_resources_exec_result",
+          "read_mcp_resource_exec_result",
+          "mcp_state_exec_result",
+          "subagent_result",
+          "git_diff_response",
+          "pi_read_result",
+          "pi_bash_result",
+          "pi_edit_result",
+          "pi_write_result",
+          "pi_grep_result",
+          "pi_find_result",
+          "pi_ls_result",
+        ],
+      },
+    ],
   )
 
-  addType(root, "ExecServerControlMessage", [
-    { id: 1, name: "abort", type: "ExecServerAbort" },
-  ])
+  addType(root, "ExecServerControlMessage", [{ id: 1, name: "abort", type: "ExecServerAbort" }])
 
-  addType(root, "ExecServerAbort", [
-    { id: 1, name: "id", type: "uint32" },
-  ])
+  addType(root, "ExecServerAbort", [{ id: 1, name: "id", type: "uint32" }])
 
   // Client→server control (ACM #5). Distinct from ExecServerControlMessage (ASM #5).
   // After every exec result (especially multi-frame shell_stream), the real CLI
@@ -1279,9 +1505,7 @@ export function createMessageTypes(): protobuf.Root {
     ],
     [{ name: "data_or_blob_id", fields: ["blob_id", "data", "blob_id_with_data"] }],
   )
-  addType(root, "SelectedContext", [
-    { id: 1, name: "selected_images", type: "SelectedImage", repeated: true },
-  ])
+  addType(root, "SelectedContext", [{ id: 1, name: "selected_images", type: "SelectedImage", repeated: true }])
 
   addType(root, "UserMessage", [
     { id: 1, name: "text", type: "string" },
@@ -1329,9 +1553,7 @@ export function createMessageTypes(): protobuf.Root {
     { id: 2, name: "request_context", type: "RequestContext" },
   ])
 
-  addType(root, "CancelAction", [
-    { id: 1, name: "conversation_id", type: "string" },
-  ])
+  addType(root, "CancelAction", [{ id: 1, name: "conversation_id", type: "string" }])
 
   // Deferred answers for an AskQuestion the client already replied to with
   // `async`. `original_args` is kept as raw bytes so the exact AskQuestionArgs
@@ -1352,30 +1574,23 @@ export function createMessageTypes(): protobuf.Root {
       { id: 3, name: "cancel_action", type: "CancelAction" },
       { id: 8, name: "async_ask_question_completion_action", type: "AsyncAskQuestionCompletionAction" },
     ],
-    [{
-      name: "action",
-      fields: [
-        "user_message_action",
-        "resume_action",
-        "cancel_action",
-        "async_ask_question_completion_action",
-      ],
-    }],
+    [
+      {
+        name: "action",
+        fields: ["user_message_action", "resume_action", "cancel_action", "async_ask_question_completion_action"],
+      },
+    ],
   )
 
   // Seed ConversationStateStructure for turn 1 (system prompt as JSON strings
   // in #1). After the first conversation_checkpoint_update we echo opaque
   // server bytes instead — CLI's live structure uses blob-id bytes in #1/#8.
-  addType(root, "AssistantMessage", [
-    { id: 1, name: "text", type: "string" },
-  ])
+  addType(root, "AssistantMessage", [{ id: 1, name: "text", type: "string" }])
 
   addType(
     root,
     "ConversationStep",
-    [
-      { id: 1, name: "assistant_message", type: "AssistantMessage" },
-    ],
+    [{ id: 1, name: "assistant_message", type: "AssistantMessage" }],
     [{ name: "message", fields: ["assistant_message"] }],
   )
 
@@ -1387,9 +1602,7 @@ export function createMessageTypes(): protobuf.Root {
   addType(
     root,
     "ConversationTurn",
-    [
-      { id: 1, name: "agent_conversation_turn", type: "AgentConversationTurn" },
-    ],
+    [{ id: 1, name: "agent_conversation_turn", type: "AgentConversationTurn" }],
     [{ name: "turn", fields: ["agent_conversation_turn"] }],
   )
 
@@ -1421,13 +1634,9 @@ export function createMessageTypes(): protobuf.Root {
     { id: 8, name: "turns", type: "ConversationTurn", repeated: true },
   ])
 
-  addType(root, "ModelDetails", [
-    { id: 1, name: "model_id", type: "string" },
-  ])
+  addType(root, "ModelDetails", [{ id: 1, name: "model_id", type: "string" }])
 
-  addType(root, "McpTools", [
-    { id: 1, name: "mcp_tools", type: "McpToolDefinition", repeated: true },
-  ])
+  addType(root, "McpTools", [{ id: 1, name: "mcp_tools", type: "McpToolDefinition", repeated: true }])
 
   addType(root, "AgentRunRequest", [
     { id: 1, name: "conversation_state", type: "bytes" },
@@ -1468,25 +1677,37 @@ export function createMessageTypes(): protobuf.Root {
       { id: 13, name: "replace_env_args", type: "bytes" },
       { id: 14, name: "connect_scm_request_query", type: "bytes" },
     ],
-    [{
-      name: "query",
-      fields: [
-        "web_search_request_query", "ask_question_interaction_query",
-        "switch_mode_request_query", "create_plan_request_query",
-        "setup_vm_environment_args", "web_fetch_request_query",
-        "pr_management_request_query", "mcp_auth_request_query",
-        "generate_image_request_query", "replace_env_args",
-        "connect_scm_request_query",
-      ],
-    }],
+    [
+      {
+        name: "query",
+        fields: [
+          "web_search_request_query",
+          "ask_question_interaction_query",
+          "switch_mode_request_query",
+          "create_plan_request_query",
+          "setup_vm_environment_args",
+          "web_fetch_request_query",
+          "pr_management_request_query",
+          "mcp_auth_request_query",
+          "generate_image_request_query",
+          "replace_env_args",
+          "connect_scm_request_query",
+        ],
+      },
+    ],
   )
 
   addType(root, "WebSearchRequestApproved", [])
   addType(root, "WebSearchRequestRejected", [{ id: 1, name: "reason", type: "string" }])
-  addType(root, "WebSearchRequestResponse", [
-    { id: 1, name: "approved", type: "WebSearchRequestApproved" },
-    { id: 2, name: "rejected", type: "WebSearchRequestRejected" },
-  ], [{ name: "result", fields: ["approved", "rejected"] }])
+  addType(
+    root,
+    "WebSearchRequestResponse",
+    [
+      { id: 1, name: "approved", type: "WebSearchRequestApproved" },
+      { id: 2, name: "rejected", type: "WebSearchRequestRejected" },
+    ],
+    [{ name: "result", fields: ["approved", "rejected"] }],
+  )
 
   addType(root, "AskQuestionRejected", [{ id: 1, name: "reason", type: "string" }])
   addType(root, "AskQuestionError", [{ id: 1, name: "error_message", type: "string" }])
@@ -1496,18 +1717,19 @@ export function createMessageTypes(): protobuf.Root {
     { id: 2, name: "selected_option_ids", type: "string", repeated: true },
     { id: 3, name: "freeform_text", type: "string" },
   ])
-  addType(root, "AskQuestionSuccess", [
-    { id: 1, name: "answers", type: "AskQuestionSuccessAnswer", repeated: true },
-  ])
-  addType(root, "AskQuestionResult", [
-    { id: 1, name: "success", type: "AskQuestionSuccess" },
-    { id: 2, name: "error", type: "AskQuestionError" },
-    { id: 3, name: "rejected", type: "AskQuestionRejected" },
-    { id: 4, name: "async", type: "AskQuestionAsync" },
-  ], [{ name: "result", fields: ["success", "error", "rejected", "async"] }])
-  addType(root, "AskQuestionInteractionResponse", [
-    { id: 1, name: "result", type: "AskQuestionResult" },
-  ])
+  addType(root, "AskQuestionSuccess", [{ id: 1, name: "answers", type: "AskQuestionSuccessAnswer", repeated: true }])
+  addType(
+    root,
+    "AskQuestionResult",
+    [
+      { id: 1, name: "success", type: "AskQuestionSuccess" },
+      { id: 2, name: "error", type: "AskQuestionError" },
+      { id: 3, name: "rejected", type: "AskQuestionRejected" },
+      { id: 4, name: "async", type: "AskQuestionAsync" },
+    ],
+    [{ name: "result", fields: ["success", "error", "rejected", "async"] }],
+  )
+  addType(root, "AskQuestionInteractionResponse", [{ id: 1, name: "result", type: "AskQuestionResult" }])
   // InteractionQuery keeps query bodies opaque (see the InteractionQuery
   // comment); this type decodes only the ask-question body on demand.
   addType(root, "AskQuestionInteractionQuery", [
@@ -1517,26 +1739,32 @@ export function createMessageTypes(): protobuf.Root {
 
   addType(root, "SwitchModeRequestApproved", [])
   addType(root, "SwitchModeRequestRejected", [{ id: 1, name: "reason", type: "string" }])
-  addType(root, "SwitchModeRequestResponse", [
-    { id: 1, name: "approved", type: "SwitchModeRequestApproved" },
-    { id: 2, name: "rejected", type: "SwitchModeRequestRejected" },
-  ], [{ name: "result", fields: ["approved", "rejected"] }])
+  addType(
+    root,
+    "SwitchModeRequestResponse",
+    [
+      { id: 1, name: "approved", type: "SwitchModeRequestApproved" },
+      { id: 2, name: "rejected", type: "SwitchModeRequestRejected" },
+    ],
+    [{ name: "result", fields: ["approved", "rejected"] }],
+  )
   // InteractionQuery keeps query bodies opaque; decoded on demand like
   // AskQuestionInteractionQuery / CreatePlanRequestQuery.
-  addType(root, "SwitchModeRequestQuery", [
-    { id: 1, name: "args", type: "SwitchModeToolArgs" },
-  ])
+  addType(root, "SwitchModeRequestQuery", [{ id: 1, name: "args", type: "SwitchModeToolArgs" }])
 
   addType(root, "CreatePlanSuccess", [])
   addType(root, "CreatePlanError", [{ id: 1, name: "error", type: "string" }])
-  addType(root, "CreatePlanResult", [
-    { id: 1, name: "success", type: "CreatePlanSuccess" },
-    { id: 2, name: "error", type: "CreatePlanError" },
-    { id: 3, name: "plan_uri", type: "string" },
-  ], [{ name: "result", fields: ["success", "error"] }])
-  addType(root, "CreatePlanRequestResponse", [
-    { id: 1, name: "result", type: "CreatePlanResult" },
-  ])
+  addType(
+    root,
+    "CreatePlanResult",
+    [
+      { id: 1, name: "success", type: "CreatePlanSuccess" },
+      { id: 2, name: "error", type: "CreatePlanError" },
+      { id: 3, name: "plan_uri", type: "string" },
+    ],
+    [{ name: "result", fields: ["success", "error"] }],
+  )
+  addType(root, "CreatePlanRequestResponse", [{ id: 1, name: "result", type: "CreatePlanResult" }])
   // InteractionQuery keeps query bodies opaque; decoded on demand like
   // AskQuestionInteractionQuery / GenerateImageRequestQuery.
   addType(root, "CreatePlanRequestQuery", [
@@ -1545,54 +1773,85 @@ export function createMessageTypes(): protobuf.Root {
   ])
 
   addType(root, "SetupVmEnvironmentSuccess", [])
-  addType(root, "SetupVmEnvironmentResult", [
-    { id: 1, name: "success", type: "SetupVmEnvironmentSuccess" },
-  ], [{ name: "result", fields: ["success"] }])
+  addType(
+    root,
+    "SetupVmEnvironmentResult",
+    [{ id: 1, name: "success", type: "SetupVmEnvironmentSuccess" }],
+    [{ name: "result", fields: ["success"] }],
+  )
 
   addType(root, "WebFetchRequestApproved", [])
   addType(root, "WebFetchRequestRejected", [{ id: 1, name: "reason", type: "string" }])
-  addType(root, "WebFetchRequestResponse", [
-    { id: 1, name: "approved", type: "WebFetchRequestApproved" },
-    { id: 2, name: "rejected", type: "WebFetchRequestRejected" },
-  ], [{ name: "result", fields: ["approved", "rejected"] }])
+  addType(
+    root,
+    "WebFetchRequestResponse",
+    [
+      { id: 1, name: "approved", type: "WebFetchRequestApproved" },
+      { id: 2, name: "rejected", type: "WebFetchRequestRejected" },
+    ],
+    [{ name: "result", fields: ["approved", "rejected"] }],
+  )
 
   addType(root, "PrManagementRejected", [{ id: 1, name: "reason", type: "string" }])
-  addType(root, "PrManagementResult", [
-    { id: 3, name: "rejected", type: "PrManagementRejected" },
-  ], [{ name: "result", fields: ["rejected"] }])
+  addType(
+    root,
+    "PrManagementResult",
+    [{ id: 3, name: "rejected", type: "PrManagementRejected" }],
+    [{ name: "result", fields: ["rejected"] }],
+  )
 
   addType(root, "McpAuthRequestApproved", [])
   addType(root, "McpAuthRequestRejected", [{ id: 1, name: "reason", type: "string" }])
-  addType(root, "McpAuthRequestResponse", [
-    { id: 1, name: "approved", type: "McpAuthRequestApproved" },
-    { id: 2, name: "rejected", type: "McpAuthRequestRejected" },
-  ], [{ name: "result", fields: ["approved", "rejected"] }])
+  addType(
+    root,
+    "McpAuthRequestResponse",
+    [
+      { id: 1, name: "approved", type: "McpAuthRequestApproved" },
+      { id: 2, name: "rejected", type: "McpAuthRequestRejected" },
+    ],
+    [{ name: "result", fields: ["approved", "rejected"] }],
+  )
 
   addType(root, "GenerateImageRequestApproved", [{ id: 1, name: "description", type: "string" }])
   addType(root, "GenerateImageRequestRejected", [{ id: 1, name: "reason", type: "string" }])
-  addType(root, "GenerateImageRequestResponse", [
-    { id: 1, name: "approved", type: "GenerateImageRequestApproved" },
-    { id: 2, name: "rejected", type: "GenerateImageRequestRejected" },
-  ], [{ name: "result", fields: ["approved", "rejected"] }])
+  addType(
+    root,
+    "GenerateImageRequestResponse",
+    [
+      { id: 1, name: "approved", type: "GenerateImageRequestApproved" },
+      { id: 2, name: "rejected", type: "GenerateImageRequestRejected" },
+    ],
+    [{ name: "result", fields: ["approved", "rejected"] }],
+  )
 
   addType(root, "ReplaceEnvSuccess", [])
   addType(root, "ReplaceEnvFailure", [
     { id: 1, name: "error_message", type: "string" },
     { id: 2, name: "setup_logs", type: "string" },
   ])
-  addType(root, "ReplaceEnvResult", [
-    { id: 1, name: "success", type: "ReplaceEnvSuccess" },
-    { id: 2, name: "failure", type: "ReplaceEnvFailure" },
-  ], [{ name: "result", fields: ["success", "failure"] }])
+  addType(
+    root,
+    "ReplaceEnvResult",
+    [
+      { id: 1, name: "success", type: "ReplaceEnvSuccess" },
+      { id: 2, name: "failure", type: "ReplaceEnvFailure" },
+    ],
+    [{ name: "result", fields: ["success", "failure"] }],
+  )
 
   addType(root, "ConnectScmRequestApproved", [])
   addType(root, "ConnectScmRequestRejected", [{ id: 1, name: "reason", type: "string" }])
   addType(root, "ConnectScmRequestFailed", [{ id: 1, name: "error", type: "string" }])
-  addType(root, "ConnectScmRequestResponse", [
-    { id: 1, name: "approved", type: "ConnectScmRequestApproved" },
-    { id: 2, name: "rejected", type: "ConnectScmRequestRejected" },
-    { id: 3, name: "failed", type: "ConnectScmRequestFailed" },
-  ], [{ name: "result", fields: ["approved", "rejected", "failed"] }])
+  addType(
+    root,
+    "ConnectScmRequestResponse",
+    [
+      { id: 1, name: "approved", type: "ConnectScmRequestApproved" },
+      { id: 2, name: "rejected", type: "ConnectScmRequestRejected" },
+      { id: 3, name: "failed", type: "ConnectScmRequestFailed" },
+    ],
+    [{ name: "result", fields: ["approved", "rejected", "failed"] }],
+  )
 
   addType(
     root,
@@ -1611,17 +1870,24 @@ export function createMessageTypes(): protobuf.Root {
       { id: 13, name: "replace_env_result", type: "ReplaceEnvResult" },
       { id: 14, name: "connect_scm_request_response", type: "ConnectScmRequestResponse" },
     ],
-    [{
-      name: "result",
-      fields: [
-        "web_search_request_response", "ask_question_interaction_response",
-        "switch_mode_request_response", "create_plan_request_response",
-        "setup_vm_environment_result", "web_fetch_request_response",
-        "pr_management_result", "mcp_auth_request_response",
-        "generate_image_request_response", "replace_env_result",
-        "connect_scm_request_response",
-      ],
-    }],
+    [
+      {
+        name: "result",
+        fields: [
+          "web_search_request_response",
+          "ask_question_interaction_response",
+          "switch_mode_request_response",
+          "create_plan_request_response",
+          "setup_vm_environment_result",
+          "web_fetch_request_response",
+          "pr_management_result",
+          "mcp_auth_request_response",
+          "generate_image_request_response",
+          "replace_env_result",
+          "connect_scm_request_response",
+        ],
+      },
+    ],
   )
 
   // ── KV blob store (cursor moves large payloads out-of-band via this channel) ──
@@ -1630,19 +1896,13 @@ export function createMessageTypes(): protobuf.Root {
   // If we don't ack set_blob / answer get_blob, the server hangs (endless
   // heartbeats, no response) — this was the "no response" root cause.
 
-  addType(root, "GetBlobArgs", [
-    { id: 1, name: "blob_id", type: "bytes" },
-  ])
-  addType(root, "GetBlobResult", [
-    { id: 1, name: "blob_data", type: "bytes" },
-  ])
+  addType(root, "GetBlobArgs", [{ id: 1, name: "blob_id", type: "bytes" }])
+  addType(root, "GetBlobResult", [{ id: 1, name: "blob_data", type: "bytes" }])
   addType(root, "SetBlobArgs", [
     { id: 1, name: "blob_id", type: "bytes" },
     { id: 2, name: "blob_data", type: "bytes" },
   ])
-  addType(root, "SetBlobResult", [
-    { id: 1, name: "error", type: "string" },
-  ])
+  addType(root, "SetBlobResult", [{ id: 1, name: "error", type: "string" }])
   addType(
     root,
     "KvServerMessage",
@@ -1678,18 +1938,20 @@ export function createMessageTypes(): protobuf.Root {
       { id: 6, name: "interaction_response", type: "InteractionResponse" },
       { id: 7, name: "client_heartbeat", type: "ClientHeartbeat" },
     ],
-    [{
-      name: "message",
-      fields: [
-        "run_request",
-        "exec_client_message",
-        "kv_client_message",
-        "conversation_action",
-        "exec_client_control_message",
-        "interaction_response",
-        "client_heartbeat",
-      ],
-    }],
+    [
+      {
+        name: "message",
+        fields: [
+          "run_request",
+          "exec_client_message",
+          "kv_client_message",
+          "conversation_action",
+          "exec_client_control_message",
+          "interaction_response",
+          "client_heartbeat",
+        ],
+      },
+    ],
   )
 
   // ── AgentServerMessage ──
@@ -1705,7 +1967,19 @@ export function createMessageTypes(): protobuf.Root {
       { id: 5, name: "exec_server_control_message", type: "ExecServerControlMessage" },
       { id: 7, name: "interaction_query", type: "InteractionQuery" },
     ],
-    [{ name: "message", fields: ["interaction_update", "exec_server_message", "conversation_checkpoint_update", "kv_server_message", "exec_server_control_message", "interaction_query"] }],
+    [
+      {
+        name: "message",
+        fields: [
+          "interaction_update",
+          "exec_server_message",
+          "conversation_checkpoint_update",
+          "kv_server_message",
+          "exec_server_control_message",
+          "interaction_query",
+        ],
+      },
+    ],
   )
 
   // ── AvailableModels types ──
@@ -1744,9 +2018,7 @@ export function createMessageTypes(): protobuf.Root {
     { id: 30, name: "variants", type: "AvailableModelVariant", repeated: true },
   ])
 
-  addType(root, "AvailableModelsResponse", [
-    { id: 1, name: "models", type: "AvailableModelEntry", repeated: true },
-  ])
+  addType(root, "AvailableModelsResponse", [{ id: 1, name: "models", type: "AvailableModelEntry", repeated: true }])
 
   return root
 }
@@ -1770,10 +2042,7 @@ export function encodeMessage(typeName: string, message: Record<string, unknown>
   return type.encode(type.fromObject(message)).finish()
 }
 
-export function decodeMessage<T = Record<string, unknown>>(
-  typeName: string,
-  data: Uint8Array,
-): T {
+export function decodeMessage<T = Record<string, unknown>>(typeName: string, data: Uint8Array): T {
   const root = getMessageTypes()
   const type = root.lookupType(typeName)
   const decoded = type.decode(data)
@@ -1781,10 +2050,7 @@ export function decodeMessage<T = Record<string, unknown>>(
 }
 
 /** Decode without inventing absent proto defaults (used for byte-stable snapshots). */
-export function decodeMessageSparse<T = Record<string, unknown>>(
-  typeName: string,
-  data: Uint8Array,
-): T {
+export function decodeMessageSparse<T = Record<string, unknown>>(typeName: string, data: Uint8Array): T {
   const root = getMessageTypes()
   const type = root.lookupType(typeName)
   const decoded = type.decode(data)
@@ -1847,10 +2113,7 @@ export function debugWalkTurnEnded(payload: Uint8Array): string {
     if (!teField?.bytes) return "(no turn_ended field in interaction_update)"
     const te = readRawFields(teField.bytes)
     return te
-      .map(
-        (f) =>
-          `f${f.field}:wt${f.wireType}=${f.varint ?? f.fixed ?? (f.bytes ? `bytes[${f.bytes.length}]` : "?")}`,
-      )
+      .map((f) => `f${f.field}:wt${f.wireType}=${f.varint ?? f.fixed ?? (f.bytes ? `bytes[${f.bytes.length}]` : "?")}`)
       .join(" ")
   } catch (e) {
     return `(walk failed: ${(e as Error).message})`
@@ -1862,10 +2125,7 @@ export function debugWalkTurnEnded(payload: Uint8Array): string {
  * a top-level field key + length varint.  Skips the outer wrapper and
  * decodes the inner body as `typeName`.
  */
-export function decodeWrappedMessage<T = Record<string, unknown>>(
-  typeName: string,
-  data: Uint8Array,
-): T {
+export function decodeWrappedMessage<T = Record<string, unknown>>(typeName: string, data: Uint8Array): T {
   let offset = 1 // skip field key
   // skip varint length
   while (offset < data.length) {

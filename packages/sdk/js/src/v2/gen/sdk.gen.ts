@@ -3594,6 +3594,7 @@ export class Session2 extends HeyApiClient {
       title?: string
       sessionComplete?: boolean
       sessionFailed?: boolean
+      agent?: string
       metadata?: {
         [key: string]: unknown
       }
@@ -3613,6 +3614,7 @@ export class Session2 extends HeyApiClient {
             { in: "query", key: "directory" },
             { in: "query", key: "workspace" },
             { in: "body", key: "title" },
+            { in: "body", key: "agent" },
             { in: "body", key: "sessionComplete" },
             { in: "body", key: "sessionFailed" },
             { in: "body", key: "metadata" },

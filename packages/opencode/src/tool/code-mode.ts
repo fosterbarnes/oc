@@ -145,6 +145,7 @@ const invokeChildTool = Effect.fn("CodeMode.invokeChildTool")(function* (input: 
   )
   const result: CallToolResult = yield* Effect.gen(function* () {
     yield* input.ctx.ask({ permission: input.entry.key, metadata: {}, patterns: ["*"], always: ["*"] })
+    if (input.entry.tool.beforeCall) yield* input.entry.tool.beforeCall()
     // Deliberately mirrors McpCatalog.convertTool's transport call so the MCP service stays free of tool-loop concerns.
     return yield* Effect.promise(async () => {
       const raw = await input.entry.tool.client.callTool(

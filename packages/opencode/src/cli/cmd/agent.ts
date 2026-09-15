@@ -9,7 +9,7 @@ import matter from "gray-matter"
 import { EOL } from "os"
 import type { Argv } from "yargs"
 import { Effect } from "effect"
-import { effectCmd } from "../effect-cmd"
+import { effectCmd, fail } from "../effect-cmd"
 
 type AgentMode = "all" | "primary" | "subagent"
 
@@ -251,9 +251,44 @@ const AgentListCommand = effectCmd({
   }),
 })
 
+const AgentValidateCommand = effectCmd({
+  command: "validate",
+  describe: "validate agent markdown files",
+  handler: Effect.fn("Cli.agent.validate")(function* () {
+    const { Config } = yield* Effect.promise(() => import("../../config/config"))
+    const { ConfigAgent } = yield* Effect.promise(() => import("../../config/agent"))
+    const dirs: string[] = yield* Config.Service.use((svc) => svc.directories())
+
+    const failures: Array<{ path: string; reason: string }> = []
+    let checked = 0
+
+    yield* Effect.promise(async () => {
+      for (const dir of dirs) {
+        const { diagnostics, files } = await ConfigAgent.scan(dir)
+        checked += files
+        for (const diag of diagnostics) {
+          failures.push({ path: diag.path, reason: diag.message || "invalid agent file" })
+        }
+      }
+    })
+
+    failures.sort((a, b) => a.path.localeCompare(b.path))
+
+    if (failures.length === 0) {
+      process.stdout.write(`All agent files valid (${checked} files checked)${EOL}`)
+      return
+    }
+
+    const lines = failures.map((f) => `${f.path}: ${f.reason}`)
+    const message = `Found ${failures.length} invalid agent file(s):${EOL}${lines.join(EOL)}`
+    yield* fail(message, 1)
+  }),
+})
+
 export const AgentCommand = cmd({
   command: "agent",
   describe: "manage agents",
-  builder: (yargs) => yargs.command(AgentCreateCommand).command(AgentListCommand).demandCommand(),
+  builder: (yargs) =>
+    yargs.command(AgentCreateCommand).command(AgentListCommand).command(AgentValidateCommand).demandCommand(),
   async handler() {},
 })

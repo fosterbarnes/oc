@@ -14,7 +14,9 @@ Project automation lives in `.scripts/`. Scripts target PowerShell 7 and fail on
 | `.scripts/syncAndInstall.ps1` | Fail-closed upstream sync into this custom fork, then verify, backup, stop `opencode.exe`, and install. |
 | `.scripts/push.ps1` | Commits all current changes with a supplied or prompted message, then pushes the current branch. `-Force` is explicit. |
 | `.scripts/pushRelease.ps1` | Tags and publishes archives from `packages/opencode/dist` using the separate `.version/version` maintenance version. |
-| `.install.ps1` | Installs the current Windows `opencode.exe` into `C:\Users\user\Apps\opencode`; `-b` builds it first. |
+| `.scripts/install.ps1` | Builds (unless `-NoBuild`) and installs both `opencode.exe` and `ocdebug.exe` into `C:\Users\user\Apps\opencode`. |
+| `.scripts/installDebug.ps1` | Builds (unless `-NoBuild`) and installs only `ocdebug.exe`. Does not stop or replace production `opencode.exe`. |
+| `.scripts/.runDebug.ps1` | Same as `.run.ps1`, with `OPENCODE_INSTANCE=debug` and DEBUG logs. |
 
 ## Common commands
 
@@ -27,8 +29,14 @@ Project automation lives in `.scripts/`. Scripts target PowerShell 7 and fail on
 .\.scripts\syncAndInstall.ps1 -DryRun
 .\.scripts\syncAndInstall.ps1 -AllowDirtyParent -SkipFetch -SkipInstall
 .\.scripts\syncAndInstall.ps1
-.\.install.ps1 -b
+.\.scripts\install.ps1
+.\.scripts\install.ps1 -NoBuild
+.\.scripts\installDebug.ps1
+.\.scripts\.runDebug.ps1
 ```
+
+`oc` is unchanged: production `opencode.exe`, resident server on port 4096. `ocdebug` is the profile function that runs `ocdebug.exe oc launch`. That exe uses `opencode-debug` data/config/state, a resident server on port **4097**, DEBUG logs, and copies production `auth.json` / launcher settings on first run. `.scripts\install.ps1` installs both exes. `.scripts\installDebug.ps1` only stops/replaces `ocdebug.exe`.
+
 
 ## Upstream checkout
 

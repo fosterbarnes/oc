@@ -39,6 +39,7 @@ import { MAX_STEPS_PROMPT } from "./max-steps"
 import { Snapshot } from "../../snapshot"
 import { makeLocationNode } from "../../effect/app-node"
 import { llmClient } from "../../effect/app-node-platform"
+import { debug } from "../../observability/logging"
 
 /**
  * Runs one durable coding-agent Session until it settles.
@@ -221,6 +222,16 @@ const layer = Layer.effect(
       })
       if (yield* compaction.compactIfNeeded({ sessionID: session.id, entries, model, request }))
         return yield* Effect.die(continueAfterCompaction(currentStep))
+      yield* debug("session", "session.turn", {
+        sessionID,
+        step: currentStep,
+        agent: agent.id,
+        model: `${model.provider}/${model.id}`,
+        messages: context.length,
+        tools: toolMaterialization?.definitions.length ?? 0,
+        lastStep: isLastStep,
+        promotion,
+      })
       const startSnapshot = yield* snapshots.capture()
       const publisher = createLLMEventPublisher(events, {
         sessionID: session.id,
@@ -253,6 +264,7 @@ const layer = Layer.effect(
               return
             }
             needsContinuation = true
+            yield* debug("tool", "session.tool", { sessionID: session.id, name: event.name, id: event.id })
             const assistantMessageID = yield* publisher.assistantMessageID(event.id)
             yield* Effect.uninterruptibleMask((restore) =>
               restore(
@@ -295,6 +307,12 @@ const layer = Layer.effect(
             return yield* Effect.die(continueAfterOverflowCompaction(currentStep))
           if (overflowFailure) yield* publish(overflowFailure)
           const llmFailure = failure instanceof LLMError ? failure : undefined
+          if (llmFailure) {
+            yield* debug("provider", "session.provider.error", {
+              sessionID: session.id,
+              reason: llmFailure.reason.message,
+            })
+          }
           if (llmFailure && !publisher.hasProviderError()) {
             yield* withPublication(publisher.failUnsettledTools("Provider did not return a tool result", true))
             yield* withPublication(publisher.failAssistant(llmFailure.reason.message))
@@ -346,6 +364,13 @@ const layer = Layer.effect(
             yield* withPublication(publisher.failUnsettledTools("Tool execution interrupted"))
           if (stream._tag === "Success" && !publisher.hasProviderError())
             yield* withPublication(publisher.failUnsettledTools("Provider did not return a tool result", true))
+          yield* debug("session", "session.turn.done", {
+            sessionID: session.id,
+            step: currentStep,
+            continuation: !publisher.hasProviderError() && needsContinuation,
+            stream: stream._tag,
+            providerError: publisher.hasProviderError(),
+          })
           if (stream._tag === "Failure") return yield* Effect.failCause(stream.cause)
           if (settled._tag === "Failure" && Cause.hasInterrupts(settled.cause))
             return yield* Effect.failCause(settled.cause)
@@ -394,6 +419,12 @@ const layer = Layer.effect(
       const hasSteer = yield* SessionInput.hasPending(db, input.sessionID, "steer")
       const hasQueue = hasSteer ? false : yield* SessionInput.hasPending(db, input.sessionID, "queue")
       if (!input.force && !hasSteer && !hasQueue) return
+      yield* debug("session", "session.run", {
+        sessionID: input.sessionID,
+        force: input.force,
+        hasSteer,
+        hasQueue,
+      })
       yield* failInterruptedTools(input.sessionID)
       let promotion: SessionInput.Delivery | undefined = hasSteer ? "steer" : hasQueue ? "queue" : undefined
       let shouldRun = input.force || hasSteer || hasQueue

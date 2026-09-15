@@ -9,7 +9,14 @@ import { CrossSpawnSpawner } from "@opencode-ai/core/cross-spawn-spawner"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { testEffect } from "../lib/effect"
 
-const live = LayerNode.compile(CrossSpawnSpawner.node)
+const live = LayerNode.compile(
+  CrossSpawnSpawner.nodeWithOptions({
+    windowsSupervisorPath: path.resolve(
+      import.meta.dir,
+      `../../native/windows/dist/${process.arch}/opencode-process-tree.exe`,
+    ),
+  }),
+)
 const fx = testEffect(live)
 
 function js(code: string, opts?: ChildProcess.CommandOptions) {
@@ -57,6 +64,17 @@ async function gone(pid: number, timeout = 5_000) {
     await new Promise((resolve) => setTimeout(resolve, 50))
   }
   return !alive(pid)
+}
+
+async function readWhenReady(file: string) {
+  while (true) {
+    try {
+      return await fs.readFile(file, "utf8")
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error
+      await new Promise((resolve) => setTimeout(resolve, 10))
+    }
+  }
 }
 
 describe("cross-spawn spawner", () => {
@@ -377,6 +395,63 @@ describe("cross-spawn spawner", () => {
   })
 
   describe("Windows-specific", () => {
+    fx.effect(
+      "runs Git through the inherited terminal",
+      Effect.gen(function* () {
+        if (process.platform !== "win32") return
+        const out = yield* ChildProcessSpawner.ChildProcessSpawner.use((svc) =>
+          svc.string(ChildProcess.make("git", ["--version"])),
+        )
+        expect(out).toStartWith("git version ")
+      }),
+    )
+
+    fx.effect(
+      "supervises descendants and reports the root PID",
+      Effect.gen(function* () {
+        if (process.platform !== "win32") return
+        const tmp = yield* Effect.acquireRelease(
+          Effect.promise(() => tmpdir()),
+          (value) => Effect.promise(() => value[Symbol.asyncDispose]()),
+        )
+        const marker = path.join(tmp.path, "pids")
+        const handle = yield* js(
+          `const fs=require("fs"),cp=require("child_process");const child=cp.spawn(process.execPath,["-e","setInterval(()=>{},60000)"],{stdio:"ignore"});fs.writeFileSync(${JSON.stringify(marker)},process.pid+","+child.pid);setInterval(()=>{},60000)`,
+        )
+        const [root, child] = (yield* Effect.promise(() => readWhenReady(marker))).split(",").map(Number)
+        expect(Number(handle.pid)).toBe(root)
+        yield* handle.kill()
+        expect(yield* Effect.promise(() => gone(root))).toBe(true)
+        expect(yield* Effect.promise(() => gone(child))).toBe(true)
+      }),
+    )
+
+    fx.effect(
+      "keeps concurrent command trees isolated",
+      Effect.gen(function* () {
+        if (process.platform !== "win32") return
+        const [first, second] = yield* Effect.all([js("setInterval(()=>{},60000)"), js("setInterval(()=>{},60000)")], {
+          concurrency: 2,
+        })
+        yield* first.kill()
+        expect(yield* first.isRunning).toBe(false)
+        expect(yield* second.isRunning).toBe(true)
+        yield* second.kill()
+      }),
+    )
+
+    fx.effect(
+      "forwards additional output descriptors",
+      Effect.gen(function* () {
+        if (process.platform !== "win32") return
+        const handle = yield* js('require("fs").writeSync(3,"extra")', {
+          additionalFds: { fd3: { type: "output" } },
+        })
+        expect(yield* decodeByteStream(handle.getOutputFd(3))).toBe("extra")
+        yield* handle.exitCode
+      }),
+    )
+
     fx.effect(
       "uses shell routing on Windows",
       Effect.gen(function* () {

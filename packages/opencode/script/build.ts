@@ -10,6 +10,11 @@ const __dirname = path.dirname(__filename)
 const dir = path.resolve(__dirname, "..")
 const runtimeSource = path.resolve(dir, "../agentify-runtime")
 const cursorRuntimeSource = path.resolve(dir, "../cursor-runtime")
+const windowsHelperName = "opencode-process-tree.exe"
+const windowsHelperVersion = "opencode-process-tree protocol 1"
+const windowsHelperScript = path.resolve(dir, "../core/native/windows/build.ps1")
+const windowsHelperCache = new Map<string, string>()
+const deferWindowsHelper = process.env.OPENCODE_DEFER_WINDOWS_HELPER === "1"
 
 process.chdir(dir)
 
@@ -225,6 +230,49 @@ for (const item of targets) {
     await Bun.write(path.join(cursorRuntimeTarget, file), Bun.file(path.join(cursorRuntimeSource, file)))
   }
 
+  if (item.os === "win32" && !deferWindowsHelper) {
+    const helperDest = path.join(dir, `dist/${name}/bin/${windowsHelperName}`)
+    const cached = windowsHelperCache.get(item.arch)
+    if (cached) {
+      await Bun.write(helperDest, Bun.file(cached))
+    } else {
+      const tmpDir = path.join(dir, `dist/.helper-cache-${item.arch}`)
+      const tmpHelper = path.join(tmpDir, windowsHelperName)
+      await $`mkdir -p ${tmpDir}`
+      let built = false
+      try {
+        await $`pwsh -NoProfile -File ${windowsHelperScript} -Architecture ${item.arch} -Output ${tmpHelper}`
+        built = true
+      } catch {
+        try {
+          await $`powershell -NoProfile -File ${windowsHelperScript} -Architecture ${item.arch} -Output ${tmpHelper}`
+          built = true
+        } catch (e) {
+          console.error(
+            `Windows helper build failed for ${item.arch}. Required toolchain is documented in ${windowsHelperScript}.`,
+          )
+          console.error(e)
+          process.exit(1)
+        }
+      }
+      if (!built || !(await Bun.file(tmpHelper).exists())) {
+        console.error(
+          `Windows helper not produced at ${tmpHelper}. Build script must create ${windowsHelperName} via -Architecture ${item.arch} -Output <path>.`,
+        )
+        process.exit(1)
+      }
+      windowsHelperCache.set(item.arch, tmpHelper)
+      await Bun.write(helperDest, Bun.file(tmpHelper))
+    }
+    if (!(await Bun.file(helperDest).exists())) {
+      console.error(`Windows helper missing after copy: ${helperDest}`)
+      process.exit(1)
+    }
+  }
+  if (item.os === "win32" && deferWindowsHelper) {
+    console.log(`Deferring ${windowsHelperName} for ${name} to the Windows release job`)
+  }
+
   // Basic check: only run if binary is for current platform
   if (item.os === process.platform && item.arch === process.arch && !item.abi) {
     const binaryPath = `dist/${name}/bin/opencode`
@@ -235,6 +283,23 @@ for (const item of targets) {
     } catch (e) {
       console.error(`Basic check failed for ${name}:`, e)
       process.exit(1)
+    }
+    if (item.os === "win32") {
+      const helperPath = `dist/${name}/bin/${windowsHelperName}`
+      if (!(await Bun.file(path.join(dir, helperPath)).exists())) {
+        console.error(`Basic check failed: helper missing ${helperPath}`)
+        process.exit(1)
+      }
+      console.log(`Running helper check: ${helperPath} --version`)
+      try {
+        const helperOutput = await $`${helperPath} --version`.text()
+        const trimmed = helperOutput.trim()
+        console.log(`Helper check passed: ${trimmed}`)
+        if (trimmed !== windowsHelperVersion) throw new Error(`Expected ${windowsHelperVersion}, received ${trimmed}`)
+      } catch (e) {
+        console.error(`Helper check failed for ${name}:`, e)
+        process.exit(1)
+      }
     }
   }
 

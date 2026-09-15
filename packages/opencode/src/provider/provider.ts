@@ -1445,10 +1445,10 @@ const layer = Layer.effect(
         // now read config providers - includes any modifications from plugin config() hook
         const configProviders = Object.entries(cfg.provider ?? {})
         const disabled = new Set(cfg.disabled_providers ?? [])
-        const enabled = cfg.enabled_providers ? new Set(cfg.enabled_providers) : null
+        const enabled = cfg.enabled_providers !== undefined ? new Set(cfg.enabled_providers) : null
 
         function isProviderAllowed(providerID: ProviderV2.ID): boolean {
-          if (enabled && !enabled.has(providerID)) return false
+          if (enabled !== null && !enabled.has(providerID)) return false
           if (disabled.has(providerID)) return false
           return true
         }
@@ -1459,7 +1459,7 @@ const layer = Layer.effect(
           if (!p || !models) continue
 
           const providerID = ProviderV2.ID.make(p.id)
-          if (disabled.has(providerID)) continue
+          if (!isProviderAllowed(providerID)) continue
 
           const provider = database[providerID]
           if (!provider) continue
@@ -1817,25 +1817,35 @@ const layer = Layer.effect(
           const chunkAbortCtl = typeof chunkTimeout === "number" && chunkTimeout > 0 ? new AbortController() : undefined
           const headerTimeoutMs = headerTimeout === false ? undefined : headerTimeout
           const headerTimeoutCtl = typeof headerTimeoutMs === "number" ? timeoutController(headerTimeoutMs) : undefined
-          const signals: AbortSignal[] = []
+          const bodySignals: AbortSignal[] = []
 
-          if (opts.signal) signals.push(opts.signal)
-          if (chunkAbortCtl) signals.push(chunkAbortCtl.signal)
-          if (headerTimeoutCtl) signals.push(headerTimeoutCtl.signal)
+          if (opts.signal) bodySignals.push(opts.signal)
+          if (chunkAbortCtl) bodySignals.push(chunkAbortCtl.signal)
           if (options["timeout"] !== undefined && options["timeout"] !== null && options["timeout"] !== false)
-            signals.push(AbortSignal.timeout(options["timeout"]))
+            bodySignals.push(AbortSignal.timeout(options["timeout"]))
 
-          const combined = signals.length === 0 ? null : signals.length === 1 ? signals[0] : AbortSignal.any(signals)
+          const headerSignals = headerTimeoutCtl ? [...bodySignals, headerTimeoutCtl.signal] : bodySignals
+          const combined =
+            headerSignals.length === 0
+              ? null
+              : headerSignals.length === 1
+                ? headerSignals[0]
+                : AbortSignal.any(headerSignals)
           if (combined) opts.signal = combined
 
-          const res = await fetchFn(input, {
-            ...opts,
-            // @ts-ignore see here: https://github.com/oven-sh/bun/issues/16682
-            timeout: false,
-          }).finally(() => headerTimeoutCtl?.clear())
-
-          if (!chunkAbortCtl) return res
-          return wrapSSE(res, chunkTimeout, chunkAbortCtl)
+          try {
+            const res = await fetchFn(input, {
+              ...opts,
+              // @ts-ignore see here: https://github.com/oven-sh/bun/issues/16682
+              timeout: false,
+            })
+            headerTimeoutCtl?.clear()
+            if (!chunkAbortCtl) return res
+            return wrapSSE(res, chunkTimeout, chunkAbortCtl)
+          } catch (error) {
+            headerTimeoutCtl?.clear()
+            throw error
+          }
         }
 
         const bundledLoader = BUNDLED_PROVIDERS[model.api.npm]
@@ -2039,8 +2049,10 @@ const layer = Layer.effect(
         return { providerID: entry.providerID, modelID: entry.modelID }
       }
 
+      const remaining = Object.values(s.providers)
+      if (remaining.length === 0) return yield* new NoProvidersError()
       const configured = Object.keys(cfg.provider ?? {})
-      const provider = Object.values(s.providers).find((p) => configured.length === 0 || configured.includes(p.id))
+      const provider = remaining.find((p) => configured.includes(p.id)) ?? remaining[0]
       if (!provider) return yield* new NoProvidersError()
       const [model] = sort(Object.values(provider.models))
       if (!model) return yield* new NoModelsError({ providerID: provider.id })

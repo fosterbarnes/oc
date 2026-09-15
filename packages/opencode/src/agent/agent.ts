@@ -175,7 +175,9 @@ const layer = Layer.effect(
                 edit: {
                   "*": "deny",
                   [path.join(".opencode", "plans", "*.md")]: "allow",
-                  [path.relative(ctx.worktree, path.join(Global.Path.data, path.join("plans", "*.md")))]: "allow",
+                  [path.join(ctx.worktree, ".opencode", "plans", "*.md")]: "allow",
+                  [path.relative(ctx.worktree, path.join(Global.Path.data, "plans", "*.md"))]: "allow",
+                  [path.join(Global.Path.data, "plans", "*.md")]: "allow",
                 },
               }),
               user,

@@ -174,7 +174,11 @@ const layer = Layer.effect(
             try: () => plugin(input),
             catch: errorMessage,
           }).pipe(
-            Effect.tapError((error) => Effect.logError("failed to load internal plugin", { name: plugin.name, error })),
+            Effect.tapError((error) =>
+              Effect.logError("failed to load internal plugin", { name: plugin.name, error }).pipe(
+                Effect.annotateLogs({ channel: "plugin" }),
+              ),
+            ),
             Effect.option,
           )
           if (init._tag === "Some") hooks.push(init.value)
@@ -230,7 +234,11 @@ const layer = Layer.effect(
               return message
             },
           }).pipe(
-            Effect.tapError((error) => Effect.logError("failed to load plugin", { path: load.spec, error })),
+            Effect.tapError((error) =>
+              Effect.logError("failed to load plugin", { path: load.spec, error }).pipe(
+                Effect.annotateLogs({ channel: "plugin" }),
+              ),
+            ),
             Effect.catch(() => {
               // TODO: make proper events for this
               // events.publish(Session.Event.Error, {
@@ -249,7 +257,9 @@ const layer = Layer.effect(
             try: () => Promise.resolve((hook as any).config?.(cfg)),
             catch: errorMessage,
           }).pipe(
-            Effect.tapError((error) => Effect.logError("plugin config hook failed", { error })),
+            Effect.tapError((error) =>
+              Effect.logError("plugin config hook failed", { error }).pipe(Effect.annotateLogs({ channel: "plugin" })),
+            ),
             Effect.ignore,
           )
         }
@@ -272,7 +282,11 @@ const layer = Layer.effect(
                 try: () => Promise.resolve(hook.dispose?.()),
                 catch: errorMessage,
               }).pipe(
-                Effect.tapError((error) => Effect.logError("plugin dispose hook failed", { error })),
+                 Effect.tapError((error) =>
+                   Effect.logError("plugin dispose hook failed", { error }).pipe(
+                     Effect.annotateLogs({ channel: "plugin" }),
+                   ),
+                 ),
                 Effect.ignore,
               ),
             { discard: true },
@@ -318,3 +332,4 @@ export const node = LayerNode.make({
 })
 
 export * as Plugin from "."
+

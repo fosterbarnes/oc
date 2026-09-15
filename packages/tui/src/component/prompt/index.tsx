@@ -297,6 +297,7 @@ export function Prompt(props: PromptProps) {
     extmarkToPartIndex: new Map(),
     interrupt: 0,
   })
+  let abortRequestPending = false
 
   createEffect(
     on(
@@ -308,26 +309,35 @@ export function Prompt(props: PromptProps) {
     ),
   )
 
-  // Initialize agent/model/variant from last user message when session changes
-  let syncedSessionID: string | undefined
+  // Initialize agent/model/variant from the session record, then last user message
+  let syncedAgentSessionID: string | undefined
+  let syncedModelSessionID: string | undefined
   createEffect(() => {
     const sessionID = props.sessionID
     const msg = lastUserMessage()
+    const session = sessionID ? sync.session.get(sessionID) : undefined
 
-    if (sessionID !== syncedSessionID) {
-      if (!sessionID || !msg) return
-
-      syncedSessionID = sessionID
-
-      // Only set agent if it's a primary agent (not a subagent)
-      const isPrimaryAgent = local.agent.list().some((x) => x.name === msg.agent)
-      if (msg.agent && isPrimaryAgent) {
-        // Keep command line --agent if specified.
-        if (!args.agent) local.agent.set(msg.agent)
-        if (!args.model && msg.model && !local.model.hasSessionOverride(sessionID)) {
-          local.model.set(msg.model)
-          local.model.variant.set(msg.model.variant)
+    if (sessionID !== syncedAgentSessionID && sessionID) {
+      if (!local.agent.hasSession(sessionID)) {
+        const name = session?.agent ?? msg?.agent
+        const isPrimaryAgent = !!name && local.agent.list().some((x) => x.name === name)
+        if (name && isPrimaryAgent) {
+          local.agent.remember(sessionID, name)
+          syncedAgentSessionID = sessionID
+        } else if (session || msg) {
+          syncedAgentSessionID = sessionID
         }
+      } else {
+        syncedAgentSessionID = sessionID
+      }
+    }
+
+    if (sessionID !== syncedModelSessionID && sessionID && msg) {
+      syncedModelSessionID = sessionID
+      const isPrimaryAgent = !!msg.agent && local.agent.list().some((x) => x.name === msg.agent)
+      if (isPrimaryAgent && !args.model && msg.model && !local.model.hasSessionOverride(sessionID)) {
+        local.model.set(msg.model)
+        local.model.variant.set(msg.model.variant)
       }
     }
   })
@@ -412,9 +422,18 @@ export function Prompt(props: PromptProps) {
           }, 5000)
 
           if (store.interrupt >= 2) {
-            void sdk.client.session.abort({
-              sessionID: props.sessionID,
-            })
+            if (abortRequestPending) {
+              dialog.clear()
+              return
+            }
+            abortRequestPending = true
+            void sdk.client.session
+              .abort({
+                sessionID: props.sessionID,
+              })
+              .finally(() => {
+                abortRequestPending = false
+              })
             setStore("interrupt", 0)
           }
           dialog.clear()
@@ -1022,6 +1041,7 @@ export function Prompt(props: PromptProps) {
 
       sessionID = res.data.id
       await local.model.attachSessionOverride(sessionID)
+      await local.agent.attachSession(sessionID)
     }
 
     const inputText = expandTrackedPastedText(
@@ -1715,3 +1735,4 @@ export function Prompt(props: PromptProps) {
     </>
   )
 }
+

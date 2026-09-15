@@ -18,7 +18,10 @@ async function exists(p: string): Promise<boolean> {
   }
 }
 
-function parseAgentMarkdown(raw: string, fallbackName: string): {
+function parseAgentMarkdown(
+  raw: string,
+  fallbackName: string,
+): {
   name: string
   description: string
   prompt: string
@@ -56,16 +59,25 @@ function uniquePaths(paths: string[]): string[] {
   })
 }
 
+function isPathInside(child: string, parent: string): boolean {
+  const relative = path.relative(path.resolve(parent), path.resolve(child))
+  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative))
+}
+
+function isTrustedPath(target: string, trustedRoots: string[]): boolean {
+  const resolved = path.resolve(target)
+  return trustedRoots.some((root) => isPathInside(resolved, root))
+}
+
 /**
  * Read one host config root's `agent/` and `agents/` trees. Host loaders use
  * both spellings and recurse through nested markdown files. Directory symlinks
  * are followed with realpath cycle detection, matching host behavior without
  * allowing a symlink loop to hang context construction.
+ * Symlink targets that resolve outside the trusted project/config roots are
+ * rejected to prevent out-of-root disclosure.
  */
-async function scanAgentRoot(
-  root: string,
-  out: Map<string, CollectedAgent>,
-): Promise<void> {
+async function scanAgentRoot(root: string, out: Map<string, CollectedAgent>, trustedRoots: string[]): Promise<void> {
   if (!(await exists(root))) return
   const visitedDirs = new Set<string>()
   const scanDir = async (dir: string, relativePrefix: string): Promise<void> => {
@@ -75,6 +87,7 @@ async function scanAgentRoot(
     } catch {
       return
     }
+    if (!isTrustedPath(canonical, trustedRoots)) return
     if (visitedDirs.has(canonical)) return
     visitedDirs.add(canonical)
 
@@ -92,8 +105,15 @@ async function scanAgentRoot(
       let isDirectory = entry.isDirectory()
       let isFile = entry.isFile()
       if (entry.isSymbolicLink()) {
+        let realTarget: string
         try {
-          const target = await stat(full)
+          realTarget = await realpath(full)
+        } catch {
+          continue
+        }
+        if (!isTrustedPath(realTarget, trustedRoots)) continue
+        try {
+          const target = await stat(realTarget)
           isDirectory = target.isDirectory()
           isFile = target.isFile()
         } catch {
@@ -105,6 +125,15 @@ async function scanAgentRoot(
         continue
       }
       if (!isFile || !entry.name.endsWith(".md")) continue
+      // For symlinked files we already validated the target is inside a trusted root;
+      // for regular files realpath must also remain inside (defense against TOCTOU).
+      try {
+        const fileReal = await realpath(full)
+        if (!isTrustedPath(fileReal, trustedRoots)) continue
+      } catch {
+        // If realpath fails for a non-symlink, fall back to resolved path check.
+        if (!isTrustedPath(path.resolve(full), trustedRoots)) continue
+      }
 
       try {
         const raw = await readFile(full, "utf-8")
@@ -137,10 +166,7 @@ async function scanAgentRoot(
  */
 export async function collectAgents(workspaceRoot: string): Promise<CollectedAgent[]> {
   const out = new Map<string, CollectedAgent>()
-  const roots = uniquePaths([
-    ...opencodeProjectConfigDirs(workspaceRoot),
-    ...opencodeGlobalConfigDirs(),
-  ])
-  for (const root of roots) await scanAgentRoot(root, out)
+  const roots = uniquePaths([...opencodeProjectConfigDirs(workspaceRoot), ...opencodeGlobalConfigDirs()])
+  for (const root of roots) await scanAgentRoot(root, out, roots)
   return [...out.values()]
 }

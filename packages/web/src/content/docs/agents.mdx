@@ -187,10 +187,14 @@ Configure agents in your `opencode.json` config file:
 
 ### Markdown
 
-You can also define agents using markdown files. Place them in:
+You can also define agents using markdown files in the canonical plural folders:
 
-- Global: `~/.config/opencode/agents/`
-- Per-project: `.opencode/agents/`
+- Global: `~/.config/opencode/agents/` (`Global.Path.config`)
+- Project: `.opencode/agents/` in any directory returned by `ConfigPaths.directories()` (ancestor `.opencode` dirs from the worktree)
+
+`ConfigAgent.load()` scans `{agent,agents}/**/*.md` on OpenCode launch - relaunch to pick up new or changed files. There is no file watcher. `agent/` (singular) is scanned only for compatibility; `opencode agent create` always writes to `agents/`.
+
+Minimal `mode: subagent` file:
 
 ```markdown title="~/.config/opencode/agents/review.md"
 ---
@@ -213,7 +217,17 @@ You are in code review mode. Focus on:
 Provide constructive feedback without making direct changes.
 ```
 
-The markdown file name becomes the agent name. For example, `review.md` creates a `review` agent.
+The path under `agents/` becomes the agent name (extension stripped): `review.md` -> `review`, `agents/qa/nested.md` -> `qa/nested`. This is `configEntryNameFromPath()` stripping the `agents/` prefix from the path relative to the scanned directory, so nested names are stable.
+
+Precedence follows `ConfigPaths.directories()` order: `Global.Path.config` (lowest), then ancestor `.opencode` directories, then `$HOME/.opencode`, then `$OPENCODE_CONFIG_DIR` if set. Later directories override earlier ones via `mergeDeep`.
+
+Validate discovered files:
+
+```bash
+opencode agent validate
+```
+
+Scans the effective global and project `agents` directories, prints each invalid file with its absolute path and reason (YAML, schema, or missing `{file:...}` include), and exits non-zero when any issue exists. Valid siblings still load when a neighbor file is invalid.
 
 ---
 
@@ -699,19 +713,21 @@ Run `opencode models` to see a list of the available models.
 
 ## Create agents
 
-You can create new agents using the following command:
+You can create and inspect agents with:
 
 ```bash
-opencode agent create
+opencode agent create   # writes agents/<id>.md under Global.Path.config or <worktree>/.opencode
+opencode agent list     # lists all loaded agents (global + project, after ConfigAgent.load merge)
+opencode agent validate # validates every {agent,agents}/**/*.md in effective ConfigPaths.directories()
 ```
 
-This interactive command will:
+`opencode agent create` is interactive:
 
-1. Ask where to save the agent; global or project-specific.
+1. Ask where to save the agent: global (`~/.config/opencode/agents/`) or project (`.opencode/agents/`).
 2. Description of what the agent should do.
 3. Generate an appropriate system prompt and identifier.
 4. Let you select which permissions the agent should be allowed (anything you don't select is denied).
-5. Finally, create a markdown file with the agent configuration.
+5. Finally, create `agents/<identifier>.md` with the frontmatter and prompt.
 
 ---
 

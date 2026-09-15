@@ -149,7 +149,7 @@ const layer = Layer.effect(
         const servers: Record<string, LSPServer.Info> = {}
 
         if (!cfg.lsp) {
-          yield* Effect.logInfo("all LSPs are disabled")
+          yield* Effect.logInfo("all LSPs are disabled").pipe(Effect.annotateLogs({ channel: "lsp" }))
         } else {
           for (const server of Object.values(LSPServer)) {
             servers[server.id] = server
@@ -161,7 +161,7 @@ const layer = Layer.effect(
             for (const [name, item] of Object.entries(cfg.lsp)) {
               const existing = servers[name]
               if (item.disabled) {
-                yield* Effect.logInfo(`LSP server ${name} is disabled`)
+                yield* Effect.logInfo(`LSP server ${name} is disabled`).pipe(Effect.annotateLogs({ channel: "lsp" }))
                 delete servers[name]
                 continue
               }
@@ -185,7 +185,7 @@ const layer = Layer.effect(
             serverIds: Object.values(servers)
               .map((server) => server.id)
               .join(", "),
-          })
+          }).pipe(Effect.annotateLogs({ channel: "lsp" }))
         }
 
         const s: State = {
@@ -342,7 +342,7 @@ const layer = Layer.effect(
     })
 
     const touchFile = Effect.fn("LSP.touchFile")(function* (input: string, diagnostics?: "document" | "full") {
-      yield* Effect.logInfo("touching file", { file: input })
+      yield* Effect.logInfo("touching file", { file: input }).pipe(Effect.annotateLogs({ channel: "lsp" }))
       const clients = yield* getClients(input)
       yield* Effect.promise(() =>
         Promise.all(

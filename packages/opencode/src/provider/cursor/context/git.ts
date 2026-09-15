@@ -31,6 +31,29 @@ export type GitRepoInfo = {
   remote_url?: string
 }
 
+export function redactRemoteUrl(url: string): string {
+  const trimmed = url.trim()
+  if (!trimmed) return trimmed
+  if (trimmed.includes("://")) {
+    try {
+      const parsed = new URL(trimmed)
+      if (parsed.username || parsed.password) {
+        parsed.username = ""
+        parsed.password = ""
+        return parsed.toString()
+      }
+      return trimmed
+    } catch {
+      const m = trimmed.match(/^([a-zA-Z][a-zA-Z0-9+.-]*:\/\/)[^@]*@(.+)$/)
+      if (m) return `${m[1]}${m[2]}`
+      return trimmed
+    }
+  }
+  const scp = trimmed.match(/^([^@]+)@([^:]+):(.+)$/)
+  if (scp) return `${scp[2]}:${scp[3]}`
+  return trimmed
+}
+
 export async function collectGit(workspaceRoot: string): Promise<{
   repositoryInfo: RepoInfo[]
   gitRepos: GitRepoInfo[]
@@ -45,7 +68,7 @@ export async function collectGit(workspaceRoot: string): Promise<{
     const m = line.match(/^(\S+)\s+(\S+)\s+\(fetch\)/)
     if (!m) continue
     remote_names.push(m[1]!)
-    remote_urls.push(m[2]!)
+    remote_urls.push(redactRemoteUrl(m[2]!))
   }
   const primary = remote_urls[0] ?? ""
   let repo_owner = ""

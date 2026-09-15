@@ -101,7 +101,10 @@ export const OpencodePlugin = define<HttpClient.HttpClient | EventV2.Service | S
       providers = credential
         ? yield* fetchProviders(http, credential).pipe(
             Effect.catch((cause) =>
-              Effect.logWarning("failed to load OpenCode provider config", { cause }).pipe(Effect.as(undefined)),
+               Effect.logWarning("failed to load OpenCode provider config", { cause }).pipe(
+                 Effect.annotateLogs({ channel: "plugin" }),
+                 Effect.as(undefined),
+               ),
             ),
           )
         : undefined
