@@ -151,6 +151,17 @@ Windows
 
 ---
 
+## 2026-09-16 (~01:18) - fix TUI persistence error formatting - GPT-5.6 Luna
+
+### Agent
+- Fixed `packages/tui/src/context/local.tsx`: reused `errorMessage` for session agent/model persistence failures; handles generated empty `BadRequest` and nested `NotFoundError` shapes.
+- Verified `bun run typecheck` in `packages/tui` and workspace `bun turbo typecheck`: 30 packages successful.
+
+### User
+- Session agent and model save failures now show readable error messages without blocking the pre-push typecheck.
+
+---
+
 ## 2026-09-16 (~00:33) - align custom feature inventory - GPT-5.6 Luna, Go; Plan
 
 ### Agent

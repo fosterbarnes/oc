@@ -14,6 +14,7 @@ import { useToast } from "../ui/toast"
 import { useRoute } from "./route"
 import { usePermission } from "./permission"
 import { Locale } from "../util/locale"
+import { errorMessage } from "../util/error"
 
 export type LocalTheme = {
   secondary: RGBA
@@ -185,7 +186,7 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
       async function persistSessionAgent(id: string, name: string) {
         const result = await sdk.client.session.update({ sessionID: id, agent: name })
         if (result.error) {
-          toast.show({ message: `Failed to persist session agent: ${result.error.message}`, variant: "error" })
+          toast.show({ message: `Failed to persist session agent: ${errorMessage(result.error)}`, variant: "error" })
           return false
         }
         batch(() => {
@@ -439,7 +440,7 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
           model: { id: override.modelID, providerID: override.providerID, variant: override.variant },
         })
         if (result.error) {
-          toast.show({ message: `Failed to persist session model: ${result.error.message}`, variant: "error" })
+          toast.show({ message: `Failed to persist session model: ${errorMessage(result.error)}`, variant: "error" })
           return false
         }
         setModelStore("session", id, override)
