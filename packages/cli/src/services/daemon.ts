@@ -108,9 +108,14 @@ export const layer = Layer.effect(
     })
 
     const start = Effect.fn("cli.daemon.start")(function* () {
+      const executable = Global.resolveExecutablePath()
+      const compiled =
+        path
+          .basename(executable)
+          .replace(/\.exe$/, "")
+          .toLowerCase() !== "bun"
       const existing = yield* healthy().pipe(Effect.option)
       const found = Option.getOrUndefined(existing)
-      const compiled = path.basename(process.execPath).replace(/\.exe$/, "") !== "bun"
       if (found?.version === InstallationVersion && compiled) return found.url
       if (found) yield* stopProcess(found).pipe(Effect.ignore)
 
@@ -119,7 +124,7 @@ export const layer = Layer.effect(
         return yield* Effect.fail(new Error("Failed to resolve CLI entrypoint"))
       yield* Effect.try({
         try: () => {
-          spawn(process.execPath, [...(entrypoint ? [entrypoint] : []), "serve", "--register"], {
+          spawn(executable, [...(entrypoint ? [entrypoint] : []), "serve", "--register"], {
             detached: true,
             stdio: "ignore",
           }).unref()

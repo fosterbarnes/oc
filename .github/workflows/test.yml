@@ -63,18 +63,6 @@ jobs:
             turbo-${{ runner.os }}-${{ hashFiles('turbo.json', '**/package.json') }}-
             turbo-${{ runner.os }}-
 
-      - name: Build Windows helper for tests
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          $arch = if ("${{ runner.arch }}" -eq "ARM64") { "arm64" } else { "x64" }
-          $out = "packages/core/native/windows/dist/$arch/opencode-process-tree.exe"
-          New-Item -ItemType Directory -Path (Split-Path $out) -Force | Out-Null
-          # Required Windows compiler/toolchain is documented in packages/core/native/windows/build.ps1; do not download or silently install during tests.
-          pwsh -NoProfile -File packages/core/native/windows/build.ps1 -Architecture $arch -Output $out
-          if (!(Test-Path -LiteralPath $out -PathType Leaf)) { throw "Helper not produced at $out" }
-          Write-Host "Windows helper ready for tests: $out (arch $arch)"
-
       - name: Run unit tests
         timeout-minutes: 20
         run: GITHUB_ACTIONS=false bun turbo test

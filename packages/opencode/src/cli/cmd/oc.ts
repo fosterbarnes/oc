@@ -29,11 +29,10 @@ async function runNative(args: string[], options: { env?: Record<string, string>
   return stdout.trim()
 }
 
-function targetDirectory(target: string | undefined, settings: OcConfig.Settings) {
-  if (!target) return os.homedir()
-  if (target === "." || target === ".." || path.isAbsolute(target) || /[\\/:*?"]/.test(target))
-    return path.resolve(target)
-  return path.resolve(typeof settings.homeDir === "string" ? settings.homeDir : os.homedir(), target)
+export function resolveTargetDirectory(target: string | undefined, ocDir = os.homedir(), homeDir = os.homedir()) {
+  if (!target) return path.resolve(ocDir)
+  if (path.isAbsolute(target)) return path.resolve(target)
+  return path.resolve(homeDir, target)
 }
 
 async function attach(
@@ -100,7 +99,11 @@ const LaunchCommand = cmd({
     const stopIntro = startIntro()
     try {
       const settings = await OcConfig.read()
-      const directory = targetDirectory(args.target, settings)
+      const directory = resolveTargetDirectory(
+        args.target,
+        typeof settings.ocDir === "string" ? settings.ocDir : undefined,
+        typeof settings.homeDir === "string" ? settings.homeDir : undefined,
+      )
       const server = await OcConfig.startServer()
       const session = args.target
         ? JSON.parse(await runNative(["session", "bootstrap", directory], { capture: true }))

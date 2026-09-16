@@ -6,6 +6,7 @@ import { randomBytes } from "crypto"
 import { Global } from "@opencode-ai/core/global"
 
 export const keys = [
+  "ocDir",
   "homeDir",
   "homeDirSort",
   "initModel",
@@ -56,7 +57,10 @@ async function seedDebugFromProduction() {
   if (!Global.Path.debug) return
   await fs.mkdir(Global.Path.data, { recursive: true })
   await fs.mkdir(Global.Path.config, { recursive: true })
-  await copyIfMissing(path.join(productionTwin(Global.Path.data), "auth.json"), path.join(Global.Path.data, "auth.json"))
+  await copyIfMissing(
+    path.join(productionTwin(Global.Path.data), "auth.json"),
+    path.join(Global.Path.data, "auth.json"),
+  )
   await copyIfMissing(
     path.join(productionTwin(Global.Path.config), "config.json"),
     path.join(Global.Path.config, "config.json"),
@@ -119,8 +123,8 @@ export function pathName() {
   return filePath()
 }
 
-export function executablePath() {
-  return process.execPath
+export function executablePath(execPath = process.execPath) {
+  return Global.resolveExecutablePath(execPath)
 }
 
 function serverStateDirectory() {
@@ -190,9 +194,9 @@ async function startServerUnlocked() {
   if (state?.pid && state.hostname === hostname && state.port === port && (await serverHealthy(url, secret))) {
     return { url, secret }
   }
-  if (state?.pid) {
+  if (state) {
     try {
-      process.kill(state.pid)
+      await fs.rm(serverStatePath(), { force: true })
     } catch {}
   }
   const executable = executablePath()

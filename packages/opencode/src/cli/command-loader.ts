@@ -70,10 +70,32 @@ export type CommandToLoad =
   | "db"
   | "oc"
 
+export function withExecutableDefault(args: readonly string[], execPath = process.execPath) {
+  const file = execPath.split(/[\\/]/).pop() ?? execPath
+  const ext = file.includes(".") ? `.${file.split(".").pop()}` : ""
+  const base = file.slice(0, file.length - ext.length).toLowerCase()
+  if (base !== "oc" && base !== "occ") return [...args]
+  const helpOrVersion =
+    args.includes("-h") ||
+    args.includes("--help") ||
+    args.includes("-v") ||
+    args.includes("--version") ||
+    args.includes("--register")
+  if (helpOrVersion) return [...args]
+  if (base === "oc" && args.length === 1 && args[0] === "oc") return ["oc", "launch", ...args]
+  if (resolveCommandToLoad(args) !== "tui") return [...args]
+  if (base === "oc") return ["oc", "launch", ...args]
+  return ["oc", "previous", "--depth", "1", ...args]
+}
+
 export function withOcLaunchDefault(args: readonly string[], debug: boolean) {
   if (!debug) return [...args]
   const helpOrVersion =
-    args.includes("-h") || args.includes("--help") || args.includes("-v") || args.includes("--version")
+    args.includes("-h") ||
+    args.includes("--help") ||
+    args.includes("-v") ||
+    args.includes("--version") ||
+    args.includes("--register")
   if (helpOrVersion) return [...args]
   if (resolveCommandToLoad(args) !== "tui") return [...args]
   return ["oc", "launch", ...args]

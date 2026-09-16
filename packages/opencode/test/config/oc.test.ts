@@ -28,6 +28,27 @@ describe("debug instance identity", () => {
   })
 })
 
+describe("canonical child executable", () => {
+  test("maps oc and occ to sibling opencode", () => {
+    expect(OcConfig.executablePath("C:\\Apps\\opencode\\oc.exe")).toBe("C:\\Apps\\opencode\\opencode.exe")
+    expect(OcConfig.executablePath("C:\\Apps\\opencode\\occ.exe")).toBe("C:\\Apps\\opencode\\opencode.exe")
+    expect(OcConfig.executablePath("/usr/local/bin/oc")).toBe("/usr/local/bin/opencode")
+    expect(OcConfig.executablePath("/usr/local/bin/occ")).toBe("/usr/local/bin/opencode")
+  })
+
+  test("leaves bun, opencode, and ocdebug unchanged", () => {
+    expect(OcConfig.executablePath("C:\\Apps\\opencode\\opencode.exe")).toBe("C:\\Apps\\opencode\\opencode.exe")
+    expect(OcConfig.executablePath("C:\\Apps\\opencode\\ocdebug.exe")).toBe("C:\\Apps\\opencode\\ocdebug.exe")
+    expect(OcConfig.executablePath("/usr/local/bin/bun")).toBe("/usr/local/bin/bun")
+    expect(OcConfig.executablePath("C:\\Program Files\\bun\\bun.exe")).toBe("C:\\Program Files\\bun\\bun.exe")
+  })
+
+  test("preserves bun entrypoint detection", () => {
+    expect(OcConfig.executablePath("/usr/local/bin/bun").toLowerCase()).toContain("bun")
+    expect(OcConfig.executablePath("C:\\Apps\\opencode\\oc.exe").toLowerCase()).not.toContain("bun")
+  })
+})
+
 describe("OC config", () => {
   test("reads launcher settings only from the native config", async () => {
     const directory = await fs.mkdtemp(path.join(os.tmpdir(), "opencode-oc-"))
@@ -52,8 +73,10 @@ describe("OC config", () => {
       `${JSON.stringify({ homeDirSort: "modified", server: { hostname: "127.0.0.1", port: 4096 } }, null, 2)}\n`,
     )
     await OcConfig.update("serverStartOnWindowsUserStart", "true")
+    await OcConfig.update("ocDir", "C:/Users/user")
 
     expect(await OcConfig.read()).toEqual({
+      ocDir: "C:/Users/user",
       homeDirSort: "modified",
       server: { hostname: "127.0.0.1", port: 4096, startOnWindowsUserStart: true },
     })

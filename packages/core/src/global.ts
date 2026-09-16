@@ -8,8 +8,22 @@ import { Flag } from "./flag/flag"
 import { makeGlobalNode } from "./effect/app-node"
 
 export function isDebugExecutable(execPath = process.execPath) {
-  const base = path.basename(execPath, path.extname(execPath)).toLowerCase()
+  const base = executableBasename(execPath)
   return base === "ocdebug" || base === "oc-debug" || base === "opencode-debug"
+}
+
+function executableBasename(execPath: string) {
+  const file = execPath.split(/[\\/]/).pop() ?? execPath
+  const ext = path.extname(file)
+  return file.slice(0, file.length - ext.length).toLowerCase()
+}
+
+export function resolveExecutablePath(execPath = process.execPath) {
+  const base = executableBasename(execPath)
+  if (base !== "oc" && base !== "occ") return execPath
+  const isWin = execPath.includes("\\")
+  const mod = isWin ? path.win32 : path.posix
+  return mod.join(mod.dirname(execPath), `opencode${mod.extname(execPath)}`)
 }
 
 export function resolveAppName(input: { instance?: string; execPath?: string } = {}) {

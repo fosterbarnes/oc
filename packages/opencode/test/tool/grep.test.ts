@@ -170,6 +170,27 @@ describe("tool.grep", () => {
     }),
   )
 
+  it.instance("does not search sibling files when path is a single file", () =>
+    Effect.gen(function* () {
+      const test = yield* TestInstance
+      const only = path.join(test.directory, "only.txt")
+      const sibling = path.join(test.directory, "sibling.txt")
+      yield* Effect.promise(() => Bun.write(only, "alpha\n"))
+      yield* Effect.promise(() => Bun.write(sibling, "needle-in-sibling\n"))
+      const info = yield* GrepTool
+      const grep = yield* info.init()
+      const result = yield* grep.execute(
+        {
+          pattern: "needle",
+          path: only,
+        },
+        ctx,
+      )
+      expect(result.metadata.matches).toBe(0)
+      expect(result.output).toBe("No files found")
+    }),
+  )
+
   it.instance("does not ask for external_directory when alias path is allowed", () =>
     Effect.gen(function* () {
       if (process.platform === "win32") return

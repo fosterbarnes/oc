@@ -14,3 +14,24 @@ describe("global paths", () => {
     expect((await fs.stat(Global.Path.tmp)).isDirectory()).toBe(true)
   })
 })
+
+describe("resolveExecutablePath", () => {
+  test("maps oc and occ to sibling opencode", () => {
+    expect(Global.resolveExecutablePath("C:\\Apps\\opencode\\oc.exe")).toBe("C:\\Apps\\opencode\\opencode.exe")
+    expect(Global.resolveExecutablePath("C:\\Apps\\opencode\\occ.exe")).toBe("C:\\Apps\\opencode\\opencode.exe")
+    expect(Global.resolveExecutablePath("/usr/local/bin/oc")).toBe("/usr/local/bin/opencode")
+    expect(Global.resolveExecutablePath("/usr/local/bin/occ")).toBe("/usr/local/bin/opencode")
+    expect(Global.resolveExecutablePath("/opt/opencode/oc")).toBe("/opt/opencode/opencode")
+  })
+
+  test("leaves opencode, ocdebug, and bun unchanged", () => {
+    expect(Global.resolveExecutablePath("C:\\Apps\\opencode\\opencode.exe")).toBe("C:\\Apps\\opencode\\opencode.exe")
+    expect(Global.resolveExecutablePath("C:\\Apps\\opencode\\ocdebug.exe")).toBe("C:\\Apps\\opencode\\ocdebug.exe")
+    expect(Global.resolveExecutablePath("C:\\Apps\\opencode\\oc-debug.exe")).toBe("C:\\Apps\\opencode\\oc-debug.exe")
+    expect(Global.resolveExecutablePath("C:\\Apps\\opencode\\opencode-debug.exe")).toBe(
+      "C:\\Apps\\opencode\\opencode-debug.exe",
+    )
+    expect(Global.resolveExecutablePath("/usr/local/bin/bun")).toBe("/usr/local/bin/bun")
+    expect(Global.resolveExecutablePath("C:\\Program Files\\bun\\bun.exe")).toBe("C:\\Program Files\\bun\\bun.exe")
+  })
+})

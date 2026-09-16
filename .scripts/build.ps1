@@ -7,6 +7,7 @@ requireBunForCompile
 
 $buildArgs = @($buildScript, '--single')
 if ($Release) { $env:OPENCODE_RELEASE = '1' }
+if (-not $Release) { $buildArgs += '--with-debug' }
 if ($SkipInstall) { $buildArgs += '--skip-install' }
 runNativeCommand bun (@('run') + $buildArgs) 'OpenCode build'
 closeOut 3

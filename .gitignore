@@ -25,10 +25,15 @@ a.out
 target
 .direnv/
 
+.scripts/grepbench/grepbench.json
+.scripts/grepbench/grepbench-report.md
+.scripts/grepbench/grepbench.exe
+
 # Local dev files
 opencode-dev
 UPCOMING_CHANGELOG.md
 logs/
 *.bun-build
 tsconfig.tsbuildinfo
+
 UPSTREAM/opencode/

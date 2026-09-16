@@ -82,4 +82,26 @@ describe("Ripgrep", () => {
       (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
     ),
   )
+
+  it.live("skips oversized JSON records and keeps remaining matches", () =>
+    Effect.acquireUseRelease(
+      Effect.promise(() => tmpdir()),
+      (tmp) =>
+        Effect.gen(function* () {
+          const huge = "needle-huge " + "x".repeat(70 * 1024)
+          yield* Effect.promise(() =>
+            fs.writeFile(path.join(tmp.path, "mixed.txt"), `${huge}\nneedle-small\n`),
+          )
+
+          const matches = yield* (yield* Ripgrep.Service).grep({
+            cwd: tmp.path,
+            pattern: "needle",
+            limit: 10,
+          })
+
+          expect(matches.map((item) => item.text.trim())).toEqual(["needle-small"])
+        }),
+      (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+    ),
+  )
 })

@@ -9,18 +9,7 @@ import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { AppProcess } from "@opencode-ai/core/process"
 import { testEffect } from "../lib/effect"
 
-const it = testEffect(
-  LayerNode.compile(
-    process.platform === "win32"
-      ? AppProcess.nodeWithOptions({
-          windowsSupervisorPath: path.join(
-            import.meta.dir,
-            `../../native/windows/dist/${process.arch}/opencode-process-tree.exe`,
-          ),
-        })
-      : AppProcess.node,
-  ),
-)
+const it = testEffect(LayerNode.compile(AppProcess.node))
 
 const NODE = process.execPath
 const cmd = (...args: string[]) => ChildProcess.make(NODE, args)

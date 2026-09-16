@@ -7,21 +7,23 @@ Project automation lives in `.scripts/`. Scripts target PowerShell 7 and fail on
 | Path | Purpose |
 |------|---------|
 | `.scripts/scriptHelper.ps1` | Shared repository paths, maintenance version validation, and native-command checks. |
-| `.scripts/build.ps1` | Builds the current-platform standalone OpenCode executable. `-Release` also creates release archives through the existing Bun build script. |
+| `.scripts/build.ps1` | Agent-safe build of the current-platform production and debug executables. `-Release` builds the release executable and archives through the existing Bun build script. It never touches the installed runtime. |
+| `.scripts/buildDebug.ps1` | Agent-safe debug-only build. It never touches the production dist artifact or installed runtime. |
 | `.scripts/.run.ps1` | Runs the repository's normal `bun dev .` entry point and forwards arguments. |
 | `.scripts/prePush.ps1` | Runs root lint and Turbo typecheck. It does not commit or push. |
 | `.scripts/updateUpstream.ps1` | Fetches and fast-forwards the separate `UPSTREAM\opencode` checkout without modifying this customized parent checkout. |
 | `.scripts/syncAndInstall.ps1` | Fail-closed upstream sync into this custom fork, then verify, backup, stop `opencode.exe`, and install. |
 | `.scripts/push.ps1` | Commits all current changes with a supplied or prompted message, then pushes the current branch. `-Force` is explicit. |
 | `.scripts/pushRelease.ps1` | Tags and publishes archives from `packages/opencode/dist` using the separate `.version/version` maintenance version. |
-| `.scripts/install.ps1` | Builds (unless `-NoBuild`) and installs both `opencode.exe` and `ocdebug.exe` into `C:\Users\user\Apps\opencode`. |
-| `.scripts/installDebug.ps1` | Builds (unless `-NoBuild`) and installs only `ocdebug.exe`. Does not stop or replace production `opencode.exe`. |
+| `.scripts/install.ps1` | User-only build-and-install of both `opencode.exe` and `ocdebug.exe`. `-NoBuild`/`-nb` installs existing artifacts. It stops OpenCode processes and must not run from an agent. |
+| `.scripts/installDebug.ps1` | User-only debug install. Builds (unless `-NoBuild`/`-nb`) and replaces only `ocdebug.exe`; production OpenCode processes are left alone. |
 | `.scripts/.runDebug.ps1` | Same as `.run.ps1`, with `OPENCODE_INSTANCE=debug` and DEBUG logs. |
 
 ## Common commands
 
 ```powershell
 .\.scripts\build.ps1
+.\.scripts\buildDebug.ps1
 .\.scripts\build.ps1 -Release
 .\.scripts\.run.ps1
 .\.scripts\prePush.ps1
@@ -34,6 +36,22 @@ Project automation lives in `.scripts/`. Scripts target PowerShell 7 and fail on
 .\.scripts\installDebug.ps1
 .\.scripts\.runDebug.ps1
 ```
+
+Agents may run `build.ps1` and `buildDebug.ps1`. They must not run
+`install.ps1`, `installDebug.ps1`, `.install.ps1`, or normal
+`syncAndInstall.ps1`: those scripts can stop the OpenCode host that launched the
+agent. A successful agent build should report the dist artifact paths, then ask
+the user to exit OpenCode and run the install command from a fresh PowerShell:
+
+```powershell
+.\.scripts\install.ps1 -NoBuild
+# or, for debug only:
+.\.scripts\installDebug.ps1 -NoBuild
+```
+
+The installers refuse inherited OpenCode processes before building, stopping,
+backing up, or copying files. `syncAndInstall.ps1 -SkipInstall` remains the
+non-install upstream sync/build path.
 
 `oc` is unchanged: production `opencode.exe`, resident server on port 4096. `ocdebug` is the profile function that runs `ocdebug.exe oc launch`. That exe uses `opencode-debug` data/config/state, a resident server on port **4097**, DEBUG logs, and copies production `auth.json` / launcher settings on first run. `.scripts\install.ps1` installs both exes. `.scripts\installDebug.ps1` only stops/replaces `ocdebug.exe`.
 
@@ -55,7 +73,7 @@ confirmed custom behavior.
 
 `syncAndInstall.ps1` is the combined updater. Install directory, executable name, backup suffix, and the snapshot baseline live in the `CONFIG` block at the top of that script (default install `C:\Users\user\Apps\opencode\opencode.exe`). It refuses a dirty parent unless `-AllowDirtyParent` is passed after review. `Custom fork:` comments are review metadata only; overlapping hunks always stop. Text compare treats CRLF and LF as the same so Windows checkouts are not fake overlaps. `-DryRun` classifies and reports without fetch, source application, `Stop-Process`, backup, or install. `-SkipFetch` applies against the current isolated checkout. `-SkipInstall` stops after verify/build without touching the installed exe. After a clean apply it runs `git diff --check`, parses changed PowerShell files, `bun typecheck` from each affected package directory (never the repo root), then the existing Windows single-executable build. Only then (unless `-SkipInstall`) does it stop all `opencode.exe` processes, copy the current install to `opencode.exe.bak`, and install the new binary. If that `.bak` already exists, the previous backup is renamed with a timestamp unless `-OverwriteBackup` replaces it in place. Source changes stay uncommitted.
 
-The standalone build is the repository's existing `packages/opencode/script/build.ts --single` flow. The install script only supports the current Windows architecture and does not alter PATH.
+The standalone build is the repository's `packages/opencode/script/build.ts --single` flow. A normal `build.ps1` run emits `dist/opencode-windows-x64/bin/opencode.exe` and `dist/opencode-debug-windows-x64/bin/ocdebug.exe`; `buildDebug.ps1` emits only the latter. The install script only supports the current Windows architecture and does not alter PATH.
 
 `build.ps1` and `.run.ps1` call `requireBunForCompile` in `scriptHelper.ps1` before invoking Bun. Stable Bun 1.4.0 (`34cbb9a40`) is rejected because it embeds the Windows TUI `bun:ffi` FTL segfault (oven-sh/bun#39829). When PATH bun is 1.4.0 or older, the script runs `bun upgrade --canary` and refuses to compile if the version is still 1.4.0. The compiled `opencode.exe` contains that Bun runtime; upgrading PATH bun after an old compile does not fix an already-installed exe.
 

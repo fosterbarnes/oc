@@ -59,6 +59,28 @@ function requireBunForCompile {
     Write-Host "Bun $version"
 }
 
+function assertExternalInstall {
+    param(
+        [Parameter(Mandatory)][string]$BuildCommand,
+        [Parameter(Mandatory)][string]$InstallCommand
+    )
+    $hostPid = 0
+    if (-not [int]::TryParse($env:OPENCODE_PID, [ref]$hostPid)) { return }
+    $hostProcess = Get-CimInstance Win32_Process -Filter "ProcessId = $hostPid" -ErrorAction SilentlyContinue
+    if (-not $hostProcess) { return }
+    $hostName = [IO.Path]::GetFileNameWithoutExtension([string]$hostProcess.Name).ToLowerInvariant()
+    if ($hostName -notin @('opencode', 'oc', 'occ', 'ocdebug', 'ocbug', 'oc-debug')) { return }
+    throw @"
+Refusing to install from an active OpenCode process. The installer stops OpenCode before replacing its binaries.
+
+Safe agent action:
+  $BuildCommand
+
+After the build completes, exit OpenCode and run this from a fresh PowerShell:
+  $InstallCommand
+"@
+}
+
 function requireVersion {
     if (-not (Test-Path -LiteralPath $version)) {
         New-Item -ItemType Directory -LiteralPath $versionFolder -Force | Out-Null

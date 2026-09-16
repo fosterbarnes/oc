@@ -5,6 +5,7 @@
 - Local `main` ref may not exist; use `dev` or `origin/dev` for diffs.
 - `UPSTREAM\opencode` is the separate upstream-only checkout at `C:\Users\user\Documents\GitHub\oc\UPSTREAM\opencode`. Keep custom source changes in this parent checkout; upstream synchronization must not modify parent source files.
 - Windows TUI segfaults on Bun 1.4.0 (`34cbb9a40`): `bun:ffi` FTL pointer args (oven-sh/bun#39829, #40302). `.scripts\build.ps1` and `.scripts\.run.ps1` call `requireBunForCompile` and will `bun upgrade --canary` when PATH bun is still 1.4.0. Do not ship `opencode.exe` compiled with 1.4.0. Stable 1.4.1 was not published as of 2026-08-31.
+- Safe local builds: agents may run `.scripts\build.ps1` or `.scripts\buildDebug.ps1`; these never touch `C:\Users\user\Apps\opencode`. Agents must not run `.scripts\install.ps1`, `.scripts\installDebug.ps1`, `.install.ps1`, or normal `.scripts\syncAndInstall.ps1`, because those installers can stop the OpenCode host. After building, tell the user to exit OpenCode and run the relevant installer with `-NoBuild` from a fresh PowerShell.
 
 ## Build notes
 
@@ -161,6 +162,12 @@ const table = sqliteTable("session", {
 
 - Always run `bun typecheck` from package directories (e.g., `packages/opencode`), never `tsc` directly.
 
+## Known Verification Baseline
+
+- `bun typecheck` currently reports `packages/tui/src/context/local.tsx:188`: generated `EffectHttpApiErrorBadRequest` lacks `.message`.
+- Treat this unchanged diagnostic as pre-existing for unrelated plans. Report it, but do not block closeout.
+- Block only when the plan touches this error path or introduces additional typecheck failures.
+
 ## V2 Session Core
 
 - Keep durable prompt admission separate from model execution. `SessionV2.prompt(...)` admits one durable `session_input` row before scheduling advisory `SessionExecution.wake(sessionID)` unless `resume: false` requests admit-only behavior. The serialized runner promotes admitted inputs into visible user messages at safe boundaries.
@@ -172,4 +179,3 @@ const table = sqliteTable("session", {
 - Keep delivery vocabulary explicit. Prompts steer by default and promote at the next safe provider-turn boundary while the current drain requires continuation. An explicit `queue` input remains pending until the Session would otherwise become idle; promote one queued input at that boundary, then reevaluate continuation before promoting another. Promoting any new user input resets the selected agent's provider-turn allowance; a batch of steers resets it once.
 - Keep EventV2 replay owner claims separate from clustered Session execution ownership.
 - Keep the System Context algebra, registry, and built-ins in `src/system-context`; keep Context Source producers with their observed domains, and keep Session History selection plus Context Epoch persistence Session-owned.
-

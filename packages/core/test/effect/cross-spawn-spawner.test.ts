@@ -9,14 +9,7 @@ import { CrossSpawnSpawner } from "@opencode-ai/core/cross-spawn-spawner"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { testEffect } from "../lib/effect"
 
-const live = LayerNode.compile(
-  CrossSpawnSpawner.nodeWithOptions({
-    windowsSupervisorPath: path.resolve(
-      import.meta.dir,
-      `../../native/windows/dist/${process.arch}/opencode-process-tree.exe`,
-    ),
-  }),
-)
+const live = LayerNode.compile(CrossSpawnSpawner.node)
 const fx = testEffect(live)
 
 function js(code: string, opts?: ChildProcess.CommandOptions) {
@@ -396,18 +389,7 @@ describe("cross-spawn spawner", () => {
 
   describe("Windows-specific", () => {
     fx.effect(
-      "runs Git through the inherited terminal",
-      Effect.gen(function* () {
-        if (process.platform !== "win32") return
-        const out = yield* ChildProcessSpawner.ChildProcessSpawner.use((svc) =>
-          svc.string(ChildProcess.make("git", ["--version"])),
-        )
-        expect(out).toStartWith("git version ")
-      }),
-    )
-
-    fx.effect(
-      "supervises descendants and reports the root PID",
+      "kills descendant processes via native taskkill and reports root PID",
       Effect.gen(function* () {
         if (process.platform !== "win32") return
         const tmp = yield* Effect.acquireRelease(
@@ -427,7 +409,7 @@ describe("cross-spawn spawner", () => {
     )
 
     fx.effect(
-      "keeps concurrent command trees isolated",
+      "keeps concurrent process trees isolated with native kills",
       Effect.gen(function* () {
         if (process.platform !== "win32") return
         const [first, second] = yield* Effect.all([js("setInterval(()=>{},60000)"), js("setInterval(()=>{},60000)")], {
@@ -441,7 +423,7 @@ describe("cross-spawn spawner", () => {
     )
 
     fx.effect(
-      "forwards additional output descriptors",
+      "forwards additional output descriptors via native stdio pipes",
       Effect.gen(function* () {
         if (process.platform !== "win32") return
         const handle = yield* js('require("fs").writeSync(3,"extra")', {

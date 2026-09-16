@@ -96,7 +96,6 @@ jobs:
           OPENCODE_RELEASE: ${{ needs.version.outputs.release }}
           GH_REPO: ${{ needs.version.outputs.repo }}
           GH_TOKEN: ${{ steps.committer.outputs.token }}
-          OPENCODE_DEFER_WINDOWS_HELPER: "1"
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
@@ -153,21 +152,6 @@ jobs:
           tenant-id: ${{ env.AZURE_TENANT_ID }}
           subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
 
-      - name: Build Windows process supervisors
-        shell: pwsh
-        run: |
-          $x64 = "${{ github.workspace }}\packages\opencode\dist\opencode-windows-x64\bin\opencode-process-tree.exe"
-          $baseline = "${{ github.workspace }}\packages\opencode\dist\opencode-windows-x64-baseline\bin\opencode-process-tree.exe"
-          $arm64 = "${{ github.workspace }}\packages\opencode\dist\opencode-windows-arm64\bin\opencode-process-tree.exe"
-          pwsh -NoProfile -File packages/core/native/windows/build.ps1 -Architecture x64 -Output $x64
-          Copy-Item -LiteralPath $x64 -Destination $baseline -Force
-          pwsh -NoProfile -File packages/core/native/windows/build.ps1 -Architecture arm64 -Output $arm64
-          foreach ($file in @($x64, $baseline, $arm64)) {
-            if (!(Test-Path -LiteralPath $file -PathType Leaf)) { throw "Windows supervisor missing: $file" }
-          }
-          & $x64 --version | Out-Null
-          if ($LASTEXITCODE -ne 0) { throw "Windows supervisor version check failed: $x64" }
-
       - uses: azure/artifact-signing-action@b443cf8ea4124818d2ea9f043cba29fc3ec47b16 # v1.2.0
         with:
           endpoint: ${{ env.AZURE_TRUSTED_SIGNING_ENDPOINT }}
@@ -175,11 +159,8 @@ jobs:
           certificate-profile-name: ${{ env.AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE }}
           files: |
             ${{ github.workspace }}\packages\opencode\dist\opencode-windows-arm64\bin\opencode.exe
-            ${{ github.workspace }}\packages\opencode\dist\opencode-windows-arm64\bin\opencode-process-tree.exe
             ${{ github.workspace }}\packages\opencode\dist\opencode-windows-x64\bin\opencode.exe
-            ${{ github.workspace }}\packages\opencode\dist\opencode-windows-x64\bin\opencode-process-tree.exe
             ${{ github.workspace }}\packages\opencode\dist\opencode-windows-x64-baseline\bin\opencode.exe
-            ${{ github.workspace }}\packages\opencode\dist\opencode-windows-x64-baseline\bin\opencode-process-tree.exe
           exclude-environment-credential: true
           exclude-workload-identity-credential: true
           exclude-managed-identity-credential: true
@@ -196,11 +177,8 @@ jobs:
         run: |
           $files = @(
             "${{ github.workspace }}\packages\opencode\dist\opencode-windows-arm64\bin\opencode.exe",
-            "${{ github.workspace }}\packages\opencode\dist\opencode-windows-arm64\bin\opencode-process-tree.exe",
             "${{ github.workspace }}\packages\opencode\dist\opencode-windows-x64\bin\opencode.exe",
-            "${{ github.workspace }}\packages\opencode\dist\opencode-windows-x64\bin\opencode-process-tree.exe",
-            "${{ github.workspace }}\packages\opencode\dist\opencode-windows-x64-baseline\bin\opencode.exe",
-            "${{ github.workspace }}\packages\opencode\dist\opencode-windows-x64-baseline\bin\opencode-process-tree.exe"
+            "${{ github.workspace }}\packages\opencode\dist\opencode-windows-x64-baseline\bin\opencode.exe"
           )
 
           foreach ($file in $files) {

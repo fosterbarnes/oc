@@ -231,7 +231,7 @@ const layer = Layer.effect(
           ],
           parse: (line) =>
             (Buffer.byteLength(line, "utf8") > MAX_RECORD_BYTES
-              ? Effect.fail(failure(`Ripgrep JSON record exceeded ${MAX_RECORD_BYTES} bytes`))
+              ? Effect.succeed(undefined)
               : Effect.try({
                   try: () => JSON.parse(line) as unknown,
                   catch: (cause) => failure("Invalid ripgrep JSON output", cause),

@@ -6,6 +6,7 @@ import { ServerLifecycle } from "@/server/lifecycle"
 import { stop as stopAgentify } from "@/provider/agentify"
 import { stopCursorProxy } from "@/provider/cursor/runtime"
 import { spawn } from "node:child_process"
+import { Global } from "@opencode-ai/core/global"
 
 function serveArguments() {
   const commandIndex = process.argv.indexOf("serve")
@@ -14,8 +15,9 @@ function serveArguments() {
 
 function restartProcess() {
   const args = serveArguments()
-  const command = process.execPath.toLowerCase().includes("bun") && process.argv[1] ? [process.argv[1], ...args] : args
-  const child = spawn(process.execPath, command, {
+  const executable = Global.resolveExecutablePath()
+  const command = executable.toLowerCase().includes("bun") && process.argv[1] ? [process.argv[1], ...args] : args
+  const child = spawn(executable, command, {
     detached: true,
     stdio: "ignore",
     windowsHide: process.platform === "win32",

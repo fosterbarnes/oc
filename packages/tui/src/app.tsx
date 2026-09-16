@@ -98,8 +98,19 @@ registerOpencodeSpinner()
 function ocConfigPath(): string {
   return path.join(os.homedir(), ".config", "opencode", "oc.json")
 }
+
+function resolveOcDirectory(value: unknown, fallback: string) {
+  const directory = typeof value === "string" && value.trim() ? value.trim() : fallback
+  try {
+    return fs.statSync(directory).isDirectory() ? path.normalize(directory) : fallback
+  } catch {
+    return fallback
+  }
+}
+
 function readOcConfig(): {
   executable: string
+  ocDir: string
   homeDir: string
   homeDirSort: string
   serverStartOnWindowsUserStart: boolean
@@ -111,6 +122,7 @@ function readOcConfig(): {
       const raw = fs.readFileSync(file, "utf8")
       return JSON.parse(raw.replace(/^\s*\/\/.*$/gm, "")) as {
         executable?: unknown
+        ocDir?: unknown
         homeDir?: unknown
         homeDirSort?: unknown
         server?: { startOnWindowsUserStart?: unknown }
@@ -121,21 +133,16 @@ function readOcConfig(): {
       ...parsed,
     }
     const executable = typeof merged.executable === "string" ? merged.executable.trim() : ""
-    const homeDir = typeof merged.homeDir === "string" && merged.homeDir.trim() ? merged.homeDir.trim() : fallbackDir
+    const ocDir = resolveOcDirectory(merged.ocDir, fallbackDir)
+    const homeDir = resolveOcDirectory(merged.homeDir, fallbackDir)
     const sortRaw = typeof merged.homeDirSort === "string" ? merged.homeDirSort.trim().toLowerCase() : fallbackSort
     const homeDirSort = sortRaw === "modified" ? "modified" : "name"
     const serverStartOnWindowsUserStart = merged.server?.startOnWindowsUserStart === true
-    const resolved = (() => {
-      try {
-        return fs.statSync(homeDir).isDirectory() ? path.normalize(homeDir) : fallbackDir
-      } catch {
-        return fallbackDir
-      }
-    })()
-    return { executable, homeDir: resolved, homeDirSort, serverStartOnWindowsUserStart }
+    return { executable, ocDir, homeDir, homeDirSort, serverStartOnWindowsUserStart }
   } catch {
     return {
       executable: "",
+      ocDir: fallbackDir,
       homeDir: fallbackDir,
       homeDirSort: fallbackSort,
       serverStartOnWindowsUserStart: false,
@@ -281,6 +288,7 @@ async function bootstrapOcSession(executable: string, directory: string, cwd: st
 
 function persistOcConfig(
   key:
+    | "ocDir"
     | "homeDir"
     | "homeDirSort"
     | "sessionModel"
@@ -351,6 +359,7 @@ const appBindingCommands = [
   "agent.default_subagent",
   "agent.default_subagent_model",
   "oc.home_dir",
+  "oc.oc_dir",
   "oc.home_dir_sort",
   "model.list",
   "model.cycle_recent",
@@ -1175,6 +1184,32 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
         },
       },
       {
+        name: "oc.oc_dir",
+        title: "OC directory",
+        category: "oc",
+        slashName: "ocDir",
+        run: () => {
+          const current = readOcConfig().ocDir
+          dialog.replace(() => (
+            <DialogPrompt
+              title="OC directory"
+              placeholder={current}
+              onConfirm={(value) => {
+                const trimmed = value.trim()
+                if (!trimmed) return
+                const resolved = resolveOcDirectory(trimmed, "")
+                if (!resolved) {
+                  toast.show({ message: `Directory not found: ${trimmed}`, variant: "error" })
+                  return
+                }
+                void persistOcConfig("ocDir", resolved, toast)
+                dialog.clear()
+              }}
+            />
+          ))
+        },
+      },
+      {
         name: "oc.home_dir_sort",
         title: "Home directory sort order",
         category: "oc",
@@ -1209,14 +1244,8 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
               onConfirm={(value) => {
                 const trimmed = value.trim()
                 if (!trimmed) return
-                let resolved = trimmed
-                try {
-                  resolved = path.normalize(trimmed)
-                  if (!fs.statSync(resolved).isDirectory()) {
-                    toast.show({ message: `Directory not found: ${resolved}`, variant: "error" })
-                    return
-                  }
-                } catch {
+                const resolved = resolveOcDirectory(trimmed, "")
+                if (!resolved) {
                   toast.show({ message: `Directory not found: ${trimmed}`, variant: "error" })
                   return
                 }

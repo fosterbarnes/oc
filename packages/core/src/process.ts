@@ -136,7 +136,7 @@ export const collectStream = (stream: Stream.Stream<Uint8Array, PlatformError>, 
     },
   ).pipe(Effect.map((x) => ({ buffer: Buffer.concat(x.chunks), truncated: x.truncated })))
 
-const makeLayer = () => Layer.effect(
+const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
     const spawner = yield* ChildProcessSpawner
@@ -256,11 +256,6 @@ const makeLayer = () => Layer.effect(
   }),
 )
 
-export const node = makeGlobalNode({ service: Service, layer: makeLayer(), deps: [CrossSpawnSpawner.node] })
-
-export const nodeWithOptions = (options: { readonly windowsSupervisorPath?: string }) => {
-  const spawnerNode = CrossSpawnSpawner.nodeWithOptions(options)
-  return makeGlobalNode({ service: Service, layer: makeLayer(), deps: [spawnerNode] })
-}
+export const node = makeGlobalNode({ service: Service, layer: layer, deps: [CrossSpawnSpawner.node] })
 
 export * as AppProcess from "./process"

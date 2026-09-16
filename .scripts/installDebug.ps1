@@ -5,27 +5,22 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+. "$PSScriptRoot\scriptHelper.ps1"
+assertExternalInstall -BuildCommand '.\.scripts\buildDebug.ps1' -InstallCommand '.\.scripts\installDebug.ps1 -NoBuild'
+# Debug-only install: copies only ocdebug.exe, never touches opencode.exe, oc.exe, or occ.exe hard links.
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
-$binary = Join-Path $repoRoot 'packages\opencode\dist\opencode-windows-x64\bin\opencode.exe'
+$binary = Join-Path $repoRoot 'packages\opencode\dist\opencode-debug-windows-x64\bin\ocdebug.exe'
 
 if (-not $NoBuild) {
-    try {
-        & (Join-Path $PSScriptRoot 'build.ps1') -SkipInstall
-    } catch {
-        return
-    }
+    & (Join-Path $PSScriptRoot 'buildDebug.ps1') -SkipInstall
 }
 
 if (!(Test-Path -LiteralPath $binary)) {
-    throw "Built binary not found: $binary. Run build.ps1 first."
+    throw "Built debug binary not found: $binary. Run buildDebug.ps1 first."
 }
 
 $installDir = 'C:\Users\user\Apps\opencode'
 $debugDestination = Join-Path $installDir 'ocdebug.exe'
-$helperDestination = Join-Path $installDir 'opencode-process-tree.exe'
-if (!(Test-Path -LiteralPath $helperDestination -PathType Leaf)) {
-    throw "Production helper missing: $helperDestination. Run .scripts\install.ps1 once so ocdebug can reuse opencode-process-tree.exe."
-}
 
 New-Item -ItemType Directory -Path $installDir -Force | Out-Null
 $running = @(Get-Process -Name 'ocdebug' -ErrorAction SilentlyContinue)

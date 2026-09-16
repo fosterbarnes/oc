@@ -1,0 +1,32 @@
+diff --git a/chunk-bun-b3exa82d.js b/chunk-bun-b3exa82d.js
+index c83da11..a2dc561 100644
+--- a/chunk-bun-b3exa82d.js
++++ b/chunk-bun-b3exa82d.js
+@@ -9570,7 +9570,10 @@ var CliRenderer = class extends EventEmitter {
+   }
+   resume() {
+     if (this.stdin.setRawMode) {
+-      this.stdin.setRawMode(true);
++      try {
++        this.stdin.setRawMode(true);
++      } catch {
++      }
+     }
+     let drained;
+     while ((drained = this.stdin.read()) !== null)
+diff --git a/chunk-node-kr27pp2p.js b/chunk-node-kr27pp2p.js
+index 58cf5f4..196e2a4 100644
+--- a/chunk-node-kr27pp2p.js
++++ b/chunk-node-kr27pp2p.js
+@@ -9569,7 +9569,10 @@ var CliRenderer = class extends EventEmitter {
+   }
+   resume() {
+     if (this.stdin.setRawMode) {
+-      this.stdin.setRawMode(true);
++      try {
++        this.stdin.setRawMode(true);
++      } catch {
++      }
+     }
+     let drained;
+     while ((drained = this.stdin.read()) !== null)
