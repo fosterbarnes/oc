@@ -37,15 +37,18 @@ test("retries an SSE request failure and notifies after the connection is restor
       <SDKProvider
         url="http://test"
         directory={directory}
-        fetch={Object.assign(async (input: RequestInfo | URL, init?: RequestInit) => {
-          const url = new URL(input instanceof Request ? input.url : String(input))
-          if (url.pathname === "/global/event" || url.pathname === "/event" || url.pathname === "/api/event") {
-            eventCalls++
-            if (eventCalls === 1) throw new Error("offline")
-            return eventStream(init?.signal)
-          }
-          return base.fetch(input, init)
-        }, { preconnect: () => {} })}
+        fetch={Object.assign(
+          async (input: RequestInfo | URL, init?: RequestInit) => {
+            const url = new URL(input instanceof Request ? input.url : String(input))
+            if (url.pathname === "/global/event" || url.pathname === "/event" || url.pathname === "/api/event") {
+              eventCalls++
+              if (eventCalls === 1) throw new Error("offline")
+              return eventStream(init?.signal)
+            }
+            return base.fetch(input, init)
+          },
+          { preconnect: () => {} },
+        )}
       >
         {(() => {
           function Probe() {
@@ -87,15 +90,18 @@ test("clears restored-connection subscribers when the SDK provider unmounts", as
       <SDKProvider
         url="http://test"
         directory={directory}
-        fetch={Object.assign(async (input: RequestInfo | URL, init?: RequestInit) => {
-          const url = new URL(input instanceof Request ? input.url : String(input))
-          if (url.pathname === "/global/event" || url.pathname === "/event" || url.pathname === "/api/event") {
-            eventCalls++
-            if (eventCalls === 1) throw new Error("offline")
-            return eventStream(init?.signal)
-          }
-          return base.fetch(input, init)
-        }, { preconnect: () => {} })}
+        fetch={Object.assign(
+          async (input: RequestInfo | URL, init?: RequestInit) => {
+            const url = new URL(input instanceof Request ? input.url : String(input))
+            if (url.pathname === "/global/event" || url.pathname === "/event" || url.pathname === "/api/event") {
+              eventCalls++
+              if (eventCalls === 1) throw new Error("offline")
+              return eventStream(init?.signal)
+            }
+            return base.fetch(input, init)
+          },
+          { preconnect: () => {} },
+        )}
       >
         {(() => {
           function Probe() {
@@ -124,4 +130,59 @@ test("clears restored-connection subscribers when the SDK provider unmounts", as
   const after = restored
   await Bun.sleep(1200)
   expect(restored).toBe(after)
+})
+
+test("does not flush stale batched events after SDK destroy", async () => {
+  const emitted: unknown[] = []
+  let captured: ((event: unknown) => void) | undefined
+  const events = {
+    subscribe: async (handler: (event: unknown) => void) => {
+      captured = handler
+      return () => {
+        captured = undefined
+      }
+    },
+  } as unknown as import("../../src/context/sdk").EventSource
+  const base = createFetch()
+  const app = await testRender(() => (
+    <TestTuiContexts>
+      <SDKProvider
+        url="http://test"
+        directory={directory}
+        fetch={Object.assign(async (input: RequestInfo | URL, init?: RequestInit) => base.fetch(input, init), {
+          preconnect: () => {},
+        })}
+        events={events}
+      >
+        {(() => {
+          function Probe() {
+            const sdk = useSDK()
+            onMount(() => {
+              const off = sdk.event.on("event" as any, (e) => emitted.push(e))
+              onCleanup(off)
+            })
+            return <box />
+          }
+          return <Probe />
+        })()}
+      </SDKProvider>
+    </TestTuiContexts>
+  ))
+  try {
+    await Bun.sleep(20)
+    // trigger batch window: two events within 16ms should start a timer
+    const evt = {
+      type: "session.updated",
+      properties: { info: { id: "dummy", directory, time: { created: 0, updated: 0 } } },
+    } as unknown as import("@opencode-ai/sdk/v2").GlobalEvent
+    captured?.(evt as any)
+    captured?.(evt as any)
+    // destroy before 16ms batch timer fires - stale timer protection should prevent second flush
+    // first event flushed immediately, second stays queued; after destroy queued flush is cancelled
+    app.renderer.destroy()
+    await Bun.sleep(40)
+    expect(emitted.length).toBe(1)
+  } finally {
+    if (!app.renderer.isDestroyed) app.renderer.destroy()
+  }
 })

@@ -86,8 +86,18 @@ function init() {
   })
 
   let focus: Renderable | null
+  let refocusTimer: ReturnType<typeof setTimeout> | undefined
+  let refocusEpoch = 0
   function refocus() {
-    setTimeout(() => {
+    const epoch = refocusEpoch
+    if (refocusTimer) {
+      clearTimeout(refocusTimer)
+      refocusTimer = undefined
+    }
+    refocusTimer = setTimeout(() => {
+      refocusTimer = undefined
+      if (epoch !== refocusEpoch) return
+      if (renderer.isDestroyed) return
       if (!focus) return
       if (focus.isDestroyed) return
       function find(item: Renderable) {
@@ -97,11 +107,25 @@ function init() {
         }
         return false
       }
-      const found = find(renderer.root)
+      let found = false
+      try {
+        found = find(renderer.root)
+      } catch {
+        found = false
+      }
       if (!found) return
+      // stale renderable protection
+      if (focus.isDestroyed || renderer.isDestroyed) return
       focus.focus()
     }, 1)
   }
+  onCleanup(() => {
+    if (refocusTimer) {
+      clearTimeout(refocusTimer)
+      refocusTimer = undefined
+    }
+    refocusEpoch++
+  })
 
   useBindings(() => ({
     enabled: store.stack.length > 0 && !renderer.getSelection()?.getSelectedText(),
@@ -149,9 +173,19 @@ function init() {
       refocus()
     },
     replace(input: any, onClose?: () => void) {
+      refocusEpoch++
+      if (refocusTimer) {
+        clearTimeout(refocusTimer)
+        refocusTimer = undefined
+      }
       if (store.stack.length === 0) {
         focus = renderer.currentFocusedRenderable
-        focus?.blur()
+        // stale renderable protection: only blur if still in tree and not destroyed
+        if (focus && !focus.isDestroyed && !renderer.isDestroyed) {
+          try {
+            focus.blur()
+          } catch {}
+        }
       }
       for (const item of store.stack) {
         if (item.onClose) item.onClose()

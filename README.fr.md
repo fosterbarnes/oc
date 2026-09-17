@@ -43,45 +43,6 @@
 
 ---
 
-### Installation
-
-```bash
-# YOLO
-curl -fsSL https://opencode.ai/install | bash
-
-# Gestionnaires de paquets
-npm i -g opencode-ai@latest        # ou bun/pnpm/yarn
-scoop install opencode             # Windows
-choco install opencode             # Windows
-brew install anomalyco/tap/opencode # macOS et Linux (recommandé, toujours à jour)
-brew install opencode              # macOS et Linux (formule officielle brew, mise à jour moins fréquente)
-sudo pacman -S opencode            # Arch Linux (Stable)
-paru -S opencode-bin               # Arch Linux (Latest from AUR)
-mise use -g opencode               # n'importe quel OS
-nix run nixpkgs#opencode           # ou github:anomalyco/opencode pour la branche dev la plus récente
-```
-
-> [!TIP]
-> Supprimez les versions antérieures à 0.1.x avant d'installer.
-
-### Application de bureau (BETA)
-
-OpenCode est aussi disponible en application de bureau. Téléchargez-la directement depuis la [page des releases](https://github.com/anomalyco/opencode/releases) ou [opencode.ai/download](https://opencode.ai/download).
-
-| Plateforme            | Téléchargement                     |
-| --------------------- | ---------------------------------- |
-| macOS (Apple Silicon) | `opencode-desktop-mac-arm64.dmg`   |
-| macOS (Intel)         | `opencode-desktop-mac-x64.dmg`     |
-| Windows               | `opencode-desktop-windows-x64.exe` |
-| Linux                 | `.deb`, `.rpm`, ou AppImage        |
-
-```bash
-# macOS (Homebrew)
-brew install --cask opencode-desktop
-# Windows (Scoop)
-scoop bucket add extras; scoop install extras/opencode-desktop
-```
-
 #### Répertoire d'installation
 
 Le script d'installation respecte l'ordre de priorité suivant pour le chemin d'installation :

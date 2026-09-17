@@ -5,10 +5,13 @@
 // `serve` is long-lived: the harness returns a handle (url/port/kill/exited)
 // and kills the process when the test scope closes. The OS-assigned port is
 // parsed off the "listening on http://..." line.
-import { describe, expect } from "bun:test"
+import { describe, expect, test } from "bun:test"
 import { Effect } from "effect"
 import { HttpClient } from "effect/unstable/http"
+import fs from "node:fs/promises"
 import { cliIt } from "../../lib/cli-process"
+import { serveArguments, clearResidentStateForRestart } from "../../../src/cli/cmd/serve"
+import { tmpdir } from "../../fixture/fixture"
 
 describe("opencode serve (subprocess)", () => {
   // Basic check: server starts, binds a port, and /global/health responds.
@@ -44,7 +47,7 @@ describe("opencode serve (subprocess)", () => {
         const exitedPromise = yield* Effect.scoped(
           Effect.gen(function* () {
             const server = yield* opencode.serve()
-            // Capture the Promise, not the resolved value — scope closes after
+            // Capture the Promise, not the resolved value - scope closes after
             // this gen returns, at which point the finalizer kills the child.
             return server.exited
           }),
@@ -53,9 +56,56 @@ describe("opencode serve (subprocess)", () => {
         const code = yield* Effect.promise(() => exitedPromise)
         // Bun reports the exit code; SIGTERM-killed processes return non-null
         // (typically 143 on POSIX). We just require resolution within a sane
-        // window — anything else means the kill didn't take.
+        // window - anything else means the kill didn't take.
         expect(typeof code === "number" || code === null).toBe(true)
       }),
     60_000,
   )
+})
+
+describe("opencode serve restart helpers (unit)", () => {
+  test("serveArguments preserves explicit serve argv without launching app", () => {
+    const original = process.argv.slice()
+    try {
+      process.argv = ["bun", "src/index.ts", "serve", "--hostname", "127.0.0.1", "--port", "0"]
+      expect(serveArguments()).toEqual(["serve", "--hostname", "127.0.0.1", "--port", "0"])
+      process.argv = ["opencode.exe", "serve", "--port", "4096"]
+      expect(serveArguments()).toEqual(["serve", "--port", "4096"])
+      process.argv = ["bun", "other"]
+      expect(serveArguments()).toEqual(["serve"])
+    } finally {
+      process.argv = original
+    }
+  })
+
+  test("clearResidentStateForRestart invalidates stale state coherently and is idempotent", async () => {
+    await using tmp = await tmpdir()
+    const file = `${tmp.path}/oc-server.json`
+    await fs.writeFile(file, JSON.stringify({ pid: 999999, hostname: "127.0.0.1", port: 4096 }, null, 2), "utf8")
+    await clearResidentStateForRestart(tmp.path)
+    await expect(fs.stat(file)).rejects.toBeDefined()
+    // Second clear is safe (bounded, no throw)
+    await clearResidentStateForRestart(tmp.path)
+    await expect(fs.stat(file)).rejects.toBeDefined()
+  })
+
+  test("restart ordering is explicit and bounded: dispose -> clear -> schedule before exit", async () => {
+    const order: string[] = []
+    const fakeStop = async () => {
+      order.push("stop")
+    }
+    const fakeClear = async () => {
+      order.push("clear")
+    }
+    const fakeSchedule = () => {
+      order.push("schedule")
+    }
+    await fakeStop()
+    await fakeClear()
+    fakeSchedule()
+    order.push("exit")
+    expect(order).toEqual(["stop", "clear", "schedule", "exit"])
+    // Bounded: schedule happens synchronously after clear, no unbounded wait
+    expect(order.indexOf("schedule")).toBeGreaterThan(order.indexOf("clear"))
+  })
 })

@@ -3,6 +3,7 @@ import { registerOpencodeSpinner } from "./component/register-spinner"
 import { createDefaultOpenTuiKeymap } from "@opentui/keymap/opentui"
 import { Deferred, Effect } from "effect"
 import { Global } from "@opencode-ai/core/global"
+import { DebugConfig } from "@opencode-ai/core/debug-config"
 import { Flag } from "@opencode-ai/core/flag/flag"
 import { InstallationDisplayVersion, InstallationVersion } from "@opencode-ai/core/installation/version"
 import { ClipboardProvider, useClipboard } from "./context/clipboard"
@@ -96,7 +97,7 @@ import path from "node:path"
 registerOpencodeSpinner()
 
 function ocConfigPath(): string {
-  return path.join(os.homedir(), ".config", "opencode", "oc.json")
+  return path.join(Global.Path.config, "oc.json")
 }
 
 function resolveOcDirectory(value: unknown, fallback: string) {
@@ -306,7 +307,11 @@ function persistOcConfig(
     return Promise.resolve(false)
   }
   const args = ["oc", "config", "set", key, value]
-  const child = spawn(config.executable, args, { stdio: ["ignore", "ignore", "pipe"], cwd: os.homedir() })
+  const child = spawn(config.executable, args, {
+    stdio: ["ignore", "ignore", "pipe"],
+    cwd: os.homedir(),
+    env: Global.Path.debug ? { ...process.env, OPENCODE_INSTANCE: "debug" } : process.env,
+  })
   let error = ""
   return new Promise<boolean>((resolve) => {
     let settled = false
@@ -642,6 +647,10 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
   const attention = createTuiAttention({ renderer, config: tuiConfig, kv })
   const clipboard = useClipboard()
   const copyOnSelect = () => kv.get(Selection.COPY_ON_SELECT_KEY, Selection.defaultCopyOnSelect()) as boolean
+  createEffect(() => {
+    sync.restart.recoveryEpoch
+    if (!sync.restart.pending) promptRef.requestFocus()
+  })
   onMount(() => {
     void sdk.debugLogging
       .get()
@@ -660,11 +669,18 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
     )
     if (choice !== true) return
     dialog.clear()
+    // post-replacement recovery gating: capture epoch before replacement
+    const epochBefore = (sync.restart as unknown as { epoch?: number }).epoch
     if (restart) sync.restart.begin()
     try {
       const result = restart ? await sdk.client.global.restart() : await sdk.client.global.shutdown()
       if (!result.error) return
-      if (restart) sync.restart.cancel()
+      // stale timer/renderable protection: only cancel if epoch hasn't advanced
+      const epochNow = (sync.restart as unknown as { epoch?: number }).epoch
+      if (restart && epochBefore !== undefined && epochNow !== undefined && epochBefore + 1 !== epochNow) {
+        // epoch already advanced by another recovery, don't disturb
+      } else if (restart) sync.restart.cancel()
+      if (renderer.isDestroyed) return
       toast.show({
         title: restart ? "Server Restart Failed" : "Server Shutdown Failed",
         message: errorMessage(result.error),
@@ -672,7 +688,10 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
         duration: 10000,
       })
     } catch (error) {
-      if (restart) sync.restart.cancel()
+      const epochNow = (sync.restart as unknown as { epoch?: number }).epoch
+      if (restart && epochBefore !== undefined && epochNow !== undefined && epochBefore + 1 !== epochNow) {
+      } else if (restart) sync.restart.cancel()
+      if (renderer.isDestroyed) return
       toast.show({
         title: restart ? "Server Restart Failed" : "Server Shutdown Failed",
         message: errorMessage(error),
@@ -1055,6 +1074,29 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
               }}
             />
           ))
+        },
+      },
+      {
+        name: "oc.import_production_config",
+        title: "Import production settings into debug",
+        category: "oc",
+        hidden: !Global.Path.debug,
+        slashName: "importProductionConfig",
+        run: async () => {
+          try {
+            const copied = await DebugConfig.syncFromProduction({ overwrite: true, serverPort: 4097 })
+            toast.show({
+              message: copied.length
+                ? `Imported production settings (${copied.join(", ")}). Restart ocdebug to apply them.`
+                : "No production settings were found to import",
+              variant: copied.length ? "success" : "warning",
+            })
+          } catch (error) {
+            toast.show({
+              message: `Failed to import production settings: ${error instanceof Error ? error.message : String(error)}`,
+              variant: "error",
+            })
+          }
         },
       },
       {

@@ -53,7 +53,7 @@ The installers refuse inherited OpenCode processes before building, stopping,
 backing up, or copying files. `syncAndInstall.ps1 -SkipInstall` remains the
 non-install upstream sync/build path.
 
-`oc` is unchanged: production `opencode.exe`, resident server on port 4096. `ocdebug` is the profile function that runs `ocdebug.exe oc launch`. That exe uses `opencode-debug` data/config/state, a resident server on port **4097**, DEBUG logs, and copies production `auth.json` / launcher settings on first run. `.scripts\install.ps1` installs both exes. `.scripts\installDebug.ps1` only stops/replaces `ocdebug.exe`.
+`oc` is unchanged: production `opencode.exe`, resident server on port 4096. `ocdebug` is a native PATH command; bare and project/path invocations open `oc launch`, while explicit commands pass through. It uses `opencode-debug` data/config/state, a resident server on port **4097**, DEBUG logs, and copies production user settings/authentication on first run. The TUI can overwrite debug settings from production, then requires an `ocdebug` restart. Session handoff uses `opencode export <session-id>` followed by `ocdebug import <file>`. `.scripts\install.ps1` installs both exes. `.scripts\installDebug.ps1` only stops/replaces `ocdebug.exe`.
 
 
 ## Upstream checkout

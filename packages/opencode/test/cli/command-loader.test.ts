@@ -20,6 +20,7 @@ describe("CLI command loading", () => {
 
   test("debug ocdebug default is oc launch, not TUI", () => {
     expect(withOcLaunchDefault([], true)).toEqual(["oc", "launch"])
+    expect(withOcLaunchDefault(["project"], true)).toEqual(["oc", "launch", "project"])
     expect(withOcLaunchDefault(["C:\\proj"], true)).toEqual(["oc", "launch", "C:\\proj"])
     expect(withOcLaunchDefault(["serve", "--port", "4097"], true)).toEqual(["serve", "--port", "4097"])
     expect(withOcLaunchDefault(["--version"], true)).toEqual(["--version"])

@@ -6,6 +6,7 @@ import { batch, onCleanup, onMount } from "solid-js"
 
 export type EventSource = {
   subscribe: (handler: (event: GlobalEvent) => void) => Promise<() => void>
+  onReconnect?: (handler: () => void) => () => void
 }
 
 export const { use: useSDK, provider: SDKProvider } = createSimpleContext({
@@ -48,11 +49,13 @@ export const { use: useSDK, provider: SDKProvider } = createSimpleContext({
 
     let queue: GlobalEvent[] = []
     let timer: Timer | undefined
+    let flushEpoch = 0
     let last = 0
     const retryDelay = 1000
     const maxRetryDelay = 30000
 
     const flush = () => {
+      if (abort.signal.aborted) return
       if (queue.length === 0) return
       const events = queue
       queue = []
@@ -67,6 +70,7 @@ export const { use: useSDK, provider: SDKProvider } = createSimpleContext({
     }
 
     const handleEvent = (event: GlobalEvent) => {
+      if (abort.signal.aborted) return
       queue.push(event)
       const elapsed = Date.now() - last
 
@@ -74,13 +78,22 @@ export const { use: useSDK, provider: SDKProvider } = createSimpleContext({
       // If we just flushed recently (within 16ms), batch this with future events
       // Otherwise, process immediately to avoid latency
       if (elapsed < 16) {
-        timer = setTimeout(flush, 16)
+        const epoch = flushEpoch
+        timer = setTimeout(() => {
+          if (epoch !== flushEpoch || abort.signal.aborted) return
+          flush()
+        }, 16)
         return
       }
       flush()
     }
 
     function startSSE() {
+      if (timer) {
+        clearTimeout(timer)
+        timer = undefined
+      }
+      flushEpoch++
       sse?.abort()
       const ctrl = new AbortController()
       sse = ctrl
@@ -113,7 +126,10 @@ export const { use: useSDK, provider: SDKProvider } = createSimpleContext({
               handleEvent(event)
             }
 
-            if (timer) clearTimeout(timer)
+            if (timer) {
+              clearTimeout(timer)
+              timer = undefined
+            }
             if (queue.length > 0) flush()
           } catch {
             // Request and stream failures retry with the same backoff.
@@ -124,11 +140,16 @@ export const { use: useSDK, provider: SDKProvider } = createSimpleContext({
 
           const backoff = Math.min(retryDelay * 2 ** (attempt - 1), maxRetryDelay)
           await new Promise<void>((resolve) => {
+            let backoffTimer: Timer | undefined
             const onAbort = () => {
-              clearTimeout(timer)
+              if (backoffTimer) clearTimeout(backoffTimer)
+              if (timer) {
+                clearTimeout(timer)
+                timer = undefined
+              }
               resolve()
             }
-            const timer = setTimeout(() => {
+            backoffTimer = setTimeout(() => {
               abort.signal.removeEventListener("abort", onAbort)
               ctrl.signal.removeEventListener("abort", onAbort)
               resolve()
@@ -144,6 +165,10 @@ export const { use: useSDK, provider: SDKProvider } = createSimpleContext({
       if (props.events) {
         const unsub = await props.events.subscribe(handleEvent)
         onCleanup(unsub)
+        const unsubReconnect = props.events.onReconnect?.(() => {
+          for (const handler of reconnectHandlers) handler()
+        })
+        if (unsubReconnect) onCleanup(unsubReconnect)
 
         if (Flag.OPENCODE_EXPERIMENTAL_WORKSPACES) {
           // Start syncing workspaces, it's important to do this after
@@ -156,9 +181,13 @@ export const { use: useSDK, provider: SDKProvider } = createSimpleContext({
     })
 
     onCleanup(() => {
+      flushEpoch++
       abort.abort()
       sse?.abort()
-      if (timer) clearTimeout(timer)
+      if (timer) {
+        clearTimeout(timer)
+        timer = undefined
+      }
       handlers.clear()
       reconnectHandlers.clear()
     })

@@ -43,45 +43,6 @@
 
 ---
 
-### 安装
-
-```bash
-# 直接安装 (YOLO)
-curl -fsSL https://opencode.ai/install | bash
-
-# 软件包管理器
-npm i -g opencode-ai@latest        # 也可使用 bun/pnpm/yarn
-scoop install opencode             # Windows
-choco install opencode             # Windows
-brew install anomalyco/tap/opencode # macOS 和 Linux（推荐，始终保持最新）
-brew install opencode              # macOS 和 Linux（官方 brew formula，更新频率较低）
-sudo pacman -S opencode            # Arch Linux (Stable)
-paru -S opencode-bin               # Arch Linux (Latest from AUR)
-mise use -g opencode               # 任意系统
-nix run nixpkgs#opencode           # 或用 github:anomalyco/opencode 获取最新 dev 分支
-```
-
-> [!TIP]
-> 安装前请先移除 0.1.x 之前的旧版本。
-
-### 桌面应用程序 (BETA)
-
-OpenCode 也提供桌面版应用。可直接从 [发布页 (releases page)](https://github.com/anomalyco/opencode/releases) 或 [opencode.ai/download](https://opencode.ai/download) 下载。
-
-| 平台                  | 下载文件                           |
-| --------------------- | ---------------------------------- |
-| macOS (Apple Silicon) | `opencode-desktop-mac-arm64.dmg`   |
-| macOS (Intel)         | `opencode-desktop-mac-x64.dmg`     |
-| Windows               | `opencode-desktop-windows-x64.exe` |
-| Linux                 | `.deb`、`.rpm` 或 AppImage         |
-
-```bash
-# macOS (Homebrew Cask)
-brew install --cask opencode-desktop
-# Windows (Scoop)
-scoop bucket add extras; scoop install extras/opencode-desktop
-```
-
 #### 安装目录
 
 安装脚本按照以下优先级决定安装路径：

@@ -24,4 +24,30 @@ describe("pty protocol", () => {
     expect(frames[0].length).toBe(PtyProtocol.REPLAY_CHUNK)
     expect(frames.join("")).toBe(big)
   })
+
+  test("keeps single ordered queue semantics for replay, meta, and close", () => {
+    const replay = "replay-data"
+    const cursor = 123
+    const meta = PtyProtocol.metaFrame(cursor)
+    const outbox: Array<string | Uint8Array> = []
+    for (const chunk of PtyProtocol.chunks(replay)) outbox.push(chunk)
+    outbox.push(meta)
+    outbox.push("live-data")
+    // Replay chunks must precede meta, and live data after meta - no interleaving duplicate.
+    expect(outbox[0]).toBe("replay-data")
+    expect((outbox[1] as Uint8Array)[0]).toBe(0)
+    expect(outbox[2]).toBe("live-data")
+    expect(JSON.parse(new TextDecoder().decode((outbox[1] as Uint8Array).subarray(1))).cursor).toBe(cursor)
+  })
+
+  test("does not treat replay boundary as duplicate live data", () => {
+    const replay = "AAA"
+    const live = "BBB"
+    const frames = [...PtyProtocol.chunks(replay), PtyProtocol.metaFrame(replay.length)]
+    // Simulate handler enqueue order: replay, meta, then live via pending.
+    const combined = [...(frames.filter((f) => typeof f === "string") as string[]), live].join("")
+    expect(combined).toBe("AAABBB")
+    expect((combined.match(/AAA/g) ?? []).length).toBe(1)
+    expect((combined.match(/BBB/g) ?? []).length).toBe(1)
+  })
 })

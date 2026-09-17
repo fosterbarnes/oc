@@ -132,10 +132,6 @@ const commandLoaders = {
     const { ServeCommand } = await import("./cli/cmd/serve")
     cli.command(ServeCommand)
   },
-  web: async () => {
-    const { WebCommand } = await import("./cli/cmd/web")
-    cli.command(WebCommand)
-  },
   models: async () => {
     const { ModelsCommand } = await import("./cli/cmd/models")
     cli.command(ModelsCommand)

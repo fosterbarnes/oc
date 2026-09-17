@@ -221,7 +221,8 @@ export const ptyConnectHandlers = HttpApiBuilder.group(PtyConnectApi, "pty-conne
         }
 
         // Outbound frames flow through one queue drained by a single writer so replay, live
-        // output, and the close frame keep their order.
+        // output, and the close frame keep their order. Keeping the queue as the single
+        // ordering point prevents the close frame from stranding when teardown races the writer.
         const outbox = yield* Queue.unbounded<string | Uint8Array | Socket.CloseEvent>()
         const attachment = yield* pty(
           Pty.Service.use((service) =>
@@ -254,7 +255,8 @@ export const ptyConnectHandlers = HttpApiBuilder.group(PtyConnectApi, "pty-conne
         })
 
         // The reader runs concurrently with the writer; whichever finishes first ends the
-        // connection and the attachment is always released.
+        // connection and the attachment is always released. Shutting down the queue in the
+        // finalizer avoids stranding a pending close frame.
         yield* Effect.race(
           drain,
           socket.runRaw((message) => {
@@ -263,7 +265,12 @@ export const ptyConnectHandlers = HttpApiBuilder.group(PtyConnectApi, "pty-conne
           }),
         ).pipe(
           Effect.catchReason("SocketError", "SocketCloseError", () => Effect.void),
-          Effect.ensuring(Effect.sync(() => attachment.detach())),
+          Effect.ensuring(
+            Effect.gen(function* () {
+              attachment.detach()
+              yield* Queue.shutdown(outbox).pipe(Effect.ignore)
+            }),
+          ),
           Effect.orDie,
         )
         return HttpServerResponse.empty()

@@ -4,7 +4,6 @@ import {
   Message as MessageType,
   Part as PartType,
 } from "@opencode-ai/sdk/v2/client"
-import type { FileDiffInfo } from "@opencode-ai/client/promise"
 import type { SessionStatus } from "@opencode-ai/sdk/v2"
 import { useData } from "../context"
 import { useFileComponent } from "@opencode-ai/ui/context/file"
@@ -25,7 +24,7 @@ import { SessionRetry } from "./session-retry"
 import { TextReveal } from "@opencode-ai/ui/text-reveal"
 import { createAutoScroll } from "@opencode-ai/ui/hooks"
 import { useI18n } from "@opencode-ai/ui/context/i18n"
-import { normalize } from "./session-diff"
+import { normalize, type LegacyDiff } from "./session-diff"
 
 function record(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value)
@@ -91,9 +90,9 @@ function list<T>(value: T[] | undefined | null, fallback: T[]) {
   return fallback
 }
 
-type SummaryDiff = (SnapshotFileDiff & { file: string }) | FileDiffInfo
+type SummaryDiff = (SnapshotFileDiff & { file: string }) | LegacyDiff
 
-function summaryDiff(value: SnapshotFileDiff): value is SummaryDiff {
+function summaryDiff(value: SnapshotFileDiff | LegacyDiff): value is SummaryDiff {
   return typeof value.file === "string"
 }
 

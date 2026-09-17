@@ -95,6 +95,8 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
           data: { message: "Server lifecycle control is only available for a headless server." },
         })
       }
+      // Explicit ordering: dispose first, then schedule process exit.
+      // HTTP 200 is not a replacement barrier; callers must not assume new server is ready.
       yield* disposeAllInstancesAndEmitGlobalDisposed()
       yield* Effect.sync(() => setTimeout(controller.shutdown, 0))
       return true
@@ -108,6 +110,9 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
           data: { message: "Server lifecycle control is only available for a headless server." },
         })
       }
+      // Explicit bounded ordering: disposal completes before replacement is scheduled.
+      // The HTTP response is returned before the detached replacement is observable;
+      // callers must poll health + live PID rather than treating 200 as happens-before.
       yield* disposeAllInstancesAndEmitGlobalDisposed()
       yield* Effect.sync(() => setTimeout(controller.restart, 0))
       return true

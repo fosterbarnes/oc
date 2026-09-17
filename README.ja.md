@@ -43,45 +43,6 @@
 
 ---
 
-### インストール
-
-```bash
-# YOLO
-curl -fsSL https://opencode.ai/install | bash
-
-# パッケージマネージャー
-npm i -g opencode-ai@latest        # bun/pnpm/yarn でもOK
-scoop install opencode             # Windows
-choco install opencode             # Windows
-brew install anomalyco/tap/opencode # macOS と Linux（推奨。常に最新）
-brew install opencode              # macOS と Linux（公式 brew formula。更新頻度は低め）
-sudo pacman -S opencode            # Arch Linux (Stable)
-paru -S opencode-bin               # Arch Linux (Latest from AUR)
-mise use -g opencode               # どのOSでも
-nix run nixpkgs#opencode           # または github:anomalyco/opencode で最新 dev ブランチ
-```
-
-> [!TIP]
-> インストール前に 0.1.x より古いバージョンを削除してください。
-
-### デスクトップアプリ (BETA)
-
-OpenCode はデスクトップアプリとしても利用できます。[releases page](https://github.com/anomalyco/opencode/releases) から直接ダウンロードするか、[opencode.ai/download](https://opencode.ai/download) を利用してください。
-
-| プラットフォーム      | ダウンロード                       |
-| --------------------- | ---------------------------------- |
-| macOS (Apple Silicon) | `opencode-desktop-mac-arm64.dmg`   |
-| macOS (Intel)         | `opencode-desktop-mac-x64.dmg`     |
-| Windows               | `opencode-desktop-windows-x64.exe` |
-| Linux                 | `.deb`、`.rpm`、または AppImage    |
-
-```bash
-# macOS (Homebrew)
-brew install --cask opencode-desktop
-# Windows (Scoop)
-scoop bucket add extras; scoop install extras/opencode-desktop
-```
-
 #### インストールディレクトリ
 
 インストールスクリプトは、インストール先パスを次の優先順位で決定します。

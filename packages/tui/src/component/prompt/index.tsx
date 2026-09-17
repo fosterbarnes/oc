@@ -57,6 +57,7 @@ import { usePromptWorkspace } from "./workspace"
 import { usePromptMove } from "./move"
 import { readLocalAttachment } from "./local-attachment"
 import { useLocation } from "../../context/location"
+import { usePromptRef } from "../../context/prompt"
 
 registerOpencodeSpinner()
 
@@ -159,6 +160,7 @@ export function Prompt(props: PromptProps) {
   const sync = useSync()
   const tuiConfig = useTuiConfig()
   const dialog = useDialog()
+  const promptRef = usePromptRef()
   const toast = useToast()
   const status = createMemo(() => sync.data.session_status?.[props.sessionID ?? ""] ?? { type: "idle" })
   const history = usePromptHistory()
@@ -236,14 +238,17 @@ export function Prompt(props: PromptProps) {
 
   event.on("tui.prompt.append", (evt, { workspace }) => {
     if (workspace !== project.workspace.current()) return
-    if (!input || input.isDestroyed) return
+    if (!input || input.isDestroyed || renderer.isDestroyed) return
     input.insertText(evt.properties.text)
     setTimeout(() => {
       // setTimeout is a workaround and needs to be addressed properly
-      if (!input || input.isDestroyed) return
-      input.getLayoutNode().markDirty()
-      input.gotoBufferEnd()
-      renderer.requestRender()
+      if (!input || input.isDestroyed || renderer.isDestroyed) return
+      // stale renderable protection
+      try {
+        input.getLayoutNode().markDirty()
+        input.gotoBufferEnd()
+        renderer.requestRender()
+      } catch {}
     }, 0)
   })
 
@@ -652,15 +657,49 @@ export function Prompt(props: PromptProps) {
   })
 
   createEffect(() => {
-    if (!input || input.isDestroyed) return
+    if (!input || input.isDestroyed || renderer.isDestroyed) return
     if (props.visible === false || dialog.stack.length > 0) {
       if (input.focused) input.blur()
       return
     }
 
+    // guarded in-tree prompt focus: only focus if still attached to renderer tree
+    const isInTree = (() => {
+      try {
+        const search = (node: any): boolean => {
+          if (node === input) return true
+          for (const child of node.getChildren?.() ?? []) if (search(child)) return true
+          return false
+        }
+        return search(renderer.root)
+      } catch {
+        return false
+      }
+    })()
+    if (!isInTree) return
+    // stale renderable protection: avoid focusing destroyed or detached input
+    if (input.isDestroyed || renderer.isDestroyed) return
     // Slot/plugin updates can remount the background prompt while a dialog is open.
     // Keep focus with the dialog and let the prompt reclaim it after the dialog closes.
     if (!input.focused) input.focus()
+  })
+
+  createEffect(() => {
+    const epoch = promptRef.focusEpoch()
+    const current = inputTarget()
+    if (!current || current.isDestroyed || renderer.isDestroyed || props.visible === false || dialog.stack.length > 0)
+      return
+    const timer = setTimeout(() => {
+      if (epoch !== promptRef.focusEpoch() || current.isDestroyed || renderer.isDestroyed || dialog.stack.length > 0)
+        return
+      const search = (node: any): boolean => {
+        if (node === current) return true
+        for (const child of node.getChildren?.() ?? []) if (search(child)) return true
+        return false
+      }
+      if (search(renderer.root)) current.focus()
+    }, 0)
+    onCleanup(() => clearTimeout(timer))
   })
 
   createEffect(() => {
@@ -1153,16 +1192,18 @@ export function Prompt(props: PromptProps) {
     props.onSubmit?.()
 
     // temporary hack to make sure the message is sent
+    // no prompt replay: navigation only, no automatic reprompt
     if (!props.sessionID) {
       if (editorParts.length > 0) editor.preserveSelectionFromNewSession()
       setTimeout(() => {
+        if (renderer.isDestroyed) return
         route.navigate({
           type: "session",
           sessionID,
         })
       }, 50)
     }
-    input.clear()
+    if (!input.isDestroyed) input.clear()
     if (finishMoveProgress) move.finishSubmit()
     return true
   }
@@ -1412,7 +1453,14 @@ export function Prompt(props: PromptProps) {
               onSubmit={() => {
                 // IME: double-defer so the last composed character (e.g. Korean
                 // hangul) is flushed to plainText before we read it for submission.
-                setTimeout(() => setTimeout(() => submit(), 0), 0)
+                // no prompt replay: deliberate submit only, stale guard
+                setTimeout(() => {
+                  if (!input || input.isDestroyed || renderer.isDestroyed) return
+                  setTimeout(() => {
+                    if (!input || input.isDestroyed || renderer.isDestroyed) return
+                    void submit()
+                  }, 0)
+                }, 0)
               }}
               onPaste={async (event: PasteEvent) => {
                 if (props.disabled) {
@@ -1451,9 +1499,12 @@ export function Prompt(props: PromptProps) {
                 props.ref?.(ref)
                 setTimeout(() => {
                   // setTimeout is a workaround and needs to be addressed properly
-                  if (!input || input.isDestroyed) return
-                  input.cursorColor = theme.text
-                  if (tuiConfig.cursor) input.cursorStyle = tuiConfig.cursor
+                  // stale renderable protection
+                  if (!input || input.isDestroyed || renderer.isDestroyed) return
+                  try {
+                    input.cursorColor = theme.text
+                    if (tuiConfig.cursor) input.cursorStyle = tuiConfig.cursor
+                  } catch {}
                 }, 0)
               }}
               onMouseDown={(r: MouseEvent) => r.target?.focus()}
@@ -1735,4 +1786,3 @@ export function Prompt(props: PromptProps) {
     </>
   )
 }
-

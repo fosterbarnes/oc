@@ -98,7 +98,7 @@ opencode agent list
 
 ### attach
 
-Attach a terminal to an already running OpenCode backend server started via `serve` or `web` commands.
+Attach a terminal to an already running OpenCode backend server started via `serve`.
 
 ```bash
 opencode attach [url]
@@ -107,8 +107,8 @@ opencode attach [url]
 This allows using the TUI with a remote OpenCode backend. For example:
 
 ```bash
-# Start the backend server for web/mobile access
-opencode web --port 4096 --hostname 0.0.0.0
+# Start the backend server for remote access
+opencode serve --port 4096 --hostname 0.0.0.0
 
 # In another terminal, attach the TUI to the running backend
 opencode attach http://10.20.30.40:4096
@@ -495,28 +495,6 @@ You can import from a local file or an OpenCode share URL.
 opencode import session.json
 opencode import https://opncd.ai/s/abc123
 ```
-
----
-
-### web
-
-Start a headless OpenCode server with a web interface.
-
-```bash
-opencode web
-```
-
-This starts an HTTP server and opens a web browser to access OpenCode through a web interface. Set `OPENCODE_SERVER_PASSWORD` to enable HTTP basic auth (username defaults to `opencode`).
-
-#### Flags
-
-| Flag                                        | Description                                |
-| ------------------------------------------- | ------------------------------------------ |
-| <nobr><code>{"--port"}</code></nobr>        | Port to listen on                          |
-| <nobr><code>{"--hostname"}</code></nobr>    | Hostname to listen on                      |
-| <nobr><code>{"--mdns"}</code></nobr>        | Enable mDNS discovery                      |
-| <nobr><code>{"--mdns-domain"}</code></nobr> | Custom mDNS domain name                    |
-| <nobr><code>{"--cors"}</code></nobr>        | Additional browser origin(s) to allow CORS |
 
 ---
 

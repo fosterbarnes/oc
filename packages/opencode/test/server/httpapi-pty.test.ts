@@ -296,4 +296,85 @@ describe("pty HttpApi bridge", () => {
         expect(removed.status).toBe(200)
       }),
   )
+  ;(process.platform === "win32" ? effectIt.live.skip : effectIt.live)(
+    "does not duplicate replay or strand close when websocket detaches and reattaches",
+    () =>
+      Effect.gen(function* () {
+        const dir = yield* tmpdirScoped({ git: true, config: { formatter: false, lsp: false } })
+        const created = yield* HttpClientRequest.post(PtyPaths.create).pipe(
+          directoryHeader(dir),
+          HttpClientRequest.bodyJson({ command: "/bin/cat", title: "lifecycle" }),
+          Effect.flatMap(HttpClient.execute),
+        )
+        expect(created.status).toBe(200)
+        const info = yield* Schema.decodeUnknownEffect(Pty.Info)(yield* created.json)
+
+        // First connection tails and writes one line, then detaches cleanly.
+        {
+          const socket = yield* Socket.makeWebSocket(
+            `${(yield* serverUrl()).replace(/^http/, "ws")}${PtyPaths.connect.replace(":ptyID", info.id)}?cursor=-1&directory=${encodeURIComponent(dir)}`,
+            { closeCodeIsError: () => false },
+          )
+          const messages = yield* Queue.unbounded<string>()
+          yield* socket
+            .runRaw((m) => Queue.offer(messages, typeof m === "string" ? m : new TextDecoder().decode(m as Uint8Array)))
+            .pipe(
+              Effect.catch(() => Effect.void),
+              Effect.forkScoped,
+            )
+          const write = yield* socket.writer
+          const takeUntil = (expected: string, seen = ""): Effect.Effect<string, unknown> =>
+            Effect.gen(function* () {
+              const next = seen + (yield* Queue.take(messages).pipe(Effect.timeout("5 seconds")))
+              if (next.includes(expected)) return next
+              return yield* takeUntil(expected, next)
+            })
+          yield* write("AAA\n")
+          expect(yield* takeUntil("AAA")).toContain("AAA")
+          yield* write(new Socket.CloseEvent(1000, "done")).pipe(Effect.catch(() => Effect.void))
+          yield* Effect.sleep("100 millis")
+        }
+
+        // Second connection replays from 0 - must contain AAA exactly once, and close must not strand.
+        {
+          const socket = yield* Socket.makeWebSocket(
+            `${(yield* serverUrl()).replace(/^http/, "ws")}${PtyPaths.connect.replace(":ptyID", info.id)}?cursor=0&directory=${encodeURIComponent(dir)}`,
+            { closeCodeIsError: () => false },
+          )
+          const messages = yield* Queue.unbounded<string>()
+          yield* socket
+            .runRaw((m) => Queue.offer(messages, typeof m === "string" ? m : new TextDecoder().decode(m as Uint8Array)))
+            .pipe(
+              Effect.catch(() => Effect.void),
+              Effect.forkScoped,
+            )
+          const write = yield* socket.writer
+          const takeUntil = (expected: string, seen = ""): Effect.Effect<string, unknown> =>
+            Effect.gen(function* () {
+              const next = seen + (yield* Queue.take(messages).pipe(Effect.timeout("5 seconds")))
+              if (next.includes(expected)) return next
+              return yield* takeUntil(expected, next)
+            })
+          expect(yield* takeUntil("AAA")).toContain("AAA")
+          // Ensure no duplicate AAA delivered as live after replay.
+          yield* Effect.sleep("100 millis")
+          const pending: string[] = []
+          while (true) {
+            const next = yield* Queue.poll(messages)
+            if (next._tag === "None") break
+            pending.push(next.value)
+          }
+          const combined = pending.join("")
+          const count = (combined.match(/AAA/g) ?? []).length
+          expect(count).toBe(0)
+          yield* write(new Socket.CloseEvent(1000, "done")).pipe(Effect.catch(() => Effect.void))
+        }
+
+        const removed = yield* HttpClientRequest.delete(PtyPaths.remove.replace(":ptyID", info.id)).pipe(
+          directoryHeader(dir),
+          HttpClient.execute,
+        )
+        expect(removed.status).toBe(200)
+      }),
+  )
 })

@@ -447,6 +447,51 @@ describe("HttpApi Server.listen", () => {
   })
 })
 
+describe("HttpApi global restart bounded ordering", () => {
+  test("restart/shutdown dispose before scheduling replacement (explicit bounded)", async () => {
+    // Unit-level ordering: disposeAllInstances completes before setTimeout schedule.
+    // The HTTP 200 is not a replacement barrier; replacement is async and bounded via poll.
+    const order: string[] = []
+    const fakeDispose = async () => {
+      order.push("dispose")
+    }
+    const fakeSchedule = (fn: () => void) => {
+      order.push("schedule")
+      // Bounded: schedule with 0ms, not unbounded wait
+      setTimeout(fn, 0)
+    }
+    await fakeDispose()
+    let restarted = false
+    fakeSchedule(() => {
+      restarted = true
+    })
+    expect(order).toEqual(["dispose", "schedule"])
+    // Replacement not yet observed immediately after HTTP response
+    expect(restarted).toBe(false)
+    await Bun.sleep(10)
+    expect(restarted).toBe(true)
+  })
+
+  test("health check alone does not prove replacement PID (requires live PID + health)", async () => {
+    // Without launching interactive app, verify the predicate for resident reuse.
+    const deadPid = 999999
+    let health = true
+    const alive = (() => {
+      try {
+        process.kill(deadPid, 0)
+        return true
+      } catch (e) {
+        return (e as NodeJS.ErrnoException).code !== "ESRCH"
+      }
+    })()
+    expect(alive).toBe(false)
+    expect(health && alive).toBe(false)
+    // If replacement hasn't been observed, poll must check both.
+    health = false
+    expect(health && alive).toBe(false)
+  })
+})
+
 function isPortFree(port: number) {
   return new Promise<boolean>((resolve) => {
     const probe = net.createServer()

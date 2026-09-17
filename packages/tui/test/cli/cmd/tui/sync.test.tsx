@@ -171,7 +171,7 @@ describe("tui sync", () => {
     let failNextProviders = false
     let providerCalls = 0
     let exited = false
-    const { app, emit, sync } = await mount(
+    const { app, emit, reconnect, sync } = await mount(
       (url) => {
         if (url.pathname === "/config/providers") {
           providerCalls++
@@ -196,6 +196,7 @@ describe("tui sync", () => {
       sync.restart.begin()
       failNextProviders = true
       emit(disposedEvent())
+      reconnect()
       await wait(() => providerCalls >= baseline + 2)
       expect(exited).toBe(false)
       expect(sync.status).toBe("complete")
@@ -208,7 +209,7 @@ describe("tui sync", () => {
     await using tmp = await tmpdir()
     await Bun.write(`${tmp.path}/kv.json`, "{}")
     let providerCalls = 0
-    const { app, emit, sync } = await mount(
+    const { app, emit, reconnect, sync } = await mount(
       (async (url) => {
         if (url.pathname === "/config/providers") {
           providerCalls++
@@ -225,6 +226,7 @@ describe("tui sync", () => {
       sync.restart.begin()
       emit(disposedEvent())
       emit(disposedEvent())
+      reconnect()
       await wait(() => providerCalls > baseline)
       await wait(() => sync.status === "complete")
       expect(providerCalls).toBe(baseline + 1)
@@ -237,7 +239,7 @@ describe("tui sync", () => {
     await using tmp = await tmpdir()
     await Bun.write(`${tmp.path}/kv.json`, "{}")
     let messageCalls = 0
-    const { app, emit, route, sync } = await mount(
+    const { app, emit, reconnect, route, sync } = await mount(
       (url) => {
         if (url.pathname === "/experimental/session") return json([attachSession])
         if (url.pathname === `/session/${attachSessionID}`) return json(attachSession)
@@ -258,6 +260,7 @@ describe("tui sync", () => {
       const messagesBefore = messageCalls
       sync.restart.begin()
       emit(disposedEvent())
+      reconnect()
       await wait(() => messageCalls > messagesBefore)
       expect(route.data).toEqual({ type: "session", sessionID: attachSessionID })
       expect(sync.data.message[attachSessionID]?.[0]?.id).toBe(attachMessageID)
@@ -270,7 +273,7 @@ describe("tui sync", () => {
     await using tmp = await tmpdir()
     await Bun.write(`${tmp.path}/kv.json`, "{}")
     let listCalls = 0
-    const { app, emit, route, sync } = await mount(
+    const { app, emit, reconnect, route, sync } = await mount(
       (url) => {
         if (url.pathname === "/experimental/session") {
           listCalls++
@@ -287,6 +290,7 @@ describe("tui sync", () => {
       expect(sync.session.get(attachSessionID)?.id).toBe(attachSessionID)
       sync.restart.begin()
       emit(disposedEvent())
+      reconnect()
       await wait(() => route.data.type === "home")
       expect(route.data).toEqual({ type: "home" })
     } finally {
@@ -320,6 +324,97 @@ describe("tui sync", () => {
       emit(disposedEvent())
       await wait(() => exited)
       expect(exited).toBe(true)
+    } finally {
+      app.renderer.destroy()
+    }
+  })
+
+  test("cancelled restart does not trigger prompt replay and clears stale timer", async () => {
+    await using tmp = await tmpdir()
+    await Bun.write(`${tmp.path}/kv.json`, "{}")
+    let providerCalls = 0
+    const { app, emit, reconnect, sync } = await mount((url) => {
+      if (url.pathname === "/config/providers") {
+        providerCalls++
+        return undefined
+      }
+      return undefined
+    }, tmp.path)
+    try {
+      const baseline = providerCalls
+      sync.restart.begin()
+      // post-replacement gating: cancel before disposed should prevent recovery (ordinary bootstrap instead)
+      sync.restart.cancel()
+      emit(disposedEvent())
+      await Bun.sleep(120)
+      // ordinary disposal still bootstraps once, but recovery loop not triggered (stale timer cleared)
+      expect(providerCalls).toBe(baseline + 1)
+      expect(sync.restart.pending).toBe(false)
+      // epoch gating: new begin after cancel still works
+      const baseline2 = providerCalls
+      sync.restart.begin()
+      emit(disposedEvent())
+      reconnect()
+      await wait(() => providerCalls > baseline2)
+      expect(providerCalls).toBeGreaterThanOrEqual(baseline2 + 1)
+    } finally {
+      app.renderer.destroy()
+    }
+  })
+
+  test("epoch gating keeps latest captured session after rapid restarts", async () => {
+    await using tmp = await tmpdir()
+    await Bun.write(`${tmp.path}/kv.json`, "{}")
+    const sessionA = {
+      id: attachSessionID,
+      title: "attached",
+      time: { created: 0, updated: 0 },
+      version: "1.15.13",
+      directory,
+    }
+    const sessionB = {
+      id: "ses_second",
+      title: "second",
+      time: { created: 1, updated: 2 },
+      version: "1.15.13",
+      directory,
+    }
+    let listCalls = 0
+    const { app, emit, reconnect, route, sync } = await mount(
+      (url) => {
+        if (url.pathname === "/experimental/session") {
+          listCalls++
+          // post-replacement list returns both but ordering matters
+          return json([sessionA, sessionB])
+        }
+        if (url.pathname === `/session/${sessionA.id}`) return json(sessionA)
+        if (url.pathname === `/session/${sessionA.id}/message`) return json([{ info: attachMessage, parts: [] }])
+        if (url.pathname === `/session/${sessionA.id}/todo` || url.pathname === `/session/${sessionA.id}/diff`)
+          return json([])
+        if (url.pathname === `/session/${sessionB.id}`) return json(sessionB)
+        if (url.pathname === `/session/${sessionB.id}/message`) return json([])
+        if (url.pathname === `/session/${sessionB.id}/todo` || url.pathname === `/session/${sessionB.id}/diff`)
+          return json([])
+        return undefined
+      },
+      tmp.path,
+      { route: { type: "session", sessionID: attachSessionID } },
+    )
+    try {
+      await sync.session.sync(attachSessionID)
+      // first restart captures A
+      sync.restart.begin()
+      // rapid second restart would capture same route but epoch should gate first
+      // Simulate epoch bump by cancel+begin (second capture)
+      sync.restart.cancel()
+      // navigate to B before second restart to capture B
+      route.navigate({ type: "session", sessionID: sessionB.id })
+      sync.restart.begin()
+      emit(disposedEvent())
+      reconnect()
+      await wait(() => route.data.type === "session")
+      // post-replacement gating: latest epoch's captured session wins, no replay of stale A
+      expect(route.data).toEqual({ type: "session", sessionID: sessionB.id })
     } finally {
       app.renderer.destroy()
     }

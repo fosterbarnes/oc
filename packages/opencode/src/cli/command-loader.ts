@@ -11,7 +11,6 @@ const COMMANDS = new Set([
   "upgrade",
   "uninstall",
   "serve",
-  "web",
   "models",
   "stats",
   "export",
@@ -58,7 +57,6 @@ export type CommandToLoad =
   | "upgrade"
   | "uninstall"
   | "serve"
-  | "web"
   | "models"
   | "stats"
   | "export"

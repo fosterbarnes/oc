@@ -202,6 +202,90 @@ describe("pty", () => {
         expect(Cause.squash(result.cause)).toMatchObject({ _tag: "Pty.ExitedError", ptyID: info.id })
     }),
   )
+
+  ptyTest("does not duplicate replay when data arrives before activate", () =>
+    Effect.gen(function* () {
+      const pty = yield* Pty.Service
+      const info = yield* createPty("cat")
+      yield* pty.write(info.id, "AAA\n")
+      // Wait for the initial output to land in the retained buffer before attaching.
+      const probe = yield* attachCollecting(info.id)
+      yield* waitForOutput(probe.output, "AAA")
+      probe.attachment.detach()
+
+      const output = yield* Queue.unbounded<string>()
+      const ended = yield* Deferred.make<{ exitCode?: number }>()
+      const attachment = yield* pty.attach(info.id, {
+        cursor: 0,
+        onData: (chunk) => Queue.offerUnsafe(output, chunk),
+        onEnd: (event) => Deferred.doneUnsafe(ended, Effect.succeed(event)),
+      })
+      // Replay should contain the earlier AAA but not the later BBB.
+      expect(attachment.replay).toContain("AAA")
+      expect(attachment.replay).not.toContain("BBB")
+      // Data that arrives after attach but before activate must not be duplicated in replay.
+      yield* pty.write(info.id, "BBB\n")
+      attachment.activate()
+      expect(yield* waitForOutput(output, "BBB")).toContain("BBB")
+      // Drain any remaining chunks non-blockingly and verify BBB appeared exactly once across replay + live.
+      const pending: string[] = []
+      while (true) {
+        const next = yield* Queue.poll(output)
+        if (next._tag === "None") break
+        pending.push(next.value)
+      }
+      const combined = attachment.replay + pending.join("")
+      const bbbCount = (combined.match(/BBB/g) ?? []).length
+      expect(bbbCount).toBe(1)
+    }),
+  )
+
+  ptyTest("does not deliver stale output after detach", () =>
+    Effect.gen(function* () {
+      const pty = yield* Pty.Service
+      const info = yield* createPty("cat")
+      const output = yield* Queue.unbounded<string>()
+      const attachment = yield* pty.attach(info.id, {
+        cursor: -1,
+        onData: (chunk) => Queue.offerUnsafe(output, chunk),
+        onEnd: () => {},
+      })
+      attachment.activate()
+      attachment.detach()
+      yield* pty.write(info.id, "STALE\n")
+      // Give the PTY a moment to emit; detached subscriber must not receive it.
+      yield* Effect.sleep("100 millis")
+      const leaked = yield* Queue.poll(output)
+      expect(leaked._tag).toBe("None")
+      // A fresh attachment should still see the data via replay, proving the write landed but was isolated.
+      const fresh = yield* attachCollecting(info.id)
+      expect(yield* waitForOutput(fresh.output, "STALE")).toContain("STALE")
+    }),
+  )
+
+  ptyTest("delivers close without stranding when teardown races activate", () =>
+    Effect.gen(function* () {
+      const pty = yield* Pty.Service
+      const info = yield* createPty("cat")
+      const output = yield* Queue.unbounded<string>()
+      const ended = yield* Deferred.make<{ exitCode?: number }>()
+      const attachment = yield* pty.attach(info.id, {
+        cursor: -1,
+        onData: (chunk) => Queue.offerUnsafe(output, chunk),
+        onEnd: (event) => Deferred.doneUnsafe(ended, Effect.succeed(event)),
+      })
+      // Do not activate yet; remove the session while the subscriber is still pending.
+      yield* pty.remove(info.id)
+      attachment.activate()
+      // Pending subscriber must still receive the teardown close instead of hanging.
+      const result = yield* Deferred.await(ended).pipe(Effect.timeout("5 seconds"), Effect.exit)
+      expect(Exit.isSuccess(result)).toBe(true)
+      // Second activate/detach must be idempotent and not throw.
+      attachment.activate()
+      attachment.detach()
+      attachment.detach()
+    }),
+  )
 })
 
 const configuredShell = process.platform === "win32" ? undefined : Bun.which("bash")

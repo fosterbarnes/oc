@@ -92,7 +92,8 @@ const DiagnosticsCommand = cmd({
 
 const LaunchCommand = cmd({
   command: "launch [target]",
-  describe: "open an OC project session",
+  describe:
+    "open an OC project session (resident reuse requires live PID + authenticated health; stale/foreign state is not claimed)",
   builder: (yargs: Argv) =>
     yargs.positional("target", { type: "string", describe: "project path or home-directory child" }),
   handler: async (args) => {

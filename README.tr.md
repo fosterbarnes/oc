@@ -43,45 +43,6 @@
 
 ---
 
-### Kurulum
-
-```bash
-# YOLO
-curl -fsSL https://opencode.ai/install | bash
-
-# Paket yöneticileri
-npm i -g opencode-ai@latest        # veya bun/pnpm/yarn
-scoop install opencode             # Windows
-choco install opencode             # Windows
-brew install anomalyco/tap/opencode # macOS ve Linux (önerilir, her zaman güncel)
-brew install opencode              # macOS ve Linux (resmi brew formülü, daha az güncellenir)
-sudo pacman -S opencode            # Arch Linux (Stable)
-paru -S opencode-bin               # Arch Linux (Latest from AUR)
-mise use -g opencode               # Tüm işletim sistemleri
-nix run nixpkgs#opencode           # veya en güncel geliştirme dalı için github:anomalyco/opencode
-```
-
-> [!TIP]
-> Kurulumdan önce 0.1.x'ten eski sürümleri kaldırın.
-
-### Masaüstü Uygulaması (BETA)
-
-OpenCode ayrıca masaüstü uygulaması olarak da mevcuttur. Doğrudan [sürüm sayfasından](https://github.com/anomalyco/opencode/releases) veya [opencode.ai/download](https://opencode.ai/download) adresinden indirebilirsiniz.
-
-| Platform              | İndirme                            |
-| --------------------- | ---------------------------------- |
-| macOS (Apple Silicon) | `opencode-desktop-mac-arm64.dmg`   |
-| macOS (Intel)         | `opencode-desktop-mac-x64.dmg`     |
-| Windows               | `opencode-desktop-windows-x64.exe` |
-| Linux                 | `.deb`, `.rpm` veya AppImage       |
-
-```bash
-# macOS (Homebrew)
-brew install --cask opencode-desktop
-# Windows (Scoop)
-scoop bucket add extras; scoop install extras/opencode-desktop
-```
-
 #### Kurulum Dizini (Installation Directory)
 
 Kurulum betiği (install script), kurulum yolu (installation path) için aşağıdaki öncelik sırasını takip eder:

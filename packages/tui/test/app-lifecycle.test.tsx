@@ -1,11 +1,13 @@
 import { expect, mock, test } from "bun:test"
 import type { TuiPluginApi } from "@opencode-ai/plugin/tui"
+import { TextareaRenderable } from "@opentui/core"
 import { createTestRenderer } from "@opentui/core/testing"
 import { Effect } from "effect"
 import { AppNodeBuilder } from "@opencode-ai/core/effect/app-node-builder"
 import { Global } from "@opencode-ai/core/global"
 import { createTuiResolvedConfig } from "./fixture/tui-runtime"
 import { createEventSource, createFetch, directory, json } from "./fixture/tui-sdk"
+import { Prompt } from "../src/component/prompt"
 
 test("SIGHUP clears title and disposes scoped resources once", async () => {
   const setup = await createTestRenderer({ width: 80, height: 24, useThread: false })
@@ -185,6 +187,7 @@ test("restart from a session keeps that session after reconnect", async () => {
       project: "proj_test",
       payload: { id: "evt_disposed", type: "server.instance.disposed", properties: { directory } },
     })
+    events.reconnect()
     await Bun.sleep(200)
     await setup.renderOnce()
     expect(setup.renderer.isDestroyed).toBe(false)
@@ -240,6 +243,7 @@ test("restart from home returns home after reconnect", async () => {
       project: "proj_test",
       payload: { id: "evt_disposed", type: "server.instance.disposed", properties: { directory } },
     })
+    events.reconnect()
     await Bun.sleep(200)
     await setup.renderOnce()
     expect(setup.renderer.isDestroyed).toBe(false)
@@ -302,6 +306,7 @@ test("failed restart cancels recovery so later disposal can still exit", async (
       project: "proj_test",
       payload: { id: "evt_disposed", type: "server.instance.disposed", properties: { directory } },
     })
+    events.reconnect()
     await task
     expect(setup.renderer.isDestroyed).toBe(true)
   } finally {
@@ -401,23 +406,141 @@ test("restart recovery issues no prompt replay and allows deliberate prompt", as
       project: "proj_test",
       payload: { id: "evt_disposed", type: "server.instance.disposed", properties: { directory } },
     })
+    events.reconnect()
     await Bun.sleep(250)
     await setup.renderOnce()
+    await setup.renderOnce()
+    await Bun.sleep(100)
     await setup.renderOnce()
 
     // No automatic prompt or provider turn replay during SSE reconnect
     expect(promptRequests.length).toBe(0)
     expect(setup.renderer.isDestroyed).toBe(false)
 
-    // Deliberate prompt after reconnect remains possible.
-    // Synthetic fetch stands in for UI input: the existing fixture cannot safely
-    // drive the Solid prompt textarea without speculatively changing production TUI
-    // behavior, so we prove the recovered client still accepts a prompt request.
-    await calls.fetch(new Request(`http://test/session/${session.id}/prompt`, { method: "POST" }))
-    expect(promptRequests.length).toBe(1)
-    // Second deliberate prompt also accepted
-    await calls.fetch(new Request(`http://test/session/${session.id}/prompt`, { method: "POST" }))
-    expect(promptRequests.length).toBe(2)
+    setup.renderer.destroy()
+    await task
+  } finally {
+    if (!setup.renderer.isDestroyed) setup.renderer.destroy()
+    mock.restore()
+  }
+})
+
+test("recovery keeps the main prompt focused and palette usable with no replay", async () => {
+  const setup = await createTestRenderer({ width: 80, height: 24, useThread: true, kittyKeyboard: true })
+  const core = await import("@opentui/core")
+  mock.module("@opentui/core", () => ({ ...core, createCliRenderer: async () => setup.renderer }))
+  const events = createEventSource()
+  const session = {
+    id: "dummy",
+    title: "Demo session",
+    slug: "dummy",
+    projectID: "project",
+    directory,
+    version: "0.0.0-test",
+    time: { created: 0, updated: 0 },
+  }
+  const promptRequests: string[] = []
+  const calls = createFetch((url) => {
+    const pathname = url.pathname
+    if (
+      pathname.endsWith("/prompt") ||
+      pathname.endsWith("/prompt_async") ||
+      pathname.endsWith("/shell") ||
+      (pathname.includes("/session/") && pathname.includes("/command"))
+    ) {
+      promptRequests.push(pathname)
+      return json({})
+    }
+    if (url.pathname === "/experimental/session") return json([session])
+    if (url.pathname === "/global/restart") return json({})
+    if (url.pathname === `/session/${session.id}`) return json(session)
+    if (url.pathname === `/session/${session.id}/message`) return json([])
+    if (url.pathname === `/session/${session.id}/todo` || url.pathname === `/session/${session.id}/diff`)
+      return json([])
+    return undefined
+  })
+  let api: TuiPluginApi | undefined
+  let disposeSlots: (() => void) | undefined
+  let started!: () => void
+  const ready = new Promise<void>((resolve) => {
+    started = resolve
+  })
+
+  try {
+    const { run } = await import("../src/app")
+    const task = Effect.runPromise(
+      run({
+        url: "http://test",
+        directory,
+        config: createTuiResolvedConfig({ plugin_enabled: {} }),
+        fetch: calls.fetch,
+        events: events.source,
+        args: {},
+        pluginHost: {
+          async start(input) {
+            api = input.api
+            const slots = input.runtime.setupSlots(input.api)
+            disposeSlots = slots.register({
+              id: "test-passthrough",
+              slots: {
+                home_prompt: () => <Prompt />,
+                session_prompt: () => <Prompt />,
+              },
+            })
+            started()
+          },
+          async dispose() {
+            disposeSlots?.()
+          },
+        },
+      }).pipe(Effect.provide(AppNodeBuilder.build(Global.node))),
+    )
+    await ready
+    await setup.renderOnce()
+    api?.keymap.dispatchCommand("server.restart")
+    await setup.renderOnce()
+    setup.mockInput.pressEnter()
+    await setup.renderOnce()
+    events.emit({
+      directory,
+      project: "proj_test",
+      payload: { id: "evt_disposed", type: "server.instance.disposed", properties: { directory } },
+    })
+    events.reconnect()
+    await Bun.sleep(250)
+    await setup.renderOnce()
+    await setup.renderOnce()
+    await Bun.sleep(1000)
+    await setup.renderOnce()
+    setup.mockInput.pressEscape()
+    await setup.renderOnce()
+    // no prompt replay during recovery
+    expect(promptRequests.length).toBe(0)
+    expect(setup.renderer.isDestroyed).toBe(false)
+    const editors: TextareaRenderable[] = []
+    const visit = (node: any) => {
+      if (node instanceof TextareaRenderable) editors.push(node)
+      for (const child of node.getChildren?.() ?? []) visit(child)
+    }
+    visit(setup.renderer.root)
+    expect(editors.length).toBeGreaterThan(0)
+    const mainPrompt = editors[0]
+    expect(mainPrompt.focused).toBe(true)
+    expect(setup.renderer.currentFocusedEditor).toBe(mainPrompt)
+    await setup.mockInput.typeText("x")
+    await setup.renderOnce()
+    expect(mainPrompt.plainText).toContain("x")
+
+    // palette remains usable after recovery without stealing the main prompt's ownership
+    api?.keymap.dispatchCommand("command.palette.show")
+    await setup.renderOnce()
+    expect(setup.renderer.isDestroyed).toBe(false)
+    const paletteInput = setup.renderer.currentFocusedEditor
+    setup.mockInput.pressKey("p")
+    setup.mockInput.pressEscape()
+    await setup.renderOnce()
+    expect(paletteInput === null || paletteInput !== mainPrompt).toBe(true)
+    expect(promptRequests.length).toBe(0)
 
     setup.renderer.destroy()
     await task

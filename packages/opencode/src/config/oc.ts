@@ -4,6 +4,7 @@ import path from "path"
 import { spawn } from "child_process"
 import { randomBytes } from "crypto"
 import { Global } from "@opencode-ai/core/global"
+import { DebugConfig } from "@opencode-ai/core/debug-config"
 
 export const keys = [
   "ocDir",
@@ -35,49 +36,8 @@ function filePath() {
   return path.join(Global.Path.config, "oc.json")
 }
 
-function productionTwin(target: string) {
-  return target.replaceAll("opencode-debug", "opencode")
-}
-
-async function copyIfMissing(source: string, destination: string) {
-  try {
-    await fs.stat(destination)
-    return
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error
-  }
-  try {
-    await fs.copyFile(source, destination)
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error
-  }
-}
-
 async function seedDebugFromProduction() {
-  if (!Global.Path.debug) return
-  await fs.mkdir(Global.Path.data, { recursive: true })
-  await fs.mkdir(Global.Path.config, { recursive: true })
-  await copyIfMissing(
-    path.join(productionTwin(Global.Path.data), "auth.json"),
-    path.join(Global.Path.data, "auth.json"),
-  )
-  await copyIfMissing(
-    path.join(productionTwin(Global.Path.config), "config.json"),
-    path.join(Global.Path.config, "config.json"),
-  )
-  const destination = filePath()
-  try {
-    await fs.stat(destination)
-    return
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error
-  }
-  const settings = await readFile(path.join(productionTwin(Global.Path.config), "oc.json"))
-  await fs.writeFile(
-    destination,
-    `${JSON.stringify({ ...settings, server: { ...settings.server, port: defaultServerPort() } }, null, 2)}\n`,
-    "utf8",
-  )
+  await DebugConfig.syncFromProduction({ overwrite: false, serverPort: defaultServerPort() })
 }
 
 async function readFile(file: string) {
@@ -127,12 +87,31 @@ export function executablePath(execPath = process.execPath) {
   return Global.resolveExecutablePath(execPath)
 }
 
+export function isPidAlive(pid: number) {
+  if (!Number.isInteger(pid) || pid <= 0) return false
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code
+    if (code === "ESRCH") return false
+    if (code === "EPERM") return true
+    return false
+  }
+}
+
 function serverStateDirectory() {
   return Global.Path.state
 }
 
-function serverStatePath() {
-  return path.join(serverStateDirectory(), "oc-server.json")
+export function serverStatePath(directory = serverStateDirectory()) {
+  return path.join(directory, "oc-server.json")
+}
+
+export async function clearServerState(directory = serverStateDirectory()) {
+  try {
+    await fs.rm(serverStatePath(directory), { force: true })
+  } catch {}
 }
 
 function serverSecretPath() {
@@ -191,13 +170,29 @@ async function startServerUnlocked() {
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error
   }
-  if (state?.pid && state.hostname === hostname && state.port === port && (await serverHealthy(url, secret))) {
+  const healthy = await serverHealthy(url, secret)
+  const matches = state?.hostname === hostname && state?.port === port
+  const alive = state?.pid ? isPidAlive(state.pid) : false
+  if (healthy && matches && alive) {
     return { url, secret }
   }
-  if (state) {
-    try {
-      await fs.rm(serverStatePath(), { force: true })
-    } catch {}
+  if (healthy && state && (!matches || !alive)) {
+    // Healthy endpoint but not our live PID -> foreign occupant or stale recycled PID.
+    // Do not claim ownership; clear stale state that claims this host/port and fail bounded.
+    if (matches) await clearServerState()
+    throw new Error(
+      `Resident port ${hostname}:${port} is occupied by a server not owned by this launcher (pid ${state.pid ?? "unknown"} ${alive ? "alive" : "dead"}, state ${matches ? "matches" : "mismatched"}). Health is true but PID is not a live owner. Remove ${serverStatePath()} or free the port.`,
+    )
+  }
+  if (healthy && !state) {
+    throw new Error(
+      `Resident port ${hostname}:${port} is occupied (health true) but no launcher state exists at ${serverStatePath()}. Not claiming ownership.`,
+    )
+  }
+  if (state && (!matches || !alive || !healthy)) {
+    // Stale or mismatched metadata: invalidate coherently without signaling the old PID.
+    // Do not kill a potentially recycled PID; just clear stale state.
+    await clearServerState()
   }
   const executable = executablePath()
   const command =

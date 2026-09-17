@@ -43,45 +43,6 @@
 
 ---
 
-### Εγκατάσταση
-
-```bash
-# YOLO
-curl -fsSL https://opencode.ai/install | bash
-
-# Διαχειριστές πακέτων
-npm i -g opencode-ai@latest        # ή bun/pnpm/yarn
-scoop install opencode             # Windows
-choco install opencode             # Windows
-brew install anomalyco/tap/opencode # macOS και Linux (προτείνεται, πάντα ενημερωμένο)
-brew install opencode              # macOS και Linux (επίσημος τύπος brew, λιγότερο συχνές ενημερώσεις)
-sudo pacman -S opencode            # Arch Linux (Σταθερό)
-paru -S opencode-bin               # Arch Linux (Τελευταία έκδοση από AUR)
-mise use -g opencode               # Οποιοδήποτε λειτουργικό σύστημα
-nix run nixpkgs#opencode           # ή github:anomalyco/opencode με βάση την πιο πρόσφατη αλλαγή από το dev branch
-```
-
-> [!TIP]
-> Αφαίρεσε παλαιότερες εκδόσεις από τη 0.1.x πριν από την εγκατάσταση.
-
-### Εφαρμογή Desktop (BETA)
-
-Το OpenCode είναι επίσης διαθέσιμο ως εφαρμογή. Κατέβασε το απευθείας από τη [σελίδα εκδόσεων](https://github.com/anomalyco/opencode/releases) ή το [opencode.ai/download](https://opencode.ai/download).
-
-| Πλατφόρμα             | Λήψη                               |
-| --------------------- | ---------------------------------- |
-| macOS (Apple Silicon) | `opencode-desktop-mac-arm64.dmg`   |
-| macOS (Intel)         | `opencode-desktop-mac-x64.dmg`     |
-| Windows               | `opencode-desktop-windows-x64.exe` |
-| Linux                 | `.deb`, `.rpm`, ή AppImage         |
-
-```bash
-# macOS (Homebrew)
-brew install --cask opencode-desktop
-# Windows (Scoop)
-scoop bucket add extras; scoop install extras/opencode-desktop
-```
-
 #### Κατάλογος Εγκατάστασης
 
 Το script εγκατάστασης τηρεί την ακόλουθη σειρά προτεραιότητας για τη διαδρομή εγκατάστασης:

@@ -174,13 +174,17 @@ export const PtyHandler = HttpApiBuilder.group(Api, "server.pty", (handlers) =>
               )
 
           // Outbound frames flow through one queue drained by a single writer so replay, live
-          // output, and the close frame keep their order.
-          // TODO: Integrate graceful-shutdown socket tracking before clients migrate to this route.
+          // output, and the close frame keep their order. The single queue also prevents the
+          // close frame from stranding when teardown races the writer.
           const outbox = yield* Queue.unbounded<string | Uint8Array | Socket.CloseEvent>()
           const attachment = yield* pty
             .attach(ctx.params.ptyID, {
               cursor,
-              onData: (chunk) => Queue.offerUnsafe(outbox, chunk),
+              onData: (chunk) => {
+                // Queue is unbounded; offerUnsafe never blocks the PTY data path. If the queue
+                // has been shut down due to a racing disconnect, the offer is dropped safely.
+                Queue.offerUnsafe(outbox, chunk)
+              },
               onEnd: () => Queue.offerUnsafe(outbox, new Socket.CloseEvent(1000)),
             })
             .pipe(
@@ -213,7 +217,12 @@ export const PtyHandler = HttpApiBuilder.group(Api, "server.pty", (handlers) =>
             }),
           ).pipe(
             Effect.catchReason("SocketError", "SocketCloseError", () => Effect.void),
-            Effect.ensuring(Effect.sync(() => attachment.detach())),
+            Effect.ensuring(
+              Effect.gen(function* () {
+                attachment.detach()
+                yield* Queue.shutdown(outbox).pipe(Effect.ignore)
+              }),
+            ),
             Effect.orDie,
           )
           return HttpServerResponse.empty()

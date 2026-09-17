@@ -43,45 +43,6 @@
 
 ---
 
-### ইনস্টলেশন (Installation)
-
-```bash
-# YOLO
-curl -fsSL https://opencode.ai/install | bash
-
-# Package managers
-npm i -g opencode-ai@latest        # or bun/pnpm/yarn
-scoop install opencode             # Windows
-choco install opencode             # Windows
-brew install anomalyco/tap/opencode # macOS and Linux (recommended, always up to date)
-brew install opencode              # macOS and Linux (official brew formula, updated less)
-sudo pacman -S opencode            # Arch Linux (Stable)
-paru -S opencode-bin               # Arch Linux (Latest from AUR)
-mise use -g opencode               # Any OS
-nix run nixpkgs#opencode           # or github:anomalyco/opencode for latest dev branch
-```
-
-> [!TIP]
-> ইনস্টল করার আগে ০.১.x এর চেয়ে পুরোনো ভার্সনগুলো মুছে ফেলুন।
-
-### ডেস্কটপ অ্যাপ (BETA)
-
-OpenCode ডেস্কটপ অ্যাপ্লিকেশন হিসেবেও উপলব্ধ। সরাসরি [রিলিজ পেজ](https://github.com/anomalyco/opencode/releases) অথবা [opencode.ai/download](https://opencode.ai/download) থেকে ডাউনলোড করুন।
-
-| প্ল্যাটফর্ম           | ডাউনলোড                            |
-| --------------------- | ---------------------------------- |
-| macOS (Apple Silicon) | `opencode-desktop-mac-arm64.dmg`   |
-| macOS (Intel)         | `opencode-desktop-mac-x64.dmg`     |
-| Windows               | `opencode-desktop-windows-x64.exe` |
-| Linux                 | `.deb`, `.rpm`, or `.AppImage`     |
-
-```bash
-# macOS (Homebrew)
-brew install --cask opencode-desktop
-# Windows (Scoop)
-scoop bucket add extras; scoop install extras/opencode-desktop
-```
-
 #### ইনস্টলেশন ডিরেক্টরি (Installation Directory)
 
 ইনস্টল স্ক্রিপ্টটি ইনস্টলেশন পাতের জন্য নিম্নলিখিত অগ্রাধিকার ক্রম মেনে চলে:

@@ -43,45 +43,6 @@
 
 ---
 
-### Installation
-
-```bash
-# YOLO
-curl -fsSL https://opencode.ai/install | bash
-
-# Pakkehåndteringer
-npm i -g opencode-ai@latest        # eller bun/pnpm/yarn
-scoop install opencode             # Windows
-choco install opencode             # Windows
-brew install anomalyco/tap/opencode # macOS og Linux (anbefalet, altid up to date)
-brew install opencode              # macOS og Linux (officiel brew formula, opdateres sjældnere)
-sudo pacman -S opencode            # Arch Linux (Stable)
-paru -S opencode-bin               # Arch Linux (Latest from AUR)
-mise use -g opencode               # alle OS
-nix run nixpkgs#opencode           # eller github:anomalyco/opencode for nyeste dev-branch
-```
-
-> [!TIP]
-> Fjern versioner ældre end 0.1.x før installation.
-
-### Desktop-app (BETA)
-
-OpenCode findes også som desktop-app. Download direkte fra [releases-siden](https://github.com/anomalyco/opencode/releases) eller [opencode.ai/download](https://opencode.ai/download).
-
-| Platform              | Download                           |
-| --------------------- | ---------------------------------- |
-| macOS (Apple Silicon) | `opencode-desktop-mac-arm64.dmg`   |
-| macOS (Intel)         | `opencode-desktop-mac-x64.dmg`     |
-| Windows               | `opencode-desktop-windows-x64.exe` |
-| Linux                 | `.deb`, `.rpm`, eller AppImage     |
-
-```bash
-# macOS (Homebrew)
-brew install --cask opencode-desktop
-# Windows (Scoop)
-scoop bucket add extras; scoop install extras/opencode-desktop
-```
-
 #### Installationsmappe
 
 Installationsscriptet bruger følgende prioriteringsrækkefølge for installationsstien:

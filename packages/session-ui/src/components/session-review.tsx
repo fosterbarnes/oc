@@ -16,7 +16,6 @@ import { checksum } from "@opencode-ai/core/util/encode"
 import { createEffect, createMemo, For, Match, onCleanup, Show, Switch, untrack, type JSX } from "solid-js"
 import { createStore } from "solid-js/store"
 import { type FileContent, type SnapshotFileDiff, type VcsFileDiff } from "@opencode-ai/sdk/v2"
-import type { FileDiffInfo } from "@opencode-ai/client/promise"
 import { PreloadMultiFileDiffResult } from "@pierre/diffs/ssr"
 import { type SelectedLineRange } from "@pierre/diffs"
 import { Dynamic } from "solid-js/web"
@@ -24,7 +23,7 @@ import { mediaKindFromPath } from "../pierre/media"
 import { cloneSelectedLineRange, previewSelectedLines } from "../pierre/selection-bridge"
 import { createLineCommentController } from "./line-comment-annotations"
 import type { LineCommentEditorProps } from "./line-comment"
-import { normalize, text, type ViewDiff } from "./session-diff"
+import { normalize, text, type LegacyDiff, type ViewDiff } from "./session-diff"
 
 const MAX_DIFF_CHANGED_LINES = 500
 const REVIEW_MOUNT_MARGIN = 300
@@ -63,10 +62,10 @@ export type SessionReviewCommentActions = {
 
 export type SessionReviewFocus = { file: string; id: string }
 
-type RawReviewDiff = (SnapshotFileDiff | FileDiffInfo | VcsFileDiff) & {
+type RawReviewDiff = (SnapshotFileDiff | LegacyDiff | VcsFileDiff) & {
   preloaded?: PreloadMultiFileDiffResult<any>
 }
-type ReviewDiff = ((SnapshotFileDiff & { file: string }) | FileDiffInfo | VcsFileDiff) & {
+type ReviewDiff = ((SnapshotFileDiff & { file: string }) | LegacyDiff | VcsFileDiff) & {
   preloaded?: PreloadMultiFileDiffResult<any>
 }
 type Item = ViewDiff & { preloaded?: PreloadMultiFileDiffResult<any> }

@@ -5,15 +5,17 @@ import { Flag } from "@opencode-ai/core/flag/flag"
 import { ServerLifecycle } from "@/server/lifecycle"
 import { stop as stopAgentify } from "@/provider/agentify"
 import { stopCursorProxy } from "@/provider/cursor/runtime"
+import fs from "node:fs/promises"
+import path from "node:path"
 import { spawn } from "node:child_process"
 import { Global } from "@opencode-ai/core/global"
 
-function serveArguments() {
+export function serveArguments() {
   const commandIndex = process.argv.indexOf("serve")
   return commandIndex === -1 ? ["serve"] : process.argv.slice(commandIndex)
 }
 
-function restartProcess() {
+export function restartProcess() {
   const args = serveArguments()
   const executable = Global.resolveExecutablePath()
   const command = executable.toLowerCase().includes("bun") && process.argv[1] ? [process.argv[1], ...args] : args
@@ -25,11 +27,22 @@ function restartProcess() {
   child.unref()
 }
 
+function residentStatePath(directory = Global.Path.state) {
+  return path.join(directory, "oc-server.json")
+}
+
+export async function clearResidentStateForRestart(directory = Global.Path.state) {
+  try {
+    await fs.rm(residentStatePath(directory), { force: true })
+  } catch {}
+}
+
 function stopAndExit(server: { stop: (close?: boolean) => Promise<void> }, restart: boolean) {
   void server
     .stop(true)
     .then(() => stopAgentify())
     .then(() => stopCursorProxy())
+    .then(() => clearResidentStateForRestart())
     .then(() => {
       if (restart) restartProcess()
       process.exit(0)

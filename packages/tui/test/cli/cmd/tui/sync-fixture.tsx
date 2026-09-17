@@ -91,5 +91,5 @@ export async function mount(override?: FetchHandler, state?: string, options?: M
     }),
   ])
   await wait(() => sync.status === waitForStatus)
-  return { app, emit: events.emit, kv, project, sync, session: calls.session, route }
+  return { app, emit: events.emit, reconnect: events.reconnect, kv, project, sync, session: calls.session, route }
 }

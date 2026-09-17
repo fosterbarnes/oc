@@ -372,9 +372,13 @@ export function Session() {
   let seeded = false
   let scroll: ScrollBoxRenderable
   let prompt: PromptRef | undefined
+  let toBottomTimer: ReturnType<typeof setTimeout> | undefined
   const bind = (r: PromptRef | undefined) => {
+    // guarded in-tree prompt focus: ignore destroyed refs
+    if (r && (r as unknown as { isDestroyed?: boolean }).isDestroyed) return
     prompt = r
     promptRef.set(r)
+    // no prompt replay: only seed initial route prompt once
     if (seeded || !route.prompt || !r) return
     seeded = true
     r.set(route.prompt)
@@ -450,11 +454,22 @@ export function Session() {
   }
 
   function toBottom() {
-    setTimeout(() => {
+    if (toBottomTimer) clearTimeout(toBottomTimer)
+    toBottomTimer = setTimeout(() => {
+      toBottomTimer = undefined
       if (!scroll || scroll.isDestroyed) return
-      scroll.scrollTo(scroll.scrollHeight)
+      // stale renderable protection: ensure scroll still in tree
+      try {
+        scroll.scrollTo(scroll.scrollHeight)
+      } catch {}
     }, 50)
   }
+  onCleanup(() => {
+    if (toBottomTimer) {
+      clearTimeout(toBottomTimer)
+      toBottomTimer = undefined
+    }
+  })
 
   const local = useLocal()
 
@@ -2632,9 +2647,7 @@ function ApplyPatch(props: ToolProps) {
               <Show
                 when={file.type !== "delete"}
                 fallback={
-                  <text fg={theme.diffRemoved}>
-                    {`-${file.deletions} line${file.deletions !== 1 ? "s" : ""}`}
-                  </text>
+                  <text fg={theme.diffRemoved}>{`-${file.deletions} line${file.deletions !== 1 ? "s" : ""}`}</text>
                 }
               >
                 <Diff diff={file.patch} filePath={file.filePath} />

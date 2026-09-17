@@ -28,7 +28,7 @@ import { useTuiStartup } from "./runtime"
 import { createSimpleContext } from "./helper"
 import { useExit } from "./exit"
 import { useArgs } from "./args"
-import { batch, onCleanup, onMount } from "solid-js"
+import { batch, createSignal, onCleanup, onMount } from "solid-js"
 import { usePermission } from "./permission"
 import { useRoute } from "./route"
 
@@ -60,8 +60,7 @@ function mergeSessionList(
   for (const session of current) {
     if (fetchedIDs.has(session.id)) continue
     const preserve =
-      (input.preserveSessionID !== undefined && session.id === input.preserveSessionID) ||
-      input.hasMessages(session.id)
+      (input.preserveSessionID !== undefined && session.id === input.preserveSessionID) || input.hasMessages(session.id)
     if (!preserve) continue
     const match = search(merged, session.id, (item) => item.id)
     merged.splice(match.index, 0, session)
@@ -167,10 +166,15 @@ export const {
 
     let restartPending = false
     let restartSessionID: string | undefined
+    let restartEpoch = 0
+    let restartDisposed = false
+    let restartReconnected = false
+    const [recoveryEpoch, setRecoveryEpoch] = createSignal(0)
     let recovering = false
     let bootstrapInFlight: Promise<boolean> | undefined
     const recoverRetryDelay = 50
     const recoverAbort = new AbortController()
+    let recoverTimer: ReturnType<typeof setTimeout> | undefined
 
     const fullSyncedSessions = new Set<string>()
     const syncingSessions = new Map<string, Promise<void>>()
@@ -192,6 +196,7 @@ export const {
       switch (event.type) {
         case "server.instance.disposed":
           if (restartPending) {
+            restartDisposed = true
             void recoverFromRestart()
             break
           }
@@ -475,7 +480,8 @@ export const {
       setStore("session", reconcile(merged))
     }
 
-    async function restoreCapturedRoute() {
+    async function restoreCapturedRoute(expectedEpoch?: number) {
+      if (expectedEpoch !== undefined && expectedEpoch !== restartEpoch) return
       const captured = restartSessionID
       if (!captured) {
         route.navigate({ type: "home" })
@@ -488,40 +494,55 @@ export const {
         return
       }
       await result.session.sync(captured)
+      if (expectedEpoch !== undefined && expectedEpoch !== restartEpoch) return
+      // post-replacement gating: only navigate if epoch still matches captured replacement
       route.navigate({ type: "session", sessionID: captured })
     }
 
     async function recoverFromRestart() {
-      if (!restartPending || recovering) return
+      if (!restartPending || recovering || !restartDisposed || !restartReconnected) return
+      const epoch = restartEpoch
       recovering = true
       try {
-        while (restartPending && !recoverAbort.signal.aborted) {
+        while (restartPending && epoch === restartEpoch && !recoverAbort.signal.aborted) {
           const ok = (await bootstrap({ fatal: false })) !== false
+          if (epoch !== restartEpoch || !restartPending || recoverAbort.signal.aborted) return
           if (ok) {
-            await restoreCapturedRoute()
+            await restoreCapturedRoute(epoch)
+            if (epoch !== restartEpoch) return
             restartPending = false
             restartSessionID = undefined
+            setRecoveryEpoch((value) => value + 1)
             return
           }
-          if (recoverAbort.signal.aborted || !restartPending) return
+          if (recoverAbort.signal.aborted || !restartPending || epoch !== restartEpoch) return
           await new Promise<void>((resolve) => {
-            if (recoverAbort.signal.aborted) {
+            if (recoverAbort.signal.aborted || epoch !== restartEpoch) {
               resolve()
               return
             }
-            const timer = setTimeout(resolve, recoverRetryDelay)
+            recoverTimer = setTimeout(resolve, recoverRetryDelay)
             recoverAbort.signal.addEventListener(
               "abort",
               () => {
-                clearTimeout(timer)
+                if (recoverTimer) {
+                  clearTimeout(recoverTimer)
+                  recoverTimer = undefined
+                }
                 resolve()
               },
               { once: true },
             )
           })
+          if (recoverTimer) recoverTimer = undefined
+          if (epoch !== restartEpoch) return
         }
       } finally {
         recovering = false
+        if (recoverTimer) {
+          clearTimeout(recoverTimer)
+          recoverTimer = undefined
+        }
       }
     }
 
@@ -647,10 +668,18 @@ export const {
 
     onCleanup(() => {
       restartPending = false
+      restartDisposed = false
+      restartReconnected = false
+      restartEpoch++
+      if (recoverTimer) {
+        clearTimeout(recoverTimer)
+        recoverTimer = undefined
+      }
       recoverAbort.abort()
     })
     onCleanup(
       sdk.onReconnect(() => {
+        if (restartPending) restartReconnected = true
         void recoverFromRestart()
       }),
     )
@@ -660,12 +689,35 @@ export const {
       set: setStore,
       restart: {
         begin() {
+          restartEpoch++
           restartPending = true
+          restartDisposed = false
+          restartReconnected = false
           restartSessionID = route.data.type === "session" ? route.data.sessionID : undefined
+          if (recoverTimer) {
+            clearTimeout(recoverTimer)
+            recoverTimer = undefined
+          }
         },
         cancel() {
+          restartEpoch++
           restartPending = false
+          restartDisposed = false
+          restartReconnected = false
           restartSessionID = undefined
+          if (recoverTimer) {
+            clearTimeout(recoverTimer)
+            recoverTimer = undefined
+          }
+        },
+        get epoch() {
+          return restartEpoch
+        },
+        get pending() {
+          return restartPending
+        },
+        get recoveryEpoch() {
+          return recoveryEpoch()
         },
       },
       get status() {

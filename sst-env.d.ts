@@ -153,10 +153,6 @@ declare module "sst" {
       "type": "sst.cloudflare.Astro"
       "url": string
     }
-    "WebApp": {
-      "type": "sst.cloudflare.StaticSite"
-      "url": string
-    }
     "ZEN_BLACK_PRICE": {
       "plan100": string
       "plan20": string

@@ -101,16 +101,20 @@ const layer = Layer.effect(
     const exitOrder: PtyID[] = []
 
     function notifyEnd(session: Active, event: { exitCode?: number }) {
-      for (const subscriber of session.subscribers.values()) {
+      // Snapshot subscribers before clearing so stale callbacks from a concurrent detach cannot resurface.
+      const pending = Array.from(session.subscribers.values())
+      session.subscribers.clear()
+      for (const subscriber of pending) {
         if (!subscriber.active) {
+          if (subscriber.detached) continue
           subscriber.end = event
           continue
         }
+        if (subscriber.detached) continue
         try {
           subscriber.onEnd(event)
         } catch {}
       }
-      session.subscribers.clear()
     }
 
     function teardown(session: Active) {
@@ -202,8 +206,16 @@ const layer = Layer.effect(
       sessions.set(id, session)
       session.listeners.push(
         proc.onData((chunk) => {
+          // Update retained buffer before delivering so attach snapshots see a consistent cursor/buffer pair.
+          session.buffer += chunk
+          if (session.buffer.length > BUFFER_LIMIT) {
+            const excess = session.buffer.length - BUFFER_LIMIT
+            session.buffer = session.buffer.slice(excess)
+            session.bufferCursor += excess
+          }
           session.cursor += chunk.length
           for (const [token, subscriber] of session.subscribers.entries()) {
+            if (subscriber.detached) continue
             if (!subscriber.active) {
               subscriber.pending.push(chunk)
               continue
@@ -214,11 +226,6 @@ const layer = Layer.effect(
               session.subscribers.delete(token)
             }
           }
-          session.buffer += chunk
-          if (session.buffer.length <= BUFFER_LIMIT) return
-          const excess = session.buffer.length - BUFFER_LIMIT
-          session.buffer = session.buffer.slice(excess)
-          session.bufferCursor += excess
         }),
         proc.onExit(({ exitCode }) => {
           if (session.info.status === "exited") return
@@ -260,15 +267,8 @@ const layer = Layer.effect(
       const session = yield* requireSession(id)
       if (session.info.status !== "running") return yield* new ExitedError({ ptyID: id })
       yield* Effect.logInfo("client attached to session", { id, directory: location.directory })
-      const token = {}
-      const subscriber: Subscriber = {
-        onData: input.onData,
-        onEnd: input.onEnd,
-        active: false,
-        detached: false,
-        pending: [],
-      }
-      session.subscribers.set(token, subscriber)
+      // Snapshot replay before subscribing so pending cannot duplicate replay. The snapshot and
+      // subscriber install run in one synchronous segment, so no PTY data can interleave between them.
       const start = session.bufferCursor
       const end = session.cursor
       const from =
@@ -283,6 +283,15 @@ const layer = Layer.effect(
         if (offset >= session.buffer.length) return ""
         return session.buffer.slice(offset)
       })()
+      const token = {}
+      const subscriber: Subscriber = {
+        onData: input.onData,
+        onEnd: input.onEnd,
+        active: false,
+        detached: false,
+        pending: [],
+      }
+      session.subscribers.set(token, subscriber)
       return {
         replay,
         cursor: end,
@@ -292,15 +301,19 @@ const layer = Layer.effect(
         activate: () => {
           if (subscriber.active || subscriber.detached) return
           subscriber.active = true
+          const pending = [...subscriber.pending]
+          const endEvent = subscriber.end
+          subscriber.pending.length = 0
+          subscriber.end = undefined
           try {
-            for (const chunk of subscriber.pending) subscriber.onData(chunk)
-            subscriber.pending.length = 0
-            if (subscriber.end) subscriber.onEnd(subscriber.end)
+            for (const chunk of pending) subscriber.onData(chunk)
+            if (endEvent) subscriber.onEnd(endEvent)
           } catch {
             session.subscribers.delete(token)
           }
         },
         detach: () => {
+          if (subscriber.detached) return
           subscriber.detached = true
           subscriber.pending.length = 0
           subscriber.end = undefined

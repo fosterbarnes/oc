@@ -151,6 +151,129 @@ Windows
 
 ---
 
+## 2026-09-16 (~23:36) - close lifecycle reconnect investigation - GPT-5.6 Luna; Debug
+
+### Agent
+- Closed `2026-09-16-debug-main-prompt-pty.md` after user-confirmed successful `ocDebug` lifecycle session with no freeze and meaningful recovery changes.
+- Reviewed scoped TUI, PTY, launcher, and server changes; preserved unrelated worktree modifications.
+- Verified focused suites, package typechecks, and `git diff --check`; retained documented `/status` 404 and typecheck-baseline notes.
+- Confirmed active source contains no temporary diagnostic markers; archived plan collision-safely.
+
+### User
+- Lifecycle reconnect investigation is closed after the successful debug session and final cleanup review.
+
+## 2026-09-16 (~22:31) - strengthen lifecycle prompt-focus verification - GPT-5.6 Luna; Debug
+
+### Agent
+- Corrected `packages/tui/test/app-lifecycle.test.tsx`: inspect only `TextareaRenderable` instances, assert renderer focus ownership, and use production-matched Kitty keyboard input for deliberate text.
+- Verified focused TUI lifecycle, sync, SDK, core PTY, launcher, and websocket suites; all passed with documented platform skips.
+- Verified TUI, core, and OpenCode typechecks plus `git diff --check`; no temporary debug markers remain in active files.
+- Kept production source and unrelated worktree changes unchanged; debug binary was not rebuilt or installed.
+
+### User
+- Lifecycle recovery coverage now directly checks that the recovered main prompt owns focus and accepts deliberate input without automatic prompt replay.
+
+## 2026-09-16 (~22:13) - lifecycle reconnect corrective pass - GPT-5.6 Luna; Go; Plan
+
+### Agent
+- Fixed restart recovery gating: disposal and replacement reconnect are both required before bootstrap recovery completes.
+- Added reactive post-bind prompt focus with in-tree, modal-safe, destroyed-renderable, and stale-timer guards; preserved no automatic prompt replay.
+- Isolated resident server state tests to temporary directories; retained live defaults in production helpers.
+- Verified TUI, core, and opencode typechecks; focused lifecycle, sync, SDK, PTY, restart, websocket, and CLI suites passed; Windows live PTY cases skipped by platform.
+- ERROR: `packages/opencode/test/server/httpapi-listen.test.ts` has one pre-existing `/status` expectation returning 404; this test file contains unrelated worktree changes and was not modified.
+- Kept unrelated worktree changes untouched. Plan retained because one named verification remains blocked.
+
+### User
+- Reconnect recovery now waits for the replacement connection, restores the current session prompt safely, preserves palette behavior, and avoids resubmitting prompts.
+- Resident-state tests no longer touch the live server-state file.
+
+## 2026-09-16 (~current) - lifecycle reconnect recovery blocked at review - GPT-5.6 Luna; Go-a; Plan
+
+### Agent
+- Implemented approved G1-G3 lifecycle changes for TUI recovery, resident server identity, and PTY replay/teardown ordering.
+- Verified TUI, core, server, and opencode typechecks; focused lifecycle, PTY, restart, and websocket suites passed; Windows live PTY cases skipped by platform.
+- Ran approved G4 review; blocked on recovery epoch gating, explicit post-bind prompt focus/input coverage, and tests mutating live resident state.
+- Kept unrelated app, desktop, documentation, and existing worktree changes untouched; no new corrective edits retained after review blockers were identified.
+
+### User
+- Lifecycle recovery changes are implemented, but final review found three blockers that need clarification before corrective work can safely continue.
+
+---
+
+## 2026-09-16 (~20:23) - import all debug config assets - GPT-5.6 Luna; Go
+
+### Agent
+- Meta: GPT-5.6 Luna; executed `2026-09-16-debug-import-production-settings.md`; no build or install.
+- Added recursive allowlisted sync in `packages/core/src/debug-config.ts` for agent, prompt, command, mode, plugin, skill, tool, and theme assets; preserved debug port normalization and overwrite behavior.
+- Added `packages/core/test/debug-config.test.ts` coverage for all supported directory names, nested files, preservation, replacement, and import reporting.
+- Verified focused core checks (2 pass), core typecheck, Prettier, and `git diff --check`.
+- Kept shared `~/.opencode` content, plans, archives, package metadata, and unrelated worktree changes untouched.
+
+### User
+
+Debug configuration
+- Import production settings into debug now brings custom agents and their prompt files, plus commands, modes, plugins, skills, tools, and themes.
+- Existing debug-only settings remain protected during startup seeding; explicit import still overwrites matching settings and keeps port `4097`.
+
+---
+
+## 2026-09-16 (~current) - remove open computer use - GPT-5.6 Luna; Build
+
+### Agent
+- Removed global OpenCode MCP entry from `C:\Users\user\.config\opencode\opencode.json`.
+- Uninstalled global `@opensymph/open-computer-use@1.2.0`; bundled launcher and Codex plugin removed with package.
+- Verified no separate OpenCode, Codex, Claude, or Gemini plugin registration remained.
+
+### User
+- Open Computer Use is disabled in OpenCode and uninstalled from the global npm tools.
+
+---
+
+## 2026-09-16 (~current) - make ocdebug a native isolated launcher - GPT-5.6 Luna; Go
+
+### Agent
+- Removed profile `opencode` alias and `ocdebug` wrapper; PATH-native executables now own command resolution.
+- Added `@opencode-ai/core/debug-config`: seeds missing production user config/authentication into debug, supports explicit overwrite, and forces debug server port `4097`.
+- Fixed TUI OC settings to read debug config paths and preserve debug identity when persisting settings.
+- Added debug-only command-palette import with restart guidance; documented native session export/import in `SCRIPTS.md`.
+- Added focused debug config and native routing coverage.
+- Verified core debug-config test, OpenCode command-loader/config tests (`14 pass`), core/OpenCode/TUI typechecks, Prettier, and `git diff --check`.
+- ERROR: first concurrent OpenCode focused test run hit an `afterEach` timeout; isolated config tests and the combined rerun passed. Profile smoke check resolved all four commands as applications but emitted the profile's existing noninteractive cursor-position error during `clear`.
+
+### User
+- `ocdebug` now runs directly from PATH like `oc`, with separate runtime data and port `4097`.
+- Debug starts with copied production settings when missing and can overwrite them from the command palette; restart debug afterward.
+- Production sessions can be copied with `opencode export` and `ocdebug import`.
+
+---
+
+## 2026-09-16 (~02:55) - remove web and desktop packages - GPT-5.6 Luna; Plan
+
+### Agent
+- Removed `packages/app`, `packages/desktop`, embedded UI serving, `opencode web`, Electron release wiring, desktop Nix outputs, and obsolete download routes.
+- Preserved CLI, TUI, headless API, `RuntimeFlags.client`, `OPENCODE_CLIENT`, documentation site, console, SDKs, and shared session UI types.
+- Regenerated `bun.lock` with Bun 1.3.14 after removing the workspace and Electron dependency subgraphs; fixed the root `package.json` trailing comma encountered during the first build.
+- Verified `bun install` via `bunx --package=bun@1.3.14 bun install --frozen-lockfile --no-progress`, OpenCode/session-ui typechecks, session-ui tests (83), translation tests (15 with a temporary root-safe Bun config), help snapshots (33), CLI build, and `git diff --check`.
+- ERROR: Nix hash regeneration was unavailable because `nix` is not installed on Windows. Remaining localized translation files still contain historical `opencode web`/desktop wording; English documentation and localized `web.mdx` pages were updated or removed as scoped.
+
+### User
+Removal
+- The repository no longer builds or publishes the browser UI and Electron desktop application, while CLI, TUI, API, docs, SDK, console, and shared session functionality remain.
+
+---
+
+## 2026-09-16 (~current) - record terminal PTY hang in oc17 - GPT-5.6 Luna
+
+### Agent
+- Blocked session `oc17`: agent ended on `-WAITING FOR PTY-` while work remained incomplete.
+- ERROR: User reported that the session remains live but accepts no typing after the marker; the command palette remains accessible. This is an input-state/PTy handling failure, not an absent or dead session.
+- TODO: Investigate why `-WAITING FOR PTY-` can leave the live session's main input unusable while command-palette input still works.
+
+### User
+- Session `oc17` remained live but the main input became unusable at `-WAITING FOR PTY-`; the command palette still worked. This is a serious agent termination and PTY input-state problem to investigate later.
+
+---
+
 ## 2026-09-16 (~01:18) - fix TUI persistence error formatting - GPT-5.6 Luna
 
 ### Agent
