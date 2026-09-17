@@ -9,9 +9,7 @@
 
 ## Build notes
 
-- Session history lives in root `buildNotes.md`. Layout is rules/summaries, then `# Historical entries (newest first)`.
-- Insert each new session entry immediately under that heading. Do not append at EOF. Newest entries stay on top so agents start reading and writing at the same line.
-- Do not truncate, overwrite, rewrite, or compact existing entries. Do not use the Write tool on an existing `buildNotes.md` except user-ordered migration or the documented archive rotation.
+- Session history lives in root `buildNotes.md` (`# Historical entries (newest first)`, newest-first). For insert/rotate procedure use skills `base/build-notes` and `base/build-notes-archive`.
 - Do not edit `buildNotes.txt`. Do not create notes under `.md/`.
 
 ## Branch Names

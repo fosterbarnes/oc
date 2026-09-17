@@ -11,52 +11,13 @@
 
 File layout: rules and summaries above; historical session entries below, newest first. Agents add each new entry at the top of that historical section so the insert line and the start-reading line stay the same.
 
-## Entry format (working example)
+## Entry format
 
-Copy this shape for every session that changes the repo. Agent workflow rules live in `AGENTS.md`.
-
-```
-
----
-
-## YYYY-MM-DD (~HH:MM) - short plain-English title - Model name, Thinking; Plan
-
-### Agent
-- Meta: one-line session context (model / effort / mode / tokens est)
-- Verb-led bullets with file/type/method names, root cause as a clause, invariants
-
-### User
-Category label
-- Plain-language what changed for someone using the app
-```
+Use skills `base/build-notes` (insert) and `base/build-notes-archive` (rotation) for heading, Agent/User shape, and StrReplace method.
 
 ## Archive Rotation
 
-- The active `buildNotes.md` is the working history file.
-- When the entire active file exceeds 1,000 lines, archive it before adding more session history. Count every line: human rules, summaries, entries, blank lines, and separators.
-- Rename the complete file unchanged to the next available archive name: `buildNotes.archive1.md`, then `buildNotes.archive2.md`, then `buildNotes.archive3.md`, and so on.
-- Find the highest existing archive number and use the next number. Do not reuse a missing number.
-- Never delete, truncate, overwrite, or compact an archive. The archive must preserve the previous active file verbatim.
-- Create a fresh `buildNotes.md` with the human rules, a cumulative summary, then `# Historical entries (newest first)` and session entries newest-first under that heading.
-- The cumulative summary must cover all previous archives, not only the newest archive.
-- Include both a compact `## Agent` summary and a normal plain-English `## User` summary.
-- Do not impose a fixed maximum size on the cumulative summary. Keep it as compact as possible without losing information needed for future work.
-- Read only the active `buildNotes.md` by default. Start reading historical entries at `# Historical entries (newest first)`. Read archived files when the active summary lacks required context.
-
-### Cumulative Summary Shape
-
-```md
-# Cumulative Summary
-
-## Agent
-- Added `Thing::run`: shared path handling; removes duplicate logic
-- Fixed null path crash: early return at boundary
-- Kept `LegacyMode`: external callers depend on it
-
-## User
-- Startup now handles missing paths without crashing
-- Shared path handling removes duplicate behavior
-```
+See skill `base/build-notes-archive` for trigger (>1000 lines), verbatim rename to `buildNotes.archiveN.md`, and fresh-file shape.
 
 ## Agent Note Language
 
@@ -148,6 +109,21 @@ Windows
 - Hidden Git and shell work tries to avoid extra console windows. A process-tree helper ships beside `opencode.exe`. Installing a new build stops running OpenCode first.
 
 # Historical entries (newest first)
+
+---
+
+## 2026-09-17 (~current) - trim duplicated buildNotes procedure from project MDs - muse-spark-1.2-contributor, Thinking; Build
+
+### Agent
+- Trimmed `AGENTS.md:10-13` Build notes from 4 bullets to 1 pointer to skills `base/build-notes`/`base/build-notes-archive`; kept `buildNotes.txt`/`.md/` guard
+- Trimmed `buildNotes.md:14-59` procedural duplication: removed `## Entry format (working example)` code fence, `## Archive Rotation` 10 bullets, `### Cumulative Summary Shape`; replaced with skill pointers (net -39 lines, 577->538); skills now under `skills/base/`
+- Kept `## Agent Note Language`, `### MISTAKES - NEVER REPEAT`, `### Project invariants`, human rules, `Cumulative Summary` data; no archive modified
+- Verification: `git diff --check` clean (LF/CRLF warnings only), `git status` 2 MDs modified, read-back confirmed pointers
+
+### User
+Docs
+- Session history docs now point to the shared skills instead of repeating the full procedure in each file
+- Build notes stay newest-first and rotate the same way, just with less duplicated text
 
 ---
 
