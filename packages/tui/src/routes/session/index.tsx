@@ -15,7 +15,9 @@ import {
   useContext,
 } from "solid-js"
 import path from "node:path"
+import os from "node:os"
 import { mkdir, writeFile } from "node:fs/promises"
+import { appendText } from "../../util/persistence"
 import { useRoute, useRouteData } from "../../context/route"
 import { useProject } from "../../context/project"
 import { useSync } from "../../context/sync"
@@ -78,7 +80,7 @@ import { collapseToolOutput } from "../../util/collapse-tool-output"
 import { usePluginRuntime } from "../../plugin/runtime"
 import { DialogRetryAction } from "../../component/dialog-retry-action"
 import { getRevertDiffFiles } from "../../util/revert-diff"
-import { OPENCODE_BASE_MODE, useBindings, useCommandShortcut, useOpencodeKeymap } from "../../keymap"
+import { OPENCODE_BASE_MODE, useBindings, useCommandShortcut, useOpencodeKeymap, useOpencodeModeStack } from "../../keymap"
 import { usePathFormatter } from "../../context/path-format"
 import { LocationProvider } from "../../context/location"
 
@@ -384,8 +386,295 @@ export function Session() {
     r.set(route.prompt)
   }
   const keymap = useOpencodeKeymap()
+  const modeStack = useOpencodeModeStack()
   const dialog = useDialog()
   const renderer = useRenderer()
+
+  // DEBUG_TEMP_GEOMETRY: fork-only read-only overlay, no DB writes
+  const DEBUG_TEMP_FORK_ID = "ses_f5131bd29ffew9NPaPsxLug1ft"
+  const DEBUG_TEMP_LOG = path.join(os.tmpdir(), "opencode-debug", "geometry-spooky-forks.log")
+  const DEBUG_TEMP_SHOW_OVERLAY = false // off: overlay confound split; file log + sticky=false stay on
+  const debugTempEnabled = createMemo(() => {
+    const base = path.basename(process.execPath).replace(/\.[^.]+$/, "").toLowerCase()
+    if (base !== "ocdebug" && base !== "oc-debug" && base !== "opencode-debug") return false
+    if (route.sessionID === DEBUG_TEMP_FORK_ID) return true
+    return (session()?.title ?? "").includes("(fork")
+  })
+  const [debugTempTick, setDebugTempTick] = createSignal(0)
+  const debugTempSnapshot = () => {
+    try {
+      if (!scroll || (scroll as unknown as { isDestroyed?: boolean }).isDestroyed) return undefined
+      const kids = scroll.getChildren()
+      const viewportH = scroll.height
+      let frameId: unknown
+      let sched: unknown
+      let focusedEditor: unknown
+      let loopState: unknown
+      try {
+        const r = renderer as unknown as {
+          frameId?: unknown
+          getSchedulerState?: () => unknown
+          currentFocusedEditor?: { id?: unknown; isDestroyed?: unknown } | null
+          updateScheduled?: unknown
+          renderTimeout?: unknown
+          immediateRerenderRequested?: unknown
+          rendering?: unknown
+          clock?: { now?: () => unknown }
+        } & Record<string, unknown>
+        frameId = r.frameId
+        sched = r.getSchedulerState?.()
+        const ed = r.currentFocusedEditor
+        focusedEditor = ed ? { id: String(ed.id ?? "noid"), destroyed: Boolean(ed.isDestroyed) } : null
+        let clockNow: unknown
+        try {
+          clockNow = typeof r.clock?.now === "function" ? (r.clock.now as () => unknown)() : undefined
+        } catch {
+          clockNow = "throw"
+        }
+        loopState = {
+          updateScheduled: Boolean(r.updateScheduled),
+          hasTimeout: r.renderTimeout !== null && r.renderTimeout !== undefined,
+          immed: Boolean(r.immediateRerenderRequested),
+          rendering: Boolean(r.rendering),
+          destroyed: Boolean(r["_isDestroyed"]),
+          control: String(r["_controlState"] ?? "n/a"),
+          clockNow: typeof clockNow === "number" ? Math.round(clockNow) : String(clockNow),
+          dateNow: Date.now(),
+        }
+      } catch {
+        // ignore
+      }
+      let zeroCount = 0
+      let visibleCount = 0
+      let minY = 0
+      let maxY = 0
+      kids.forEach((c, i) => {
+        const y = c.y
+        const h = c.height
+        if (h === 0) zeroCount++
+        if (y < viewportH && y + h > 0) visibleCount++
+        if (i === 0 || y < minY) minY = y
+        if (i === 0 || y + h > maxY) maxY = y + h
+      })
+      return {
+        scrollHeight: scroll.scrollHeight,
+        viewportH: scroll.height,
+        scrollTop: (scroll as unknown as { scrollTop?: number }).scrollTop ?? scroll.y,
+        messagesLen: messages().length,
+        childrenLen: kids.length,
+        zeroCount,
+        visibleCount,
+        minY,
+        maxY,
+        viewportInnerH: scroll.viewport.height,
+        contentH: scroll.content.height,
+        translateY: scroll.content.translateY,
+        barSize: scroll.verticalScrollBar.scrollSize,
+        barView: scroll.verticalScrollBar.viewportSize,
+        barPos: scroll.verticalScrollBar.scrollPosition,
+        frameId,
+        sched,
+        focusedEditor,
+        loopState,
+        keyMode: (() => {
+          try {
+            return modeStack.current()
+          } catch {
+            return "throw"
+          }
+        })(),
+        dialogDepth: dialog.stack.length,
+        kids: kids.map((c) => ({ id: c.id, y: c.y, h: c.height })),
+      }
+    } catch {
+      return undefined
+    }
+  }
+  onMount(() => {
+    if (debugTempEnabled()) {
+      void appendText(
+        DEBUG_TEMP_LOG,
+        `${JSON.stringify({ t: Date.now(), start: true, pid: process.pid, sid: route.sessionID })}\n`,
+      ).catch(() => undefined)
+    }
+    let logged = 0
+    let lastTop = Number.NaN
+    let lastCompKey = ""
+    let renderErrorAttached = false
+    let renderErrorLogged = 0
+    let keysLogged = 0
+    let debugTempPatchedScroll: ScrollBoxRenderable | undefined
+    let debugTempTickNum = 0
+    let debugTempInProg = false
+    const debugTempLogTick = (via: string, delta: string, before: number) => {
+      debugTempTickNum++
+      try {
+        const top = scroll.scrollTop
+        void appendText(
+          DEBUG_TEMP_LOG,
+          `${JSON.stringify({ t: Date.now(), sid: route.sessionID, tick: debugTempTickNum, via, delta, before, top })}\n`,
+        ).catch(() => undefined)
+      } catch {
+        // ignore
+      }
+    }
+    const debugTempPatchScroll = () => {
+      if (!debugTempEnabled()) return
+      try {
+        if (!scroll || (scroll as unknown as { isDestroyed?: boolean }).isDestroyed) return
+        if (debugTempPatchedScroll === scroll) return
+        debugTempPatchedScroll = scroll
+        const proto = Object.getPrototypeOf(scroll) as Record<string, unknown>
+        const desc = Object.getOwnPropertyDescriptor(proto, "scrollTop") as
+          | { get?: () => number; set?: (v: number) => void }
+          | undefined
+        const origSet = desc?.set?.bind(scroll)
+        const origGet = desc?.get?.bind(scroll)
+        if (origSet && origGet) {
+          Object.defineProperty(scroll, "scrollTop", {
+            configurable: true,
+            get: () => origGet(),
+            set: (v: number) => {
+              if (debugTempInProg) {
+                origSet(v)
+                return
+              }
+              const before = origGet()
+              origSet(v)
+              debugTempLogTick("set", String(v - before), before)
+            },
+          })
+        }
+        const origBy = scroll.scrollBy.bind(scroll)
+        scroll.scrollBy = ((delta: number | { x: number; y: number }, unit?: never) => {
+          debugTempInProg = true
+          try {
+            const before = scroll.scrollTop
+            origBy(delta as number, unit)
+            debugTempLogTick("by", typeof delta === "number" ? String(delta) : `${delta.x},${delta.y}`, before)
+          } finally {
+            debugTempInProg = false
+          }
+        }) as typeof scroll.scrollBy
+      } catch {
+        // ignore
+      }
+    }
+    const timer = setInterval(() => {
+      if (!debugTempEnabled()) return
+      debugTempPatchScroll()
+      if (!renderErrorAttached) {
+        renderErrorAttached = true
+        try {
+          const rx = renderer as unknown as {
+            on: (event: string, handler: (e: unknown) => void) => void
+            keyInput?: { on: (event: string, handler: (e: unknown) => void) => void }
+          }
+          rx.on("render:error", (e) => {
+              if (renderErrorLogged >= 5) return
+              renderErrorLogged++
+              const evt = e as {
+                error?: { message?: unknown; stack?: unknown }
+                renderable?: { id?: unknown; constructor?: { name?: unknown } }
+              }
+              void appendText(
+                DEBUG_TEMP_LOG,
+                `${JSON.stringify({
+                  t: Date.now(),
+                  sid: route.sessionID,
+                  renderError: String(evt?.error?.message ?? evt?.error ?? "unknown"),
+                  stack: String(evt?.error?.stack ?? "").slice(0, 2000),
+                  renderableId: String(evt?.renderable?.id ?? "none"),
+                  renderableType: String(evt?.renderable?.constructor?.name ?? "unknown"),
+                })}\n`,
+              ).catch(() => undefined)
+            },
+          )
+          rx.keyInput?.on("keypress", (e) => {
+            if (keysLogged >= 100) return
+            keysLogged++
+            const k = e as {
+              name?: unknown
+              code?: unknown
+              eventType?: unknown
+              ctrl?: unknown
+              shift?: unknown
+              meta?: unknown
+              source?: unknown
+              sequence?: unknown
+              raw?: unknown
+            }
+            let shape = "throw"
+            try {
+              shape = Object.keys((e as object) ?? {}).join(",")
+            } catch {
+              // ignore
+            }
+            const seq = String(k?.sequence ?? k?.raw ?? "")
+            let seqHex = ""
+            const hexN = Math.min(seq.length, 32)
+            for (let i = 0; i < hexN; i++) {
+              seqHex += seq.charCodeAt(i).toString(16).padStart(2, "0")
+            }
+            void appendText(
+              DEBUG_TEMP_LOG,
+              `${JSON.stringify({
+                t: Date.now(),
+                sid: route.sessionID,
+                key: String(k?.name ?? "noname"),
+                code: String(k?.code ?? "nocode"),
+                etype: String(k?.eventType ?? "noetype"),
+                ctrl: Boolean(k?.ctrl),
+                shift: Boolean(k?.shift),
+                meta: Boolean(k?.meta),
+                source: String(k?.source ?? "nosource"),
+                seqLen: seq.length,
+                esc: seq.charCodeAt(0) === 27,
+                seqHex,
+                shape,
+              })}\n`,
+            ).catch(() => undefined)
+          })
+        } catch {
+          // ignore
+        }
+      }
+      setDebugTempTick((v) => v + 1)
+      logged++
+      if (logged % 4 !== 0) return
+      try {
+        const list = messages()
+        const key = `${list.length}:` + list.reduce((n, m) => n + (sync.data.part[m.id] ?? []).length, 0)
+        if (list.length > 0 && key !== lastCompKey) {
+          lastCompKey = key
+          const composition = list.map((m) => ({
+            id: m.id,
+            role: m.role,
+            parts: (sync.data.part[m.id] ?? []).map((p) => (p.type === "tool" ? `tool:${p.tool}` : p.type)),
+          }))
+          void appendText(DEBUG_TEMP_LOG, `${JSON.stringify({ t: Date.now(), sid: route.sessionID, composition })}\n`).catch(
+            () => undefined,
+          )
+        }
+      } catch {
+        // ignore
+      }
+      const snapshot = debugTempSnapshot()
+      const top = snapshot?.scrollTop
+      const changed = top !== lastTop
+      lastTop = top ?? Number.NaN
+      const { kids, ...summary } = snapshot ?? {}
+      void appendText(DEBUG_TEMP_LOG, `${JSON.stringify({ t: Date.now(), sid: route.sessionID, ...summary, kids: changed ? kids : undefined })}` + "\n").catch(
+        () => undefined,
+      )
+    }, 500)
+    onCleanup(() => clearInterval(timer))
+  })
+  const debugTempGeo = createMemo(() => {
+    debugTempTick()
+    if (!debugTempEnabled()) return undefined
+    return debugTempSnapshot()
+  })
 
   event.on("session.status", (evt) => {
     if (evt.properties.sessionID !== route.sessionID) return
@@ -1264,6 +1553,21 @@ export function Session() {
         <box flexDirection="row" flexGrow={1} minHeight={0}>
           <box flexGrow={1} minHeight={0} paddingBottom={1} paddingLeft={2} paddingRight={2} gap={1}>
             <Show when={session()}>
+              <Show when={debugTempEnabled() && DEBUG_TEMP_SHOW_OVERLAY}>
+                <box flexShrink={0} border={["bottom"]} borderColor={theme.warning} flexDirection="column">
+                  <Show
+                    when={debugTempGeo()}
+                    fallback={<text fg={theme.error}>{"DEBUG_TEMP_GEOMETRY nogeo"}</text>}
+                  >
+                    <text fg={theme.warning}>
+                      {`DEBUG_TEMP_GEOMETRY sh=${debugTempGeo()!.scrollHeight} vh=${debugTempGeo()!.viewportH} top=${debugTempGeo()!.scrollTop} msgs=${debugTempGeo()!.messagesLen} kids=${debugTempGeo()!.childrenLen}`}
+                    </text>
+                    <text fg={debugTempGeo()!.zeroCount > 0 ? theme.error : theme.textMuted}>
+                      {`DEBUG_TEMP_GEOMETRY vis=${debugTempGeo()!.visibleCount} zero=${debugTempGeo()!.zeroCount} yrange=${debugTempGeo()!.minY}..${debugTempGeo()!.maxY}`}
+                    </text>
+                  </Show>
+                </box>
+              </Show>
               <scrollbox
                 ref={(r) => (scroll = r)}
                 viewportOptions={{
@@ -1277,7 +1581,7 @@ export function Session() {
                     foregroundColor: theme.border,
                   },
                 }}
-                stickyScroll={true}
+                stickyScroll={debugTempEnabled() ? false : true} // DEBUG_TEMP_CULLING: H1 probe, fork-only
                 stickyStart="bottom"
                 flexGrow={1}
                 scrollAcceleration={scrollAcceleration()}
@@ -1448,6 +1752,20 @@ export function Session() {
   )
 }
 
+/** ocdebug only: freeze at last healthy paint (turn 58). Do not add widgets back until prevention work says so. */
+function debugTempHideAllUser() {
+  if (!debugTempIsOcdebug()) return false
+  const key = "hide-all-user"
+  if (!debugTempStripLogged.has(key)) {
+    debugTempStripLogged.add(key)
+    void appendText(
+      DEBUG_TEMP_STRIP_LOG,
+      `${JSON.stringify({ t: Date.now(), probe: "hide-all-user", freeze: true })}\n`,
+    ).catch(() => undefined)
+  }
+  return true
+}
+
 function UserMessage(props: {
   message: UserMessage
   parts: Part[]
@@ -1478,9 +1796,10 @@ function UserMessage(props: {
 
   const compaction = createMemo(() => props.parts.find((x) => x.type === "compaction"))
 
+  const hideUser = createMemo(() => debugTempHideAllUser())
   return (
     <>
-      <Show when={text()}>
+      <Show when={text() && !hideUser()}>
         <box
           id={props.message.id}
           ref={(el: BoxRenderable) => alwaysSeparate.add(el)}
@@ -1776,28 +2095,114 @@ function ReasoningHeader(props: {
   )
 }
 
+const DEBUG_TEMP_STRIP_LOG = path.join(os.tmpdir(), "opencode-debug", "geometry-spooky-forks.log")
+const debugTempStripLogged = new Set<string>()
+
+function debugTempIsOcdebug() {
+  const base = path.basename(process.execPath).replace(/\.[^.]+$/, "").toLowerCase()
+  return base === "ocdebug" || base === "oc-debug" || base === "opencode-debug"
+}
+
+function debugTempStripAutolinkUrls(text: string) {
+  if (!debugTempIsOcdebug()) return text
+  let http = 0
+  let file = 0
+  const next = text
+    .replace(/https?:\/\//gi, () => {
+      http++
+      return "http-//"
+    })
+    .replace(/file:\/\//gi, () => {
+      file++
+      return "file-//"
+    })
+  const key = `strip:${text.length}:${http}:${file}`
+  if (!debugTempStripLogged.has(key)) {
+    debugTempStripLogged.add(key)
+    void appendText(
+      DEBUG_TEMP_STRIP_LOG,
+      `${JSON.stringify({ t: Date.now(), strip: true, len: text.length, http, file, changed: next !== text })}\n`,
+    ).catch(() => undefined)
+  }
+  return next
+}
+
+/** ocdebug only: keep newlines/spaces (word-wrap geometry), replace non-whitespace with x. */
+function debugTempMaskPlainBody(text: string) {
+  if (!debugTempIsOcdebug()) return text
+  const next = text.replace(/[^\s]/g, "x")
+  const key = `plain-x:${text.length}`
+  if (!debugTempStripLogged.has(key)) {
+    debugTempStripLogged.add(key)
+    void appendText(
+      DEBUG_TEMP_STRIP_LOG,
+      `${JSON.stringify({ t: Date.now(), probe: "plain-x", len: text.length, lines: text.split("\n").length })}\n`,
+    ).catch(() => undefined)
+  }
+  return next
+}
+
+/** ocdebug only: skip painting every assistant TextPart. Tools/user boxes stay. */
+function debugTempHideAllAssistantText() {
+  if (!debugTempIsOcdebug()) return false
+  const key = "hide-all-text"
+  if (!debugTempStripLogged.has(key)) {
+    debugTempStripLogged.add(key)
+    void appendText(
+      DEBUG_TEMP_STRIP_LOG,
+      `${JSON.stringify({ t: Date.now(), probe: "hide-all-text" })}\n`,
+    ).catch(() => undefined)
+  }
+  return true
+}
+
 function TextPart(props: { last: boolean; part: TextPart; message: AssistantMessage }) {
   const ctx = use()
   const { theme, syntax } = useTheme()
+  const body = () => debugTempMaskPlainBody(debugTempStripAutolinkUrls(props.part.text.trim()))
+  const debugPlainText = createMemo(() => debugTempIsOcdebug())
+  const hideText = createMemo(() => debugTempHideAllAssistantText())
   return (
-    <Show when={props.part.text.trim()}>
+    <Show when={props.part.text.trim() && !hideText()}>
       <box ref={(el: BoxRenderable) => alwaysSeparate.add(el)} paddingLeft={3} marginTop={1} flexShrink={0}>
-        <markdown
-          syntaxStyle={syntax()}
-          streaming={true}
-          internalBlockMode="top-level"
-          content={props.part.text.trim()}
-          tableOptions={{ style: "grid" }}
-          conceal={ctx.conceal()}
-          fg={theme.markdownText}
-          bg={theme.background}
-        />
+        <Show
+          when={debugPlainText()}
+          fallback={
+            <markdown
+              syntaxStyle={syntax()}
+              streaming={true}
+              internalBlockMode="top-level"
+              content={body()}
+              tableOptions={{ style: "grid" }}
+              conceal={ctx.conceal()}
+              fg={theme.markdownText}
+              bg={theme.background}
+            />
+          }
+        >
+          <text wrapMode="word" fg={theme.markdownText} bg={theme.background}>
+            {body()}
+          </text>
+        </Show>
       </box>
     </Show>
   )
 }
 
 // Pending messages moved to individual tool pending functions
+
+function debugTempHideAllTools() {
+  if (!debugTempIsOcdebug()) return false
+  const key = "hide-all-tools"
+  if (!debugTempStripLogged.has(key)) {
+    debugTempStripLogged.add(key)
+    void appendText(
+      DEBUG_TEMP_STRIP_LOG,
+      `${JSON.stringify({ t: Date.now(), probe: "hide-all-tools" })}\n`,
+    ).catch(() => undefined)
+  }
+  return true
+}
 
 function ToolPart(props: { last: boolean; part: ToolPart; message: AssistantMessage }) {
   const ctx = use()
@@ -1828,8 +2233,9 @@ function ToolPart(props: { last: boolean; part: ToolPart; message: AssistantMess
     },
   }
 
+  const hideTools = createMemo(() => debugTempHideAllTools())
   return (
-    <Show when={!shouldHide()}>
+    <Show when={!shouldHide() && !hideTools()}>
       <Switch>
         <Match when={display() === "bash"}>
           <Shell {...toolprops} />

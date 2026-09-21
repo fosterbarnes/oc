@@ -151,6 +151,7 @@ function readOcConfig(): {
   }
 }
 function listOcHomeDirs(): Array<{ name: string; fullPath: string; mtimeMs: number }> {
+  // Keep sort/filter aligned with OcConfig.listHomeDirs.
   const { homeDir, homeDirSort } = readOcConfig()
   let entries: fs.Dirent[]
   try {
@@ -820,6 +821,22 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
         route.navigate({ type: "session", sessionID: args.sessionID })
       }
     })
+    if (args.palette) {
+      const title = args.palette.trim()
+      setTimeout(() => {
+        if (renderer.isDestroyed) return
+        const entry = keymap
+          .getCommandEntries({ namespace: "palette", visibility: "reachable" })
+          .find((e) => (e.command.hidden !== true && e.command.name !== COMMAND_PALETTE_COMMAND ? (e.command.title as string) === title : false))
+        if (entry) keymap.dispatchCommand(entry.command.name)
+        else
+          toast.show({
+            variant: "error",
+            message: `Palette entry not found: ${title}`,
+            duration: 5000,
+          })
+      }, 0)
+    }
   })
 
   let continued = false

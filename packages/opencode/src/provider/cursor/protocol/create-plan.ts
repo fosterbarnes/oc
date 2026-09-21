@@ -129,8 +129,8 @@ export type CursorPlanStageInput = {
 }
 
 /**
- * How a CreatePlan query is satisfied this turn. Keyed only on the advertised
- * catalog and the provider's own plan-mode state — never on host identity.
+ * How a CreatePlan query is satisfied this turn. Cursor plan mode is disabled
+ * on the OpenCode host, so the request is acknowledged without persistence.
  *
  * - `stage`   a host plan-stage tool is advertised; the host writes the plan
  *             *and* owns the execution-approval prompt, and its tool result is
@@ -178,14 +178,8 @@ export function resolveCreatePlanBridge(options: {
   planModeActive?: boolean
   advertised: ReadonlySet<string> | Iterable<string>
 }): CreatePlanBridge {
-  // A lifecycle turn (title generation, compaction) runs alongside the real one
-  // and must not write a second plan file or raise a second prompt.
-  if (!options.allowTools) return { kind: "ack" }
-  if (options.canStage) return { kind: "stage" }
-
-  const names =
-    options.advertised instanceof Set ? options.advertised : new Set(options.advertised)
-  if (options.planModeActive && names.has("question")) return { kind: "approve" }
+  // Do not let Cursor's native plan request create a host plan or approval gate.
+  // SwitchMode already rejects entering plan/spec; this closes the CreatePlan path.
   return { kind: "ack" }
 }
 

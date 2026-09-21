@@ -81,11 +81,12 @@ export type HandledInteraction = {
   /** Present when `outcome === "bridged"`: the question set to hand OpenCode. */
   askQuestion?: DecodedAskQuestionQuery
   /**
-   * Present when SwitchMode should mutate session mode — bridged to a host
-   * tool, or approved outright when entering plan mode needs none. Absent on
-   * lifecycle soft-acks (`ack`): those reply `approved{}` without recording
-   * a mode. The caller reads `bridge` to decide whether a tool call is emitted,
-   * and `args.targetModeId` to record the active Cursor mode when present.
+   * Present when SwitchMode should mutate session mode: leave-plan bridged to a
+   * host tool, or a same-mode no-op `approve`. Absent on lifecycle soft-acks
+   * (`ack`): those reply `approved{}` without recording a mode. Plan/spec enter
+   * never attaches this field; it is rejected. The caller reads `bridge` to
+   * decide whether a tool call is emitted, and `args.targetModeId` to record
+   * the active Cursor mode when present.
    */
   switchMode?: DecodedSwitchModeQuery & {
     bridge: SwitchModeBridge
@@ -119,12 +120,12 @@ export type HandleInteractionQueryOptions = {
   canBridgeAskQuestion?: boolean
   /**
    * True when tool calls are allowed this turn (needed before advertising can
-   * be checked for plan_enter / plan_exit).
+   * be checked for leave-plan via plan_exit / question).
    */
   allowTools?: boolean
   /**
-   * Host tool names advertised this turn. Used to resolve SwitchMode →
-   * plan_enter / plan_exit only when the matching tool is present.
+   * Host tool names advertised this turn. Used to resolve leave-plan SwitchMode
+   * to plan_exit or question only when the matching tool is present.
    */
   advertisedTools?: ReadonlySet<string> | Iterable<string>
   /**
@@ -205,12 +206,12 @@ export function inspectInteractionQueryWire(
  * headless policy (reject; ack a few no-UI cases).
  *
  * Bridged / persisted exceptions:
- * - AskQuestion (#3) → OpenCode `question` tool
- * - SwitchMode (#4) → OpenCode `plan_enter` / `plan_exit` when advertised
- * - CreatePlan (#7) → host-calculated plan file via hostPlansDir (project-config
+ * - AskQuestion (#3) -> OpenCode `question` tool
+ * - SwitchMode (#4) -> reject plan/spec; leave-plan via `plan_exit` / `question`
+ * - CreatePlan (#7) -> host-calculated plan file via hostPlansDir (project-config
  *   `plans/` in a git worktree, else host global data/plans); empty args still
  *   get the CLI empty-`plan_uri` success ack
- * - GenerateImage (#12) → approve when `cursor_image_save` is advertised
+ * - GenerateImage (#12) -> approve when `cursor_image_save` is advertised
  */
 export function handleInteractionQuery(
   query: Record<string, unknown>,
@@ -343,9 +344,10 @@ export function buildAskQuestionInteractionReply(
 }
 
 /**
- * SwitchMode is bridged to OpenCode `plan_enter` / `plan_exit` when advertised.
- * Cursor CLI blocks until the user approves or rejects; we hold the query open
- * until the host tool returns, then reply approved{} or rejected{reason}.
+ * SwitchMode to plan/spec is rejected. Leave-plan is bridged to OpenCode
+ * `plan_exit` (or `question` when that is missing). Cursor CLI blocks until
+ * the user approves or rejects; we hold the query open until the host tool
+ * returns, then reply approved{} or rejected{reason}.
  */
 function handleSwitchModeQuery(
   id: number,
@@ -371,7 +373,7 @@ function handleSwitchModeQuery(
   if (bridge.kind === "reject") return reject(bridge.reason)
 
   // Lifecycle turn: approve on the wire so the model never sees a rejection, but
-  // do not attach switchMode — the real turn owns session mode.
+  // do not attach switchMode - the real turn owns session mode.
   if (bridge.kind === "ack") {
     return {
       ...base,
@@ -381,8 +383,7 @@ function handleSwitchModeQuery(
   }
 
   if (bridge.kind === "approve") {
-    // Entering plan mode needs no host tool, so Cursor is released at once and
-    // the caller records the mode for the reminder injected on later Runs.
+    // Same-mode no-op (already in target). Cursor is released at once.
     return {
       ...base,
       outcome: "approved",
@@ -482,7 +483,7 @@ function handleCreatePlanQuery(
     }),
   })
 
-  // Missing / empty args: CLI headless fallback — success with empty plan_uri.
+  // Missing / empty args: CLI headless fallback - success with empty plan_uri.
   if (!variantBytes) return reply({ success: {}, plan_uri: "" })
   const decoded = decodeCreatePlanQuery(variantBytes)
   if (!decoded) return reply({ success: {}, plan_uri: "" })
@@ -493,6 +494,8 @@ function handleCreatePlanQuery(
     planModeActive: options.planModeActive === true,
     advertised: options.advertisedTools ?? [],
   })
+
+  if (bridge.kind === "ack") return reply({ success: {}, plan_uri: "" })
 
   // The host plan-stage tool owns the write and the approval prompt together.
   if (bridge.kind === "stage") {

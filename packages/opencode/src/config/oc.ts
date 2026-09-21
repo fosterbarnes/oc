@@ -79,6 +79,13 @@ export async function update(key: Key, value: string) {
   return next
 }
 
+export const PALETTE_NEW_SESSION_OC = "New session (oc)"
+
+export function resolvePaletteLaunch(title: string) {
+  if (title.trim() === PALETTE_NEW_SESSION_OC) return "pick-home-dir" as const
+  throw new Error(`Palette entry not found: ${title.trim()}`)
+}
+
 export function pathName() {
   return filePath()
 }
@@ -226,6 +233,92 @@ async function startServerUnlocked() {
   throw new Error(`Resident OpenCode server did not become ready: ${url}`)
 }
 
+async function killTuiProcesses() {
+  if (process.platform !== "win32") return
+  try {
+    const result = Bun.spawnSync(
+      ["pwsh", "-NoProfile", "-Command", "Get-Process -Name opencode,oc,occ,ocdebug -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Id"],
+      { stdout: "pipe", stderr: "pipe" },
+    )
+    const out = result.stdout.toString().trim()
+    if (!out) return
+    const pids = out
+      .split(/\r?\n/)
+      .map((line) => Number(line.trim()))
+      .filter((pid) => Number.isInteger(pid) && pid > 0 && pid !== process.pid)
+    for (const pid of pids) {
+      if (!isPidAlive(pid)) continue
+      try {
+        process.kill(pid, "SIGTERM")
+      } catch {}
+      for (let attempt = 0; attempt < 100; attempt++) {
+        if (!isPidAlive(pid)) break
+        await Bun.sleep(50)
+      }
+      if (isPidAlive(pid)) {
+        try {
+          process.kill(pid, "SIGKILL")
+        } catch {}
+        for (let attempt = 0; attempt < 100; attempt++) {
+          if (!isPidAlive(pid)) break
+          await Bun.sleep(50)
+        }
+      }
+      if (isPidAlive(pid)) {
+        Bun.spawnSync(["taskkill", "/PID", String(pid), "/T", "/F"], { stdout: "pipe", stderr: "pipe" })
+      }
+    }
+  } catch {}
+}
+
+export async function stopServer(directory = serverStateDirectory(), opts: { killTuis?: boolean } = {}) {
+  const killTuis = opts.killTuis ?? true
+  const file = serverStatePath(directory)
+  let state: { pid?: number } | undefined
+  try {
+    state = JSON.parse(await fs.readFile(file, "utf8"))
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error
+    return { stopped: false }
+  }
+  if (!state?.pid || !isPidAlive(state.pid)) {
+    await clearServerState(directory)
+    try {
+      await fs.rm(`${serverStatePath(directory)}.lock`, { force: true })
+    } catch {}
+    if (killTuis) await killTuiProcesses()
+    return { stopped: false, pid: state?.pid }
+  }
+  const pid = state.pid
+  try {
+    process.kill(pid, "SIGTERM")
+  } catch {}
+  for (let attempt = 0; attempt < 100; attempt++) {
+    if (!isPidAlive(pid)) break
+    await Bun.sleep(50)
+  }
+  if (isPidAlive(pid)) {
+    try {
+      process.kill(pid, "SIGKILL")
+    } catch {}
+    for (let attempt = 0; attempt < 100; attempt++) {
+      if (!isPidAlive(pid)) break
+      await Bun.sleep(50)
+    }
+  }
+  await clearServerState(directory)
+  try {
+    await fs.rm(`${serverStatePath(directory)}.lock`, { force: true })
+  } catch {}
+  if (killTuis) await killTuiProcesses()
+  return { stopped: true, pid }
+}
+
+export async function restartServer() {
+  await stopServer(undefined, { killTuis: false })
+  return startServer()
+}
+
 export async function startServer() {
   const lock = `${serverStatePath()}.lock`
   await fs.mkdir(path.dirname(lock), { recursive: true })
@@ -236,6 +329,11 @@ export async function startServer() {
       break
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error
+      try {
+        const stat = await fs.stat(lock)
+        const ageMs = Date.now() - stat.mtimeMs
+        if (ageMs > 10000) await fs.rm(lock, { force: true })
+      } catch {}
       await Bun.sleep(100)
     }
   }

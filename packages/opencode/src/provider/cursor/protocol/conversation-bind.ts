@@ -7,12 +7,13 @@ import {
 } from "../context/frozen.js"
 
 /**
- * OpenCode session key → active Cursor conversation_id.
+ * OpenCode session key -> active Cursor conversation_id.
  *
  * Normally the binding is the deterministic UUID from the OpenCode session id
  * (CLI-shaped sticky conversation). Compaction/summary turns mint a fresh id
  * and drop the prior checkpoint + blobs so Cursor no longer bills the old
- * cached conversation against OpenCode's newly compacted prompt.
+ * cached conversation against OpenCode's newly compacted prompt. The host
+ * LLMRequestPrep `opencodeCompaction` flag is the source of truth for that reset.
  */
 const activeBySession = new Map<string, string>()
 export const MAX_ACTIVE_CONVERSATION_BINDINGS = 256

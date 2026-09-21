@@ -79,9 +79,10 @@ export async function CopilotAuthPlugin(input: PluginInput): Promise<Hooks> {
         )
           .then((result) => {
             models = result.models
-            return Object.fromEntries(
-              Object.entries(result.models).filter(([, model]) => result.pickerEnabled.has(model.api.id)),
-            )
+            // GitHub currently returns model_picker_enabled: false for every usable
+            // model, so filtering on pickerEnabled empties the list and OpenCode
+            // drops the github-copilot provider. result.models is already usable().
+            return result.models
           })
           .catch((error) => {
             models = {}

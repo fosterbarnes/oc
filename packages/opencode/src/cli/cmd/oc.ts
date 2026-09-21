@@ -95,21 +95,42 @@ const LaunchCommand = cmd({
   describe:
     "open an OC project session (resident reuse requires live PID + authenticated health; stale/foreign state is not claimed)",
   builder: (yargs: Argv) =>
-    yargs.positional("target", { type: "string", describe: "project path or home-directory child" }),
+    yargs
+      .positional("target", { type: "string", describe: "project path or home-directory child" })
+      .option("palette", {
+        type: "string",
+        describe: 'open palette entry by title, e.g. "New session (oc)"',
+      }),
   handler: async (args) => {
+    const palette = typeof args.palette === "string" ? args.palette.trim() : ""
+    if (palette && args.target) throw new Error("--palette cannot be used with a launch target")
+    if (palette) OcConfig.resolvePaletteLaunch(palette)
+
+    if (palette) {
+      // Direct link to TUI palette entry, no clack intermediate (Image 2 not Image 1)
+      const exe = OcConfig.executablePath()
+      const child = Bun.spawn([exe, "--palette", palette], {
+        cwd: os.homedir(),
+        stdin: "inherit",
+        stdout: "inherit",
+        stderr: "inherit",
+      })
+      await child.exited
+      return
+    }
+
     const stopIntro = startIntro()
     try {
       const settings = await OcConfig.read()
-      const directory = resolveTargetDirectory(
-        args.target,
-        typeof settings.ocDir === "string" ? settings.ocDir : undefined,
-        typeof settings.homeDir === "string" ? settings.homeDir : undefined,
-      )
+      const homeDir = typeof settings.homeDir === "string" ? settings.homeDir : os.homedir()
+      const ocDir = typeof settings.ocDir === "string" ? settings.ocDir : undefined
+      const directory = resolveTargetDirectory(args.target, ocDir, homeDir)
       const server = await OcConfig.startServer()
+      stopIntro()
+
       const session = args.target
         ? JSON.parse(await runNative(["session", "bootstrap", directory], { capture: true }))
         : undefined
-      stopIntro()
       await attach(server, settings, { directory, session: session?.sessionID })
     } finally {
       stopIntro()
@@ -170,6 +191,19 @@ export const OcCommand = cmd({
   describe: "manage OpenCode launcher settings",
   builder: (yargs: Argv) =>
     yargs
+      .option("restart-server", {
+        type: "boolean",
+        describe: "Restart the resident oc server",
+      })
+      .option("kill-server", {
+        type: "boolean",
+        describe: "Shut down the resident oc server",
+      })
+      .option("shutdown-server", {
+        type: "boolean",
+        describe: "Shut down the resident oc server (alias for --kill-server)",
+        hidden: true,
+      })
       .command(ConfigCommand)
       .command({
         command: "server start",
@@ -181,6 +215,23 @@ export const OcCommand = cmd({
       .command(LaunchCommand)
       .command(PreviousCommand)
       .command(DiagnosticsCommand)
-      .demandCommand(),
-  handler: async () => {},
+      .check((argv) => {
+        const flags = Boolean(argv["restart-server"]) || Boolean(argv["kill-server"]) || Boolean(argv["shutdown-server"])
+        if (flags && argv._.length > 1) throw new Error("--restart-server and --kill-server cannot be used with a launch target")
+        if (argv["restart-server"] && (argv["kill-server"] || argv["shutdown-server"]))
+          throw new Error("--restart-server cannot be used with --kill-server")
+        return true
+      }),
+  handler: async (args) => {
+    const doRestart = Boolean((args as Record<string, unknown>)["restart-server"])
+    const doKill = Boolean((args as Record<string, unknown>)["kill-server"] || (args as Record<string, unknown>)["shutdown-server"])
+    if (doRestart) {
+      console.log(JSON.stringify(await OcConfig.restartServer()))
+      return
+    }
+    if (doKill) {
+      console.log(JSON.stringify(await OcConfig.stopServer()))
+      return
+    }
+  },
 })

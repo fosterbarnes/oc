@@ -13,6 +13,17 @@ $binary = Join-Path $repoRoot 'packages\opencode\dist\opencode-windows-x64\bin\o
 $debugBinary = Join-Path $repoRoot 'packages\opencode\dist\opencode-debug-windows-x64\bin\ocdebug.exe'
 $runtime = Join-Path $repoRoot 'packages\opencode\dist\opencode-windows-x64\bin\agentify-runtime'
 $cursorRuntime = Join-Path $repoRoot 'packages\opencode\dist\opencode-windows-x64\bin\cursor-runtime'
+$processNames = @('opencode', 'oc', 'occ', 'ocdebug', 'ocbug')
+$running = @($processNames | ForEach-Object { Get-Process -Name $_ -ErrorAction SilentlyContinue })
+if ($running) {
+    Write-Host 'Stopping running opencode.exe and ocdebug.exe processes...'
+    $running | Stop-Process -Force
+    $deadline = (Get-Date).AddSeconds(30)
+    while (@($processNames | ForEach-Object { Get-Process -Name $_ -ErrorAction SilentlyContinue })) {
+        if ((Get-Date) -gt $deadline) { throw 'opencode.exe or ocdebug.exe is still running after Stop-Process.' }
+        Start-Sleep -Milliseconds 200
+    }
+}
 
 if (-not $NoBuild) {
     $buildArgs = if ($SkipInstall) { @('-SkipInstall') } else { @() }
@@ -40,17 +51,6 @@ $debugDestination = Join-Path $installDir 'ocdebug.exe'
 $ocLink = Join-Path $installDir 'oc.exe'
 $occLink = Join-Path $installDir 'occ.exe'
 $obsoleteAliases = @('ocbug.exe', 'oc-debug.exe')
-$processNames = @('opencode', 'oc', 'occ', 'ocdebug', 'ocbug')
-$running = @($processNames | ForEach-Object { Get-Process -Name $_ -ErrorAction SilentlyContinue })
-if ($running) {
-    Write-Host 'Stopping running opencode.exe and ocdebug.exe processes...'
-    $running | Stop-Process -Force
-    $deadline = (Get-Date).AddSeconds(30)
-    while (@($processNames | ForEach-Object { Get-Process -Name $_ -ErrorAction SilentlyContinue })) {
-        if ((Get-Date) -gt $deadline) { throw 'opencode.exe or ocdebug.exe is still running after Stop-Process.' }
-        Start-Sleep -Milliseconds 200
-    }
-}
 try {
     Copy-Item -LiteralPath $binary -Destination $destination -Force
     Copy-Item -LiteralPath $debugBinary -Destination $debugDestination -Force

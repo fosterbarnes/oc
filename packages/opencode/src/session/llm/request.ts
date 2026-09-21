@@ -14,6 +14,7 @@ import { Effect, Record } from "effect"
 import { jsonSchema, tool as aiTool, type ModelMessage, type Tool } from "ai"
 import type { Plugin } from "@/plugin"
 import { mergeDeep } from "remeda"
+import { CURSOR_COMPACTION_OPTION, CURSOR_PROVIDER_ID } from "@/provider/cursor/shared"
 
 const USER_AGENT = `opencode/${InstallationVersion}`
 
@@ -53,6 +54,16 @@ export type Prepared = {
 const mergeOptions = (target: Record<string, any>, source: Record<string, any> | undefined): Record<string, any> =>
   mergeDeep(target, source ?? {}) as Record<string, any>
 
+/** Cursor-only host mark so compaction Runs reset/rebase without a plugin hook. */
+export function applyCursorCompactionOption(
+  options: Record<string, any>,
+  input: { readonly providerID: string; readonly agentName: string },
+) {
+  if (input.providerID !== CURSOR_PROVIDER_ID || input.agentName !== "compaction") return options
+  options[CURSOR_COMPACTION_OPTION] = true
+  return options
+}
+
 export const prepare = Effect.fn("LLMRequestPrep.prepare")(function* (input: PrepareInput) {
   const isOpenaiOauth = input.provider.id === "openai" && input.auth?.type === "oauth"
   const system = [
@@ -89,6 +100,10 @@ export const prepare = Effect.fn("LLMRequestPrep.prepare")(function* (input: Pre
         providerOptions: input.provider.options,
       })
   const options = mergeOptions(mergeOptions(mergeOptions(base, input.model.options), input.agent.options), variant)
+  applyCursorCompactionOption(options, {
+    providerID: input.model.providerID,
+    agentName: input.agent.name,
+  })
   if (
     input.model.api.npm === "@ai-sdk/azure" &&
     (input.provider.options.useCompletionUrls || input.model.options.useCompletionUrls || options.useCompletionUrls)

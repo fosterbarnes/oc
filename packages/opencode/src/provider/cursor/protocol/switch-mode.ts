@@ -1,5 +1,5 @@
 /**
- * Cursor-native SwitchMode ⇄ OpenCode `plan_enter` / `plan_exit`.
+ * Cursor-native SwitchMode: reject plan/spec enter; leave-plan via `plan_exit`.
  *
  * Cursor raises `switch_mode_request_query` (#4) with SwitchModeArgs and blocks
  * until the client replies approved{} or rejected{reason} (no async variant).
@@ -9,28 +9,17 @@
  * not replayed as a host tool.
  *
  * Host mapping (advertisement-gated):
- * - plan, spec → plan_enter
- * - every other non-empty target → plan_exit (leave plan for OpenCode build),
- *   then inject the Cursor CLI-shaped mode reminder for that target
+ * - plan, spec -> rejected. Cursor unifiedMode plan is not a host feature.
+ *   OpenCode planning is a different primary agent. Auto-approving enter is
+ *   how sessions get stuck with a Cursor plan <system_reminder> and no exit.
+ * - every other non-empty target -> plan_exit (leave Cursor plan for OpenCode
+ *   build), then inject the Cursor CLI-shaped mode reminder for that target
  *
- * Upstream OpenCode's plan tools are not mode flags. Each one asks the user
- * through the Question service and, on "Yes", injects a synthetic user message
- * carrying `agent: "plan" | "build"`, which `createUserMessage` turns into a
- * `setAgentModel` primary-agent switch (opencode `tool/plan.ts`,
- * `session/prompt.ts`). A provider cannot reach `setAgentModel`, but the two
- * observable halves — the approval gate and the behavioural contract — are both
- * reachable, so the bridge degrades instead of refusing when the host tool is
- * missing (`plan_enter` is commented out upstream and `plan_exit` is gated
- * behind OPENCODE_EXPERIMENTAL_PLAN_MODE + CLI client):
- *
- * - entering plan/spec needs no host tool at all — approve immediately and let
- *   the injected <system_reminder> carry the contract, exactly as Cursor CLI's
- *   own plan mode is prompt-enforced.
- * - leaving plan mode is the gate the user must actually see, so it falls back
- *   to the host `question` tool and only rejects when that is absent too.
+ * Leaving plan still degrades to the host `question` tool when `plan_exit` is
+ * missing, and only rejects when that is absent too.
  *
  * Resolution is keyed solely on the advertised catalog under canonical tool
- * names — never on host identity or model id. A compatibility layer may restate
+ * names - never on host identity or model id. A compatibility layer may restate
  * alternate host vocabulary under canonical names before the provider sees the
  * catalog, so the bridge itself remains OpenCode-shaped.
  *
@@ -61,7 +50,7 @@ export const MISSING_TARGET_REASON = "Missing targetModeId"
 /**
  * A turn that cannot call host tools is a lifecycle turn (title generation,
  * compaction, summarization). OpenCode opens one alongside the real Run, and it
- * must not mutate session state — approving there flips plan mode twice and
+ * must not mutate session state - approving there flips plan mode twice and
  * lets the throwaway turn write its own plan file.
  *
  * Soft-ack with `approved{}` instead of `rejected{reason}`: a hard reject lands
@@ -72,6 +61,13 @@ export const MISSING_TARGET_REASON = "Missing targetModeId"
 export const PLAN_EXIT_UNAVAILABLE_REASON =
   "Neither the OpenCode `plan_exit` tool nor the `question` tool is available to the " +
   "current agent, so leaving plan mode cannot be approved this turn."
+
+/** SwitchMode target plan/spec is refused so Cursor unifiedMode never engages. */
+export const PLAN_ENTER_DISABLED_REASON =
+  "Cursor plan/spec mode is disabled on this OpenCode host. Stay in the current " +
+  "OpenCode agent and keep working. OpenCode planning is a different primary agent, " +
+  "not SwitchMode. Do not retry SwitchMode to plan or spec, and do not narrate that " +
+  "planning is blocked."
 
 /** Upstream `PlanExitTool` wording, minus a plan path the provider cannot verify. */
 export const SWITCH_MODE_EXIT_QUESTION =
@@ -87,12 +83,11 @@ export type SwitchModeHostTool = "plan_enter" | "plan_exit"
 /**
  * How a SwitchMode query is satisfied this turn.
  *
- * - `native`   the host advertises the matching plan tool; bridge to it.
- * - `approve`  entering plan mode needs no host tool — approve immediately.
- * - `ack`      lifecycle turn (`allowTools=false`): approve on the wire without
- *              mutating session mode (same soft-ack pattern as CreatePlan).
+ * - `native`   leave-plan: host advertises `plan_exit`; bridge to it.
+ * - `approve`  already in the requested non-plan target; no-op on the wire.
+ * - `ack`      lifecycle turn (`allowTools=false`) for leave-plan only.
  * - `question` leaving plan mode falls back to the host `question` prompt.
- * - `reject`   nothing can satisfy it; `reason` names the real cause.
+ * - `reject`   plan/spec enter, or leave-plan with no gate.
  */
 export type SwitchModeBridge =
   | { kind: "native"; toolName: SwitchModeHostTool }
@@ -144,11 +139,11 @@ export function normalizeSwitchModeId(targetModeId: string): string {
 
 /**
  * Map a Cursor unified-mode id onto an OpenCode plan enter/exit tool.
- * Does not check advertisement — callers gate on the host catalog.
+ * Does not check advertisement - callers gate on the host catalog.
  *
- * plan/spec enter plan; every other non-empty target leaves plan via plan_exit
- * (host-portable primary switch) and relies on {@link cursorModeSystemReminder}
- * for CLI-shaped behavioral guidance.
+ * plan/spec would enter Cursor plan mode (refused by {@link resolveSwitchModeBridge}).
+ * Every other non-empty target leaves plan via plan_exit and relies on
+ * {@link cursorModeSystemReminder} for CLI-shaped behavioral guidance.
  */
 export function mapSwitchModeTarget(targetModeId: string): SwitchModeMapping {
   const id = normalizeSwitchModeId(targetModeId)
@@ -199,9 +194,8 @@ export function switchModeExitQuestionInput(): OpencodeQuestionInput {
  * Resolve how this SwitchMode target is satisfied, keyed only on the advertised
  * catalog under canonical tool names.
  *
- * A missing plan tool is not a refusal: entering plan mode needs no host tool,
- * and leaving it degrades to the `question` prompt so the user still approves
- * before any execution starts.
+ * Entering Cursor plan/spec is always refused. Leaving degrades to `question`
+ * when `plan_exit` is missing so already-stuck sessions can still exit.
  */
 export function resolveSwitchModeBridge(
   targetModeId: string,
@@ -214,6 +208,10 @@ export function resolveSwitchModeBridge(
 ): SwitchModeBridge {
   const mapped = mapSwitchModeTarget(targetModeId)
   if (!mapped.ok) return { kind: "reject", reason: mapped.reason }
+
+  // Cursor unifiedMode plan/spec is not a host feature. Reject before the
+  // lifecycle soft-ack so a title/compaction Run cannot approve enter on the wire.
+  if (mapped.toolName === "plan_enter") return { kind: "reject", reason: PLAN_ENTER_DISABLED_REASON }
 
   // Lifecycle turn: soft-ack on the wire, no session mutation. A hard reject
   // would enter the transcript and make the real turn narrate a blocked switch.
@@ -236,11 +234,7 @@ export function resolveSwitchModeBridge(
 
   if (names.has(mapped.toolName)) return { kind: "native", toolName: mapped.toolName }
 
-  // Entering plan mode is provider-owned: the injected <system_reminder> is the
-  // whole contract, exactly as Cursor CLI's own plan mode is prompt-enforced.
-  if (mapped.toolName === "plan_enter") return { kind: "approve" }
-
-  // Leaving plan mode starts real work, so it keeps a user-visible gate.
+  // Leaving Cursor plan mode starts real work, so it keeps a user-visible gate.
   if (names.has("question")) {
     return { kind: "question", input: switchModeExitQuestionInput() }
   }
@@ -291,7 +285,7 @@ export function switchModeRejectedResult(reason: string): Record<string, unknown
 }
 
 /**
- * Host tool outcome → Cursor SwitchModeRequestResponse.
+ * Host tool outcome -> Cursor SwitchModeRequestResponse.
  * Question/permission declines and empty failures use the CLI user-reject string.
  */
 export function switchModeResultFromToolOutput(
@@ -300,7 +294,7 @@ export function switchModeResultFromToolOutput(
 ): Record<string, unknown> {
   if (!isError) return switchModeApprovedResult()
   const trimmed = output.trim()
-  // OpenCode plan tools throw Question.RejectedError on "No" — treat as user reject.
+  // OpenCode plan tools throw Question.RejectedError on "No" - treat as user reject.
   if (
     !trimmed
     || /reject/i.test(trimmed)
@@ -314,7 +308,7 @@ export function switchModeResultFromToolOutput(
 }
 
 /**
- * Host `question` outcome → Cursor SwitchModeRequestResponse, for the emulated
+ * Host `question` outcome -> Cursor SwitchModeRequestResponse, for the emulated
  * plan exit. Only an explicit "Yes" approves; an unanswered or dismissed prompt
  * keeps the model in plan mode rather than silently starting execution.
  */
@@ -432,7 +426,7 @@ Your role in Ask mode:
       first
         ? `You are now in **DEBUG MODE**. You must debug with **runtime evidence**.
 
-**Why this approach:** Traditional AI agents jump to fixes claiming high confidence, but fail due to lacking runtime information. You cannot and must NOT fix bugs from code-only guesses — you need actual runtime data.
+**Why this approach:** Traditional AI agents jump to fixes claiming high confidence, but fail due to lacking runtime information. You cannot and must NOT fix bugs from code-only guesses - you need actual runtime data.
 
 **Your systematic workflow:**
 1. Generate 3-5 precise hypotheses about WHY the bug occurs.
@@ -457,7 +451,7 @@ Prefer reproduction, runtime logs, and end-to-end verification over speculative 
 
 - For most non-trivial requests, launch or resume one coherent worker and let that worker handle the investigation/implementation.
 - After delegating the only coherent worker task, do not redo the same work in the foreground. Only coordinate, answer a new independent question, or synthesize after multiple workers return.
-- NEVER await or sleep while waiting for a running subagent — end your response; you will be notified when it completes.
+- NEVER await or sleep while waiting for a running subagent - end your response; you will be notified when it completes.
 - Do NOT aggressively decompose small or medium tasks into many sibling agents. Multitask Mode is about moving substantial work out of the foreground, not maximizing parallel agents.
 - For trivial requests (zero or one tool call), fulfill them directly and disregard these Multitask instructions.`,
     )
@@ -483,11 +477,11 @@ Prefer reproduction, runtime logs, and end-to-end verification over speculative 
 Your mandate is to convert user intent into a correct, high-quality implementation by delegating nearly all work to subagents and coordinating them safely over long horizons.
 
 ## Non-Negotiable Rules
-1) Orchestrate, don't execute — you are NOT an implementer. Workspace modifications MUST be performed by OpenCode \`task\` subagents.
-2) Task-first for everything — default to spawning subagents for research, exploration, implementation, validation, and review. Use your own read-only tools only for quick triage and synthesizing plans.
-3) No work without clarity — if ambiguity remains, stop and ask clarifying questions (OpenCode \`question\` when available).
-4) Phase-gated workflow — Clarify → Research → Plan → User Review → Implement → Review → Iterate → Finalize. Do not skip phases.
-5) Externalize state — assume chat context may be condensed; keep durable progress notes so work can resume from written artifacts.`,
+1) Orchestrate, don't execute - you are NOT an implementer. Workspace modifications MUST be performed by OpenCode \`task\` subagents.
+2) Task-first for everything - default to spawning subagents for research, exploration, implementation, validation, and review. Use your own read-only tools only for quick triage and synthesizing plans.
+3) No work without clarity - if ambiguity remains, stop and ask clarifying questions (OpenCode \`question\` when available).
+4) Phase-gated workflow - Clarify -> Research -> Plan -> User Review -> Implement -> Review -> Iterate -> Finalize. Do not skip phases.
+5) Externalize state - assume chat context may be condensed; keep durable progress notes so work can resume from written artifacts.`,
     )
   }
 
@@ -504,11 +498,11 @@ Your mandate is to convert user intent into a correct, high-quality implementati
   // agent / build / edit / unknown leave-plan targets: implementation mode.
   return wrapReminder(
     first
-      ? `Agent mode is active (OpenCode build / agents). You have left plan mode and may implement: edit files, run tools, and execute the agreed approach.
+      ? `Agent mode is active (OpenCode build / agents). You may implement: edit files, run tools, and execute the agreed approach.
 
 - Prefer making progress with the advertised host tools.
-- If the task is large or ambiguous again, switch back to plan mode (OpenCode \`plan_enter\` / SwitchMode target plan) before a large rewrite.`
-      : `Agent mode is still active. Continue implementing with the advertised host tools. Switch back to plan mode only when a new large/ambiguous design decision appears.`,
+- If the task is large or ambiguous again, use an OpenCode planning primary agent. Do not SwitchMode to Cursor plan or spec.`
+      : `Agent mode is still active. Continue implementing with the advertised host tools. Do not SwitchMode to Cursor plan or spec.`,
   )
 }
 

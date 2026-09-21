@@ -41,6 +41,7 @@ const VALUE_OPTIONS = new Set([
   "--mdns-domain",
   "--cors",
   "--replay-limit",
+  "--palette",
 ])
 
 export type CommandToLoad =
@@ -80,6 +81,10 @@ export function withExecutableDefault(args: readonly string[], execPath = proces
     args.includes("--version") ||
     args.includes("--register")
   if (helpOrVersion) return [...args]
+  if (args.includes("--restart-server") || args.includes("--kill-server") || args.includes("--shutdown-server")) {
+    if (args[0] === "oc") return [...args]
+    return ["oc", ...args]
+  }
   if (base === "oc" && args.length === 1 && args[0] === "oc") return ["oc", "launch", ...args]
   if (resolveCommandToLoad(args) !== "tui") return [...args]
   if (base === "oc") return ["oc", "launch", ...args]
@@ -95,6 +100,10 @@ export function withOcLaunchDefault(args: readonly string[], debug: boolean) {
     args.includes("--version") ||
     args.includes("--register")
   if (helpOrVersion) return [...args]
+  if (args.includes("--restart-server") || args.includes("--kill-server") || args.includes("--shutdown-server")) {
+    if (args[0] === "oc") return [...args]
+    return ["oc", ...args]
+  }
   if (resolveCommandToLoad(args) !== "tui") return [...args]
   return ["oc", "launch", ...args]
 }

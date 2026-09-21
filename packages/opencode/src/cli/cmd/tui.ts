@@ -140,6 +140,10 @@ export const TuiThreadCommand = cmd({
       .option("demo", {
         type: "boolean",
         hidden: true,
+      })
+      .option("palette", {
+        type: "string",
+        describe: 'open palette entry by title, e.g. "New session (oc)"',
       }),
   handler: async (args) => {
     if (args.replay === true) {
@@ -292,6 +296,7 @@ export const TuiThreadCommand = cmd({
               prompt,
               fork: args.fork,
               auto: args.auto || args.yolo || args["dangerously-skip-permissions"],
+              palette: args.palette,
             },
           }),
         )

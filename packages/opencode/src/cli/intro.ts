@@ -114,10 +114,6 @@ export function startIntro() {
     if (stopped) return
     stopped = true
     if (timer) clearInterval(timer)
-    for (let row = top; row <= bottom; row++) {
-      at(left, row)
-      write(`${background}${" ".repeat(frameWidth)}${reset}`)
-    }
-    write("\x1b[0m\x1b[?25h")
+    write("\x1b[0m\x1b[?25h\x1b[2J\x1b[H")
   }
 }

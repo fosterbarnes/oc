@@ -162,7 +162,6 @@ import { progressOnlyContinuationPrompt, shouldContinueProgressOnlyTurn } from "
 import { ensureOpencodeProjectDir, opencodeGlobalCacheDir, setHostCacheDirOverride } from "./context/paths.js"
 import { invalidateAgentUrl, resolveAgentUrl } from "./agent-url.js"
 import { CURSOR_API_HOST, CURSOR_COMPACTION_OPTION } from "./shared.js"
-import { isCompactionSession } from "./compaction-marker.js"
 import { getSessionDirectory } from "./session-directory.js"
 import type { SeedHistoryMessage } from "./protocol/request.js"
 import { assertCursorUserImageSupport, extractCursorPromptImages } from "./image-input.js"
@@ -804,11 +803,10 @@ async function startSession(
     if (restored?.toolCatalog.length) restoreTurnToolCatalog(sessionKey, restored.toolCatalog)
   }
   const providerOptions = callOptions.providerOptions?.cursor as Record<string, unknown> | undefined
-  // The classic plugin marks OpenCode's agent="compaction" through chat.params.
-  // OpenCode 2.0 removed that hook, so its plugin records the same fact against
-  // the session id from session.hook("context") instead; consult both.
-  // Do not infer this from tools/toolChoice: standalone no-tool calls are valid.
-  const isCompaction = providerOptions?.[CURSOR_COMPACTION_OPTION] === true || isCompactionSession(sessionKey)
+  // Host LLMRequestPrep sets opencodeCompaction for cursor agent="compaction".
+  // Classic chat.params writes the same key. Do not infer from tools/toolChoice:
+  // title and other lifecycle Runs are valid no-tool calls.
+  const isCompaction = isCursorCompactionTurn(callOptions.providerOptions)
   const toolState = await resolveTurnToolState({
     sessionKey,
     incomingTools,
@@ -827,7 +825,7 @@ async function startSession(
   }
   const allowTools = toolState.allowTools
   const discoveredSubagentCatalog = extractHostSubagentCatalog(cursorTools)
-  const resetState = resolveTurnConversationReset({ sessionKey, isCompaction })
+  const resetState = resolveTurnConversationReset({ sessionKey, isCompaction, allowTools })
   let recovery = startOptions?.recovery
   let resumeRecovery = recovery?.kind === "resume" ? recovery : undefined
   let resuming = !!resumeRecovery
@@ -1153,7 +1151,7 @@ async function startSession(
       execRequests: 0,
     },
     openCodeSessionId: lifecycle ? undefined : sessionKey,
-    postCompactionRebase: isCompaction,
+    postCompactionRebase: isCompaction || (!!sessionKey && postCompactionRebaseBySession.has(sessionKey)),
     toolCatalog: snapshotToolCatalog(sessionKey),
     stream,
     frames: stream.frames()[Symbol.asyncIterator](),
@@ -1436,8 +1434,8 @@ export function deliverContinuationResults(
         return undefined
       }
     } else if (pending.resultField === SWITCH_MODE_RESULT_FIELD) {
-      // Bridged SwitchMode: host plan_enter / plan_exit outcome becomes
-      // approved{} or rejected{reason} on the still-open InteractionQuery.
+      // Bridged SwitchMode: host plan_exit (or the emulated question) outcome
+      // becomes approved{} or rejected{reason} on the still-open InteractionQuery.
       // Approval also arms the CLI-shaped mode reminder for the next Run.
       try {
         frames = [buildSwitchModeContinuationFrame(pending, r, session.openCodeSessionId)]
@@ -2765,26 +2763,25 @@ export async function pump(
           return
         }
         if (handled.outcome === "approved" && handled.switchMode) {
-          // Entering plan mode without a host plan tool: Cursor was already
-          // released with approved{} above, and the behavioural contract travels
-          // as the <system_reminder> injected on subsequent Runs. Nothing is
-          // pending, so keep pumping this Run rather than ending doStream.
+          // Same-mode no-op: Cursor was released with approved{}. Record the
+          // active id so later Runs keep a consistent reminder. Plan/spec enter
+          // is rejected before this path.
           const sw = handled.switchMode
           setActiveCursorMode(session.openCodeSessionId, sw.args.targetModeId, {
             bridgedPlanEntered: false,
           })
           trace(
             `interaction_query: APPROVED switch_mode id=${handled.id} ` +
-              `target=${JSON.stringify(sw.args.targetModeId)} (no host plan tool; ` +
-              `provider-owned mode) cursorToolCallId=${sw.toolCallId || "(none)"}`,
+              `target=${JSON.stringify(sw.args.targetModeId)} (same-mode no-op) ` +
+              `cursorToolCallId=${sw.toolCallId || "(none)"}`,
           )
           continue
         }
         if (handled.outcome === "bridged" && handled.switchMode) {
-          // Cursor raised SwitchMode; the host owns the outcome, so the switch
-          // leaves as a tool call (native plan_enter / plan_exit, or the emulated
-          // `question` approval prompt) and this doStream ends. The Run stays open
-          // on the pending entry; approved/rejected is written back on the next
+          // Cursor raised SwitchMode; the host owns the outcome, so leave-plan
+          // goes out as a tool call (native plan_exit, or the emulated `question`
+          // approval prompt) and this doStream ends. The Run stays open on the
+          // pending entry; approved/rejected is written back on the next
           // continuation while Cursor is still blocking on the query.
           const sw = handled.switchMode
           const bridgeKind = sw.bridge.kind
@@ -3000,6 +2997,14 @@ function extractSystemPrompt(prompt: LanguageModelV3CallOptions["prompt"]): stri
  * Cursor's native UI interactions cannot be surfaced through the AI SDK.
  * Redirect only to OpenCode tools that are genuinely advertised this turn;
  * compaction keeps its dedicated summary prompt unchanged.
+ *
+ * Cursor Agent Run never removes native Shell/Grep/Read from the model. These
+ * lines are host-identity injection so the model uses advertised OpenCode names
+ * and does not narrate missing MCP tools. Native Read/Grep/Shell still remap.
+ *
+ * Lead with the host/provider split. Model branding and a `cursor` tool
+ * namespace must not be read as Cursor IDE. Empty catalogs still get the host
+ * block so a seed Run cannot omit it; compaction keeps its own prompt.
  */
 export function buildOpenCodeInteractionGuidance(
   tools: OpencodeToolDef[],
@@ -3008,7 +3013,16 @@ export function buildOpenCodeInteractionGuidance(
 ): string | undefined {
   if (isCompaction) return undefined
   const names = new Set(tools.map((tool) => tool.name))
-  if (names.size === 0) return undefined
+  const hostPreamble = [
+    "You are in OpenCode. You are not in Cursor IDE.",
+    "Cursor is only the model provider for this turn. It is not the app, the host, or the session runtime.",
+    "Do not treat model branding, a `cursor` tool namespace, or Cursor-named tools as evidence of Cursor IDE.",
+    "Session, task, and spawn tools belong to OpenCode. A child task is a new OpenCode session, never a Cursor IDE session.",
+    "That child uses Cursor SwitchMode, CreatePlan, AskQuestion, and native Shell/Grep/Read remap only when the child's model is this same native Cursor provider.",
+    "If the child's model is any other OpenCode model, it calls OpenCode tools directly and never raises those Cursor interactions.",
+    "Decide the host from these sentences. Do not decide it from the model name or from tool-namespace labels.",
+  ]
+  if (names.size === 0) return hostPreamble.join("\n")
   const instructions: string[] = []
   const subagents = extractHostSubagentCatalog(tools)
 
@@ -3018,7 +3032,12 @@ export function buildOpenCodeInteractionGuidance(
     // the model from treating a question as impossible when it reaches for its
     // native interaction first.
     instructions.push(
-      "- When user input is required, call the OpenCode `question` tool. Cursor-native AskQuestion requests are also accepted and answered through it.",
+      "- When user input is required, call the OpenCode `question` tool (Cursor may list it as `question` or `opencode-question`). Cursor-native AskQuestion is the same channel and is also accepted.",
+    )
+  }
+  if (names.has("skill")) {
+    instructions.push(
+      "- For OpenCode vs Cursor skill-catalog questions, call OpenCode `skill` with name `host-skills` first. Do not invent skill names.",
     )
   }
   // CreatePlan is a Cursor InteractionQuery (#7), not an OpenCode/MCP catalog
@@ -3029,18 +3048,17 @@ export function buildOpenCodeInteractionGuidance(
   instructions.push(
     "- Cursor-native CreatePlan is accepted as a Cursor interaction (not an OpenCode or MCP catalog tool). Raise it normally; the provider writes the plan under the host's calculated plans directory and handles execution approval. Do not narrate that CreatePlan is missing, unavailable, or not an MCP tool.",
   )
-  if (names.has("plan_enter")) {
-    instructions.push(
-      "- To enter plan mode, call the OpenCode `plan_enter` tool. Cursor-native SwitchMode requests for plan/spec are also accepted and answered through it.",
-    )
-  } else if (names.has("todowrite")) {
+  instructions.push(
+    "- Do not SwitchMode to Cursor plan or spec. That mode is disabled. OpenCode planning is a different primary agent, not Cursor unifiedMode. A rejected plan/spec SwitchMode is expected; stay on this agent and keep working. Do not narrate that planning is blocked.",
+  )
+  if (names.has("todowrite")) {
     instructions.push(
       "- For planning task lists, call the OpenCode `todowrite` tool and/or write the plan as normal markdown.",
     )
   }
   if (names.has("plan_exit")) {
     instructions.push(
-      "- To leave plan mode, call the OpenCode `plan_exit` tool. Cursor-native SwitchMode for any non-plan target (agent, build, chat, debug, edit, background, multitask, triage, project, …) is also accepted and answered through it; the provider then injects the Cursor CLI-shaped mode reminder for that target.",
+      "- To leave Cursor plan mode, call the OpenCode `plan_exit` tool. SwitchMode to any non-plan target (agent, build, chat, debug, edit, ...) is also accepted as leave-plan.",
     )
   }
   if (names.has(CUSTOM_WEBSEARCH_TOOL)) {
@@ -3078,6 +3096,11 @@ export function buildOpenCodeInteractionGuidance(
       )
     }
   }
+  if (names.has("bash") && process.platform === "win32") {
+    instructions.push(
+      "- To delete a file, call OpenCode `bash` with `Remove-Item -LiteralPath <path> -Force`. Cursor-native Delete is accepted and rewritten that way on Windows; do not use Unix `rm -f`.",
+    )
+  }
   if (names.has("write")) {
     instructions.push(
       names.has("edit")
@@ -3098,11 +3121,17 @@ export function buildOpenCodeInteractionGuidance(
     )
   }
   return [
+    ...hostPreamble,
     `OpenCode exposes exactly these executable tools for this turn: ${[...names].map((name) => `\`${name}\``).join(", ")}.`,
+    "This is OpenCode, not Cursor IDE. Call only the listed host names. Do not inventory tools or list Cursor IDE tools.",
+    "If this turn lists host tools, do not write that they are missing, disabled, or MCP-unavailable. Call a listed tool instead of announcing discovery.",
+    "There is no GetDynamicTools, CallDynamicTool, or StrReplace on this host. Do not claim those ran. Prefer listed OpenCode names (grep, read, edit, bash). Native Cursor Read/Grep/Shell in this session are those same tools.",
+    "When asked to describe available tools, repeat only the exact host names in the first sentence. Do not add Cursor-native aliases, dynamic-tool helpers, MCP namespaces, or hypothetical tools unless the user explicitly asks for a mapping.",
+    "OpenCode `read` already attaches image bytes on the next turn. Do not call `cursor_image_save` after OpenCode `read`; that tool only commits images Cursor generated this session.",
     `Workspace root: ${JSON.stringify(workspaceRoot)}. Resolve workspace paths against exactly this root; never invent an absolute prefix, and verify uncertain paths with an available tool before using them.`,
     subagents.executor
-      ? "Call only tools in that exact list for ordinary host execution. Cursor-native Task/subagent requests are permitted because a compatible host executor is listed. Bridged Cursor interactions named below (AskQuestion, SwitchMode, CreatePlan, …) are not OpenCode/MCP catalog tools — raise them normally and do not narrate that they are missing."
-      : "Call only tools in that exact list for ordinary host execution. Bridged Cursor interactions named below (AskQuestion, SwitchMode, CreatePlan, …) are not OpenCode/MCP catalog tools — raise them normally and do not narrate that they are missing. Other unlisted Cursor-native tools are not bridged; complete the work with the listed tools or explain the limitation without claiming a missing MCP tool.",
+      ? "Call only tools in that exact list for ordinary host execution. Cursor-native Task/subagent requests are permitted because a compatible host executor is listed. Bridged Cursor interactions named below (AskQuestion, CreatePlan, SwitchMode off plan, ...) are not OpenCode/MCP catalog tools - raise them normally except SwitchMode to plan/spec, which is rejected. Do not narrate that those interactions are missing."
+      : "Call only tools in that exact list for ordinary host execution. Bridged Cursor interactions named below (AskQuestion, CreatePlan, SwitchMode off plan, ...) are not OpenCode/MCP catalog tools - raise them normally except SwitchMode to plan/spec, which is rejected. Do not narrate that those interactions are missing. Other unlisted Cursor-native tools are not bridged; complete the work with the listed tools or explain the limitation without claiming a missing MCP tool.",
     ...(instructions.length > 0
       ? ["Use these OpenCode tools instead of equivalent Cursor-native UI interactions:"]
       : []),
@@ -3366,15 +3395,35 @@ export async function resolveTurnToolState(input: {
   }
 }
 
-export function resolveTurnConversationReset(input: { sessionKey?: string; isCompaction: boolean }): {
+/** True when OpenCode marked this Run as compaction (nested or flat providerOptions). */
+export function isCursorCompactionTurn(providerOptions: unknown): boolean {
+  if (!providerOptions || typeof providerOptions !== "object" || Array.isArray(providerOptions)) return false
+  const record = providerOptions as Record<string, unknown>
+  if (record[CURSOR_COMPACTION_OPTION] === true) return true
+  const nested = record.cursor
+  return (
+    !!nested &&
+    typeof nested === "object" &&
+    !Array.isArray(nested) &&
+    (nested as Record<string, unknown>)[CURSOR_COMPACTION_OPTION] === true
+  )
+}
+
+export function resolveTurnConversationReset(input: {
+  sessionKey?: string
+  isCompaction: boolean
+  allowTools: boolean
+}): {
   reset: boolean
   reason?: "compaction" | "post-compaction-rebase"
 } {
-  const { sessionKey, isCompaction } = input
+  const { sessionKey, isCompaction, allowTools } = input
   if (isCompaction) {
     if (sessionKey) rememberPostCompactionRebase(sessionKey)
     return { reset: true, reason: "compaction" }
   }
+  // Title and other no-tool Runs must not spend the post-compaction rebase.
+  if (!allowTools) return { reset: false }
   if (sessionKey && postCompactionRebaseBySession.delete(sessionKey)) {
     return { reset: true, reason: "post-compaction-rebase" }
   }

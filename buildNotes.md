@@ -112,6 +112,156 @@ Windows
 
 ---
 
+## 2026-09-21 (~current) - disable Cursor native plan mode - gpt-5.6-luna, Thinking; Go
+
+### Agent
+- Changed `resolveCreatePlanBridge` to acknowledge Cursor CreatePlan requests without staging, persisting, or opening an approval gate.
+- Kept SwitchMode plan/spec rejection and leave-plan behavior unchanged.
+- Verification: focused Cursor provider tests passed: 17 pass; `bun typecheck` reports the known unrelated `test/plugin/cursor.test.ts:16` cast error.
+
+### User
+Providers
+- Cursor-backed sessions no longer expose or activate native plan-mode requests; ordinary OpenCode planning agents remain unchanged.
+
+---
+
+## 2026-09-18 (~current) - Cursor compaction rebase token - grok-4.6; Go
+
+### Agent
+- Changed `resolveTurnConversationReset`: take `allowTools`; no-tool turns do not delete the post-compaction rebase token
+- Changed `CursorSession.postCompactionRebase`: true when compaction or token still pending after resolve
+- Verification: `bun test ./test/provider/cursor.test.ts ./test/plugin/cursor.test.ts` 18 pass
+
+### User
+Providers
+- After Cursor compact, a title or other no-tool job cannot steal the one-time rebase. The next real tool-using turn still starts a fresh Cursor conversation from the summary.
+
+---
+
+## 2026-09-18 (~current) - Cursor compaction host reset flag - grok-4.6; Go
+
+### Agent
+- Added `applyCursorCompactionOption` in `session/llm/request.ts`: sets `opencodeCompaction` for cursor + agent compaction before `chat.params`
+- Added `isCursorCompactionTurn`: nested or flat providerOptions; `startSession` no longer uses `isCompactionSession`
+- Removed unused `compaction-marker.ts`; kept plugin `chat.params` as redundant write
+- Verification: `bun test ./test/provider/cursor.test.ts ./test/plugin/cursor.test.ts` 17 pass
+
+### User
+Providers
+- OpenCode Cursor compact now always starts a new Cursor conversation, then rebases the next turn from the summary, even if the old OpenCode 2 compaction marker is missing.
+
+---
+
+## 2026-09-18 (~current) - Cursor seed host preamble on empty catalog - grok-4.6; Go
+
+### Agent
+- Changed `buildOpenCodeInteractionGuidance`: non-compaction empty tool catalogs still return the seven-sentence OpenCode host vs Cursor-provider block; catalog/tool-list bullets stay gated on `names.size > 0`; compaction still `undefined`
+- Kept `startSession` `systemPrompt: conversationState ? undefined : systemPrompt`; no `task.ts` change
+- Verification: `bun test test/provider/cursor.test.ts` 12 pass
+
+### User
+Providers
+- Cursor conversation seeds keep the OpenCode host preamble even when the first Run has no tools. Checkpointed continuations still omit system prompt.
+
+---
+
+## 2026-09-18 (~current) - Cursor provider host-identity injection - grok-4.6; Go
+
+### Agent
+- Changed `buildOpenCodeInteractionGuidance`: lead with OpenCode host vs Cursor-provider split (not Cursor IDE; child `task` is OpenCode; Cursor protocol only when child model is this native Cursor provider)
+- Added focused test in `test/provider/cursor.test.ts`
+- Kept later remap / no-SwitchMode-to-plan lines unchanged; compaction still skips guidance
+
+### User
+Providers
+- Cursor-model turns now state that the host is OpenCode and that child tasks are OpenCode sessions, not Cursor IDE.
+
+---
+
+## 2026-09-18 (~current) - make Select a project open TUI palette (Image 2) - muse-spark-1.2-contributor, Thinking; Build
+
+### Agent
+- Changed `packages/opencode/src/cli/cmd/oc.ts`: removed `autocomplete` clack picker for `--palette`; palette now spawns `opencode --palette` TUI directly via `Bun.spawn` with inherit stdio, `app.tsx:824` dispatches `oc.new_session` DialogSelect (dark modal Image 2) instead of gold full-screen list Image 1
+- Removed unused `import { autocomplete, isCancel } from "@clack/prompts"` and `listHomeDirs`/`dirsPromise` from palette path; kept `resolvePaletteLaunch` validation and non-palette `bootstrap`+`attach` unchanged
+- Verification: `grep autocomplete` 0 hits in `oc.ts`, `bun test ./test/cli/command-loader.test.ts ./test/cli/oc.test.ts` 21 pass, `dotnet build` in sibling `octray` 0 warnings 0 errors, `octray` now resolves `opencode.exe` for palette
+- Note: user must rebuild `oc.exe`/`opencode.exe` (`.scripts\build.ps1` or `buildDebug.ps1 -SkipInstall` then install with `-NoBuild` after closing TUI) before `oc --palette "New session (oc)"` shows Image 2
+
+### User
+Launch
+- Select a project now opens the real opencode palette instead of the intermediate full-screen list.
+
+---
+
+## 2026-09-18 (~current) - stop managed processes before install build - gpt-5.6-luna, Thinking; Build
+
+### Agent
+- Fixed `.scripts\install.ps1`: move existing managed-process shutdown before the build so `ocdebug.exe` cannot lock the build cleanup path
+- Kept process names and 30-second exit wait unchanged; installer still owns the stop behavior
+- Verification: PowerShell parser passed; focused diff check passed; installer was not run
+- ERROR: `install.ps1 -h` is unsupported by its existing parameter declaration; no installer mutation was performed during verification
+
+### User
+Build and install
+- The installer now stops managed OpenCode processes before rebuilding, preventing locked debug binaries from breaking cleanup.
+
+## 2026-09-18 (~current) - searchable fast project picker - gpt-5.6-luna, Thinking; Build
+
+### Agent
+- Changed `packages/opencode/src/cli/cmd/oc.ts`: use `@clack/prompts.autocomplete` with a search placeholder; preserve cancellation, bootstrap, and attach flow
+- Kept `octray` launcher unchanged; picker behavior belongs in the `oc` fork
+- Verification: `bun typecheck` passed; focused CLI tests passed 21/21; `.scripts\buildDebug.ps1 -SkipInstall` passed on Bun 1.4.1
+- Manual built-binary check: typing `octray` narrowed the picker to one match; Enter selected it and entered the attached TUI
+- ERROR: source `bun run src/index.ts oc launch --palette ...` attach reached a missing `react` package in `packages/tui`; built binary attach check passed
+
+### User
+Launch
+- Select a project now supports typing a phrase or project name to filter the list before selecting.
+
+## 2026-09-18 (~current) - oc --palette fast launch picker - Cursor Grok 4.6; Go
+
+### Agent
+- Added `--palette` to `VALUE_OPTIONS` and `LaunchCommand`; `oc.exe --palette "New session (oc)"` maps to `oc launch --palette ...` (`command-loader.ts`)
+- Added `OcConfig.PALETTE_NEW_SESSION_OC`, `resolvePaletteLaunch`, `listHomeDirs`; unknown titles fail loud; `--palette` + target rejected
+- Changed launch: intro + `startServer` + clack homeDir select + `session bootstrap` + attach (no worker TUI)
+- Fixed `startIntro` stop: full `\x1b[0m\x1b[?25h\x1b[2J\x1b[H`; old frame-only wipe left a black bar over the picker
+- Note: TUI `listOcHomeDirs` stays sync in `app.tsx`; keep sort aligned with `OcConfig.listHomeDirs`
+- Verification: `bun test test/cli/command-loader.test.ts test/cli/oc.test.ts` 21 pass
+- Note: user must rebuild/install `oc.exe`; agents must not run install scripts
+
+### User
+Launch
+- `oc --palette "New session (oc)"` shows the intro, then a project list, then attaches to the resident server. The leftover black bar over the list is cleared.
+
+---
+
+## 2026-09-17 (~current) - restore ponytail npm plugin - grok-4.6; Go
+
+### Agent
+- Changed `~\.config\opencode\opencode.jsonc` `"plugin"`: added unpinned `@dietrichgebert/ponytail` npm spec; kept sessions.js + other npm plugins; did not list a directory; did not add a `~\.opencode\plugins\` wrapper
+- Note: cache already has `@dietrichgebert/ponytail` 4.10.0 under `~\.cache\opencode\packages\`; previous removal was because the spec toasted when the package was missing, not because the plugin is forbidden
+- Kept Session bombs rule: npm/file specs only, never a plugins folder in `"plugin"`
+
+### User
+Config
+- Ponytail is back as a normal npm plugin. Restart OpenCode if `/ponytail` is missing after this jsonc edit. The TUI paint bug is unrelated.
+
+---
+
+## 2026-09-17 (~current) - prevent session bombs (plugin list + instructions) - grok-4.6; Go
+
+### Agent
+- Changed `~\.config\opencode\opencode.jsonc` `"plugin"`: removed `fork-chat.ts` (auto-discovery from `~\.opencode\plugins\`); removed `@dietrichgebert/ponytail`; kept `opencode-sessions.js` file spec + npm `opencode-command-inject@1.3.0`, `opencode-ascii@0.1.8`, `opencode-notify@0.3.1`, `opencode-planner@latest`, `opencode-pty@0.3.6`
+- Added `principles.md` `## Session bombs`; added same short reminder to `agents/Debug.md`, `Debug-a.md`, `DebugAgent+.md`
+- Kept `C:\Users\user\.opencode\plugins\fork-chat.ts` on disk; did not edit `fork-chat.ts`, TUI paint probes, persist cap, or `publishPluginError`
+- Note: TUI paint still broken; this pass only stops `bad plugin spec -> toast -> dump into chat -> fork copies it`
+- Plan: `~\.config\opencode\plans\2026-09-17-prevent-session-bombs.md`; paint plan stays frozen at `~\.config\opencode\plans\2026-09-17-debug-geometry-overlay.md`
+
+### User
+Config
+- Local fork-chat loads from the plugins folder by itself; it is no longer listed in jsonc. Dead ponytail plugin is gone. Agents must file long plugin/TUI dumps instead of pasting them into keeper chats. OpenCode paint is not fixed.
+
+---
+
 ## 2026-09-17 (~current) - trim duplicated buildNotes procedure from project MDs - muse-spark-1.2-contributor, Thinking; Build
 
 ### Agent

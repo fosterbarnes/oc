@@ -5,7 +5,14 @@ import os from "node:os"
 import path from "node:path"
 import { cliIt } from "../lib/cli-process"
 import { resolveTargetDirectory } from "../../src/cli/cmd/oc"
-import { isPidAlive, serverStatePath, clearServerState, defaultServerPort } from "../../src/config/oc"
+import {
+  isPidAlive,
+  serverStatePath,
+  clearServerState,
+  defaultServerPort,
+  resolvePaletteLaunch,
+  PALETTE_NEW_SESSION_OC,
+} from "../../src/config/oc"
 import { Global } from "@opencode-ai/core/global"
 import { tmpdir } from "../fixture/fixture"
 
@@ -25,6 +32,14 @@ describe("OC launcher paths", () => {
     const target = path.resolve("C:\\Users\\user\\Something")
 
     expect(resolveTargetDirectory(target, ocDir, homeDir)).toBe(target)
+  })
+})
+
+describe("OC palette launch", () => {
+  test("maps New session (oc) and rejects unknown titles", () => {
+    expect(resolvePaletteLaunch(PALETTE_NEW_SESSION_OC)).toBe("pick-home-dir")
+    expect(resolvePaletteLaunch("  New session (oc)  ")).toBe("pick-home-dir")
+    expect(() => resolvePaletteLaunch("Switch agent")).toThrow("Palette entry not found: Switch agent")
   })
 })
 

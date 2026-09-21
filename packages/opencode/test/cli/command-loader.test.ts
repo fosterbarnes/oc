@@ -67,6 +67,16 @@ describe("CLI command loading", () => {
     expect(withExecutableDefault(["-v"], "C:\\Apps\\opencode\\oc.exe")).toEqual(["-v"])
   })
 
+  test("oc --palette maps to oc launch and does not treat the title as a command", () => {
+    expect(resolveCommandToLoad(["--palette", "New session (oc)"])).toBe("tui")
+    expect(withExecutableDefault(["--palette", "New session (oc)"], "C:\\Apps\\opencode\\oc.exe")).toEqual([
+      "oc",
+      "launch",
+      "--palette",
+      "New session (oc)",
+    ])
+  })
+
   test("executable default leaves bun and opencode unchanged", () => {
     expect(withExecutableDefault([], "/usr/local/bin/bun")).toEqual([])
     expect(withExecutableDefault(["C:\\proj"], "C:\\Program Files\\bun\\bun.exe")).toEqual(["C:\\proj"])

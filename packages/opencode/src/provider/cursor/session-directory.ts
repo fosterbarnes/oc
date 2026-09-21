@@ -8,7 +8,7 @@
  * The only place the 2.0 runtime names a session's actual directory is
  * `SessionInfo.location.directory`, reachable from `session.hook("context")`'s
  * `sessionID` via `ctx.session.get()`. Record it there and let the provider
- * read it back by session id, same mechanism as `compaction-marker.ts`.
+ * read it back by session id.
  *
  * Bounded so a long-lived server cannot accumulate ids for dead sessions.
  */
