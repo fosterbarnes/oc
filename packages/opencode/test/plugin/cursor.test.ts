@@ -19,7 +19,7 @@ function output() {
     topK: undefined,
     maxOutputTokens: 32_000,
     options: {},
-  } as Parameters<ChatParams>[1]
+  } as unknown as Parameters<ChatParams>[1]
 }
 
 describe("CursorPlugin compaction chat.params", () => {
