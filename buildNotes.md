@@ -112,6 +112,79 @@ Windows
 
 ---
 
+## 2026-09-22 (~00:54) - fix Windows clipboard PowerShell script - gpt-5.6-luna, Thinking; Build
+
+### Agent
+- Fixed `packages/tui/src/clipboard.ts`: keep `Where-Object` expressions intact when joining the PowerShell script; previous semicolons caused parser errors and silently returned no clipboard content.
+- Strengthened `packages/tui/test/clipboard.test.ts` against malformed filter construction.
+- Verification: live Windows clipboard reader returned the copied image path; focused clipboard/local-attachment tests passed (10); `bun typecheck` passed.
+- ERROR: first live PowerShell probe was invalid because the outer shell expanded `$` variables; reran with correct quoting before isolating the source script error.
+
+### User
+Clipboard
+- Windows image pasting now reaches OC's existing attachment path instead of failing in the clipboard reader.
+- Rebuild and restart OC before retesting; no build or install was run here.
+
+---
+
+## 2026-09-22 (~current) - add Poe GPT-5.6 models - GPT-5.6 Luna, Thinking; Go
+
+### Agent
+- Added global `provider.poe` config in `C:\Users\user\.config\opencode\opencode.jsonc` with the Poe OpenAI-compatible endpoint.
+- Added `GPT-5.6-Luna`, `GPT-5.6-Terra`, and `GPT-5.6-Sol` with requested display names; kept existing providers and models unchanged.
+- Verification: `opencode auth list` shows Poe OAuth; fresh `opencode models poe` lists all three exact IDs; config read-back confirms endpoint, package, and names.
+- Restarted through a fresh CLI process for catalog verification; interactive `/models` remains for the user's already-running TUI after restart.
+
+### User
+Providers
+- Poe now exposes GPT-5.6 Luna, Terra, and Sol in the model picker after restarting OpenCode.
+
+---
+
+## 2026-09-21 (~23:56) - Windows image clipboard paths - gpt-5.6-luna, Thinking; Build
+
+### Agent
+- Changed `packages/tui/src/clipboard.ts`: prefer usable Windows image file-drop paths; save image-only clipboard pixels to process-scoped temporary PNG; preserve text fallback.
+- Added focused `packages/tui/test/clipboard.test.ts` coverage for file paths, temporary PNG paths, ordering, safe output paths, and text fallback.
+- Kept prompt integration, WezTerm source/configuration, generated files, and unrelated worktree changes unchanged.
+- Verification: focused clipboard/local-attachment tests passed (10); `bun typecheck` passed in `packages/tui`; `git diff --check` passed with existing line-ending warnings.
+- Manual WezTerm clipboard smoke check remains for the user after rebuilding/restarting OC; no build or install was run.
+
+### User
+Clipboard
+- Windows image pastes now use an existing image file when available, or a temporary PNG when the clipboard contains pixels only, while ordinary text pastes remain unchanged.
+
+---
+
+## 2026-09-21 (~19:54) - set up global Jev MCP tool - gpt-5.6-luna, Thinking; Plan
+
+### Agent
+- Registered global `jev` MCP entry in `C:\Users\user\.config\opencode\opencode.json`.
+- Kept the TypeSafe key in the launching PowerShell environment; config contains no secret.
+- Installed verified `jev-code` checkout at `C:\Users\user\Apps\jev-code`; no `oc` source changes.
+- Verification: `oc mcp list` reported `jev connected`; user confirmed the live TypeSafe request succeeded; config has no token or temp path.
+- Note: npm package lookup returned HTTP 404; setup uses the GitHub checkout. Upstream Windows/CRLF check failures remain isolated to that checkout.
+
+### User
+Providers
+- Jev is available globally in `oc` as a structured decision tool through the TypeSafe API; it does not appear in `/models`.
+- No UI change.
+
+---
+
+## 2026-09-21 (~19:36) - disable stock plan agent from user config - gpt-5.6-luna, Thinking; Go
+
+### Agent
+- Fixed `C:\Users\user\.config\opencode\opencode.jsonc`: changed the stock `plan` agent key from `disabled` to `disable`.
+- Added focused coverage for built-in `plan` removal and separate `hidden` addressability in `packages/opencode/test/agent/agent.test.ts`.
+- Verification: focused agent tests passed: 45 pass; `git diff --check` passed; `bun typecheck` remains blocked by the known unrelated `test/plugin/cursor.test.ts:16` cast error.
+
+### User
+Agents
+- The stock Plan agent is now disabled through the active configuration key, while `hidden` remains a separate option that does not remove an agent from backend resolution.
+
+---
+
 ## 2026-09-21 (~current) - disable Cursor native plan mode - gpt-5.6-luna, Thinking; Go
 
 ### Agent

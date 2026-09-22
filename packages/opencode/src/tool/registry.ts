@@ -2,6 +2,7 @@ import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { httpClient } from "@opencode-ai/core/effect/app-node-platform"
 import { Ripgrep } from "@opencode-ai/core/ripgrep"
 import { PlanExitTool } from "./plan"
+import { PlanExecuteTool } from "./plan-execute"
 import { SessionCompleteTool } from "./session-complete"
 import { SessionFailedTool } from "./session-failed"
 import { Session } from "@/session/session"
@@ -107,6 +108,7 @@ const layer = Layer.effect(
     const todo = yield* TodoWriteTool
     const lsptool = yield* LspTool
     const plan = yield* PlanExitTool
+    const planExecute = yield* PlanExecuteTool
     const sessionComplete = yield* SessionCompleteTool
     const sessionFailed = yield* SessionFailedTool
     const webfetch = yield* WebFetchTool
@@ -227,6 +229,7 @@ const layer = Layer.effect(
           question: Tool.init(question),
           lsp: Tool.init(lsptool),
           plan: Tool.init(plan),
+          planExecute: Tool.init(planExecute),
           sessionComplete: Tool.init(sessionComplete),
           sessionFailed: Tool.init(sessionFailed),
           ...(codeModeTool ? { execute: Tool.init(codeModeTool) } : {}),
@@ -253,6 +256,7 @@ const layer = Layer.effect(
             tool.patch,
             ...(tool.execute ? [tool.execute] : []),
             ...(flags.experimentalLspTool ? [tool.lsp] : []),
+            tool.planExecute,
             ...(flags.experimentalPlanMode && flags.client === "cli" ? [tool.plan] : []),
           ],
           task: tool.task,

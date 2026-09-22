@@ -6,6 +6,13 @@ import { promisify } from "node:util"
 
 const exec = promisify(execFile)
 
+type Command = (command: string, args?: string[], input?: string) => Promise<Buffer>
+type ReadOptions = Readonly<{
+  os?: NodeJS.Platform
+  command?: Command
+  text?: () => Promise<string | undefined>
+}>
+
 function command(command: string, args: string[] = [], input?: string) {
   return new Promise<Buffer>((resolve, reject) => {
     const child = spawn(command, args, { stdio: [input === undefined ? "ignore" : "pipe", "pipe", "ignore"] })
@@ -27,8 +34,11 @@ function writeOsc52(text: string) {
   process.stdout.write(process.env.TMUX ? sequence + passthrough : process.env.STY ? passthrough : sequence)
 }
 
-export async function read() {
-  if (platform() === "darwin") {
+export async function read(options: ReadOptions = {}) {
+  const os = options.os ?? platform()
+  const run = options.command ?? command
+
+  if (os === "darwin") {
     const file = path.join(tmpdir(), "opencode-clipboard.png")
     try {
       await exec("osascript", [
@@ -51,13 +61,9 @@ export async function read() {
     }
   }
 
-  if (platform() === "win32" || release().includes("WSL")) {
-    const script =
-      "Add-Type -AssemblyName System.Windows.Forms; $img = [System.Windows.Forms.Clipboard]::GetImage(); if ($img) { $ms = New-Object System.IO.MemoryStream; $img.Save($ms, [System.Drawing.Imaging.ImageFormat]::Png); [System.Convert]::ToBase64String($ms.ToArray()) }"
-    const image = await command("powershell.exe", ["-NonInteractive", "-NoProfile", "-command", script]).catch(() =>
-      Buffer.alloc(0),
-    )
-    if (image.length) return { data: image.toString().trim(), mime: "image/png" }
+  if (os === "win32" || release().includes("WSL")) {
+    const image = await runWindowsClipboard(run)
+    if (image) return image
   }
 
   if (platform() === "linux") {
@@ -69,9 +75,32 @@ export async function read() {
     if (x11.length) return { data: x11.toString("base64"), mime: "image/png" }
   }
 
-  const { default: clipboardy } = await import("clipboardy")
-  const text = await clipboardy.read().catch(() => undefined)
+  const text = await (options.text ?? readText)()
   if (text) return { data: text, mime: "text/plain" }
+}
+
+async function readText() {
+  const { default: clipboardy } = await import("clipboardy")
+  return clipboardy.read().catch(() => undefined)
+}
+
+async function runWindowsClipboard(run: Command) {
+  const outputPath = path.join(tmpdir(), `opencode-clipboard-${process.pid}.png`)
+  const escapedOutputPath = outputPath.replace(/'/g, "''")
+  const script = [
+    "Add-Type -AssemblyName System.Windows.Forms",
+    "$extensions = @('.avif', '.gif', '.jpeg', '.jpg', '.png', '.svg', '.webp')",
+    "$file = [System.Windows.Forms.Clipboard]::GetFileDropList() | Where-Object { $_ -and (Test-Path -LiteralPath $_ -PathType Leaf) -and $extensions -contains ([System.IO.Path]::GetExtension($_)).ToLowerInvariant() } | Select-Object -First 1",
+    "if ($file) { Write-Output ('path:' + $file); exit }",
+    "$img = [System.Windows.Forms.Clipboard]::GetImage()",
+    `if ($img) { $outputPath = '${escapedOutputPath}'; $img.Save($outputPath, [System.Drawing.Imaging.ImageFormat]::Png); Write-Output ('image:' + $outputPath) }`,
+  ].join("; ")
+  const output = await run("powershell.exe", ["-NonInteractive", "-NoProfile", "-Command", script]).catch(() =>
+    Buffer.alloc(0),
+  )
+  const result = output.toString().trim()
+  if (result.startsWith("path:")) return { data: result.slice("path:".length), mime: "text/plain" }
+  if (result.startsWith("image:")) return { data: result.slice("image:".length), mime: "text/plain" }
 }
 
 export function copyCommand(

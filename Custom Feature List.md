@@ -1,5 +1,7 @@
 # Custom Feature Inventory
 
+> **Superseded.** The living project definition is [`README.oc.md`](README.oc.md). This file is the 2026-09-16 inventory snapshot and is not current.
+
 Last reviewed: September 16, 2026
 
 ## Purpose

@@ -51,14 +51,17 @@ Protect these areas during synchronization:
 
 - `.install.ps1` and `.scripts\*` local automation
 - `.version\version` maintenance versioning
-- `AGENTS.md`, `SCRIPTS.md`, `buildNotes.md`, and this guide
+- `AGENTS.md`, `SCRIPTS.md`, `buildNotes.md`, `README.md`, `README.oc.md`, and this guide
 - TUI maintenance display-version behavior in the core, build, plugin, and TUI
   adapter/sidebar paths
 - Custom declaration fixes in the app and enterprise packages
 
 These are examples, not an exhaustive allowlist. Compare the validated
 baseline, current parent, and refreshed upstream before deciding whether any
-overlap is upstream drift or intentional fork behavior.
+overlap is upstream drift or intentional fork behavior. After a successful
+apply, walk the Tracking table in `README.md`. Update **Upstream** and the
+compared-against SHA when native behavior moved. Do not replace that table
+with upstream's README.
 
 ## Verification
 

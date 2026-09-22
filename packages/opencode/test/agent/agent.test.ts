@@ -259,6 +259,42 @@ it.instance(
 )
 
 it.instance(
+  "agent disable removes the built-in plan agent",
+  () =>
+    Effect.gen(function* () {
+      const plan = yield* load((svc) => svc.get("plan"))
+      expect(plan).toBeUndefined()
+      const names = (yield* load((svc) => svc.list())).map((agent) => agent.name)
+      expect(names).not.toContain("plan")
+    }),
+  {
+    config: {
+      agent: {
+        plan: { disable: true },
+      },
+    },
+  },
+)
+
+it.instance(
+  "hidden keeps a primary agent addressable",
+  () =>
+    Effect.gen(function* () {
+      const plan = yield* load((svc) => svc.get("plan"))
+      expect(plan?.hidden).toBe(true)
+      const names = (yield* load((svc) => svc.list())).map((agent) => agent.name)
+      expect(names).toContain("plan")
+    }),
+  {
+    config: {
+      agent: {
+        plan: { hidden: true },
+      },
+    },
+  },
+)
+
+it.instance(
   "agent permission config merges with defaults",
   () =>
     Effect.gen(function* () {

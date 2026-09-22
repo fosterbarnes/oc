@@ -7,6 +7,10 @@
 - Windows TUI segfaults on Bun 1.4.0 (`34cbb9a40`): `bun:ffi` FTL pointer args (oven-sh/bun#39829, #40302). `.scripts\build.ps1` and `.scripts\.run.ps1` call `requireBunForCompile` and will `bun upgrade --canary` when PATH bun is still 1.4.0. Do not ship `opencode.exe` compiled with 1.4.0. Stable 1.4.1 was not published as of 2026-08-31.
 - Safe local builds: agents may run `.scripts\build.ps1` or `.scripts\buildDebug.ps1`; these never touch `C:\Users\user\Apps\opencode`. Agents must not run `.scripts\install.ps1`, `.scripts\installDebug.ps1`, `.install.ps1`, or normal `.scripts\syncAndInstall.ps1`, because those installers can stop the OpenCode host. After building, tell the user to exit OpenCode and run the relevant installer with `-NoBuild` from a fresh PowerShell.
 
+## Project definition
+
+- `README.oc.md` is the living definition of this fork. Statuses describe current state; they do not authorize work. Do not treat `Custom Feature List.md` as current. `README.md` tracks native OpenCode in this checkout (Now / Keep / Upstream). Keep fork-only work in `README.oc.md`.
+
 ## Build notes
 
 - Session history lives in root `buildNotes.md` (`# Historical entries (newest first)`, newest-first). For insert/rotate procedure use skills `base/build-notes` and `base/build-notes-archive`.
