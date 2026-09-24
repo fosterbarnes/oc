@@ -89,6 +89,39 @@ describe("QuestionV2", () => {
     }),
   )
 
+  it.effect("cancels only questions owned by the session", () =>
+    Effect.gen(function* () {
+      const service = yield* QuestionV2.Service
+      const events = yield* EventV2.Service
+      const published: EventV2.Payload[] = []
+      const unsubscribe = yield* events.listen((event) =>
+        Effect.sync(() => {
+          if (event.type === QuestionV2.Event.Rejected.type) published.push(event)
+        }),
+      )
+      yield* Effect.addFinalizer(() => unsubscribe)
+
+      const otherSessionID = SessionV2.ID.make("ses_other_question_test")
+      const firstFiber = yield* service.ask({ sessionID, questions: [question] }).pipe(Effect.forkScoped)
+      const secondFiber = yield* service
+        .ask({ sessionID: otherSessionID, questions: [question] })
+        .pipe(Effect.forkScoped)
+      yield* Effect.yieldNow
+      const requests = yield* service.list()
+      const first = requests.find((request) => request.sessionID === sessionID)!
+      const second = requests.find((request) => request.sessionID === otherSessionID)!
+
+      yield* service.cancel(sessionID)
+
+      expect(Exit.isFailure(yield* Fiber.await(firstFiber))).toBe(true)
+      expect(yield* service.list()).toEqual([second])
+      expect(published.map((event) => event.data)).toEqual([{ sessionID, requestID: first.id }])
+
+      yield* service.reject(second.id)
+      expect(Exit.isFailure(yield* Fiber.await(secondFiber))).toBe(true)
+    }),
+  )
+
   it.effect("isolates pending requests by location-layer instance and rejects them on finalization", () =>
     Effect.gen(function* () {
       const firstScope = yield* Scope.make()

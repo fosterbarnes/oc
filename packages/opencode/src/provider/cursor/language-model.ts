@@ -984,9 +984,9 @@ async function startSession(
     maxMode: hintMaxMode,
     picked,
   })
-  // Wire max_mode from the hint *or* a 1m context pick — OpenCode's variant
-  // paramMap does not include a maxMode key when the user selects 1m.
-  const maxMode = resolveVariantMaxMode(parameterValues, { picked, maxMode: hintMaxMode })
+  // Wire max_mode from the selected Cursor context variant. The variant tuple
+  // does not include a separate maxMode key.
+  const maxMode = resolveVariantMaxMode(parameterValues, { model: modelInfo, picked, maxMode: hintMaxMode })
 
   // Do NOT pass callOptions.abortSignal into the h2 Run stream. OpenCode aborts
   // that signal when a turn ends with tool-calls; the Cursor stream must stay

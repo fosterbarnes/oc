@@ -398,22 +398,35 @@ export const {
           break
         }
         case "message.part.updated": {
-          touchPart(event.properties.part.sessionID, event.properties.part.id)
-          const parts = store.part[event.properties.part.messageID]
+          const part = event.properties.part
+          touchPart(part.sessionID, part.id)
+          if (part.type === "tool" && part.tool === "question" && part.state.status === "error") {
+            const requests = store.question[part.sessionID]
+            if (requests) {
+              setStore(
+                "question",
+                part.sessionID,
+                requests.filter(
+                  (request) => request.tool?.messageID !== part.messageID || request.tool.callID !== part.callID,
+                ),
+              )
+            }
+          }
+          const parts = store.part[part.messageID]
           if (!parts) {
-            setStore("part", event.properties.part.messageID, [event.properties.part])
+            setStore("part", part.messageID, [part])
             break
           }
-          const result = search(parts, event.properties.part.id, (part) => part.id)
+          const result = search(parts, part.id, (part) => part.id)
           if (result.found) {
-            setStore("part", event.properties.part.messageID, result.index, reconcile(event.properties.part))
+            setStore("part", part.messageID, result.index, reconcile(part))
             break
           }
           setStore(
             "part",
-            event.properties.part.messageID,
+            part.messageID,
             produce((draft) => {
-              draft.splice(result.index, 0, event.properties.part)
+              draft.splice(result.index, 0, part)
             }),
           )
           break

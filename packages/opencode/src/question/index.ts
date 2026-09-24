@@ -56,6 +56,7 @@ export interface Interface {
     answers: ReadonlyArray<Answer>
   }) => Effect.Effect<void, NotFoundError>
   readonly reject: (requestID: QuestionID) => Effect.Effect<void, NotFoundError>
+  readonly cancel: (sessionID: SessionID) => Effect.Effect<void>
   readonly list: () => Effect.Effect<ReadonlyArray<Request>>
 }
 
@@ -84,6 +85,18 @@ const layer = Layer.effect(
       }),
     )
 
+    const cancelRequest = Effect.fn("Question.cancelRequest")(function* (requestID: QuestionID) {
+      const pending = (yield* InstanceState.get(state)).pending
+      const existing = pending.get(requestID)
+      if (!existing) return
+      pending.delete(requestID)
+      yield* events.publish(Event.Rejected, {
+        sessionID: existing.info.sessionID,
+        requestID: existing.info.id,
+      })
+      yield* Deferred.fail(existing.deferred, new RejectedError())
+    })
+
     const ask = Effect.fn("Question.ask")(function* (input: {
       sessionID: SessionID
       questions: ReadonlyArray<Info>
@@ -104,7 +117,7 @@ const layer = Layer.effect(
       yield* events.publish(Event.Asked, info)
 
       return yield* Effect.ensuring(
-        Deferred.await(deferred),
+        Deferred.await(deferred).pipe(Effect.onInterrupt(() => cancelRequest(id))),
         Effect.sync(() => {
           pending.delete(id)
         }),
@@ -147,12 +160,21 @@ const layer = Layer.effect(
       yield* Deferred.fail(existing.deferred, new RejectedError())
     })
 
+    const cancel = Effect.fn("Question.cancel")(function* (sessionID: SessionID) {
+      const pending = (yield* InstanceState.get(state)).pending
+      yield* Effect.forEach(
+        Array.from(pending.values(), (entry) => entry.info).filter((request) => request.sessionID === sessionID),
+        (request) => cancelRequest(request.id),
+        { discard: true },
+      )
+    })
+
     const list = Effect.fn("Question.list")(function* () {
       const pending = (yield* InstanceState.get(state)).pending
       return Array.from(pending.values(), (x) => x.info)
     })
 
-    return Service.of({ ask, reply, reject, list })
+    return Service.of({ ask, reply, reject, cancel, list })
   }),
 )
 

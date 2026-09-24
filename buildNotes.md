@@ -112,6 +112,229 @@ Windows
 
 ---
 
+## 2026-09-24 (~03:55) - restore Luna agents to OpenAI GPT-6 - GPT-5.6 Luna, Thinking; Implementation
+
+### Agent
+- Meta: GPT-5.6 Luna; Thinking; Implementation; completed
+- Updated `~/.config/opencode/oc.json`, global Luna agent entries, and eight architect/redteam agent files to `openai/gpt-6-luna`.
+- Removed incomplete Poe SDK experiment from `packages/opencode/src/plugin/poe.ts`, `plugin/index.ts`, and `provider/transform.ts`; deleted temporary SDK probe.
+- Kept pre-existing dependency, Cursor, and other worktree edits untouched.
+- MISTAKE: Earlier Poe entry described `poe/gpt-5.4` as the active Luna route. Corrected active session and agent routes to OpenAI GPT-6 Luna, which was live-tested.
+- Verification: `opencode models openai` lists `openai/gpt-6-luna`; live `opencode run --model openai/gpt-6-luna` returned `LUNA6_OK`; `git diff --check` passed.
+
+### User
+Providers
+- Default sessions and Luna agents use the working OpenAI GPT-6 Luna model; Poe remains separate.
+
+---
+
+## 2026-09-24 (~01:10) - make Poe model routing usable - GPT-5.6 Luna, Thinking; Implementation
+
+### Agent
+- Meta: GPT-5.6 Luna; Thinking; Implementation; completed
+- Changed active `~/.config/opencode` session and Luna agent references to `poe/gpt-5.4`.
+- Removed manually configured GPT-5.6 Poe IDs after live Poe returned 404 for all three names.
+- Kept generic OpenAI-compatible transport and Cursor provider unchanged.
+- Verification: `opencode auth list`; `opencode models poe`; live `opencode run --model poe/gpt-5.4` returned `POE_OK`.
+- ERROR: Poe live `/v1/models` does not expose `GPT-5.6-Luna`, `GPT-5.6-Terra`, or `GPT-5.6-Sol`; stale local entries produced Poe 404 responses.
+
+### User
+Providers
+- Poe is now the active session and Luna-agent provider through the live `gpt-5.4` model, with no Cursor integration changes.
+
+---
+
+## 2026-09-23 (~20:43) - harden question terminal races - GPT-5.6 Luna, Thinking; Implementation
+
+### Agent
+- Meta: GPT-5.6 Luna; Thinking; Implementation; completed
+- Fixed V2 question terminal-state race: remove pending request before publishing reply/rejection so concurrent cancellation cannot emit a contradictory terminal event.
+- Reviewed only pending-question changes from this session; preserved unrelated worktree changes.
+- Verification: core question/tool tests 8 pass; core typecheck passes; `git diff --check` passes.
+
+### User
+Session recovery
+- Hardened interrupted question cleanup so one prompt cannot finish twice during a race between answering and aborting.
+
+---
+
+## 2026-09-23 (~20:41) - clear pending questions on interrupted sessions - GPT-5.6 Luna, Thinking; Implementation
+
+### Agent
+- Meta: GPT-5.6 Luna; Thinking; Implementation; completed
+- Added session-scoped question cancellation to legacy and V2 question services.
+- Published `question.rejected` and failed pending deferreds during abort, interruption, processor cleanup, and V2 runner finalization.
+- Added TUI cleanup for errored question tool parts when rejection events are missed.
+- Verification: legacy question tests 15 pass; core question/tool tests 8 pass; TUI sync tests 11 pass; opencode, core, and TUI typechecks pass; `git diff --check` passed.
+- ERROR: TUI sync test logs an existing provider bootstrap HTTP 500 while all 11 tests still pass.
+
+### User
+Session recovery
+- Interrupted question prompts now reject cleanly, notify the UI, and release Cursor-backed sessions instead of leaving them queued.
+- Stale question prompts are removed when their tool part is finalized as an error.
+
+---
+
+## 2026-09-23 (~15:46) - update OpenCode component dependencies - GPT-5.6 Luna, Thinking; Go
+
+### Agent
+- Meta: GPT-5.6 Luna; Thinking; Go; completed
+- Updated global `@opencode-ai/plugin` from `1.18.4` to `1.18.32` and `~/.opencode` from `1.18.30` to `1.18.32`.
+- Updated global `opencode-command-inject` config from `1.3.0` to `1.3.1`; package fetched into the OpenCode cache.
+- Refreshed both dependency directories with `bun install`.
+- Verification: resolved plugin manifests report `1.18.32`; `opencode debug config` completed and lists `opencode-command-inject@1.3.1`.
+- ERROR: `opencode plugin opencode-command-inject@1.3.1 --global` reported no recognized plugin entrypoint, but normal config resolution fetched the package successfully.
+
+### User
+Dependency update
+- Updated the selected OpenCode plugin dependencies and command-inject version; restart OpenCode to load them.
+
+---
+
+## 2026-09-23 (~15:23) - sync Cursor model catalog tiers - GPT-5.6 Luna, Thinking; Implementation
+
+### Agent
+- Meta: GPT-5.6 Luna; Thinking; Implementation; completed
+- Added generalized Cursor context-tier materialization for live variants, including Grok 4.7 base, Fast, 500k, and 500k Fast entries with exact wire tuples.
+- Added generated Cursor pricing/context/capability tooling, fixture inputs, coverage validation, and current metadata for Grok 4.7 and Claude Opus 5.5.
+- Kept legacy `-fast` and `-1m` pricing behavior; arbitrary generated tier keys now resolve directly without collapsing 500k rates into the 1M nested cost.
+- Verification: focused Cursor tests (22 pass), live `generate:pricing`, `generate:pricing:check`, `check:pricing` (12 covered), `bun typecheck`, Prettier checks, and `git diff --check` passed.
+- Preserved unrelated README, package, TUI, plan-execute, and lockfile worktree changes.
+
+### User
+Providers
+- Cursor's model picker can now expose live multi-tier models such as Grok 4.7 with correct context limits, Fast variants, wire parameters, and pricing; Claude Opus 5.5 metadata is included.
+
+---
+
+## 2026-09-23 (~15:13) - expose the exact plan path during write handoff - GPT-5.6 Luna, Thinking; Implementation
+
+### Agent
+- Meta: GPT-5.6 Luna; Thinking; Implementation; completed
+- Changed `packages/opencode/src/tool/write.ts` to include the canonical absolute filepath in successful write output.
+- Updated `C:\Users\user\.config\opencode\prompts\sp.md` to require forwarding that returned path unchanged to `plan_execute`.
+- Verification: `bun test test/tool/plan-execute.test.ts` passed with 7 tests; `git diff --check` passed. Prettier reports an existing warning in `src/tool/write.ts`.
+
+### User
+SuperPlan++ execution
+- SuperPlan++ now receives the exact path created by the plan-writing tool instead of reconstructing a plan filename.
+
+---
+
+## 2026-09-23 (~05:20) - require the exact planner plan path - GPT-5.6 Luna, Thinking; Debug
+
+### Agent
+- Meta: GPT-5.6 Luna; Thinking; Debug; completed
+- Fixed `packages/opencode/src/tool/plan-execute.ts` so `plan_execute` requires an absolute `planPath`, verifies the exact file exists, and passes that path unchanged to both Go execution modes.
+- Removed the unsafe `Session.plan(...)` filename reconstruction that generated paths from session timestamps and slugs.
+- Updated `C:\Users\user\.config\opencode\prompts\sp.md` to require the exact written path in the tool call.
+- Added regression coverage for exact path forwarding and missing-plan rejection in `packages/opencode/test/tool/plan-execute.test.ts`.
+- Verification: `bun test test/tool/plan-execute.test.ts` (7 pass), `bun typecheck`, `bunx prettier --check src/tool/plan-execute.ts test/tool/plan-execute.test.ts`, and `git diff --check` passed.
+- MISTAKE: The previous execution implementation reconstructed the plan path with `Session.plan(...)` instead of carrying the planner-created path; execution must never invent a plan filename.
+- MISTAKE: The first regression-test fixture path was one directory short; corrected it before final verification.
+
+### User
+SuperPlan++ execution
+- Go now receives the exact plan file created by SuperPlan++ and refuses to run when that file is missing or the path is not absolute.
+
+---
+
+## 2026-09-23 (~04:41) - restore branched Go execution - GPT-5.6 Luna, Thinking; Implementation
+
+### Agent
+- Meta: GPT-5.6 Luna; Thinking; Implementation; completed
+- Restored `This session` execution in `packages/opencode/src/tool/plan-execute.ts` by appending a synthetic Go message with the planner's model and context.
+- Restored `New session` execution with selected model and reasoning variant, creating and background-prompting a separate Go session.
+- Updated `C:\Users\user\.config\opencode\prompts\sp.md` and `go.md` for explicit `go <plan-path>` execution without the removed handoff block.
+- Added focused tests for both execution paths and conditional reasoning selection.
+- Verification: `bun test test/tool/plan-execute.test.ts` (6 pass), `bun typecheck`, `bunx prettier --check src/tool/plan-execute.ts test/tool/plan-execute.test.ts`, and `git diff --check` passed.
+
+### User
+SuperPlan++
+- Approved plans can now execute in the current session with inherited context or dispatch to a new Go session with the questionnaire-selected model and reasoning.
+
+---
+
+## 2026-09-23 (~04:34) - add execution location questionnaire branch - GPT-5.6 Luna, Thinking; Implementation
+
+### Agent
+- Meta: GPT-5.6 Luna; Thinking; Implementation; completed
+- Added `This session` and `New session` branching to `packages/opencode/src/tool/plan-execute.ts`.
+- Kept model and conditional reasoning questions limited to `New session`; `This session` records immediately without execution.
+- Updated `packages/opencode/test/tool/plan-execute.test.ts` for both questionnaire paths.
+- Verification: `bun test test/tool/plan-execute.test.ts`, `bun typecheck`, `bunx prettier --check src/tool/plan-execute.ts test/tool/plan-execute.test.ts`, and `git diff --check` passed.
+
+### User
+SuperPlan++
+- The questionnaire now asks whether execution should use `This session` or `New session` before asking for new-session model choices.
+
+---
+
+## 2026-09-23 (~04:25) - remove SuperPlan++ auto-execution handoff - GPT-5.6 Luna, Thinking; Implementation
+
+### Agent
+- Meta: GPT-5.6 Luna; Thinking; Implementation; completed
+- Changed `packages/opencode/src/tool/plan-execute.ts` to retain the existing questionnaire and model/variant options while recording selections without starting Go or creating sessions.
+- Removed the SuperPlan++ execution-handoff contract and fallback instructions from `C:\Users\user\.config\opencode\prompts\sp.md`.
+- Replaced handoff tests with questionnaire-only coverage in `packages/opencode/test/tool/plan-execute.test.ts`.
+- Verification: `bun test test/tool/plan-execute.test.ts`, `bun typecheck`, `bunx prettier --check src/tool/plan-execute.ts test/tool/plan-execute.test.ts`, and `git diff --check` passed.
+
+### User
+SuperPlan++
+- The questionnaire remains available, but its answers no longer trigger automatic Go execution or an execution handoff.
+
+---
+
+## 2026-09-22 (~22:10) - cleanup SuperPlan++ Go handoff - Cursor Grok 4.6, Thinking; Go
+
+### Agent
+- Cleaned `plan-execute.ts`: typed `sessionPrompt()` helper, shared model ref for create/prompt, dropped extra Truncate/PlanExecuteTool annotations.
+- Cleaned `plan-execute.test.ts`: Effect harness, `run()` helper, dispose only around instance tests.
+- Verification: `bun test test/tool/plan-execute.test.ts` 6 pass; prettier check ok; `bun typecheck` ok.
+
+### User
+SuperPlan++
+- Same Go handoff behavior; just tidier internals. Still rebuild/restart before live Yes/No.
+
+---
+
+## 2026-09-22 (~21:53) - SuperPlan++ Go handoff new root session - Cursor Grok 4.6, Thinking; Go
+
+### Agent
+- Changed `packages/opencode/src/tool/plan-execute.ts`: Yes still asks model/variant, then creates a root `Go` session in the active directory and backgrounds `SessionPrompt.prompt` with exact text `go <absolute plan path>`.
+- Stopped writing synthetic Go user/text parts into the planner session. Tool metadata now includes the new `sessionID`.
+- Loaded `SessionPrompt` at execute time (not tool init). Init-time require cycles `ToolRegistry` <-> `SessionPrompt` and breaks AppRuntime.
+- Extended `packages/opencode/test/tool/plan-execute.test.ts`: inherited model/variant handoff; declined Yes/No still creates no session.
+- Verification: `bun test test/tool/plan-execute.test.ts` 6 pass; `bunx prettier --check` on those two files ok; `bun typecheck` ok (no `local.tsx:188` this run). Live SuperPlan++ Yes/No questionnaire not exercised.
+- Kept `plan.ts`, `registry.ts`, CLI tool display, agents, prompts, session plugin, and unrelated dirty worktree files unchanged.
+
+### User
+SuperPlan++
+- Approving automatic Go now starts a separate Go session in the same folder instead of continuing inside the planner chat.
+- Rebuild/restart OpenCode before trying Yes, No, inherit, and a reasoning model from SuperPlan++.
+
+---
+
+## 2026-09-22 (~01:50) - align OpenTUI with isolated upstream 0.4.5 - Cursor Grok 4.6, Thinking; Go
+
+### Agent
+- Rollback SHA: `d29935d` (`pre opentui downgrade`). HEAD at start: `bc38fc8`. Isolated `UPSTREAM\opencode` stayed clean.
+- Aligned root catalog `@opentui/core|keymap|solid` to `0.4.5` and plugin peers to `>=0.4.5` via `bun run script/upgrade-opentui.ts 0.4.5`.
+- Removed `patchedDependencies` `@opentui/core@0.5.8` and deleted `patches/@opentui%2Fcore@0.5.8.patch`.
+- Deleted patch-only `packages/tui/test/opentui-resume.test.ts`. Kept fork TUI source (`terminal-win32.ts`, text coercion) unchanged.
+- Regenerated `bun.lock` to OpenTUI `0.4.5` (all platform packages) and `bun-ffi-structs@0.2.4`. Lock also reordered existing `@ai-sdk/openai-compatible@2.0.41` patch map entry; no other dep churn.
+- Updated live OpenTUI wording in `README.md` and `README.oc.md`. Paint, key, and `/editor` resume stay unconfirmed until user smoke after rebuild.
+- Verification: `bun install --frozen-lockfile` ok; `packages/tui` and `packages/plugin` `bun typecheck` ok (no `local.tsx:188` this run); `packages/tui` `bun test test/terminal-win32.test.ts` 2 pass; `git diff --check` only LF/CRLF warnings; deleted patch/test paths `$false`. Remaining `0.5.8` in `bun.lock` is unrelated `yaml-language-server/request-light@0.5.8`.
+- Risk: unpatched `renderer.resume()` may throw on Windows raw-mode after `/editor`.
+- Note: no build/install; user must rebuild and restart before live TUI check.
+
+### User
+OpenTUI
+- OC now uses the same OpenTUI 0.4.5 packages as isolated upstream, without the old resume patch.
+- Rebuild and restart before testing a normal launch, palette typing, `/editor` return, and large-chat scroll. Paint, key, and resume issues are not marked fixed yet.
+
+---
+
 ## 2026-09-22 (~00:54) - fix Windows clipboard PowerShell script - gpt-5.6-luna, Thinking; Build
 
 ### Agent

@@ -39,6 +39,11 @@ const rejectEffect = Effect.fn("QuestionTest.reject")(function* (id: QuestionID)
   yield* question.reject(id)
 })
 
+const cancelEffect = Effect.fn("QuestionTest.cancel")(function* (sessionID: SessionID) {
+  const question = yield* Question.Service
+  yield* question.cancel(sessionID)
+})
+
 afterEach(async () => {
   await disposeAllInstances()
 })
@@ -259,6 +264,27 @@ it.instance(
 
       const after = yield* listEffect
       expect(after.length).toBe(0)
+    }),
+  { git: true },
+)
+
+it.instance(
+  "cancel - rejects only questions owned by the session",
+  () =>
+    Effect.gen(function* () {
+      const sessionID = SessionID.make("ses_test")
+      const otherSessionID = SessionID.make("ses_other_test")
+      const first = yield* askEffect({ sessionID, questions: [] }).pipe(Effect.forkScoped)
+      const second = yield* askEffect({ sessionID: otherSessionID, questions: [] }).pipe(Effect.forkScoped)
+      const pending = yield* waitForPending(2)
+
+      yield* cancelEffect(sessionID)
+
+      expect((yield* Fiber.await(first))._tag).toBe("Failure")
+      const other = pending.find((request) => request.sessionID === otherSessionID)!
+      expect(yield* listEffect).toEqual([other])
+      yield* rejectEffect(other.id)
+      expect((yield* Fiber.await(second))._tag).toBe("Failure")
     }),
   { git: true },
 )

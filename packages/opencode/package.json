@@ -11,6 +11,9 @@
     "test:httpapi": "bun run script/httpapi-exercise.ts --mode coverage --fail-on-missing --fail-on-skip && bun run script/httpapi-exercise.ts --mode auth --fail-on-missing --fail-on-skip && bun run script/httpapi-exercise.ts --mode effect --fail-on-missing --fail-on-skip",
     "bench:test": "bun run script/bench-test-suite.ts",
     "profile:test": "bun run script/profile-test-files.ts",
+    "generate:pricing": "bun run script/generate-cursor-pricing.ts",
+    "generate:pricing:check": "bun run script/generate-cursor-pricing.ts -- --check",
+    "check:pricing": "bun run script/check-cursor-pricing-coverage.ts",
     "build": "bun run script/build.ts",
     "dev": "bun run ./src/index.ts",
     "dev:temporary": "bun run ./src/temporary.ts"

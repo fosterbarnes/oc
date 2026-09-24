@@ -57,6 +57,7 @@ export interface Interface {
   readonly ask: (input: AskInput) => Effect.Effect<ReadonlyArray<Answer>, RejectedError>
   readonly reply: (input: ReplyInput) => Effect.Effect<void, NotFoundError>
   readonly reject: (requestID: ID) => Effect.Effect<void, NotFoundError>
+  readonly cancel: (sessionID: SessionSchema.ID) => Effect.Effect<void>
   readonly list: () => Effect.Effect<ReadonlyArray<Request>>
 }
 
@@ -90,6 +91,17 @@ const layer = Layer.effect(
       ),
     )
 
+    const cancelRequest = Effect.fn("QuestionV2.cancelRequest")(function* (requestID: ID) {
+      const existing = pending.get(requestID)
+      if (!existing) return
+      pending.delete(requestID)
+      yield* events.publish(Event.Rejected, {
+        sessionID: existing.request.sessionID,
+        requestID: existing.request.id,
+      })
+      yield* Deferred.fail(existing.deferred, new RejectedError())
+    })
+
     const ask = Effect.fn("QuestionV2.ask")((input: AskInput) =>
       Effect.uninterruptibleMask((restore) =>
         Effect.gen(function* () {
@@ -98,7 +110,7 @@ const layer = Layer.effect(
           const request: Request = { id, ...input }
           pending.set(id, { request, deferred })
           return yield* events.publish(Event.Asked, request).pipe(
-            Effect.andThen(restore(Deferred.await(deferred))),
+            Effect.andThen(restore(Deferred.await(deferred)).pipe(Effect.onInterrupt(() => cancelRequest(id)))),
             Effect.ensuring(
               Effect.sync(() => {
                 pending.delete(id)
@@ -114,13 +126,13 @@ const layer = Layer.effect(
         Effect.gen(function* () {
           const existing = pending.get(input.requestID)
           if (!existing) return yield* new NotFoundError({ requestID: input.requestID })
+          pending.delete(input.requestID)
           yield* events.publish(Event.Replied, {
             sessionID: existing.request.sessionID,
             requestID: existing.request.id,
             answers: input.answers.map((answer) => [...answer]),
           })
           yield* Deferred.succeed(existing.deferred, input.answers)
-          pending.delete(input.requestID)
         }),
       ),
     )
@@ -130,21 +142,29 @@ const layer = Layer.effect(
         Effect.gen(function* () {
           const existing = pending.get(requestID)
           if (!existing) return yield* new NotFoundError({ requestID })
+          pending.delete(requestID)
           yield* events.publish(Event.Rejected, {
             sessionID: existing.request.sessionID,
             requestID: existing.request.id,
           })
           yield* Deferred.fail(existing.deferred, new RejectedError())
-          pending.delete(requestID)
         }),
       ),
     )
+
+    const cancel = Effect.fn("QuestionV2.cancel")(function* (sessionID: SessionSchema.ID) {
+      yield* Effect.forEach(
+        Array.from(pending.values(), (item) => item.request).filter((request) => request.sessionID === sessionID),
+        (request) => cancelRequest(request.id),
+        { discard: true },
+      )
+    })
 
     const list = Effect.fn("QuestionV2.list")(function* () {
       return Array.from(pending.values(), (item) => item.request)
     })
 
-    return Service.of({ ask, reply, reject, list })
+    return Service.of({ ask, reply, reject, cancel, list })
   }),
 )
 

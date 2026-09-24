@@ -118,16 +118,64 @@ function modelInfoVariants(
   return entries
 }
 
-function isLongContextVariant(v: ModelVariant): boolean {
-  return v.parameterValues.some((p) => p.id === "context" && parseCursorContextLimit(p.value) === 1_000_000)
-}
-
 function isFastVariant(v: ModelVariant): boolean {
   return v.parameterValues.some((p) => p.id === "fast" && p.value === "true")
 }
 
-function variantsForTier(mi: ModelInfo, tier: "base" | "long"): ModelVariant[] {
-  return mi.variants.filter((v) => isLongContextVariant(v) === (tier === "long"))
+type ContextTier = "base" | "long" | number
+
+function documentedBaseContext(mi: ModelInfo): number | undefined {
+  return (
+    mi.maxContext ??
+    getDocumentedCursorModelContext(mi.id)?.maxContext ??
+    parseCursorContextLimit(
+      (mi.variants.find((variant) => variant.isDefaultNonMax) ?? mi.variants[0])?.parameterValues.find(
+        (parameter) => parameter.id === "context",
+      )?.value,
+    )
+  )
+}
+
+function contextTierTokens(mi: ModelInfo, tier: ContextTier): number | undefined {
+  if (tier === "base") return documentedBaseContext(mi)
+  if (tier === "long") return mi.maxContextForMaxMode ?? getDocumentedCursorModelContext(mi.id)?.maxContextForMaxMode
+  return tier
+}
+
+function variantsForTier(mi: ModelInfo, tier: ContextTier): ModelVariant[] {
+  const tokens = contextTierTokens(mi, tier)
+  return mi.variants.filter((variant) => {
+    const context = variant.parameterValues.find((parameter) => parameter.id === "context")
+    if (!context) return tier === "base"
+    return parseCursorContextLimit(context.value) === tokens
+  })
+}
+
+function contextTiers(mi: ModelInfo): ContextTier[] {
+  const base = documentedBaseContext(mi)
+  const contexts = new Set(
+    mi.variants.flatMap((variant) => {
+      const value = variant.parameterValues.find((parameter) => parameter.id === "context")?.value
+      const tokens = parseCursorContextLimit(value)
+      return tokens === undefined ? [] : [tokens]
+    }),
+  )
+  if (base !== undefined) contexts.add(base)
+  const tiers = [...contexts].sort((a, b) => a - b)
+  if (tiers.length === 0) return ["base"]
+  return ["base", ...tiers.filter((tier) => tier !== base)]
+}
+
+function contextSuffix(tier: ContextTier, tokens: number | undefined): string {
+  if (tier === "base" || tokens === undefined) return ""
+  if (tier === "long" || tokens === 1_000_000) return "-1m"
+  return `-${tokens / 1_000}k`
+}
+
+function contextLabel(tier: ContextTier, tokens: number | undefined): string {
+  if (tier === "base" || tokens === undefined) return ""
+  if (tier === "long" || tokens === 1_000_000) return "1M"
+  return `${tokens / 1_000}k`
 }
 
 /**
@@ -156,7 +204,7 @@ export function modelInfoToConfig(
   mi: ModelInfo,
   options: {
     thinkingSuffix?: boolean
-    contextTier?: "base" | "long"
+    contextTier?: ContextTier
     variants?: ModelVariant[]
     fast?: boolean
   } = {},
@@ -166,20 +214,22 @@ export function modelInfoToConfig(
   let name = baseName(mi)
   if (options.thinkingSuffix) name += " Thinking"
   if (options.fast) name += " Fast"
-  if (contextTier === "long") name += " 1M"
+  const contextTokens = contextTierTokens(mi, contextTier)
+  const contextName = contextLabel(contextTier, contextTokens)
+  if (contextName) name += ` ${contextName}`
   // OpenCode's context limit is static per model entry, while Cursor's context
   // tier is a variant parameter. Long-context choices are therefore emitted as
   // separate OpenCode entries by modelsToConfig.
   const documentedContext = getDocumentedCursorModelContext(mi.id)
   const context =
-    contextTier === "long"
-      ? (mi.maxContextForMaxMode ?? documentedContext?.maxContextForMaxMode ?? 1_000_000)
-      : (mi.maxContext ?? documentedContext?.maxContext ?? 200_000)
+    contextTier === "base"
+      ? (mi.maxContext ?? documentedContext?.maxContext ?? 200_000)
+      : (contextTokens ?? documentedContext?.maxContextForMaxMode ?? 1_000_000)
   // OpenCode's overflow/compaction/UI use limit.context; generation and
   // thinking budgets use limit.output. models.dev 1M peers advertise
   // 64k–128k output — a tiny cap makes long-context sessions feel broken
   // even when the 1M input window is correct.
-  const output = contextTier === "long" ? 128_000 : 32_000
+  const output = contextTier === "base" ? 32_000 : 128_000
   const supportsImages = resolveCursorModelSupportsImages(mi.id, mi.supportsImages)
   const config: Record<string, any> = {
     name,
@@ -198,9 +248,9 @@ export function modelInfoToConfig(
   }
   const variantConfig = modelInfoVariants(mi, variants)
   if (variantConfig) config.variants = variantConfig
-  if (contextTier === "long" || options.fast) {
+  if (contextTier !== "base" || options.fast) {
     const defaultVariant =
-      contextTier === "long"
+      contextTier !== "base"
         ? (variants.find((v) => v.isDefaultMax) ?? variants[0])
         : (variants.find((v) => v.isDefaultNonMax) ?? variants[0])
     if (defaultVariant) {
@@ -236,12 +286,7 @@ function uniqueCatalogId(usedIds: Set<string>, modelId: string, suffix: string):
   }
   let n = 2
   while (true) {
-    const candidate =
-      suffix === "-fast"
-        ? `${modelId}-fast-${n}`
-        : suffix === "-1m-fast"
-          ? `${modelId}-1m-${n}-fast`
-          : `${modelId}-1m-${n}`
+    const candidate = `${modelId}${suffix}-${n}`
     if (!usedIds.has(candidate)) {
       usedIds.add(candidate)
       return candidate
@@ -258,13 +303,15 @@ export function modelsToConfig(models: ModelInfo[]): Record<string, any> {
     const thinkingSuffix = !!m.supportsThinking && ambiguous.has(baseName(m))
     const splitFast = hasCursorFastPricing(m.id)
     const groups: Array<{
-      contextTier: "base" | "long"
+      contextTier: ContextTier
       fast: boolean
       variants: ModelVariant[]
       suffix: string
     }> = []
-    for (const contextTier of ["base", "long"] as const) {
-      const suffixFor = (fast: boolean) => (contextTier === "long" ? (fast ? "-1m-fast" : "-1m") : fast ? "-fast" : "")
+    for (const contextTier of contextTiers(m)) {
+      const tokens = contextTierTokens(m, contextTier)
+      const contextSuffixValue = contextSuffix(contextTier, tokens)
+      const suffixFor = (fast: boolean) => `${contextSuffixValue}${fast ? "-fast" : ""}`
       for (const group of speedGroups(variantsForTier(m, contextTier), splitFast)) {
         groups.push({
           contextTier,
@@ -283,7 +330,7 @@ export function modelsToConfig(models: ModelInfo[]): Record<string, any> {
     const primary = primaryIndex >= 0 ? primaryIndex : 0
     for (const [index, group] of groups.entries()) {
       const catalogId = index === primary ? m.id : uniqueCatalogId(usedIds, m.id, group.suffix || "-fast")
-      const pricingId = group.fast ? `${m.id}-fast` : group.contextTier === "long" ? `${m.id}-1m` : m.id
+      const pricingId = `${m.id}${group.suffix || (group.fast ? "-fast" : "")}`
       const config = modelInfoToConfig(m, {
         thinkingSuffix,
         contextTier: group.contextTier,
@@ -292,7 +339,7 @@ export function modelsToConfig(models: ModelInfo[]): Record<string, any> {
       })
       if (catalogId !== m.id && !config.options) {
         const defaultVariant =
-          (group.contextTier === "long"
+          (group.contextTier !== "base"
             ? group.variants.find((v) => v.isDefaultMax)
             : group.variants.find((v) => v.isDefaultNonMax)) ?? group.variants[0]
         if (defaultVariant) {

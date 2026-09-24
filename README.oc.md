@@ -6,7 +6,7 @@ OC is a personal, Windows-first OpenCode: native `oc` launcher, extra model prov
 
 Use this file to agree on what OC *is*. Statuses describe current state. They do not authorize implementation work.
 
-Last reviewed: 2026-09-21
+Last reviewed: 2026-09-22
 
 ---
 
@@ -137,12 +137,12 @@ Timestamps, copy, keys, diffs, plugins, and the terminal itself.
 | Don't crash on odd tool text | medium | After the OpenTUI upgrade, non-string or nested text no longer takes down the UI. | No explicit "no regression" confirmation. |
 | Diff hover colors | ~done~ | Neutral diff regions share one hover background; add/remove colors stay. | None realistic. |
 | Crow session lock | medium | Each Crow tab stays on the exact OpenCode session; Tailscale callback address works. | Live integration evidence is limited. |
-| Guard resume after `/editor` | high | After an external editor, Windows raw-mode failure should not leave typing detached. | Regression test exists. Original field freeze is still unconfirmed as the same bug. |
-| Parallel PTY shells | medium | Long/independent work can use concurrent PowerShell PTYs; short commands stay as normal bash. | Plugin-based (`opencode-pty`). An earlier "WAITING FOR PTY" hang left the main prompt unusable while the palette still worked. |
+| Resume after `/editor` | high | After an external editor, TUI resume is whatever stock OpenTUI 0.4.5 does. The previous raw-mode resume patch and its test are gone. | Live `/editor` return is unconfirmed. Raw-mode throw on resume may come back. |
+| Parallel bgShell jobs | medium | Independent work starts with concurrent `bgRun`; short commands stay as bash. | Local plugin `C:\Users\user\Documents\GitHub\bgShell\bgShell.js`. Agent `opencode-pty` removed. TUI `/pty` is human-only. |
 | Plugin / session-bomb hygiene | high | Plugin list uses npm or file specs only (no plugins *folder* in the list). Ponytail is back as a normal npm plugin. Agents must not dump huge plugin errors into keeper chats. | Stops *new* landmine transcripts. Does not repair old poisoned sessions. |
 | Fork display version for plugins | high | Compatible plugins can read the current model, preferred editor, and fork version. | External plugins are not broadly tested. |
-| Session paint death | **CRITICAL** | Scrolling a heavy chat can blank or tear the whole TUI. Palette rows may only appear on hover until a full reopen. | OpenTUI 0.5.8 drawing layer. Not a sidebar bug. See the revert section. |
-| WezTerm letter-key death | **CRITICAL** | After that same break, letters and main Enter do nothing while arrows and Ctrl+P still work. | OpenTUI 0.5.8 cannot decode the Windows key sequences WezTerm starts sending. |
+| Session paint death | **CRITICAL** | Scrolling a heavy chat can blank or tear the whole TUI. Palette rows may only appear on hover until a full reopen. | Seen on the previous OpenTUI pin. Catalog is now isolated-upstream 0.4.5. Do not mark fixed until a live Windows smoke check. Not a sidebar bug. See the revert section. |
+| WezTerm letter-key death | **CRITICAL** | After that same break, letters and main Enter do nothing while arrows and Ctrl+P still work. | Seen on the previous OpenTUI pin (Windows key sequences WezTerm started sending). Catalog is now 0.4.5. Do not mark fixed from the downgrade alone. |
 
 ---
 
@@ -183,7 +183,7 @@ Stay close to upstream without losing custom work.
 |---|---|---|---|
 | Safe upstream sync | medium | Isolated upstream checkout, content compare, preserve custom files, stop on overlap, bump maintenance version, optional build/install. | No shared Git merge base. Combined installer can omit provider runtimes. |
 | Separate display version | ~done~ | Fork version in the TUI footer is independent of OpenCode's package version. | None realistic. |
-| Stay on OpenTUI 0.5.8 | high | Pin (plus a small resume patch) to avoid worse native-pointer crashes. | Remaining paint/input bugs are in this same layer. See CRITICAL below. |
+| Match isolated upstream OpenTUI 0.4.5 | high | Catalog and plugin peers follow isolated upstream 0.4.5. No version-specific OpenTUI resume patch. | Paint, key, and `/editor` resume still need a live Windows check. See CRITICAL below. |
 | Windows-safe generated paths | ~done~ | Fixes Windows migration path generation and invalid custom-element declarations. | None realistic. |
 
 ---
@@ -194,8 +194,8 @@ These are not extra rows. They restate the three **CRITICAL** items already coun
 
 | Issue | Level | What it feels like | Why it is CRITICAL |
 |---|---|---|---|
-| Session paint death | **CRITICAL** | Scrolling a large chat (especially a long markdown dump) blanks the screen. Palette rows may only appear on hover. It stays dead until a full close and reopen. | Proven in debug: layout numbers stay valid while the screen dies. Dummy text of the same size still dies. This is the terminal drawing layer (OpenTUI 0.5.8), not "the sidebar is wrong." |
-| WezTerm letter-key death | **CRITICAL** | After that same break, `a-z` and main Enter do nothing. Arrows, numpad Enter, and Ctrl+P still work. | WezTerm starts sending Windows-style key sequences that OpenTUI 0.5.8 does not decode. PowerShell 7 can still take letters while paint is already dead. Two bugs, one trigger zone. |
+| Session paint death | **CRITICAL** | Scrolling a large chat (especially a long markdown dump) blanks the screen. Palette rows may only appear on hover. It stays dead until a full close and reopen. | Proven in debug on the previous OpenTUI pin: layout numbers stay valid while the screen dies. Dummy text of the same size still dies. This is the terminal drawing layer, not "the sidebar is wrong." Catalog is now OpenTUI 0.4.5; re-validate after rebuild. |
+| WezTerm letter-key death | **CRITICAL** | After that same break, `a-z` and main Enter do nothing. Arrows, numpad Enter, and Ctrl+P still work. | On the previous OpenTUI pin, WezTerm started sending Windows-style key sequences that the renderer did not decode. PowerShell 7 can still take letters while paint is already dead. Two bugs, one trigger zone. Catalog is now 0.4.5; re-validate after rebuild. |
 | Debug paint freeze (empty transcript) | **CRITICAL** | Debug instance shows almost no messages on purpose. | Last diagnostic freeze after turn 58. Fine as a probe, unusable as a second OpenCode. |
 
 Related but not labeled CRITICAL: plugin-folder config once *created* the huge transcript that makes the paint bug easy to hit. That config path is already cleaned. Old forked sessions still contain the blob.
@@ -210,17 +210,17 @@ Related but not labeled CRITICAL: plugin-folder config once *created* the huge t
 
 | If you revert... | You leave... |
 |---|---|
-| **A.** The current OpenTUI 0.5.8 terminal UI for the older Go / pre-OpenTUI TUI (classic v1 UI) | Same OpenCode chat backend |
-| **B.** Only *custom* TUI widgets (sidebar, timestamps, ocdebug hides) while keeping OpenTUI 0.5.8 | Same renderer |
+| **A.** The current OpenTUI 0.4.5 terminal UI for the older Go / pre-OpenTUI TUI (classic v1 UI) | Same OpenCode chat backend |
+| **B.** Only *custom* TUI widgets (sidebar, timestamps, ocdebug hides) while keeping OpenTUI 0.4.5 | Same renderer |
 | **C.** Custom providers, SuperPlan, `oc` launcher, etc. | Same TUI |
 
 Only column **A** is a true renderer revert. Column **B** does **not** fix the blank screen.
 
 | Bug | 100% gone if... | Not gone if... |
 |---|---|---|
-| Session paint death | Leave OpenTUI 0.5.8 for a TUI that does not paint through this renderer (classic v1 Go TUI). | Only remove the sidebar, SuperPlan, or ChatGPT Web. Stock OpenTUI 0.5.8 still dies on the same blob. Hiding widgets in `ocdebug` only *avoids* drawing; it is not a fix. |
-| WezTerm letter-key death | Leave OpenTUI 0.5.8's key parser (v1 TUI does not use it). | Disable `allow_win32_input_mode` in WezTerm (already tried; not the lever). Same OpenTUI in PowerShell can still paint-blank *without* this key bug. |
-| Typing dead after `/editor` if resume throws on raw-mode | Classic v1 TUI never takes this OpenTUI resume path. This fork already patches 0.5.8 resume; causality of the original freeze is unconfirmed. | Reverting the patch while staying on 0.5.8 can bring the failure class back. |
+| Session paint death | Leave OpenTUI for a TUI that does not paint through this renderer (classic v1 Go TUI). Matching upstream 0.4.5 is not proof this is gone. | Only remove the sidebar, SuperPlan, or ChatGPT Web. Stock OpenTUI still died on the same blob on the previous pin. Hiding widgets in `ocdebug` only *avoids* drawing; it is not a fix. |
+| WezTerm letter-key death | Leave OpenTUI's key parser (v1 TUI does not use it). Matching upstream 0.4.5 is not proof this is gone. | Disable `allow_win32_input_mode` in WezTerm (already tried; not the lever). Same OpenTUI in PowerShell can still paint-blank *without* this key bug. |
+| Typing dead after `/editor` if resume throws on raw-mode | Classic v1 TUI never takes this OpenTUI resume path. The previous resume patch is removed; 0.4.5 is unpatched. | Do not treat the downgrade as a resume fix. Confirm `/editor` return after rebuild. |
 | Debug paint freeze (empty transcript) | Revert the ocdebug-only hide flags to the normal session renderer. | That immediately puts `ocdebug` back on the **same** paint landmine. Solved empty-chat; not solved blank-paint. |
 
 ### Explicitly **not** 100% (do not revert the stack for these)
@@ -236,7 +236,7 @@ Only column **A** is a true renderer revert. Column **B** does **not** fix the b
 | Upstream-sync installer omitting provider runtimes | Install script gap. |
 | Bun 1.4.0 TUI segfault | Known Bun bug. This fork already refuses to ship that compiler. |
 
-**Short version:** the only family of bugs that can honestly be marked "fixed by going back to stable/v1 UI" is the **OpenTUI 0.5.8 paint and key-decode** family (blank session, hover-only palette, WezTerm letter death). Everything else is custom-on-purpose, already patched, or unproven.
+**Short version:** the only family of bugs that can honestly be marked "fixed by going back to stable/v1 UI" is the **OpenTUI paint and key-decode** family (blank session, hover-only palette, WezTerm letter death), if those still reproduce on 0.4.5. Matching isolated upstream 0.4.5 does not by itself mark them fixed. Everything else is custom-on-purpose or unproven.
 
 The old process-tree helper is already gone. Extra console flashes from it are not an open revert question.
 

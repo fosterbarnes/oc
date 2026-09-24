@@ -215,10 +215,10 @@ export function resolveCursorWireModelId(
   return typeof value === "string" && value.trim() ? value : fallback
 }
 
-/** True when resolved params select the long-context (1m) tier. */
+/** True when resolved params select a max-context variant. */
 export function paramsImplyMaxMode(params: ModelParameterValue[]): boolean {
   return params.some(
-    (parameter) => parameter.id === "context" && parseCursorContextLimit(parameter.value) === 1_000_000,
+    (parameter) => parameter.id === "context" && parseCursorContextLimit(parameter.value) !== undefined,
   )
 }
 
@@ -228,8 +228,19 @@ export function paramsImplyMaxMode(params: ModelParameterValue[]): boolean {
  */
 export function resolveVariantMaxMode(
   params: ModelParameterValue[],
-  opts: { picked?: ModelParameterValue[]; maxMode?: boolean } = {},
+  opts: { model?: ModelInfo; picked?: ModelParameterValue[]; maxMode?: boolean } = {},
 ): boolean {
+  if (opts.model) {
+    const selected = opts.model.variants.find(
+      (variant) =>
+        variant.parameterValues.length === params.length &&
+        variant.parameterValues.every((parameter, index) => {
+          const selectedParameter = params[index]
+          return selectedParameter?.id === parameter.id && selectedParameter.value === parameter.value
+        }),
+    )
+    if (selected) return selected.isDefaultMax
+  }
   return paramsImplyMaxMode(params) || (opts.picked === undefined && opts.maxMode === true)
 }
 
@@ -256,10 +267,6 @@ export function parseCursorContextLimit(value: unknown): number | undefined {
 function variantContextTokens(v: ModelVariant | undefined): number | undefined {
   const raw = v?.parameterValues.find((p) => p.id === "context")?.value
   return parseCursorContextLimit(raw)
-}
-
-function isLongContextVariant(v: ModelVariant): boolean {
-  return variantContextTokens(v) === 1_000_000
 }
 
 function positiveNumber(value: unknown): number | undefined {
@@ -412,7 +419,7 @@ export function resolveVariantParameters(
   const effortOf = (v: ModelVariant): string | undefined =>
     v.parameterValues.find((p) => p.id === "effort" || p.id === "reasoning")?.value
   const isFast = (v: ModelVariant): boolean => v.parameterValues.find((p) => p.id === "fast")?.value === "true"
-  const isMaxVariant = (v: ModelVariant): boolean => v.isDefaultMax || isLongContextVariant(v)
+  const isMaxVariant = (v: ModelVariant): boolean => v.isDefaultMax || variantContextTokens(v) === 1_000_000
 
   const wantMax = opts.maxMode ?? false
   // Non-fast pool for hint-based resolution only. Exact `picked` matching
@@ -455,7 +462,7 @@ export function resolveVariantParameters(
 
   // 3. Max-mode hint → prefer the default max variant (1m context).
   if (wantMax) {
-    const max = scoped.find((v) => v.isDefaultMax) ?? scoped.find(isLongContextVariant)
+    const max = scoped.find((v) => v.isDefaultMax) ?? scoped.find(isMaxVariant)
     if (max) return buildRequestedModelParams(max.parameterValues, { maxMode: true })
   }
 

@@ -78,7 +78,7 @@ export function isOpenCodeModelCost(value: unknown): value is OpenCodeModelCost 
   return validateOpenCodeModelCost(value).valid
 }
 
-/** Strip synthetic OpenCode suffixes (`…-1m`, `…-1m-2`, `…-1m-fast`, …). */
+/** Resolve legacy `-1m` aliases while retaining arbitrary generated tier keys. */
 export function wireModelIdForPricing(modelId: string): {
   baseId: string
   longContextEntry: boolean
@@ -114,6 +114,8 @@ function asMutableCost(value: OpenCodeModelCost): OpenCodeModelCost {
  * Synthetic `-fast` entries are stored as their own keys.
  */
 export function getCursorModelCost(modelId: string): OpenCodeModelCost | undefined {
+  const direct = (CURSOR_MODEL_COSTS as Record<string, OpenCodeModelCost>)[modelId]
+  if (direct) return asMutableCost(direct)
   const { baseId } = wireModelIdForPricing(modelId)
   const found = (CURSOR_MODEL_COSTS as Record<string, OpenCodeModelCost>)[baseId]
   if (!found) return undefined

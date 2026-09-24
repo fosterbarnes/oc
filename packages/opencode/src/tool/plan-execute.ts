@@ -2,16 +2,18 @@ import path from "path"
 import { SessionV1 } from "@opencode-ai/core/v1/session"
 import { ProviderV2 } from "@opencode-ai/core/provider"
 import { ModelV2 } from "@opencode-ai/core/model"
-import { Effect, Schema } from "effect"
+import { Effect, Schema, Scope } from "effect"
 import * as Tool from "./tool"
 import { Question } from "../question"
 import { Session } from "@/session/session"
 import { Agent } from "@/agent/agent"
 import { Provider } from "@/provider/provider"
-import { InstanceState } from "@/effect/instance-state"
-import { MessageID, PartID } from "../session/schema"
+import { MessageID, PartID, SessionID } from "../session/schema"
+import type { SessionPrompt } from "@/session/prompt"
 
-export const Parameters = Schema.Struct({})
+export const Parameters = Schema.Struct({
+  planPath: Schema.String,
+})
 
 const MODEL_OPTIONS = [
   { id: "inherit", label: "Same as planner", description: "Use the planner's exact model and variant" },
@@ -39,9 +41,10 @@ export type ExecutionModel = {
 }
 
 type ExecutionMetadata = {
-  executionMode?: "automatic"
+  mode?: "this-session" | "new-session"
   model?: ExecutionModel
   variant?: string
+  sessionID?: SessionID
 }
 
 export function modelOptions() {
@@ -85,10 +88,17 @@ function currentModel(messages: SessionV1.WithParts[], fallback: ExecutionModel)
   }
 }
 
+function sessionPrompt() {
+  return Effect.gen(function* () {
+    const loaded = yield* Effect.promise(() => import("@/session/prompt"))
+    return yield* loaded.SessionPrompt.Service
+  }) as unknown as Effect.Effect<SessionPrompt.Interface>
+}
+
 export const PlanExecuteTool = Tool.define<
   typeof Parameters,
   ExecutionMetadata,
-  Session.Service | Question.Service | Provider.Service | Agent.Service
+  Session.Service | Question.Service | Provider.Service | Agent.Service | Scope.Scope
 >(
   "plan_execute",
   Effect.gen(function* () {
@@ -96,15 +106,18 @@ export const PlanExecuteTool = Tool.define<
     const question = yield* Question.Service
     const provider = yield* Provider.Service
     const agents = yield* Agent.Service
+    const scope = yield* Scope.Scope
 
     return {
-      description:
-        "Ask whether to automatically execute the completed plan with Go, select and validate its model, then start Go.",
+      description: "Ask how to execute the completed plan, then execute it using the selected path.",
       parameters: Parameters,
-      execute: (_params: {}, ctx: Tool.Context) =>
+      execute: (params, ctx: Tool.Context): Effect.Effect<Tool.ExecuteResult<ExecutionMetadata>> =>
         Effect.gen(function* () {
-          if (ctx.agent !== "superPlan++") {
-            return yield* Effect.die(new Error("plan_execute is available only to superPlan++"))
+          if (!path.isAbsolute(params.planPath)) {
+            return yield* Effect.die(new Error(`Plan path must be absolute: ${params.planPath}`))
+          }
+          if (!(yield* Effect.promise(() => Bun.file(params.planPath).exists()))) {
+            return yield* Effect.die(new Error(`Plan file was not found: ${params.planPath}`))
           }
 
           const approval = yield* question.ask({
@@ -115,7 +128,7 @@ export const PlanExecuteTool = Tool.define<
                 header: "Automatic Go",
                 custom: false,
                 options: [
-                  { label: "Yes", description: "Select a model and start Go automatically" },
+                  { label: "Yes", description: "Choose how Go should execute the plan" },
                   { label: "No", description: "Leave the plan ready for manual execution" },
                 ],
               },
@@ -134,11 +147,57 @@ export const PlanExecuteTool = Tool.define<
             return yield* Effect.die(new Error("Automatic execution requires an explicit Yes or No answer"))
           }
 
-          const instance = yield* InstanceState.context
-          const info = yield* session.get(ctx.sessionID)
-          const plan = path.relative(instance.worktree, Session.plan(info, instance))
-          const plannerModel = currentModel(yield* session.messages({ sessionID: ctx.sessionID }), yield* provider.defaultModel())
-          const plannerFull = yield* provider.getModel(plannerModel.providerID, plannerModel.modelID)
+          const location = yield* question.ask({
+            sessionID: ctx.sessionID,
+            questions: [
+              {
+                question: "Where should Go execute this plan?",
+                header: "Execution Location",
+                custom: false,
+                options: [
+                  { label: "This session", description: "Use this session's model and context" },
+                  { label: "New session", description: "Use a new session with a selected model" },
+                ],
+              },
+            ],
+            tool: ctx.callID ? { messageID: ctx.messageID, callID: ctx.callID } : undefined,
+          })
+          const locationChoice = requireAnswer(location, "execution location")
+          const plannerModel = currentModel(
+            yield* session.messages({ sessionID: ctx.sessionID }),
+            yield* provider.defaultModel(),
+          )
+          const go = yield* agents.get("Go")
+          if (!go) return yield* Effect.die(new Error('The "Go" agent is not configured'))
+
+          if (locationChoice === "This session") {
+            const messageID = MessageID.ascending()
+            yield* session.updateMessage({
+              id: messageID,
+              sessionID: ctx.sessionID,
+              role: "user",
+              time: { created: Date.now() },
+              agent: "Go",
+              model: plannerModel,
+            } satisfies SessionV1.User)
+            yield* session.updatePart({
+              id: PartID.ascending(),
+              messageID,
+              sessionID: ctx.sessionID,
+              type: "text",
+              text: `go ${params.planPath}`,
+              synthetic: true,
+            } satisfies SessionV1.TextPart)
+            return {
+              title: "Starting Go in this session",
+              output: `Go is continuing in this session with the plan at ${params.planPath}.`,
+              metadata: { mode: "this-session" as const, model: plannerModel },
+            }
+          }
+          if (locationChoice !== "New session") {
+            return yield* Effect.die(new Error("Execution requires an explicit This session or New session answer"))
+          }
+
           const selectedModel = yield* question.ask({
             sessionID: ctx.sessionID,
             questions: [
@@ -153,45 +212,52 @@ export const PlanExecuteTool = Tool.define<
           })
           const choice = modelChoice(requireAnswer(selectedModel, "Go model"))
           const selected = choice === "inherit" ? plannerModel : executionModel(choice)
-          const model = choice === "inherit" ? plannerFull : yield* provider.getModel(selected.providerID, selected.modelID)
-          const variant = choice === "inherit"
-            ? plannerModel.variant
-            : needsVariantChoice(choice)
-              ? yield* selectVariant(question, ctx, model)
-              : undefined
+          const model = yield* provider.getModel(selected.providerID, selected.modelID)
+          const variant =
+            choice === "inherit"
+              ? plannerModel.variant
+              : needsVariantChoice(choice)
+                ? yield* selectVariant(question, ctx, model)
+                : undefined
           if (variant && !model.variants?.[variant]) {
             return yield* Effect.die(new Error(`Unsupported execution variant: ${variant}`))
           }
 
-          const go = yield* agents.get("Go")
-          if (!go) return yield* Effect.die(new Error('The "Go" agent is not configured'))
-
-          const msg: SessionV1.User = {
-            id: MessageID.ascending(),
-            sessionID: ctx.sessionID,
-            role: "user",
-            time: { created: Date.now() },
+          const prompt = yield* sessionPrompt()
+          const modelRef = { providerID: selected.providerID, modelID: selected.modelID }
+          const goSession = yield* session.create({
             agent: "Go",
+            title: `Go: ${path.basename(params.planPath)}`,
             model: {
-              providerID: selected.providerID,
-              modelID: selected.modelID,
+              id: modelRef.modelID,
+              providerID: modelRef.providerID,
               ...(variant ? { variant } : {}),
             },
-          }
-          yield* session.updateMessage(msg)
-          yield* session.updatePart({
-            id: PartID.ascending(),
-            messageID: msg.id,
-            sessionID: ctx.sessionID,
-            type: "text",
-            text: `The plan at ${plan} has been approved, you can now edit files. Execute the plan`,
-            synthetic: true,
-          } satisfies SessionV1.TextPart)
+          })
+          yield* prompt
+            .prompt({
+              sessionID: goSession.id,
+              agent: "Go",
+              model: modelRef,
+              ...(variant ? { variant } : {}),
+              parts: [{ type: "text", text: `go ${params.planPath}` }],
+            })
+            .pipe(
+              Effect.catchCause((cause) =>
+                Effect.logError("plan_execute prompt failed", { sessionID: goSession.id, cause }),
+              ),
+              Effect.forkIn(scope, { startImmediately: true }),
+            )
 
           return {
-            title: "Starting Go",
-            output: `Approved automatic Go execution with ${model.name}${variant ? ` (${variant})` : ""}.`,
-            metadata: { executionMode: "automatic" as const, model: selected, ...(variant ? { variant } : {}) },
+            title: "Starting Go in new session",
+            output: `Go is starting in session ${goSession.id} with the plan at ${params.planPath}.`,
+            metadata: {
+              mode: "new-session" as const,
+              model: selected,
+              sessionID: goSession.id,
+              ...(variant ? { variant } : {}),
+            },
           }
         }).pipe(Effect.orDie),
     }

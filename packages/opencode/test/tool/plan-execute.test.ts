@@ -1,8 +1,21 @@
-import { expect, test } from "bun:test"
-import { Provider } from "../../src/provider/provider"
-import { executionModel, modelOptions, needsVariantChoice, variantOptions } from "../../src/tool/plan-execute"
+import { describe, expect, test } from "bun:test"
+import path from "node:path"
+import { ModelV2 } from "@opencode-ai/core/model"
+import { ProviderV2 } from "@opencode-ai/core/provider"
+import { SessionV1 } from "@opencode-ai/core/v1/session"
+import { Deferred, Effect, Layer } from "effect"
+import { Agent } from "@/agent/agent"
+import { Provider } from "@/provider/provider"
+import { Question } from "@/question"
+import { Session } from "@/session/session"
+import { SessionPrompt } from "@/session/prompt"
+import { MessageID, SessionID } from "@/session/schema"
+import { PlanExecuteTool, executionModel, modelOptions, needsVariantChoice, variantOptions } from "@/tool/plan-execute"
+import { Tool } from "@/tool/tool"
+import { Truncate } from "@/tool/truncate"
+import { it } from "../lib/effect"
 
-test("plan execution offers the approved Go model choices", () => {
+test("plan execution preserves the approved Go model choices", () => {
   expect(modelOptions().map((option) => option.label)).toEqual([
     "Same as planner",
     "OpenAI Luna",
@@ -13,14 +26,6 @@ test("plan execution offers the approved Go model choices", () => {
   ])
 })
 
-test("plan execution maps fixed choices to exact provider models", () => {
-  expect(executionModel("luna")).toMatchObject({ providerID: "openai", modelID: "gpt-5.6-luna" })
-  expect(executionModel("muse")).toMatchObject({ providerID: "meta", modelID: "muse-spark-1.2-contributor" })
-  expect(executionModel("grok")).toMatchObject({ providerID: "cursor", modelID: "grok-4.6" })
-  expect(executionModel("composer")).toMatchObject({ providerID: "cursor", modelID: "composer-2.5" })
-  expect(executionModel("auto")).toMatchObject({ providerID: "cursor", modelID: "default" })
-})
-
 test("only reasoning-capable Go choices request a variant", () => {
   expect(needsVariantChoice("inherit")).toBe(false)
   expect(needsVariantChoice("luna")).toBe(true)
@@ -28,6 +33,10 @@ test("only reasoning-capable Go choices request a variant", () => {
   expect(needsVariantChoice("grok")).toBe(true)
   expect(needsVariantChoice("composer")).toBe(false)
   expect(needsVariantChoice("auto")).toBe(false)
+})
+
+test("fixed model choices map to provider models", () => {
+  expect(executionModel("composer")).toMatchObject({ providerID: "cursor", modelID: "composer-2.5" })
 })
 
 test("variant choices preserve provider model keys and labels", () => {
@@ -44,3 +53,174 @@ test("variant choices preserve provider model keys and labels", () => {
     { label: "high", description: "Use the high variant reported by Example model" },
   ])
 })
+
+describe("plan_execute questionnaire", () => {
+  it.instance("executes in This session with the planner model and context", () =>
+    Effect.gen(function* () {
+      const result = yield* runQuestionnaire(["Yes", "This session"])
+
+      expect(result.asked.map((questions) => questions[0]?.header)).toEqual(["Automatic Go", "Execution Location"])
+      expect(result.value).toMatchObject({
+        title: "Starting Go in this session",
+        metadata: { mode: "this-session", model: { modelID: "gpt-5.6-luna", variant: "high" } },
+      })
+      expect(result.messages[0]).toMatchObject({ agent: "Go", model: result.plannerModel })
+      expect(result.parts[0]).toMatchObject({ type: "text", text: `go ${TEST_PLAN_PATH}` })
+    }),
+  )
+
+  it.instance("dispatches New session with the selected model and variant", () =>
+    Effect.gen(function* () {
+      const result = yield* runQuestionnaire(["Yes", "New session", "OpenAI Luna", "high"])
+      yield* Deferred.await(result.started)
+
+      expect(result.asked.map((questions) => questions[0]?.header)).toEqual([
+        "Automatic Go",
+        "Execution Location",
+        "Go Model",
+        "Go Reasoning",
+      ])
+      expect(result.value).toMatchObject({
+        title: "Starting Go in new session",
+        metadata: { mode: "new-session", model: { providerID: "openai", modelID: "gpt-5.6-luna" }, variant: "high" },
+      })
+      expect(result.prompts[0]).toMatchObject({
+        agent: "Go",
+        model: { providerID: "openai", modelID: "gpt-5.6-luna" },
+        variant: "high",
+        parts: [{ type: "text", text: `go ${TEST_PLAN_PATH}` }],
+      })
+    }),
+  )
+
+  it.instance("rejects a missing plan before asking execution questions", () =>
+    Effect.gen(function* () {
+      const result = yield* Effect.exit(runQuestionnaire(["Yes", "This session"], "C:\\missing-plan.md"))
+
+      expect(result._tag).toBe("Failure")
+    }),
+  )
+})
+
+const plannerID = SessionID.make("ses_questionnaire")
+const TEST_PLAN_PATH = path.resolve(import.meta.dir, "../../../../buildNotes.md")
+const plannerModel = {
+  providerID: ProviderV2.ID.make("openai"),
+  modelID: ModelV2.ID.make("gpt-5.6-luna"),
+  variant: "high",
+}
+
+function runQuestionnaire(answers: string[], planPath = TEST_PLAN_PATH) {
+  return Effect.gen(function* () {
+    const asked: Question.Info[][] = []
+    const messages: SessionV1.Info[] = []
+    const parts: SessionV1.Part[] = []
+    const prompts: SessionPrompt.PromptInput[] = []
+    const started = yield* Deferred.make<void>()
+    const planner = {
+      id: plannerID,
+      slug: "planner",
+      title: "Planner",
+      directory: "/unused",
+      projectID: "proj_test",
+      version: "0",
+      time: { created: 1_700_000_000_000, updated: 1_700_000_000_000 },
+      cost: 0,
+      tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+    } as Session.Info
+    const created = {
+      id: SessionID.make("ses_go"),
+      slug: "go-plan",
+      title: "Go",
+      directory: "/unused",
+      projectID: "proj_test",
+      version: "0",
+      time: { created: 1_700_000_000_000, updated: 1_700_000_000_000 },
+      cost: 0,
+      tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+    } as Session.Info
+    const layer = Layer.mergeAll(
+      Layer.mock(Truncate.Service, {
+        output: (text: string) => Effect.succeed({ content: text, truncated: false as const }),
+      }),
+      Layer.mock(Agent.Service, {
+        get: (name: string) => Effect.succeed({ name, permission: [] } as unknown as Agent.Info),
+      }),
+      Layer.mock(Provider.Service, {
+        defaultModel: () => Effect.succeed(plannerModel),
+        getModel: (providerID: ProviderV2.ID, modelID: ModelV2.ID) =>
+          Effect.succeed({
+            id: modelID,
+            providerID,
+            name: `${providerID}/${modelID}`,
+            variants: { medium: {}, high: {} },
+          } as unknown as Provider.Model),
+      }),
+      Layer.mock(Session.Service, {
+        get: (id: SessionID) => Effect.succeed(id === plannerID ? planner : created),
+        messages: () =>
+          Effect.succeed([
+            {
+              info: {
+                id: MessageID.make("msg_planner"),
+                sessionID: plannerID,
+                role: "user" as const,
+                time: { created: Date.now() },
+                agent: "superPlan++",
+                model: plannerModel,
+              },
+              parts: [],
+            },
+          ] as SessionV1.WithParts[]),
+        updateMessage: ((message: SessionV1.Info) =>
+          Effect.sync(() => {
+            messages.push(message)
+            return message
+          })) as Session.Interface["updateMessage"],
+        updatePart: ((part: SessionV1.Part) =>
+          Effect.sync(() => {
+            parts.push(part)
+            return part
+          })) as Session.Interface["updatePart"],
+        create: () => Effect.succeed(created),
+      }),
+      Layer.mock(SessionPrompt.Service, {
+        prompt: ((input: SessionPrompt.PromptInput) =>
+          Effect.gen(function* () {
+            prompts.push(input)
+            yield* Deferred.succeed(started, undefined)
+            return { info: { id: MessageID.make("msg_go"), role: "assistant", sessionID: input.sessionID }, parts: [] }
+          })) as unknown as SessionPrompt.Interface["prompt"],
+      }),
+      Layer.mock(Question.Service, {
+        ask: (input: { questions: ReadonlyArray<Question.Info> }) =>
+          Effect.sync(() => {
+            asked.push([...input.questions])
+            return [[answers.shift()!]] as Question.Answer[]
+          }),
+      }),
+    )
+
+    const value = yield* PlanExecuteTool.pipe(
+      Effect.flatMap(Tool.init),
+      Effect.flatMap((tool) =>
+        tool.execute(
+          { planPath },
+          {
+            sessionID: plannerID,
+            messageID: MessageID.make("msg_questionnaire"),
+            agent: "superPlan++",
+            abort: new AbortController().signal,
+            callID: "call_questionnaire",
+            messages: [],
+            metadata: () => Effect.void,
+            ask: () => Effect.void,
+          },
+        ),
+      ),
+      Effect.provide(layer),
+    )
+
+    return { asked, value, messages, parts, prompts, started, plannerModel }
+  })
+}

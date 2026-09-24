@@ -83,7 +83,7 @@ Add a row when a native surface lands, is overlaid, is pinned, or is deleted. Af
 | Aspect | Now | Keep | Upstream | Notes |
 | --- | --- | --- | --- | --- |
 | Chat, tools, sessions | native | native | same | Core agent loop. |
-| TUI renderer | native | native | pin | Catalog `@opentui/*` **0.5.8** plus a resume patch. Isolated upstream is **0.4.5**. Freeze is intentional (Windows crash class). Paint/key bugs stay on this pin; see `README.oc.md`. |
+| TUI renderer | native | native | same | Catalog `@opentui/*` **0.4.5**, matching isolated upstream. No OpenTUI resume patch. Paint, key, and `/editor` resume still need a live Windows check; see `README.oc.md`. |
 | TUI chrome | mixed | mixed | same | Stock prompt, slash commands, sessions. OC adds timestamps, copy, some keys. |
 | Session sidebar | mixed | mixed | same | Stock plugins still registered: context, MCP, LSP, todos. Stock files/footer plugins exist in source but are **not** registered; OC `sidebar-tools` replaced them. |
 | Built-in agents | native | native | same | `build`, `plan`, `general`, `explore`, plus hidden compaction/title/summary. User config may `disable` Plan. |
@@ -129,7 +129,7 @@ Official npm, brew, scoop, and `curl -fsSL https://opencode.ai/install | bash` p
 - `@filename` to attach files, `@agent-name` to invoke a subagent, `!command` for a one-line shell prompt
 - Native sidebar plugins: context, MCP, LSP, todos. Files, git-style diffs, usage, and script launch in the sidebar are OC (`README.oc.md`).
 
-The drawing layer is pinned OpenTUI **0.5.8**, not isolated upstream's 0.4.5.
+The drawing layer is OpenTUI **0.4.5**, matching isolated upstream.
 
 ---
 
