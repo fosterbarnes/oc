@@ -6,6 +6,8 @@ import { randomBytes } from "crypto"
 import { Global } from "@opencode-ai/core/global"
 import { DebugConfig } from "@opencode-ai/core/debug-config"
 
+export const RESIDENT_ENV = "OC_RESIDENT"
+
 export const keys = [
   "ocDir",
   "homeDir",
@@ -162,6 +164,71 @@ async function serverHealthy(url: string, secret: string) {
   }
 }
 
+type ResidentState = { pid?: number; hostname?: string; port?: number; restarting?: string }
+
+export type ResidentObservation = {
+  healthy: boolean
+  hasState: boolean
+  matches: boolean
+  alive: boolean
+  restartingFresh: boolean
+}
+
+export type ResidentLaunchAction = "reuse" | "wait" | "wait-unowned" | "spawn" | "clear-spawn" | "refuse-foreign"
+
+const residentReadyAttempts = 100
+const unownedReadyAttempts = 10
+const residentRestartWindowMs = 30_000
+
+export function residentRestartFresh(restarting: string | undefined, now = Date.now()) {
+  if (!restarting) return false
+  const marked = Date.parse(restarting)
+  return Number.isFinite(marked) && now - marked >= 0 && now - marked < residentRestartWindowMs
+}
+
+export function residentLaunchAction(observation: ResidentObservation): ResidentLaunchAction {
+  if (observation.healthy && observation.matches && observation.alive) return "reuse"
+  if (observation.restartingFresh) return "wait"
+  if (observation.healthy && observation.hasState && (!observation.matches || !observation.alive)) return "refuse-foreign"
+  if (observation.healthy) return "wait-unowned"
+  if (!observation.hasState) return "spawn"
+  return "clear-spawn"
+}
+
+function residentRefusal(hostname: string, port: number, state: ResidentState | undefined, alive: boolean, matches: boolean) {
+  if (!state) {
+    return new Error(
+      `Resident port ${hostname}:${port} is occupied (health true) but no launcher state exists at ${serverStatePath()}. Not claiming ownership.`,
+    )
+  }
+  return new Error(
+    `Resident port ${hostname}:${port} is occupied by a server not owned by this launcher (pid ${state.pid ?? "unknown"} ${alive ? "alive" : "dead"}, state ${matches ? "matches" : "mismatched"}). Health is true but PID is not a live owner. Remove ${serverStatePath()} or free the port.`,
+  )
+}
+
+async function readResidentState(): Promise<ResidentState | undefined> {
+  try {
+    return JSON.parse(await fs.readFile(serverStatePath(), "utf8")) as ResidentState
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error
+  }
+}
+
+async function observeResident(url: string, secret: string, hostname: string, port: number) {
+  const state = await readResidentState()
+  const healthy = await serverHealthy(url, secret)
+  const matches = state?.hostname === hostname && state?.port === port
+  const alive = state?.pid ? isPidAlive(state.pid) : false
+  const action = residentLaunchAction({
+    healthy,
+    hasState: state !== undefined,
+    matches,
+    alive,
+    restartingFresh: residentRestartFresh(state?.restarting),
+  })
+  return { state, healthy, matches, alive, action }
+}
+
 async function startServerUnlocked() {
   const settings = await read()
   const hostname = settings.server?.hostname || "127.0.0.1"
@@ -171,35 +238,36 @@ async function startServerUnlocked() {
   }
   const secret = await serverSecret()
   const url = `http://${hostname}:${port}`
-  let state: { pid?: number; hostname?: string; port?: number } | undefined
-  try {
-    state = JSON.parse(await fs.readFile(serverStatePath(), "utf8"))
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error
+  let ready = false
+  let unownedAttempts = 0
+  for (let attempt = 0; attempt < residentReadyAttempts; attempt++) {
+    const observed = await observeResident(url, secret, hostname, port)
+    if (observed.action === "reuse") return { url, secret }
+    if (observed.action === "refuse-foreign") {
+      throw residentRefusal(hostname, port, observed.state, observed.alive, observed.matches)
+    }
+    if (observed.action === "spawn") {
+      ready = true
+      break
+    }
+    if (observed.action === "clear-spawn") {
+      await clearServerState()
+      ready = true
+      break
+    }
+    if (observed.action === "wait-unowned") {
+      unownedAttempts++
+      if (unownedAttempts >= unownedReadyAttempts) {
+        throw residentRefusal(hostname, port, observed.state, observed.alive, observed.matches)
+      }
+    }
+    await Bun.sleep(100)
   }
-  const healthy = await serverHealthy(url, secret)
-  const matches = state?.hostname === hostname && state?.port === port
-  const alive = state?.pid ? isPidAlive(state.pid) : false
-  if (healthy && matches && alive) {
-    return { url, secret }
-  }
-  if (healthy && state && (!matches || !alive)) {
-    // Healthy endpoint but not our live PID -> foreign occupant or stale recycled PID.
-    // Do not claim ownership; clear stale state that claims this host/port and fail bounded.
-    if (matches) await clearServerState()
-    throw new Error(
-      `Resident port ${hostname}:${port} is occupied by a server not owned by this launcher (pid ${state.pid ?? "unknown"} ${alive ? "alive" : "dead"}, state ${matches ? "matches" : "mismatched"}). Health is true but PID is not a live owner. Remove ${serverStatePath()} or free the port.`,
-    )
-  }
-  if (healthy && !state) {
-    throw new Error(
-      `Resident port ${hostname}:${port} is occupied (health true) but no launcher state exists at ${serverStatePath()}. Not claiming ownership.`,
-    )
-  }
-  if (state && (!matches || !alive || !healthy)) {
-    // Stale or mismatched metadata: invalidate coherently without signaling the old PID.
-    // Do not kill a potentially recycled PID; just clear stale state.
-    await clearServerState()
+  if (!ready) {
+    const observed = await observeResident(url, secret, hostname, port)
+    if (observed.action === "reuse") return { url, secret }
+    if (observed.healthy) throw residentRefusal(hostname, port, observed.state, observed.alive, observed.matches)
+    if (observed.state) await clearServerState()
   }
   const executable = executablePath()
   const command =
@@ -213,21 +281,16 @@ async function startServerUnlocked() {
     windowsHide: true,
     env: {
       ...process.env,
+      [RESIDENT_ENV]: "1",
       OPENCODE_SERVER_PASSWORD: secret,
       OPENCODE_SERVER_USERNAME: "opencode",
       ...(Global.Path.debug ? { OPENCODE_LOG_LEVEL: process.env.OPENCODE_LOG_LEVEL || "DEBUG" } : {}),
     },
   })
   child.unref()
-  for (let attempt = 0; attempt < 100; attempt++) {
-    if (await serverHealthy(url, secret)) {
-      await fs.writeFile(
-        serverStatePath(),
-        JSON.stringify({ pid: child.pid, hostname, port, executable, started: new Date().toISOString() }, null, 2),
-        "utf8",
-      )
-      return { url, secret }
-    }
+  for (let attempt = 0; attempt < residentReadyAttempts; attempt++) {
+    const observed = await observeResident(url, secret, hostname, port)
+    if (observed.action === "reuse") return { url, secret }
     await Bun.sleep(100)
   }
   throw new Error(`Resident OpenCode server did not become ready: ${url}`)

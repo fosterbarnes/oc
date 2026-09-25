@@ -112,6 +112,23 @@ Windows
 
 ---
 
+## 2026-09-24 (~19:20) - port safe native provider and debug fixes - GPT-6 Luna, Thinking; Go
+
+### Agent
+- Meta: GPT-6 Luna; Thinking; Go; completed
+- Redacted credentials from `opencode debug config` output without mutating resolved provider configuration; added helper and unit/CLI coverage.
+- Matched upstream Gemini thinking defaults for legacy Gemini, current/future Gemini, and Gemma; added option and variant coverage.
+- Limited Bedrock tool-result images to Anthropic, Nova, and Llama 4 model IDs; other images are relocated to user content.
+- Matched upstream Codex OAuth allowlist and coverage for GPT-6 Sol/Luna.
+- Verification: four focused test files, 672 pass; `bun typecheck`; Prettier check; `git diff --check` passed.
+- MISTAKE: Initial Bedrock test expected synthetic media under `parts`; converted model messages use `content`. Corrected expectation after focused test failure and reran all scoped tests.
+
+### User
+Upstream fixes
+- Debug config output now masks credentials; Gemini thinking options follow model-family support; Bedrock images go through tool results only for supported model families; Codex OAuth explicitly includes GPT-6 Sol and Luna.
+
+---
+
 ## 2026-09-24 (~03:55) - restore Luna agents to OpenAI GPT-6 - GPT-5.6 Luna, Thinking; Implementation
 
 ### Agent

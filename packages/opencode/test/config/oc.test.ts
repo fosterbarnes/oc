@@ -18,6 +18,45 @@ afterEach(async () => {
   )
 })
 
+const idle = { restartingFresh: false }
+
+describe("resident launch policy", () => {
+  test("reuses a healthy server whose record matches a live pid", () => {
+    expect(OcConfig.residentLaunchAction({ ...idle, healthy: true, hasState: true, matches: true, alive: true })).toBe("reuse")
+  })
+
+  test("waits only while a restart mark is fresh", () => {
+    const restarting = { restartingFresh: true }
+    expect(OcConfig.residentLaunchAction({ ...restarting, healthy: false, hasState: true, matches: true, alive: false })).toBe("wait")
+    expect(OcConfig.residentLaunchAction({ ...restarting, healthy: true, hasState: true, matches: true, alive: false })).toBe("wait")
+  })
+
+  test("starts immediately when a stale record's pid is dead and the port is down", () => {
+    expect(OcConfig.residentLaunchAction({ ...idle, healthy: false, hasState: true, matches: true, alive: false })).toBe("clear-spawn")
+  })
+
+  test("does not adopt a healthy server with a mismatched, dead, or missing record", () => {
+    expect(OcConfig.residentLaunchAction({ ...idle, healthy: true, hasState: true, matches: false, alive: true })).toBe("refuse-foreign")
+    expect(OcConfig.residentLaunchAction({ ...idle, healthy: true, hasState: true, matches: true, alive: false })).toBe("refuse-foreign")
+    expect(OcConfig.residentLaunchAction({ ...idle, healthy: true, hasState: false, matches: false, alive: false })).toBe("wait-unowned")
+  })
+
+  test("starts when nothing is recorded and the port is down", () => {
+    expect(OcConfig.residentLaunchAction({ ...idle, healthy: false, hasState: false, matches: false, alive: false })).toBe("spawn")
+  })
+
+  test("drops a record for a different host or port when the port is down", () => {
+    expect(OcConfig.residentLaunchAction({ ...idle, healthy: false, hasState: true, matches: false, alive: false })).toBe("clear-spawn")
+  })
+
+  test("treats a restart mark as fresh for 30 seconds", () => {
+    const now = Date.parse("2026-09-24T23:53:00.000Z")
+    expect(OcConfig.residentRestartFresh(new Date(now - 1_000).toISOString(), now)).toBe(true)
+    expect(OcConfig.residentRestartFresh(new Date(now - 31_000).toISOString(), now)).toBe(false)
+    expect(OcConfig.residentRestartFresh(undefined, now)).toBe(false)
+  })
+})
+
 describe("debug instance identity", () => {
   test("treats oc-debug executable and OPENCODE_INSTANCE as the debug app", () => {
     expect(resolveAppName({ execPath: "C:\\Apps\\opencode\\opencode.exe" })).toBe("opencode")

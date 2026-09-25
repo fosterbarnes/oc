@@ -9,6 +9,7 @@ import fs from "node:fs/promises"
 import path from "node:path"
 import { spawn } from "node:child_process"
 import { Global } from "@opencode-ai/core/global"
+import { RESIDENT_ENV } from "@/config/oc"
 
 export function serveArguments() {
   const commandIndex = process.argv.indexOf("serve")
@@ -31,18 +32,70 @@ function residentStatePath(directory = Global.Path.state) {
   return path.join(directory, "oc-server.json")
 }
 
+export function shouldClearResidentState(restart: boolean) {
+  return !restart
+}
+
 export async function clearResidentStateForRestart(directory = Global.Path.state) {
   try {
     await fs.rm(residentStatePath(directory), { force: true })
   } catch {}
 }
 
-function stopAndExit(server: { stop: (close?: boolean) => Promise<void> }, restart: boolean) {
-  void server
-    .stop(true)
+export async function writeResidentState(input: {
+  pid: number
+  hostname: string
+  port: number
+  executable?: string
+  restarting?: string
+  directory?: string
+}) {
+  const file = residentStatePath(input.directory ?? Global.Path.state)
+  await fs.mkdir(path.dirname(file), { recursive: true })
+  const temporary = `${file}.tmp-${process.pid}-${Date.now()}`
+  const body = {
+    pid: input.pid,
+    hostname: input.hostname,
+    port: input.port,
+    executable: input.executable,
+    restarting: input.restarting,
+    started: new Date().toISOString(),
+  }
+  await fs.writeFile(temporary, `${JSON.stringify(body, null, 2)}\n`, "utf8")
+  await fs.rm(file, { force: true })
+  try {
+    await fs.rename(temporary, file)
+  } catch (error) {
+    await fs.rm(temporary, { force: true })
+    throw error
+  }
+}
+
+export async function markResidentRestart(input: { hostname: string; port: number; directory?: string }) {
+  const directory = input.directory ?? Global.Path.state
+  let existing: { pid?: number; executable?: string } = {}
+  try {
+    existing = JSON.parse(await fs.readFile(residentStatePath(directory), "utf8"))
+  } catch {}
+  await writeResidentState({
+    pid: existing.pid && existing.pid > 0 ? existing.pid : process.pid,
+    hostname: input.hostname,
+    port: input.port,
+    executable: existing.executable,
+    restarting: new Date().toISOString(),
+    directory,
+  })
+}
+
+function stopAndExit(server: { hostname: string; port: number; stop: (close?: boolean) => Promise<void> }, restart: boolean) {
+  // Mark before the port closes. A launch during shutdown must see a fresh restart,
+  // not a dead pid with the port already down.
+  const prepare = restart ? markResidentRestart({ hostname: server.hostname, port: server.port }) : Promise.resolve()
+  void prepare
+    .then(() => server.stop(true))
     .then(() => stopAgentify())
     .then(() => stopCursorProxy())
-    .then(() => clearResidentStateForRestart())
+    .then(() => (shouldClearResidentState(restart) ? clearResidentStateForRestart() : undefined))
     .then(() => {
       if (restart) restartProcess()
       process.exit(0)
@@ -72,6 +125,16 @@ export const ServeCommand = effectCmd({
       restart: () => stopAndExit(server, true),
     })
     console.log(`opencode server listening on http://${server.hostname}:${server.port}`)
+    if (process.env[RESIDENT_ENV] === "1") {
+      yield* Effect.promise(() =>
+        writeResidentState({
+          pid: process.pid,
+          hostname: server.hostname,
+          port: server.port,
+          executable: Global.resolveExecutablePath(),
+        }),
+      )
+    }
 
     yield* Effect.never
   }),

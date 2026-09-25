@@ -601,6 +601,94 @@ describe("session.message-v2.toModelMessage", () => {
     ])
   })
 
+  test("keeps Bedrock tool-result images only for supported model families", async () => {
+    const image = Buffer.from("image").toString("base64")
+    const userID = "m-user-bedrock-image"
+    const assistantID = "m-assistant-bedrock-image"
+    const input: SessionV1.WithParts[] = [
+      {
+        info: userInfo(userID),
+        parts: [{ ...basePart(userID, "u1-bedrock-image"), type: "text", text: "run tool" }] as SessionV1.Part[],
+      },
+      {
+        info: assistantInfo(assistantID, userID),
+        parts: [
+          {
+            ...basePart(assistantID, "a1-bedrock-image"),
+            type: "tool",
+            callID: "call-bedrock-image-1",
+            tool: "read",
+            state: {
+              status: "completed",
+              input: { filePath: "/tmp/image.png" },
+              output: "Image read successfully",
+              title: "Read",
+              metadata: {},
+              time: { start: 0, end: 1 },
+              attachments: [
+                {
+                  ...basePart(assistantID, "file-bedrock-image-1"),
+                  type: "file",
+                  mime: "image/png",
+                  filename: "image.png",
+                  url: `data:image/png;base64,${image}`,
+                },
+              ],
+            },
+          },
+        ] as SessionV1.Part[],
+      },
+    ]
+
+    for (const [apiId, supported] of [
+      ["us.anthropic.claude-sonnet-4-6", true],
+      ["amazon.nova-pro-v1:0", true],
+      ["meta.llama4-maverick-17b-instruct-v1:0", true],
+      ["meta.llama-4-maverick-17b-instruct-v1:0", true],
+      ["amazon.titan-text-lite-v1", false],
+    ] as const) {
+      const bedrockModel: Provider.Model = {
+        ...model,
+        id: ModelV2.ID.make(`amazon-bedrock/${apiId}`),
+        providerID: ProviderV2.ID.make("amazon-bedrock"),
+        api: { id: apiId, url: "https://bedrock-runtime.us-east-1.amazonaws.com", npm: "@ai-sdk/amazon-bedrock" },
+        capabilities: {
+          ...model.capabilities,
+          attachment: true,
+          input: { ...model.capabilities.input, image: true },
+        },
+      }
+      const result = await MessageV2.toModelMessages(input, bedrockModel)
+      const tool = result.find((message) => message.role === "tool")
+
+      expect(result).toHaveLength(supported ? 3 : 4)
+      if (supported) {
+        expect(tool).toMatchObject({
+          content: [
+            {
+              output: {
+                type: "content",
+                value: [
+                  { type: "text", text: "Image read successfully" },
+                  { type: "media", mediaType: "image/png", data: image },
+                ],
+              },
+            },
+          ],
+        })
+        continue
+      }
+      expect(tool).toMatchObject({ content: [{ output: { type: "text", value: "Image read successfully" } }] })
+      expect(result.at(-1)).toMatchObject({
+        role: "user",
+        content: [
+          { type: "text", text: "Attached media from tool result:" },
+          { type: "file", mediaType: "image/png", filename: "image.png", data: `data:image/png;base64,${image}` },
+        ],
+      })
+    }
+  })
+
   test("omits provider metadata when assistant model differs", async () => {
     const userID = "m-user"
     const assistantID = "m-assistant"
