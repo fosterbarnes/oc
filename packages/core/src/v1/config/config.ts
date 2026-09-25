@@ -41,6 +41,13 @@ export const Info = Schema.Struct({
   command: Schema.optional(Schema.Record(Schema.String, ConfigCommandV1.Info)).annotate({
     description: "Command configuration, see https://opencode.ai/docs/commands",
   }),
+  command_palette: Schema.optional(
+    Schema.Struct({
+      order: Schema.optional(Schema.Record(Schema.String, Schema.Finite)),
+    }),
+  ).annotate({
+    description: "Custom command palette order by command name. Listed commands are sorted by number and appear before unlisted commands; unlisted commands keep their source order",
+  }),
   skills: Schema.optional(ConfigSkillsV1.Info).annotate({ description: "Additional skill folder paths" }),
   references: Schema.optional(ConfigReference.Info).annotate({
     description: "Named git or local directory references",
@@ -193,3 +200,4 @@ export const Info = Schema.Struct({
 }).annotate({ identifier: "Config" })
 
 export type Info = DeepMutable<Schema.Schema.Type<typeof Info>>
+

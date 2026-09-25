@@ -76,6 +76,18 @@ describe("Config", () => {
     }),
   )
 
+  it.effect("parses command palette order from v1 config", () =>
+    Effect.sync(() => {
+      const command_palette = { order: { "oc.new_session": 1, "model.default": 3 } }
+      const parsed = Schema.decodeUnknownSync(ConfigV1.Info)({ command_palette })
+      expect(parsed.command_palette).toEqual(command_palette)
+      expect(ConfigMigrateV1.migrate(parsed).command_palette).toEqual(command_palette)
+      expect(Schema.decodeUnknownSync(Config.Info)(ConfigMigrateV1.migrate(parsed)).command_palette).toEqual(
+        command_palette,
+      )
+    }),
+  )
+
   it.effect("migrates arbitrary v1 configuration into valid v2 configuration", () =>
     Effect.sync(() => {
       FastCheck.assert(

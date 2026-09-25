@@ -6,6 +6,10 @@ import type {
   AgentPartInput,
   AppAgentsErrors,
   AppAgentsResponses,
+  AppDebugLoggingGetErrors,
+  AppDebugLoggingGetResponses,
+  AppDebugLoggingSetErrors,
+  AppDebugLoggingSetResponses,
   AppLogErrors,
   AppLogResponses,
   AppSkillsErrors,
@@ -513,6 +517,44 @@ export class Auth extends HeyApiClient {
   }
 }
 
+export class DebugLogging extends HeyApiClient {
+  /**
+   * Get debug logging
+   *
+   * Return whether debug logging is persisted on for this machine.
+   */
+  public get<ThrowOnError extends boolean = false>(options?: Options<never, ThrowOnError>) {
+    return (options?.client ?? this.client).get<AppDebugLoggingGetResponses, AppDebugLoggingGetErrors, ThrowOnError>({
+      url: "/debug-logging",
+      ...options,
+    })
+  }
+
+  /**
+   * Set debug logging
+   *
+   * Enable or disable debug logging for this process and all future OpenCode processes until changed.
+   */
+  public set<ThrowOnError extends boolean = false>(
+    parameters?: {
+      enabled?: boolean
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ in: "body", key: "enabled" }] }])
+    return (options?.client ?? this.client).put<AppDebugLoggingSetResponses, AppDebugLoggingSetErrors, ThrowOnError>({
+      url: "/debug-logging",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+}
+
 export class App extends HeyApiClient {
   /**
    * Write log
@@ -617,6 +659,11 @@ export class App extends HeyApiClient {
       ...options,
       ...params,
     })
+  }
+
+  private _debugLogging?: DebugLogging
+  get debugLogging(): DebugLogging {
+    return (this._debugLogging ??= new DebugLogging({ client: this.client }))
   }
 }
 
@@ -3592,9 +3639,9 @@ export class Session2 extends HeyApiClient {
       directory?: string
       workspace?: string
       title?: string
+      agent?: string
       sessionComplete?: boolean
       sessionFailed?: boolean
-      agent?: string
       metadata?: {
         [key: string]: unknown
       }

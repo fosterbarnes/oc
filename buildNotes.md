@@ -112,6 +112,68 @@ Windows
 
 ---
 
+## 2026-09-24 (~20:55) - move palette order into OpenCode config - GPT-6 Luna, Thinking; Build
+
+### Agent
+- Meta: GPT-6 Luna; Thinking; Build; completed
+- Removed source-level order values; arranged OC commands in requested natural source order.
+- Added optional `command_palette.order` map to V1/V2 config schemas and migration; regenerated SDK types.
+- Applied configured order within each category's existing slots. Commands listed in `command_palette.order` sort by that number and appear before unlisted commands in that category; unlisted commands keep their source order. Categories are not regrouped. Fuzzy search ranking remains unchanged.
+- Verification: core config tests 16 pass; TUI palette test 1 pass; core, TUI, OpenCode, and SDK typechecks; client generation and SDK build; `git diff --check` passed.
+- ERROR: Prettier checks flagged core/TUI files despite formatter output showing no differences in those files; `app.tsx` retains an unrelated pre-existing format difference at line 827.
+
+### User
+Command palette
+- OC command order now comes from source order by default and can be customized in `opencode.json` with `command_palette.order` keyed by command name.
+
+---
+
+## 2026-09-24 (~20:37) - order and rename OC palette commands - GPT-6 Luna, Thinking; Build
+
+### Agent
+- Meta: GPT-6 Luna; Thinking; Build; completed
+- Applied requested `oc` palette ordering and friendly labels; pinned 12 existing entries with `categoryOrder`.
+- Kept unavailable default sub-agent reasoning entry out; no matching setting or command exists.
+- Verification: command palette ordering test passed; TUI `bun typecheck` passed; `git diff --check` passed.
+
+### User
+Command palette
+- OC commands now follow the requested order and labels; the non-existent default sub-agent reasoning option was omitted.
+
+---
+
+## 2026-09-24 (~20:27) - add category ordering to command palette - GPT-6 Luna, Thinking; Build
+
+### Agent
+- Meta: GPT-6 Luna; Thinking; Build; completed
+- Added optional `categoryOrder` sorting within command palette categories; unset entries and equal-order entries preserve registration order.
+- Set `New session (oc)` to order 1 and `Default model` to order 3; fuzzy search ranking remains intact.
+- Added ordering coverage in `packages/tui/test/component/command-palette.test.ts`.
+- Verification: focused test passed; TUI `bun typecheck` passed; `git diff --check` passed. Prettier check reported a warning for `src/component/command-palette.tsx` without producing a formatting diff.
+
+### User
+Command palette
+- Commands can now opt into a custom order within their category; unset commands remain in natural code order after ordered entries.
+- New session (oc) and Default model demonstrate the order values 1 and 3.
+
+---
+
+## 2026-09-24 (~20:12) - restore fast resident server startup - GPT-6 Luna, Thinking; Build
+
+### Agent
+- Meta: GPT-6 Luna; Thinking; Build; completed
+- Moved resident server state writes into launcher-managed `serve`; restart marks ownership before stopping, replacement refreshes its PID, and stale cold-start state no longer causes a 10-second delay.
+- Added bounded restart-marker handling and resident launch policy coverage in `packages/opencode`.
+- Moved shutdown and restart palette commands into the `oc` category in `packages/tui/src/app.tsx`.
+- Verification: resident config and serve tests passed (20); TUI `bun typecheck` passed.
+
+### User
+Server startup
+- First `oc` launches no longer wait through the restart timeout when only a stale server record remains, while launches during an active restart still wait for the replacement.
+- Shut down server and Restart server now appear under the existing `oc` command-palette section.
+
+---
+
 ## 2026-09-24 (~19:20) - port safe native provider and debug fixes - GPT-6 Luna, Thinking; Go
 
 ### Agent
@@ -1014,3 +1076,4 @@ Project notes
 Project notes
 - Older session history now lives in `buildNotes.archive1.md` and `buildNotes.archive2.md`.
 - The live notes file is short again and starts with the archive rules so the next overflow can rotate to `buildNotes.archive3.md`.
+

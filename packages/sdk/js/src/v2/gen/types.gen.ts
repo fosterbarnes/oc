@@ -1943,6 +1943,11 @@ export type Config = {
       subtask?: boolean
     }
   }
+  command_palette?: {
+    order?: {
+      [key: string]: number
+    }
+  }
   skills?: {
     paths?: Array<string>
     urls?: Array<string>
@@ -7332,6 +7337,71 @@ export type AppLogResponses = {
 }
 
 export type AppLogResponse = AppLogResponses[keyof AppLogResponses]
+
+export type AppDebugLoggingGetData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/debug-logging"
+}
+
+export type AppDebugLoggingGetErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type AppDebugLoggingGetError = AppDebugLoggingGetErrors[keyof AppDebugLoggingGetErrors]
+
+export type AppDebugLoggingGetResponses = {
+  /**
+   * Current persisted debug logging state
+   */
+  200: {
+    /**
+     * Whether debug logging is persisted on for future processes
+     */
+    enabled: boolean
+  }
+}
+
+export type AppDebugLoggingGetResponse = AppDebugLoggingGetResponses[keyof AppDebugLoggingGetResponses]
+
+export type AppDebugLoggingSetData = {
+  body?: {
+    /**
+     * Whether debug logging is persisted on for future processes
+     */
+    enabled: boolean
+  }
+  path?: never
+  query?: never
+  url: "/debug-logging"
+}
+
+export type AppDebugLoggingSetErrors = {
+  /**
+   * BadRequest | InvalidRequestError
+   */
+  400: EffectHttpApiErrorBadRequest | InvalidRequestError
+}
+
+export type AppDebugLoggingSetError = AppDebugLoggingSetErrors[keyof AppDebugLoggingSetErrors]
+
+export type AppDebugLoggingSetResponses = {
+  /**
+   * Updated persisted debug logging state
+   */
+  200: {
+    /**
+     * Whether debug logging is persisted on for future processes
+     */
+    enabled: boolean
+  }
+}
+
+export type AppDebugLoggingSetResponse = AppDebugLoggingSetResponses[keyof AppDebugLoggingSetResponses]
 
 export type ExperimentalControlPlaneMoveSessionData = {
   body?: {

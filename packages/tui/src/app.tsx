@@ -918,18 +918,6 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
         },
       },
       {
-        name: "server.shutdown",
-        title: "Shut down server",
-        category: "Server",
-        run: () => void controlServer("shutdown"),
-      },
-      {
-        name: "server.restart",
-        title: "Restart server",
-        category: "Server",
-        run: () => void controlServer("restart"),
-      },
-      {
         name: "session.list",
         title: "Switch session",
         category: "Session",
@@ -1047,7 +1035,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
       },
       {
         name: "oc.new_session",
-        title: "New session (oc)",
+        title: "New oc session",
         category: "oc",
         slashName: "newOcSession",
         run: () => {
@@ -1059,7 +1047,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
           }
           dialog.replace(() => (
             <DialogSelect
-              title="New session (oc)"
+              title="New oc session"
               options={dirs.map((dir) => ({ value: dir.fullPath, title: dir.name }))}
               onSelect={async (option) => {
                 const directory = path.normalize(option.value)
@@ -1094,31 +1082,8 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
         },
       },
       {
-        name: "oc.import_production_config",
-        title: "Import production settings into debug",
-        category: "oc",
-        hidden: !Global.Path.debug,
-        slashName: "importProductionConfig",
-        run: async () => {
-          try {
-            const copied = await DebugConfig.syncFromProduction({ overwrite: true, serverPort: 4097 })
-            toast.show({
-              message: copied.length
-                ? `Imported production settings (${copied.join(", ")}). Restart ocdebug to apply them.`
-                : "No production settings were found to import",
-              variant: copied.length ? "success" : "warning",
-            })
-          } catch (error) {
-            toast.show({
-              message: `Failed to import production settings: ${error instanceof Error ? error.message : String(error)}`,
-              variant: "error",
-            })
-          }
-        },
-      },
-      {
         name: "model.default",
-        title: "Default model",
+        title: "Set default model",
         category: "oc",
         slashName: "sessionModel",
         run: () => {
@@ -1134,7 +1099,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
       },
       {
         name: "oc.reasoning_effort",
-        title: "Default reasoning effort",
+        title: "Set default reasoning",
         category: "oc",
         slashName: "reasoningEffort",
         run: () => {
@@ -1158,7 +1123,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
       },
       {
         name: "agent.session",
-        title: "Default agent mode",
+        title: "Set default agent",
         category: "oc",
         slashName: "sessionAgent",
         run: () => {
@@ -1173,7 +1138,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
       },
       {
         name: "agent.default_subagent_model",
-        title: "Default sub-agent model",
+        title: "Set default sub-agent model",
         category: "oc",
         slashName: "defaultSubagentModel",
         run: () => {
@@ -1207,7 +1172,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
       },
       {
         name: "agent.default_subagent",
-        title: "Default sub-agent mode",
+        title: "Set default sub-agent agent",
         category: "oc",
         slashName: "defaultSubagent",
         run: () => {
@@ -1224,7 +1189,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
           }
           dialog.replace(() => (
             <DialogSelect
-              title="Default sub-agent mode"
+              title="Set default sub-agent agent"
               current={sync.data.config.default_subagent}
               options={options}
               onSelect={async (option) => {
@@ -1237,53 +1202,6 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
                   return
                 }
                 if (await persistOcConfig("defaultSubagent", option.value, toast)) dialog.clear()
-              }}
-            />
-          ))
-        },
-      },
-      {
-        name: "oc.oc_dir",
-        title: "OC directory",
-        category: "oc",
-        slashName: "ocDir",
-        run: () => {
-          const current = readOcConfig().ocDir
-          dialog.replace(() => (
-            <DialogPrompt
-              title="OC directory"
-              placeholder={current}
-              onConfirm={(value) => {
-                const trimmed = value.trim()
-                if (!trimmed) return
-                const resolved = resolveOcDirectory(trimmed, "")
-                if (!resolved) {
-                  toast.show({ message: `Directory not found: ${trimmed}`, variant: "error" })
-                  return
-                }
-                void persistOcConfig("ocDir", resolved, toast)
-                dialog.clear()
-              }}
-            />
-          ))
-        },
-      },
-      {
-        name: "oc.home_dir_sort",
-        title: "Home directory sort order",
-        category: "oc",
-        slashName: "homeDirSort",
-        run: () => {
-          dialog.replace(() => (
-            <DialogSelect
-              title="Home directory sort order"
-              options={[
-                { value: "name", title: "name" },
-                { value: "modified", title: "modified" },
-              ]}
-              onSelect={(option) => {
-                void persistOcConfig("homeDirSort", option.value, toast)
-                dialog.clear()
               }}
             />
           ))
@@ -1316,15 +1234,62 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
         },
       },
       {
+        name: "oc.home_dir_sort",
+        title: "Home directory sort order",
+        category: "oc",
+        slashName: "homeDirSort",
+        run: () => {
+          dialog.replace(() => (
+            <DialogSelect
+              title="Home directory sort order"
+              options={[
+                { value: "name", title: "name" },
+                { value: "modified", title: "modified" },
+              ]}
+              onSelect={(option) => {
+                void persistOcConfig("homeDirSort", option.value, toast)
+                dialog.clear()
+              }}
+            />
+          ))
+        },
+      },
+      {
+        name: "oc.oc_dir",
+        title: "oc directory",
+        category: "oc",
+        slashName: "ocDir",
+        run: () => {
+          const current = readOcConfig().ocDir
+          dialog.replace(() => (
+            <DialogPrompt
+              title="oc directory"
+              placeholder={current}
+              onConfirm={(value) => {
+                const trimmed = value.trim()
+                if (!trimmed) return
+                const resolved = resolveOcDirectory(trimmed, "")
+                if (!resolved) {
+                  toast.show({ message: `Directory not found: ${trimmed}`, variant: "error" })
+                  return
+                }
+                void persistOcConfig("ocDir", resolved, toast)
+                dialog.clear()
+              }}
+            />
+          ))
+        },
+      },
+      {
         name: "oc.server_startup",
-        title: "Background server auto-start (Windows only)",
+        title: "Server auto-start",
         category: "oc",
         slashName: "serverStartOnWindowsUserStart",
         run: () => {
           const current = readOcConfig().serverStartOnWindowsUserStart
           dialog.replace(() => (
             <DialogSelect
-              title="Background server auto-start (Windows only)"
+              title="Server auto-start"
               current={current ? "true" : "false"}
               options={[
                 { value: "true", title: "on" },
@@ -1336,6 +1301,41 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
               }}
             />
           ))
+        },
+      },
+      {
+        name: "server.restart",
+        title: "Restart",
+        category: "oc",
+        run: () => void controlServer("restart"),
+      },
+      {
+        name: "server.shutdown",
+        title: "Shut Down",
+        category: "oc",
+        run: () => void controlServer("shutdown"),
+      },
+      {
+        name: "oc.import_production_config",
+        title: "Import production settings into debug",
+        category: "oc",
+        hidden: !Global.Path.debug,
+        slashName: "importProductionConfig",
+        run: async () => {
+          try {
+            const copied = await DebugConfig.syncFromProduction({ overwrite: true, serverPort: 4097 })
+            toast.show({
+              message: copied.length
+                ? `Imported production settings (${copied.join(", ")}). Restart ocdebug to apply them.`
+                : "No production settings were found to import",
+              variant: copied.length ? "success" : "warning",
+            })
+          } catch (error) {
+            toast.show({
+              message: `Failed to import production settings: ${error instanceof Error ? error.message : String(error)}`,
+              variant: "error",
+            })
+          }
         },
       },
       {

@@ -96,6 +96,13 @@ export class Info extends Schema.Class<Info>("Config.Info")({
   commands: Schema.Record(Schema.String, ConfigCommand.Info).pipe(Schema.optional).annotate({
     description: "Named slash command definitions",
   }),
+  command_palette: Schema.Struct({
+    order: Schema.Record(Schema.String, Schema.Finite).pipe(Schema.optional),
+  })
+    .pipe(Schema.optional)
+    .annotate({
+      description: "Custom command palette order by command name. Listed commands are sorted by number and appear before unlisted commands; unlisted commands keep their source order",
+    }),
   instructions: Schema.String.pipe(Schema.Array, Schema.optional).annotate({
     description: "Additional paths or URLs supplying ambient instructions",
   }),
@@ -228,3 +235,4 @@ export const node = makeLocationNode({
   layer,
   deps: [FSUtil.node, Global.node, Location.node, Policy.node],
 })
+

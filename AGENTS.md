@@ -9,7 +9,7 @@
 
 ## Project definition
 
-- `README.oc.md` is the living definition of this fork. Statuses describe current state; they do not authorize work. Do not treat `Custom Feature List.md` as current. `README.md` tracks native OpenCode in this checkout (Now / Keep / Upstream). Keep fork-only work in `README.oc.md`.
+- `README.md` is the living definition of this fork. Statuses describe current state; they do not authorize work. Do not treat `Custom Feature List.md` as current. `README.OG.md` tracks native OpenCode in this checkout (Now / Keep / Upstream). Keep fork-only work in `README.md`.
 
 ## Build notes
 

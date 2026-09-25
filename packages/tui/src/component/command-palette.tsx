@@ -9,8 +9,44 @@ import {
   useOpencodeKeymap,
 } from "../keymap"
 import { useTuiConfig } from "../config"
+import { useSync } from "../context/sync"
 
 type PaletteCommandEntry = ReturnType<OpenTuiKeymap["getCommandEntries"]>[number]
+
+type PaletteCommand = { name: string; category?: string }
+
+function compareConfiguredFirst(left: string, right: string, order: Record<string, number>) {
+  const leftOrder = order[left]
+  const rightOrder = order[right]
+  if (leftOrder === undefined) return rightOrder === undefined ? 0 : 1
+  if (rightOrder === undefined) return -1
+  return leftOrder - rightOrder
+}
+
+export function orderPaletteEntries<T extends { command: PaletteCommand }>(
+  entries: readonly T[],
+  order: Record<string, number> = {},
+) {
+  if (Object.keys(order).length === 0) return entries.slice()
+
+  const result = entries.slice()
+  const slotsByCategory = new Map<string | undefined, number[]>()
+  entries.forEach((entry, index) => {
+    const slots = slotsByCategory.get(entry.command.category)
+    if (slots) slots.push(index)
+    else slotsByCategory.set(entry.command.category, [index])
+  })
+
+  for (const slots of slotsByCategory.values()) {
+    const sorted = slots
+      .map((index) => entries[index])
+      .toSorted((left, right) => compareConfiguredFirst(left.command.name, right.command.name, order))
+    slots.forEach((slot, index) => {
+      result[slot] = sorted[index]
+    })
+  }
+  return result
+}
 
 function isVisiblePaletteCommand(command: PaletteCommandEntry["command"]) {
   return command.hidden !== true && command.name !== COMMAND_PALETTE_COMMAND
@@ -25,6 +61,7 @@ function isSuggestedPaletteCommand(entry: PaletteCommandEntry) {
 
 export function CommandPaletteDialog(props: { category?: string } = {}) {
   const config = useTuiConfig()
+  const sync = useSync()
   const keymap = useOpencodeKeymap()
   const entries = useKeymapSelector((keymap: OpenTuiKeymap) => {
     const query = {
@@ -40,7 +77,7 @@ export function CommandPaletteDialog(props: { category?: string } = {}) {
       commands: reachable.map((entry) => entry.command.name),
     })
 
-    return reachable.map((entry) => ({
+    return orderPaletteEntries(reachable, sync.data.config.command_palette?.order).map((entry) => ({
       ...entry,
       bindings: registeredBindings.get(entry.command.name) ?? entry.bindings,
     }))
@@ -77,3 +114,4 @@ export function CommandPaletteDialog(props: { category?: string } = {}) {
 
   return <DialogSelect ref={(value) => (ref = value)} title="Commands" options={list()} />
 }
+
