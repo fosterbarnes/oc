@@ -1256,7 +1256,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
       },
       {
         name: "oc.oc_dir",
-        title: "oc directory",
+        title: "OC directory",
         category: "oc",
         slashName: "ocDir",
         run: () => {
@@ -1304,16 +1304,16 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
         },
       },
       {
-        name: "server.restart",
-        title: "Restart",
-        category: "oc",
-        run: () => void controlServer("restart"),
-      },
-      {
         name: "server.shutdown",
         title: "Shut Down",
         category: "oc",
         run: () => void controlServer("shutdown"),
+      },
+      {
+        name: "server.restart",
+        title: "Restart",
+        category: "oc",
+        run: () => void controlServer("restart"),
       },
       {
         name: "oc.import_production_config",

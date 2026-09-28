@@ -43,6 +43,7 @@ import {
   DEFAULT_USAGE_PROVIDERS,
   normalizeUsageProviders,
   orderUsageWindows,
+  probeClaudeCodeUsage,
   probeCursorUsage,
   probeOpenAIUsage,
   probeOpenCodeGoUsage,
@@ -1030,9 +1031,9 @@ test("saveUserScriptSettings persists a global default applied when the project 
 
 test("weekly usage defaults include every supported provider", () => {
   const settings = normalizeSidebarSettings({})
-  assert.deepEqual(settings.usageProviders, ["openai", "cursor", "opencode-go", "openrouter"])
-  assert.deepEqual(DEFAULT_USAGE_PROVIDERS, ["openai", "cursor", "opencode-go", "openrouter"])
-  assert.deepEqual([...USAGE_PROVIDER_IDS], ["openai", "cursor", "opencode-go", "openrouter"])
+  assert.deepEqual(settings.usageProviders, ["openai", "cursor", "opencode-go", "openrouter", "claude-code"])
+  assert.deepEqual(DEFAULT_USAGE_PROVIDERS, ["openai", "cursor", "opencode-go", "openrouter", "claude-code"])
+  assert.deepEqual([...USAGE_PROVIDER_IDS], ["openai", "cursor", "opencode-go", "openrouter", "claude-code"])
 })
 
 test("normalizes usage providers by filtering, deduplicating, and preserving an empty list", () => {
@@ -1043,6 +1044,34 @@ test("normalizes usage providers by filtering, deduplicating, and preserving an 
   assert.deepEqual(normalizeSidebarSettings({ usageProviders: ["openrouter", "openrouter", "nope"] }).usageProviders, [
     "openrouter",
   ])
+})
+
+test("reads Claude Code status-line snapshots and keeps old readings available", async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "sidebar-claude-usage-"))
+  try {
+    const nowMs = 1_800_000_000_000
+    const usagePath = path.join(root, "opencode-usage.json")
+    writeFileSync(
+      usagePath,
+      JSON.stringify({
+        capturedAt: nowMs - 60 * 60 * 1000,
+        fiveHour: { usedPercentage: 8.4, resetsAt: 1_800_000_100 },
+        weekly: { usedPercentage: 101, resetsAt: 1_800_000_200 },
+      }),
+    )
+    const result = await probeClaudeCodeUsage({ claudeUsagePath: usagePath, nowMs })
+    assert.equal(result.ok, true)
+    if (result.ok) {
+      assert.equal(result.fiveHour.usedPercent, 8)
+      assert.equal(result.weekly.usedPercent, 100)
+      assert.equal(result.capturedAt, nowMs - 60 * 60 * 1000)
+      assert.ok(result.fiveHour.resetAt)
+    }
+    writeFileSync(usagePath, JSON.stringify({ capturedAt: nowMs + 1 }))
+    assert.deepEqual(await probeClaudeCodeUsage({ claudeUsagePath: usagePath, nowMs }), { ok: false })
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
 })
 
 test("saveUserUsageProviders persists the selection without overwriting other sidebar settings", () => {

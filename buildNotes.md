@@ -112,6 +112,58 @@ Windows
 
 ---
 
+## 2026-09-27 (~23:36) - Show Claude Code usage in sidebar - GPT-6 Luna, Thinking; Build
+
+### Agent
+- Meta: GPT-6 Luna; Thinking; Build; completed
+- Added `packages/tui/scripts/claude-usage-statusline.mjs`: writes 5-hour and weekly quota snapshots locally from Claude Code's documented status-line payload
+- Added `claude-code` usage provider; sidebar retains the latest snapshot, shows reset times and age, refreshes on file change
+- Configured `~/.claude/settings.json` and enabled Claude in `~/.config/openSidebar/config.json`
+- Verification: sidebar tests (66 pass, 2 skip), `bun typecheck` in `packages/tui`, status-line script syntax and isolated snapshot update, `git diff --check`; no build/install
+- MISTAKE: First smoke test assigned PowerShell's read-only `$HOME` variable, so it wrote test values to the real Claude snapshot path; removed the fixture without checking whether a prior snapshot existed. Use `$testHome` and verify isolation before filesystem tests.
+
+### User
+Claude usage meter
+- The sidebar now shows Claude's latest interactive-session and weekly usage percentages, reset times, and snapshot age. Values remain visible when old.
+- Claude Code's status line writes snapshots to `~/.claude/opencode-usage.json`; OpenCode refreshes the display when that file changes.
+
+---
+
+## 2026-09-27 (~23:17) - Hide models in model picker - Opus 5.5, minimal reasoning; Build
+
+### Agent
+- Meta: Opus 5.5; minimal reasoning; Build; completed
+- Added `hidden[]` to model store in `context/local.tsx` (persisted in `state/model.json`) plus `hidden()` and `toggleHidden()`; hiding also removes the favorite
+- Added `model_hidden_toggle` keybind (`ctrl+h`, command `model.dialog.hide`) in `config/keybind.ts`
+- Added `dialog.push()` in `ui/dialog.tsx`: stacks a dialog so escape pops back to the previous one (`replace` always leaves a single dialog)
+- `DialogModel` (`component/dialog-model.tsx`): hidden models excluded from favorites, recents, providers and search; `Hidden (N)` row at the bottom pushes `DialogModel hiddenOnly` (title `Hidden models`, Unhide action); `HIDDEN_MENU` sentinel value makes Favorite/Hide ignore that row
+- Recent cycle (`cycle()` in `local.tsx`) skips hidden models
+- Documented `model_hidden_toggle` in `packages/web/src/content/docs/keybinds.mdx`
+- Risk: `ctrl+h` sends 0x08 (same as backspace) in legacy terminal key encoding; works only with the kitty keyboard protocol. Rebind if it collides
+- Verification: `bun typecheck` in `packages/tui` clean; not run interactively
+
+### User
+Model picker
+- Press ctrl+h in the model picker to hide the selected model.
+- Hidden models are collected in a `Hidden (N)` row at the bottom; press Enter to open them, ctrl+h there to unhide, Esc to go back.
+- Hidden models do not appear in search.
+
+---
+
+## 2026-09-27 (~21:56) - reorder oc palette settings - GPT-6 Luna, Thinking; Build
+
+### Agent
+- Meta: GPT-6 Luna; Thinking; Build; completed
+- Reordered OC palette commands in `packages/tui/src/app.tsx`; moved Shut Down before Restart and renamed `oc directory` to `OC directory`.
+- Kept default sub-agent reasoning omitted because no matching setting or command exists.
+- Verification: command-palette test passed (1); `git diff --check` passed with line-ending warnings.
+
+### User
+Command palette
+- OC settings now follow the requested in-code order, with Shut Down before Restart and Restart last among the listed settings.
+
+---
+
 ## 2026-09-24 (~20:55) - move palette order into OpenCode config - GPT-6 Luna, Thinking; Build
 
 ### Agent
@@ -1076,4 +1128,3 @@ Project notes
 Project notes
 - Older session history now lives in `buildNotes.archive1.md` and `buildNotes.archive2.md`.
 - The live notes file is short again and starts with the archive rules so the next overflow can rotate to `buildNotes.archive3.md`.
-

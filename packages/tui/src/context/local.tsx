@@ -300,6 +300,10 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
           providerID: string
           modelID: string
         }[]
+        hidden: {
+          providerID: string
+          modelID: string
+        }[]
         variant: Record<string, string | undefined>
         session: Record<string, SessionModelOverride>
         pending: SessionModelOverride | undefined
@@ -308,6 +312,7 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
         model: {},
         recent: [],
         favorite: [],
+        hidden: [],
         variant: {},
         session: {},
         pending: undefined,
@@ -327,6 +332,7 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
         void writeJsonAtomic(filePath, {
           recent: modelStore.recent,
           favorite: modelStore.favorite,
+          hidden: modelStore.hidden,
           variant: modelStore.variant,
           session: modelStore.session,
         })
@@ -338,6 +344,7 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
           const value = x as Record<string, unknown>
           if (Array.isArray(value.recent)) setModelStore("recent", value.recent)
           if (Array.isArray(value.favorite)) setModelStore("favorite", value.favorite)
+          if (Array.isArray(value.hidden)) setModelStore("hidden", value.hidden)
           if (typeof value.variant === "object" && value.variant !== null)
             setModelStore("variant", value.variant as Record<string, string | undefined>)
           if (typeof value.session === "object" && value.session !== null)
@@ -475,6 +482,9 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
         favorite() {
           return modelStore.favorite
         },
+        hidden() {
+          return modelStore.hidden
+        },
         parsed: createMemo(() => {
           const value = currentModel()
           if (!value) {
@@ -495,7 +505,9 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
         async cycle(direction: 1 | -1) {
           const current = currentModel()
           if (!current) return
-          const recent = modelStore.recent
+          const recent = modelStore.recent.filter(
+            (x) => !modelStore.hidden.some((h) => h.providerID === x.providerID && h.modelID === x.modelID),
+          )
           const index = recent.findIndex((x) => x.providerID === current.providerID && x.modelID === current.modelID)
           if (index === -1) return
           let next = index + direction
@@ -603,6 +615,22 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
               "favorite",
               next.map((x) => ({ providerID: x.providerID, modelID: x.modelID })),
             )
+            save()
+          })
+        },
+        // Hiding also unfavorites, so favorite cycling never lands on a hidden model
+        toggleHidden(model: { providerID: string; modelID: string }) {
+          const same = (x: { providerID: string; modelID: string }) =>
+            x.providerID === model.providerID && x.modelID === model.modelID
+          const item = { providerID: model.providerID, modelID: model.modelID }
+          batch(() => {
+            if (modelStore.hidden.some(same)) {
+              setModelStore("hidden", (list) => list.filter((x) => !same(x)))
+              save()
+              return
+            }
+            setModelStore("hidden", (list) => [item, ...list])
+            setModelStore("favorite", (list) => list.filter((x) => !same(x)))
             save()
           })
         },

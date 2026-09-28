@@ -8,7 +8,7 @@ const OPENROUTER_URL = "https://openrouter.ai/api/v1/key"
 const CURSOR_USAGE_URL = "https://cursor.com/api/usage-summary"
 const REQUEST_TIMEOUT_MS = 15_000
 
-export const USAGE_PROVIDER_IDS = ["openai", "cursor", "opencode-go", "openrouter"] as const
+export const USAGE_PROVIDER_IDS = ["openai", "cursor", "opencode-go", "openrouter", "claude-code"] as const
 export type UsageProviderId = (typeof USAGE_PROVIDER_IDS)[number]
 
 export const DEFAULT_USAGE_PROVIDERS: UsageProviderId[] = [...USAGE_PROVIDER_IDS]
@@ -18,6 +18,7 @@ export const USAGE_PROVIDER_OPTIONS: { id: UsageProviderId; title: string }[] = 
   { id: "cursor", title: "Cursor" },
   { id: "opencode-go", title: "OpenCode Go" },
   { id: "openrouter", title: "OpenRouter" },
+  { id: "claude-code", title: "Claude Code" },
 ]
 
 export function isUsageProviderId(value: string): value is UsageProviderId {
@@ -98,10 +99,22 @@ export type CursorUsage =
       reason?: "need-token" | "reauthenticate"
     }
 
+export type ClaudeCodeUsage =
+  | {
+      ok: true
+      fiveHour: UsageWindow
+      weekly: UsageWindow
+      capturedAt: number
+    }
+  | {
+      ok: false
+    }
+
 type UsageOptions = {
   authPath?: string
   cursorSessionToken?: string
   cursorDbPath?: string
+  claudeUsagePath?: string
   env?: NodeJS.ProcessEnv
   homeDir?: string
   fetchImpl?: (input: URL | RequestInfo, init?: RequestInit) => Promise<Response>
@@ -201,6 +214,50 @@ function compactResetDate(date: Date): string {
   const hours = date.getHours()
   const minutes = String(date.getMinutes()).padStart(2, "0")
   return `${date.getMonth() + 1}/${date.getDate()}/${String(date.getFullYear()).slice(2)} ~${hours % 12 || 12}:${minutes}${hours >= 12 ? "PM" : "AM"}`
+}
+
+export async function probeClaudeCodeUsage(options: UsageOptions = {}): Promise<ClaudeCodeUsage> {
+  try {
+    const value = JSON.parse(
+      await readFile(
+        options.claudeUsagePath ?? path.join(options.homeDir ?? os.homedir(), ".claude", "opencode-usage.json"),
+        "utf8",
+      ),
+    ) as {
+      capturedAt?: unknown
+      fiveHour?: { usedPercentage?: unknown; resetsAt?: unknown }
+      weekly?: { usedPercentage?: unknown; resetsAt?: unknown }
+    }
+    const window = (item: typeof value.fiveHour): UsageWindow | undefined => {
+      if (
+        typeof item?.usedPercentage !== "number" ||
+        !Number.isFinite(item.usedPercentage) ||
+        typeof item.resetsAt !== "number" ||
+        !Number.isFinite(item.resetsAt)
+      )
+        return
+      const date = new Date(item.resetsAt * 1000)
+      if (Number.isNaN(date.valueOf())) return
+      return {
+        usedPercent: Math.round(Math.max(0, Math.min(100, item.usedPercentage))),
+        resetAt: compactResetDate(date),
+        minutes: null,
+      }
+    }
+    const fiveHour = window(value.fiveHour)
+    const weekly = window(value.weekly)
+    if (
+      !fiveHour ||
+      !weekly ||
+      typeof value.capturedAt !== "number" ||
+      !Number.isFinite(value.capturedAt) ||
+      value.capturedAt > (options.nowMs ?? Date.now())
+    )
+      return { ok: false }
+    return { ok: true, fiveHour, weekly, capturedAt: value.capturedAt }
+  } catch {
+    return { ok: false }
+  }
 }
 
 function resetDate(resetAt: unknown, resetAfterSeconds: unknown, nowMs: number): string | null {

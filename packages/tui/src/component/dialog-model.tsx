@@ -9,10 +9,14 @@ import * as fuzzysort from "fuzzysort"
 import { useConnected } from "./use-connected"
 import { useSync } from "../context/sync"
 
+// Value of the "Hidden" row, so model actions can ignore it
+const HIDDEN_MENU = { providerID: "", modelID: "" }
+
 export function DialogModel(props: {
   providerID?: string
   current?: { providerID: string; modelID: string }
   updateCurrent?: boolean
+  hiddenOnly?: boolean
   onSelect?: (providerID: string, modelID: string) => void
 }) {
   const local = useLocal()
@@ -23,13 +27,16 @@ export function DialogModel(props: {
   const connected = useConnected()
   const providers = createDialogProviderOptions()
 
-  const showExtra = createMemo(() => connected() && !props.providerID)
+  const showExtra = createMemo(() => connected() && !props.providerID && !props.hiddenOnly)
 
   const options = createMemo(() => {
     const needle = query().trim()
     const showSections = showExtra() && needle.length === 0
-    const favorites = connected() ? local.model.favorite() : []
-    const recents = local.model.recent()
+    const hidden = local.model.hidden()
+    const isHidden = (model: { providerID: string; modelID: string }) =>
+      hidden.some((item) => item.providerID === model.providerID && item.modelID === model.modelID)
+    const favorites = connected() ? local.model.favorite().filter((item) => !isHidden(item)) : []
+    const recents = local.model.recent().filter((item) => !isHidden(item))
 
     function toOptions(items: typeof favorites, category: string) {
       if (!showSections) return []
@@ -75,6 +82,7 @@ export function DialogModel(props: {
           entries(),
           filter(([_, info]) => info.status !== "deprecated"),
           filter(([_, info]) => (props.providerID ? info.providerID === props.providerID : true)),
+          filter(([model]) => isHidden({ providerID: provider.id, modelID: model }) === !!props.hiddenOnly),
           map(([model, info]) => ({
             value: { providerID: provider.id, modelID: model },
             title: info.name ?? model,
@@ -110,6 +118,20 @@ export function DialogModel(props: {
       ),
     )
 
+    const hiddenCount = hidden.filter(
+      (item) => sync.data.provider.find((provider) => provider.id === item.providerID)?.models[item.modelID],
+    ).length
+    const hiddenMenu =
+      showSections && hiddenCount > 0
+        ? [
+            {
+              value: HIDDEN_MENU,
+              title: `Hidden (${hiddenCount})`,
+              onSelect: () => dialog.push(() => <DialogModel hiddenOnly current={props.current} />),
+            },
+          ]
+        : []
+
     const popularProviders = !connected()
       ? pipe(
           providers(),
@@ -131,7 +153,7 @@ export function DialogModel(props: {
       ]
     }
 
-    return [...favoriteOptions, ...recentOptions, ...providerOptions, ...popularProviders]
+    return [...favoriteOptions, ...recentOptions, ...providerOptions, ...popularProviders, ...hiddenMenu]
   })
 
   const provider = createMemo(() =>
@@ -140,6 +162,7 @@ export function DialogModel(props: {
 
   const title = createMemo(() => {
     const value = provider()
+    if (props.hiddenOnly) return "Hidden models"
     if (!value) return "Select model"
     return value.name
   })
@@ -180,9 +203,19 @@ export function DialogModel(props: {
         {
           command: "model.dialog.favorite",
           title: "Favorite",
+          hidden: !connected() || props.hiddenOnly,
+          onTrigger: (option) => {
+            if (option.value === HIDDEN_MENU) return
+            local.model.toggleFavorite(option.value as { providerID: string; modelID: string })
+          },
+        },
+        {
+          command: "model.dialog.hide",
+          title: props.hiddenOnly ? "Unhide" : "Hide",
           hidden: !connected(),
           onTrigger: (option) => {
-            local.model.toggleFavorite(option.value as { providerID: string; modelID: string })
+            if (option.value === HIDDEN_MENU) return
+            local.model.toggleHidden(option.value as { providerID: string; modelID: string })
           },
         },
       ]}

@@ -57,6 +57,7 @@ import {
   cursorSessionCookie,
   createUsageRefreshScheduler,
   orderUsageWindows,
+  probeClaudeCodeUsage,
   probeCursorUsage,
   probeOpenAIUsage,
   probeOpenCodeGoUsage,
@@ -64,6 +65,7 @@ import {
   shouldRefreshUsageAfterIdle,
   USAGE_PROVIDER_OPTIONS,
   type CursorUsage,
+  type ClaudeCodeUsage,
   type OpenAIUsage,
   type OpenCodeGoUsage,
   type OpenRouterUsage,
@@ -93,6 +95,8 @@ const SCRIPT_LANGUAGE_SECTION = "__sidebar_script_language_section__"
 const SCRIPT_EXTENSION_SECTION = "__sidebar_script_extension_section__"
 const WEZTERM_SIZE_SECTION = "__sidebar_wezterm_size_section__"
 const USAGE_REFRESH_INTERVAL_MS = 5 * 60 * 1000
+const CLAUDE_USAGE_DIRECTORY = path.join(os.homedir(), ".claude")
+const CLAUDE_USAGE_FILENAME = "opencode-usage.json"
 const MODEL_STATE_PATH = path.join(
   process.env.XDG_STATE_HOME ?? path.join(os.homedir(), ".local", "state"),
   "opencode",
@@ -307,6 +311,7 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
   const [goUsage, setGoUsage] = createSignal<OpenCodeGoUsage>({ ok: false })
   const [openRouterUsage, setOpenRouterUsage] = createSignal<OpenRouterUsage>({ ok: false })
   const [cursorUsage, setCursorUsage] = createSignal<CursorUsage>({ ok: false })
+  const [claudeCodeUsage, setClaudeCodeUsage] = createSignal<ClaudeCodeUsage>({ ok: false })
   const [showRemaining, setShowRemaining] = createSignal(false)
   const [showGoRemaining, setShowGoRemaining] = createSignal(false)
   const [showOrRemaining, setShowOrRemaining] = createSignal(false)
@@ -323,6 +328,7 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
   const usageAbort = new AbortController()
   let usageScheduler: ReturnType<typeof createUsageRefreshScheduler>
   let modelStateWatcher: fs.FSWatcher | undefined
+  let claudeUsageWatcher: fs.FSWatcher | undefined
   let refreshCommands = () => {}
   let visibilityRunning = false
 
@@ -459,7 +465,7 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
     usageRunning = true
     try {
       const selected = new Set(usageProviders())
-      const [next, nextGo, nextOpenRouter, nextCursor] = await Promise.all([
+      const [next, nextGo, nextOpenRouter, nextCursor, nextClaudeCode] = await Promise.all([
         selected.has("openai")
           ? probeOpenAIUsage({ signal: usageAbort.signal })
           : Promise.resolve<OpenAIUsage>({ ok: false }),
@@ -472,6 +478,9 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
         selected.has("cursor")
           ? probeCursorUsage({ signal: usageAbort.signal, cursorSessionToken })
           : Promise.resolve<CursorUsage>({ ok: false }),
+        selected.has("claude-code")
+          ? probeClaudeCodeUsage({ homeDir: os.homedir() })
+          : Promise.resolve<ClaudeCodeUsage>({ ok: false }),
       ])
       let cursor = nextCursor
       if (selected.has("cursor") && !cursor.ok && cursor.reason === "reauthenticate" && cursorSessionToken) {
@@ -483,6 +492,7 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
       if (!usageAbort.signal.aborted) setGoUsage(nextGo)
       if (!usageAbort.signal.aborted) setOpenRouterUsage(nextOpenRouter)
       if (!usageAbort.signal.aborted) setCursorUsage(cursor)
+      if (!usageAbort.signal.aborted) setClaudeCodeUsage(nextClaudeCode)
     } finally {
       usageRunning = false
     }
@@ -658,6 +668,18 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
     const cursorValue = `${cursorSide(cursorOk?.usedPercent)}; ${cursorSide(cursorOk?.apiUsedPercent)} api`
     const cursorNeedsToken =
       !cursorSnapshot.ok && (cursorSnapshot.reason === "need-token" || cursorSnapshot.reason === "reauthenticate")
+    const claudeSnapshot = claudeCodeUsage()
+    const claudeOk = claudeSnapshot.ok ? claudeSnapshot : undefined
+    const claudeAgeMinutes = claudeOk ? Math.floor(Math.max(0, Date.now() - claudeOk.capturedAt) / 60_000) : 0
+    const claudeUpdated = claudeOk
+      ? claudeAgeMinutes < 1
+        ? "Updated just now"
+        : claudeAgeMinutes < 60
+          ? `Updated ${claudeAgeMinutes}m ago`
+          : claudeAgeMinutes < 24 * 60
+            ? `Updated ${Math.floor(claudeAgeMinutes / 60)}h ago`
+            : `Updated ${Math.floor(claudeAgeMinutes / (24 * 60))}d ago`
+      : "Set Claude Code status line to publish usage"
     return (
       <>
         <box
@@ -761,6 +783,29 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
           <Show when={orOk}>
             <box flexDirection="row" gap={1}>
               <text fg={theme.textMuted}>{`$${orOk?.usedUsd.toFixed(2)} / $${orOk?.limitUsd.toFixed(2)}`}</text>
+            </box>
+          </Show>
+        </Show>
+        <Show when={usageProviders().includes("claude-code")}>
+          <box flexDirection="row" gap={1}>
+            <text fg={theme.text}>Claude session:</text>
+            <text fg={theme.textMuted}>{claudeOk ? `${claudeOk.fiveHour.usedPercent}% used` : "unavailable"}</text>
+          </box>
+          <box flexDirection="row" gap={1}>
+            <text fg={theme.text}>Claude week:</text>
+            <text fg={theme.textMuted}>{claudeOk ? `${claudeOk.weekly.usedPercent}% used` : "unavailable"}</text>
+          </box>
+          <Show when={claudeOk}>
+            <box flexDirection="row" gap={1}>
+              <text fg={theme.textMuted}>{`Resets ${claudeOk?.fiveHour.resetAt} / ${claudeOk?.weekly.resetAt}`}</text>
+            </box>
+            <box flexDirection="row" gap={1}>
+              <text fg={theme.textMuted}>{claudeUpdated}</text>
+            </box>
+          </Show>
+          <Show when={!claudeOk}>
+            <box flexDirection="row" gap={1}>
+              <text fg={theme.textMuted}>{claudeUpdated}</text>
             </box>
           </Show>
         </Show>
@@ -1523,6 +1568,13 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
   } catch {
     // The sidebar remains usable when OpenCode has not created model state yet.
   }
+  try {
+    claudeUsageWatcher = fs.watch(CLAUDE_USAGE_DIRECTORY, (_event, filename) => {
+      if (filename?.toString() === CLAUDE_USAGE_FILENAME) usageScheduler.request()
+    })
+  } catch {
+    // Claude usage stays on the regular refresh interval until its config directory exists.
+  }
   refreshSelectedModel()
   refreshVariant()
   const modelTimer = setInterval(() => refreshSelectedModel(), 500)
@@ -1532,6 +1584,7 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
     usageScheduler.dispose()
     clearInterval(modelTimer)
     modelStateWatcher?.close()
+    claudeUsageWatcher?.close()
     rootPickerSearchGeneration += 1
     if (rootPickerDebounce) clearTimeout(rootPickerDebounce)
     rootPickerSearchAbort?.abort()

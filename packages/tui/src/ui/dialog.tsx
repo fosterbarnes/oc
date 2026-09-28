@@ -198,6 +198,10 @@ function init() {
         },
       ])
     },
+    // Stacks over the current dialog so escape returns to it
+    push(input: any) {
+      setStore("stack", [...store.stack, { element: input }])
+    },
     get stack() {
       return store.stack
     },
