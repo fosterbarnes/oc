@@ -116,6 +116,9 @@ const BUNDLED_PROVIDERS: Record<string, () => Promise<(opts: any) => BundledSDK>
   // Pre-fold configs named oakimov's npm package. Load the in-tree provider
   // instead of `Npm.add("cursor-opencode-provider")`.
   "cursor-opencode-provider": () => import("./cursor").then((m) => m.createCursor),
+  "@opencode-ai/claude-code": () => import("./claude-code").then((m) => m.createClaudeCode),
+  // Pre-fold configs pinned the plugin package as the provider npm.
+  "@khalilgharbaoui/opencode-claude-code-plugin": () => import("./claude-code").then((m) => m.createClaudeCode),
   "@ai-sdk/amazon-bedrock": () => import("@ai-sdk/amazon-bedrock").then((m) => m.createAmazonBedrock),
   "@ai-sdk/amazon-bedrock/mantle": () => import("@ai-sdk/amazon-bedrock/mantle").then((m) => m.createBedrockMantle),
   "@ai-sdk/anthropic": () => import("@ai-sdk/anthropic").then((m) => m.createAnthropic),

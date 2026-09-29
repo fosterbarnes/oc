@@ -1307,12 +1307,14 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
         name: "server.shutdown",
         title: "Shut Down",
         category: "oc",
+        hidden: process.env.OC_STABLE === "1",
         run: () => void controlServer("shutdown"),
       },
       {
         name: "server.restart",
         title: "Restart",
         category: "oc",
+        hidden: process.env.OC_STABLE === "1",
         run: () => void controlServer("restart"),
       },
       {

@@ -50,6 +50,19 @@ export function recentModels(
     .map((item) => ({ providerID: item.providerID, modelID: item.modelID }))
 }
 
+export function moveModelFavorite<T extends { providerID: string; modelID: string }>(
+  favorites: T[],
+  model: T,
+  direction: -1 | 1,
+) {
+  const index = favorites.findIndex(
+    (item) => item.providerID === model.providerID && item.modelID === model.modelID,
+  )
+  const next = index + direction
+  if (index < 0 || next < 0 || next >= favorites.length) return favorites
+  return favorites.with(index, favorites[next]!).with(next, model)
+}
+
 export function resolveCurrentModel<T>(selected: T | undefined, cli: T | undefined, agent: T | undefined, fallback: T | undefined) {
   return selected ?? cli ?? agent ?? fallback
 }
@@ -617,6 +630,12 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
             )
             save()
           })
+        },
+        moveFavorite(model: { providerID: string; modelID: string }, direction: -1 | 1) {
+          const next = moveModelFavorite(modelStore.favorite, model, direction)
+          if (next === modelStore.favorite) return
+          setModelStore("favorite", next)
+          save()
         },
         // Hiding also unfavorites, so favorite cycling never lands on a hidden model
         toggleHidden(model: { providerID: string; modelID: string }) {

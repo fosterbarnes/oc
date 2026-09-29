@@ -4,6 +4,8 @@ export const FALLBACK_CLIENT_VERSION = "cli-2026.07.09-a3815c0"
 export const CURSOR_PROVIDER_ID = "cursor"
 /** Private provider option injected by the OpenCode plugin for summary turns. */
 export const CURSOR_COMPACTION_OPTION = "opencodeCompaction"
+/** Host-set on every turn after a compaction; value is the summary message id. */
+export const COMPACTION_BOUNDARY_OPTION = "opencodeCompactionBoundary"
 export const TOKEN_EXPIRY_THRESHOLD_S = 300
 
 export const RUN_PATH = "/agent.v1.AgentService/Run"

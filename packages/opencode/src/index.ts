@@ -1,7 +1,7 @@
 import yargs from "yargs"
 import { hideBin } from "yargs/helpers"
 import { UI } from "./cli/ui"
-import { InstallationVersion } from "@opencode-ai/core/installation/version"
+import { InstallationDisplayVersion } from "@opencode-ai/core/installation/version"
 import { FormatError } from "./cli/error"
 import { EOL } from "os"
 import { errorMessage } from "./util/error"
@@ -15,7 +15,13 @@ import {
 } from "./cli/command-loader"
 
 const rawArgs = hideBin(process.argv)
-const args = withOcLaunchDefault(withExecutableDefault(rawArgs, process.execPath), isDebugExecutable())
+// `oc stable` children run the vanilla in-process TUI, so they must skip the resident-attach rewrites.
+const args =
+  process.env.OC_STABLE === "1"
+    ? rawArgs
+    : rawArgs[0] === "stable"
+      ? ["oc", ...rawArgs]
+      : withOcLaunchDefault(withExecutableDefault(rawArgs, process.execPath), isDebugExecutable())
 
 function needsAllCommands(args: readonly string[]) {
   return args.includes("-h") || args.includes("--help") || args.includes("completion")
@@ -41,7 +47,7 @@ const cli = yargs(args)
   .wrap(100)
   .help("help", "show help")
   .alias("help", "h")
-  .version("version", "show version number", InstallationVersion)
+  .version("version", "show version number", InstallationDisplayVersion)
   .alias("version", "v")
   .option("print-logs", {
     describe: "print logs to stderr",

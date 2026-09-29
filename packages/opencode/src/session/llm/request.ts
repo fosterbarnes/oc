@@ -14,7 +14,12 @@ import { Effect, Record } from "effect"
 import { jsonSchema, tool as aiTool, type ModelMessage, type Tool } from "ai"
 import type { Plugin } from "@/plugin"
 import { mergeDeep } from "remeda"
-import { CURSOR_COMPACTION_OPTION, CURSOR_PROVIDER_ID } from "@/provider/cursor/shared"
+import { COMPACTION_BOUNDARY_OPTION, CURSOR_COMPACTION_OPTION, CURSOR_PROVIDER_ID } from "@/provider/cursor/shared"
+import {
+  CLAUDE_CODE_AGENT_OPTION,
+  CLAUDE_CODE_SESSION_OPTION,
+  isClaudeCodeProvider,
+} from "@/provider/claude-code/shared"
 
 const USER_AGENT = `opencode/${InstallationVersion}`
 
@@ -34,6 +39,7 @@ type PrepareInput = {
   readonly plugin: Plugin.Interface
   readonly flags: RuntimeFlags.Info
   readonly isWorkflow: boolean
+  readonly compactionBoundary?: string
 }
 
 export type Prepared = {
@@ -88,10 +94,12 @@ export const prepare = Effect.fn("LLMRequestPrep.prepare")(function* (input: Pre
     system.push(header, rest.join("\n"))
   }
 
-  const variant =
-    !input.small && input.model.variants && input.user.model.variant
-      ? input.model.variants[input.user.model.variant]
-      : {}
+  // A compaction agent pinned to its own model uses its own variant, not the session's.
+  const variantName =
+    input.agent.name === "compaction" && input.agent.model && input.agent.variant
+      ? input.agent.variant
+      : input.user.model.variant
+  const variant = !input.small && input.model.variants && variantName ? input.model.variants[variantName] : {}
   const base = input.small
     ? ProviderTransform.smallOptions(input.model)
     : ProviderTransform.options({
@@ -104,6 +112,13 @@ export const prepare = Effect.fn("LLMRequestPrep.prepare")(function* (input: Pre
     providerID: input.model.providerID,
     agentName: input.agent.name,
   })
+  const claudeCode = isClaudeCodeProvider(input.model.providerID)
+  if (input.compactionBoundary && (claudeCode || input.model.providerID === CURSOR_PROVIDER_ID))
+    options[COMPACTION_BOUNDARY_OPTION] = input.compactionBoundary
+  if (claudeCode) {
+    options[CLAUDE_CODE_SESSION_OPTION] = input.sessionID
+    options[CLAUDE_CODE_AGENT_OPTION] = input.agent.name
+  }
   if (
     input.model.api.npm === "@ai-sdk/azure" &&
     (input.provider.options.useCompletionUrls || input.model.options.useCompletionUrls || options.useCompletionUrls)

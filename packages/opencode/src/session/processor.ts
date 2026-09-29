@@ -44,6 +44,8 @@ export interface Handle {
       attachments?: SessionV1.FilePart[]
     },
   ) => Effect.Effect<void>
+  // Resolves once the tool part exists, so provider-executed tools never run before their part renders.
+  readonly toolPartReady: (toolCallID: string) => Effect.Effect<void>
   readonly process: (streamInput: LLM.StreamInput) => Effect.Effect<Result>
 }
 
@@ -114,6 +116,8 @@ const layer = Layer.effect(
         reasoningMap: {},
       }
       let aborted = false
+      const partReady: Record<string, Deferred.Deferred<void>> = {}
+      const readyFor = (toolCallID: string) => (partReady[toolCallID] ??= Deferred.makeUnsafe<void>())
 
       const parse = (e: unknown) =>
         MessageV2.fromError(e, {
@@ -250,6 +254,7 @@ const layer = Layer.effect(
           messageID: part.messageID,
           sessionID: part.sessionID,
         }
+        Deferred.doneUnsafe(readyFor(input.id), Effect.void)
         return { call: ctx.toolcalls[input.id], part }
       })
 
@@ -704,6 +709,7 @@ const layer = Layer.effect(
         },
         updateToolCall,
         completeToolCall,
+        toolPartReady: (toolCallID) => Deferred.await(readyFor(toolCallID)),
         process,
       } satisfies Handle
     })

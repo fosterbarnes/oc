@@ -161,7 +161,7 @@ import { workspaceRootFromRequestContext } from "./context/env.js"
 import { progressOnlyContinuationPrompt, shouldContinueProgressOnlyTurn } from "./protocol/progress-continuation.js"
 import { ensureOpencodeProjectDir, opencodeGlobalCacheDir, setHostCacheDirOverride } from "./context/paths.js"
 import { invalidateAgentUrl, resolveAgentUrl } from "./agent-url.js"
-import { CURSOR_API_HOST, CURSOR_COMPACTION_OPTION } from "./shared.js"
+import { COMPACTION_BOUNDARY_OPTION, CURSOR_API_HOST, CURSOR_COMPACTION_OPTION } from "./shared.js"
 import { getSessionDirectory } from "./session-directory.js"
 import type { SeedHistoryMessage } from "./protocol/request.js"
 import { assertCursorUserImageSupport, extractCursorPromptImages } from "./image-input.js"
@@ -196,6 +196,7 @@ const sentHistoryImageHashesBySession = new Map<string, Set<string>>()
 // suppresses OpenCode's compacted prompt/system seed and makes Cursor narrate
 // tool use instead of emitting exec requests. Rebase once on the next turn.
 const postCompactionRebaseBySession = new Set<string>()
+const compactionBoundaryBySession = new Map<string, string>()
 export const MAX_TURN_STATE_SESSIONS = 256
 const MAX_SENT_HISTORY_IMAGES_PER_SESSION = 256
 const DEFAULT_RETRY_POLICY = {
@@ -825,7 +826,14 @@ async function startSession(
   }
   const allowTools = toolState.allowTools
   const discoveredSubagentCatalog = extractHostSubagentCatalog(cursorTools)
-  const resetState = resolveTurnConversationReset({ sessionKey, isCompaction, allowTools })
+  const boundary =
+    callOptions.providerOptions?.[COMPACTION_BOUNDARY_OPTION] ?? providerOptions?.[COMPACTION_BOUNDARY_OPTION]
+  const resetState = resolveTurnConversationReset({
+    sessionKey,
+    isCompaction,
+    allowTools,
+    boundary: typeof boundary === "string" ? boundary : undefined,
+  })
   let recovery = startOptions?.recovery
   let resumeRecovery = recovery?.kind === "resume" ? recovery : undefined
   let resuming = !!resumeRecovery
@@ -3413,6 +3421,7 @@ export function resolveTurnConversationReset(input: {
   sessionKey?: string
   isCompaction: boolean
   allowTools: boolean
+  boundary?: string
 }): {
   reset: boolean
   reason?: "compaction" | "post-compaction-rebase"
@@ -3423,8 +3432,19 @@ export function resolveTurnConversationReset(input: {
     return { reset: true, reason: "compaction" }
   }
   // Title and other no-tool Runs must not spend the post-compaction rebase.
-  if (!allowTools) return { reset: false }
-  if (sessionKey && postCompactionRebaseBySession.delete(sessionKey)) {
+  if (!allowTools || !sessionKey) return { reset: false }
+  // Another model may have written the summary, so the host boundary id is the
+  // only sign of a compaction this provider never saw.
+  // ponytail: in-memory, so a restart rebases once per compacted session.
+  const newBoundary = !!input.boundary && compactionBoundaryBySession.get(sessionKey) !== input.boundary
+  if (input.boundary) {
+    compactionBoundaryBySession.delete(sessionKey)
+    compactionBoundaryBySession.set(sessionKey, input.boundary)
+    if (compactionBoundaryBySession.size > MAX_TURN_STATE_SESSIONS) {
+      compactionBoundaryBySession.delete(compactionBoundaryBySession.keys().next().value!)
+    }
+  }
+  if (postCompactionRebaseBySession.delete(sessionKey) || newBoundary) {
     return { reset: true, reason: "post-compaction-rebase" }
   }
   return { reset: false }
@@ -3437,6 +3457,7 @@ export function resetTurnStateForTests(): void {
   toolCatalogWaitersBySession.clear()
   toolCatalogBySession.clear()
   postCompactionRebaseBySession.clear()
+  compactionBoundaryBySession.clear()
 }
 
 function extractUserText(lastUser: Record<string, unknown> | undefined): string {

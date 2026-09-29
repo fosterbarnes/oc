@@ -7,6 +7,7 @@ import { Effect, Latch, Layer, Scope, Context } from "effect"
 import { Session } from "./session"
 import { SessionID } from "./schema"
 import { SessionStatus } from "./status"
+import { Flock } from "@opencode-ai/core/util/flock"
 
 export interface Interface {
   readonly assertNotBusy: (sessionID: SessionID) => Effect.Effect<void, Session.BusyError>
@@ -90,7 +91,7 @@ const layer = Layer.effect(
       onInterrupt: Effect.Effect<SessionV1.WithParts>,
       work: Effect.Effect<SessionV1.WithParts>,
     ) {
-      return yield* (yield* runner(sessionID, onInterrupt)).ensureRunning(work)
+      return yield* (yield* runner(sessionID, onInterrupt)).ensureRunning(owned(sessionID, work))
     })
 
     const startShell = Effect.fn("SessionRunState.startShell")(function* (
@@ -100,7 +101,7 @@ const layer = Layer.effect(
       ready?: Latch.Latch,
     ) {
       return yield* (yield* runner(sessionID, onInterrupt))
-        .startShell(work, ready)
+        .startShell(owned(sessionID, work), ready)
         .pipe(Effect.catchTag("RunnerBusy", () => Effect.fail(busyError(sessionID))))
     })
 
@@ -141,6 +142,18 @@ const cancelBackgroundJobs = Effect.fn("SessionRunState.cancelBackgroundJobs")(f
     batch = jobs.filter(matches)
   }
 })
+
+// Cross-process guard so the resident server and `oc stable` never drive the same session at once.
+// Held only while work runs; a crashed holder goes stale once its heartbeat stops.
+function owned<A>(sessionID: SessionID, work: Effect.Effect<A>) {
+  return Effect.acquireRelease(
+    Effect.tryPromise({
+      try: () => Flock.acquire(`session:${sessionID}`, { timeoutMs: 0, staleMs: 15_000 }),
+      catch: (cause) => new Error("Session is running in another oc instance", { cause }),
+    }).pipe(Effect.orDie),
+    (lock) => Effect.promise(() => lock.release().catch(() => undefined)),
+  ).pipe(Effect.andThen(work), Effect.scoped)
+}
 
 function busyError(sessionID: SessionID) {
   return new Session.BusyError({ sessionID })

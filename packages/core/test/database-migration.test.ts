@@ -174,6 +174,19 @@ describe("DatabaseMigration", () => {
     ).rejects.toThrow("Database is not empty and has no session table")
   })
 
+  test("rejects a database migrated by a different build", async () => {
+    await expect(
+      run(
+        Effect.gen(function* () {
+          const db = yield* makeDb
+          yield* DatabaseMigration.apply(db)
+          yield* db.run(sql`INSERT INTO migration (id, time_completed) VALUES ('29990101000000_foreign', 0)`)
+          yield* DatabaseMigration.apply(db)
+        }),
+      ),
+    ).rejects.toThrow("Database was migrated by a different OpenCode build (29990101000000_foreign)")
+  })
+
   test("backfills existing Context Epoch rows to the build agent", async () => {
     await run(
       Effect.gen(function* () {

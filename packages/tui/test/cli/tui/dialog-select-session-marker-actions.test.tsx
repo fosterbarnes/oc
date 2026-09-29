@@ -136,6 +136,7 @@ async function mountSessionMarkerDialog(input: {
                 {
                   command: "session.complete.toggle",
                   title: "complete/incomplete",
+                  hidden: (option) => !option,
                   onTrigger: (option) => input.onComplete(option.value.id),
                 },
                 {

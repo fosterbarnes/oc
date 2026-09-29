@@ -15,7 +15,7 @@ import { ToolRegistry } from "@/tool/registry"
 import { Truncate } from "@/tool/truncate"
 import { Plugin } from "@/plugin"
 import { RuntimeFlags } from "@/effect/runtime-flags"
-import { Effect, Layer, Schema } from "effect"
+import { Deferred, Effect, Layer, Schema } from "effect"
 import { testEffect } from "../lib/effect"
 
 const callID = "call-test"
@@ -94,47 +94,47 @@ const layer = Layer.mergeAll(
 
 const it = testEffect(layer)
 
-it.effect("preserves running tool start time across metadata updates", () =>
-  Effect.gen(function* () {
-    const state: SessionV1.ToolPart = {
-      id: partID,
+function timingTool(toolPartReady: () => Effect.Effect<void> = () => Effect.void) {
+  const state: SessionV1.ToolPart = {
+    id: partID,
+    sessionID,
+    messageID,
+    type: "tool",
+    tool: "timing",
+    callID,
+    state: {
+      status: "running",
+      input: {},
+      time: { start: 100 },
+    },
+  }
+  const updates: number[] = []
+  const processor = {
+    message: {
+      id: messageID,
       sessionID,
-      messageID,
-      type: "tool",
-      tool: "timing",
-      callID,
-      state: {
-        status: "running",
-        input: {},
-        time: { start: 100 },
-      },
-    }
-    const updates: number[] = []
-    const processor = {
-      message: {
-        id: messageID,
-        sessionID,
-        role: "assistant",
-        parentID: MessageID.ascending(),
-        agent: "build",
-        mode: "build",
-        path: { cwd: "/tmp", root: "/tmp" },
-        cost: 0,
-        tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
-        modelID: ModelV2.ID.make("test-model"),
-        providerID: ProviderV2.ID.make("test"),
-        time: { created: 1 },
-      } satisfies SessionV1.Assistant,
-      updateToolCall: (_toolCallID, update) =>
-        Effect.sync(() => {
-          const next = update(state)
-          state.state = next.state
-          if (state.state.status === "running") updates.push(state.state.time.start)
-          return state
-        }),
-      completeToolCall: () => Effect.void,
-    } satisfies Pick<SessionProcessor.Handle, "message" | "updateToolCall" | "completeToolCall">
-
+      role: "assistant",
+      parentID: MessageID.ascending(),
+      agent: "build",
+      mode: "build",
+      path: { cwd: "/tmp", root: "/tmp" },
+      cost: 0,
+      tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+      modelID: ModelV2.ID.make("test-model"),
+      providerID: ProviderV2.ID.make("test"),
+      time: { created: 1 },
+    } satisfies SessionV1.Assistant,
+    updateToolCall: (_toolCallID, update) =>
+      Effect.sync(() => {
+        const next = update(state)
+        state.state = next.state
+        if (state.state.status === "running") updates.push(state.state.time.start)
+        return state
+      }),
+    completeToolCall: () => Effect.void,
+    toolPartReady,
+  } satisfies Pick<SessionProcessor.Handle, "message" | "updateToolCall" | "completeToolCall" | "toolPartReady">
+  return Effect.gen(function* () {
     const tools = yield* SessionTools.resolve({
       agent,
       model,
@@ -146,22 +146,38 @@ it.effect("preserves running tool start time across metadata updates", () =>
     })
     const execute = tools.timing.execute
     if (!execute) throw new Error("timing tool is missing execute")
-
-    yield* Effect.promise(() =>
-      execute(
-        {},
-        {
-          toolCallId: callID,
-          abortSignal: new AbortController().signal,
-          messages: [],
-        },
-      ),
-    )
-
-    expect(updates).toEqual([100, 100])
-    expect(state.state.status).toBe("running")
-    if (state.state.status === "running") {
-      expect(state.state.time.start).toBe(100)
+    return {
+      state,
+      updates,
+      run: (experimental_context?: unknown) =>
+        execute({}, { toolCallId: callID, abortSignal: new AbortController().signal, messages: [], experimental_context }),
     }
+  })
+}
+
+it.effect("preserves running tool start time across metadata updates", () =>
+  Effect.gen(function* () {
+    const timing = yield* timingTool()
+    yield* Effect.promise(() => timing.run())
+
+    expect(timing.updates).toEqual([100, 100])
+    expect(timing.state.state.status).toBe("running")
+    if (timing.state.state.status === "running") {
+      expect(timing.state.state.time.start).toBe(100)
+    }
+  }),
+)
+
+it.live("provider-executed calls wait for their tool part before running", () =>
+  Effect.gen(function* () {
+    const ready = Deferred.makeUnsafe<void>()
+    const timing = yield* timingTool(() => Deferred.await(ready))
+    const result = timing.run({ awaitToolPart: true })
+    yield* Effect.sleep(20)
+    expect(timing.updates).toEqual([])
+
+    yield* Deferred.succeed(ready, undefined)
+    yield* Effect.promise(() => result)
+    expect(timing.updates).toEqual([100, 100])
   }),
 )

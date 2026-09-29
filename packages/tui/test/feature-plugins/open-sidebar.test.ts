@@ -1029,10 +1029,10 @@ test("saveUserScriptSettings persists a global default applied when the project 
   }
 })
 
-test("weekly usage defaults include every supported provider", () => {
+test("weekly usage defaults exclude opt-in providers", () => {
   const settings = normalizeSidebarSettings({})
-  assert.deepEqual(settings.usageProviders, ["openai", "cursor", "opencode-go", "openrouter", "claude-code"])
-  assert.deepEqual(DEFAULT_USAGE_PROVIDERS, ["openai", "cursor", "opencode-go", "openrouter", "claude-code"])
+  assert.deepEqual(settings.usageProviders, ["openai", "cursor", "opencode-go", "openrouter"])
+  assert.deepEqual(DEFAULT_USAGE_PROVIDERS, ["openai", "cursor", "opencode-go", "openrouter"])
   assert.deepEqual([...USAGE_PROVIDER_IDS], ["openai", "cursor", "opencode-go", "openrouter", "claude-code"])
 })
 
@@ -1046,29 +1046,41 @@ test("normalizes usage providers by filtering, deduplicating, and preserving an 
   ])
 })
 
-test("reads Claude Code status-line snapshots and keeps old readings available", async () => {
+test("reads Claude Code usage with its OAuth login and falls back to the cached result", async () => {
   const root = mkdtempSync(path.join(os.tmpdir(), "sidebar-claude-usage-"))
   try {
     const nowMs = 1_800_000_000_000
-    const usagePath = path.join(root, "opencode-usage.json")
-    writeFileSync(
-      usagePath,
-      JSON.stringify({
-        capturedAt: nowMs - 60 * 60 * 1000,
-        fiveHour: { usedPercentage: 8.4, resetsAt: 1_800_000_100 },
-        weekly: { usedPercentage: 101, resetsAt: 1_800_000_200 },
-      }),
-    )
-    const result = await probeClaudeCodeUsage({ claudeUsagePath: usagePath, nowMs })
+    const credentialsPath = path.join(root, ".credentials.json")
+    const claudeUsageCachePath = path.join(root, "cache", "claude-usage.json")
+    const requests: RequestInit[] = []
+    const fetchImpl = async (_input: URL | RequestInfo, init?: RequestInit) => {
+      requests.push(init ?? {})
+      return Response.json({
+        five_hour: { utilization: 8.4, resets_at: "2027-01-20T08:00:00Z" },
+        seven_day: { utilization: 101, resets_at: null },
+      })
+    }
+    writeFileSync(credentialsPath, JSON.stringify({ claudeAiOauth: { accessToken: "tok", expiresAt: nowMs + 1 } }))
+    const options = { claudeCredentialsPath: credentialsPath, claudeUsageCachePath, fetchImpl, nowMs }
+    const result = await probeClaudeCodeUsage(options)
     assert.equal(result.ok, true)
     if (result.ok) {
       assert.equal(result.fiveHour.usedPercent, 8)
       assert.equal(result.weekly.usedPercent, 100)
-      assert.equal(result.capturedAt, nowMs - 60 * 60 * 1000)
       assert.ok(result.fiveHour.resetAt)
+      assert.equal(result.weekly.resetAt, null)
     }
-    writeFileSync(usagePath, JSON.stringify({ capturedAt: nowMs + 1 }))
-    assert.deepEqual(await probeClaudeCodeUsage({ claudeUsagePath: usagePath, nowMs }), { ok: false })
+    assert.equal((requests[0].headers as Record<string, string>).Authorization, "Bearer tok")
+    writeFileSync(credentialsPath, JSON.stringify({ claudeAiOauth: { accessToken: "tok", expiresAt: nowMs } }))
+    assert.deepEqual(await probeClaudeCodeUsage(options), result)
+    assert.equal(requests.length, 1)
+    assert.deepEqual(await probeClaudeCodeUsage({ ...options, nowMs: Date.parse("2027-01-21T00:00:00Z") }), {
+      ok: true,
+      fiveHour: { usedPercent: 0, resetAt: null, minutes: null },
+      weekly: { usedPercent: 100, resetAt: null, minutes: null },
+    })
+    rmSync(credentialsPath)
+    assert.deepEqual(await probeClaudeCodeUsage(options), { ok: false })
   } finally {
     rmSync(root, { recursive: true, force: true })
   }

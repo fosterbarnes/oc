@@ -167,6 +167,12 @@ export function DialogModel(props: {
     return value.name
   })
 
+  function favoriteIndex(model: { providerID: string; modelID: string }) {
+    return local.model.favorite().findIndex(
+      (item) => item.providerID === model.providerID && item.modelID === model.modelID,
+    )
+  }
+
   function onSelect(providerID: string, modelID: string) {
     if (props.updateCurrent !== false) {
       void local.model.select({ providerID, modelID }, { recent: true })
@@ -210,6 +216,40 @@ export function DialogModel(props: {
           },
         },
         {
+          command: "model.dialog.favorite.move_up",
+          title: "Move favorite up",
+          hidden: (option) => {
+            if (query().trim() || !option || typeof option.value === "string") return true
+            return favoriteIndex(option.value) < 0
+          },
+          disabled: (option) => {
+            if (!option || typeof option.value === "string") return true
+            return favoriteIndex(option.value) <= 0
+          },
+          onTrigger: (option) => {
+            if (typeof option.value === "string") return
+            local.model.moveFavorite(option.value, -1)
+          },
+        },
+        {
+          command: "model.dialog.favorite.move_down",
+          title: "Move favorite down",
+          hidden: (option) => {
+            if (query().trim() || !option || typeof option.value === "string") return true
+            return favoriteIndex(option.value) < 0
+          },
+          disabled: (option) => {
+            const favorites = local.model.favorite()
+            if (!option || typeof option.value === "string") return true
+            const index = favoriteIndex(option.value)
+            return index < 0 || index >= favorites.length - 1
+          },
+          onTrigger: (option) => {
+            if (typeof option.value === "string") return
+            local.model.moveFavorite(option.value, 1)
+          },
+        },
+        {
           command: "model.dialog.hide",
           title: props.hiddenOnly ? "Unhide" : "Hide",
           hidden: !connected(),
@@ -220,6 +260,7 @@ export function DialogModel(props: {
         },
       ]}
       onFilter={setQuery}
+      preserveSelection={true}
       flat={true}
       skipFilter={true}
       title={title()}

@@ -169,4 +169,15 @@ describe("Cursor compaction reset and rebase", () => {
       reason: "post-compaction-rebase",
     })
   })
+
+  test("a new host compaction boundary rebases once when another model compacted", () => {
+    resetTurnStateForTests()
+    const sessionKey = "ses_compaction_boundary"
+    const turn = (boundary?: string) =>
+      resolveTurnConversationReset({ sessionKey, isCompaction: false, allowTools: true, boundary })
+    expect(turn()).toEqual({ reset: false })
+    expect(turn("msg_a")).toEqual({ reset: true, reason: "post-compaction-rebase" })
+    expect(turn("msg_a")).toEqual({ reset: false })
+    expect(turn("msg_b")).toEqual({ reset: true, reason: "post-compaction-rebase" })
+  })
 })

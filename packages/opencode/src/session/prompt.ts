@@ -1263,10 +1263,12 @@ const layer = Layer.effect(
 
             yield* plugin.trigger("experimental.chat.messages.transform", {}, { messages: msgs })
 
-            const [skills, env, instructions, mcpInstructions, modelMsgs] = yield* Effect.all([
+            const modelKey = `${model.providerID}/${model.id}`
+            const [skills, env, instructions, base, mcpInstructions, modelMsgs] = yield* Effect.all([
               sys.skills(agent),
               sys.environment(model),
-              instruction.system().pipe(Effect.orDie),
+              instruction.system(modelKey).pipe(Effect.orDie),
+              agent.prompt ? Effect.succeed(undefined) : instruction.base(modelKey).pipe(Effect.orDie),
               sys.mcp(agent, session.permission),
               MessageV2.toModelMessagesEffect(msgs, model),
             ])
@@ -1280,7 +1282,8 @@ const layer = Layer.effect(
             if (format.type === "json_schema") system.push(STRUCTURED_OUTPUT_SYSTEM_PROMPT)
             const result = yield* handle.process({
               user: lastUser,
-              agent,
+              // A matching `instructionsByModel` base stands in for the built-in provider prompt.
+              agent: base ? { ...agent, prompt: base } : agent,
               permission: session.permission,
               sessionID,
               parentSessionID: session.parentID,
@@ -1292,6 +1295,7 @@ const layer = Layer.effect(
               tools,
               model,
               toolChoice: format.type === "json_schema" ? "required" : undefined,
+              compactionBoundary: msgs.find((m) => m.info.role === "assistant" && m.info.summary)?.info.id,
             })
 
             if (structured !== undefined) {

@@ -138,6 +138,24 @@ const LaunchCommand = cmd({
   },
 })
 
+const StableCommand = cmd({
+  command: "stable [target]",
+  describe: "open a standalone session in this window, independent of the resident server",
+  builder: (yargs: Argv) =>
+    yargs
+      .positional("target", { type: "string", describe: "project path or home-directory child" })
+      .option("portable", { type: "boolean", describe: "use a separate session database (ocPortable.db)" }),
+  handler: async (args) => {
+    const settings = await OcConfig.read()
+    const homeDir = typeof settings.homeDir === "string" ? settings.homeDir : os.homedir()
+    const ocDir = typeof settings.ocDir === "string" ? settings.ocDir : undefined
+    const tui = [resolveTargetDirectory(args.target, ocDir, homeDir)]
+    if (typeof settings.sessionModel === "string") tui.push("--model", settings.sessionModel)
+    if (typeof settings.sessionAgent === "string") tui.push("--agent", settings.sessionAgent)
+    await runNative(tui, { env: { OC_STABLE: "1", ...(args.portable ? { OPENCODE_DB: "ocPortable.db" } : {}) } })
+  },
+})
+
 const PreviousCommand = cmd({
   command: "previous",
   describe: "open a previous global session",
@@ -214,6 +232,7 @@ export const OcCommand = cmd({
       })
       .command(LaunchCommand)
       .command(PreviousCommand)
+      .command(StableCommand)
       .command(DiagnosticsCommand)
       .check((argv) => {
         const flags = Boolean(argv["restart-server"]) || Boolean(argv["kill-server"]) || Boolean(argv["shutdown-server"])

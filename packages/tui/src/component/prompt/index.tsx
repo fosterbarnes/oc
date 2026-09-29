@@ -1116,6 +1116,17 @@ export function Prompt(props: PromptProps) {
           ]
         : []
 
+    // Pull known "/command" words from anywhere in the text; unknown ones like "/usr/bin" stay
+    const commands: typeof sync.data.command = []
+    const rest = inputText
+      .replace(/(^|\s)\/(\S+)(?=\s|$)/g, (match, lead: string, name: string) => {
+        const command = sync.data.command.find((x) => x.name === name)
+        if (!command) return match
+        commands.push(command)
+        return lead === "\n" ? lead : ""
+      })
+      .trim()
+
     if (store.mode === "shell") {
       move.startSubmit()
       void sdk.client.session.shell({
@@ -1128,21 +1139,14 @@ export function Prompt(props: PromptProps) {
         command: inputText,
       })
       setStore("mode", "normal")
-    } else if (
-      inputText.startsWith("/") &&
-      sync.data.command.some((x) => x.name === inputText.split("\n")[0].split(" ")[0].slice(1))
-    ) {
+    } else if (commands.length) {
       move.startSubmit()
-      // Parse command from first line, preserve multi-line content in arguments
-      const firstLineEnd = inputText.indexOf("\n")
-      const firstLine = firstLineEnd === -1 ? inputText : inputText.slice(0, firstLineEnd)
-      const [command, ...firstLineArgs] = firstLine.split(" ")
-      const restOfInput = firstLineEnd === -1 ? "" : inputText.slice(firstLineEnd + 1)
-      const args = firstLineArgs.join(" ") + (restOfInput ? "\n" + restOfInput : "")
+      // First command runs natively; later templates lead the arguments in typed order
+      const args = [...commands.slice(1).map((x) => x.template), rest].filter(Boolean).join("\n")
 
       void sdk.client.session.command({
         sessionID,
-        command: command.slice(1),
+        command: commands[0].name,
         arguments: args,
         agent: agent.name,
         model: `${selectedModel.providerID}/${selectedModel.modelID}`,

@@ -221,7 +221,8 @@ describe("Instruction.system", () => {
         expect(paths.has(path.join(projectTmp, "AGENTS.md"))).toBe(true)
         expect(paths.has(path.join(globalTmp, "AGENTS.md"))).toBe(true)
 
-        const rules = yield* svc.system()
+        // Only files from the temp dirs: the temp root may sit under a home folder with its own AGENTS.md.
+        const rules = (yield* svc.system()).filter((rule) => rule.includes(globalTmp) || rule.includes(projectTmp))
         expect(rules).toHaveLength(2)
         expect(rules[0]).toBe(`Instructions from: ${path.join(globalTmp, "AGENTS.md")}\n# Global Instructions`)
         expect(rules[1]).toBe(`Instructions from: ${path.join(projectTmp, "AGENTS.md")}\n# Project Instructions`)
@@ -239,11 +240,58 @@ describe("Instruction.system", () => {
         const paths = yield* svc.systemPaths()
         expect(paths.has(path.join(globalTmp, ".claude", "CLAUDE.md"))).toBe(false)
         expect(paths.has(path.join(projectTmp, "CLAUDE.md"))).toBe(false)
-        expect(yield* svc.system()).toEqual([])
+        const own = (yield* svc.system()).filter((rule) => rule.includes(globalTmp) || rule.includes(projectTmp))
+        expect(own).toEqual([])
       }).pipe(
         provideInstance(projectTmp),
         provideInstruction({ home: globalTmp, config: globalTmp }, { disableClaudeCodePrompt: true }),
       )
+    }),
+  )
+})
+
+describe("Instruction instructionsByModel", () => {
+  const byModelLayer = (dir: string) =>
+    AppNodeBuilder.build(Instruction.node, [
+      [
+        Config.node,
+        Layer.succeed(
+          Config.Service,
+          TestConfig.make({
+            get: () =>
+              Effect.succeed({
+                instructionsByModel: {
+                  "claude-code/*": [{ base: path.join(dir, "base.md") }, path.join(dir, "claude.md")],
+                  "cursor/*": [path.join(dir, "cursor.md")],
+                },
+              }),
+          }),
+        ),
+      ],
+      [Global.node, Global.layerWith({ home: dir, config: dir })],
+      [RuntimeFlags.node, RuntimeFlags.layer({})],
+    ])
+
+  it.live("adds files and base only for matching models", () =>
+    Effect.gen(function* () {
+      const dir = yield* tmpWithFiles({ "base.md": "# Base", "claude.md": "# Claude", "cursor.md": "# Cursor" })
+      const projectTmp = yield* tmpdirScoped()
+
+      yield* Effect.gen(function* () {
+        const svc = yield* Instruction.Service
+        // Only files from `dir`: the temp root may sit under a home folder with its own AGENTS.md.
+        const own = (rules: string[]) => rules.filter((rule) => rule.includes(dir))
+        expect(own(yield* svc.system("claude-code/claude-opus-5-5"))).toEqual([
+          `Instructions from: ${path.join(dir, "claude.md")}\n# Claude`,
+        ])
+        expect(own(yield* svc.system("cursor/composer-2.5"))).toEqual([
+          `Instructions from: ${path.join(dir, "cursor.md")}\n# Cursor`,
+        ])
+        expect(own(yield* svc.system("openai/gpt-5.6"))).toEqual([])
+        expect(own(yield* svc.system())).toEqual([])
+        expect(yield* svc.base("claude-code/claude-opus-5-5")).toBe("# Base")
+        expect(yield* svc.base("cursor/composer-2.5")).toBeUndefined()
+      }).pipe(provideInstance(projectTmp), Effect.provide(byModelLayer(dir)))
     }),
   )
 })

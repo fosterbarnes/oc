@@ -69,12 +69,12 @@ function View(props: { api: TuiPluginApi; sessionID: string }) {
         <span style={{ fg: theme().text }}>{path().name}</span>
       </text>
       <text fg={theme().textMuted}>
-        <span style={{ fg: theme().success }}>•</span> <b>Open</b>
+        <span style={{ fg: theme().success }}>-</span>{" "}
         <span style={{ fg: theme().text }}>
-          <b>Code</b>
+          <b>oc</b>
         </span>{" "}
-        {/* Custom fork: show the maintenance display value when this build provides one. */}
-        <span>{props.api.app.displayVersion ?? props.api.app.version}</span>
+        {/* Custom fork: short version, dropping the "-branch-timestamp" build suffix. */}
+        <span>v{(props.api.app.displayVersion ?? props.api.app.version).split("-")[0]}</span>
       </text>
     </box>
   )

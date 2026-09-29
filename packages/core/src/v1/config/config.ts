@@ -134,6 +134,15 @@ export const Info = Schema.Struct({
   instructions: Schema.optional(Schema.mutable(Schema.Array(Schema.String))).annotate({
     description: "Additional instruction files or patterns to include",
   }),
+  instructionsByModel: Schema.optional(
+    Schema.Record(
+      Schema.String,
+      Schema.mutable(Schema.Array(Schema.Union([Schema.String, Schema.Struct({ base: Schema.String })]))),
+    ),
+  ).annotate({
+    description:
+      "Instruction files keyed by `providerID/modelID` glob. A `{ base }` entry replaces the built-in provider prompt",
+  }),
   layout: Schema.optional(ConfigLayoutV1.Layout).annotate({ description: "@deprecated Always uses stretch layout." }),
   permission: Schema.optional(ConfigPermissionV1.Info),
   tools: Schema.optional(Schema.Record(Schema.String, Schema.Boolean)),

@@ -62,19 +62,24 @@ function normalizeLoadedConfig(data: unknown) {
   return copy
 }
 
-function isLegacyCursorPlugin(spec: ConfigPluginV1.Spec): boolean {
+function isFoldedPlugin(spec: ConfigPluginV1.Spec): boolean {
   const value = ConfigPlugin.pluginSpecifier(spec).replaceAll("\\", "/").toLowerCase()
-  return value.includes("cursor-opencode-provider@0.6.2") || value.includes("opencursor/opencode-plugin.ts")
+  return (
+    value.includes("cursor-opencode-provider@0.6.2") ||
+    value.includes("opencursor/opencode-plugin.ts") ||
+    // Claude Code is built in now; a leftover plugin entry would register its hooks twice.
+    value.includes("opencode-claude-code-plugin")
+  )
 }
 
-async function migrateLegacyCursorPlugins(filepath: string) {
+async function migrateFoldedPlugins(filepath: string) {
   if (!existsSync(filepath) || !path.extname(filepath)) return
   const text = await fsNode.readFile(filepath, "utf8")
   const data = parse(text) as { plugin?: unknown }
   if (Array.isArray(data.plugin)) {
     const next = data.plugin.filter((spec) => {
       if (typeof spec !== "string" && !Array.isArray(spec)) return true
-      return !isLegacyCursorPlugin(spec as ConfigPluginV1.Spec)
+      return !isFoldedPlugin(spec as ConfigPluginV1.Spec)
     })
     if (next.length === data.plugin.length) return
     await fsNode.writeFile(
@@ -88,7 +93,7 @@ async function migrateLegacyCursorPlugins(filepath: string) {
     )
     return
   }
-  if (typeof data.plugin !== "string" || !isLegacyCursorPlugin(data.plugin)) return
+  if (typeof data.plugin !== "string" || !isFoldedPlugin(data.plugin)) return
   await fsNode.writeFile(
     filepath,
     applyEdits(text, modify(text, ["plugin"], undefined, { formattingOptions: { insertSpaces: true, tabSize: 2 } })),
@@ -588,18 +593,18 @@ const layer = Layer.effect(
         }
 
         const legacyPluginSources = (result.plugin_origins ?? [])
-          .filter((origin) => isLegacyCursorPlugin(origin.spec))
+          .filter((origin) => isFoldedPlugin(origin.spec))
           .map((origin) => origin.source)
-        const activePlugins = result.plugin?.filter((spec) => !isLegacyCursorPlugin(spec)) ?? []
+        const activePlugins = result.plugin?.filter((spec) => !isFoldedPlugin(spec)) ?? []
         if (activePlugins.length !== (result.plugin?.length ?? 0)) {
           result.plugin = activePlugins
-          result.plugin_origins = result.plugin_origins?.filter((origin) => !isLegacyCursorPlugin(origin.spec))
+          result.plugin_origins = result.plugin_origins?.filter((origin) => !isFoldedPlugin(origin.spec))
           const files = new Set([
             ...legacyPluginSources,
             ...["config.json", "opencode.json", "opencode.jsonc"].map((file) => path.join(Global.Path.config, file)),
           ])
           yield* Effect.promise(() =>
-            Promise.all([...files].filter((file) => existsSync(file)).map(migrateLegacyCursorPlugins)),
+            Promise.all([...files].filter((file) => existsSync(file)).map(migrateFoldedPlugins)),
           )
         }
 

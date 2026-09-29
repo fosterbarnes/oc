@@ -10,6 +10,7 @@ import { RuntimeFlags } from "@/effect/runtime-flags"
 import { Flag } from "@opencode-ai/core/flag/flag"
 import { FSUtil } from "@opencode-ai/core/fs-util"
 import { withTransientReadRetry } from "@/util/effect-http-client"
+import { Wildcard } from "@/util/wildcard"
 import { Global } from "@opencode-ai/core/global"
 import type { MessageV2 } from "./message-v2"
 import type { MessageID } from "./schema"
@@ -31,10 +32,15 @@ function extract(messages: SessionV1.WithParts[]) {
   return paths
 }
 
+const isUrl = (item: string) => item.startsWith("https://") || item.startsWith("http://")
+
 export interface Interface {
   readonly clear: (messageID: MessageID) => Effect.Effect<void>
-  readonly systemPaths: () => Effect.Effect<Set<string>, FSUtil.Error>
-  readonly system: () => Effect.Effect<string[], FSUtil.Error>
+  /** `model` is `providerID/modelID`; it adds matching `instructionsByModel` files. */
+  readonly systemPaths: (model?: string) => Effect.Effect<Set<string>, FSUtil.Error>
+  readonly system: (model?: string) => Effect.Effect<string[], FSUtil.Error>
+  /** Content of the first matching `{ base }` entry, which replaces the built-in provider prompt. */
+  readonly base: (model: string) => Effect.Effect<string | undefined, FSUtil.Error>
   readonly find: (dir: string) => Effect.Effect<string | undefined, FSUtil.Error>
   readonly resolve: (
     messages: SessionV1.WithParts[],
@@ -88,6 +94,28 @@ const layer: Layer.Layer<
         .pipe(Effect.catch(() => Effect.succeed([] as string[])))
     })
 
+    const expand = Effect.fnUntraced(function* (raw: string) {
+      const instruction = raw.startsWith("~/") ? path.join(global.home, raw.slice(2)) : raw
+      return yield* (
+        path.isAbsolute(instruction)
+          ? fs.glob(path.basename(instruction), {
+              cwd: path.dirname(instruction),
+              absolute: true,
+              include: "file",
+            })
+          : relative(instruction)
+      ).pipe(Effect.catch(() => Effect.succeed([] as string[])))
+    })
+
+    // `instructions` followed by the entries of every `instructionsByModel` pattern matching `model`.
+    const entries = Effect.fnUntraced(function* (model?: string) {
+      const config = yield* cfg.get()
+      const matched = Object.entries(config.instructionsByModel ?? {}).filter(
+        ([pattern]) => model !== undefined && Wildcard.match(model, pattern),
+      )
+      return [...(config.instructions ?? []), ...matched.flatMap(([, items]) => items)]
+    })
+
     const read = Effect.fnUntraced(function* (filepath: string) {
       return yield* fs.readFileString(filepath).pipe(Effect.catch(() => Effect.succeed("")))
     })
@@ -107,8 +135,7 @@ const layer: Layer.Layer<
       s.claims.delete(messageID)
     })
 
-    const systemPaths = Effect.fn("Instruction.systemPaths")(function* () {
-      const config = yield* cfg.get()
+    const systemPaths = Effect.fn("Instruction.systemPaths")(function* (model?: string) {
       const ctx = yield* InstanceState.context
       const paths = new Set<string>()
 
@@ -132,32 +159,18 @@ const layer: Layer.Layer<
         }
       }
 
-      if (config.instructions) {
-        for (const raw of config.instructions) {
-          if (raw.startsWith("https://") || raw.startsWith("http://")) continue
-          const instruction = raw.startsWith("~/") ? path.join(global.home, raw.slice(2)) : raw
-          const matches = yield* (
-            path.isAbsolute(instruction)
-              ? fs.glob(path.basename(instruction), {
-                  cwd: path.dirname(instruction),
-                  absolute: true,
-                  include: "file",
-                })
-              : relative(instruction)
-          ).pipe(Effect.catch(() => Effect.succeed([] as string[])))
-          matches.forEach((item) => paths.add(path.resolve(item)))
-        }
+      for (const raw of yield* entries(model)) {
+        if (typeof raw !== "string" || isUrl(raw)) continue
+        const matches = yield* expand(raw)
+        matches.forEach((item) => paths.add(path.resolve(item)))
       }
 
       return paths
     })
 
-    const system = Effect.fn("Instruction.system")(function* () {
-      const config = yield* cfg.get()
-      const paths = yield* systemPaths()
-      const urls = (config.instructions ?? []).filter(
-        (item) => item.startsWith("https://") || item.startsWith("http://"),
-      )
+    const system = Effect.fn("Instruction.system")(function* (model?: string) {
+      const paths = yield* systemPaths(model)
+      const urls = (yield* entries(model)).filter((item): item is string => typeof item === "string" && isUrl(item))
 
       const files = yield* Effect.forEach(Array.from(paths), read, { concurrency: 8 })
       const remote = yield* Effect.forEach(urls, fetch, { concurrency: 4 })
@@ -166,6 +179,14 @@ const layer: Layer.Layer<
         ...Array.from(paths).flatMap((item, i) => (files[i] ? [`Instructions from: ${item}\n${files[i]}`] : [])),
         ...urls.flatMap((item, i) => (remote[i] ? [`Instructions from: ${item}\n${remote[i]}`] : [])),
       ]
+    })
+
+    const base = Effect.fn("Instruction.base")(function* (model: string) {
+      const entry = (yield* entries(model)).find((item) => typeof item !== "string")
+      if (!entry || typeof entry === "string") return undefined
+      const [file] = yield* expand(entry.base)
+      if (!file) return undefined
+      return (yield* read(file)) || undefined
     })
 
     const find = Effect.fn("Instruction.find")(function* (dir: string) {
@@ -220,7 +241,7 @@ const layer: Layer.Layer<
       return results
     })
 
-    return Service.of({ clear, systemPaths, system, find, resolve })
+    return Service.of({ clear, systemPaths, system, base, find, resolve })
   }),
 )
 

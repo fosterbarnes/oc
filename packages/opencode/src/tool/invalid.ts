@@ -12,10 +12,6 @@ export const InvalidTool = Tool.define(
     description: "Do not use",
     parameters: Parameters,
     execute: (params: { tool: string; error: string }) =>
-      Effect.succeed({
-        title: "Invalid Tool",
-        output: `The arguments provided to the tool are invalid: ${params.error}`,
-        metadata: {},
-      }),
+      Effect.die(new Error(`Tool call rejected: "${params.tool}" was not executed. ${params.error}`)),
   }),
 )

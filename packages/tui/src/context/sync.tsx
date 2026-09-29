@@ -653,6 +653,13 @@ export const {
             sdk.client.session.status({ workspace }).then((x) => {
               setStore("session_status", reconcile(x.data ?? {}))
             }),
+            // Restore prompts still pending on the server after a restart or reconnect.
+            sdk.client.question.list({ workspace }).then((x) =>
+              setStore("question", reconcile(groupBySession(x.data ?? []))),
+            ),
+            sdk.client.permission.list({ workspace }).then((x) =>
+              setStore("permission", reconcile(groupBySession(x.data ?? []))),
+            ),
             sdk.client.provider.auth({ workspace }).then((x) => setStore("provider_auth", reconcile(x.data ?? {}))),
             sdk.client.vcs.get({ workspace }).then((x) => setStore("vcs", reconcile(x.data))),
             project.workspace.sync(),
@@ -843,3 +850,13 @@ export const {
     return result
   },
 })
+
+// Event handlers binary-search these lists by id, so keep each group sorted.
+function groupBySession<T extends { id: string; sessionID: string }>(requests: T[]) {
+  return requests
+    .toSorted((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+    .reduce<Record<string, T[]>>((acc, r) => {
+      ;(acc[r.sessionID] ??= []).push(r)
+      return acc
+    }, {})
+}

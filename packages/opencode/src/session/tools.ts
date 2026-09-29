@@ -42,7 +42,7 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
   agent: Agent.Info
   model: Provider.Model
   session: Session.Info
-  processor: Pick<SessionProcessor.Handle, "message" | "updateToolCall" | "completeToolCall">
+  processor: Pick<SessionProcessor.Handle, "message" | "updateToolCall" | "completeToolCall" | "toolPartReady">
   bypassAgentCheck: boolean
   messages: SessionV1.WithParts[]
   promptOps: TaskPromptOps
@@ -102,6 +102,9 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
       execute(args, options) {
         return run.promise(
           Effect.gen(function* () {
+            // Set by the Claude Code executor in session/llm.ts; the provider emits the call just before running it.
+            if (isRecord(options.experimental_context) && options.experimental_context.awaitToolPart)
+              yield* input.processor.toolPartReady(options.toolCallId)
             const ctx = context(args, options)
             yield* plugin.trigger(
               "tool.execute.before",
@@ -398,6 +401,8 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
     item.execute = (args, opts) =>
       run.promise(
         Effect.gen(function* () {
+          if (isRecord(opts.experimental_context) && opts.experimental_context.awaitToolPart)
+            yield* input.processor.toolPartReady(opts.toolCallId)
           const ctx = context(args, opts)
           yield* plugin.trigger(
             "tool.execute.before",

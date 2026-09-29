@@ -21,7 +21,21 @@ export function apply(db: Database) {
       const tables = yield* db.all<{ name: string }>(
         sql`SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'`,
       )
-      if (tables.some((table) => table.name === "session")) return yield* applyOnly(db, migrations)
+      if (tables.some((table) => table.name === "session")) {
+        // Stock OpenCode shares this database path; its newer migrations rewrite tables oc still uses.
+        const unknown = tables.some((table) => table.name === "migration")
+          ? (yield* db.all<{ id: string }>(sql`SELECT id FROM ${sql.identifier("migration")}`))
+              .map((row) => row.id)
+              .filter((id) => !migrations.some((migration) => migration.id === id))
+          : []
+        if (unknown.length > 0)
+          return yield* Effect.die(
+            new Error(
+              `Database was migrated by a different OpenCode build (${unknown.join(", ")}). Restore a backup of opencode.db and run that build with its own data directory.`,
+            ),
+          )
+        return yield* applyOnly(db, migrations)
+      }
       if (tables.length > 0) return yield* Effect.die("Database is not empty and has no session table")
       yield* db.transaction((tx) =>
         Effect.gen(function* () {

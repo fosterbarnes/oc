@@ -2049,6 +2049,14 @@ export type Config = {
             }
       }
   instructions?: Array<string>
+  instructionsByModel?: {
+    [key: string]: Array<
+      | string
+      | {
+          base: string
+        }
+    >
+  }
   layout?: LayoutConfig
   permission?: PermissionConfig
   tools?: {

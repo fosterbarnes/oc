@@ -17,6 +17,7 @@ import type { Agent } from "@/agent/agent"
 import type { MessageV2 } from "./message-v2"
 import { Plugin } from "@/plugin"
 import { Permission } from "@/permission"
+import { Question } from "@/question"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { EventV2 } from "@opencode-ai/core/event"
 import { Wildcard } from "@/util/wildcard"
@@ -29,6 +30,7 @@ import * as OtelTracer from "@effect/opentelemetry/Tracer"
 import { LLMAISDK } from "./llm/ai-sdk"
 import { LLMNativeRuntime } from "./llm/native-runtime"
 import { LLMRequestPrep } from "./llm/request"
+import { hostToolExecutors, isClaudeCodeProvider, type HostToolResult } from "@/provider/claude-code/shared"
 
 export const OUTPUT_TOKEN_MAX = ProviderTransform.OUTPUT_TOKEN_MAX
 
@@ -45,6 +47,8 @@ export type StreamInput = {
   tools: Record<string, Tool>
   retries?: number
   toolChoice?: "auto" | "required" | "none"
+  /** Summary message id the history starts from; providers reset their own conversation when it changes. */
+  compactionBoundary?: string
 }
 
 export type StreamRequest = StreamInput & {
@@ -116,6 +120,32 @@ const live: Layer.Layer<
       // from the workflow service are executed via opencode's tool system
       // and results sent back over the WebSocket.
       const bridge = yield* EffectBridge.make()
+      // Claude Code runs oc tools inside its own stream (providerExecuted), so it needs the bound tools.
+      // Tool-less calls (title, summary) share the session id and must not replace the turn's executor.
+      if (isClaudeCodeProvider(input.model.providerID) && Object.keys(prepared.tools).length > 0) {
+        const executeHostTool = async (name: string, args: Record<string, unknown>, callID: string) => {
+          const execute = prepared.tools[name]?.execute
+          if (!execute) throw new Error(`Unknown tool: ${name}`)
+          return (await Promise.resolve(
+            execute(args, {
+              toolCallId: callID,
+              messages: prepared.messages,
+              abortSignal: input.abort,
+              experimental_context: { awaitToolPart: true },
+            }),
+          ).catch((error) => {
+            if (error instanceof PermissionV1.RejectedError || error instanceof Question.RejectedError)
+              return { output: "Denied by user.", denied: error }
+            throw error
+          })) as HostToolResult
+        }
+        hostToolExecutors.set(input.sessionID, executeHostTool)
+        yield* Effect.addFinalizer(() =>
+          Effect.sync(() => {
+            if (hostToolExecutors.get(input.sessionID) === executeHostTool) hostToolExecutors.delete(input.sessionID)
+          }),
+        )
+      }
       if (language instanceof GitLabWorkflowLanguageModel) {
         const workflowModel = language as GitLabWorkflowLanguageModel & {
           sessionID?: string

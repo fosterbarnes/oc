@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test"
 import {
+  moveModelFavorite,
   parseModel,
   pruneSessionAgents,
   pruneSessionModelOverrides,
@@ -8,6 +9,18 @@ import {
   resolveSessionAgent,
   resolveSessionModel,
 } from "../../src/context/local"
+
+test("moves a favorite one place and leaves it unchanged at the edge", () => {
+  const favorites = [
+    { providerID: "provider", modelID: "first" },
+    { providerID: "provider", modelID: "second" },
+    { providerID: "provider", modelID: "third" },
+  ]
+
+  expect(moveModelFavorite(favorites, favorites[1]!, -1)).toEqual([favorites[1], favorites[0], favorites[2]])
+  expect(moveModelFavorite(favorites, favorites[0]!, -1)).toBe(favorites)
+  expect(moveModelFavorite(favorites, favorites[2]!, 1)).toBe(favorites)
+})
 
 test("parses model IDs containing slashes", () => {
   expect(parseModel("provider/family/model")).toEqual({

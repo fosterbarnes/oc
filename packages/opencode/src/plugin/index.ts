@@ -34,6 +34,7 @@ import { RuntimeFlags } from "@/effect/runtime-flags"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { InstallationChannel } from "@opencode-ai/core/installation/version"
 import { CursorPlugin } from "./cursor"
+import { ClaudeCodePlugin } from "@/provider/claude-code"
 
 type State = {
   hooks: Hooks[]
@@ -84,6 +85,7 @@ function internalPlugins(flags: RuntimeFlags.Info): PluginInstance[] {
     XaiAuthPlugin,
     CerebrasPlugin,
     CursorPlugin,
+    ClaudeCodePlugin,
   ]
 }
 

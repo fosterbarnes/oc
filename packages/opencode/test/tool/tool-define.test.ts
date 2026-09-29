@@ -3,6 +3,7 @@ import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { Cause, Effect, Exit, Schema } from "effect"
 import { Agent } from "../../src/agent/agent"
 import { MessageID, SessionID } from "../../src/session/schema"
+import { InvalidTool } from "@/tool/invalid"
 import { Tool } from "@/tool/tool"
 import { Truncate } from "@/tool/truncate"
 import { testEffect } from "../lib/effect"
@@ -39,6 +40,30 @@ function makeTool(id: string, executeFn?: () => void) {
 }
 
 describe("Tool.define", () => {
+  it.effect("invalid tool calls fail instead of returning a successful result", () =>
+    Effect.gen(function* () {
+      const info = yield* InvalidTool
+      const tool = yield* Tool.init(info)
+      const exit = yield* tool
+        .execute(
+          {
+            tool: "ListAgents",
+            error: "Model tried to call unavailable tool 'ListAgents'",
+          },
+          makeCtx(),
+        )
+        .pipe(Effect.exit)
+
+      expect(Exit.isFailure(exit)).toBe(true)
+      if (!Exit.isFailure(exit)) return
+      const die = exit.cause.reasons.find(Cause.isDieReason)
+      expect(die?.defect).toBeInstanceOf(Error)
+      if (!(die?.defect instanceof Error)) return
+      expect(die.defect.message).toContain('Tool call rejected: "ListAgents" was not executed')
+      expect(die.defect.message).toContain("unavailable tool")
+    }),
+  )
+
   it.effect("object-defined tool does not mutate the original init object", () =>
     Effect.gen(function* () {
       const original = makeTool("test")
