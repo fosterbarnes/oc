@@ -63,7 +63,7 @@ export const SessionTailTool = Tool.define(
             always: ["*"],
             metadata: {},
           })
-          const messages = yield* session.messages({ sessionID: ctx.sessionID })
+          const messages = yield* session.messages({ sessionID: ctx.sessionID }).pipe(Effect.orDie)
           const rendered = renderSessionTail(messages as Row[], ctx.sessionID, params)
           return {
             title: "Session tail",

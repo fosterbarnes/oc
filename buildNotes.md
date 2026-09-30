@@ -152,6 +152,21 @@ Since 2026-09-15 (archive3)
 
 ---
 
+## 2026-09-30 (~15:05) - r17 - Fix pre-push typecheck failures - GPT-6 Luna, n/a; Agent
+
+### Agent
+- Meta: GPT-6 Luna; n/a; Agent; completed
+- Fixed TUI sidebar nullable visible-token formatting; `state()` accessor is not narrowed across calls
+- Fixed `session_tail` typecheck: session lookup's `NotFoundError` is impossible for current-session tool context; match `plan.ts` by making it a defect
+- Bun 1.4.1 warning is non-blocking under the existing `^1.3.14` range
+- Verification: root `bun typecheck` passed all 28 tasks; `git diff --check` passed
+
+### User
+Push
+- Fixed the type errors that blocked the pre-push typecheck. The Bun version message is only a warning; Bun 1.4.1 is accepted by the current version range.
+
+---
+
 ## 2026-09-30 (~14:56) - r16 - Remove the unused claudeImports feature - Opus 5.5, low; Agent
 
 ### Agent
@@ -1095,5 +1110,4 @@ Compaction
 ### User
 Project notes
 - History through 2026-09-28 now lives in `buildNotes.archive3.md`, and the live notes file is short again.
-
 
