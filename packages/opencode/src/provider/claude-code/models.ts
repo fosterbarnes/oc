@@ -105,6 +105,7 @@ export function passthroughModel(id: string): OpenCodeModel {
 // one. Verified against the pricing docs 2026-07-26.
 const haikuCost = { input: 1, output: 5, cacheRead: 0.1, cacheWrite: 1.25 }
 const sonnetCost = { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 }
+const sonnet55Cost = { input: 2, output: 10, cacheRead: 0.2, cacheWrite: 2.5 }
 // Opus 4.5+ standard pricing is $5/M in, $25/M out (the price cut at 4.5; held
 // through 4.6/4.7/4.8/5). Cache read 0.1x input, cache write 1.25x input.
 const opusCost = { input: 5, output: 25, cacheRead: 0.5, cacheWrite: 6.25 }
@@ -220,6 +221,17 @@ export const defaultModels: Record<string, OpenCodeModel> = {
     cost: sonnetCost,
     multiplier: 3,
     releaseDate: "2026-06-30",
+  }),
+  "claude-sonnet-5-5": defineModel({
+    id: "claude-sonnet-5-5",
+    name: "Claude Sonnet 5.5",
+    family: "sonnet",
+    reasoning: true,
+    context: 1_000_000,
+    output: 128_000,
+    cost: sonnet55Cost,
+    multiplier: 2,
+    releaseDate: "2026-09-28",
   }),
   "claude-opus-4-5": defineModel({
     id: "claude-opus-4-5",

@@ -36,13 +36,13 @@ import type { LanguageModelV3CallOptions, LanguageModelV3StreamPart } from "@ai-
 
 import { claudeCodeServer, createClaudeCode, extractDeletedSessionId } from "@/provider/claude-code/index.js"
 import {
-  _setProxyDeadlineRecheckMs,
   createProxyMcpServer,
-  DEFAULT_PROXY_TOOLS,
   SERVER_CLOSED_MESSAGE,
   type ProxyMcpServer,
   type ProxyToolCall,
 } from "@/provider/claude-code/proxy-mcp.js"
+import { DEFAULT_PROXY_TOOLS } from "@/provider/claude-code/proxy-tool-defs.js"
+import { _setProxyDeadlineRecheckMs } from "@/provider/claude-code/proxy-deadline.js"
 import { getPendingProxyCalls, onPendingProxyCall, queuePendingProxyCall } from "@/provider/claude-code/proxy-broker.js"
 import { setOpencodeClient } from "@/provider/claude-code/runtime-status.js"
 import {
@@ -56,7 +56,7 @@ import {
   sessionKey,
   setActiveProcess,
   setClaudeSessionId,
-  snapshotActiveProcesses,
+  hasActiveProcess,
   type ActiveProcess,
 } from "@/provider/claude-code/session-manager.js"
 
@@ -106,7 +106,7 @@ test("the event hook releases a deleted session's processes and parked calls, an
   const stamp = Date.now()
   const cwd = `/tmp/lifecycle-${stamp}`
   const keyFor = (session: string) =>
-    sessionKey(cwd, `claude-opus-5::tools::${session}::context=["claude-code",null]`)
+    sessionKey(cwd, `tools::${session}::context=["claude-code"]`)
   const killed: string[] = []
   const gone = keyFor("ses_gone")
   const kept = keyFor("ses_kept")
@@ -188,7 +188,7 @@ readline.createInterface({ input: process.stdin }).on("line", () => {
 async function completeOneTurn(settings: { idleProcessTimeoutMs?: number }) {
   const fake = fakeAnsweringCli()
   const modelId = `claude-test-idle-${settings.idleProcessTimeoutMs ?? "default"}`
-  const sk = sessionKey(fake.cwd, `${modelId}::tools::default::context=["claude-code",null]`)
+  const sk = sessionKey(fake.cwd, `tools::default::context=["claude-code"]`)
   try {
     const model = createClaudeCode({
       cliPath: fake.cliPath,
@@ -206,14 +206,14 @@ async function completeOneTurn(settings: { idleProcessTimeoutMs?: number }) {
     assert.equal(parts.find((part) => part.type === "finish")?.finishReason.unified, "stop")
     // Read-only: `getActiveProcess` counts as reuse and would disarm the timer.
     assert.ok(
-      snapshotActiveProcesses().some((snapshot) => snapshot.sessionKey === sk),
+      hasActiveProcess(sk),
       "the worker is retained for the next turn",
     )
     return isIdleProcessEvictionScheduled(sk)
   } finally {
     await deleteActiveProcessAndWait(sk)
     deleteClaudeSessionId(sk)
-    rmSync(fake.cwd, { recursive: true, force: true })
+    rmSync(fake.cwd, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 })
   }
 }
 
@@ -384,7 +384,7 @@ async function withParkedTaskCli(
 ) {
   const fake = parkedTaskCli(mode)
   const modelId = `claude-test-lifecycle-${mode}`
-  const sk = sessionKey(fake.cwd, `${modelId}::tools::${session}::context=["claude-code",null]`)
+  const sk = sessionKey(fake.cwd, `tools::${session}::context=["claude-code"]`)
   let captured: ProxyMcpServer | undefined
   try {
     const model = createClaudeCode({
@@ -407,7 +407,7 @@ async function withParkedTaskCli(
   } finally {
     await deleteActiveProcessAndWait(sk)
     deleteClaudeSessionId(sk)
-    rmSync(fake.cwd, { recursive: true, force: true })
+    rmSync(fake.cwd, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 })
   }
 }
 

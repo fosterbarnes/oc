@@ -1,15 +1,14 @@
 // @ts-nocheck
 // WIP: ported from opencode-claude-code-plugin, which never typechecked its tests; type them as Phase 3 rewrites land.
 /**
- * Per-turn cost and cache stats: the pure formatter, the `turnStats` option
- * default, and the strip that keeps the footer out of a rebuilt transcript.
+ * Per-turn cost and cache stats: the pure formatter and the `turnStats` option
+ * default.
  *
  * Usage: npx tsx --test test-turn-stats.ts
  */
 import assert from "node:assert/strict"
 import { test } from "node:test"
 import { createClaudeCode } from "@/provider/claude-code/index.js"
-import { stripPluginHistory } from "@/provider/claude-code/message-builder.js"
 import {
   TURN_STATS_MARKER,
   extractTurnStats,
@@ -115,24 +114,6 @@ test("the log payload is emitted whether or not the footer is", () => {
   const empty = turnStatsLogPayload(extractTurnStats({ type: "result" }))
   assert.equal(empty.costUsd, null)
   assert.equal(empty.permissionDenials, 0)
-})
-
-test("the footer is stripped from a transcript rebuilt for the CLI", () => {
-  const footer = formatTurnStatsBlock(extractTurnStats(fullResult))!
-  const prompt = [
-    { role: "user", content: [{ type: "text", text: "hi" }] },
-    {
-      role: "assistant",
-      content: [
-        { type: "text", text: "the answer" },
-        { type: "text", text: footer },
-      ],
-    },
-  ] as any
-
-  const filtered = stripPluginHistory(prompt)
-  assert.equal(filtered.length, 2)
-  assert.deepEqual((filtered[1] as any).content, [{ type: "text", text: "the answer" }])
 })
 
 test("turnStats is off unless the provider option asks for it", () => {

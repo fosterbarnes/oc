@@ -140,6 +140,18 @@ test("configModelsForProvider registers Sonnet 5 and Opus 5 metadata", () => {
   assert.ok("max" in (opus.variants as Record<string, unknown>))
 })
 
+test("configModelsForProvider registers Sonnet 5.5 metadata", () => {
+  const model = configModelsForProvider({}, "claude-code")["claude-sonnet-5-5"] as Record<string, unknown>
+  assert.ok(model, "claude-sonnet-5-5 should be present")
+  assert.equal(model.name, "Claude Sonnet 5.5 (2\u00d7)")
+  assert.equal(model.family, "sonnet")
+  assert.equal(model.release_date, "2026-09-28")
+  assert.equal(model.reasoning, true)
+  assert.deepEqual(model.limit, { context: 1_000_000, output: 128_000 })
+  assert.deepEqual(model.cost, { input: 2, output: 10, cache_read: 0.2, cache_write: 2.5 })
+  assert.ok("max" in (model.variants as Record<string, unknown>))
+})
+
 // Fast mode is only registered for the two models the CLI actually gates it
 // on, and it is priced at the Mythos-class rate ($10/$50 per MTok), which is
 // the exact table the CLI applies for `speed: "fast"`. A fast entry priced at
@@ -245,6 +257,7 @@ test("configModelsForProvider reports the published context and output limits", 
   for (const id of [
     "claude-sonnet-4-6",
     "claude-sonnet-5",
+    "claude-sonnet-5-5",
     "claude-opus-4-6",
     "claude-opus-4-7",
     "claude-opus-4-8",

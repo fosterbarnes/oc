@@ -18,8 +18,7 @@ import { join } from "node:path"
 
 import { STREAM_TIMEOUT_MARKER, formatStreamTimeoutNote } from "@/provider/claude-code/cli-events.js"
 import { createClaudeCode } from "@/provider/claude-code/index.js"
-import { stripPluginHistory } from "@/provider/claude-code/message-builder.js"
-import { deleteActiveProcess, sessionKey } from "@/provider/claude-code/session-manager.js"
+import { deleteActiveProcessAndWait, sessionKey } from "@/provider/claude-code/session-manager.js"
 
 /** Replays a fixed line sequence, then stays alive and silent forever. */
 function createSilentFakeCli(lines: unknown[]) {
@@ -60,7 +59,7 @@ async function streamParts(lines: unknown[], fallbackMs: number): Promise<any[]>
   const modelId = "claude-test-result-fallback"
   const sk = sessionKey(
     fake.cwd,
-    `${modelId}::tools::default::context=["claude-code",null]`,
+    `tools::default::context=["claude-code"]`,
   )
   const previous = process.env.CLAUDE_CODE_RESULT_FALLBACK_MS
   process.env.CLAUDE_CODE_RESULT_FALLBACK_MS = String(fallbackMs)
@@ -89,8 +88,8 @@ async function streamParts(lines: unknown[], fallbackMs: number): Promise<any[]>
   } finally {
     if (previous === undefined) delete process.env.CLAUDE_CODE_RESULT_FALLBACK_MS
     else process.env.CLAUDE_CODE_RESULT_FALLBACK_MS = previous
-    deleteActiveProcess(sk)
-    rmSync(fake.cwd, { recursive: true, force: true })
+    await deleteActiveProcessAndWait(sk)
+    rmSync(fake.cwd, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 })
   }
 }
 
@@ -118,23 +117,6 @@ test("a CLI that goes silent after content says so, and the stream closes", asyn
 
   // The stream really ended rather than hanging until the test timeout.
   assert.ok(parts.some((part) => part.type === "finish"))
-})
-
-test("the note is stripped from a rebuilt transcript", () => {
-  const prompt = [
-    { role: "user", content: [{ type: "text", text: "go" }] },
-    {
-      role: "assistant",
-      content: [
-        { type: "text", text: "half an ans" },
-        { type: "text", text: formatStreamTimeoutNote(60_000) },
-      ],
-    },
-  ] as any
-
-  const filtered = stripPluginHistory(prompt)
-  assert.equal(filtered.length, 2)
-  assert.deepEqual((filtered[1] as any).content, [{ type: "text", text: "half an ans" }])
 })
 
 test("the note rounds the silence to whole seconds, never to zero", () => {

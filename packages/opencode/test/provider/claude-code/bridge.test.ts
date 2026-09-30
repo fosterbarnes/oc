@@ -55,7 +55,7 @@ async function withIsolatedEnv<T>(fn: (xdgRoot: string) => Promise<T> | T): Prom
       if (v === undefined) delete process.env[k]
       else process.env[k] = v
     }
-    fs.rmSync(xdgRoot, { recursive: true, force: true })
+    fs.rmSync(xdgRoot, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 })
   }
 }
 

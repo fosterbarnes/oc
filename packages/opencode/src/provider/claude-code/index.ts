@@ -13,21 +13,15 @@ import { DEFAULT_PROXY_TOOL_NAMES } from "./types.js"
 import type { ClaudeCodeProviderSettings } from "./types.js"
 import {
   BASE_PROVIDER_ID,
-  accountDisplayName,
-  accountModelSuffix,
-  accountProviderId,
   ensureAccountRuntime,
-  resolveAccounts,
 } from "./accounts.js"
 import {
   type AgentRecord,
   agentDirectories,
   getDefaultSubagentModel,
-  parseFallbackModelList,
   readAgentMarkdownRecords,
   setAgentRegistry,
   setDefaultSubagentModel,
-  setProviderFallbackModels,
 } from "./agent-models.js"
 import { configureLogger, log } from "./logger.js"
 import {
@@ -35,10 +29,7 @@ import {
   resolvePermissionPreset,
   type ResolvedPermissionPreset,
 } from "./permission-presets.js"
-import {
-  deleteActiveProcessesForSession,
-  ensureProcessExitCleanup,
-} from "./session-manager.js"
+import { deleteActiveProcessesForSession, ensureProcessExitCleanup } from "./session-manager.js"
 import {
   getOpencodeProjectDirectory,
   isUsableDirectory,
@@ -60,7 +51,7 @@ export interface ClaudeCodeProvider {
 // Picks the best directory from opencode's plugin context (`directory` /
 // `worktree`). Result is handed to runtime-status so it's available as a
 // *fallback* at spawn time only when `process.cwd()` is unusable (macOS
-// GUI launches at `/`). Never baked into provider config — see #4.
+// GUI launches at `/`). Never baked into provider config - see #4.
 function pickOpencodeDirectory(input: unknown): string | undefined {
   if (!input || typeof input !== "object") return undefined
   const ctx = input as { directory?: unknown; worktree?: unknown }
@@ -71,11 +62,6 @@ function pickOpencodeDirectory(input: unknown): string | undefined {
 
 let warnedAnthropicApiKey = false
 let warnedPlanModeNoExit = false
-
-// Defined in `types.ts` so `permission-presets.ts` and the two diagnostics
-// modules can read it without importing this file, and re-exported here
-// unchanged because it is part of the package's public surface.
-export { DEFAULT_PROXY_TOOL_NAMES } from "./types.js"
 
 // One-time heads-up: an API key in the environment makes Claude Code bill
 // pay-as-you-go (Console) instead of the logged-in Pro/Max subscription, which
@@ -182,10 +168,6 @@ export function createClaudeCode(
       cwd: settings.cwd,
       account: settings.account,
       configDir: settings.configDir,
-      // TODO: parked extra (account failover). No candidates means failover never arms.
-      // failoverAccounts: settings.failoverAccounts,
-      baseCliPath: settings.baseCliPath ?? cliPath,
-      accountFailover: settings.accountFailover ?? "ask",
       providerID: settings.providerID,
       skipPermissions: preset?.skipPermissions ?? settings.skipPermissions ?? true,
       permissionMode: preset?.permissionMode ?? settings.permissionMode,
@@ -198,24 +180,14 @@ export function createClaudeCode(
       extraDisallowedTools:
         preset?.extraDisallowedTools ?? settings.extraDisallowedTools,
       proxyToolTimeoutMs: settings.proxyToolTimeoutMs,
-      // TODO: parked extra (plan-mode question form).
-      // planModeQuestion: settings.planModeQuestion ?? false,
-      planModeQuestion: false,
       webSearch: settings.webSearch,
       hotReloadMcp: settings.hotReloadMcp ?? true,
       multiStepContinuation: settings.multiStepContinuation ?? true,
       autoContinueIncompleteTurns:
         settings.autoContinueIncompleteTurns ?? "smart",
-      compactionModel: settings.compactionModel,
       ignoreAnthropicApiKey: settings.ignoreAnthropicApiKey,
       idleProcessTimeoutMs: settings.idleProcessTimeoutMs,
       turnStats: settings.turnStats === true,
-      // TODO: parked extra (interactive PTY transport). Headless stream-json only.
-      // interactive: settings.interactive,
-      // interactiveBypass: settings.interactiveBypass,
-      // interactiveAllowTools: settings.interactiveAllowTools,
-      // interactiveSystemPrompt: settings.interactiveSystemPrompt,
-      interactive: false,
     })
   }
 
@@ -249,39 +221,43 @@ function cleanProviderOptions(
 function defaultModelsForProvider(
   providerModels: OpenCodeProvider["models"],
   providerID = PROVIDER_ID,
-  modelSuffix?: string,
 ) {
-  const models = Object.fromEntries(
-    Object.entries(defaultModels).map(([id, model]) => {
-      const modelId = modelSuffix ? `${id}@${modelSuffix}` : id
-      const existing = providerModels[id] ?? providerModels[modelId]
-      return [
-        modelId,
-        {
-          ...model,
-          id: modelId,
-          providerID,
-          api: {
-            ...model.api,
-            id: modelId,
-            npm: existing?.api?.npm ?? model.api.npm,
-            url: existing?.api?.url ?? model.api.url,
-          },
-        },
-      ]
+  const models: Record<string, OpenCodeModel> = Object.fromEntries(
+    Object.keys(defaultModels).map((id) => {
+      const model = registeredModel(id, providerModels, providerID)
+      return [model.id, model]
     }),
   )
-
   for (const [id, model] of Object.entries(providerModels)) {
-    if (!(id in models)) {
-      models[id] = {
-        ...model,
-        providerID,
-      }
-    }
+    if (!(id in models)) models[id] = { ...model, providerID }
   }
-
   return models
+}
+
+/**
+ * One built-in model as this provider registers it. Keeps the npm package and
+ * URL of an entry the operator already declared under the same id.
+ */
+function registeredModel(
+  id: string,
+  providerModels: OpenCodeProvider["models"],
+  providerID: string,
+  modelSuffix?: string,
+): OpenCodeModel {
+  const model = defaultModels[id]
+  const modelId = modelSuffix ? `${id}@${modelSuffix}` : id
+  const existing = providerModels[id] ?? providerModels[modelId]
+  return {
+    ...model,
+    id: modelId,
+    providerID,
+    api: {
+      ...model.api,
+      id: modelId,
+      npm: existing?.api?.npm ?? model.api.npm,
+      url: existing?.api?.url ?? model.api.url,
+    },
+  }
 }
 
 /**
@@ -295,30 +271,17 @@ export function configModelsForProvider(
   modelSuffix?: string,
 ): Record<string, Record<string, unknown>> {
   const models: Record<string, Record<string, unknown>> = {}
-
-  for (const [id, model] of Object.entries(defaultModels)) {
-    const modelId = modelSuffix ? `${id}@${modelSuffix}` : id
-    const existing = providerModels[id] ?? providerModels[modelId]
-    const existingVariants =
-      existing && typeof (existing as { variants?: unknown }).variants === "object"
-        ? ((existing as { variants?: Record<string, Record<string, unknown>> }).variants ?? {})
-        : {}
-    const full: OpenCodeModel = {
+  for (const id of Object.keys(defaultModels)) {
+    const model = registeredModel(id, providerModels, providerID, modelSuffix)
+    const existing = providerModels[id] ?? providerModels[model.id]
+    const existingVariants = (existing as { variants?: unknown } | undefined)?.variants
+    models[model.id] = toConfigModel({
       ...model,
-      id: modelId,
-      providerID,
-      api: {
-        ...model.api,
-        id: modelId,
-        npm: existing?.api?.npm ?? model.api.npm,
-        url: existing?.api?.url ?? model.api.url,
-      },
       variants: {
         ...(model.variants ?? {}),
-        ...existingVariants,
+        ...(isRecord(existingVariants) ? (existingVariants as OpenCodeModel["variants"]) : {}),
       },
-    }
-    models[modelId] = toConfigModel(full)
+    })
   }
 
   for (const [id, model] of Object.entries(providerModels)) {
@@ -411,10 +374,6 @@ async function providerConfig(
     options: {
       ...mergedOptions,
       ...runtime,
-      // The pre-wrapper binary, kept because `runtime` replaces `cliPath`
-      // with the account's wrapper and a failover has to build ANOTHER
-      // account's wrapper on top of the same base (src/account-failover.ts).
-      baseCliPath: cliPath,
     },
     // models is intentionally omitted: both callers overwrite it with
     // configModelsForProvider(), which emits the flat config schema
@@ -437,79 +396,10 @@ export function claudeCodeProviders(
   return out
 }
 
-async function expandAccountProviders(config: {
-  provider?: Record<
-    string,
-    {
-      name?: string
-      npm?: string
-      options?: Record<string, unknown>
-      models?: Record<string, unknown>
-    }
-  >
-}): Promise<boolean> {
-  const seed = config.provider?.[PROVIDER_ID]
-  const accounts = resolveAccounts(seed?.options?.accounts)
-
-  if (!accounts) return false
-
-  config.provider ??= {}
-
-  const seedOptions = cleanProviderOptions(seed?.options)
-  let expandedCount = 0
-
-  for (const account of accounts) {
-    const providerID = accountProviderId(account)
-    try {
-      const existing = config.provider[providerID]
-      const modelSuffix = accountModelSuffix(account)
-
-      config.provider[providerID] = {
-        ...existing,
-        ...(await providerConfig(
-          existing,
-          providerID,
-          {
-            ...seedOptions,
-            account,
-            // The resolved list, so this account's language model can offer
-            // the others when it runs out of usage. `accounts` itself stays
-            // stripped by cleanProviderOptions.
-            failoverAccounts: accounts,
-          },
-          accountDisplayName(account),
-        )),
-        models: configModelsForProvider(
-          (existing?.models ?? seed?.models ?? {}) as OpenCodeProvider["models"],
-          providerID,
-          modelSuffix,
-        ),
-      }
-      expandedCount++
-    } catch (err) {
-      log.error("failed to expand account provider", {
-        account,
-        providerID,
-        error: String(err),
-      })
-    }
-  }
-
-  if (expandedCount > 0) {
-    delete config.provider[PROVIDER_ID]
-  }
-
-  return expandedCount > 0
-}
-
 /**
  * Record what every known agent asked for, so `resolveAgentModel` and
  * `resolveAgentEffort` can answer at spawn time without the language model
  * needing to see opencode's config.
- *
- * Runs BEFORE `expandAccountProviders`, which deletes the seed provider entry
- * once it has expanded it: `defaultSubagentModel` has to be read while it is
- * still there.
  *
  * Purely observational. It defines no agents and changes no agent's config;
  * an agent this plugin never heard of is simply absent from the registry,
@@ -521,8 +411,6 @@ export async function buildAgentRegistry(config: OpenCodeConfig): Promise<void> 
   setDefaultSubagentModel(
     typeof configured === "string" ? configured : undefined,
   )
-  setProviderFallbackModels(parseFallbackModelList(options?.fallbackModels))
-
   // Markdown agents may or may not reach a plugin's config hook (undocumented
   // either way), so they are read from disk and then overlaid with whatever
   // config does carry, which is authoritative when both describe one agent.
@@ -540,21 +428,12 @@ export async function buildAgentRegistry(config: OpenCodeConfig): Promise<void> 
       return typeof value === "string" ? value : undefined
     }
 
-    // A list, unlike the four scalars, so it cannot go through `pick`, and an
-    // empty declaration must not erase what the markdown file said.
-    const declaredChain = parseFallbackModelList(
-      (agent as Record<string, unknown>).fallbackModels ?? bag.fallbackModels,
-    )
-
     records[name] = {
       mode: pick("mode") ?? records[name]?.mode,
       model: pick("model") ?? records[name]?.model,
       forceModel: pick("forceModel") ?? records[name]?.forceModel,
       reasoningEffort:
         pick("reasoningEffort") ?? records[name]?.reasoningEffort,
-      fallbackModels: declaredChain.length
-        ? declaredChain
-        : records[name]?.fallbackModels,
     }
   }
 
@@ -606,16 +485,6 @@ export const claudeCodeServer: OpenCodePlugin = async (input) => {
 
       await buildAgentRegistry(config)
 
-      // TODO: parked extra (multiple accounts). Restore to expand `claude-code-<account>` providers.
-      // const expanded = await expandAccountProviders(config)
-      // if (expanded) {
-      //   logStartupDiagnostics(
-      //     claudeCodeProviders(config.provider),
-      //     opencodeVersion,
-      //   )
-      //   return
-      // }
-
       const existing = config.provider[PROVIDER_ID]
       config.provider[PROVIDER_ID] = {
         ...existing,
@@ -631,7 +500,7 @@ export const claudeCodeServer: OpenCodePlugin = async (input) => {
       )
     },
     // Only `session.deleted` is acted on. MCP config drift is still detected
-    // at turn start by the hot-reload check in `claude-code-language-model.ts`,
+    // at turn start by the hot-reload check in `turn-stream.ts`,
     // which respawns claude safely between turns, and eviction on
     // `global.disposed` would kill an in-flight stream and abort the user's
     // current turn. A deleted session has no turn left to abort, and its
@@ -655,22 +524,3 @@ export const claudeCodeServer: OpenCodePlugin = async (input) => {
 // Built-in plugin, registered in plugin/index.ts internalPlugins.
 // WIP: hooks still use the plugin-era loose types in opencode-types.ts; drop the cast when those go.
 export const ClaudeCodePlugin = claudeCodeServer as unknown as Plugin
-
-// ---------------------------------------------------------------------------
-// Re-exports
-// ---------------------------------------------------------------------------
-
-export { ClaudeCodeLanguageModel } from "./claude-code-language-model.js"
-export {
-  type AgentRecord,
-  getAgentRegistry,
-  getDefaultSubagentModel,
-  resolveAgentModel,
-} from "./agent-models.js"
-export { defaultModels } from "./models.js"
-export type {
-  ClaudeCodeConfig,
-  ClaudeCodeProviderSettings,
-  ClaudeStreamMessage,
-} from "./types.js"
-export type { OpenCodeHooks, OpenCodeModel, OpenCodePlugin } from "./opencode-types.js"

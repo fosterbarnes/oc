@@ -2,9 +2,9 @@
  * Claude Code's `AskUserQuestion`: recognising it, rendering it to the
  * operator, and the message the model gets back when it is denied.
  *
- * Split out of `claude-code-language-model.ts` verbatim. The deny path is
- * load-bearing (issue #8): the message must tell the model to stop and wait
- * unconditionally, and must never offer a proceed-anyway escape hatch.
+ * The deny path is load-bearing (issue #8): the message must tell the model
+ * to stop and wait unconditionally, and must never offer a proceed-anyway
+ * escape hatch.
  */
 
 /** Tool names that mean "ask the human a question" (CLI casing variants). */

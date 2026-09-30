@@ -21,7 +21,7 @@ import { join } from "node:path"
 
 import { _resetRateLimitReports, _resetSystemInitReports } from "@/provider/claude-code/cli-events.js"
 import { createClaudeCode } from "@/provider/claude-code/index.js"
-import { deleteActiveProcess, sessionKey } from "@/provider/claude-code/session-manager.js"
+import { deleteActiveProcessAndWait, sessionKey } from "@/provider/claude-code/session-manager.js"
 
 /** A fake `claude` that replays a fixed line sequence on the first stdin write. */
 function createFakeCli(lines: unknown[]) {
@@ -59,7 +59,7 @@ async function streamParts(
   const modelId = "claude-test-cli-events"
   const sk = sessionKey(
     fake.cwd,
-    `${modelId}::tools::default::context=["claude-code",null]`,
+    `tools::default::context=["claude-code"]`,
   )
   try {
     const model = createClaudeCode({
@@ -86,8 +86,8 @@ async function streamParts(
     for await (const part of response.stream) parts.push(part)
     return parts
   } finally {
-    deleteActiveProcess(sk)
-    rmSync(fake.cwd, { recursive: true, force: true })
+    await deleteActiveProcessAndWait(sk)
+    rmSync(fake.cwd, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 })
   }
 }
 

@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process"
-import * as path from "node:path"
+import { basename } from "node:path"
 import { promisify } from "node:util"
 
 import { InstallationVersion } from "@opencode-ai/core/installation/version"
@@ -37,9 +37,6 @@ export interface StartupDiagnostics {
    * one for the provider the operator is actually running under.
    */
   permissionPresets: PermissionPresetSummary[]
-  interactiveTransport: boolean
-  /** ExitPlanMode approval routed through opencode's `question` tool. */
-  planModeQuestion: boolean
   anthropicApiKeyInEnv: boolean
 }
 
@@ -58,7 +55,7 @@ export interface DiagnosticsProviderEntry {
  * and the server has no `/version` route. So this probes a couple of plausible
  * shapes for future opencode releases and otherwise returns undefined, leaving
  * the binary probe (`detectOpencodeVersion`) as the fallback. Do not replace it
- * with a `client.app.get()` call — that method does not exist.
+ * with a `client.app.get()` call - that method does not exist.
  */
 export function pickOpencodeVersion(input: unknown): string | undefined {
   if (!input || typeof input !== "object") return undefined
@@ -78,7 +75,7 @@ let opencodeVersionProbe: Promise<string | undefined> | undefined
 
 /**
  * The plugin runs *inside* opencode's process, so `process.execPath` is the
- * opencode binary itself — asking it for `--version` is the only reliable way
+ * opencode binary itself - asking it for `--version` is the only reliable way
  * to name the version, since the plugin API exposes it nowhere (see
  * `pickOpencodeVersion`). Guarded on the basename: when opencode is run from
  * source (`bun run packages/opencode/src/index.ts`) execPath is the Bun binary,
@@ -90,7 +87,7 @@ export function detectOpencodeVersion(
 ): Promise<string | undefined> {
   if (opencodeVersionProbe) return opencodeVersionProbe
   opencodeVersionProbe = (async (): Promise<string | undefined> => {
-    if (!path.basename(execPath).toLowerCase().includes("opencode")) {
+    if (!basename(execPath).toLowerCase().includes("opencode")) {
       log.debug("skipping opencode version probe: execPath is not opencode", { execPath })
       return undefined
     }
@@ -118,7 +115,7 @@ export function resetOpencodeVersionProbe(): void {
  * Mirror of `resolveSpawnCwd`'s priority order, but reporting *which* branch
  * won. `configured` means `options.cwd` pinned it, `process` is the normal
  * lazy path, `captured` means `process.cwd()` was unusable (macOS GUI launch
- * at `/`) and the captured project directory rescued it — that one is the
+ * at `/`) and the captured project directory rescued it - that one is the
  * fingerprint of issue #4.
  */
 export function describeSpawnCwd(
@@ -186,10 +183,6 @@ export function collectStartupDiagnostics(
     permissionPresets: Object.entries(providers).map(([name, entry]) =>
       summarizePermissionPreset(name, entry?.options),
     ),
-    interactiveTransport:
-      firstOption(providers, "interactive") === true ||
-      process.env.CLAUDE_CODE_INTERACTIVE_TRANSPORT === "1",
-    planModeQuestion: firstOption(providers, "planModeQuestion") === true,
     anthropicApiKeyInEnv: Boolean(
       process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_AUTH_TOKEN,
     ),
@@ -197,22 +190,6 @@ export function collectStartupDiagnostics(
 }
 
 let logged = false
-let lastProviders: Record<string, DiagnosticsProviderEntry> = {}
-let lastOpencodeVersion: string | undefined
-
-/**
- * The providers the config hook last registered, so `/claude-code-doctor` can
- * re-run `collectStartupDiagnostics` on demand instead of reporting a snapshot
- * frozen at startup. Kept here rather than in the doctor because this is
- * already the module that owns the shape.
- */
-export function lastDiagnosticsProviders(): Record<string, DiagnosticsProviderEntry> {
-  return lastProviders
-}
-
-export function lastKnownOpencodeVersion(): string | undefined {
-  return lastOpencodeVersion
-}
 
 /**
  * Emit the startup block once per process. Fire-and-forget: the Claude CLI
@@ -223,11 +200,6 @@ export function logStartupDiagnostics(
   providers: Record<string, DiagnosticsProviderEntry>,
   opencodeVersion?: string,
 ): void {
-  // Recorded before the once-per-process guard: an account expansion calls
-  // this a second time with the real provider set, and the doctor should read
-  // that one rather than the pre-expansion view.
-  lastProviders = providers
-  if (opencodeVersion) lastOpencodeVersion = opencodeVersion
   if (logged) return
   logged = true
   void (async () => {
@@ -251,9 +223,3 @@ export function logStartupDiagnostics(
   })()
 }
 
-/** For tests. */
-export function _resetStartupDiagnostics(): void {
-  logged = false
-  lastProviders = {}
-  lastOpencodeVersion = undefined
-}

@@ -17,6 +17,7 @@ import { mergeDeep } from "remeda"
 import { COMPACTION_BOUNDARY_OPTION, CURSOR_COMPACTION_OPTION, CURSOR_PROVIDER_ID } from "@/provider/cursor/shared"
 import {
   CLAUDE_CODE_AGENT_OPTION,
+  CLAUDE_CODE_AGENT_PROMPT_OPTION,
   CLAUDE_CODE_SESSION_OPTION,
   isClaudeCodeProvider,
 } from "@/provider/claude-code/shared"
@@ -94,12 +95,12 @@ export const prepare = Effect.fn("LLMRequestPrep.prepare")(function* (input: Pre
     system.push(header, rest.join("\n"))
   }
 
-  // A compaction agent pinned to its own model uses its own variant, not the session's.
-  const variantName =
-    input.agent.name === "compaction" && input.agent.model && input.agent.variant
-      ? input.agent.variant
-      : input.user.model.variant
-  const variant = !input.small && input.model.variants && variantName ? input.model.variants[variantName] : {}
+  // Compaction and rename agents pinned to their own model use their own variant, even on small requests.
+  const pinned =
+    (input.agent.name === "compaction" || input.agent.name === "rename") && input.agent.model && input.agent.variant
+  const variantName = pinned ? input.agent.variant : input.user.model.variant
+  const variant =
+    (pinned || !input.small) && input.model.variants && variantName ? input.model.variants[variantName] : {}
   const base = input.small
     ? ProviderTransform.smallOptions(input.model)
     : ProviderTransform.options({
@@ -113,11 +114,12 @@ export const prepare = Effect.fn("LLMRequestPrep.prepare")(function* (input: Pre
     agentName: input.agent.name,
   })
   const claudeCode = isClaudeCodeProvider(input.model.providerID)
-  if (input.compactionBoundary && (claudeCode || input.model.providerID === CURSOR_PROVIDER_ID))
+  if (input.compactionBoundary && input.model.providerID === CURSOR_PROVIDER_ID)
     options[COMPACTION_BOUNDARY_OPTION] = input.compactionBoundary
   if (claudeCode) {
     options[CLAUDE_CODE_SESSION_OPTION] = input.sessionID
     options[CLAUDE_CODE_AGENT_OPTION] = input.agent.name
+    if (input.agent.prompt) options[CLAUDE_CODE_AGENT_PROMPT_OPTION] = input.agent.prompt
   }
   if (
     input.model.api.npm === "@ai-sdk/azure" &&

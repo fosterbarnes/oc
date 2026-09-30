@@ -11,16 +11,15 @@
  * Claude Code 2.1.248 added `--restricted`, which removes the built-in tools
  * that run commands or code plus WebFetch, confines the file tools to the
  * working directories, and refuses bypassPermissions. That covers the CLI's
- * own tools and nothing else, and this plugin's whole point is that it puts a
- * second execution path next to them: `proxyTools` defaults to `Bash`, `Edit`,
- * `Write`, `WebFetch` and `Task`, each an MCP tool the CLI calls and opencode
- * executes. `--restricted` never sees those. So the preset has to work at
- * three layers at once:
+ * own tools and nothing else, and this plugin puts a second execution path
+ * next to them: proxy tools (`task` by default) are MCP tools the CLI calls
+ * and opencode executes. `--restricted` never sees those. So the preset has to
+ * work at three layers at once:
  *
  *   1. the CLI's own tools (`--restricted`, plus `--disallowedTools` for the
  *      same names so a CLI too old for `--restricted` still refuses them),
- *   2. the opencode proxy (the mutating defs are dropped before the proxy
- *      server is built, so they are never offered),
+ *   2. the opencode proxy (`task` is dropped before the proxy server is
+ *      built, so an opencode subagent is never offered),
  *   3. everything left that would prompt (denied, because an opencode MCP
  *      tool via the proxy or a file tool reaching outside the cwd is neither
  *      of the above).
@@ -75,19 +74,11 @@ export const READ_ONLY_DISALLOWED_CLI_TOOLS = [
  * `resolvedProxyTools` matches them. `task_batch` rides along with `task`
  * inside that resolver, so naming `task` alone would not be enough.
  *
- * `question` and `compress` are deliberately absent: neither changes
- * anything. They are dropped anyway in practice, because the preset denies
+ * `question` is deliberately absent: it changes nothing. They are dropped anyway in practice, because the preset denies
  * every permission request and an MCP tool prompts, which is documented as a
  * limitation rather than pretended away.
  */
-export const READ_ONLY_DENIED_PROXY_TOOLS = new Set([
-  "bash",
-  "write",
-  "edit",
-  "webfetch",
-  "task",
-  "task_batch",
-])
+export const READ_ONLY_DENIED_PROXY_TOOLS = new Set(["task", "task_batch"])
 
 /** The options a preset decides, resolved. */
 export interface ResolvedPermissionPreset {

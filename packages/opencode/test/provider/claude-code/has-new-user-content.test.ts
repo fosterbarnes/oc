@@ -1,12 +1,12 @@
 // @ts-nocheck
 // WIP: ported from opencode-claude-code-plugin, which never typechecked its tests; type them as Phase 3 rewrites land.
 /**
- * Unit tests for hasNewUserContent in src/claude-code-language-model.ts.
+ * Unit tests for hasNewUserContent in src/provider/claude-code/call-options.ts.
  */
 import { test } from "node:test"
 import assert from "node:assert/strict"
 
-import { hasNewUserContent } from "@/provider/claude-code/claude-code-language-model.js"
+import { hasNewUserContent } from "@/provider/claude-code/call-options.js"
 
 const p = (msgs: any[]) => msgs as any
 

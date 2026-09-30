@@ -1,7 +1,7 @@
-import * as fs from "node:fs"
-import * as path from "node:path"
-import * as os from "node:os"
-import * as crypto from "node:crypto"
+import { existsSync, readFileSync, statSync } from "node:fs"
+import { dirname, join, resolve } from "node:path"
+import { homedir } from "node:os"
+import { createHash } from "node:crypto"
 import {
   parse as parseJsonc,
   printParseErrorCode,
@@ -71,7 +71,7 @@ const PROJECT_FILE_NAMES = ["opencode.json", "opencode.jsonc"] as const
 
 function fileExists(p: string): boolean {
   try {
-    return fs.statSync(p).isFile()
+    return statSync(p).isFile()
   } catch {
     return false
   }
@@ -79,7 +79,7 @@ function fileExists(p: string): boolean {
 
 function dirExists(p: string): boolean {
   try {
-    return fs.statSync(p).isDirectory()
+    return statSync(p).isDirectory()
   } catch {
     return false
   }
@@ -87,7 +87,7 @@ function dirExists(p: string): boolean {
 
 function readAndParse(file: string): Record<string, unknown> | null {
   try {
-    const raw = fs.readFileSync(file, "utf8")
+    const raw = readFileSync(file, "utf8")
     const errors: ParseError[] = []
     const parsed = parseJsonc(raw, errors, { allowTrailingComma: true })
     if (errors.length > 0) {
@@ -147,14 +147,14 @@ function walkUp(opts: {
   predicate: (p: string) => boolean
 }): string[] {
   const out: string[] = []
-  let current = path.resolve(opts.start)
+  let current = resolve(opts.start)
   while (true) {
     for (const target of opts.targets) {
-      const candidate = path.join(current, target)
+      const candidate = join(current, target)
       if (opts.predicate(candidate)) out.push(candidate)
     }
-    if (opts.stop && current === path.resolve(opts.stop)) break
-    const parent = path.dirname(current)
+    if (opts.stop && current === resolve(opts.stop)) break
+    const parent = dirname(current)
     if (parent === current) break
     current = parent
   }
@@ -168,24 +168,24 @@ function walkUp(opts: {
  */
 function detectWorktree(cwd: string): string | undefined {
   const override = process.env.OPENCODE_WORKTREE
-  if (override) return path.resolve(override)
-  let current = path.resolve(cwd)
+  if (override) return resolve(override)
+  let current = resolve(cwd)
   while (true) {
-    const gitPath = path.join(current, ".git")
+    const gitPath = join(current, ".git")
     try {
-      if (fs.existsSync(gitPath)) return current
+      if (existsSync(gitPath)) return current
     } catch {
       // ignore
     }
-    const parent = path.dirname(current)
+    const parent = dirname(current)
     if (parent === current) return undefined
     current = parent
   }
 }
 
 function globalConfigDir(): string {
-  const xdg = process.env.XDG_CONFIG_HOME ?? path.join(os.homedir(), ".config")
-  return path.join(xdg, "opencode")
+  const xdg = process.env.XDG_CONFIG_HOME ?? join(homedir(), ".config")
+  return join(xdg, "opencode")
 }
 
 /**
@@ -198,7 +198,7 @@ function loadGlobalConfig(): Record<string, unknown> {
   let merged: Record<string, unknown> = {}
   for (const name of FILE_NAMES.slice().reverse()) {
     // FILE_NAMES is jsonc-first; reverse to get config.json-first order.
-    const file = path.join(dir, name)
+    const file = join(dir, name)
     if (!fileExists(file)) continue
     const parsed = readAndParse(file)
     if (parsed) merged = deepMerge(merged, parsed)
@@ -210,7 +210,7 @@ function loadGlobalConfig(): Record<string, unknown> {
 function loadProjectFilesInDir(dir: string): Record<string, unknown> {
   let merged: Record<string, unknown> = {}
   for (const name of PROJECT_FILE_NAMES) {
-    const file = path.join(dir, name)
+    const file = join(dir, name)
     if (!fileExists(file)) continue
     const parsed = readAndParse(file)
     if (parsed) merged = deepMerge(merged, parsed)
@@ -227,7 +227,7 @@ function dotOpencodeDirs(cwd: string, worktree?: string): string[] {
   const dirs: string[] = []
   const seen = new Set<string>()
   const push = (p: string) => {
-    const abs = path.resolve(p)
+    const abs = resolve(p)
     if (!seen.has(abs) && dirExists(abs)) {
       seen.add(abs)
       dirs.push(abs)
@@ -243,9 +243,9 @@ function dotOpencodeDirs(cwd: string, worktree?: string): string[] {
     push(dir)
   }
 
-  const home = os.homedir()
+  const home = homedir()
   if (home) {
-    const homeDot = path.join(home, ".opencode")
+    const homeDot = join(home, ".opencode")
     if (dirExists(homeDot)) push(homeDot)
   }
 
@@ -365,7 +365,7 @@ export function opencodeConfigLayers(cwd: string): Record<string, unknown>[] {
   const projectDirs: string[] = []
   const seenProjectDirs = new Set<string>()
   for (const f of projectFiles) {
-    const d = path.dirname(f)
+    const d = dirname(f)
     if (!seenProjectDirs.has(d)) {
       seenProjectDirs.add(d)
       projectDirs.push(d)
@@ -387,12 +387,6 @@ export function opencodeConfigLayers(cwd: string): Record<string, unknown>[] {
   return layers
 }
 
-/** The on-disk opencode config, every layer deep-merged in precedence order. */
-export function loadMergedOpencodeConfig(cwd: string): Record<string, unknown> {
-  let merged: Record<string, unknown> = {}
-  for (const layer of opencodeConfigLayers(cwd)) merged = deepMerge(merged, layer)
-  return merged
-}
 
 /**
  * Merge opencode's MCP config layers (see `opencodeConfigLayers`), apply the
@@ -439,8 +433,7 @@ export function mergeOpencodeMcp(
   // Hash the merged block so the hot-reload detector picks up
   // upstream config changes.
   const mergedBody = JSON.stringify({ mcpServers: merged }, null, 2)
-  const hash = crypto
-    .createHash("sha256")
+  const hash = createHash("sha256")
     .update(mergedBody)
     .digest("hex")
     .slice(0, 12)

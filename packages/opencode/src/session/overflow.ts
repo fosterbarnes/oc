@@ -4,6 +4,7 @@ import { SessionV1 } from "@opencode-ai/core/v1/session"
 import type { Provider } from "@/provider/provider"
 import { ProviderTransform } from "@/provider/transform"
 import type { MessageV2 } from "./message-v2"
+import { isClaudeCodeProvider } from "@/provider/claude-code/shared"
 
 const COMPACTION_BUFFER = 20_000
 
@@ -27,6 +28,8 @@ export function isOverflow(input: {
 }) {
   if (input.cfg.compaction?.auto === false) return false
   if (input.model.limit.context === 0) return false
+  // Claude Code compacts its own conversation; oc only mirrors it.
+  if (isClaudeCodeProvider(input.model.providerID)) return false
 
   const count =
     input.tokens.total || input.tokens.input + input.tokens.output + input.tokens.cache.read + input.tokens.cache.write

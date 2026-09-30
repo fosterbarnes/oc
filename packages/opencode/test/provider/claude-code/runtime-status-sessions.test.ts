@@ -10,7 +10,6 @@ import { test } from "node:test"
 
 import {
   fetchSessionDirectory,
-  fetchSessionParentId,
   fetchSessionRunState,
   setOpencodeClient,
 } from "@/provider/claude-code/runtime-status.js"
@@ -89,41 +88,6 @@ test("fetchSessionDirectory survives a malformed or rejected response", async ()
 
   setOpencodeClient(NO_ROUTES)
   assert.equal(await fetchSessionDirectory("ses_1"), undefined)
-})
-
-// ---------------------------------------------------------------------------
-// fetchSessionParentId
-// ---------------------------------------------------------------------------
-
-test("fetchSessionParentId names the session that spawned a subagent", async () => {
-  clientWithSessionGet(() => ({
-    data: { id: "ses_child", parentID: "ses_parent", directory: "/p" },
-  }))
-  assert.equal(await fetchSessionParentId("ses_child"), "ses_parent")
-})
-
-test("fetchSessionParentId is undefined for a top-level session", async () => {
-  for (const parentID of [undefined, null, "", 0, {}]) {
-    clientWithSessionGet(() => ({ data: { parentID } }))
-    assert.equal(
-      await fetchSessionParentId("ses_1"),
-      undefined,
-      `parentID ${JSON.stringify(parentID)} is not a parent`,
-    )
-  }
-})
-
-test("fetchSessionParentId degrades quietly without a client or a route", async () => {
-  assert.equal(await fetchSessionParentId("default"), undefined)
-  assert.equal(await fetchSessionParentId(""), undefined)
-
-  clientWithSessionGet(() => {
-    throw new Error("boom")
-  })
-  assert.equal(await fetchSessionParentId("ses_1"), undefined)
-
-  setOpencodeClient(NO_ROUTES)
-  assert.equal(await fetchSessionParentId("ses_1"), undefined)
 })
 
 // ---------------------------------------------------------------------------

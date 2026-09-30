@@ -29,13 +29,9 @@ import {
   DEFAULT_ACCOUNT,
   accountConfigDir,
   accountConfigDirPath,
-  accountDisplayName,
-  accountModelSuffix,
-  accountProviderId,
   ensureAccountRuntime,
   expandHome,
   normalizeAccountName,
-  resolveAccounts,
 } from "@/provider/claude-code/accounts.js"
 
 const run = promisify(execFile)
@@ -98,7 +94,7 @@ async function withSandbox(
     else process.env.HOME = savedHome
     if (savedCache === undefined) delete process.env.XDG_CACHE_HOME
     else process.env.XDG_CACHE_HOME = savedCache
-    rmSync(box.root, { recursive: true, force: true })
+    rmSync(box.root, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 })
     sandboxes.splice(sandboxes.indexOf(box.root), 1)
   }
 }
@@ -131,6 +127,10 @@ async function callWrapper(
 // Naming
 // ---------------------------------------------------------------------------
 
+const WRAPPER_ONLY_POSIX = {
+  skip: process.platform === "win32" && "accounts use a bash wrapper; Mac/Linux only",
+}
+
 test("account names normalize to a slug, whatever the operator typed", () => {
   assert.equal(normalizeAccountName("  Work Account  "), "work-account")
   assert.equal(normalizeAccountName("Appical"), "appical")
@@ -141,29 +141,9 @@ test("account names normalize to a slug, whatever the operator typed", () => {
   assert.equal(normalizeAccountName("!!!"), "")
 })
 
-test("resolveAccounts always leads with default and de-duplicates", () => {
-  assert.deepEqual(resolveAccounts(["Work", "work", "Appical"]), [
-    "default",
-    "work",
-    "appical",
-  ])
-  // An explicit `default` is not duplicated, and junk entries drop out.
-  assert.deepEqual(resolveAccounts(["default", "!!!", "Work"]), [
-    "default",
-    "work",
-  ])
-  // Not an array: the caller must treat accounts as unconfigured, not empty.
-  assert.equal(resolveAccounts(undefined), null)
-  assert.equal(resolveAccounts("work"), null)
-  assert.deepEqual(resolveAccounts([]), ["default"])
-})
-
-test("the default account has no suffix, no config dir and no wrapper", async () => {
-  assert.equal(accountModelSuffix(DEFAULT_ACCOUNT), undefined)
+test("the default account has no config dir and no wrapper", async () => {
   assert.equal(accountConfigDir(DEFAULT_ACCOUNT), undefined)
   assert.equal(accountConfigDirPath(DEFAULT_ACCOUNT), undefined)
-  assert.equal(accountProviderId(DEFAULT_ACCOUNT), "claude-code-default")
-  assert.equal(accountDisplayName("work account"), "Claude Code (Work Account)")
   assert.equal(accountConfigDir("Work Account"), "~/.claude-work-account")
 
   await withSandbox(async (box) => {
@@ -181,7 +161,7 @@ test("expandHome only expands a leading ~", () => {
   try {
     process.env.HOME = "/tmp/home"
     assert.equal(expandHome("~"), "/tmp/home")
-    assert.equal(expandHome("~/.claude-work"), "/tmp/home/.claude-work")
+    assert.equal(expandHome("~/.claude-work"), join("/tmp/home", ".claude-work"))
     assert.equal(expandHome("/absolute/~/path"), "/absolute/~/path")
     assert.equal(expandHome("~notmyhome/x"), "~notmyhome/x")
   } finally {
@@ -194,7 +174,7 @@ test("expandHome only expands a leading ~", () => {
 // The generated wrapper, executed
 // ---------------------------------------------------------------------------
 
-test("the wrapper exports CLAUDE_CONFIG_DIR and execs the base CLI", async () => {
+test("the wrapper exports CLAUDE_CONFIG_DIR and execs the base CLI", WRAPPER_ONLY_POSIX, async () => {
   await withSandbox(async (box) => {
     const runtime = await ensureAccountRuntime("Work Account", box.fakeCli)
 
@@ -212,7 +192,7 @@ test("the wrapper exports CLAUDE_CONFIG_DIR and execs the base CLI", async () =>
   })
 })
 
-test("the wrapper strips its own @account marker from --model", async () => {
+test("the wrapper strips its own @account marker from --model", WRAPPER_ONLY_POSIX, async () => {
   await withSandbox(async (box) => {
     const runtime = await ensureAccountRuntime("work", box.fakeCli)
 
@@ -234,7 +214,7 @@ test("the wrapper strips its own @account marker from --model", async () => {
   })
 })
 
-test("a model with no marker, or another account's marker, is untouched", async () => {
+test("a model with no marker, or another account's marker, is untouched", WRAPPER_ONLY_POSIX, async () => {
   await withSandbox(async (box) => {
     const runtime = await ensureAccountRuntime("work", box.fakeCli)
 
@@ -257,7 +237,7 @@ test("a model with no marker, or another account's marker, is untouched", async 
   })
 })
 
-test("only the value after --model is rewritten, and only that occurrence", async () => {
+test("only the value after --model is rewritten, and only that occurrence", WRAPPER_ONLY_POSIX, async () => {
   await withSandbox(async (box) => {
     const runtime = await ensureAccountRuntime("work", box.fakeCli)
 
@@ -281,7 +261,7 @@ test("only the value after --model is rewritten, and only that occurrence", asyn
   })
 })
 
-test("a trailing bare --model is passed through rather than eaten", async () => {
+test("a trailing bare --model is passed through rather than eaten", WRAPPER_ONLY_POSIX, async () => {
   await withSandbox(async (box) => {
     const runtime = await ensureAccountRuntime("work", box.fakeCli)
     assert.deepEqual((await callWrapper(runtime.cliPath, ["--model"])).argv, [
@@ -290,7 +270,7 @@ test("a trailing bare --model is passed through rather than eaten", async () => 
   })
 })
 
-test("arguments keep their spaces, quotes, globs and newlines", async () => {
+test("arguments keep their spaces, quotes, globs and newlines", WRAPPER_ONLY_POSIX, async () => {
   await withSandbox(async (box) => {
     const runtime = await ensureAccountRuntime("work", box.fakeCli)
 
@@ -307,7 +287,7 @@ test("arguments keep their spaces, quotes, globs and newlines", async () => {
   })
 })
 
-test("the wrapper runs with no arguments at all", async () => {
+test("the wrapper runs with no arguments at all", WRAPPER_ONLY_POSIX, async () => {
   await withSandbox(async (box) => {
     const runtime = await ensureAccountRuntime("work", box.fakeCli)
     // macOS ships bash 3.2, where `"${args[@]}"` on an empty array is an
@@ -318,7 +298,7 @@ test("the wrapper runs with no arguments at all", async () => {
   })
 })
 
-test("the wrapper is executable and rewritten on every run", async () => {
+test("the wrapper is executable and rewritten on every run", WRAPPER_ONLY_POSIX, async () => {
   await withSandbox(async (box) => {
     const first = await ensureAccountRuntime("work", box.fakeCli)
     assert.equal(lstatSync(first.cliPath).mode & 0o111, 0o111)

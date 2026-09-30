@@ -193,11 +193,12 @@ test("respawn preserves the original CLI args, config and prompt on a real child
   timeout: 10_000,
 }, async () => {
   const fixture = createNodeFixture()
+  // Run the child outside fixture.cwd: Windows locks a live process's cwd, so cleanup would EBUSY.
   const sk = `respawn-${fixture.cwd}`
   const original = spawnClaudeProcess(
     process.execPath,
     fixture.args,
-    fixture.cwd,
+    tmpdir(),
     sk,
     undefined,
     "original-mcp-hash",
@@ -215,7 +216,7 @@ test("respawn preserves the original CLI args, config and prompt on a real child
     const originalExit = once(original.proc, "close", { signal: AbortSignal.timeout(5_000) })
     // A reattached doStream turn has no freshly built args. Respawn must use
     // the original process's args, not launch Node (or Claude) with just resume.
-    const replacement = respawnActiveProcess(sk, process.execPath, [], fixture.cwd)
+    const replacement = respawnActiveProcess(sk, process.execPath, [], tmpdir())
     assert.ok(replacement)
     assert.notEqual(replacement.proc.pid, original.proc.pid)
     assert.deepEqual(
@@ -245,7 +246,7 @@ test("respawn preserves the original CLI args, config and prompt on a real child
   } finally {
     await deleteActiveProcessAndWait(sk)
     deleteClaudeSessionId(sk)
-    rmSync(fixture.cwd, { recursive: true, force: true })
+    rmSync(fixture.cwd, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 })
   }
 })
 
@@ -309,7 +310,7 @@ readline.createInterface({ input: process.stdin }).on("line", () => {
     }
     return parts as any[]
   } finally {
-    rmSync(cwd, { recursive: true, force: true })
+    rmSync(cwd, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 })
   }
 }
 

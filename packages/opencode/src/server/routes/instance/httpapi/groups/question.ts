@@ -1,5 +1,6 @@
 import { Question } from "@/question"
 import { QuestionID } from "@/question/schema"
+import { SessionID } from "@/session/schema"
 import { Schema } from "effect"
 import { HttpApi, HttpApiEndpoint, HttpApiError, HttpApiGroup, OpenApi } from "effect/unstable/httpapi"
 import { QuestionNotFoundError } from "../errors"
@@ -14,6 +15,10 @@ const ReplyPayload = Schema.Struct({
     description: "User answers in order of questions (each answer is an array of selected labels)",
   }),
 })
+const AskPayload = Schema.Struct({
+  sessionID: SessionID,
+  questions: Schema.Array(Question.Info),
+})
 
 export const QuestionApi = HttpApi.make("question")
   .add(
@@ -27,6 +32,21 @@ export const QuestionApi = HttpApi.make("question")
             identifier: "question.list",
             summary: "List pending questions",
             description: "Get all pending question requests across all sessions.",
+          }),
+        ),
+        HttpApiEndpoint.post("ask", `${root}/ask`, {
+          query: WorkspaceRoutingQuery,
+          payload: AskPayload,
+          success: described(
+            Schema.NullOr(Schema.Array(Question.Answer)),
+            "Answers in order of questions, or null when the user dismissed them",
+          ),
+          error: HttpApiError.BadRequest,
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "question.ask",
+            summary: "Ask the user a question",
+            description: "Show a question in the session's UI and wait for the answer.",
           }),
         ),
         HttpApiEndpoint.post("reply", `${root}/:requestID/reply`, {

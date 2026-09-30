@@ -5,15 +5,13 @@
  *
  * Covers the v0.4.8 fix: tool-role messages (AI SDK V3 shape) must produce
  * tool_result content blocks instead of falling through to the "(empty)"
- * sentinel — otherwise opencode's outer agent loop hangs after every proxy
+ * sentinel - otherwise opencode's outer agent loop hangs after every proxy
  * tool call, forcing the user to press "continue".
  */
 import { test } from "node:test"
 import assert from "node:assert/strict"
 
 import {
-  compactConversationHistory,
-  stripPluginHistory,
   getClaudeUserMessage,
   shouldStripContextReminders,
 } from "@/provider/claude-code/message-builder.js"
@@ -97,7 +95,7 @@ test("tool-role without tool-result parts still falls through to sentinel", () =
     ]),
   )
 
-  // No tool-result extracted → falls through to "(empty)" sentinel path
+  // No tool-result extracted -> falls through to "(empty)" sentinel path
   // (correct behavior, matches hasNewUserContent's symmetry).
   const blocks = out.message.content
   assert.equal(blocks.length, 1)
@@ -135,175 +133,6 @@ test("mixed user-text + tool-role both flow into the same content array", () => 
   // No "(empty)" sentinel injected.
   const textBlock = blocks.find((b: any) => b.type === "text")
   assert.notEqual(textBlock.text, "(empty)")
-})
-
-// ---------------------------------------------------------------------------
-// Compaction mode tests
-// ---------------------------------------------------------------------------
-
-function parsedCompaction(prompt: any) {
-  return JSON.parse(
-    getClaudeUserMessage(prompt as any, false, {
-      compactionMode: true,
-    }),
-  )
-}
-
-test("compaction wraps transcript in <conversation_transcript> tag", () => {
-  const out = parsedCompaction(
-    p([
-      { role: "user", content: "what's 2+2?" },
-      { role: "assistant", content: [{ type: "text", text: "4" }] },
-      {
-        role: "user",
-        content: [{ type: "text", text: "summarize this conversation" }],
-      },
-    ]),
-  )
-
-  const blocks = out.message.content
-  const textBlock = blocks.find((b: any) => b.type === "text")
-  assert.ok(textBlock, "expected a text block")
-  assert.ok(
-    textBlock.text.includes("<conversation_transcript>"),
-    "expected transcript wrapper",
-  )
-  assert.ok(
-    textBlock.text.includes("</conversation_transcript>"),
-    "expected closing transcript tag",
-  )
-  assert.ok(
-    !textBlock.text.includes("from a previous session that couldn't be resumed"),
-    "should not use the fresh-session wrapper text",
-  )
-})
-
-test("compaction transcript includes tool_use input, not just count", () => {
-  const out = parsedCompaction(
-    p([
-      { role: "user", content: "list files" },
-      {
-        role: "assistant",
-        content: [
-          { type: "text", text: "running ls" },
-          {
-            type: "tool-call",
-            toolCallId: "call_1",
-            toolName: "Bash",
-            input: { command: "ls -la /tmp/specific-path" },
-          },
-        ],
-      },
-      {
-        role: "tool",
-        content: [
-          {
-            type: "tool-result",
-            toolCallId: "call_1",
-            toolName: "Bash",
-            output: {
-              type: "text",
-              value: "file1.txt\nfile2.txt\nspecific-content-here",
-            },
-          },
-        ],
-      },
-      { role: "user", content: "summarize" },
-    ]),
-  )
-
-  const transcript = out.message.content.find((b: any) => b.type === "text").text
-  assert.ok(
-    transcript.includes("tool_use:Bash"),
-    "expected rendered tool_use with name",
-  )
-  assert.ok(
-    transcript.includes("ls -la /tmp/specific-path"),
-    "expected tool input rendered, not placeholder",
-  )
-  assert.ok(
-    transcript.includes("specific-content-here"),
-    "expected tool_result content rendered, not placeholder",
-  )
-  // Legacy placeholder text must NOT appear in compaction mode.
-  assert.ok(
-    !transcript.includes("[Called 1 tool(s)"),
-    "should not use legacy placeholder",
-  )
-  assert.ok(
-    !transcript.includes("[Received 1 tool result(s)]"),
-    "should not use legacy placeholder",
-  )
-})
-
-test("compaction clips long tool_result with truncation marker", () => {
-  const longOutput = "x".repeat(15_000)
-  const out = parsedCompaction(
-    p([
-      { role: "user", content: "do thing" },
-      {
-        role: "assistant",
-        content: [
-          {
-            type: "tool-call",
-            toolCallId: "call_1",
-            toolName: "Read",
-            input: { file: "big.txt" },
-          },
-        ],
-      },
-      {
-        role: "tool",
-        content: [
-          {
-            type: "tool-result",
-            toolCallId: "call_1",
-            toolName: "Read",
-            output: { type: "text", value: longOutput },
-          },
-        ],
-      },
-      { role: "user", content: "summarize" },
-    ]),
-  )
-
-  const transcript = out.message.content.find((b: any) => b.type === "text").text
-  assert.ok(
-    transcript.includes("[truncated"),
-    "expected truncation marker for over-cap tool_result",
-  )
-  // Bounded: must not contain the full 15k blob.
-  assert.ok(
-    transcript.length < 14_000,
-    `transcript should be capped near 10k chars per tool_result, got ${transcript.length}`,
-  )
-})
-
-test("compaction final user instruction follows the transcript", () => {
-  const out = parsedCompaction(
-    p([
-      { role: "user", content: "what's up" },
-      { role: "assistant", content: [{ type: "text", text: "hi" }] },
-      {
-        role: "user",
-        content: [
-          {
-            type: "text",
-            text: "Your task is to summarize the conversation.",
-          },
-        ],
-      },
-    ]),
-  )
-
-  const blocks = out.message.content
-  // Expect: [transcript-text-block, instruction-text-block]
-  const texts = blocks.filter((b: any) => b.type === "text").map((b: any) => b.text)
-  assert.equal(texts.length, 2, `expected 2 text blocks, got ${texts.length}`)
-  assert.ok(texts[0].includes("<conversation_transcript>"))
-  assert.ok(texts[1].includes("Your task is to summarize"))
-  // Synthesis instruction must NOT be embedded inside the transcript block.
-  assert.ok(!texts[0].includes("Your task is to summarize"))
 })
 
 test("no thinking keyword is appended to the user message", () => {
@@ -359,23 +188,6 @@ test("part.data still wins when part.image is absent", () => {
   assert.ok(image, "data-carrying file part must still produce an image block")
   assert.equal(image.source.media_type, "image/webp")
   assert.equal(image.source.data, "aGVsbG8=")
-})
-
-test("aside filtering preserves ordinary /btw mentions, mixed media, tools, and their replies", () => {
-  const prompt = p([
-    { role: "user", content: "explain /btw please" },
-    { role: "assistant", content: [{ type: "text", text: "/btw is a command" }] },
-    { role: "user", content: [{ type: "text", text: "/btw image question" }, { type: "image", image: "image data" }] },
-    { role: "assistant", content: [{ type: "text", text: "image response" }] },
-    { role: "tool", content: [{ type: "tool-result", toolCallId: "call", output: { type: "text", value: "tool result" } }] },
-    { role: "user", content: "summarize" },
-  ])
-  assert.deepEqual(stripPluginHistory(prompt), prompt)
-  const transcript = compactConversationHistory(prompt, { mode: "compaction" })!
-  assert.match(transcript, /explain \/btw please/)
-  assert.match(transcript, /image question/)
-  assert.match(transcript, /image response/)
-  assert.match(transcript, /tool result/)
 })
 
 // Issue #29 (@nic-lan): opencode runs some tools itself, notably the `task`
@@ -438,14 +250,6 @@ test("a tool result this CLI process is waiting on is still a real tool_result b
   assert.ok(result, "the proxy round-trip depends on this block, so the gate must let it through")
   assert.equal(result.tool_use_id, "call_X")
   assert.match(result.content, /We decided X because of Y\./)
-})
-
-test("the fresh-session history keeps tool inputs and result bodies", () => {
-  const history = compactConversationHistory(subtaskPrompt())
-  assert.ok(history, "there is prior conversation to render")
-  assert.match(history!, /We decided X because of Y\./, "the result body survives, not just a count")
-  assert.match(history!, /\[tool_use:task\(/, "and the call that produced it is named with its input")
-  assert.doesNotMatch(history!, /Called 1 tool\(s\)/, "the lossy placeholder is gone")
 })
 
 // --- dcp context reminders -------------------------------------------------
@@ -534,7 +338,10 @@ test("the fresh-session rebuild strips them too, where they all replay at once",
     { role: "user", content: [{ type: "text", text: "current question" }] },
   ])
   const out = getClaudeUserMessage(prompt, true, { stripContextReminders: true })
-  assert.match(out, /old turn/, "the history itself is still rebuilt")
+  assert.doesNotMatch(out, /<conversation_history>/)
+  assert.doesNotMatch(out, /old turn/)
+  assert.doesNotMatch(out, /session_tail/)
+  assert.match(out, /current question/)
   assert.doesNotMatch(out, /MAX CONTEXT LIMIT REACHED/)
 })
 

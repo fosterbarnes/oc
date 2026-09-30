@@ -191,6 +191,7 @@ const Tokens = Schema.Struct({
     read: Schema.Finite,
     write: Schema.Finite,
   }),
+  visible: Schema.optional(Schema.Finite),
 })
 
 const EmptyTokens = { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } }
@@ -371,6 +372,7 @@ export const getUsage = (input: { model: Provider.Model; usage: Usage; metadata?
 
   const total = input.usage.totalTokens
 
+  const visible = input.metadata?.["claude-code"]?.["visibleThreadTokens"]
   const tokens = {
     total,
     input: adjustedInputTokens,
@@ -380,6 +382,7 @@ export const getUsage = (input: { model: Provider.Model; usage: Usage; metadata?
       write: cacheWriteInputTokens,
       read: cacheReadInputTokens,
     },
+    ...(typeof visible === "number" && Number.isFinite(visible) ? { visible } : {}),
   }
 
   const contextTokens = inputTokens

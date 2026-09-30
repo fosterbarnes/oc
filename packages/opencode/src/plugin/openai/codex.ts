@@ -564,7 +564,7 @@ export async function CodexAuthPlugin(input: PluginInput, options: CodexAuthPlug
       // Temporary fetch-layer hack: title generation currently shares the conversation
       // session ID, so the OpenAI plugin marks it for HTTP fallback until transport
       // context can be passed directly instead of smuggled through headers.
-      if (websocketFetchInstalled && input.agent === "title") output.headers[OpenAIWebSocketPool.TITLE_HEADER] = "true"
+      if (websocketFetchInstalled && (input.agent === "title" || input.agent === "rename")) output.headers[OpenAIWebSocketPool.TITLE_HEADER] = "true"
     },
     "chat.params": async (input, output) => {
       if (input.model.providerID !== "openai") return

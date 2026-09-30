@@ -354,7 +354,24 @@ test("h2 forwarding retains strict https://*.cursor.sh origin validation", async
   }
 })
 
-test("current 9418/9419 data behavior stays compatible: h2 does not require control token", async () => {
+test("port 0 lets two sidecars run side by side and reports their ports", async () => {
+  const spawnAuto = () => spawnSidecar({ healthPort: 0, h2Port: 0, token: crypto.randomUUID() })
+  const readPorts = async (child) => JSON.parse((await once(child.stdout, "data"))[0].toString().split("\n")[0])
+  const a = spawnAuto()
+  const b = spawnAuto()
+  try {
+    const [pa, pb] = await Promise.all([readPorts(a), readPorts(b)])
+    for (const p of [pa, pb]) assert.ok(p.health > 0 && p.h2 > 0)
+    assert.notEqual(pa.h2, pb.h2)
+    assert.equal(a.exitCode, null)
+    assert.equal(b.exitCode, null)
+  } finally {
+    a.kill()
+    b.kill()
+  }
+})
+
+test("h2 data behavior stays compatible: h2 does not require control token", async () => {
   const [healthPort, h2Port] = await getTwoPorts()
   const token = crypto.randomUUID()
   const child = spawnSidecar({ healthPort, h2Port, token })

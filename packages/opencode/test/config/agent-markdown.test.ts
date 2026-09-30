@@ -74,6 +74,80 @@ describe("ConfigAgent.scan", () => {
     expect(second.diagnostics[0].message).toBe(diagnostics[0].message)
   })
 
+  test("agents/sub strips the sub prefix and stays subagent", async () => {
+    await using tmp = await tmpdir()
+    await writeAgent(tmp.path, "agents/sub/helper.md", `---\nmodel: test/model\n---\nHelper prompt`)
+    const { agents, diagnostics } = await ConfigAgent.scan(tmp.path)
+    expect(diagnostics.length).toBe(0)
+    expect(agents["helper"]).toMatchObject({ name: "helper", mode: "subagent", prompt: "Helper prompt" })
+    expect(agents["sub/helper"]).toBeUndefined()
+  })
+
+  test("agents/sub rejects a non-subagent mode", async () => {
+    await using tmp = await tmpdir()
+    await writeAgent(tmp.path, "agents/sub/helper.md", `---\nmodel: test/model\nmode: primary\n---\nNope`)
+    const { agents, diagnostics } = await ConfigAgent.scan(tmp.path)
+    expect(agents["helper"]).toBeUndefined()
+    expect(diagnostics[0].message).toContain("only for mode: subagent")
+  })
+
+  test("variants expand to stem-id and share one prompt", async () => {
+    await using tmp = await tmpdir()
+    await Filesystem.write(path.join(tmp.path, "shared.txt"), "shared prompt")
+    await writeAgent(
+      tmp.path,
+      "agents/sub/sp-redteam-luna.md",
+      `---
+model: openai/gpt-6-luna
+prompt: "{file:../../shared.txt}"
+variants:
+  - id: low
+    description: low effort
+  - id: high
+    description: high effort
+    variant: max
+---
+`,
+    )
+    const { agents, diagnostics } = await ConfigAgent.scan(tmp.path)
+    expect(diagnostics.length).toBe(0)
+    expect(agents["sp-redteam-luna"]).toBeUndefined()
+    expect(agents["sp-redteam-luna-low"]).toMatchObject({
+      model: "openai/gpt-6-luna",
+      variant: "low",
+      description: "low effort",
+      mode: "subagent",
+    })
+    expect(agents["sp-redteam-luna-low"].prompt).toContain("shared prompt")
+    expect(agents["sp-redteam-luna-high"]).toMatchObject({ variant: "max", description: "high effort" })
+    expect(agents["sp-redteam-luna-high"].prompt).toBe(agents["sp-redteam-luna-low"].prompt)
+  })
+
+  test("agents map uses explicit names and omits an empty prompt", async () => {
+    await using tmp = await tmpdir()
+    await writeAgent(
+      tmp.path,
+      "agents/sub/general.md",
+      `---
+mode: subagent
+agents:
+  general:
+    model: meta/muse
+    description: stock
+  general-luna-low:
+    model: openai/gpt-6-luna
+    variant: low
+    description: luna low
+---
+`,
+    )
+    const { agents, diagnostics } = await ConfigAgent.scan(tmp.path)
+    expect(diagnostics.length).toBe(0)
+    expect(agents["general"]).toMatchObject({ model: "meta/muse", description: "stock", mode: "subagent" })
+    expect(agents["general"].prompt).toBeUndefined()
+    expect(agents["general-luna-low"]).toMatchObject({ variant: "low", description: "luna low" })
+  })
+
   test("valid {file:...} include resolves", async () => {
     await using tmp = await tmpdir()
     await Filesystem.write(path.join(tmp.path, "shared.txt"), "shared prompt")

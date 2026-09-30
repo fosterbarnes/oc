@@ -13,31 +13,9 @@ export interface ClaudeCodeConfig {
    * so nothing process-wide may decide it.
    */
   hostApi?: "v1" | "v2"
-  /** Drive interactive claude (subscription) instead of headless --print. */
-  interactive?: boolean
-  /** Deprecated/no-op with interactive: Claude Code's TUI requires manual confirmation for bypassPermissions. */
-  interactiveBypass?: boolean
-  /** With interactive: built-in tools to allow without prompting (replaces
-   *  the default Bash/Edit/Write/Read/WebFetch list; MCP wildcards are always
-   *  derived from opencode's enabled MCP servers). */
-  interactiveAllowTools?: string[]
-  /** With interactive: append this plugin's own prompts via --append-system-prompt-file. Defaults to true. */
-  interactiveSystemPrompt?: boolean
   cwd?: string
   account?: string
   configDir?: string
-  /**
-   * Every account the provider expansion produced, so a limited account can
-   * offer the others. Set by `providerConfig`, not by the user.
-   */
-  failoverAccounts?: string[]
-  /**
-   * The CLI path BEFORE the per-account wrapper substitution, so a failover
-   * can build another account's wrapper on top of the same binary. Set by
-   * `providerConfig`, not by the user.
-   */
-  baseCliPath?: string
-  accountFailover?: AccountFailoverMode
   providerID?: string
   skipPermissions?: boolean
   /**
@@ -56,26 +34,13 @@ export interface ClaudeCodeConfig {
   stripContextReminders?: boolean
   extraDisallowedTools?: string[]
   proxyToolTimeoutMs?: Record<string, number>
-  /**
-   * Route `ExitPlanMode` through opencode's native `question` tool so plan
-   * approval is a real form instead of a "(yes/no)" line the operator has to
-   * answer in prose. Off by default because it cannot currently fire: headless
-   * `--print` is not offered an `ExitPlanMode` tool at all, and this bridge
-   * keys on that tool call. See the plan-mode gotcha in AGENTS.md.
-   */
-  planModeQuestion?: boolean
   webSearch?: WebSearchRouting
   hotReloadMcp?: boolean
   multiStepContinuation?: boolean
   autoContinueIncompleteTurns?: boolean | "smart"
-  compactionModel?: string
   ignoreAnthropicApiKey?: boolean
   /** Kill an idle headless Claude worker after this many milliseconds. */
   idleProcessTimeoutMs?: number
-  /** Stage opencode skills as a `--plugin-dir` so Claude's Skill tool can run them. */
-  bridgeOpencodeSkills?: boolean
-  /** Leave out the skills the Claude session already loads natively. Default true. */
-  bridgeSkipNativeSkills?: boolean
   /** Append a one-line cost / duration / cache footer to each finished turn. */
   turnStats?: boolean
   logging?: LoggingConfig
@@ -83,7 +48,7 @@ export interface ClaudeCodeConfig {
 
 export interface LoggingConfig {
   /**
-   * Persist log activity (DEBUG / INFO / NOTICE / WARN / ERROR — those
+   * Persist log activity (DEBUG / INFO / NOTICE / WARN / ERROR - those
    * passing `level`) to a file. Default: `false`. When `false`, entries
    * below WARN vanish entirely; WARN / ERROR still surface in the TUI via
    * stderr. Set to `true` to capture the audit trail to disk for review
@@ -112,69 +77,21 @@ export interface LoggingConfig {
 
 export type WebSearchRouting = "claude" | "disabled" | (string & {})
 
-/**
- * What happens when the account a conversation runs on is out of usage.
- * `"ask"` (default) shows the operator a form listing the other configured
- * accounts and applies the pick inside the same turn; `"off"` keeps today's
- * behaviour, where the turn ends with the rate-limit error.
- */
-export type AccountFailoverMode = "ask" | "off"
-
 export interface ClaudeCodeProviderSettings {
   cliPath?: string
   /** Internal: set by the opencode 2 entrypoint. See `ClaudeCodeConfig.hostApi`. */
   hostApi?: "v1" | "v2"
-  /** Drive interactive claude (subscription) instead of headless --print. */
-  interactive?: boolean
-  /** Deprecated/no-op with interactive: Claude Code's TUI requires manual confirmation for bypassPermissions. */
-  interactiveBypass?: boolean
-  /** With interactive: built-in tools to allow without prompting (replaces
-   *  the default Bash/Edit/Write/Read/WebFetch list; MCP wildcards are always
-   *  derived from opencode's enabled MCP servers). */
-  interactiveAllowTools?: string[]
-  /** With interactive: append this plugin's own prompts via --append-system-prompt-file. Defaults to true. */
-  interactiveSystemPrompt?: boolean
   cwd?: string
   name?: string
   providerID?: string
   account?: string
   configDir?: string
-  accounts?: string[]
-  /**
-   * Every account the provider expansion produced. Written by the config
-   * hook; setting it by hand only limits what a limited account may offer.
-   */
-  failoverAccounts?: string[]
-  /** The CLI path before the per-account wrapper substitution. */
-  baseCliPath?: string
-  /**
-   * When this account is out of usage, show the operator a form listing the
-   * other configured accounts and continue the task on the pick, inside the
-   * same opencode turn. `"ask"` by default, which only does anything when
-   * more than one account is configured. `"off"` keeps the plain rate-limit
-   * error. See README "Account failover".
-   */
-  accountFailover?: AccountFailoverMode
   /**
    * Model that subagents run on when their own definition pins nothing.
    * Unset means no implicit override at all, so an agent keeps inheriting the
    * caller's model exactly as opencode intends. See `src/agent-models.ts`.
    */
   defaultSubagentModel?: string
-  /**
-   * Models to try, in order, when the model a turn would have run on is
-   * refused. The default for every agent that declares no `fallbackModels` of
-   * its own; a per-agent list replaces this one rather than extending it.
-   *
-   * Unset means no chain at all, so an upgrade never moves a turn onto a
-   * model nobody picked. Entries are model NAMES from this plugin's own list
-   * (an unknown one is refused with a WARN and skipped) and always run on the
-   * account the turn arrived on: this never crosses accounts, which is what
-   * `accountFailover` is for. Only two things arm it, the CLI refusing the
-   * model outright and a usage limit with no other account to offer. See
-   * README "Fallback model chain" and `src/model-fallback.ts`.
-   */
-  fallbackModels?: string[]
   skipPermissions?: boolean
   permissionMode?: PermissionMode
   /**
@@ -274,23 +191,23 @@ export interface ClaudeCodeProviderSettings {
    * otherwise. Names are Claude's, not opencode's: `["NotebookEdit"]`.
    *
    * Disabling a tool with no replacement removes the capability rather
-   * than routing it through opencode — that is the point, but it does mean
+   * than routing it through opencode - that is the point, but it does mean
    * the model has to work without it.
    */
   extraDisallowedTools?: string[]
 
   /**
    * Per-tool proxy call timeouts in milliseconds, keyed by the proxy tool
-   * name (`bash`, `edit`, `write`, `webfetch`, `task`, `question` —
+   * name (`bash`, `edit`, `write`, `webfetch`, `task`, `question` -
    * case-insensitive). When a proxied tool call waits longer than its
    * deadline for opencode to resolve it, the call is rejected and Claude
    * receives a timeout error.
    *
    * Defaults (used when a tool is absent here): `bash`/`edit`/`write`/
-   * `webfetch` → 10 min (matches Claude CLI's Bash ceiling); `task` and
-   * `task_batch` → no deadline (the call waits for the subagent; abandoned
+   * `webfetch` -> 10 min (matches Claude CLI's Bash ceiling); `task` and
+   * `task_batch` -> no deadline (the call waits for the subagent; abandoned
    * calls are released by aborts, the next user turn, and the process going
-   * away); `question` → 30 min (operator AFK). A positive value here replaces
+   * away); `question` -> 30 min (operator AFK). A positive value here replaces
    * the default for that tool, `0` disables its deadline, and a negative or
    * non-finite value is ignored.
    *
@@ -302,32 +219,10 @@ export interface ClaudeCodeProviderSettings {
   proxyToolTimeoutMs?: Record<string, number>
 
   /**
-   * Route Claude's `ExitPlanMode` through opencode's native `question` tool.
-   *
-   * Off (default): the plan is rendered as markdown followed by
-   * `**Do you want to proceed with this plan?** (yes/no)` and the operator
-   * answers in prose. On: the plan is rendered, the turn ends on
-   * `tool-calls`, and opencode runs its own `question` tool so approval is a
-   * real form; the answer is fed back to the CLI as the `tool_result` for
-   * the original `ExitPlanMode` call, which is what unlocks plan mode.
-   *
-   * Opt-in, and currently dormant. The delivery surface works: opencode's
-   * `question` form renders and round-trips (verified 2026-09-06, correcting
-   * an earlier claim here that it was broken upstream). What does not work is
-   * the trigger: headless `--print` does not offer the model an
-   * `ExitPlanMode` tool, measured on CLI 2.1.258, so the bridge has nothing
-   * to key on and the text path is what you get. Older opencode builds also
-   * have no `question` registry entry, in which case the plugin silently
-   * keeps the text path. Re-run the probes in AGENTS.md on a newer CLI before
-   * assuming the bridge is reachable.
-   */
-  planModeQuestion?: boolean
-
-  /**
    * Strip `ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN` from the environment of
    * every spawned `claude` process. When an API key is present, Claude Code
    * authenticates with it (pay-as-you-go Console billing) instead of the
-   * logged-in Pro/Max subscription — silently bypassing the Agent SDK plan
+   * logged-in Pro/Max subscription - silently bypassing the Agent SDK plan
    * credit. Set this to `true` to force the CLI to fall back to its stored
    * subscription auth. Defaults to `false` (the key is passed through, so
    * deliberate API-key users are unaffected). Regardless of this setting, the
@@ -341,47 +236,9 @@ export interface ClaudeCodeProviderSettings {
    * starts when a turn completes (not at spawn), starting another turn cancels
    * it, a worker found mid-turn when it fires is left alone and re-timed, and
    * the Claude session id is retained for a transparent resume. Omit or set 0
-   * to keep workers until LRU eviction (16 processes). Interactive transport is
-   * excluded because it does not currently guarantee session-id resume.
+   * to keep workers until LRU eviction (16 processes).
    */
   idleProcessTimeoutMs?: number
-  /**
-   * Expose your opencode skills to Claude Code's native Skill tool by staging
-   * them as a session-scoped `--plugin-dir`, so a `Skill("<name>")` call for a
-   * skill opencode advertises does not fail with `Unknown skill`. Covers every
-   * root opencode itself reads: project `.opencode/`, `.claude/` and `.agents/`
-   * walking up from the workspace, the opencode config dirs, and the global
-   * `~/.claude/skills` and `~/.agents/skills` (those last two behind the same
-   * `OPENCODE_DISABLE_EXTERNAL_SKILLS` / `OPENCODE_DISABLE_CLAUDE_CODE_SKILLS`
-   * switches opencode honours).
-   *
-   * Off by default: every bridged skill is also listed in the system prompt
-   * opencode forwards, so a large skill set costs prompt tokens twice per turn.
-   * When on it applies to the headless, interactive and direct `doGenerate`
-   * spawns alike; compaction never loads it, and the bundled configuration
-   * skill is staged either way. No-op on CLIs without `--plugin-dir`.
-   */
-  bridgeOpencodeSkills?: boolean
-
-  /**
-   * Leave a skill unbridged when the Claude Code session already loads it:
-   * from `<CLAUDE_CONFIG_DIR>/skills` (`~/.claude/skills` by default), from the
-   * project's own `.claude/skills`, or from an installed plugin's `skills/`.
-   * On by default, because those roots overlap opencode's and the duplicate
-   * costs prompt tokens on every turn for nothing.
-   *
-   * A skill is treated as already loaded when it is literally the same
-   * directory (symlinks resolved), when its SKILL.md is byte-identical to a
-   * native one, or when a *different* skill of the same name is registered
-   * under user or project scope. That last case is the only one that changes
-   * behaviour, because `Skill("<name>")` then answers from Claude's copy
-   * rather than opencode's, so it is logged at WARN naming both paths. Plugin
-   * skills are namespaced `<plugin>:<name>` and so only ever match by content.
-   *
-   * Set `false` to bridge everything regardless, which restores the pre-0.25
-   * behaviour of advertising a shared skill twice.
-   */
-  bridgeSkipNativeSkills?: boolean
 
   /**
    * Append one compact line to the end of every finished (non-compaction,
@@ -450,14 +307,6 @@ export interface ClaudeCodeProviderSettings {
    */
   autoContinueIncompleteTurns?: boolean | "smart"
 
-  /**
-   * Model id used when opencode invokes `/compact`. Defaults to
-   * `claude-haiku-4-5` — fast, cheap, strong structured summarizer. Set
-   * to override per-project in `opencode.json` / `opencode.jsonc`; the
-   * `CLAUDE_CODE_COMPACTION_MODEL` env var overrides this in turn for
-   * one-off runs without editing config.
-   */
-  compactionModel?: string
 
   /**
    * Logger configuration. See `LoggingConfig` for fields. Env vars
@@ -516,21 +365,11 @@ export type EffectivePermissionMode =
  * which proxy tools a preset dropped, and `startup-diagnostics.ts` and
  * `doctor.ts` read that answer. Importing `index.ts` from any of the three
  * would be a cycle.
+ *
+ * Only oc-only tools are proxied: Claude Code's native file, shell and web
+ * tools run in the CLI and render as oc tool rows.
  */
-export const DEFAULT_PROXY_TOOL_NAMES = [
-  "Bash",
-  "Edit",
-  "Write",
-  "Read",
-  "Glob",
-  "Grep",
-  "WebFetch",
-  "Task",
-]
-
-export interface ClaudeCodeCallOptions {
-  reasoningEffort?: ReasoningEffort
-}
+export const DEFAULT_PROXY_TOOL_NAMES = ["Task"]
 
 /**
  * Claude CLI stream-json message types.
@@ -579,6 +418,7 @@ export interface ClaudeStreamMessage {
   message?: {
     role?: string
     model?: string
+    usage?: ClaudeStreamMessage["usage"]
     content?: Array<{
       type: string
       text?: string
@@ -623,6 +463,10 @@ export interface ClaudeStreamMessage {
   }
 
   session_id?: string
+  /** Transcript chain entry id; `--resume-session-at` rewinds to an assistant one. */
+  uuid?: string
+  /** Set on a subagent's messages, which live on a side chain, not the main one. */
+  parent_tool_use_id?: string | null
   total_cost_usd?: number
   duration_ms?: number
   duration_api_ms?: number

@@ -7,6 +7,8 @@ $subject = if ($Message) { $Message.Trim() } else { (Read-Host 'Commit message')
 if (-not $subject) { throw 'A commit message is required.' }
 $branch = ((& git branch --show-current) | Out-String).Trim()
 if ($LASTEXITCODE -or -not $branch) { throw 'Could not determine a non-detached current branch.' }
+# Revision counts sessions since the last commit, so every commit carries revision 0.
+[IO.File]::WriteAllText($version, "$(requireVersion)`n0`n")
 runNativeCommand git @('add', '-A') 'git add'
 runNativeCommand git @('commit', '-m', $subject) 'git commit'
 $pushArgs = @('push', 'origin', $branch)

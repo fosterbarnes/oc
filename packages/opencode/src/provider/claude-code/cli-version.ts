@@ -165,16 +165,6 @@ export function cliSupportsPermissionPrompts(v: CliVersion | null): boolean {
 }
 
 /**
- * `alwaysLoad` on an `--mcp-config` server entry exempts its tools from tool
- * search deferral. Found in the 2.1.241 binary and absent from 2.1.81, the two
- * on hand, so the gate sits at what was measured.
- */
-export function cliSupportsMcpAlwaysLoad(v: CliVersion | null): boolean {
-  if (!v) return false
-  return gte(v, { major: 2, minor: 1, patch: 241 })
-}
-
-/**
  * `--thinking` has been part of Claude Code's CLI since the 2.x line.
  * We require a detected 2.0.0+ before passing it; unknown version → skip
  * to avoid crashing a pre-flag binary. Anyone on the 1.x line should
@@ -185,47 +175,3 @@ export function cliSupportsThinking(v: CliVersion | null): boolean {
   return gte(v, { major: 2, minor: 0, patch: 0 })
 }
 
-/** For tests. */
-const flagSupport = new Map<string, Promise<boolean>>()
-
-/**
- * Probe whether the binary's own `--help` mentions a flag. For flags with no
- * published version marker (`--plugin-dir`), where an invented semver
- * threshold would be a guess. One `--help` spawn per cliPath+flag, cached for
- * the process lifetime. Any failure is false, so the caller skips the flag
- * rather than risking a parse error on spawn. (From @broskees' 68ed142.)
- */
-export function detectCliSupportsFlag(cliPath: string, flag: string): Promise<boolean> {
-  const key = `${cliPath}\x00${flag}`
-  const cached = flagSupport.get(key)
-  if (cached) return cached
-  const promise = (async (): Promise<boolean> => {
-    try {
-      const command = cliCommand(cliPath, ["--help"])
-      const execution = execFileAsync(command.command, command.args, {
-        timeout: 5000,
-        killSignal: "SIGKILL",
-        maxBuffer: 4 * 1024 * 1024,
-        shell: command.shell,
-      })
-      // A wrapper may wait for stdin EOF even when asked for help.
-      execution.child.stdin?.end()
-      const { stdout } = await execution
-      return stdout.includes(flag)
-    } catch (err) {
-      log.warn("failed to probe claude cli flag support", {
-        cliPath,
-        flag,
-        error: err instanceof Error ? err.message : String(err),
-      })
-      return false
-    }
-  })()
-  flagSupport.set(key, promise)
-  return promise
-}
-
-export function _clearCache(): void {
-  flagSupport.clear()
-  cache.clear()
-}

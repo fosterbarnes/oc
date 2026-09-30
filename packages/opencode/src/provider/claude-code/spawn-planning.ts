@@ -1,37 +1,66 @@
 /**
  * Spawn planning: what a single `claude` spawn gets before it starts.
  * Which `--mcp-config` files, which proxy tool definitions, what opencode's
- * live tool registry says, which config dir the skill bridge reads, whether
- * the plan-mode approval bridge is live, and the proxy MCP server itself.
- *
- * Split out of `claude-code-language-model.ts` verbatim. These were private
- * methods whose only use of `this` was `this.config` (and `this.modelId` in
- * the registry fetch), so they take those as arguments now and the class
- * delegates to them with its original signatures.
+ * live tool registry says, the proxy MCP server itself, and the CLI args
+ * that tie them together (`planSpawn`).
  */
+import type { LanguageModelV3CallOptions } from "@ai-sdk/provider"
 import type { ClaudeCodeConfig } from "./types.js"
+import type { TurnContext } from "./turn-context.js"
 import { shouldStripContextReminders } from "./message-builder.js"
-import { isPlanModeQuestionActive } from "./plan-mode-question.js"
 import { mergeOpencodeMcp, type RuntimeMcpStatus } from "./mcp-bridge.js"
 import {
   fetchOpencodeToolList,
   type OpencodeToolListItem,
 } from "./runtime-status.js"
-import { storeCompressionSummary } from "./compression-store.js"
+import { buildAppendedSystemPrompt, buildToolEnvironmentNote } from "./prompts.js"
+import { buildCliArgs, thinkingCliOptions } from "./cli-args.js"
+import type { CliVersion } from "./cli-version.js"
+import { ensureSkillPlugin, fetchOpencodeSkills } from "./skill-plugin.js"
+import { parseModelId } from "./models.js"
+import { createProxyMcpServer, type ProxyMcpServer, type ProxyToolCall } from "./proxy-mcp.js"
 import {
-  createProxyMcpServer,
-  resolveMcpProxyToolDefs,
+  overlayTaskProxyDescription,
+  overlayQuestionProxyDescription,
+  filterQuestionProxyByOpencodeSupport,
   DEFAULT_PROXY_TOOLS,
   TASK_BATCH_TOOL_NAME,
+  type ProxyToolDef,
+} from "./proxy-tool-defs.js"
+import {
+  resolveMcpProxyToolDefs,
+  resolveDisallowedTools,
+  resolveProxyOpencodeToolDefs,
+  filterProxyByModelTools,
+  filterProxyOpencodeToolDefs,
+  nativeToolsDeniedByHost,
   type McpProxyToolResolution,
   type ModelToolEntry,
-  type ProxyMcpServer,
-  type ProxyToolCall,
-  type ProxyToolDef,
-  type ProxyToolInterceptor,
-} from "./proxy-mcp.js"
+} from "./proxy-tool-selection.js"
 import { queuePendingProxyCall } from "./proxy-broker.js"
 import { log } from "./logger.js"
+import { createHash } from "node:crypto"
+
+export function toolCatalogHash(config: ClaudeCodeConfig, tools: readonly ModelToolEntry[] | undefined) {
+  return createHash("sha256").update(JSON.stringify({
+    tools: tools?.map((tool) => ({
+      name: tool.name,
+      description: tool.description,
+      inputSchema: tool.inputSchema,
+    })).toSorted((a, b) => (a.name ?? "").localeCompare(b.name ?? "")),
+    proxyTools: config.proxyTools,
+    proxyOpencodeTools: config.proxyOpencodeTools,
+    extraDisallowedTools: config.extraDisallowedTools,
+    proxyToolTimeoutMs: config.proxyToolTimeoutMs,
+    webSearch: config.webSearch,
+    strictMcpConfig: config.strictMcpConfig,
+    mcpConfig: config.mcpConfig,
+    permissionMode: config.permissionMode,
+    skipPermissions: config.skipPermissions,
+  }, (_: string, value: unknown) => value !== null && typeof value === "object" && !Array.isArray(value)
+    ? Object.fromEntries(Object.entries(value).toSorted(([a], [b]) => a.localeCompare(b)))
+    : value)).digest("hex")
+}
 
 /** One per-turn snapshot of opencode's live tool registry. */
 export interface LiveToolInfo {
@@ -182,7 +211,7 @@ export function resolvedProxyMcpTools(
  * - `questionDescription` / `hasQuestion`: opencode's `question` tool
  *   description and whether the registry has the entry at all. Older
  *   builds lack it, in which case a `mcp__opencode_proxy__question`
- *   call resolves to `⚙ invalid`; the version gate drops the def.
+ *   call resolves to `:gear: invalid`; the version gate drops the def.
  *
  * Returns undefined/false when the SDK client is unavailable (direct
  * AI-SDK use, tests) so the static defs stand. `resolved` distinguishes
@@ -236,37 +265,6 @@ export function createLiveToolInfoLoader(
 }
 
 /**
- * Whether the ExitPlanMode approval bridge is live for this turn: the
- * operator opted in AND opencode's registry actually has the `question`
- * tool. Without the registry entry the emitted tool-call would render as
- * `⚙ invalid` and wedge the turn, so the plugin keeps the text path.
- */
-export async function resolvePlanModeQuestion(
-  config: ClaudeCodeConfig,
-  compactionMode: boolean,
-  loadLiveToolInfo: () => Promise<LiveToolInfo>,
-): Promise<boolean> {
-  if (compactionMode || config.planModeQuestion !== true) return false
-  const info = await loadLiveToolInfo()
-  const active = isPlanModeQuestionActive({
-    configured: config.planModeQuestion,
-    opencodeHasQuestion: info.hasQuestion,
-    compactionMode,
-  })
-  if (!active) {
-    // Same reasoning as the question proxy's version-gate log: a silent
-    // fallback to the text path looks from the outside like the setting
-    // was ignored.
-    log.info("plan-mode question gate", {
-      opencodeHasQuestion: info.hasQuestion,
-      registryResolved: info.resolved,
-      active,
-    })
-  }
-  return active
-}
-
-/**
  * Create a proxy MCP server for a single active Claude process/session.
  * The process lifecycle owns the server lifecycle via session-manager.
  */
@@ -274,43 +272,175 @@ export async function ensureProxyServer(
   config: ClaudeCodeConfig,
   tools: ProxyToolDef[],
   sessionKeyForCalls: string,
-  // Whether the `compress` in `tools` is the PLUGIN's def rather than
-  // opencode's forwarded one. Keying the interceptor on the name alone
-  // would answer a forwarded `compress` in-process and opencode would
-  // never see the call: the same name, the wrong tool, silently. The
-  // caller knows which list the def came from, so it decides.
-  interceptCompress: boolean,
 ): Promise<ProxyMcpServer> {
   const timeoutOverrides = config.proxyToolTimeoutMs
-  const interceptors = new Map<string, ProxyToolInterceptor>()
-  if (interceptCompress && tools.some((t) => t.name === "compress")) {
-    interceptors.set("compress", (input) => {
-      const summary = typeof input.summary === "string" ? input.summary.trim() : ""
-      if (!summary) {
-        return {
-          kind: "error",
-          message:
-            "compress needs a non-empty `summary`: it becomes the only" +
-            " prior context after the reset. Nothing was compressed.",
-        }
-      }
-      storeCompressionSummary(sessionKeyForCalls, summary)
-      log.info("compress stored summary; session resets next turn", {
-        sessionKey: sessionKeyForCalls,
-        summaryLength: summary.length,
-      })
-      return {
-        kind: "text",
-        text:
-          "Summary stored. Finish this turn as normal; the next turn starts" +
-          " a fresh Claude Code session with this summary as its only prior" +
-          " context.",
-      }
-    })
-  }
-  const srv = await createProxyMcpServer(tools, timeoutOverrides, interceptors)
+  const srv = await createProxyMcpServer(tools, timeoutOverrides)
   srv.calls.on("call", (call: ProxyToolCall) => {
     queuePendingProxyCall(sessionKeyForCalls, call, timeoutOverrides)
   })
   return srv
+}
+
+/**
+ * Everything one spawn of `claude` needs. Computed every turn, even when a
+ * live process is reused, because the start watchdog respawns with `cliArgs`.
+ * A reused process keeps its system prompt, so no prompt file is written then.
+ */
+export async function planSpawn(input: {
+  config: ClaudeCodeConfig
+  turn: TurnContext
+  options: LanguageModelV3CallOptions
+  reusing: boolean
+  proxyServer: ProxyMcpServer | null
+  proxyTools: ProxyToolDef[] | null
+  runtimeStatus: RuntimeMcpStatus | undefined
+  cliVersion: CliVersion | null
+  loadLiveToolInfo: () => Promise<LiveToolInfo>
+}) {
+  const config = input.config
+  const turn = input.turn
+  const spawnModel = parseModelId(turn.effectiveModelId)
+  const systemPrompt = (toolEnvironment?: string) =>
+    input.reusing
+      ? undefined
+      : buildAppendedSystemPrompt({
+          agentPrompt: turn.agentPrompt,
+          multiStepHint: config.multiStepContinuation !== false,
+          toolEnvironment,
+        })
+
+  // Text-only requests have no execution authority, including inherited MCP
+  // tools. A compaction turn resumes the conversation only to run `/compact`.
+  if (turn.compactionMode || !input.options.tools?.length) {
+    const systemPromptFile = turn.compactionMode ? undefined : systemPrompt()
+    return {
+      cliArgs: buildCliArgs({
+        sessionKey: turn.sessionKey,
+        skipPermissions: false,
+        model: spawnModel.model,
+        tools: [],
+        strictMcpConfig: true,
+        disallowedTools: ["*"],
+        appendSystemPromptFile: systemPromptFile,
+        fastMode: spawnModel.fast,
+        cliVersion: input.cliVersion,
+      }),
+      systemPromptFile,
+      proxyServer: null,
+      mcpHash: null,
+    }
+  }
+
+  const [tools, skills] = await Promise.all([assembleProxyTools(input), fetchOpencodeSkills(turn.cwd)])
+  const proxyServer =
+    input.proxyServer ??
+    (tools.combined.length > 0 ? await ensureProxyServer(config, tools.combined, turn.sessionKey) : null)
+  const mcp = effectiveMcpConfig(config, turn.cwd, proxyServer?.configPath(), input.runtimeStatus)
+  const systemPromptFile = systemPrompt(buildToolEnvironmentNote(tools.combined.map((t) => t.name)))
+  return {
+    cliArgs: buildCliArgs({
+      sessionKey: turn.sessionKey,
+      skipPermissions: config.skipPermissions !== false,
+      model: spawnModel.model,
+      permissionMode: config.permissionMode,
+      mcpConfig: mcp.paths,
+      strictMcpConfig: config.strictMcpConfig,
+      disallowedTools: tools.disallowed.length > 0 ? tools.disallowed : undefined,
+      appendSystemPromptFile: systemPromptFile,
+      pluginDir: skills ? ensureSkillPlugin(skills) : undefined,
+      ...thinkingCliOptions(),
+      fastMode: spawnModel.fast,
+      cliVersion: input.cliVersion,
+    }),
+    systemPromptFile,
+    proxyServer,
+    mcpHash: mcp.mcpHash,
+  }
+}
+/**
+ * The proxy tool list for one spawn: the configured static defs (overlaid
+ * with opencode's live descriptions and version gates), opencode's MCP tools,
+ * and explicitly forwarded opencode tools, plus the built-ins to disallow.
+ */
+async function assembleProxyTools(input: Parameters<typeof planSpawn>[0]) {
+  const config = input.config
+  const modelTools = input.options.tools as readonly ModelToolEntry[] | undefined
+  const dialect = config.hostApi === "v2" ? "v2" : "v1"
+
+  // opencode's MCP tools reach Claude only as proxy defs, one per tool of
+  // each connected server.
+  warnUnavailableMcpServers(input.runtimeStatus)
+  const mcpDefs =
+    resolvedProxyMcpTools(
+      effectiveMcpConfig(config, input.turn.cwd, undefined, input.runtimeStatus).allEnabledServerNames,
+      modelTools,
+      new Set((input.proxyTools ?? []).map((def) => def.name)),
+    )?.defs ?? []
+
+  // The `task` description (with its "Available agent types" list), the
+  // `question` version gate, and `proxyOpencodeTools` all derive from one
+  // registry fetch. Spawn-time only; a reused process keeps its defs.
+  const taskEnabled = input.proxyTools?.some((t) => t.name === "task") ?? false
+  const questionEnabled = input.proxyTools?.some((t) => t.name === "question") ?? false
+  const opencodeToolsRequested = (config.proxyOpencodeTools?.length ?? 0) > 0
+  const live: LiveToolInfo =
+    taskEnabled || questionEnabled || opencodeToolsRequested
+      ? await input.loadLiveToolInfo()
+      : { resolved: false, taskDescription: undefined, questionDescription: undefined, hasQuestion: false }
+
+  const gated = gateStaticDefs(input.proxyTools, live, taskEnabled, questionEnabled)
+  const staticDefs = gated ? filterProxyByModelTools(gated, modelTools, dialect) : []
+
+  // Opencode tools that belong to no MCP server are invisible to the MCP
+  // resolution, so an explicitly named one is resolved here. Last in `taken`,
+  // so a static def or an MCP tool keeps a contested name and this one is
+  // dropped with a warning rather than shadowing it.
+  const resolvedOpencodeDefs = resolveProxyOpencodeToolDefs({
+    requested: config.proxyOpencodeTools,
+    items: live.items,
+    taken: new Set([...staticDefs, ...mcpDefs].map((t) => t.name)),
+  })
+  const opencodeDefs = filterProxyOpencodeToolDefs(resolvedOpencodeDefs, modelTools, dialect)
+  if (opencodeDefs.length > 0) {
+    log.info("forwarding opencode tools through the proxy", { tools: opencodeDefs.map((t) => t.name) })
+  }
+
+  return {
+    combined: [...staticDefs, ...mcpDefs, ...opencodeDefs],
+    // Disallow against the post-version-gate defs, before the model-tools
+    // filter: an unsupported question proxy leaves its native fallback live,
+    // and a permission-denied proxy keeps its native replacement off.
+    disallowed: resolveDisallowedTools({
+      proxyTools: [...(gated ?? []), ...resolvedOpencodeDefs],
+      extraDisallowedTools: [...nativeToolsDeniedByHost(modelTools, dialect), ...(config.extraDisallowedTools ?? [])],
+      disableWebSearch: config.webSearch === "disabled",
+    }),
+  }
+}
+
+function gateStaticDefs(
+  defs: ProxyToolDef[] | null,
+  live: LiveToolInfo,
+  taskEnabled: boolean,
+  questionEnabled: boolean,
+) {
+  if (!defs) return null
+  const withTask = taskEnabled ? overlayTaskProxyDescription(defs, live.taskDescription) : defs
+  if (taskEnabled) {
+    // Whether the model sees opencode's agent list is the difference between
+    // a dispatch and an "Unknown agent type" guess.
+    log.info("task proxy description overlay", {
+      applied: Boolean(live.taskDescription),
+      liveDescriptionLength: live.taskDescription?.length ?? 0,
+      listsAgentTypes: Boolean(live.taskDescription?.includes("Available agent types")),
+    })
+  }
+  if (!questionEnabled) return withTask
+  // When the gate drops the def the model silently falls back to the
+  // deny/markdown path, which looks like the feature is off; log it.
+  log.info("question proxy version gate", { opencodeHasQuestion: live.hasQuestion, kept: live.hasQuestion })
+  return filterQuestionProxyByOpencodeSupport(
+    overlayQuestionProxyDescription(withTask, live.hasQuestion ? live.questionDescription : undefined),
+    live.hasQuestion,
+  )
 }

@@ -19,21 +19,19 @@ import {
   resolvePendingProxyCallById,
   rejectPendingProxyCallById,
   rejectAllPendingProxyCallsForSession,
-  snapshotPendingProxyCalls,
   PROXY_STALL_WARNING_MS,
   PROXY_DEADLINE_WARNING_FRACTION,
   PROXY_DEADLINE_WARNING_MIN_MS,
   type PendingProxyCall,
 } from "@/provider/claude-code/proxy-broker.js"
 import { configureLogger, _resetLoggerForTests } from "@/provider/claude-code/logger.js"
+import { type ProxyToolCall, type ProxyToolResult } from "@/provider/claude-code/proxy-mcp.js"
 import {
   _setProxyDeadlineRecheckMs,
   armProxyDeadline,
   PROXY_NO_DEADLINE_MS,
   setProxyDeadlineGuard,
-  type ProxyToolCall,
-  type ProxyToolResult,
-} from "@/provider/claude-code/proxy-mcp.js"
+} from "@/provider/claude-code/proxy-deadline.js"
 
 type CallHandle = {
   id: string
@@ -250,12 +248,6 @@ test("queuePendingProxyCall: a call with no deadline arms no timer and stays pen
   await new Promise((r) => setTimeout(r, 60))
   assert.equal(a.rejected, false, "task must not time out")
   assert.equal(b.rejected, false, "a 0 override disables the bash deadline")
-  const snapshot = snapshotPendingProxyCalls().filter((c) => c.sessionKey === sk)
-  assert.deepEqual(
-    snapshot.map((c) => c.deadlineMs),
-    [PROXY_NO_DEADLINE_MS, PROXY_NO_DEADLINE_MS],
-    "the doctor sees 0 as the deadline",
-  )
 
   // The next user turn's orphan sweep is one such lifecycle event.
   assert.equal(rejectAllPendingProxyCallsForSession(sk, new Error("orphaned")), 2)

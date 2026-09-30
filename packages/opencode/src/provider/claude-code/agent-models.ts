@@ -59,16 +59,10 @@ export type AgentRecord = {
   forceModel?: string
   /** Thinking budget this agent wants, whatever the caller's picker says. */
   reasoningEffort?: string
-  /**
-   * Models to try, in order, when the one this agent would have run is
-   * refused. Same account throughout; see `src/model-fallback.ts`.
-   */
-  fallbackModels?: string[]
 }
 
 let registry: Record<string, AgentRecord> = {}
 let defaultSubagentModel: string | undefined
-let providerFallbackModels: string[] = []
 
 export function setAgentRegistry(records: Record<string, AgentRecord>): void {
   registry = records
@@ -87,24 +81,9 @@ export function getDefaultSubagentModel(): string | undefined {
   return defaultSubagentModel
 }
 
-/**
- * The chain every agent that declares none falls back along. Empty (the
- * default) means no chain at all, for the same reason `defaultSubagentModel`
- * is unset by default: an upgrade must not silently start running somebody's
- * turns on a model they did not pick.
- */
-export function setProviderFallbackModels(models: string[] | undefined): void {
-  providerFallbackModels = models ?? []
-}
-
-export function getProviderFallbackModels(): string[] {
-  return providerFallbackModels
-}
-
 export function _resetAgentRegistryForTests(): void {
   registry = {}
   defaultSubagentModel = undefined
-  providerFallbackModels = []
 }
 
 /** `claude-opus-5-fast@work` -> `@work`; a default-account id has none. */
@@ -130,9 +109,6 @@ function withoutAccountMarker(modelId: string): string {
  * alternative is spawning the CLI with a `--model` it rejects on a turn
  * someone is waiting for.
  *
- * Shared with `src/model-fallback.ts`: a fallback chain entry has exactly the
- * same two requirements as a `forceModel`, and one of them failing silently
- * in only one of the two places is how they would drift.
  */
 export function qualifyModelName(
   wanted: string,
@@ -245,55 +221,25 @@ export function resolveAgentEffort(
 }
 
 /**
- * Read the five fields that matter out of an agent markdown file's YAML
- * frontmatter. Hand-parsed rather than pulling a YAML dependency in for four
- * scalars and one list, and deliberately top-level only: `permission:` has
- * nested keys (`bash:`, `edit:`) that must not be mistaken for agent fields.
- *
- * `fallbackModels` is the one list, and it accepts both YAML spellings,
- * because a person writing an agent file will reach for either:
- *
- *   fallbackModels: [claude-opus-5, claude-sonnet-5]
- *   fallbackModels:
- *     - claude-opus-5
- *     - claude-sonnet-5
- *
- * The block form is the reason this loop tracks a key across lines at all.
- * Its items are consumed only while they keep the `- item` shape, so the
- * next `key:` line ends the list exactly as YAML would.
+ * Read the fields that matter out of an agent markdown file's YAML
+ * frontmatter. Hand-parsed rather than pulling a YAML dependency, and
+ * deliberately top-level only: `permission:` has nested keys that must not
+ * be mistaken for agent fields.
  */
 export function parseAgentFrontmatter(text: string): AgentRecord {
   const record: AgentRecord = {}
   if (!text.startsWith("---")) return record
 
   const lines = text.split(/\r?\n/)
-  let listKey: "fallbackModels" | null = null
   for (let i = 1; i < lines.length; i++) {
     const line = lines[i]
     if (line.trim() === "---") break
-
-    if (listKey) {
-      const item = /^[ \t]*-[ \t]+(.*)$/.exec(line)
-      if (item) {
-        const value = item[1].trim().replace(/^["']|["']$/g, "")
-        if (value) (record[listKey] ??= []).push(value)
-        continue
-      }
-      listKey = null
-    }
 
     const match = /^([A-Za-z_][A-Za-z0-9_-]*):[ \t]*(.*)$/.exec(line)
     if (!match) continue
 
     const key = match[1]
     const value = match[2].trim().replace(/^["']|["']$/g, "")
-
-    if (key === "fallbackModels") {
-      if (value) record.fallbackModels = parseFallbackModelList(value)
-      else listKey = "fallbackModels"
-      continue
-    }
-
     if (!value) continue
     if (key === "mode") record.mode = value
     else if (key === "model") record.model = value
@@ -302,28 +248,6 @@ export function parseAgentFrontmatter(text: string): AgentRecord {
   }
 
   return record
-}
-
-/**
- * A declared fallback list, from frontmatter, from opencode.json's `agent`
- * block, or from the provider options. Accepts the three shapes a person
- * actually writes: a YAML/JSON array, a comma or whitespace separated string,
- * and the inline bracket form `[a, b]`, which the line-based frontmatter
- * parser above hands over as one string.
- */
-export function parseFallbackModelList(value: unknown): string[] {
-  if (Array.isArray(value)) {
-    return value
-      .map((entry) => (typeof entry === "string" ? entry.trim() : ""))
-      .filter(Boolean)
-  }
-  if (typeof value !== "string") return []
-  return value
-    .trim()
-    .replace(/^\[|\]$/g, "")
-    .split(/[,\s]+/)
-    .map((entry) => entry.trim().replace(/^["']|["']$/g, ""))
-    .filter(Boolean)
 }
 
 /**

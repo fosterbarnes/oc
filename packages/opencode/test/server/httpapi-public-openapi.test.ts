@@ -300,6 +300,12 @@ describe("PublicApi OpenAPI v2 errors", () => {
     }
   })
 
+  test("documents the question ask route", () => {
+    const spec = OpenApi.fromApi(PublicApi) as OpenApiSpec
+
+    expect(spec.paths["/question/ask"]?.post?.requestBody).toBeDefined()
+  })
+
   test("documents MCP server not-found errors", () => {
     const spec = OpenApi.fromApi(PublicApi) as OpenApiSpec
 

@@ -1,17 +1,39 @@
 /**
  * Mapping the Claude CLI's own counters onto the AI SDK's usage and finish
  * shapes.
- *
- * Split out of `claude-code-language-model.ts` verbatim. Neither function
- * ever read `this`, so both became free functions unchanged and the class
- * keeps its `toUsage` / `toFinishReason` methods as one-line delegates (the
- * turn controller binds them).
  */
 import type {
   LanguageModelV3FinishReason,
   LanguageModelV3Usage,
 } from "@ai-sdk/provider"
 import type { ClaudeStreamMessage } from "./types.js"
+
+type CallUsage = NonNullable<ClaudeStreamMessage["usage"]>
+
+/**
+ * Context occupancy for one API call. `result.usage` sums every tool-loop
+ * call in the turn; pass the last assistant `message.usage` here instead.
+ * Output is that call only, not the sum of earlier calls in the turn.
+ */
+export function contextUsage(lastCall?: CallUsage | null): CallUsage {
+  return {
+    input_tokens: lastCall?.input_tokens ?? 0,
+    output_tokens: lastCall?.output_tokens ?? 0,
+    cache_read_input_tokens: lastCall?.cache_read_input_tokens ?? 0,
+    cache_creation_input_tokens: lastCall?.cache_creation_input_tokens ?? 0,
+  }
+}
+
+/** Same sum `isOverflow` uses once `getUsage` has split cache out of input. */
+export function claudePromptTokens(lastCall?: CallUsage | null): number {
+  const usage = contextUsage(lastCall)
+  return (
+    (usage.input_tokens ?? 0) +
+    (usage.output_tokens ?? 0) +
+    (usage.cache_read_input_tokens ?? 0) +
+    (usage.cache_creation_input_tokens ?? 0)
+  )
+}
 
 export function toUsage(rawUsage?: ClaudeStreamMessage["usage"]): LanguageModelV3Usage {
   // Prefer the last iteration's counters over cumulative totals.

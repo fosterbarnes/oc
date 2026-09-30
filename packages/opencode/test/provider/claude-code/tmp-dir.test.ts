@@ -31,16 +31,10 @@ import {
   sweepStalePluginTmpDirs,
 } from "@/provider/claude-code/tmp.js"
 
-// Read before anything calls pluginTmpDir(): the module registers its exit
-// hook lazily on first use, not at import, so this is the clean baseline.
-const exitListenersAtImport = process.listeners("exit")
-
 function pluginExitHook(): () => void {
-  const added = process
-    .listeners("exit")
-    .filter((listener) => !exitListenersAtImport.includes(listener))
-  assert.equal(added.length, 1, "expected exactly one exit hook from tmp.ts")
-  return added[0] as () => void
+  const hooks = process.listeners("exit").filter((listener) => listener === __test.exitCleanup)
+  assert.equal(hooks.length, 1, "expected exactly one exit hook from tmp.ts")
+  return __test.exitCleanup
 }
 
 test("the scratch directory is pid-isolated and lives under the OS tmpdir", () => {
@@ -61,12 +55,12 @@ test("repeated calls reuse the directory and arm exactly one exit hook", () => {
 
   assert.equal(second, first)
   assert.equal(third, first)
-  assert.equal(process.listenerCount("exit"), exitListenersAtImport.length + 1)
+  pluginExitHook()
 })
 
 test("the directory is recreated when something removed it underneath", () => {
   const dir = pluginTmpDir()
-  rmSync(dir, { recursive: true, force: true })
+  rmSync(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 })
   assert.equal(existsSync(dir), false)
 
   // Same path, existing again: callers hold onto the string and write into it
@@ -110,19 +104,21 @@ test("the registered exit hook removes the whole tree, nested dirs included", ()
 
 test("the scratch directory is created 0700, not the umask default", () => {
   const dir = pluginTmpDir()
-  assert.equal(statSync(dir).mode & 0o777, 0o700)
+  const posix = process.platform !== "win32"
+  if (posix) assert.equal(statSync(dir).mode & 0o777, 0o700)
 
   // Loosened underneath: the next call re-asserts the mode rather than
   // trusting whatever it finds.
-  rmSync(dir, { recursive: true, force: true })
+  rmSync(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 })
   mkdirSync(dir, { recursive: true, mode: 0o755 })
-  assert.equal(statSync(pluginTmpDir()).mode & 0o777, 0o700)
+  const mode = statSync(pluginTmpDir()).mode & 0o777
+  if (posix) assert.equal(mode, 0o700)
 })
 
 test("a symlink squatting on the pid name is refused for a fresh directory", () => {
   const pidPath = __test.PID_TMP_DIR
   const decoy = mkdtempSync(join(tmpdir(), "tmp-dir-decoy-"))
-  rmSync(pidPath, { recursive: true, force: true })
+  rmSync(pidPath, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 })
   symlinkSync(decoy, pidPath, "dir")
 
   try {
@@ -137,14 +133,14 @@ test("a symlink squatting on the pid name is refused for a fresh directory", () 
     // Still a scratch directory of ours, and still 0700.
     assert.equal(dirname(dir), tmpdir())
     assert.equal(basename(dir).startsWith("opencode-claude-code-"), true)
-    assert.equal(statSync(dir).mode & 0o777, 0o700)
+    if (process.platform !== "win32") assert.equal(statSync(dir).mode & 0o777, 0o700)
 
     writeFileSync(join(dir, "mcp-config.json"), "{}", "utf8")
     assert.deepEqual(readdirSync(decoy), [])
-    rmSync(dir, { recursive: true, force: true })
+    rmSync(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 })
   } finally {
     rmSync(pidPath, { force: true })
-    rmSync(decoy, { recursive: true, force: true })
+    rmSync(decoy, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 })
     _resetPluginTmpDir()
   }
 
@@ -196,18 +192,21 @@ function deadPid(): number {
 
 function withTmpRoot(fn: (root: string) => void): void {
   const root = mkdtempSync(join(tmpdir(), "tmp-sweep-"))
-  const saved = process.env.TMPDIR
+  const keys = ["TMPDIR", "TEMP", "TMP"]
+  const saved = keys.map((key) => process.env[key])
   try {
-    process.env.TMPDIR = root
-    // os.tmpdir() re-reads TMPDIR on every call, so this redirects the sweep.
+    for (const key of keys) process.env[key] = root
+    // os.tmpdir() re-reads TMPDIR (TEMP/TMP on Windows) on every call, so this redirects the sweep.
     // Hand the callback what os.tmpdir() reports, not the realpath: on macOS
     // those differ (/var vs /private/var) and the sweep reports the former.
     assert.equal(realpathSync(tmpdir()), realpathSync(root))
     fn(tmpdir())
   } finally {
-    if (saved === undefined) delete process.env.TMPDIR
-    else process.env.TMPDIR = saved
-    rmSync(root, { recursive: true, force: true })
+    keys.forEach((key, i) => {
+      if (saved[i] === undefined) delete process.env[key]
+      else process.env[key] = saved[i]
+    })
+    rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 })
   }
 }
 

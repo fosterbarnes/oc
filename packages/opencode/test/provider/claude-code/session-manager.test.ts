@@ -5,8 +5,8 @@ import { EventEmitter, once } from "node:events"
 import { setTimeout as delay } from "node:timers/promises"
 import { test } from "node:test"
 import { spawn, type ChildProcess } from "node:child_process"
+import { buildCliArgs } from "@/provider/claude-code/cli-args.js"
 import {
-  buildCliArgs,
   DEFAULT_IDLE_PROCESS_TIMEOUT_MS,
   deleteActiveProcess,
   deleteActiveProcessAndWait,
@@ -36,16 +36,11 @@ import {
 } from "@/provider/claude-code/session-manager.js"
 import { getPendingProxyCalls, queuePendingProxyCall } from "@/provider/claude-code/proxy-broker.js"
 import {
-  applyTaskCreateToolResult,
-  applyTaskCreateToolUse,
-  getLedger,
-} from "@/provider/claude-code/todo-ledger.js"
-import {
   createProxyMcpServer,
-  DEFAULT_PROXY_TOOLS,
   SERVER_CLOSED_MESSAGE,
   type ProxyToolCall,
 } from "@/provider/claude-code/proxy-mcp.js"
+import { DEFAULT_PROXY_TOOLS } from "@/provider/claude-code/proxy-tool-defs.js"
 
 function fakeActiveProcess(options: { exitOn: NodeJS.Signals; delayMs: number }): {
   activeProcess: ActiveProcess
@@ -365,13 +360,6 @@ test("interruptTurn reports false when the CLI never answers", async () => {
   assert.equal(isTurnInFlight(ap), true, "still in flight; the next turn's guard will retry")
 })
 
-test("the interactive transport is never marked in flight", () => {
-  const { ap } = fakeTurnProcess()
-  ap.asideTransport = { cliPath: "claude", interactive: true }
-  noteTurnStarted(ap)
-  assert.equal(isTurnInFlight(ap), false)
-})
-
 function captureStderr(): { lines: string[]; restore: () => void } {
   const lines: string[] = []
   const original = console.error
@@ -511,10 +499,7 @@ test("deleting a process rejects the broker calls its proxy server can no longer
 
 test("deleteActiveProcessesForSession releases every process and remembered id of one session only", async () => {
   const stamp = Date.now()
-  const keyFor = (session: string, model = "claude-opus-5", scope = "tools") =>
-    scope === "compaction"
-      ? `/tmp/proj-${stamp}::${model}::compaction::${session}`
-      : `/tmp/proj-${stamp}::${model}::${scope}::${session}::context=["claude-code",null]`
+  const keyFor = (session: string, scope = "tools") => `/tmp/proj-${stamp}::${scope}::${session}::context=["claude-code"]`
   const killed: string[] = []
   const register = (key: string, opencodeSessionID?: string) => {
     const { activeProcess } = fakeActiveProcess({ exitOn: "SIGTERM", delayMs: 0 })
@@ -528,8 +513,8 @@ test("deleteActiveProcessesForSession releases every process and remembered id o
     setActiveProcess(key, activeProcess)
   }
   const a1 = keyFor("ses_A")
-  const a2 = keyFor("ses_A", "claude-haiku-4-5", "compaction")
-  const aEffort = `${keyFor("ses_A")}::effort=high`
+  const a2 = keyFor("ses_A", "subagent")
+  const aEffort = keyFor("ses_A", "no-tools")
   const b = keyFor("ses_B")
   const shared = keyFor("default")
   register(a1, "ses_A")
@@ -541,7 +526,7 @@ test("deleteActiveProcessesForSession releases every process and remembered id o
   setClaudeSessionId(b, "claude-b")
   // An idle-evicted process keeps its session id for a resume; a deleted
   // session must drop that too.
-  const aEvicted = keyFor("ses_A", "claude-sonnet-5")
+  const aEvicted = keyFor("ses_A", "title")
   setClaudeSessionId(aEvicted, "claude-a-evicted")
   try {
     assert.deepEqual(deleteActiveProcessesForSession("default"), [], "the shared bucket is never matched")
@@ -666,15 +651,9 @@ test("a child that dies keeps its stderr for the crash report", async () => {
   }
 })
 
-test("the claude session store is capped, and eviction takes the ledger with it", () => {
+test("the claude session store is capped", () => {
   const total = MAX_CLAUDE_SESSION_ENTRIES + 10
   const keys = Array.from({ length: total }, (_, i) => `cap-session-${i}`)
-
-  // The first key's ledger must go when the id does: an orphaned ledger is
-  // exactly the leak the cap exists to stop.
-  applyTaskCreateToolUse("cap-claude-0", "tu-1", { subject: "Write tests" })
-  applyTaskCreateToolResult("cap-claude-0", "tu-1", "Task #1 created")
-  assert.equal(getLedger("cap-claude-0").length, 1)
 
   try {
     for (const [index, key] of keys.entries()) {
@@ -685,7 +664,6 @@ test("the claude session store is capped, and eviction takes the ledger with it"
     // these, which only evicts more of the early ones, never the recent ones.
     assert.equal(getClaudeSessionId(keys[0]), undefined)
     assert.equal(getClaudeSessionId(keys[5]), undefined)
-    assert.deepEqual(getLedger("cap-claude-0"), [])
     for (const key of keys.slice(-20)) {
       assert.ok(getClaudeSessionId(key), `${key} should have survived the cap`)
     }

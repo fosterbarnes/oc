@@ -1,6 +1,6 @@
-import * as fs from "node:fs"
-import * as os from "node:os"
-import * as path from "node:path"
+import { Stats, chmodSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join, resolve } from "node:path"
 import { log } from "./logger.js"
 
 /**
@@ -22,8 +22,8 @@ import { log } from "./logger.js"
  */
 export const PLUGIN_TMP_PREFIX = "opencode-claude-code-"
 
-const PID_TMP_DIR = path.join(
-  os.tmpdir(),
+const PID_TMP_DIR = join(
+  tmpdir(),
   `${PLUGIN_TMP_PREFIX}${process.pid}`,
 )
 
@@ -43,9 +43,9 @@ function currentUid(): number | undefined {
  * point is to see a symlink rather than follow it.
  */
 function untrustworthyReason(dir: string): string | null {
-  let stat: fs.Stats
+  let stat: Stats
   try {
-    stat = fs.lstatSync(dir)
+    stat = lstatSync(dir)
   } catch {
     return null
   }
@@ -60,10 +60,10 @@ function untrustworthyReason(dir: string): string | null {
 
 /** Create `dir` 0700 (and re-assert the mode on a directory we already own). */
 function ensureDir(dir: string): void {
-  fs.mkdirSync(dir, { recursive: true, mode: 0o700 })
+  mkdirSync(dir, { recursive: true, mode: 0o700 })
   try {
     // mkdir's mode is masked by the umask, so state it once more outright.
-    fs.chmodSync(dir, 0o700)
+    chmodSync(dir, 0o700)
   } catch {}
 }
 
@@ -73,7 +73,7 @@ function chooseDir(): string {
 
   // Someone else got to the pid name first. mkdtempSync creates 0700 and
   // fails rather than reusing an existing path, so the fresh name is safe.
-  const fallback = fs.mkdtempSync(path.join(os.tmpdir(), PLUGIN_TMP_PREFIX))
+  const fallback = mkdtempSync(join(tmpdir(), PLUGIN_TMP_PREFIX))
   log.warn("refusing the pid-named scratch directory", {
     path: PID_TMP_DIR,
     reason,
@@ -82,16 +82,18 @@ function chooseDir(): string {
   return fallback
 }
 
+function exitCleanup(): void {
+  for (const dir of createdDirs) {
+    try {
+      rmSync(dir, { recursive: true, force: true })
+    } catch {}
+  }
+}
+
 function registerExitCleanup(): void {
   if (registered) return
   registered = true
-  process.on("exit", () => {
-    for (const dir of createdDirs) {
-      try {
-        fs.rmSync(dir, { recursive: true, force: true })
-      } catch {}
-    }
-  })
+  process.on("exit", exitCleanup)
 }
 
 const PID_DIR_NAME = /^opencode-claude-code-(\d+)$/
@@ -126,16 +128,16 @@ export function sweepStalePluginTmpDirs(keep?: string): string[] {
   const removed: string[] = []
   if (process.env.OPENCODE_CLAUDE_CODE_NO_TMP_SWEEP === "1") return removed
 
-  const root = os.tmpdir()
+  const root = tmpdir()
   let entries: string[]
   try {
-    entries = fs.readdirSync(root)
+    entries = readdirSync(root)
   } catch {
     return removed
   }
 
   const uid = currentUid()
-  const keepPath = keep ? path.resolve(keep) : null
+  const keepPath = keep ? resolve(keep) : null
   for (const entry of entries) {
     const match = PID_DIR_NAME.exec(entry)
     if (!match) continue
@@ -143,12 +145,12 @@ export function sweepStalePluginTmpDirs(keep?: string): string[] {
     if (!Number.isSafeInteger(pid) || pid <= 0) continue
     if (pid === process.pid) continue
 
-    const dir = path.join(root, entry)
-    if (keepPath && path.resolve(dir) === keepPath) continue
+    const dir = join(root, entry)
+    if (keepPath && resolve(dir) === keepPath) continue
 
-    let stat: fs.Stats
+    let stat: Stats
     try {
-      stat = fs.lstatSync(dir)
+      stat = lstatSync(dir)
     } catch {
       continue
     }
@@ -157,7 +159,7 @@ export function sweepStalePluginTmpDirs(keep?: string): string[] {
     if (isProcessAlive(pid)) continue
 
     try {
-      fs.rmSync(dir, { recursive: true, force: true })
+      rmSync(dir, { recursive: true, force: true })
       removed.push(dir)
     } catch (err) {
       log.debug("could not remove a stale scratch directory", {
@@ -212,4 +214,5 @@ export function _resetPluginTmpDir(): void {
 export const __test = {
   untrustworthyReason,
   PID_TMP_DIR,
+  exitCleanup,
 }

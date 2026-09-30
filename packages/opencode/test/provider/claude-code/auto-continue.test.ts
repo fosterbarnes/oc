@@ -2,7 +2,7 @@
 // WIP: ported from opencode-claude-code-plugin, which never typechecked its tests; type them as Phase 3 rewrites land.
 /**
  * Unit tests for smart auto-continuation policy in
- * src/claude-code-language-model.ts.
+ * src/provider/claude-code/auto-continue.ts.
  */
 import { test } from "node:test"
 import assert from "node:assert/strict"
@@ -10,7 +10,7 @@ import assert from "node:assert/strict"
 import {
   shouldAutoContinueIncompleteTurn,
   autoContinueEnabledFor,
-} from "@/provider/claude-code/claude-code-language-model.js"
+} from "@/provider/claude-code/auto-continue.js"
 
 function state(overrides: Record<string, unknown> = {}) {
   return {

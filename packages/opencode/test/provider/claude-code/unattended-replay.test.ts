@@ -2,7 +2,7 @@
 // WIP: ported from opencode-claude-code-plugin, which never typechecked its tests; type them as Phase 3 rewrites land.
 /**
  * Regression for the unattended-stdout replay path in
- * src/claude-code-language-model.ts. When a reused Claude CLI subprocess
+ * src/provider/claude-code/turn-stream.ts. When a reused Claude CLI subprocess
  * emitted output while no turn was listening (e.g. the previous turn's
  * stream already closed), that output is replayed as narration at the start
  * of the next turn. The replay loop must reuse a single open text block
@@ -122,6 +122,6 @@ test("a reused process's unattended output replays as a single text block, not o
     assert.equal(startsForReplayBlock.length, 1, "the replay block must open exactly once")
     assert.equal(endsForReplayBlock.length, 1, "the replay block must close exactly once")
   } finally {
-    rmSync(fixture.cwd, { recursive: true, force: true })
+    rmSync(fixture.cwd, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 })
   }
 })

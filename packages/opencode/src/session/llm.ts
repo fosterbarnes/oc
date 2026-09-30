@@ -18,6 +18,7 @@ import type { MessageV2 } from "./message-v2"
 import { Plugin } from "@/plugin"
 import { Permission } from "@/permission"
 import { Question } from "@/question"
+import { Image } from "@/image/image"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { EventV2 } from "@opencode-ai/core/event"
 import { Wildcard } from "@/util/wildcard"
@@ -71,6 +72,7 @@ const live: Layer.Layer<
   | Provider.Service
   | Plugin.Service
   | Permission.Service
+  | Image.Service
   | EventV2Bridge.Service
   | LLMClientService
   | RuntimeFlags.Service
@@ -82,6 +84,7 @@ const live: Layer.Layer<
     const provider = yield* Provider.Service
     const plugin = yield* Plugin.Service
     const perm = yield* Permission.Service
+    const image = yield* Image.Service
     const events = yield* EventV2Bridge.Service
     const llmClient = yield* LLMClient.Service
     const flags = yield* RuntimeFlags.Service
@@ -123,14 +126,16 @@ const live: Layer.Layer<
       // Claude Code runs oc tools inside its own stream (providerExecuted), so it needs the bound tools.
       // Tool-less calls (title, summary) share the session id and must not replace the turn's executor.
       if (isClaudeCodeProvider(input.model.providerID) && Object.keys(prepared.tools).length > 0) {
-        const executeHostTool = async (name: string, args: Record<string, unknown>, callID: string) => {
+        const executeHostTool = async (name: string, args: Record<string, unknown>, callID: string, signal?: AbortSignal) => {
           const execute = prepared.tools[name]?.execute
           if (!execute) throw new Error(`Unknown tool: ${name}`)
-          return (await Promise.resolve(
+          const abortSignal = signal ? AbortSignal.any([input.abort, signal]) : input.abort
+          abortSignal.throwIfAborted()
+          const result = (await Promise.resolve(
             execute(args, {
               toolCallId: callID,
               messages: prepared.messages,
-              abortSignal: input.abort,
+              abortSignal,
               experimental_context: { awaitToolPart: true },
             }),
           ).catch((error) => {
@@ -138,6 +143,13 @@ const live: Layer.Layer<
               return { output: "Denied by user.", denied: error }
             throw error
           })) as HostToolResult
+          if (!result.attachments?.some((attachment) => attachment.mime.startsWith("image/"))) return result
+          return {
+            ...result,
+            attachments: await bridge.promise(Effect.forEach(result.attachments, (attachment) =>
+              attachment.mime.startsWith("image/") ? image.normalize(attachment) : Effect.succeed(attachment),
+            ), { signal: abortSignal }),
+          }
         }
         hostToolExecutors.set(input.sessionID, executeHostTool)
         yield* Effect.addFinalizer(() =>
@@ -425,6 +437,7 @@ export const node = LayerNode.make({
     Provider.node,
     Plugin.node,
     Permission.node,
+    Image.node,
     EventV2Bridge.node,
     llmClient,
     RuntimeFlags.node,

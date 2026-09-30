@@ -1,68 +1,33 @@
 import type { LanguageModelV3 } from "@ai-sdk/provider"
-import {
-  ACCOUNT_BLOCK_MARKER,
-  FAILOVER_MARKER,
-  stripAccountFailoverParts,
-} from "./account-failover.js"
-import {
-  COMPACT_BOUNDARY_MARKER,
-  CONVERSATION_RESET_MARKER,
-  RATE_LIMIT_MARKER,
-  RESULT_ERROR_MARKER,
-  SILENT_TURN_MARKER,
-  STREAM_TIMEOUT_MARKER,
-} from "./cli-events.js"
 import { log } from "./logger.js"
-import { MODEL_FALLBACK_MARKER } from "./model-fallback.js"
-import { TURN_STATS_MARKER } from "./turn-stats.js"
+
+/** Historical transcript marker. The account-failover feature that wrote it is gone. */
+const ACCOUNT_FAILOVER_TOOL_CALL_PREFIX = "account_failover_"
 
 type Prompt = Parameters<LanguageModelV3["doGenerate"]>[0]["prompt"]
 
-/**
- * Leading markers of text parts the plugin itself wrote into an assistant
- * reply: the turn-stats footer and the `▌` notes for a CLI compaction, a rate-limit rejection and a failed result
- * subtype. None of them was ever model output or ever in Claude's context, so
- * a transcript rebuilt for a fresh CLI process must not hand any of them back
- * as something Claude said. Each is the first characters of its own text part,
- * which is what makes the strip exact instead of a guess at where a block ends.
- */
-const PLUGIN_NOTE_MARKERS = [
-  TURN_STATS_MARKER,
-  COMPACT_BOUNDARY_MARKER,
-  CONVERSATION_RESET_MARKER,
-  RATE_LIMIT_MARKER,
-  RESULT_ERROR_MARKER,
-  STREAM_TIMEOUT_MARKER,
-  SILENT_TURN_MARKER,
-  FAILOVER_MARKER,
-  ACCOUNT_BLOCK_MARKER,
-  MODEL_FALLBACK_MARKER,
-]
-
-function isPluginNote(part: any): boolean {
-  if (!part || part.type !== "text" || typeof part.text !== "string") return false
-  const text = part.text.trimStart()
-  return PLUGIN_NOTE_MARKERS.some((marker) => text.startsWith(marker))
+function isHistoricalFailoverPart(part: any): boolean {
+  if (!part || typeof part.toolCallId !== "string") return false
+  if (part.type !== "tool-call" && part.type !== "tool-result") return false
+  return part.toolCallId.startsWith(ACCOUNT_FAILOVER_TOOL_CALL_PREFIX)
 }
 
-function stripPluginNotes(content: unknown): unknown {
-  if (!Array.isArray(content)) return content
-  const kept = content.filter((part: any) => !isPluginNote(part))
-  return kept.length === content.length ? content : kept
-}
-
-/**
- * Drop every plugin-authored note from a transcript before it is replayed to
- * the CLI: the `▌` blocks listed in `PLUGIN_NOTE_MARKERS`. The one place they
- * are removed; called from both transcript rebuild paths.
- */
-export function stripPluginHistory(prompt: Prompt): Prompt {
-  // The account-failover form is a synthetic `question` call Claude never
-  // issued, answered by a `tool-result` it never saw. It has to come out
-  // before anything is replayed, which is on the switch turn by definition.
-  return stripAccountFailoverParts(prompt).map((message) =>
-    message.role === "assistant" ? ({ ...message, content: stripPluginNotes(message.content) } as typeof message) : message,
-  )
+/** Drop persisted failover dialog parts Claude never issued. */
+function stripHistoricalFailoverParts(prompt: Prompt): Prompt {
+  let changed = false
+  const out = [] as unknown as Prompt
+  for (const message of prompt) {
+    const content = (message as { content?: unknown }).content
+    if (!Array.isArray(content) || !content.some(isHistoricalFailoverPart)) {
+      out.push(message)
+      continue
+    }
+    changed = true
+    const kept = content.filter((part: any) => !isHistoricalFailoverPart(part))
+    if (kept.length === 0) continue
+    out.push({ ...message, content: kept } as typeof message)
+  }
+  return changed ? out : prompt
 }
 
 /**
@@ -238,210 +203,9 @@ function getToolResultText(part: any): string {
   }
 }
 
-// Compaction-mode caps. These are the only knobs that affect how much
-// transcript content reaches the model when opencode invokes /compact.
-// 180k chars ≈ 60k tokens worst-case — well under Haiku 4.5's 200k window
-// after accounting for system prompt + output budget.
-const MAX_HISTORY_CHARS = 180_000
-const MAX_TOOL_RESULT_CHARS = 10_000
-const MAX_TOOL_INPUT_CHARS = 2_000
-
-function clipWithMarker(text: string, max: number): string {
-  if (text.length <= max) return text
-  return `${text.slice(0, max)}\n…[truncated ${text.length - max} chars]`
-}
-
-function renderToolInput(input: unknown): string {
-  let raw: string
-  try {
-    raw = typeof input === "string" ? input : JSON.stringify(input)
-  } catch {
-    raw = String(input)
-  }
-  return clipWithMarker(raw, MAX_TOOL_INPUT_CHARS)
-}
-
-function renderMessageContentForCompaction(
-  msg: any,
-): { text: string; toolResultCount: number } {
-  const lines: string[] = []
-  let toolResultCount = 0
-
-  if (typeof msg.content === "string") {
-    return { text: msg.content, toolResultCount: 0 }
-  }
-
-  if (!Array.isArray(msg.content)) {
-    return { text: "", toolResultCount: 0 }
-  }
-
-  for (const part of msg.content as any[]) {
-    if (!part) continue
-    switch (part.type) {
-      case "text":
-        if (part.text) lines.push(part.text)
-        break
-      case "tool-call":
-        lines.push(
-          `[tool_use:${part.toolName ?? "unknown"}(${renderToolInput(part.input)})]`,
-        )
-        break
-      case "tool-result":
-        toolResultCount++
-        lines.push(
-          `[tool_result:${part.toolName ?? part.toolCallId ?? "unknown"}]\n${clipWithMarker(
-            getToolResultText(part),
-            MAX_TOOL_RESULT_CHARS,
-          )}`,
-        )
-        break
-      case "image":
-        lines.push(
-          `[image: ${part.mediaType ?? part.mimeType ?? "unknown"}]`,
-        )
-        break
-      case "file":
-        lines.push(
-          `[file: ${part.mediaType ?? part.mimeType ?? "unknown"}]`,
-        )
-        break
-      case "reasoning":
-        // Skip reasoning blocks in compaction — they bloat input without
-        // helping the summarizer.
-        break
-    }
-  }
-
-  return { text: lines.join("\n"), toolResultCount }
-}
-
 /**
- * Compact conversation history into a context summary.
- *
- * - mode "fresh-session" (default): includes user, assistant and tool roles,
- *   renders each with the same serializer /compact uses so tool inputs and
- *   result bodies survive, then clips each message at 2000 chars. Used when
- *   starting a fresh CLI session that lost its prior session id. It used to
- *   filter to user/assistant only and reduce tool content to
- *   `[Called N tool(s)]` placeholders, which silently dropped subagent
- *   output entirely (issue #29).
- * - mode "compaction": rich serializer for opencode /compact. Includes
- *   tool roles, renders tool_use input and tool_result content (each
- *   clipped at MAX_TOOL_RESULT_CHARS), and caps aggregate output at
- *   MAX_HISTORY_CHARS by dropping oldest entries first.
- */
-export function compactConversationHistory(
-  prompt: Prompt,
-  opts: { mode?: "fresh-session" | "compaction" } = {},
-): string | null {
-  const mode = opts.mode ?? "fresh-session"
-    prompt = stripPluginHistory(prompt)
-
-  if (mode === "compaction") {
-    return buildCompactionHistory(prompt)
-  }
-
-  // `tool`-role messages carry the results of everything opencode ran itself,
-  // so they belong in the transcript. Filtering them out (issue #29) meant a
-  // subagent's whole answer vanished: the assistant message kept a
-  // `[Called 1 tool(s): task]` placeholder and the result it referred to was
-  // never rendered at all.
-  const conversationMessages = prompt.filter(
-    (m) => m.role === "user" || m.role === "assistant" || m.role === "tool",
-  )
-
-  if (conversationMessages.length <= 1) {
-    return null
-  }
-
-  const historyParts: string[] = []
-
-  for (let i = 0; i < conversationMessages.length - 1; i++) {
-    const msg = conversationMessages[i]
-    const role =
-      msg.role === "user" ? "User" : msg.role === "assistant" ? "Assistant" : "Tool"
-
-    // Same renderer the /compact transcript uses, so tool inputs and result
-    // bodies survive instead of collapsing to counts. This path used to write
-    // `[Called N tool(s): ...]` / `[Received N tool result(s)]` and discard
-    // every byte of the payload, which is the second half of issue #29.
-    const { text } = renderMessageContentForCompaction(msg)
-
-    if (text.trim()) {
-      const truncated =
-        text.length > 2000 ? text.slice(0, 2000) + "..." : text
-      historyParts.push(`${role}: ${truncated}`)
-    }
-  }
-
-  if (historyParts.length === 0) {
-    return null
-  }
-
-  return historyParts.join("\n\n")
-}
-
-function buildCompactionHistory(prompt: Prompt): string | null {
-  // Iterate newest-first, accumulate up to MAX_HISTORY_CHARS, then reverse
-  // to chronological order. Oldest messages get dropped when the budget
-  // is exhausted — they are the least relevant for a summary of recent
-  // work.
-  const entries: string[] = []
-  let total = 0
-  let totalToolResults = 0
-  let droppedOldest = 0
-
-  // Skip the trailing user message: opencode's /compact appends the
-  // synthesis instruction as the final user turn. The instruction itself
-  // is added by getClaudeUserMessage after the transcript block, so we
-  // don't want it duplicated inside the transcript.
-  const end = prompt.length > 0 && prompt[prompt.length - 1].role === "user"
-    ? prompt.length - 1
-    : prompt.length
-
-  for (let i = end - 1; i >= 0; i--) {
-    const msg = prompt[i] as any
-    const roleLabel =
-      msg.role === "user"
-        ? "User"
-        : msg.role === "assistant"
-          ? "Assistant"
-          : msg.role === "tool"
-            ? "Tool"
-            : msg.role
-
-    const { text, toolResultCount } = renderMessageContentForCompaction(msg)
-    if (!text.trim()) continue
-
-    const entry = `${roleLabel}: ${text}`
-    if (total + entry.length > MAX_HISTORY_CHARS) {
-      droppedOldest = i + 1
-      break
-    }
-    entries.push(entry)
-    total += entry.length + 2 // +2 for the "\n\n" join
-    totalToolResults += toolResultCount
-  }
-
-  if (entries.length === 0) return null
-
-  entries.reverse()
-  log.info("built compaction history", {
-    entries: entries.length,
-    chars: total,
-    toolResults: totalToolResults,
-    droppedOldestBefore: droppedOldest,
-  })
-
-  return entries.join("\n\n")
-}
-
-/**
- * Convert AI SDK prompt into a Claude CLI stream-json user message.
- *
- * `compactionMode` switches behavior for opencode /compact: the prior
- * transcript is rendered with rich tool content (not placeholders) and the
- * wrapper framing tells the model this is the authoritative thread.
+ * Convert AI SDK prompt into a Claude CLI stream-json user message: only
+ * what arrived since the last assistant message.
  *
  * Reasoning effort is not part of the message. It used to ride here as a
  * thinking keyword ("(ultrathink)"), but Claude Code dropped every keyword
@@ -452,25 +216,20 @@ export function getClaudeUserMessage(
   prompt: Prompt,
   includeHistoryContext: boolean = false,
   opts: {
-    compactionMode?: boolean
     cliToolCallIds?: ReadonlySet<string>
     stripContextReminders?: boolean
   } = {},
 ): string {
-  const compactionMode = opts.compactionMode === true
   const cliToolCallIds = opts.cliToolCallIds
   const content: any[] = []
 
   // The account-failover form is the plugin's own dialog: Claude never issued
-  // that call and never saw its answer. The transcript rebuilds stripped it
-  // already; the current message did not, so on the turn after a form the
-  // answer reached Claude as a stray `<opencode_tool_result>` ("The user
+  // that call and never saw its answer. On the turn after a form the answer
+  // reached Claude as a stray `<opencode_tool_result>` ("The user
   // dismissed this question"), measured 2026-09-23.
-  prompt = stripAccountFailoverParts(prompt)
+  prompt = stripHistoricalFailoverParts(prompt)
 
-  // Done once here, at the top, so every path below (the current message,
-  // the fresh-session rebuild and the /compact transcript) sees the cleaned
-  // text without each needing its own flag.
+  // Done once here, at the top, so everything below sees the cleaned text.
   if (opts.stripContextReminders) {
     const stripped = stripContextReminders(prompt)
     if (stripped.removed > 0) {
@@ -513,45 +272,11 @@ export function getClaudeUserMessage(
     })
   }
 
-  if (compactionMode) {
-    const transcript = compactConversationHistory(prompt, {
-      mode: "compaction",
+  if (includeHistoryContext) {
+    // No transcript paste. Memory is the live process or `--resume`.
+    log.info("no claude session to resume; history not inlined", {
+      messages: prompt.length,
     })
-    if (transcript) {
-      log.info("including compaction transcript", {
-        historyLength: transcript.length,
-      })
-      content.push({
-        type: "text",
-        text: `<conversation_transcript>
-${transcript}
-</conversation_transcript>
-
-The complete prior conversation appears above. The synthesis instructions follow below.
-
-`,
-      })
-    }
-  } else if (includeHistoryContext) {
-    const historyContext = compactConversationHistory(prompt)
-    if (historyContext) {
-      log.info("including conversation history context", {
-        historyLength: historyContext.length,
-      })
-      content.push({
-        type: "text",
-        text: `<conversation_history>
-The following is a summary of our conversation so far (from a previous session that couldn't be resumed):
-
-${historyContext}
-
-</conversation_history>
-
-Now continuing with the current message:
-
-`,
-      })
-    }
   }
 
   // Find messages since last assistant message
@@ -591,7 +316,7 @@ Now continuing with the current message:
     } else if (msg.role === "tool") {
       // AI SDK V3 delivers tool results in `tool`-role messages, not `user`.
       // Without this branch we'd hit the empty-content sentinel path and
-      // send "(empty)" to Claude CLI instead of the actual tool result —
+      // send "(empty)" to Claude CLI instead of the actual tool result -
       // forcing the user to press "continue" between proxy tool calls.
       if (Array.isArray(msg.content)) {
         for (const part of msg.content as any[]) {
@@ -605,7 +330,7 @@ Now continuing with the current message:
 
   if (content.length === 0) {
     // CLI rejects a zero-block message with 400, and Anthropic rejects
-    // whitespace-only text blocks — so we need a non-whitespace sentinel.
+    // whitespace-only text blocks - so we need a non-whitespace sentinel.
     // "(empty)" matches the parenthetical meta-note convention this file
     // already uses for reasoning keywords ("(think)", "(megathink)", etc.),
     // which the model reads as out-of-band metadata rather than a prompt to
@@ -627,4 +352,15 @@ Now continuing with the current message:
       content,
     },
   })
+}
+
+/** Rough visible-thread size. Not the Claude prompt. */
+export function visibleThreadTokens(prompt: Prompt): number {
+  let chars = 0
+  for (const msg of prompt) {
+    const content = (msg as { content?: unknown }).content
+    if (typeof content === "string") chars += content.length
+    else if (Array.isArray(content)) chars += JSON.stringify(content).length
+  }
+  return Math.ceil(chars / 4)
 }

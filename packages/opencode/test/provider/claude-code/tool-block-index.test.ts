@@ -7,7 +7,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import { createClaudeCode } from "@/provider/claude-code/index.js"
-import { deleteActiveProcess, sessionKey } from "@/provider/claude-code/session-manager.js"
+import { deleteActiveProcessAndWait, sessionKey } from "@/provider/claude-code/session-manager.js"
 
 // Claude CLI restarts content-block indices at 0 on every assistant message,
 // and one turn holds several of them (tool_use -> tool_result -> answer).
@@ -93,7 +93,7 @@ async function streamIndexReuse() {
   const modelId = "claude-test-block-index"
   const sk = sessionKey(
     fake.cwd,
-    `${modelId}::tools::default::context=["claude-code",null]`,
+    `tools::default::context=["claude-code"]`,
   )
 
   try {
@@ -123,8 +123,8 @@ async function streamIndexReuse() {
     for await (const part of response.stream) parts.push(part)
     return parts
   } finally {
-    deleteActiveProcess(sk)
-    rmSync(fake.cwd, { recursive: true, force: true })
+    await deleteActiveProcessAndWait(sk)
+    rmSync(fake.cwd, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 })
   }
 }
 

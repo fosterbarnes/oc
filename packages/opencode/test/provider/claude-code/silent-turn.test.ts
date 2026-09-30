@@ -24,7 +24,7 @@ import { isSilentTurn } from "@/provider/claude-code/auto-continue.js"
 import { SILENT_TURN_MARKER, formatSilentTurnNote } from "@/provider/claude-code/cli-events.js"
 import { createClaudeCode } from "@/provider/claude-code/index.js"
 import {
-  deleteActiveProcess,
+  deleteActiveProcessAndWait,
   killAllActiveProcesses,
   sessionKey,
 } from "@/provider/claude-code/session-manager.js"
@@ -71,7 +71,7 @@ async function streamParts(
   const modelId = "claude-test-silent-turn"
   const sk = sessionKey(
     fake.cwd,
-    `${modelId}::tools::default::context=["claude-code",null]`,
+    `tools::default::context=["claude-code"]`,
   )
   try {
     const model = createClaudeCode({
@@ -99,8 +99,8 @@ async function streamParts(
     for await (const part of response.stream) parts.push(part)
     return parts
   } finally {
-    deleteActiveProcess(sk)
-    rmSync(fake.cwd, { recursive: true, force: true })
+    await deleteActiveProcessAndWait(sk)
+    rmSync(fake.cwd, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 })
   }
 }
 
@@ -372,6 +372,6 @@ test("the title stub is answered without a CLI turn, so it cannot get the note",
     assert.ok(body.length > 0, "the stub must still produce a title")
     assert.equal(body.includes(SILENT_TURN_MARKER), false)
   } finally {
-    rmSync(fake.cwd, { recursive: true, force: true })
+    rmSync(fake.cwd, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 })
   }
 })

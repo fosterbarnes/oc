@@ -1,4 +1,6 @@
+import { homedir } from "node:os"
 import { log } from "./logger.js"
+import { DEFAULT_ACCOUNT, normalizeAccountName } from "./accounts.js"
 import type { ClaudeStreamMessage } from "./types.js"
 
 /**
@@ -544,4 +546,61 @@ export function formatSilentTurnNote(hadReasoning: boolean): string {
     `\n${SILENT_TURN_MARKER} ${what}, so there is no reply above. ` +
     "Nothing failed and nothing is pending: send the message again, or rephrase it.\n"
   )
+}
+
+// ---------------------------------------------------------------------------
+// account-level CLI failures (login, billing). Switching is not offered.
+// ---------------------------------------------------------------------------
+
+export const ACCOUNT_BLOCK_MARKER = "▌ **claude account:**"
+
+const ACCOUNT_LIMIT_PATTERNS: RegExp[] = [
+  /third-party apps now draw from your extra usage/i,
+  /you[''`]?ve hit your individual spend limit/i,
+]
+
+const ACCOUNT_BLOCKS = {
+  authentication_failed: { what: "is not logged in (its login expired or was revoked)", login: true },
+  oauth_org_not_allowed: { what: "belongs to an organization that does not allow this login", login: false },
+  account_on_hold: { what: "is on hold", login: false },
+  verification_required: { what: "needs to be verified at claude.ai", login: false },
+  billing_error: { what: "has a billing problem", login: false },
+} as const
+
+export type AccountBlockKind = keyof typeof ACCOUNT_BLOCKS
+
+export function accountBlockKind(msg: { type?: string; error?: unknown }): AccountBlockKind | null {
+  if (msg.type !== "assistant" || typeof msg.error !== "string") return null
+  return Object.prototype.hasOwnProperty.call(ACCOUNT_BLOCKS, msg.error)
+    ? (msg.error as AccountBlockKind)
+    : null
+}
+
+export function loginCommandFor(configDir: string | undefined, home = homedir()): string {
+  if (!configDir) return "claude auth login"
+  const shown = configDir === home || configDir.startsWith(`${home}/`) ? `~${configDir.slice(home.length)}` : configDir
+  return `CLAUDE_CONFIG_DIR=${shown} claude auth login`
+}
+
+export function formatAccountBlockNote(input: {
+  kind: AccountBlockKind
+  account: string
+  configDir?: string
+}): string {
+  const block = ACCOUNT_BLOCKS[input.kind]
+  const account = normalizeAccountName(input.account || DEFAULT_ACCOUNT)
+  const fix = block.login
+    ? `Log in again with \`${loginCommandFor(input.configDir)}\`, then resend your message.`
+    : "Check the account at claude.ai, then resend your message."
+  return `\n${ACCOUNT_BLOCK_MARKER} the Claude account "${account}" ${block.what}. ${fix}\n`
+}
+
+export function isAccountLimitError(input: {
+  rateLimit?: RateLimitInfo | null
+  resultText?: string | null
+}): boolean {
+  if (input.rateLimit && isRateLimitRejected(input.rateLimit)) return true
+  const text = input.resultText
+  if (typeof text !== "string" || text.length === 0) return false
+  return ACCOUNT_LIMIT_PATTERNS.some((pattern) => pattern.test(text))
 }

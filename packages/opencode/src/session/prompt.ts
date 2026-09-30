@@ -4,6 +4,7 @@ import path from "path"
 import { SessionV1 } from "@opencode-ai/core/v1/session"
 import os from "os"
 import { SessionID, MessageID, PartID } from "./schema"
+import { isClaudeCodeProvider } from "@/provider/claude-code/shared"
 import { MessageV2 } from "./message-v2"
 import { SessionRevert } from "./revert"
 import { Session } from "./session"
@@ -108,6 +109,7 @@ export interface Interface {
   readonly shell: (input: ShellInput) => Effect.Effect<SessionV1.WithParts, Session.BusyError>
   readonly command: (input: CommandInput) => Effect.Effect<SessionV1.WithParts, Image.Error>
   readonly resolvePromptParts: (template: string) => Effect.Effect<PromptInput["parts"]>
+  readonly rename: (sessionID: SessionID) => Effect.Effect<Session.Info>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/SessionPrompt") {}
@@ -249,17 +251,52 @@ const layer = Layer.effect(
           Stream.mkString,
           Effect.orDie,
         )
-      const cleaned = text
-        .replace(/<think>[\s\S]*?<\/think>\s*/g, "")
-        .split("\n")
-        .map((line) => line.trim())
-        .find((line) => line.length > 0)
-      if (!cleaned) return
-      const t = cleaned.length > 100 ? cleaned.substring(0, 97) + "..." : cleaned
+      const t = cleanTitle(text)
+      if (!t) return
       yield* sessions
         .setTitle({ sessionID: input.session.id, title: t })
         .pipe(Effect.catchCause((cause) => Effect.logError("failed to generate title", { error: Cause.squash(cause) })))
     })
+
+    // Re-titles a session from a digest of its history, for the /rename command.
+    const rename = Effect.fn("SessionPrompt.rename")(function* (sessionID: SessionID) {
+      const session = yield* sessions.get(sessionID)
+      const history = yield* sessions.messages({ sessionID })
+      const lastUser = history.findLast((m) => m.info.role === "user")?.info
+      const ag = yield* agents.get("rename")
+      if (!lastUser || lastUser.role !== "user" || !ag) return yield* sessions.get(sessionID)
+      const fallback = Effect.gen(function* () {
+        return (
+          (yield* provider.getSmallModel(lastUser.model.providerID)) ??
+          (yield* provider.getModel(lastUser.model.providerID, lastUser.model.modelID))
+        )
+      })
+      const pinned = ag.model
+      const mdl = pinned
+        ? yield* provider.getModel(pinned.providerID, pinned.modelID).pipe(Effect.catch(() => fallback))
+        : yield* fallback
+      const text = yield* llm
+        .stream({
+          agent: ag,
+          user: lastUser,
+          system: [],
+          small: true,
+          tools: {},
+          model: mdl,
+          sessionID,
+          retries: 2,
+          messages: [
+            {
+              role: "user",
+              content: `Generate a concise title for this conversation. Start it with the folder name "${path.basename(session.directory)}", followed by " - " and a short description, for example "oc - description".\n\n${renameDigest(history)}`,
+            },
+          ],
+        })
+        .pipe(Stream.filter(LLMEvent.is.textDelta), Stream.map((e) => e.text), Stream.mkString, Effect.orDie)
+      const t = cleanTitle(text)
+      if (t) yield* sessions.setTitle({ sessionID, title: t })
+      return yield* sessions.get(sessionID)
+    }, Effect.orDie)
 
     const handleSubtask = Effect.fn("SessionPrompt.handleSubtask")(function* (input: {
       task: SessionV1.SubtaskPart
@@ -1264,12 +1301,14 @@ const layer = Layer.effect(
             yield* plugin.trigger("experimental.chat.messages.transform", {}, { messages: msgs })
 
             const modelKey = `${model.providerID}/${model.id}`
+            // Claude Code brings its own environment, instructions and skills and takes only the agent prompt.
+            const claudeCode = isClaudeCodeProvider(model.providerID)
             const [skills, env, instructions, base, mcpInstructions, modelMsgs] = yield* Effect.all([
-              sys.skills(agent),
-              sys.environment(model),
-              instruction.system(modelKey).pipe(Effect.orDie),
+              claudeCode ? Effect.succeed(undefined) : sys.skills(agent),
+              claudeCode ? Effect.succeed([]) : sys.environment(model),
+              claudeCode ? Effect.succeed([]) : instruction.system(modelKey).pipe(Effect.orDie),
               agent.prompt ? Effect.succeed(undefined) : instruction.base(modelKey).pipe(Effect.orDie),
-              sys.mcp(agent, session.permission),
+              claudeCode ? Effect.succeed(undefined) : sys.mcp(agent, session.permission),
               MessageV2.toModelMessagesEffect(msgs, model),
             ])
             const system = [
@@ -1500,9 +1539,35 @@ const layer = Layer.effect(
       shell,
       command,
       resolvePromptParts,
+      rename,
     })
   }),
 )
+
+function cleanTitle(text: string) {
+  const line = text
+    .replace(/<think>[\s\S]*?<\/think>\s*/g, "")
+    .split("\n")
+    .map((l) => l.trim())
+    .find((l) => l.length > 0)
+  if (!line) return
+  return line.length > 100 ? line.substring(0, 97) + "..." : line
+}
+
+// First user message plus the latest exchanges, text only, so the model sees where the session started and where it is now.
+export function renameDigest(history: SessionV1.WithParts[]) {
+  const lines = history.flatMap((m) => {
+    const text = m.parts
+      .filter((p): p is SessionV1.TextPart => p.type === "text" && !p.synthetic)
+      .map((p) => p.text.trim())
+      .join("\n")
+      .slice(0, 1500)
+    return text ? [`${m.info.role}: ${text}`] : []
+  })
+  const first = lines.find((l) => l.startsWith("user: "))
+  const recent = lines.slice(-6)
+  return (first && !recent.includes(first) ? [first, "...", ...recent] : recent).join("\n\n")
+}
 
 const ModelRef = Schema.Struct({
   providerID: ProviderV2.ID,

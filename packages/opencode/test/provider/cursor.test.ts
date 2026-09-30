@@ -8,6 +8,7 @@ import {
 } from "@/provider/cursor/protocol/switch-mode"
 import {
   buildOpenCodeInteractionGuidance,
+  connectFrameError,
   isCursorCompactionTurn,
   resetTurnStateForTests,
   resolveTurnConversationReset,
@@ -17,6 +18,12 @@ import { applyCursorCompactionOption } from "@/session/llm/request"
 import { resolveCreatePlanBridge } from "@/provider/cursor/protocol/create-plan"
 
 describe("native Cursor provider", () => {
+  test("includes the server reason in Connect errors", () => {
+    expect(
+      connectFrameError('{"error":{"code":"resource_exhausted","message":"Account limit reached"}}').message,
+    ).toContain("Cursor API error (code=resource_exhausted): Account limit reached")
+  })
+
   test("creates a language model without starting the proxy", () => {
     const sdk = createCursor({ name: "cursor", accessToken: "token" })
     expect(sdk.languageModel("gpt-4o").provider).toBe("cursor")

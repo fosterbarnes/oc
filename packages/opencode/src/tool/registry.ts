@@ -5,6 +5,7 @@ import { PlanExitTool } from "./plan"
 import { PlanExecuteTool } from "./plan-execute"
 import { SessionCompleteTool } from "./session-complete"
 import { SessionFailedTool } from "./session-failed"
+import { SessionTailTool } from "./session-tail"
 import { Session } from "@/session/session"
 import { QuestionTool } from "./question"
 import { ShellTool } from "./shell"
@@ -111,6 +112,7 @@ const layer = Layer.effect(
     const planExecute = yield* PlanExecuteTool
     const sessionComplete = yield* SessionCompleteTool
     const sessionFailed = yield* SessionFailedTool
+    const sessionTail = yield* SessionTailTool
     const webfetch = yield* WebFetchTool
     const websearch = yield* WebSearchTool
     const shell = yield* ShellTool
@@ -232,6 +234,7 @@ const layer = Layer.effect(
           planExecute: Tool.init(planExecute),
           sessionComplete: Tool.init(sessionComplete),
           sessionFailed: Tool.init(sessionFailed),
+          sessionTail: Tool.init(sessionTail),
           ...(codeModeTool ? { execute: Tool.init(codeModeTool) } : {}),
         })
 
@@ -249,6 +252,7 @@ const layer = Layer.effect(
             tool.task,
             tool.sessionComplete,
             tool.sessionFailed,
+            tool.sessionTail,
             tool.fetch,
             tool.todo,
             tool.search,

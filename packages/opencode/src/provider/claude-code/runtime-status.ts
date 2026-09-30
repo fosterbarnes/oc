@@ -4,7 +4,7 @@ import { log } from "./logger.js"
 /**
  * Captured opencode runtime context (SDK client + project directory) from
  * `PluginInput`. Lives in its own module to break the cycle that would
- * otherwise form between `index.ts` and `claude-code-language-model.ts`.
+ * otherwise form between `index.ts` and the turn modules.
  * Values are `null`/`undefined` until the plugin's `server` factory runs
  * (e.g. early provider lookups, direct AI-SDK use, tests).
  */
@@ -18,7 +18,7 @@ type OpencodeClient = {
     }) => Promise<{ data?: unknown; error?: unknown }>
   }
   session?: {
-    /** `GET /session/{id}` — the returned Session carries `directory`. */
+    /** `GET /session/{id}` - the returned Session carries `directory`. */
     get?: (options: {
       path: { id: string }
       query?: { directory?: string }
@@ -42,6 +42,26 @@ export function setOpencodeClient(client: unknown): void {
  */
 export function getOpencodeClient(): unknown {
   return opencodeClient
+}
+
+type RawClient = {
+  get: (options: { url: string; query?: Record<string, string> }) => Promise<{ data?: unknown; error?: unknown }>
+  post: (options: {
+    url: string
+    body: unknown
+    signal?: AbortSignal
+  }) => Promise<{ data?: unknown; error?: unknown }>
+}
+
+/**
+ * The plugin's SDK client predates routes such as `/question/ask` and
+ * `/skill`, so call them through its underlying HTTP client, which already
+ * carries the instance directory, auth headers and in-process fetch.
+ */
+export function rawOpencodeClient(): RawClient | undefined {
+  const client = opencodeClient as { _client?: Partial<RawClient> } | null
+  const raw = client?._client
+  return typeof raw?.get === "function" && typeof raw.post === "function" ? (raw as RawClient) : undefined
 }
 
 /**
@@ -78,7 +98,7 @@ export function isUsableDirectory(d: unknown): d is string {
  *    `x-session-affinity` id via the SDK). Authoritative for
  *    `opencode serve` / web-UI mode, where one long-lived server process
  *    handles many projects and `process.cwd()` is the server's launch
- *    dir — not the session's project. Equals `process.cwd()` in the TUI,
+ *    dir - not the session's project. Equals `process.cwd()` in the TUI,
  *    so it does not regress that path.
  * 3. Live `process.cwd()` when it's a real directory. Lazy resolution
  *    that lets opencode's project-aware behavior (chdir on workspace
@@ -114,13 +134,13 @@ export function resolveSpawnCwdFrom(
  * id opencode sets on LLM calls) and feeds it into `resolveSpawnCwdFrom`
  * as tier 2. Falls back cleanly to the non-session resolution when the
  * id is absent ("default"), no SDK client is captured, or the lookup
- * fails — so the TUI / direct-AI-SDK / test paths are unaffected.
+ * fails - so the TUI / direct-AI-SDK / test paths are unaffected.
  */
 export async function resolveSpawnCwdForSession(
   configured: string | undefined,
   sessionID: string | undefined,
 ): Promise<string> {
-  // An explicit pin wins unconditionally — skip the lookup entirely.
+  // An explicit pin wins unconditionally - skip the lookup entirely.
   if (configured) return configured
   const sessionDir = sessionID
     ? await fetchSessionDirectory(sessionID)
@@ -155,39 +175,6 @@ export async function fetchSessionDirectory(
     return isUsableDirectory(dir) ? dir : undefined
   } catch (err) {
     log.warn("failed to fetch opencode session directory", {
-      sessionID,
-      error: err instanceof Error ? err.message : String(err),
-    })
-    return undefined
-  }
-}
-
-/**
- * The id of the session that spawned this one, or undefined when it is a
- * top-level session (or the lookup is unavailable). Read off the same
- * `GET /session/{id}` response `fetchSessionDirectory` uses, kept separate
- * because the two are needed at different points in a turn.
- *
- * Account failover is the only caller: a subagent must never be shown the
- * switch form. It follows its parent's account for free, because the override
- * is scoped to the account rather than the session.
- */
-export async function fetchSessionParentId(
-  sessionID: string,
-): Promise<string | undefined> {
-  if (!sessionID || sessionID === "default") return undefined
-  const client = opencodeClient
-  if (!client?.session?.get) return undefined
-  try {
-    const res = await client.session.get({ path: { id: sessionID } })
-    const data = (res as { data?: unknown }).data
-    if (!data || typeof data !== "object") return undefined
-    const parentID = (data as { parentID?: unknown }).parentID
-    return typeof parentID === "string" && parentID.length > 0
-      ? parentID
-      : undefined
-  } catch (err) {
-    log.warn("failed to fetch opencode session parent", {
       sessionID,
       error: err instanceof Error ? err.message : String(err),
     })

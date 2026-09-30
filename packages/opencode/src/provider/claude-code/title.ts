@@ -1,11 +1,6 @@
 /**
  * Title requests: telling one apart from a real turn, and the synthetic
  * title the plugin answers it with instead of spawning `claude`.
- *
- * Split out of `claude-code-language-model.ts` verbatim. `isTitleRequest`
- * inlines what the class's `getOpencodeAgent` did, which was this exact
- * `resolveOpencodeAgent` call and nothing else, so the V2 short-circuit is
- * unchanged.
  */
 import type { LanguageModelV3CallOptions } from "@ai-sdk/provider"
 import type { ClaudeCodeConfig } from "./types.js"

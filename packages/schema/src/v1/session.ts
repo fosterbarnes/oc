@@ -252,6 +252,7 @@ export const StepFinishPart = Schema.Struct({
       read: Schema.Finite,
       write: Schema.Finite,
     }),
+    visible: Schema.optional(Schema.Finite),
   }),
 }).annotate({ identifier: "StepFinishPart" })
 export type StepFinishPart = Types.DeepMutable<Schema.Schema.Type<typeof StepFinishPart>>
@@ -478,6 +479,7 @@ export const Assistant = Schema.Struct({
       read: Schema.Finite,
       write: Schema.Finite,
     }),
+    visible: Schema.optional(Schema.Finite),
   }),
   structured: Schema.optional(Schema.Any),
   variant: Schema.optional(Schema.String),

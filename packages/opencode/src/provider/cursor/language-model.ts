@@ -364,9 +364,10 @@ function retryInfoProtobufDelayMs(encoded: string): number | undefined {
 export function connectFrameError(payload: string): CursorProviderError {
   try {
     const envelope = JSON.parse(payload) as {
-      error?: { code?: unknown; details?: unknown; retryAfter?: unknown; retry_after?: unknown }
+      error?: { code?: unknown; message?: unknown; details?: unknown; retryAfter?: unknown; retry_after?: unknown }
     }
     const code = typeof envelope.error?.code === "string" ? envelope.error.code : "unknown"
+    const reason = typeof envelope.error?.message === "string" && envelope.error.message ? `: ${envelope.error.message}` : ""
     if (code === "unauthenticated" || code === "permission_denied") {
       return new CursorAuthError(`Cursor authentication failed (${code}); reauthenticate with Cursor`, { code })
     }
@@ -383,7 +384,7 @@ export function connectFrameError(payload: string): CursorProviderError {
         }
       }
     }
-    return new CursorServerError(`Cursor API error (code=${code})`, {
+    return new CursorServerError(`Cursor API error (code=${code})${reason}`, {
       transient: isTransientGrpcStatus(code) || hasRetryInfo,
       replaySafe: true,
       code,

@@ -21,15 +21,18 @@ function View(props: { api: TuiPluginApi; session_id: string }) {
     if (!last) {
       return {
         tokens: 0,
+        visible: null as number | null,
         percent: null,
       }
     }
 
     const tokens =
       last.tokens.input + last.tokens.output + last.tokens.reasoning + last.tokens.cache.read + last.tokens.cache.write
+    const visible = (last.tokens as { visible?: number }).visible
     const model = props.api.state.provider.find((item) => item.id === last.providerID)?.models[last.modelID]
     return {
       tokens,
+      visible: typeof visible === "number" ? visible : null,
       percent: model?.limit.context ? Math.round((tokens / model.limit.context) * 100) : null,
     }
   })
@@ -40,6 +43,9 @@ function View(props: { api: TuiPluginApi; session_id: string }) {
         <b>Context</b>
       </text>
       <text fg={theme().textMuted}>{`${state().tokens.toLocaleString()} tokens`}</text>
+      {state().visible != null ? (
+        <text fg={theme().textMuted}>{`${state().visible.toLocaleString()} visible (estimate)`}</text>
+      ) : null}
       <text fg={theme().textMuted}>{`${state().percent ?? 0}% used`}</text>
       <text fg={theme().textMuted}>{money.format(cost())} spent</text>
     </box>

@@ -2,26 +2,28 @@
 // WIP: ported from opencode-claude-code-plugin, which never typechecked its tests; type them as Phase 3 rewrites land.
 import assert from "node:assert/strict"
 import { readFileSync } from "node:fs"
-import { tmpdir } from "node:os"
 import { test } from "node:test"
-import { SUBAGENT_DISPATCH_HINT, QUESTION_PROXY_HINT } from "@/provider/claude-code/claude-code-language-model.js"
+import { SUBAGENT_DISPATCH_HINT, QUESTION_PROXY_HINT } from "@/provider/claude-code/prompts.js"
 import { buildAppendedSystemPrompt, buildToolEnvironmentNote } from "@/provider/claude-code/prompts.js"
 import {
   DEFAULT_PROXY_TOOLS,
-  filterProxyByModelTools,
-  filterProxyOpencodeToolDefs,
-  resolveDisallowedTools,
   extractAgentTypeList,
   overlayTaskProxyDescription,
   overlayQuestionProxyDescription,
   filterQuestionProxyByOpencodeSupport,
-  disallowedToolFlags,
   TASK_PROXY_NOTE,
   TASK_BATCH_PROXY_NOTE,
   TASK_BATCH_TOOL_NAME,
   QUESTION_PROXY_NOTE,
   type ProxyToolDef,
-} from "@/provider/claude-code/proxy-mcp.js"
+} from "@/provider/claude-code/proxy-tool-defs.js"
+import {
+  filterProxyByModelTools,
+  filterProxyOpencodeToolDefs,
+  resolveDisallowedTools,
+  disallowedToolFlags,
+  nativeToolsDeniedByHost,
+} from "@/provider/claude-code/proxy-tool-selection.js"
 
 // Subagent dispatch must use OpenCode's task proxy, not a similarly named
 // todo or Claude-native tool.
@@ -70,7 +72,7 @@ test("extractAgentTypeList keeps the agent names and drops the preamble", () => 
   assert.ok(!list.includes("When NOT to use"))
   assert.ok(!list.includes("Usage notes"))
   // Long blurbs are trimmed with an ellipsis so the block stays small.
-  assert.match(list, /…/)
+  assert.match(list, /\.\.\./)
 })
 
 test("extractAgentTypeList declines when there is no parsable list", () => {
@@ -98,9 +100,9 @@ test("overlayTaskProxyDescription front-loads the agent list", () => {
     `task description too long to survive truncation: ${task.description.length}`,
   )
   // Other defs untouched (same object references).
-  const bashIn = DEFAULT_PROXY_TOOLS.find((t) => t.name === "bash")!
-  const bashOut = out.find((t) => t.name === "bash")!
-  assert.equal(bashOut, bashIn)
+  const tailIn = DEFAULT_PROXY_TOOLS.find((t) => t.name === "session_tail")!
+  const tailOut = out.find((t) => t.name === "session_tail")!
+  assert.equal(tailOut, tailIn)
   // Source array not mutated.
   const original = DEFAULT_PROXY_TOOLS.find((t) => t.name === "task")!
   assert.ok(!original.description.includes("subagent_type values"))
@@ -150,9 +152,9 @@ test("overlayQuestionProxyDescription prepends live description, keeps the note"
   assert.ok(question.description.startsWith(live))
   assert.ok(question.description.endsWith(QUESTION_PROXY_NOTE))
   // Other defs untouched (same object references).
-  const bashIn = DEFAULT_PROXY_TOOLS.find((t) => t.name === "bash")!
-  const bashOut = out.find((t) => t.name === "bash")!
-  assert.equal(bashOut, bashIn)
+  const tailIn = DEFAULT_PROXY_TOOLS.find((t) => t.name === "session_tail")!
+  const tailOut = out.find((t) => t.name === "session_tail")!
+  assert.equal(tailOut, tailIn)
   // task def untouched too — overlay is question-scoped.
   const taskOut = out.find((t) => t.name === "task")!
   assert.ok(!taskOut.description.includes(live))
@@ -181,8 +183,8 @@ test("filterQuestionProxyByOpencodeSupport drops the def when unsupported", () =
   // def would render a forwarded call as `⚙ invalid`.
   const out = filterQuestionProxyByOpencodeSupport(DEFAULT_PROXY_TOOLS, false)
   assert.ok(!out.some((t) => t.name === "question"))
-  // Other defs preserved (bash/task/etc. untouched).
-  assert.ok(out.some((t) => t.name === "bash"))
+  // Other defs preserved (task/session_tail untouched).
+  assert.ok(out.some((t) => t.name === "session_tail"))
   assert.ok(out.some((t) => t.name === "task"))
   assert.equal(out.length, DEFAULT_PROXY_TOOLS.length - 1)
 })
@@ -195,7 +197,7 @@ test("filterQuestionProxyByOpencodeSupport keeps the def when supported", () => 
   // Works on a filtered subset too.
   const subset: ProxyToolDef[] = [
     DEFAULT_PROXY_TOOLS.find((t) => t.name === "question")!,
-    DEFAULT_PROXY_TOOLS.find((t) => t.name === "bash")!,
+    DEFAULT_PROXY_TOOLS.find((t) => t.name === "session_tail")!,
   ]
   assert.deepEqual(
     filterQuestionProxyByOpencodeSupport(subset, true),
@@ -221,7 +223,7 @@ test("filterQuestionProxyByOpencodeSupport is a no-op when no question def is pr
 test("version gate + disallowedToolFlags: dropping question also drops AskUserQuestion disable", () => {
   // A config that proxies question alongside the standard tools.
   const resolved = [
-    DEFAULT_PROXY_TOOLS.find((t) => t.name === "bash")!,
+    DEFAULT_PROXY_TOOLS.find((t) => t.name === "task")!,
     DEFAULT_PROXY_TOOLS.find((t) => t.name === "question")!,
   ]
 
@@ -238,8 +240,8 @@ test("version gate + disallowedToolFlags: dropping question also drops AskUserQu
   assert.ok(!unsupported.some((t) => t.name === "question"))
   const unsupportedFlags = disallowedToolFlags(unsupported)
   assert.ok(!unsupportedFlags.includes("AskUserQuestion"))
-  // Sanity: bash is still disabled in both cases.
-  assert.ok(unsupportedFlags.includes("Bash"))
+  // Sanity: the native subagent tool is still disabled in both cases.
+  assert.ok(unsupportedFlags.includes("Agent"))
 })
 
 test("no empty proxy server: combined list is empty when all defs are filtered out", () => {
@@ -281,13 +283,17 @@ test("subagent dispatch hint names task_batch as the way to run subagents concur
   )
 })
 
-test("task and task_batch point at each other and both disable only Agent", () => {
+test("task and task_batch point at each other and disable the native subagent tools once", () => {
   const task = DEFAULT_PROXY_TOOLS.find((t) => t.name === "task")!
   const batch = DEFAULT_PROXY_TOOLS.find((t) => t.name === TASK_BATCH_TOOL_NAME)!
   assert.match(task.description, /task_batch/)
   assert.ok(batch.description.endsWith(TASK_BATCH_PROXY_NOTE))
   assert.match(batch.description, /one at a time/)
-  assert.deepEqual(disallowedToolFlags([task, batch]), ["Agent"], "the CLI's own Agent is disabled once, not twice")
+  assert.deepEqual(
+    disallowedToolFlags([task, batch]),
+    ["Agent", "Task", "TaskOutput"],
+    "the CLI's own subagent tools are disabled once, not twice",
+  )
 })
 
 test("the agent-list overlay lands on task_batch too, within the truncation budget", () => {
@@ -305,31 +311,26 @@ test("the agent-list overlay lands on task_batch too, within the truncation budg
 })
 
 // opencode strips permission-denied tools from the model tool set before the
-// provider sees it, so an agent with `task: deny` / `edit: deny` must not be
-// handed the proxy defs for them.
+// provider sees it, so an agent with `task: deny` must not be handed the
+// proxy defs for it.
 test("proxy defs follow the tools opencode offered the agent", () => {
   const defs = DEFAULT_PROXY_TOOLS
-  const offered = ["bash", "read", "write", "webfetch", "question"].map((name) => ({ type: "function", name }))
+  const offered = ["bash", "read", "question"].map((name) => ({ type: "function", name, inputSchema: { type: "object" } }))
   const names = filterProxyByModelTools(defs, offered).map((t) => t.name)
-  assert.ok(names.includes("bash") && names.includes("write"))
-  assert.ok(!names.includes("edit"), "denied edit kept")
-  assert.ok(!names.includes("task") && !names.includes(TASK_BATCH_TOOL_NAME), "task_batch must follow task")
-  assert.ok(names.includes("compress"), "plugin-run def must never be filtered")
-  // No host tool set means there is no permission snapshot to filter against.
-  assert.equal(filterProxyByModelTools(defs, undefined).length, defs.length)
-  // An empty snapshot means no opencode tools are allowed; plugin-local compress remains.
-  assert.deepEqual(filterProxyByModelTools(defs, []).map((tool) => tool.name), ["compress"])
-  const v2 = ["shell", "write", "subagent", "webfetch", "question"].map(
-    (name) => ({ name }),
-  )
+  assert.deepEqual(names, ["question"])
+  assert.deepEqual(filterProxyByModelTools(defs, undefined).map((tool) => tool.name), [
+    "task",
+    TASK_BATCH_TOOL_NAME,
+    "question",
+    "session_tail",
+  ])
+  assert.deepEqual(filterProxyByModelTools(defs, []).map((tool) => tool.name), [])
+  const v2 = ["shell", "subagent", "question"].map((name) => ({ name, inputSchema: { type: "object" } }))
   const v2Names = filterProxyByModelTools(defs, v2, "v2").map((tool) => tool.name)
-  assert.ok(v2Names.includes("bash") && v2Names.includes("write"))
-  assert.ok(v2Names.includes("task") && v2Names.includes(TASK_BATCH_TOOL_NAME))
-  assert.ok(!v2Names.includes("edit"), "denied V2 edit kept")
-  assert.ok(v2Names.includes("compress"), "plugin-run def must never be filtered")
+  assert.deepEqual(v2Names, ["task", TASK_BATCH_TOOL_NAME, "question"])
   // The built-in stays off even when its proxy is hidden, because the
   // disallowed list is computed from the list before this filter.
-  assert.ok(disallowedToolFlags(defs).includes("Edit"))
+  assert.ok(disallowedToolFlags(defs).includes("Agent"))
 })
 
 test("forwarded opencode proxy defs follow the allowed host tool set", () => {
@@ -353,45 +354,53 @@ test("forwarded opencode proxy defs follow the allowed host tool set", () => {
   )
   assert.deepEqual(filterProxyOpencodeToolDefs(forwarded, []).map((tool) => tool.name), [])
   assert.equal(filterProxyOpencodeToolDefs(forwarded, undefined).length, forwarded.length)
-  assert.ok(resolveDisallowedTools({ proxyTools: forwarded }).includes("Edit"))
+  // A forwarded `edit` never turns Claude Code's native Edit off.
+  assert.ok(!resolveDisallowedTools({ proxyTools: forwarded }).includes("Edit"))
   assert.ok(resolveDisallowedTools({ proxyTools: forwarded }).includes("Agent"))
 })
 
-test("tool environment note names full proxy names and the disabled built-ins", () => {
-  const note = buildToolEnvironmentNote(["bash", "task"], ["Bash", "Agent"])!
-  assert.match(note, /`mcp__opencode_proxy__bash`, `mcp__opencode_proxy__task`/)
-  assert.match(note, /turned off this session: Bash, Agent/)
+test("tool environment note names the proxy prefix and how to load a deferred tool", () => {
+  const note = buildToolEnvironmentNote(["session_tail"])!
+  assert.match(note, /mcp__opencode_proxy__<name>/)
   assert.match(note, /ToolSearch \(`select:mcp__opencode_proxy__<name>`\)/)
-  assert.match(note, /Proxy tools not listed below are unavailable in this session/)
-  assert.match(note, /native TaskCreate\/TaskUpdate/)
-  assert.equal(buildToolEnvironmentNote([], []), undefined)
-})
-
-test("strict proxy mode documents OpenCode todos without native-tool fallbacks", () => {
-  const note = buildToolEnvironmentNote(
-    ["grep", "todowrite"],
-    ["Bash", "Read", "Grep", "TaskCreate", "TaskUpdate", "TaskList", "TodoWrite", "ToolSearch"],
-  )!
-  assert.match(note, /mcp__opencode_proxy__todowrite/)
-  assert.doesNotMatch(note, /load it with ToolSearch|native TaskCreate|Claude Code's native/)
+  assert.equal(buildToolEnvironmentNote([]), undefined)
 })
 
 // The dispatch and question sections live inside the one note and appear
 // only for a live proxy: a gated or permission-denied tool must not be
 // advertised, or the model calls a tool that does not exist.
 test("tool environment note carries the task and question sections only when live", () => {
-  const both = buildToolEnvironmentNote(["task", "question"], [])!
+  const both = buildToolEnvironmentNote(["task", "question"])!
   assert.ok(both.includes(SUBAGENT_DISPATCH_HINT) && both.includes(QUESTION_PROXY_HINT))
-  const neither = buildToolEnvironmentNote(["bash"], ["AskUserQuestion"])!
+  const neither = buildToolEnvironmentNote(["session_tail"])!
   assert.ok(!neither.includes("### Subagents") && !neither.includes("### Asking"))
 })
 
-test("tool environment note sits right after the runtime note", () => {
-  const file = buildAppendedSystemPrompt(tmpdir(), false, ["FORWARDED"], {
-    toolEnvironment: buildToolEnvironmentNote(["bash"], [])!,
+// Claude Code brings its own prompt, CLAUDE.md and AGENTS.md: the appended
+// file carries the agent prompt and the tool note, nothing else from oc.
+test("appended prompt is the agent prompt, the tool note and the multi-step hint only", () => {
+  const file = buildAppendedSystemPrompt({
+    agentPrompt: "AGENT PROMPT",
+    multiStepHint: true,
+    toolEnvironment: buildToolEnvironmentNote(["task"])!,
   })!
   const text = readFileSync(file, "utf8")
-  const runtime = text.indexOf("## Runtime environment")
-  const tools = text.indexOf("## Tools in this environment")
-  assert.ok(runtime === 0 && tools > runtime && tools < text.indexOf("FORWARDED"))
+  assert.ok(text.startsWith("AGENT PROMPT"))
+  assert.ok(text.indexOf("## OpenCode tools") > 0)
+  assert.match(text, /## Continuing through multi-step tasks/)
+  assert.doesNotMatch(text, /<available_skills>|<env>|Instructions from:|Runtime environment/)
+  assert.equal(buildAppendedSystemPrompt({}), undefined)
+})
+
+// oc's per-agent permissions reach Claude Code's own tools only through
+// --disallowedTools: whatever oc left out of the agent's tool set is off.
+test("native tools follow the oc tools the agent was given", () => {
+  const all = ["bash", "edit", "write", "read", "glob", "grep", "webfetch"].map((name) => ({ name }))
+  assert.deepEqual(nativeToolsDeniedByHost(all), [])
+  const readOnly = ["read", "glob", "grep", "webfetch"].map((name) => ({ name }))
+  assert.deepEqual(nativeToolsDeniedByHost(readOnly), ["Bash", "PowerShell", "Edit", "MultiEdit", "NotebookEdit", "Write"])
+  // V2 hosts name the shell tool `shell`.
+  assert.deepEqual(nativeToolsDeniedByHost([{ name: "shell" }, ...all.filter((t) => t.name !== "bash")], "v2"), [])
+  // No tool snapshot (direct AI SDK use) changes nothing.
+  assert.deepEqual(nativeToolsDeniedByHost(undefined), [])
 })

@@ -63,6 +63,71 @@ async function resolvePromptFiles(text: string, mdPath: string) {
   return out
 }
 
+const FAMILY_KEYS = new Set(["variants", "agents"])
+
+/**
+ * One markdown file is either a single agent, a `variants` list
+ * (`<stem>-<id>`), or an `agents` map (explicit names). Shared frontmatter
+ * is copied onto each child. `{file:}` prompts resolve once per distinct
+ * reference. An empty prompt is omitted so native agents keep their prompt.
+ */
+async function expandAgentFile(
+  data: Record<string, unknown>,
+  body: string,
+  name: string,
+  mdPath: string,
+): Promise<Record<string, Record<string, unknown>>> {
+  const shared: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(data)) {
+    if (!FAMILY_KEYS.has(key)) shared[key] = value
+  }
+
+  const children: Record<string, Record<string, unknown>> = {}
+  if (data.agents && typeof data.agents === "object" && !Array.isArray(data.agents)) {
+    for (const [agentName, overrides] of Object.entries(data.agents as Record<string, unknown>)) {
+      if (!overrides || typeof overrides !== "object" || Array.isArray(overrides)) {
+        throw new InvalidError({ path: mdPath, message: `${mdPath}: agent "${agentName}" must be an object` })
+      }
+      children[agentName] = { ...shared, ...(overrides as Record<string, unknown>) }
+    }
+  } else if (Array.isArray(data.variants)) {
+    for (const entry of data.variants) {
+      if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+        throw new InvalidError({ path: mdPath, message: `${mdPath}: each variant must be an object` })
+      }
+      const variant = entry as Record<string, unknown>
+      const id = typeof variant.id === "string" ? variant.id.trim() : ""
+      if (!id) throw new InvalidError({ path: mdPath, message: `${mdPath}: variant missing id` })
+      const { id: _id, ...overrides } = variant
+      children[`${name}-${id}`] = { ...shared, variant: id, ...overrides }
+    }
+  } else {
+    children[name] = { ...shared }
+  }
+
+  const cache = new Map<string, string>()
+  const resolve = async (text: string) => {
+    const cached = cache.get(text)
+    if (cached !== undefined) return cached
+    const resolved = await resolvePromptFiles(text, mdPath)
+    cache.set(text, resolved)
+    return resolved
+  }
+
+  const sharedPrompt = typeof shared.prompt === "string" ? await resolve(shared.prompt) : ""
+  const trimmedBody = body.trim()
+
+  for (const config of Object.values(children)) {
+    delete config.variants
+    delete config.agents
+    const own = typeof config.prompt === "string" && config.prompt !== shared.prompt ? await resolve(config.prompt) : sharedPrompt
+    const prompt = [own.trim(), trimmedBody].filter(Boolean).join("\n\n")
+    if (prompt) config.prompt = prompt
+    else delete config.prompt
+  }
+  return children
+}
+
 export interface AgentDiagnostic {
   path: string
   message: string
@@ -121,11 +186,14 @@ export async function scan(dir: string): Promise<{
       continue
     }
 
-    const name = configEntryNameFromPath(path.relative(dir, item), ["agent/", "agents/"])
+    const relative = path.relative(dir, item).replaceAll("\\", "/")
+    const underSub = relative.startsWith("agents/sub/") || relative.startsWith("agent/sub/")
+    let name = configEntryNameFromPath(relative, ["agent/", "agents/"])
+    if (name.startsWith("sub/")) name = name.slice("sub/".length)
 
-    let head = ""
+    let entries: Record<string, Record<string, unknown>>
     try {
-      head = typeof md.data.prompt === "string" ? await resolvePromptFiles(md.data.prompt, item) : ""
+      entries = await expandAgentFile(md.data, md.content, name, item)
     } catch (error) {
       diagnostics.push({
         path: item,
@@ -134,22 +202,29 @@ export async function scan(dir: string): Promise<{
       })
       continue
     }
-    const body = md.content.trim()
-    const prompt = [head.trim(), body].filter(Boolean).join("\n\n")
 
-    const config = {
-      name,
-      ...md.data,
-      prompt,
+    if (underSub) {
+      const wrong = Object.entries(entries).filter(([, config]) => config.mode && config.mode !== "subagent")
+      if (wrong.length) {
+        diagnostics.push({
+          path: item,
+          message: `${item}: agents/sub is only for mode: subagent`,
+        })
+        continue
+      }
+      for (const config of Object.values(entries)) config.mode = "subagent"
     }
-    try {
-      agents[config.name] = ConfigParse.schema(ConfigAgentV1.Info, config, item)
-    } catch (error) {
-      diagnostics.push({
-        path: item,
-        message: agentDiagnosticMessage(error),
-        issues: agentDiagnosticIssues(error),
-      })
+
+    for (const [agentName, config] of Object.entries(entries)) {
+      try {
+        agents[agentName] = ConfigParse.schema(ConfigAgentV1.Info, { ...config, name: agentName }, item)
+      } catch (error) {
+        diagnostics.push({
+          path: item,
+          message: agentDiagnosticMessage(error),
+          issues: agentDiagnosticIssues(error),
+        })
+      }
     }
   }
   return { agents, diagnostics, files: items.length }

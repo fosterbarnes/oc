@@ -131,6 +131,7 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
             }
             return output
           }),
+          { signal: options.abortSignal },
         )
       },
     })

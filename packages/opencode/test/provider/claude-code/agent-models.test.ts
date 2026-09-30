@@ -183,7 +183,7 @@ test("readAgentMarkdownRecords reads a directory, project before global", async 
     assert.deepEqual(Object.keys(found), ["designer"])
     assert.equal(found.designer.forceModel, "claude-haiku-4-5")
   } finally {
-    rmSync(root, { recursive: true, force: true })
+    rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 })
   }
 })
 
@@ -246,9 +246,9 @@ test("parseAgentFrontmatter reads reasoningEffort", () => {
 
 test("agentDirectories covers both names, project before global", () => {
   assert.deepEqual(agentDirectories("/home/k", "/work/app"), [
-    "/work/app/.opencode/agents",
-    "/work/app/.opencode/agent",
-    "/home/k/.config/opencode/agents",
-    "/home/k/.config/opencode/agent",
+    join("/work/app", ".opencode", "agents"),
+    join("/work/app", ".opencode", "agent"),
+    join("/home/k", ".config", "opencode", "agents"),
+    join("/home/k", ".config", "opencode", "agent"),
   ])
 })

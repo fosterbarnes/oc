@@ -1,13 +1,12 @@
 import { EventEmitter } from "node:events"
+import { type ProxyToolCall, type ProxyToolResult } from "./proxy-mcp.js"
 import {
   armProxyDeadline,
   buildProxyTimeoutError,
   PROXY_NO_DEADLINE_MS,
   resolveProxyCallTimeoutMs,
   type ProxyDeadline,
-  type ProxyToolCall,
-  type ProxyToolResult,
-} from "./proxy-mcp.js"
+} from "./proxy-deadline.js"
 import { log } from "./logger.js"
 
 export interface PendingProxyCall {
@@ -15,6 +14,7 @@ export interface PendingProxyCall {
   toolCallId: string
   toolName: string
   input: Record<string, unknown>
+  signal?: AbortSignal
 }
 
 type InternalPending = PendingProxyCall & {
@@ -27,6 +27,7 @@ type InternalPending = PendingProxyCall & {
   stallTimer: ReturnType<typeof setInterval> | null
   /** One-shot "this is going to run out" notice; deadline-bearing calls only. */
   deadlineWarnTimer: ReturnType<typeof setTimeout> | null
+  onAbort?: () => void
   resolve(result: ProxyToolResult): void
   reject(error: Error): void
 }
@@ -67,18 +68,10 @@ export const PROXY_DEADLINE_WARNING_MIN_MS = 60_000
 
 /** Every timer a pending call can hold. Each removal site must use this. */
 function clearPendingTimers(pending: InternalPending): void {
+  if (pending.onAbort) pending.signal?.removeEventListener("abort", pending.onAbort)
   pending.timer?.cancel()
   if (pending.stallTimer) clearInterval(pending.stallTimer)
   if (pending.deadlineWarnTimer) clearTimeout(pending.deadlineWarnTimer)
-}
-
-/** One pending call, flattened for `/claude-code-doctor`. */
-export interface PendingProxyCallSnapshot {
-  sessionKey: string
-  toolCallId: string
-  toolName: string
-  ageMs: number
-  deadlineMs: number
 }
 
 // Primary index: callId -> pending. Tool call IDs are UUIDs produced by
@@ -226,6 +219,7 @@ export function queuePendingProxyCall(
     toolCallId: call.id,
     toolName: call.toolName,
     input: call.input,
+    signal: call.signal,
     createdAt: Date.now(),
     deadlineMs,
     timer,
@@ -236,6 +230,17 @@ export function queuePendingProxyCall(
   }
   pendingByCallId.set(call.id, pending)
   indexAdd(sessionKey, call.id)
+  if (call.signal) {
+    pending.onAbort = () => rejectPendingProxyCallById(
+      call.id,
+      call.signal?.reason instanceof Error ? call.signal.reason : new Error("Proxy tool call was aborted"),
+    )
+    call.signal.addEventListener("abort", pending.onAbort, { once: true })
+    if (call.signal.aborted) {
+      pending.onAbort()
+      return pending
+    }
+  }
   emitter.emit(eventName(sessionKey), pending)
   log.info("queued pending proxy call", {
     sessionKey,
@@ -257,26 +262,6 @@ export function getPendingProxyCalls(sessionKey: string): PendingProxyCall[] {
   for (const id of s) {
     const p = pendingByCallId.get(id)
     if (p) out.push(p)
-  }
-  return out
-}
-
-/**
- * Every call the broker is currently holding, across all sessions, with how
- * long it has waited and when it gives up. Read-only view for the doctor
- * report; deliberately carries no `input`, since a pending call's arguments
- * can be a whole file's contents.
- */
-export function snapshotPendingProxyCalls(now = Date.now()): PendingProxyCallSnapshot[] {
-  const out: PendingProxyCallSnapshot[] = []
-  for (const pending of pendingByCallId.values()) {
-    out.push({
-      sessionKey: pending.sessionKey,
-      toolCallId: pending.toolCallId,
-      toolName: pending.toolName,
-      ageMs: Math.max(0, now - pending.createdAt),
-      deadlineMs: pending.deadlineMs,
-    })
   }
   return out
 }

@@ -1,45 +1,15 @@
 /**
  * Reading a single LLM call: which opencode session and agent it belongs
- * to, which model handles /compact, whether the prompt has anything new in
- * it, and how to describe an abort.
- *
- * Split out of `claude-code-language-model.ts` verbatim. Everything here is
- * pure and free-standing, which is why it was already exported and unit
- * tested from the class's outside.
+ * to, the agent prompt, whether the prompt has anything new in it, and how to
+ * describe an abort.
  */
 import type { LanguageModelV3CallOptions } from "@ai-sdk/provider"
 import {
   CLAUDE_CODE_AGENT_OPTION,
+  CLAUDE_CODE_AGENT_PROMPT_OPTION,
   CLAUDE_CODE_PROVIDER_ID,
   CLAUDE_CODE_SESSION_OPTION,
-  COMPACTION_BOUNDARY_OPTION,
 } from "./shared.js"
-
-/**
- * Default model used for opencode `/compact`. Haiku 4.5 is fast
- * (~150 tok/s), has a hard 8k output cap that bounds latency, and is a
- * strong structured summarizer. Override per-project via the
- * `compactionModel` provider setting in opencode.json / opencode.jsonc,
- * or per-run via the `CLAUDE_CODE_COMPACTION_MODEL` env var (env wins).
- */
-export const DEFAULT_COMPACTION_MODEL = "claude-haiku-4-5"
-
-/**
- * Pick the model used to handle /compact. Precedence:
- *   1. `CLAUDE_CODE_COMPACTION_MODEL` env var (per-process override)
- *   2. `configured` argument (the `compactionModel` provider setting)
- *   3. `DEFAULT_COMPACTION_MODEL`
- *
- * Exported as a free function so it can be unit-tested without
- * instantiating the language model class.
- */
-export function resolveCompactionModel(configured?: string): string {
-  const env = process.env.CLAUDE_CODE_COMPACTION_MODEL?.trim()
-  if (env) return env
-  const trimmed = configured?.trim()
-  if (trimmed) return trimmed
-  return DEFAULT_COMPACTION_MODEL
-}
 
 type ProviderOptions = LanguageModelV3CallOptions["providerOptions"]
 
@@ -63,36 +33,9 @@ export function resolveOpencodeAgent(providerOptions: ProviderOptions, providerK
   return hostOption(providerOptions, providerKey, CLAUDE_CODE_AGENT_OPTION)
 }
 
-const compactionBoundaryBySession = new Map<string, string>()
-
-/**
- * True the first time `key` sees a new host compaction boundary (the summary
- * message id opencode sends on every turn after a compaction). Another model
- * may have written the summary, so this id is the only sign the CLI transcript
- * is stale.
- * ponytail: in-memory, so a restart starts one extra fresh conversation per compacted session.
- */
-export function compactionBoundaryChanged(key: string, providerOptions: ProviderOptions, providerKey: string): boolean {
-  const boundary = hostOption(providerOptions, providerKey, COMPACTION_BOUNDARY_OPTION)
-  if (!boundary || compactionBoundaryBySession.get(key) === boundary) return false
-  compactionBoundaryBySession.delete(key)
-  compactionBoundaryBySession.set(key, boundary)
-  if (compactionBoundaryBySession.size > 256) {
-    compactionBoundaryBySession.delete(compactionBoundaryBySession.keys().next().value!)
-  }
-  return true
-}
-
-/** An `AbortSignal.reason` as loggable text: its name and message, or its type. */
-export function describeAbortReason(reason: unknown): string {
-  if (reason === undefined) return "undefined"
-  if (reason instanceof Error) return `${reason.name}: ${reason.message}`
-  if (typeof reason === "string") return reason
-  try {
-    return JSON.stringify(reason) ?? typeof reason
-  } catch {
-    return typeof reason
-  }
+/** The active oc agent's own prompt, appended to Claude Code's system prompt at spawn. */
+export function resolveOpencodeAgentPrompt(providerOptions: ProviderOptions, providerKey: string): string | undefined {
+  return hostOption(providerOptions, providerKey, CLAUDE_CODE_AGENT_PROMPT_OPTION)
 }
 
 /**

@@ -10418,6 +10418,40 @@ export type SessionSummarizeResponses = {
 
 export type SessionSummarizeResponse = SessionSummarizeResponses[keyof SessionSummarizeResponses]
 
+export type SessionRenameData = {
+  body?: never
+  path: {
+    sessionID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/session/{sessionID}/rename"
+}
+
+export type SessionRenameErrors = {
+  /**
+   * BadRequest | InvalidRequestError
+   */
+  400: EffectHttpApiErrorBadRequest | InvalidRequestError
+  /**
+   * NotFoundError
+   */
+  404: NotFoundError
+}
+
+export type SessionRenameError = SessionRenameErrors[keyof SessionRenameErrors]
+
+export type SessionRenameResponses = {
+  /**
+   * Renamed session
+   */
+  200: Session
+}
+
+export type SessionRenameResponse = SessionRenameResponses[keyof SessionRenameResponses]
+
 export type SessionPromptAsyncData = {
   body?: {
     messageID?: string

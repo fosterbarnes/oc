@@ -149,8 +149,8 @@ function timingTool(toolPartReady: () => Effect.Effect<void> = () => Effect.void
     return {
       state,
       updates,
-      run: (experimental_context?: unknown) =>
-        execute({}, { toolCallId: callID, abortSignal: new AbortController().signal, messages: [], experimental_context }),
+      run: (experimental_context?: unknown, abortSignal = new AbortController().signal) =>
+        execute({}, { toolCallId: callID, abortSignal, messages: [], experimental_context }),
     }
   })
 }
@@ -179,5 +179,18 @@ it.live("provider-executed calls wait for their tool part before running", () =>
     yield* Deferred.succeed(ready, undefined)
     yield* Effect.promise(() => result)
     expect(timing.updates).toEqual([100, 100])
+  }),
+)
+
+it.live("an aborted provider call interrupts the readiness wait without executing", () =>
+  Effect.gen(function* () {
+    const ready = Deferred.makeUnsafe<void>()
+    const timing = yield* timingTool(() => Deferred.await(ready))
+    const cancellation = new AbortController()
+    const result = timing.run({ awaitToolPart: true }, cancellation.signal).then(() => false, () => true)
+    cancellation.abort()
+    expect(yield* Effect.promise(() => result)).toBe(true)
+    yield* Deferred.succeed(ready, undefined)
+    expect(timing.updates).toEqual([])
   }),
 )

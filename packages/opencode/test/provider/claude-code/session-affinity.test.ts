@@ -3,13 +3,13 @@ import { Effect } from "effect"
 import { LLMRequestPrep } from "@/session/llm/request"
 import { ProviderTransform } from "@/provider/transform"
 import {
-  compactionBoundaryChanged,
   resolveOpencodeAgent,
+  resolveOpencodeAgentPrompt,
   resolveSessionAffinity,
 } from "@/provider/claude-code/call-options"
 
 // Host -> provider round trip: what request.ts writes is what the language model reads.
-function prepare(input: { providerID: string; agent: string; compactionBoundary?: string }) {
+function prepare(input: { providerID: string; agent: string; prompt?: string; compactionBoundary?: string }) {
   const model = {
     id: `${input.providerID}/claude-opus-5-5`,
     providerID: input.providerID,
@@ -31,7 +31,7 @@ function prepare(input: { providerID: string; agent: string; compactionBoundary?
       } as never,
       sessionID: "ses_host",
       model: model as never,
-      agent: { name: input.agent, mode: "primary", options: {}, permission: [] } as never,
+      agent: { name: input.agent, mode: "primary", options: {}, permission: [], prompt: input.prompt } as never,
       system: [],
       messages: [{ role: "user", content: "Hello" }],
       tools: {},
@@ -62,14 +62,20 @@ describe("claude-code host call options", () => {
     expect(resolveOpencodeAgent(options, "claude-code-work")).toBe("compaction")
   })
 
-  test("compaction boundary reaches the provider and fires once per boundary", async () => {
-    const options = await prepare({ providerID: "claude-code", agent: "build", compactionBoundary: "msg_summary" })
-    expect(compactionBoundaryChanged("round-trip", options, "claude-code")).toBe(true)
-    expect(compactionBoundaryChanged("round-trip", options, "claude-code")).toBe(false)
+  test("the agent's own prompt reaches the provider, and only when it has one", async () => {
+    const options = await prepare({ providerID: "claude-code", agent: "build", prompt: "AGENT PROMPT" })
+    expect(resolveOpencodeAgentPrompt(options, "claude-code")).toBe("AGENT PROMPT")
+    const plain = await prepare({ providerID: "claude-code", agent: "build" })
+    expect(resolveOpencodeAgentPrompt(plain, "claude-code")).toBeUndefined()
   })
 
   test("other providers get no claude-code options", async () => {
-    const options = await prepare({ providerID: "openai-compatible", agent: "build", compactionBoundary: "msg_summary" })
+    const options = await prepare({
+      providerID: "openai-compatible",
+      agent: "build",
+      prompt: "AGENT PROMPT",
+      compactionBoundary: "msg_summary",
+    })
     expect(JSON.stringify(options)).not.toContain("opencode")
   })
 

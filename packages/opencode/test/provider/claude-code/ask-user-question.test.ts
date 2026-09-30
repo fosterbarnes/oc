@@ -5,7 +5,7 @@ import { test } from "node:test"
 import {
   denyMessageForTool,
   isAskUserQuestionTool,
-} from "@/provider/claude-code/claude-code-language-model.js"
+} from "@/provider/claude-code/ask-user-question.js"
 
 test("isAskUserQuestionTool matches CLI casing variants", () => {
   assert.equal(isAskUserQuestionTool("AskUserQuestion"), true)

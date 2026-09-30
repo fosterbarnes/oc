@@ -22,6 +22,7 @@ import { ProviderV2 } from "@opencode-ai/core/provider"
 import { ModelV2 } from "@opencode-ai/core/model"
 import { buildPrompt } from "@opencode-ai/core/session/compaction"
 import { SessionCompactionEvent } from "@opencode-ai/schema/session-compaction-event"
+import { isClaudeCodeProvider } from "@/provider/claude-code/shared"
 
 export const Event = SessionCompactionEvent
 
@@ -356,8 +357,11 @@ const layer = Layer.effect(
       }
 
       const agent = yield* agents.get("compaction")
-      const model = agent.model
-        ? yield* provider.getModel(agent.model.providerID, agent.model.modelID).pipe(Effect.orDie)
+      // A Claude Code chat compacts inside its own conversation (Claude Code `/compact`), so it never
+      // hands the transcript to the pinned compaction model.
+      const pinned = agent.model && !isClaudeCodeProvider(userMessage.model.providerID) ? agent.model : undefined
+      const model = pinned
+        ? yield* provider.getModel(pinned.providerID, pinned.modelID).pipe(Effect.orDie)
         : yield* provider.getModel(userMessage.model.providerID, userMessage.model.modelID).pipe(Effect.orDie)
       const cfg = yield* config.get()
       const history = compactionPart && messages.at(-1)?.info.id === input.parentID ? messages.slice(0, -1) : messages
@@ -397,7 +401,7 @@ const layer = Layer.effect(
         sessionID: input.sessionID,
         mode: "compaction",
         agent: "compaction",
-        variant: agent.model && agent.variant ? agent.variant : userMessage.model.variant,
+        variant: pinned && agent.variant ? agent.variant : userMessage.model.variant,
         summary: true,
         path: {
           cwd: ctx.directory,

@@ -15,12 +15,12 @@ import {
   cliSupportsRestricted,
   type CliVersion,
 } from "@/provider/claude-code/cli-version.js"
-import { buildCliArgs } from "@/provider/claude-code/session-manager.js"
+import { buildCliArgs } from "@/provider/claude-code/cli-args.js"
 import { applyPermissionPreset, createClaudeCode } from "@/provider/claude-code/index.js"
 import { configureLogger, _resetLoggerForTests } from "@/provider/claude-code/logger.js"
 import { READ_ONLY_PERMISSION_MODE } from "@/provider/claude-code/types.js"
 
-const DEFAULTS = ["Bash", "Edit", "Write", "Read", "Glob", "Grep", "WebFetch", "Task"]
+const DEFAULTS = ["Task"]
 
 function version(raw: string): CliVersion {
   const [major, minor, patch] = raw.split(".").map(Number)
@@ -99,11 +99,11 @@ test("read-only forbids bypass, because the CLI refuses to start with both", () 
   )
 })
 
-test("read-only drops the write and command tools from the proxy", () => {
+test("read-only drops the opencode subagent tools from the proxy", () => {
   const resolved = readOnly()
 
-  assert.deepEqual(resolved.proxyTools, ["Read", "Glob", "Grep"])
-  for (const name of ["bash", "edit", "write", "webfetch", "task", "task_batch"]) {
+  assert.deepEqual(resolved.proxyTools, [])
+  for (const name of ["task", "task_batch"]) {
     assert.ok(
       READ_ONLY_DENIED_PROXY_TOOLS.has(name),
       `${name} must be denied on the proxy`,
@@ -112,17 +112,17 @@ test("read-only drops the write and command tools from the proxy", () => {
 })
 
 test("read-only keeps a proxy tool that changes nothing", () => {
-  const resolved = readOnly({ proxyTools: ["Bash", "Question", "Task"] })
+  const resolved = readOnly({ proxyTools: ["Question", "Task"] })
 
   assert.deepEqual(resolved.proxyTools, ["Question"])
   assert.ok(
-    resolved.overridden.some((line) => line.includes("Bash, Task")),
+    resolved.overridden.some((line) => line.includes("dropped Task")),
     `dropped names must be named: ${resolved.overridden.join(" | ")}`,
   )
 })
 
 test("read-only matches proxy tool names case-insensitively", () => {
-  assert.deepEqual(readOnly({ proxyTools: ["bash", "WEBFETCH"] }).proxyTools, [])
+  assert.deepEqual(readOnly({ proxyTools: ["task", "TASK_BATCH"] }).proxyTools, [])
 })
 
 test("read-only disallows the mutating CLI built-ins and keeps the reads", () => {
@@ -345,7 +345,7 @@ test("createClaudeCode applies the preset to the language model's config", () =>
   assert.equal(model.config.permissionPreset, "read-only")
   assert.equal(model.config.permissionMode, READ_ONLY_PERMISSION_MODE)
   assert.equal(model.config.skipPermissions, false)
-  assert.deepEqual(model.config.proxyTools, ["Read", "Glob", "Grep"])
+  assert.deepEqual(model.config.proxyTools, [])
   assert.deepEqual(
     model.config.extraDisallowedTools,
     [...READ_ONLY_DISALLOWED_CLI_TOOLS],

@@ -2,9 +2,10 @@
  * Local HTTP/2 reverse proxy so OpenCode (Bun on Windows) can reach Cursor
  * AWS agent hosts. Bun's TLS/H2 client fails those handshakes; Node's works.
  *
- * Listens:
- *   127.0.0.1:9418  HTTP/1.1 health
- *   127.0.0.1:9419  h2c (cleartext HTTP/2) from OpenCode
+ * Listens on OS-assigned 127.0.0.1 ports (env overrides for tests):
+ *   HTTP/1.1 health and h2c (cleartext HTTP/2) from OpenCode.
+ * Once listening, prints one JSON line to stdout: {"health":port,"h2":port}.
+ * Each OpenCode process owns its own proxy; it exits when that parent dies.
  *
  * Upstream is taken only from x-cursor-h2-origin (must be https://*.cursor.sh).
  *
@@ -21,8 +22,8 @@ import http2 from "node:http2";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-export const HEALTH_PORT = Number(process.env.CURSOR_H2_HEALTH_PORT || 9418);
-export const H2_PORT = Number(process.env.CURSOR_H2_PROXY_PORT || 9419);
+export const HEALTH_PORT = Number(process.env.CURSOR_H2_HEALTH_PORT || 0);
+export const H2_PORT = Number(process.env.CURSOR_H2_PROXY_PORT || 0);
 const HOST = "127.0.0.1";
 const ALLOWED_ORIGIN = /^https:\/\/([a-z0-9-]+\.)+cursor\.sh$/i;
 export const FLOW_WINDOW = 4 * 1024 * 1024;
@@ -325,8 +326,18 @@ function shutdown() {
 export async function start() {
   await listen(healthServer, HEALTH_PORT);
   await listen(h2Server, H2_PORT);
-  console.error(`OpenCode Cursor proxy health http://${HOST}:${HEALTH_PORT}/health`);
-  console.error(`OpenCode Cursor proxy h2c   http://${HOST}:${H2_PORT}`);
+  const ports = { health: healthServer.address().port, h2: h2Server.address().port };
+  process.stdout.write(`${JSON.stringify(ports)}\n`);
+  console.error(`OpenCode Cursor proxy health http://${HOST}:${ports.health}/health`);
+  console.error(`OpenCode Cursor proxy h2c   http://${HOST}:${ports.h2}`);
+  // Parent crashes skip its exit hook; poll so orphans do not linger.
+  setInterval(() => {
+    try {
+      process.kill(process.ppid, 0);
+    } catch {
+      shutdown();
+    }
+  }, 2000).unref();
   for (const origin of [
     "https://api2.cursor.sh",
     "https://agentn.us.api5.cursor.sh",

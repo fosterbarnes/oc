@@ -1,11 +1,8 @@
 import { log } from "./logger.js"
-import { applyTaskCreateToolUse, applyTaskUpdate, type TodoEntry } from "./todo-ledger.js"
 import type { WebSearchRouting } from "./types.js"
 
 export interface MapToolOptions {
   webSearch?: WebSearchRouting
-  sessionId?: string
-  toolUseId?: string
 }
 
 /** Claude CLI's built-in web search tool (name varies by CLI version). */
@@ -111,7 +108,11 @@ const OPENCODE_HANDLED_TOOLS = new Set([
 // forwarding them surfaces as `⚙ invalid` rows in the UI. Skip them.
 // TaskOutput is intentionally NOT here — it has an explicit bash-echo mapping
 // below so the result stays visible.
+// TaskCreate/TaskUpdate change Claude Code's own task list one item per call;
+// turn-stream.ts mirrors the saved list into oc once per turn (task-list.ts).
 const CLAUDE_INTERNAL_TOOLS = new Set([
+  "TaskCreate",
+  "TaskUpdate",
   "ToolSearch",
   "Agent",
   "AskFollowupQuestion",
@@ -136,20 +137,6 @@ export function singleQuoteForShell(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`
 }
 
-function emitTodoWrite(todos: TodoEntry[]) {
-  return {
-    name: "todowrite",
-    input: {
-      todos: todos.map((todo) => ({
-        id: todo.id,
-        content: todo.content,
-        status: todo.status,
-        priority: "medium",
-      })),
-    },
-    executed: false,
-  }
-}
 
 export function mapTool(
   name: string,
@@ -162,34 +149,13 @@ export function mapTool(
     return { name, input, executed: true, skip: true }
   }
 
-  // TaskCreate: stash subject keyed by tool_use_id; emission happens on tool_result.
-  // Without sessionId+toolUseId we cannot maintain the ledger, so fall back to skip
-  // (preserves old behavior for callers that haven't been threaded yet).
-  if (name === "TaskCreate") {
-    if (opts?.sessionId && opts?.toolUseId) {
-      applyTaskCreateToolUse(opts.sessionId, opts.toolUseId, input)
-    }
-    return { name, input, executed: true, skip: true }
-  }
-
-  // TaskUpdate: mutate ledger and emit full list as opencode todowrite. Without
-  // sessionId, fall back to skip. Unknown task ids return null from the ledger
-  // and we drop the event.
-  if (name === "TaskUpdate") {
-    if (opts?.sessionId) {
-      const list = applyTaskUpdate(opts.sessionId, input)
-      if (list !== null) return emitTodoWrite(list)
-    }
-    return { name, input, executed: true, skip: true }
-  }
-
   // Plan mode tools
   if (name === "EnterPlanMode") return { name: "plan_enter", input: {}, executed: false }
   if (name === "ExitPlanMode") return { name: "plan_exit", input, executed: false }
 
-  // TodoWrite needs opencode to run it locally so Todo.Service (and the UI
-  // widget backed by it) gets populated. Reporting as provider-executed would
-  // short-circuit opencode's own execute and leave the todo panel empty.
+  // TodoWrite becomes oc's `todowrite` so Todo.Service (and the todo panel)
+  // gets populated. The stream mirrors the turn's last list once, in-process
+  // and provider-executed (`flushTodo` in turn-stream.ts), never as an oc tool turn.
   if (name === "TodoWrite") {
     const mappedInput = mapToolInput(name, input)
     return { name: "todowrite", input: mappedInput, executed: false }

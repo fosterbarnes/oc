@@ -1,29 +1,20 @@
-import { spawn, type ChildProcess } from "node:child_process"
+import type { ChildProcess } from "node:child_process"
+import launch from "cross-spawn"
 import { createInterface } from "node:readline"
 import { randomUUID } from "node:crypto"
 import { EventEmitter } from "node:events"
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { unlink } from "node:fs/promises"
+import path from "node:path"
+import { Global } from "@opencode-ai/core/global"
 import { log } from "./logger.js"
 import { SERVER_CLOSED_MESSAGE, type ProxyMcpServer } from "./proxy-mcp.js"
 import {
   getPendingProxyCalls,
   rejectAllPendingProxyCallsForSession,
 } from "./proxy-broker.js"
-import { clearLedger } from "./todo-ledger.js"
-import { clearExitPlanModeQuestions, hasExitPlanModeQuestions } from "./plan-mode-question.js"
-import { clearAccountFailoverQuestions } from "./account-failover.js"
-import { clearCompression } from "./compression-store.js"
-import {
-  cliHygieneEnv,
-  cliSupportsFastMode,
-  cliSupportsPermissionPrompts,
-  cliSupportsRestricted,
-  cliSupportsThinking,
-  cliSupportsThinkingDisplay,
-  type CliVersion,
-} from "./cli-version.js"
-import { isReadOnlyPermissionMode } from "./permission-presets.js"
 import type { ReasoningEffort } from "./types.js"
+import { claudeSpawnEnv } from "./spawn-env.js"
 import { cliCommand } from "./cli-executable.js"
 
 export interface ActiveProcess {
@@ -36,11 +27,17 @@ export interface ActiveProcess {
    * config drift and force a respawn.
    */
   mcpHash?: string | null
+  toolCatalogHash?: string
   /** Temp file holding `--append-system-prompt-file` content; unlinked on exit. */
   systemPromptFile?: string
   /** Effort the process was spawned with, so a respawn keeps it. */
   effort?: ReasoningEffort
-  /** When the child was spawned, so `/claude-code-doctor` can report its age. */
+  /**
+   * Model, agent and effort the process was spawned with. A turn with other
+   * settings retires the process and resumes the same conversation.
+   */
+  settings?: string
+  /** When the child was spawned. */
   startedAt?: number
   /**
    * The binary this child was spawned with. Account failover compares it
@@ -61,12 +58,9 @@ export interface ActiveProcess {
   unattendedDropped?: number
   /**
    * opencode session this process last served, tagged by doStream each turn.
-   * `/btw` runs from a command hook that only knows the session id, so this is
-   * how it finds the process to ask (see `findActiveProcessBySessionId`).
+   * Session deletion matches this tag as well as the session key.
    */
   opencodeSessionID?: string
-  /** What the /btw command hook needs to send a side question to this process early. */
-  asideTransport?: { cliPath: string; interactive: boolean }
   /**
    * True from a stdin write that asks the CLI for work until its terminal
    * `result` line, whether or not a turn is still listening. Set by
@@ -81,16 +75,6 @@ export interface ActiveProcess {
    * line; see `describeChildCrash`.
    */
   lastStderr?: string
-}
-
-/** Most recently used process serving an opencode session id, if any. */
-export function findActiveProcessBySessionId(sessionID: string): ActiveProcess | undefined {
-  let found: ActiveProcess | undefined
-  // Map order is LRU (see `touch`), so the last match is the freshest.
-  for (const ap of activeProcesses.values()) {
-    if (ap.opencodeSessionID === sessionID) found = ap
-  }
-  return found
 }
 
 // A child normally only speaks while a doStream turn is listening. The one
@@ -160,12 +144,35 @@ export function describeChildCrash(
   )
 }
 
+/** A completed exchange the CLI can be rewound to with `--resume-session-at`. */
+export interface SessionAnchor {
+  /** Last main-chain assistant message uuid of the exchange. */
+  uuid: string
+  /** `exchangeHash` of everything the exchange showed in opencode. */
+  hash: string
+}
+
+interface ClaudeSessionRecord {
+  sessionId: string
+  /** Oldest first; the last entry is the newest completed exchange. */
+  anchors: SessionAnchor[]
+}
+
 // One active CLI process per session key. Keyed by a composite
-// (cwd + model + opencode session-affinity) so two chats don't race.
+// (cwd + opencode session-affinity) so two chats don't race.
 // Iteration order is insertion order, which we refresh on access to
 // make this a poor-man's LRU; see `touch()` below.
 const activeProcesses = new Map<string, ActiveProcess>()
-const claudeSessions = new Map<string, string>()
+// Loaded from `SESSIONS_FILE` on first use so a restarted opencode resumes
+// the same Claude conversations instead of silently starting new ones.
+const claudeSessions = new Map<string, ClaudeSessionRecord>()
+let claudeSessionsLoaded = false
+const SESSIONS_FILE = path.join(Global.Path.data, "claude-code", "sessions.json")
+const MAX_SESSION_ANCHORS = 20
+/** Why a session key lost its Claude conversation; read by the next turn's confirm. */
+const lostSessions = new Map<string, string>()
+/** Assistant uuid the next spawn for a key rewinds to (`--resume-session-at`). */
+const pendingRewinds = new Map<string, string>()
 // Idle-eviction timers keyed like `activeProcesses` (idle timeout by
 // @bernardofortes, absorbed from a5f723a).
 const idleEvictionTimers = new Map<string, ReturnType<typeof setTimeout>>()
@@ -200,78 +207,6 @@ const PROCESS_FORCE_EXIT_TIMEOUT_MS = 500
  * shape covers a child that died mid-turn and one that died between turns. */
 export const CHILD_EXITED_MESSAGE =
   "Claude CLI subprocess closed before pending tool calls were resolved"
-
-function envFlagEnabled(value: string | undefined): boolean {
-  if (value === undefined) return false
-  const normalized = value.trim().toLowerCase()
-  if (!normalized) return false
-  return !["0", "false", "no", "off"].includes(normalized)
-}
-
-export function isClaudeThinkingDisabled(): boolean {
-  return (
-    envFlagEnabled(process.env.CLAUDE_CODE_DISABLE_THINKING) ||
-    envFlagEnabled(process.env.CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING)
-  )
-}
-
-/**
- * The CLI's effort vocabulary is low | medium | high | xhigh | max. `minimal`
- * is this provider's own lowest step with no CLI counterpart, so it lands on
- * `low`.
- */
-export function cliEffortLevel(effort: ReasoningEffort): string {
-  return effort === "minimal" ? "low" : effort
-}
-
-export function claudeSpawnEnv(opts?: {
-  ignoreAnthropicApiKey?: boolean
-  /** Reasoning effort for this spawn; wins over a shell-level override. */
-  effort?: ReasoningEffort
-}): Record<string, string | undefined> {
-  const env: Record<string, string | undefined> = {
-    ...process.env,
-    TERM: "xterm-256color",
-    // Pin the child to the binary whose version we detected, and keep it off
-    // non-essential network calls. Fills gaps only, so an explicit shell value
-    // survives: see `cliHygieneEnv` for why the version has to hold still.
-    ...cliHygieneEnv(),
-  }
-
-  // Effort travels as CLAUDE_CODE_EFFORT_LEVEL, which the CLI treats as the
-  // session-wide override (it beats settings.json and `/effort`). An env var
-  // rather than `--effort` because a CLI too old to know it ignores it
-  // instead of refusing to start. Unlike the thinking vars below, an explicit
-  // effort from the request wins over the shell: the variant picker and an
-  // agent's `reasoningEffort` are per-request choices, a shell export is not.
-  if (opts?.effort) {
-    env.CLAUDE_CODE_EFFORT_LEVEL = cliEffortLevel(opts.effort)
-  }
-
-  // Force subscription auth: with an API key in the env, Claude Code bills
-  // pay-as-you-go (Console) instead of the logged-in plan's usage limits.
-  // Opt-in via `ignoreAnthropicApiKey`.
-  if (opts?.ignoreAnthropicApiKey) {
-    delete env.ANTHROPIC_API_KEY
-    delete env.ANTHROPIC_AUTH_TOKEN
-  }
-
-  // Default-on thinking summaries for opus-4-7 (which omits thinking by
-  // default on the CLI side). Any var the user has explicitly set in their
-  // shell is passed through untouched; the plugin only fills in the default.
-  if (
-    !isClaudeThinkingDisabled() &&
-    process.env.CLAUDE_CODE_SHOW_THINKING_SUMMARIES === undefined
-  ) {
-    env.CLAUDE_CODE_SHOW_THINKING_SUMMARIES = "1"
-  }
-
-  // Headless CLIs (2.1.283) only expose TaskCreate/TaskUpdate for a short
-  // list of older models unless this is set; they feed opencode's todo panel.
-  env.CLAUDE_CODE_ENABLE_TODO_TOOLS ??= "1"
-
-  return env
-}
 
 function touch(key: string): void {
   const existing = activeProcesses.get(key)
@@ -342,9 +277,6 @@ function settleTurn(ap: ActiveProcess): void {
 
 /** Call immediately before any stdin write that asks the CLI to do work. */
 export function noteTurnStarted(ap: ActiveProcess): void {
-  // The interactive transport never reports through `noteTurnLine`, so a flag
-  // set there would never clear.
-  if (ap.asideTransport?.interactive) return
   ap.turnInFlight = true
 }
 
@@ -387,9 +319,8 @@ export function interruptTurn(
 ): Promise<boolean> {
   if (!ap.turnInFlight) return Promise.resolve(true)
   const stdin = ap.proc.stdin
-  if (ap.asideTransport?.interactive || !stdin || !stdin.writable) {
-    // A TUI stdin would type the JSON in as text. Wait the turn out instead.
-    log.notice("cannot interrupt this transport; waiting for the turn to end")
+  if (!stdin || !stdin.writable) {
+    log.notice("cannot interrupt this process; waiting for the turn to end")
     return awaitTurnIdle(ap, timeoutMs)
   }
   try {
@@ -414,6 +345,11 @@ function cancelIdleProcessEviction(key: string): void {
   if (!timer) return
   clearTimeout(timer)
   idleEvictionTimers.delete(key)
+}
+
+/** Whether a live process owns `key`, without refreshing LRU order or idle timers. */
+export function hasActiveProcess(key: string): boolean {
+  return activeProcesses.has(key)
 }
 
 export function getActiveProcess(key: string): ActiveProcess | undefined {
@@ -494,9 +430,8 @@ function detachActiveProcess(key: string): ActiveProcess | undefined {
 
 /**
  * Release everything this plugin holds for one opencode session that was
- * deleted: its live `claude` children (any model, effort, or compaction
- * spawn), the remembered Claude session ids, and per-session state. Unlike
- * idle eviction this is a real deletion, so nothing is kept for a resume.
+ * deleted: its live `claude` children (any model or effort), the remembered
+ * Claude session ids, and per-session state. Unlike idle eviction this is a real deletion, so nothing is kept for a resume.
  * The `"default"` affinity is the shared bucket used when no session id is
  * known and is deliberately never matched. Returns the released keys.
  */
@@ -513,10 +448,10 @@ export function deleteActiveProcessesForSession(sessionID: string): string[] {
   }
   // Session ids and per-session state can outlive their process (idle
   // eviction keeps them for `--resume`); a deleted session never resumes.
-  for (const key of [...claudeSessions.keys()]) {
+  for (const key of [...loadedSessions().keys()]) {
     if (describeSessionKey(key).session !== sessionID) continue
     deleteClaudeSessionId(key)
-    clearCompression(key)
+    lostSessions.delete(key)
     if (!released.includes(key)) released.push(key)
   }
   return released
@@ -602,37 +537,91 @@ export async function deleteActiveProcessAndWait(
   ap.proc.kill("SIGKILL")
   if (await forcedExit) return true
 
-  log.warn("claude process did not exit; starting a fresh session", {
+  log.warn("claude process did not exit; its conversation is lost", {
     sessionKey: key,
   })
-  deleteClaudeSessionId(key)
+  markClaudeSessionLost(key, "the Claude process did not exit when asked to")
   return false
 }
 
 export function getClaudeSessionId(key: string): string | undefined {
-  return claudeSessions.get(key)
+  return loadedSessions().get(key)?.sessionId
+}
+
+function loadedSessions(): Map<string, ClaudeSessionRecord> {
+  if (claudeSessionsLoaded) return claudeSessions
+  claudeSessionsLoaded = true
+  const text = readSessionsFile()
+  if (!text) return claudeSessions
+  const parsed = parseSessionsFile(text)
+  if (!parsed) {
+    log.warn("ignoring unreadable claude sessions file", { file: SESSIONS_FILE })
+    return claudeSessions
+  }
+  for (const [key, record] of parsed) claudeSessions.set(key, record)
+  return claudeSessions
+}
+
+function readSessionsFile(): string | undefined {
+  try {
+    return readFileSync(SESSIONS_FILE, "utf8")
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+      log.warn("cannot read claude sessions file", { file: SESSIONS_FILE, error: String(error) })
+    }
+    return undefined
+  }
+}
+
+function parseSessionsFile(text: string): [string, ClaudeSessionRecord][] | undefined {
+  try {
+    const data = JSON.parse(text) as unknown
+    if (!data || typeof data !== "object") return undefined
+    return Object.entries(data).flatMap(([key, value]): [string, ClaudeSessionRecord][] => {
+      const record = value as Partial<ClaudeSessionRecord> | null
+      if (typeof record?.sessionId !== "string") return []
+      const anchors = Array.isArray(record.anchors)
+        ? record.anchors.filter((a) => typeof a?.uuid === "string" && typeof a?.hash === "string")
+        : []
+      return [[key, { sessionId: record.sessionId, anchors }]]
+    })
+  } catch {
+    return undefined
+  }
+}
+
+/** Written on every change; small, since it is capped at `MAX_CLAUDE_SESSION_ENTRIES`. */
+function persistSessions(): void {
+  try {
+    mkdirSync(path.dirname(SESSIONS_FILE), { recursive: true })
+    writeFileSync(SESSIONS_FILE, JSON.stringify(Object.fromEntries(claudeSessions)), {
+      encoding: "utf8",
+      mode: 0o600,
+    })
+  } catch (error) {
+    log.warn("cannot write claude sessions file", { file: SESSIONS_FILE, error: String(error) })
+  }
 }
 
 /**
  * A Claude session id outlives its process on purpose, so nothing in the
  * ordinary lifecycle ever removes one: under a long-lived `opencode serve`
- * that hops projects and models this map only grows, and each entry pins a
- * todo ledger with it. The cap is the same shape as
- * `MAX_COMPRESSION_ENTRIES`, and it is generous because the cost of getting
+ * that hops projects and models this map only grows. The cap is generous
+ * because the cost of getting
  * it wrong is a conversation that silently restarts.
  */
 export const MAX_CLAUDE_SESSION_ENTRIES = 64
 
 /**
- * A key with a live process, a proxied call still in the air or an unanswered
- * plan-mode question is doing work that the id is part of; dropping it would
+ * A key with a live process or a proxied call still in the air
+ * is doing work that the id is part of; dropping it would
  * strand that work on a session the next turn no longer resumes. Read from
  * the map directly rather than through `getActiveProcess`: that one refreshes
  * LRU order and cancels idle timers, which a scan must not do.
  */
 function claudeSessionIsBusy(key: string): boolean {
   if (activeProcesses.has(key)) return true
-  return getPendingProxyCalls(key).length > 0 || hasExitPlanModeQuestions(key)
+  return getPendingProxyCalls(key).length > 0
 }
 
 /**
@@ -650,62 +639,83 @@ function capClaudeSessions(): void {
       size: claudeSessions.size,
       cap: MAX_CLAUDE_SESSION_ENTRIES,
     })
-    // Through the central release so the todo ledger and any pending
-    // plan-mode question go with it rather than outliving the id.
-    deleteClaudeSessionId(key)
+    markClaudeSessionLost(key, "too many Claude conversations were remembered, so the oldest idle one was released")
   }
 }
 
 export function setClaudeSessionId(key: string, sessionId: string): void {
+  const sessions = loadedSessions()
+  const existing = sessions.get(key)
   // Re-inserting moves the key to the back, so the cap sheds the conversation
-  // that has been quiet longest rather than the one that started first.
-  claudeSessions.delete(key)
-  claudeSessions.set(key, sessionId)
+  // that has been quiet longest rather than the one that started first. A
+  // forked id keeps its anchors: `--fork-session` preserves message uuids.
+  sessions.delete(key)
+  sessions.set(key, { sessionId, anchors: existing?.anchors ?? [] })
   capClaudeSessions()
+  if (existing?.sessionId !== sessionId) persistSessions()
 }
 
 export function deleteClaudeSessionId(key: string): void {
-  clearExitPlanModeQuestions(key)
-  clearAccountFailoverQuestions(key)
-  const claudeSessionId = claudeSessions.get(key)
-  if (claudeSessionId) clearLedger(claudeSessionId)
-  claudeSessions.delete(key)
+  const sessions = loadedSessions()
+  const record = sessions.get(key)
+  if (!record) return
+  sessions.delete(key)
+  pendingRewinds.delete(key)
+  persistSessions()
 }
 
-export function effortSessionKey(baseKey: string, effort?: ReasoningEffort): string {
-  return effort ? `${baseKey}::effort=${effort}` : baseKey
+/**
+ * Drop a conversation that ended without anyone asking for it (crash,
+ * missing transcript, cap). The next turn for the key asks the operator
+ * before it starts a fresh one; see `session-sync.ts`.
+ */
+export function markClaudeSessionLost(key: string, reason: string): void {
+  deleteClaudeSessionId(key)
+  lostSessions.set(key, reason)
 }
 
-/** Retire sibling effort sessions before deciding whether to replay history. */
-export function invalidateOtherEffortSessions(
-  baseKey: string,
-  effort?: ReasoningEffort,
-): void {
-  const levels: (ReasoningEffort | undefined)[] = [
-    undefined, "minimal", "low", "medium", "high", "xhigh", "max",
-  ]
-  const staleKeys = levels
-    .filter((level) => level !== effort)
-    .map((level) => effortSessionKey(baseKey, level))
+/** Why the key's conversation was lost, once; undefined when it was not. */
+export function takeClaudeSessionLoss(key: string): string | undefined {
+  const reason = lostSessions.get(key)
+  lostSessions.delete(key)
+  return reason
+}
 
-  // Refuse the transition atomically while the old process still owns work.
-  for (const key of staleKeys) {
-    const active = activeProcesses.get(key)
-    if (
-      getPendingProxyCalls(key).length ||
-      hasExitPlanModeQuestions(key) ||
-      (active && active.lineEmitter.listenerCount("line") > 0)
-    ) {
-      throw new Error(
-        "Cannot change reasoning effort while the previous effort session has pending work. Finish that work at its original effort first.",
-      )
-    }
-  }
-  for (const key of staleKeys) {
-    deleteActiveProcess(key)
-    deleteClaudeSessionId(key)
-    clearCompression(key)
-  }
+export function getSessionAnchors(key: string): readonly SessionAnchor[] {
+  return loadedSessions().get(key)?.anchors ?? []
+}
+
+export function recordSessionAnchor(key: string, anchor: SessionAnchor): void {
+  const record = loadedSessions().get(key)
+  if (!record) return
+  record.anchors = [...record.anchors, anchor].slice(-MAX_SESSION_ANCHORS)
+  persistSessions()
+}
+
+export function clearSessionAnchors(key: string): void {
+  const record = loadedSessions().get(key)
+  if (!record?.anchors.length) return
+  record.anchors = []
+  persistSessions()
+}
+
+/**
+ * Rewind the key's next spawn to `anchor` and forget the exchanges after
+ * it. The caller must retire the live process first; only a spawn reads it.
+ */
+export function rewindClaudeSession(key: string, anchor: SessionAnchor): void {
+  const record = loadedSessions().get(key)
+  if (!record) return
+  const at = record.anchors.findIndex((a) => a.uuid === anchor.uuid)
+  if (at >= 0) record.anchors = record.anchors.slice(0, at + 1)
+  pendingRewinds.set(key, anchor.uuid)
+  persistSessions()
+}
+
+export function takePendingRewind(key: string): string | undefined {
+  const uuid = pendingRewinds.get(key)
+  pendingRewinds.delete(key)
+  return uuid
 }
 
 export function spawnClaudeProcess(
@@ -729,11 +739,10 @@ export function spawnClaudeProcess(
   })
 
   const command = cliCommand(cliPath, cliArgs)
-  const proc = spawn(command.command, command.args, {
+  const proc = launch(command.command, command.args, {
     cwd,
     stdio: ["pipe", "pipe", "pipe"],
     env: claudeSpawnEnv({ ignoreAnthropicApiKey, effort }),
-    shell: command.shell,
     windowsHide: true,
   })
 
@@ -818,7 +827,7 @@ export function spawnClaudeProcess(
         code,
         sessionKey,
       })
-      claudeSessions.delete(sessionKey)
+      markClaudeSessionLost(sessionKey, `the Claude process exited with code ${code}`)
     }
   })
 
@@ -828,7 +837,7 @@ export function spawnClaudeProcess(
     retainStderr(ap, stderr)
 
     // "No conversation found with session ID: <uuid>" is what `--resume`
-    // prints for a purged transcript — note the lowercase "session ID",
+    // prints for a purged transcript - note the lowercase "session ID",
     // which the capitalized match below does not catch.
     if (
       stderr.includes("No conversation found") ||
@@ -842,7 +851,7 @@ export function spawnClaudeProcess(
           sessionKey,
           error: stderr.slice(0, 200),
         })
-        claudeSessions.delete(sessionKey)
+        markClaudeSessionLost(sessionKey, "Claude Code could not find or open this chat's transcript")
       } else {
         log.debug("ignoring session ID error from stale claude process", {
           sessionKey,
@@ -861,11 +870,11 @@ export function spawnClaudeProcess(
  * in a fresh child without rebuilding the whole (version-gated) args vector.
  * `--resume`, not `--session-id`: the latter means "create a NEW session
  * with this UUID" and the CLI rejects it with "Session ID ... is already in
- * use" whenever a transcript exists on disk — which is exactly the state a
+ * use" whenever a transcript exists on disk - which is exactly the state a
  * mid-conversation respawn is in. If the wedged child died before writing
  * any transcript, `--resume` fails with "No conversation found with session
- * ID", which the stderr recovery matcher already catches (fresh-session
- * fallback).
+ * ID", which the stderr recovery matcher already catches (marks the
+ * conversation lost, so the next turn asks before starting fresh).
  */
 export function appendResumeIfNeeded(
   sessionKey: string,
@@ -874,7 +883,7 @@ export function appendResumeIfNeeded(
   if (cliArgs.includes("--resume") || cliArgs.includes("--session-id")) {
     return cliArgs
   }
-  const sid = claudeSessions.get(sessionKey)
+  const sid = getClaudeSessionId(sessionKey)
   if (!sid) return cliArgs
   return [...cliArgs, "--resume", sid]
 }
@@ -883,7 +892,7 @@ export function appendResumeIfNeeded(
  * Replace a wedged reused process with a fresh one, resuming the same
  * Claude conversation. Used by the doStream start-watchdog when a reused
  * process produces no stdout within a grace window after a fresh-turn
- * envelope write — observed after a very long proxy-blocked tool call
+ * envelope write - observed after a very long proxy-blocked tool call
  * (e.g. a multi-minute `task` subagent). Before the per-tool proxy timeout
  * fix this was masked because the flat 10-minute ceiling ended the turn
  * first; now that the task proxy blocks and returns successfully, resuming
@@ -920,7 +929,7 @@ export function respawnActiveProcess(
   activeProcesses.delete(sessionKey)
   // Silence the old exit handler so it doesn't close the proxy server,
   // unlink the system-prompt file, or touch claudeSessions on its way out
-  // — those handles are reused by the new child. spawnClaudeProcess wires
+  // - those handles are reused by the new child. spawnClaudeProcess wires
   // a fresh exit handler for the respawned child.
   old.proc.removeAllListeners("exit")
   try {
@@ -938,249 +947,21 @@ export function respawnActiveProcess(
     old.effort,
   )
   if (turnWasInFlight) noteTurnStarted(replacement)
+  replacement.toolCatalogHash = old.toolCatalogHash
+  replacement.settings = old.settings
   return replacement
 }
 
-export function buildCliArgs(opts: {
-  sessionKey: string
-  skipPermissions: boolean
-  includeSessionId?: boolean
-  model?: string
-  permissionMode?: string
-  mcpConfig?: string | string[]
-  strictMcpConfig?: boolean
-  disallowedTools?: string[]
-  appendSystemPromptFile?: string
-  /** `--plugin-dir` values (skill bridge), one flag per directory. */
-  pluginDirs?: string[]
-  thinking?: "enabled" | "disabled"
-  thinkingDisplay?: "summarized" | "omitted"
-  fastMode?: boolean
-  cliVersion?: CliVersion | null
-}): string[] {
-  const {
-    sessionKey,
-    skipPermissions,
-    includeSessionId = true,
-    model,
-    permissionMode,
-    mcpConfig,
-    strictMcpConfig,
-    disallowedTools,
-    appendSystemPromptFile,
-    pluginDirs,
-    thinking,
-    thinkingDisplay,
-    fastMode,
-    cliVersion,
-  } = opts
-  const args = [
-    "--print",
-    "--output-format",
-    "stream-json",
-    "--input-format",
-    "stream-json",
-    "--include-partial-messages",
-    "--verbose",
-  ]
-
-  if (model) {
-    args.push("--model", model)
-  }
-
-  // The read-only preset arrives as an internal `permissionMode` token rather
-  // than a mode the CLI knows, because it is a capability restriction and the
-  // CLI spells that as its own flags. `--restricted` removes Bash, the REPL,
-  // the other code-running built-ins and WebFetch, confines the file tools to
-  // the working directories, and refuses bypassPermissions.
-  // `--permission-prompts none` denies anything left that would prompt
-  // without asking this plugin, which is the same answer every
-  // `can_use_tool` request gets on a CLI too old for the flag.
-  const readOnly = isReadOnlyPermissionMode(permissionMode)
-  if (readOnly) {
-    if (cliSupportsRestricted(cliVersion ?? null)) {
-      args.push("--restricted")
-    } else {
-      // The preset still holds: `--disallowedTools` carries the same tool
-      // names and the plugin denies every permission request itself. What is
-      // lost is the cwd confinement on reads and the CLI-side refusal of
-      // bypass, so say so rather than degrading quietly.
-      log.warn(
-        'permissionPreset "read-only": this claude CLI has no --restricted' +
-          " (2.1.258+), so file reads are not confined to the working" +
-          " directory. The mutating tools are still refused via" +
-          " --disallowedTools and every permission request is denied.",
-        { cliVersion: cliVersion?.raw ?? "unknown" },
-      )
-    }
-    if (cliSupportsPermissionPrompts(cliVersion ?? null)) {
-      args.push("--permission-prompts", "none")
-    } else {
-      log.warn(
-        'permissionPreset "read-only": this claude CLI has no' +
-          " --permission-prompts (2.1.263+), so permission requests are" +
-          " denied by the plugin's own can_use_tool handler instead of by" +
-          " the CLI. Same outcome, one layer fewer.",
-        { cliVersion: cliVersion?.raw ?? "unknown" },
-      )
-    }
-  } else if (permissionMode) {
-    args.push("--permission-mode", permissionMode)
-  }
-
-  // `--session-id` means "create a NEW session with this UUID" and the CLI
-  // exits with "Session ID ... is already in use" whenever a transcript for
-  // that ID already exists on disk. Continuing an existing session requires
-  // `--resume` (which keeps the same session ID in print mode).
-  if (includeSessionId) {
-    const sessionId = claudeSessions.get(sessionKey)
-    if (sessionId && !activeProcesses.has(sessionKey)) {
-      args.push("--resume", sessionId)
-    }
-  }
-
-  if (mcpConfig) {
-    const configs = Array.isArray(mcpConfig) ? mcpConfig : [mcpConfig]
-    const filtered = configs.filter((c) => typeof c === "string" && c.length > 0)
-    if (filtered.length > 0) {
-      args.push("--mcp-config", ...filtered)
-    }
-  }
-
-  if (strictMcpConfig) {
-    args.push("--strict-mcp-config")
-  }
-
-  if (disallowedTools && disallowedTools.length > 0) {
-    args.push("--disallowedTools", ...disallowedTools)
-  }
-
-  // `--thinking` is only present from Claude Code 2.x onward; gate so
-  // pre-2.x binaries don't crash with a parse error. Unknown version →
-  // skip (the spawn still works, the user just doesn't get extended
-  // thinking until they upgrade).
-  if (thinking && cliSupportsThinking(cliVersion ?? null)) {
-    args.push("--thinking", thinking)
-  }
-
-  // `--thinking-display` was added in Claude Code 2.1.142. Older CLIs
-  // reject it with a parse error, so gate on detected version. When
-  // version is unknown (detection failed), be conservative and skip.
-  if (thinkingDisplay && cliSupportsThinkingDisplay(cliVersion ?? null)) {
-    args.push("--thinking-display", thinkingDisplay)
-  }
-
-  if (appendSystemPromptFile) {
-    args.push("--append-system-prompt-file", appendSystemPromptFile)
-  }
-  for (const dir of pluginDirs ?? []) {
-    args.push("--plugin-dir", dir)
-  }
-
-  // Fast mode's only headless opt-in. `--settings` feeds the CLI's
-  // `flagSettings` layer, which is the one its SDK gate checks; a `fastMode`
-  // in the user's own settings.json is NOT enough for a `--print` run.
-  // Built as one object so later flag-settings keys merge here instead of
-  // adding a second `--settings` (the CLI takes the flag once).
-  if (fastMode && cliSupportsFastMode(cliVersion ?? null)) {
-    args.push("--settings", JSON.stringify({ fastMode: true }))
-  }
-
-  // Same rule as plan mode below, with a harder edge: `--restricted` and
-  // `--dangerously-skip-permissions` together are not a silent override but a
-  // startup error ("Error: bypassPermissions not supported in restricted
-  // mode", measured on 2.1.280), so a read-only spawn carrying both would
-  // never run at all. The preset already forces `skipPermissions` false; this
-  // is the second lock, for anyone calling `buildCliArgs` directly.
-  //
-  // Plan mode is a capability restriction, not a prompt policy, and the CLI
-  // lets `--dangerously-skip-permissions` override it outright: measured on
-  // 2.1.258, a plan-mode run carrying both flags wrote a file on request
-  // without prompting, while the same run without the skip flag refused and
-  // created nothing. Since `skipPermissions` defaults to true, passing both
-  // is the common case, so anyone asking for plan mode was silently getting
-  // full write access. Plan mode must never permit edits, so it wins here.
-  // Every other `permissionMode` value governs prompting, which is exactly
-  // what the skip flag is for, so those still pass both.
-  if (skipPermissions && permissionMode !== "plan" && !readOnly) {
-    args.push("--dangerously-skip-permissions")
-  }
-
-  return args
-}
-
-/**
- * Build a session key that includes both cwd and model,
- * so different models get separate processes.
- */
-export function sessionKey(cwd: string, modelId: string): string {
-  return `${cwd}::${modelId}`
+/** Build a session key: the cwd, then what identifies the conversation in it. */
+export function sessionKey(cwd: string, conversation: string): string {
+  return `${cwd}::${conversation}`
 }
 
 /**
  * Pull the readable parts back out of a session key for the doctor report.
- * The key is `<cwd>::<model>::<scope>::<affinity>::context=[...]` with an
- * optional `::effort=<level>` tail, and the compaction variant is
- * `<cwd>::<model>::compaction::<affinity>`, so the model and the opencode
- * session id sit at the same two positions either way.
+ * The conversation key is `<cwd>::<scope>::<affinity>::context=[...]`.
  */
-export function describeSessionKey(key: string): {
-  cwd: string
-  model: string
-  session: string
-  compaction: boolean
-} {
+export function describeSessionKey(key: string): { cwd: string; session: string } {
   const parts = key.split("::")
-  return {
-    cwd: parts[0] ?? "unknown",
-    model: parts[1] ?? "unknown",
-    session: parts[3] ?? "unknown",
-    compaction: parts[2] === "compaction",
-  }
-}
-
-/** One live `claude` child, flattened for `/claude-code-doctor`. */
-export interface ActiveProcessSnapshot {
-  sessionKey: string
-  session: string
-  model: string
-  compaction: boolean
-  pid?: number
-  inFlight: boolean
-  ageMs?: number
-  effort?: ReasoningEffort
-  attached: boolean
-  proxyUrl?: string
-  /**
-   * Tail of the child's stderr, when something upstream of this module is
-   * recording one. Read through an optional property so the doctor works
-   * whether or not that field exists on the running build.
-   */
-  lastStderr?: string
-}
-
-/**
- * Every live child, oldest-used first (the map is LRU). Read-only; nothing
- * here touches eviction or the process's own listeners.
- */
-export function snapshotActiveProcesses(now = Date.now()): ActiveProcessSnapshot[] {
-  const out: ActiveProcessSnapshot[] = []
-  for (const [key, ap] of activeProcesses) {
-    const described = describeSessionKey(key)
-    const lastStderr = (ap as { lastStderr?: unknown }).lastStderr
-    out.push({
-      sessionKey: key,
-      session: ap.opencodeSessionID ?? described.session,
-      model: described.model,
-      compaction: described.compaction,
-      pid: ap.proc.pid,
-      inFlight: ap.turnInFlight === true,
-      ageMs: ap.startedAt === undefined ? undefined : Math.max(0, now - ap.startedAt),
-      effort: ap.effort,
-      attached: ap.lineEmitter.listenerCount("line") > 0,
-      proxyUrl: ap.proxyServer?.url,
-      lastStderr: typeof lastStderr === "string" ? lastStderr : undefined,
-    })
-  }
-  return out
+  return { cwd: parts[0] ?? "unknown", session: parts[2] ?? "unknown" }
 }

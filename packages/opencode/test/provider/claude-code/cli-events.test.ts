@@ -209,11 +209,15 @@ test("init warns once per failed MCP server and once per api key source", () => 
   configureLogger({ file: false, mode: "silent", level: "info" })
 
   const first = captureStderr(() => reportSystemInit(init, {}))
-  assert.equal(first.lines.length, 2, "one for the failed MCP server, one for the API key")
+  assert.equal(
+    first.lines.length,
+    4,
+    "two outside-proxy notices, the failed MCP server, and the API key",
+  )
   assert.ok(first.lines.some((line) => line.includes('"slack" is failed')))
   assert.ok(first.lines.some((line) => line.includes("apiKeySource: ANTHROPIC_API_KEY")))
   assert.equal(
-    first.lines.some((line) => line.includes("github")),
+    first.lines.some((line) => line.includes('"github" is connected')),
     false,
     "a connected server is not a warning",
   )
@@ -275,4 +279,36 @@ test("a failing result subtype is named, a successful one is not", () => {
   const unknown = describeResultFailure({ type: "result", subtype: "error_from_a_future_cli" })
   assert.equal(unknown, "Claude Code ended the turn with `error_from_a_future_cli`.")
   assert.ok(formatResultFailureNote(known!).startsWith(`\n${RESULT_ERROR_MARKER} `))
+})
+
+test("account blocks come from the CLI error kind and name the login command", async () => {
+  const {
+    ACCOUNT_BLOCK_MARKER,
+    accountBlockKind,
+    formatAccountBlockNote,
+    isAccountLimitError,
+    loginCommandFor,
+  } = await import("@/provider/claude-code/cli-events.js")
+  assert.equal(accountBlockKind({ type: "assistant", error: "authentication_failed" }), "authentication_failed")
+  assert.equal(accountBlockKind({ type: "assistant", error: "billing_error" }), "billing_error")
+  assert.equal(accountBlockKind({ type: "assistant", error: "server_error" }), null)
+  assert.equal(accountBlockKind({ type: "assistant", error: "rate_limit" }), null)
+  assert.equal(accountBlockKind({ type: "result", error: "authentication_failed" }), null)
+  assert.equal(loginCommandFor(undefined), "claude auth login")
+  assert.equal(
+    loginCommandFor("/Users/me/.claude-work", "/Users/me"),
+    "CLAUDE_CONFIG_DIR=~/.claude-work claude auth login",
+  )
+  const note = formatAccountBlockNote({
+    kind: "authentication_failed",
+    account: "default",
+  })
+  assert.ok(note.includes(ACCOUNT_BLOCK_MARKER))
+  assert.match(note, /claude auth login/)
+  assert.doesNotMatch(note, /pick another account/)
+  assert.equal(
+    isAccountLimitError({ resultText: "You've hit your individual spend limit." }),
+    true,
+  )
+  assert.equal(isAccountLimitError({ resultText: "API Error: 400 invalid model name" }), false)
 })

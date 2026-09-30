@@ -141,7 +141,7 @@ test("collectStartupDiagnostics carries the options a preset replaced", () => {
   assert.match(joined, /permissionMode: "acceptEdits" is dropped/)
   assert.match(joined, /skipPermissions: forced to false/)
   // No proxyTools of its own, so the default list is what got filtered.
-  assert.match(joined, /proxyTools: dropped Bash, Edit, Write, WebFetch, Task/)
+  assert.match(joined, /proxyTools: dropped Task;/)
 })
 
 test("collectStartupDiagnostics calls out an unrecognised preset", () => {
@@ -166,39 +166,16 @@ test("collectStartupDiagnostics falls back when options are absent", () => {
     { provider: "claude-code", preset: "none", applied: false, overrides: [] },
   ])
   assert.equal(diagnostics.cwd.source, "process")
-  // No opencode version handed in and none in the env → explicit "unknown",
+  // No opencode version handed in and none in the env -> explicit "unknown",
   // never a fabricated number.
   if (!process.env.OPENCODE_VERSION) {
     assert.equal(diagnostics.opencode, "unknown")
   }
 })
 
-test("collectStartupDiagnostics reports interactive transport from env", () => {
-  const previous = process.env.CLAUDE_CODE_INTERACTIVE_TRANSPORT
-  try {
-    delete process.env.CLAUDE_CODE_INTERACTIVE_TRANSPORT
-    assert.equal(
-      collectStartupDiagnostics({ "claude-code": {} }).interactiveTransport,
-      false,
-    )
-    assert.equal(
-      collectStartupDiagnostics({
-        "claude-code": { options: { interactive: true } },
-      }).interactiveTransport,
-      true,
-    )
-    process.env.CLAUDE_CODE_INTERACTIVE_TRANSPORT = "1"
-    assert.equal(
-      collectStartupDiagnostics({ "claude-code": {} }).interactiveTransport,
-      true,
-    )
-  } finally {
-    if (previous === undefined) delete process.env.CLAUDE_CODE_INTERACTIVE_TRANSPORT
-    else process.env.CLAUDE_CODE_INTERACTIVE_TRANSPORT = previous
-  }
-})
-
-test("detectOpencodeVersion reads the version from the opencode binary", async () => {
+test("detectOpencodeVersion reads the version from the opencode binary", {
+  skip: process.platform === "win32" && "sh fixture; Mac/Linux only",
+}, async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "oc-version-probe-"))
   const fake = path.join(dir, "opencode")
   fs.writeFileSync(fake, '#!/bin/sh\necho "1.18.5"\n')
@@ -210,7 +187,7 @@ test("detectOpencodeVersion reads the version from the opencode binary", async (
     assert.equal(await detectOpencodeVersion("/nonexistent/opencode"), "1.18.5")
   } finally {
     resetOpencodeVersionProbe()
-    fs.rmSync(dir, { recursive: true, force: true })
+    fs.rmSync(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 })
   }
 })
 

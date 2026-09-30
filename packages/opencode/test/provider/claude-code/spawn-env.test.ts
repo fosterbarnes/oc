@@ -2,9 +2,8 @@
 // WIP: ported from opencode-claude-code-plugin, which never typechecked its tests; type them as Phase 3 rewrites land.
 import assert from "node:assert/strict"
 import { test } from "node:test"
-import { claudeSpawnEnv, cliEffortLevel } from "@/provider/claude-code/session-manager.js"
+import { claudeSpawnEnv, cliEffortLevel } from "@/provider/claude-code/spawn-env.js"
 import { CLI_HYGIENE_ENV_VARS, cliHygieneEnv } from "@/provider/claude-code/cli-version.js"
-import { interactiveSpawnEnv } from "@/provider/claude-code/claude-session-bun.js"
 
 /** Every hygiene var absent, which is the ordinary case for a user shell. */
 const noHygieneVars = Object.fromEntries(
@@ -135,24 +134,4 @@ test("cliHygieneEnv fills only the vars missing from the inherited env", () => {
     }),
     {},
   )
-})
-
-test("the interactive transport gets the same hygiene as the headless spawn", () => {
-  withEnv(noHygieneVars, () => {
-    const env = interactiveSpawnEnv({ configDir: "/tmp/cfg" })
-    for (const name of CLI_HYGIENE_ENV_VARS) {
-      assert.equal(env[name], "1", `interactive spawn is missing ${name}`)
-    }
-    // The env it already built is untouched.
-    assert.equal(env.CLAUDE_CONFIG_DIR, "/tmp/cfg")
-    assert.equal(env.TERM, "xterm-256color")
-  })
-})
-
-test("the interactive transport also respects a hygiene var the user set", () => {
-  withEnv({ DISABLE_AUTOUPDATER: "0" }, () => {
-    const env = interactiveSpawnEnv({ configDir: "/tmp/cfg" })
-    assert.equal(env.DISABLE_AUTOUPDATER, "0")
-    assert.equal(env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC, "1")
-  })
 })

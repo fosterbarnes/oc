@@ -21,16 +21,16 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import { claudeCodeServer, createClaudeCode } from "@/provider/claude-code/index.js"
+import { resolvedProxyTools } from "@/provider/claude-code/spawn-planning.js"
 import {
   createProxyMcpServer,
-  DEFAULT_PROXY_TOOLS,
-  disallowedToolFlags,
   isExpectedCleanupError,
-  MAX_PROXY_TIMEOUT_MS,
-  resolveProxyClientCeilingMs,
   SERVER_CLOSED_MESSAGE,
   type ProxyMcpServer,
 } from "@/provider/claude-code/proxy-mcp.js"
+import { DEFAULT_PROXY_TOOLS } from "@/provider/claude-code/proxy-tool-defs.js"
+import { disallowedToolFlags } from "@/provider/claude-code/proxy-tool-selection.js"
+import { MAX_PROXY_TIMEOUT_MS, resolveProxyClientCeilingMs } from "@/provider/claude-code/proxy-deadline.js"
 import {
   getPendingProxyCalls,
   onPendingProxyCall,
@@ -41,7 +41,6 @@ import {
   type PendingProxyCall,
 } from "@/provider/claude-code/proxy-broker.js"
 import {
-  deleteActiveProcess,
   deleteActiveProcessAndWait,
   deleteClaudeSessionId,
   getActiveProcess,
@@ -468,7 +467,7 @@ async function streamTaskBoundary(
 ) {
   const fake = createFakeTaskCli(mode)
   const modelId = `claude-test-task-${mode}`
-  const sk = sessionKey(fake.cwd, `${modelId}::tools::default::context=["claude-code",null]`)
+  const sk = sessionKey(fake.cwd, `tools::default::context=["claude-code"]`)
 
   try {
     const model = createClaudeCode({
@@ -506,8 +505,8 @@ async function streamTaskBoundary(
         text: "test cleanup",
       })
     }
-    deleteActiveProcess(sk)
-    rmSync(fake.cwd, { recursive: true, force: true })
+    await deleteActiveProcessAndWait(sk)
+    rmSync(fake.cwd, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 })
   }
 }
 
@@ -633,7 +632,7 @@ async function exerciseTaskRecovery(mode: "late" | "late-queued" | "swallow" | "
   const swallowMode = mode === "swallow" || mode.startsWith("bookkeeping")
   const fake = createFakeTaskCli(mode)
   const modelId = `claude-test-task-${mode}`
-  const sk = sessionKey(fake.cwd, `${modelId}::tools::default::context=["claude-code",null]`)
+  const sk = sessionKey(fake.cwd, `tools::default::context=["claude-code"]`)
   const previousWatchdog = process.env.CLAUDE_CODE_START_WATCHDOG_MS
   // Derived, never a literal: see START_WATCHDOG_MS.
   process.env.CLAUDE_CODE_START_WATCHDOG_MS = String(START_WATCHDOG_MS)
@@ -835,18 +834,12 @@ async function exerciseTaskRecovery(mode: "late" | "late-queued" | "swallow" | "
     rejectAllPendingProxyCallsForSession(sk, new Error("test cleanup"))
     await deleteActiveProcessAndWait(sk)
     deleteClaudeSessionId(sk)
-    rmSync(fake.cwd, { recursive: true, force: true })
+    rmSync(fake.cwd, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 })
   }
 }
 
 test("default provider proxies Task through opencode", () => {
-  assert.deepEqual(modelProxyTools(), [
-    "Bash",
-    "Edit",
-    "Write",
-    "WebFetch",
-    "Task",
-  ])
+  assert.deepEqual(modelProxyTools(), ["Task"])
 })
 
 test("explicit proxyTools overrides preserve custom selection and empty opt-out", () => {
@@ -860,13 +853,7 @@ test("opencode provider registration defaults Task without overriding proxyTools
 
   const defaults: any = {}
   await hooks.config?.(defaults)
-  assert.deepEqual(defaults.provider["claude-code"].options.proxyTools, [
-    "Bash",
-    "Edit",
-    "Write",
-    "WebFetch",
-    "Task",
-  ])
+  assert.deepEqual(defaults.provider["claude-code"].options.proxyTools, ["Task"])
 
   const explicit: any = {
     provider: {
@@ -906,7 +893,7 @@ test("Task proxy schema matches current opencode TaskTool fields", () => {
 test("proxy MCP initializes, lists Task, and resolves it through the broker", async () => {
   const task = DEFAULT_PROXY_TOOLS.find((tool) => tool.name === "task")
   assert.ok(task)
-  assert.deepEqual(disallowedToolFlags([task]), ["Agent"])
+  assert.deepEqual(disallowedToolFlags([task]), ["Agent", "Task", "TaskOutput"])
 
   const brokerSession = `proxy-http-${Date.now()}`
   const server = await createProxyMcpServer([task])
@@ -1111,9 +1098,9 @@ test("parallel proxy calls preserve success and error correlation", async () => 
 
 test("proxyTools Task brings task_batch along, once", () => {
   const names = (list: string[]) =>
-    ((createClaudeCode({ proxyTools: list }).languageModel("claude-haiku-4-5") as any).resolvedProxyTools() as { name: string }[]).map((t) => t.name)
+    (resolvedProxyTools({ proxyTools: list } as any) ?? []).map((t) => t.name)
   assert.deepEqual(names(["Task"]), ["task", "task_batch"])
   assert.deepEqual(names(["Task", "task_batch", "TASK"]), ["task", "task_batch"])
-  assert.deepEqual(names(["Bash"]), ["bash"], "only task carries the companion")
+  assert.deepEqual(names(["Question"]), ["question"], "only task carries the companion")
 })
 

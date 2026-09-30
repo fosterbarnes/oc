@@ -13,7 +13,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import { createClaudeCode } from "@/provider/claude-code/index.js"
-import { deleteActiveProcess, sessionKey } from "@/provider/claude-code/session-manager.js"
+import { deleteActiveProcessAndWait, sessionKey } from "@/provider/claude-code/session-manager.js"
 
 /** A fake `claude` that streams one tool call it ran itself, plus its result. */
 function createFakeToolCallCli(toolName: string, toolUseId: string) {
@@ -89,7 +89,7 @@ rl.on("line", () => {
 async function streamToolPairs(toolName: string, toolUseId: string) {
   const fake = createFakeToolCallCli(toolName, toolUseId)
   const modelId = "claude-test-tool-result-name"
-  const sk = sessionKey(fake.cwd, `${modelId}::tools::default::context=["claude-code",null]`)
+  const sk = sessionKey(fake.cwd, `tools::default::context=["claude-code"]`)
 
   try {
     const model = createClaudeCode({
@@ -116,8 +116,8 @@ async function streamToolPairs(toolName: string, toolUseId: string) {
     for await (const part of response.stream) parts.push(part)
     return parts
   } finally {
-    deleteActiveProcess(sk)
-    rmSync(fake.cwd, { recursive: true, force: true })
+    await deleteActiveProcessAndWait(sk)
+    rmSync(fake.cwd, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 })
   }
 }
 

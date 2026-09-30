@@ -554,10 +554,33 @@ export function Session() {
       value: "session.rename",
       category: "Session",
       slash: {
-        name: "rename",
+        name: "title",
       },
       run: () => {
         dialog.replace(() => <DialogSessionRename session={route.sessionID} />)
+      },
+    },
+    {
+      title: "Auto-rename session",
+      value: "session.rename.auto",
+      category: "Session",
+      slash: {
+        name: "rename",
+      },
+      run: async () => {
+        dialog.clear()
+        toast.show({ message: "Renaming session...", variant: "info" })
+        const before = session()?.title
+        const result = await sdk.client.session.rename({ sessionID: route.sessionID })
+        if (result.error || !result.data) {
+          toast.show({ message: result.error ? errorMessage(result.error) : "Failed to rename session", variant: "error" })
+          return
+        }
+        if (result.data.title === before) {
+          toast.show({ message: "Title unchanged", variant: "info" })
+          return
+        }
+        toast.show({ message: `Renamed: ${result.data.title}`, variant: "success" })
       },
     },
     {

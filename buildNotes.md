@@ -152,6 +152,508 @@ Since 2026-09-15 (archive3)
 
 ---
 
+## 2026-09-30 (~14:56) - r16 - Remove the unused claudeImports feature - Opus 5.5, low; Agent
+
+### Agent
+- Meta: Opus 5.5; low; Agent; completed. Pass over this session's work; revision not bumped (this session already bumped to r15; r16 is the green-suite session's)
+- Removed `claudeImports` (built earlier this session, then replaced by `~/.claude/CLAUDE.md` importing `principles.md`): deleted `claude-imports.ts` and `claude-imports.test.ts`; dropped the option from `types.ts` and `index.ts`, the `imports` field from `prompts.ts`, and the read in `spawn-planning.ts`
+- Fixed `~/.claude/CLAUDE.md` Everything line: none outside oc, deferred `everything-search` MCP tool inside oc
+- Verification: no remaining references; `bun typecheck` only the two known pre-existing errors; `bun test test/provider/claude-code` 521 pass / 9 skip / 0 fail. No build
+
+### User
+Claude chats
+- No visible change: the per-file instruction importer is gone because Claude Code now reads `principles.md` through `~/.claude/CLAUDE.md`.
+
+---
+
+## 2026-09-30 (~14:47) - r16 - Green Claude Code test suite on Windows - Opus 5.5, low; Go
+
+### Agent
+- Meta: Opus 5.5; low; Go; completed plan `2026-09-30-windows-green-suite.md`
+- Fixed Windows spawn quoting: `session-manager.ts` spawns via `cross-spawn` (no `shell: true`); cmd.exe no longer splits args with spaces/quotes (e.g. `--settings {"fastMode":true}`). `cli-executable.ts`/`cli-version.ts` unchanged.
+- Changed `tmp.ts`: exit handler is module-level `exitCleanup`, exported on `__test`; tmp-dir tests match it by identity (listener-diff since import broke when other files ran first in same process).
+- Kept accounts Mac/Linux only (bash wrapper): 8 wrapper tests skip on win32 (`WRAPPER_ONLY_POSIX`); comment on `writeAccountWrapper`; README Claude Code row notes it.
+- Fixed test drift: `path.join` expectations (expandHome, agentDirectories), cli-events expects 4 first-run lines (2 outside-proxy notices), subagent ellipsis is ASCII `...`, respawn child runs in `tmpdir()` (Windows locks live cwd -> EBUSY), detectOpencodeVersion skips on win32 (sh fixture), tmp 0700 asserts POSIX-only, `withTmpRoot` sets TEMP/TMP too.
+- Verification: `bun test test/provider/claude-code` = 522 pass, 9 skip, 0 fail. `bun typecheck` = only known `session-tail.ts:52` and `sidebar/context.tsx:47`. Claude Code known-failure baseline on Windows is now empty.
+- TODO (user): after build, live-check a Claude chat starts/streams; optionally fast-mode model for `--settings`.
+
+### User
+Claude Code
+- Claude chats on Windows now pass arguments containing spaces or quotes intact, such as fast-mode settings.
+- Extra Claude accounts are documented as Mac/Linux only.
+- The Claude Code test suite passes on Windows.
+
+---
+
+## 2026-09-30 (~14:40) - r15 - Claude chats get adapted oc principles and AGENTS.md - Opus 5.5, low; Agent
+
+### Agent
+- Meta: Opus 5.5; low; Agent; completed. Same session as r15, revision not bumped again
+- Gap: since r15 oc sends Claude only the agent prompt, so `principles.md` and oc's global `AGENTS.md` never reached Claude chats
+- Added `claude-imports.ts` `readClaudeImports`: reads each `claudeImports` file fresh at every spawn (`expandHome`, CRLF normalized), keeps only named `<!-- NAME -->`...`<!-- end NAME -->` sections when `sections` is set, drops `<!-- oc-only -->` blocks; missing files or sections log and are skipped. Appended after the agent prompt in the per-spawn prompt file (`prompts.ts` `imports`, `spawn-planning.ts`); new `claudeImports` provider option (`types.ts`, `index.ts`)
+- User config: `opencode.jsonc` imports `principles.md` whole and `AGENTS.md` section `USER WRITTEN INSTRUCTIONS` (skips the context7 steps and the "bash runs PowerShell" environment block). `principles.md`: bgShell/`bash`/`/pty` lines wrapped in `<!-- oc-only -->` (user approved). Also added the verification-cadence rules to `principles.md` `## Verification`
+- Live preview against the real files: ~13.6K chars (~3.4K tokens), no bgRun, no context7 steps, no PowerShell-bash line
+- Test: `claude-imports.test.ts` (sections, oc-only, CRLF, missing file)
+- Verification: `bun test test/provider/claude-code` 510 pass / 21 fail (known); `bun typecheck` only the two known errors. No build
+- Note: applies on the next Claude process start (new chat, respawn, restart); a running process keeps its prompt
+
+### User
+Claude chats
+- Claude chats now follow your `principles.md` and the user-written part of oc's `AGENTS.md`, read fresh each time a Claude process starts.
+- Wrap text in `<!-- oc-only -->` ... `<!-- end oc-only -->` to keep it from Claude; oc's other models still see everything.
+
+---
+
+## 2026-09-30 (~14:27) - r15 - Claude Code front end: final pass and cleanup - Opus 5.5, low; Agent
+
+### Agent
+- Meta: Opus 5.5; low; Agent; completed. Same session as r15, revision not bumped again
+- Live base15 run of `claudeTestFlow.md` passed every step: one reply per turn, ~48K first-turn context, parallel subagents, clean interrupt, `/compact` 50,224 -> 3,563 tokens with memory kept, revert rewind plus a todo list after it, restart resume, effort switch; turns after the first post-compaction turn read ~37-38K from cache and write under 400 tokens (base14's high writes were one-off)
+- Cleanups: `request.ts` sends the compaction boundary to Cursor only; dropped the unused `COMPACTION_BOUNDARY_OPTION` re-export from `claude-code/shared.ts`; `prompt.ts` skips building env, instruction, skill and MCP system text for Claude Code models (the provider never forwards it)
+- README "Claude Code as the agent" row raised to high with what was live-checked and what is left
+- Removed the two probe junctions left in the earlier session scratchpad by unlinking them only (`[IO.Directory]::Delete(path, $false)`); the linked oc skill folders are intact
+- Verification: `bun typecheck` only the two known pre-existing errors. `bun test test/provider/claude-code test/server/httpapi-public-openapi.test.ts test/session`: 934 pass / 20 skip / 26 fail. Claude Code failures are the known 21 Windows/pre-existing ones. `revert-compact.test.ts` (2) and `snapshot-tool-race.test.ts` (1) also fail with the `prompt.ts` change reverted; `compaction.test.ts` "publishes compacted event on continue" is flaky (failed once, passed on rerun with the change). No build
+- Left for the user: `C:\Users\user\.config\opencode\claudeInOpencode.md` is no longer referenced; delete or keep as reference
+
+### User
+Claude chats
+- oc no longer spends time building instructions, environment and skill text for Claude chats that Claude Code never receives.
+- The README now lists Claude Code as the agent at high completion, with the live checks it passed.
+
+---
+
+## 2026-09-30 (~14:12) - r15 - oc agent permissions restrict Claude's native tools - Opus 5.5, low; Agent
+
+### Agent
+- Meta: Opus 5.5; low; Agent; completed. Same session as r15, revision not bumped again
+- Gap: with native tools on and bypass permissions, oc's per-agent tool rules (denied `edit`, read-only subagents) no longer reached Claude Code's Edit/Write/Bash
+- Added `nativeToolsDeniedByHost` (`proxy-tool-selection.ts`): an always-registered oc tool (bash, edit, write, read, glob, grep, webfetch) missing from the agent's tool set disallows its Claude built-ins (bash -> Bash, PowerShell; edit -> Edit, MultiEdit, NotebookEdit; ...), V2 names via `toolNameForHost`. websearch/skill left out since their absence can mean "not registered". Wired into `assembleProxyTools` disallow list; the tool catalog hash already respawns on a changed set
+- Tests: `subagent-hint.test.ts` mapping cases (full set, read-only, V2 `shell`, no snapshot); `fundamental-tools.test.ts` offers the full native set and checks a read-only turn disallows Bash/Edit/Write/WebFetch but not Read
+- `claudeTestFlow.md`: step 5 adds a todo list after the revert; new step 8 sends "Codeword?" twice to tell a one-time cache miss from an ongoing one after compaction
+- Verification: `bun test test/provider/claude-code` 509 pass / 21 fail (all pre-existing); `bun typecheck` only the two known pre-existing errors. No live check: the user's `explore` subagent runs on Cursor, so no Claude-backed restricted agent exists to exercise it. No build
+- Not done (listed as optional): `request.ts` still sends the compaction boundary to claude-code; `prompt.ts` still builds env/instructions/skills text Claude never receives; `claudeInOpencode.md` left in the user's config
+
+### User
+Claude chats
+- A Claude-backed agent that oc limits (for example one without edit or shell access) now also has Claude Code's matching built-in tools turned off.
+
+---
+
+## 2026-09-30 (~14:00) - r15 - /compact finds the Claude conversation - Opus 5.5, low; Agent
+
+### Agent
+- Meta: Opus 5.5; low; Agent; completed. Same session as r15, revision not bumped again
+- Cause (live base13 step 4): oc sends the compaction request with no tools, so `requestScope` returned `no-tools` and the turn key pointed at the tool-less conversation; `/compact` replied "There is no Claude Code conversation to compact yet." and oc still drew a "Compacted" divider
+- Fixed `turn-context.ts`: compaction turns always use the `tools` scope, the chat's own conversation key
+- Test: the `/compact` test in `fundamental-tools.test.ts` now sends tools on the chat turn and `tools: undefined` on the compaction turn, as oc does (the old `tools: []` counted as "tools" and hid the bug)
+- Verification: `bun test test/provider/claude-code` 508 pass / 21 fail (all pre-existing); `bun typecheck` only the two known pre-existing errors. Did not confirm the updated test fails without the fix. No build
+- MISTAKE: the compaction test used a tool shape oc never sends. Build provider test inputs from what oc actually passes (`tools` undefined for tool-less calls)
+
+### User
+Claude chats
+- `/compact` in a Claude chat now compacts the Claude Code conversation instead of saying there is none.
+
+---
+
+## 2026-09-30 (~13:50) - r15 - Claude todos read from Claude Code's own task list - Opus 5.5, low; Agent
+
+### Agent
+- Meta: Opus 5.5; low; Agent; completed. Same session as r15, revision not bumped again. Supersedes the burst merging from the ~13:41 entry (user chose "native tools + read Claude's saved list" to cut complexity)
+- Observed: Claude Code 2.1.285 saves its task list as `<config dir>/tasks/<Claude session id>/<n>.json` (`id`, `subject`, `status`); folder names match the base9-11 Claude session ids. Layout is undocumented
+- Added `task-list.ts` `readClaudeTaskList(configDir, claudeSessionId)` (config dir = account `configDir`, else `CLAUDE_CONFIG_DIR`, else `~/.claude`; unknown statuses, unreadable or missing folder yield nothing and log)
+- `turn-stream.ts`: TaskCreate/TaskUpdate set `usedTaskTools`; `flushTodo` runs once at `onResult` and on abort, mirroring the newest TodoWrite list or the saved task list through the existing in-stream `mirrorTodoWrite`. Removed `holdTodo`, burst merging, `StreamWriter.beforeWrite`, `emitTodoLedger`
+- `tool-mapping.ts`: TaskCreate/TaskUpdate are plain skipped internal tools; removed `emitTodoWrite`, ledger branches and `MapToolOptions.sessionId/toolUseId`. Deleted `todo-ledger.ts` and `todo-ledger.test.ts`; `session-manager.ts` no longer clears a ledger
+- Tests: `fundamental-tools.test.ts` adds a TaskCreate/TaskUpdate turn (one `todowrite` from the saved files; missing folder -> no call, normal finish); TodoWrite test now expects one mirror at turn end. Trimmed ledger cases from `tool-mapping.test.ts` and `session-manager.test.ts`
+- Verification: `bun test test/provider/claude-code` 508 pass / 21 fail (all pre-existing; lower pass count is the deleted ledger tests); `bun typecheck` only the two known pre-existing errors. No build
+
+### User
+Claude chats
+- Claude uses its own task tools as it normally would, and oc's todo list shows Claude's saved list once at the end of each turn.
+- If Claude Code's saved list can't be read, the todo list simply doesn't update; the reply is unaffected.
+
+---
+
+## 2026-09-30 (~13:41) - r15 - One todo block per burst of Claude todo updates - Opus 5.5, low; Agent
+
+### Agent
+- Meta: Opus 5.5; low; Agent; completed. Same session as r15, revision not bumped again
+- Cause (live base10): Claude Code 2.1.285 uses TaskCreate/TaskUpdate (one item per call); each call mirrored as a whole-list `todowrite`, which the TUI draws as a full "# Todos" block (`tui/.../session/index.tsx:2704`), so one 8-item list showed as 16 blocks. Claude also batched all completions at the end (model behavior, not changed)
+- Changed `turn-stream.ts`: `holdTodo` keeps only the newest list of a burst; `flushTodo` mirrors it (via `mirrorTodoWrite`) before the next non-reasoning part is written (new `StreamWriter.beforeWrite` hook), before `onResult` finishes, and on abort. Todo blocks no longer emit `tool-input-start`/deltas at block start. Fixed a stray tab in the `isTodoMirror` doc comment from a PowerShell backtick
+- Test: `fundamental-tools.test.ts` todo test now sends a two-update burst and expects one host call with the newest list, one tool row, written before the reply text
+- Verification: `bun test test/provider/claude-code` 529 pass / 21 fail, all pre-existing; `bun typecheck` only the two known pre-existing errors. No build
+- MISTAKE: a PowerShell double-quoted string turned `` `t `` into a tab inside a comment; scanned all changed TS files for control characters (none else). Use doubled backticks or single-quoted here-strings for literal backticks
+
+### User
+Claude chats
+- A run of Claude todo updates now shows as one todo block with the final list instead of one block per update.
+
+---
+
+## 2026-09-30 (~13:34) - r15 - Claude todo updates no longer cost an extra Claude turn - Opus 5.5, low; Agent
+
+### Agent
+- Meta: Opus 5.5; low; Agent; completed. Same session as r15, revision not bumped again
+- Cause (live base9): native TodoWrite and the TaskCreate/TaskUpdate ledger reached oc as `todowrite` calls with `providerExecuted: false`; oc ran them, `prompt.ts:1151-1159` `hasToolCalls` kept the loop going, and the next call pasted every result into Claude as `<opencode_tool_result>` text (12 results, 13.5K chars, +5.3K cache write, one unasked reply)
+- Fixed `turn-stream.ts`: `mirrorTodoWrite` runs oc's `todowrite` through `hostToolExecutors` inside the stream and emits the call and result as provider-executed; mirrors run serially, a denial or error only logs, and `onResult` waits for pending mirrors before finishing. `emitTodoLedger` and `completeToolUse` both use it; block-start marks todowrite provider-executed. Updated the `tool-mapping.ts` TodoWrite comment
+- Added test in `fundamental-tools.test.ts` (fake CLI TodoWrite -> one host `todowrite` call, provider-executed call and result before finish)
+- Verification: `bun test test/provider/claude-code` 529 pass / 21 fail, all pre-existing (Windows wrapper/tmp-dir/mode/real-child, `extractAgentTypeList` ellipsis); `bun typecheck` only the two known pre-existing errors. No build
+
+### User
+Claude chats
+- Claude's todo list still fills oc's todo panel, but no longer triggers an extra Claude reply or pastes the list back into Claude's context.
+
+---
+
+## 2026-09-30 (~13:31) - r15 - Fresh Claude chat no longer reports a lost conversation - Opus 5.5, low; Agent
+
+### Agent
+- Meta: Opus 5.5; low; Agent; completed. Same session as the r15 entry below, so the revision was not bumped again
+- Fixed `claude-code-language-model.ts`: `hasPriorConversation` is now "the prompt has an assistant message" instead of "more than one user/assistant message". Live base9 check showed `opencode session`'s no-reply synthetic "Working directory initialized" user message (`cli/cmd/session.ts:93-103`) made every `oc <dir>` chat's first turn show "Claude conversation lost" and ask to start fresh
+- Added regression test in `fundamental-tools.test.ts` (init message + first prompt, no notice)
+- Verification: `bun test test/provider/claude-code/fundamental-tools.test.ts test/provider/claude-code/session-sync.test.ts` 14 pass / 0 fail; `bun typecheck` only the two known pre-existing errors. Did not confirm the new test fails without the fix. No build
+
+### User
+Claude chats
+- A new Claude chat opened with `oc <dir>` no longer says the Claude conversation was lost or asks to start fresh.
+
+---
+
+## 2026-09-30 (~01:43) - r15 - Claude Code as the agent, oc as its front end - Opus 5.5, low; Go
+
+### Agent
+- Meta: Opus 5.5; low; Go; completed (plan `2026-09-30-claude-code-front-end.md`)
+- Checked live (CLI 2.1.285, Sonnet): `--plugin-dir` with `.claude-plugin/plugin.json` + `skills/<name>` junctions lists `oc:<name>` skills and `Skill` loads one; a stream-json `/compact` emits `system/status compacting`, `compact_boundary`, a replayed user message carrying the summary, `<local-command-stdout>Compacted </local-command-stdout>`, then `result` (`num_turns: 0`), and context survives. Bun `rmSync` on a junction folder leaves the target intact. Proxy ToolSearch (Step 1c) left to the live check
+- Added `CLAUDE_CODE_AGENT_PROMPT_OPTION` (`shared.ts`), set in `session/llm/request.ts`, read by `resolveOpencodeAgentPrompt`; `prompts.ts` now appends only the agent prompt, a short `## OpenCode tools` note (+ task/question hints) and `MULTI_STEP_TASK_HINT`. Removed `extractSystemMessages`, disk AGENTS.md reads, CLI/compress notes
+- Native tools on: removed `FUNDAMENTAL_PROXY_TOOLS` and the `compress` def, `DEFAULT_PROXY_TOOL_NAMES = ["Task"]`, `task`/`task_batch` disallow `Agent`, `Task`, `TaskOutput`; proxy MCP config no longer sets `alwaysLoad` (removed `cliSupportsMcpAlwaysLoad`, interceptors); read-only preset denies only `task`/`task_batch`
+- Added `skill-plugin.ts`: `fetchOpencodeSkills` (`GET /skill` via shared `rawOpencodeClient`) + `ensureSkillPlugin` junction plugin under `Global.Path.data/claude-code/skill-plugin`, skipping `.claude/skills` locations and `~/.claude/skills` names; `buildCliArgs` `pluginDir` -> `--plugin-dir`
+- Compaction: `isOverflow` false for claude-code providers; `compaction.ts` uses the user's model for claude-code chats; a compaction turn uses the conversation key, sends `/compact` to the live/resumed process (synthetic note when none exists), shows the replayed summary, and clears both watchdogs on `status: compacting`. Removed the one-shot compaction spawn, `compactConversationHistory`/`stripPluginHistory`, `resolveCompactionModel`/`compactionModel`
+- Removed boundary resets (`compactionBoundaryChanged`, r14 persisted `boundary`, session-sync restart notice) and the plugin `compress` reset (`compression-store.ts`, turn-stream restart). `describeSessionKey` drops the compaction key shape
+- User config: `opencode.jsonc` claude-code `proxyTools ["Task","Question"]`, `proxyOpencodeTools` session tools only, trimmed `extraDisallowedTools`, dropped `claudeInOpencode.md` from `instructionsByModel`; rewrote `claudeBase.md`. README gains a "Claude Code as the agent" row
+- Tests: rewrote `fundamental-tools.test.ts` (oc-only proxies, agent-prompt-only file, `/compact` in the live conversation), `compaction-model.test.ts` (`isOverflow`, 0600 prompt file), `subagent-hint`, `cli-args`, `proxy-mcp`, `proxy-task`, `permission-presets`, `startup-diagnostics`, `session-affinity`, `session-manager`; added `skill-plugin.test.ts`; deleted `compress-tool.test.ts` and compaction-transcript/strip tests
+- Verification: `bun typecheck` clean except pre-existing `src/tool/session-tail.ts:52` and `tui/.../sidebar/context.tsx:47`. `bun test test/provider/claude-code test/server/httpapi-public-openapi.test.ts test/session/compaction.test.ts`: 600 pass / 22 fail; all failures pre-existing (Windows wrapper/tmp-dir/mode/real-child tests, `extractAgentTypeList` ellipsis, `compaction.test.ts` "publishes compacted event on continue" timeout). No build, no live TUI run
+- Note: oc's `instructions` (`principles.md`, `build-notes-required.md`) no longer reach Claude chats; Claude Code's own CLAUDE.md and AGENTS.md carry the rules
+
+### User
+Claude chats
+- Claude chats now run as real Claude Code sessions: Claude Code's own prompt, tools and memory, with oc showing it live.
+- oc sends only the agent's own prompt, so a new Claude chat should start near plain `claude` cost instead of about 67K tokens.
+- Claude uses its native Read, Edit, Bash and other tools; oc subagents, questions, session tools and MCP servers load only when Claude needs them.
+- oc skills show up as native Claude Code skills (`oc:<name>`) without copies.
+- `/compact` in a Claude chat runs Claude Code's own compaction in the same conversation; oc no longer auto-compacts Claude chats with Luna or restarts the Claude conversation after a compaction.
+
+---
+
+## 2026-09-30 (~00:50) - r14 - Claude session sync - Opus 5.5, low; Go
+
+### Agent
+- Meta: Opus 5.5; low; Go; plan `C:\Users\user\.claude\plans\2026-09-30-claude-session-sync.md` complete
+- Verified CLI 2.1.285 live: stream `assistant` lines carry `uuid`; `--resume <id> --model <other> --effort <x>` keeps conversation; `--resume-session-at <uuid> --fork-session` truncates and returns new id; uuids survive fork; works with `--input-format stream-json`
+- Changed session key (`turn-context.ts`): `cwd::scope::affinity::context=[provider]`; model/agent/effort moved to `processSettings`; `ClaudeTurn.retireStaleProcess` respawns on mismatch and keeps id so next spawn `--resume`s. Removed `effortSessionKey`, `invalidateOtherEffortSessions`; `describeSessionKey` drops `model`
+- Added persistence (`session-manager.ts`): records `{sessionId, anchors[], boundary}` in `Global.Path.data/claude-code/sessions.json`, lazy load, write on change. Fixed restart silently starting new conversations
+- Fixed `compactionBoundaryChanged` (`call-options.ts`): falls back to persisted boundary so restart no longer resets compacted chats
+- Added `markClaudeSessionLost`/`takeClaudeSessionLoss`; all unplanned drops (exit non-zero, stderr no conversation, proc error, watchdog, wait-exit failure, cap) use it. `setup` throws if a retire lost the id
+- Added `session-sync.ts`: lost or unrecorded conversation with prior history -> `POST /question/ask` Yes/No; cancel throws and keeps loss; no client or `default` affinity -> proceed with note + toast
+- Added drift rewind: anchor `{uuid, exchangeHash}` per clean result; hash = whitespace-stripped text+reasoning per user exchange. Rewind only when oc's latest exchange equals an older anchor (revert case); else log only. Spawn gets `--resume-session-at <uuid> --fork-session` via `takePendingRewind` in `cli-args.ts`
+- Added `POST /question/ask` (`httpapi/groups/question.ts`, `handlers/question.ts`): returns answers or null on dismiss
+- Note: plugin client is legacy v1 SDK without question routes; `session-sync.ts` posts through its underlying `_client`. v2 SDK not regenerated (route lives in instance API; `packages/client` generates from protocol `ClientApi`, unaffected)
+- Removed `test/provider/claude-code/effort-sessions.test.ts` (tested removed API); added `session-sync.test.ts` (4 cases); updated old key shapes in 10 test files; added openapi `/question/ask` check
+- Risk: long question wait over real HTTP relies on no client/server timeout; unverified in a live TUI
+- Risk: exchange hash assumes oc stores text/reasoning verbatim in order; mismatch only disables rewind, never forces one
+- Verification: `bun typecheck` clean except pre-existing `src/tool/session-tail.ts:52` and `tui/.../sidebar/context.tsx:47` (uncommitted user files). `session-sync.test.ts` 4/0. `bun test test/provider/claude-code test/server/httpapi-public-openapi.test.ts`: 571 pass / 26 fail; remaining fails are Windows EBUSY temp cleanup, file mode/symlink/wrapper-path tests, and proxy-tool default lists, none on session keys or resume. No baseline run possible (dirty tree). No build, no live TUI run
+- ERROR: 26 claude-code tests fail on this Windows host independent of this change (see above)
+
+### User
+Claude Code provider
+- Changing model, effort, or agent mid-chat now keeps Claude's memory of the conversation instead of starting over.
+- Restarting oc now continues each chat's existing Claude conversation.
+- If a chat's Claude conversation is lost, oc asks before starting a fresh one, and cancelling sends nothing.
+- If you revert messages in oc, Claude is rewound to match and a note in the chat says so.
+- Only your new message is ever sent; oc never pastes old history into Claude.
+
+---
+
+## 2026-09-30 (~00:13) - r13 - Claude Code provider restructure - Opus 5.5, n/a; Build
+
+### Agent
+- Meta: Claude Opus 5.5; Build; completed
+- Changed `claude-code-language-model.ts` 3272 -> ~190 lines: removed ~25 one-line private delegate wrappers and all re-exports; class is now doGenerate (aggregates doStream) + doStream orchestration
+- Removed `doGenerateForHost` separate tool-less spawn path (~520 lines); doGenerate always aggregates doStream. Fixed: v2 doGenerate double-translated host tool parts
+- Added `turn-context.ts` (session key/effort/model resolution, `resetStaleSession`), `turn-stream.ts` (`ClaudeTurn` class + `StreamWriter`, one method per CLI message kind, replaces 2200-line closure), `planSpawn` + `assembleProxyTools` in `spawn-planning.ts`
+- Unified duplicated tool_use handling (stream stop vs non-partial assistant) into `ClaudeTurn.completeToolUse`; AskUserQuestion latch now also set on non-partial path
+- Split `proxy-mcp.ts` 1768 -> server only (777) + `proxy-deadline.ts`, `proxy-tool-defs.ts`, `proxy-tool-selection.ts`; importers rewritten, no re-exports
+- Split `session-manager.ts`: `buildCliArgs` + `thinkingCliOptions` -> `cli-args.ts`; spawn env -> `spawn-env.ts`; added read-only `hasActiveProcess`
+- Removed dead code: `describeAbortReason`, `detectCliSupportsFlag`, `_clearCache`, `loadMergedOpencodeConfig`, `_resetStartupDiagnostics`, `ClaudeCodeCallOptions`, doctor-only `snapshotActiveProcesses`/`snapshotPendingProxyCalls` (no doctor command exists), index.ts re-export block
+- Changed `index.ts`: model registration deduped via `registeredModel`; star imports replaced with named imports in mcp-bridge/proxy-mcp/tmp/startup-diagnostics
+- Fixed tests: temp-dir cleanup awaits child exit (`deleteActiveProcessAndWait`) + rmSync retries; Windows EBUSY had masked 22 stream tests
+- Verification: `bun typecheck` clean except pre-existing `src/tool/session-tail.ts` and `tui/.../sidebar/context.tsx` errors from earlier uncommitted work; claude-code tests 558 pass / 26 fail, identical to recorded baseline
+- ERROR: pre-existing test failures (not caused here): Windows path separators (expandHome, agentDirectories), POSIX shell wrapper/chmod/symlink tests, stale default-proxy expectations missing Read/Glob/Grep, init-warning count 4 vs 2, `a child that dies` uses bad eval quoting
+- TODO: fix those stale/Windows-incompatible tests; turn-stream (1436 after formatter) and session-manager (875) are the largest remaining files
+
+### User
+Claude Code provider
+- The Claude Code integration code was reorganized into smaller, focused files; behavior is unchanged apart from non-streaming calls now using the same path as streaming ones.
+- No UI change.
+
+---
+
+## 2026-09-29 (~23:02) - r12 - Claude Code parked-feature cleanup - Grok 4.7, n/a; Build
+
+### Agent
+- Meta: Grok 4.7; n/a; Build; completed
+- Removed interactive PTY transport, account expansion/failover, model fallback chain, ExitPlanMode approval forms, skill-bridge `pluginDirs`, and doctor snapshot getters from `packages/opencode/src/provider/claude-code`.
+- Kept headless stream-json, explicit `account` wrapper selection, CLI plan-mode/read-only flags, oc question/task proxy, native AskUserQuestion text, and account login/billing notes in `cli-events.ts`.
+- Kept historical transcript sanitation for `account_failover_` parts and `▌` failover/fallback markers in `message-builder.ts`.
+- Fixed text-only and compaction spawns: supplied system text is written with existing `buildAppendedSystemPrompt` / `extractSystemMessages` and removed with the process. No tool-environment hint and no history replay.
+- TODO: conversation memory still omits ordinary prior history when no transcript can resume. Do not restore replay in this cleanup.
+- Verification: `fundamental-tools` 8/8; host `test/session/llm.test.ts` and `test/session/tools.test.ts` 33/33.
+- ERROR: full `bun test test/provider/claude-code` was 532 pass / 52 fail. Failures are Windows temp `EBUSY` cleanup, POSIX mode bits, `bash` quoting timeouts, path separators, and spawn PATH equality. No missing-symbol failures from the removal. Baseline suite started before edits did not finish, so those names were not compared one-for-one.
+- ERROR: `bun typecheck` reports pre-existing dirty-tree errors in `src/tool/session-tail.ts` and `packages/tui/src/feature-plugins/sidebar/context.tsx`. Known `local.tsx:188` diagnostic was not the one reported.
+
+### User
+Claude Code cleanup
+- Parked account switching, model fallback, plan-approval forms, and the interactive Claude transport are gone. The headless provider still runs through the existing tool bridge.
+- Text-only requests now receive the system instructions you supplied, without gaining tool access.
+- Remembering earlier conversation turns when Claude has no transcript to resume is still unfinished and was left for a later change.
+
+---
+
+## 2026-09-29 (~20:11) - r11 - Confirm Cursor account reauthentication fix - GPT-6 Luna, n/a; Debug
+
+### Agent
+- Meta: GPT-6 Luna; n/a; Debug; completed
+- Confirmed Cursor `resource_exhausted` was caused by saved auth for old unpaid account; signing in with new account resolved it.
+- Added regression in `test/provider/cursor.test.ts` for preserving Connect error message.
+- Verification: Cursor provider test 19/19; `bun typecheck` passed; `git diff --check` passed.
+
+### User
+Cursor
+- Signing in again with the paid Cursor account fixed the model errors. Cursor Connect errors now have a regression check to ensure server explanations remain visible.
+
+---
+
+## 2026-09-29 (~20:05) - r10 - Surface Cursor Connect error message - Claude Opus 5.5, low; Implementation
+
+### Agent
+
+- Fixed: `connectFrameError` (`provider/cursor/language-model.ts`) dropped `error.message` from Connect envelopes; errors showed only `code=resource_exhausted`. Now appended.
+- Evidence: explore subagent ran ~6 turns fine, then 3x `resource_exhausted` -> likely Cursor-side quota/rate limit, unconfirmed until message visible.
+- Verified: `bun typecheck` clean. `test/provider/cursor` 102/103; failing "explicit non-max variant ahead of max-mode hint" is unrelated to error parsing.
+
+### User
+
+- Cursor errors now include Cursor's own explanation. Rebuild and reproduce to see why Cursor returns `resource_exhausted`.
+
+---
+
+## 2026-09-29 (~19:51) - r9 - Per-process Cursor proxy on OS-assigned ports - Claude Opus 5.5, low; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low; Implementation; completed
+- ERROR: `Cursor proxy startup timed out: invalid_health_response` in ocDebug. Cause: fixed ports 9418/9419 held by installed oc's proxy (pid 20620, started 19:42); foreign token made health 401 and `/shutdown` rejected, and the new child hit EADDRINUSE. Same 19:42 start matches the earlier Grok 4.7 "Provider is overloaded" reports (`session/retry.ts:154` maps "exhausted"/"unavailable" to that text).
+- Changed `packages/cursor-runtime/main.mjs`: ports default 0; prints `{"health":p,"h2":p}` line on stdout after listen; polls `process.ppid` every 2s and exits when parent is gone.
+- Rewrote `packages/opencode/src/provider/cursor/runtime.ts`: always spawns an owned child with fresh token and ports 0, reads the ports line (15s timeout, fails fast with stderr tail on exit); removed stamp reuse, `stopExisting`, health polling, and unused test exports. `stopCursorProxy` just kills the child.
+- Added test `port 0 lets two sidecars run side by side` in `packages/cursor-runtime/test/main.test.mjs`.
+- Verification: `node --test` in cursor-runtime 9/9 pass; `bun typecheck` in packages/opencode clean; `ensureCursorProxy()` via bun came up on :55284 while 9418/9419 were still occupied, then stopped.
+- TODO: retry.ts "overloaded" text still masks real errors; revisit with a `CURSOR_PROVIDER_DEBUG=1` trace if it recurs.
+
+### User
+Cursor
+- Each oc window now runs its own private Cursor connection helper, so oc, ocDebug, and old installs no longer fight over it.
+- Fixes "Cursor proxy startup timed out" and likely the sticky "Provider is overloaded" errors that previously needed a reboot.
+- Leftover helpers from an oc that crashed now shut themselves down within a few seconds.
+
+---
+
+## 2026-09-29 (~18:58) - r8 - Tighten Claude Code fundamental tool routing - GPT-6.1 Sol, n/a; Implementation
+
+### Agent
+- Meta: GPT-6.1 Sol; n/a; Implementation; completed; Muse Spark 1.3 Contributor scoped exploration/design/review. Refined 2026-09-29 OpenCode-only tools and one-permission-path work.
+- Replaced seven fundamental static proxy schemas/descriptions with current model definitions in `provider/claude-code/proxy-mcp.ts`; absent/invalid definitions fail closed. Native Read/Glob/Grep/Bash/Edit/Write/WebFetch and MultiEdit remain blocked even when their proxy is hidden or unconfigured.
+- Fixed `claude-code-language-model.ts` compaction and explicit empty-tool requests: `--tools ""`, deny `*`, strict MCP, no permission bypass. Ordinary tool-less replies retain conversation via `--resume`; compaction remains fresh.
+- Added canonical `toolCatalogHash` in `spawn-planning.ts`; `session-manager.ts` preserves hash through watchdog replacement. Changed catalog replaces old process/server before next turn, retaining Claude transcript identity.
+- Added image normalization at host executor (`session/llm.ts`) and image MCP content (`proxyToolResult`); supported PNG/JPEG/GIF/WebP deliver actual bytes. Unsupported, malformed, empty, or oversized attachments return tool errors.
+- ERROR: Claude CLI MCP PDF blobs are saved to disk without document content reaching model (anthropics/claude-code#72271, #53453). PDF delivery now fails explicitly; no native-tool fallback or PDF extraction added.
+- Added per-call AbortSignal through HTTP proxy, broker, host executor, `EffectBridge.promise`, and registry execution. Disconnect/timeout/rejection/stream cancellation interrupt host Effect and clear pending calls; late settlement cannot execute again.
+- Fixed denied proxy result echo matching and latched denial before accepting further calls; cleanup clears listeners/timers and rejects leftover calls. Kept task/question/todo/skill feature work deferred.
+- Added typed `fundamental-tools.test.ts`: real fake-CLI/MCP transport verifies seven exact-once calls, duplicate stream echoes, catalog reuse/replacement, tool-less isolation/resume, denial, cancellation, and image content/error delivery. Updated existing filtering/disconnect tests and added aborted readiness regression.
+- MISTAKE: Initial new tests used ReadableStream async iteration absent from project's DOM types; replaced with reusable getReader drain, keeping tests typechecked without suppression.
+- Verification: `bun typecheck` clean in `packages/opencode`; focused suite 168 pass/0 fail; LLM/image suite 35 pass/0 fail; final resume/cancellation checks 10 pass/0 fail; `git diff --check` clean. Three scoped reviews reported no actionable delta defects. No live Claude subscription run, build, or install.
+- ERROR: Initial combined LLM/image run hit existing test's 5-second cold-start timeout; isolated parent-header test passed, and LLM/image suite passed with `--timeout 15000`.
+
+### User
+Claude Code tools
+- Read, Glob, Grep, Bash, Edit, Write, and WebFetch use oc's current tool definitions and one execution path.
+- Bash exposes the correct shell instructions and working-directory option.
+- Tool availability refreshes between replies when permissions or definitions change.
+- Images reach Claude, and PDFs return a clear delivery error instead of a misleading success.
+- Cancellation stops pending tool work, and permission denial prevents further tool calls in that turn.
+- Compaction and tool-less replies cannot execute native tools or inherited MCP tools.
+
+---
+
+## 2026-09-29 (~17:32) - r6 - Use Muse Spark 1.3 Contributor for /rename - GPT-6 Luna, n/a; Implementation
+
+### Agent
+- Meta: GPT-6 Luna; n/a; Implementation; completed
+- Changed the hidden `rename` agent default to `meta/muse-spark-1.3-contributor`
+- Verification: `bun typecheck` passed in `packages/opencode`
+
+### User
+Sessions
+- `/rename` now uses Muse Spark 1.3 Contributor to generate titles.
+
+---
+
+## 2026-09-29 (~17:27) - r6 - Include folder name in /rename titles - GPT-6 Luna, n/a; Implementation
+
+### Agent
+- Meta: GPT-6 Luna; n/a; Implementation; completed
+- Updated `SessionPrompt.rename` to request titles in `<session folder> - <description>` format, using the session's directory name
+- Verification: `bun test test/session/rename-digest.test.ts` passed; `bun typecheck` passed in `packages/opencode`
+
+### User
+Sessions
+- `/rename` now includes the folder name the session is in, such as `oc - description`.
+
+---
+
+## 2026-09-29 (~16:38) - Add Claude Sonnet 5.5 to Claude Code - GPT-6 Luna, n/a; Implementation
+
+### Agent
+- Meta: GPT-6 Luna; n/a; Implementation; completed
+- Added `claude-sonnet-5-5` to the Claude Code model catalog with published pricing, limits, and release date
+- Verification: focused Sonnet 5.5 config test passed; `bun typecheck` passed; full config-model test file had one beforeEach/afterEach timeout, remaining 16 passed
+
+### User
+Claude Code
+- Claude Sonnet 5.5 is now available in oc's Claude Code model picker.
+
+---
+
+## 2026-09-29 - r4 - Fix build reading two-line version file - Opus 5.5; Implementation
+
+### Agent
+- Fixed `packages/opencode/script/build.ts`: read line 1 of `.version/version` only; whole-file read failed the `X.Y.Z` check after the revision line was added
+- Verification: bun parse of current file yields `0.2.0`, regex passes; full build not run
+
+### User
+Build
+- The build was failing because it read the new revision line as part of the version. It now reads only the base version line.
+
+---
+
+## 2026-09-29 (~03:48) - r3 - Reset revision on commit - Opus 5.5, low; Implementation
+
+### Agent
+- Meta: Opus 5.5; low; Implementation; completed
+- push.ps1: writes revision `0` (keeps base) before `git add`, so every commit carries revision 0
+- AGENTS `## Revision`: revision now counts sessions since last commit; only push.ps1 resets it; manual commits should zero line 2 first
+- Verification: ran the reset expression against `.version/version` (base kept, line 2 -> 0), restored, then bumped to r3
+
+### User
+Versioning
+- Committing with push.ps1 now resets the revision to 0, so the revision counts changes since the last commit.
+
+---
+
+## 2026-09-29 (~03:47) - r2 - Split base version and revision into separate lines - Opus 5.5, low; Implementation
+
+### Agent
+- Meta: Opus 5.5; low; Implementation; completed
+- Changed `.version/version` to two lines: base `X.Y.Z`, then revision `N` (never resets). Replaces `X.Y.Z+rN` format from earlier entries
+- scriptHelper `requireVersion`: requires exactly two lines, returns base; `incrementMaintenancePatch` rewrites line 1, preserves line 2
+- Reverted pushRelease tag split (base is already clean)
+- Rewrote AGENTS `## Revision` for the two-line format; heading prefix now `r<N>`
+- Verification: dot-sourced scriptHelper; base read, patch bump kept revision, old `+rN` format rejected; file restored then bumped to r2
+
+### User
+Versioning
+- The version file now keeps the base version and the revision counter on separate lines, and releases or upstream syncs never change the revision.
+
+---
+
+## 2026-09-29 (~03:46) - Revision rules cleanup pass - Opus 5.5, low; Agent
+
+### Agent
+- Meta: Opus 5.5; low; Agent (pass and cleanup); completed
+- Reviewed session changes: scriptHelper `requireVersion`/`incrementMaintenancePatch`, pushRelease tag, `.version/version`, AGENTS `## Revision`; all correct
+- Clarified AGENTS rule: version goes at the start of the buildNotes heading title
+- Verification: diff review; line endings match untouched scripts (LF, autocrlf warning only). No revision bump: docs-only
+
+### User
+Versioning
+- Docs only: clarified where the revision goes in build note headings.
+
+---
+
+## 2026-09-29 (~03:43) - 0.2.0+r1 - Revision bump on any code change - Opus 5.5, low; Implementation
+
+### Agent
+- Meta: Opus 5.5; low; Implementation; completed
+- Changed AGENTS.md `## Revision`: bump at session tail with build-notes whenever code changed (source, scripts, config, tests); skip only read-only or docs-only
+- Bumped `.version/version` to `0.2.0+r1` for the previous session's script changes
+- Verification: re-read rule text; version format already verified by prior session
+
+### User
+Versioning
+- The revision now goes up at the end of any session that changed code, at the same time build notes are written.
+
+---
+
+## 2026-09-29 (~03:41) - Revision numbers in .version - Opus 5.5, low; Implementation
+
+### Agent
+- Meta: Opus 5.5; low; Implementation; completed
+- Added `## Revision` rules to AGENTS.md: `.version/version` is `X.Y.Z` or `X.Y.Z+rN`; agents bump `rN` once per verified code-changing handoff
+- Updated `requireVersion` regex to accept `+rN`; `incrementMaintenancePatch` now drops `+rN` when bumping patch
+- Updated pushRelease.ps1 to tag `X.Y.Z` only
+- Reset `.version/version` to `0.2.0` (user's two-line draft failed `requireVersion`)
+- Verification: dot-sourced scriptHelper; `0.2.0` and `0.2.0+r3` parse; `0.2.0+r3` bumps to `0.2.1`; file restored
+- Revision not bumped this session: tooling/docs only, starts counting next code change
+
+### User
+Versioning
+- Local changes between releases are now tracked as `0.2.0+r1`, `0.2.0+r2`, and so on in `.version/version`.
+- Upstream sync still bumps the patch number and clears the revision; release tags ignore the revision.
+
+---
+
+## 2026-09-29 (~03:33) - Rename review pass - Opus 5.5, low; Agent
+
+### Agent
+- Meta: Opus 5.5; low; review/cleanup pass over the /rename work; completed
+- Reviewed agent.ts, request.ts, prompt.ts rename/cleanTitle/renameDigest, HttpApi route+handler, codex header, TUI command, test: no functional issues
+- Fixed packages/tui/src/routes/session/index.tsx: `session.rename.auto` toasts "Title unchanged" when the server returns the same title (no user message or empty model output); title captured before the request because the title-change event can reach the TUI before the HTTP response
+- Verification: `bun typecheck` in packages/tui passed
+
+### User
+Session
+- Auto-rename now says "Title unchanged" instead of falsely reporting a rename when nothing changed.
+
+---
+
+
+## 2026-09-29 (~03:30) - Add /rename auto session titling - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation; completed
+- Added hidden `rename` agent in `agent/agent.ts`: default `openai/gpt-6-luna`, variant `low`, reuses `PROMPT_TITLE`; override via `agent.rename` in config
+- Added `SessionPrompt.rename(sessionID)` in `session/prompt.ts`: `renameDigest` (first user msg + last 6 text messages, 1500 chars each, synthetic skipped), pinned model falls back to small model then last user model; shared `cleanTitle` with first-message titling
+- Changed `session/llm/request.ts`: pinned `compaction`/`rename` variant now applies on small requests too
+- Added `POST /session/:sessionID/rename` (`session.rename`), regenerated legacy JS SDK; `packages/client` generate produced no diff
+- Added TUI command `session.rename.auto` ("Auto-rename session", `/rename`); manual rename dialog slash moved `/rename` -> `/title`, keeps palette + `ctrl+r`; added to `crowRemoteSessionScopedCommands`
+- Added `rename` to Codex websocket title-header check (`plugin/openai/codex.ts`)
+- Verification: `bun typecheck` clean in `packages/opencode` and `packages/tui`; `test/session/rename-digest.test.ts` 2 pass; `test/session/llm.test.ts` flaky (2 fail then 30/30 on rerun with change; 30/30 without)
+- ERROR: `bun test` crashed once (bun.report) running llm.test.ts; rerun fine
+
+### User
+Sessions
+- `/rename` or "Auto-rename session" in the command palette now asks GPT-6 Luna (low) to read the session and give it a short new title.
+- The manual rename dialog is now `/title` and is still on `ctrl+r`.
+- The rename model can be changed with `"rename": { "model": "...", "variant": "..." }` under `agent` in `opencode.jsonc`.
+
+---
+
 ## 2026-09-29 (~02:58) - Remove Claude Code proxy fallback - GPT-6 Luna, n/a; Implementation
 
 ### Agent
@@ -593,4 +1095,5 @@ Compaction
 ### User
 Project notes
 - History through 2026-09-28 now lives in `buildNotes.archive3.md`, and the live notes file is short again.
+
 

@@ -46,7 +46,7 @@ function withTempDir(): { dir: string; cleanup: () => void; readLog: () => strin
       return existsSync(f) ? readFileSync(f, "utf8") : ""
     },
     cleanup() {
-      rmSync(dir, { recursive: true, force: true })
+      rmSync(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 })
     },
   }
 }

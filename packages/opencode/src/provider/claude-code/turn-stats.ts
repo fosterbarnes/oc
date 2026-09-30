@@ -26,13 +26,7 @@ export interface TurnStats {
   permissionDenials?: unknown[]
 }
 
-/**
- * Header of the footer block, and the marker `message-builder` strips by when
- * a transcript is rebuilt for a fresh Claude process. The footer is the
- * plugin's own accounting, never something the model said, so it must not come
- * back as model output on a resume. Kept as the first characters of its own
- * text part so the strip is exact.
- */
+/** Header of the footer block: the plugin's own accounting, never model output. */
 export const TURN_STATS_MARKER = "▌ **stats:**"
 
 /**

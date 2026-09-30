@@ -1,7 +1,7 @@
 // @ts-nocheck
 // WIP: ported from opencode-claude-code-plugin, which never typechecked its tests; type them as Phase 3 rewrites land.
 /**
- * Integration tests for src/proxy-mcp.ts — the in-process MCP HTTP server.
+ * Integration tests for src/proxy-mcp.ts - the in-process MCP HTTP server.
  *
  * These stand up a real `createProxyMcpServer` on an ephemeral port and
  * drive it over plain HTTP, so they exercise the actual JSON-RPC framing
@@ -16,41 +16,56 @@ import * as http from "node:http"
 import * as fs from "node:fs"
 import {
   createProxyMcpServer,
-  buildProxyTimeoutError,
-  resolveProxyCallTimeoutMs,
-  resolveProxyClientCeilingMs,
+  SERVER_CLOSED_MESSAGE,
+  type ProxyMcpServer,
+  type ProxyToolCall,
+  type ProxyToolResult,
+} from "@/provider/claude-code/proxy-mcp.js"
+import {
   overlayQuestionProxyDescription,
   filterQuestionProxyByOpencodeSupport,
-  resolveMcpProxyToolDefs,
   formatTaskBatchResults,
   taskBatchChildToolCallId,
   taskBatchInputError,
   taskBatchTasks,
   TASK_BATCH_TOOL_NAME,
   DEFAULT_PROXY_TOOLS,
+} from "@/provider/claude-code/proxy-tool-defs.js"
+import {
+  resolveMcpProxyToolDefs,
   filterProxyByModelTools,
   disallowedToolFlags,
+} from "@/provider/claude-code/proxy-tool-selection.js"
+import {
+  buildProxyTimeoutError,
+  resolveProxyCallTimeoutMs,
+  resolveProxyClientCeilingMs,
   PROXY_DEFAULT_TIMEOUT_MS,
   PROXY_NO_DEADLINE_MS,
   MAX_PROXY_TIMEOUT_MS,
-  SERVER_CLOSED_MESSAGE,
-  type ProxyMcpServer,
-  type ProxyToolCall,
-  type ProxyToolResult,
-} from "@/provider/claude-code/proxy-mcp.js"
+} from "@/provider/claude-code/proxy-deadline.js"
 import { DEFAULT_PROXY_TOOL_NAMES } from "@/provider/claude-code/types.js"
 import { resolvedProxyTools } from "@/provider/claude-code/spawn-planning.js"
 
-test("default file-search tools execute through opencode only when offered", () => {
+test("default proxy tools are oc-only and leave Claude Code's native tools on", () => {
   const defaults = resolvedProxyTools({ proxyTools: DEFAULT_PROXY_TOOL_NAMES })!
-  const names = ["read", "glob", "grep"]
-  assert.ok(names.every((name) => defaults.some((tool) => tool.name === name)))
-  assert.ok(names.every((name) => disallowedToolFlags(defaults).includes(name[0].toUpperCase() + name.slice(1))))
-  assert.deepEqual(
-    filterProxyByModelTools(defaults, [{ name: "read" }]).map((tool) => tool.name),
-    ["read"],
-  )
+  assert.deepEqual(defaults.map((tool) => tool.name), ["task", TASK_BATCH_TOOL_NAME])
+  assert.deepEqual(disallowedToolFlags(defaults), ["Agent", "Task", "TaskOutput"])
+  assert.deepEqual(filterProxyByModelTools(defaults, [modelTool("task")]).map((tool) => tool.name), [
+    "task",
+    TASK_BATCH_TOOL_NAME,
+  ])
 })
+
+// A generic opencode tool for the HTTP tests below; native tools are no longer proxied by default.
+const TOOLS = [
+  ...DEFAULT_PROXY_TOOLS,
+  {
+    name: "bash",
+    description: "Run a shell command",
+    inputSchema: { type: "object", properties: { command: { type: "string" }, timeout: { type: "number" } } },
+  },
+]
 
 /**
  * Low-level POST. `headers` REPLACES the default header set, so the
@@ -111,7 +126,7 @@ function authedPost(srv: ProxyMcpServer, body: unknown) {
 async function withServer<T>(
   fn: (srv: ProxyMcpServer) => Promise<T>,
 ): Promise<T> {
-  const srv = await createProxyMcpServer(DEFAULT_PROXY_TOOLS)
+  const srv = await createProxyMcpServer(TOOLS)
   try {
     return await fn(srv)
   } finally {
@@ -241,7 +256,7 @@ test("tools/list exposes the default proxy defs", async () => {
     const names = res.json.result.tools.map((t: any) => t.name)
     assert.ok(names.includes("question"))
     assert.ok(names.includes("task"))
-    assert.ok(names.includes("bash"))
+    assert.ok(names.includes("session_tail"))
   })
 })
 
@@ -425,9 +440,9 @@ test("tools/call timeout uses the per-tool override and surfaces the task-specif
   // Stand up a server with a tiny Task deadline and never resolve the call,
   // so the proxy-mcp timer fires and we see the real error envelope that
   // Claude would receive.
-  const srv = await createProxyMcpServer(DEFAULT_PROXY_TOOLS, { task: 50 })
+  const srv = await createProxyMcpServer(TOOLS, { task: 50 })
   try {
-    // Intentionally do NOT attach a calls listener — let the deadline fire.
+    // Intentionally do NOT attach a calls listener - let the deadline fire.
     const res = await authedPost(srv, {
       jsonrpc: "2.0",
       id: "timeout-1",
@@ -448,10 +463,10 @@ test("tools/call timeout uses the per-tool override and surfaces the task-specif
 })
 
 test("tools/call bash timeout honours input.timeout over a shorter override", async () => {
-  // Override says 40ms but the call asks for a 30s bash timeout — the
+  // Override says 40ms but the call asks for a 30s bash timeout - the
   // effective deadline must be 30s, so the call must NOT time out within a
   // short window. Resolve it ourselves to end the test promptly.
-  const srv = await createProxyMcpServer(DEFAULT_PROXY_TOOLS, { bash: 40 })
+  const srv = await createProxyMcpServer(TOOLS, { bash: 40 })
   try {
     let resolved = false
     srv.calls.on("call", (call: ProxyToolCall) => {
@@ -500,7 +515,7 @@ test("resolveProxyClientCeilingMs is always a positive, timer-safe value", () =>
 test("tools/call with no deadline stays pending instead of timing out on the next tick", async () => {
   // A zero deadline must mean "no timer", not `setTimeout(fn, 0)`: the
   // latter rejects the call immediately with "timed out after 0ms".
-  const srv = await createProxyMcpServer(DEFAULT_PROXY_TOOLS)
+  const srv = await createProxyMcpServer(TOOLS)
   try {
     let settled: string | null = null
     const callReceived = new Promise<void>((resolve) => srv.calls.once("call", () => resolve()))
@@ -573,7 +588,7 @@ function readAll(res: http.IncomingMessage): Promise<string> {
 }
 
 test("a JSON-only tools/call gets its headers and keepalive whitespace before the result", async () => {
-  const srv = await createProxyMcpServer(DEFAULT_PROXY_TOOLS, undefined, undefined, { keepaliveMs: 20 })
+  const srv = await createProxyMcpServer(TOOLS, undefined, { keepaliveMs: 20 })
   try {
     let call: ProxyToolCall | undefined
     srv.calls.once("call", (c: ProxyToolCall) => { call = c })
@@ -612,7 +627,7 @@ test("a JSON-only tools/call gets its headers and keepalive whitespace before th
 })
 
 test("a JSON-only tools/call that fails after its headers went out still ends as valid JSON", async () => {
-  const srv = await createProxyMcpServer(DEFAULT_PROXY_TOOLS, undefined, undefined, { keepaliveMs: 10 })
+  const srv = await createProxyMcpServer(TOOLS, undefined, { keepaliveMs: 10 })
   try {
     srv.calls.once("call", (c: ProxyToolCall) => {
       setTimeout(() => c.reject(new Error("simulated late broker rejection")), 40)
@@ -637,7 +652,7 @@ test("a JSON-only tools/call that fails after its headers went out still ends as
 })
 
 test("a JSON-only client that hangs up stops its keepalive and the result is dropped, not thrown", async () => {
-  const srv = await createProxyMcpServer(DEFAULT_PROXY_TOOLS, undefined, undefined, { keepaliveMs: 10 })
+  const srv = await createProxyMcpServer(TOOLS, undefined, { keepaliveMs: 10 })
   try {
     const callReceived = new Promise<ProxyToolCall>((resolve) => srv.calls.once("call", resolve))
     const res = await openPost(srv, {
@@ -650,9 +665,9 @@ test("a JSON-only client that hangs up stops its keepalive and the result is dro
     assert.equal(call.channel?.closed, false)
     res.destroy()
     await new Promise((r) => setTimeout(r, 50))
-    // The reply channel is what the language model reads before answering;
-    // the entry itself stays so a late result can still be recovered.
     assert.equal(call.channel?.closed, true)
+    assert.equal(call.signal?.aborted, true)
+    assert.deepEqual(srv.pendingCallIds(), [])
     // Resolving now must not throw into the server (no write to a dead socket).
     call.resolve({ kind: "text", text: "nobody is listening" })
     await new Promise((r) => setTimeout(r, 30))
@@ -709,7 +724,7 @@ test("filterQuestionProxyByOpencodeSupport drops the def on older opencode", () 
   )
   // Only `question` is gated; everything else survives untouched.
   assert.ok(dropped.some((t) => t.name === "task"))
-  assert.ok(dropped.some((t) => t.name === "bash"))
+  assert.ok(dropped.some((t) => t.name === "session_tail"))
 })
 
 test("overlayQuestionProxyDescription prefers opencode's live description", () => {
@@ -878,7 +893,7 @@ test("security: the 401 path answers without reading the request body", async ()
         req.destroy()
         reject(
           new Error(
-            "no response while the body was still incomplete — the handler appears to read the body before authenticating",
+            "no response while the body was still incomplete - the handler appears to read the body before authenticating",
           ),
         )
       }, 5000)
@@ -925,7 +940,7 @@ test("security: the generated MCP config carries the token, 0600, and never in t
 // response arrived, which is exactly the cleanup the server must not depend on.
 test("security: rejecting an unauthenticated request does not leave shutdown hostage to an unfinished body", async () => {
   const net = await import("node:net")
-  const srv = await createProxyMcpServer(DEFAULT_PROXY_TOOLS)
+  const srv = await createProxyMcpServer(TOOLS)
   const { port } = new URL(srv.url)
 
   const sock = net.connect({ host: "127.0.0.1", port: Number(port) })
@@ -972,8 +987,8 @@ test("security: a client using only the generated config's header is accepted (r
 })
 
 test("security: two servers get distinct tokens, and one's token is rejected by the other", async () => {
-  const a = await createProxyMcpServer(DEFAULT_PROXY_TOOLS)
-  const b = await createProxyMcpServer(DEFAULT_PROXY_TOOLS)
+  const a = await createProxyMcpServer(TOOLS)
+  const b = await createProxyMcpServer(TOOLS)
   try {
     assert.notEqual(a.authToken, b.authToken)
     const payload = JSON.stringify(LIST_REQ)
@@ -1145,6 +1160,8 @@ test("a client that drops the request flips the call's channel to closed; a late
     // The server sees the socket close on the next turn of the loop.
     await new Promise((r) => setTimeout(r, 100))
     assert.equal(pending!.channel?.closed, true)
+    assert.equal(pending!.signal?.aborted, true)
+    assert.deepEqual(srv.pendingCallIds(), [])
     // Resolving now must neither throw nor keep the server from closing.
     pending!.resolve({ kind: "text", text: "nobody home" })
     await new Promise((r) => setTimeout(r, 30))
@@ -1450,13 +1467,12 @@ async function mcpConfigsForSpawn(servers: string[], modelToolNames: string[]) {
 
   const cli = argvRecordingCli(root, fsMod, pathMod, id)
   const modelId = `claude-test-mcp-argv-${id}`
-  const sk = sessionKey(cwd, `${modelId}::tools::default::context=["claude-code",null]`)
+  const sk = sessionKey(cwd, `tools::default::context=["claude-code"]`)
   try {
     const model = createClaudeCode({
       cliPath: cli.cliPath,
       cwd,
       proxyTools: [],
-      bridgeOpencodeSkills: false,
       autoContinueIncompleteTurns: false,
     }).languageModel(modelId)
     const response = await model.doStream({
@@ -1500,7 +1516,7 @@ async function mcpConfigsForSpawn(servers: string[], modelToolNames: string[]) {
       if (v === undefined) delete process.env[k]
       else process.env[k] = v
     }
-    fsMod.rmSync(root, { recursive: true, force: true })
+    fsMod.rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 })
   }
 }
 
@@ -1515,3 +1531,4 @@ test("opencode MCP servers never reach --mcp-config; only the proxy does", async
   const full = await mcpConfigsForSpawn(["gamma", "delta"], ["gamma_thing", "delta_thing"])
   assert.deepEqual(full, { count: 1, proxyConfigs: 1, bridged: [] })
 })
+

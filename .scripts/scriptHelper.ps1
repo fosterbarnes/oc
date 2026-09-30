@@ -84,18 +84,21 @@ After the build completes, exit OpenCode and run this from a fresh PowerShell:
 function requireVersion {
     if (-not (Test-Path -LiteralPath $version)) {
         New-Item -ItemType Directory -LiteralPath $versionFolder -Force | Out-Null
-        [IO.File]::WriteAllText($version, "0.0.1`n")
+        [IO.File]::WriteAllText($version, "0.0.1`n0`n")
     }
-    $value = ([IO.File]::ReadAllText($version)).Trim()
-    if ($value -notmatch '^\d+\.\d+\.\d+$') { throw "Invalid maintenance version: $value" }
-    $value
+    $lines = [IO.File]::ReadAllLines($version)
+    if ($lines.Count -ne 2 -or $lines[0] -notmatch '^\d+\.\d+\.\d+$' -or $lines[1] -notmatch '^\d+$') {
+        throw "Invalid $version`: expected base X.Y.Z on line 1 and revision N on line 2"
+    }
+    $lines[0]
 }
 
+# Line 2 (revision) is agent-owned; scripts only rewrite line 1.
 function incrementMaintenancePatch {
     $current = requireVersion
     $parts = $current.Split('.')
     $next = '{0}.{1}.{2}' -f $parts[0], $parts[1], ([int]$parts[2] + 1)
-    [IO.File]::WriteAllText($version, "$next`n")
+    [IO.File]::WriteAllText($version, "$next`n$([IO.File]::ReadAllLines($version)[1])`n")
     Write-Host "Maintenance version $current -> $next"
     $next
 }

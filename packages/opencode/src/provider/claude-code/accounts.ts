@@ -22,29 +22,6 @@ export function normalizeAccountName(account: string): string {
     .replace(/^-+|-+$/g, "")
 }
 
-export function resolveAccounts(value: unknown): string[] | null {
-  if (!Array.isArray(value)) return null
-
-  const accounts = value
-    .map((account) => normalizeAccountName(String(account)))
-    .filter(Boolean)
-
-  return Array.from(new Set([DEFAULT_ACCOUNT, ...accounts]))
-}
-
-export function accountProviderId(account: string): string {
-  return `${BASE_PROVIDER_ID}-${normalizeAccountName(account)}`
-}
-
-export function accountDisplayName(account: string): string {
-  return `Claude Code (${titleizeAccount(account)})`
-}
-
-export function accountModelSuffix(account: string): string | undefined {
-  const normalized = normalizeAccountName(account)
-  return normalized === DEFAULT_ACCOUNT ? undefined : normalized
-}
-
 export function accountConfigDir(account: string): string | undefined {
   const normalized = normalizeAccountName(account)
 
@@ -160,6 +137,7 @@ async function ensureSharedCapabilityItem(
   await symlink(source, target, type)
 }
 
+// The wrapper is a bash script, so extra accounts are Mac/Linux only; Windows cannot exec it.
 async function writeAccountWrapper(
   account: string,
   baseCliPath: string,
@@ -210,12 +188,4 @@ function shellSingleQuote(value: string): string {
 
 function shellDoubleQuote(value: string): string {
   return value.replace(/[$`"\\]/g, "\\$&")
-}
-
-function titleizeAccount(account: string): string {
-  return normalizeAccountName(account)
-    .split("-")
-    .filter(Boolean)
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(" ")
 }

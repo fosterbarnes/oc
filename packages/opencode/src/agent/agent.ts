@@ -254,6 +254,23 @@ const layer = Layer.effect(
             ),
             prompt: PROMPT_TITLE,
           },
+          rename: {
+            name: "rename",
+            mode: "primary",
+            options: {},
+            native: true,
+            hidden: true,
+            model: Provider.parseModel("meta/muse-spark-1.3-contributor"),
+            variant: "low",
+            permission: Permission.merge(
+              defaults,
+              Permission.fromConfig({
+                "*": "deny",
+              }),
+              user,
+            ),
+            prompt: PROMPT_TITLE,
+          },
           summary: {
             name: "summary",
             mode: "primary",
