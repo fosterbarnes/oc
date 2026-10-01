@@ -47,7 +47,7 @@ Counts below are for **active** rows only. Retired work is listed separately and
 
 ## 1. Models and providers
 
-Use ChatGPT, Claude, Cursor, or Poe from OpenCode without treating them as ordinary API-only vendors.
+Use ChatGPT, Claude, or Cursor from OpenCode without treating them as ordinary API-only vendors.
 
 | Feature | Level | What it does | What's left |
 |---|---|---|---|
@@ -55,7 +55,6 @@ Use ChatGPT, Claude, Cursor, or Poe from OpenCode without treating them as ordin
 | Claude Web | medium | Same browser-backed idea for Claude. | Live login and a real Claude request are still unconfirmed. |
 | Claude Code as the agent | high | Claude chats run in the Claude Code CLI with its own prompt, native tools, transcript and `/compact`; oc streams it live. oc sends only the agent's own prompt. oc skills load natively through a generated `--plugin-dir` of links, and oc-only tools (subagents, questions, session tools, MCP servers) are deferred proxy tools Claude loads with ToolSearch. Claude's own task list fills oc's todo list at the end of each turn, and an oc agent's missing tools turn off the matching Claude built-ins. Live-checked with `claudeTestFlow.md` (tools, memory, interrupt, compact, revert, restart, effort switch, cache). | No Claude-backed restricted agent exists yet to live-check the agent tool limits. The task-list folder layout is undocumented Claude Code behavior. Extra Claude accounts are Mac/Linux only (the per-account wrapper is a bash script). |
 | Cursor as a native model | medium | Talks to local Cursor as an OpenCode model (tools, reasoning, connection proxy). The picker can show live multi-tier models (Grok 4.7 base, Fast, 500k, and Claude Opus 5.5 metadata) with matching context, wire params, and pricing. | Live auth/request proof is thin. Git/shell protocol parity is deferred. Compaction and "this is OpenCode, not Cursor IDE" guidance were added later and look solid in tests. |
-| Poe as a model route | medium | OpenAI-compatible Poe models. `poe/gpt-5.4` answered a live request. | Poe does not list GPT-5.6 Luna, Terra, or Sol; those names 404. Daily Luna sessions use `openai/gpt-6-luna`, not Poe. |
 | Hide Cursor's own plan mode | ~done~ | Cursor-backed chats no longer open Cursor's native plan/spec flow. OpenCode planning agents stay available. | None realistic. |
 | Start helpers only when needed | high | Browser and Cursor helpers start on first use and shut down with the server. | Not every provider has a live start/stop check. |
 
@@ -68,6 +67,7 @@ Get into a project quickly, keep a local server running, and control it from the
 | Feature | Level | What it does | What's left |
 |---|---|---|---|
 | Native `oc` launcher | ~done~ | `oc` is OpenCode itself, with settings in `~/.config/opencode/oc.json`. Launch, previous session (`occ`), diagnostics, and `oc config get/set` all work. | None realistic. |
+| Run after turn and hard revive | ~done~ | Built-in `run_after_turn` tool runs an exe once the agent's turn ends (permission `run_after_turn`, allowed by default). `/hard-revive` and `/hard-revive-&-install` run oc.json `revive.exe` / `revive.installExe` directly with no agent turn; each is hidden when unset. | None realistic. A detached `pwsh` gets no console and exits without running, so queue console apps that open their own window. |
 | Separate home vs OC directory | high | Bare `oc` and relative project names can use two different folders. Absolute paths stay absolute. | Latest palette settings may still need a rebuild/restart to show in the running app. |
 | New-session project picker | high | Tray/palette "New session" starts the intro, then the real OpenCode project picker, then attaches to the running server. | The intermediate full-screen list was tried and dropped. Confirm the installed `oc.exe` shows the intended picker. |
 | Startup loading animation | medium | Column-sweep animation while the server and session come up. | Visual sign-off in the running app is still thin. |

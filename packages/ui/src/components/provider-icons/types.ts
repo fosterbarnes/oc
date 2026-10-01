@@ -28,7 +28,6 @@ export const iconNames = [
   "qiniu-ai",
   "qihang-ai",
   "privatemode-ai",
-  "poe",
   "perplexity",
   "ovhcloud",
   "openrouter",

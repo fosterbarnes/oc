@@ -8,7 +8,7 @@ $distFolder = "$repoRoot\packages\opencode\dist"
 $versionFolder = "$repoRoot\.version"
 $version = "$versionFolder\version"
 $readme = "$repoRoot\README.md"
-$ghRepo = 'anomalyco/opencode'
+$ghRepo = 'fosterbarnes/opencode'
 
 function runNativeCommand {
     param(
@@ -45,6 +45,11 @@ function testBunHasFfiFix {
 }
 
 function requireBunForCompile {
+    # An empty BUN_INSTALL (e.g. a blank HKCU\Environment value reloaded by WezTerm) makes `bun install` spin forever
+    if ((Test-Path Env:BUN_INSTALL) -and -not $env:BUN_INSTALL) {
+        Write-Host 'Clearing empty BUN_INSTALL for this build.'
+        Remove-Item Env:BUN_INSTALL
+    }
     $version = getBunVersion
     if (testBunHasFfiFix $version) {
         Write-Host "Bun $version (Windows TUI FFI segfault fix present)"
@@ -84,21 +89,21 @@ After the build completes, exit OpenCode and run this from a fresh PowerShell:
 function requireVersion {
     if (-not (Test-Path -LiteralPath $version)) {
         New-Item -ItemType Directory -LiteralPath $versionFolder -Force | Out-Null
-        [IO.File]::WriteAllText($version, "0.0.1`n0`n")
+        [IO.File]::WriteAllText($version, "0.0.1`n")
     }
-    $lines = [IO.File]::ReadAllLines($version)
-    if ($lines.Count -ne 2 -or $lines[0] -notmatch '^\d+\.\d+\.\d+$' -or $lines[1] -notmatch '^\d+$') {
-        throw "Invalid $version`: expected base X.Y.Z on line 1 and revision N on line 2"
+    $contents = [IO.File]::ReadAllText($version).Trim()
+    if ($contents -notmatch '^\d+\.\d+\.\d+$') {
+        throw "Invalid $version`: expected one version in X.Y.Z format"
     }
-    $lines[0]
+    $contents
 }
 
-# Line 2 (revision) is agent-owned; scripts only rewrite line 1.
+# Maintenance version is X.Y.Z. Upstream sync increments the patch.
 function incrementMaintenancePatch {
     $current = requireVersion
     $parts = $current.Split('.')
     $next = '{0}.{1}.{2}' -f $parts[0], $parts[1], ([int]$parts[2] + 1)
-    [IO.File]::WriteAllText($version, "$next`n$([IO.File]::ReadAllLines($version)[1])`n")
+    [IO.File]::WriteAllText($version, "$next`n")
     Write-Host "Maintenance version $current -> $next"
     $next
 }

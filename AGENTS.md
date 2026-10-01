@@ -19,14 +19,12 @@
 
 ## Revision
 
-`.version/version` holds two lines: line 1 is the base version `X.Y.Z`, line 2 is the revision `N`, a counter of code-changing sessions since the last GitHub commit.
-
-- `push.ps1` resets the revision to `0` before committing, so every commit carries `0`. Agents never reset it; a manual commit outside `push.ps1` should set line 2 to `0` first.
+`.version/version` holds one version `X.Y.Z`. The patch component is the revision.
 
 - Bump the revision once per session at the tail end, in the same step as the `build-notes` entry, whenever the session changed code (source, scripts, config, tests).
 - Skip only sessions with no code changes: read-only or docs/notes-only.
-- Agents only increment line 2. Never change line 1; scripts own it (`incrementMaintenancePatch` on upstream sync, `pushRelease.ps1` tags it). Only `push.ps1` touches line 2 from scripts.
-- Read the file immediately before writing. Keep exactly two lines with a trailing newline.
+- Increment the final version component. Upstream sync also increments it when the upstream SHA advances; `pushRelease.ps1` uses the full version for tags.
+- Read the file immediately before writing. Keep exactly one line with a trailing newline.
 - Start the buildNotes heading title with `r<N>`: `## <date> - r2 - <title> - <model>...`.
 
 ## Branch Names

@@ -533,7 +533,6 @@
         "npm-package-arg": "13.0.2",
         "open": "10.1.2",
         "opencode-gitlab-auth": "2.1.0",
-        "opencode-poe-auth": "0.0.1",
         "opentui-spinner": "catalog:",
         "partial-json": "0.1.7",
         "protobufjs": "^7.6.5",
@@ -4162,8 +4161,6 @@
 
     "opencode-gitlab-auth": ["opencode-gitlab-auth@2.1.0", "", { "dependencies": { "@fastify/rate-limit": "^10.2.0", "@opencode-ai/plugin": "*", "fastify": "^5.2.0", "open": "^10.0.0" } }, "sha512-ZCDYaY0V8Se6hOH2tqZqqcskrd0xLTgfiGhU0J1igkUP52oFtN9eSwxOPLT0ctvNXUq8b+zOmJ4sskAQoC/IUA=="],
 
-    "opencode-poe-auth": ["opencode-poe-auth@0.0.1", "", { "dependencies": { "open": "^10.0.0", "poe-oauth": "*" }, "peerDependencies": { "@opencode-ai/plugin": "*" } }, "sha512-cXqTlS6AXHzo1oBdosnxbT47ZJEZ9WXn050X8Re6wZ1vaNnTpB/l2fMQt90evT7RBK0fB8UjXQUDMKyd7bbiqg=="],
-
     "openid-client": ["openid-client@5.6.4", "", { "dependencies": { "jose": "^4.15.4", "lru-cache": "^6.0.0", "object-hash": "^2.2.0", "oidc-token-hash": "^5.0.3" } }, "sha512-T1h3B10BRPKfcObdBklX639tVz+xh34O7GjofqrqiAQdm7eHsQ00ih18x6wuJ/E6FxdtS2u3FmUGPDeEcMwzNA=="],
 
     "opentui-spinner": ["opentui-spinner@0.0.7", "", { "dependencies": { "cli-spinners": "^3.3.0" }, "peerDependencies": { "@opentui/core": "^0.3.4", "@opentui/react": "^0.3.4", "@opentui/solid": "^0.3.4", "typescript": "^5" }, "optionalPeers": ["@opentui/react", "@opentui/solid"] }, "sha512-nPzwAvJG+y9rVEwwHLHqbsMzLnIk2zw+F9LqwA7aYJvpM5gsrKC2rrGi36A+tZpA+1RnWxXeWEgVZMchnaH18Q=="],
@@ -4277,8 +4274,6 @@
     "pkg-types": ["pkg-types@2.3.1", "", { "dependencies": { "confbox": "^0.2.4", "exsolve": "^1.0.8", "pathe": "^2.0.3" } }, "sha512-y+ichcgc2LrADuhLNAx8DFjVfgz91pRxfZdI3UDhxHvcVEZsenLO+7XaU5vOp0u/7V/wZ+plyuQxtrDlZJ+yeg=="],
 
     "pkg-up": ["pkg-up@3.1.0", "", { "dependencies": { "find-up": "^3.0.0" } }, "sha512-nDywThFk1i4BQK4twPQ6TA4RT8bDY96yeuCVBWL3ePARCiEKDRSrNGbFIgUJpLp+XeIR65v8ra7WuJOFUBtkMA=="],
-
-    "poe-oauth": ["poe-oauth@0.0.8", "", {}, "sha512-zlaRVLR6vuxBIYUkZoTIVo3f8h3qd27gv9Ms+kmGiYEiiV4TdccddTdNcGyI0DnuJ9tVi+5LP3Bvzez59IFbjw=="],
 
     "possible-typed-array-names": ["possible-typed-array-names@1.1.0", "", {}, "sha512-/+5VFTchJDoVj3bhoqi6UeymcD00DAwb1nJwamzPvHEszJ4FpF6SNNbUbOS8yI56qHzdV8eK0qEfOSiodkTdxg=="],
 

@@ -50,7 +50,7 @@ async function fetchProviderIcons() {
     .then((res) => res.json())
     .then((json) => Object.keys(json))
   await Promise.all(
-    providers.map((provider) =>
+    providers.filter((provider) => provider !== "poe").map((provider) =>
       fetch(`${url}/logos/${provider}.svg`)
         .then((res) => res.text())
         .then((svg) => fs.writeFileSync(`./src/assets/icons/provider/${provider}.svg`, svg)),

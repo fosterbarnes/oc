@@ -15,7 +15,6 @@ import { NamedError } from "@opencode-ai/core/util/error"
 import { CopilotAuthPlugin } from "./github-copilot/copilot"
 import { ModalPlugin } from "./modal/modal"
 import { gitlabAuthPlugin as GitlabAuthPlugin } from "opencode-gitlab-auth"
-import { PoeAuthPlugin } from "opencode-poe-auth"
 import { CloudflareAIGatewayAuthPlugin, CloudflareWorkersAuthPlugin } from "./cloudflare"
 import { AzureAuthPlugin } from "./azure"
 import { DigitalOceanAuthPlugin } from "./digitalocean"
@@ -76,7 +75,6 @@ function internalPlugins(flags: RuntimeFlags.Info): PluginInstance[] {
     CopilotAuthPlugin,
     ModalPlugin,
     GitlabAuthPlugin,
-    PoeAuthPlugin,
     CloudflareWorkersAuthPlugin,
     CloudflareAIGatewayAuthPlugin,
     AzureAuthPlugin,

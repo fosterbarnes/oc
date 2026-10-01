@@ -19,7 +19,7 @@ import { Script } from "@opencode-ai/script"
 import pkg from "../package.json"
 
 // Custom fork: preview binaries display the local maintenance version without changing release metadata.
-// Line 1 is the base version; line 2 is the local revision counter.
+// The patch component is the local revision counter.
 const maintenanceVersion = (await Bun.file(path.resolve(dir, "../../.version/version")).text()).split("\n")[0].trim()
 if (!/^\d+\.\d+\.\d+$/.test(maintenanceVersion)) {
   throw new Error(`Invalid maintenance version: ${maintenanceVersion}`)

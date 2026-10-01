@@ -115,6 +115,8 @@ function readOcConfig(): {
   homeDir: string
   homeDirSort: string
   serverStartOnWindowsUserStart: boolean
+  reviveExe: string
+  reviveInstallExe: string
 } {
   const fallbackDir = os.homedir()
   const fallbackSort = "name"
@@ -127,6 +129,7 @@ function readOcConfig(): {
         homeDir?: unknown
         homeDirSort?: unknown
         server?: { startOnWindowsUserStart?: unknown }
+        revive?: { exe?: unknown; installExe?: unknown }
       }
     }
     const parsed = parse(ocConfigPath())
@@ -139,7 +142,9 @@ function readOcConfig(): {
     const sortRaw = typeof merged.homeDirSort === "string" ? merged.homeDirSort.trim().toLowerCase() : fallbackSort
     const homeDirSort = sortRaw === "modified" ? "modified" : "name"
     const serverStartOnWindowsUserStart = merged.server?.startOnWindowsUserStart === true
-    return { executable, ocDir, homeDir, homeDirSort, serverStartOnWindowsUserStart }
+    const reviveExe = typeof merged.revive?.exe === "string" ? merged.revive.exe.trim() : ""
+    const reviveInstallExe = typeof merged.revive?.installExe === "string" ? merged.revive.installExe.trim() : ""
+    return { executable, ocDir, homeDir, homeDirSort, serverStartOnWindowsUserStart, reviveExe, reviveInstallExe }
   } catch {
     return {
       executable: "",
@@ -147,6 +152,8 @@ function readOcConfig(): {
       homeDir: fallbackDir,
       homeDirSort: fallbackSort,
       serverStartOnWindowsUserStart: false,
+      reviveExe: "",
+      reviveInstallExe: "",
     }
   }
 }
@@ -338,6 +345,33 @@ function persistOcConfig(
       finish(false)
     })
   })
+}
+
+// Run the oc.json revive executables straight from the TUI, with no agent turn. Detached and
+// unref'd because the revive scripts shut this process down.
+function hardReviveCommands(toast: ToastContext) {
+  const config = readOcConfig()
+  const run = (exe: string) => () => {
+    spawn(exe, [], { detached: true, stdio: "ignore", windowsHide: true })
+  }
+  return [
+    {
+      name: "oc.hard_revive",
+      title: "Hard revive oc",
+      category: "System",
+      hidden: !config.reviveExe,
+      slashName: "hard-revive",
+      run: run(config.reviveExe),
+    },
+    {
+      name: "oc.hard_revive_install",
+      title: "Hard revive and install oc",
+      category: "System",
+      hidden: !config.reviveInstallExe,
+      slashName: "hard-revive-&-install",
+      run: run(config.reviveInstallExe),
+    },
+  ]
 }
 
 const appGlobalBindingCommands = [
@@ -917,6 +951,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
           dialog.replace(() => <CommandPaletteDialog category="oc" />)
         },
       },
+      ...hardReviveCommands(toast),
       {
         name: "session.list",
         title: "Switch session",
