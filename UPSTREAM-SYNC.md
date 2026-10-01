@@ -9,7 +9,7 @@ changes to the customized parent only after a content comparison.
 - Isolated upstream source: `C:\Users\user\Documents\GitHub\oc\UPSTREAM\opencode`
 - Upstream remote: `https://github.com/anomalyco/opencode`
 - Upstream branch: `dev`
-- Parent remote: `https://github.com/fosterbarnes/opencode`
+- Parent remote: `https://github.com/fosterbarnes/oc`
 - Parent branch: `main`
 
 ## Workflow
@@ -40,8 +40,8 @@ changes to the customized parent only after a content comparison.
 8. After a successful apply that advances the isolated `dev` SHA, bump the
    last number of `.version/version` (for example `0.0.8` to `0.0.9`). Do this
    before the Windows dist build so the TUI display version matches. Do not bump
-   OpenCode's package version. `syncAndInstall.ps1` does this bump when the new
-   upstream SHA differs from the stored baseline.
+   OpenCode's package version. `syncAndInstall.ps1` does not bump it; the agent
+   running the sync does, per `AGENTS.md` Revision.
 9. Leave the parent changes uncommitted for review. Do not reset, stash, commit,
    or push unless the user explicitly requests it.
 
@@ -51,7 +51,7 @@ Protect these areas during synchronization:
 
 - `.install.ps1` and `.scripts\*` local automation
 - `.version\version` maintenance versioning
-- `AGENTS.md`, `SCRIPTS.md`, `buildNotes.md`, `README.md`, `README.oc.md`, and this guide
+- `AGENTS.md`, `SCRIPTS.md`, `buildNotes.md`, `README.md`, `README.OG.md`, and this guide
 - TUI maintenance display-version behavior in the core, build, plugin, and TUI
   adapter/sidebar paths
 - Custom declaration fixes in the app and enterprise packages
@@ -59,7 +59,7 @@ Protect these areas during synchronization:
 These are examples, not an exhaustive allowlist. Compare the validated
 baseline, current parent, and refreshed upstream before deciding whether any
 overlap is upstream drift or intentional fork behavior. After a successful
-apply, walk the Tracking table in `README.md`. Update **Upstream** and the
+apply, walk the Tracking table in `README.OG.md`. Update **Upstream** and the
 compared-against SHA when native behavior moved. Do not replace that table
 with upstream's README.
 

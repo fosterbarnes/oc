@@ -44,7 +44,7 @@ $CONFIG = @{
     BackupSuffix   = '.bak'
     UpstreamRel    = 'UPSTREAM\opencode'
     UpstreamRemote = 'anomalyco/opencode'
-    ParentRemote   = 'fosterbarnes/opencode'
+    ParentRemote   = 'fosterbarnes/oc'
     StateFile      = Join-Path $PSScriptRoot 'upstream-sync.state.json'
     DefaultBaselineSha = '5cd8e68fdd72b27818d26d168b9c7a06b359567e'
 }

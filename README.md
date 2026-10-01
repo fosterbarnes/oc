@@ -6,7 +6,7 @@ OC is a personal, Windows-first OpenCode: native `oc` launcher, extra model prov
 
 Use this file to agree on what OC *is*. Statuses describe current state. They do not authorize implementation work.
 
-Last reviewed: 2026-09-24
+Last reviewed: 2026-09-30
 
 ---
 
@@ -26,12 +26,12 @@ Counts below are for **active** rows only. Retired work is listed separately and
 
 | Level | Count |
 |---|---:|
-| ~done~ | 18 |
-| high | 20 |
-| medium | 23 |
+| ~done~ | 19 |
+| high | 21 |
+| medium | 22 |
 | low | 0 |
 | CRITICAL | 3 |
-| **Total** | **64** |
+| **Total** | **65** |
 
 ---
 
@@ -41,7 +41,7 @@ Counts below are for **active** rows only. Retired work is listed separately and
 - Related backend plumbing is folded into the user-facing feature it supports.
 - Companion pieces that live next to this repo (`octray`, Everything Search, SuperPlan agents) are included when they are part of daily OC use.
 - Status is conservative: tests and source are not enough for **~done~** when a rebuild, login, or interactive check is still part of the feature.
-- `README.OG.md` tracks native OpenCode (Now / Keep / Upstream). Localized `README.*.md` files still lag that native page. Hosted docs at opencode.ai remain upstream.
+- `README.OG.md` tracks native OpenCode (Now / Keep / Upstream). Hosted docs at opencode.ai remain upstream.
 
 ---
 
@@ -71,12 +71,12 @@ Get into a project quickly, keep a local server running, and control it from the
 | Separate home vs OC directory | high | Bare `oc` and relative project names can use two different folders. Absolute paths stay absolute. | Latest palette settings may still need a rebuild/restart to show in the running app. |
 | New-session project picker | high | Tray/palette "New session" starts the intro, then the real OpenCode project picker, then attaches to the running server. | The intermediate full-screen list was tried and dropped. Confirm the installed `oc.exe` shows the intended picker. |
 | Startup loading animation | medium | Column-sweep animation while the server and session come up. | Visual sign-off in the running app is still thin. |
-| Resident background server | medium | Local server stays up between launches (production port **4096**). Palette can shut down or restart it. Attach can forward model/agent. A stale server record no longer adds a 10-second wait on the first `oc` launch; a launch during an active restart still waits for the replacement. | Full installed shutdown/restart flow is not fully signed off. |
+| Resident background server | medium | Local server stays up between launches (production port **4096**). Palette can shut down or restart it. Attach can forward model/agent. A stale server record no longer adds a 10-second wait on the first `oc` launch; a launch during an active restart still waits for the replacement. On Windows the server starts through a hidden `Start-Process` hop, so it has a hidden console (no flashing windows from its child processes) and outlives the launcher. | Full installed shutdown/restart flow is not fully signed off. |
 | Start server at Windows sign-in | high | OC settings can turn sign-in auto-start on or off. | Final installed palette click is not recorded. |
 | `oc --kill-server` / `--restart-server` | high | Simple flags for the tray and CLI to stop or bounce the resident server without a full TUI. | Tray wiring exists; treat as nearly done once it is used from a cold start. |
 | Faster command startup | ~done~ | Only the command asked for is loaded. `--version` is much quicker. | None realistic. |
 | Windows tray (`octray`) | medium | Separate tray app: open OC, open the project picker, start the server if it is down, restart/shut down the server. | Logs, live status, and settings menu items are still thin. Not inside this git checkout. |
-| No browser/desktop OpenCode app | ~done~ | This checkout no longer builds the website UI or Electron desktop app. CLI, TUI, and API remain. `README.OG.md` states that. | Localized `README.*.md` files and some `packages/web` pages still mention desktop / `opencode web`. Intentional removal, not a missing product. |
+| No browser/desktop OpenCode app | ~done~ | This checkout no longer builds the website UI or Electron desktop app. CLI, TUI, and API remain. `README.OG.md` states that. | Some `packages/web` pages still mention desktop / `opencode web`. Intentional removal, not a missing product. |
 
 ---
 
@@ -167,7 +167,7 @@ Build safely, install without fighting locks, and keep logs.
 
 | Feature | Level | What it does | What's left |
 |---|---|---|---|
-| PowerShell build / install / release | ~done~ | Scripts for build, debug build, check, install, commit, publish, archives. Installer rebuilds by default, stops running OC first, can keep a timestamped backup. | Agents must not run installers (they can kill the host). |
+| PowerShell build / install / release | ~done~ | Scripts for build, debug build, install, pre-push check, push, release, upstream sync, safe shutdown, and revive. Installer rebuilds by default, stops running OC first, can keep a timestamped backup. | Agents must not run installers (they can kill the host). |
 | Agent-safe build vs user install | ~done~ | Agents can build. Install later with `-NoBuild`. Debug-only install does not touch production. | None realistic. |
 | `oc.exe` / `occ.exe` hard links | ~done~ | Installer links those names to the same production binary and accepts a valid link set. | None realistic. |
 | Stop processes before rebuild | ~done~ | Installer stops managed processes *before* build so `ocdebug.exe` cannot lock cleanup. | None realistic. |
@@ -280,7 +280,6 @@ These used to be customizations. They are history, not a backlog.
 |---|---|
 | `README.md` | **This file.** Living definition of OC. |
 | `README.OG.md` | Native OpenCode map: Now / Keep / Upstream. Not the OC product list. |
-| `Custom Feature List.md` | Earlier inventory (2026-09-16). Historical. Do not treat as current. |
 | `SCRIPTS.md` | How to build, install, and sync. |
 | `UPSTREAM-SYNC.md` | How upstream is applied without dropping custom work. |
 | `AGENTS.md` | Agent working rules for this checkout. |

@@ -53,7 +53,7 @@ Example compact Agent notes:
 ### Project invariants (do not regress)
 - Isolated upstream lives at `UPSTREAM\opencode`; custom source stays in the parent checkout. Sync via `UPSTREAM-SYNC.md` / `.scripts\syncAndInstall.ps1`; no unrelated-history merge; do not commit/push unless asked.
 - Version SoT is `.version\version` (maintenance display only; do not bump OpenCode package version). Agents never edit `buildNotes.txt`.
-- Default branch is `dev`. Do not ship `opencode.exe` compiled with Bun 1.4.0 (`bun:ffi` TUI crash).
+- Default branch is `main` (`dev` is the UPSTREAM checkout). Do not ship `opencode.exe` compiled with Bun 1.4.0 (`bun:ffi` TUI crash).
 - Do not treat empty tool lists as compaction. Protect local `.scripts`, `.version`, `AGENTS.md`, `SCRIPTS.md`, `buildNotes.md`, `UPSTREAM-SYNC.md`, `CONTEXT.md`, TUI display-version, and custom declaration fixes during upstream apply.
 - Installer may stop running `opencode` processes; do not kill them from other agent work. Live install often blocked while `C:\Users\user\Apps\opencode\opencode.exe` is in use.
 
@@ -75,8 +75,10 @@ Example compact Agent notes:
 - Added DB unknown-migration refusal after stock OpenCode 2.0.6 changed shared database; restore backup and isolate stock build data. Local sqlite3 3.22 cannot DROP COLUMN.
 - Kept upstream ports for Gemini thinking defaults, Bedrock tool-result images, GPT-6 Codex allowlist and debug credential redaction; working Luna route openai/gpt-6-luna; Poe GPT-5.6 routes failed.
 - MISTAKE: PowerShell HOME read-only; use testHome and verify filesystem isolation. Never reconstruct plan paths. Parallel proxy edits can report rejection despite applying; issue edits one at a time.
-- ERROR / baseline: TUI local.tsx:188 generated BadRequest lacks message; full tests have unrelated event/session-bootstrap/plugin failures; two Instruction.system tests discover home AGENTS.md. Live provider/terminal checks often require user installation.
+- ERROR / baseline: `bun typecheck` clean in opencode and tui as of v0.2.23 (old local.tsx:188 diagnostic gone); full tests have unrelated event/session-bootstrap/plugin failures; two Instruction.system tests discover home AGENTS.md. Live provider/terminal checks often require user installation.
 - Latest archive4 sessions removed Poe assets/dependency and simplified revision file; current source and README remain authoritative for other work. Historical entries and detailed fixes preserved in archive4.
+- Removed (2026-09-30 doc cleanup): r20 entry (`.scripts/lib/stopResidents.ps1`, sidebar elevated installer/sendoff) superseded by r21 `safeShutdown.ps1`; v0.2.22 plugin-era bullets (`plugins/runAfterTurn.ts`, `tuiPlugins/hardRevive.ts`) superseded by native `run_after_turn` and `/hard-revive`. Deleted `Custom Feature List.md`.
+- MISTAKE (r20): agent called force-kill "safe cancellation" and edited during read-only discussion; cancellation must be explicit and agents never run installers.
 
 ## User
 - Local scripts build, check, run, install and sync this fork. Upstream changes are reviewed against a separate checkout. Agents do not run live installers.
@@ -90,10 +92,34 @@ Example compact Agent notes:
 
 ---
 
+## 2026-09-30 (~20:52) - v0.2.24 - Stale documentation cleanup - Claude Opus 5.5, low effort; Cleanup
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Cleanup (fpcmd, 3 read-only audit sub-agents); completed
+- Version: 0.2.24
+- Removed `Custom Feature List.md`, `task_plan.md`, `findings.md` (user approved); dropped their references
+- Fixed `.scripts/syncAndInstall.ps1` `ParentRemote` and `scriptHelper.ps1` `$ghRepo`: `fosterbarnes/opencode` -> `fosterbarnes/oc`. Origin check at syncAndInstall.ps1:420 would throw on the renamed repo; pushRelease targeted the old name
+- Fixed AGENTS.md: default branch `main` (not `dev`); `requireBunForCompile` callers include buildDebug/.runDebug; root test guard wording; removed stale `local.tsx:188` typecheck baseline (opencode and tui typecheck clean)
+- Fixed SCRIPTS.md/UPSTREAM-SYNC.md: no script bumps `.version/version` (agent does, per AGENTS.md Revision); added revive rows; `README.oc.md` -> `README.OG.md`; Tracking table lives in README.OG.md
+- Fixed README.md: level counts 19/21/22/3 = 65; resident server row notes Windows `Start-Process` hop; script list matches `.scripts`; review date. README.OG.md: removed 21 dead localized README links; row now removed/gone (deleted v0.1.5)
+- Rewrote buildNotes history (user ordered): removed r20 entry and v0.2.22 plugin-era bullets (superseded); summary records what was removed
+- Kept: `run_after_turn` stays detached (user choice); README caveat stays. Upstream-owned docs (packages/*, specs/) not audited
+- TODO (unclear, not changed): README L175 says hidden `taskkill` windows but `killTuiProcesses` `Bun.spawnSync` has no `windowsHide`; undocumented `-SkipInstall` on build scripts, `syncAndInstall -SelfCheck`
+- Verification: PowerShell parse of both edited scripts 0 errors; `bun typecheck` clean in tui; no em dashes in edited docs
+
+### User
+Docs
+- Project docs now match the current code: branch name, scripts, versioning, feature counts, and the background server launch.
+- Removed three outdated planning and inventory files.
+Scripts
+- The upstream sync and release scripts now point at the renamed `fosterbarnes/oc` repository, so the sync no longer refuses to run.
+
+---
+
 ## 2026-09-30 (~20:42) - v0.2.23 - Stop console window flashes from the resident server - Claude Opus 5.5, low effort; Debug
 
 ### Agent
-- Meta: Claude Opus 5.5; low effort; Debug; completed, installed build not yet checked by user
+- Meta: Claude Opus 5.5; low effort; Debug; completed, user confirmed live
 - Version: 0.2.23
 - Fixed root cause of console flashes: resident server spawned with `detached: true` = libuv `DETACHED_PROCESS` (no console; `CREATE_NO_WINDOW` ignored), so every console child of the server (cmd/claude --version, reg query, MCP node/uv, rg, cmd taskkill on Esc, shell tools) got a new visible conhost
 - Added `spawnResident` in `packages/opencode/src/config/oc.ts`: on win32 runs hidden non-detached `pwsh -Command Start-Process ... -WindowStyle Hidden`; server gets its own hidden console, children inherit it. Exe/args passed via `OC_SPAWN_EXE`/`OC_SPAWN_ARGS` env, removed before Start-Process. Resolves on pwsh exit 0. Non-win32 keeps detached spawn
@@ -118,24 +144,19 @@ Windows
 - Added `.scripts/revive.ps1`: elevated copy runs `safeShutdown.exe` and exits; non-admin copy starts it with `-Verb RunAs -Wait`, then opens `Desktop\occ.lnk` so WezTerm stays unelevated (FancyZones cannot snap elevated windows)
 - Added `.scripts/reviveAndInstall.ps1`: same flow, runs `install.ps1 @args` between shutdown and reopen; hardcoded install path because pwshXer exes run a temp copy of the script (`$PSScriptRoot` is `%TEMP%\pwshXer`)
 - Kept `revive.exe`/`reviveAndInstall.exe` as pwshXer wrappers; they pass args through. Rebuild them after editing the `.ps1`
-- Added user-level `~\.config\opencode\plugins\runAfterTurn.ts`: `runAfterTurn({ exe, args })` queues per session and spawns detached on `session.idle`
-- Added user commands `~\.opencode\commands\revive.md` and `revive-&-install.md`; both only queue their exe (no agent-side build)
-- Added `~\.config\opencode\tuiPlugins\hardRevive.ts` (registered in `tui.json` `plugin`): `/hard-revive` and `/hard-revive-&-install` palette commands spawn the exes directly, no agent turn. Kept out of `plugins/` because the server scans that folder
-- Added permission rule to `runAfterTurn` description: revive exes need the /revive command or user approval
+- Added user commands `~\.opencode\commands\revive.md` and `revive-&-install.md`; both only call `run_after_turn` with their exe (no agent-side build)
 - Fixed `/revive-&-install` hang at build.ts `bun install`: empty `HKCU\Environment\BUN_INSTALL` (reloaded by WezTerm) makes bun install spin forever. Deleted the value; `requireBunForCompile` in `.scripts/scriptHelper.ps1` now removes an empty `BUN_INSTALL` before any build
 - ERROR: `[Environment]::SetEnvironmentVariable('BUN_INSTALL', $null, 'User')` did not delete the empty value; `reg delete` did
 - Risk: `install.ps1` `assertExternalInstall` reads inherited `OPENCODE_PID`; passes only because the host is dead by then
 - MISTAKE: `IsInRole('Administrator')` checked a nonexistent group and relaunched forever; use `IsInRole(544)`
-- MISTAKE: first plugin/skill/command design was overbuilt; keep agent hooks to one generic run-after-turn tool
+- MISTAKE: first plugin/skill/command design (user-level plugins, since removed) was overbuilt; keep agent hooks to one generic run-after-turn tool
 - Added native `run_after_turn` tool (`packages/opencode/src/tool/run-after-turn.ts`, registered in `tool/registry.ts`): asks permission `run_after_turn` (default allow), queues per session, spawns detached on `session.status` idle via `EventV2Bridge.listen`; spawn `error` is logged, not thrown. Not `CrossSpawnSpawner`: it kills children on scope release
 - Added native `/hard-revive` and `/hard-revive-&-install` in `packages/tui/src/app.tsx` (`hardReviveCommands`), reading oc.json `revive.exe` / `revive.installExe` (type in `config/oc.ts`); hidden when unset, toast on spawn error
 - Added `test/tool/run-after-turn.test.ts` (idle-gated spawn, other-session idle ignored, missing exe does not crash)
 - Set user `oc.json` `revive` paths; added revive rule to `principles.md`; README row added
 - Gated `run_after_turn`: user `opencode.jsonc` sets `run_after_turn` `"*": "ask"` with `.scripts\revive*.exe` allowed (global and repeated after `build`'s `"*": "allow"`, since rules are last-match); tool description and `principles.md` say other uses need the user's explicit approval. Checked with `Permission.evaluate`: revive exes allow, other exe ask
-- Done after install: renamed `runAfterTurn` to `run_after_turn` in `~\.opencode\commands\revive*.md`, drop `tuiPlugins/hardRevive.ts` from `tui.json`, delete `plugins\runAfterTurn.ts` and `tuiPlugins\` (deferred so the installed build keeps working until then)
 - ERROR: a detached `pwsh` (DETACHED_PROCESS, no console) exits 0 without running its command; queue console apps that open their own window
-- Verification (native): `bun test test/tool/run-after-turn.test.ts` 2 pass; `test/tool/registry.test.ts` 15 pass; `bun typecheck` clean in opencode and tui; `.scripts\build.ps1` passed; user confirmed live after install
-- Verification: user ran `/revive` successfully; plugin compiled with `bun build`; `/revive-&-install` not confirmed
+- Verification: `bun test test/tool/run-after-turn.test.ts` 2 pass; `test/tool/registry.test.ts` 15 pass; `bun typecheck` clean in opencode and tui; `.scripts\build.ps1` passed; user confirmed `/revive` live after install; `/revive-&-install` not confirmed
 
 ### User
 Scripts
@@ -163,24 +184,5 @@ Agents
 Local scripts
 - `safeShutdown.ps1` attempts graceful cancellation and shutdown, then force-stops detected OpenCode processes and confirms they are gone.
 - `safeShutdown.ps1` also closes WezTerm after OpenCode processes are confirmed stopped.
-
----
-
-## 2026-09-30 (~16:02) - r20 - Graceful sidebar installer shutdown - GPT-6.1 Sol, reasoning; Implementation
-
-### Agent
-- Meta: GPT-6.1 Sol; reasoning; Implementation; script checks passed; live install not run
-- Added `.scripts/lib/stopResidents.ps1`: resident-state credentials, paginated global session directories, session abort and idle wait, global shutdown and process exit wait; failures abort before force-stop.
-- Refused unmanaged CLI runs/servers; kept sendoff explicit process exit for sidebar NoExit launcher.
-- Updated elevated installer and SCRIPTS.md; kept existing build/install path and no WezTerm reopening.
-- Verification: read-only InspectOnly authenticated to production and found current active session; PowerShell parser and targeted diff checks passed. Cancellation/shutdown/install remain user live checks.
-- Rotated prior 1144-line buildNotes.md verbatim to archive4; incremented revision 0.2.19 to 0.2.20.
-- MISTAKE: earlier agent called force-kill safe cancellation and edited during read-only discussion; cancellation now explicit and no installer executed by this agent.
-
-### User
-Installation
-- The sidebar installer cancels resident agent runs and waits for server shutdown before closing OpenCode and WezTerm.
-- If graceful cancellation or shutdown fails, installation stops instead of force-killing active runs.
-- The sendoff still closes its launch window, and installation does not reopen WezTerm.
 
 ---

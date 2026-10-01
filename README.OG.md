@@ -14,36 +14,11 @@
   <a href="https://github.com/anomalyco/opencode/actions/workflows/publish.yml"><img alt="Build status" src="https://img.shields.io/github/actions/workflow/status/anomalyco/opencode/publish.yml?style=flat-square&branch=dev" /></a>
 </p>
 
-<p align="center">
-  <a href="README.md">English</a> |
-  <a href="README.zh.md">简体中文</a> |
-  <a href="README.zht.md">繁體中文</a> |
-  <a href="README.ko.md">한국어</a> |
-  <a href="README.de.md">Deutsch</a> |
-  <a href="README.es.md">Español</a> |
-  <a href="README.fr.md">Français</a> |
-  <a href="README.it.md">Italiano</a> |
-  <a href="README.da.md">Dansk</a> |
-  <a href="README.ja.md">日本語</a> |
-  <a href="README.pl.md">Polski</a> |
-  <a href="README.ru.md">Русский</a> |
-  <a href="README.bs.md">Bosanski</a> |
-  <a href="README.ar.md">العربية</a> |
-  <a href="README.no.md">Norsk</a> |
-  <a href="README.br.md">Português (Brasil)</a> |
-  <a href="README.th.md">ไทย</a> |
-  <a href="README.tr.md">Türkçe</a> |
-  <a href="README.uk.md">Українська</a> |
-  <a href="README.bn.md">বাংলা</a> |
-  <a href="README.gr.md">Ελληνικά</a> |
-  <a href="README.vi.md">Tiếng Việt</a>
-</p>
-
 [![OpenCode Terminal UI](packages/web/src/assets/lander/screenshot.png)](https://opencode.ai)
 
 This file is the native-OpenCode map for this checkout (Now / Keep / Upstream). It records which stock surfaces still live here, whether they should stay stock, and whether they match isolated upstream or are pinned / lagging / gone on purpose.
 
-Fork-only OC work stays in [README.md](./README.md). Do not copy those rows here. Localized `README.*.md` files lag this English file.
+Fork-only OC work stays in [README.md](./README.md). Do not copy those rows here.
 
 Last reviewed: 2026-09-21. Compared against isolated `UPSTREAM/opencode` at `5cd8e68` (same SHA as `.scripts/upstream-sync.state.json`). That nested checkout is the sync source of truth.
 
@@ -99,7 +74,7 @@ Add a row when a native surface lands, is overlaid, is pinned, or is deleted. Af
 | Desktop / Electron | removed | removed | gone | `packages/desktop` gone. |
 | Web app / `opencode web` | removed | removed | gone | `packages/app` and `WebCommand` gone. `packages/web` docs source remains; it is not a shipped app. |
 | Docs site source | native | native | lag | `packages/web` still has leftover desktop / `opencode web` wording. |
-| Localized `README.*.md` | native | native | lag | Still the old truncated translations. |
+| Localized `README.*.md` | removed | removed | gone | Deleted in v0.1.5. Isolated upstream still has 21. |
 | Install / run | mixed | mixed | gone | This checkout: `bun dev` and `.scripts` (see `SCRIPTS.md`). Upstream curl/npm/brew installers are not this fork. |
 
 ---

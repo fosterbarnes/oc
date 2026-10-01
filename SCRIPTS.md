@@ -14,9 +14,11 @@ Project automation lives in `.scripts/`. Scripts target PowerShell 7 and fail on
 | `.scripts/updateUpstream.ps1` | Fetches and fast-forwards the separate `UPSTREAM\opencode` checkout without modifying this customized parent checkout. |
 | `.scripts/syncAndInstall.ps1` | Fail-closed upstream sync into this custom fork, then verify, backup, stop `opencode.exe`, and install. |
 | `.scripts/push.ps1` | Commits parent changes with a supplied or prompted message, then pushes the current branch. It does not rewrite `.version/version` and does not stage `UPSTREAM/`. `-Force` is explicit. |
-| `.scripts/pushRelease.ps1` | Tags and publishes archives from `packages/opencode/dist` to `fosterbarnes/opencode` using the `.version/version` maintenance version. Existing tags are not force-moved. |
+| `.scripts/pushRelease.ps1` | Tags and publishes archives from `packages/opencode/dist` to `fosterbarnes/oc` using the `.version/version` maintenance version. Existing tags are not force-moved. |
 | `.scripts/install.ps1` | User-only build-and-install of both `opencode.exe` and `ocdebug.exe`. `-NoBuild`/`-nb` installs existing artifacts. It stops OpenCode processes and must not run from an agent. |
 | `.scripts/safeShutdown.ps1` | Admin-only shutdown: cancel sessions on discoverable resident servers, request shutdown, force-stop and verify remaining OpenCode processes, then stop WezTerm. `-WhatIf` inspects without stopping anything. |
+| `.scripts/revive.ps1` / `revive.exe` | Runs `safeShutdown` elevated, then reopens oc through `Desktop\occ.lnk` as a normal window. The `.exe` is a pwshXer wrapper; rebuild it after editing the `.ps1`. |
+| `.scripts/reviveAndInstall.ps1` / `reviveAndInstall.exe` | Same as `revive`, running `install.ps1` between shutdown and reopen. |
 | `.scripts/installDebug.ps1` | User-only debug install. Builds (unless `-NoBuild`/`-nb`) and replaces only `ocdebug.exe`; production OpenCode processes are left alone. |
 | `.scripts/.runDebug.ps1` | Same as `.run.ps1`, with `OPENCODE_INSTANCE=debug` and DEBUG logs. |
 
@@ -76,11 +78,11 @@ confirmed custom behavior.
 
 The standalone build is the repository's `packages/opencode/script/build.ts --single` flow. A normal `build.ps1` run emits `dist/opencode-windows-x64/bin/opencode.exe` and `dist/opencode-debug-windows-x64/bin/ocdebug.exe`; `buildDebug.ps1` emits only the latter. The install script only supports the current Windows architecture and does not alter PATH.
 
-`build.ps1` and `.run.ps1` call `requireBunForCompile` in `scriptHelper.ps1` before invoking Bun. Stable Bun 1.4.0 (`34cbb9a40`) is rejected because it embeds the Windows TUI `bun:ffi` FTL segfault (oven-sh/bun#39829). When PATH bun is 1.4.0 or older, the script runs `bun upgrade --canary` and refuses to compile if the version is still 1.4.0. The compiled `opencode.exe` contains that Bun runtime; upgrading PATH bun after an old compile does not fix an already-installed exe.
+`build.ps1`, `buildDebug.ps1`, `.run.ps1`, and `.runDebug.ps1` call `requireBunForCompile` in `scriptHelper.ps1` before invoking Bun. Stable Bun 1.4.0 (`34cbb9a40`) is rejected because it embeds the Windows TUI `bun:ffi` FTL segfault (oven-sh/bun#39829). When PATH bun is 1.4.0 or older, the script runs `bun upgrade --canary` and refuses to compile if the version is still 1.4.0. The compiled `opencode.exe` contains that Bun runtime; upgrading PATH bun after an old compile does not fix an already-installed exe.
 
 ## Version and release
 
-`.version\version` is a maintenance-only semantic version for these local scripts. It is intentionally separate from OpenCode's package version. Each successful daily upstream apply that advances isolated `dev` increments the last number (`0.0.8` -> `0.0.9`). `pushRelease.ps1` uses `v<maintenance-version>` and uploads archive files under `packages/opencode/dist` to `fosterbarnes/opencode`. It does not force-move an existing tag. `push.ps1` does not rewrite this file.
+`.version\version` is a maintenance-only semantic version for these local scripts. It is intentionally separate from OpenCode's package version. The agent increments the last number once per code-changing session and when an upstream apply advances isolated `dev` (`0.0.8` -> `0.0.9`); no script bumps it (see `AGENTS.md` Revision). `pushRelease.ps1` uses `v<maintenance-version>` and uploads archive files under `packages/opencode/dist` to `fosterbarnes/oc`. It does not force-move an existing tag. `push.ps1` does not rewrite this file.
 
 Do not run `push.ps1` or `pushRelease.ps1` during ordinary validation. They create commits, push branches or tags, and publish GitHub releases. `buildNotes.txt` is not used or modified by these scripts.
 

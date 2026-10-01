@@ -1,16 +1,15 @@
 - To regenerate the legacy JavaScript SDK, run `./packages/sdk/js/script/build.ts`.
 - After changing the public Protocol or Server `HttpApi`, run `bun run generate` from `packages/client`. Do not edit `src/generated` or `src/generated-effect` directly.
 - Keep runtime dependencies directed from Schema to Core and Protocol, then from Core and Protocol to Server. Client runtime code may depend on Schema and Protocol but never Core or Server; `sdk-next` composes Client, Core, and Server.
-- The default branch in this repo is `dev`.
-- Local `main` ref may not exist; use `dev` or `origin/dev` for diffs.
+- The default branch in this repo is `main`; use `main` or `origin/main` for diffs. `dev` is the branch of the `UPSTREAM\opencode` checkout.
 - `UPSTREAM\opencode` is the separate upstream-only checkout at `C:\Users\user\Documents\GitHub\oc\UPSTREAM\opencode`. Keep custom source changes in this parent checkout; upstream synchronization must not modify parent source files.
-- Windows TUI segfaults on Bun 1.4.0 (`34cbb9a40`): `bun:ffi` FTL pointer args (oven-sh/bun#39829, #40302). `.scripts\build.ps1` and `.scripts\.run.ps1` call `requireBunForCompile` and will `bun upgrade --canary` when PATH bun is still 1.4.0. Do not ship `opencode.exe` compiled with 1.4.0. Stable 1.4.1 was not published as of 2026-08-31.
+- Windows TUI segfaults on Bun 1.4.0 (`34cbb9a40`): `bun:ffi` FTL pointer args (oven-sh/bun#39829, #40302). `.scripts\build.ps1`, `buildDebug.ps1`, `.run.ps1`, and `.runDebug.ps1` call `requireBunForCompile` and will `bun upgrade --canary` when PATH bun is still 1.4.0. Do not ship `opencode.exe` compiled with 1.4.0. Stable 1.4.1 was not published as of 2026-08-31.
 - Stock OpenCode shares oc's default data dir, so it can migrate `~\.local\share\opencode\opencode.db` into a schema oc cannot read (stock 2.0.6 did on 2026-09-27: FOREIGN KEY failures, "Unexpected server error"). `DatabaseMigration.apply` now refuses unknown migration ids. If oc reports "Database was migrated by a different OpenCode build", find the other version's `database migration started` lines in `opencode.log`, restore a backup, and give that build its own `XDG_DATA_HOME`. Local sqlite3 is 3.22 (no `DROP COLUMN`).
 - Safe local builds: agents may run `.scripts\build.ps1` or `.scripts\buildDebug.ps1`; these never touch `C:\Users\user\Apps\opencode`. Agents must not run `.scripts\install.ps1`, `.scripts\installDebug.ps1`, `.install.ps1`, or normal `.scripts\syncAndInstall.ps1`, because those installers can stop the OpenCode host. After building, tell the user to exit OpenCode and run the relevant installer with `-NoBuild` from a fresh PowerShell.
 
 ## Project definition
 
-- `README.md` is the living definition of this fork. Statuses describe current state; they do not authorize work. Do not treat `Custom Feature List.md` as current. `README.OG.md` tracks native OpenCode in this checkout (Now / Keep / Upstream). Keep fork-only work in `README.md`.
+- `README.md` is the living definition of this fork. Statuses describe current state; they do not authorize work. `README.OG.md` tracks native OpenCode in this checkout (Now / Keep / Upstream). Keep fork-only work in `README.md`.
 
 ## Build notes
 
@@ -170,17 +169,11 @@ const table = sqliteTable("session", {
 
 - Avoid mocks as much as possible, you shouldn't be using globalThis.\* at all unless it's the only option.
 - Test actual implementation, do not duplicate logic into tests
-- Tests cannot run from repo root (guard: `do-not-run-tests-from-root`); run from package dirs like `packages/opencode`.
+- Tests cannot run from repo root (root `test` script prints "do not run tests from root" and exits 1); run from package dirs like `packages/opencode`.
 
 ## Type Checking
 
 - Always run `bun typecheck` from package directories (e.g., `packages/opencode`), never `tsc` directly.
-
-## Known Verification Baseline
-
-- `bun typecheck` currently reports `packages/tui/src/context/local.tsx:188`: generated `EffectHttpApiErrorBadRequest` lacks `.message`.
-- Treat this unchanged diagnostic as pre-existing for unrelated plans. Report it, but do not block closeout.
-- Block only when the plan touches this error path or introduces additional typecheck failures.
 
 ## V2 Session Core
 
