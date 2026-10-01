@@ -674,6 +674,15 @@ export const RunCommand = effectCmd({
           process.exit(1)
         }
         const sessionID = sess.id
+        // A failed prompt both publishes session.error and rejects the request; report only the first.
+        let errorReported = false
+
+        function reportRequestError(err: unknown) {
+          process.exitCode = 1
+          if (errorReported) return
+          errorReported = true
+          if (!emit("error", { error: err })) UI.error(formatRunError(err))
+        }
 
         function emit(type: string, data: Record<string, unknown>) {
           if (args.format === "json") {
@@ -786,6 +795,8 @@ export const RunCommand = effectCmd({
                 err = String(props.error.data.message)
               }
               error = error ? error + EOL + err : err
+              if (errorReported) continue
+              errorReported = true
               if (emit("error", { error: props.error })) continue
               UI.error(err)
             }
@@ -852,8 +863,7 @@ export const RunCommand = effectCmd({
               variant: args.variant,
             })
             if (result.error) {
-              if (!emit("error", { error: result.error })) UI.error(formatRunError(result.error))
-              process.exitCode = 1
+              reportRequestError(result.error)
               return
             }
             await finish()
@@ -869,8 +879,7 @@ export const RunCommand = effectCmd({
             parts: [...files, { type: "text", text: message }],
           })
           if (result.error) {
-            if (!emit("error", { error: result.error })) UI.error(formatRunError(result.error))
-            process.exitCode = 1
+            reportRequestError(result.error)
             return
           }
           await finish()

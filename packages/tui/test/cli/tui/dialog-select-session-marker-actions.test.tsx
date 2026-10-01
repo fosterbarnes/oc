@@ -36,6 +36,7 @@ async function mountSessionMarkerDialog(input: {
   root: string
   onComplete: (id: string) => void
   onFailed: (id: string) => void
+  onInProgress: (id: string) => void
   onSelect: (id: string) => void
   onBlocked: (key: string) => void
 }) {
@@ -111,6 +112,12 @@ async function mountSessionMarkerDialog(input: {
               group: "Input",
               cmd: () => input.onBlocked("failed"),
             },
+            {
+              key: "ctrl+shift+i",
+              desc: "Competing input binding",
+              group: "Input",
+              cmd: () => input.onBlocked("in progress"),
+            },
           ],
         })
         onCleanup(off)
@@ -143,6 +150,11 @@ async function mountSessionMarkerDialog(input: {
                   command: "session.failed.toggle",
                   title: "failed/not failed",
                   onTrigger: (option) => input.onFailed(option.value.id),
+                },
+                {
+                  command: "session.in_progress.toggle",
+                  title: "in progress/unmarked",
+                  onTrigger: (option) => input.onInProgress(option.value.id),
                 },
               ]}
             />
@@ -210,12 +222,14 @@ test("dialog select session marker shortcuts toggle without closing and return s
   await using tmp = await tmpdir()
   const complete: string[] = []
   const failed: string[] = []
+  const inProgress: string[] = []
   const selected: string[] = []
   const blocked: string[] = []
   const dialog = await mountSessionMarkerDialog({
     root: tmp.path,
     onComplete: (id) => complete.push(id),
     onFailed: (id) => failed.push(id),
+    onInProgress: (id) => inProgress.push(id),
     onSelect: (id) => selected.push(id),
     onBlocked: (key) => blocked.push(key),
   })
@@ -262,6 +276,16 @@ test("dialog select session marker shortcuts toggle without closing and return s
     await dialog.app.flush()
     await wait(() => failed.length === 2)
     expect(failed).toEqual(["failed", "failed"])
+    expect(blocked).toEqual([])
+    expect(selected).toEqual([])
+    expect(dialog.isOpen()).toBe(true)
+
+    await waitForActiveCommand(dialog.app, dialog.keymap, "session.in_progress.toggle")
+    dialog.app.mockInput.pressKey("i", { ctrl: true, shift: true })
+    dialog.app.mockInput.pressKey("i", { ctrl: true, shift: true })
+    await dialog.app.flush()
+    await wait(() => inProgress.length === 2)
+    expect(inProgress).toEqual(["failed", "failed"])
     expect(blocked).toEqual([])
     expect(selected).toEqual([])
     expect(dialog.isOpen()).toBe(true)

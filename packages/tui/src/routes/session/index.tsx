@@ -118,6 +118,7 @@ const sessionBindingCommands = [
   "session.rename",
   "session.complete.toggle",
   "session.failed.toggle",
+  "session.in_progress.toggle",
   "session.timeline",
   "session.fork",
   "session.compact",
@@ -617,6 +618,27 @@ export function Session() {
         const result = await sdk.client.session.update({
           sessionID: current.id,
           sessionFailed: !current.sessionFailed,
+        })
+        if (result.error) {
+          toast.show({ message: errorMessage(result.error), variant: "error" })
+          return
+        }
+        dialog.clear()
+      },
+    },
+    {
+      title: session()?.sessionInProgress ? "Mark session unmarked" : "Mark session in progress",
+      value: "session.in_progress.toggle",
+      category: "Session",
+      slash: {
+        name: "in-progress",
+      },
+      run: async () => {
+        const current = session()
+        if (!current) return
+        const result = await sdk.client.session.update({
+          sessionID: current.id,
+          sessionInProgress: !current.sessionInProgress,
         })
         if (result.error) {
           toast.show({ message: errorMessage(result.error), variant: "error" })

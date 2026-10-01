@@ -176,6 +176,9 @@ import type {
   PtyUpdateErrors,
   PtyUpdateResponses,
   QuestionAnswer,
+  QuestionAskErrors,
+  QuestionAskResponses,
+  QuestionInfo,
   QuestionListErrors,
   QuestionListResponses,
   QuestionRejectErrors,
@@ -871,6 +874,7 @@ export class Session extends HeyApiClient {
       start?: number
       cursor?: number
       search?: string
+      status?: "unmarked" | "in_progress" | "complete" | "failed"
       limit?: number
       archived?: boolean | "true" | "false"
     },
@@ -887,6 +891,7 @@ export class Session extends HeyApiClient {
             { in: "query", key: "start" },
             { in: "query", key: "cursor" },
             { in: "query", key: "search" },
+            { in: "query", key: "status" },
             { in: "query", key: "limit" },
             { in: "query", key: "archived" },
           ],
@@ -3090,6 +3095,45 @@ export class Question extends HeyApiClient {
   }
 
   /**
+   * Ask the user a question
+   *
+   * Show a question in the session's UI and wait for the answer.
+   */
+  public ask<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+      sessionID?: string
+      questions?: Array<QuestionInfo>
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "body", key: "sessionID" },
+            { in: "body", key: "questions" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<QuestionAskResponses, QuestionAskErrors, ThrowOnError>({
+      url: "/question/ask",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
    * Reply to question request
    *
    * Provide answers to a question request from the AI assistant.
@@ -3644,6 +3688,7 @@ export class Session2 extends HeyApiClient {
       agent?: string
       sessionComplete?: boolean
       sessionFailed?: boolean
+      sessionInProgress?: boolean
       metadata?: {
         [key: string]: unknown
       }
@@ -3666,6 +3711,7 @@ export class Session2 extends HeyApiClient {
             { in: "body", key: "agent" },
             { in: "body", key: "sessionComplete" },
             { in: "body", key: "sessionFailed" },
+            { in: "body", key: "sessionInProgress" },
             { in: "body", key: "metadata" },
             { in: "body", key: "permission" },
             { in: "body", key: "time" },

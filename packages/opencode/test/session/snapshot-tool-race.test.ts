@@ -136,7 +136,9 @@ it.live("tool execution produces non-empty session diff (snapshot race)", () =>
       })
 
       // Use bash tool (always registered) to create a file
-      const command = `echo 'snapshot race test content' > ${path.join(dir, "race-test.txt")}`
+      // Relative target: the tool runs in the instance directory, and a Windows absolute path
+      // would be mangled by Git Bash when it is the ambient shell.
+      const command = "echo 'snapshot race test content' > race-test.txt"
       yield* llm.toolMatch((hit) => JSON.stringify(hit.body).includes("create the file"), "bash", {
         command,
       })

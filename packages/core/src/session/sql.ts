@@ -59,6 +59,7 @@ export const SessionTable = sqliteTable(
     time_archived: integer(),
     session_complete: integer().notNull().default(0),
     session_failed: integer().notNull().default(0),
+    session_in_progress: integer().notNull().default(0),
   },
   (table) => [
     index("session_project_idx").on(table.project_id),

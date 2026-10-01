@@ -267,6 +267,96 @@ describe("experimental HttpApi", () => {
     { git: true, config: { formatter: false, lsp: false } },
   )
 
+  it.instance(
+    "filters statuses and search before pagination and validates the status query",
+    () =>
+      Effect.gen(function* () {
+        const tmp = yield* TestInstance
+        const sessions = yield* Session.Service
+        const progress = yield* createSession({ title: "filter-target-progress" })
+        const older = yield* createSession({ title: "filter-target-older" })
+        const unmarked = yield* createSession({ title: "filter-target-unmarked" })
+        const complete = yield* createSession({ title: "filter-target-complete" })
+        const failed = yield* createSession({ title: "filter-target-failed" })
+        const archived = yield* createSession({ title: "filter-target-archived" })
+        const child = yield* createSession({ title: "filter-target-child", parentID: progress.id })
+        yield* sessions.setSessionInProgress({ sessionID: progress.id, sessionInProgress: true })
+        yield* sessions.setSessionInProgress({ sessionID: older.id, sessionInProgress: true })
+        yield* sessions.setSessionComplete({ sessionID: complete.id, sessionComplete: true })
+        yield* sessions.setSessionFailed({ sessionID: failed.id, sessionFailed: true })
+        yield* sessions.setSessionInProgress({ sessionID: archived.id, sessionInProgress: true })
+        yield* sessions.setArchived({ sessionID: archived.id, time: 1 })
+        yield* sessions.setSessionInProgress({ sessionID: child.id, sessionInProgress: true })
+        yield* Effect.forEach([older, progress, unmarked, complete, failed, archived, child], (session, index) =>
+          setSessionUpdated(session, index + 1),
+        )
+        yield* Effect.forEach([0, 1, 2], (index) =>
+          createSession({ title: `filter-other-${index}` }).pipe(
+            Effect.flatMap((session) => setSessionUpdated(session, 10 + index)),
+          ),
+        )
+        const query = { roots: "true", search: "filter-target", limit: "1" }
+        for (const [status, expected] of [
+          ["unmarked", unmarked],
+          ["in_progress", progress],
+          ["complete", complete],
+          ["failed", failed],
+        ] as const) {
+          const response = yield* request(
+            `${ExperimentalPaths.session}?${new URLSearchParams({ ...query, status })}`,
+            tmp.directory,
+          )
+          expect(response.status).toBe(200)
+          expect((yield* json<Session.GlobalInfo[]>(response)).map((session) => session.id)).toEqual([
+            expected.id,
+          ])
+          if (status === "in_progress") expect(response.headers["x-next-cursor"]).toBe("2")
+          else expect(response.headers["x-next-cursor"]).toBeUndefined()
+        }
+        const next = yield* request(
+          `${ExperimentalPaths.session}?${new URLSearchParams({ ...query, status: "in_progress", cursor: "2" })}`,
+          tmp.directory,
+        )
+        expect(next.status).toBe(200)
+        expect((yield* json<Session.GlobalInfo[]>(next)).map((session) => session.id)).toEqual([older.id])
+        expect(next.headers["x-next-cursor"]).toBeUndefined()
+        const all = yield* request(
+          `${ExperimentalPaths.session}?${new URLSearchParams({ ...query, limit: "10" })}`,
+          tmp.directory,
+        )
+        expect((yield* json<Session.GlobalInfo[]>(all)).map((session) => session.id)).toEqual([
+          failed.id,
+          complete.id,
+          unmarked.id,
+          progress.id,
+          older.id,
+        ])
+        for (const [extra, expected] of [
+          [{ archived: "true" }, archived],
+          [{ roots: "false" }, child],
+        ] as const) {
+          const response = yield* request(
+            `${ExperimentalPaths.session}?${new URLSearchParams({ ...query, status: "in_progress", ...extra })}`,
+            tmp.directory,
+          )
+          expect((yield* json<Session.GlobalInfo[]>(response)).map((session) => session.id)).toEqual([
+            expected.id,
+          ])
+        }
+        const empty = yield* request(
+          `${ExperimentalPaths.session}?${new URLSearchParams({ ...query, status: "in_progress", search: "filter-other" })}`,
+          tmp.directory,
+        )
+        expect(yield* json(empty)).toEqual([])
+        expect(empty.headers["x-next-cursor"]).toBeUndefined()
+        for (const status of ["all", "busy", "IN_PROGRESS", ""]) {
+          const invalid = yield* request(`${ExperimentalPaths.session}?status=${status}`, tmp.directory)
+          expect(invalid.status).toBe(400)
+        }
+      }),
+    { git: true, config: { formatter: false, lsp: false } },
+  )
+
   testWorktreeMutations(
     "serves worktree mutations through the default server app",
     () =>
@@ -296,3 +386,4 @@ describe("experimental HttpApi", () => {
     { git: true, config: { formatter: false, lsp: false } },
   )
 })
+

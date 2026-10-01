@@ -154,6 +154,7 @@ import {
   resolveVariantMaxMode,
   extractCursorVariantParameters,
   resolveCursorWireModelId,
+  CURSOR_MAX_MODE_KEY,
   type ModelInfo,
 } from "./models.js"
 import { getOrBuildRequestContext } from "./context/frozen.js"
@@ -993,9 +994,14 @@ async function startSession(
     maxMode: hintMaxMode,
     picked,
   })
-  // Wire max_mode from the selected Cursor context variant. The variant tuple
-  // does not include a separate maxMode key.
-  const maxMode = resolveVariantMaxMode(parameterValues, { model: modelInfo, picked, maxMode: hintMaxMode })
+  // Wire max_mode from the selected Cursor variant, else the menu entry's own flag.
+  const entryMaxMode = providerOptions?.[CURSOR_MAX_MODE_KEY]
+  const maxMode = resolveVariantMaxMode(parameterValues, {
+    model: modelInfo,
+    picked,
+    entryMaxMode: typeof entryMaxMode === "boolean" ? entryMaxMode : undefined,
+    maxMode: hintMaxMode,
+  })
 
   // Do NOT pass callOptions.abortSignal into the h2 Run stream. OpenCode aborts
   // that signal when a turn ends with tool-calls; the Cursor stream must stay

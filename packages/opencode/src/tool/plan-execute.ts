@@ -1,4 +1,5 @@
 import path from "path"
+import matter from "gray-matter"
 import { SessionV1 } from "@opencode-ai/core/v1/session"
 import { ProviderV2 } from "@opencode-ai/core/provider"
 import { ModelV2 } from "@opencode-ai/core/model"
@@ -40,11 +41,97 @@ export type ExecutionModel = {
   variant?: string
 }
 
+// Location label -> kickoff suffix Go reads to pick its execution mode.
+const LOCATIONS = {
+  "New session": { mode: "new-session", kickoff: "" },
+  "Phase sessions": { mode: "phase-sessions", kickoff: " mode=sessions phase=1" },
+  "Conductor + sub-agents": { mode: "conductor", kickoff: " mode=conductor" },
+} as const
+
+const PLAN_EXECUTORS = "Plan's suggestions"
+
 type ExecutionMetadata = {
-  mode?: "this-session" | "new-session"
+  mode?: "this-session" | (typeof LOCATIONS)[keyof typeof LOCATIONS]["mode"]
   model?: ExecutionModel
   variant?: string
+  executor?: string
   sessionID?: SessionID
+}
+
+export type PlanShape = { size: string; phases: number }
+
+/** Reads the planner's `size` and `phases` frontmatter. Plans without it are one small phase. */
+export function planShape(text: string): PlanShape {
+  const data = matter(text).data
+  const phases = Number(data.phases)
+  return {
+    size: typeof data.size === "string" ? data.size : "small",
+    phases: Number.isInteger(phases) && phases > 1 ? phases : 1,
+  }
+}
+
+export function locationOptions(shape: PlanShape) {
+  const fit = (size: string) => (shape.size === size ? " Recommended for this plan." : "")
+  return [
+    { label: "This session", description: `Use this session's model and context.${fit("small")}` },
+    { label: "New session", description: "Run the whole plan in one new session with a selected model" },
+    ...(shape.phases > 1
+      ? [
+          {
+            label: "Phase sessions",
+            description: `Run each phase in its own new session; Go hands off between phases.${fit("medium")}`,
+          },
+          {
+            label: "Conductor + sub-agents",
+            description: `A new Go session sends each phase to a fresh sub-agent.${fit("large")}`,
+          },
+        ]
+      : []),
+  ]
+}
+
+export function requirePlanFile(planPath: string) {
+  return Effect.gen(function* () {
+    if (!path.isAbsolute(planPath)) return yield* Effect.die(new Error(`Plan path must be absolute: ${planPath}`))
+    const file = Bun.file(planPath)
+    if (!(yield* Effect.promise(() => file.exists()))) {
+      return yield* Effect.die(new Error(`Plan file was not found: ${planPath}`))
+    }
+    return yield* Effect.promise(() => file.text())
+  })
+}
+
+/** Creates a Go session and starts its first prompt in the background. */
+export function startGoSession(input: {
+  session: Session.Interface
+  scope: Scope.Scope
+  model: ExecutionModel
+  title: string
+  text: string
+}): Effect.Effect<Session.Info> {
+  return Effect.gen(function* () {
+    const prompt = yield* sessionPrompt()
+    const modelRef = { providerID: input.model.providerID, modelID: input.model.modelID }
+    const variant = input.model.variant
+    const goSession = yield* input.session.create({
+      agent: "Go",
+      title: input.title,
+      model: { id: modelRef.modelID, providerID: modelRef.providerID, ...(variant ? { variant } : {}) },
+    })
+    yield* prompt
+      .prompt({
+        sessionID: goSession.id,
+        agent: "Go",
+        model: modelRef,
+        ...(variant ? { variant } : {}),
+        parts: [{ type: "text", text: input.text }],
+      })
+      .pipe(
+        Effect.catchCause((cause) => Effect.logError("Go prompt failed", { sessionID: goSession.id, cause })),
+        Effect.forkIn(input.scope, { startImmediately: true }),
+      )
+    return goSession
+  })
 }
 
 export function modelOptions() {
@@ -78,7 +165,7 @@ function modelChoice(label: string): ModelChoice {
   return choice
 }
 
-function currentModel(messages: SessionV1.WithParts[], fallback: ExecutionModel): ExecutionModel {
+export function currentModel(messages: SessionV1.WithParts[], fallback: ExecutionModel): ExecutionModel {
   const lastUser = messages.findLast((item) => item.info.role === "user" && item.info.model)
   if (lastUser?.info.role !== "user" || !lastUser.info.model) return fallback
   return {
@@ -88,7 +175,7 @@ function currentModel(messages: SessionV1.WithParts[], fallback: ExecutionModel)
   }
 }
 
-function sessionPrompt() {
+function sessionPrompt(): Effect.Effect<SessionPrompt.Interface> {
   return Effect.gen(function* () {
     const loaded = yield* Effect.promise(() => import("@/session/prompt"))
     return yield* loaded.SessionPrompt.Service
@@ -113,12 +200,7 @@ export const PlanExecuteTool = Tool.define<
       parameters: Parameters,
       execute: (params, ctx: Tool.Context): Effect.Effect<Tool.ExecuteResult<ExecutionMetadata>> =>
         Effect.gen(function* () {
-          if (!path.isAbsolute(params.planPath)) {
-            return yield* Effect.die(new Error(`Plan path must be absolute: ${params.planPath}`))
-          }
-          if (!(yield* Effect.promise(() => Bun.file(params.planPath).exists()))) {
-            return yield* Effect.die(new Error(`Plan file was not found: ${params.planPath}`))
-          }
+          const shape = planShape(yield* requirePlanFile(params.planPath))
 
           const approval = yield* question.ask({
             sessionID: ctx.sessionID,
@@ -154,10 +236,7 @@ export const PlanExecuteTool = Tool.define<
                 question: "Where should Go execute this plan?",
                 header: "Execution Location",
                 custom: false,
-                options: [
-                  { label: "This session", description: "Use this session's model and context" },
-                  { label: "New session", description: "Use a new session with a selected model" },
-                ],
+                options: locationOptions(shape),
               },
             ],
             tool: ctx.callID ? { messageID: ctx.messageID, callID: ctx.callID } : undefined,
@@ -194,9 +273,10 @@ export const PlanExecuteTool = Tool.define<
               metadata: { mode: "this-session" as const, model: plannerModel },
             }
           }
-          if (locationChoice !== "New session") {
-            return yield* Effect.die(new Error("Execution requires an explicit This session or New session answer"))
+          if (!(locationChoice in LOCATIONS)) {
+            return yield* Effect.die(new Error(`Unknown execution location: ${locationChoice}`))
           }
+          const target = LOCATIONS[locationChoice as keyof typeof LOCATIONS]
 
           const selectedModel = yield* question.ask({
             sessionID: ctx.sessionID,
@@ -223,46 +303,57 @@ export const PlanExecuteTool = Tool.define<
             return yield* Effect.die(new Error(`Unsupported execution variant: ${variant}`))
           }
 
-          const prompt = yield* sessionPrompt()
-          const modelRef = { providerID: selected.providerID, modelID: selected.modelID }
-          const goSession = yield* session.create({
-            agent: "Go",
+          const executor = target.mode === "conductor" ? yield* selectExecutor(question, ctx, agents) : undefined
+
+          const goSession = yield* startGoSession({
+            session,
+            scope,
+            model: { providerID: selected.providerID, modelID: selected.modelID, ...(variant ? { variant } : {}) },
             title: `Go: ${path.basename(params.planPath)}`,
-            model: {
-              id: modelRef.modelID,
-              providerID: modelRef.providerID,
-              ...(variant ? { variant } : {}),
-            },
+            text: `go ${params.planPath}${target.kickoff}${executor ? ` executor=${executor}` : ""}`,
           })
-          yield* prompt
-            .prompt({
-              sessionID: goSession.id,
-              agent: "Go",
-              model: modelRef,
-              ...(variant ? { variant } : {}),
-              parts: [{ type: "text", text: `go ${params.planPath}` }],
-            })
-            .pipe(
-              Effect.catchCause((cause) =>
-                Effect.logError("plan_execute prompt failed", { sessionID: goSession.id, cause }),
-              ),
-              Effect.forkIn(scope, { startImmediately: true }),
-            )
 
           return {
-            title: "Starting Go in new session",
+            title: `Starting Go: ${locationChoice}`,
             output: `Go is starting in session ${goSession.id} with the plan at ${params.planPath}.`,
             metadata: {
-              mode: "new-session" as const,
+              mode: target.mode,
               model: selected,
               sessionID: goSession.id,
               ...(variant ? { variant } : {}),
+              ...(executor ? { executor } : {}),
             },
           }
         }).pipe(Effect.orDie),
     }
   }),
 )
+
+/** Conductor mode: one general-* sub-agent for every phase, or each phase's `executor` from the plan. */
+function selectExecutor(question: Question.Interface, ctx: Tool.Context, agents: Agent.Interface) {
+  return Effect.gen(function* () {
+    const executors = (yield* agents.list()).filter(
+      (agent) => agent.mode !== "primary" && agent.name.startsWith("general-"),
+    )
+    const answers = yield* question.ask({
+      sessionID: ctx.sessionID,
+      questions: [
+        {
+          question: "Which sub-agent should execute each phase?",
+          header: "Phase Executors",
+          custom: false,
+          options: [
+            { label: PLAN_EXECUTORS, description: "Use each phase's executor from the plan" },
+            ...executors.map((agent) => ({ label: agent.name, description: agent.description ?? agent.name })),
+          ],
+        },
+      ],
+      tool: ctx.callID ? { messageID: ctx.messageID, callID: ctx.callID } : undefined,
+    })
+    const answer = requireAnswer(answers, "phase executors")
+    return answer === PLAN_EXECUTORS ? undefined : answer
+  })
+}
 
 function selectVariant(
   question: Question.Interface,

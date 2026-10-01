@@ -27,6 +27,8 @@ if (!/^\d+\.\d+\.\d+$/.test(maintenanceVersion)) {
 const displayVersion = Script.version.startsWith("0.0.0-")
   ? maintenanceVersion + Script.version.slice("0.0.0".length)
   : Script.version
+// Local previews report their incorporated upstream version to provider compatibility gates.
+const runtimeVersion = Script.version.startsWith("0.0.0-") ? pkg.version : Script.version
 
 const singleFlag = process.argv.includes("--single")
 const baselineFlag = process.argv.includes("--baseline")
@@ -183,7 +185,7 @@ for (const variant of variants) {
         autoloadPackageJson: true,
         target: compileTarget as any,
         outfile: `dist/${name}/bin/${binaryName}`,
-        execArgv: [`--user-agent=opencode/${Script.version}`, "--use-system-ca", "--"],
+        execArgv: [`--user-agent=opencode/${runtimeVersion}`, "--use-system-ca", "--"],
         windows: {},
       },
       files: {
@@ -196,7 +198,7 @@ for (const variant of variants) {
       ],
       define: {
         FFF_LIBC: JSON.stringify(item.abi === "musl" ? "musl" : "gnu"),
-        OPENCODE_VERSION: `'${Script.version}'`,
+        OPENCODE_VERSION: `'${runtimeVersion}'`,
         OPENCODE_DISPLAY_VERSION: `'${displayVersion}'`,
         OPENCODE_MODELS_DEV: generated.modelsData,
         OTUI_TREE_SITTER_WORKER_PATH: bunfsRoot + treeSitterWorkerPath,

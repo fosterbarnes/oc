@@ -65,6 +65,11 @@ globalThis.AI_SDK_LOG_WARNINGS = false
 
 const decodeMessageInfo = Schema.decodeUnknownExit(SessionV1.Info)
 const decodeMessagePart = Schema.decodeUnknownExit(SessionV1.Part)
+// Tried in order after the rename agent's own model fails or returns an empty title.
+const RENAME_FALLBACKS = [
+  { model: Provider.parseModel("opencode/mimo-v2.6-flash-free"), variant: undefined },
+  { model: Provider.parseModel("openai/gpt-6-luna"), variant: "medium" },
+]
 const MAX_MCP_RESOURCE_BLOB_BYTES = 10 * 1024 * 1024
 const SUPPORTED_MCP_RESOURCE_ATTACHMENT_MIMES = new Set([
   "application/pdf",
@@ -265,36 +270,61 @@ const layer = Layer.effect(
       const lastUser = history.findLast((m) => m.info.role === "user")?.info
       const ag = yield* agents.get("rename")
       if (!lastUser || lastUser.role !== "user" || !ag) return yield* sessions.get(sessionID)
-      const fallback = Effect.gen(function* () {
-        return (
-          (yield* provider.getSmallModel(lastUser.model.providerID)) ??
-          (yield* provider.getModel(lastUser.model.providerID, lastUser.model.modelID))
-        )
-      })
-      const pinned = ag.model
-      const mdl = pinned
-        ? yield* provider.getModel(pinned.providerID, pinned.modelID).pipe(Effect.catch(() => fallback))
-        : yield* fallback
-      const text = yield* llm
-        .stream({
-          agent: ag,
-          user: lastUser,
-          system: [],
-          small: true,
-          tools: {},
-          model: mdl,
-          sessionID,
-          retries: 2,
-          messages: [
-            {
-              role: "user",
-              content: `Generate a concise title for this conversation. Start it with the folder name "${path.basename(session.directory)}", followed by " - " and a short description, for example "oc - description".\n\n${renameDigest(history)}`,
-            },
-          ],
-        })
-        .pipe(Stream.filter(LLMEvent.is.textDelta), Stream.map((e) => e.text), Stream.mkString, Effect.orDie)
-      const t = cleanTitle(text)
-      if (t) yield* sessions.setTitle({ sessionID, title: t })
+      const small = ag.model ? undefined : yield* provider.getSmallModel(lastUser.model.providerID)
+      const attempts = [
+        {
+          model: ag.model ?? (small ? { providerID: small.providerID, modelID: small.id } : lastUser.model),
+          variant: ag.variant,
+        },
+        ...RENAME_FALLBACKS,
+      ].filter(
+        (attempt, index, all) =>
+          all.findIndex(
+            (other) =>
+              other.model.providerID === attempt.model.providerID && other.model.modelID === attempt.model.modelID,
+          ) === index,
+      )
+      const t = yield* Effect.firstSuccessOf(
+        attempts.map((attempt) =>
+          Effect.gen(function* () {
+            const mdl =
+              small && small.providerID === attempt.model.providerID && small.id === attempt.model.modelID
+                ? small
+                : yield* provider.getModel(attempt.model.providerID, attempt.model.modelID)
+            const text = yield* llm
+              .stream({
+                agent: { ...ag, model: { providerID: mdl.providerID, modelID: mdl.id }, variant: attempt.variant },
+                // Request preparation otherwise inherits the conversation's effort for unvaried agents.
+                user: { ...lastUser, model: { ...lastUser.model, variant: attempt.variant } },
+                system: [],
+                small: true,
+                tools: {},
+                model: mdl,
+                sessionID,
+                retries: 2,
+                messages: [
+                  {
+                    role: "user",
+                    content: `Generate a concise title for this conversation. Start it with the folder name "${path.basename(session.directory)}", followed by " - " and a short description, for example "oc - description".\n\n${renameDigest(history)}`,
+                  },
+                ],
+              })
+              .pipe(Stream.filter(LLMEvent.is.textDelta), Stream.map((e) => e.text), Stream.mkString)
+            const title = cleanTitle(text)
+            if (!title) return yield* Effect.fail(new Error("Rename model returned an empty title"))
+            return title
+          }).pipe(
+            // SDK initialization surfaces its known provider error as a defect.
+            Effect.catchDefect((error) =>
+              Provider.InitError.isInstance(error) ? Effect.fail(error) : Effect.die(error),
+            ),
+            Effect.tapError((error) =>
+              Effect.logWarning("rename model failed", { sessionID, model: attempt.model, error }),
+            ),
+          ),
+        ),
+      )
+      yield* sessions.setTitle({ sessionID, title: t })
       return yield* sessions.get(sessionID)
     }, Effect.orDie)
 

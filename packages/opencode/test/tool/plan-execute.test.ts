@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test"
+import fs from "node:fs/promises"
 import path from "node:path"
 import { ModelV2 } from "@opencode-ai/core/model"
 import { ProviderV2 } from "@opencode-ai/core/provider"
@@ -10,10 +11,20 @@ import { Question } from "@/question"
 import { Session } from "@/session/session"
 import { SessionPrompt } from "@/session/prompt"
 import { MessageID, SessionID } from "@/session/schema"
-import { PlanExecuteTool, executionModel, modelOptions, needsVariantChoice, variantOptions } from "@/tool/plan-execute"
+import {
+  PlanExecuteTool,
+  executionModel,
+  locationOptions,
+  modelOptions,
+  needsVariantChoice,
+  planShape,
+  variantOptions,
+} from "@/tool/plan-execute"
+import { PlanCloseoutTool } from "@/tool/plan-closeout"
 import { Tool } from "@/tool/tool"
 import { Truncate } from "@/tool/truncate"
 import { it } from "../lib/effect"
+import { TestInstance } from "../fixture/fixture"
 
 test("plan execution preserves the approved Go model choices", () => {
   expect(modelOptions().map((option) => option.label)).toEqual([
@@ -54,6 +65,22 @@ test("variant choices preserve provider model keys and labels", () => {
   ])
 })
 
+test("plan frontmatter decides which execution locations are offered", () => {
+  const large = planShape(PHASED_PLAN)
+  expect(large).toEqual({ size: "large", phases: 3 })
+  expect(locationOptions(large).map((option) => option.label)).toEqual([
+    "This session",
+    "New session",
+    "Phase sessions",
+    "Conductor + sub-agents",
+  ])
+  expect(locationOptions(large)[3]?.description).toContain("Recommended")
+
+  const plain = planShape("# Plan without frontmatter\n")
+  expect(plain).toEqual({ size: "small", phases: 1 })
+  expect(locationOptions(plain).map((option) => option.label)).toEqual(["This session", "New session"])
+})
+
 describe("plan_execute questionnaire", () => {
   it.instance("executes in This session with the planner model and context", () =>
     Effect.gen(function* () {
@@ -81,7 +108,7 @@ describe("plan_execute questionnaire", () => {
         "Go Reasoning",
       ])
       expect(result.value).toMatchObject({
-        title: "Starting Go in new session",
+        title: "Starting Go: New session",
         metadata: { mode: "new-session", model: { providerID: "openai", modelID: "gpt-5.6-luna" }, variant: "high" },
       })
       expect(result.prompts[0]).toMatchObject({
@@ -90,6 +117,34 @@ describe("plan_execute questionnaire", () => {
         variant: "high",
         parts: [{ type: "text", text: `go ${TEST_PLAN_PATH}` }],
       })
+    }),
+  )
+
+  it.instance("starts a conductor with the selected phase executor", () =>
+    Effect.gen(function* () {
+      const dir = (yield* TestInstance).directory
+      const planPath = path.join(dir, "phased.md")
+      yield* Effect.promise(() => Bun.write(planPath, PHASED_PLAN))
+      const result = yield* runQuestionnaire(
+        ["Yes", "Conductor + sub-agents", "Cursor Composer 2.5", "general-luna-high"],
+        planPath,
+      )
+      yield* Deferred.await(result.started)
+
+      expect(result.asked.map((questions) => questions[0]?.header)).toEqual([
+        "Automatic Go",
+        "Execution Location",
+        "Go Model",
+        "Phase Executors",
+      ])
+      expect(result.asked[3]?.[0]?.options.map((option) => option.label)).toEqual([
+        "Plan's suggestions",
+        "general-luna-high",
+      ])
+      expect(result.value.metadata).toMatchObject({ mode: "conductor", executor: "general-luna-high" })
+      expect(result.prompts[0]?.parts).toEqual([
+        { type: "text", text: `go ${planPath} mode=conductor executor=general-luna-high` },
+      ])
     }),
   )
 
@@ -102,6 +157,7 @@ describe("plan_execute questionnaire", () => {
   )
 })
 
+const PHASED_PLAN = "---\nsize: large\nphases: 3\n---\n# Plan\n"
 const plannerID = SessionID.make("ses_questionnaire")
 const TEST_PLAN_PATH = path.resolve(import.meta.dir, "../../../../buildNotes.md")
 const plannerModel = {
@@ -145,6 +201,12 @@ function runQuestionnaire(answers: string[], planPath = TEST_PLAN_PATH) {
       }),
       Layer.mock(Agent.Service, {
         get: (name: string) => Effect.succeed({ name, permission: [] } as unknown as Agent.Info),
+        list: () =>
+          Effect.succeed([
+            { name: "Go", mode: "primary" },
+            { name: "general-luna-high", mode: "subagent", description: "Luna high" },
+            { name: "explore", mode: "subagent" },
+          ] as unknown as Agent.Info[]),
       }),
       Layer.mock(Provider.Service, {
         defaultModel: () => Effect.succeed(plannerModel),
@@ -223,4 +285,62 @@ function runQuestionnaire(answers: string[], planPath = TEST_PLAN_PATH) {
 
     return { asked, value, messages, parts, prompts, started, plannerModel }
   })
+}
+
+describe("plan_closeout", () => {
+  it.instance("moves a plan into plans/archive and refuses to overwrite an archive", () =>
+    Effect.gen(function* () {
+      const plans = path.join((yield* TestInstance).directory, "plans")
+      const planPath = path.join(plans, "done.md")
+      const archivePath = path.join(plans, "archive", "done.md")
+      yield* Effect.promise(() => Bun.write(planPath, "# Done\n"))
+
+      const value = yield* closeout(planPath)
+      expect(value.metadata).toMatchObject({ archivePath })
+      expect(yield* Effect.promise(() => Bun.file(planPath).exists())).toBe(false)
+      expect(yield* Effect.promise(() => Bun.file(archivePath).text())).toBe("# Done\n")
+
+      yield* Effect.promise(() => Bun.write(planPath, "# Again\n"))
+      expect((yield* Effect.exit(closeout(planPath)))._tag).toBe("Failure")
+      expect(yield* Effect.promise(() => Bun.file(planPath).text())).toBe("# Again\n")
+    }),
+  )
+
+  it.instance("rejects plans outside a plans directory", () =>
+    Effect.gen(function* () {
+      const planPath = path.join((yield* TestInstance).directory, "loose.md")
+      yield* Effect.promise(() => fs.writeFile(planPath, "# Loose\n"))
+      expect((yield* Effect.exit(closeout(planPath)))._tag).toBe("Failure")
+    }),
+  )
+})
+
+function closeout(planPath: string) {
+  return PlanCloseoutTool.pipe(
+    Effect.flatMap(Tool.init),
+    Effect.flatMap((tool) =>
+      tool.execute(
+        { planPath },
+        {
+          sessionID: plannerID,
+          messageID: MessageID.make("msg_closeout"),
+          agent: "Go",
+          abort: new AbortController().signal,
+          messages: [],
+          metadata: () => Effect.void,
+          ask: () => Effect.void,
+        },
+      ),
+    ),
+    Effect.provide(
+      Layer.mergeAll(
+        Layer.mock(Truncate.Service, {
+          output: (text: string) => Effect.succeed({ content: text, truncated: false as const }),
+        }),
+        Layer.mock(Agent.Service, {
+          get: (name: string) => Effect.succeed({ name, permission: [] } as unknown as Agent.Info),
+        }),
+      ),
+    ),
+  )
 }

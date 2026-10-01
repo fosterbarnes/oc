@@ -120,6 +120,22 @@ test("resolves the session failure keybind", () => {
   expect(config.keybinds.get("session.failed.toggle")).toMatchObject([{ key: "ctrl+shift+backspace" }])
 })
 
+test("resolves and overrides the manual In progress keybind", () => {
+  expect(resolve({}, { terminalSuspend: true }).keybinds.get("session.in_progress.toggle")).toMatchObject([
+    { key: "ctrl+shift+i" },
+  ])
+  expect(
+    resolve({ keybinds: { session_in_progress_toggle: "ctrl+alt+i" } }, { terminalSuspend: true }).keybinds.get(
+      "session.in_progress.toggle",
+    ),
+  ).toMatchObject([{ key: "ctrl+alt+i" }])
+  expect(
+    resolve({ keybinds: { session_in_progress_toggle: "none" } }, { terminalSuspend: true }).keybinds.has(
+      "session.in_progress.toggle",
+    ),
+  ).toBe(false)
+})
+
 test("keeps cursor movement available with ctrl shift arrows", () => {
   const config = resolve({}, { terminalSuspend: true })
 

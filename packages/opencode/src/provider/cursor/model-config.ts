@@ -1,4 +1,5 @@
 import {
+  CURSOR_MAX_MODE_KEY,
   CURSOR_VARIANT_PARAMETERS_KEY,
   CURSOR_WIRE_MODEL_ID_KEY,
   parseCursorContextLimit,
@@ -216,7 +217,8 @@ export function modelInfoToConfig(
   if (options.fast) name += " Fast"
   const contextTokens = contextTierTokens(mi, contextTier)
   const contextName = contextLabel(contextTier, contextTokens)
-  if (contextName) name += ` ${contextName}`
+  // Long-context entries run in Cursor max mode, which bills more; say so in the menu.
+  if (contextName) name += ` ${contextName} (Max)`
   // OpenCode's context limit is static per model entry, while Cursor's context
   // tier is a variant parameter. Long-context choices are therefore emitted as
   // separate OpenCode entries by modelsToConfig.
@@ -260,6 +262,8 @@ export function modelInfoToConfig(
       }
     }
   }
+  // The entry, not its parameters, decides max mode (see resolveVariantMaxMode).
+  config.options = { ...config.options, [CURSOR_MAX_MODE_KEY]: contextTier !== "base" }
   return config
 }
 
@@ -337,13 +341,14 @@ export function modelsToConfig(models: ModelInfo[]): Record<string, any> {
         variants: group.variants,
         fast: group.fast,
       })
-      if (catalogId !== m.id && !config.options) {
+      if (catalogId !== m.id && !config.options[CURSOR_WIRE_MODEL_ID_KEY]) {
         const defaultVariant =
           (group.contextTier !== "base"
             ? group.variants.find((v) => v.isDefaultMax)
             : group.variants.find((v) => v.isDefaultNonMax)) ?? group.variants[0]
         if (defaultVariant) {
           config.options = {
+            ...config.options,
             [CURSOR_WIRE_MODEL_ID_KEY]: m.id,
             [CURSOR_VARIANT_PARAMETERS_KEY]: defaultVariant.parameterValues.map((p) => ({ ...p })),
           }

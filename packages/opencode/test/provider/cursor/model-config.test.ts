@@ -40,7 +40,12 @@ describe("Cursor model catalog", () => {
     expect(config["grok-4.7-500k"].options).toEqual({
       cursorModelId: "grok-4.7",
       cursorVariantParameters: [{ id: "context", value: "500k" }],
+      cursorMaxMode: true,
     })
+    expect(config["grok-4.7"].options.cursorMaxMode).toBe(false)
+    expect(config["grok-4.7-fast"].options.cursorMaxMode).toBe(false)
+    expect(config["grok-4.7"].name).not.toContain("(Max)")
+    expect(config["grok-4.7-500k"].name).toEndWith("500k (Max)")
     expect(config["grok-4.7-500k"].cost).toEqual(getCursorModelCost("grok-4.7-500k"))
     expect(config["grok-4.7-500k-fast"].cost).toEqual(getCursorModelCost("grok-4.7-500k-fast"))
   })

@@ -92,6 +92,132 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-01 (~03:39) - v0.2.29 - Consistency cleanup for session in-progress mark - Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Opus 5.5; low effort; Implementation; completed
+- Version: 0.2.29 (same session as previous entry; no second bump)
+- Fixed "In progress" -> "in progress" in `packages/tui/src/routes/session/index.tsx` command title and `session_in_progress_toggle` description in `packages/tui/src/config/keybind.ts`.
+- Moved `"dialog.session.status.cycle"` keybind next to the other `"dialog.*"` entries in `keybind.ts`.
+- Changed `sessionInProgress` to `Schema.optional(Schema.Boolean)` in `packages/schema/src/session.ts` and `v1/session.ts`, matching `sessionComplete`/`sessionFailed`; generated SDK types already read `sessionInProgress?: boolean`.
+- Kept explicit return type on `sessionPrompt()` in `packages/opencode/src/tool/plan-execute.ts`: may break a circular inference through the dynamic `@/session/prompt` import; confirm with tomorrow's typecheck before removing.
+- Verification: grep checks only; typecheck and tests skipped per user.
+
+### User
+Cleanup
+- The in-progress command and keybind labels now use "in progress" in lowercase.
+
+---
+
+## 2026-10-01 (~03:38) - v0.2.29 - Cleanup pass on uncommitted changes - Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Opus 5.5; low effort; Implementation; completed
+- Version: 0.2.29
+- Moved rename fallback models to module constant `RENAME_FALLBACKS` in `packages/opencode/src/session/prompt.ts`; wrapped `catchDefect`/`tapError` lines under 100 chars.
+- Refactored `packages/tui/src/component/dialog-session-list.tsx`: complete/failed/in-progress toggles share `toggleMark(sessionID, mark)`.
+- Kept rename failing when every model fails: `test/session/rename-fallback.test.ts` asserts that exit.
+- Verification: `bun test test/session/rename-fallback.test.ts` (14 pass), tui `bun test test/component/dialog-session-list.test.ts` (7 pass), isolated tsc check of computed-key update payload. Full typecheck skipped per user.
+
+### User
+Cleanup
+- No behavior change; rename fallback models and session mark toggles are simpler to maintain.
+
+---
+
+## 2026-10-01 (~03:26) - v0.2.28 - Session picker status filter - Grok 4.7, thinking; Implementation
+
+### Agent
+- Meta: Grok 4.7; thinking; Implementation; completed
+- Version: 0.2.28
+- Added all-projects picker status filter in `packages/tui/src/component/dialog-session-list.tsx`: All, Unmarked, In progress, Complete, Failed. Ctrl+S cycles. Choice is local and resets when the picker opens again.
+- Added optional `status` on the experimental global session list. SQL applies it before order and limit.
+- Registered the cycle command on the same dialog key layer as row actions (`dialog-select.tsx` `commands` / `commandBindings`). A separate layer left Complete/Failed inactive.
+- Kept row-action keys registered when the footer hides them, so an empty list ignores those keys instead of dropping the binding.
+- `moveTo` ignores indexes outside the current list.
+- Verification: opencode `global-session-list` + `httpapi-experimental` pass; tui dialog-session-list, marker-action, and status-filter tests pass (14). `bun typecheck` clean in opencode and tui. `bun run migration --check` in core reported no pending schema change. `git diff --check` clean aside from existing CRLF warnings. Full package suites not re-run. Live picker check not run.
+- Note: filter cycle lives on the dialog layer, not a second `useBindings` layer. A parent modal layer shadowed row shortcuts.
+
+### User
+Session list
+- The all-projects session picker can show All, Unmarked, In progress, Complete, or Failed. Click a choice or press Ctrl+S. Search text stays put.
+- The filter starts on All every time the picker opens. It is not saved.
+- Pinned and current sessions follow the same filter. An empty match says "No matching sessions" and does not change the open session.
+- In progress is still the manual "-" marker from the earlier change.
+
+---
+
+## 2026-10-01 (~03:26) - v0.2.27 - Rename falls back when Muse fails - Grok 4.7, n/a; Implementation
+
+### Agent
+- Meta: Grok 4.7; Implementation; completed. User skipped typecheck and the full package suite.
+- Version: 0.2.27
+- Changed `SessionPrompt.rename` in `packages/opencode/src/session/prompt.ts`: attempts are the configured rename model (default Muse low), then `opencode/mimo-v2.6-flash-free` with no variant, then `openai/gpt-6-luna` at medium. Same model id is not tried twice. Lookup failure, stream failure, empty cleaned title, and known `Provider.InitError` defects advance. Interrupt and other defects stop the chain. Title is written once, only after a cleaned title succeeds.
+- Added `packages/opencode/test/session/rename-fallback.test.ts` with 14 service cases.
+- Catalog: cached `models.json` lists MiMo V2.6 Flash Free at zero input, output, and cache-read cost with no reasoning options; GPT-6 Luna effort values include medium.
+- Verification: `bun test test/session/rename-fallback.test.ts --timeout 30000` from `packages/opencode`: 14 pass. Typecheck skipped by user. Full package suite stopped by user and is not a result.
+- Note: unpinned rename still picks the small model, or the conversation model, before those two fallbacks.
+
+### User
+Rename
+- `/rename` tries Muse first. If that fails, it tries the free MiMo Flash model, then GPT-6 Luna at medium effort.
+- A new title is saved only when a model returns a usable title. Partial text from a failed attempt is discarded.
+- If all three fail, the old title stays and rename reports failure.
+- Cancelling rename does not continue to another model.
+
+---
+
+## 2026-10-01 (~02:22) - v0.2.26 - Phased SuperPlan execution, Cursor max-mode fix, test isolation fixes - Opus 5.5, low; Implementation
+
+### Agent
+- Meta: Opus 5.5; low; Implementation (imp after spit); completed
+- Version: 0.2.26
+- Added `planShape`/`locationOptions`/`requirePlanFile`/`startGoSession` in `src/tool/plan-execute.ts`. `plan_execute` reads plan frontmatter (`size`, `phases`) and offers This session, New session, Phase sessions (`go <plan> mode=sessions phase=1`), Conductor + sub-agents (`go <plan> mode=conductor [executor=<general-*>]`, "Phase Executors" question).
+- Added `plan_next_phase` (`src/tool/plan-next-phase.ts`): starts next phase in new Go session with current session model. Added `plan_closeout` (`src/tool/plan-closeout.ts`): moves plan to sibling `archive/`, refuses overwrite, rejects plans not directly in a `plans` dir. Both registered in `registry.ts`, default-deny in `agent.ts`.
+- Note: `startGoSession`/`sessionPrompt` need explicit return types; inference is circular through prompt -> registry -> plan-execute (TS7023).
+- Changed config (outside repo): `~/.config/opencode/prompts/sp.md` rewritten (sizing table, phase blocks with file allowlist/done-when/out-of-scope, Progress/Parked, no archive steps or tool logs); `prompts/go.md` rewritten (modes, red-flag stops, phase-scoped reading, `plan_closeout`); `agents/Go.md` allows `task`, `plan_next_phase`, `plan_closeout`; `superPlan++.md` archive perms removed.
+- Moved Go-a, superPlan-a, `go-a.md`, `sp-a.md`, `goa`/`spa` commands (`.opencode` + `.claude`) to `~/.config/opencode/archive/agentA/`. Renamed `prompts/sp-{architect,scout,redteam}.md` to `{architect,scout,redteam}.md`; updated 11 `agents/sub/*` prompt refs.
+- Fixed Cursor max mode (`src/provider/cursor/models.ts`, `model-config.ts`, `language-model.ts`): every menu entry carries `cursorMaxMode` (false base, true long-context); `resolveVariantMaxMode` order = exact catalog variant `isDefaultMax`, entry flag, generic hint only when nothing picked. Removed `paramsImplyMaxMode` (v0.1.4 made any context param imply max; base 200k/256k picks billed as max when catalog missing). Long-context names end `(Max)`.
+- Fixed `opencode run` duplicate error records (`src/cli/cmd/run.ts`): failed prompt publishes `session.error` and rejects request; `errorReported` + `reportRequestError` emit only first.
+- Fixed tests: event manifest count 89 (fork-only `tui.command.execute.targeted`); `tui.test.ts`/`v2-compat.test.ts` use `{ git: true }` so `.opencode` walk-up stops at project (Windows temp under real home leaked `~/.opencode/plugins/fork-chat.ts`); listen test requests real `/global/health` (fork has no `/status`); compression below-threshold uses `/global/health` (fork `/config` includes built-in providers, about 10 KB); shell workdir-variants test pins cmd; snapshot race test writes relative path (Git Bash mangled backslash path).
+- Verification: `bun typecheck` clean; `bun test --timeout 30000` from `packages/opencode`: 4417 pass, 0 fail, 69 skip, 1 todo. Live `/sp` phased run and Cursor menu not checked; needs rebuild by user.
+- MISTAKE: ran bare `bun test` (5 s default timeout) and reported LSP/session-bootstrap timeouts as failures. Use `bun test --timeout 30000` (package `test` script) for full runs.
+- ERROR: running tests from Git Bash sets `SHELL`, which changes shell-tool path semantics; tests touching shell paths must pin a shell or avoid absolute Windows paths.
+
+### User
+SuperPlan and Go
+- Plans are now sized and split into phases, each with its own file list and a check that proves it works.
+- The "run this plan" questions now offer running each phase in its own session, or a coordinator that hands each phase to a fresh sub-agent.
+- Go keeps going between phases and only stops to ask when something is actually wrong.
+- Finished plans are archived by a tool instead of a long manual procedure.
+- The old Go-a and SuperPlan-a agents were moved to an archive folder.
+
+Cursor
+- Bigger-context Cursor models are labeled "(Max)" in the model list.
+- Normal Cursor models can no longer be silently billed as max mode when the model catalog has not loaded.
+
+CLI
+- `opencode run --format json` prints one error record instead of two when a prompt is rejected.
+
+---
+
+## 2026-10-01 (~01:03) - v0.2.25 - Correct local binary provider version - GPT-6.1 Sol, low; Implementation
+
+### Agent
+- Meta: GPT-6.1 Sol; low; Implementation; completed
+- Version: 0.2.25
+- Fixed `packages/opencode/script/build.ts`: local preview binaries embed `pkg.version` as runtime version and Bun default HTTP user agent; explicit release versions retain `Script.version`.
+- Kept maintenance display version, preview channel, and artifact metadata unchanged; shared build covers production/debug.
+- Verified recorded upstream baseline `5cd8e68` declares `1.18.29`; benchmark runtime logged `0.0.0-main-202610010454` and Zen minimum-version failures.
+- Verification: `bun typecheck` passed in packages/opencode; `git diff --check` passed. Build/install and live Zen retry not run; user-driven verification remains.
+
+### User
+Providers
+- Local builds now identify their incorporated upstream version to providers while retaining OC's own display version.
+- Rebuild and install, then retry one blocked free model to confirm Zen accepts the corrected version.
+
+---
+
 ## 2026-09-30 (~20:52) - v0.2.24 - Stale documentation cleanup - Claude Opus 5.5, low effort; Cleanup
 
 ### Agent

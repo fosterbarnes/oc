@@ -83,6 +83,7 @@ export const SessionListQuery = Schema.Struct({
   start: Schema.optional(Schema.NumberFromString),
   cursor: Schema.optional(Schema.NumberFromString),
   search: Schema.optional(Schema.String),
+  status: Schema.optional(Schema.Literals(["unmarked", "in_progress", "complete", "failed"])),
   limit: Schema.optional(Schema.NumberFromString),
   archived: Schema.optional(QueryBoolean),
 })

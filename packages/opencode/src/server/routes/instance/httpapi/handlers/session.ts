@@ -203,6 +203,12 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
           sessionFailed: ctx.payload.sessionFailed,
         })
       }
+      if (ctx.payload.sessionInProgress !== undefined) {
+        yield* session.setSessionInProgress({
+          sessionID: ctx.params.sessionID,
+          sessionInProgress: ctx.payload.sessionInProgress,
+        })
+      }
       if (ctx.payload.metadata !== undefined) {
         yield* session.setMetadata({ sessionID: ctx.params.sessionID, metadata: ctx.payload.metadata })
       }

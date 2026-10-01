@@ -12,6 +12,8 @@ export type ModelParameterValue = { id: string; value: string }
 export const CURSOR_VARIANT_PARAMETERS_KEY = "cursorVariantParameters"
 /** Real Cursor model id used when an OpenCode entry has a synthetic id. */
 export const CURSOR_WIRE_MODEL_ID_KEY = "cursorModelId"
+/** Max-mode bit owned by the OpenCode menu entry: true only for its long-context entries. */
+export const CURSOR_MAX_MODE_KEY = "cursorMaxMode"
 
 export type ModelVariant = {
   key: string
@@ -215,20 +217,15 @@ export function resolveCursorWireModelId(
   return typeof value === "string" && value.trim() ? value : fallback
 }
 
-/** True when resolved params select a max-context variant. */
-export function paramsImplyMaxMode(params: ModelParameterValue[]): boolean {
-  return params.some(
-    (parameter) => parameter.id === "context" && parseCursorContextLimit(parameter.value) !== undefined,
-  )
-}
-
 /**
- * Resolve the request-level max_mode bit. An explicit variant pick owns the
- * context tier; otherwise a standalone maxMode hint may select max mode.
+ * Resolve the request-level max_mode bit, most specific first: the catalog's
+ * flag for the exact variant, then the menu entry's own `cursorMaxMode`, then a
+ * standalone maxMode hint only when nothing was picked. Never inferred from
+ * parameters, so a base pick can never be billed as max.
  */
 export function resolveVariantMaxMode(
   params: ModelParameterValue[],
-  opts: { model?: ModelInfo; picked?: ModelParameterValue[]; maxMode?: boolean } = {},
+  opts: { model?: ModelInfo; picked?: ModelParameterValue[]; entryMaxMode?: boolean; maxMode?: boolean } = {},
 ): boolean {
   if (opts.model) {
     const selected = opts.model.variants.find(
@@ -241,7 +238,8 @@ export function resolveVariantMaxMode(
     )
     if (selected) return selected.isDefaultMax
   }
-  return paramsImplyMaxMode(params) || (opts.picked === undefined && opts.maxMode === true)
+  if (opts.entryMaxMode !== undefined) return opts.entryMaxMode
+  return opts.picked === undefined && opts.maxMode === true
 }
 
 // Cursor encodes a model's context window as a variant parameter `id: "context"`

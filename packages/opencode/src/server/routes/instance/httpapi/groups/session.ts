@@ -51,6 +51,7 @@ export const UpdatePayload = Schema.Struct({
   agent: Schema.optional(Schema.String),
   sessionComplete: Schema.optional(Schema.Boolean),
   sessionFailed: Schema.optional(Schema.Boolean),
+  sessionInProgress: Schema.optional(Schema.Boolean),
   metadata: Schema.optional(Session.Metadata),
   permission: Schema.optional(PermissionV1.Ruleset),
   time: Schema.optional(

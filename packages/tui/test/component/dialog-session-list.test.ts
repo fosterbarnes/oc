@@ -17,6 +17,31 @@ describe("dialog session list", () => {
     })
   })
 
+  test("passes each status through browse and search while All omits it", () => {
+    for (const status of ["unmarked", "in_progress", "complete", "failed"] as const) {
+      expect(createDialogSessionListQuery({ status })).toEqual({ roots: true, limit: 100, status })
+      expect(createDialogSessionListQuery({ search: " deploy ", status })).toEqual({
+        roots: true,
+        limit: 30,
+        search: "deploy",
+        status,
+      })
+    }
+    expect(createDialogSessionListQuery({ search: " ", status: undefined })).toEqual({ roots: true, limit: 100 })
+  })
+
+  test("a successful empty filtered result is not a fallback failure", async () => {
+    expect(
+      await loadDialogSessionList({
+        status: "failed",
+        list: async (query) => {
+          expect(query).toEqual({ roots: true, limit: 100, status: "failed" })
+          return { data: [] }
+        },
+      }),
+    ).toEqual([])
+  })
+
   test("keeps the cache usable while the root request is pending", async () => {
     let resolve!: (result: { data: string[] }) => void
     const pending = loadDialogSessionList<string>({

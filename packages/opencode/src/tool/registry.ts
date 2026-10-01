@@ -3,6 +3,8 @@ import { httpClient } from "@opencode-ai/core/effect/app-node-platform"
 import { Ripgrep } from "@opencode-ai/core/ripgrep"
 import { PlanExitTool } from "./plan"
 import { PlanExecuteTool } from "./plan-execute"
+import { PlanNextPhaseTool } from "./plan-next-phase"
+import { PlanCloseoutTool } from "./plan-closeout"
 import { SessionCompleteTool } from "./session-complete"
 import { SessionFailedTool } from "./session-failed"
 import { SessionTailTool } from "./session-tail"
@@ -111,6 +113,8 @@ const layer = Layer.effect(
     const lsptool = yield* LspTool
     const plan = yield* PlanExitTool
     const planExecute = yield* PlanExecuteTool
+    const planNextPhase = yield* PlanNextPhaseTool
+    const planCloseout = yield* PlanCloseoutTool
     const sessionComplete = yield* SessionCompleteTool
     const sessionFailed = yield* SessionFailedTool
     const sessionTail = yield* SessionTailTool
@@ -234,6 +238,8 @@ const layer = Layer.effect(
           lsp: Tool.init(lsptool),
           plan: Tool.init(plan),
           planExecute: Tool.init(planExecute),
+          planNextPhase: Tool.init(planNextPhase),
+          planCloseout: Tool.init(planCloseout),
           sessionComplete: Tool.init(sessionComplete),
           sessionFailed: Tool.init(sessionFailed),
           sessionTail: Tool.init(sessionTail),
@@ -265,6 +271,8 @@ const layer = Layer.effect(
             ...(tool.execute ? [tool.execute] : []),
             ...(flags.experimentalLspTool ? [tool.lsp] : []),
             tool.planExecute,
+            tool.planNextPhase,
+            tool.planCloseout,
             ...(flags.experimentalPlanMode && flags.client === "cli" ? [tool.plan] : []),
           ],
           task: tool.task,

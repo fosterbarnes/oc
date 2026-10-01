@@ -800,6 +800,71 @@ describe("session HttpApi", () => {
   )
 
   it.instance(
+    "persists mutually exclusive manual markers without changing recency",
+    () =>
+      Effect.gen(function* () {
+        const test = yield* TestInstance
+        const headers = { "x-opencode-directory": test.directory, "content-type": "application/json" }
+        const created = yield* requestJson<Session.Info>(SessionPaths.create, {
+          method: "POST",
+          headers,
+          body: JSON.stringify({ title: "markers" }),
+        })
+        expect(created).toMatchObject({ sessionComplete: false, sessionFailed: false, sessionInProgress: false })
+        const updatePath = pathFor(SessionPaths.update, { sessionID: created.id })
+        const transitions = [
+          { payload: { sessionInProgress: true }, active: "sessionInProgress" },
+          { payload: { title: "renamed" }, active: "sessionInProgress" },
+          { payload: { sessionComplete: false, sessionFailed: false }, active: "sessionInProgress" },
+          { payload: { sessionInProgress: false }, active: undefined },
+          { payload: { sessionInProgress: true }, active: "sessionInProgress" },
+          { payload: { sessionComplete: true }, active: "sessionComplete" },
+          { payload: { sessionInProgress: false }, active: "sessionComplete" },
+          { payload: { sessionComplete: false }, active: undefined },
+          { payload: { sessionInProgress: true }, active: "sessionInProgress" },
+          { payload: { sessionFailed: true }, active: "sessionFailed" },
+          { payload: { sessionInProgress: false }, active: "sessionFailed" },
+          { payload: { sessionFailed: false }, active: undefined },
+          { payload: { sessionComplete: true, sessionFailed: true }, active: "sessionFailed" },
+          {
+            payload: { sessionComplete: true, sessionFailed: true, sessionInProgress: true },
+            active: "sessionInProgress",
+          },
+        ]
+        for (const transition of transitions) {
+          const updated = yield* requestJson<Session.Info>(updatePath, {
+            method: "PATCH",
+            headers,
+            body: JSON.stringify(transition.payload),
+          })
+          const expected = {
+            sessionComplete: transition.active === "sessionComplete",
+            sessionFailed: transition.active === "sessionFailed",
+            sessionInProgress: transition.active === "sessionInProgress",
+            time: { updated: created.time.updated },
+          }
+          expect(updated).toMatchObject(expected)
+          expect(yield* requestJson<Session.Info>(updatePath, { headers })).toMatchObject(expected)
+          expect(
+            (yield* requestJson<{ data: Session.Info }>(`/api/session/${created.id}`, { headers })).data,
+          ).toMatchObject({
+            sessionInProgress: expected.sessionInProgress,
+            sessionComplete: expected.sessionComplete,
+            sessionFailed: expected.sessionFailed,
+          })
+        }
+        const invalid = yield* request(updatePath, {
+          method: "PATCH",
+          headers,
+          body: JSON.stringify({ sessionInProgress: "true" }),
+        })
+        expect(invalid.status).toBe(400)
+        expect(yield* requestJson<Session.Info>(updatePath, { headers })).toMatchObject({ sessionInProgress: true })
+      }),
+    { git: true, config: { formatter: false, lsp: false, share: "disabled" } },
+  )
+
+  it.instance(
     "persists selected workspace id when creating a session",
     () =>
       Effect.gen(function* () {

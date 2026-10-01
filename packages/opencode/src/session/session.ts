@@ -116,6 +116,7 @@ export function fromRow(row: SessionRow): Info {
     },
     sessionComplete: row.session_complete === 1,
     sessionFailed: row.session_failed === 1,
+    sessionInProgress: row.session_in_progress === 1,
   }
 }
 
@@ -159,6 +160,7 @@ export function toRow(info: Info) {
     time_archived: info.time.archived,
     session_complete: info.sessionComplete ? 1 : 0,
     session_failed: info.sessionFailed ? 1 : 0,
+    session_in_progress: info.sessionInProgress ? 1 : 0,
   }
 }
 
@@ -246,6 +248,7 @@ export const Info = Schema.Struct({
   time: Time,
   sessionComplete: optional(Schema.Boolean),
   sessionFailed: optional(Schema.Boolean),
+  sessionInProgress: optional(Schema.Boolean),
   permission: optional(PermissionV1.Ruleset),
   revert: optional(Revert),
 }).annotate({ identifier: "Session" })
@@ -323,6 +326,7 @@ export type GlobalListInput = {
   start?: number
   cursor?: number
   search?: string
+  status?: "unmarked" | "in_progress" | "complete" | "failed"
   limit?: number
   archived?: boolean
 }
@@ -439,6 +443,7 @@ export interface Interface {
   readonly setArchived: (input: { sessionID: SessionID; time?: number }) => Effect.Effect<void>
   readonly setSessionComplete: (input: { sessionID: SessionID; sessionComplete: boolean }) => Effect.Effect<void>
   readonly setSessionFailed: (input: { sessionID: SessionID; sessionFailed: boolean }) => Effect.Effect<void>
+  readonly setSessionInProgress: (input: { sessionID: SessionID; sessionInProgress: boolean }) => Effect.Effect<void>
   readonly setMetadata: (input: typeof SetMetadataInput.Type) => Effect.Effect<void>
   readonly setAgentModel: (input: {
     sessionID: SessionID
@@ -543,6 +548,7 @@ const layer: Layer.Layer<
         },
         sessionComplete: false,
         sessionFailed: false,
+        sessionInProgress: false,
       }
       yield* Effect.logInfo("created", result)
 
@@ -573,6 +579,16 @@ const layer: Layer.Layer<
       if (input?.start) conditions.push(gte(SessionTable.time_updated, input.start))
       if (input?.cursor) conditions.push(lt(SessionTable.time_updated, input.cursor))
       if (input?.search) conditions.push(like(SessionTable.title, `%${input.search}%`))
+      if (input?.status === "unmarked") {
+        conditions.push(
+          eq(SessionTable.session_in_progress, 0),
+          eq(SessionTable.session_complete, 0),
+          eq(SessionTable.session_failed, 0),
+        )
+      }
+      if (input?.status === "in_progress") conditions.push(eq(SessionTable.session_in_progress, 1))
+      if (input?.status === "complete") conditions.push(eq(SessionTable.session_complete, 1))
+      if (input?.status === "failed") conditions.push(eq(SessionTable.session_failed, 1))
       if (!input?.archived) conditions.push(isNull(SessionTable.time_archived))
 
       const query =
@@ -782,7 +798,7 @@ const layer: Layer.Layer<
     }) {
       yield* patch(input.sessionID, {
         sessionComplete: input.sessionComplete,
-        ...(input.sessionComplete && { sessionFailed: false }),
+        ...(input.sessionComplete && { sessionFailed: false, sessionInProgress: false }),
       }).pipe(Effect.orDie)
     })
 
@@ -792,7 +808,17 @@ const layer: Layer.Layer<
     }) {
       yield* patch(input.sessionID, {
         sessionFailed: input.sessionFailed,
-        ...(input.sessionFailed && { sessionComplete: false }),
+        ...(input.sessionFailed && { sessionComplete: false, sessionInProgress: false }),
+      }).pipe(Effect.orDie)
+    })
+
+    const setSessionInProgress = Effect.fn("Session.setSessionInProgress")(function* (input: {
+      sessionID: SessionID
+      sessionInProgress: boolean
+    }) {
+      yield* patch(input.sessionID, {
+        sessionInProgress: input.sessionInProgress,
+        ...(input.sessionInProgress && { sessionComplete: false, sessionFailed: false }),
       }).pipe(Effect.orDie)
     })
 
@@ -953,6 +979,7 @@ const layer: Layer.Layer<
       setArchived,
       setSessionComplete,
       setSessionFailed,
+      setSessionInProgress,
       setMetadata,
       setAgentModel,
       setPermission,

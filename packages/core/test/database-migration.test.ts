@@ -30,6 +30,7 @@ import { Database } from "@opencode-ai/core/database/database"
 import { SessionProjector } from "@opencode-ai/core/session/projector"
 import { SessionV1 } from "@opencode-ai/core/v1/session"
 import { tmpdir } from "./fixture/tmpdir"
+import sessionInProgressMigration from "@opencode-ai/core/database/migration/20261001064009_session_in_progress"
 
 const run = <A, E>(effect: Effect.Effect<A, E, SqlClientService>) =>
   Effect.runPromise(
@@ -39,6 +40,33 @@ const run = <A, E>(effect: Effect.Effect<A, E, SqlClientService>) =>
 const makeDb = EffectDrizzleSqlite.makeWithDefaults()
 
 describe("DatabaseMigration", () => {
+  test("adds an unmarked In progress flag without changing legacy markers or history", async () => {
+    await run(
+      Effect.gen(function* () {
+        const db = yield* makeDb
+        yield* db.run(
+          sql`CREATE TABLE session (id text PRIMARY KEY, session_complete integer DEFAULT 0 NOT NULL, session_failed integer DEFAULT 0 NOT NULL)`,
+        )
+        yield* db.run(sql`INSERT INTO session VALUES ('unmarked', 0, 0), ('complete', 1, 0), ('failed', 0, 1)`)
+        yield* db.run(sql`CREATE TABLE event (id text PRIMARY KEY, data text NOT NULL)`)
+        yield* db.run(sql`INSERT INTO event VALUES ('legacy', '{"title":"keep"}')`)
+
+        yield* DatabaseMigration.applyOnly(db, [sessionInProgressMigration])
+
+        expect(yield* db.all(sql`SELECT * FROM session ORDER BY id`)).toEqual([
+          { id: "complete", session_complete: 1, session_failed: 0, session_in_progress: 0 },
+          { id: "failed", session_complete: 0, session_failed: 1, session_in_progress: 0 },
+          { id: "unmarked", session_complete: 0, session_failed: 0, session_in_progress: 0 },
+        ])
+        yield* db.run(sql`INSERT INTO session (id) VALUES ('new')`)
+        expect(yield* db.get(sql`SELECT session_in_progress FROM session WHERE id = 'new'`)).toEqual({
+          session_in_progress: 0,
+        })
+        expect(yield* db.all(sql`SELECT * FROM event`)).toEqual([{ id: "legacy", data: '{"title":"keep"}' }])
+      }),
+    )
+  })
+
   test("defaults missing workspace names while preserving legacy workspace data", async () => {
     await run(
       Effect.gen(function* () {

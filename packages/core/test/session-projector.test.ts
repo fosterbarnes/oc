@@ -23,6 +23,8 @@ import { SessionInputTable, SessionMessageTable, SessionTable } from "@opencode-
 import { testEffect } from "./lib/effect"
 import { Snapshot } from "@opencode-ai/core/snapshot"
 import { Location } from "@opencode-ai/core/location"
+import { SessionV1 } from "@opencode-ai/core/v1/session"
+import { fromRow } from "@opencode-ai/core/session/info"
 
 const it = testEffect(AppNodeBuilder.build(LayerNode.group([Database.node, EventV2.node, SessionProjector.node])))
 const sessionsLayer = AppNodeBuilder.build(SessionV2.node, [[SessionExecution.node, SessionExecution.noopLayer]])
@@ -45,6 +47,55 @@ const assistantRow = (
 }
 
 describe("SessionProjector", () => {
+  it.effect("retains manual In progress through full session updates and current reads", () =>
+    Effect.gen(function* () {
+      const database = yield* Database.Service
+      const events = yield* EventV2.Service
+      yield* database.db
+        .insert(ProjectTable)
+        .values({
+          id: Project.ID.global,
+          worktree: AbsolutePath.make("/project"),
+          sandboxes: [],
+        })
+        .run()
+      const info = {
+        id: sessionID,
+        projectID: Project.ID.global,
+        slug: "test",
+        directory: "/project",
+        title: "Before",
+        version: "test",
+        time: { created: 1, updated: 1 },
+        sessionInProgress: true,
+      }
+      yield* events.publish(SessionV1.Event.Created, { sessionID, info })
+      yield* events.publish(SessionV1.Event.Updated, {
+        sessionID,
+        info: { ...info, title: "After", time: { created: 1, updated: 2 } },
+      })
+      const row = yield* database.db.select().from(SessionTable).where(eq(SessionTable.id, sessionID)).get()
+      if (!row) return yield* Effect.die("Session projection missing")
+      expect(row).toMatchObject({ title: "After", session_in_progress: 1, session_complete: 0, session_failed: 0 })
+      expect(fromRow(row)).toMatchObject({
+        title: "After",
+        sessionInProgress: true,
+        sessionComplete: false,
+        sessionFailed: false,
+      })
+
+      yield* events.publish(SessionV1.Event.Updated, {
+        sessionID,
+        info: { ...info, sessionInProgress: undefined, sessionComplete: true },
+      })
+      expect(yield* database.db.select().from(SessionTable).get()).toMatchObject({
+        session_in_progress: 0,
+        session_complete: 1,
+        session_failed: 0,
+      })
+    }),
+  )
+
   it.effect("projects moved sessions without the transitional context epoch table", () =>
     Effect.gen(function* () {
       const { db } = yield* Database.Service

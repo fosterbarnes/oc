@@ -48,5 +48,6 @@ export function fromRow(row: typeof SessionTable.$inferSelect): SessionSchema.In
     },
     sessionComplete: row.session_complete === 1,
     sessionFailed: row.session_failed === 1,
+    sessionInProgress: row.session_in_progress === 1,
   })
 }

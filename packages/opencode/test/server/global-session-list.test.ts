@@ -7,9 +7,14 @@ import { Session as SessionNs } from "@/session/session"
 import { CrossSpawnSpawner } from "@opencode-ai/core/cross-spawn-spawner"
 import { provideInstance, TestInstance, tmpdirScoped } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
+import { Database } from "@opencode-ai/core/database/database"
+import { SessionTable } from "@opencode-ai/core/session/sql"
+import { eq } from "drizzle-orm"
 
 const it = testEffect(
-  LayerNode.compile(LayerNode.group([SessionNs.node, SessionProjector.node, Project.node, CrossSpawnSpawner.node])),
+  LayerNode.compile(
+    LayerNode.group([SessionNs.node, SessionProjector.node, Project.node, CrossSpawnSpawner.node, Database.node]),
+  ),
 )
 
 const withSession = (input?: Parameters<SessionNs.Interface["create"]>[0]) =>
@@ -18,6 +23,68 @@ const withSession = (input?: Parameters<SessionNs.Interface["create"]>[0]) =>
   )
 
 describe("session.listGlobal", () => {
+  it.instance(
+    "intersects all manual statuses with search before limiting and retains root/archive conditions",
+    () =>
+      Effect.gen(function* () {
+        const instance = yield* TestInstance
+        const sessions = yield* SessionNs.Service
+        const database = yield* Database.Service
+        const unmarked = yield* withSession({ title: "status-target-unmarked" })
+        const progress = yield* withSession({ title: "status-target-progress" })
+        const complete = yield* withSession({ title: "status-target-complete" })
+        const failed = yield* withSession({ title: "status-target-failed" })
+        const archived = yield* withSession({ title: "status-target-archived" })
+        const child = yield* withSession({ title: "status-target-child", parentID: progress.id })
+        yield* sessions.setSessionInProgress({ sessionID: progress.id, sessionInProgress: true })
+        yield* sessions.setSessionComplete({ sessionID: complete.id, sessionComplete: true })
+        yield* sessions.setSessionFailed({ sessionID: failed.id, sessionFailed: true })
+        yield* sessions.setSessionInProgress({ sessionID: archived.id, sessionInProgress: true })
+        yield* sessions.setArchived({ sessionID: archived.id, time: 1 })
+        yield* sessions.setSessionInProgress({ sessionID: child.id, sessionInProgress: true })
+        yield* Effect.forEach([unmarked, progress, complete, failed, archived, child], (session, index) =>
+          database.db
+            .update(SessionTable)
+            .set({ time_updated: index + 1 })
+            .where(eq(SessionTable.id, session.id))
+            .run()
+            .pipe(Effect.orDie),
+        )
+        // More recent nonmatches than the limit must not hide the older marked rows.
+        yield* Effect.forEach([0, 1, 2], (index) => withSession({ title: `status-other-${index}` }))
+        const query = { directory: instance.directory, roots: true, search: "status-target", limit: 1 }
+        for (const [status, expected] of [
+          ["unmarked", unmarked],
+          ["in_progress", progress],
+          ["complete", complete],
+          ["failed", failed],
+        ] as const) {
+          expect((yield* sessions.listGlobal({ ...query, status })).map((session) => session.id)).toEqual([
+            expected.id,
+          ])
+        }
+        expect((yield* sessions.listGlobal({ ...query, limit: 10 })).map((session) => session.id)).toEqual([
+          failed.id,
+          complete.id,
+          progress.id,
+          unmarked.id,
+        ])
+        expect(
+          (yield* sessions.listGlobal({ ...query, status: "in_progress", archived: true })).map(
+            (session) => session.id,
+          ),
+        ).toEqual([archived.id])
+        expect(
+          (yield* sessions.listGlobal({ ...query, status: "in_progress", roots: false })).map(
+            (session) => session.id,
+          ),
+        ).toEqual([child.id])
+        expect(yield* sessions.listGlobal({ ...query, status: "in_progress", start: 3 })).toEqual([])
+        expect(yield* sessions.listGlobal({ ...query, status: "complete", cursor: 3 })).toEqual([])
+      }),
+    { git: true },
+  )
+
   it.instance(
     "lists sessions across projects with project metadata",
     () =>

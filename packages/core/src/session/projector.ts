@@ -73,6 +73,7 @@ function sessionRow(info: SessionV1.SessionInfo): typeof SessionTable.$inferInse
     time_archived: info.time.archived,
     session_complete: info.sessionComplete ? 1 : 0,
     session_failed: info.sessionFailed ? 1 : 0,
+    session_in_progress: info.sessionInProgress ? 1 : 0,
   }
 }
 

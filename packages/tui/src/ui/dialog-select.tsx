@@ -50,6 +50,17 @@ export interface DialogSelectProps<T> {
     side?: "left" | "right"
   }[]
   bindings?: readonly Binding<Renderable, KeyEvent>[]
+  /**
+   * Commands registered on this dialog layer even when no row is selected.
+   * Row-action filtering does not apply to these bindings.
+   */
+  commands?: {
+    name: string
+    title: string
+    category: string
+    run: () => void
+  }[]
+  commandBindings?: readonly Binding<Renderable, KeyEvent>[]
   current?: T
 }
 
@@ -299,6 +310,7 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
   }
 
   function moveTo(next: number, center = false, preserve = true) {
+    if (next < 0 || next >= flat().length) return
     setFocusedAction(undefined)
     setStore("selected", next)
     const option = selected()
@@ -336,7 +348,8 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
       }
       if (y < 0) {
         scroll.scrollBy(y)
-        if (isDeepEqual(flat()[0].value, selected()?.value)) {
+        const first = flat()[0]
+        if (first && isDeepEqual(first.value, selected()?.value)) {
           scroll.scrollTo(0)
         }
       }
@@ -451,6 +464,7 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
             item.onTrigger(option)
           },
         })),
+        ...(props.commands ?? []),
       ],
       bindings: [
         ...tuiConfig.keybinds.gather("dialog.select", [
@@ -483,6 +497,7 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
           if (typeof binding.cmd !== "string") return true
           return visible.some((item) => item.command === binding.cmd)
         }),
+        ...(props.commandBindings ?? []),
       ],
     }
   })

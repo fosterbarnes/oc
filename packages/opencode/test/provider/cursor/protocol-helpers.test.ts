@@ -13,12 +13,15 @@ describe("Cursor protocol helpers", () => {
         maxMode: true,
       }),
     ).toBe(false)
-    expect(
-      resolveVariantMaxMode([{ id: "context", value: "1m" }], {
-        picked: [{ id: "context", value: "1m" }],
-        maxMode: false,
-      }),
-    ).toBe(true)
+  })
+
+  test("without a catalog match, the menu entry's flag decides max mode", () => {
+    const base = [{ id: "context", value: "200k" }]
+    const long = [{ id: "context", value: "1m" }]
+    expect(resolveVariantMaxMode(base, { picked: base, entryMaxMode: false, maxMode: true })).toBe(false)
+    expect(resolveVariantMaxMode(long, { picked: long, entryMaxMode: true, maxMode: false })).toBe(true)
+    // Parameters alone never imply max mode.
+    expect(resolveVariantMaxMode(long, { picked: long })).toBe(false)
   })
 
   test("recognizes only short progress fragments", () => {

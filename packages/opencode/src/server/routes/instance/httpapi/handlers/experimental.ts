@@ -142,6 +142,7 @@ export const experimentalHandlers = HttpApiBuilder.group(InstanceHttpApi, "exper
         start: ctx.query.start,
         cursor: ctx.query.cursor,
         search: ctx.query.search,
+        status: ctx.query.status,
         limit: limit + 1,
         archived: ctx.query.archived,
       })
