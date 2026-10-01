@@ -92,6 +92,188 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-01 (~19:57) - v0.2.44 - Single rebuild and parse cache for hot reload - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation; completed
+- Version: 0.2.44
+- Fixes the two v0.2.43 leftovers (duplicate rebuild/toast on concurrent reads; double parse at startup)
+- Added `Fingerprint.reloading(state, read)` in `src/util/fingerprint.ts`: per-directory `Semaphore.makeUnsafe(1)` around compare + `InstanceState.invalidate`; second reader waits, sees matching fingerprint, skips rebuild. Replaces duplicated `current()` bodies in `command/index.ts` and `skill/index.ts`
+- Added `Fingerprint.memo<T>()`: per-file cache keyed by path, reused while mtime+size stamp unchanged. Used by `ConfigCommand.load` (wraps `parse`) and skill `load` (wraps markdown parse). Startup second pass and every rebuild now only re-parse changed files
+- Note: lock nesting is one-way (Command lock -> Skill lock via `skill.fingerprint()`/`skill.all()`); Skill never calls Command, so no deadlock. Keep it that way
+- Note: still-broken files re-toast on each rebuild (cached failure result is replayed); unchanged behavior
+- Changed `Fingerprint.of`: missing file now signs as `path:missing`
+- Verification: concurrent-read case added to `hot reloads skill files...` test; `test/skill`, `test/config`, `test/session/system.test.ts`, `test/agent` 345 pass; `test/session/prompt*` 47 pass; `bun typecheck` clean
+
+### User
+Hot reload
+- Editing a command or skill file now re-reads only that file instead of all of them.
+- When several parts of oc check for changes at the same moment, the list is rebuilt once and any warning shows once.
+
+---
+
+## 2026-10-01 (~19:53) - v0.2.43 - Pass over hot reload and slash menu work - Claude Opus 5.5, low effort; Pass
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Pass; completed
+- Version: 0.2.43
+- Reviewed v0.2.35-v0.2.42 diff (command/skill hot reload, `util/fingerprint.ts`, slash labels and colors)
+- Fixed `tui/src/context/sync.tsx` `refreshCommands`: failed `command.list` no longer blanks the slash menu (`if (x.data)` instead of `x.data ?? []`); matters now that it runs on every `/` open
+- Risk: `Command.current()` / `Skill.current()` can both invalidate when two fibers read during the same change; worst case is a duplicate rebuild and duplicate toast. Left as is
+- Note: startup parses command files twice (Config load for `config.command` snapshot, then `Command` init via `Config.commands()`); cheap, kept for `debug config` fidelity
+- Verification: `bun typecheck` in `packages/tui` clean
+
+### User
+Slash menu
+- If oc briefly cannot reach its server when you open `/`, the menu keeps its current entries instead of going empty.
+
+---
+
+## 2026-10-01 (~19:51) - v0.2.42 - Peach for skill slash entries - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation; completed
+- Version: 0.2.42
+- Changed `kindColor` skill color in `tui/src/component/prompt/autocomplete.tsx`: `theme.success` (green, user disliked) -> `theme.syntaxNumber` (drac: fosterPeach `#ef9f76`); user picked peach over blue (`primary`, close to teal) and red (`error`)
+- Note: status tokens exhausted; syntaxNumber is a non-status token so other themes may map it to a less distinct hue
+- Verification: `bun typecheck` in `packages/tui` clean; visual check left to user
+
+### User
+Slash menu
+- Skills in the `/` menu are now peach instead of green.
+
+---
+
+## 2026-10-01 (~19:49) - v0.2.41 - Swap slash entry colors - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation; completed
+- Version: 0.2.41
+- Changed `kindColor` in `tui/src/component/prompt/autocomplete.tsx` per user: tui `theme.secondary` (purple), command `theme.warning` (yellow), mcp `theme.info` (teal), skill `theme.success` (green, agent pick: only remaining distinct status hue that is not red/error)
+- Verification: `bun typecheck` in `packages/tui` clean; visual check left to user
+
+### User
+Slash menu
+- New colors: TUI actions purple, your commands yellow, MCP prompts teal, and skills green.
+
+---
+
+## 2026-10-01 (~19:27) - v0.2.40 - Color slash entries by kind - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation; completed
+- Version: 0.2.40
+- Added `kind?: "tui" | "command" | "mcp" | "skill"` to `AutocompleteOption` (`tui/src/component/prompt/autocomplete.tsx`); set in `commands` memo (TUI slashes `tui`, server commands `serverCommand.source`)
+- Added `kindColor` in `Autocomplete`: tui `theme.info`, command `theme.success`, mcp `theme.warning`, skill `theme.secondary`, else `theme.text`; whole `display` text colored. Selected row keeps `selectedForeground`; description stays `textMuted`
+- Note: theme tokens, not hex, so colors follow the active theme. User theme `drac` (`~/.config/opencode/themes/drac.json`) maps them to fosterTeal, fosterGreen, fosterYellow, fosterMauve: distinct. Built-in system theme maps info and accent both to cyan, primary also cyan; avoided primary/accent for that reason
+- TODO: user may switch to coloring only the `:(kind)` label instead of the whole entry
+- Verification: `bun typecheck` in `packages/tui` clean; visual check left to user
+
+### User
+Slash menu
+- Each `/` entry is colored by where it comes from: TUI actions teal, your commands green, MCP prompts yellow, and skills mauve (in the drac theme).
+- The highlighted row and the descriptions keep their usual colors.
+
+---
+
+## 2026-10-01 (~19:24) - v0.2.39 - TUI label in slash menu - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation; completed
+- Version: 0.2.39
+- Changed `tui/src/component/prompt/autocomplete.tsx` `commands` memo: TUI-local slashes from `useCommandSlashes()` get `:(tui)` appended to `display` at the call site; `keymap` hook left generic (autocomplete is its only caller)
+- Note: labels live only in `display`; `onSelect` dispatches the keymap command or inserts `/name `, so labels never reach the prompt. `expandDirectory` uses `display` only for `@` paths
+- Verification: `bun typecheck` in `packages/tui` clean; no TUI test covers the slash list
+
+### User
+Slash menu
+- Built-in TUI actions such as `/skills` and `/new` now show a `:(tui)` label, so every `/` entry shows where it comes from.
+
+---
+
+## 2026-10-01 (~19:23) - v0.2.38 - Source labels in slash menu - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation; completed
+- Version: 0.2.38
+- Changed `tui/src/component/prompt/autocomplete.tsx` `commands` memo: label is `:(${source})` for every server command, giving `:(command)`, `:(mcp)`, `:(skill)`; no label when `source` is absent
+- Note: `Command.Info.source` literals are exactly `command | mcp | skill` (`opencode/src/command/index.ts:32`); built-ins `init`/`review` are `command`. TUI-local slashes (`slashes()`, e.g. `/skills`) are not server commands and stay unlabeled
+- Verification: `bun typecheck` in `packages/tui` clean; no TUI test covers the slash list
+
+### User
+Slash menu
+- Every server slash entry now shows where it comes from: `/name:(command)`, `/name:(mcp)`, or `/name:(skill)`.
+- Built-in TUI actions such as `/skills` stay unlabeled.
+
+---
+
+## 2026-10-01 (~19:19) - v0.2.37 - Show skills in slash menu - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation; completed
+- Version: 0.2.37
+- Changed `tui/src/component/prompt/autocomplete.tsx` `commands` memo: removed upstream `source === "skill"` skip; skills now listed with `:skill` label (same pattern as `:mcp`)
+- Note: user tested v0.2.36 by typing `/demo` and saw nothing; cause was this upstream filter, not hot reload (server had loaded the skill)
+- Note: `Command` init skips a skill whose name matches an existing command, so commands win name clashes
+- Verification: `bun typecheck` in `packages/tui` clean; no TUI test covers the slash list
+
+### User
+Skills
+- Skills now appear in the `/` menu with a `:skill` label, so `/demo` shows a newly added skill right away.
+
+---
+
+## 2026-10-01 (~19:14) - v0.2.36 - Hot reload for skills - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation; completed
+- Version: 0.2.36
+- Follows v0.2.35 command hot reload; same fingerprint-on-read pattern
+- Added `src/util/fingerprint.ts` (`Fingerprint.scan(roots)`, `Fingerprint.of(files)`); `config/command.ts` now uses it (dropped own glob/stat code)
+- Changed `skill/index.ts`: `discovered` InstanceState now holds roots (`{dir, pattern, dot}`), resolved once; URL skills pulled once there, later only rescanned from cache dirs (no re-pull)
+- Changed `skill/index.ts` `state`: scans roots, fingerprints, parses via `load()`; `get/require/all/dirs/available` go through `current()` which invalidates state on fingerprint mismatch
+- Added module `lastGood` Map in skill: YAML parse error or invalid frontmatter keeps previous version; toast `Invalid skill file` (replaced old `Session.Event.Error` publish). Files that never had valid frontmatter still skip quietly (no toast spam for foreign SKILL.md files)
+- Added `Skill.Interface.fingerprint()`; `Command` signature = command files + skill fingerprint so `/` menu tracks skill add/remove
+- Changed skill load order: `Promise.all` preserves scan order, so duplicate-name override is now deterministic (last root wins)
+- Kept `skills.paths`/`skills.urls` config edits out of scope (need restart), per user
+- Risk: `Agent` caches `skill.dirs()` for permission allowlist (`agent/agent.ts:103`); a brand-new skill folder's extra files may prompt for read permission until restart
+- Note: `test/tool/skill.test.ts` "execute returns skill content block with files" runs ~5s against bun's 5s default timeout; flaky with or without this change (timed HEAD vs change: same 6.4-6.6s file runs)
+- Verification: new test `hot reloads skill files and keeps the last good version` in `test/skill/skill.test.ts`; `test/skill`, `test/config`, `test/session/system.test.ts`, `test/agent` 345 pass; `bun typecheck` clean. Full suite skipped per user
+
+### User
+Skills
+- Adding, editing, or deleting a skill's `SKILL.md` now takes effect the next time a skill is used or you open the `/` menu, with no restart.
+- If an edited skill file breaks, oc keeps the last working version and shows a warning toast instead of an error in the chat.
+- Changing `skills.paths` or `skills.urls` in `opencode.jsonc` still needs a restart.
+
+---
+
+## 2026-10-01 (~19:00) - v0.2.35 - Hot reload for command files - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation; completed
+- Version: 0.2.35
+- Added hot reload for `{command,commands}/**/*.md` in all config dirs (global `~/.config/opencode`, `~/.opencode`, project `.opencode`, `OPENCODE_CONFIG_DIR`)
+- Changed `config/command.ts` `load(dir)`: returns `{ commands, diagnostics }`; no longer throws `InvalidError` on bad file; module `lastGood` Map (path -> last valid command) serves previous version while file is broken; a new broken file is skipped
+- Added `ConfigCommand.fingerprint(dirs)`: sorted `path:mtimeMs:size` of matching files
+- Added `Config.commands()`: `State.commandLayers` records command sources in startup merge order (inline `command` records from every `merge()` plus managed prefs, dir strings for file commands); folds them with dir rescans so precedence matches startup. `Config.get().command` stays the startup snapshot
+- Changed `Command` service: state holds fingerprint; `get`/`list` recompute fingerprint and `InstanceState.invalidate` on mismatch; init reads `config.commands()` instead of `cfg.command`; publishes `TuiEvent.ToastShow` warning per diagnostic; added `EventV2Bridge.node` dep
+- Added TUI `sync.refreshCommands()`; autocomplete `show("/")` calls it, so slash menu refetches on open (no watcher, no new event, no SDK regen)
+- Kept skills out of scope; separate loader (`Skill.all()`), same fingerprint pattern applies later
+- Note: `ConfigMarkdown.parse` is lenient on bad YAML; schema-invalid frontmatter (e.g. `subtask: not-a-boolean`) is what triggers diagnostics
+- Updated `test/fixture/config.ts` with default `commands()` derived from `get`
+- Verification: new test `commands() rescans command files and keeps the last good version` in `test/config/config.test.ts`; `test/config`, command and prompt tests 309 pass; `bun typecheck` clean in `packages/opencode` and `packages/tui`. Full suite cancelled at user request (known issues, slow)
+- MISTAKE: `bunx prettier --write` reformatted unrelated hunks in `sync.tsx` and `config.test.ts`; reverted. Do not run bunx prettier across whole files; check diff for unrelated hunks after formatting
+
+### User
+Commands
+- Adding or editing a file in `~/.opencode/commands` (or any other commands folder) now takes effect the next time you type `/`, with no restart or reinstall.
+- Deleted command files disappear from the slash menu the same way.
+- If an edited command file has invalid settings, oc keeps using the last working version and shows a warning toast naming the file.
+- A broken command file no longer stops oc from starting; it is skipped with a warning.
+
+---
+
 ## 2026-10-01 (~18:43) - v0.2.34 - Rename revive command pairs - GPT-6 Luna; Implementation
 
 ### Agent

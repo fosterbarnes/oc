@@ -1,7 +1,6 @@
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import path from "path"
 import { Effect, Layer, Context, Schema } from "effect"
-import { NamedError } from "@opencode-ai/core/util/error"
 import type { Agent } from "@/agent/agent"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { InstanceState } from "@/effect/instance-state"
@@ -13,7 +12,8 @@ import { Config } from "@/config/config"
 import { FrontmatterError } from "@opencode-ai/core/v1/config/error"
 import { ConfigMarkdown } from "@/config/markdown"
 import { RuntimeFlags } from "@/effect/runtime-flags"
-import { Glob } from "@opencode-ai/core/util/glob"
+import { Fingerprint } from "@/util/fingerprint"
+import { TuiEvent } from "@/server/tui-event"
 import { Discovery } from "./discovery"
 import { isRecord } from "@/util/record"
 import { escapeHtml } from "@/util/html"
@@ -81,17 +81,9 @@ export class NotFoundError extends Schema.TaggedErrorClass<NotFoundError>()("Ski
 
 type State = {
   skills: Record<string, Info>
-  dirs: Set<string>
-}
-
-type DiscoveryState = {
-  matches: string[]
   dirs: string[]
-}
-
-type ScanState = {
-  matches: Set<string>
-  dirs: Set<string>
+  // Signature of skill files at load time; a mismatch on read triggers a rebuild.
+  fingerprint: string
 }
 
 export interface Interface {
@@ -100,77 +92,35 @@ export interface Interface {
   readonly all: () => Effect.Effect<Info[]>
   readonly dirs: () => Effect.Effect<string[]>
   readonly available: (agent?: Agent.Info) => Effect.Effect<Info[]>
+  /** Changes whenever a skill file is added, edited, or removed. */
+  readonly fingerprint: () => Effect.Effect<string>
 }
 
-const add = Effect.fnUntraced(function* (state: State, match: string, events: EventV2Bridge.Service["Service"]) {
-  const md = yield* Effect.tryPromise({
-    try: () => ConfigMarkdown.parse(match),
-    catch: (err) => err,
-  }).pipe(
-    Effect.catch(
-      Effect.fnUntraced(function* (err) {
-        const message = FrontmatterError.isInstance(err) ? err.data.message : `Failed to parse skill ${match}`
-        const { Session } = yield* Effect.promise(() => import("@/session/session"))
-        yield* events.publish(Session.Event.Error, { error: new NamedError.Unknown({ message }).toObject() })
-        yield* Effect.logError("failed to load skill", { skill: match, error: err })
-        return undefined
-      }),
-    ),
-  )
+// Last successfully parsed skill per file, so a broken edit keeps serving the previous version.
+const lastGood = new Map<string, Info>()
+const parsed = Fingerprint.memo<Awaited<ReturnType<typeof parse>>>()
 
-  if (!md) return
+function parse(match: string) {
+  return ConfigMarkdown.parse(match).catch((err: unknown) => ({
+    error: FrontmatterError.isInstance(err) ? err.data.message : `Failed to parse skill ${match}`,
+  }))
+}
 
-  if (!isSkillFrontmatter(md.data)) return
-
-  if (state.skills[md.data.name]) {
-    yield* Effect.logWarning("duplicate skill name", {
-      name: md.data.name,
-      existing: state.skills[md.data.name].location,
-      duplicate: match,
-    })
+async function load(match: string): Promise<{ info?: Info; problem?: string }> {
+  const md = await parsed(match, () => parse(match))
+  const previous = lastGood.get(match)
+  if ("error" in md) return { info: previous, problem: md.error }
+  // Files that never had valid frontmatter are skipped quietly, as before hot reload.
+  if (!isSkillFrontmatter(md.data)) {
+    return { info: previous, problem: previous ? `${match}: frontmatter needs a string name` : undefined }
   }
+  const info = { name: md.data.name, description: md.data.description, location: match, content: md.content }
+  lastGood.set(match, info)
+  return { info }
+}
 
-  state.dirs.add(path.dirname(match))
-  state.skills[md.data.name] = {
-    name: md.data.name,
-    description: md.data.description,
-    location: match,
-    content: md.content,
-  }
-})
-
-const scan = Effect.fnUntraced(function* (
-  state: ScanState,
-  root: string,
-  pattern: string,
-  opts?: { dot?: boolean; scope?: string },
-) {
-  const matches = yield* Effect.tryPromise({
-    try: () =>
-      Glob.scan(pattern, {
-        cwd: root,
-        absolute: true,
-        include: "file",
-        symlink: true,
-        dot: opts?.dot,
-      }),
-    catch: (error) => error,
-  }).pipe(
-    Effect.catch((error) => {
-      if (!opts?.scope) return Effect.die(error)
-      return Effect.logError(`failed to scan ${opts.scope} skills`, { dir: root, error: error }).pipe(
-        Effect.as([] as string[]),
-      )
-    }),
-  )
-
-  for (const match of matches) {
-    state.matches.add(match)
-    state.dirs.add(path.dirname(match))
-  }
-})
-
-const discoverSkills = Effect.fnUntraced(function* (
+// Roots are resolved once per instance; URL skills are pulled here and later only rescanned from cache.
+const discoverRoots = Effect.fnUntraced(function* (
   config: Config.Interface,
   discovery: Discovery.Interface,
   fsys: FSUtil.Interface,
@@ -180,7 +130,7 @@ const discoverSkills = Effect.fnUntraced(function* (
   directory: string,
   worktree: string,
 ) {
-  const state: ScanState = { matches: new Set(), dirs: new Set() }
+  const roots: Fingerprint.Root[] = []
 
   const externalDirs: string[] = []
   if (!disableExternalSkills) {
@@ -190,7 +140,7 @@ const discoverSkills = Effect.fnUntraced(function* (
     for (const dir of externalDirs) {
       const root = path.join(global.home, dir)
       if (!(yield* fsys.isDir(root))) continue
-      yield* scan(state, root, EXTERNAL_SKILL_PATTERN, { dot: true, scope: "global" })
+      roots.push({ dir: root, pattern: EXTERNAL_SKILL_PATTERN, dot: true })
     }
 
     const upDirs = yield* fsys
@@ -198,13 +148,12 @@ const discoverSkills = Effect.fnUntraced(function* (
       .pipe(Effect.catch(() => Effect.succeed([] as string[])))
 
     for (const root of upDirs) {
-      yield* scan(state, root, EXTERNAL_SKILL_PATTERN, { dot: true, scope: "project" })
+      roots.push({ dir: root, pattern: EXTERNAL_SKILL_PATTERN, dot: true })
     }
   }
 
-  const configDirs = yield* config.directories()
-  for (const dir of configDirs) {
-    yield* scan(state, dir, OPENCODE_SKILL_PATTERN)
+  for (const dir of yield* config.directories()) {
+    roots.push({ dir, pattern: OPENCODE_SKILL_PATTERN })
   }
 
   const cfg = yield* config.get()
@@ -215,34 +164,16 @@ const discoverSkills = Effect.fnUntraced(function* (
       yield* Effect.logWarning("skill path not found", { path: dir })
       continue
     }
-
-    yield* scan(state, dir, SKILL_PATTERN)
+    roots.push({ dir, pattern: SKILL_PATTERN })
   }
 
   for (const url of cfg.skills?.urls ?? []) {
-    const pulledDirs = yield* discovery.pull(url)
-    for (const dir of pulledDirs) {
-      yield* scan(state, dir, SKILL_PATTERN)
+    for (const dir of yield* discovery.pull(url)) {
+      roots.push({ dir, pattern: SKILL_PATTERN })
     }
   }
 
-  return {
-    matches: Array.from(state.matches),
-    dirs: Array.from(state.dirs),
-  }
-})
-
-const loadSkills = Effect.fnUntraced(function* (
-  state: State,
-  discovered: DiscoveryState,
-  events: EventV2Bridge.Service["Service"],
-) {
-  yield* Effect.forEach(discovered.matches, (match) => add(state, match, events), {
-    concurrency: "unbounded",
-    discard: true,
-  })
-
-  yield* Effect.logInfo("init", { count: Object.keys(state.skills).length })
+  return roots
 })
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/Skill") {}
@@ -258,7 +189,7 @@ const layer = Layer.effect(
     const flags = yield* RuntimeFlags.Service
     const discovered = yield* InstanceState.make(
       Effect.fn("Skill.discovery")(function* (ctx) {
-        return yield* discoverSkills(
+        return yield* discoverRoots(
           config,
           discovery,
           fsys,
@@ -272,49 +203,90 @@ const layer = Layer.effect(
     )
     const state = yield* InstanceState.make(
       Effect.fn("Skill.state")(function* () {
-        const s: State = { skills: {}, dirs: new Set() }
-        // Register the built-in skill BEFORE disk discovery so a user-disk
+        const roots = yield* InstanceState.get(discovered)
+        const matches = yield* Effect.promise(() => Fingerprint.scan(roots))
+        // Fingerprint before parsing so an edit during the load is picked up by the next read.
+        const fingerprint = yield* Effect.promise(() => Fingerprint.of(matches))
+        const loaded = yield* Effect.promise(() => Promise.all(matches.map(load)))
+        // Register the built-in skill BEFORE disk skills so a user-disk
         // skill with the same name can override it.
-        s.skills[CUSTOMIZE_OPENCODE_SKILL_NAME] = {
-          name: CUSTOMIZE_OPENCODE_SKILL_NAME,
-          description: CUSTOMIZE_OPENCODE_SKILL_DESCRIPTION,
-          location: "<built-in>",
-          content: CUSTOMIZE_OPENCODE_SKILL_BODY,
+        const skills: Record<string, Info> = {
+          [CUSTOMIZE_OPENCODE_SKILL_NAME]: {
+            name: CUSTOMIZE_OPENCODE_SKILL_NAME,
+            description: CUSTOMIZE_OPENCODE_SKILL_DESCRIPTION,
+            location: "<built-in>",
+            content: CUSTOMIZE_OPENCODE_SKILL_BODY,
+          },
         }
-        yield* loadSkills(s, yield* InstanceState.get(discovered), events)
-        return s
+        for (const item of loaded) {
+          if (item.problem) {
+            yield* Effect.logWarning("invalid skill file", { message: item.problem })
+            yield* events
+              .publish(TuiEvent.ToastShow, {
+                title: "Invalid skill file",
+                message: item.problem,
+                variant: "warning",
+                duration: 8000,
+              })
+              .pipe(Effect.ignore)
+          }
+          if (!item.info) continue
+          if (skills[item.info.name]) {
+            yield* Effect.logWarning("duplicate skill name", {
+              name: item.info.name,
+              existing: skills[item.info.name].location,
+              duplicate: item.info.location,
+            })
+          }
+          skills[item.info.name] = item.info
+        }
+        yield* Effect.logInfo("init", { count: Object.keys(skills).length })
+        return { skills, dirs: [...new Set(matches.map((match) => path.dirname(match)))], fingerprint }
+      }),
+    )
+
+    // Skill files are hot-reloaded: rebuild when any SKILL.md was added, changed, or removed.
+    const current = Fingerprint.reloading(
+      state,
+      Effect.gen(function* () {
+        const roots = yield* InstanceState.get(discovered)
+        return yield* Effect.promise(() => Fingerprint.scan(roots).then(Fingerprint.of))
       }),
     )
 
     const get = Effect.fn("Skill.get")(function* (name: string) {
-      const s = yield* InstanceState.get(state)
+      const s = yield* current()
       return s.skills[name]
     })
 
     const require = Effect.fn("Skill.require")(function* (name: string) {
-      const s = yield* InstanceState.get(state)
+      const s = yield* current()
       const info = s.skills[name]
       if (info) return info
       return yield* new NotFoundError({ name, available: Object.keys(s.skills).toSorted() })
     })
 
     const all = Effect.fn("Skill.all")(function* () {
-      const s = yield* InstanceState.get(state)
+      const s = yield* current()
       return Object.values(s.skills)
     })
 
     const dirs = Effect.fn("Skill.dirs")(function* () {
-      return (yield* InstanceState.get(discovered)).dirs
+      return (yield* current()).dirs
     })
 
     const available = Effect.fn("Skill.available")(function* (agent?: Agent.Info) {
-      const s = yield* InstanceState.get(state)
+      const s = yield* current()
       const list = Object.values(s.skills).toSorted((a, b) => a.name.localeCompare(b.name))
       if (!agent) return list
       return list.filter((skill) => Permission.evaluate("skill", skill.name, agent.permission).action !== "deny")
     })
 
-    return Service.of({ get, require, all, dirs, available })
+    const fingerprint = Effect.fn("Skill.fingerprint")(function* () {
+      return (yield* current()).fingerprint
+    })
+
+    return Service.of({ get, require, all, dirs, available, fingerprint })
   }),
 )
 

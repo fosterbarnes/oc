@@ -1107,6 +1107,26 @@ Nested command template`,
   }),
 )
 
+it.instance("commands() rescans command files and keeps the last good version", () =>
+  Effect.gen(function* () {
+    const test = yield* TestInstance
+    const file = path.join(test.directory, ".opencode", "commands", "live.md")
+    yield* FSUtil.use.writeWithDirs(file, "---\ndescription: first\n---\nFirst template")
+    expect((yield* Config.use.commands()).commands["live"]?.template).toBe("First template")
+
+    yield* FSUtil.use.writeWithDirs(file, "---\ndescription: second\n---\nSecond template")
+    expect((yield* Config.use.commands()).commands["live"]?.template).toBe("Second template")
+
+    yield* FSUtil.use.writeWithDirs(file, "---\nsubtask: not-a-boolean\n---\nBroken")
+    const broken = yield* Config.use.commands()
+    expect(broken.commands["live"]?.template).toBe("Second template")
+    expect(broken.diagnostics.map((diag) => diag.path)).toEqual([file])
+
+    yield* FSUtil.use.writeWithDirs(path.join(test.directory, ".opencode", "commands", "added.md"), "Added")
+    expect((yield* Config.use.commands()).commands["added"]?.template).toBe("Added")
+  }),
+)
+
 it.instance("updates config and writes to file", () =>
   Effect.gen(function* () {
     const test = yield* TestInstance

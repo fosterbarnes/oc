@@ -156,6 +156,8 @@ type Info = ConfigV1.Info & {
 type State = {
   config: Info
   directories: string[]
+  // Command sources in merge order: inline config records, or config dirs rescanned on every commands() call.
+  commandLayers: (NonNullable<Info["command"]> | string)[]
   deps: Fiber.Fiber<void>[]
   consoleState: ConsoleState
 }
@@ -168,6 +170,10 @@ export interface Interface {
   readonly updateGlobal: (config: Info) => Effect.Effect<{ info: Info; changed: boolean }>
   readonly invalidate: () => Effect.Effect<void>
   readonly directories: () => Effect.Effect<string[]>
+  readonly commands: () => Effect.Effect<{
+    commands: NonNullable<Info["command"]>
+    diagnostics: ConfigCommand.Diagnostic[]
+  }>
   readonly waitForDependencies: () => Effect.Effect<void>
 }
 
@@ -371,6 +377,7 @@ const layer = Layer.effect(
         const authEnv: Record<string, string> = {}
         const consoleManagedProviders = new Set<string>()
         let activeOrgName: string | undefined
+        const commandLayers: State["commandLayers"] = []
 
         const pluginScopeForSource = Effect.fnUntraced(function* (source: string) {
           if (source.startsWith("http://") || source.startsWith("https://")) return "global"
@@ -402,6 +409,7 @@ const layer = Layer.effect(
 
         const merge = (source: string, next: Info, kind?: ConfigPlugin.Scope) => {
           result = mergeConfigConcatArrays(result, next)
+          if (next.command) commandLayers.push(next.command)
           return mergePluginOrigins(source, next.plugin, kind)
         }
 
@@ -507,7 +515,12 @@ const layer = Layer.effect(
             )
           deps.push(dep)
 
-          result.command = mergeDeep(result.command ?? {}, yield* Effect.promise(() => ConfigCommand.load(dir)))
+          const loaded = yield* Effect.promise(() => ConfigCommand.load(dir))
+          for (const diag of loaded.diagnostics) {
+            yield* Effect.logWarning("invalid command file", { path: diag.path, message: diag.message })
+          }
+          result.command = mergeDeep(result.command ?? {}, loaded.commands)
+          commandLayers.push(dir)
           const scanned = yield* Effect.promise(() => ConfigAgent.scan(dir))
           for (const diag of scanned.diagnostics) {
             yield* Effect.logWarning("invalid agent file", {
@@ -583,13 +596,12 @@ const layer = Layer.effect(
         // macOS managed preferences (.mobileconfig deployed via MDM) override everything
         const managed = yield* Effect.promise(() => ConfigManaged.readManagedPreferences())
         if (managed) {
-          result = mergeConfigConcatArrays(
-            result,
-            yield* loadConfig(managed.text, {
-              dir: path.dirname(managed.source),
-              source: managed.source,
-            }),
-          )
+          const next = yield* loadConfig(managed.text, {
+            dir: path.dirname(managed.source),
+            source: managed.source,
+          })
+          result = mergeConfigConcatArrays(result, next)
+          if (next.command) commandLayers.push(next.command)
         }
 
         const legacyPluginSources = (result.plugin_origins ?? [])
@@ -661,6 +673,7 @@ const layer = Layer.effect(
         return {
           config: result,
           directories,
+          commandLayers,
           deps,
           consoleState: {
             consoleManagedProviders: Array.from(consoleManagedProviders),
@@ -684,6 +697,22 @@ const layer = Layer.effect(
 
     const directories = Effect.fn("Config.directories")(function* () {
       return yield* InstanceState.use(state, (s) => s.directories)
+    })
+
+    // Rebuilds commands with the startup merge order, rescanning command dirs so file edits apply live.
+    const commands = Effect.fn("Config.commands")(function* () {
+      const layers = yield* InstanceState.use(state, (s) => s.commandLayers)
+      const loaded = yield* Effect.promise(() =>
+        Promise.all(
+          layers.map((layer) =>
+            typeof layer === "string" ? ConfigCommand.load(layer) : { commands: layer, diagnostics: [] },
+          ),
+        ),
+      )
+      return {
+        commands: loaded.reduce<NonNullable<Info["command"]>>((acc, layer) => mergeDeep(acc, layer.commands), {}),
+        diagnostics: loaded.flatMap((layer) => layer.diagnostics),
+      }
     })
 
     const getConsoleState = Effect.fn("Config.getConsoleState")(function* () {
@@ -749,6 +778,7 @@ const layer = Layer.effect(
       invalidate,
       directories,
       waitForDependencies,
+      commands,
     })
   }),
 )

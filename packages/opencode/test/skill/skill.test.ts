@@ -582,4 +582,33 @@ description: A skill in the .opencode/skills directory.
       { git: true },
     ),
   )
+
+  it.live("hot reloads skill files and keeps the last good version", () =>
+    provideTmpdirInstance(
+      (dir) =>
+        Effect.gen(function* () {
+          const file = path.join(dir, ".opencode", "skill", "live", "SKILL.md")
+          const write = (text: string) => Effect.promise(() => Bun.write(file, text))
+          const skill = yield* Skill.Service
+          const content = (name: string) => skill.get(name).pipe(Effect.map((item) => item?.content.trim()))
+
+          yield* write("---\nname: live\ndescription: Live skill.\n---\nFirst body\n")
+          expect(yield* content("live")).toBe("First body")
+
+          // Concurrent readers during a change share one rebuild and both see the new version.
+          yield* write("---\nname: live\ndescription: Live skill.\n---\nSecond body, longer\n")
+          expect(yield* Effect.all([content("live"), content("live")], { concurrency: 2 })).toEqual([
+            "Second body, longer",
+            "Second body, longer",
+          ])
+
+          yield* write("---\nname: 42\n---\nBroken\n")
+          expect(yield* content("live")).toBe("Second body, longer")
+
+          yield* Effect.promise(() => fs.rm(path.dirname(file), { recursive: true }))
+          expect(yield* skill.get("live")).toBeUndefined()
+        }),
+      { git: true },
+    ),
+  )
 })

@@ -5,6 +5,10 @@ import { EffectBridge } from "@/effect/bridge"
 import type { InstanceContext } from "@/project/instance-context"
 import { Effect, Layer, Context, Schema } from "effect"
 import { Config } from "@/config/config"
+import { ConfigCommand } from "@/config/command"
+import { Fingerprint } from "@/util/fingerprint"
+import { EventV2Bridge } from "@/event-v2-bridge"
+import { TuiEvent } from "@/server/tui-event"
 import { MCP } from "../mcp"
 import { Skill } from "../skill"
 import PROMPT_INITIALIZE from "./template/initialize.txt"
@@ -13,6 +17,8 @@ import { LegacyEvent } from "@opencode-ai/schema/legacy-event"
 
 type State = {
   commands: Record<string, Info>
+  // Signature of command and skill files at load time; a mismatch on read triggers a rebuild.
+  fingerprint: string
 }
 
 export const Event = {
@@ -61,9 +67,30 @@ const layer = Layer.effect(
     const config = yield* Config.Service
     const mcp = yield* MCP.Service
     const skill = yield* Skill.Service
+    const events = yield* EventV2Bridge.Service
+
+    // Skills also appear as commands, so their files count toward the command signature.
+    const readFingerprint = Effect.fnUntraced(function* () {
+      const dirs = yield* config.directories()
+      const commands = yield* Effect.promise(() => ConfigCommand.fingerprint(dirs))
+      return `${commands}\n${yield* skill.fingerprint()}`
+    })
 
     const init = Effect.fn("Command.state")(function* (ctx: InstanceContext) {
-      const cfg = yield* config.get()
+      // Fingerprint before loading so an edit during the load is picked up by the next read.
+      const fingerprint = yield* readFingerprint()
+      const loaded = yield* config.commands()
+      for (const diag of loaded.diagnostics) {
+        yield* Effect.logWarning("invalid command file", { path: diag.path, message: diag.message })
+        yield* events
+          .publish(TuiEvent.ToastShow, {
+            title: "Invalid command file",
+            message: `${diag.path}\n${diag.message}`,
+            variant: "warning",
+            duration: 8000,
+          })
+          .pipe(Effect.ignore)
+      }
       const bridge = yield* EffectBridge.make()
       const commands: Record<string, Info> = {}
 
@@ -87,7 +114,7 @@ const layer = Layer.effect(
         hints: hints(PROMPT_REVIEW),
       }
 
-      for (const [name, command] of Object.entries(cfg.command ?? {})) {
+      for (const [name, command] of Object.entries(loaded.commands)) {
         commands[name] = {
           name,
           agent: command.agent,
@@ -153,18 +180,22 @@ const layer = Layer.effect(
 
       return {
         commands,
+        fingerprint,
       }
     })
 
     const state = yield* InstanceState.make<State>((ctx) => init(ctx))
 
+    // Command files are hot-reloaded: rebuild when any command file was added, changed, or removed.
+    const current = Fingerprint.reloading(state, readFingerprint())
+
     const get = Effect.fn("Command.get")(function* (name: string) {
-      const s = yield* InstanceState.get(state)
+      const s = yield* current()
       return s.commands[name]
     })
 
     const list = Effect.fn("Command.list")(function* () {
-      const s = yield* InstanceState.get(state)
+      const s = yield* current()
       return Object.values(s.commands)
     })
 
@@ -172,6 +203,10 @@ const layer = Layer.effect(
   }),
 )
 
-export const node = LayerNode.make({ service: Service, layer: layer, deps: [Config.node, MCP.node, Skill.node] })
+export const node = LayerNode.make({
+  service: Service,
+  layer: layer,
+  deps: [Config.node, MCP.node, Skill.node, EventV2Bridge.node],
+})
 
 export * as Command from "."

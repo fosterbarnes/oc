@@ -750,6 +750,13 @@ export const {
       get path() {
         return project.instance.path()
       },
+      // The server rescans command files on list, so this picks up added or edited commands.
+      async refreshCommands() {
+        const workspace = project.workspace.current()
+        const x = await sdk.client.command.list({ workspace })
+        // Keep the current list on a failed request instead of blanking the menu.
+        if (x.data) setStore("command", reconcile(x.data))
+      },
       session: {
         get(sessionID: string) {
           const match = search(store.session, sessionID, (s) => s.id)

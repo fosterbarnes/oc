@@ -70,6 +70,8 @@ export type AutocompleteOption = {
   isDirectory?: boolean
   onSelect?: () => void
   path?: string
+  // Slash entry origin; colors the row so each kind reads at a glance.
+  kind?: "tui" | "command" | "mcp" | "skill"
 }
 
 export function Autocomplete(props: {
@@ -92,6 +94,15 @@ export function Autocomplete(props: {
   const slashes = useCommandSlashes()
   const modeStack = useOpencodeModeStack()
   const { theme } = useTheme()
+  // Theme tokens keep the four slash kinds distinct in every theme: built-in TUI actions secondary (purple),
+  // user commands warning (yellow), MCP prompts info (teal/cyan), skills syntaxNumber (peach/orange).
+  const kindColor = (kind: AutocompleteOption["kind"]) => {
+    if (kind === "tui") return theme.secondary
+    if (kind === "command") return theme.warning
+    if (kind === "mcp") return theme.info
+    if (kind === "skill") return theme.syntaxNumber
+    return theme.text
+  }
   const dimensions = useTerminalDimensions()
   const frecency = useFrecency()
   const tuiConfig = useTuiConfig()
@@ -445,14 +456,18 @@ export function Autocomplete(props: {
   )
 
   const commands = createMemo((): AutocompleteOption[] => {
-    const results: AutocompleteOption[] = [...slashes()]
+    const results: AutocompleteOption[] = slashes().map((slash) => ({
+      ...slash,
+      display: `${slash.display}:(tui)`,
+      kind: "tui" as const,
+    }))
 
     for (const serverCommand of sync.data.command) {
-      if (serverCommand.source === "skill") continue
-      const label = serverCommand.source === "mcp" ? ":mcp" : ""
+      const label = serverCommand.source ? `:(${serverCommand.source})` : ""
       results.push({
         display: "/" + serverCommand.name + label,
         description: serverCommand.description,
+        kind: serverCommand.source,
         onSelect: () => {
           const newText = "/" + serverCommand.name + " "
           const cursor = props.input().logicalCursor
@@ -641,6 +656,7 @@ export function Autocomplete(props: {
   }))
 
   function show(mode: "@" | "/") {
+    if (mode === "/") void sync.refreshCommands()
     setStore({
       visible: mode,
       index: props.input().cursorOffset,
@@ -764,7 +780,10 @@ export function Autocomplete(props: {
               }}
               onMouseUp={() => select()}
             >
-              <text fg={index === store.selected ? selectedForeground(theme) : theme.text} flexShrink={0}>
+              <text
+                fg={index === store.selected ? selectedForeground(theme) : kindColor(option().kind)}
+                flexShrink={0}
+              >
                 {option().display}
               </text>
               <Show when={option().description}>
