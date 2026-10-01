@@ -28,7 +28,7 @@ export type Value = string | boolean
 export type Settings = Partial<Record<Key, Value>> & {
   executable?: string
   server?: { hostname?: string; port?: number; startOnWindowsUserStart?: boolean }
-  // Executables behind the TUI /hard-revive and /hard-revive-&-install commands
+  // Executables behind the TUI /revive-no-install and /revive commands
   revive?: { exe?: string; installExe?: string }
 }
 

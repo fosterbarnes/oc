@@ -411,11 +411,11 @@ export function DialogSessionList() {
       }}
       actions={[
         {
-          command: "session.pin.toggle",
-          title: "pin",
+          command: "session.rename",
+          title: "rename",
           hidden: () => !hasOptions(),
-          onTrigger: (option: { value: string }) => {
-            local.session.togglePin(option.value)
+          onTrigger: async (option) => {
+            dialog.replace(() => <DialogSessionRename session={option.value} />)
           },
         },
         {
@@ -469,6 +469,14 @@ export function DialogSessionList() {
           },
         },
         {
+          command: "session.pin.toggle",
+          title: "pin",
+          hidden: () => !hasOptions(),
+          onTrigger: (option: { value: string }) => {
+            local.session.togglePin(option.value)
+          },
+        },
+        {
           command: "session.complete.toggle",
           title: "complete",
           hidden: () => !hasOptions(),
@@ -479,14 +487,6 @@ export function DialogSessionList() {
           title: "failed",
           hidden: () => !hasOptions(),
           onTrigger: (option) => toggleMark(option.value, "sessionFailed"),
-        },
-        {
-          command: "session.rename",
-          title: "rename",
-          hidden: () => !hasOptions(),
-          onTrigger: async (option) => {
-            dialog.replace(() => <DialogSessionRename session={option.value} />)
-          },
         },
         {
           command: "session.in_progress.toggle",

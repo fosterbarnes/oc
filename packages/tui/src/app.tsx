@@ -349,26 +349,26 @@ function persistOcConfig(
 
 // Run the oc.json revive executables straight from the TUI, with no agent turn. Detached and
 // unref'd because the revive scripts shut this process down.
-function hardReviveCommands(toast: ToastContext) {
+function reviveCommands(toast: ToastContext) {
   const config = readOcConfig()
   const run = (exe: string) => () => {
     spawn(exe, [], { detached: true, stdio: "ignore", windowsHide: true })
   }
   return [
     {
-      name: "oc.hard_revive",
-      title: "Hard revive oc",
+      name: "oc.revive_no_install",
+      title: "Revive oc without installing",
       category: "System",
       hidden: !config.reviveExe,
-      slashName: "hard-revive",
+      slashName: "revive-no-install",
       run: run(config.reviveExe),
     },
     {
-      name: "oc.hard_revive_install",
-      title: "Hard revive and install oc",
+      name: "oc.revive",
+      title: "Revive and install oc",
       category: "System",
       hidden: !config.reviveInstallExe,
-      slashName: "hard-revive-&-install",
+      slashName: "revive",
       run: run(config.reviveInstallExe),
     },
   ]
@@ -951,7 +951,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
           dialog.replace(() => <CommandPaletteDialog category="oc" />)
         },
       },
-      ...hardReviveCommands(toast),
+      ...reviveCommands(toast),
       {
         name: "session.list",
         title: "Switch session",

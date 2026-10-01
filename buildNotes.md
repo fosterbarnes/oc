@@ -92,6 +92,36 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-01 (~18:43) - v0.2.34 - Rename revive command pairs - GPT-6 Luna; Implementation
+
+### Agent
+- Meta: GPT-6 Luna; Implementation; completed
+- Version: 0.2.34
+- Renamed agent-turn commands to `/agent-revive-no-install` and `/agent-revive`; mapped no-install to `revive.exe`, install to `reviveAndInstall.exe`.
+- Renamed immediate TUI commands to `/revive-no-install` and `/revive`; updated IDs, titles, README, config comment, and permission guidance.
+- Verification: command-file listing, source grep, and `git diff --check`; typecheck skipped for slash-name changes.
+
+### User
+Commands
+- The no-install commands now use `-no-install`, while `/agent-revive` and `/revive` run the install variant.
+
+---
+
+## 2026-10-01 (~18:38) - v0.2.33 - Rename revive commands - GPT-6 Luna; Implementation
+
+### Agent
+- Meta: GPT-6 Luna; Implementation; completed
+- Version: 0.2.33
+- Renamed agent-turn slash commands to `/agent-revive` and `/agent-revive-&-install` in user commands.
+- Renamed immediate TUI commands to `/revive` and `/revive-&-install`; updated command IDs, titles, README, config comment, and permission guidance.
+- Verification: command-file listing and source grep; `git diff --check` passed. Typecheck skipped for slash-name-only changes.
+
+### User
+Commands
+- Agent-turn restart commands are now `/agent-revive` and `/agent-revive-&-install`; immediate restart commands are now `/revive` and `/revive-&-install`.
+
+---
+
 ## 2026-10-01 (~18:09) - v0.2.32 - Stack dialog footer shortcuts - GPT-6.1 Sol; Implementation
 
 ### Agent
@@ -104,6 +134,7 @@ Example compact Agent notes:
 - Added accent-colored Pinned filter after All; click and Ctrl+S cycling filter local pin membership, including search. Pinned is excluded from server status queries.
 - Verification follow-up: TUI typecheck and 8 dialog-session-list query tests passed.
 - Reordered filter tabs and Ctrl+S cycle to All, Unmarked, In Progress, Pinned, Complete, Failed.
+- Reordered session footer actions and Tab navigation to rename, delete, pin, complete, failed, in progress.
 - Reviewed session-owned changes; reused `local.session.isPinned`, updated picker tests for six-tab cycle, active chip styling and diamond gutters; added live unpin filtering and stacked footer alignment assertions.
 - Verification cleanup: 15 focused tests passed; final TUI typecheck and diff whitespace check passed. Full TUI suite: 320 pass, 3 skip, 4 fail, 3 errors.
 - ERROR / unrelated suite baseline: runtime home-path test expects Unix separator on Windows; three debug-temp tests require missing external `opencode-debug/msg22-text.md`. Left those files unchanged. Full run log: `C:\Users\user\AppData\Local\Temp\bgShell\ses_f0680295effebtpzH3DnZnEFnQ\bg_cc03da15b5\err.log`.
