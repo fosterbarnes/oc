@@ -25,7 +25,7 @@
 - Skip only sessions with no code changes: read-only or docs/notes-only.
 - Increment the final version component. Upstream sync also increments it when the upstream SHA advances; `pushRelease.ps1` uses the full version for tags.
 - Read the file immediately before writing. Keep exactly one line with a trailing newline.
-- Start the buildNotes heading title with `r<N>`: `## <date> - r2 - <title> - <model>...`.
+- Start the buildNotes heading title with the full version: `## <date> - v0.2.22 - <title> - <model>...`, and repeat it in the `Version:` Agent bullet.
 
 ## Branch Names
 

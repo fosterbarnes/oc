@@ -276,11 +276,8 @@ async function startServerUnlocked() {
     executable.toLowerCase().includes("bun") && process.argv[1]
       ? [process.argv[1], "serve", "--hostname", hostname, "--port", String(port)]
       : ["serve", "--hostname", hostname, "--port", String(port)]
-  const child = spawn(executable, command, {
+  await spawnResident(executable, command, {
     cwd: os.homedir(),
-    detached: true,
-    stdio: "ignore",
-    windowsHide: true,
     env: {
       ...process.env,
       [RESIDENT_ENV]: "1",
@@ -289,13 +286,49 @@ async function startServerUnlocked() {
       ...(Global.Path.debug ? { OPENCODE_LOG_LEVEL: process.env.OPENCODE_LOG_LEVEL || "DEBUG" } : {}),
     },
   })
-  child.unref()
   for (let attempt = 0; attempt < residentReadyAttempts; attempt++) {
     const observed = await observeResident(url, secret, hostname, port)
     if (observed.action === "reuse") return { url, secret }
     await Bun.sleep(100)
   }
   throw new Error(`Resident OpenCode server did not become ready: ${url}`)
+}
+
+// Starts the resident server so it outlives its launcher. On Windows, libuv `detached` means
+// DETACHED_PROCESS (no console), so every console program the server runs would open a visible
+// window; non-detached children join a kill-on-close job and die with the launcher. A hidden
+// pwsh hop runs Start-Process, which gives the server its own hidden console outside that job.
+// Resolves once the server process exists, so the caller may exit right after.
+export function spawnResident(
+  executable: string,
+  args: string[],
+  options: { cwd?: string; env?: NodeJS.ProcessEnv } = {},
+) {
+  if (process.platform !== "win32") {
+    spawn(executable, args, { ...options, detached: true, stdio: "ignore" }).unref()
+    return Promise.resolve()
+  }
+  const script = [
+    "$exe = $env:OC_SPAWN_EXE; $argList = $env:OC_SPAWN_ARGS",
+    "Remove-Item Env:OC_SPAWN_EXE, Env:OC_SPAWN_ARGS",
+    "Start-Process -FilePath $exe -ArgumentList $argList -WindowStyle Hidden -ErrorAction Stop",
+  ].join("; ")
+  const child = spawn("pwsh", ["-NoProfile", "-NonInteractive", "-Command", script], {
+    cwd: options.cwd,
+    stdio: "ignore",
+    windowsHide: true,
+    env: {
+      ...(options.env ?? process.env),
+      OC_SPAWN_EXE: executable,
+      OC_SPAWN_ARGS: args.map((arg) => `"${arg}"`).join(" "),
+    },
+  })
+  return new Promise<void>((resolve, reject) => {
+    child.once("error", reject)
+    child.once("exit", (code) =>
+      code === 0 ? resolve() : reject(new Error(`Resident server launch failed: pwsh exited ${code}`)),
+    )
+  })
 }
 
 async function killTuiProcesses() {

@@ -7,9 +7,8 @@ import { stop as stopAgentify } from "@/provider/agentify"
 import { stopCursorProxy } from "@/provider/cursor/runtime"
 import fs from "node:fs/promises"
 import path from "node:path"
-import { spawn } from "node:child_process"
 import { Global } from "@opencode-ai/core/global"
-import { RESIDENT_ENV } from "@/config/oc"
+import { RESIDENT_ENV, spawnResident } from "@/config/oc"
 
 export function serveArguments() {
   const commandIndex = process.argv.indexOf("serve")
@@ -20,12 +19,7 @@ export function restartProcess() {
   const args = serveArguments()
   const executable = Global.resolveExecutablePath()
   const command = executable.toLowerCase().includes("bun") && process.argv[1] ? [process.argv[1], ...args] : args
-  const child = spawn(executable, command, {
-    detached: true,
-    stdio: "ignore",
-    windowsHide: process.platform === "win32",
-  })
-  child.unref()
+  return spawnResident(executable, command)
 }
 
 function residentStatePath(directory = Global.Path.state) {
@@ -96,10 +90,8 @@ function stopAndExit(server: { hostname: string; port: number; stop: (close?: bo
     .then(() => stopAgentify())
     .then(() => stopCursorProxy())
     .then(() => (shouldClearResidentState(restart) ? clearResidentStateForRestart() : undefined))
-    .then(() => {
-      if (restart) restartProcess()
-      process.exit(0)
-    })
+    .then(() => (restart ? restartProcess() : undefined))
+    .then(() => process.exit(0))
     .catch((error) => {
       console.error(error)
       process.exit(1)

@@ -29,14 +29,15 @@ See skill `base/build-notes-archive` for trigger (>1000 lines), verbatim rename 
 - Do not shorten away information needed to continue safely.
 - Use `MISTAKE:` for an agent-caused mistake, process violation, or incorrect change. Make it explicit and explain the prevention rule.
 - Use `ERROR:` for an observed product, build, runtime, or tooling failure that is not necessarily caused by the agent.
-- Keep the `Meta` line compact. Include model, mode, and token estimate only when useful.
+- Keep the `Meta` line compact: model, mode, phase, and status.
+- Follow `Meta` with a `Version` line holding the project's current version (`none` when the project has no version file). The heading carries the same value: `## <date> - v<version> - <title> - <model>...`.
 - Keep `### User` notes in normal plain English. Do not use grug shorthand in User notes.
 
 Example compact Agent notes:
 
 ```md
 ### Agent
-- Meta: GPT-5.6 Luna; build; tokens est
+- Meta: GPT-5.6 Luna; build; completed
 - Fixed `Thing::run`: null path crash; early return
 - Added `Parser::read`: shared by A/B; removes dupes
 - Kept `LegacyMode`: external callers depend on it
@@ -89,10 +90,31 @@ Example compact Agent notes:
 
 ---
 
-## 2026-09-30 (~17:31) - r22 - Add revive scripts and agent-triggered restart - Claude Opus 5.5, low effort; Build
+## 2026-09-30 (~20:42) - v0.2.23 - Stop console window flashes from the resident server - Claude Opus 5.5, low effort; Debug
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Debug; completed, installed build not yet checked by user
+- Version: 0.2.23
+- Fixed root cause of console flashes: resident server spawned with `detached: true` = libuv `DETACHED_PROCESS` (no console; `CREATE_NO_WINDOW` ignored), so every console child of the server (cmd/claude --version, reg query, MCP node/uv, rg, cmd taskkill on Esc, shell tools) got a new visible conhost
+- Added `spawnResident` in `packages/opencode/src/config/oc.ts`: on win32 runs hidden non-detached `pwsh -Command Start-Process ... -WindowStyle Hidden`; server gets its own hidden console, children inherit it. Exe/args passed via `OC_SPAWN_EXE`/`OC_SPAWN_ARGS` env, removed before Start-Process. Resolves on pwsh exit 0. Non-win32 keeps detached spawn
+- Changed `ensureResidentServer` spawn and `restartProcess` in `src/cli/cmd/serve.ts` to use `spawnResident`; `stopAndExit` now awaits restart spawn before `process.exit` (pwsh is in the server's job and would be killed)
+- Kept: non-detached spawn alone is NOT a fix: libuv puts non-detached children in a KILL_ON_JOB_CLOSE job, so the server would die with oc.exe. Start-Process grandchild escapes via the job's SILENT_BREAKAWAY_OK
+- Verification: `bun typecheck` clean; process log of real shortcut launch traced flashes to server children; stand-in server via current detached spawn showed visible `cmd.exe` window on screen (computer use), via `spawnResident` showed none, outlived launcher, env passed, child had no own conhost
+- MISTAKE: first attempted fix (drop `detached` on win32) would have killed the resident server on oc exit; check libuv job semantics before changing Windows spawn flags
+- Risk: WezTerm config (wezFig) also spawns `wsl.exe -l -v` x2, `powershell.exe` wezCord check, `node.exe` on startup; not changed
+
+### User
+Windows
+- The background server no longer makes console windows flash on startup, on Esc cancel, or when tools and MCP servers run.
+- Rebuild and reinstall with `-NoBuild` to get the fix; the server still keeps running after you close WezTerm.
+
+---
+
+## 2026-09-30 (~17:31) - v0.2.22 - Add revive scripts and agent-triggered restart - Claude Opus 5.5, low effort; Build
 
 ### Agent
 - Meta: Claude Opus 5.5; low effort; Build; completed, user confirmed /revive works
+- Version: 0.2.22
 - Added `.scripts/revive.ps1`: elevated copy runs `safeShutdown.exe` and exits; non-admin copy starts it with `-Verb RunAs -Wait`, then opens `Desktop\occ.lnk` so WezTerm stays unelevated (FancyZones cannot snap elevated windows)
 - Added `.scripts/reviveAndInstall.ps1`: same flow, runs `install.ps1 @args` between shutdown and reopen; hardcoded install path because pwshXer exes run a temp copy of the script (`$PSScriptRoot` is `%TEMP%\pwshXer`)
 - Kept `revive.exe`/`reviveAndInstall.exe` as pwshXer wrappers; they pass args through. Rebuild them after editing the `.ps1`
