@@ -30,6 +30,15 @@ describe("dialog session list", () => {
     expect(createDialogSessionListQuery({ search: " ", status: undefined })).toEqual({ roots: true, limit: 100 })
   })
 
+  test("keeps the local pinned filter out of server queries", () => {
+    expect(createDialogSessionListQuery({ status: "pinned" })).toEqual({ roots: true, limit: 100 })
+    expect(createDialogSessionListQuery({ search: " deploy ", status: "pinned" })).toEqual({
+      roots: true,
+      limit: 30,
+      search: "deploy",
+    })
+  })
+
   test("a successful empty filtered result is not a fallback failure", async () => {
     expect(
       await loadDialogSessionList({

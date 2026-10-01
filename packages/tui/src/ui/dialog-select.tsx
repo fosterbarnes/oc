@@ -23,6 +23,7 @@ import { formatKeyBindings, useBindings, useKeymapSelector } from "../keymap"
 export interface DialogSelectProps<T> {
   title: string
   titleView?: JSX.Element
+  filterFooter?: JSX.Element
   placeholder?: string
   footer?: JSX.Element
   emptyView?: JSX.Element
@@ -546,12 +547,14 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
   function FooterAction(action: { item: VisibleAction }) {
     if (!isActionItem(action.item))
       return (
-        <text>
-          <span style={{ fg: theme.text }}>
-            <b>{action.item.title}</b>{" "}
-          </span>
-          <span style={{ fg: theme.textMuted }}>{action.item.label}</span>
-        </text>
+        <box flexDirection="column" flexShrink={0}>
+          <text fg={theme.text} attributes={TextAttributes.BOLD} wrapMode="none">
+            {action.item.title}
+          </text>
+          <text fg={theme.textMuted} wrapMode="none">
+            {action.item.label}
+          </text>
+        </box>
       )
     const item = action.item
     const active = createMemo(() => isActionFocused(item))
@@ -559,17 +562,21 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
     const fg = selectedForeground(theme)
     return (
       <box
-        flexDirection="row"
+        flexDirection="column"
+        flexShrink={0}
         backgroundColor={active() ? theme.primary : RGBA.fromInts(0, 0, 0, 0)}
         onMouseUp={() => triggerAction(item)}
       >
         <text
           fg={disabled() ? theme.textMuted : active() ? fg : theme.text}
           attributes={active() ? TextAttributes.BOLD : undefined}
+          wrapMode="none"
         >
           {item.title}
         </text>
-        <text fg={disabled() ? theme.textMuted : active() ? fg : theme.textMuted}> {item.label}</text>
+        <text fg={disabled() ? theme.textMuted : active() ? fg : theme.textMuted} wrapMode="none">
+          {item.label}
+        </text>
       </box>
     )
   }
@@ -614,6 +621,9 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
               placeholderColor={theme.textMuted}
             />
           </box>
+        </Show>
+        <Show when={props.filterFooter}>
+          <box paddingTop={1}>{props.filterFooter}</box>
         </Show>
       </box>
       <box flexGrow={1} flexShrink={1}>
@@ -735,12 +745,20 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
         </Show>
       </box>
       <Show when={props.footer || visibleActions().length} fallback={<box flexShrink={0} />}>
-        <box paddingRight={2} paddingLeft={4} flexDirection="row" justifyContent="space-between" flexShrink={0}>
-          <box flexDirection="row" gap={2}>
+        <box
+          paddingRight={2}
+          paddingLeft={4}
+          flexDirection="row"
+          flexWrap="wrap"
+          rowGap={1}
+          justifyContent="space-between"
+          flexShrink={0}
+        >
+          <box flexDirection="row" flexWrap="wrap" gap={2} rowGap={1} maxWidth="100%">
             {props.footer}
             <For each={left()}>{(item) => <FooterAction item={item} />}</For>
           </box>
-          <box flexDirection="row" gap={2}>
+          <box flexDirection="row" flexWrap="wrap" gap={2} rowGap={1} maxWidth="100%">
             <For each={right()}>{(item) => <FooterAction item={item} />}</For>
           </box>
         </box>

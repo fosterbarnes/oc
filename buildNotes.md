@@ -92,6 +92,71 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-01 (~18:09) - v0.2.32 - Stack dialog footer shortcuts - GPT-6.1 Sol; Implementation
+
+### Agent
+- Meta: GPT-6.1 Sol; Implementation; completed
+- Version: 0.2.32
+- Changed `packages/tui/src/ui/dialog-select.tsx` footer actions and hints: title above shortcut, non-shrinking blocks, unwrapped text; footer groups wrap with row gaps.
+- Kept existing action click/focus behavior and unrelated worktree edits.
+- Shortened session footer labels in `dialog-session-list.tsx` to pin, delete, complete, failed, rename, in progress; toggle behavior preserved. Follow-up label-only edit, no additional tests run.
+- Replaced pinned session numeric gutters with accent-colored `◆`; busy spinner retains priority and quick-switch bindings remain unchanged.
+- Added accent-colored Pinned filter after All; click and Ctrl+S cycling filter local pin membership, including search. Pinned is excluded from server status queries.
+- Verification follow-up: TUI typecheck and 8 dialog-session-list query tests passed.
+- Reordered filter tabs and Ctrl+S cycle to All, Unmarked, In Progress, Pinned, Complete, Failed.
+- Reviewed session-owned changes; reused `local.session.isPinned`, updated picker tests for six-tab cycle, active chip styling and diamond gutters; added live unpin filtering and stacked footer alignment assertions.
+- Verification cleanup: 15 focused tests passed; final TUI typecheck and diff whitespace check passed. Full TUI suite: 320 pass, 3 skip, 4 fail, 3 errors.
+- ERROR / unrelated suite baseline: runtime home-path test expects Unix separator on Windows; three debug-temp tests require missing external `opencode-debug/msg22-text.md`. Left those files unchanged. Full run log: `C:\Users\user\AppData\Local\Temp\bgShell\ses_f0680295effebtpzH3DnZnEFnQ\bg_cc03da15b5\err.log`.
+- Verification: TUI `bun typecheck` and `git diff --check` passed; terminal resize and interaction checks left to user. No build or install run.
+
+### User
+Dialog footer
+- Actions now show their shortcut underneath and move to another row when space runs out.
+- Session actions use short labels: pin, delete, complete, failed, rename, in progress.
+- Pinned sessions show a purple diamond instead of a slot number.
+- Added a Pinned tab to show only pinned sessions.
+
+---
+
+## 2026-10-01 (~22:10) - v0.2.31 - Fix session list Ctrl+D delete never confirming - Sonnet 5.5; Debug
+
+### Agent
+- Meta: Sonnet 5.5; Debug; completed
+- Version: 0.2.31
+- Fixed: `DialogSessionList` confirm title read `useCommandShortcut("session.delete")` (keymap-registered bindings) inside `options()`. Arming rebuilt options, `selected()` got a new identity, `DialogSelect` `useBindings` disposed/re-registered its layer, the hint went empty, options rebuilt again: loop left `session.delete` unregistered, so the second Ctrl+D hit the Search input.
+- Changed: `deleteHint` now reads static `tuiConfig.keybinds.get("session.delete")` (string or `stringifyKeyStroke`).
+- Verified on ocdebug (run-1790891861433): two `session.delete` triggers (execute false then true), delete result without error, one `useBindings` rebuild after arming (was ~80 in ~640ms), no keymap errors. Click-outside on the command palette hid it correctly.
+- Removed: all DEBUG_TEMP_SESSION_DELETE probes (`debug-temp-session-delete.ts`, edits in dialog-select, dialog, prompt, session-list).
+- Not reproduced: reported click-to-chat leak with picker open; never captured in logs.
+- Verification: TUI `bun typecheck` passed.
+
+### User
+Sessions
+- Ctrl+D twice in the session list now deletes the selected session, and the confirm row shows up without a delay.
+
+---
+
+## 2026-10-01 (~17:13) - v0.2.30 - Search above session status selector - GPT-6.1 Sol, default; Implementation
+
+### Agent
+- Meta: GPT-6.1 Sol; default; Implementation; completed
+- Version: 0.2.30
+- Added optional `DialogSelect.filterFooter` beneath search; moved `DialogSessionList` status selector from title into slot.
+- Kept search focus, status filtering, mouse handlers, and keybindings unchanged.
+- Added padded solid-background status buttons; selected button uses primary background and contrasting foreground instead of brackets.
+- Changed status button colors to marker colors: success for Complete, error for Failed, text for In progress, textMuted for neutral choices; inactive backgrounds blend 20% marker color into panel, active backgrounds use full color.
+- Increased inactive tint to 65% after user feedback; contrasting text applies to both states, active remains full color and bold.
+- Reverted uniform 13-column status button width at user request; labels return to dynamic widths.
+- Verification: TUI `bun typecheck` passed; `git diff --check` passed. Layout-only change; no new tests or build. Live layout check remains user-run.
+
+### User
+Sessions
+- Search now appears above the session status selector.
+- Session status choices now have separate clickable backgrounds and a highlighted selection.
+- Status buttons use muted and active variants of their session marker colors.
+
+---
+
 ## 2026-10-01 (~03:39) - v0.2.29 - Consistency cleanup for session in-progress mark - Opus 5.5, low effort; Implementation
 
 ### Agent

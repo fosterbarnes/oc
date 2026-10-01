@@ -238,6 +238,17 @@ test("dialog select session marker shortcuts toggle without closing and return s
     await wait(() => dialog.isOpen())
     await dialog.app.waitForVisualIdle()
 
+    const lines = dialog.app.captureCharFrame().split("\n")
+    for (const [title, shortcut] of [
+      ["complete/incomplete", "ctrl+shift+enter"],
+      ["failed/not failed", "ctrl+shift+backspace"],
+      ["in progress/unmarked", "ctrl+shift+i"],
+    ]) {
+      const row = lines.findIndex((line) => line.includes(title))
+      expect(row).toBeGreaterThanOrEqual(0)
+      expect(lines[row + 1].indexOf(shortcut)).toBe(lines[row].indexOf(title))
+    }
+
     await waitForActiveCommand(dialog.app, dialog.keymap, "session.complete.toggle")
     dialog.app.mockInput.pressEnter({ ctrl: true, shift: true })
     await dialog.app.flush()

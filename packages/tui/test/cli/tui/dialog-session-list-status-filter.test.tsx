@@ -1,5 +1,5 @@
 /** @jsxImportSource @opentui/solid */
-import { InputRenderable, type Renderable } from "@opentui/core"
+import { InputRenderable, TextAttributes, TextRenderable, type Renderable } from "@opentui/core"
 import { createDefaultOpenTuiKeymap } from "@opentui/keymap/opentui"
 import { testRender, useRenderer } from "@opentui/solid"
 import type { Session } from "@opencode-ai/sdk/v2"
@@ -166,6 +166,10 @@ async function mount(input: {
   }
   return {
     app, dialog, route, sync, local, keymap, updates, requests, navigated, open, editor,
+    activeStatus(status: string) {
+      const label = find(app.renderer.root, `session-status-${status}`)?.getChildren()[0]
+      return label instanceof TextRenderable && (label.attributes & TextAttributes.BOLD) !== 0
+    },
     async clickStatus(status: string) {
       await app.waitForVisualIdle()
       const choice = find(app.renderer.root, `session-status-${status}`)
@@ -196,7 +200,7 @@ test("real picker cycles/clicks all filters, keeps search and attachment, and re
   const pinned = session("pinned", "Other pinned", { sessionFailed: true })
   const current = session("current", "Other current", { sessionComplete: true })
   await using picker = await mount({ root: tmp.path, rows, cached: [...rows, pinned, current], current: current.id, pinned: [pinned.id] })
-  expect(await picker.frame()).toContain("[All]")
+  expect(picker.activeStatus("all")).toBe(true)
   expect(await picker.frame()).toContain("ctrl+s")
   expect(await picker.frame()).toContain("- Work progress")
   expect(await picker.frame()).toContain("\u2713 Work complete")
@@ -207,7 +211,8 @@ test("real picker cycles/clicks all filters, keeps search and attachment, and re
   await wait(() => picker.requests.some((url) => url.searchParams.get("search") === "Work"))
   for (const [status, title, visible] of [
     ["unmarked", "Unmarked", "Work unmarked"],
-    ["in_progress", "In progress", "Work progress"],
+    ["in_progress", "In Progress", "Work progress"],
+    ["pinned", "Pinned", null],
     ["complete", "Complete", "Work complete"],
     ["failed", "Failed", "Work failed"],
     [null, "All", "Work unmarked"],
@@ -217,13 +222,15 @@ test("real picker cycles/clicks all filters, keeps search and attachment, and re
       picker.requests.some(
         (url) =>
           url.searchParams.get("search") === "Work" &&
-          url.searchParams.get("status") === status &&
+          url.searchParams.get("status") === (status === "pinned" ? null : status) &&
           url.searchParams.get("limit") === "30",
       ),
     )
     const frame = await picker.frame()
-    expect(frame).toContain(`[${title}]`)
-    expect(frame).toContain(visible)
+    expect(frame).toContain(title)
+    expect(picker.activeStatus(status ?? "all")).toBe(true)
+    if (visible) expect(frame).toContain(visible)
+    if (!visible) expect(frame).toContain("No matching sessions")
     if (status) rows.filter((row) => row.title !== visible).forEach((row) => expect(frame).not.toContain(row.title))
     expect(picker.editor()).toBe(editor)
     expect(editor.plainText).toBe("Work")
@@ -233,7 +240,7 @@ test("real picker cycles/clicks all filters, keeps search and attachment, and re
     expect(picker.navigated).toEqual([])
   }
   await picker.clickStatus("failed")
-  expect(await picker.frame()).toContain("[Failed]")
+  expect(picker.activeStatus("failed")).toBe(true)
   picker.dialog.clear()
   await picker.app.flush()
   const beforeReopen = picker.requests.length
@@ -241,7 +248,7 @@ test("real picker cycles/clicks all filters, keeps search and attachment, and re
   await wait(() =>
     picker.requests.slice(beforeReopen).some((url) => url.searchParams.get("status") === null && url.searchParams.get("limit") === "100" && url.searchParams.get("search") === null),
   )
-  expect(await picker.frame()).toContain("[All]")
+  expect(picker.activeStatus("all")).toBe(true)
   expect(picker.editor().plainText).toBe("")
   expect(picker.route.data).toMatchObject({ type: "session", sessionID: "current" })
 })
@@ -257,14 +264,22 @@ test("real picker filters pinned/current extras and retains quick slots without 
   await using picker = await mount({ root: tmp.path, rows, cached, current: "current", pinned: ["pinned-failed", "progress"] })
   await picker.clickStatus("in_progress")
   const frame = await picker.frame()
-  expect(frame).toContain("[In progress]")
+  expect(picker.activeStatus("in_progress")).toBe(true)
   expect(frame).toContain("Visible progress")
   expect(frame).not.toContain("Hidden pin")
   expect(frame).not.toContain("Hidden current")
-  expect(frame).toMatch(/2\s+- Visible progress/)
+  expect(frame).toMatch(/◆\s+- Visible progress/)
   expect(picker.local.session.slots()).toEqual(["pinned-failed", "progress"])
   expect(picker.route.data).toMatchObject({ type: "session", sessionID: "current" })
   expect(picker.navigated).toEqual([])
+  await picker.clickStatus("pinned")
+  expect(picker.activeStatus("pinned")).toBe(true)
+  expect(await picker.frame()).toContain("Hidden pin")
+  expect(await picker.frame()).toContain("Visible progress")
+  expect(await picker.frame()).not.toContain("Hidden current")
+  picker.local.session.togglePin("pinned-failed")
+  await picker.app.waitForFrame((frame) => !frame.includes("Hidden pin"))
+  expect(await picker.frame()).toContain("Visible progress")
 })
 
 test("real marker actions remove rows, preserve valid selection, do nothing when empty, and recover", async () => {
@@ -286,7 +301,7 @@ test("real marker actions remove rows, preserve valid selection, do nothing when
   })
   await picker.cycle()
   await picker.cycle()
-  await picker.app.waitForFrame((frame) => frame.includes("[In progress]"))
+  await wait(() => picker.activeStatus("in_progress"))
   picker.app.mockInput.pressArrow("down")
   await picker.app.flush()
   picker.app.mockInput.pressEnter({ ctrl: true, shift: true })
@@ -297,7 +312,7 @@ test("real marker actions remove rows, preserve valid selection, do nothing when
   await wait(() => picker.updates.length === 2)
   expect(picker.updates[1].sessionID).toBe("first")
   await picker.app.waitForFrame((frame) => frame.includes("No matching sessions"))
-  expect(await picker.frame()).not.toContain("complete/incomplete")
+  expect(await picker.frame()).not.toContain("ctrl+shift+enter")
   picker.app.mockInput.pressEnter()
   picker.app.mockInput.pressEnter({ ctrl: true, shift: true })
   picker.app.mockInput.pressBackspace({ ctrl: true, shift: true })
@@ -307,7 +322,9 @@ test("real marker actions remove rows, preserve valid selection, do nothing when
   expect(picker.route.data).toMatchObject({ type: "session", sessionID: "current" })
   expect(picker.dialog.stack).toHaveLength(1)
   await picker.cycle()
-  expect(await picker.frame()).toContain("[Complete]")
+  expect(picker.activeStatus("pinned")).toBe(true)
+  await picker.cycle()
+  expect(picker.activeStatus("complete")).toBe(true)
   expect(await picker.frame()).toContain("First progress")
   picker.app.mockInput.pressEnter()
   await picker.app.flush()
@@ -319,7 +336,7 @@ test("empty selection recovers even after End and filter changes clear delete co
   await using tmp = await tmpdir()
   const rows = [session("first", "First unmarked"), session("second", "Second unmarked")]
   await using picker = await mount({ root: tmp.path, rows })
-  for (let i = 0; i < 4; i++) await picker.cycle()
+  for (let i = 0; i < 5; i++) await picker.cycle()
   expect(await picker.frame()).toContain("No matching sessions")
   picker.app.mockInput.pressKey("end")
   picker.app.mockInput.pressEnter()
@@ -356,6 +373,8 @@ test("late filter/search responses never replace the active query and successful
   picker.app.mockInput.typeText("alpha")
   await wait(() => pending.some((item) => item.url.searchParams.get("search") === "alpha" && item.url.searchParams.get("status") === "in_progress"))
   await picker.cycle()
+  expect(picker.activeStatus("pinned")).toBe(true)
+  await picker.cycle()
   await wait(() => pending.some((item) => item.url.searchParams.get("search") === "alpha" && item.url.searchParams.get("status") === "complete"))
   pending
     .filter((item) => item.url.searchParams.get("status") === "in_progress" && item.url.searchParams.get("search") === "alpha")
@@ -374,9 +393,9 @@ test("picker cycle shortcut is configurable and remains usable without rows", as
   await using picker = await mount({ root: tmp.path, rows: [], cycleKey: "ctrl+g" })
   expect(await picker.frame()).toContain("ctrl+g")
   await picker.cycle()
-  expect(await picker.frame()).toContain("[All]")
+  expect(picker.activeStatus("all")).toBe(true)
   picker.app.mockInput.pressKey("g", { ctrl: true })
   await picker.app.flush()
-  expect(await picker.frame()).toContain("[Unmarked]")
+  expect(picker.activeStatus("unmarked")).toBe(true)
   expect(picker.dialog.stack).toHaveLength(1)
 })

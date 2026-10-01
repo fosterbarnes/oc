@@ -3,12 +3,12 @@ import { DialogSelect } from "../ui/dialog-select"
 import { useRoute } from "../context/route"
 import { useSync } from "../context/sync"
 import { batch, createMemo, createResource, createSignal, For, onCleanup, onMount } from "solid-js"
-import { TextAttributes } from "@opentui/core"
+import { RGBA, TextAttributes } from "@opentui/core"
 import type { ExperimentalSessionListData } from "@opencode-ai/sdk/v2"
 import path from "path"
 import { Locale } from "../util/locale"
 import { useProject } from "../context/project"
-import { useTheme } from "../context/theme"
+import { selectedForeground, useTheme } from "../context/theme"
 import { useSDK } from "../context/sdk"
 import { useLocal } from "../context/local"
 import { DialogSessionRename } from "./dialog-session-rename"
@@ -18,16 +18,18 @@ import { openWorkspaceSelect, type WorkspaceSelection, warpWorkspaceSession } fr
 import { Spinner } from "./spinner"
 import { errorMessage } from "../util/error"
 import { DialogSessionDeleteFailed } from "./dialog-session-delete-failed"
+import { stringifyKeyStroke } from "@opentui/keymap"
 import { useCommandShortcut } from "../keymap"
 import { useEvent } from "../context/event"
 import { useTuiConfig } from "../config"
 
-type SessionStatusFilter = NonNullable<ExperimentalSessionListData["query"]>["status"]
+type SessionStatusFilter = NonNullable<ExperimentalSessionListData["query"]>["status"] | "pinned"
 
 const statusChoices = [
   { value: undefined, title: "All" },
   { value: "unmarked", title: "Unmarked" },
-  { value: "in_progress", title: "In progress" },
+  { value: "in_progress", title: "In Progress" },
+  { value: "pinned", title: "Pinned" },
   { value: "complete", title: "Complete" },
   { value: "failed", title: "Failed" },
 ] as const
@@ -38,7 +40,7 @@ export function createDialogSessionListQuery(input: { search?: string; status?: 
     roots: true,
     limit: search ? 30 : 100,
     ...(search ? { search } : {}),
-    ...(input.status ? { status: input.status } : {}),
+    ...(input.status && input.status !== "pinned" ? { status: input.status } : {}),
   }
 }
 
@@ -69,7 +71,12 @@ export function DialogSessionList() {
   const [search, setSearch] = createDebouncedSignal("", 150)
   const [status, setStatus] = createSignal<SessionStatusFilter>()
   const statusHint = useCommandShortcut("dialog.session.status.cycle")
-  const deleteHint = useCommandShortcut("session.delete")
+  // Static config lookup: a keymap-registered shortcut would drop out of options() whenever
+  // DialogSelect recycles its binding layer, re-triggering that recycle.
+  const deleteHint = createMemo(() => {
+    const key = tuiConfig.keybinds.get("session.delete")[0]?.key
+    return !key ? "" : typeof key === "string" ? key : stringifyKeyStroke(key)
+  })
   const quickSwitch1 = useCommandShortcut("session.quick_switch.1")
   const quickSwitch9 = useCommandShortcut("session.quick_switch.9")
 
@@ -143,6 +150,7 @@ export function DialogSessionList() {
       .filter((session) => !deleted().has(session.id))
       .filter((session) => !query || session.title.toLowerCase().includes(query))
       .filter((session) => {
+        if (status() === "pinned") return local.session.isPinned(session.id)
         if (status() === "in_progress") return session.sessionInProgress
         if (status() === "complete") return session.sessionComplete
         if (status() === "failed") return session.sessionFailed
@@ -279,7 +287,6 @@ export function DialogSessionList() {
 
     const pinned = local.session.pinned().filter((id) => sessionMap.has(id))
     const pinnedSet = new Set(pinned)
-    const slotByID = new Map<string, number>(local.session.slots().map((id, i) => [id, i + 1]))
 
     function buildOption(id: string, category: string) {
       const x = sessionMap.get(id)
@@ -295,11 +302,10 @@ export function DialogSessionList() {
       const isDeleting = toDelete() === x.id
       const status = sync.data.session_status?.[x.id]
       const isWorking = status?.type === "busy" || status?.type === "retry"
-      const slot = slotByID.get(x.id)
       const gutter = isWorking
         ? () => <Spinner />
-        : slot !== undefined
-          ? () => <text fg={theme.accent}>{slot}</text>
+        : pinnedSet.has(x.id)
+          ? () => <text fg={theme.accent}>◆</text>
           : undefined
       return {
         title: isDeleting ? `Press ${deleteHint()} again to confirm` : x.title,
@@ -341,24 +347,46 @@ export function DialogSessionList() {
   return (
     <DialogSelect
       title="Sessions"
-      titleView={
-        <box flexDirection="column" gap={1}>
-          <text fg={theme.text} attributes={TextAttributes.BOLD}>Sessions</text>
-          <box flexDirection="row" gap={1}>
-            <For each={statusChoices}>
-              {(choice) => (
-                <text
+      filterFooter={
+        <box flexDirection="row" gap={1}>
+          <For each={statusChoices}>
+            {(choice) => {
+              const color = createMemo(() => {
+                if (choice.value === "pinned") return theme.accent
+                if (choice.value === "complete") return theme.success
+                if (choice.value === "failed") return theme.error
+                if (choice.value === "in_progress") return theme.text
+                return theme.textMuted
+              })
+              const active = createMemo(() => status() === choice.value)
+              const background = createMemo(() => {
+                if (active()) return color()
+                return RGBA.fromValues(
+                  theme.backgroundPanel.r * 0.35 + color().r * 0.65,
+                  theme.backgroundPanel.g * 0.35 + color().g * 0.65,
+                  theme.backgroundPanel.b * 0.35 + color().b * 0.65,
+                  1,
+                )
+              })
+              return (
+                <box
                   id={`session-status-${choice.value ?? "all"}`}
-                  fg={theme.text}
-                  attributes={status() === choice.value ? TextAttributes.BOLD : undefined}
+                  backgroundColor={background()}
+                  paddingLeft={1}
+                  paddingRight={1}
                   onMouseUp={() => changeStatus(choice.value)}
                 >
-                  {status() === choice.value ? `[${choice.title}]` : choice.title}
-                </text>
-              )}
-            </For>
-            <text fg={theme.textMuted}>{statusHint()}</text>
-          </box>
+                  <text
+                    fg={selectedForeground(theme, background())}
+                    attributes={active() ? TextAttributes.BOLD : undefined}
+                  >
+                    {choice.title}
+                  </text>
+                </box>
+              )
+            }}
+          </For>
+          <text fg={theme.textMuted}>{statusHint()}</text>
         </box>
       }
       emptyView={
@@ -371,7 +399,7 @@ export function DialogSessionList() {
       preserveSelection={true}
       current={currentSessionID()}
       onFilter={setSearch}
-      onMove={() => {
+      onMove={(option) => {
         setToDelete(undefined)
       }}
       onSelect={(option) => {
@@ -384,7 +412,7 @@ export function DialogSessionList() {
       actions={[
         {
           command: "session.pin.toggle",
-          title: "pin/unpin",
+          title: "pin",
           hidden: () => !hasOptions(),
           onTrigger: (option: { value: string }) => {
             local.session.togglePin(option.value)
@@ -442,13 +470,13 @@ export function DialogSessionList() {
         },
         {
           command: "session.complete.toggle",
-          title: "complete/incomplete",
+          title: "complete",
           hidden: () => !hasOptions(),
           onTrigger: (option) => toggleMark(option.value, "sessionComplete"),
         },
         {
           command: "session.failed.toggle",
-          title: "failed/not failed",
+          title: "failed",
           hidden: () => !hasOptions(),
           onTrigger: (option) => toggleMark(option.value, "sessionFailed"),
         },
@@ -462,7 +490,7 @@ export function DialogSessionList() {
         },
         {
           command: "session.in_progress.toggle",
-          title: "in progress/unmarked",
+          title: "in progress",
           hidden: () => !hasOptions(),
           onTrigger: (option) => toggleMark(option.value, "sessionInProgress"),
         },
