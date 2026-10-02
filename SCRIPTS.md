@@ -10,7 +10,8 @@ Project automation lives in `.scripts/`. Scripts target PowerShell 7 and fail on
 | `.scripts/build.ps1` | Agent-safe build of the current-platform production and debug executables. `-Release` builds the release executable and archives through the existing Bun build script. It never touches the installed runtime. |
 | `.scripts/buildDebug.ps1` | Agent-safe debug-only build. It never touches the production dist artifact or installed runtime. |
 | `.scripts/.run.ps1` | Runs the repository's normal `bun dev .` entry point and forwards arguments. |
-| `.scripts/prePush.ps1` | Runs root lint and Turbo typecheck. It does not commit or push. |
+| `.scripts/prePush.ps1` | Runs root lint and Turbo typecheck, then refreshes the README code count and `scc.txt`. It does not commit or push. |
+| `.scripts/countCode.ps1` | Uses `scc` on PATH to refresh the README code count and root `scc.txt` language report. Runnable independently. |
 | `.scripts/updateUpstream.ps1` | Fetches and fast-forwards the separate `UPSTREAM\opencode` checkout without modifying this customized parent checkout. |
 | `.scripts/syncAndInstall.ps1` | Fail-closed upstream sync into this custom fork, then verify, backup, stop `opencode.exe`, and install. |
 | `.scripts/push.ps1` | Commits parent changes with a supplied or prompted message, then pushes the current branch. It does not rewrite `.version/version` and does not stage `UPSTREAM/`. `-Force` is explicit. |
@@ -85,6 +86,20 @@ The standalone build is the repository's `packages/opencode/script/build.ts --si
 `.version\version` is a maintenance-only semantic version for these local scripts. It is intentionally separate from OpenCode's package version. The agent increments the last number once per code-changing session and when an upstream apply advances isolated `dev` (`0.0.8` -> `0.0.9`); no script bumps it (see `AGENTS.md` Revision). `pushRelease.ps1` uses `v<maintenance-version>` and uploads archive files under `packages/opencode/dist` to `fosterbarnes/oc`. It does not force-move an existing tag. `push.ps1` does not rewrite this file.
 
 Do not run `push.ps1` or `pushRelease.ps1` during ordinary validation. They create commits, push branches or tags, and publish GitHub releases. `buildNotes.txt` is not used or modified by these scripts.
+
+## Code count
+
+Run `.\.scripts\countCode.ps1` to refresh just the count, or `.\.scripts\prePush.ps1`
+to refresh it after the existing checks pass. Requires `scc` on PATH.
+The README uses the report's **Code** total, excluding blank and comment lines,
+and displays a language table with all six report columns. The script changes only
+the number in the `[number](scc.txt)` link and the table between
+`<!-- code-count:start -->` and `<!-- code-count:end -->`.
+Keep the link and markers; surrounding wording and placement can be edited freely.
+Counts maintained source, tests, and scripts across this checkout, including inherited
+OpenCode source. Includes TS/TSX, JS/MJS/CJS, CSS, HTML, Astro, SQL, PowerShell, shell,
+Go, and Nix. Honors ignore files and excludes `UPSTREAM`, dependencies, build output,
+and generated client directories (`gen`, `generated`, `generated-effect`).
 
 ## Excluded base scripts
 

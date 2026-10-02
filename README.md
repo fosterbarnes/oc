@@ -1,12 +1,34 @@
-# OC
+# oc
 
-**This is the project definition for this OpenCode fork.** It tracks OC-only work. `README.OG.md` tracks native OpenCode in this checkout (what is still stock, what should stay stock, and same / pin / lag / gone vs isolated upstream).
+**This is the project definition for this OpenCode fork.** It tracks oc-only work. `README.OG.md` tracks native OpenCode in this checkout (what is still stock, what should stay stock, and same / pin / lag / gone vs isolated upstream).
 
-OC is a personal, Windows-first OpenCode: native `oc` launcher, extra model providers, a workspace sidebar, custom planning agents, and local build/install tooling. Stock OpenCode still supplies the core chat, tools, and terminal UI. Everything listed below is what this project added or changed, and how complete that work is today.
+oc is a personal, Windows-first OpenCode: native `oc` launcher, extra model providers, a workspace sidebar, custom planning agents, and local build/install tooling. Stock OpenCode still supplies the core chat, tools, and terminal UI. Everything listed below is what this project added or changed, and how complete that work is today.
 
-Use this file to agree on what OC *is*. Statuses describe current state. They do not authorize implementation work.
+Use this file to agree on what oc *is*. Statuses describe current state. They do not authorize implementation work.
 
 Last reviewed: 2026-10-01
+
+## Progress
+
+[511,629](scc.txt) lines of code and counting...
+
+<!-- code-count:start -->
+
+| Language | Files | Lines | Blanks | Comments | Code |
+|---|---:|---:|---:|---:|---:|
+| Astro | 8 | 1,299 | 150 | 10 | 1,139 |
+| CSS | 163 | 40,551 | 5,296 | 574 | 34,681 |
+| Go | 5 | 902 | 54 | 3 | 845 |
+| HTML | 1 | 1,161 | 79 | 0 | 1,082 |
+| JavaScript | 23 | 5,259 | 419 | 63 | 4,777 |
+| Nix | 3 | 258 | 23 | 26 | 209 |
+| Powershell | 18 | 1,220 | 112 | 27 | 1,081 |
+| SQL | 95 | 592 | 0 | 17 | 575 |
+| Shell | 1 | 120 | 17 | 17 | 86 |
+| TypeScript | 2,694 | 524,715 | 42,722 | 14,839 | 467,154 |
+| **Total** | **3,011** | **576,077** | **48,872** | **15,576** | **511,629** |
+
+<!-- code-count:end -->
 
 ---
 

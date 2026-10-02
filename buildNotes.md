@@ -110,6 +110,40 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-02 (~01:35) - v0.2.66 - README language table - GPT-6.1 Sol, effort not exposed; Implementation
+
+### Agent
+- Meta: GPT-6.1 Sol; effort not exposed; Implementation; completed follow-up
+- Version: 0.2.66 (same session; no second revision bump)
+- Updated `countCode.ps1`: replace only linked number; preserve user's Progress placement and count wording.
+- Added README Markdown language table from same scc JSON, with Files/Lines/Blanks/Comments/Code and totals; replace only code-count marker contents.
+- Documented editable wording/placement and required markers in `SCRIPTS.md`.
+- Verification: counter ran twice; README/report hashes stable; manual wording retained; LF/CRLF number-only replacement checks and git diff --check passed. Full prePush not run.
+
+### User
+README
+- Added the full language breakdown under Progress, keeping your wording and placement.
+- Count refresh now preserves surrounding text and updates only the number and generated table.
+
+---
+
+## 2026-10-02 (~01:27) - v0.2.66 - README code count - GPT-6.1 Sol, effort not exposed; Implementation
+
+### Agent
+- Meta: GPT-6.1 Sol; effort not exposed; Implementation; completed
+- Version: 0.2.66
+- Added `.scripts/countCode.ps1`: scc JSON Code sum updates exactly one README link; tabular report at root `scc.txt`.
+- Counts maintained source/tests/scripts, including inherited source; honors ignore files; excludes UPSTREAM, dependencies, builds and generated client directories.
+- Updated `prePush.ps1`: refresh count after lint/typecheck; documented standalone command and scope in `SCRIPTS.md`.
+- Verification: counter ran successfully with scc 3.7.0; 511,608 code lines; repeated output stable; LF/CRLF replacement checks, prePush syntax parse and git diff --check passed. Full prePush not run (root-wide typecheck requires user approval).
+
+### User
+Code count
+- README now links to a language breakdown showing 511,608 code lines, excluding blanks and comments.
+- Run `.\.scripts\countCode.ps1` independently, or use prePush to refresh the count after its checks pass.
+
+---
+
 ## 2026-10-02 (~00:24) - v0.2.65 - V2 removal follow-up cleanup - GPT-6.1 Sol, effort not exposed; Pass
 
 ### Agent
