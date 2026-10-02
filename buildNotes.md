@@ -110,6 +110,75 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-02 (~03:06) - v0.2.67 - Review and clean up cloud workflows - GPT-6.1 Sol, effort not exposed; Implementation
+
+### Agent
+- Meta: GPT-6.1 Sol; effort not exposed; Implementation; completed
+- Version: 0.2.67 (revision already bumped once this session)
+- Fixed review/opencode cancellation: moved concurrency into authorized command jobs so ordinary comments cannot cancel active agents.
+- Removed duplicate Node setup from test jobs; shared setup-bun already installs Node 24.
+- Removed enterprise integration tests from matrix at user's request; Storage only supports credentialed S3/R2 and fresh runners lacked adapter configuration. Kept enterprise in whole-repository typechecking. Remaining 22 test workspaces run on Linux/Windows.
+- MISTAKE: earlier whole-repository matrix added enterprise storage suites without checking infrastructure prerequisites; prior no-custom-secrets claim did not cover those suites. Read integration dependencies before adding CI jobs.
+- Verification: root typecheck dry run confirmed 35 workspaces and 27 executable typechecks; actionlint 1.7.12, five-workflow Prettier check, and git diff --check passed. Cloud execution remains unverified until push; no local full suites run.
+
+### User
+GitHub Actions
+- Ordinary comments no longer cancel active GitHub agent jobs, and tests no longer set up Node twice.
+- Removed enterprise storage integration jobs as requested; enterprise code remains included in whole-repository typechecking.
+
+---
+
+## 2026-10-02 (~03:01) - v0.2.67 - Expand cloud checks to whole repository - GPT-6.1 Sol, effort not exposed; Implementation
+
+### Agent
+- Meta: GPT-6.1 Sol; effort not exposed; Implementation; completed
+- Version: 0.2.67 (revision already bumped once this session)
+- Removed typecheck package filters; root typecheck script runs every workspace with --continue=always.
+- Added console/app, console/core, console/function, enterprise, function, session-ui, stats/core to Linux/Windows test matrix. Covers 23 test workspaces including two Node provider suites.
+- Verification: actionlint 1.7.12 and git diff --check passed. Local full suites not run; cloud execution awaits push.
+
+### User
+GitHub Actions
+- Cloud checks now include whole-repository typechecking and all identified package test suites, including retained upstream packages.
+
+---
+
+## 2026-10-02 (~02:58) - v0.2.67 - Automate OC cloud verification - GPT-6.1 Sol, effort not exposed; Implementation
+
+### Agent
+- Meta: GPT-6.1 Sol; effort not exposed; Implementation; completed
+- Version: 0.2.67 (revision already bumped once this session)
+- Changed test/typecheck/generate triggers to main pushes, main-targeted PRs, and manual dispatch; GitHub-hosted runners replace Blacksmith; cancel superseded runs.
+- Added independent Linux/Windows test jobs for cli, client, codemode, core, effect-drizzle-sqlite, http-recorder, httpapi-codegen, llm, opencode, protocol, schema, sdk/js, tui, ui; Bun timeout 30000. Separate Node-script provider jobs cover Agentify/Cursor; Linux HttpApi gates remain independent.
+- Scoped typecheck to opencode/cli/client dependency closures; dry run confirms 17 existing typecheck commands, including shared ui required by tui. Excluded hosted console/stats/enterprise products.
+- Changed generate to read-only client/legacy SDK/OpenAPI drift checks; removed GitHub App credentials, whole-repo formatting, commits, and pushes. Generated untracked files also fail verification.
+- Changed on-demand review/opencode to Ubuntu hosted runners, per-thread concurrency, credential checks; restricted /oc callers to OWNER/MEMBER/COLLABORATOR; review prompt follows repository rules. Existing model choices retained.
+- Verification: actionlint 1.7.12 passed for all five workflows (optional shellcheck/pyflakes disabled); Prettier check and git diff --check passed; Turbo typecheck dry run passed. No local full suites or generation builds run; first pushed CI run remains live validation.
+- Required: add OPENCODE_API_KEY repository secret for /review and /oc only; automatic verification needs no custom secrets.
+
+### User
+GitHub Actions
+- Pushes to main now automatically run OC package tests on Windows/Linux, typechecking, and generated-code checks using GitHub cloud runners.
+- Test packages report independently, and generated-code checks report stale files instead of pushing changes.
+- GitHub review and agent commands remain on demand and require an API-key repository secret.
+
+---
+
+## 2026-10-02 (~02:47) - v0.2.67 - Remove upstream-only workflows - GPT-6.1 Sol, effort not exposed; Implementation
+
+### Agent
+- Meta: GPT-6.1 Sol; effort not exposed; Implementation; completed
+- Version: 0.2.67
+- Removed 21 workflows: close-issues, close-prs, compliance-close, duplicate-issues, pr-management, pr-standards, triage, deploy, unlock, publish, publish-github-action, release-github-action, publish-vscode, containers, notify-discord, docs-update, docs-locale-sync, stats, nix-eval, nix-hashes, storybook.
+- Kept generate, opencode, review, test, typecheck workflows.
+- Verification: directory read confirms exactly five workflows remain; git diff --check passed. Tests not run for workflow deletion.
+
+### User
+GitHub Actions
+- Removed the 21 inherited workflows identified as unnecessary for this fork. Five workflows remain.
+
+---
+
 ## 2026-10-02 (~02:08) - v0.2.66 - README leftover notes only - Grok 4.6, effort not exposed; Implementation
 
 ### Agent
