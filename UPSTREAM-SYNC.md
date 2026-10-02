@@ -65,16 +65,10 @@ with upstream's README.
 
 ## Verification
 
-Run these checks from the appropriate directories:
-
-```powershell
-git diff --check
-bun typecheck
-```
-
-Run `bun typecheck` from each affected package directory, never from the repo
-root. Parse any changed PowerShell scripts with PowerShell 7. Recheck both
-checkout statuses, inspect the final diff, and confirm the isolated checkout
-remains clean. Insert a newest-first session entry in `buildNotes.md` after
-successful verification (immediately under `# Historical entries (newest first)`).
+Agents run only newly added tests, selecting those cases in existing files.
+Existing tests, type checks, and other automated checks run on GitHub when the
+user pushes. Do not run them locally or ask to run them unless explicitly requested.
+Recheck both checkout statuses, inspect the final diff, and confirm the isolated
+checkout remains clean. Insert a newest-first session entry in `buildNotes.md` after
+permitted verification (immediately under `# Historical entries (newest first)`).
 Record the upstream SHA, method, checks, and remaining issues.

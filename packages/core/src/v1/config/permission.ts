@@ -32,6 +32,8 @@ const InputObject = Schema.StructWithRest(
     doom_loop: Schema.optional(Action),
      skill: Schema.optional(Rule),
      session_complete: Schema.optional(Action),
+     session_in_progress: Schema.optional(Action),
+     session_reopen: Schema.optional(Action),
      session_failed: Schema.optional(Action),
    }),
   [Schema.Record(Schema.String, Rule)],

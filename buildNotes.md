@@ -110,6 +110,42 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-02 (~15:12) - v0.2.68 - Agent session marking approvals - GPT-6.1 Sol, effort not exposed; Implementation
+
+### Agent
+- Meta: GPT-6.1 Sol; effort not exposed; Implementation; completed
+- Version: 0.2.68
+- Added `session_in_progress` tool and registry entry; ordinary marking defaults allow, complete/failed reopening uses separate `session_reopen` permission default ask. Re-reads after reopening approval and preserves a newer mark.
+- Changed `session_complete` default deny to ask; already-complete calls return without another approval. Kept failed-tool policy.
+- Added typed config permission keys, completion/reopening prompt titles, agent-facing usage descriptions, and README session-mark behavior.
+- Added eight session-marking integration cases with real permission requests/replies; updated obsolete default-deny assertion. Reused existing setters and persistence; no migration or API endpoint changes.
+- Verification: eight new session-marking cases and the changed completion-default case run in `packages/opencode/test/tool/task.test.ts`; 9 pass, 0 fail. Existing suites, typechecks, and builds not run. Installed permission UI remains user verification.
+- MISTAKE: race test initially asserted an `Exit` wrapper although its fiber returned the tool result directly; corrected assertion and reran all nine selected cases.
+
+### User
+Session marks
+- Agents can mark sessions in progress without approval by default. Completing a session or reopening a complete/failed session asks permission, with existing Allow once / Allow always / Reject choices.
+- Permission prompts describe the proposed change. Repeating an already-complete mark does not ask again.
+
+---
+
+## 2026-10-02 (~14:44) - v0.2.67 - Simplify agent verification guidance - GPT-6.1 Sol, effort not exposed; Implementation
+
+### Agent
+- Meta: GPT-6.1 Sol; effort not exposed; Implementation; completed
+- Version: 0.2.67 (docs-only; no revision bump)
+- Replaced AGENTS.md check budgets, timings, full-suite approval, local typecheck mandates, and stale failure baseline with newly-added-tests-only policy. Updated UPSTREAM-SYNC.md verification.
+- Updated global oc AGENTS.md, principles.md, Go/SuperPlan prompts, and verify skill: existing tests and automated checks belong to GitHub on push; project policy overrides older plans and generic skills.
+- Supersedes cumulative verification budget above and home notes dated 2026-10-01 (~23:35); historical entries preserved.
+- Verification: read guidance and GitHub test workflow; docs-only, no tests added or automated checks run.
+- Reviewed session edits; removed unsupported claim in verify skill that builds are delegated to GitHub. Kept build permissions under existing project rules.
+
+### User
+Agent guidance
+- Agents now run only newly added tests and leave existing tests, type checks, and other automated checks to GitHub when you push. Removed timing budgets and approval prompts; no UI change.
+
+---
+
 ## 2026-10-02 (~03:06) - v0.2.67 - Review and clean up cloud workflows - GPT-6.1 Sol, effort not exposed; Implementation
 
 ### Agent

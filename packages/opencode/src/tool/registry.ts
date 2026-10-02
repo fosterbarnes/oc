@@ -6,6 +6,7 @@ import { PlanExecuteTool } from "./plan-execute"
 import { PlanNextPhaseTool } from "./plan-next-phase"
 import { PlanCloseoutTool } from "./plan-closeout"
 import { SessionCompleteTool } from "./session-complete"
+import { SessionInProgressTool } from "./session-in-progress"
 import { SessionFailedTool } from "./session-failed"
 import { SessionTailTool } from "./session-tail"
 import { RunAfterTurnTool } from "./run-after-turn"
@@ -116,6 +117,7 @@ const layer = Layer.effect(
     const planNextPhase = yield* PlanNextPhaseTool
     const planCloseout = yield* PlanCloseoutTool
     const sessionComplete = yield* SessionCompleteTool
+    const sessionInProgress = yield* SessionInProgressTool
     const sessionFailed = yield* SessionFailedTool
     const sessionTail = yield* SessionTailTool
     const runAfterTurn = yield* RunAfterTurnTool
@@ -241,6 +243,7 @@ const layer = Layer.effect(
           planNextPhase: Tool.init(planNextPhase),
           planCloseout: Tool.init(planCloseout),
           sessionComplete: Tool.init(sessionComplete),
+          sessionInProgress: Tool.init(sessionInProgress),
           sessionFailed: Tool.init(sessionFailed),
           sessionTail: Tool.init(sessionTail),
           runAfterTurn: Tool.init(runAfterTurn),
@@ -260,6 +263,7 @@ const layer = Layer.effect(
             tool.write,
             tool.task,
             tool.sessionComplete,
+            tool.sessionInProgress,
             tool.sessionFailed,
             tool.sessionTail,
             tool.runAfterTurn,

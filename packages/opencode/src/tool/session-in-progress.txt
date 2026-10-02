@@ -1,0 +1,1 @@
+Mark the current session in progress when undertaking work. Unmarked sessions need no approval by default. Reopening a complete or failed session requires permission and clears its previous mark. Already-in-progress sessions need no change. This only labels the session; it does not start work or change whether the agent is busy.

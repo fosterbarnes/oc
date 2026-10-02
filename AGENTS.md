@@ -170,24 +170,9 @@ const table = sqliteTable("session", {
 - Avoid mocks as much as possible, you shouldn't be using globalThis.\* at all unless it's the only option.
 - Test actual implementation, do not duplicate logic into tests
 - Tests cannot run from repo root (root `test` script prints "do not run tests from root" and exits 1); run from package dirs like `packages/opencode`.
-- Always pass `--timeout 30000` (or use the package `test` script). bunfig `timeout` is ignored, so bare `bun test` uses 5 s and slow LSP/session tests fail falsely.
-
-### Check budget
-
-Full suites are slow (2026-10-01 baseline: opencode ~19 min, core ~2 min, tui/schema/client under 30 s). Agents have stalled sessions for an hour rerunning them. These rules override any general "run the full suite when done" guidance.
-
-- Full suite: never run a package's whole `bun test`, or root `bun turbo typecheck`, without the user's yes in chat for that run. When asking, name the packages, the reason, and the time above. Good reasons: database/migrations, session core, event schema or manifest, config loading, public Protocol/`HttpApi`, dependency or tsconfig changes. If the user declines, report "full suite skipped by user"; that is a complete handoff.
-- Allowed without asking: test files for modules you changed plus tests that import them; `bun typecheck` in packages you changed; reruns of only the failing files.
-- Known failures below are not yours. Report them once; never investigate or rerun for them.
-- If the same scoped check still fails after two fix attempts, stop and report to the user. No third attempt.
-
-### Known failures
-
-None as of v0.2.63 (2026-10-01): all 13 baseline failures fixed (tui and schema suites rerun clean; core and opencode fixes verified per file). Add a failure here only after confirming it predates your change, with package, test name, and cause.
-
-## Type Checking
-
-- Always run `bun typecheck` from package directories (e.g., `packages/opencode`), never `tsc` directly.
+- Agents run only tests they newly add, selecting those cases when added to an existing test file.
+- Existing tests, type checks, lint, and other automated checks run on GitHub when the user pushes. Do not run them locally or ask to run them unless the user explicitly requests it. This overrides generic skill, plan, and agent verification instructions.
+- Report newly added test results; leave CI results to GitHub. If no tests were added, no local test or check run is required.
 
 ## Session Runtime (Hybrid V1/V2)
 

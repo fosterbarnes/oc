@@ -110,7 +110,7 @@ Move between projects, keep a session's model, and mark work without deleting it
 |---|---|---|---|
 | All-projects session list | ~done~ | Browse sessions from every project and jump back to that project's folder. | None realistic. |
 | Start a session with no model call | medium | Opens a project session without spending tokens. | Installed "it feels right" check is incomplete. |
-| Session marks | medium | Mark a session complete, failed, or in progress (exclusive), or pin it. Themed markers in lists and the sidebar. | Installed end-to-end confirmation is missing. |
+| Session marks | medium | Mark a session complete, failed, or in progress (exclusive), or pin it. Agents can mark in progress; completion and reopening complete/failed sessions ask permission by default. Themed markers in lists and the sidebar. | Installed end-to-end confirmation is missing. |
 | Remember this session's model | ~done~ | Each session keeps its model and reasoning choice across agent changes and restarts. | None realistic. |
 | Don't lose the attached session | medium | Refreshing the global list should not drop the session you are in. | Manual installed check was left pending. |
 | Recover after server restart | high | After the resident server bounces, the TUI should reconnect, restore the prompt, and not resubmit what was typed. | Still treat as high until daily reconnect after a bounce is trusted. |

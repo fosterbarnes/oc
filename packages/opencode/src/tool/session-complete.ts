@@ -1,6 +1,6 @@
 import { Effect, Schema } from "effect"
 import { Session } from "@/session/session"
-import * as Tool from "./tool"
+import { Tool } from "./tool"
 import DESCRIPTION from "./session-complete.txt"
 
 export const Parameters = Schema.Struct({})
@@ -15,6 +15,9 @@ export const SessionCompleteTool = Tool.define(
       parameters: Parameters,
       execute: (_params: {}, ctx: Tool.Context) =>
         Effect.gen(function* () {
+          if ((yield* session.get(ctx.sessionID)).sessionComplete) {
+            return { title: "Session complete", output: "The current session is already complete.", metadata: {} }
+          }
           yield* ctx.ask({
             permission: "session_complete",
             patterns: ["*"],

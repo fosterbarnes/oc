@@ -1,1 +1,1 @@
-Mark the current session complete. This only labels the session and does not archive it or prevent future prompts.
+Request permission to mark the current session complete when the agreed work is finished. Already-complete sessions need no change or approval. This only labels the session and does not archive it or prevent future prompts.
