@@ -92,6 +92,366 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-01 (~23:28) - v0.2.63 - Fix all baseline test failures - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation; completed; same session as previous entry, revision not bumped again
+- Version: 0.2.63
+- Fixed `opencode/test/provider/claude-code/unattended-replay.test.ts`: assertions passed; `rmSync` hit EBUSY because the fake CLI still held its cwd. Now `await deleteActiveProcessAndWait(sessionKey(...))` before cleanup, matching `silent-turn.test.ts`.
+- Fixed `opencode/test/cli/acp/lifecycle.test.ts` "stdin EOF exits cleanly": exit wait 5 s -> 20 s; cold subprocess boot passes 5 s under full-suite load (passes alone in 5 s). Line also exists upstream; small conflict risk.
+- Fixed `core/test/npm-config.test.ts`: `C:\Users\user` has `package.json`, so npm's project-root walk-up from `%TEMP%` read the home `.npmrc`. Added `project(npmrc)` helper writing `package.json` + `.npmrc`. Source `npm-config.ts` unchanged (correct npm behavior).
+- Fixed `tui/test/runtime.test.tsx`: expected `~/project`; `abbreviateHome` uses `path.sep`, so expect `"~" + path.sep + "project"`.
+- Removed `tui/test/debug-temp-frame.test.tsx`, `debug-temp-spooky-repro.test.tsx`, `debug-temp-spooky2.test.tsx` (user approved): self-labeled temporary repros reading a hard-coded `%TEMP%\opencode-debug`; caused unhandled errors between tests.
+- Changed `AGENTS.md` `### Known failures`: list cleared.
+- Checked fork provider tests (claude-code 42 files, cursor 11): 625 pass, 47 s total, cover fork-only code; kept all.
+- Verification: unattended-replay 3/3 pass; acp lifecycle file 6 pass; npm-config 5 pass; tui full suite 321 pass, 0 fail, 18 s; `bun typecheck` clean in core, opencode, schema, tui. Full core/opencode suites not rerun (opencode ~19 min; ask user).
+
+### User
+Tests
+- Every test failure from the baseline run is fixed, so a red result now means something actually broke.
+- Removed three leftover debug test files from the TUI package.
+- No app behavior or UI change; only tests changed.
+
+---
+
+## 2026-10-01 (~23:20) - v0.2.63 - Agent check budget and test baseline - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation; completed
+- Version: 0.2.63
+- Cause: agents looped 20 min full suites at session end; every package except client fails at baseline, so agents chased unrelated failures; global principles mandated a full suite on every finish.
+- Added `AGENTS.md` Testing: `--timeout 30000` rule, `### Check budget` (full suite only after user yes in chat; scoped checks free; 2-attempt stop rule), `### Known failures` baseline.
+- Changed `~/.config/opencode/principles.md` Verification cadence: no full suite without asking; added stop rule.
+- Fixed `packages/schema/test/contract-hygiene.test.ts`, `v1-isolation.test.ts`: `new URL(...).pathname` gave `/C:/...` ENOENT on Windows; now `${import.meta.dir}/../src`.
+- Baseline timings (2026-10-01): opencode 18.8 min (4437 pass, 2 fail), core 2.2 min (5 fail), tui 18 s (4 fail), schema/client under 1 s.
+- TODO: delete stray tracked `packages/tui/test/debug-temp-*.test.tsx` (commit 2f5a5cd, not upstream) with user approval; investigate core NpmConfig registry failures.
+- Verification: schema `bun test` 15 pass, 0 fail. Full baseline run of core, schema, opencode, tui, client done before fix.
+
+### User
+Agent workflow
+- Agents must now ask you before running any full test suite, with the packages, reason, and expected time.
+- Agents stop and report after two failed fix attempts on the same check instead of looping.
+- Known pre-existing test failures are listed in AGENTS.md so agents ignore them.
+- Two schema tests that always failed on Windows now pass. No UI change.
+
+---
+
+## 2026-10-01 (~22:51) - v0.2.62 - Safe-shutdown and revive session cleanup pass - Claude Opus 5.5, low effort; Pass
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Pass; completed; scoped to v0.2.46-v0.2.60 safe-shutdown/revive work
+- Version: 0.2.62
+- Removed revive timing probes now that diagnosis is done: `OcConfig.stopServer` `requestMs`/`exitMs` return fields, `ServerShutdown.prepare` `server shutdown prepared` log and timers.
+- Trimmed `test/server/httpapi-global.test.ts` layer to `SessionWork` + `InstanceStore` (dropped Database, EventV2, SessionProjector, SessionExecution leftovers from v0.2.46; `prepare` no longer touches V2).
+- Reviewed, kept: `SessionWork` gate + 30s detached-close timeout; graceful `stopServer` with SIGKILL fallback; `shutdownAll` close-windows-first order; `launchDetached` (exe/.ps1); TUI WezTerm kill; revive scripts; `setReviveConsolePosition.ps1`; parallel `PreviousCommand` startup; kept-unused `cancelled_seq` migration (required by live DB).
+- Kept (not ours): untracked `.scripts/desktop.ini` (Explorer metadata).
+- Verification: `httpapi-global`, `shutdown`, `config/oc` tests 21 pass. Typecheck skipped per user.
+
+### User
+Cleanup
+- Removed temporary timing measurements from shutdown now that revive is fast; no behavior change.
+
+---
+
+## 2026-10-01 (~23:10) - v0.2.61 - Intro reads stdin so Windows resizes arrive - Claude Opus 5.5, low effort; Debug
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Debug; completed
+- Version: 0.2.61
+- ERROR: v0.2.60 polling never saw FancyZones resize. Confirmed live (Bun probe in `wezterm-gui start`): without stdin reads, `getWindowSize()` and `stdout.columns` stay 80x24 for 6s after the snap and no `resize` event fires; with `stdin.setRawMode(true)` + `resume()` they report 238x89 within 200ms and `resize` fires. Root cause: Bun/libuv on Windows only refreshes console size while the TTY is being read; the cached size is what `getWindowSize` returns.
+- Changed `packages/opencode/src/cli/intro.ts`: when stdin is a TTY, intro holds it in raw mode and resumes it (keys discarded); `stop` sets raw off and pauses before the attach TUI spawns. Kept the per-tick size check.
+- Verification: opencode `bun typecheck` clean. Live harness (source `startIntro`) in WezTerm: snapped window fully black with logo centered; maximize mid-intro redrew clean and centered; after stop `isRaw=false paused=true`. `.scripts\build.ps1` run. Not yet verified via installed `occ.lnk` + TUI handoff.
+
+### User
+Startup
+- The startup animation now fills and re-centers after the window is snapped into place, and when resized during startup.
+
+---
+
+## 2026-10-01 (~22:42) - v0.2.60 - Intro polls console size each tick - Claude Opus 5.5, low effort; Debug
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Debug; completed
+- Version: 0.2.60
+- ERROR: v0.2.59 `SIGWINCH` intro resize also never fired live. User clue: started when `occ.lnk` switched to `occ.exe` directly (v0.2.53). Cause: Bun on Windows reports console resizes only while stdin is being read (opentui reads stdin; previously `pwsh` hosted occ). The intro never reads stdin, so neither stdout `resize` nor `SIGWINCH` arrives.
+- Changed `packages/opencode/src/cli/intro.ts`: each 15ms tick calls `stdout.getWindowSize()`; on change, re-center, clear, repaint painted columns. Ticks continue after the animation finishes until `stopIntro`, so late resizes still redraw. No listeners.
+- Risk: if Bun's `getWindowSize()` returns a cached size, this also fails; next step would be reading stdin (raw) during the intro.
+- Verification: opencode `bun typecheck` clean. Not run live.
+
+### User
+Startup
+- The startup animation checks the window size continuously, so it fills and re-centers after the window is snapped into place.
+
+---
+
+## 2026-10-01 (~22:40) - v0.2.59 - Intro resize via SIGWINCH - Claude Opus 5.5, low effort; Debug
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Debug; completed
+- Version: 0.2.59
+- ERROR: v0.2.58 intro `stdout.on("resize")` never fired live (Bun on Windows); intro stayed in the initial small box after FancyZones resize.
+- Changed `packages/opencode/src/cli/intro.ts`: listen on `process.on("SIGWINCH")` and read `stdout.columns`/`rows`, matching opentui's renderer (`sigwinchHandler` in `@opentui/core` chunk), which resizes correctly in the live TUI. Redraw clears and repaints painted columns at the new center; listener removed on stop.
+- MISTAKE: v0.2.58 shipped an unverified Windows resize path. Tried to verify `getWindowSize` in a `start`-spawned console; Bun did not start there (3 attempts), so no evidence either way. Prefer the mechanism a working component already uses.
+- Verification: opencode `bun typecheck` clean. Not run live.
+
+### User
+Startup
+- Second attempt at making the startup animation fill the window after it is snapped into place.
+
+---
+
+## 2026-10-01 (~22:35) - v0.2.58 - Intro animation follows window resizes - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation; completed
+- Version: 0.2.58
+- Fixed `packages/opencode/src/cli/intro.ts` `startIntro`: center/row were computed once and the black clear covered only the initial size, so a FancyZones resize after launch left the intro in a small black box. Cause surfaced because v0.2.53 `occ.lnk` runs `occ.exe` directly (no ~3.3s pwsh profile before first paint). Added `layout()` + stdout `resize` listener: recompute, clear, repaint painted columns; removed on stop.
+- Verification: opencode `bun typecheck` clean; no intro tests exist. Not run live.
+
+### User
+Startup
+- The startup animation now fills and re-centers in the whole window when the window is resized or snapped into place.
+
+---
+
+## 2026-10-01 (~22:29) - v0.2.57 - Revive runs .ps1 directly, no compiled wrappers - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation; completed; supersedes v0.2.56 centering block
+- Version: 0.2.57
+- Added `packages/core/src/util/launch-detached.ts` `launchDetached(file, args)`: exe -> detached spawn; `.ps1` -> `cmd /d /c start "<script basename>" pwsh -NoProfile -File "<file>" "<args>"` (windowsVerbatimArguments; `start` gives a new visible console outside WezTerm). Returns unref'd child.
+- Changed TUI `reviveCommands` and `run_after_turn` to use it; tool text/param now say exe or `.ps1`. Fixed README limit note: detached `pwsh` no longer an issue for `.ps1`.
+- Changed `oc.json` `revive.exe`/`installExe` to `.scripts/revive.ps1`/`reviveAndInstall.ps1` (keys unchanged). Removed `revive.exe`/`reviveAndInstall.exe` pwsh72exe wrappers; scripts now use `$PSScriptRoot` (no temp copy). Removed v0.2.56 Add-Type centering block.
+- Added `.scripts/setReviveConsolePosition.ps1`: one-time, measures its own conhost window and writes centered `WindowPosition` to `HKCU\Console\revive` and `HKCU\Console\reviveAndInstall` (conhost applies per-title settings; zero runtime cost). Ran it via `launchDetached`: saved 1236,692.
+- Updated `SCRIPTS.md` revive rows (removed safeShutdown/pwshXer rows).
+- MISTAKE: first live probe of the `.ps1` path used `bun -e` with Windows paths in a template literal; escapes mangled the path and looked like a launcher failure. Use a `.ts` file with `String.raw` for Windows-path probes.
+- Verification: core/opencode/tui `bun typecheck` clean; `test/tool/run-after-turn.test.ts` 2 pass; `launchDetached` `.ps1` path verified end to end (setup script ran in a new console and wrote both registry values). `/revive` not run live.
+
+### User
+Revive
+- `/revive` and `/revive-no-install` run the PowerShell scripts directly; the compiled `.exe` wrappers are gone, so editing a script takes effect immediately.
+- The revive console window opens centered, using a saved Windows console setting instead of code that runs each time.
+- Agents' run-after-turn tool can now queue `.ps1` scripts as well as programs.
+
+---
+
+## 2026-10-01 (~22:21) - v0.2.56 - Center the revive install console - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation; completed
+- Version: 0.2.56
+- Added centering block at top of `.scripts/reviveAndInstall.ps1`: minimal `Add-Type` (`Revive.Win`: GetConsoleWindow, SetProcessDpiAwarenessContext(-4 = per-monitor v2), GetSystemMetrics, GetWindowRect, MoveWindow), true screen center instead of profile `cntr` hardcoded coords. No profile load. Rebuilt `reviveAndInstall.exe`.
+- Verification: parser clean; block run alone in a new `pwsh -NoProfile` console, 768ms total including pwsh start, no errors. Not run via live `/revive`.
+
+### User
+Revive
+- The `/revive` install window now opens centered on screen.
+
+---
+
+## 2026-10-01 (~22:18) - v0.2.55 - Revive closes WezTerm immediately - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation; completed
+- Version: 0.2.55
+- Measured v0.2.54 live revive: downtime ~2.8s (shutdown prepared 22:15:35.301, WezTerm 36.528, server 36.738, attach 38.116). User confirmed Defender exclusion for `Apps\opencode` and `dist` is in place.
+- Changed `packages/tui/src/app.tsx` `reviveCommands` run: after spawning the detached revive exe, `taskkill /F /IM wezterm-gui.exe` (win32). Window closes at once; revive helper (own pwsh72exe console) does build/shutdown/install in background. `shutdownAll` still kills WezTerm too (harmless no-op by then). TODO comment shared with `shutdownAll` for oc-only windows.
+- Risk: if `/revive` build fails, no oc window remains; the revive console shows the error.
+- Verification: tui `bun typecheck` clean. Not run live.
+
+### User
+Revive
+- `/revive` and `/revive-no-install` close WezTerm right away; shutdown, build, and install continue in the background before oc reopens.
+
+---
+
+## 2026-10-01 (~22:14) - v0.2.54 - Start resident server alongside revive relaunch - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation; completed
+- Version: 0.2.54
+- Measured v0.2.53 live revive: downtime ~12s -> ~4.9s (shutdown prepared 22:11:40.126, WezTerm 40.797, occ 41.079, server process 44.605, attach 44.974). 3.5s inside occ before server exists.
+- Measured warm: closed-port health fetch 2ms (not a cost); `pwsh` Start-Process hop 1.17s; `oc config get` 0.5s; `session previous` 0.65s (parallel since v0.2.53, off critical path). Remainder suspected first-run Defender scan of new exe; exclusion state unknown (Get-MpPreference needs admin).
+- Changed `.scripts/revive.ps1`, `reviveAndInstall.ps1`: `Start-Process oc.exe oc server start -WindowStyle Hidden` before `Invoke-Item occ.lnk`, so the resident spawn hop overlaps WezTerm/occ startup; occ joins via `startServer` lock + reuse. Rebuilt both pwsh72exe wrappers.
+- Kept `spawnResident` pwsh hop: libuv children sit in a KILL_ON_JOB_CLOSE job and Bun/Node hops cannot escape it; only non-libuv creator (Start-Process) gives a hidden console outside the job. TODO: direct `CreateProcessW` (CREATE_NEW_CONSOLE|CREATE_BREAKAWAY_FROM_JOB, SW_HIDE) via `bun:ffi` once Windows FFI pointer crash (AGENTS.md, Bun 1.4.0) is confirmed fixed.
+- Decided chunk B (native `oc --revive`) low value now: the wrapper's pwsh start happens before shutdown, not during downtime.
+- Verification: scripts reviewed; not run live.
+
+### User
+Revive
+- `/revive` starts the oc server at the same time as the new WezTerm window, instead of waiting for oc to start it, cutting about a second more off the restart.
+
+---
+
+## 2026-10-01 (~22:09) - v0.2.53 - Cut revive relaunch gaps - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation; completed; revive speed, from timing probe
+- Version: 0.2.53
+- Measured (`%TEMP%\reviveTiming.log` + process CreationDate): shutdown 0.6s, copy 0.2s, install `--version`/`config get` checks 3.3s, `pwsh -NoExit` profile load 3.3s, `occ` pre-server 3.6s, server boot+attach 0.4s. Server `/global/shutdown` itself ~0.15s.
+- Removed 6 post-install exe runs from `.scripts/install.ps1` (each ~0.55s, Defender first-run scan suspected). Removed timing probe lines; restored `reviveAndInstall.ps1` and rebuilt its pwsh72exe wrapper.
+- Changed `Desktop\occ.lnk` args to `start --cwd "C:\Users\user" -- C:\Users\user\Apps\opencode\occ.exe` (no pwsh/profile; tab closes when occ exits). Backup `%TEMP%\occ.lnk.bak`. Profile env vars moved to User scope by user.
+- Changed `cli/cmd/oc.ts` `PreviousCommand`: `OcConfig.read`, `session previous` subprocess, and `startServer` now run via `Promise.all` instead of serially.
+- Kept: user deleted `.scripts/safeShutdown.ps1`/`.exe` (not agent).
+- TODO: resident server `pwsh` `Start-Process` hop (`config/oc.ts` spawnResident, ~0.7s); `session previous` still spawns a full second process; chunk B native `oc --revive`.
+- Verification: opencode `bun typecheck` clean; `oc` + `command-loader` tests 22 pass. Not run live.
+
+### User
+Revive and launch
+- `/revive` no longer runs six check commands after installing, saving about 3 seconds.
+- The `occ` desktop shortcut starts oc directly instead of through PowerShell, saving about 3 seconds on every launch; the tab now closes when oc exits.
+- `occ` starts the server while it looks up your last session, instead of one after the other.
+
+---
+
+## 2026-10-01 (~22:00) - v0.2.52 - Faster revive: build first, close windows first, shutdown timings - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation; completed; revive speed chunk A
+- Version: 0.2.52
+- Changed `.scripts/reviveAndInstall.ps1`: `build.ps1` runs first while oc is still up, then `oc.exe --shutdown-all`, then `install.ps1 -NoBuild @args`, then `occ.lnk`. Downtime is shutdown + copy + relaunch. `install.ps1`'s `assertExternalInstall` passes because the host pid is dead by then; `build.ps1` `closeOut` only sleeps when it is the `-File` target. Rebuilt `reviveAndInstall.exe` (pwsh72exe, console, noprofile).
+- Changed `OcConfig.shutdownAll` order: read resident pids, `taskkill /F /IM wezterm-gui.exe`, force-kill non-server oc pids, then graceful `stopServer` both residents in parallel, then kill leftovers. Removes the "Unable to connect" screen gap.
+- Added timings: `stopServer` returns `requestMs` (POST `/global/shutdown`) and `exitMs` (wait for exit); `ServerShutdown.prepare` logs `server shutdown prepared` with `workCloseMs`/`disposeMs`. Printed by `--shutdown-all` JSON in the revive console.
+- TODO: chunk B native `oc --revive [--install]` (TUI spawns directly; install from new `dist\opencode.exe`; relaunch `wezterm-gui start -- occ.exe`, no pwsh). User env vars from profile to be moved to User scope by user (commands given). Chunk C: fix slow step shown by timings.
+- Verification: opencode `bun typecheck` clean; `oc`, `command-loader`, `shutdown`, `httpapi-global` tests 30 pass. Not run live.
+
+### User
+Revive
+- `/revive` now builds before closing oc, so oc is only down for the install and restart instead of the whole build.
+- WezTerm windows close right away instead of showing an "Unable to connect" error while the servers stop.
+- The revive console now prints how long each server took to shut down, so the slow part can be found.
+
+---
+
+## 2026-10-01 (~21:50) - v0.2.51 - Revive kills all WezTerm windows - Claude Opus 5.5, low effort; Debug
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Debug; completed (band-aid per user)
+- Version: 0.2.51
+- ERROR: v0.2.50 pre-stop parent-chain snapshot still left the oc WezTerm window open on live `/revive`. Root cause not investigated (user chose band-aid); suspect oc's process chain does not lead back to `wezterm-gui.exe` (e.g. hidden `Start-Process` hops).
+- Removed `snapshotOcProcesses`/`weztermAncestor` (CIM parent walk). Added `ocProcessIds()` via `tasklist /FO CSV /NH` (no pwsh startup). `shutdownAll` now stops servers, force-kills other oc pids, then `taskkill /F /IM wezterm-gui.exe`. TODO comment left in `shutdownAll` to restore oc-only window closing.
+- Verification: opencode `bun typecheck` clean; `test/config/oc.test.ts` + `test/cli/command-loader.test.ts` 22 pass. Not run live.
+
+### User
+Revive
+- `/revive` now closes every WezTerm window so the old oc window reliably goes away; closing only oc windows is a later fix.
+
+---
+
+## 2026-10-01 (~21:48) - v0.2.50 - Close oc WezTerm windows on revive - Claude Opus 5.5, low effort; Debug
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Debug; completed
+- Version: 0.2.50
+- Fixed `OcConfig.shutdownAll`: WezTerm windows hosting oc stayed open after `/revive`. Cause: TUIs exit by themselves once their server stops ("Unable to connect"), so the post-stop snapshot found no oc processes and no WezTerm ancestors. Now snapshots windows before stopping servers, snapshots oc processes after, then force-kills both.
+- Refactored `killOcProcesses` into `snapshotOcProcesses()` (returns `ours`, `windows`) + `forceKill(pids)`; `stopServer` killTuis path uses them.
+- Verification: opencode `bun typecheck` clean; `test/config/oc.test.ts` + `test/cli/command-loader.test.ts` 22 pass. Not run live.
+
+### User
+Revive
+- The WezTerm windows that were running oc now close during `/revive` instead of staying open with an error.
+
+---
+
+## 2026-10-01 (~21:43) - v0.2.49 - Revive uses oc --shutdown-all, no elevation - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation; completed; safe-shutdown chunk 3
+- Version: 0.2.49
+- Changed `.scripts/revive.ps1` and `reviveAndInstall.ps1`: run `C:\Users\user\Apps\opencode\oc.exe --shutdown-all` in-process, exit on nonzero, then install (install variant) and open `Desktop\occ.lnk`. Removed admin check, `-Verb RunAs` self-relaunch, `safeShutdown.exe`, and profile `launch`/`waitFor` dependencies. FancyZones concern gone: nothing runs elevated.
+- Kept: `oc.exe` exits before `install.ps1`, so the installed binary is not locked during replacement.
+- Rebuilt `revive.exe`/`reviveAndInstall.exe` with `pwsh72exe.Cli create` (pwsh 7, visible console per user, `-noprofile`, no admin); old wrappers backed up to `%TEMP%/reviveExeOld`. CLI needs forward-slash `-script` paths (backslashes gave "script was not found").
+- TODO: `safeShutdown.ps1`/`.exe` now unused; delete after live sign-off.
+- Verification: script content reviewed only; not executed (would kill host session).
+
+### User
+Revive
+- `/revive` and `/revive-no-install` no longer ask for admin rights and use oc's own shutdown instead of the old safe-shutdown script.
+
+---
+
+## 2026-10-01 (~21:41) - v0.2.48 - Graceful kill-server and oc --shutdown-all - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation; completed; safe-shutdown chunk 2 of plan (supervisor command)
+- Version: 0.2.48
+- Changed `config/oc.ts` `stopServer`: POST `/global/shutdown` with the directory's `oc-server.secret` (35s timeout), wait 5s for exit, SIGKILL fallback, throw if still alive. Fixes v0.2.47 TODO: `--kill-server` no longer hard-kills first.
+- Replaced `killTuiProcesses` with `killOcProcesses(closeWindows)`: one `Get-CimInstance Win32_Process` snapshot (pid, parent, name), `taskkill /F /PID` per oc binary except self. Names mirror `safeShutdown.ps1`. `--kill-server` keeps windows open.
+- Added `OcConfig.shutdownAll` + `oc --shutdown-all`: stops `state\opencode` and `state\opencode-debug` residents in parallel, then kills `wezterm-gui.exe` ancestors of oc processes and the oc processes. No elevation. No `taskkill /T`: a revive helper descends from the TUI being replaced.
+- Updated `cli/command-loader.ts` flag routing and `cli/cmd/oc.ts` flag exclusivity check.
+- Risk: WezTerm may host several windows in one `wezterm-gui` process; killing it closes all of them, including plain shell windows. User accepted; revisit if it bites.
+- TODO: next chunk swaps `revive.ps1`/`reviveAndInstall.ps1` from elevated `safeShutdown.exe` to `oc --shutdown-all`.
+- Verification: opencode `bun typecheck` clean; `test/config/oc.test.ts` + `test/cli/command-loader.test.ts` 22 pass. `--shutdown-all` not run live (would kill the host session).
+
+### User
+Shutdown
+- `oc --kill-server` now asks the server to stop running work and exit cleanly, and only force-stops it if it hangs.
+- New `oc --shutdown-all` stops both the normal and debug servers, closes every oc process, and closes the WezTerm windows running oc, without needing admin rights.
+
+---
+
+## 2026-10-01 (~21:26) - v0.2.47 - Trim safe shutdown to the legacy path - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation; completed cleanup of v0.2.46
+- Version: 0.2.47
+- Removed v0.2.46 V2 durable prompt cancellation: `session.next.prompt.cancelled`, `Admitted.cancelledSeq`, `SessionInput.cancelPending`/`projectCancelled`, projector/updater hooks, pending-query filters. User direction: V2 inbox unused by TUI; do not prep for V2. Legacy queued prompts are in-memory, so they already drop on exit.
+- Removed `SessionWork` wrapping from V2 `session.ts` prompt and `execution/local.ts`; reverted those files to HEAD. `server.ts` group now `[SessionV2.node, SessionWork.node]`.
+- Changed `server/shutdown.ts` `prepare`: close `SessionWork` -> dispose instances. `close` is uninterruptible, so await it from a `forkDetach` fiber with a 30s `timeoutOrElse` warning; a stuck tool cannot hang exit.
+- Changed `/global/restart` to use the cached `prepareShutdown` too.
+- Fixed command-template `` !`cmd` `` substitution: spawn/run failure yields "" again (old `nothrow`) instead of `orDie`.
+- Kept migration `20261002003418_sessionInputCancellation` and nullable `session_input.cancelled_seq` as unused schema: the live DB already applied it, and `DatabaseMigration.apply` refuses unknown ids. Regenerated schema via `bun script/migration.ts --name`, then renamed the file back to the original id. MISTAKE: first deleted the migration; check `migration` table in the live DB before removing any shipped migration.
+- Regenerated Client and legacy SDK types; remaining Client diff is pre-existing `sessionInProgress | null` drift. Updated tests: `shutdown.test.ts` drops pending-input checks; Schema manifest counts 58/89/89/35.
+- TODO: `--kill-server` (`OcConfig.stopServer`) still SIGTERMs the pid (hard kill on Windows) and skips graceful shutdown; route through `/global/shutdown` in the `oc safe-shutdown` chunk.
+- Verification: core `migration.ts --check` clean; core/opencode/schema/client `bun typecheck` clean; core `session-work` + `session-prompt` 26 pass; opencode `shutdown`, `httpapi-global`, `event-manifest` 10 pass; schema `event-manifest` 2 pass.
+
+### User
+Safe shutdown
+- Shut Down and Restart now stop running agent work before the server exits, and give up waiting after 30 seconds.
+- The database column added in the previous version stays but is unused, so already-updated databases keep working.
+- A failing shell command inside a custom command template inserts empty text again instead of failing the prompt.
+
+---
+
+## 2026-10-01 (~21:09) - v0.2.46 - Native server-side safe shutdown - GPT-6.1 Sol, effort not exposed; Implementation
+
+### Agent
+- Meta: GPT-6.1 Sol; effort not exposed; Implementation; completed server-side chunk
+- Version: 0.2.46
+- Added Core `session/work.ts` process-local scoped admission/cancellation boundary; shared by V2 admission/execution and legacy prompt, command, shell, subagent prompt operations, and run-state execution. Closing rejects new work and awaits interrupted-work cleanup, including atomic admissions already underway.
+- Added `server/shutdown.ts` preparation: close work boundary, join remaining V2 coordinator owners, cancel durable pending inputs, dispose instances. `/global/shutdown` coalesces preparation before scheduling existing process-exit controller; server graph exposes shared execution/work services.
+- Added `session.next.prompt.cancelled`, `Admitted.cancelledSeq`, `session_input.cancelled_seq`, projection and pending-query filters. Retained retry identities; cancelled inputs cannot promote or wake on exact retry; cancellation survives event replay. Added generated migration `20261002003418_sessionInputCancellation`.
+- Moved command-template shell substitutions onto existing scoped `ChildProcessSpawner`; shutdown now terminates and awaits these subprocesses. Preserved stdout substitution and nonzero-exit handling.
+- Updated public-event manifest assertions, generated Client/legacy SDK types, and README resident-server behavior. External supervisor/script migration remains a later chunk; existing restart/auto-start controls are integration points, not shutdown design authority.
+- Verification: Core, opencode, Schema, Client `bun typecheck` clean; migration `--check` clean; Client and legacy SDK regeneration succeeded; diff whitespace check clean. No application build, install, or live host shutdown.
+- Verification: final opencode legacy/native shutdown + manifest tests 57 pass, 14 skip (`--timeout 15000`); Core full suite 1111 pass, 10 skip, 5 unrelated npm-config failures; Client suite 16 pass; Schema final suite 13 pass, 2 unrelated Windows URL-path failures. Tests cover atomic admission, concurrent boundary closure, durable cancellation/replay/retry, legacy cleanup ordering, HTTP preparation, and real command-template subprocess termination.
+- ERROR (unrelated): Core `test/npm-config.test.ts` has five registry/.npmrc assertions failing. Schema `contract-hygiene`/`v1-isolation` filesystem scans use URL pathname `/C:/...`, causing ENOENT. Full opencode suite stalled in LSP tests after CLI/bootstrap timeouts and LSP EPIPE errors; cancelled own test worker. Logs: `C:\Users\user\AppData\Local\Temp\bgShell\ses_f0612ac9cffeDJyL06SCLq376X\` jobs `bg_31a0bbc29d`, `bg_982727a94a`, `bg_6dec251679`.
+- ERROR: legacy LLM-loop test exceeded default 5-second test timeout; isolated retry and final affected-file run passed with 15-second limit. Event-manifest expectations corrected for new cancellation event and previously stale Schema counts/position.
+- MISTAKE: initial boundary used `Fiber.join` inside interruption cleanup, re-interrupting a finishing child and hanging atomic-admission test. Fixed: await child Exit, then propagate outside interruption cleanup.
+- MISTAKE: initial test cleanup used unsupported Effect v4 `Effect.try` thunk form. Fixed `{ try, catch }` form after typecheck/test exposed it; verify installed Effect API before use.
+
+### User
+Safe shutdown
+- Server shutdown now blocks new session work, waits for active-work cancellation, cancels pending prompts, and closes project resources before scheduling exit.
+- Cancelled pending prompts stay cancelled after retries and history replay.
+- Command-template shell processes are stopped as part of shutdown.
+
+---
+
+## 2026-10-01 (~19:59) - v0.2.45 - Rename tui slash label to oc - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation; completed
+- Version: 0.2.45
+- Changed TUI-local slash label `:(tui)` -> `:(oc)` in `tui/src/component/prompt/autocomplete.tsx` `commands` memo; internal `kind` stays `"tui"` (color unchanged, purple)
+- Verification: `bun typecheck` in `packages/tui` clean
+
+### User
+Slash menu
+- Built-in actions such as `/skills` and `/new` now show `:(oc)` instead of `:(tui)`.
+
+---
+
 ## 2026-10-01 (~19:57) - v0.2.44 - Single rebuild and parse cache for hot reload - Claude Opus 5.5, low effort; Implementation
 
 ### Agent

@@ -1,6 +1,9 @@
 import { NodeHttpServer } from "@effect/platform-node"
 import { describe, expect } from "bun:test"
-import { Context, Effect, Layer, Option } from "effect"
+import { Context, Deferred, Effect, Fiber, Layer, Option } from "effect"
+import { AppNodeBuilder } from "@opencode-ai/core/effect/app-node-builder"
+import { LayerNode } from "@opencode-ai/core/effect/layer-node"
+import { SessionWork } from "@opencode-ai/core/session/work"
 import { HttpBody, HttpClient, HttpClientRequest, HttpRouter } from "effect/unstable/http"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { Auth } from "../../src/auth"
@@ -16,6 +19,9 @@ import { globalHandlers } from "../../src/server/routes/instance/httpapi/handler
 import { authorizationLayer } from "../../src/server/routes/instance/httpapi/middleware/authorization"
 import { schemaErrorLayer } from "../../src/server/routes/instance/httpapi/middleware/schema-error"
 import { testEffect } from "../lib/effect"
+import { InstanceStore } from "../../src/project/instance-store"
+import { ServerLifecycle } from "../../src/server/lifecycle"
+import { testInstanceStoreLayer } from "../fixture/fixture"
 
 const apiLayer = HttpRouter.serve(
   HttpApiBuilder.layer(RootHttpApi).pipe(
@@ -39,10 +45,43 @@ const apiLayer = HttpRouter.serve(
     }),
   ),
   Layer.provide(ServerAuth.Config.configLayer({ password: Option.none(), username: "opencode" })),
+  Layer.provideMerge(AppNodeBuilder.build(
+    LayerNode.group([SessionWork.node, InstanceStore.node]),
+    [[InstanceStore.node, testInstanceStoreLayer]],
+  )),
 )
 const it = testEffect(apiLayer)
 
 describe("global HttpApi", () => {
+  it.live("prepares coordinated shutdown before scheduling the managed process exit", () =>
+    Effect.gen(function* () {
+      const work = yield* SessionWork.Service
+      const started = yield* Deferred.make<void>()
+      const cleaned = yield* Deferred.make<void>()
+      const scheduled = yield* Deferred.make<void>()
+      yield* Effect.acquireRelease(
+        Effect.sync(() => ServerLifecycle.setController({
+          shutdown: () => { Deferred.doneUnsafe(scheduled, Effect.void) },
+          restart: () => { throw new Error("Unexpected restart") },
+        })),
+        (clear) => Effect.sync(clear),
+      )
+      const active = yield* work.run(Deferred.succeed(started, undefined).pipe(
+        Effect.andThen(Effect.never),
+        Effect.ensuring(Deferred.succeed(cleaned, undefined)),
+      )).pipe(Effect.forkChild)
+      yield* Deferred.await(started)
+      const response = yield* HttpClientRequest.post(GlobalPaths.shutdown).pipe(HttpClient.execute)
+      expect(response.status).toBe(200)
+      expect(yield* response.json).toBeTrue()
+      expect(yield* Deferred.isDone(cleaned)).toBeTrue()
+      yield* Deferred.await(scheduled)
+      yield* Fiber.await(active)
+      const rejected = yield* work.run(Effect.die("must not execute")).pipe(Effect.exit)
+      expect(rejected._tag).toBe("Failure")
+    }),
+  )
+
   it.live("upgrades to the requested version", () =>
     Effect.gen(function* () {
       const response = yield* HttpClientRequest.post(GlobalPaths.upgrade).pipe(

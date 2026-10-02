@@ -16,9 +16,9 @@ Project automation lives in `.scripts/`. Scripts target PowerShell 7 and fail on
 | `.scripts/push.ps1` | Commits parent changes with a supplied or prompted message, then pushes the current branch. It does not rewrite `.version/version` and does not stage `UPSTREAM/`. `-Force` is explicit. |
 | `.scripts/pushRelease.ps1` | Tags and publishes archives from `packages/opencode/dist` to `fosterbarnes/oc` using the `.version/version` maintenance version. Existing tags are not force-moved. |
 | `.scripts/install.ps1` | User-only build-and-install of both `opencode.exe` and `ocdebug.exe`. `-NoBuild`/`-nb` installs existing artifacts. It stops OpenCode processes and must not run from an agent. |
-| `.scripts/safeShutdown.ps1` | Admin-only shutdown: cancel sessions on discoverable resident servers, request shutdown, force-stop and verify remaining OpenCode processes, then stop WezTerm. `-WhatIf` inspects without stopping anything. |
-| `.scripts/revive.ps1` / `revive.exe` | Runs `safeShutdown` elevated, then reopens oc through `Desktop\occ.lnk` as a normal window. The `.exe` is a pwshXer wrapper; rebuild it after editing the `.ps1`. |
-| `.scripts/reviveAndInstall.ps1` / `reviveAndInstall.exe` | Same as `revive`, running `install.ps1` between shutdown and reopen. |
+| `.scripts/revive.ps1` | `/revive-no-install`: `oc --shutdown-all`, start the resident server, reopen oc through `Desktop\occ.lnk`. No elevation. |
+| `.scripts/reviveAndInstall.ps1` | `/revive`: build while oc runs, `oc --shutdown-all`, `install.ps1 -NoBuild`, then reopen like `revive`. |
+| `.scripts/setReviveConsolePosition.ps1` | One-time: saves a centered `HKCU\Console\<title>` WindowPosition for the revive console windows. Rerun after a resolution change. |
 | `.scripts/installDebug.ps1` | User-only debug install. Builds (unless `-NoBuild`/`-nb`) and replaces only `ocdebug.exe`; production OpenCode processes are left alone. |
 | `.scripts/.runDebug.ps1` | Same as `.run.ps1`, with `OPENCODE_INSTANCE=debug` and DEBUG logs. |
 

@@ -166,9 +166,12 @@ const PreviousCommand = cmd({
       throw new Error(`Previous session depth must be between 1 and 50: ${depth}`)
     const stopIntro = startIntro()
     try {
-      const settings = await OcConfig.read()
-      const session = await runNative(["session", "previous", "--depth", String(depth)], { capture: true })
-      const server = await OcConfig.startServer()
+      // Independent startup work: the session lookup is its own process, so overlap it with server startup.
+      const [settings, session, server] = await Promise.all([
+        OcConfig.read(),
+        runNative(["session", "previous", "--depth", String(depth)], { capture: true }),
+        OcConfig.startServer(),
+      ])
       stopIntro()
       await attach(server, settings, { directory: os.homedir(), session })
     } finally {
@@ -222,6 +225,10 @@ export const OcCommand = cmd({
         describe: "Shut down the resident oc server (alias for --kill-server)",
         hidden: true,
       })
+      .option("shutdown-all", {
+        type: "boolean",
+        describe: "Shut down production and debug servers, oc processes, and their WezTerm windows",
+      })
       .command(ConfigCommand)
       .command({
         command: "server start",
@@ -235,13 +242,18 @@ export const OcCommand = cmd({
       .command(StableCommand)
       .command(DiagnosticsCommand)
       .check((argv) => {
-        const flags = Boolean(argv["restart-server"]) || Boolean(argv["kill-server"]) || Boolean(argv["shutdown-server"])
-        if (flags && argv._.length > 1) throw new Error("--restart-server and --kill-server cannot be used with a launch target")
-        if (argv["restart-server"] && (argv["kill-server"] || argv["shutdown-server"]))
-          throw new Error("--restart-server cannot be used with --kill-server")
+        const kill = Boolean(argv["kill-server"]) || Boolean(argv["shutdown-server"])
+        const selected = [Boolean(argv["restart-server"]), kill, Boolean(argv["shutdown-all"])].filter(Boolean).length
+        if (selected > 0 && argv._.length > 1)
+          throw new Error("--restart-server, --kill-server, and --shutdown-all cannot be used with a launch target")
+        if (selected > 1) throw new Error("Use only one of --restart-server, --kill-server, or --shutdown-all")
         return true
       }),
   handler: async (args) => {
+    if ((args as Record<string, unknown>)["shutdown-all"]) {
+      console.log(JSON.stringify(await OcConfig.shutdownAll()))
+      return
+    }
     const doRestart = Boolean((args as Record<string, unknown>)["restart-server"])
     const doKill = Boolean((args as Record<string, unknown>)["kill-server"] || (args as Record<string, unknown>)["shutdown-server"])
     if (doRestart) {

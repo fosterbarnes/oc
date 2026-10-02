@@ -90,6 +90,7 @@ import { win32AssertRawMode } from "./terminal-win32"
 import { destroyRenderer } from "./util/renderer"
 import { cliErrorMessage, errorFormat } from "./util/error"
 import { spawn } from "node:child_process"
+import { launchDetached } from "@opencode-ai/core/util/launch-detached"
 import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
@@ -347,12 +348,15 @@ function persistOcConfig(
   })
 }
 
-// Run the oc.json revive executables straight from the TUI, with no agent turn. Detached and
-// unref'd because the revive scripts shut this process down.
+// Run the oc.json revive scripts (.ps1 or .exe) straight from the TUI, with no agent turn.
 function reviveCommands(toast: ToastContext) {
   const config = readOcConfig()
   const run = (exe: string) => () => {
-    spawn(exe, [], { detached: true, stdio: "ignore", windowsHide: true })
+    launchDetached(exe)
+    // Close the terminal right away; the detached revive helper shuts the servers down in the background.
+    // TODO: close only WezTerm windows hosting oc (see OcConfig.shutdownAll).
+    if (process.platform !== "win32") return
+    spawn("taskkill", ["/F", "/IM", "wezterm-gui.exe"], { stdio: "ignore", windowsHide: true })
   }
   return [
     {

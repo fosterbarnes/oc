@@ -1,4 +1,4 @@
-import { spawn } from "child_process"
+import { launchDetached } from "@opencode-ai/core/util/launch-detached"
 import path from "path"
 import { Effect, Schema } from "effect"
 import { EventV2Bridge } from "@/event-v2-bridge"
@@ -7,7 +7,7 @@ import * as Tool from "./tool"
 import DESCRIPTION from "./run-after-turn.txt"
 
 export const Parameters = Schema.Struct({
-  exe: Schema.String.annotate({ description: "Absolute path to the executable" }),
+  exe: Schema.String.annotate({ description: "Absolute path to the executable or .ps1 script" }),
   args: Schema.optional(Schema.Array(Schema.String)).annotate({ description: "Arguments for the executable" }),
 })
 
@@ -18,7 +18,7 @@ export const RunAfterTurnTool = Tool.define(
     const queued = new Map<string, { exe: string; args: readonly string[] }>()
 
     // Spawn only once the session is idle, so the turn is finished and saved first.
-    // Detached and unref'd: it must outlive OpenCode (revive scripts shut it down).
+    // launchDetached: it must outlive OpenCode (revive scripts shut it down).
     const unsubscribe = yield* events.listen((event) => {
       if (event.type !== SessionStatus.Event.Status.type) return Effect.void
       const data = event.data as { sessionID: string; status: { type: string } }
@@ -27,9 +27,8 @@ export const RunAfterTurnTool = Tool.define(
       if (!command) return Effect.void
       queued.delete(data.sessionID)
       return Effect.sync(() =>
-        spawn(command.exe, [...command.args], { detached: true, stdio: "ignore", windowsHide: true })
-          .on("error", (cause) => console.error(`run_after_turn: failed to start ${command.exe}: ${cause.message}`))
-          .unref(),
+        launchDetached(command.exe, command.args)
+          .on("error", (cause) => console.error(`run_after_turn: failed to start ${command.exe}: ${cause.message}`)),
       )
     })
     yield* Effect.addFinalizer(() => unsubscribe)

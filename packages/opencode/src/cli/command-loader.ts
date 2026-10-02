@@ -81,7 +81,7 @@ export function withExecutableDefault(args: readonly string[], execPath = proces
     args.includes("--version") ||
     args.includes("--register")
   if (helpOrVersion) return [...args]
-  if (args.includes("--restart-server") || args.includes("--kill-server") || args.includes("--shutdown-server")) {
+  if (["--restart-server", "--kill-server", "--shutdown-server", "--shutdown-all"].some((flag) => args.includes(flag))) {
     if (args[0] === "oc") return [...args]
     return ["oc", ...args]
   }
@@ -100,7 +100,7 @@ export function withOcLaunchDefault(args: readonly string[], debug: boolean) {
     args.includes("--version") ||
     args.includes("--register")
   if (helpOrVersion) return [...args]
-  if (args.includes("--restart-server") || args.includes("--kill-server") || args.includes("--shutdown-server")) {
+  if (["--restart-server", "--kill-server", "--shutdown-server", "--shutdown-all"].some((flag) => args.includes(flag))) {
     if (args[0] === "oc") return [...args]
     return ["oc", ...args]
   }

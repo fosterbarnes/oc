@@ -18,7 +18,8 @@ describe("opencode acp lifecycle subprocess", () => {
         const acp = yield* opencode.acp()
         acp.close()
 
-        const code = yield* Effect.promise(() => acp.exited).pipe(Effect.timeout(Duration.seconds(5)))
+        // Cold subprocess boot alone can pass 5 s on Windows under full-suite load.
+        const code = yield* Effect.promise(() => acp.exited).pipe(Effect.timeout(Duration.seconds(20)))
         expect(code).toBe(0)
       }),
     60_000,

@@ -458,7 +458,7 @@ export function Autocomplete(props: {
   const commands = createMemo((): AutocompleteOption[] => {
     const results: AutocompleteOption[] = slashes().map((slash) => ({
       ...slash,
-      display: `${slash.display}:(tui)`,
+      display: `${slash.display}:(oc)`,
       kind: "tui" as const,
     }))
 

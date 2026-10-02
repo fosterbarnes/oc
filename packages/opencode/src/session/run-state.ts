@@ -8,6 +8,7 @@ import { Session } from "./session"
 import { SessionID } from "./schema"
 import { SessionStatus } from "./status"
 import { Flock } from "@opencode-ai/core/util/flock"
+import { SessionWork } from "@opencode-ai/core/session/work"
 
 export interface Interface {
   readonly assertNotBusy: (sessionID: SessionID) => Effect.Effect<void, Session.BusyError>
@@ -32,6 +33,7 @@ const layer = Layer.effect(
   Effect.gen(function* () {
     const background = yield* BackgroundJob.Service
     const status = yield* SessionStatus.Service
+    const workBoundary = yield* SessionWork.Service
 
     const state = yield* InstanceState.make(
       Effect.fn("SessionRunState.state")(function* () {
@@ -91,7 +93,7 @@ const layer = Layer.effect(
       onInterrupt: Effect.Effect<SessionV1.WithParts>,
       work: Effect.Effect<SessionV1.WithParts>,
     ) {
-      return yield* (yield* runner(sessionID, onInterrupt)).ensureRunning(owned(sessionID, work))
+      return yield* (yield* runner(sessionID, onInterrupt)).ensureRunning(workBoundary.run(owned(sessionID, work)))
     })
 
     const startShell = Effect.fn("SessionRunState.startShell")(function* (
@@ -101,7 +103,7 @@ const layer = Layer.effect(
       ready?: Latch.Latch,
     ) {
       return yield* (yield* runner(sessionID, onInterrupt))
-        .startShell(owned(sessionID, work), ready)
+        .startShell(workBoundary.run(owned(sessionID, work)), ready)
         .pipe(Effect.catchTag("RunnerBusy", () => Effect.fail(busyError(sessionID))))
     })
 
@@ -159,6 +161,10 @@ function busyError(sessionID: SessionID) {
   return new Session.BusyError({ sessionID })
 }
 
-export const node = LayerNode.make({ service: Service, layer: layer, deps: [BackgroundJob.node, SessionStatus.node] })
+export const node = LayerNode.make({
+  service: Service,
+  layer,
+  deps: [BackgroundJob.node, SessionStatus.node, SessionWork.node],
+})
 
 export * as SessionRunState from "./run-state"

@@ -101,9 +101,3 @@ if (-not $hasPath) {
 }
 if (-not $currentPathHas) { $env:Path = "$installDir;$env:Path" }
 
-& (Join-Path $installDir 'opencode.exe') --version
-& (Join-Path $installDir 'ocdebug.exe') --version
-& $ocLink --version
-& $occLink --version
-& (Join-Path $installDir 'opencode.exe') oc config get | Out-Null
-& (Join-Path $installDir 'ocdebug.exe') oc config get | Out-Null

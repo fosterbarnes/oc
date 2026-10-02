@@ -1,3 +1,3 @@
-Runs an executable after your turn ends. Call it as your last tool call, then end the turn with a short reply.
+Runs an executable or .ps1 script after your turn ends. Call it as your last tool call, then end the turn with a short reply.
 
 Only call it when the user explicitly asked for it (for example with a slash command). If you think it would help as part of a plan or process, ask the user first and wait for their approval.

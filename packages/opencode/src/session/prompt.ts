@@ -43,7 +43,6 @@ import { FSUtil } from "@opencode-ai/core/fs-util"
 import { Truncate } from "@/tool/truncate"
 import { Image } from "@/image/image"
 import { decodeDataUrl } from "@/util/data-url"
-import { Process } from "@/util/process"
 import { Cause, Effect, Exit, Latch, Layer, Option, Scope, Context, Schema, Types } from "effect"
 import { InstanceState } from "@/effect/instance-state"
 import { TaskTool, type TaskPromptOps } from "@/tool/task"
@@ -59,6 +58,7 @@ import { SessionReminders } from "./reminders"
 import { SessionTools } from "./tools"
 import { LLMEvent } from "@opencode-ai/llm"
 import { Question } from "@/question"
+import { SessionWork } from "@opencode-ai/core/session/work"
 
 // @ts-ignore
 globalThis.AI_SDK_LOG_WARNINGS = false
@@ -154,12 +154,13 @@ const layer = Layer.effect(
     const flags = yield* RuntimeFlags.Service
     const database = yield* Database.Service
     const question = yield* Question.Service
+    const work = yield* SessionWork.Service
     const { db } = database
     const ops = Effect.fn("SessionPrompt.ops")(function* () {
       return {
         cancel: (sessionID: SessionID) => cancel(sessionID),
         resolvePromptParts: (template: string) => resolvePromptParts(template),
-        prompt: (input: PromptInput) => prompt(input).pipe(Effect.catch(Effect.die)),
+        prompt: (input: PromptInput) => work.run(prompt(input)).pipe(Effect.catch(Effect.die)),
       } satisfies TaskPromptOps
     })
 
@@ -1480,10 +1481,20 @@ const layer = Layer.effect(
       if (shellMatches.length > 0) {
         const cfg = yield* config.get()
         const sh = Shell.preferred(cfg.shell)
-        const results = yield* Effect.promise(() =>
-          Promise.all(
-            shellMatches.map(async ([, cmd]) => (await Process.text([cmd], { shell: sh, nothrow: true })).text),
-          ),
+        const results = yield* Effect.forEach(
+          shellMatches,
+          ([, cmd]) => Effect.gen(function* () {
+            const handle = yield* spawner.spawn(ChildProcess.make(sh, Shell.args(sh, cmd, process.cwd()), {
+              stdin: "ignore",
+              stdout: "pipe",
+              stderr: "ignore",
+              forceKillAfter: "3 seconds",
+            }))
+            const text = yield* Stream.mkString(Stream.decodeText(handle.stdout))
+            yield* handle.exitCode
+            return text
+          }).pipe(Effect.scoped, Effect.catch(() => Effect.succeed(""))),
+          { concurrency: "unbounded" },
         )
         let index = 0
         template = template.replace(bashRegex, () => results[index++])
@@ -1564,12 +1575,12 @@ const layer = Layer.effect(
 
     return Service.of({
       cancel,
-      prompt,
-      loop,
-      shell,
-      command,
+      prompt: (input) => work.run(prompt(input)),
+      loop: (input) => work.run(loop(input)),
+      shell: (input) => work.run(shell(input)),
+      command: (input) => work.run(command(input)),
       resolvePromptParts,
-      rename,
+      rename: (sessionID) => work.run(rename(sessionID)),
     })
   }),
 )
@@ -1734,6 +1745,7 @@ export const node = LayerNode.make({
     RuntimeFlags.node,
     Database.node,
     Question.node,
+    SessionWork.node,
   ],
 })
 

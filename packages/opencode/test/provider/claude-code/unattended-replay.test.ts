@@ -19,6 +19,7 @@ import { join } from "node:path"
 import { test } from "node:test"
 
 import { createClaudeCode } from "@/provider/claude-code/index.js"
+import { deleteActiveProcessAndWait, sessionKey } from "@/provider/claude-code/session-manager.js"
 
 function createFixture() {
   const cwd = mkdtempSync(join(tmpdir(), "opencode-unattended-replay-"))
@@ -122,6 +123,7 @@ test("a reused process's unattended output replays as a single text block, not o
     assert.equal(startsForReplayBlock.length, 1, "the replay block must open exactly once")
     assert.equal(endsForReplayBlock.length, 1, "the replay block must close exactly once")
   } finally {
+    await deleteActiveProcessAndWait(sessionKey(fixture.cwd, `tools::default::context=["claude-code"]`))
     rmSync(fixture.cwd, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 })
   }
 })

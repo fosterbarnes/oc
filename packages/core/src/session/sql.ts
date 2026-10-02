@@ -152,6 +152,8 @@ export const SessionInputTable = sqliteTable(
     delivery: text().$type<SessionInput.Delivery>().notNull(),
     admitted_seq: integer().notNull(),
     promoted_seq: integer(),
+    // Unused: added by v0.2.46 and kept so already-migrated databases stay valid.
+    cancelled_seq: integer(),
     time_created: integer()
       .notNull()
       .$default(() => Date.now()),

@@ -331,85 +331,99 @@ export function spawnResident(
   })
 }
 
-async function killTuiProcesses() {
-  if (process.platform !== "win32") return
-  try {
-    const result = Bun.spawnSync(
-      ["pwsh", "-NoProfile", "-Command", "Get-Process -Name opencode,oc,occ,ocdebug -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Id"],
-      { stdout: "pipe", stderr: "pipe" },
-    )
-    const out = result.stdout.toString().trim()
-    if (!out) return
-    const pids = out
-      .split(/\r?\n/)
-      .map((line) => Number(line.trim()))
-      .filter((pid) => Number.isInteger(pid) && pid > 0 && pid !== process.pid)
-    for (const pid of pids) {
-      if (!isPidAlive(pid)) continue
-      try {
-        process.kill(pid, "SIGTERM")
-      } catch {}
-      for (let attempt = 0; attempt < 100; attempt++) {
-        if (!isPidAlive(pid)) break
-        await Bun.sleep(50)
-      }
-      if (isPidAlive(pid)) {
-        try {
-          process.kill(pid, "SIGKILL")
-        } catch {}
-        for (let attempt = 0; attempt < 100; attempt++) {
-          if (!isPidAlive(pid)) break
-          await Bun.sleep(50)
-        }
-      }
-      if (isPidAlive(pid)) {
-        Bun.spawnSync(["taskkill", "/PID", String(pid), "/T", "/F"], { stdout: "pipe", stderr: "pipe" })
-      }
-    }
-  } catch {}
+const OC_PROCESS_NAMES = new Set([
+  "oc.exe",
+  "occ.exe",
+  "ocdebug.exe",
+  "ocbug.exe",
+  "oc-debug.exe",
+  "opencode.exe",
+  "opencode-debug.exe",
+])
+
+/** Lists oc process ids other than this one. */
+function ocProcessIds() {
+  if (process.platform !== "win32") return []
+  const list = Bun.spawnSync(["tasklist", "/FO", "CSV", "/NH"], { stdout: "pipe", stderr: "pipe" })
+  if (list.exitCode !== 0) throw new Error(`Failed to list processes: ${list.stderr.toString()}`)
+  return list.stdout
+    .toString()
+    .split(/\r?\n/)
+    .map((line) => line.split('","'))
+    .filter((parts) => parts.length > 1 && OC_PROCESS_NAMES.has(parts[0].replace(/^"/, "").toLowerCase()))
+    .map((parts) => Number(parts[1]))
+    .filter((pid) => pid !== process.pid)
+}
+
+// No /T: a revive helper descends from the TUI it is replacing, so tree kills would take it down too.
+function forceKill(pids: number[]) {
+  for (const pid of pids) Bun.spawnSync(["taskkill", "/F", "/PID", String(pid)], { stdout: "pipe", stderr: "pipe" })
+}
+
+async function waitForExit(pid: number, timeoutMs: number) {
+  const deadline = Date.now() + timeoutMs
+  while (isPidAlive(pid) && Date.now() < deadline) await Bun.sleep(50)
+  return !isPidAlive(pid)
+}
+
+/** Asks the resident server to cancel its work and exit. The server bounds its own cleanup to 30 seconds. */
+async function requestShutdown(directory: string, state: ResidentState) {
+  if (!state.hostname || !state.port) return
+  const secret = (await fs.readFile(path.join(directory, "oc-server.secret"), "utf8").catch(() => "")).trim()
+  if (!secret) return
+  const host = state.hostname === "::1" ? "[::1]" : state.hostname
+  await fetch(`http://${host}:${state.port}/global/shutdown`, {
+    method: "POST",
+    headers: { authorization: `Basic ${Buffer.from(`opencode:${secret}`).toString("base64")}` },
+    signal: AbortSignal.timeout(35_000),
+  }).catch(() => undefined)
 }
 
 export async function stopServer(directory = serverStateDirectory(), opts: { killTuis?: boolean } = {}) {
   const killTuis = opts.killTuis ?? true
   const file = serverStatePath(directory)
-  let state: { pid?: number } | undefined
+  let state: ResidentState | undefined
   try {
     state = JSON.parse(await fs.readFile(file, "utf8"))
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error
     return { stopped: false }
   }
-  if (!state?.pid || !isPidAlive(state.pid)) {
-    await clearServerState(directory)
-    try {
-      await fs.rm(`${serverStatePath(directory)}.lock`, { force: true })
-    } catch {}
-    if (killTuis) await killTuiProcesses()
-    return { stopped: false, pid: state?.pid }
-  }
-  const pid = state.pid
-  try {
-    process.kill(pid, "SIGTERM")
-  } catch {}
-  for (let attempt = 0; attempt < 100; attempt++) {
-    if (!isPidAlive(pid)) break
-    await Bun.sleep(50)
-  }
-  if (isPidAlive(pid)) {
-    try {
+  const pid = state?.pid
+  const alive = pid !== undefined && isPidAlive(pid)
+  if (alive) {
+    await requestShutdown(directory, state!)
+    // Graceful exit is scheduled right after the response; force-kill only if it never happens.
+    if (!(await waitForExit(pid, 5_000))) {
       process.kill(pid, "SIGKILL")
-    } catch {}
-    for (let attempt = 0; attempt < 100; attempt++) {
-      if (!isPidAlive(pid)) break
-      await Bun.sleep(50)
+      if (!(await waitForExit(pid, 5_000))) throw new Error(`Resident server ${pid} did not exit`)
     }
   }
   await clearServerState(directory)
-  try {
-    await fs.rm(`${serverStatePath(directory)}.lock`, { force: true })
-  } catch {}
-  if (killTuis) await killTuiProcesses()
-  return { stopped: true, pid }
+  await fs.rm(`${serverStatePath(directory)}.lock`, { force: true }).catch(() => undefined)
+  if (killTuis) forceKill(ocProcessIds())
+  return { stopped: alive, pid }
+}
+
+/** Closes all WezTerm windows and TUIs first, then stops production and debug resident servers gracefully. */
+export async function shutdownAll() {
+  const directories = ["opencode", "opencode-debug"].map((app) => path.join(path.dirname(serverStateDirectory()), app))
+  const serverPids = await Promise.all(
+    directories.map((directory) =>
+      fs
+        .readFile(serverStatePath(directory), "utf8")
+        .then((text) => (JSON.parse(text) as ResidentState).pid)
+        .catch(() => undefined),
+    ),
+  )
+  // TODO: close only WezTerm windows that hosted oc. Parent-process matching missed them, so kill all for now.
+  Bun.spawnSync(["taskkill", "/F", "/IM", "wezterm-gui.exe"], { stdout: "pipe", stderr: "pipe" })
+  // TUIs have nothing to save; killing them up front avoids the "Unable to connect" screen while servers stop.
+  forceKill(ocProcessIds().filter((pid) => !serverPids.includes(pid)))
+  const stopped = await Promise.all(directories.map((directory) => stopServer(directory, { killTuis: false })))
+  const leftovers = ocProcessIds()
+  forceKill(leftovers)
+  return { servers: stopped, leftovers: leftovers.length }
 }
 
 export async function restartServer() {
