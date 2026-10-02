@@ -170,9 +170,7 @@ const table = sqliteTable("session", {
 - Avoid mocks as much as possible, you shouldn't be using globalThis.\* at all unless it's the only option.
 - Test actual implementation, do not duplicate logic into tests
 - Tests cannot run from repo root (root `test` script prints "do not run tests from root" and exits 1); run from package dirs like `packages/opencode`.
-- Agents run only tests they newly add, selecting those cases when added to an existing test file.
-- Existing tests, type checks, lint, and other automated checks run on GitHub when the user pushes. Do not run them locally or ask to run them unless the user explicitly requests it. This overrides generic skill, plan, and agent verification instructions.
-- Report newly added test results; leave CI results to GitHub. If no tests were added, no local test or check run is required.
+- Only run checks you edit or introduce. If you edit a check, run that specific check afterward. Leave everything else to GitHub Actions.
 
 ## Session Runtime (Hybrid V1/V2)
 
