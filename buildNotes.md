@@ -110,6 +110,21 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-02 (~15:30) - v0.2.69 - Fix session tool error types - GPT-6.1 Sol, effort not exposed; Implementation
+
+### Agent
+- Meta: GPT-6.1 Sol; effort not exposed; Implementation; completed
+- Version: 0.2.69
+- Fixed three session.get calls in session-complete.ts and session-in-progress.ts with Effect.orDie; matches existing session-tail tool and Tool.Def.execute error-free contract.
+- ERROR: user push blocked by opencode typecheck; new lookups leaked typed NotFoundError into tool execution.
+- Verification: inspected tool contract and existing session-tail boundary; no new tests, local automated checks not run under project policy. Push hook remains user verification.
+
+### User
+Push fix
+- Fixed the session-marking type mismatch that blocked the pre-push hook.
+
+---
+
 ## 2026-10-02 (~15:12) - v0.2.68 - Agent session marking approvals - GPT-6.1 Sol, effort not exposed; Implementation
 
 ### Agent

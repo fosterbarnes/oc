@@ -19,7 +19,7 @@ export const SessionInProgressTool = Tool.define(
             always: ["*"],
             metadata: {},
           })
-          const current = yield* session.get(ctx.sessionID)
+          const current = yield* session.get(ctx.sessionID).pipe(Effect.orDie)
           if (current.sessionInProgress) {
             return {
               title: "Session in progress",
@@ -34,7 +34,7 @@ export const SessionInProgressTool = Tool.define(
               always: ["*"],
               metadata: { previous: current.sessionFailed ? "failed" : "complete" },
             })
-            const latest = yield* session.get(ctx.sessionID)
+            const latest = yield* session.get(ctx.sessionID).pipe(Effect.orDie)
             if (
               latest.sessionComplete !== current.sessionComplete ||
               latest.sessionFailed !== current.sessionFailed ||

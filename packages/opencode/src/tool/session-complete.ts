@@ -15,7 +15,7 @@ export const SessionCompleteTool = Tool.define(
       parameters: Parameters,
       execute: (_params: {}, ctx: Tool.Context) =>
         Effect.gen(function* () {
-          if ((yield* session.get(ctx.sessionID)).sessionComplete) {
+          if ((yield* session.get(ctx.sessionID).pipe(Effect.orDie)).sessionComplete) {
             return { title: "Session complete", output: "The current session is already complete.", metadata: {} }
           }
           yield* ctx.ask({
