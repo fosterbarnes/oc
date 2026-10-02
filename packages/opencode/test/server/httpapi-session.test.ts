@@ -26,7 +26,7 @@ import { SessionPaths } from "../../src/server/routes/instance/httpapi/groups/se
 import { Session } from "@/session/session"
 import { MessageID, PartID, SessionID, type SessionID as SessionIDType } from "../../src/session/schema"
 import { Database } from "@opencode-ai/core/database/database"
-import { SessionInputTable, SessionMessageTable, SessionTable } from "@opencode-ai/core/session/sql"
+import { SessionMessageTable, SessionTable } from "@opencode-ai/core/session/sql"
 import { SessionMessage } from "@opencode-ai/core/session/message"
 import { ModelV2 } from "@opencode-ai/core/model"
 import { ProviderV2 } from "@opencode-ai/core/provider"
@@ -36,7 +36,7 @@ import { resetDatabase } from "../fixture/db"
 import { disposeAllInstances, provideInstanceEffect, TestInstance, tmpdirScoped } from "../fixture/fixture"
 import { TestLLMServer } from "../lib/llm-server"
 import { testProviderConfig } from "../lib/test-provider"
-import { pollWithTimeout, testEffect } from "../lib/effect"
+import { testEffect } from "../lib/effect"
 
 const originalWorkspaces = Flag.OPENCODE_EXPERIMENTAL_WORKSPACES
 const noopBootstrapLayer = Layer.succeed(
@@ -541,124 +541,6 @@ describe("session HttpApi", () => {
         const context = yield* request(`/api/session/${missing}/context`, { headers })
         expect(context.status).toBe(404)
         expect(yield* responseJson(context)).toEqual(expected)
-
-        const compact = yield* request(`/api/session/${missing}/compact`, { method: "POST", headers })
-        expect(compact.status).toBe(404)
-        expect(yield* responseJson(compact)).toEqual(expected)
-
-        const wait = yield* request(`/api/session/${missing}/wait`, { method: "POST", headers })
-        expect(wait.status).toBe(404)
-        expect(yield* responseJson(wait)).toEqual(expected)
-
-        const prompt = yield* request(`/api/session/${missing}/prompt`, {
-          method: "POST",
-          headers: { ...headers, "content-type": "application/json" },
-          body: JSON.stringify({ prompt: { text: "hello" } }),
-        })
-        expect(prompt.status).toBe(404)
-        expect(yield* responseJson(prompt)).toEqual(expected)
-      }),
-    { git: true, config: { formatter: false, lsp: false } },
-  )
-
-  it.instance(
-    "durably records one v2 prompt for exact message-ID retries",
-    () =>
-      Effect.gen(function* () {
-        const test = yield* TestInstance
-        const headers = { "x-opencode-directory": test.directory }
-        const session = yield* createSession({ title: "v2 prompt recording" })
-
-        const recordPrompt = () =>
-          request(`/api/session/${session.id}/prompt`, {
-            method: "POST",
-            headers: { ...headers, "content-type": "application/json" },
-            body: JSON.stringify({ id: "msg_http_prompt", prompt: { text: "hello" }, resume: false }),
-          })
-        const first = yield* recordPrompt()
-        const retried = yield* recordPrompt()
-        type PromptBody = { id: string; prompt: { text: string }; delivery: string; promotedSeq?: number }
-        const firstBody = yield* json<{ data: PromptBody }>(first)
-        const retriedBody = yield* json<{ data: PromptBody }>(retried)
-        expect(first.status).toBe(200)
-        expect(retried.status).toBe(200)
-        expect(retriedBody).toEqual(firstBody)
-        expect(firstBody).toMatchObject({
-          data: { id: "msg_http_prompt", prompt: { text: "hello" }, delivery: "steer" },
-        })
-
-        const messages = yield* requestJson<{ data: PromptBody[] }>(`/api/session/${session.id}/message`, {
-          headers,
-        })
-        expect(messages.data).toHaveLength(0)
-        const admitted = yield* Database.Service.use(({ db }) =>
-          db
-            .select()
-            .from(SessionInputTable)
-            .where(eq(SessionInputTable.id, SessionMessage.ID.make("msg_http_prompt")))
-            .get()
-            .pipe(Effect.orDie),
-        )
-        expect(admitted).toMatchObject({
-          id: "msg_http_prompt",
-          session_id: session.id,
-          delivery: "steer",
-          promoted_seq: null,
-        })
-        const conflict = yield* request(`/api/session/${session.id}/prompt`, {
-          method: "POST",
-          headers: { ...headers, "content-type": "application/json" },
-          body: JSON.stringify({ id: "msg_http_prompt", prompt: { text: "goodbye" } }),
-        })
-        expect(conflict.status).toBe(409)
-        expect(yield* responseJson(conflict)).toEqual({
-          _tag: "ConflictError",
-          message: "Prompt message ID conflicts with an existing durable record: msg_http_prompt",
-          resource: "msg_http_prompt",
-        })
-
-        const wakeID = SessionMessage.ID.make("msg_http_wake")
-        const wake = yield* request(`/api/session/${session.id}/prompt`, {
-          method: "POST",
-          headers: { ...headers, "content-type": "application/json" },
-          body: JSON.stringify({ id: wakeID, prompt: { text: "hello again" } }),
-        })
-        expect(wake.status).toBe(200)
-        const message = yield* pollWithTimeout(
-          requestJson<{ data: SessionMessage.Message[] }>(`/api/session/${session.id}/message`, { headers }).pipe(
-            Effect.map(({ data }) => data.find((message) => message.id === wakeID)),
-          ),
-          "V2 prompt was not promoted after wake",
-          "10 seconds",
-        )
-        expect(message).toMatchObject({ id: wakeID, type: "user" })
-      }),
-    { git: true, config: { formatter: false, lsp: false } },
-  )
-
-  it.instance(
-    "returns v2 public unavailable errors for unfinished session mutations",
-    () =>
-      Effect.gen(function* () {
-        const test = yield* TestInstance
-        const headers = { "x-opencode-directory": test.directory }
-        const session = yield* createSession({ title: "v2 unavailable" })
-
-        const compact = yield* request(`/api/session/${session.id}/compact`, { method: "POST", headers })
-        expect(compact.status).toBe(503)
-        expect(yield* responseJson(compact)).toEqual({
-          _tag: "ServiceUnavailableError",
-          message: "Session compact is not available yet",
-          service: "session.compact",
-        })
-
-        const wait = yield* request(`/api/session/${session.id}/wait`, { method: "POST", headers })
-        expect(wait.status).toBe(503)
-        expect(yield* responseJson(wait)).toEqual({
-          _tag: "ServiceUnavailableError",
-          message: "Session wait is not available yet",
-          service: "session.wait",
-        })
       }),
     { git: true, config: { formatter: false, lsp: false } },
   )

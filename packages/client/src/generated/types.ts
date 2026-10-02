@@ -33,21 +33,13 @@ export type SessionNotFoundError = {
 export const isSessionNotFoundError = (value: unknown): value is SessionNotFoundError =>
   typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "SessionNotFoundError"
 
-export type ConflictError = {
-  readonly _tag: "ConflictError"
+export type UnknownError = {
+  readonly _tag: "UnknownError"
   readonly message: string
-  readonly resource?: string | undefined
+  readonly ref?: string | undefined
 }
-export const isConflictError = (value: unknown): value is ConflictError =>
-  typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "ConflictError"
-
-export type ServiceUnavailableError = {
-  readonly _tag: "ServiceUnavailableError"
-  readonly message: string
-  readonly service?: string | undefined
-}
-export const isServiceUnavailableError = (value: unknown): value is ServiceUnavailableError =>
-  typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "ServiceUnavailableError"
+export const isUnknownError = (value: unknown): value is UnknownError =>
+  typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "UnknownError"
 
 export type MessageNotFoundError = {
   readonly _tag: "MessageNotFoundError"
@@ -58,13 +50,13 @@ export type MessageNotFoundError = {
 export const isMessageNotFoundError = (value: unknown): value is MessageNotFoundError =>
   typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "MessageNotFoundError"
 
-export type UnknownError = {
-  readonly _tag: "UnknownError"
+export type ServiceUnavailableError = {
+  readonly _tag: "ServiceUnavailableError"
   readonly message: string
-  readonly ref?: string | undefined
+  readonly service?: string | undefined
 }
-export const isUnknownError = (value: unknown): value is UnknownError =>
-  typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "UnknownError"
+export const isServiceUnavailableError = (value: unknown): value is ServiceUnavailableError =>
+  typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "ServiceUnavailableError"
 
 export type ProviderNotFoundError = {
   readonly _tag: "ProviderNotFoundError"
@@ -333,8 +325,6 @@ export type SessionsCreateOutput = {
   }
 }["data"]
 
-export type SessionsActiveOutput = { readonly data: { readonly [x: string]: { readonly type: "running" } } }["data"]
-
 export type SessionsGetInput = { readonly sessionID: { readonly sessionID: string }["sessionID"] }
 
 export type SessionsGetOutput = {
@@ -389,145 +379,6 @@ export type SessionsSwitchModelInput = {
 }
 
 export type SessionsSwitchModelOutput = void
-
-export type SessionsPromptInput = {
-  readonly sessionID: { readonly sessionID: string }["sessionID"]
-  readonly id?: {
-    readonly id?: string | null
-    readonly prompt: {
-      readonly text: string
-      readonly files?: ReadonlyArray<{
-        readonly uri: string
-        readonly name?: string
-        readonly description?: string
-        readonly source?: { readonly start: number; readonly end: number; readonly text: string }
-      }>
-      readonly agents?: ReadonlyArray<{
-        readonly name: string
-        readonly source?: { readonly start: number; readonly end: number; readonly text: string }
-      }>
-    }
-    readonly delivery?: "steer" | "queue" | null
-    readonly resume?: boolean | null
-  }["id"]
-  readonly prompt: {
-    readonly id?: string | null
-    readonly prompt: {
-      readonly text: string
-      readonly files?: ReadonlyArray<{
-        readonly uri: string
-        readonly name?: string
-        readonly description?: string
-        readonly source?: { readonly start: number; readonly end: number; readonly text: string }
-      }>
-      readonly agents?: ReadonlyArray<{
-        readonly name: string
-        readonly source?: { readonly start: number; readonly end: number; readonly text: string }
-      }>
-    }
-    readonly delivery?: "steer" | "queue" | null
-    readonly resume?: boolean | null
-  }["prompt"]
-  readonly delivery?: {
-    readonly id?: string | null
-    readonly prompt: {
-      readonly text: string
-      readonly files?: ReadonlyArray<{
-        readonly uri: string
-        readonly name?: string
-        readonly description?: string
-        readonly source?: { readonly start: number; readonly end: number; readonly text: string }
-      }>
-      readonly agents?: ReadonlyArray<{
-        readonly name: string
-        readonly source?: { readonly start: number; readonly end: number; readonly text: string }
-      }>
-    }
-    readonly delivery?: "steer" | "queue" | null
-    readonly resume?: boolean | null
-  }["delivery"]
-  readonly resume?: {
-    readonly id?: string | null
-    readonly prompt: {
-      readonly text: string
-      readonly files?: ReadonlyArray<{
-        readonly uri: string
-        readonly name?: string
-        readonly description?: string
-        readonly source?: { readonly start: number; readonly end: number; readonly text: string }
-      }>
-      readonly agents?: ReadonlyArray<{
-        readonly name: string
-        readonly source?: { readonly start: number; readonly end: number; readonly text: string }
-      }>
-    }
-    readonly delivery?: "steer" | "queue" | null
-    readonly resume?: boolean | null
-  }["resume"]
-}
-
-export type SessionsPromptOutput = {
-  readonly data: {
-    readonly admittedSeq: number
-    readonly id: string
-    readonly sessionID: string
-    readonly prompt: {
-      readonly text: string
-      readonly files?: ReadonlyArray<{
-        readonly uri: string
-        readonly mime: string
-        readonly name?: string
-        readonly description?: string
-        readonly source?: { readonly start: number; readonly end: number; readonly text: string }
-      }>
-      readonly agents?: ReadonlyArray<{
-        readonly name: string
-        readonly source?: { readonly start: number; readonly end: number; readonly text: string }
-      }>
-    }
-    readonly delivery: "steer" | "queue"
-    readonly timeCreated: number
-    readonly promotedSeq?: number
-  }
-}["data"]
-
-export type SessionsCompactInput = { readonly sessionID: { readonly sessionID: string }["sessionID"] }
-
-export type SessionsCompactOutput = void
-
-export type SessionsWaitInput = { readonly sessionID: { readonly sessionID: string }["sessionID"] }
-
-export type SessionsWaitOutput = void
-
-export type SessionsStageInput = {
-  readonly sessionID: { readonly sessionID: string }["sessionID"]
-  readonly messageID: { readonly messageID: string; readonly files?: boolean | undefined }["messageID"]
-  readonly files?: { readonly messageID: string; readonly files?: boolean | undefined }["files"]
-}
-
-export type SessionsStageOutput = {
-  readonly data: {
-    readonly messageID: string
-    readonly partID?: string
-    readonly snapshot?: string
-    readonly diff?: string
-    readonly files?: ReadonlyArray<{
-      readonly path: string
-      readonly status: "added" | "modified" | "deleted"
-      readonly additions: number
-      readonly deletions: number
-      readonly patch: string
-    }>
-  }
-}["data"]
-
-export type SessionsClearInput = { readonly sessionID: { readonly sessionID: string }["sessionID"] }
-
-export type SessionsClearOutput = void
-
-export type SessionsCommitInput = { readonly sessionID: { readonly sessionID: string }["sessionID"] }
-
-export type SessionsCommitOutput = void
 
 export type SessionsContextInput = { readonly sessionID: { readonly sessionID: string }["sessionID"] }
 
@@ -1599,10 +1450,6 @@ export type SessionsEventsOutput =
       readonly location?: { readonly directory: string; readonly workspaceID?: string }
       readonly data: { readonly timestamp: number; readonly sessionID: string; readonly messageID: string }
     }
-
-export type SessionsInterruptInput = { readonly sessionID: { readonly sessionID: string }["sessionID"] }
-
-export type SessionsInterruptOutput = void
 
 export type SessionsMessageInput = {
   readonly sessionID: { readonly sessionID: string; readonly messageID: string }["sessionID"]

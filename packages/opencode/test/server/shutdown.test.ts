@@ -4,7 +4,6 @@ import { AppNodeBuilder } from "@opencode-ai/core/effect/app-node-builder"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { Database } from "@opencode-ai/core/database/database"
 import { EventV2 } from "@opencode-ai/core/event"
-import { SessionExecution } from "@opencode-ai/core/session/execution"
 import { SessionProjector } from "@opencode-ai/core/session/projector"
 import { SessionWork } from "@opencode-ai/core/session/work"
 import { ModelV2 } from "@opencode-ai/core/model"
@@ -23,9 +22,9 @@ import { pollWithTimeout, testEffect } from "../lib/effect"
 const it = testEffect(AppNodeBuilder.build(
   LayerNode.group([
     SessionRunState.node, Session.node, SessionStatus.node, SessionWork.node, SessionPrompt.node,
-    SessionExecution.node, Database.node, EventV2.node, SessionProjector.node, InstanceStore.node,
+    Database.node, EventV2.node, SessionProjector.node, InstanceStore.node,
   ]),
-  [[SessionExecution.node, SessionExecution.noopLayer], [InstanceStore.node, testInstanceStoreLayer]],
+  [[InstanceStore.node, testInstanceStoreLayer]],
 ))
 
 describe("ServerShutdown", () => {

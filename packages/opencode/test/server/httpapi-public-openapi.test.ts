@@ -138,7 +138,6 @@ describe("PublicApi OpenAPI v2 errors", () => {
     const spec = OpenApi.fromApi(PublicApi) as OpenApiSpec
 
     for (const path of [
-      "/api/session/{sessionID}/prompt",
       "/api/session/{sessionID}/permission/{requestID}/reply",
       "/api/session/{sessionID}/question/{requestID}/reply",
     ]) {
@@ -224,26 +223,10 @@ describe("PublicApi OpenAPI v2 errors", () => {
     const spec = OpenApi.fromApi(PublicApi) as OpenApiSpec
 
     for (const route of [
-      ["post", "/api/session/{sessionID}/prompt"],
-      ["post", "/api/session/{sessionID}/compact"],
-      ["post", "/api/session/{sessionID}/wait"],
       ["get", "/api/session/{sessionID}/context"],
       ["get", "/api/session/{sessionID}/message"],
     ] as const) {
       expect(componentNames(spec.paths[route[1]]?.[route[0]]?.responses?.["404"])).toContain("SessionNotFoundError")
-    }
-  })
-
-  test("documents v2 unfinished session mutation errors", () => {
-    const spec = OpenApi.fromApi(PublicApi) as OpenApiSpec
-
-    for (const route of [
-      ["post", "/api/session/{sessionID}/compact"],
-      ["post", "/api/session/{sessionID}/wait"],
-    ] as const) {
-      expect(componentName(responseRef(spec.paths[route[1]]?.[route[0]]?.responses?.["503"]) ?? "")).toBe(
-        "ServiceUnavailableError",
-      )
     }
   })
 

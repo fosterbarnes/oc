@@ -28,8 +28,8 @@ export type Value = string | boolean
 export type Settings = Partial<Record<Key, Value>> & {
   executable?: string
   server?: { hostname?: string; port?: number; startOnWindowsUserStart?: boolean }
-  // Executables behind the TUI /revive-no-install and /revive commands
-  revive?: { exe?: string; installExe?: string }
+  // Exe or .ps1 paths behind the TUI /revive-no-install and /revive commands
+  revive?: { path?: string; installPath?: string }
 }
 
 export function defaultServerPort() {

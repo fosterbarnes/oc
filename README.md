@@ -6,7 +6,7 @@ OC is a personal, Windows-first OpenCode: native `oc` launcher, extra model prov
 
 Use this file to agree on what OC *is*. Statuses describe current state. They do not authorize implementation work.
 
-Last reviewed: 2026-09-30
+Last reviewed: 2026-10-01
 
 ---
 
@@ -26,12 +26,12 @@ Counts below are for **active** rows only. Retired work is listed separately and
 
 | Level | Count |
 |---|---:|
-| ~done~ | 19 |
-| high | 21 |
+| ~done~ | 18 |
+| high | 22 |
 | medium | 22 |
 | low | 0 |
-| CRITICAL | 3 |
-| **Total** | **65** |
+| CRITICAL | 2 |
+| **Total** | **64** |
 
 ---
 
@@ -66,14 +66,14 @@ Get into a project quickly, keep a local server running, and control it from the
 
 | Feature | Level | What it does | What's left |
 |---|---|---|---|
-| Native `oc` launcher | ~done~ | `oc` is OpenCode itself, with settings in `~/.config/opencode/oc.json`. Launch, previous session (`occ`), diagnostics, and `oc config get/set` all work. | None realistic. |
-| Run after turn and revive | ~done~ | Built-in `run_after_turn` tool runs an exe or `.ps1` once the agent's turn ends (permission `run_after_turn`, allowed by default). `/revive-no-install` and `/revive` run oc.json `revive.exe` / `revive.installExe` (exe or `.ps1`) directly with no agent turn and close WezTerm at once; each is hidden when unset. `.ps1` runs in its own titled console via `start`. | None realistic. |
+| Native `oc` launcher | ~done~ | `oc` is OpenCode itself, with settings in `~/.config/opencode/oc.json`. Launch, previous session (`occ`), diagnostics, and `oc config get/set` all work. The `occ` desktop shortcut runs `occ.exe` directly (no PowerShell profile), and `occ` looks up the last session while the server starts. | None realistic. |
+| Run after turn and revive | high | **Revive** restarts oc: `/revive-no-install` runs `.scripts\revive.ps1` (shut down, reopen); `/revive` runs `.scripts\reviveAndInstall.ps1` (build while oc is still up, shut down, install, reopen). The paths come from `oc.json` `revive.path` and `revive.installPath` (exe or `.ps1`); each command is hidden when its path is unset. The palette commands run the script directly with no agent turn and close WezTerm at once. A `.ps1` runs in its own titled console via `start`. **`run_after_turn`** is a built-in tool that lets an agent queue an exe or `.ps1` to run once its turn ends (`/agent-revive` uses it). Its permission is `run_after_turn`: the built-in default allows it, and the global `opencode.jsonc` asks except for `.scripts\revive*.ps1`. | Revive closes *every* WezTerm window, not only oc ones (band-aid with a TODO). The latest revive changes are not live-checked. TODO: `/agent-revive` and `/agent-revive-no-install` do not work in Claude Code sessions, because the oc proxy does not expose `run_after_turn`. |
 | Separate home vs OC directory | high | Bare `oc` and relative project names can use two different folders. Absolute paths stay absolute. | Latest palette settings may still need a rebuild/restart to show in the running app. |
 | New-session project picker | high | Tray/palette "New session" starts the intro, then the real OpenCode project picker, then attaches to the running server. | The intermediate full-screen list was tried and dropped. Confirm the installed `oc.exe` shows the intended picker. |
-| Startup loading animation | medium | Column-sweep animation while the server and session come up. | Visual sign-off in the running app is still thin. |
-| Resident background server | medium | Local server stays up between launches (production port **4096**). Palette can shut down or restart it. Server shutdown and restart close session admission, wait up to 30 seconds for active-work cancellation, then dispose project resources before scheduling exit. Attach can forward model/agent. A stale server record no longer adds a 10-second wait on the first `oc` launch; a launch during an active restart still waits for the replacement. On Windows the server starts through a hidden `Start-Process` hop, so it has a hidden console (no flashing windows from its child processes) and outlives the launcher. | Full installed shutdown/restart flow is not fully signed off. |
+| Startup loading animation | medium | Column-sweep animation while the server and session come up. Fills and re-centers when the window is snapped or resized. | Visual sign-off in the running app is still thin. Resize fix not checked through the installed `occ` shortcut and TUI handoff. |
+| Resident background server | medium | Local server stays up between launches (production port **4096**). Palette can shut down or restart it. Server shutdown and restart close session admission, wait up to 30 seconds for active-work cancellation, then dispose project resources before scheduling exit. Attach can forward model/agent. A stale server record no longer adds a 10-second wait on the first `oc` launch; a launch during an active restart still waits for the replacement. On Windows the server starts through a hidden `Start-Process` hop, so it has a hidden console (no flashing windows from its child processes) and outlives the launcher. | Full installed shutdown/restart flow is not fully signed off. The hidden PowerShell hop costs about a second; a direct native launch waits on the Bun Windows FFI fix. |
 | Start server at Windows sign-in | high | OC settings can turn sign-in auto-start on or off. | Final installed palette click is not recorded. |
-| `oc --kill-server` / `--restart-server` | high | Simple flags for the tray and CLI to stop or bounce the resident server without a full TUI. | Tray wiring exists; treat as nearly done once it is used from a cold start. |
+| `oc --kill-server` / `--restart-server` / `--shutdown-all` | high | Simple flags for the tray and CLI to stop or bounce the resident server without a full TUI. `--shutdown-all` closes WezTerm and every oc process, then stops both resident servers (used by revive). | Tray wiring exists; treat as nearly done once it is used from a cold start. |
 | Faster command startup | ~done~ | Only the command asked for is loaded. `--version` is much quicker. | None realistic. |
 | Windows tray (`octray`) | medium | Separate tray app: open OC, open the project picker, start the server if it is down, restart/shut down the server. | Logs, live status, and settings menu items are still thin. Not inside this git checkout. |
 | No browser/desktop OpenCode app | ~done~ | This checkout no longer builds the website UI or Electron desktop app. CLI, TUI, and API remain. `README.OG.md` states that. | Some `packages/web` pages still mention desktop / `opencode web`. Intentional removal, not a missing product. |
@@ -136,7 +136,7 @@ Timestamps, copy, keys, diffs, plugins, and the terminal itself.
 |---|---|---|---|
 | Response timestamps | medium | Local date/time, then duration. Uses start time while the reply is still streaming. | Final look in the installed UI is not recorded. |
 | Copy on release vs Ctrl+C | medium | Copy-on-release or Ctrl+C. Removed a Windows console poll that contributed to crashes. | In-TUI copy-mode checks were blocked. |
-| Keys and command palette | high | Context-sensitive Ctrl+D, Ctrl+Shift+Up/Down, Ctrl+N for a new OC session. OC commands use a source order and friendly labels. `command_palette.order` in `opencode.json` can reorder commands inside a category; unlisted commands keep source order. Shut down and restart sit in the `oc` section. | Order and labels are tested. A full click-through in the installed app is not recorded. |
+| Keys and command palette | high | Context-sensitive Ctrl+D, Ctrl+Shift+Up/Down, Ctrl+N for a new OC session. OC commands use a source order and friendly labels. `command_palette.order` in `opencode.jsonc` can reorder commands inside a category; unlisted commands keep source order. Shut down and restart sit in the `oc` section. | Order and labels are tested. A full click-through in the installed app is not recorded. |
 | Don't crash on odd tool text | medium | After the OpenTUI upgrade, non-string or nested text no longer takes down the UI. | No explicit "no regression" confirmation. |
 | Diff hover colors | ~done~ | Neutral diff regions share one hover background; add/remove colors stay. | None realistic. |
 | Crow session lock | medium | Each Crow tab stays on the exact OpenCode session; Tailscale callback address works. | Live integration evidence is limited. |
@@ -157,7 +157,6 @@ A second OpenCode that can run beside production.
 |---|---|---|---|
 | Isolated `ocdebug` | high | Native PATH command, own data/config, port **4097**, copies production settings on first run, can overwrite from the palette (then restart). Export/import copies sessions. | Trust it beside production in daily use. |
 | Import *all* production extras | high | Import also copies agents, prompts, commands, modes, plugins, skills, tools, and themes. Debug-only files stay unless overwritten. | Restart after import. |
-| Debug paint freeze (empty transcript) | **CRITICAL** | `ocdebug` currently hides user bubbles, assistant text, and tools as a diagnostic "last healthy paint." Thoughts, sidebar, and prompt remain; the real chat does not. | Frozen experiment, not a product feature. Production TUI still draws everything. |
 
 ---
 
@@ -167,7 +166,7 @@ Build safely, install without fighting locks, and keep logs.
 
 | Feature | Level | What it does | What's left |
 |---|---|---|---|
-| PowerShell build / install / release | ~done~ | Scripts for build, debug build, install, pre-push check, push, release, upstream sync, safe shutdown, and revive. Installer rebuilds by default, stops running OC first, can keep a timestamped backup. | Agents must not run installers (they can kill the host). |
+| PowerShell build / install / release | ~done~ | Scripts for build, debug build, install, pre-push check, push, release, upstream sync, and revive (`revive.ps1`, `reviveAndInstall.ps1`). Installer rebuilds by default, stops running OC first, can keep a timestamped backup. | Agents must not run installers (they can kill the host). |
 | Agent-safe build vs user install | ~done~ | Agents can build. Install later with `-NoBuild`. Debug-only install does not touch production. | None realistic. |
 | `oc.exe` / `occ.exe` hard links | ~done~ | Installer links those names to the same production binary and accepts a valid link set. | None realistic. |
 | Stop processes before rebuild | ~done~ | Installer stops managed processes *before* build so `ocdebug.exe` cannot lock cleanup. | None realistic. |
@@ -193,13 +192,12 @@ Stay close to upstream without losing custom work.
 
 ## CRITICAL issues (must see these first)
 
-These are not extra rows. They restate the three **CRITICAL** items already counted in sections 6 and 7. They are breakages sitting on top of otherwise useful work.
+These are not extra rows. They restate the two **CRITICAL** items already counted in section 6. They are breakages sitting on top of otherwise useful work.
 
 | Issue | Level | What it feels like | Why it is CRITICAL |
 |---|---|---|---|
 | Session paint death | **CRITICAL** | Scrolling a large chat (especially a long markdown dump) blanks the screen. Palette rows may only appear on hover. It stays dead until a full close and reopen. | Proven in debug on the previous OpenTUI pin: layout numbers stay valid while the screen dies. Dummy text of the same size still dies. This is the terminal drawing layer, not "the sidebar is wrong." Catalog is now OpenTUI 0.4.5; re-validate after rebuild. |
 | WezTerm letter-key death | **CRITICAL** | After that same break, `a-z` and main Enter do nothing. Arrows, numpad Enter, and Ctrl+P still work. | On the previous OpenTUI pin, WezTerm started sending Windows-style key sequences that the renderer did not decode. PowerShell 7 can still take letters while paint is already dead. Two bugs, one trigger zone. Catalog is now 0.4.5; re-validate after rebuild. |
-| Debug paint freeze (empty transcript) | **CRITICAL** | Debug instance shows almost no messages on purpose. | Last diagnostic freeze after turn 58. Fine as a probe, unusable as a second OpenCode. |
 
 Related but not labeled CRITICAL: plugin-folder config once *created* the huge transcript that makes the paint bug easy to hit. That config path is already cleaned. Old forked sessions still contain the blob.
 
@@ -214,17 +212,16 @@ Related but not labeled CRITICAL: plugin-folder config once *created* the huge t
 | If you revert... | You leave... |
 |---|---|
 | **A.** The current OpenTUI 0.4.5 terminal UI for the older Go / pre-OpenTUI TUI (classic v1 UI) | Same OpenCode chat backend |
-| **B.** Only *custom* TUI widgets (sidebar, timestamps, ocdebug hides) while keeping OpenTUI 0.4.5 | Same renderer |
+| **B.** Only *custom* TUI widgets (sidebar, timestamps) while keeping OpenTUI 0.4.5 | Same renderer |
 | **C.** Custom providers, SuperPlan, `oc` launcher, etc. | Same TUI |
 
 Only column **A** is a true renderer revert. Column **B** does **not** fix the blank screen.
 
 | Bug | 100% gone if... | Not gone if... |
 |---|---|---|
-| Session paint death | Leave OpenTUI for a TUI that does not paint through this renderer (classic v1 Go TUI). Matching upstream 0.4.5 is not proof this is gone. | Only remove the sidebar, SuperPlan, or ChatGPT Web. Stock OpenTUI still died on the same blob on the previous pin. Hiding widgets in `ocdebug` only *avoids* drawing; it is not a fix. |
+| Session paint death | Leave OpenTUI for a TUI that does not paint through this renderer (classic v1 Go TUI). Matching upstream 0.4.5 is not proof this is gone. | Only remove the sidebar, SuperPlan, or ChatGPT Web. Stock OpenTUI still died on the same blob on the previous pin. |
 | WezTerm letter-key death | Leave OpenTUI's key parser (v1 TUI does not use it). Matching upstream 0.4.5 is not proof this is gone. | Disable `allow_win32_input_mode` in WezTerm (already tried; not the lever). Same OpenTUI in PowerShell can still paint-blank *without* this key bug. |
 | Typing dead after `/editor` if resume throws on raw-mode | Classic v1 TUI never takes this OpenTUI resume path. The previous resume patch is removed; 0.4.5 is unpatched. | Do not treat the downgrade as a resume fix. Confirm `/editor` return after rebuild. |
-| Debug paint freeze (empty transcript) | Revert the ocdebug-only hide flags to the normal session renderer. | That immediately puts `ocdebug` back on the **same** paint landmine. Solved empty-chat; not solved blank-paint. |
 
 ### Explicitly **not** 100% (do not revert the stack for these)
 

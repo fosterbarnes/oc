@@ -116,8 +116,8 @@ function readOcConfig(): {
   homeDir: string
   homeDirSort: string
   serverStartOnWindowsUserStart: boolean
-  reviveExe: string
-  reviveInstallExe: string
+  revivePath: string
+  reviveInstallPath: string
 } {
   const fallbackDir = os.homedir()
   const fallbackSort = "name"
@@ -130,7 +130,7 @@ function readOcConfig(): {
         homeDir?: unknown
         homeDirSort?: unknown
         server?: { startOnWindowsUserStart?: unknown }
-        revive?: { exe?: unknown; installExe?: unknown }
+        revive?: { path?: unknown; installPath?: unknown }
       }
     }
     const parsed = parse(ocConfigPath())
@@ -143,9 +143,9 @@ function readOcConfig(): {
     const sortRaw = typeof merged.homeDirSort === "string" ? merged.homeDirSort.trim().toLowerCase() : fallbackSort
     const homeDirSort = sortRaw === "modified" ? "modified" : "name"
     const serverStartOnWindowsUserStart = merged.server?.startOnWindowsUserStart === true
-    const reviveExe = typeof merged.revive?.exe === "string" ? merged.revive.exe.trim() : ""
-    const reviveInstallExe = typeof merged.revive?.installExe === "string" ? merged.revive.installExe.trim() : ""
-    return { executable, ocDir, homeDir, homeDirSort, serverStartOnWindowsUserStart, reviveExe, reviveInstallExe }
+    const revivePath = typeof merged.revive?.path === "string" ? merged.revive.path.trim() : ""
+    const reviveInstallPath = typeof merged.revive?.installPath === "string" ? merged.revive.installPath.trim() : ""
+    return { executable, ocDir, homeDir, homeDirSort, serverStartOnWindowsUserStart, revivePath, reviveInstallPath }
   } catch {
     return {
       executable: "",
@@ -153,8 +153,8 @@ function readOcConfig(): {
       homeDir: fallbackDir,
       homeDirSort: fallbackSort,
       serverStartOnWindowsUserStart: false,
-      reviveExe: "",
-      reviveInstallExe: "",
+      revivePath: "",
+      reviveInstallPath: "",
     }
   }
 }
@@ -351,8 +351,8 @@ function persistOcConfig(
 // Run the oc.json revive scripts (.ps1 or .exe) straight from the TUI, with no agent turn.
 function reviveCommands(toast: ToastContext) {
   const config = readOcConfig()
-  const run = (exe: string) => () => {
-    launchDetached(exe)
+  const run = (file: string) => () => {
+    launchDetached(file)
     // Close the terminal right away; the detached revive helper shuts the servers down in the background.
     // TODO: close only WezTerm windows hosting oc (see OcConfig.shutdownAll).
     if (process.platform !== "win32") return
@@ -363,17 +363,17 @@ function reviveCommands(toast: ToastContext) {
       name: "oc.revive_no_install",
       title: "Revive oc without installing",
       category: "System",
-      hidden: !config.reviveExe,
+      hidden: !config.revivePath,
       slashName: "revive-no-install",
-      run: run(config.reviveExe),
+      run: run(config.revivePath),
     },
     {
       name: "oc.revive",
       title: "Revive and install oc",
       category: "System",
-      hidden: !config.reviveInstallExe,
+      hidden: !config.reviveInstallPath,
       slashName: "revive",
-      run: run(config.reviveInstallExe),
+      run: run(config.reviveInstallPath),
     },
   ]
 }
