@@ -110,6 +110,37 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-02 (~01:51) - v0.2.66 - Test response header merging - GPT-6.1 Sol, effort not exposed; Implementation
+
+### Agent
+- Meta: GPT-6.1 Sol; effort not exposed; Implementation; completed follow-up
+- Version: 0.2.66 (same session; no second revision bump)
+- Fixed `tui/test/fixture/tui-sdk.ts` json helper: native Headers handles objects, Headers instances and pairs; supplies JSON content type only when absent; preserves caller input.
+- Added one regression test covering header shapes, content type, response status/body and input preservation.
+- Verification: fixture regression, SDK context and TUI data tests: 11 pass, 0 fail, --timeout 30000; TUI bun typecheck and git diff --check passed.
+- Deferred model/variant persistence rejection review in README at user request; no model runtime changes. GitHub tool header-array weakness remains dormant in current callers.
+
+### User
+Test helper
+- Fixed custom header handling in the TUI test response helper with a small native Headers change.
+- Focused tests and the TUI typecheck pass. No application runtime change.
+
+---
+
+## 2026-10-02 (~01:44) - v0.2.66 - Remove lint from prePush - GPT-6.1 Sol, effort not exposed; Implementation
+
+### Agent
+- Meta: GPT-6.1 Sol; effort not exposed; Implementation; completed follow-up
+- Version: 0.2.66 (same session; no second revision bump)
+- Removed Oxlint invocation from `.scripts/prePush.ps1` at user request; retained Turbo typecheck and code-count refresh. Updated `SCRIPTS.md`.
+- Verification: PowerShell syntax parse and git diff --check passed; counter refreshed successfully. Full prePush not run.
+
+### User
+Pre-push
+- Pre-push now runs typecheck and refreshes the README code table without the Oxlint warning output.
+
+---
+
 ## 2026-10-02 (~01:35) - v0.2.66 - README language table - GPT-6.1 Sol, effort not exposed; Implementation
 
 ### Agent

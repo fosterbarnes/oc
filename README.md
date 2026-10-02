@@ -10,7 +10,7 @@ Last reviewed: 2026-10-01
 
 ## Progress
 
-[511,629](scc.txt) lines of code and counting...
+[511,648](scc.txt) lines of code and counting...
 
 <!-- code-count:start -->
 
@@ -22,11 +22,11 @@ Last reviewed: 2026-10-01
 | HTML | 1 | 1,161 | 79 | 0 | 1,082 |
 | JavaScript | 23 | 5,259 | 419 | 63 | 4,777 |
 | Nix | 3 | 258 | 23 | 26 | 209 |
-| Powershell | 18 | 1,220 | 112 | 27 | 1,081 |
+| Powershell | 18 | 1,219 | 112 | 27 | 1,080 |
 | SQL | 95 | 592 | 0 | 17 | 575 |
 | Shell | 1 | 120 | 17 | 17 | 86 |
-| TypeScript | 2,694 | 524,715 | 42,722 | 14,839 | 467,154 |
-| **Total** | **3,011** | **576,077** | **48,872** | **15,576** | **511,629** |
+| TypeScript | 2,695 | 524,736 | 42,723 | 14,839 | 467,174 |
+| **Total** | **3,012** | **576,097** | **48,873** | **15,576** | **511,648** |
 
 <!-- code-count:end -->
 
@@ -111,7 +111,7 @@ Move between projects, keep a session's model, and mark work without deleting it
 | All-projects session list | ~done~ | Browse sessions from every project and jump back to that project's folder. | None realistic. |
 | Start a session with no model call | medium | Opens a project session without spending tokens. | Installed "it feels right" check is incomplete. |
 | Complete / failed marks | medium | Mark a session done or failed. Themed check/cross in lists and the sidebar. Marks are exclusive and stay in list order. | Installed end-to-end confirmation is missing. |
-| Remember this session's model | ~done~ | Each session keeps its model and reasoning choice across agent changes and restarts. | None realistic. |
+| Remember this session's model | ~done~ | Each session keeps its model and reasoning choice across agent changes and restarts. | TODO: verify rejected model/variant persistence requests are handled in `tui/src/context/local.tsx`. Variant restoration normally makes no API request; the lint warning alone does not establish a bug. |
 | Don't lose the attached session | medium | Refreshing the global list should not drop the session you are in. | Manual installed check was left pending. |
 | Recover after server restart | high | After the resident server bounces, the TUI should reconnect, restore the prompt, and not resubmit what was typed. | A successful debug session closed the investigation. Remaining `/status` 404 noise is unrelated. Still treat as high until daily use is trusted. |
 | Clear interrupted questions | high | Aborting a session rejects a pending question, tells the UI, and does not leave a Cursor-backed chat stuck on that prompt. | Covered by tests. Not signed off in the installed app. |

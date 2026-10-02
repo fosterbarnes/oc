@@ -10,7 +10,7 @@ Project automation lives in `.scripts/`. Scripts target PowerShell 7 and fail on
 | `.scripts/build.ps1` | Agent-safe build of the current-platform production and debug executables. `-Release` builds the release executable and archives through the existing Bun build script. It never touches the installed runtime. |
 | `.scripts/buildDebug.ps1` | Agent-safe debug-only build. It never touches the production dist artifact or installed runtime. |
 | `.scripts/.run.ps1` | Runs the repository's normal `bun dev .` entry point and forwards arguments. |
-| `.scripts/prePush.ps1` | Runs root lint and Turbo typecheck, then refreshes the README code count and `scc.txt`. It does not commit or push. |
+| `.scripts/prePush.ps1` | Runs Turbo typecheck, then refreshes the README code count and `scc.txt`. It does not commit or push. |
 | `.scripts/countCode.ps1` | Uses `scc` on PATH to refresh the README code count and root `scc.txt` language report. Runnable independently. |
 | `.scripts/updateUpstream.ps1` | Fetches and fast-forwards the separate `UPSTREAM\opencode` checkout without modifying this customized parent checkout. |
 | `.scripts/syncAndInstall.ps1` | Fail-closed upstream sync into this custom fork, then verify, backup, stop `opencode.exe`, and install. |
