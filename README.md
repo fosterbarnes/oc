@@ -6,7 +6,7 @@ oc is a personal, Windows-first OpenCode: native `oc` launcher, extra model prov
 
 Use this file to agree on what oc *is*. Statuses describe current state. They do not authorize implementation work.
 
-Last reviewed: 2026-10-01
+Last reviewed: 2026-10-02
 
 ## Progress
 
@@ -49,11 +49,11 @@ Counts below are for **active** rows only. Retired work is listed separately and
 | Level | Count |
 |---|---:|
 | ~done~ | 18 |
-| high | 22 |
+| high | 18 |
 | medium | 22 |
 | low | 0 |
-| CRITICAL | 2 |
-| **Total** | **64** |
+| CRITICAL | 0 |
+| **Total** | **58** |
 
 ---
 
@@ -61,7 +61,7 @@ Counts below are for **active** rows only. Retired work is listed separately and
 
 - Names describe what you can *use*, not where the code lives.
 - Related backend plumbing is folded into the user-facing feature it supports.
-- Companion pieces that live next to this repo (`octray`, Everything Search, SuperPlan agents) are included when they are part of daily OC use.
+- Companion pieces that live next to this repo (`octray`, Everything Search, SuperPlan agents, `bgShell`) are included when they are part of daily OC use.
 - Status is conservative: tests and source are not enough for **~done~** when a rebuild, login, or interactive check is still part of the feature.
 - `README.OG.md` tracks native OpenCode (Now / Keep / Upstream). Hosted docs at opencode.ai remain upstream.
 
@@ -73,7 +73,7 @@ Use ChatGPT, Claude, or Cursor from OpenCode without treating them as ordinary A
 
 | Feature | Level | What it does | What's left |
 |---|---|---|---|
-| ChatGPT Web | ~done~ | Uses a normal ChatGPT website login as a built-in model. Starts a managed Edge window only when needed. | Keep packaged with new installs. |
+| ChatGPT Web | ~done~ | Uses a normal ChatGPT website login as a built-in model. Starts a managed Edge window only when needed. | None realistic. |
 | Claude Web | medium | Same browser-backed idea for Claude. | Live login and a real Claude request are still unconfirmed. |
 | Claude Code as the agent | high | Claude chats run in the Claude Code CLI with its own prompt, native tools, transcript and `/compact`; oc streams it live. oc sends only the agent's own prompt. oc skills load natively through a generated `--plugin-dir` of links, and oc-only tools (subagents, questions, session tools, MCP servers) are deferred proxy tools Claude loads with ToolSearch. Claude's own task list fills oc's todo list at the end of each turn, and an oc agent's missing tools turn off the matching Claude built-ins. Live-checked with `claudeTestFlow.md` (tools, memory, interrupt, compact, revert, restart, effort switch, cache). | No Claude-backed restricted agent exists yet to live-check the agent tool limits. The task-list folder layout is undocumented Claude Code behavior. Extra Claude accounts are Mac/Linux only (the per-account wrapper is a bash script). |
 | Cursor as a native model | medium | Talks to local Cursor as an OpenCode model (tools, reasoning, connection proxy). The picker can show live multi-tier models (Grok 4.7 base, Fast, 500k, and Claude Opus 5.5 metadata) with matching context, wire params, and pricing. | Live auth/request proof is thin. Git/shell protocol parity is deferred. Compaction and "this is OpenCode, not Cursor IDE" guidance were added later and look solid in tests. |
@@ -91,7 +91,7 @@ Get into a project quickly, keep a local server running, and control it from the
 | Native `oc` launcher | ~done~ | `oc` is OpenCode itself, with settings in `~/.config/opencode/oc.json`. Launch, previous session (`occ`), diagnostics, and `oc config get/set` all work. The `occ` desktop shortcut runs `occ.exe` directly (no PowerShell profile), and `occ` looks up the last session while the server starts. | None realistic. |
 | Run after turn and revive | high | **Revive** restarts oc: `/revive-no-install` runs `.scripts\revive.ps1` (shut down, reopen); `/revive` runs `.scripts\reviveAndInstall.ps1` (build while oc is still up, shut down, install, reopen). The paths come from `oc.json` `revive.path` and `revive.installPath` (exe or `.ps1`); each command is hidden when its path is unset. The palette commands run the script directly with no agent turn and close WezTerm at once. A `.ps1` runs in its own titled console via `start`. **`run_after_turn`** is a built-in tool that lets an agent queue an exe or `.ps1` to run once its turn ends (`/agent-revive` uses it). Its permission is `run_after_turn`: the built-in default allows it, and the global `opencode.jsonc` asks except for `.scripts\revive*.ps1`. | Revive closes *every* WezTerm window, not only oc ones (band-aid with a TODO). The latest revive changes are not live-checked. TODO: `/agent-revive` and `/agent-revive-no-install` do not work in Claude Code sessions, because the oc proxy does not expose `run_after_turn`. |
 | Separate home vs OC directory | high | Bare `oc` and relative project names can use two different folders. Absolute paths stay absolute. | Latest palette settings may still need a rebuild/restart to show in the running app. |
-| New-session project picker | high | Tray/palette "New session" starts the intro, then the real OpenCode project picker, then attaches to the running server. | The intermediate full-screen list was tried and dropped. Confirm the installed `oc.exe` shows the intended picker. |
+| New-session project picker | high | Tray/palette "New session" starts the intro, then the real OpenCode project picker, then attaches to the running server. | Confirm the installed `oc.exe` shows the intended picker. |
 | Startup loading animation | medium | Column-sweep animation while the server and session come up. Fills and re-centers when the window is snapped or resized. | Visual sign-off in the running app is still thin. Resize fix not checked through the installed `occ` shortcut and TUI handoff. |
 | Resident background server | medium | Local server stays up between launches (production port **4096**). Palette can shut down or restart it. Server shutdown and restart close session admission, wait up to 30 seconds for active-work cancellation, then dispose project resources before scheduling exit. Attach can forward model/agent. A stale server record no longer adds a 10-second wait on the first `oc` launch; a launch during an active restart still waits for the replacement. On Windows the server starts through a hidden `Start-Process` hop, so it has a hidden console (no flashing windows from its child processes) and outlives the launcher. | Full installed shutdown/restart flow is not fully signed off. The hidden PowerShell hop costs about a second; a direct native launch waits on the Bun Windows FFI fix. |
 | Start server at Windows sign-in | high | OC settings can turn sign-in auto-start on or off. | Final installed palette click is not recorded. |
@@ -110,10 +110,10 @@ Move between projects, keep a session's model, and mark work without deleting it
 |---|---|---|---|
 | All-projects session list | ~done~ | Browse sessions from every project and jump back to that project's folder. | None realistic. |
 | Start a session with no model call | medium | Opens a project session without spending tokens. | Installed "it feels right" check is incomplete. |
-| Complete / failed marks | medium | Mark a session done or failed. Themed check/cross in lists and the sidebar. Marks are exclusive and stay in list order. | Installed end-to-end confirmation is missing. |
-| Remember this session's model | ~done~ | Each session keeps its model and reasoning choice across agent changes and restarts. | TODO: verify rejected model/variant persistence requests are handled in `tui/src/context/local.tsx`. Variant restoration normally makes no API request; the lint warning alone does not establish a bug. |
+| Session marks | medium | Mark a session complete, failed, or in progress (exclusive), or pin it. Themed markers in lists and the sidebar. | Installed end-to-end confirmation is missing. |
+| Remember this session's model | ~done~ | Each session keeps its model and reasoning choice across agent changes and restarts. | None realistic. |
 | Don't lose the attached session | medium | Refreshing the global list should not drop the session you are in. | Manual installed check was left pending. |
-| Recover after server restart | high | After the resident server bounces, the TUI should reconnect, restore the prompt, and not resubmit what was typed. | A successful debug session closed the investigation. Remaining `/status` 404 noise is unrelated. Still treat as high until daily use is trusted. |
+| Recover after server restart | high | After the resident server bounces, the TUI should reconnect, restore the prompt, and not resubmit what was typed. | Still treat as high until daily reconnect after a bounce is trusted. |
 | Clear interrupted questions | high | Aborting a session rejects a pending question, tells the UI, and does not leave a Cursor-backed chat stuck on that prompt. | Covered by tests. Not signed off in the installed app. |
 
 ---
@@ -138,7 +138,7 @@ Drop in Markdown agents, share prompts, and run SuperPlan / SuperGo / Debug as a
 
 | Feature | Level | What it does | What's left |
 |---|---|---|---|
-| Markdown agents from folders | medium | Loads agents from `agent/` and `agents/` (global or project). Bad sibling files are skipped with a path warning. `opencode agent validate` exists. | Installed command availability and UI discovery after restart were unverified. |
+| Markdown agent files | medium | Bad sibling files in `agent/` and `agents/` are skipped with a path warning. `opencode agent validate` exists. Stock OpenCode already loads those folders. | Installed command availability and UI discovery after restart were unverified. |
 | Tab order and friendly names | medium | Custom agents can have a Tab cycle order and a readable label. | Installed-build check is incomplete. |
 | Shared prompt files | medium | An agent can pull another file with `{file:...}` (relative, home, or absolute). | Installed-runtime freshness is uncertain. |
 | Cheap vs hard delegated models | medium | Primary agent stays on the selected model. Routine child work can go cheaper; hard work can go to a high-reasoning agent. | A live delegated request is not recorded. |
@@ -159,15 +159,10 @@ Timestamps, copy, keys, diffs, plugins, and the terminal itself.
 | Response timestamps | medium | Local date/time, then duration. Uses start time while the reply is still streaming. | Final look in the installed UI is not recorded. |
 | Copy on release vs Ctrl+C | medium | Copy-on-release or Ctrl+C. Removed a Windows console poll that contributed to crashes. | In-TUI copy-mode checks were blocked. |
 | Keys and command palette | high | Context-sensitive Ctrl+D, Ctrl+Shift+Up/Down, Ctrl+N for a new OC session. OC commands use a source order and friendly labels. `command_palette.order` in `opencode.jsonc` can reorder commands inside a category; unlisted commands keep source order. Shut down and restart sit in the `oc` section. | Order and labels are tested. A full click-through in the installed app is not recorded. |
-| Don't crash on odd tool text | medium | After the OpenTUI upgrade, non-string or nested text no longer takes down the UI. | No explicit "no regression" confirmation. |
+| Don't crash on odd tool text | medium | Coerces non-string OpenTUI text nodes (numbers become strings; null/boolean and other `add()` explosions are skipped) so nested tool output does not take down the UI. | Live "no regression" check is not recorded. |
 | Diff hover colors | ~done~ | Neutral diff regions share one hover background; add/remove colors stay. | None realistic. |
-| Crow session lock | medium | Each Crow tab stays on the exact OpenCode session; Tailscale callback address works. | Live integration evidence is limited. |
-| Resume after `/editor` | high | After an external editor, TUI resume is whatever stock OpenTUI 0.4.5 does. The previous raw-mode resume patch and its test are gone. | Live `/editor` return is unconfirmed. Raw-mode throw on resume may come back. |
-| Parallel bgShell jobs | medium | Independent work starts with concurrent `bgRun`; short commands stay as bash. | Local plugin `C:\Users\user\Documents\GitHub\bgShell\bgShell.js`. Agent `opencode-pty` removed. TUI `/pty` is human-only. |
-| Plugin / session-bomb hygiene | high | Plugin list uses npm or file specs only (no plugins *folder* in the list). Ponytail is back as a normal npm plugin. Agents must not dump huge plugin errors into keeper chats. | Stops *new* landmine transcripts. Does not repair old poisoned sessions. |
-| Fork display version for plugins | high | Compatible plugins can read the current model, preferred editor, and fork version. | External plugins are not broadly tested. |
-| Session paint death | **CRITICAL** | Scrolling a heavy chat can blank or tear the whole TUI. Palette rows may only appear on hover until a full reopen. | Seen on the previous OpenTUI pin. Catalog is now isolated-upstream 0.4.5. Do not mark fixed until a live Windows smoke check. Not a sidebar bug. See the revert section. |
-| WezTerm letter-key death | **CRITICAL** | After that same break, letters and main Enter do nothing while arrows and Ctrl+P still work. | Seen on the previous OpenTUI pin (Windows key sequences WezTerm started sending). Catalog is now 0.4.5. Do not mark fixed from the downgrade alone. |
+| Crow session lock | medium | Each Crow tab stays on one OpenCode session via `CROW_SESSION_HANDLE`. Targeted commands only run on that handle. Optional `CROW_SESSION_ROUTE_URL` reports session changes. | Live Crow integration is limited. |
+| Parallel bgShell jobs | medium | Independent work starts with concurrent `bgRun`; short commands stay as bash. | Sibling `bgShell` plugin, not this git checkout. Agent `opencode-pty` removed. TUI `/pty` is human-only. |
 
 ---
 
@@ -193,7 +188,7 @@ Build safely, install without fighting locks, and keep logs.
 | `oc.exe` / `occ.exe` hard links | ~done~ | Installer links those names to the same production binary and accepts a valid link set. | None realistic. |
 | Stop processes before rebuild | ~done~ | Installer stops managed processes *before* build so `ocdebug.exe` cannot lock cleanup. | None realistic. |
 | Refuse crashing Bun 1.4.0 | high | Will not compile the Windows TUI with the known-bad Bun. Can upgrade to a canary. | Automatic global Bun upgrades are an operational risk. |
-| Cleaner hidden Windows commands | medium | Runs the Windows shell more directly and hides extra `taskkill` windows. Process-tree helper was **removed**. | Escape-to-cancel confirmation is missing. |
+| Cleaner hidden Windows commands | medium | Runs the Windows shell more directly and hides extra `taskkill` windows. | Escape-to-cancel confirmation is missing. |
 | Packaged ChatGPT/Cursor helpers | high | Agentify and Cursor files sit next to the exe so they work outside the source tree. Canonical installer copies them. | Combined upstream-sync installer still may omit those folders. |
 | On-disk debug logs | medium | Channel-aware logs, 20 MB rotate, palette and HTTP toggle. | Live restart and installed palette acceptance are not recorded. |
 
@@ -206,61 +201,8 @@ Stay close to upstream without losing custom work.
 | Feature | Level | What it does | What's left |
 |---|---|---|---|
 | Safe upstream sync | medium | Isolated upstream checkout, content compare, preserve custom files, stop on overlap, bump maintenance version, optional build/install. | No shared Git merge base. Combined installer can omit provider runtimes. |
-| Separate display version | ~done~ | Fork version in the TUI footer is independent of OpenCode's package version. | None realistic. |
-| Match isolated upstream OpenTUI 0.4.5 | high | Catalog and plugin peers follow isolated upstream 0.4.5. No version-specific OpenTUI resume patch. | Paint, key, and `/editor` resume still need a live Windows check. See CRITICAL below. |
+| Separate display version | ~done~ | Fork version in the TUI footer is independent of OpenCode's package version. Compatible plugins can read the current model, preferred editor, and this display version. | None realistic. |
 | Windows-safe generated paths | ~done~ | Fixes Windows migration path generation and invalid custom-element declarations. | None realistic. |
-
----
-
-## CRITICAL issues (must see these first)
-
-These are not extra rows. They restate the two **CRITICAL** items already counted in section 6. They are breakages sitting on top of otherwise useful work.
-
-| Issue | Level | What it feels like | Why it is CRITICAL |
-|---|---|---|---|
-| Session paint death | **CRITICAL** | Scrolling a large chat (especially a long markdown dump) blanks the screen. Palette rows may only appear on hover. It stays dead until a full close and reopen. | Proven in debug on the previous OpenTUI pin: layout numbers stay valid while the screen dies. Dummy text of the same size still dies. This is the terminal drawing layer, not "the sidebar is wrong." Catalog is now OpenTUI 0.4.5; re-validate after rebuild. |
-| WezTerm letter-key death | **CRITICAL** | After that same break, `a-z` and main Enter do nothing. Arrows, numpad Enter, and Ctrl+P still work. | On the previous OpenTUI pin, WezTerm started sending Windows-style key sequences that the renderer did not decode. PowerShell 7 can still take letters while paint is already dead. Two bugs, one trigger zone. Catalog is now 0.4.5; re-validate after rebuild. |
-
-Related but not labeled CRITICAL: plugin-folder config once *created* the huge transcript that makes the paint bug easy to hit. That config path is already cleaned. Old forked sessions still contain the blob.
-
----
-
-## Issues that would **100%** go away on stable / v1 components
-
-"100%" here means the failure path is in a specific unstable layer. Replacing *that* layer removes the bug. Replacing an unrelated custom feature does not.
-
-### What "stable / v1" means in this table
-
-| If you revert... | You leave... |
-|---|---|
-| **A.** The current OpenTUI 0.4.5 terminal UI for the older Go / pre-OpenTUI TUI (classic v1 UI) | Same OpenCode chat backend |
-| **B.** Only *custom* TUI widgets (sidebar, timestamps) while keeping OpenTUI 0.4.5 | Same renderer |
-| **C.** Custom providers, SuperPlan, `oc` launcher, etc. | Same TUI |
-
-Only column **A** is a true renderer revert. Column **B** does **not** fix the blank screen.
-
-| Bug | 100% gone if... | Not gone if... |
-|---|---|---|
-| Session paint death | Leave OpenTUI for a TUI that does not paint through this renderer (classic v1 Go TUI). Matching upstream 0.4.5 is not proof this is gone. | Only remove the sidebar, SuperPlan, or ChatGPT Web. Stock OpenTUI still died on the same blob on the previous pin. |
-| WezTerm letter-key death | Leave OpenTUI's key parser (v1 TUI does not use it). Matching upstream 0.4.5 is not proof this is gone. | Disable `allow_win32_input_mode` in WezTerm (already tried; not the lever). Same OpenTUI in PowerShell can still paint-blank *without* this key bug. |
-| Typing dead after `/editor` if resume throws on raw-mode | Classic v1 TUI never takes this OpenTUI resume path. The previous resume patch is removed; 0.4.5 is unpatched. | Do not treat the downgrade as a resume fix. Confirm `/editor` return after rebuild. |
-
-### Explicitly **not** 100% (do not revert the stack for these)
-
-| Problem | Why a v1 / stable TUI revert is not a guaranteed cure |
-|---|---|
-| Claude Web / Cursor live login still unproven | Custom providers. Stock OpenCode never had them. |
-| Resident server, tray, `oc` picker polish | Custom launcher. v1 OpenCode does not replace this product. |
-| PTY "WAITING FOR PTY" then dead main prompt | Involves the PTY plugin plus TUI focus. Reconnect work later looked good; original hang is not proven to be OpenTUI-only. |
-| Plugin toast dumping into chat ("session bombs") | Config and agent behavior. Any TUI version will store a huge message if the model writes one. |
-| Typecheck noise in `local.tsx` | Generated client types. Unrelated to the blank screen. |
-| Everything Search / WezTerm script launch | Windows extras. Independent of v1 TUI. |
-| Upstream-sync installer omitting provider runtimes | Install script gap. |
-| Bun 1.4.0 TUI segfault | Known Bun bug. This fork already refuses to ship that compiler. |
-
-**Short version:** the only family of bugs that can honestly be marked "fixed by going back to stable/v1 UI" is the **OpenTUI paint and key-decode** family (blank session, hover-only palette, WezTerm letter death), if those still reproduce on 0.4.5. Matching isolated upstream 0.4.5 does not by itself mark them fixed. Everything else is custom-on-purpose or unproven.
-
-The old process-tree helper is already gone. Extra console flashes from it are not an open revert question.
 
 ---
 
@@ -281,6 +223,7 @@ These used to be customizations. They are history, not a backlog.
 - Intermediate clack "type to filter" project list (replaced by the real TUI picker)
 - Cursor native plan-mode bridge (acknowledged, not activated)
 - ocdebug PowerShell wrapper function (native `ocdebug.exe` replaced it)
+- OpenTUI raw-mode resume patch (removed; stock 0.4.5 resume remains)
 
 ---
 
@@ -289,7 +232,7 @@ These used to be customizations. They are history, not a backlog.
 - This checkout does not share a Git merge base with upstream. "Custom" is judged from notes, `Custom fork:` markers, isolated packages (`agentify-runtime`, `cursor-runtime`), `.scripts`, and `~/.config/opencode` agents.
 - Several "high" rows are source-complete and waiting on a rebuild (`install` stops the running app).
 - Small wording, generated-client, and selector fixes are support for the features above, not their own product rows.
-- `octray` and Everything Search are sibling checkouts. They still shape daily OC use.
+- `octray`, Everything Search, and `bgShell` are sibling checkouts. They still shape daily OC use.
 
 ---
 
@@ -315,3 +258,4 @@ This file is the source of truth for what OC is and how complete each piece is.
 - File new capabilities under how they are *used*.
 - Keep OC-only work in this file. Native OpenCode belongs in the `README.OG.md` Tracking table (Now / Keep / Upstream).
 - Session notes stay in `buildNotes.md`. This document stays the product contract.
+

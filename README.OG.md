@@ -58,7 +58,7 @@ Add a row when a native surface lands, is overlaid, is pinned, or is deleted. Af
 | Aspect | Now | Keep | Upstream | Notes |
 | --- | --- | --- | --- | --- |
 | Chat, tools, sessions | native | native | same | Core agent loop. |
-| TUI renderer | native | native | same | Catalog `@opentui/*` **0.4.5**, matching isolated upstream. No OpenTUI resume patch. Paint, key, and `/editor` resume still need a live Windows check; see `README.md`. |
+| TUI renderer | native | native | same | Catalog `@opentui/*` **0.4.5**, matching isolated upstream. No OpenTUI resume patch. Paint, key, and `/editor` resume still need a live Windows check. |
 | TUI chrome | mixed | mixed | same | Stock prompt, slash commands, sessions. OC adds timestamps, copy, some keys. |
 | Session sidebar | mixed | mixed | same | Stock plugins still registered: context, MCP, LSP, todos. Stock files/footer plugins exist in source but are **not** registered; OC `sidebar-tools` replaced them. |
 | Built-in agents | native | native | same | `build`, `plan`, `general`, `explore`, plus hidden compaction/title/summary. User config may `disable` Plan. |

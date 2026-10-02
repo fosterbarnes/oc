@@ -110,6 +110,53 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-02 (~02:08) - v0.2.66 - README leftover notes only - Grok 4.6, effort not exposed; Implementation
+
+### Agent
+- Meta: Grok 4.6; effort not exposed; Implementation; completed
+- Version: 0.2.66 (docs-only; revision not bumped)
+- Kept Claude Code row, Cursor SKUs, Luna/SuperGo routing, hide Plan, cheap/hard delegate, and no-desktop row.
+- Folded plugin `displayVersion` into the footer display-version row; dropped the duplicate high row.
+- Reworded markdown agent row to skip-bad-files + `opencode agent validate` (stock already loads the folders). Broadened session marks to complete/failed/in progress/pin.
+- Stripped What's left archaeology: ChatGPT packaging overlap, dropped picker, `local.tsx` lint TODO, debug-session/`/status` 404, process-tree already-retired note.
+- Counts: ~done~ 18, high 18, medium 22, low 0, CRITICAL 0, total 58.
+
+### User
+Docs
+- README cleanup dropped leftover notes and one duplicate display-version row. Claude, Cursor SKUs, and daily agent routing stay.
+
+---
+
+## 2026-10-02 (~02:04) - v0.2.66 - README OpenTUI row cleanup - Grok 4.6, effort not exposed; Implementation
+
+### Agent
+- Meta: Grok 4.6; effort not exposed; Implementation; completed
+- Version: 0.2.66 (docs-only; revision not bumped)
+- Removed `README.md` section 6 CRITICAL rows (session paint death, WezTerm letter-key death), the OpenTUI 0.4.5 match row, and session-bomb hygiene. Retired the OpenTUI raw-mode resume patch. Native renderer notes stay in `README.OG.md` (no pointer back to README).
+- Reworded text-node crash (actual `patch-text-node.ts` coerce), Crow (`CROW_SESSION_HANDLE` / callback URL, no Tailscale), and bgShell (sibling plugin, no absolute path).
+- Counts: ~done~ 18, high 19, medium 22, low 0, CRITICAL 0, total 59.
+
+### User
+Docs
+- README no longer treats unconfirmed OpenTUI paint/key death, matching stock 0.4.5, or the removed `/editor` resume patch as oc product rows. Crow and the text-node crash row now match the code.
+
+---
+
+## 2026-10-02 (~02:00) - v0.2.66 - Drop README v1 revert memo - Grok 4.6, effort not exposed; Implementation
+
+### Agent
+- Meta: Grok 4.6; effort not exposed; Implementation; completed
+- Version: 0.2.66 (docs-only; revision not bumped)
+- Removed `README.md` duplicate CRITICAL restatement and the "100% gone on stable / v1" revert memo (classic Go TUI columns, dummy-text notes, process-tree closer). Those were session archaeology; this checkout has no Go TUI (only `.scripts/grepbench`).
+- Kept section 6 CRITICAL rows and counts (~done~ 18, high 22, medium 22, CRITICAL 2, total 64). Dropped "See the revert section." Pointed the OpenTUI 0.4.5 row at section 6.
+- Changed Last reviewed to 2026-10-02.
+
+### User
+Docs
+- README no longer restates the paint/key CRITICAL items or argues about reverting OpenTUI to a Go v1 TUI. The two CRITICAL rows in section 6 stay until a later pass.
+
+---
+
 ## 2026-10-02 (~01:51) - v0.2.66 - Test response header merging - GPT-6.1 Sol, effort not exposed; Implementation
 
 ### Agent
