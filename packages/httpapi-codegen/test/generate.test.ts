@@ -607,18 +607,19 @@ describe("HttpApiCodegen.generate", () => {
     Effect.gen(function* () {
       const output = compile(FixtureApi)
       const actual = yield* Effect.promise(() =>
-        Array.fromAsync(new Bun.Glob("*.ts").scan(new URL("generated", import.meta.url).pathname)),
+        Array.fromAsync(new Bun.Glob("*.ts").scan(`${import.meta.dir}/generated`)),
       )
       expect(actual.sort((a, b) => a.localeCompare(b))).toEqual(
         output.files.map((file) => file.path).sort((a, b) => a.localeCompare(b)),
       )
+      // Windows checkouts may convert the fixture to CRLF; prettier always emits LF.
       yield* Effect.forEach(output.files, (file) =>
         Effect.tryPromise(() =>
           Promise.all([
             Bun.file(new URL(`generated/${file.path}`, import.meta.url)).text(),
             format(file.content, { parser: "typescript", semi: false, printWidth: 120 }),
           ]),
-        ).pipe(Effect.map(([content, expected]) => expect(content).toBe(expected))),
+        ).pipe(Effect.map(([content, expected]) => expect(content.replaceAll("\r\n", "\n")).toBe(expected))),
       )
     }),
   )

@@ -164,6 +164,42 @@ const scenarios: Scenario[] = [
     .at((ctx) => ({ path: "/config", headers: ctx.headers(), body: { username: 1 } }))
     .status(400),
   http.protected.get("/config/providers", "config.providers").json(),
+  http.protected.get("/debug-logging", "app.debugLogging.get").global().json(200, (body) => {
+    object(body)
+    boolean(body.enabled)
+  }),
+  http.protected
+    .put("/debug-logging", "app.debugLogging.set")
+    .global()
+    .seeded(() =>
+      Effect.gen(function* () {
+        const logging = yield* Effect.promise(() => import("@opencode-ai/core/observability/logging"))
+        const originalPath = process.env.OPENCODE_DEBUG_LOGGING_PATH
+        yield* Effect.addFinalizer(() =>
+          Effect.sync(() => {
+            if (originalPath === undefined) {
+              delete process.env.OPENCODE_DEBUG_LOGGING_PATH
+              return
+            }
+            process.env.OPENCODE_DEBUG_LOGGING_PATH = originalPath
+          }),
+        )
+        process.env.OPENCODE_DEBUG_LOGGING_PATH = path.join(exerciseGlobalRoot, "debug-logging.json")
+        return { enabled: logging.persistedDebug() }
+      }),
+    )
+    .at((ctx) => ({ path: "/debug-logging", body: ctx.state }))
+    .jsonEffect(200, (body, ctx) =>
+      Effect.gen(function* () {
+        object(body)
+        check(body.enabled === ctx.state.enabled, "debug logging should return the requested state")
+        const persisted = yield* Effect.promise(() =>
+          Bun.file(path.join(exerciseGlobalRoot, "debug-logging.json")).json(),
+        )
+        object(persisted)
+        check(persisted.enabled === ctx.state.enabled, "debug logging should write isolated persisted state")
+      }),
+    ),
   http.protected.get("/project", "project.list").json(200, array, "status"),
   http.protected.get("/project/current", "project.current").json(
     200,
@@ -299,6 +335,15 @@ const scenarios: Scenario[] = [
     }))
     .json(404, object, "status"),
   http.protected.get("/question", "question.list").json(200, array),
+  http.protected
+    .post("/question/ask", "question.ask.invalid")
+    .seeded((ctx) => ctx.session({ title: "Question ask owner" }))
+    .at((ctx) => ({
+      path: "/question/ask",
+      headers: ctx.headers(),
+      body: { sessionID: ctx.state.id, questions: "invalid" },
+    }))
+    .status(400),
   http.protected
     .post("/question/{requestID}/reply", "question.reply.invalid")
     .at((ctx) => ({
@@ -1353,6 +1398,15 @@ const scenarios: Scenario[] = [
       check(body === true, "abort should return true")
     }),
   http.protected
+    .post("/session/{sessionID}/rename", "session.rename")
+    .seeded((ctx) => ctx.session({ title: "Empty rename session" }))
+    .at((ctx) => ({ path: route("/session/{sessionID}/rename", { sessionID: ctx.state.id }), headers: ctx.headers() }))
+    .json(200, (body, ctx) => {
+      object(body)
+      check(body.id === ctx.state.id, "rename should return the requested session")
+      check(body.title === ctx.state.title, "rename should preserve the title without user messages")
+    }),
+  http.protected
     .post("/session/{sessionID}/abort", "session.abort.missing")
     .at((ctx) => ({
       path: route("/session/{sessionID}/abort", { sessionID: "ses_httpapi_missing" }),
@@ -1643,6 +1697,21 @@ const scenarios: Scenario[] = [
     .post("/tui/execute-command", "tui.executeCommand")
     .at((ctx) => ({ path: "/tui/execute-command", headers: ctx.headers(), body: { command: "agent_cycle" } }))
     .json(200, boolean, "status"),
+  http.protected
+    .post("/tui/execute-targeted-command", "tui.executeTargetedCommand")
+    .seeded((ctx) => ctx.session({ title: "Targeted command owner" }))
+    .at((ctx) => ({
+      path: "/tui/execute-targeted-command",
+      headers: ctx.headers(),
+      body: {
+        command: "agent.cycle",
+        crowSessionHandle: "00000000-0000-4000-8000-000000000001",
+        expectedOpenCodeSessionID: ctx.state.id,
+      },
+    }))
+    .json(200, (body) => {
+      check(body === true, "targeted command should be published")
+    }),
   http.protected
     .post("/tui/show-toast", "tui.showToast")
     .at((ctx) => ({

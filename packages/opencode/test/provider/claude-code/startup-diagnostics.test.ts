@@ -141,7 +141,7 @@ test("collectStartupDiagnostics carries the options a preset replaced", () => {
   assert.match(joined, /permissionMode: "acceptEdits" is dropped/)
   assert.match(joined, /skipPermissions: forced to false/)
   // No proxyTools of its own, so the default list is what got filtered.
-  assert.match(joined, /proxyTools: dropped Task;/)
+  assert.match(joined, /proxyTools: dropped Task, run_after_turn;/)
 })
 
 test("collectStartupDiagnostics calls out an unrecognised preset", () => {

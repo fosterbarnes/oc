@@ -159,7 +159,7 @@ Timestamps, copy, keys, diffs, plugins, and the terminal itself.
 
 | Feature | Level | What it does | What's left |
 |---|---|---|---|
-| Agent square and status in the terminal tab | high | Terminal title prefixes the nearest emoji square to the current agent color. OSC progress shows busy, idle, and error states where the terminal supports it. WezTerm can draw an exact-color square with an optional tab-title Lua snippet documented in `v0.3.0.md`. | Live check on Windows Terminal (square and progress ring), conhost (square only), WezTerm with and without the snippet. |
+| Agent square and status in the terminal tab | high | Terminal title starts with a `■` for the active agent. WezTerm colors it with the agent color through a tab-title snippet (in `v0.3.0.md`); other terminals show it uncolored. OSC progress shows busy, idle, and error states where the terminal supports it. | Live check on Windows Terminal (square and progress ring), conhost (square), WezTerm (square color follows the agent). |
 | Response timestamps | medium | Local date/time, then duration. Uses start time while the reply is still streaming. | Final look in the installed UI is not recorded. |
 | Copy on release vs Ctrl+C | medium | Copy-on-release or Ctrl+C. Removed a Windows console poll that contributed to crashes. | In-TUI copy-mode checks were blocked. |
 | Keys and command palette | high | Context-sensitive Ctrl+D, Ctrl+Shift+Up/Down, Ctrl+N for a new OC session. OC commands use a source order and friendly labels. `command_palette.order` in `opencode.jsonc` can reorder commands inside a category; unlisted commands keep source order. Shut down and restart sit in the `oc` section. | Order and labels are tested. A full click-through in the installed app is not recorded. |

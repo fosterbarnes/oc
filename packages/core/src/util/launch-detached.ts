@@ -37,7 +37,9 @@ export function detachedCommand(
     file: "pwsh",
     args: ["-NoProfile", "-NonInteractive", "-Command",
       "$parameters = @{ FilePath = $env:OC_LAUNCH_EXE; WindowStyle = $env:OC_LAUNCH_STYLE; ErrorAction = 'Stop' }; if ($env:OC_LAUNCH_ARGS) { $parameters.ArgumentList = $env:OC_LAUNCH_ARGS }; Remove-Item Env:OC_LAUNCH_EXE, Env:OC_LAUNCH_ARGS, Env:OC_LAUNCH_STYLE; Start-Process @parameters"],
-    options: { ...options, env: { ...options.env, OC_LAUNCH_EXE: file,
+    // Not detached: a DETACHED_PROCESS pwsh has no console and its Start-Process silently runs nothing.
+    // The hop exits right away; Start-Process is what puts the target outside the caller's job.
+    options: { ...options, detached: false, env: { ...options.env, OC_LAUNCH_EXE: file,
       OC_LAUNCH_ARGS: input.windowsVerbatimArguments ? args.join(" ") : windowsArguments(args),
       OC_LAUNCH_STYLE: input.windowStyle ?? "Hidden" } },
   }

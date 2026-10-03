@@ -1722,6 +1722,8 @@ export type PermissionConfig =
       doom_loop?: PermissionActionConfig
       skill?: PermissionRuleConfig
       session_complete?: PermissionActionConfig
+      session_in_progress?: PermissionActionConfig
+      session_reopen?: PermissionActionConfig
       session_failed?: PermissionActionConfig
       [key: string]: PermissionRuleConfig | PermissionActionConfig | undefined
     }

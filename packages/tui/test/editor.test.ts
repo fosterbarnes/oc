@@ -43,6 +43,8 @@ test("preserves multiline prompts that end with a newline", () => {
 })
 
 test("resolves relative file paths from the working directory", () => {
+  // Windows drive paths only resolve with win32 path semantics.
+  if (process.platform !== "win32") return
   expect(resolveFilePath("src/app.ts", "C:\\workspace")).toBe("C:\\workspace\\src\\app.ts")
   expect(resolveFilePath("C:\\other\\app.ts", "C:\\workspace")).toBe("C:\\other\\app.ts")
 })

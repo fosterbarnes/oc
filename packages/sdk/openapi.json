@@ -212,6 +212,120 @@
         ]
       }
     },
+    "/debug-logging": {
+      "get": {
+        "tags": ["control"],
+        "operationId": "app.debugLogging.get",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Current persisted debug logging state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "enabled": {
+                      "type": "boolean",
+                      "description": "Whether debug logging is persisted on for future processes"
+                    }
+                  },
+                  "required": ["enabled"],
+                  "additionalProperties": false,
+                  "description": "Current persisted debug logging state"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BadRequestError"
+                }
+              }
+            }
+          }
+        },
+        "description": "Return whether debug logging is persisted on for this machine.",
+        "summary": "Get debug logging",
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.app.debugLogging.get({\n  ...\n})"
+          }
+        ]
+      },
+      "put": {
+        "tags": ["control"],
+        "operationId": "app.debugLogging.set",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Updated persisted debug logging state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "enabled": {
+                      "type": "boolean",
+                      "description": "Whether debug logging is persisted on for future processes"
+                    }
+                  },
+                  "required": ["enabled"],
+                  "additionalProperties": false,
+                  "description": "Updated persisted debug logging state"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "BadRequest | InvalidRequestError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/effect_HttpApiError_BadRequest"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidRequestError"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "description": "Enable or disable debug logging for this process and all future OpenCode processes until changed.",
+        "summary": "Set debug logging",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "enabled": {
+                    "type": "boolean",
+                    "description": "Whether debug logging is persisted on for future processes"
+                  }
+                },
+                "required": ["enabled"],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.app.debugLogging.set({\n  ...\n})"
+          }
+        ]
+      }
+    },
     "/experimental/control-plane/move-session": {
       "post": {
         "tags": ["controlPlane"],
@@ -570,6 +684,102 @@
           {
             "lang": "js",
             "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.global.upgrade({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/global/shutdown": {
+      "post": {
+        "tags": ["global"],
+        "operationId": "global.shutdown",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Server shutdown scheduled",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "boolean",
+                  "description": "Server shutdown scheduled"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BadRequestError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "ServerLifecycleUnavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServerLifecycleUnavailable"
+                }
+              }
+            }
+          }
+        },
+        "description": "Dispose OpenCode instances and stop a managed server.",
+        "summary": "Shut down server",
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.global.shutdown({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/global/restart": {
+      "post": {
+        "tags": ["global"],
+        "operationId": "global.restart",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Server restart scheduled",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "boolean",
+                  "description": "Server restart scheduled"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BadRequestError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "ServerLifecycleUnavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServerLifecycleUnavailable"
+                }
+              }
+            }
+          }
+        },
+        "description": "Dispose OpenCode instances and restart a managed server.",
+        "summary": "Restart server",
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.global.restart({\n  ...\n})"
           }
         ]
       }
@@ -1559,6 +1769,15 @@
             "in": "query",
             "schema": {
               "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": ["unmarked", "in_progress", "complete", "failed"]
             },
             "required": false
           },
@@ -4627,6 +4846,93 @@
         ]
       }
     },
+    "/question/ask": {
+      "post": {
+        "tags": ["question"],
+        "operationId": "question.ask",
+        "parameters": [
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Answers in order of questions, or null when the user dismissed them",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/QuestionAnswer"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "BadRequest | InvalidRequestError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/effect_HttpApiError_BadRequest"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidRequestError"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "description": "Show a question in the session's UI and wait for the answer.",
+        "summary": "Ask the user a question",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "sessionID": {
+                    "type": "string",
+                    "pattern": "^ses"
+                  },
+                  "questions": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/components/schemas/QuestionInfo"
+                    }
+                  }
+                },
+                "required": ["sessionID", "questions"],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.question.ask({\n  ...\n})"
+          }
+        ]
+      }
+    },
     "/question/{requestID}/reply": {
       "post": {
         "tags": ["question"],
@@ -5375,7 +5681,7 @@
                 "schema": {
                   "type": "array",
                   "items": {
-                    "$ref": "#/components/schemas/Session"
+                    "$ref": "#/components/schemas/Session1"
                   },
                   "description": "List of sessions"
                 }
@@ -5429,7 +5735,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Session"
+                  "$ref": "#/components/schemas/Session3"
                 }
               }
             }
@@ -5612,7 +5918,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Session"
+                  "$ref": "#/components/schemas/Session2"
                 }
               }
             }
@@ -5769,7 +6075,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Session"
+                  "$ref": "#/components/schemas/Session4"
                 }
               }
             }
@@ -5812,6 +6118,18 @@
                 "properties": {
                   "title": {
                     "type": "string"
+                  },
+                  "agent": {
+                    "type": "string"
+                  },
+                  "sessionComplete": {
+                    "type": "boolean"
+                  },
+                  "sessionFailed": {
+                    "type": "boolean"
+                  },
+                  "sessionInProgress": {
+                    "type": "boolean"
                   },
                   "metadata": {
                     "type": "object"
@@ -5881,7 +6199,7 @@
                 "schema": {
                   "type": "array",
                   "items": {
-                    "$ref": "#/components/schemas/Session"
+                    "$ref": "#/components/schemas/Session1"
                   },
                   "description": "List of children"
                 }
@@ -6599,7 +6917,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Session"
+                  "$ref": "#/components/schemas/Session5"
                 }
               }
             }
@@ -6870,7 +7188,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Session"
+                  "$ref": "#/components/schemas/Session6"
                 }
               }
             }
@@ -6951,7 +7269,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Session"
+                  "$ref": "#/components/schemas/Session7"
                 }
               }
             }
@@ -7096,6 +7414,86 @@
           {
             "lang": "js",
             "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.session.summarize({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/session/{sessionID}/rename": {
+      "post": {
+        "tags": ["session"],
+        "operationId": "session.rename",
+        "parameters": [
+          {
+            "name": "sessionID",
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "pattern": "^ses"
+            },
+            "required": true
+          },
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Renamed session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Session8"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "BadRequest | InvalidRequestError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/effect_HttpApiError_BadRequest"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidRequestError"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NotFoundError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotFoundError"
+                }
+              }
+            }
+          }
+        },
+        "description": "Generate a new session title from the conversation using the rename agent.",
+        "summary": "Rename session",
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.session.rename({\n  ...\n})"
           }
         ]
       }
@@ -7574,7 +7972,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Session"
+                  "$ref": "#/components/schemas/Session9"
                 }
               }
             }
@@ -7685,7 +8083,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Session"
+                  "$ref": "#/components/schemas/Session10"
                 }
               }
             }
@@ -8891,6 +9289,128 @@
           {
             "lang": "js",
             "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.tui.executeCommand({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/tui/execute-targeted-command": {
+      "post": {
+        "tags": ["tui"],
+        "operationId": "tui.executeTargetedCommand",
+        "parameters": [
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Targeted command published successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "boolean",
+                  "description": "Targeted command published successfully"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "BadRequest | InvalidRequestError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/effect_HttpApiError_BadRequest"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidRequestError"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NotFoundError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotFoundError"
+                }
+              }
+            }
+          }
+        },
+        "description": "Publish a Crow-targeted TUI command for the session handle and expected OpenCode session ID.",
+        "summary": "Execute targeted TUI command",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "command": {
+                    "type": "string",
+                    "enum": [
+                      "session.list",
+                      "session.most_recent",
+                      "oc.new_session",
+                      "model.default",
+                      "oc.reasoning_effort",
+                      "agent.session",
+                      "agent.default_subagent",
+                      "agent.default_subagent_model",
+                      "oc.home_dir",
+                      "oc.home_dir_sort",
+                      "session.new",
+                      "session.rename",
+                      "session.compact",
+                      "session.complete.toggle",
+                      "session.failed.toggle",
+                      "model.list",
+                      "agent.list",
+                      "agent.cycle",
+                      "variant.cycle",
+                      "command.palette.show",
+                      "theme.switch",
+                      "session.sidebar.toggle",
+                      "opencode.status"
+                    ]
+                  },
+                  "crowSessionHandle": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                  },
+                  "expectedOpenCodeSessionID": {
+                    "type": "string",
+                    "pattern": "^ses",
+                    "description": "OpenCode session ID the targeted TUI must match before executing the command"
+                  }
+                },
+                "required": ["command", "crowSessionHandle", "expectedOpenCodeSessionID"],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.tui.executeTargetedCommand({\n  ...\n})"
           }
         ]
       }
@@ -10188,66 +10708,6 @@
         ]
       }
     },
-    "/api/session/active": {
-      "get": {
-        "tags": ["sessions"],
-        "operationId": "v2.session.active",
-        "parameters": [],
-        "security": [],
-        "responses": {
-          "200": {
-            "description": "Success",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "data": {
-                      "type": "object",
-                      "patternProperties": {
-                        "^ses": {
-                          "$ref": "#/components/schemas/SessionActive"
-                        }
-                      }
-                    }
-                  },
-                  "required": ["data"],
-                  "additionalProperties": false
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "InvalidRequestError",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/InvalidRequestError"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "UnauthorizedError",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/UnauthorizedError"
-                }
-              }
-            }
-          }
-        },
-        "description": "Retrieve foreground Session drains currently owned by this OpenCode process. Sessions absent from the result are inactive.",
-        "summary": "List active sessions",
-        "x-codeSamples": [
-          {
-            "lang": "js",
-            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.v2.session.active({\n  ...\n})"
-          }
-        ]
-      }
-    },
     "/api/session/{sessionID}": {
       "get": {
         "tags": ["sessions"],
@@ -10496,542 +10956,6 @@
           {
             "lang": "js",
             "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.v2.session.switchModel({\n  ...\n})"
-          }
-        ]
-      }
-    },
-    "/api/session/{sessionID}/prompt": {
-      "post": {
-        "tags": ["sessions"],
-        "operationId": "v2.session.prompt",
-        "parameters": [
-          {
-            "name": "sessionID",
-            "in": "path",
-            "schema": {
-              "type": "string",
-              "pattern": "^ses"
-            },
-            "required": true
-          }
-        ],
-        "security": [],
-        "responses": {
-          "200": {
-            "description": "Success",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "data": {
-                      "$ref": "#/components/schemas/SessionInputAdmitted"
-                    }
-                  },
-                  "required": ["data"],
-                  "additionalProperties": false
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "InvalidRequestError",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/InvalidRequestError"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "UnauthorizedError",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/UnauthorizedError"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "SessionNotFoundError",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "anyOf": [
-                    {
-                      "$ref": "#/components/schemas/SessionNotFoundError"
-                    },
-                    {
-                      "$ref": "#/components/schemas/SessionNotFoundError"
-                    }
-                  ]
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "ConflictError",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ConflictError"
-                }
-              }
-            }
-          }
-        },
-        "description": "Durably admit one session input and schedule agent-loop execution unless resume is false.",
-        "summary": "Send message",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "id": {
-                    "type": "string",
-                    "pattern": "^msg_"
-                  },
-                  "prompt": {
-                    "$ref": "#/components/schemas/PromptInput"
-                  },
-                  "delivery": {
-                    "type": "string",
-                    "enum": ["steer", "queue"]
-                  },
-                  "resume": {
-                    "type": "boolean"
-                  }
-                },
-                "required": ["prompt"],
-                "additionalProperties": false
-              }
-            }
-          },
-          "required": true
-        },
-        "x-codeSamples": [
-          {
-            "lang": "js",
-            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.v2.session.prompt({\n  ...\n})"
-          }
-        ]
-      }
-    },
-    "/api/session/{sessionID}/compact": {
-      "post": {
-        "tags": ["sessions"],
-        "operationId": "v2.session.compact",
-        "parameters": [
-          {
-            "name": "sessionID",
-            "in": "path",
-            "schema": {
-              "type": "string",
-              "pattern": "^ses"
-            },
-            "required": true
-          }
-        ],
-        "security": [],
-        "responses": {
-          "204": {
-            "description": "<No Content>"
-          },
-          "400": {
-            "description": "InvalidRequestError",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/InvalidRequestError"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "UnauthorizedError",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/UnauthorizedError"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "SessionNotFoundError",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "anyOf": [
-                    {
-                      "$ref": "#/components/schemas/SessionNotFoundError"
-                    },
-                    {
-                      "$ref": "#/components/schemas/SessionNotFoundError"
-                    }
-                  ]
-                }
-              }
-            }
-          },
-          "503": {
-            "description": "ServiceUnavailableError",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ServiceUnavailableError"
-                }
-              }
-            }
-          }
-        },
-        "description": "Compact a session conversation.",
-        "summary": "Compact session",
-        "x-codeSamples": [
-          {
-            "lang": "js",
-            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.v2.session.compact({\n  ...\n})"
-          }
-        ]
-      }
-    },
-    "/api/session/{sessionID}/wait": {
-      "post": {
-        "tags": ["sessions"],
-        "operationId": "v2.session.wait",
-        "parameters": [
-          {
-            "name": "sessionID",
-            "in": "path",
-            "schema": {
-              "type": "string",
-              "pattern": "^ses"
-            },
-            "required": true
-          }
-        ],
-        "security": [],
-        "responses": {
-          "204": {
-            "description": "<No Content>"
-          },
-          "400": {
-            "description": "InvalidRequestError",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/InvalidRequestError"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "UnauthorizedError",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/UnauthorizedError"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "SessionNotFoundError",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "anyOf": [
-                    {
-                      "$ref": "#/components/schemas/SessionNotFoundError"
-                    },
-                    {
-                      "$ref": "#/components/schemas/SessionNotFoundError"
-                    }
-                  ]
-                }
-              }
-            }
-          },
-          "503": {
-            "description": "ServiceUnavailableError",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ServiceUnavailableError"
-                }
-              }
-            }
-          }
-        },
-        "description": "Wait for a session agent loop to become idle.",
-        "summary": "Wait for session",
-        "x-codeSamples": [
-          {
-            "lang": "js",
-            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.v2.session.wait({\n  ...\n})"
-          }
-        ]
-      }
-    },
-    "/api/session/{sessionID}/revert/stage": {
-      "post": {
-        "tags": ["sessions"],
-        "operationId": "v2.session.revert.stage",
-        "parameters": [
-          {
-            "name": "sessionID",
-            "in": "path",
-            "schema": {
-              "type": "string",
-              "pattern": "^ses"
-            },
-            "required": true
-          }
-        ],
-        "security": [],
-        "responses": {
-          "200": {
-            "description": "Success",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "data": {
-                      "$ref": "#/components/schemas/RevertState"
-                    }
-                  },
-                  "required": ["data"],
-                  "additionalProperties": false
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "InvalidRequestError",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/InvalidRequestError"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "UnauthorizedError",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/UnauthorizedError"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "MessageNotFoundError | SessionNotFoundError",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "anyOf": [
-                    {
-                      "$ref": "#/components/schemas/MessageNotFoundError"
-                    },
-                    {
-                      "$ref": "#/components/schemas/SessionNotFoundError"
-                    },
-                    {
-                      "$ref": "#/components/schemas/SessionNotFoundError"
-                    }
-                  ]
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "UnknownError",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/UnknownError1"
-                }
-              }
-            }
-          }
-        },
-        "description": "Stage or move a reversible session boundary and optionally apply its file changes.",
-        "summary": "Stage session revert",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "messageID": {
-                    "type": "string",
-                    "pattern": "^msg_"
-                  },
-                  "files": {
-                    "type": "boolean"
-                  }
-                },
-                "required": ["messageID"],
-                "additionalProperties": false
-              }
-            }
-          },
-          "required": true
-        },
-        "x-codeSamples": [
-          {
-            "lang": "js",
-            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.v2.session.revert.stage({\n  ...\n})"
-          }
-        ]
-      }
-    },
-    "/api/session/{sessionID}/revert/clear": {
-      "post": {
-        "tags": ["sessions"],
-        "operationId": "v2.session.revert.clear",
-        "parameters": [
-          {
-            "name": "sessionID",
-            "in": "path",
-            "schema": {
-              "type": "string",
-              "pattern": "^ses"
-            },
-            "required": true
-          }
-        ],
-        "security": [],
-        "responses": {
-          "204": {
-            "description": "<No Content>"
-          },
-          "400": {
-            "description": "InvalidRequestError",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/InvalidRequestError"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "UnauthorizedError",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/UnauthorizedError"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "SessionNotFoundError",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "anyOf": [
-                    {
-                      "$ref": "#/components/schemas/SessionNotFoundError"
-                    },
-                    {
-                      "$ref": "#/components/schemas/SessionNotFoundError"
-                    }
-                  ]
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "UnknownError",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/UnknownError1"
-                }
-              }
-            }
-          }
-        },
-        "summary": "Clear staged revert",
-        "x-codeSamples": [
-          {
-            "lang": "js",
-            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.v2.session.revert.clear({\n  ...\n})"
-          }
-        ]
-      }
-    },
-    "/api/session/{sessionID}/revert/commit": {
-      "post": {
-        "tags": ["sessions"],
-        "operationId": "v2.session.revert.commit",
-        "parameters": [
-          {
-            "name": "sessionID",
-            "in": "path",
-            "schema": {
-              "type": "string",
-              "pattern": "^ses"
-            },
-            "required": true
-          }
-        ],
-        "security": [],
-        "responses": {
-          "204": {
-            "description": "<No Content>"
-          },
-          "400": {
-            "description": "InvalidRequestError",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/InvalidRequestError"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "UnauthorizedError",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/UnauthorizedError"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "SessionNotFoundError",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "anyOf": [
-                    {
-                      "$ref": "#/components/schemas/SessionNotFoundError"
-                    },
-                    {
-                      "$ref": "#/components/schemas/SessionNotFoundError"
-                    }
-                  ]
-                }
-              }
-            }
-          }
-        },
-        "summary": "Commit staged revert",
-        "x-codeSamples": [
-          {
-            "lang": "js",
-            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.v2.session.revert.commit({\n  ...\n})"
           }
         ]
       }
@@ -11375,74 +11299,6 @@
           {
             "lang": "js",
             "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.v2.session.events({\n  ...\n})"
-          }
-        ]
-      }
-    },
-    "/api/session/{sessionID}/interrupt": {
-      "post": {
-        "tags": ["sessions"],
-        "operationId": "v2.session.interrupt",
-        "parameters": [
-          {
-            "name": "sessionID",
-            "in": "path",
-            "schema": {
-              "type": "string",
-              "pattern": "^ses"
-            },
-            "required": true
-          }
-        ],
-        "security": [],
-        "responses": {
-          "204": {
-            "description": "<No Content>"
-          },
-          "400": {
-            "description": "InvalidRequestError",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/InvalidRequestError"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "UnauthorizedError",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/UnauthorizedError"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "SessionNotFoundError",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "anyOf": [
-                    {
-                      "$ref": "#/components/schemas/SessionNotFoundError"
-                    },
-                    {
-                      "$ref": "#/components/schemas/SessionNotFoundError"
-                    }
-                  ]
-                }
-              }
-            }
-          }
-        },
-        "description": "Interrupt active execution owned by this OpenCode process. Idle interruption is a no-op.",
-        "summary": "Interrupt session execution",
-        "x-codeSamples": [
-          {
-            "lang": "js",
-            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.v2.session.interrupt({\n  ...\n})"
           }
         ]
       }
@@ -15462,6 +15318,9 @@
             "$ref": "#/components/schemas/Event.tui.prompt.append"
           },
           {
+            "$ref": "#/components/schemas/EventTuiCommandExecuteTargeted"
+          },
+          {
             "$ref": "#/components/schemas/Event.tui.command.execute"
           },
           {
@@ -15883,6 +15742,15 @@
             },
             "required": ["created", "updated"],
             "additionalProperties": false
+          },
+          "sessionComplete": {
+            "type": "boolean"
+          },
+          "sessionFailed": {
+            "type": "boolean"
+          },
+          "sessionInProgress": {
+            "type": "boolean"
           },
           "permission": {
             "$ref": "#/components/schemas/PermissionRuleset"
@@ -16351,6 +16219,9 @@
                 },
                 "required": ["read", "write"],
                 "additionalProperties": false
+              },
+              "visible": {
+                "type": "number"
               }
             },
             "required": ["input", "output", "reasoning", "cache"],
@@ -16960,6 +16831,9 @@
                 },
                 "required": ["read", "write"],
                 "additionalProperties": false
+              },
+              "visible": {
+                "type": "number"
               }
             },
             "required": ["input", "output", "reasoning", "cache"],
@@ -19792,6 +19666,65 @@
                   },
                   "type": {
                     "type": "string",
+                    "enum": ["tui.command.execute.targeted"]
+                  },
+                  "properties": {
+                    "type": "object",
+                    "properties": {
+                      "command": {
+                        "type": "string",
+                        "enum": [
+                          "session.list",
+                          "session.most_recent",
+                          "oc.new_session",
+                          "model.default",
+                          "oc.reasoning_effort",
+                          "agent.session",
+                          "agent.default_subagent",
+                          "agent.default_subagent_model",
+                          "oc.home_dir",
+                          "oc.home_dir_sort",
+                          "session.new",
+                          "session.rename",
+                          "session.compact",
+                          "session.complete.toggle",
+                          "session.failed.toggle",
+                          "model.list",
+                          "agent.list",
+                          "agent.cycle",
+                          "variant.cycle",
+                          "command.palette.show",
+                          "theme.switch",
+                          "session.sidebar.toggle",
+                          "opencode.status"
+                        ]
+                      },
+                      "crowSessionHandle": {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                      },
+                      "expectedOpenCodeSessionID": {
+                        "type": "string",
+                        "pattern": "^ses",
+                        "description": "OpenCode session ID the targeted TUI must match before executing the command"
+                      }
+                    },
+                    "required": ["command", "crowSessionHandle", "expectedOpenCodeSessionID"],
+                    "additionalProperties": false
+                  }
+                },
+                "required": ["id", "type", "properties"],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "pattern": "^evt_"
+                  },
+                  "type": {
+                    "type": "string",
                     "enum": ["tui.command.execute"]
                   },
                   "properties": {
@@ -20633,6 +20566,18 @@
               },
               "skill": {
                 "$ref": "#/components/schemas/PermissionRuleConfig"
+              },
+              "session_complete": {
+                "$ref": "#/components/schemas/PermissionActionConfig"
+              },
+              "session_in_progress": {
+                "$ref": "#/components/schemas/PermissionActionConfig"
+              },
+              "session_reopen": {
+                "$ref": "#/components/schemas/PermissionActionConfig"
+              },
+              "session_failed": {
+                "$ref": "#/components/schemas/PermissionActionConfig"
               }
             },
             "additionalProperties": {
@@ -20701,6 +20646,12 @@
           "maxSteps": {
             "type": "integer",
             "exclusiveMinimum": 0
+          },
+          "tab_order": {
+            "type": "number"
+          },
+          "display_name": {
+            "type": "string"
           },
           "permission": {
             "$ref": "#/components/schemas/PermissionConfig"
@@ -21158,6 +21109,18 @@
               "additionalProperties": false
             }
           },
+          "command_palette": {
+            "type": "object",
+            "properties": {
+              "order": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "number"
+                }
+              }
+            },
+            "additionalProperties": false
+          },
           "skills": {
             "type": "object",
             "properties": {
@@ -21469,6 +21432,29 @@
               "type": "string"
             }
           },
+          "instructionsByModel": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "base": {
+                        "type": "string"
+                      }
+                    },
+                    "required": ["base"],
+                    "additionalProperties": false
+                  }
+                ]
+              }
+            }
+          },
           "layout": {
             "$ref": "#/components/schemas/LayoutConfig"
           },
@@ -21566,6 +21552,27 @@
             "additionalProperties": false
           }
         },
+        "additionalProperties": false
+      },
+      "ServerLifecycleUnavailable": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "enum": ["ServerLifecycleUnavailable"]
+          },
+          "data": {
+            "type": "object",
+            "properties": {
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": ["message"],
+            "additionalProperties": false
+          }
+        },
+        "required": ["name", "data"],
         "additionalProperties": false
       },
       "Model": {
@@ -22108,6 +22115,9 @@
                 },
                 "required": ["read", "write"],
                 "additionalProperties": false
+              },
+              "visible": {
+                "type": "number"
               }
             },
             "required": ["input", "output", "reasoning", "cache"],
@@ -22172,6 +22182,15 @@
             },
             "required": ["created", "updated"],
             "additionalProperties": false
+          },
+          "sessionComplete": {
+            "type": "boolean"
+          },
+          "sessionFailed": {
+            "type": "boolean"
+          },
+          "sessionInProgress": {
+            "type": "boolean"
           },
           "permission": {
             "$ref": "#/components/schemas/PermissionRuleset"
@@ -22575,6 +22594,12 @@
           },
           "steps": {
             "type": "number"
+          },
+          "tabOrder": {
+            "type": "number"
+          },
+          "displayName": {
+            "type": "string"
           }
         },
         "required": ["name", "mode", "permission", "options"],
@@ -23076,6 +23101,368 @@
         "required": ["name", "data"],
         "additionalProperties": false
       },
+      "Session1": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^ses"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "projectID": {
+            "type": "string"
+          },
+          "workspaceID": {
+            "type": "string",
+            "pattern": "^wrk"
+          },
+          "directory": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "parentID": {
+            "type": "string",
+            "pattern": "^ses"
+          },
+          "summary": {
+            "type": "object",
+            "properties": {
+              "additions": {
+                "type": "number"
+              },
+              "deletions": {
+                "type": "number"
+              },
+              "files": {
+                "type": "number"
+              },
+              "diffs": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/SnapshotFileDiff"
+                }
+              }
+            },
+            "required": ["additions", "deletions", "files"],
+            "additionalProperties": false
+          },
+          "cost": {
+            "type": "number"
+          },
+          "tokens": {
+            "type": "object",
+            "properties": {
+              "input": {
+                "type": "number"
+              },
+              "output": {
+                "type": "number"
+              },
+              "reasoning": {
+                "type": "number"
+              },
+              "cache": {
+                "type": "object",
+                "properties": {
+                  "read": {
+                    "type": "number"
+                  },
+                  "write": {
+                    "type": "number"
+                  }
+                },
+                "required": ["read", "write"],
+                "additionalProperties": false
+              },
+              "visible": {
+                "type": "number"
+              }
+            },
+            "required": ["input", "output", "reasoning", "cache"],
+            "additionalProperties": false
+          },
+          "share": {
+            "type": "object",
+            "properties": {
+              "url": {
+                "type": "string"
+              }
+            },
+            "required": ["url"],
+            "additionalProperties": false
+          },
+          "title": {
+            "type": "string"
+          },
+          "agent": {
+            "type": "string"
+          },
+          "model": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "providerID": {
+                "type": "string"
+              },
+              "variant": {
+                "type": "string"
+              }
+            },
+            "required": ["id", "providerID"],
+            "additionalProperties": false
+          },
+          "version": {
+            "type": "string"
+          },
+          "metadata": {
+            "type": "object"
+          },
+          "time": {
+            "type": "object",
+            "properties": {
+              "created": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "updated": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "compacting": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "archived": {
+                "type": "number"
+              }
+            },
+            "required": ["created", "updated"],
+            "additionalProperties": false
+          },
+          "sessionComplete": {
+            "type": "boolean"
+          },
+          "sessionFailed": {
+            "type": "boolean"
+          },
+          "sessionInProgress": {
+            "type": "boolean"
+          },
+          "permission": {
+            "$ref": "#/components/schemas/PermissionRuleset"
+          },
+          "revert": {
+            "type": "object",
+            "properties": {
+              "messageID": {
+                "type": "string",
+                "pattern": "^msg"
+              },
+              "partID": {
+                "type": "string",
+                "pattern": "^prt"
+              },
+              "snapshot": {
+                "type": "string"
+              },
+              "diff": {
+                "type": "string"
+              }
+            },
+            "required": ["messageID"],
+            "additionalProperties": false
+          }
+        },
+        "required": ["id", "slug", "projectID", "directory", "title", "version", "time"],
+        "additionalProperties": false
+      },
+      "Session2": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^ses"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "projectID": {
+            "type": "string"
+          },
+          "workspaceID": {
+            "type": "string",
+            "pattern": "^wrk"
+          },
+          "directory": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "parentID": {
+            "type": "string",
+            "pattern": "^ses"
+          },
+          "summary": {
+            "type": "object",
+            "properties": {
+              "additions": {
+                "type": "number"
+              },
+              "deletions": {
+                "type": "number"
+              },
+              "files": {
+                "type": "number"
+              },
+              "diffs": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/SnapshotFileDiff"
+                }
+              }
+            },
+            "required": ["additions", "deletions", "files"],
+            "additionalProperties": false
+          },
+          "cost": {
+            "type": "number"
+          },
+          "tokens": {
+            "type": "object",
+            "properties": {
+              "input": {
+                "type": "number"
+              },
+              "output": {
+                "type": "number"
+              },
+              "reasoning": {
+                "type": "number"
+              },
+              "cache": {
+                "type": "object",
+                "properties": {
+                  "read": {
+                    "type": "number"
+                  },
+                  "write": {
+                    "type": "number"
+                  }
+                },
+                "required": ["read", "write"],
+                "additionalProperties": false
+              },
+              "visible": {
+                "type": "number"
+              }
+            },
+            "required": ["input", "output", "reasoning", "cache"],
+            "additionalProperties": false
+          },
+          "share": {
+            "type": "object",
+            "properties": {
+              "url": {
+                "type": "string"
+              }
+            },
+            "required": ["url"],
+            "additionalProperties": false
+          },
+          "title": {
+            "type": "string"
+          },
+          "agent": {
+            "type": "string"
+          },
+          "model": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "providerID": {
+                "type": "string"
+              },
+              "variant": {
+                "type": "string"
+              }
+            },
+            "required": ["id", "providerID"],
+            "additionalProperties": false
+          },
+          "version": {
+            "type": "string"
+          },
+          "metadata": {
+            "type": "object"
+          },
+          "time": {
+            "type": "object",
+            "properties": {
+              "created": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "updated": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "compacting": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "archived": {
+                "type": "number"
+              }
+            },
+            "required": ["created", "updated"],
+            "additionalProperties": false
+          },
+          "sessionComplete": {
+            "type": "boolean"
+          },
+          "sessionFailed": {
+            "type": "boolean"
+          },
+          "sessionInProgress": {
+            "type": "boolean"
+          },
+          "permission": {
+            "$ref": "#/components/schemas/PermissionRuleset"
+          },
+          "revert": {
+            "type": "object",
+            "properties": {
+              "messageID": {
+                "type": "string",
+                "pattern": "^msg"
+              },
+              "partID": {
+                "type": "string",
+                "pattern": "^prt"
+              },
+              "snapshot": {
+                "type": "string"
+              },
+              "diff": {
+                "type": "string"
+              }
+            },
+            "required": ["messageID"],
+            "additionalProperties": false
+          }
+        },
+        "required": ["id", "slug", "projectID", "directory", "title", "version", "time"],
+        "additionalProperties": false
+      },
       "NotFoundError": {
         "type": "object",
         "required": ["name", "data"],
@@ -23094,6 +23481,1092 @@
             }
           }
         }
+      },
+      "Session3": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^ses"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "projectID": {
+            "type": "string"
+          },
+          "workspaceID": {
+            "type": "string",
+            "pattern": "^wrk"
+          },
+          "directory": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "parentID": {
+            "type": "string",
+            "pattern": "^ses"
+          },
+          "summary": {
+            "type": "object",
+            "properties": {
+              "additions": {
+                "type": "number"
+              },
+              "deletions": {
+                "type": "number"
+              },
+              "files": {
+                "type": "number"
+              },
+              "diffs": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/SnapshotFileDiff"
+                }
+              }
+            },
+            "required": ["additions", "deletions", "files"],
+            "additionalProperties": false
+          },
+          "cost": {
+            "type": "number"
+          },
+          "tokens": {
+            "type": "object",
+            "properties": {
+              "input": {
+                "type": "number"
+              },
+              "output": {
+                "type": "number"
+              },
+              "reasoning": {
+                "type": "number"
+              },
+              "cache": {
+                "type": "object",
+                "properties": {
+                  "read": {
+                    "type": "number"
+                  },
+                  "write": {
+                    "type": "number"
+                  }
+                },
+                "required": ["read", "write"],
+                "additionalProperties": false
+              },
+              "visible": {
+                "type": "number"
+              }
+            },
+            "required": ["input", "output", "reasoning", "cache"],
+            "additionalProperties": false
+          },
+          "share": {
+            "type": "object",
+            "properties": {
+              "url": {
+                "type": "string"
+              }
+            },
+            "required": ["url"],
+            "additionalProperties": false
+          },
+          "title": {
+            "type": "string"
+          },
+          "agent": {
+            "type": "string"
+          },
+          "model": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "providerID": {
+                "type": "string"
+              },
+              "variant": {
+                "type": "string"
+              }
+            },
+            "required": ["id", "providerID"],
+            "additionalProperties": false
+          },
+          "version": {
+            "type": "string"
+          },
+          "metadata": {
+            "type": "object"
+          },
+          "time": {
+            "type": "object",
+            "properties": {
+              "created": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "updated": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "compacting": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "archived": {
+                "type": "number"
+              }
+            },
+            "required": ["created", "updated"],
+            "additionalProperties": false
+          },
+          "sessionComplete": {
+            "type": "boolean"
+          },
+          "sessionFailed": {
+            "type": "boolean"
+          },
+          "sessionInProgress": {
+            "type": "boolean"
+          },
+          "permission": {
+            "$ref": "#/components/schemas/PermissionRuleset"
+          },
+          "revert": {
+            "type": "object",
+            "properties": {
+              "messageID": {
+                "type": "string",
+                "pattern": "^msg"
+              },
+              "partID": {
+                "type": "string",
+                "pattern": "^prt"
+              },
+              "snapshot": {
+                "type": "string"
+              },
+              "diff": {
+                "type": "string"
+              }
+            },
+            "required": ["messageID"],
+            "additionalProperties": false
+          }
+        },
+        "required": ["id", "slug", "projectID", "directory", "title", "version", "time"],
+        "additionalProperties": false
+      },
+      "Session4": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^ses"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "projectID": {
+            "type": "string"
+          },
+          "workspaceID": {
+            "type": "string",
+            "pattern": "^wrk"
+          },
+          "directory": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "parentID": {
+            "type": "string",
+            "pattern": "^ses"
+          },
+          "summary": {
+            "type": "object",
+            "properties": {
+              "additions": {
+                "type": "number"
+              },
+              "deletions": {
+                "type": "number"
+              },
+              "files": {
+                "type": "number"
+              },
+              "diffs": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/SnapshotFileDiff"
+                }
+              }
+            },
+            "required": ["additions", "deletions", "files"],
+            "additionalProperties": false
+          },
+          "cost": {
+            "type": "number"
+          },
+          "tokens": {
+            "type": "object",
+            "properties": {
+              "input": {
+                "type": "number"
+              },
+              "output": {
+                "type": "number"
+              },
+              "reasoning": {
+                "type": "number"
+              },
+              "cache": {
+                "type": "object",
+                "properties": {
+                  "read": {
+                    "type": "number"
+                  },
+                  "write": {
+                    "type": "number"
+                  }
+                },
+                "required": ["read", "write"],
+                "additionalProperties": false
+              },
+              "visible": {
+                "type": "number"
+              }
+            },
+            "required": ["input", "output", "reasoning", "cache"],
+            "additionalProperties": false
+          },
+          "share": {
+            "type": "object",
+            "properties": {
+              "url": {
+                "type": "string"
+              }
+            },
+            "required": ["url"],
+            "additionalProperties": false
+          },
+          "title": {
+            "type": "string"
+          },
+          "agent": {
+            "type": "string"
+          },
+          "model": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "providerID": {
+                "type": "string"
+              },
+              "variant": {
+                "type": "string"
+              }
+            },
+            "required": ["id", "providerID"],
+            "additionalProperties": false
+          },
+          "version": {
+            "type": "string"
+          },
+          "metadata": {
+            "type": "object"
+          },
+          "time": {
+            "type": "object",
+            "properties": {
+              "created": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "updated": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "compacting": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "archived": {
+                "type": "number"
+              }
+            },
+            "required": ["created", "updated"],
+            "additionalProperties": false
+          },
+          "sessionComplete": {
+            "type": "boolean"
+          },
+          "sessionFailed": {
+            "type": "boolean"
+          },
+          "sessionInProgress": {
+            "type": "boolean"
+          },
+          "permission": {
+            "$ref": "#/components/schemas/PermissionRuleset"
+          },
+          "revert": {
+            "type": "object",
+            "properties": {
+              "messageID": {
+                "type": "string",
+                "pattern": "^msg"
+              },
+              "partID": {
+                "type": "string",
+                "pattern": "^prt"
+              },
+              "snapshot": {
+                "type": "string"
+              },
+              "diff": {
+                "type": "string"
+              }
+            },
+            "required": ["messageID"],
+            "additionalProperties": false
+          }
+        },
+        "required": ["id", "slug", "projectID", "directory", "title", "version", "time"],
+        "additionalProperties": false
+      },
+      "Session5": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^ses"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "projectID": {
+            "type": "string"
+          },
+          "workspaceID": {
+            "type": "string",
+            "pattern": "^wrk"
+          },
+          "directory": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "parentID": {
+            "type": "string",
+            "pattern": "^ses"
+          },
+          "summary": {
+            "type": "object",
+            "properties": {
+              "additions": {
+                "type": "number"
+              },
+              "deletions": {
+                "type": "number"
+              },
+              "files": {
+                "type": "number"
+              },
+              "diffs": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/SnapshotFileDiff"
+                }
+              }
+            },
+            "required": ["additions", "deletions", "files"],
+            "additionalProperties": false
+          },
+          "cost": {
+            "type": "number"
+          },
+          "tokens": {
+            "type": "object",
+            "properties": {
+              "input": {
+                "type": "number"
+              },
+              "output": {
+                "type": "number"
+              },
+              "reasoning": {
+                "type": "number"
+              },
+              "cache": {
+                "type": "object",
+                "properties": {
+                  "read": {
+                    "type": "number"
+                  },
+                  "write": {
+                    "type": "number"
+                  }
+                },
+                "required": ["read", "write"],
+                "additionalProperties": false
+              },
+              "visible": {
+                "type": "number"
+              }
+            },
+            "required": ["input", "output", "reasoning", "cache"],
+            "additionalProperties": false
+          },
+          "share": {
+            "type": "object",
+            "properties": {
+              "url": {
+                "type": "string"
+              }
+            },
+            "required": ["url"],
+            "additionalProperties": false
+          },
+          "title": {
+            "type": "string"
+          },
+          "agent": {
+            "type": "string"
+          },
+          "model": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "providerID": {
+                "type": "string"
+              },
+              "variant": {
+                "type": "string"
+              }
+            },
+            "required": ["id", "providerID"],
+            "additionalProperties": false
+          },
+          "version": {
+            "type": "string"
+          },
+          "metadata": {
+            "type": "object"
+          },
+          "time": {
+            "type": "object",
+            "properties": {
+              "created": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "updated": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "compacting": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "archived": {
+                "type": "number"
+              }
+            },
+            "required": ["created", "updated"],
+            "additionalProperties": false
+          },
+          "sessionComplete": {
+            "type": "boolean"
+          },
+          "sessionFailed": {
+            "type": "boolean"
+          },
+          "sessionInProgress": {
+            "type": "boolean"
+          },
+          "permission": {
+            "$ref": "#/components/schemas/PermissionRuleset"
+          },
+          "revert": {
+            "type": "object",
+            "properties": {
+              "messageID": {
+                "type": "string",
+                "pattern": "^msg"
+              },
+              "partID": {
+                "type": "string",
+                "pattern": "^prt"
+              },
+              "snapshot": {
+                "type": "string"
+              },
+              "diff": {
+                "type": "string"
+              }
+            },
+            "required": ["messageID"],
+            "additionalProperties": false
+          }
+        },
+        "required": ["id", "slug", "projectID", "directory", "title", "version", "time"],
+        "additionalProperties": false
+      },
+      "Session6": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^ses"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "projectID": {
+            "type": "string"
+          },
+          "workspaceID": {
+            "type": "string",
+            "pattern": "^wrk"
+          },
+          "directory": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "parentID": {
+            "type": "string",
+            "pattern": "^ses"
+          },
+          "summary": {
+            "type": "object",
+            "properties": {
+              "additions": {
+                "type": "number"
+              },
+              "deletions": {
+                "type": "number"
+              },
+              "files": {
+                "type": "number"
+              },
+              "diffs": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/SnapshotFileDiff"
+                }
+              }
+            },
+            "required": ["additions", "deletions", "files"],
+            "additionalProperties": false
+          },
+          "cost": {
+            "type": "number"
+          },
+          "tokens": {
+            "type": "object",
+            "properties": {
+              "input": {
+                "type": "number"
+              },
+              "output": {
+                "type": "number"
+              },
+              "reasoning": {
+                "type": "number"
+              },
+              "cache": {
+                "type": "object",
+                "properties": {
+                  "read": {
+                    "type": "number"
+                  },
+                  "write": {
+                    "type": "number"
+                  }
+                },
+                "required": ["read", "write"],
+                "additionalProperties": false
+              },
+              "visible": {
+                "type": "number"
+              }
+            },
+            "required": ["input", "output", "reasoning", "cache"],
+            "additionalProperties": false
+          },
+          "share": {
+            "type": "object",
+            "properties": {
+              "url": {
+                "type": "string"
+              }
+            },
+            "required": ["url"],
+            "additionalProperties": false
+          },
+          "title": {
+            "type": "string"
+          },
+          "agent": {
+            "type": "string"
+          },
+          "model": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "providerID": {
+                "type": "string"
+              },
+              "variant": {
+                "type": "string"
+              }
+            },
+            "required": ["id", "providerID"],
+            "additionalProperties": false
+          },
+          "version": {
+            "type": "string"
+          },
+          "metadata": {
+            "type": "object"
+          },
+          "time": {
+            "type": "object",
+            "properties": {
+              "created": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "updated": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "compacting": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "archived": {
+                "type": "number"
+              }
+            },
+            "required": ["created", "updated"],
+            "additionalProperties": false
+          },
+          "sessionComplete": {
+            "type": "boolean"
+          },
+          "sessionFailed": {
+            "type": "boolean"
+          },
+          "sessionInProgress": {
+            "type": "boolean"
+          },
+          "permission": {
+            "$ref": "#/components/schemas/PermissionRuleset"
+          },
+          "revert": {
+            "type": "object",
+            "properties": {
+              "messageID": {
+                "type": "string",
+                "pattern": "^msg"
+              },
+              "partID": {
+                "type": "string",
+                "pattern": "^prt"
+              },
+              "snapshot": {
+                "type": "string"
+              },
+              "diff": {
+                "type": "string"
+              }
+            },
+            "required": ["messageID"],
+            "additionalProperties": false
+          }
+        },
+        "required": ["id", "slug", "projectID", "directory", "title", "version", "time"],
+        "additionalProperties": false
+      },
+      "Session7": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^ses"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "projectID": {
+            "type": "string"
+          },
+          "workspaceID": {
+            "type": "string",
+            "pattern": "^wrk"
+          },
+          "directory": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "parentID": {
+            "type": "string",
+            "pattern": "^ses"
+          },
+          "summary": {
+            "type": "object",
+            "properties": {
+              "additions": {
+                "type": "number"
+              },
+              "deletions": {
+                "type": "number"
+              },
+              "files": {
+                "type": "number"
+              },
+              "diffs": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/SnapshotFileDiff"
+                }
+              }
+            },
+            "required": ["additions", "deletions", "files"],
+            "additionalProperties": false
+          },
+          "cost": {
+            "type": "number"
+          },
+          "tokens": {
+            "type": "object",
+            "properties": {
+              "input": {
+                "type": "number"
+              },
+              "output": {
+                "type": "number"
+              },
+              "reasoning": {
+                "type": "number"
+              },
+              "cache": {
+                "type": "object",
+                "properties": {
+                  "read": {
+                    "type": "number"
+                  },
+                  "write": {
+                    "type": "number"
+                  }
+                },
+                "required": ["read", "write"],
+                "additionalProperties": false
+              },
+              "visible": {
+                "type": "number"
+              }
+            },
+            "required": ["input", "output", "reasoning", "cache"],
+            "additionalProperties": false
+          },
+          "share": {
+            "type": "object",
+            "properties": {
+              "url": {
+                "type": "string"
+              }
+            },
+            "required": ["url"],
+            "additionalProperties": false
+          },
+          "title": {
+            "type": "string"
+          },
+          "agent": {
+            "type": "string"
+          },
+          "model": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "providerID": {
+                "type": "string"
+              },
+              "variant": {
+                "type": "string"
+              }
+            },
+            "required": ["id", "providerID"],
+            "additionalProperties": false
+          },
+          "version": {
+            "type": "string"
+          },
+          "metadata": {
+            "type": "object"
+          },
+          "time": {
+            "type": "object",
+            "properties": {
+              "created": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "updated": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "compacting": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "archived": {
+                "type": "number"
+              }
+            },
+            "required": ["created", "updated"],
+            "additionalProperties": false
+          },
+          "sessionComplete": {
+            "type": "boolean"
+          },
+          "sessionFailed": {
+            "type": "boolean"
+          },
+          "sessionInProgress": {
+            "type": "boolean"
+          },
+          "permission": {
+            "$ref": "#/components/schemas/PermissionRuleset"
+          },
+          "revert": {
+            "type": "object",
+            "properties": {
+              "messageID": {
+                "type": "string",
+                "pattern": "^msg"
+              },
+              "partID": {
+                "type": "string",
+                "pattern": "^prt"
+              },
+              "snapshot": {
+                "type": "string"
+              },
+              "diff": {
+                "type": "string"
+              }
+            },
+            "required": ["messageID"],
+            "additionalProperties": false
+          }
+        },
+        "required": ["id", "slug", "projectID", "directory", "title", "version", "time"],
+        "additionalProperties": false
+      },
+      "Session8": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^ses"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "projectID": {
+            "type": "string"
+          },
+          "workspaceID": {
+            "type": "string",
+            "pattern": "^wrk"
+          },
+          "directory": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "parentID": {
+            "type": "string",
+            "pattern": "^ses"
+          },
+          "summary": {
+            "type": "object",
+            "properties": {
+              "additions": {
+                "type": "number"
+              },
+              "deletions": {
+                "type": "number"
+              },
+              "files": {
+                "type": "number"
+              },
+              "diffs": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/SnapshotFileDiff"
+                }
+              }
+            },
+            "required": ["additions", "deletions", "files"],
+            "additionalProperties": false
+          },
+          "cost": {
+            "type": "number"
+          },
+          "tokens": {
+            "type": "object",
+            "properties": {
+              "input": {
+                "type": "number"
+              },
+              "output": {
+                "type": "number"
+              },
+              "reasoning": {
+                "type": "number"
+              },
+              "cache": {
+                "type": "object",
+                "properties": {
+                  "read": {
+                    "type": "number"
+                  },
+                  "write": {
+                    "type": "number"
+                  }
+                },
+                "required": ["read", "write"],
+                "additionalProperties": false
+              },
+              "visible": {
+                "type": "number"
+              }
+            },
+            "required": ["input", "output", "reasoning", "cache"],
+            "additionalProperties": false
+          },
+          "share": {
+            "type": "object",
+            "properties": {
+              "url": {
+                "type": "string"
+              }
+            },
+            "required": ["url"],
+            "additionalProperties": false
+          },
+          "title": {
+            "type": "string"
+          },
+          "agent": {
+            "type": "string"
+          },
+          "model": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "providerID": {
+                "type": "string"
+              },
+              "variant": {
+                "type": "string"
+              }
+            },
+            "required": ["id", "providerID"],
+            "additionalProperties": false
+          },
+          "version": {
+            "type": "string"
+          },
+          "metadata": {
+            "type": "object"
+          },
+          "time": {
+            "type": "object",
+            "properties": {
+              "created": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "updated": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "compacting": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "archived": {
+                "type": "number"
+              }
+            },
+            "required": ["created", "updated"],
+            "additionalProperties": false
+          },
+          "sessionComplete": {
+            "type": "boolean"
+          },
+          "sessionFailed": {
+            "type": "boolean"
+          },
+          "sessionInProgress": {
+            "type": "boolean"
+          },
+          "permission": {
+            "$ref": "#/components/schemas/PermissionRuleset"
+          },
+          "revert": {
+            "type": "object",
+            "properties": {
+              "messageID": {
+                "type": "string",
+                "pattern": "^msg"
+              },
+              "partID": {
+                "type": "string",
+                "pattern": "^prt"
+              },
+              "snapshot": {
+                "type": "string"
+              },
+              "diff": {
+                "type": "string"
+              }
+            },
+            "required": ["messageID"],
+            "additionalProperties": false
+          }
+        },
+        "required": ["id", "slug", "projectID", "directory", "title", "version", "time"],
+        "additionalProperties": false
       },
       "TextPartInput": {
         "type": "object",
@@ -23255,6 +24728,368 @@
           }
         },
         "required": ["_tag", "sessionID", "message"],
+        "additionalProperties": false
+      },
+      "Session9": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^ses"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "projectID": {
+            "type": "string"
+          },
+          "workspaceID": {
+            "type": "string",
+            "pattern": "^wrk"
+          },
+          "directory": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "parentID": {
+            "type": "string",
+            "pattern": "^ses"
+          },
+          "summary": {
+            "type": "object",
+            "properties": {
+              "additions": {
+                "type": "number"
+              },
+              "deletions": {
+                "type": "number"
+              },
+              "files": {
+                "type": "number"
+              },
+              "diffs": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/SnapshotFileDiff"
+                }
+              }
+            },
+            "required": ["additions", "deletions", "files"],
+            "additionalProperties": false
+          },
+          "cost": {
+            "type": "number"
+          },
+          "tokens": {
+            "type": "object",
+            "properties": {
+              "input": {
+                "type": "number"
+              },
+              "output": {
+                "type": "number"
+              },
+              "reasoning": {
+                "type": "number"
+              },
+              "cache": {
+                "type": "object",
+                "properties": {
+                  "read": {
+                    "type": "number"
+                  },
+                  "write": {
+                    "type": "number"
+                  }
+                },
+                "required": ["read", "write"],
+                "additionalProperties": false
+              },
+              "visible": {
+                "type": "number"
+              }
+            },
+            "required": ["input", "output", "reasoning", "cache"],
+            "additionalProperties": false
+          },
+          "share": {
+            "type": "object",
+            "properties": {
+              "url": {
+                "type": "string"
+              }
+            },
+            "required": ["url"],
+            "additionalProperties": false
+          },
+          "title": {
+            "type": "string"
+          },
+          "agent": {
+            "type": "string"
+          },
+          "model": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "providerID": {
+                "type": "string"
+              },
+              "variant": {
+                "type": "string"
+              }
+            },
+            "required": ["id", "providerID"],
+            "additionalProperties": false
+          },
+          "version": {
+            "type": "string"
+          },
+          "metadata": {
+            "type": "object"
+          },
+          "time": {
+            "type": "object",
+            "properties": {
+              "created": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "updated": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "compacting": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "archived": {
+                "type": "number"
+              }
+            },
+            "required": ["created", "updated"],
+            "additionalProperties": false
+          },
+          "sessionComplete": {
+            "type": "boolean"
+          },
+          "sessionFailed": {
+            "type": "boolean"
+          },
+          "sessionInProgress": {
+            "type": "boolean"
+          },
+          "permission": {
+            "$ref": "#/components/schemas/PermissionRuleset"
+          },
+          "revert": {
+            "type": "object",
+            "properties": {
+              "messageID": {
+                "type": "string",
+                "pattern": "^msg"
+              },
+              "partID": {
+                "type": "string",
+                "pattern": "^prt"
+              },
+              "snapshot": {
+                "type": "string"
+              },
+              "diff": {
+                "type": "string"
+              }
+            },
+            "required": ["messageID"],
+            "additionalProperties": false
+          }
+        },
+        "required": ["id", "slug", "projectID", "directory", "title", "version", "time"],
+        "additionalProperties": false
+      },
+      "Session10": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^ses"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "projectID": {
+            "type": "string"
+          },
+          "workspaceID": {
+            "type": "string",
+            "pattern": "^wrk"
+          },
+          "directory": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "parentID": {
+            "type": "string",
+            "pattern": "^ses"
+          },
+          "summary": {
+            "type": "object",
+            "properties": {
+              "additions": {
+                "type": "number"
+              },
+              "deletions": {
+                "type": "number"
+              },
+              "files": {
+                "type": "number"
+              },
+              "diffs": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/SnapshotFileDiff"
+                }
+              }
+            },
+            "required": ["additions", "deletions", "files"],
+            "additionalProperties": false
+          },
+          "cost": {
+            "type": "number"
+          },
+          "tokens": {
+            "type": "object",
+            "properties": {
+              "input": {
+                "type": "number"
+              },
+              "output": {
+                "type": "number"
+              },
+              "reasoning": {
+                "type": "number"
+              },
+              "cache": {
+                "type": "object",
+                "properties": {
+                  "read": {
+                    "type": "number"
+                  },
+                  "write": {
+                    "type": "number"
+                  }
+                },
+                "required": ["read", "write"],
+                "additionalProperties": false
+              },
+              "visible": {
+                "type": "number"
+              }
+            },
+            "required": ["input", "output", "reasoning", "cache"],
+            "additionalProperties": false
+          },
+          "share": {
+            "type": "object",
+            "properties": {
+              "url": {
+                "type": "string"
+              }
+            },
+            "required": ["url"],
+            "additionalProperties": false
+          },
+          "title": {
+            "type": "string"
+          },
+          "agent": {
+            "type": "string"
+          },
+          "model": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "providerID": {
+                "type": "string"
+              },
+              "variant": {
+                "type": "string"
+              }
+            },
+            "required": ["id", "providerID"],
+            "additionalProperties": false
+          },
+          "version": {
+            "type": "string"
+          },
+          "metadata": {
+            "type": "object"
+          },
+          "time": {
+            "type": "object",
+            "properties": {
+              "created": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "updated": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "compacting": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "archived": {
+                "type": "number"
+              }
+            },
+            "required": ["created", "updated"],
+            "additionalProperties": false
+          },
+          "sessionComplete": {
+            "type": "boolean"
+          },
+          "sessionFailed": {
+            "type": "boolean"
+          },
+          "sessionInProgress": {
+            "type": "boolean"
+          },
+          "permission": {
+            "$ref": "#/components/schemas/PermissionRuleset"
+          },
+          "revert": {
+            "type": "object",
+            "properties": {
+              "messageID": {
+                "type": "string",
+                "pattern": "^msg"
+              },
+              "partID": {
+                "type": "string",
+                "pattern": "^prt"
+              },
+              "snapshot": {
+                "type": "string"
+              },
+              "diff": {
+                "type": "string"
+              }
+            },
+            "required": ["messageID"],
+            "additionalProperties": false
+          }
+        },
+        "required": ["id", "slug", "projectID", "directory", "title", "version", "time"],
         "additionalProperties": false
       },
       "EventTuiPromptAppend": {
@@ -23545,17 +25380,6 @@
         "required": ["_tag", "message"],
         "additionalProperties": false
       },
-      "SessionActive": {
-        "type": "object",
-        "properties": {
-          "type": {
-            "type": "string",
-            "enum": ["running"]
-          }
-        },
-        "required": ["type"],
-        "additionalProperties": false
-      },
       "SessionNotFoundError": {
         "type": "object",
         "properties": {
@@ -23571,82 +25395,6 @@
           }
         },
         "required": ["_tag", "sessionID", "message"],
-        "additionalProperties": false
-      },
-      "PromptInput": {
-        "type": "object",
-        "properties": {
-          "text": {
-            "type": "string"
-          },
-          "files": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/PromptInputFileAttachment"
-            }
-          },
-          "agents": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/PromptAgentAttachment"
-            }
-          }
-        },
-        "required": ["text"],
-        "additionalProperties": false
-      },
-      "ConflictError": {
-        "type": "object",
-        "properties": {
-          "_tag": {
-            "type": "string",
-            "enum": ["ConflictError"]
-          },
-          "message": {
-            "type": "string"
-          },
-          "resource": {
-            "type": "string"
-          }
-        },
-        "required": ["_tag", "message"],
-        "additionalProperties": false
-      },
-      "ServiceUnavailableError": {
-        "type": "object",
-        "properties": {
-          "_tag": {
-            "type": "string",
-            "enum": ["ServiceUnavailableError"]
-          },
-          "message": {
-            "type": "string"
-          },
-          "service": {
-            "type": "string"
-          }
-        },
-        "required": ["_tag", "message"],
-        "additionalProperties": false
-      },
-      "MessageNotFoundError": {
-        "type": "object",
-        "properties": {
-          "_tag": {
-            "type": "string",
-            "enum": ["MessageNotFoundError"]
-          },
-          "sessionID": {
-            "type": "string"
-          },
-          "messageID": {
-            "type": "string"
-          },
-          "message": {
-            "type": "string"
-          }
-        },
-        "required": ["_tag", "sessionID", "messageID", "message"],
         "additionalProperties": false
       },
       "UnknownError1": {
@@ -23777,6 +25525,26 @@
         },
         "contentMediaType": "application/json"
       },
+      "MessageNotFoundError": {
+        "type": "object",
+        "properties": {
+          "_tag": {
+            "type": "string",
+            "enum": ["MessageNotFoundError"]
+          },
+          "sessionID": {
+            "type": "string"
+          },
+          "messageID": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": ["_tag", "sessionID", "messageID", "message"],
+        "additionalProperties": false
+      },
       "SessionMessagesResponse": {
         "type": "object",
         "properties": {
@@ -23800,6 +25568,23 @@
           }
         },
         "required": ["data", "cursor"],
+        "additionalProperties": false
+      },
+      "ServiceUnavailableError": {
+        "type": "object",
+        "properties": {
+          "_tag": {
+            "type": "string",
+            "enum": ["ServiceUnavailableError"]
+          },
+          "message": {
+            "type": "string"
+          },
+          "service": {
+            "type": "string"
+          }
+        },
+        "required": ["_tag", "message"],
         "additionalProperties": false
       },
       "ProviderNotFoundError": {
@@ -24215,6 +26000,9 @@
           },
           {
             "$ref": "#/components/schemas/TuiPromptAppend"
+          },
+          {
+            "$ref": "#/components/schemas/TuiCommandExecuteTargeted"
           },
           {
             "$ref": "#/components/schemas/TuiCommandExecute"
@@ -27315,6 +29103,15 @@
             "required": ["created", "updated"],
             "additionalProperties": false
           },
+          "sessionComplete": {
+            "type": "boolean"
+          },
+          "sessionFailed": {
+            "type": "boolean"
+          },
+          "sessionInProgress": {
+            "type": "boolean"
+          },
           "title": {
             "type": "string"
           },
@@ -27329,58 +29126,6 @@
           }
         },
         "required": ["id", "projectID", "cost", "tokens", "time", "title", "location"],
-        "additionalProperties": false
-      },
-      "PromptInputFileAttachment": {
-        "type": "object",
-        "properties": {
-          "uri": {
-            "type": "string"
-          },
-          "name": {
-            "type": "string"
-          },
-          "description": {
-            "type": "string"
-          },
-          "source": {
-            "$ref": "#/components/schemas/PromptSource"
-          }
-        },
-        "required": ["uri"],
-        "additionalProperties": false
-      },
-      "SessionInputAdmitted": {
-        "type": "object",
-        "properties": {
-          "admittedSeq": {
-            "type": "integer",
-            "minimum": 0
-          },
-          "id": {
-            "type": "string",
-            "pattern": "^msg_"
-          },
-          "sessionID": {
-            "type": "string",
-            "pattern": "^ses"
-          },
-          "prompt": {
-            "$ref": "#/components/schemas/Prompt"
-          },
-          "delivery": {
-            "type": "string",
-            "enum": ["steer", "queue"]
-          },
-          "timeCreated": {
-            "type": "number"
-          },
-          "promotedSeq": {
-            "type": "integer",
-            "minimum": 0
-          }
-        },
-        "required": ["admittedSeq", "id", "sessionID", "prompt", "delivery", "timeCreated"],
         "additionalProperties": false
       },
       "SessionMessageAgentSwitched": {
@@ -32779,6 +34524,87 @@
         "required": ["id", "type", "data"],
         "additionalProperties": false
       },
+      "TuiCommandExecuteTargeted": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^evt_"
+          },
+          "metadata": {
+            "type": "object"
+          },
+          "type": {
+            "type": "string",
+            "enum": ["tui.command.execute.targeted"]
+          },
+          "durable": {
+            "type": "object",
+            "properties": {
+              "aggregateID": {
+                "type": "string"
+              },
+              "seq": {
+                "type": "integer"
+              },
+              "version": {
+                "type": "integer"
+              }
+            },
+            "required": ["aggregateID", "seq", "version"],
+            "additionalProperties": false
+          },
+          "location": {
+            "$ref": "#/components/schemas/LocationRef"
+          },
+          "data": {
+            "type": "object",
+            "properties": {
+              "command": {
+                "type": "string",
+                "enum": [
+                  "session.list",
+                  "session.most_recent",
+                  "oc.new_session",
+                  "model.default",
+                  "oc.reasoning_effort",
+                  "agent.session",
+                  "agent.default_subagent",
+                  "agent.default_subagent_model",
+                  "oc.home_dir",
+                  "oc.home_dir_sort",
+                  "session.new",
+                  "session.rename",
+                  "session.compact",
+                  "session.complete.toggle",
+                  "session.failed.toggle",
+                  "model.list",
+                  "agent.list",
+                  "agent.cycle",
+                  "variant.cycle",
+                  "command.palette.show",
+                  "theme.switch",
+                  "session.sidebar.toggle",
+                  "opencode.status"
+                ]
+              },
+              "crowSessionHandle": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+              },
+              "expectedOpenCodeSessionID": {
+                "type": "string",
+                "pattern": "^ses",
+                "description": "OpenCode session ID the targeted TUI must match before executing the command"
+              }
+            },
+            "required": ["command", "crowSessionHandle", "expectedOpenCodeSessionID"],
+            "additionalProperties": false
+          }
+        },
+        "required": ["id", "type", "data"],
+        "additionalProperties": false
+      },
       "TuiCommandExecute": {
         "type": "object",
         "properties": {
@@ -36167,6 +37993,65 @@
               }
             },
             "required": ["sessionID", "requestID", "reply"],
+            "additionalProperties": false
+          }
+        },
+        "required": ["id", "type", "properties"],
+        "additionalProperties": false
+      },
+      "EventTuiCommandExecuteTargeted": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^evt_"
+          },
+          "type": {
+            "type": "string",
+            "enum": ["tui.command.execute.targeted"]
+          },
+          "properties": {
+            "type": "object",
+            "properties": {
+              "command": {
+                "type": "string",
+                "enum": [
+                  "session.list",
+                  "session.most_recent",
+                  "oc.new_session",
+                  "model.default",
+                  "oc.reasoning_effort",
+                  "agent.session",
+                  "agent.default_subagent",
+                  "agent.default_subagent_model",
+                  "oc.home_dir",
+                  "oc.home_dir_sort",
+                  "session.new",
+                  "session.rename",
+                  "session.compact",
+                  "session.complete.toggle",
+                  "session.failed.toggle",
+                  "model.list",
+                  "agent.list",
+                  "agent.cycle",
+                  "variant.cycle",
+                  "command.palette.show",
+                  "theme.switch",
+                  "session.sidebar.toggle",
+                  "opencode.status"
+                ]
+              },
+              "crowSessionHandle": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+              },
+              "expectedOpenCodeSessionID": {
+                "type": "string",
+                "pattern": "^ses",
+                "description": "OpenCode session ID the targeted TUI must match before executing the command"
+              }
+            },
+            "required": ["command", "crowSessionHandle", "expectedOpenCodeSessionID"],
             "additionalProperties": false
           }
         },

@@ -88,7 +88,6 @@ import { createTuiAttention } from "./attention"
 import * as TuiAudio from "./audio"
 import { win32AssertRawMode } from "./terminal-win32"
 import { destroyRenderer, writeTerminalEscape } from "./util/renderer"
-import { nearestAgentSquare } from "./util/terminalTab"
 import { detectTerminal } from "@opencode-ai/core/util/terminal"
 import { cliErrorMessage, errorFormat } from "./util/error"
 import { spawn } from "node:child_process"
@@ -875,7 +874,8 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
       terminalTabState.color = hex
     }
     if (!titleEnabled) return
-    const prefix = color ? `${nearestAgentSquare([color[0], color[1], color[2]])} ` : ""
+    // Plain ■ renders everywhere; WezTerm (with the oc tab snippet) colors it via oc_agent_color.
+    const prefix = color ? "■ " : ""
 
     if (route.data.type === "home") {
       renderer.setTerminalTitle(`${prefix}OpenCode`)
@@ -889,12 +889,12 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
       }
 
       const title = session.title.length > 40 ? session.title.slice(0, 37) + "..." : session.title
-      renderer.setTerminalTitle(`${prefix}OC | ${title}`)
+      renderer.setTerminalTitle(`${prefix}${title}`)
       return
     }
 
     if (route.data.type === "plugin") {
-      renderer.setTerminalTitle(`OC | ${route.data.id}`)
+      renderer.setTerminalTitle(route.data.id)
     }
   })
 

@@ -487,6 +487,8 @@ test("formats script and file clipboard text", () => {
 })
 
 test("writes clipboard text through clip.exe", async () => {
+  // copyToClipboard is Windows-only and reports an error elsewhere.
+  if (process.platform !== "win32") return
   let command = ""
   let args: string[] = []
   let input = ""

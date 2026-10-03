@@ -110,6 +110,51 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-03 (~15:28) - v0.2.79 - Tab title: plain ■ agent marker, no "OC |" prefix - Claude Opus 5.5, low effort; Agent
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Agent; completed
+- Version: 0.2.79 (uncommitted with the CI parity fixes)
+- Changed `packages/tui/src/app.tsx` title effect: prefix is a plain `■ ` (U+25A0 text glyph) instead of the nearest emoji square; removed the `OC | ` prefix from session and plugin titles. WezTerm still gets `oc_agent_color` and colors the square.
+- Removed `packages/tui/src/util/terminalTab.ts` (`nearestAgentSquare`) and its test; moved the renderer escape test into the existing `packages/tui/test/util/renderer.test.ts` (3 tests).
+- MISTAKE: first wrote `renderer.test.ts` with the Write tool without checking it existed, dropping its 2 existing tests; caught at session close and restored. Prevention: check `git ls-files` / Read before Write on any test path.
+- Updated `v0.3.0.md` with a "Current state" section: what is pushed vs uncommitted, CI billing block, ordered next steps, live-check table, known limitations, known CI failures.
+- Updated wezFig `wezterm.lua` `format-tab-title`: strips the leading `■ `, redraws it in `oc_agent_color`; removed its now-unneeded `oc | ` strip. wezFig build notes appended.
+- Updated `v0.3.0.md` item 5 (table, implementation, snippet) and README row.
+- Verification: `bun test test/util/renderer.test.ts` 1/1; tui `tsc --noEmit` clean. WezTerm config not reloaded or live-checked.
+
+### User
+Terminal tab
+- The tab title now starts with a plain ■ (colored per agent in WezTerm) and no longer has the "OC |" prefix.
+
+---
+
+## 2026-10-03 (~06:54) - v0.2.79 - CI check: billing blocked runs; local CI parity fixes (launchDetached hop, generated SDK, httpapi scenarios, Windows test paths) - Claude Opus 5.5, low effort; Agent
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Agent; user asleep, full suites authorized; completed
+- Version: 0.2.79
+- ERROR (not code): every v0.2.78 GitHub job was "not started because recent account payments have failed or your spending limit needs to be increased". No cloud results exist for v0.2.78. User must fix Billing & plans, then re-run.
+- Ran CI equivalents locally (Windows): `bun run typecheck --continue=always` 27/27; generate (client `check:generated`, sdk build + openapi); all `test.yml` unit packages; providers; `test:httpapi`. Baseline = v0.2.76 cloud run (logs saved in session scratch).
+- Fixed launchDetached (`core/src/util/launch-detached.ts`): Windows pwsh hop was spawned `detached: true`; a DETACHED_PROCESS pwsh has no console and its Start-Process silently runs nothing. Hop now `detached: false` (same as `spawnResident`). This broke `run_after_turn` (test "queued exe never ran") and would have broken built-in `/revive-no-install` (11c). Verified argv round-trip incl. quotes, spaces, trailing backslash.
+- Fixed generated drift (pre-existing, baseline failed too): regenerated `packages/sdk/js/src/v2/gen/types.gen.ts` (`session_in_progress`, `session_reopen` permissions) and `packages/sdk/openapi.json` (`/debug-logging` etc.).
+- Fixed httpapi coverage (pre-existing): added exerciser scenarios for GET/PUT `/debug-logging` (isolated state path), POST `/question/ask` (invalid body 400), POST `/session/{id}/rename`, POST `/tui/execute-targeted-command`. Coverage and auth: 207 pass, 0 missing.
+- Fixed tests for item 9 default `["Task", "run_after_turn"]`: `proxy-task.test.ts` (2), `startup-diagnostics.test.ts` (1).
+- Fixed Windows-only test assumptions (pre-existing): `httpapi-codegen` write tests use `join()` for expected paths; fixture test uses `import.meta.dir` and normalizes CRLF. Guarded Windows-only tui tests on other platforms: `editor.test.ts` drive-path resolve, `open-sidebar.test.ts` clip.exe.
+- Verification: all unit packages pass locally on Windows: core 963, tui 366, opencode 4459 pass + 5 new failures (fixed; those files re-run 89 pass / 2 skip), httpapi-codegen 66/66, all others green; typecheck 27/27. httpapi effect mode: 205 pass, 2 fail (`POST /pty`, `/api/pty` 500) Windows-local only; no pty code touched this session; CI runs httpapi on Ubuntu where it passed in baseline.
+- Known CI failures not fixed (need a Linux run, no WSL distro here): tui ubuntu Cursor `state.vscdb` tests (2), core ubuntu pty stale/duplicate replay (2), opencode ubuntu/windows baseline fails (17/14, e.g. LSP interop timeouts, describeSpawnCwd, opencode run json). None of the 14 baseline Windows opencode failures reproduced locally.
+- Risk: running tests/exerciser from `packages/opencode` writes an untracked `packages/opencode/config.json` (`{}` or `$schema` only). Deleted both times; source not found yet. TODO: find the test writing to cwd.
+
+### User
+CI
+- The v0.2.78 GitHub Actions never ran: GitHub blocked them for a failed payment or spending limit. Fix Billing & plans, then re-run the workflows.
+- Locally, typecheck, generated-file checks, and the unit suites now pass on Windows; the remaining known failures are Linux-only or Windows pty in the HTTP exerciser.
+
+Revive and run after turn
+- Fixed a bug where programs started "detached" on Windows (run_after_turn targets and the new built-in revive helper) silently never launched.
+
+---
+
 ## 2026-10-03 (~06:10) - v0.2.78 - pwsh 7 is a required dependency; revert Windows PowerShell fallbacks - Claude Opus 5.5, low effort; Agent
 
 ### Agent
