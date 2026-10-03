@@ -109,3 +109,19 @@ test("TodoWrite still maps to oc's todowrite", () => {
   assert.equal(result.executed, false)
   assert.equal(result.name, "todowrite")
 })
+
+test("mapTool shows CLI-executed PowerShell as oc's bash row", () => {
+  const mapped = mapTool("PowerShell", {
+    command: "$PSVersionTable.PSVersion.ToString()",
+    description: "Show pwsh version",
+  })
+  assert.deepEqual(mapped, {
+    name: "bash",
+    input: {
+      command: "$PSVersionTable.PSVersion.ToString()",
+      description: "Show pwsh version",
+      timeout: undefined,
+    },
+    executed: true,
+  })
+})

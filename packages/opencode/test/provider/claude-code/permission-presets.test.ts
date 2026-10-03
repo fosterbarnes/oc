@@ -128,7 +128,7 @@ test("read-only matches proxy tool names case-insensitively", () => {
 test("read-only disallows the mutating CLI built-ins and keeps the reads", () => {
   const resolved = readOnly()
 
-  for (const name of ["Bash", "Write", "Edit", "NotebookEdit", "REPL", "JavaScript", "WebFetch"]) {
+  for (const name of ["Bash", "PowerShell", "Write", "Edit", "NotebookEdit", "REPL", "JavaScript", "WebFetch"]) {
     assert.ok(
       resolved.extraDisallowedTools.includes(name),
       `${name} must be disallowed`,

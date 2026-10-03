@@ -373,6 +373,17 @@ export function Prompt(props: PromptProps) {
         },
       },
       {
+        title: "Send prompt and stay on Home",
+        name: "prompt.submit.background",
+        category: "Prompt",
+        enabled: !props.sessionID && route.data.type === "home",
+        run: async () => {
+          if (props.sessionID || route.data.type !== "home") return
+          const handled = await submit(true)
+          if (handled) dialog.clear()
+        },
+      },
+      {
         title: "Remove editor context",
         name: "prompt.editor_context.clear",
         category: "Prompt",
@@ -863,6 +874,15 @@ export function Prompt(props: PromptProps) {
     }
   })
 
+  // Targeted so Ctrl+Enter on Home wins over the managed textarea's input.newline.
+  useBindings(() => {
+    return {
+      target: inputTarget,
+      enabled: inputTarget() !== undefined && !props.disabled && !props.sessionID && route.data.type === "home",
+      bindings: tuiConfig.keybinds.get("prompt.submit.background"),
+    }
+  })
+
   useBindings(() => {
     return {
       target: inputTarget,
@@ -986,7 +1006,7 @@ export function Prompt(props: PromptProps) {
   })
 
   let submitting = false
-  async function submit() {
+  async function submit(stayHome = false) {
     // Prevent overlapping invocations (e.g. a double-pressed Enter, or the
     // input's native onSubmit racing another dispatch). Without this guard,
     // a second call slips past the empty-input check before the first call
@@ -996,13 +1016,13 @@ export function Prompt(props: PromptProps) {
     if (submitting) return false
     submitting = true
     try {
-      return await submitInner()
+      return await submitInner(stayHome)
     } finally {
       submitting = false
     }
   }
 
-  async function submitInner() {
+  async function submitInner(stayHome = false) {
     workspace.clearNotice()
 
     // IME: double-defer may fire before onContentChange flushes the last
@@ -1197,7 +1217,7 @@ export function Prompt(props: PromptProps) {
 
     // temporary hack to make sure the message is sent
     // no prompt replay: navigation only, no automatic reprompt
-    if (!props.sessionID) {
+    if (!props.sessionID && !stayHome) {
       if (editorParts.length > 0) editor.preserveSelectionFromNewSession()
       setTimeout(() => {
         if (renderer.isDestroyed) return
@@ -1208,6 +1228,10 @@ export function Prompt(props: PromptProps) {
       }, 50)
     }
     if (!input.isDestroyed) input.clear()
+    if (stayHome && !input.isDestroyed) {
+      input.focus()
+      toast.show({ message: "Started new session", variant: "info" })
+    }
     if (finishMoveProgress) move.finishSubmit()
     return true
   }

@@ -135,3 +135,13 @@ test("cliHygieneEnv fills only the vars missing from the inherited env", () => {
     {},
   )
 })
+
+test("claudeSpawnEnv enables the PowerShell tool on Windows unless the shell set it", () => {
+  withEnv({ CLAUDE_CODE_USE_POWERSHELL_TOOL: undefined }, () => {
+    const env = claudeSpawnEnv()
+    assert.equal(env.CLAUDE_CODE_USE_POWERSHELL_TOOL, process.platform === "win32" ? "1" : undefined)
+  })
+  withEnv({ CLAUDE_CODE_USE_POWERSHELL_TOOL: "0" }, () => {
+    assert.equal(claudeSpawnEnv().CLAUDE_CODE_USE_POWERSHELL_TOOL, "0")
+  })
+})

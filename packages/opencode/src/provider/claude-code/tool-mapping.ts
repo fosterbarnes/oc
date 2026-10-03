@@ -46,6 +46,7 @@ function mapToolInput(name: string, input: any): any {
         limit: input.limit,
       }
     case "Bash":
+    case "PowerShell":
       return {
         command: input.command,
         description:
@@ -210,6 +211,12 @@ export function mapTool(
       log.debug("mapping MCP tool", { original: name, mapped: openCodeName })
       return { name: openCodeName, input, executed: true }
     }
+  }
+
+  // oc has one shell tool, so PowerShell (enabled in spawn-env.ts) shows as a
+  // `bash` row; a raw "PowerShell" part has no registry entry and renders invalid.
+  if (name === "PowerShell") {
+    return { name: "bash", input: mapToolInput(name, input), executed: true }
   }
 
   // Tools executed by Claude CLI internally - map to lowercase for opencode

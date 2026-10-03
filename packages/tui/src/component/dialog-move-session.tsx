@@ -70,7 +70,7 @@ export function DialogMoveSession(props: DialogMoveSessionProps) {
     return loadedProject()
   })
 
-  const [directories, { refetch }] = createResource(
+  const [directories, { refetch }] = createResource<ProjectDirectory[] | undefined, string>(
     () => (props.initialRemoving ? undefined : props.projectID),
     async (projectID, info): Promise<ProjectDirectory[] | undefined> => {
       try {
@@ -86,11 +86,14 @@ export function DialogMoveSession(props: DialogMoveSessionProps) {
         // An initial load with no data surfaces the inline error view below. A
         // failed refresh intentionally stays quiet and keeps the already-shown
         // list interactive; reopening the dialog retries the load.
-        return info.value
+        return Array.isArray(info.value) ? info.value : undefined
       }
     },
   )
-  const directoryData = createMemo(() => directories() ?? props.initialDirectories)
+  const directoryData = createMemo((): ProjectDirectory[] | undefined => {
+    const loaded = directories()
+    return Array.isArray(loaded) ? loaded : props.initialDirectories
+  })
   // Show the locked error view only when we have nothing to display. A refresh
   // that fails after the list rendered keeps the list and its actions.
   const showError = createMemo(() => Boolean(loadError()) && !directoryData())
@@ -113,7 +116,7 @@ export function DialogMoveSession(props: DialogMoveSessionProps) {
     if (showError()) return []
     const data = directoryData()
     const current = currentRoot()?.directory
-    if (directories.loading && !data && !current) return [{ title: "Loading project directories…", value: undefined }]
+    if (directories.loading && !data && !current) return [{ title: "Loading project directories...", value: undefined }]
     const roots = [...(data ?? [])]
     if (current && !roots.some((item) => item.directory === current)) roots.unshift({ directory: current })
     roots.sort((a, b) => {

@@ -52,15 +52,17 @@ import {
  * Task, TodoWrite, TaskCreate, TaskUpdate, TaskGet, TaskList, TaskStop,
  * Skill, REPL, JavaScript, AskUserQuestion, ToolSearch, SendUserMessage.
  *
- * The ones `read-only` refuses are the four that change this machine (Bash,
- * Write, Edit, NotebookEdit), the two that run code (REPL, JavaScript) and
- * WebFetch, which `--restricted` also strips. `WebSearch` stays: it reads.
+ * The ones `read-only` refuses are the five that change this machine (Bash,
+ * PowerShell, Write, Edit, NotebookEdit), the two that run code (REPL,
+ * JavaScript) and WebFetch, which `--restricted` also strips. `WebSearch`
+ * stays: it reads.
  * `Task` stays because a Claude-internal subagent inherits the same
  * restricted tool set; the `task` PROXY def is dropped instead, since an
  * opencode subagent runs in opencode under its own permissions.
  */
 export const READ_ONLY_DISALLOWED_CLI_TOOLS = [
   "Bash",
+  "PowerShell",
   "Write",
   "Edit",
   "NotebookEdit",

@@ -110,6 +110,178 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-03 (~03:20) - v0.2.76 - PowerShell calls display as bash; read-only blocks PowerShell - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation; completed
+- Version: 0.2.76
+- Follows v0.2.75 (`CLAUDE_CODE_USE_POWERSHELL_TOOL`). Live check sessions ses_eff5f93afffeJyYvosWd1cL0Dy / ses_eff5f69a7ffeJUk1WAxKHSnoCV: CLI had PowerShell, ran pwsh 7.6.6, Write kept literal `\x1b`. But oc rendered every PowerShell call as `invalid` ("Model tried to call unavailable tool 'PowerShell'"), output still present.
+- Fixed `mapTool` (`provider/claude-code/tool-mapping.ts`): `PowerShell` -> oc `bash` row, provider-executed; `mapToolInput` shares Bash case.
+- Fixed `READ_ONLY_DISALLOWED_CLI_TOOLS` (`permission-presets.ts`): added `PowerShell`. Risk closed: read-only preset on CLI without `--restricted` would have left PowerShell able to mutate.
+- Checked: no other src code in `provider/claude-code` keys on "Bash" (`proxy-tool-selection.ts` already pairs Bash+PowerShell).
+- Verification: `bun test test/provider/claude-code/tool-mapping.test.ts test/provider/claude-code/permission-presets.test.ts` 32 pass (new PowerShell mapping test; read-only test now lists PowerShell). Live oc display not rechecked (needs user build/install).
+
+### User
+Claude Code provider
+- PowerShell commands Claude runs inside oc now show as normal shell rows instead of red "invalid" tool rows.
+- The read-only permission preset now blocks PowerShell as well as Bash.
+
+---
+
+## 2026-10-03 (~03:12) - v0.2.75 - Claude Code gets the PowerShell tool on Windows - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation; completed
+- Version: 0.2.75
+- Added `claudeSpawnEnv` (`provider/claude-code/spawn-env.ts`): `CLAUDE_CODE_USE_POWERSHELL_TOOL ??= "1"` on win32. CLI 2.1.285 gates PowerShell behind this preview var; desktop app enables it. Without it oc spawns had `Shell: bash` only.
+- Cause: oc Claude did 53% of file edits via shell (heredoc/sed/python) vs 28% in desktop (all `~/.claude/projects` transcripts). Git Bash quoting layers turned `\x1b` into raw ESC in wezterm.lua (session ses_eff6f6454ffeGE1S03pCXIjC4V); Edit then could not match the byte.
+- Added principles.md (`~/.config/opencode`) Work rule: edit project files with Edit/Write, not shell writes. CLAUDE.md loads it in both harnesses, so no oc appended-prompt change.
+- Note: `NATIVE_TOOLS_BY_HOST_TOOL.bash` already maps to Bash+PowerShell, so oc agent bash denial still disables PowerShell.
+- Note: checked other recurring oc tool errors: proxy edit rejections/"Could not find oldString" (proxy edit no longer default; `DEFAULT_PROXY_TOOL_NAMES = ["Task"]`) and "Unknown skill: build-notes" (all recent Skill calls succeed). Both historical; no change.
+- Verification: `bun test test/provider/claude-code/spawn-env.test.ts` 11 pass (new PowerShell test included). First run showed one unnamed beforeEach/afterEach hook timeout that did not reproduce. Live CLI check (`claude -p` stream-json init, haiku): var=1 lists Bash+PowerShell, var=0 Bash only. Full oc spawn not checked (needs user build/install).
+
+### User
+Claude Code provider
+- On Windows, Claude inside oc now gets the PowerShell tool like the Claude desktop app, so it no longer has to edit files through Git Bash quoting.
+- Set `CLAUDE_CODE_USE_POWERSHELL_TOOL=0` in your shell to turn it off.
+- Your global principles now tell agents to use Edit/Write for project files instead of shell writes.
+
+---
+
+## 2026-10-03 (~03:04) - v0.2.74 - Home launch bound to Ctrl+Enter - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation; completed, live TUI unverified
+- Version: 0.2.74
+- Changed `prompt_submit_background` default `f7` -> `ctrl+return` in `packages/tui/src/config/keybind.ts`. User decision: F7 removed entirely, Ctrl+Enter is the bind.
+- Removed `prompt.submit.background` from the untargeted `prompt.palette` gather in `prompt/index.tsx`; added a Home-only `useBindings` layer targeted at the prompt textarea so Ctrl+Enter beats managed-textarea `input.newline` (which still lists `ctrl+return` for sessions).
+- Rewrote `packages/tui/test/cli/tui/prompt-background.test.tsx`: focused textarea + real `registerOpencodeKeymap`; Ctrl+Enter runs command on Home without inserting text, inserts newline when disabled (session).
+- Added WezTerm key in `wezFig/wezterm.lua` (outside repo): CTRL+Enter -> `SendString '\x1b[13;5u'` (CSI-u), same pattern as existing Ctrl+M entry, so modifier survives Win10 ConPTY.
+- Verification: `bun test ./test/cli/tui/prompt-background.test.tsx` 2 pass; `tsc --noEmit` in packages/tui clean. Not built or installed.
+- MISTAKE: Python text-mode writes on Windows converted LF files to CRLF and a `\\x1b` heredoc wrote a raw ESC byte; fixed with `sed 's/\r$//'` and an explicit `chr(92)`. Edit text files with the Edit tool, not Python, on this machine.
+
+### User
+Prompt
+- On Home, Ctrl+Enter sends the prompt to a new session and keeps you on Home; F7 no longer does this.
+- Inside a session, Ctrl+Enter still adds a newline.
+- WezTerm now sends a distinct Ctrl+Enter code so the TUI can tell it apart from Enter.
+
+---
+
+## 2026-10-03 (~03:00) - v0.2.73 - Clean Home launch debug tests - GPT-6.1 Sol, effort not exposed; Implementation
+
+### Agent
+- Meta: GPT-6.1 Sol; effort not exposed; Implementation; completed
+- Version: 0.2.73
+- Kept F7 `prompt_submit_background` / command `prompt.submit.background` / stayHome submit path.
+- Removed source-slicing diagnostic tests (`Bun.Transpiler` / `new Function` extract of prompt/index.tsx). Replaced with two wiring checks: default F7 bind, F7 fires on Home and not in a session.
+- Verification: `bun test ./test/cli/tui/prompt-background.test.tsx --timeout 30000` in packages/tui; 2 pass. Live install still user-only.
+
+### User
+Home launch
+- F7 is unchanged. Diagnostic extract tests are gone. Next agent should pick up from a handoff, not re-debug the bind.
+
+---
+
+## 2026-10-03 (~02:30) - v0.2.72 - Fix TUI tsc build errors - GPT-6.1 Sol, effort not exposed; Implementation
+
+### Agent
+- Meta: GPT-6.1 Sol; effort not exposed; Implementation; completed
+- Version: 0.2.72
+- Changed Home launch keybind to `prompt_submit_background` + CommandMap `prompt.submit.background`; matches other prompt_* keys. tui.json override is `prompt_submit_background`.
+- Fixed `DialogMoveSession` directory resource typing: Solid `createResource` inferred `{}`, so tsc failed on `filter`/`find`/`spread`. Typed resource as `ProjectDirectory[]` and guarded `directoryData`.
+- Verification: `bunx tsc --noEmit` in packages/tui clean; `bun test ./test/cli/tui/prompt-background.test.tsx --timeout 30000` 3 pass. `bun turbo typecheck` was already clean (tsgo).
+
+### User
+Build
+- tsc no longer fails on the move-session directory list. F7 still sends a Home prompt to a new session; configure it in tui.json as `prompt_submit_background`.
+
+---
+
+## 2026-10-02 (~16:45) - v0.2.71 - Diagnose Home F7 launch - GPT-6.1 Sol, effort not exposed; Implementation
+
+### Agent
+- Meta: GPT-6.1 Sol; effort not exposed; Implementation; completed
+- Version: 0.2.71
+- Root cause: `prompt.submit.background` was a leftover Ctrl+Enter textarea `target`/`focus-within` layer; F7 never joined `prompt.palette` gather. Submit path itself was fine. Prior session tests used kitty-only `pressKey("F7")` and required focus, so they could not catch CSI/unfocused Home.
+- Fixed: register F7 on the untargeted Home `prompt.palette` layer; removed dedicated target binding. Command still no-ops off Home.
+- Added prompt-background tests: lookup cmd/key, palette gather, kitty F7, CSI F7 without kitty, unfocused Home dispatch, session no-op, `dispatchCommand`.
+- Verification: `bun test ./test/cli/tui/prompt-background.test.tsx --timeout 30000` in packages/tui; 3 pass, 0 fail, 25 assertions. Live ocDebug/install not run.
+- TODO: user must install/restart ocdebug to pick this up; previous F7/Ctrl+Enter/F6 changes were source-only.
+
+### User
+Home F7
+- F7 was bound only while the Home prompt box owned keyboard focus, so it often did nothing even when the command existed.
+- It is now a normal Home command. After install, Ctrl+P "Send prompt and stay on Home" and F7 should both launch without leaving Home.
+
+---
+
+## 2026-10-02 (~16:18) - v0.2.70 - Use F7 for Home prompt launch - GPT-6.1 Sol, effort not exposed; Implementation
+
+### Agent
+- Meta: GPT-6.1 Sol; effort not exposed; Implementation; completed
+- Version: 0.2.70
+- Changed `prompt.submit.background` default F6 -> F7 at user request; F6 belongs to another app. Updated same-session shortcut assertions and emitted function keys.
+- Verification: `bun test ./test/cli/tui/prompt-background.test.tsx --timeout 30000` in packages/tui; 2 pass, 0 fail, 19 assertions. Build/install and RustDesk behavior not tested.
+- Kept revision 0.2.70; already bumped once in this session.
+
+### User
+Home shortcut
+- Press F7 to send your Home prompt to a new session and remain on Home.
+
+---
+
+## 2026-10-02 (~16:14) - v0.2.70 - Use F6 for Home prompt launch - GPT-6.1 Sol, effort not exposed; Implementation
+
+### Agent
+- Meta: GPT-6.1 Sol; effort not exposed; Implementation; completed
+- Version: 0.2.70
+- Changed `prompt.submit.background` default from Ctrl+Enter to F6 after user reported RustDesk shortcut failure and requested no Control modifier. No default F6 conflict found in TUI keybindings.
+- Updated same-session regression checks: F6 launches only focused Home prompt; F6 in session does not submit, Ctrl+Enter remains newline.
+- Verification: `bun test ./test/cli/tui/prompt-background.test.tsx --timeout 30000` in packages/tui; 2 pass, 0 fail, 19 assertions. RustDesk behavior/build/install not tested.
+- MISTAKE: mockInput.pressKey requires uppercase F6 symbolic key; lowercase f6 did not emit function key. Corrected after reading mock key definitions.
+- Kept revision 0.2.70; already bumped once in this session.
+
+### User
+Home shortcut
+- Press F6 to send your Home prompt to a new session and remain on Home; no modifier key is required.
+
+---
+
+## 2026-10-02 (~16:10) - v0.2.70 - Review Home prompt launch changes - GPT-6.1 Sol, effort not exposed; Cleanup
+
+### Agent
+- Meta: GPT-6.1 Sol; effort not exposed; Cleanup; completed
+- Version: 0.2.70
+- Reviewed only same-session Home submission action, target binding, shared-submit option, toast, regression checks, and revision/notes; no introduced runtime defect found.
+- Hardened prompt-background.test.tsx source extraction: normalize CRLF, fail explicitly when production blocks disappear, execute production action rather than stand-in callback, check unfocused prompt cannot launch.
+- Verification: `bun test ./test/cli/tui/prompt-background.test.tsx --timeout 30000` in packages/tui; 2 pass, 0 fail, 18 assertions. Live terminal/build/install deferred to user.
+- Kept revision 0.2.70; already bumped once in this session.
+
+### User
+Scoped cleanup
+- Reviewed the Home launch feature and strengthened its checks for Windows line endings, the actual Ctrl+Enter action, and prompt focus.
+
+---
+
+## 2026-10-02 (~16:01) - v0.2.70 - Send prompts while staying on Home - GPT-6.1 Sol, effort not exposed; Implementation
+
+### Agent
+- Meta: GPT-6.1 Sol; effort not exposed; Implementation; completed
+- Version: 0.2.70
+- Added Home-only `prompt.submit.background` action, default Ctrl+Enter; focused target binding overrides newline only on Home.
+- Changed shared Prompt submission to accept stayHome; reuses session creation/send/history/guard, skips navigation, clears and focuses input, shows Started new session toast.
+- Added prompt-background.test.tsx: executes production submission functions and mounts production binding with real keymap/textarea; checks distinct sessions, normal navigation, draft retention on creation failure, and session-screen newline.
+- Verification: `bun test ./test/cli/tui/prompt-background.test.tsx --timeout 30000` in packages/tui; 2 pass, 0 fail. Build/install and live terminal shortcut deferred to user.
+- MISTAKE: keybinding test first used mockInput.pressKey("return"), which did not emit Enter; corrected to pressEnter({ ctrl: true }).
+
+### User
+Home prompt
+- Ctrl+Enter starts a new session from Home and leaves the cleared prompt focused for your next task, with a brief confirmation toast.
+- Enter still opens the new session. Ctrl+Enter inside a session still inserts a newline.
+
+---
+
 ## 2026-10-02 (~15:30) - v0.2.69 - Fix session tool error types - GPT-6.1 Sol, effort not exposed; Implementation
 
 ### Agent

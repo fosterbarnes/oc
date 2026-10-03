@@ -74,5 +74,10 @@ export function claudeSpawnEnv(opts?: {
   // list of older models unless this is set; they feed opencode's todo panel.
   env.CLAUDE_CODE_ENABLE_TODO_TOOLS ??= "1"
 
+  // The standalone CLI (2.1.285) offers its PowerShell tool only behind this
+  // preview flag; the desktop app turns it on. Without it Windows gets Git
+  // Bash alone, whose nested quoting mangled escapes in shell file writes.
+  if (process.platform === "win32") env.CLAUDE_CODE_USE_POWERSHELL_TOOL ??= "1"
+
   return env
 }
