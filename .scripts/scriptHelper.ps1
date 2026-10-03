@@ -8,6 +8,7 @@ $distFolder = "$repoRoot\packages\opencode\dist"
 $versionFolder = "$repoRoot\.version"
 $version = "$versionFolder\version"
 $readme = "$repoRoot\README.md"
+$buildNotes = "$repoRoot\buildNotes.txt"
 $ghRepo = 'fosterbarnes/oc'
 
 function runNativeCommand {

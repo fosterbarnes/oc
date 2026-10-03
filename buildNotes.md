@@ -110,6 +110,25 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-03 (~04:08) - v0.2.76 - push.ps1 reads buildNotes.txt; agent-push skill - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation; completed
+- Version: 0.2.76 (same session as entries below; no second bump)
+- Changed `.scripts/push.ps1` to base `SCRIPTS.md` convention: commit subject/body from repo-root `buildNotes.txt` (line 1, blank line, body), positional or prompted subject as fallback, `-DryRun`/`-n` prints commands only. Kept oc specifics: `UPSTREAM` excluded from `git add`, `closeOut 3`, no browser open (oc helper has no `openUrl`).
+- Added `$buildNotes` to `.scripts/scriptHelper.ps1`.
+- Changed `AGENTS.md`: replaced "Do not edit buildNotes.txt" with a `buildNotes.txt` section; agents write it when preparing a push (`agent-push`), commit-message format defined there. `SCRIPTS.md` push rows updated.
+- Note: older buildNotes.md lines (MISTAKES list, project invariants) still say agents never edit `buildNotes.txt`; insert-only file, so not edited. `AGENTS.md` now governs.
+- Added user-level: `~/.claude/skills/agent-push/SKILL.md` (message to buildNotes.txt, focused checks, prePush, push -DryRun, push); `principles.md` push and buildNotes.txt rules now name the `agent-push` exception.
+- Verification: `push.ps1 -DryRun` with no file (fallback subject), with a valid `buildNotes.txt` (subject + body), and with a non-blank line 2 (throws). Temporary `buildNotes.txt` removed. No real push run.
+
+### User
+Scripts
+- push.ps1 now takes the commit message from buildNotes.txt (first line is the title, then a blank line, then the description), like the base template, and has a -DryRun option.
+- The new agent-push skill writes that message, runs quick checks and prePush, then pushes.
+
+---
+
 ## 2026-10-03 (~03:52) - v0.2.76 - Live Claude Code probing: unmapped tools, background wake-ups - Claude Opus 5.5, low effort; Implementation
 
 ### Agent

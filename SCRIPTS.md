@@ -14,7 +14,7 @@ Project automation lives in `.scripts/`. Scripts target PowerShell 7 and fail on
 | `.scripts/countCode.ps1` | Uses `scc` on PATH to refresh the README code count and root `scc.txt` language report. Runnable independently. |
 | `.scripts/updateUpstream.ps1` | Fetches and fast-forwards the separate `UPSTREAM\opencode` checkout without modifying this customized parent checkout. |
 | `.scripts/syncAndInstall.ps1` | Fail-closed upstream sync into this custom fork, then verify, backup, stop `opencode.exe`, and install. |
-| `.scripts/push.ps1` | Commits parent changes with a supplied or prompted message, then pushes the current branch. It does not rewrite `.version/version` and does not stage `UPSTREAM/`. `-Force` is explicit. |
+| `.scripts/push.ps1` | Commits parent changes with the message in `buildNotes.txt` (line 1 subject, blank line, body), falling back to a supplied or prompted subject, then pushes the current branch. It does not rewrite `.version/version` and does not stage `UPSTREAM/`. `-DryRun` prints the commands only; `-Force` is explicit. |
 | `.scripts/pushRelease.ps1` | Tags and publishes archives from `packages/opencode/dist` to `fosterbarnes/oc` using the `.version/version` maintenance version. Existing tags are not force-moved. |
 | `.scripts/install.ps1` | User-only build-and-install of both `opencode.exe` and `ocdebug.exe`. `-NoBuild`/`-nb` installs existing artifacts. It stops OpenCode processes and must not run from an agent. |
 | `.scripts/revive.ps1` | `/revive-no-install`: `oc --shutdown-all`, start the resident server, reopen oc through `Desktop\occ.lnk`. No elevation. |
@@ -85,7 +85,7 @@ The standalone build is the repository's `packages/opencode/script/build.ts --si
 
 `.version\version` is a maintenance-only semantic version for these local scripts. It is intentionally separate from OpenCode's package version. The agent increments the last number once per code-changing session and when an upstream apply advances isolated `dev` (`0.0.8` -> `0.0.9`); no script bumps it (see `AGENTS.md` Revision). `pushRelease.ps1` uses `v<maintenance-version>` and uploads archive files under `packages/opencode/dist` to `fosterbarnes/oc`. It does not force-move an existing tag. `push.ps1` does not rewrite this file.
 
-Do not run `push.ps1` or `pushRelease.ps1` during ordinary validation. They create commits, push branches or tags, and publish GitHub releases. `buildNotes.txt` is not used or modified by these scripts.
+Do not run `push.ps1` or `pushRelease.ps1` during ordinary validation. They create commits, push branches or tags, and publish GitHub releases. `push.ps1` reads `buildNotes.txt` for the commit message (see `AGENTS.md`); it never modifies it.
 
 ## Code count
 
