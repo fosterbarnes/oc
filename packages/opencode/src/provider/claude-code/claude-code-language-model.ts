@@ -10,7 +10,7 @@ import type { ClaudeCodeConfig } from "./types.js"
 import { translateStreamForHost } from "./host-tools.js"
 import { getClaudeUserMessage, visibleThreadTokens } from "./message-builder.js"
 import { getRuntimeMcpStatus, fetchSessionRunState } from "./runtime-status.js"
-import { getActiveProcess, getClaudeSessionId, describeSessionKey } from "./session-manager.js"
+import { getActiveProcess, getClaudeSessionId, describeSessionKey, WAKE_PROMPT_TEXT } from "./session-manager.js"
 import { log } from "./logger.js"
 import { detectCliVersion } from "./cli-version.js"
 import { setProxyDeadlineGuard } from "./proxy-deadline.js"
@@ -156,6 +156,12 @@ export class ClaudeCodeLanguageModel implements LanguageModelV3 {
           cliToolCallIds: new Set(previousPendingProxyCalls.map((c) => c.toolCallId)),
           stripContextReminders: stripContextRemindersEnabled(this.config),
         })
+    // A wake prompt whose CLI turn was already taken over by a user message
+    // has nothing to attach to; sending it would hand Claude the marker text.
+    if (userMsg.includes(WAKE_PROMPT_TEXT) && !getActiveProcess(turn.sessionKey)?.autonomousTurn) {
+      log.info("doStream short-circuit: stale wake prompt")
+      return syntheticStream("stale-wake")
+    }
     const proxyTools = turn.compactionMode || !options.tools?.length ? null : resolvedProxyTools(this.config)
 
     // One MCP status snapshot per turn, so the hot-reload check and the spawn

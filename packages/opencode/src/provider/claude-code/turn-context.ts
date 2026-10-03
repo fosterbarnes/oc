@@ -38,6 +38,9 @@ export async function resolveTurnContext(
     affinity,
     cwd,
     agent,
+    // oc's own model and variant names, for a wake prompt (session-manager.ts).
+    modelId,
+    variant: readReasoningEffort(options.providerOptions, config.provider),
     agentPrompt: resolveOpencodeAgentPrompt(options.providerOptions, config.provider),
     compactionMode,
     effectiveModelId,

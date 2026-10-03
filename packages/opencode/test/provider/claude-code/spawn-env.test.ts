@@ -84,56 +84,28 @@ test("a requested effort wins over a shell-level CLAUDE_CODE_EFFORT_LEVEL", () =
   })
 })
 
-// CLI hygiene. Both names were verified against the Claude Code 2.1.263 bundle;
-// the point is to stop the CLI autoupdating out from under the version
+// CLI hygiene: stop the CLI autoupdating out from under the version
 // `detectCliVersion` cached, which several flag gates are keyed on.
 
-test("the hygiene list is the two vars verified against the CLI bundle", () => {
-  assert.deepEqual(
-    [...CLI_HYGIENE_ENV_VARS],
-    ["DISABLE_AUTOUPDATER", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"],
-  )
-})
-
-test("claudeSpawnEnv disables the autoupdater and non-essential traffic", () => {
-  withEnv(noHygieneVars, () => {
+test("claudeSpawnEnv disables the autoupdater but keeps non-essential traffic", () => {
+  withEnv({ ...noHygieneVars, CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: undefined }, () => {
     const env = claudeSpawnEnv()
     assert.equal(env.DISABLE_AUTOUPDATER, "1")
-    assert.equal(env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC, "1")
+    // Setting it drops Monitor, PushNotification and claude.ai connectors.
+    assert.equal(env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC, undefined)
   })
 })
 
 test("claudeSpawnEnv never overrides a hygiene var the user set", () => {
-  withEnv(
-    {
-      DISABLE_AUTOUPDATER: "0",
-      CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "",
-    },
-    () => {
-      const env = claudeSpawnEnv()
-      // "0" is how the CLI is told to keep autoupdating; we must not stomp it.
-      assert.equal(env.DISABLE_AUTOUPDATER, "0")
-      // An empty string reads as off to the CLI, so it is a real choice too.
-      assert.equal(env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC, "")
-    },
-  )
+  withEnv({ DISABLE_AUTOUPDATER: "0" }, () => {
+    // "0" is how the CLI is told to keep autoupdating; we must not stomp it.
+    assert.equal(claudeSpawnEnv().DISABLE_AUTOUPDATER, "0")
+  })
 })
 
 test("cliHygieneEnv fills only the vars missing from the inherited env", () => {
-  assert.deepEqual(cliHygieneEnv({}), {
-    DISABLE_AUTOUPDATER: "1",
-    CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
-  })
-  assert.deepEqual(cliHygieneEnv({ DISABLE_AUTOUPDATER: "0" }), {
-    CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
-  })
-  assert.deepEqual(
-    cliHygieneEnv({
-      DISABLE_AUTOUPDATER: "1",
-      CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
-    }),
-    {},
-  )
+  assert.deepEqual(cliHygieneEnv({}), { DISABLE_AUTOUPDATER: "1" })
+  assert.deepEqual(cliHygieneEnv({ DISABLE_AUTOUPDATER: "0" }), {})
 })
 
 test("claudeSpawnEnv enables the PowerShell tool on Windows unless the shell set it", () => {

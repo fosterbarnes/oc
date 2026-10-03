@@ -27,18 +27,13 @@ const cache = new Map<string, Promise<CliVersion | null>>()
  * supports it. A binary swapped mid-session is a plain correctness hazard
  * besides.
  *
- * Both names were read out of the Claude Code 2.1.263 bundle rather than
- * assumed (`rg -a` over the Mach-O, the technique AGENTS.md records for the CLI
- * stream events). `DISABLE_AUTOUPDATER` is read as an update blocker, and
- * `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` both suppresses non-essential
- * network traffic and counts as a second, independent update blocker.
- * Anthropic's own runner sets `DISABLE_AUTOUPDATER: "1"` on the children it
- * spawns, which is the same use we are putting it to here.
+ * `DISABLE_AUTOUPDATER` is the update blocker Anthropic's own runner sets on
+ * the children it spawns. Do not add `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`:
+ * it also blocks updates, but on 2.1.285 it drops Monitor, PushNotification,
+ * DesignSync, claude.ai MCP connectors and several slash commands, which left
+ * oc's Claude weaker than the CLI run directly.
  */
-export const CLI_HYGIENE_ENV_VARS = [
-  "DISABLE_AUTOUPDATER",
-  "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC",
-] as const
+export const CLI_HYGIENE_ENV_VARS = ["DISABLE_AUTOUPDATER"] as const
 
 /**
  * The hygiene vars that are missing from `inherited`, each set to "1".

@@ -110,6 +110,52 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-03 (~03:52) - v0.2.76 - Live Claude Code probing: unmapped tools, background wake-ups - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation; completed
+- Version: 0.2.76 (same session as entries below; no second bump)
+- Method: temporary `OC_CC_PROBE` tap in `spawnClaudeProcess` (args, env names, system prompt, stdin, stdout, stderr per spawn), oc run from source (`bun run src/index.ts run|serve`) with isolated `XDG_DATA_HOME`, 8 Sonnet 5.5 prompts. Probe removed after.
+- Fixed `turn-stream.ts` tool-call emit: `dynamic: mapped.executed`. AI SDK 6 `doParseToolCall` keeps a `providerExecuted && dynamic` call with no registry entry under its own name; before, `experimental_repairToolCall` in `session/llm.ts` turned every unmapped CLI tool (Monitor, WebFetch, ScheduleWakeup, Cron*, Skill...) into an `invalid` row. Kept PowerShell's explicit `bash` mapping from the entry below: it still routes PowerShell to oc's shell renderer instead of a generic row.
+- Added autonomous-turn wake: when the CLI emits `system/init` with no oc turn listening (background task finished after the turn ended; Claude wakes itself), `requestWakeTurn` (`session-manager.ts`) posts `prompt_async` with a synthetic `WAKE_PROMPT_TEXT` part using the last turn's `wakeTarget` (session, directory, provider, oc model, agent, variant). The turn carrying the marker skips the in-flight interrupt and stdin write, and feeds buffered lines from that `init` on through `onLine` so tool calls and text render live. A normal turn clears `autonomousTurn` and interrupts as before; a stale wake short-circuits in `claude-code-language-model.ts` (`stale-wake`).
+- Added `modelId`/`variant` to `resolveTurnContext` for the wake prompt.
+- Added `test/provider/claude-code/autonomous-turn.test.ts`: fake CLI wakes after turn 1; asserts wake post body and that turn 2 streams "Woke." without any stdin write.
+- Live results: wake turn opened 150ms after CLI init, showed Read + reply; marker never reached CLI stdin (1 stdin write total). Interrupt mid-`ping` aborted cleanly, follow-up turn healthy. Server restart: respawn used `--resume`, Claude remembered prior turn.
+- Note: Claude Code refuses a standalone foreground `Start-Sleep N`; use `ping -n N 127.0.0.1` for long-running probes.
+- MISTAKE: `XDG_DATA_HOME` alone did not isolate the source runs: the user env sets absolute `OPENCODE_DB` (`~\.local\share\opencode\opencode.db`), which `Database.path()` (`core/src/database/database.ts`) prefers. 4 harness test sessions (dir `...scratchpad/proj`) landed in the real DB. No schema change, so no migration risk. For isolated runs set `OPENCODE_DB` too.
+- Live TUI check by user (sessions base17-19, installed build): PowerShell + Bash rows normal; WebFetch/Monitor rows normal; background follow-up woke on its own with synthetic marker hidden.
+- MISTAKE: one `turn-stream.ts` import edit done via Python through Bash right after adding the Edit/Write rule to principles.md. Use the Edit tool for project files.
+- Risk: `bufferUnattendedLine` cap (500 lines) could drop an autonomous turn's `init` if the wake turn is slow; then the attach turn waits on live lines only.
+- Verification: `bun test test/provider/claude-code` 532 tests, 0 fail, 9 skip; `tsc --noEmit` clean for `provider/claude-code`. Not checked in the TUI (needs user build/install).
+
+### User
+Claude Code provider
+- Claude Code tools oc has no name for (Monitor, WebFetch, ScheduleWakeup and others) now show as normal tool rows instead of red "invalid" rows.
+- When Claude starts a background command and it finishes after Claude's turn ended, Claude's follow-up now appears right away, like in a normal Claude Code terminal, instead of showing up under your next message.
+
+---
+
+## 2026-10-03 (~03:30) - v0.2.76 - Claude Code no longer runs in essential-traffic mode - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation; completed
+- Version: 0.2.76 (same session as PowerShell display entry below; no second bump)
+- Removed `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` from `CLI_HYGIENE_ENV_VARS` (`provider/claude-code/cli-version.ts`); list is now `DISABLE_AUTOUPDATER` only, which already pins the CLI version.
+- Cause: measured `claude` stream-json init (2.1.285) in a clean env (desktop `CLAUDE*` vars unset) with vs without the var. With it the CLI loses `Monitor`, `PushNotification`, `DesignSync`, claude.ai MCP connectors (Claude Docs), skills design/design-sync, slash advisor/ultrareview/skill-doctor/import/design*, and sets `analytics_disabled`/`product_feedback_disabled`. Binary also skips the `[Bootstrap]` fetch (`additional_model_options`).
+- Note: user env/profile/settings do not set the var, so oc was the only source.
+- Note: scratchpad dir, `Artifact*`, `SendUserFile`, `ListSkills`/`SearchPlugins` etc. are host-gated by `CLAUDE_CODE_ENTRYPOINT` (`claude-desktop`, `claude-vscode`), absent for `cli`/`sdk-*`, so plain terminal `claude` lacks them too. Not spoofing the entrypoint. `strictMcpConfig: true` in opencode.jsonc still blocks claude.ai connectors.
+- MISTAKE: first probe ran inside the desktop app and inherited its `CLAUDE_CODE_ENTRYPOINT=claude-desktop`, so it wrongly credited the traffic var with scratchpad/Artifact loss. Probe CLI behavior with host `CLAUDE*` vars unset.
+- Note: `disallowedToolFlags` maps proxied `task` to `Agent`, `Task`, `TaskOutput`; oc agents use oc's bgRun/bgStatus instead. Background bash via `run_in_background` is rare in oc (5 calls / 173 sessions). Not changed.
+- Updated `test/provider/claude-code/spawn-env.test.ts` hygiene tests to the one-var list and assert the traffic var stays unset.
+- Verification: `bun test test/provider/claude-code/spawn-env.test.ts` 10 pass. Full oc spawn not checked (needs user build/install).
+
+### User
+Claude Code provider
+- Claude inside oc now gets the same tools as Claude Code run in a terminal, including Monitor for watching background work and push notifications.
+- oc still stops the Claude CLI from updating itself mid-session.
+
+---
+
 ## 2026-10-03 (~03:20) - v0.2.76 - PowerShell calls display as bash; read-only blocks PowerShell - Claude Opus 5.5, low effort; Implementation
 
 ### Agent

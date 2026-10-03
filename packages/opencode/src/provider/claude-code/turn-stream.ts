@@ -50,6 +50,8 @@ import {
   interruptTurn,
   takeUnattendedLines,
   describeChildCrash,
+  isInitLine,
+  WAKE_PROMPT_TEXT,
   type ActiveProcess,
 } from "./session-manager.js"
 import { appendExchangeText, currentExchangeHash } from "./session-sync.js"
@@ -278,11 +280,25 @@ class ClaudeTurn {
     }
     this.proc = this.activeProcess.proc
     this.lineEmitter = this.activeProcess.lineEmitter
+    if (!this.turn.compactionMode && this.turn.affinity !== "default") {
+      this.activeProcess.wakeTarget = {
+        sessionID: this.turn.affinity,
+        directory: this.turn.cwd,
+        providerID: this.config.provider,
+        modelID: this.turn.modelId,
+        agent: this.turn.agent,
+        variant: this.turn.variant,
+      }
+    }
+    // A wake prompt attaches to the turn the CLI started on its own; any
+    // other turn takes over from it (interrupting it below if still running).
+    const attachAutonomous = this.activeProcess.autonomousTurn === true && this.input.userMsg.includes(WAKE_PROMPT_TEXT)
+    this.activeProcess.autonomousTurn = false
 
     // The CLI serves one turn at a time. If the previous one is still running
     // (aborted, or ended on the inactivity fallback rather than a `result`),
     // stop it before attaching listeners, or its tail streams into this turn.
-    if (isTurnInFlight(this.activeProcess)) {
+    if (!attachAutonomous && isTurnInFlight(this.activeProcess)) {
       log.warn("previous turn still in flight; interrupting it", { sk: this.sk })
       const idle = await interruptTurn(this.activeProcess)
       if (!idle) log.warn("previous turn did not stop in time; this turn may see stale output", { sk: this.sk })
@@ -291,7 +307,7 @@ class ClaudeTurn {
     this.out.enqueue({ type: "stream-start", warnings: [] })
     this.attached = true
     for (const notice of this.notices) this.out.note(notice)
-    this.replayUnattendedOutput()
+    const autonomousLines = this.replayUnattendedOutput(attachAutonomous)
 
     if (!this.turn.compactionMode) this.activeProcess.opencodeSessionID = this.turn.affinity
     this.lineEmitter.on("line", this.onLine)
@@ -321,6 +337,14 @@ class ClaudeTurn {
           `Pending proxy call '${call.toolName}' (${call.toolCallId}) was orphaned by a new user turn; rejecting`,
         ),
       )
+    }
+
+    if (attachAutonomous) {
+      // Feed what the CLI already said in its own turn through the normal
+      // handlers, so tool calls and text render live; its `result` ends this turn.
+      log.info("attaching to a turn claude started on its own", { sk: this.sk, lines: autonomousLines.length })
+      for (const line of autonomousLines) this.onLine(line)
+      return
     }
 
     noteTurnStarted(this.activeProcess)
@@ -381,11 +405,16 @@ class ClaudeTurn {
   /**
    * Whatever the child said while no turn was listening comes first, so the
    * operator sees it. Narration only: replaying actionable events could run
-   * old tools or close this stream on a stale approval or result.
+   * old tools or close this stream on a stale approval or result. When this
+   * turn attaches to one the CLI started on its own, the lines from that
+   * turn's `init` on are returned for live handling instead.
    */
-  private replayUnattendedOutput() {
-    const unattended = takeUnattendedLines(this.activeProcess!)
-    if (unattended.lines.length === 0 && unattended.dropped === 0) return
+  private replayUnattendedOutput(attachAutonomous: boolean): string[] {
+    const all = takeUnattendedLines(this.activeProcess!)
+    const start = attachAutonomous ? all.lines.findLastIndex(isInitLine) : -1
+    const live = start < 0 ? [] : all.lines.slice(start)
+    const unattended = { lines: start < 0 ? all.lines : all.lines.slice(0, start), dropped: all.dropped }
+    if (unattended.lines.length === 0 && unattended.dropped === 0) return live
     log.notice("replaying stdout the child emitted between turns", {
       sessionKey: this.sk,
       lines: unattended.lines.length,
@@ -420,6 +449,7 @@ class ClaudeTurn {
     // on what it does from here on.
     this.clearResultFallback()
     this.hasReceivedContent = false
+    return live
   }
 
   // ---------------------------------------------------------------------------
@@ -707,6 +737,10 @@ class ClaudeTurn {
       toolName: mapped.name,
       input: JSON.stringify(mapped.input),
       providerExecuted: mapped.executed,
+      // The CLI already ran it. `dynamic` makes the AI SDK keep a CLI tool oc
+      // has no registry entry for (Monitor, ScheduleWakeup, ...) under its own
+      // name instead of repairing it into an `invalid` row.
+      dynamic: mapped.executed,
     })
   }
 

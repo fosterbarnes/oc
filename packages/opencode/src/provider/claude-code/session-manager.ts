@@ -8,6 +8,7 @@ import { unlink } from "node:fs/promises"
 import path from "node:path"
 import { Global } from "@opencode-ai/core/global"
 import { log } from "./logger.js"
+import { rawOpencodeClient } from "./runtime-status.js"
 import { SERVER_CLOSED_MESSAGE, type ProxyMcpServer } from "./proxy-mcp.js"
 import {
   getPendingProxyCalls,
@@ -75,7 +76,29 @@ export interface ActiveProcess {
    * line; see `describeChildCrash`.
    */
   lastStderr?: string
+  /** The oc session and settings of the last turn, for `requestWakeTurn`. */
+  wakeTarget?: WakeTarget
+  /**
+   * True from a turn the CLI started on its own between oc turns (a
+   * background task finished) until an oc turn attaches to it.
+   */
+  autonomousTurn?: boolean
 }
+
+export interface WakeTarget {
+  sessionID: string
+  directory: string
+  providerID: string
+  modelID: string
+  agent?: string
+  variant?: string
+}
+
+/**
+ * Hidden prompt oc posts when the CLI starts a turn on its own. The turn that
+ * carries it attaches to the running CLI turn instead of sending anything.
+ */
+export const WAKE_PROMPT_TEXT = "[Claude Code continued on its own after a background task finished.]"
 
 // A child normally only speaks while a doStream turn is listening. The one
 // exception is a turn that ended on the CLI's side while opencode was still
@@ -109,6 +132,44 @@ export function takeUnattendedLines(ap: ActiveProcess): {
   ap.unattendedLines = []
   ap.unattendedDropped = 0
   return { lines, dropped }
+}
+
+/** The CLI emits `system/init` at the start of every turn it runs. */
+export function isInitLine(line: string): boolean {
+  if (!line.includes('"init"')) return false
+  try {
+    const msg = JSON.parse(line) as { type?: string; subtype?: string }
+    return msg.type === "system" && msg.subtype === "init"
+  } catch {
+    return false
+  }
+}
+
+/**
+ * The CLI began a turn with no oc turn listening (a background task finished
+ * and Claude woke to report it). Post a hidden prompt so oc opens a turn that
+ * attaches to it and shows it live, as Claude Code does in a terminal.
+ */
+function requestWakeTurn(ap: ActiveProcess) {
+  const target = ap.wakeTarget
+  const client = rawOpencodeClient()
+  if (!target || !client) return
+  ap.autonomousTurn = true
+  ap.turnInFlight = true
+  log.notice("claude started a turn between oc turns; waking the session", { sessionID: target.sessionID })
+  void client
+    .post({
+      url: `/session/${target.sessionID}/prompt_async?directory=${encodeURIComponent(target.directory)}`,
+      body: {
+        model: { providerID: target.providerID, modelID: target.modelID },
+        agent: target.agent,
+        variant: target.variant,
+        parts: [{ type: "text", text: WAKE_PROMPT_TEXT, synthetic: true }],
+      },
+    })
+    .then((response) => {
+      if (response.error !== undefined) log.warn("wake prompt failed", { error: String(response.error) })
+    })
 }
 
 // The CLI writes its own diagnostics to stderr, which is where the reason a
@@ -767,6 +828,7 @@ export function spawnClaudeProcess(
     noteTurnLine(ap, line)
     if (lineEmitter.listenerCount("line") === 0) {
       bufferUnattendedLine(ap, line)
+      if (!ap.autonomousTurn && isInitLine(line)) requestWakeTurn(ap)
       return
     }
     lineEmitter.emit("line", line)
