@@ -369,7 +369,7 @@ export type EffectivePermissionMode =
  * Only oc-only tools are proxied: Claude Code's native file, shell and web
  * tools run in the CLI and render as oc tool rows.
  */
-export const DEFAULT_PROXY_TOOL_NAMES = ["Task"]
+export const DEFAULT_PROXY_TOOL_NAMES = ["Task", "run_after_turn"]
 
 /**
  * Claude CLI stream-json message types.

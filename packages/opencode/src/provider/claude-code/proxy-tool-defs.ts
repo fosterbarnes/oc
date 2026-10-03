@@ -384,4 +384,22 @@ export const DEFAULT_PROXY_TOOLS: ProxyToolDef[] = [
       },
     },
   },
+  {
+    name: "run_after_turn",
+    description:
+      "Queue an executable or .ps1 script after this turn through oc's run_after_turn permission." +
+      " Use only when explicitly requested by the user. Call it last, then end your turn with a short reply.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        exe: { type: "string", description: "Absolute path to the executable or .ps1 script" },
+        args: {
+          type: "array",
+          items: { type: "string" },
+          description: "Arguments for the executable",
+        },
+      },
+      required: ["exe"],
+    },
+  },
 ]

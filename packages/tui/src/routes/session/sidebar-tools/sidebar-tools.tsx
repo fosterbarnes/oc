@@ -45,7 +45,8 @@ import {
   sessionProjectDirectory,
   sidebarConfigPaths,
   updateLanguage,
-  WEZTERM_TERMINALS,
+  scriptTerminals,
+  resolveScriptTerminal,
   writeCursorSessionToken,
   type Script,
   type ScriptLanguage,
@@ -63,6 +64,9 @@ import {
   probeOpenCodeGoUsage,
   probeOpenRouterUsage,
   shouldRefreshUsageAfterIdle,
+  shouldRefreshUsageProvider,
+  updateUsageSnapshot,
+  usageProviderForModel,
   USAGE_PROVIDER_OPTIONS,
   type CursorUsage,
   type ClaudeCodeUsage,
@@ -71,6 +75,7 @@ import {
   type OpenRouterUsage,
   type UsageProviderId,
   type UsageWindow,
+  type UsageSnapshot,
 } from "./usage.js"
 import {
   copyToClipboard,
@@ -93,13 +98,10 @@ const RESET_SCRIPT_SETTINGS = "__sidebar_reset_script_settings__"
 const SCRIPT_SHELL_SECTION = "__sidebar_script_shell_section__"
 const SCRIPT_LANGUAGE_SECTION = "__sidebar_script_language_section__"
 const SCRIPT_EXTENSION_SECTION = "__sidebar_script_extension_section__"
+
+let everythingSearchHintShown = false
 const WEZTERM_SIZE_SECTION = "__sidebar_wezterm_size_section__"
 const USAGE_REFRESH_INTERVAL_MS = 5 * 60 * 1000
-const MODEL_STATE_PATH = path.join(
-  process.env.XDG_STATE_HOME ?? path.join(os.homedir(), ".local", "state"),
-  "opencode",
-  "model.json",
-)
 
 function directoryColor(depth: number, colors: string[]): string {
   return colors[Math.min(depth, colors.length - 1)]
@@ -150,7 +152,6 @@ function scriptSettingsKey(worktree: string): string {
 }
 
 type RootState = { customRoots: string[]; activeRoot?: string }
-type SelectedModel = { providerID: string; modelID: string }
 
 function globalScriptSettings(options: unknown): ScriptSettings {
   if (!options || typeof options !== "object") return defaultScriptSettings()
@@ -191,51 +192,6 @@ function loadRootPins(kv: ReturnType<typeof useKV>, worktree: string): Set<strin
 function commandId(prefix: string, value: string): string {
   const safe = value.replace(/[^a-zA-Z0-9]+/g, "-").replace(/^-|-$/g, "") || "item"
   return `sidebar.${prefix}.${safe}`
-}
-
-function isSelectedModel(value: unknown): value is SelectedModel {
-  if (!value || typeof value !== "object") return false
-  const model = value as { providerID?: unknown; modelID?: unknown }
-  return typeof model.providerID === "string" && typeof model.modelID === "string"
-}
-
-function configuredModel(agent: unknown, config: unknown): SelectedModel | undefined {
-  if (!config || typeof config !== "object") return undefined
-  const settings = config as { model?: unknown; agent?: Record<string, { model?: unknown }> }
-  const value = typeof agent === "string" ? (settings.agent?.[agent]?.model ?? settings.model) : settings.model
-  if (isSelectedModel(value)) return value
-  if (typeof value !== "string") return undefined
-  const slash = value.indexOf("/")
-  return slash > 0 && slash < value.length - 1
-    ? { providerID: value.slice(0, slash), modelID: value.slice(slash + 1) }
-    : undefined
-}
-
-function savedModelState(agent: unknown, config: unknown): SelectedModel | undefined {
-  try {
-    const state = JSON.parse(fs.readFileSync(MODEL_STATE_PATH, "utf8")) as {
-      model?: Record<string, unknown>
-      recent?: unknown[]
-    }
-    const model =
-      typeof agent === "string" && isSelectedModel(state.model?.[agent])
-        ? state.model[agent]
-        : (configuredModel(agent, config) ?? state.recent?.find(isSelectedModel))
-    return model
-  } catch {
-    return undefined
-  }
-}
-
-function savedVariant(model: { providerID: string; id: string } | undefined): string | undefined {
-  if (!model) return "none"
-  try {
-    const state = JSON.parse(fs.readFileSync(MODEL_STATE_PATH, "utf8")) as { variant?: Record<string, unknown> }
-    const variant = state.variant?.[`${model.providerID}/${model.id}`]
-    return typeof variant === "string" && variant !== "default" ? variant : "none"
-  } catch {
-    return undefined
-  }
 }
 
 function footerPath(directory: string, homeDirectory: string, branch?: string): string {
@@ -305,27 +261,26 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
   const [scriptsOpen, setScriptsOpen] = createSignal(true)
   const [filesOpen, setFilesOpen] = createSignal(true)
   const [hovered, setHovered] = createSignal<string>()
-  const [usage, setUsage] = createSignal<OpenAIUsage>({ ok: false })
-  const [goUsage, setGoUsage] = createSignal<OpenCodeGoUsage>({ ok: false })
-  const [openRouterUsage, setOpenRouterUsage] = createSignal<OpenRouterUsage>({ ok: false })
-  const [cursorUsage, setCursorUsage] = createSignal<CursorUsage>({ ok: false })
-  const [claudeCodeUsage, setClaudeCodeUsage] = createSignal<ClaudeCodeUsage>({ ok: false })
+  const [usage, setUsage] = createSignal<UsageSnapshot<OpenAIUsage>>({ ok: false })
+  const [goUsage, setGoUsage] = createSignal<UsageSnapshot<OpenCodeGoUsage>>({ ok: false })
+  const [openRouterUsage, setOpenRouterUsage] = createSignal<UsageSnapshot<OpenRouterUsage>>({ ok: false })
+  const [cursorUsage, setCursorUsage] = createSignal<UsageSnapshot<CursorUsage>>({ ok: false })
+  const [claudeCodeUsage, setClaudeCodeUsage] = createSignal<UsageSnapshot<ClaudeCodeUsage>>({ ok: false })
   const [showRemaining, setShowRemaining] = createSignal(false)
   const [showGoRemaining, setShowGoRemaining] = createSignal(false)
   const [showOrRemaining, setShowOrRemaining] = createSignal(false)
   const [showCursorRemaining, setShowCursorRemaining] = createSignal(false)
   const [usageProviders, setUsageProviders] = createSignal<UsageProviderId[]>([...sidebarSettings.usageProviders])
-  const [model, setModel] = createSignal<SelectedModel>()
-  const [variant, setVariant] = createSignal("none")
   const [expanded, setExpanded] = createSignal<Set<string>>(new Set(["."]))
   const [tree, setTree] = createSignal(readTree(root, expanded()))
   let pins = new Set(sidebarSettings.scriptPins)
   let favorites = new Set(sidebarSettings.favoriteFileRoots)
   let cursorSessionToken = readCursorSessionToken(os.homedir())
-  let usageRunning = false
+  const usageRunning = new Set<UsageProviderId>()
+  const usageRequestedAt: Partial<Record<UsageProviderId, number>> = {}
+  const [usageNow, setUsageNow] = createSignal(Date.now())
   const usageAbort = new AbortController()
   let usageScheduler: ReturnType<typeof createUsageRefreshScheduler>
-  let modelStateWatcher: fs.FSWatcher | undefined
   let refreshCommands = () => {}
   let visibilityRunning = false
 
@@ -435,65 +390,70 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
   loadProjectSettings()
   ensureSessionScrollbarVisible(kv)
 
-  const refreshSelectedModel = (forSessionID = currentSessionID()) => {
-    const live = local.model.current()
-    const next = live ?? savedModelState(sync.session.get(forSessionID)?.agent, sync.data.config)
-    if (next === undefined) return false
-    const selected = model()
-    if (selected?.providerID === next.providerID && selected.modelID === next.modelID) return false
-    setModel(next)
-    return true
-  }
-  const refreshVariant = (forSessionID = currentSessionID()) => {
-    const next = savedVariant(sync.session.get(forSessionID)?.model)
-    if (next === undefined) return false
-    setVariant(next)
-    return true
-  }
   const modelLabel = () => {
-    const selected = model()
+    const selected = local.model.current()
     if (!selected) return "unavailable"
     const provider = sync.data.provider.find((item) => item.id === selected.providerID)
     return provider?.models[selected.modelID]?.name || selected.modelID
   }
 
-  const refreshUsage = async () => {
-    if (usageRunning) return
-    usageRunning = true
-    try {
-      const selected = new Set(usageProviders())
-      const [next, nextGo, nextOpenRouter, nextCursor, nextClaudeCode] = await Promise.all([
-        selected.has("openai")
-          ? probeOpenAIUsage({ signal: usageAbort.signal })
-          : Promise.resolve<OpenAIUsage>({ ok: false }),
-        selected.has("opencode-go")
-          ? probeOpenCodeGoUsage({ signal: usageAbort.signal })
-          : Promise.resolve<OpenCodeGoUsage>({ ok: false }),
-        selected.has("openrouter")
-          ? probeOpenRouterUsage({ signal: usageAbort.signal })
-          : Promise.resolve<OpenRouterUsage>({ ok: false }),
-        selected.has("cursor")
-          ? probeCursorUsage({ signal: usageAbort.signal, cursorSessionToken })
-          : Promise.resolve<CursorUsage>({ ok: false }),
-        selected.has("claude-code")
-          ? probeClaudeCodeUsage({ signal: usageAbort.signal })
-          : Promise.resolve<ClaudeCodeUsage>({ ok: false }),
-      ])
-      let cursor = nextCursor
-      if (selected.has("cursor") && !cursor.ok && cursor.reason === "reauthenticate" && cursorSessionToken) {
-        clearCursorSessionToken(os.homedir())
-        cursorSessionToken = undefined
-        cursor = await probeCursorUsage({ signal: usageAbort.signal })
+  const refreshUsage = async (providers = usageProviders()) => {
+    await Promise.all(providers.filter((provider) => usageProviders().includes(provider)).map(async (provider) => {
+      if (usageRunning.has(provider) || usageAbort.signal.aborted) return
+      usageRunning.add(provider)
+      usageRequestedAt[provider] = Date.now()
+      try {
+        const options = { signal: usageAbort.signal }
+        if (provider === "openai") {
+          const next = await probeOpenAIUsage(options)
+          if (!usageAbort.signal.aborted) setUsage((previous) => updateUsageSnapshot(previous, next, Date.now()))
+          return
+        }
+        if (provider === "opencode-go") {
+          const next = await probeOpenCodeGoUsage(options)
+          if (!usageAbort.signal.aborted) setGoUsage((previous) => updateUsageSnapshot(previous, next, Date.now()))
+          return
+        }
+        if (provider === "openrouter") {
+          const next = await probeOpenRouterUsage(options)
+          if (!usageAbort.signal.aborted) setOpenRouterUsage((previous) => updateUsageSnapshot(previous, next, Date.now()))
+          return
+        }
+        if (provider === "claude-code") {
+          const next = await probeClaudeCodeUsage(options)
+          if (!usageAbort.signal.aborted) setClaudeCodeUsage((previous) => updateUsageSnapshot(previous, next, Date.now()))
+          return
+        }
+        const next = await probeCursorUsage({ ...options, cursorSessionToken })
+        const retry = !next.ok && next.reason === "reauthenticate" && !!cursorSessionToken
+        if (retry) {
+          clearCursorSessionToken(os.homedir())
+          cursorSessionToken = undefined
+        }
+        const cursor = retry ? await probeCursorUsage(options) : next
+        if (!usageAbort.signal.aborted) setCursorUsage((previous) => updateUsageSnapshot(previous, cursor, Date.now()))
+      } finally {
+        usageRunning.delete(provider)
+        setUsageNow(Date.now())
       }
-      if (!usageAbort.signal.aborted) setUsage(next)
-      if (!usageAbort.signal.aborted) setGoUsage(nextGo)
-      if (!usageAbort.signal.aborted) setOpenRouterUsage(nextOpenRouter)
-      if (!usageAbort.signal.aborted) setCursorUsage(cursor)
-      if (!usageAbort.signal.aborted) setClaudeCodeUsage(nextClaudeCode)
-    } finally {
-      usageRunning = false
-    }
+    }))
   }
+  const refreshOldUsage = () => {
+    const snapshots = {
+      openai: usage(),
+      "opencode-go": goUsage(),
+      openrouter: openRouterUsage(),
+      cursor: cursorUsage(),
+      "claude-code": claudeCodeUsage(),
+    }
+    void refreshUsage(usageProviders().filter((provider) =>
+      Date.now() - (snapshots[provider].fetchedAt ?? 0) > 60_000,
+    ))
+  }
+  const usageColor = (snapshot: UsageSnapshot<{ ok: boolean }>) =>
+    snapshot.stale || snapshot.source === "cache" || usageNow() - (snapshot.fetchedAt ?? 0) > 600_000
+      ? theme.textMuted
+      : theme.text
   usageScheduler = createUsageRefreshScheduler({
     refresh: refreshUsage,
     fallbackIntervalMs: USAGE_REFRESH_INTERVAL_MS,
@@ -516,11 +476,10 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
     setScriptsOpen(true)
     setFilesOpen(true)
     setExpanded(new Set(["."]))
-    refreshSelectedModel(sessionID)
-    refreshVariant(sessionID)
     setScripts(readScripts(project, root, scriptSettings))
     setTree(readTree(root, expanded()))
     refreshCommands()
+    refreshOldUsage()
   }
   const refresh = () => {
     const nextSessionID = currentSessionID()
@@ -699,7 +658,7 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
               if (event.button === 0) setShowRemaining((value) => !value)
             }}
           >
-            <text fg={theme.text}>
+            <text fg={usageColor(usage())}>
               {!codex.reauthenticate && codexHasData && showRemaining() ? "Codex remaining:" : "Codex:"}
             </text>
             <text fg={theme.textMuted}>{codexValue}</text>
@@ -712,7 +671,7 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
         </Show>
         <Show when={usageProviders().includes("claude-code")}>
           <box flexDirection="row" gap={1}>
-            <text fg={theme.text}>Claude:</text>
+            <text fg={usageColor(claudeSnapshot)}>Claude:</text>
             <text fg={theme.textMuted}>{claudeValue}</text>
           </box>
           <box flexDirection="row" gap={1}>
@@ -736,7 +695,7 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
               }
             }}
           >
-            <text fg={theme.text}>{showCursorRemaining() && !cursorNeedsToken ? "Cursor remaining:" : "Cursor:"}</text>
+            <text fg={usageColor(cursorSnapshot)}>{showCursorRemaining() && !cursorNeedsToken ? "Cursor remaining:" : "Cursor:"}</text>
             <text fg={theme.textMuted}>{cursorNeedsToken ? "sign in" : cursorValue}</text>
           </box>
           <box flexDirection="row" gap={1}>
@@ -760,7 +719,7 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
               if (event.button === 0) setShowGoRemaining((value) => !value)
             }}
           >
-            <text fg={theme.text}>{showGoRemaining() ? "OpenCode Go remaining:" : "OpenCode Go:"}</text>
+            <text fg={usageColor(goSnapshot)}>{showGoRemaining() ? "OpenCode Go remaining:" : "OpenCode Go:"}</text>
             <text fg={theme.textMuted}>{goValue}</text>
           </box>
           <box flexDirection="row" gap={1}>
@@ -777,7 +736,7 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
               if (event.button === 0) setShowOrRemaining((value) => !value)
             }}
           >
-            <text fg={theme.text}>{orOk && showOrRemaining() ? "OpenRouter remaining:" : "OpenRouter:"}</text>
+            <text fg={usageColor(orSnapshot)}>{orOk && showOrRemaining() ? "OpenRouter remaining:" : "OpenRouter:"}</text>
             <text fg={theme.textMuted}>{orValue}</text>
           </box>
           <Show when={orOk}>
@@ -825,17 +784,12 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
         : { variant: "success", message: "Copied to clipboard" },
     )
   }
-  const cycleVariant = (sessionID: string) => {
-    if (sessionID === currentSessionID()) promptRef.current?.focus()
+  const cycleVariant = () => {
+    promptRef.current?.focus()
     const result = keymap.dispatchCommand("variant.cycle")
     if (!result.ok) {
       toast.show({ variant: "error", message: `Could not change reasoning: ${result.reason}` })
-      return
     }
-    setTimeout(() => {
-      if (!refreshVariant(sessionID))
-        toast.show({ variant: "error", message: "Could not read the active reasoning setting." })
-    }, 50)
   }
   const selectModel = () => {
     const result = keymap.dispatchCommand("model.list")
@@ -1044,13 +998,16 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
             if (generation !== rootPickerSearchGeneration) return
             if (result.ok === false) {
               if (result.error === "aborted") return
-              if (result.error === "missing-es") {
-                toast.show({ variant: "error", message: "Install es.exe and add it to PATH for file search." })
-              } else if (result.error === "ipc-unavailable") {
-                toast.show({
-                  variant: "error",
-                  message: "Everything search needs es.exe on PATH and the Everything app running.",
-                })
+              if (!everythingSearchHintShown) {
+                everythingSearchHintShown = true
+                if (result.error === "missing-es") {
+                  toast.show({ variant: "info", message: "Install es.exe and add it to PATH for file search." })
+                } else if (result.error === "ipc-unavailable") {
+                  toast.show({
+                    variant: "info",
+                    message: "Everything search needs es.exe on PATH and the Everything app running.",
+                  })
+                }
               }
               applyRootPickerOptions([])
               return
@@ -1301,7 +1258,9 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
         : scriptSettings.terminal === "wezterm-vertical"
           ? "vertical"
           : undefined
-    const splitSizeOptions = splitDirection
+    const placements = scriptTerminals()
+    const selectedTarget = resolveScriptTerminal(scriptSettings.terminal)
+    const splitSizeOptions = splitDirection && placements.length > 0
       ? [
           { title: "Split size", value: WEZTERM_SIZE_SECTION, disabled: true },
           {
@@ -1330,18 +1289,18 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
               footer: "selected",
             },
           ]),
-      { title: "WezTerm", value: "wezterm-section", disabled: true },
-      ...WEZTERM_TERMINALS.map((terminal) => ({
+      ...(placements.length > 0 ? [{ title: "Terminal placement", value: "terminal-section", disabled: true }] : []),
+      ...placements.map((terminal) => ({
         title: terminal.title,
         value: `terminal:${terminal.id}`,
-        category: "WezTerm",
-        footer: scriptSettings.terminal === terminal.id ? "selected" : "",
+        category: "Terminal placement",
+        footer: selectedTarget === terminal.id ? "selected" : "",
       })),
       {
         title: "Native detached runner",
         value: "terminal:native",
-        category: "WezTerm",
-        footer: scriptSettings.terminal === "native" ? "selected" : "",
+        category: placements.length > 0 ? "Terminal placement" : undefined,
+        footer: selectedTarget === "native" ? "selected" : "",
       },
       ...splitSizeOptions,
       { title: "Languages", value: SCRIPT_LANGUAGE_SECTION, disabled: true },
@@ -1358,7 +1317,7 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
       { title: "Reset global script settings", value: RESET_SCRIPT_SETTINGS },
     ]
     const selectedTerminal =
-      scriptSettings.terminal === "native" ? "terminal:native" : `terminal:${scriptSettings.terminal}`
+      selectedTarget === "native" ? "terminal:native" : `terminal:${selectedTarget}`
     const dialogProps = {
       title: `Global script settings`,
       skipFilter: true,
@@ -1374,7 +1333,7 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
           const terminal = option.value.slice("terminal:".length) as ScriptSettings["terminal"]
           saveScriptSettings(
             { ...scriptSettings, terminal },
-            terminal === "native" ? "Using native detached runner" : `Using WezTerm: ${option.title}`,
+            terminal === "native" ? "Using native detached runner" : `Using terminal placement: ${option.title}`,
           )
           selectScriptSettings()
         } else if (option.value.startsWith("wezterm-size:")) {
@@ -1529,31 +1488,30 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
   }
   onCleanup(() => commandDisposer?.())
   onCleanup(event.on("file.watcher.updated", refresh))
-  onCleanup(event.on("tui.session.select", () => queueMicrotask(refresh)))
-  onCleanup(event.on("message.updated", () => queueMicrotask(refresh)))
+  onCleanup(event.on("tui.session.select", () => queueMicrotask(() => {
+    refresh()
+    refreshOldUsage()
+  })))
+  onCleanup(event.on("message.updated", (evt) => {
+    queueMicrotask(refresh)
+    const info = evt.properties.info
+    if (info.role !== "assistant" || info.time.completed === undefined) return
+    const provider = usageProviderForModel(info.providerID)
+    if (!provider || !shouldRefreshUsageProvider(usageRequestedAt[provider], Date.now())) return
+    void refreshUsage([provider])
+  }))
   onCleanup(
     event.on("session.status", (evt) => {
       if (!shouldRefreshUsageAfterIdle(evt.properties, props.sessionID)) return
       usageScheduler.request()
     }),
   )
-  try {
-    modelStateWatcher = fs.watch(MODEL_STATE_PATH, () => {
-      refreshSelectedModel()
-      refreshVariant()
-    })
-  } catch {
-    // The sidebar remains usable when OpenCode has not created model state yet.
-  }
-  refreshSelectedModel()
-  refreshVariant()
-  const modelTimer = setInterval(() => refreshSelectedModel(), 500)
   void syncSidebarVisibility()
+  const usageAgeTimer = setInterval(() => setUsageNow(Date.now()), 60_000)
   onCleanup(() => {
+    clearInterval(usageAgeTimer)
     usageAbort.abort()
     usageScheduler.dispose()
-    clearInterval(modelTimer)
-    modelStateWatcher?.close()
     rootPickerSearchGeneration += 1
     if (rootPickerDebounce) clearTimeout(rootPickerDebounce)
     rootPickerSearchAbort?.abort()
@@ -1608,16 +1566,18 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
             if (event.button === 0) selectModel()
           }}
         >{`> ${modelLabel()}`}</text>
-        <text
-          fg={hovered() === "header-button-reasoning" ? hoverColor : headerButtonColor}
-          paddingLeft={1}
-          paddingRight={1}
-          onMouseOver={() => setHovered("header-button-reasoning")}
-          onMouseOut={() => setHovered()}
-          onMouseDown={(event) => {
-            if (event.button === 0) cycleVariant(currentSessionID())
-          }}
-        >{`> ${variant()}`}</text>
+        <Show when={local.model.variant.list().length > 0}>
+          <text
+            fg={hovered() === "header-button-reasoning" ? hoverColor : headerButtonColor}
+            paddingLeft={1}
+            paddingRight={1}
+            onMouseOver={() => setHovered("header-button-reasoning")}
+            onMouseOut={() => setHovered()}
+            onMouseUp={(event) => {
+              if (event.button === 0) cycleVariant()
+            }}
+          >{`> ${local.model.variant.current() ?? "default"}`}</text>
+        </Show>
       </box>
       <box flexDirection="column" gap={0}>
         {usageRows()}

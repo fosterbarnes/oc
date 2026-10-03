@@ -4,6 +4,7 @@ import os from "os"
 import path from "path"
 import { Global, resolveAppName } from "@opencode-ai/core/global"
 import * as OcConfig from "@/config/oc"
+import { tmpdir } from "../fixture/fixture"
 
 const originalConfigPath = Global.Path.config
 const originalLegacyConfig = process.env.OPENCODE_OC_CONFIG
@@ -19,6 +20,49 @@ afterEach(async () => {
 })
 
 const idle = { restartingFresh: false }
+
+for (const control of ["stopServer", "shutdownAll"] as const) {
+  test(`${control} still stops its resident server when the injected process lister fails`, async () => {
+    await using tmp = await tmpdir()
+    const child = Bun.spawn([process.execPath, "-e", [
+      "const server = Bun.serve({ port: 0, fetch(request) {",
+      `if (request.method !== 'POST' || new URL(request.url).pathname !== '/global/shutdown' || request.headers.get('authorization') !== 'Basic ${Buffer.from("opencode:test-secret").toString("base64")}') return new Response('', { status: 403 });`,
+      "setTimeout(() => process.exit(0), 20); return new Response('{}'); } });",
+      "console.log(JSON.stringify({ pid: process.pid, hostname: '127.0.0.1', port: server.port }));",
+    ].join(" ")], { stdout: "pipe", stderr: "pipe", windowsHide: true })
+    try {
+      const reader = child.stdout.getReader()
+      let output = ""
+      while (!output.includes("\n")) {
+        const chunk = await reader.read()
+        if (chunk.done) throw new Error("Resident test process exited before readiness")
+        output += new TextDecoder().decode(chunk.value)
+      }
+      reader.releaseLock()
+      await Bun.write(OcConfig.serverStatePath(tmp.path), output.trim())
+      await Bun.write(path.join(tmp.path, "oc-server.secret"), "test-secret")
+      // A record must survive an unavailable snapshot rather than being mistaken for a dead TUI.
+      await fs.mkdir(path.join(tmp.path, "oc-tuis"))
+      await Bun.write(path.join(tmp.path, "oc-tuis", "99.json"), "{}")
+      let listings = 0
+      const listProcesses = () => {
+        listings++
+        throw new Error("Injected CIM failure")
+      }
+      const result = control === "stopServer"
+        ? await OcConfig.stopServer(tmp.path, { listProcesses })
+        : (await OcConfig.shutdownAll({ directory: tmp.path, listProcesses })).servers[0]
+      expect(result.stopped).toBe(true)
+      expect(listings).toBe(1)
+      expect(await child.exited).toBe(0)
+      expect(await Bun.file(OcConfig.serverStatePath(tmp.path)).exists()).toBe(false)
+      expect(await Bun.file(path.join(tmp.path, "oc-tuis", "99.json")).exists()).toBe(true)
+    } finally {
+      if (child.exitCode === null) child.kill()
+      await child.exited
+    }
+  }, 20_000)
+}
 
 describe("resident launch policy", () => {
   test("reuses a healthy server whose record matches a live pid", () => {

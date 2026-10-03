@@ -1,6 +1,30 @@
-v0.2.76
+v0.2.78
 
-scripts:
-push.ps1 now uses a supplied commit subject first, then a changed buildNotes.txt, then a prompt. It no longer reuses the message committed by the previous push.
+planning:
+Added v0.3.0.md, the roadmap for v0.3.0 with every item's status, design and code references. Work toward 0.3.0 ships as 0.2.x revisions. PowerShell 7 (pwsh) is now an explicit requirement on Windows; oc no longer falls back to Windows PowerShell.
 
-Under the hood: updated AGENTS.md and SCRIPTS.md to document the message precedence. No checks run.
+sidebar:
+The model and reasoning rows now always match the session you are looking at, and clicking reasoning updates it right away. Usage numbers refresh shortly after you use a provider and when you switch sessions; old or cached numbers are dimmed instead of looking current. A new Sub-agents section shows running and just-finished sub-agents; click one to open it.
+
+terminal tab:
+The tab title starts with a colored square for the current agent, and Windows Terminal and WezTerm show a progress ring while the agent works. Turn it off with "Disable tab agent square and status".
+
+questions:
+If you close oc while an agent is asking a question, reopening the session shows the question again, and answering it continues the agent.
+
+revive and shutdown:
+/revive-no-install works without any setup and reopens oc in the same kind of terminal. Revive and --shutdown-all now close only this oc's windows and leave ocdebug and your other terminals alone.
+
+windows:
+Script launch offers tab, window and split placements in Windows Terminal too; other terminals launch scripts normally. ChatGPT and Claude Web find Edge or Chrome on their own, and the Everything search hint shows only once.
+
+editor:
+openEditedWith in tui.json can now be a map, for example { "default": "code", ".md": "typora" }, to open each file type in its own editor.
+
+startup:
+The startup animation now draws over your normal terminal background. Set "intro": { "background": "black" } in oc.json for the old black look.
+
+claude code:
+Claude Code sessions can now use run_after_turn, so /agent-revive works there once run_after_turn is listed in your proxyTools setting. Questions asked through Claude Code no longer time out.
+
+Under the hood: added a shared terminal detector (WezTerm, Windows Terminal, other) and a per-instance TUI ledger that scopes shutdown. The work was split across headless oc workers with per-item reviews. Focused tests passed in core (terminal), opencode (config, ledger, revive, Claude Code proxy, agentify) and tui (editor, sidebar, usage freshness, sub-agents, terminal tab, restored questions), and tsc --noEmit was clean in tui, opencode, core and plugin. Not built or installed; live checks are still pending.

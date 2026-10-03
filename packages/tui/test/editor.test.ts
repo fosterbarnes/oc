@@ -8,6 +8,7 @@ import {
   normalizePromptContent,
   openEditor,
   openFileAtLocation,
+  resolveEditorForFile,
   resolveFilePath,
 } from "../src/editor"
 
@@ -53,6 +54,28 @@ test("splits editor commands and enables a Windows shell for file opens", () => 
   expect(launch.options.shell).toBe(process.platform === "win32")
   expect(launch.options.detached).toBe(true)
   expect(launch.options.stdio).toBe("ignore")
+})
+
+test("picks the editor by file extension before default and env", () => {
+  const env = { EDITOR: "env-editor" }
+  const setting = { default: "default-editor", ".md": "md-editor" }
+  expect(resolveEditorForFile("notes.md", setting, env)).toBe("md-editor")
+  expect(resolveEditorForFile("NOTES.MD", setting, env)).toBe("md-editor")
+  expect(resolveEditorForFile("app.ts", setting, env)).toBe("default-editor")
+  expect(resolveEditorForFile("Makefile", setting, env)).toBe("default-editor")
+  expect(resolveEditorForFile("app.ts", { ".md": "md-editor" }, env)).toBe("env-editor")
+  expect(resolveEditorForFile("app.ts", "string-editor", env)).toBe("string-editor")
+})
+
+test("falls back to VISUAL then EDITOR then undefined", () => {
+  const setting = { ".md": "md-editor" }
+  expect(resolveEditorForFile("app.ts", setting, { VISUAL: "visual-editor", EDITOR: "env-editor" })).toBe(
+    "visual-editor",
+  )
+  expect(resolveEditorForFile("app.ts", setting, { EDITOR: "env-editor" })).toBe("env-editor")
+  expect(resolveEditorForFile("app.ts", "", { EDITOR: "env-editor" })).toBe("env-editor")
+  expect(resolveEditorForFile("app.ts", setting, {})).toBeUndefined()
+  expect(resolveEditorForFile("app.ts", undefined, {})).toBeUndefined()
 })
 
 test("skips dead IDE lock files and prefers a live port", async () => {

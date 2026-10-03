@@ -49,7 +49,7 @@ function blank(value: string | undefined) {
   return value === undefined || value === " " || value === "\u2800"
 }
 
-export function startIntro() {
+export function startIntro(mode: "terminal" | "black" = "terminal") {
   if (!process.stdout.isTTY) return () => {}
 
   const output = process.stdout
@@ -98,7 +98,7 @@ export function startIntro() {
   const openColor = color("#a89bba")
   const codeColor = color("#5f566d")
   const borderColor = color("#3A2D5C")
-  const background = "\x1b[48;2;0;0;0m"
+  const background = mode === "black" ? "\x1b[48;2;0;0;0m" : "\x1b[49m"
   const interior = color("#1c1c1c", 48)
   const reset = `\x1b[0m${background}`
   const write = (value: string) => output.write(value)

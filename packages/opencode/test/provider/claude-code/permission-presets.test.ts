@@ -20,7 +20,7 @@ import { applyPermissionPreset, createClaudeCode } from "@/provider/claude-code/
 import { configureLogger, _resetLoggerForTests } from "@/provider/claude-code/logger.js"
 import { READ_ONLY_PERMISSION_MODE } from "@/provider/claude-code/types.js"
 
-const DEFAULTS = ["Task"]
+const DEFAULTS = ["Task", "run_after_turn"]
 
 function version(raw: string): CliVersion {
   const [major, minor, patch] = raw.split(".").map(Number)
@@ -103,7 +103,7 @@ test("read-only drops the opencode subagent tools from the proxy", () => {
   const resolved = readOnly()
 
   assert.deepEqual(resolved.proxyTools, [])
-  for (const name of ["task", "task_batch"]) {
+  for (const name of ["task", "task_batch", "run_after_turn"]) {
     assert.ok(
       READ_ONLY_DENIED_PROXY_TOOLS.has(name),
       `${name} must be denied on the proxy`,
@@ -122,7 +122,7 @@ test("read-only keeps a proxy tool that changes nothing", () => {
 })
 
 test("read-only matches proxy tool names case-insensitively", () => {
-  assert.deepEqual(readOnly({ proxyTools: ["task", "TASK_BATCH"] }).proxyTools, [])
+  assert.deepEqual(readOnly({ proxyTools: ["task", "TASK_BATCH", "RUN_AFTER_TURN"] }).proxyTools, [])
 })
 
 test("read-only disallows the mutating CLI built-ins and keeps the reads", () => {

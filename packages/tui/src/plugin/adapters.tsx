@@ -16,6 +16,7 @@ import { Prompt } from "../component/prompt"
 import type { useToast } from "../ui/toast"
 import * as Keymap from "../keymap"
 import { createCommandShim } from "./command-shim"
+import { Locale } from "../util/locale"
 import type { PluginRoutes } from "./api"
 export type { RouteMap } from "./api"
 export { createPluginRoutes, createTuiApi } from "./api"
@@ -122,6 +123,12 @@ function stateApi(sync: ReturnType<typeof useSync>, currentModel: NonNullable<Tu
     session: {
       count() {
         return sync.data.session.length
+      },
+      children(sessionID) {
+        return sync.data.session.filter((session) => session.parentID === sessionID)
+      },
+      agentLabel(name) {
+        return sync.data.agent.find((agent) => agent.name === name)?.displayName || Locale.titlecase(name)
       },
       get(sessionID) {
         return sync.session.get(sessionID)

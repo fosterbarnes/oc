@@ -1,6 +1,8 @@
 import { spawn } from "node:child_process"
 import { existsSync } from "node:fs"
 import path from "node:path"
+import { detectTerminal, type TerminalInfo } from "@opencode-ai/core/util/terminal"
+import { resolveScriptTerminal } from "./helpers.js"
 import type { Script, ScriptLauncher, ScriptTerminal, WezTermSplitSize } from "./helpers.js"
 
 export type RunResult = { target: string; error?: string }
@@ -130,6 +132,28 @@ function sizeArgs(size: WezTermSplitSize | undefined): string[] {
   return "Percent" in size ? ["--percent", String(size.Percent)] : ["--cells", String(size.Cells)]
 }
 
+export function windowsTerminalArgs(
+  terminal: Exclude<ScriptTerminal, "native">,
+  cwd: string,
+  size?: WezTermSplitSize,
+): string[] {
+  if (terminal === "wezterm-window") return ["-w", "new", "new-tab", "-d", cwd]
+  if (terminal === "wezterm-tab") return ["-w", "0", "new-tab", "-d", cwd]
+  return [
+    "-w", "0", "split-pane", terminal === "wezterm-horizontal" ? "-V" : "-H",
+    ...(size && "Percent" in size ? ["--size", String(size.Percent / 100)] : []),
+    "-d", cwd,
+  ]
+}
+
+export function windowsTerminalScriptArgs(script: Script, cwd: string): string[] {
+  if (script.terminal === "native") return []
+  return [
+    ...windowsTerminalArgs(script.terminal, script.filePath ? path.dirname(script.filePath) : cwd, script.weztermSize),
+    "pwsh", ...shellArgs(`$env:SCRIPT_OWN_PANE='1'; ${scriptCommand(script)}`),
+  ]
+}
+
 export function weztermExecutable(configured = process.env.WEZTERM_EXECUTABLE): string {
   if (process.platform === "win32" && configured && path.basename(configured).toLowerCase() === "wezterm-gui.exe") {
     return path.join(path.dirname(configured), "wezterm.exe")
@@ -187,23 +211,37 @@ async function runWezterm(
   return sent.error ? { target: "WezTerm", error: sent.error } : { target: "WezTerm" }
 }
 
-export async function runScript(script: Script, cwd: string): Promise<RunResult> {
-  if (script.terminal !== "native") return runWezterm(script, cwd, script.terminal, true)
+type RunnerOptions = {
+  kind?: TerminalInfo["kind"]
+  available?: typeof available
+  spawnCommand?: typeof spawnCommand
+  runCommand?: typeof runCommand
+}
+
+export async function runScript(script: Script, cwd: string, options: RunnerOptions = {}): Promise<RunResult> {
+  const kind = options.kind ?? detectTerminal().kind
+  const probe = options.available ?? available
+  const terminal = resolveScriptTerminal(script.terminal, kind)
+  if (terminal !== "native") {
+    if (kind === "wezterm") return runWezterm(script, cwd, terminal, true)
+    if (await probe("wt.exe")) return (options.runCommand ?? runCommand)("wt.exe", windowsTerminalScriptArgs(script, cwd), cwd)
+  }
   const target = script.filePath || script.command
-  if (!(await available(script.launcher.executable))) {
+  if (!(await probe(script.launcher.executable))) {
     return { target: script.launcher.executable, error: `Executable not found: ${script.launcher.executable}` }
   }
   const args = launchArgs(script.launcher, target)
   const command = process.platform === "win32" ? "cmd.exe" : script.launcher.executable
   const commandArgs =
     process.platform === "win32" ? ["/d", "/c", "start", "", script.launcher.executable, ...args] : args
-  return spawnCommand(command, commandArgs, cwd)
+  return (options.spawnCommand ?? spawnCommand)(command, commandArgs, cwd)
 }
 
-export async function placeScript(script: Script, cwd: string): Promise<RunResult> {
-  if (script.terminal === "native")
-    return { target: "Interactive terminal", error: "Select a WezTerm terminal for command placement." }
-  return runWezterm(script, cwd, script.terminal, false)
+export async function placeScript(script: Script, cwd: string, options: RunnerOptions = {}): Promise<RunResult> {
+  const kind = options.kind ?? detectTerminal().kind
+  const terminal = resolveScriptTerminal(script.terminal, kind)
+  if (terminal === "native" || kind === "windows-terminal") return runScript({ ...script, terminal: "native" }, cwd, options)
+  return runWezterm(script, cwd, terminal, false)
 }
 
 export function commandArgs(command: string): string[] {

@@ -245,10 +245,7 @@ export function Session() {
     if (session()?.parentID) return []
     return children().flatMap((x) => sync.data.permission[x.id] ?? [])
   })
-  const questions = createMemo(() => {
-    if (session()?.parentID) return []
-    return children().flatMap((x) => sync.data.question[x.id] ?? [])
-  })
+  const questions = createMemo(() => sync.session.questions(route.sessionID))
   const visible = createMemo(() => !session()?.parentID && permissions().length === 0 && questions().length === 0)
   const disabled = createMemo(() => permissions().length > 0 || questions().length > 0)
 
@@ -1434,11 +1431,21 @@ export function Session() {
                     directory={sync.session.get(permissions()[0].sessionID)?.directory}
                   />
                 </Show>
-                <Show when={permissions().length === 0 && questions().length > 0}>
-                  <QuestionPrompt
-                    request={questions()[0]}
-                    directory={sync.session.get(questions()[0].sessionID)?.directory}
-                  />
+                <Show when={permissions().length === 0 && questions()[0]} keyed>
+                  {(request) => (
+                    <QuestionPrompt
+                      request={request}
+                      directory={sync.session.get(request.sessionID)?.directory}
+                      workspace={sync.session.get(request.sessionID)?.workspaceID}
+                      agent={
+                        sync.session.get(request.sessionID)?.agent ??
+                        sync.data.message[request.sessionID]?.at(-1)?.agent
+                      }
+                      model={sync.session.get(request.sessionID)?.model}
+                      restored={request.restored}
+                      onDismiss={() => sync.session.dismissQuestion(request)}
+                    />
+                  )}
                 </Show>
                 <Show when={session()?.parentID}>
                   <SubagentFooter />

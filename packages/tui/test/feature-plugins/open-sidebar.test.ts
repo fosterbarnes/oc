@@ -22,6 +22,8 @@ import {
   promptProjectDirectory,
   readCursorSessionToken,
   readScripts,
+  resolveScriptTerminal,
+  scriptTerminals,
   readTree,
   rootPathKey,
   rootSections,
@@ -61,13 +63,23 @@ import {
   weztermArgs,
   weztermExecutable,
   weztermSendArgs,
+  windowsTerminalArgs,
+  windowsTerminalScriptArgs,
+  runScript,
+  placeScript,
 } from "../../src/routes/session/sidebar-tools/script-runner.ts"
 
 test("keeps retained sidebar builtins while replacing files and footer", () => {
   const ids = createBuiltinPlugins({ experimentalEventSystem: false }).map((plugin) => plugin.id)
   assert.deepEqual(
     ids.filter((id) => id.startsWith("internal:sidebar-")),
-    ["internal:sidebar-context", "internal:sidebar-mcp", "internal:sidebar-lsp", "internal:sidebar-todo"],
+    [
+      "internal:sidebar-context",
+      "internal:sidebar-mcp",
+      "internal:sidebar-lsp",
+      "internal:sidebar-subagents",
+      "internal:sidebar-todo",
+    ],
   )
   assert.equal(ids.includes("internal:sidebar-files"), false)
   assert.equal(ids.includes("internal:sidebar-footer"), false)
@@ -527,6 +539,101 @@ test("uses the WezTerm CLI executable when Windows provides the GUI executable",
     weztermExecutable("C:\\Users\\test\\Apps\\wezterm\\wezterm-gui.exe"),
     path.join("C:\\Users\\test\\Apps\\wezterm", "wezterm.exe"),
   )
+})
+
+test("maps Windows Terminal placements and percentage sizes to CLI arguments", () => {
+  const cwd = "C:\\work\\safe folder"
+  assert.deepEqual(windowsTerminalArgs("wezterm-tab", cwd), ["-w", "0", "new-tab", "-d", cwd])
+  assert.deepEqual(windowsTerminalArgs("wezterm-window", cwd), ["-w", "new", "new-tab", "-d", cwd])
+  assert.deepEqual(windowsTerminalArgs("wezterm-horizontal", cwd, { Percent: 30 }), [
+    "-w", "0", "split-pane", "-V", "--size", "0.3", "-d", cwd,
+  ])
+  assert.deepEqual(windowsTerminalArgs("wezterm-vertical", cwd, { Percent: 70 }), [
+    "-w", "0", "split-pane", "-H", "--size", "0.7", "-d", cwd,
+  ])
+  assert.deepEqual(windowsTerminalArgs("wezterm-vertical", cwd, { Cells: 20 }), [
+    "-w", "0", "split-pane", "-H", "-d", cwd,
+  ])
+})
+
+test("falls back to native in generic terminals without changing saved targets", () => {
+  const settings = normalizeScriptSettings({ terminal: "wezterm-horizontal" })
+  assert.deepEqual(scriptTerminals("generic"), [])
+  assert.equal(resolveScriptTerminal(settings.terminal, "generic"), "native")
+  assert.equal(settings.terminal, "wezterm-horizontal")
+  for (const kind of ["wezterm", "windows-terminal"] as const) {
+    assert.equal(scriptTerminals(kind).length, 4)
+    for (const terminal of scriptTerminals(kind)) {
+      assert.equal(resolveScriptTerminal(terminal.id, "generic"), "native")
+      assert.equal(resolveScriptTerminal(terminal.id, kind), terminal.id)
+    }
+    assert.equal(resolveScriptTerminal("native", kind), "native")
+  }
+})
+
+test("runs the WezTerm command in Windows Terminal from the script directory", () => {
+  const script = {
+    name: "run.ps1",
+    command: "",
+    filePath: path.join("C:\\work", "safe folder", "run.ps1"),
+    terminal: "wezterm-tab" as const,
+    launcher: { executable: "pwsh", args: ["-File"] },
+    weztermSize: { Percent: 50 },
+  }
+  const args = windowsTerminalScriptArgs(script, "C:\\other")
+  assert.deepEqual(args.slice(0, -1), [
+    "-w", "0", "new-tab", "-d", path.dirname(script.filePath),
+    "pwsh", "-NoLogo", "-NoExit", "-EncodedCommand",
+  ])
+  assert.equal(Buffer.from(args.at(-1)!, "base64").toString("utf16le"), weztermSendArgs(script, "7", false).at(-1))
+})
+
+test("falls back to native when wt.exe is unavailable without changing the saved target", async () => {
+  const script = {
+    name: "build", command: "npm run build", terminal: "wezterm-tab" as const,
+    launcher: { executable: "pwsh", args: [] }, weztermSize: { Percent: 50 },
+  }
+  const probed: string[] = []
+  const launched: Array<{ command: string; args: string[]; cwd: string }> = []
+  const result = await runScript(script, "C:\\work", {
+    kind: "windows-terminal",
+    available: async (command) => {
+      probed.push(command)
+      return command !== "wt.exe"
+    },
+    runCommand: async () => { throw new Error("WT must not run when unavailable") },
+    spawnCommand: async (command, args, cwd) => {
+      launched.push({ command, args, cwd })
+      return { target: command }
+    },
+  })
+  assert.deepEqual(probed, ["wt.exe", "pwsh"])
+  assert.deepEqual(launched, [{
+    command: process.platform === "win32" ? "cmd.exe" : "pwsh",
+    args: process.platform === "win32" ? ["/d", "/c", "start", "", "pwsh", script.command] : [script.command],
+    cwd: "C:\\work",
+  }])
+  assert.equal(result.error, undefined)
+  assert.equal(script.terminal, "wezterm-tab")
+})
+
+test("placing a script in Windows Terminal uses native instead of reporting unsupported placement", async () => {
+  const script = {
+    name: "build", command: "npm run build", terminal: "wezterm-horizontal" as const,
+    launcher: { executable: "pwsh", args: [] }, weztermSize: { Percent: 50 },
+  }
+  const probed: string[] = []
+  let nativeLaunches = 0
+  const result = await placeScript(script, "C:\\work", {
+    kind: "windows-terminal",
+    available: async (command) => { probed.push(command); return true },
+    runCommand: async () => { throw new Error("Placement must use native") },
+    spawnCommand: async (command) => { nativeLaunches++; return { target: command } },
+  })
+  assert.deepEqual(probed, ["pwsh"])
+  assert.equal(nativeLaunches, 1)
+  assert.equal(result.error, undefined)
+  assert.equal(script.terminal, "wezterm-horizontal")
 })
 
 test("places commands without submitting them and submits only when running", () => {
@@ -1072,13 +1179,17 @@ test("reads Claude Code usage with its OAuth login and falls back to the cached 
     }
     assert.equal((requests[0].headers as Record<string, string>).Authorization, "Bearer tok")
     writeFileSync(credentialsPath, JSON.stringify({ claudeAiOauth: { accessToken: "tok", expiresAt: nowMs } }))
-    assert.deepEqual(await probeClaudeCodeUsage(options), result)
+    const cached = await probeClaudeCodeUsage(options)
+    assert.equal(result.ok && result.source, "live")
+    assert.equal(cached.ok && cached.source, "cache")
+    assert.deepEqual(cached.ok && [cached.fiveHour, cached.weekly], result.ok && [result.fiveHour, result.weekly])
     assert.equal(requests.length, 1)
-    assert.deepEqual(await probeClaudeCodeUsage({ ...options, nowMs: Date.parse("2027-01-21T00:00:00Z") }), {
-      ok: true,
-      fiveHour: { usedPercent: 0, resetAt: null, minutes: null },
-      weekly: { usedPercent: 100, resetAt: null, minutes: null },
-    })
+    const reset = await probeClaudeCodeUsage({ ...options, nowMs: Date.parse("2027-01-21T00:00:00Z") })
+    assert.equal(reset.ok && reset.source, "cache")
+    assert.deepEqual(reset.ok && [reset.fiveHour, reset.weekly], [
+      { usedPercent: 0, resetAt: null, minutes: null },
+      { usedPercent: 100, resetAt: null, minutes: null },
+    ])
     rmSync(credentialsPath)
     assert.deepEqual(await probeClaudeCodeUsage(options), { ok: false })
   } finally {

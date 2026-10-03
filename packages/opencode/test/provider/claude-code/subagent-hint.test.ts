@@ -323,8 +323,13 @@ test("proxy defs follow the tools opencode offered the agent", () => {
     TASK_BATCH_TOOL_NAME,
     "question",
     "session_tail",
+    "run_after_turn",
   ])
   assert.deepEqual(filterProxyByModelTools(defs, []).map((tool) => tool.name), [])
+  assert.deepEqual(
+    filterProxyByModelTools(defs, [{ name: "run_after_turn" }]).map((tool) => tool.name),
+    ["run_after_turn"],
+  )
   const v2 = ["shell", "subagent", "question"].map((name) => ({ name, inputSchema: { type: "object" } }))
   const v2Names = filterProxyByModelTools(defs, v2, "v2").map((tool) => tool.name)
   assert.deepEqual(v2Names, ["task", TASK_BATCH_TOOL_NAME, "question"])

@@ -87,7 +87,9 @@ import { DialogSelect } from "./ui/dialog-select"
 import { createTuiAttention } from "./attention"
 import * as TuiAudio from "./audio"
 import { win32AssertRawMode } from "./terminal-win32"
-import { destroyRenderer } from "./util/renderer"
+import { destroyRenderer, writeTerminalEscape } from "./util/renderer"
+import { nearestAgentSquare } from "./util/terminalTab"
+import { detectTerminal } from "@opencode-ai/core/util/terminal"
 import { cliErrorMessage, errorFormat } from "./util/error"
 import { spawn } from "node:child_process"
 import { launchDetached } from "@opencode-ai/core/util/launch-detached"
@@ -348,24 +350,34 @@ function persistOcConfig(
   })
 }
 
-// Run the oc.json revive scripts (.ps1 or .exe) straight from the TUI, with no agent turn.
+// Built-in revive uses a detached helper; configured scripts remain overrides.
 function reviveCommands(toast: ToastContext) {
   const config = readOcConfig()
-  const run = (file: string) => () => {
-    launchDetached(file)
-    // Close the terminal right away; the detached revive helper shuts the servers down in the background.
-    // TODO: close only WezTerm windows hosting oc (see OcConfig.shutdownAll).
-    if (process.platform !== "win32") return
-    spawn("taskkill", ["/F", "/IM", "wezterm-gui.exe"], { stdio: "ignore", windowsHide: true })
-  }
+  const route = useRoute()
+  const sync = useSync()
+  const sdk = useSDK()
   return [
     {
       name: "oc.revive_no_install",
       title: "Revive oc without installing",
       category: "System",
-      hidden: !config.revivePath,
       slashName: "revive-no-install",
-      run: run(config.revivePath),
+      run: () => {
+        if (config.revivePath) return launchDetached(config.revivePath)
+        const sessionID = route.data.type === "session" ? route.data.sessionID : undefined
+        const context = Buffer.from(JSON.stringify({
+          terminal: detectTerminal().kind,
+          directory: (sessionID ? sync.session.get(sessionID)?.directory : undefined) ?? sdk.directory ?? process.cwd(),
+          ...(sessionID ? { sessionID } : {}),
+        })).toString("base64url")
+        launchDetached(process.execPath, [
+          ...(/^bun(?:\.exe)?$/i.test(path.basename(process.execPath)) ? [process.argv[1]] : []),
+          "oc", "--revive", context,
+        ]).once("error", (error) => toast.error(error))
+          .once("exit", (code) => {
+            if (code) toast.error(new Error(`Revive helper launch failed: exit code ${code}`))
+          })
+      },
     },
     {
       name: "oc.revive",
@@ -373,7 +385,9 @@ function reviveCommands(toast: ToastContext) {
       category: "System",
       hidden: !config.reviveInstallPath,
       slashName: "revive",
-      run: run(config.reviveInstallPath),
+      run: () => {
+        launchDetached(config.reviveInstallPath)
+      },
     },
   ]
 }
@@ -511,6 +525,25 @@ export const run = Effect.fn("Tui.run")(function* (input: TuiInput) {
           Effect.sync(() => {
             destroyRenderer(renderer)
           }),
+      )
+      const terminal = detectTerminal()
+      const ledgerPath = path.join(global.state, "oc-tuis", `${process.pid}.json`)
+      // The ledger only scopes revive/shutdown to this instance; failing to write it must not stop the TUI.
+      yield* Effect.acquireRelease(
+        Effect.try({
+          try: () => {
+            fs.mkdirSync(path.dirname(ledgerPath), { recursive: true })
+            fs.writeFileSync(ledgerPath, JSON.stringify({
+              pid: process.pid,
+              instance: Global.Path.app,
+              executable: Global.resolveExecutablePath(process.execPath),
+              startedAt: Date.now() - process.uptime() * 1000,
+              ...(terminal.kind === "wezterm" && terminal.paneID ? { paneID: terminal.paneID } : {}),
+            }))
+          },
+          catch: (error) => error,
+        }).pipe(Effect.ignore),
+        () => Effect.sync(() => fs.rmSync(ledgerPath, { force: true })),
       )
       win32AssertRawMode()
       const keymap = createDefaultOpenTuiKeymap(renderer)
@@ -811,28 +844,52 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
     renderer.clearSelection()
   }
   const [terminalTitleEnabled, setTerminalTitleEnabled] = createSignal(kv.get("terminal_title_enabled", true))
+  const terminal = detectTerminal()
+  const terminalTabState = { progress: 0, color: "" }
   const [pasteSummaryEnabled, setPasteSummaryEnabled] = createSignal(
     kv.get("paste_summary_enabled", !sync.data.config.experimental?.disable_paste_summary),
   )
 
   // Update terminal window title based on current route and session
   createEffect(() => {
-    if (!terminalTitleEnabled() || Flag.OPENCODE_DISABLE_TERMINAL_TITLE) return
+    const titleEnabled = terminalTitleEnabled() && !Flag.OPENCODE_DISABLE_TERMINAL_TITLE
+    const tabEnabled = titleEnabled && kv.get("terminal_tab_agent_enabled", true)
+    const session = route.data.type === "session" ? sync.session.get(route.data.sessionID) : undefined
+    const status = route.data.type === "session" ? sync.data.session_status[route.data.sessionID]?.type : undefined
+    // Error ring only when the latest turn actually failed; aborts and the sticky "failed" mark do not count.
+    const lastError =
+      route.data.type === "session"
+        ? (sync.data.message[route.data.sessionID] ?? []).findLast((message) => message.role === "assistant")?.error
+        : undefined
+    const failed = lastError !== undefined && lastError.name !== "MessageAbortedError"
+    const progress = !tabEnabled ? 0 : status === "busy" || status === "retry" ? 3 : failed ? 2 : 0
+    if (progress !== terminalTabState.progress) {
+      writeTerminalEscape(renderer, `\x1b]9;4;${progress}\x1b\\`)
+      terminalTabState.progress = progress
+    }
+    const agent = local.agent.current()
+    const color = tabEnabled && route.data.type !== "plugin" && agent ? local.agent.color(agent.name).toInts() : undefined
+    const hex = color ? `#${color.slice(0, 3).map((channel) => channel.toString(16).padStart(2, "0")).join("")}` : ""
+    if (terminal.kind === "wezterm" && hex !== terminalTabState.color) {
+      writeTerminalEscape(renderer, `\x1b]1337;SetUserVar=oc_agent_color=${Buffer.from(hex).toString("base64")}\x07`)
+      terminalTabState.color = hex
+    }
+    if (!titleEnabled) return
+    const prefix = color ? `${nearestAgentSquare([color[0], color[1], color[2]])} ` : ""
 
     if (route.data.type === "home") {
-      renderer.setTerminalTitle("OpenCode")
+      renderer.setTerminalTitle(`${prefix}OpenCode`)
       return
     }
 
     if (route.data.type === "session") {
-      const session = sync.session.get(route.data.sessionID)
       if (!session || isDefaultTitle(session.title)) {
-        renderer.setTerminalTitle("OpenCode")
+        renderer.setTerminalTitle(`${prefix}OpenCode`)
         return
       }
 
       const title = session.title.length > 40 ? session.title.slice(0, 37) + "..." : session.title
-      renderer.setTerminalTitle(`OC | ${title}`)
+      renderer.setTerminalTitle(`${prefix}OC | ${title}`)
       return
     }
 
@@ -1606,6 +1663,17 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
             if (!next) renderer.setTerminalTitle("")
             return next
           })
+          dialog.clear()
+        },
+      },
+      {
+        name: "terminal.tab_agent.toggle",
+        title: kv.get("terminal_tab_agent_enabled", true)
+          ? "Disable tab agent square and status"
+          : "Enable tab agent square and status",
+        category: "System",
+        run: () => {
+          kv.set("terminal_tab_agent_enabled", !kv.get("terminal_tab_agent_enabled", true))
           dialog.clear()
         },
       },

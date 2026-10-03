@@ -6,11 +6,11 @@ oc is a personal, Windows-first OpenCode: native `oc` launcher, extra model prov
 
 Use this file to agree on what oc *is*. Statuses describe current state. They do not authorize implementation work.
 
-Last reviewed: 2026-10-02
+Last reviewed: 2026-10-03
 
 ## Progress
 
-[512,108](scc.txt) lines of code and counting...
+[513,896](scc.txt) lines of code and counting...
 
 <!-- code-count:start -->
 
@@ -25,8 +25,8 @@ Last reviewed: 2026-10-02
 | Powershell | 18 | 1,252 | 113 | 30 | 1,109 |
 | SQL | 95 | 592 | 0 | 17 | 575 |
 | Shell | 1 | 120 | 17 | 17 | 86 |
-| TypeScript | 2,698 | 525,228 | 42,747 | 14,876 | 467,605 |
-| **Total** | **3,015** | **576,622** | **48,898** | **15,616** | **512,108** |
+| TypeScript | 2,711 | 527,151 | 42,867 | 14,891 | 469,393 |
+| **Total** | **3,028** | **578,545** | **49,018** | **15,631** | **513,896** |
 
 <!-- code-count:end -->
 
@@ -48,12 +48,12 @@ Counts below are for **active** rows only. Retired work is listed separately and
 
 | Level | Count |
 |---|---:|
-| ~done~ | 18 |
-| high | 18 |
-| medium | 22 |
+| ~done~ | 16 |
+| high | 25 |
+| medium | 21 |
 | low | 0 |
 | CRITICAL | 0 |
-| **Total** | **58** |
+| **Total** | **62** |
 
 ---
 
@@ -89,13 +89,13 @@ Get into a project quickly, keep a local server running, and control it from the
 | Feature | Level | What it does | What's left |
 |---|---|---|---|
 | Native `oc` launcher | ~done~ | `oc` is OpenCode itself, with settings in `~/.config/opencode/oc.json`. Launch, previous session (`occ`), diagnostics, and `oc config get/set` all work. The `occ` desktop shortcut runs `occ.exe` directly (no PowerShell profile), and `occ` looks up the last session while the server starts. | None realistic. |
-| Run after turn and revive | high | **Revive** restarts oc: `/revive-no-install` runs `.scripts\revive.ps1` (shut down, reopen); `/revive` runs `.scripts\reviveAndInstall.ps1` (build while oc is still up, shut down, install, reopen). The paths come from `oc.json` `revive.path` and `revive.installPath` (exe or `.ps1`); each command is hidden when its path is unset. The palette commands run the script directly with no agent turn and close WezTerm at once. A `.ps1` runs in its own titled console via `start`. **`run_after_turn`** is a built-in tool that lets an agent queue an exe or `.ps1` to run once its turn ends (`/agent-revive` uses it). Its permission is `run_after_turn`: the built-in default allows it, and the global `opencode.jsonc` asks except for `.scripts\revive*.ps1`. | Revive closes *every* WezTerm window, not only oc ones (band-aid with a TODO). The latest revive changes are not live-checked. TODO: `/agent-revive` and `/agent-revive-no-install` do not work in Claude Code sessions, because the oc proxy does not expose `run_after_turn`. |
+| Run after turn and revive | high | **Revive** restarts this oc instance: built-in revive (no personal script) shuts down, starts the server, and reopens in the same terminal kind (WezTerm, Windows Terminal, or a new console). `oc.json` `revive.path` and `revive.installPath` still override when set (exe or `.ps1`); each palette command stays hidden when its path is unset. Install-and-revive stays developer-only. Shutdown and revive close only terminals and processes recorded for this instance; `ocdebug` and unrelated windows stay open. WezTerm closes only panes that hosted oc. **`run_after_turn`** queues an exe or `.ps1` after the agent turn (`/agent-revive` uses it), including Claude Code sessions when `run_after_turn` is listed in `proxyTools`. Permission: built-in default allows; global config can deny except revive scripts. | Live check built-in revive on a fresh Windows profile; unrelated WezTerm and Windows Terminal windows survive `/revive-no-install`. Claude Code `/agent-revive-no-install`. |
 | Separate home vs OC directory | high | Bare `oc` and relative project names can use two different folders. Absolute paths stay absolute. | Latest palette settings may still need a rebuild/restart to show in the running app. |
 | New-session project picker | high | Tray/palette "New session" starts the intro, then the real OpenCode project picker, then attaches to the running server. | Confirm the installed `oc.exe` shows the intended picker. |
-| Startup loading animation | medium | Column-sweep animation while the server and session come up. Fills and re-centers when the window is snapped or resized. | Visual sign-off in the running app is still thin. Resize fix not checked through the installed `occ` shortcut and TUI handoff. |
+| Startup loading animation | high | Column-sweep animation while the server and session come up. `intro.background` in `oc.json` uses your terminal background (default) or paints black. Fills and re-centers when the window is snapped or resized. | Live look with both `intro.background` values. Resize through the installed `occ` shortcut and TUI handoff is not fully checked. |
 | Resident background server | medium | Local server stays up between launches (production port **4096**). Palette can shut down or restart it. Server shutdown and restart close session admission, wait up to 30 seconds for active-work cancellation, then dispose project resources before scheduling exit. Attach can forward model/agent. A stale server record no longer adds a 10-second wait on the first `oc` launch; a launch during an active restart still waits for the replacement. On Windows the server starts through a hidden `Start-Process` hop, so it has a hidden console (no flashing windows from its child processes) and outlives the launcher. | Full installed shutdown/restart flow is not fully signed off. The hidden PowerShell hop costs about a second; a direct native launch waits on the Bun Windows FFI fix. |
 | Start server at Windows sign-in | high | OC settings can turn sign-in auto-start on or off. | Final installed palette click is not recorded. |
-| `oc --kill-server` / `--restart-server` / `--shutdown-all` | high | Simple flags for the tray and CLI to stop or bounce the resident server without a full TUI. `--shutdown-all` closes WezTerm and every oc process, then stops both resident servers (used by revive). | Tray wiring exists; treat as nearly done once it is used from a cold start. |
+| `oc --kill-server` / `--restart-server` / `--shutdown-all` | high | Simple flags for the tray and CLI to stop or bounce the resident server without a full TUI. `--shutdown-all` stops only this instance's TUIs and server (TUI ledger), not `ocdebug` or unrelated terminals; revive uses the same scoping. | Tray wiring exists; treat as nearly done once it is used from a cold start. |
 | Faster command startup | ~done~ | Only the command asked for is loaded. `--version` is much quicker. | None realistic. |
 | Windows tray (`octray`) | medium | Separate tray app: open OC, open the project picker, start the server if it is down, restart/shut down the server. | Logs, live status, and settings menu items are still thin. Not inside this git checkout. |
 | No browser/desktop OpenCode app | ~done~ | This checkout no longer builds the website UI or Electron desktop app. CLI, TUI, and API remain. `README.OG.md` states that. | Some `packages/web` pages still mention desktop / `opencode web`. Intentional removal, not a missing product. |
@@ -109,12 +109,14 @@ Move between projects, keep a session's model, and mark work without deleting it
 | Feature | Level | What it does | What's left |
 |---|---|---|---|
 | All-projects session list | ~done~ | Browse sessions from every project and jump back to that project's folder. | None realistic. |
+| Send prompt and stay on Home | high | On Home, Ctrl+Enter sends the prompt to a new session and keeps you on Home so you can start several in a row. On a session screen Ctrl+Enter still inserts a newline. | Unit tests cover the command; installed Home Ctrl+Enter streak is not recorded. |
 | Start a session with no model call | medium | Opens a project session without spending tokens. | Installed "it feels right" check is incomplete. |
 | Session marks | medium | Mark a session complete, failed, or in progress (exclusive), or pin it. Agents can mark in progress; completion and reopening complete/failed sessions ask permission by default. Themed markers in lists and the sidebar. | Installed end-to-end confirmation is missing. |
 | Remember this session's model | ~done~ | Each session keeps its model and reasoning choice across agent changes and restarts. | None realistic. |
 | Don't lose the attached session | medium | Refreshing the global list should not drop the session you are in. | Manual installed check was left pending. |
 | Recover after server restart | high | After the resident server bounces, the TUI should reconnect, restore the prompt, and not resubmit what was typed. | Still treat as high until daily reconnect after a bounce is trusted. |
 | Clear interrupted questions | high | Aborting a session rejects a pending question, tells the UI, and does not leave a Cursor-backed chat stuck on that prompt. | Covered by tests. Not signed off in the installed app. |
+| Questions survive closing the window | high | Pending questions reload when you open the session again (including via `occ`). If the live request is gone, the UI rebuilds from the saved tool call and your answer continues the agent as a normal follow-up. | Live check after close via `occ` and the session list; repeat after server restart (restored-question path). |
 
 ---
 
@@ -124,9 +126,10 @@ One sidebar for usage, files, scripts, search, and status.
 
 | Feature | Level | What it does | What's left |
 |---|---|---|---|
-| Integrated workspace sidebar | ~done~ | Native sidebar: usage, files, git changes, scripts, context, MCP, LSP, todos, footer. Usage refreshes after idle. | None realistic. |
-| Click a path to open it | ~done~ | Tool paths, edited files, and changed-file rows open in the configured editor. | None realistic. |
-| Windows file search and script launch | high | Fast file lookup and launching repo scripts in WezTerm (or copy). WezTerm GUI vs CLI executable mapping is fixed. | Broader daily-workflow sign-off is limited. |
+| Integrated workspace sidebar | high | Native sidebar: usage, files, git changes, scripts, context, MCP, LSP, todos, footer. Model and reasoning rows follow the current session (same as the prompt footer). Usage refreshes per provider after you use it and when you return; stale or cached numbers are dimmed with age on hover. | Two sessions on different models and reasoning: switch and confirm rows match the footer. Live Claude usage refresh and dim when stale. |
+| Click a path to open it | high | Tool paths, edited files, and changed-file rows open in an editor chosen by extension via `openEditedWith` (a string or a map with `default` and per-extension keys). | Live click on a `.md` and a `.ts` path. |
+| Sub-agents in the sidebar | high | Lists the current session's sub-agents with name, short title, and live status; click opens the child session. Shows running agents and recent finishes that drop off after a short time. Hidden when empty. | Live SuperPlan conductor or `task_batch`; rows update and click through. |
+| Windows file search and script launch | high | Fast file lookup and launching repo scripts. WezTerm gets tab, window, and split targets; Windows Terminal gets matching `wt` targets; other terminals use native launch. A saved target the current terminal cannot run falls back to native. | Fresh Windows Terminal and conhost daily workflow sign-off. |
 | Choose which usage meters to show | medium | Sidebar can show Codex, Cursor, Go, and OpenRouter usage. Defaults are on. | Latest installed picker interaction is not recorded. |
 | Everything Search (Windows) | high | Starts the Everything daemon when needed, reconnects if it drops, does not try to own shutdown. Friendly sort names work in the local checkout. | Full start/reconnect acceptance is incomplete. Lives partly in `mcp-everything-search`. |
 
@@ -156,6 +159,7 @@ Timestamps, copy, keys, diffs, plugins, and the terminal itself.
 
 | Feature | Level | What it does | What's left |
 |---|---|---|---|
+| Agent square and status in the terminal tab | high | Terminal title prefixes the nearest emoji square to the current agent color. OSC progress shows busy, idle, and error states where the terminal supports it. WezTerm can draw an exact-color square with an optional tab-title Lua snippet documented in `v0.3.0.md`. | Live check on Windows Terminal (square and progress ring), conhost (square only), WezTerm with and without the snippet. |
 | Response timestamps | medium | Local date/time, then duration. Uses start time while the reply is still streaming. | Final look in the installed UI is not recorded. |
 | Copy on release vs Ctrl+C | medium | Copy-on-release or Ctrl+C. Removed a Windows console poll that contributed to crashes. | In-TUI copy-mode checks were blocked. |
 | Keys and command palette | high | Context-sensitive Ctrl+D, Ctrl+Shift+Up/Down, Ctrl+N for a new OC session. OC commands use a source order and friendly labels. `command_palette.order` in `opencode.jsonc` can reorder commands inside a category; unlisted commands keep source order. Shut down and restart sit in the `oc` section. | Order and labels are tested. A full click-through in the installed app is not recorded. |
@@ -255,6 +259,7 @@ This file is the source of truth for what OC is and how complete each piece is.
 
 - Change a level when new live proof arrives, or when the behavior actually changes.
 - Keep retired work out of the counts.
+
 - File new capabilities under how they are *used*.
 - Keep OC-only work in this file. Native OpenCode belongs in the `README.OG.md` Tracking table (Now / Keep / Upstream).
 - Session notes stay in `buildNotes.md`. This document stays the product contract.

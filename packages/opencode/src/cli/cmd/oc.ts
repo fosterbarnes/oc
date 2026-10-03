@@ -119,9 +119,9 @@ const LaunchCommand = cmd({
       return
     }
 
-    const stopIntro = startIntro()
+    const settings = await OcConfig.read()
+    const stopIntro = startIntro(settings.intro?.background)
     try {
-      const settings = await OcConfig.read()
       const homeDir = typeof settings.homeDir === "string" ? settings.homeDir : os.homedir()
       const ocDir = typeof settings.ocDir === "string" ? settings.ocDir : undefined
       const directory = resolveTargetDirectory(args.target, ocDir, homeDir)
@@ -164,11 +164,11 @@ const PreviousCommand = cmd({
     const depth = Number(args.depth)
     if (!Number.isInteger(depth) || depth < 1 || depth > 50)
       throw new Error(`Previous session depth must be between 1 and 50: ${depth}`)
-    const stopIntro = startIntro()
+    const settings = await OcConfig.read()
+    const stopIntro = startIntro(settings.intro?.background)
     try {
       // Independent startup work: the session lookup is its own process, so overlap it with server startup.
-      const [settings, session, server] = await Promise.all([
-        OcConfig.read(),
+      const [session, server] = await Promise.all([
         runNative(["session", "previous", "--depth", String(depth)], { capture: true }),
         OcConfig.startServer(),
       ])
@@ -227,7 +227,12 @@ export const OcCommand = cmd({
       })
       .option("shutdown-all", {
         type: "boolean",
-        describe: "Shut down production and debug servers, oc processes, and their WezTerm windows",
+        describe: "Shut down this instance's resident server and close its oc terminals",
+      })
+      .option("revive", {
+        type: "string",
+        hidden: true,
+        describe: "Restart this instance and reopen its terminal using an encoded context",
       })
       .command(ConfigCommand)
       .command({
@@ -243,13 +248,27 @@ export const OcCommand = cmd({
       .command(DiagnosticsCommand)
       .check((argv) => {
         const kill = Boolean(argv["kill-server"]) || Boolean(argv["shutdown-server"])
-        const selected = [Boolean(argv["restart-server"]), kill, Boolean(argv["shutdown-all"])].filter(Boolean).length
+        const selected = [Boolean(argv["restart-server"]), kill, Boolean(argv["shutdown-all"]),
+          argv.revive !== undefined].filter(Boolean).length
         if (selected > 0 && argv._.length > 1)
-          throw new Error("--restart-server, --kill-server, and --shutdown-all cannot be used with a launch target")
-        if (selected > 1) throw new Error("Use only one of --restart-server, --kill-server, or --shutdown-all")
+          throw new Error("Server controls and --revive cannot be used with a launch target")
+        if (selected > 1) throw new Error("Use only one server control or --revive")
         return true
       }),
   handler: async (args) => {
+    if (args.revive !== undefined) {
+      const { Revive } = await import("@/config/revive")
+      const context = Revive.decodeContext(args.revive)
+      if (!context.reopen) {
+        await OcConfig.revive(context)
+        return
+      }
+      const server = await OcConfig.startServer()
+      await runNative(Revive.attachArguments(server.url, context), {
+        env: { OPENCODE_SERVER_PASSWORD: server.secret, OPENCODE_SERVER_USERNAME: "opencode" },
+      })
+      return
+    }
     if ((args as Record<string, unknown>)["shutdown-all"]) {
       console.log(JSON.stringify(await OcConfig.shutdownAll()))
       return

@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process"
 import { randomUUID } from "node:crypto"
+import { existsSync } from "node:fs"
 import fs from "node:fs/promises"
 import net from "node:net"
 import path from "path"
@@ -143,6 +144,19 @@ async function waitReady(connection: Connection, abort?: AbortSignal) {
   throw new Error(`agentify_startup_timeout:${last}`)
 }
 
+function desktopBrowserBin(): string {
+  const programFilesX86 = process.env["ProgramFiles(x86)"] ?? "C:\\Program Files (x86)"
+  const programFiles = process.env.ProgramFiles ?? "C:\\Program Files"
+  const localAppData = process.env.LOCALAPPDATA ?? ""
+  const candidates = [
+    path.join(programFilesX86, "Microsoft", "Edge", "Application", "msedge.exe"),
+    path.join(programFiles, "Microsoft", "Edge", "Application", "msedge.exe"),
+    path.join(programFiles, "Google", "Chrome", "Application", "chrome.exe"),
+    ...(localAppData ? [path.join(localAppData, "Google", "Chrome", "Application", "chrome.exe")] : []),
+  ]
+  return candidates.find((candidate) => existsSync(candidate)) ?? candidates[0]
+}
+
 async function start(abort?: AbortSignal) {
   const entry = runtimeEntry()
   await fs.access(entry)
@@ -159,9 +173,7 @@ async function start(abort?: AbortSignal) {
       AGENTIFY_RUNTIME_PORT: String(port),
       AGENTIFY_DESKTOP_BROWSER_BACKEND: "chrome-cdp",
       AGENTIFY_DESKTOP_SHOW_TABS: "true",
-      AGENTIFY_DESKTOP_CHROME_BIN:
-        process.env.AGENTIFY_DESKTOP_CHROME_BIN ||
-        "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
+      AGENTIFY_DESKTOP_CHROME_BIN: process.env.AGENTIFY_DESKTOP_CHROME_BIN || desktopBrowserBin(),
     },
     stdio: ["ignore", "pipe", "pipe"],
     windowsHide: true,

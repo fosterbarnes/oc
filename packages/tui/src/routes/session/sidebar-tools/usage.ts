@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises"
+import { mkdir, readFile, stat, writeFile } from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 
@@ -11,6 +11,32 @@ const REQUEST_TIMEOUT_MS = 15_000
 
 export const USAGE_PROVIDER_IDS = ["openai", "cursor", "opencode-go", "openrouter", "claude-code"] as const
 export type UsageProviderId = (typeof USAGE_PROVIDER_IDS)[number]
+
+// Extra Claude Code accounts are separate providers named "claude-code-<account>".
+export function usageProviderForModel(providerID: string): UsageProviderId | undefined {
+  if (providerID.startsWith("claude-code-")) return "claude-code"
+  return USAGE_PROVIDER_IDS.find((id) => id === providerID)
+}
+
+export function shouldRefreshUsageProvider(lastRequestedAt: number | undefined, nowMs: number): boolean {
+  return lastRequestedAt === undefined || nowMs - lastRequestedAt >= 45_000
+}
+
+export type UsageSnapshot<T> = T & {
+  fetchedAt?: number
+  source?: "live" | "cache"
+  stale?: boolean
+}
+
+export function updateUsageSnapshot<T extends { ok: boolean }>(
+  previous: UsageSnapshot<T>,
+  next: UsageSnapshot<T>,
+  nowMs: number,
+): UsageSnapshot<T> {
+  if (!next.ok && previous.ok) return { ...previous, stale: true }
+  if (!next.ok) return next
+  return { ...next, fetchedAt: next.fetchedAt ?? nowMs, source: next.source ?? "live", stale: false }
+}
 
 export const DEFAULT_USAGE_PROVIDERS: UsageProviderId[] = ["openai", "cursor", "opencode-go", "openrouter"]
 
@@ -103,6 +129,8 @@ export type CursorUsage =
 export type ClaudeCodeUsage =
   | {
       ok: true
+      fetchedAt: number
+      source: "live" | "cache"
       fiveHour: UsageWindow
       weekly: UsageWindow
     }
@@ -246,12 +274,15 @@ export async function probeClaudeCodeUsage(options: UsageOptions = {}): Promise<
       .catch(() => undefined)
     return liveUsage
   }
-  return parseClaudeUsage(
+  const cached = parseClaudeUsage(
     await readFile(cachePath, "utf8")
       .then((raw) => JSON.parse(raw) as unknown)
       .catch(() => undefined),
     nowMs,
   )
+  if (!cached.ok) return cached
+  const cache = await stat(cachePath).catch(() => undefined)
+  return { ...cached, source: "cache", fetchedAt: cache?.mtimeMs ?? 0 }
 }
 
 function parseClaudeUsage(value: unknown, nowMs: number): ClaudeCodeUsage {
@@ -259,7 +290,7 @@ function parseClaudeUsage(value: unknown, nowMs: number): ClaudeCodeUsage {
   const fiveHour = claudeWindow(body?.five_hour, nowMs)
   const weekly = claudeWindow(body?.seven_day, nowMs)
   if (!fiveHour || !weekly) return { ok: false }
-  return { ok: true, fiveHour, weekly }
+  return { ok: true, fiveHour, weekly, fetchedAt: nowMs, source: "live" }
 }
 
 function claudeWindow(value: unknown, nowMs: number): UsageWindow | undefined {

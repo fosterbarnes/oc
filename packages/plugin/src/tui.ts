@@ -386,6 +386,8 @@ export type TuiState = {
   readonly vcs: { branch?: string; default_branch?: string } | undefined
   session: {
     count: () => number
+    children: (sessionID: string) => ReadonlyArray<Session>
+    agentLabel: (name: string) => string
     get: (sessionID: string) => Session | undefined
     diff: (sessionID: string) => ReadonlyArray<TuiSidebarFileItem>
     todo: (sessionID: string) => ReadonlyArray<TuiSidebarTodoItem>
@@ -419,7 +421,7 @@ type TuiAttentionConfigView = {
 
 type TuiConfigView = Pick<PluginConfig, "$schema" | "theme" | "plugin"> &
   NonNullable<PluginConfig["tui"]> & {
-    openEditedWith?: string
+    openEditedWith?: string | Record<string, string>
     leader_timeout: number
     attention: TuiAttentionConfigView
     plugin_enabled?: Record<string, boolean>

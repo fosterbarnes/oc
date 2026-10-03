@@ -3,22 +3,41 @@ import { createEffect, createMemo, createSignal, For, onCleanup, Show } from "so
 import { useRenderer } from "@opentui/solid"
 import type { TextareaRenderable } from "@opentui/core"
 import { selectedForeground, tint, useTheme } from "../../context/theme"
-import type { QuestionAnswer, QuestionRequest } from "@opencode-ai/sdk/v2"
+import type { QuestionAnswer, QuestionRequest, Session } from "@opencode-ai/sdk/v2"
 import { useSDK } from "../../context/sdk"
 import { SplitBorder } from "../../ui/border"
 import { useTuiConfig } from "../../config"
 import { useBindings, useOpencodeModeStack } from "../../keymap"
 import { useDialog } from "../../ui/dialog"
+import { useToast } from "../../ui/toast"
+import { errorMessage } from "../../util/error"
 
 const QUESTION_MODE = "question"
 
-export function QuestionPrompt(props: { request: QuestionRequest; directory?: string }) {
+export function questionAnswerText(request: QuestionRequest, answers: QuestionAnswer[]) {
+  const formatted = request.questions
+    .map((question, i) => `"${question.question}"="${answers[i]?.length ? answers[i].join(", ") : "Unanswered"}"`)
+    .join(", ")
+  return `User has answered your questions: ${formatted}. You can now continue with the user's answers in mind.`
+}
+
+export function QuestionPrompt(props: {
+  request: QuestionRequest
+  directory?: string
+  workspace?: string
+  agent?: string
+  model?: Session["model"]
+  restored?: boolean
+  onDismiss?: () => void
+}) {
   const sdk = useSDK()
+  const toast = useToast()
   const { theme } = useTheme()
   const renderer = useRenderer()
   const tuiConfig = useTuiConfig()
   const modeStack = useOpencodeModeStack()
   const dialog = useDialog()
+  const [sending, setSending] = createSignal(false)
 
   const questions = createMemo(() => props.request.questions)
   const single = createMemo(() => questions().length === 1 && questions()[0]?.multiple !== true)
@@ -47,20 +66,55 @@ export function QuestionPrompt(props: { request: QuestionRequest; directory?: st
     return store.answers[store.tab]?.includes(value) ?? false
   })
 
+  function reply(answers: QuestionAnswer[]) {
+    if (sending()) return
+    const onDismiss = props.onDismiss
+    setSending(true)
+    // A restored question has no live request; the answer goes back as a follow-up message instead.
+    const sent: Promise<unknown> = props.restored
+      ? sdk.client.session.promptAsync({
+          sessionID: props.request.sessionID,
+          directory: props.directory,
+          workspace: props.workspace,
+          agent: props.agent,
+          model: props.model ? { providerID: props.model.providerID, modelID: props.model.id } : undefined,
+          variant: props.model?.variant === "default" ? undefined : props.model?.variant,
+          parts: [{ type: "text", text: questionAnswerText(props.request, answers) }],
+        }, { throwOnError: true })
+      : sdk.client.question.reply({
+          requestID: props.request.id,
+          directory: props.directory,
+          workspace: props.workspace,
+          answers,
+        }, { throwOnError: true })
+    void sent
+      .then(() => onDismiss?.())
+      .catch((error) =>
+        toast.show({ title: "Failed to send answer", message: errorMessage(error), variant: "error" }),
+      )
+      .finally(() => setSending(false))
+  }
+
   function submit() {
-    const answers = questions().map((_, i) => store.answers[i] ?? [])
-    void sdk.client.question.reply({
-      requestID: props.request.id,
-      directory: props.directory,
-      answers,
-    })
+    reply(questions().map((_, i) => store.answers[i] ?? []))
   }
 
   function reject() {
-    void sdk.client.question.reject({
-      requestID: props.request.id,
-      directory: props.directory,
-    })
+    if (sending()) return
+    if (props.restored) {
+      props.onDismiss?.()
+      return
+    }
+    void sdk.client.question
+      .reject({
+        requestID: props.request.id,
+        directory: props.directory,
+        workspace: props.workspace,
+      }, { throwOnError: true })
+      .then(() => props.onDismiss?.())
+      .catch((error) =>
+        toast.show({ title: "Failed to dismiss question", message: errorMessage(error), variant: "error" }),
+      )
   }
 
   function pick(answer: string, custom: boolean = false) {
@@ -73,11 +127,7 @@ export function QuestionPrompt(props: { request: QuestionRequest; directory?: st
       setStore("custom", inputs)
     }
     if (single()) {
-      void sdk.client.question.reply({
-        requestID: props.request.id,
-        directory: props.directory,
-        answers: [[answer]],
-      })
+      reply([[answer]])
       return
     }
     setStore("tab", store.tab + 1)
@@ -298,6 +348,9 @@ export function QuestionPrompt(props: { request: QuestionRequest; directory?: st
       customBorderChars={SplitBorder.customBorderChars}
     >
       <box gap={1} paddingLeft={1} paddingRight={3} paddingTop={1} paddingBottom={1}>
+        <Show when={props.restored}>
+          <text fg={theme.textMuted}>restored</text>
+        </Show>
         <Show when={!single()}>
           <box flexDirection="row" gap={1} paddingLeft={1}>
             <For each={questions()}>

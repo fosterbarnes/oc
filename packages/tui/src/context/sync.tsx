@@ -9,6 +9,7 @@ import type {
   Command,
   PermissionRequest,
   QuestionRequest,
+  QuestionInfo,
   LspStatus,
   McpStatus,
   McpResource,
@@ -73,6 +74,48 @@ function compareMessage(a: Message, b: Message) {
 }
 
 const messageKey = (message: Message) => message.time.created + message.id
+
+export function restoredQuestion(messages: Message[], parts: Record<string, Part[]>) {
+  const message = messages.at(-1)
+  if (message?.role !== "assistant") return
+  const part = parts[message.id]?.findLast(
+    (part) => part.type === "tool" || ((part.type === "text" || part.type === "reasoning") && !!part.text.trim()),
+  )
+  if (part?.type !== "tool" || part.tool !== "question") return
+  if (part.state.status !== "running" && part.state.status !== "error") return
+  if (part.state.status === "error" && part.state.error !== "The user dismissed this question") return
+  const questions: unknown = part.state.input.questions
+  if (!Array.isArray(questions) || !questions.length || !questions.every(isQuestionInfo)) return
+  return {
+    id: `restored_${part.id}`,
+    sessionID: part.sessionID,
+    questions,
+    tool: { messageID: part.messageID, callID: part.callID },
+    restored: true as const,
+  }
+}
+
+function questionToolKey(tool: NonNullable<QuestionRequest["tool"]>) {
+  return JSON.stringify([tool.messageID, tool.callID])
+}
+
+function isQuestionInfo(value: unknown): value is QuestionInfo {
+  if (!value || typeof value !== "object") return false
+  if (!("question" in value) || typeof value.question !== "string") return false
+  if (!("header" in value) || typeof value.header !== "string") return false
+  if ("multiple" in value && value.multiple !== undefined && typeof value.multiple !== "boolean") return false
+  if ("custom" in value && value.custom !== undefined && typeof value.custom !== "boolean") return false
+  return (
+    "options" in value &&
+    Array.isArray(value.options) &&
+    value.options.every(
+      (option: unknown) =>
+        !!option && typeof option === "object" &&
+        "label" in option && typeof option.label === "string" &&
+        "description" in option && typeof option.description === "string",
+    )
+  )
+}
 
 export const {
   context: SyncContext,
@@ -163,6 +206,70 @@ export const {
     const project = useProject()
     const sdk = useSDK()
     const route = useRoute()
+    const [promptReady, setPromptReady] = createStore<Record<string, boolean>>({})
+    const [dismissedQuestions, setDismissedQuestions] = createStore<Record<string, Record<string, boolean>>>({})
+    const promptRevisions = new Map<string, number>()
+    const statusRevisions = new Map<string, number>()
+    const questionRequests = new Map<string, QuestionRequest>()
+    const settledQuestions = new Set<string>()
+
+    function dismissQuestion(request: QuestionRequest) {
+      if (request.tool) {
+        const key = questionToolKey(request.tool)
+        setDismissedQuestions(request.sessionID, (dismissed) => ({ ...dismissed, [key]: true }))
+      }
+      setStore("question", request.sessionID, (requests) => (requests ?? []).filter((item) => item.id !== request.id))
+    }
+
+    async function refreshPrompts(location: { directory?: string; workspaceID?: string }, sessionID?: string) {
+      const query = { directory: location.directory, workspace: location.workspaceID }
+      const ids = new Set([
+        ...store.session
+          .filter((session) => session.directory === location.directory && session.workspaceID === location.workspaceID)
+          .map((session) => session.id),
+        ...(sessionID ? [sessionID] : []),
+      ])
+      ids.forEach((id) => setPromptReady(id, false))
+      const beforeStatus = new Map(statusRevisions)
+      const statuses = await sdk.client.session.status(query, { throwOnError: true }).catch(() => undefined)
+      if (statuses) {
+        Object.keys(statuses.data ?? {}).forEach((id) => ids.add(id))
+        ids.forEach((id) => {
+          if (statusRevisions.get(id) !== beforeStatus.get(id)) return
+          const status = statuses.data?.[id] ?? { type: "idle" as const }
+          if (store.session_status[id]?.type !== status.type) {
+            statusRevisions.set(id, (statusRevisions.get(id) ?? 0) + 1)
+          }
+          setStore("session_status", id, reconcile(status))
+        })
+      }
+      const revisions = new Map(promptRevisions)
+      const fetchedStatuses = new Map(statusRevisions)
+      const [questions, permissions] = await Promise.all([
+        sdk.client.question.list(query, { throwOnError: true }).catch(() => undefined),
+        sdk.client.permission.list(query, { throwOnError: true }).catch(() => undefined),
+      ])
+      questions?.data?.forEach((request) => {
+        questionRequests.set(request.id, request)
+        if (settledQuestions.has(request.id)) dismissQuestion(request)
+      })
+      const questionGroups = groupBySession((questions?.data ?? []).filter((request) => !settledQuestions.has(request.id)))
+      const permissionGroups = groupBySession(permissions?.data ?? [])
+      Object.keys(questionGroups).forEach((id) => ids.add(id))
+      Object.keys(permissionGroups).forEach((id) => ids.add(id))
+      batch(() => {
+        ids.forEach((id) => {
+          if (statusRevisions.get(id) !== fetchedStatuses.get(id)) return
+          // SSE changes after the fetch began are newer than its snapshot; restore stays off until a clean apply.
+          const applied = !!statuses && !!questions && !!permissions && promptRevisions.get(id) === revisions.get(id)
+          if (applied) {
+            setStore("question", id, reconcile(questionGroups[id] ?? []))
+            setStore("permission", id, reconcile(permissionGroups[id] ?? []))
+          }
+          setPromptReady(id, applied)
+        })
+      })
+    }
 
     let restartPending = false
     let restartSessionID: string | undefined
@@ -193,6 +300,13 @@ export const {
     }
 
     event.subscribe((event, { directory, workspace }) => {
+      if (
+        event.type === "question.asked" || event.type === "question.replied" || event.type === "question.rejected" ||
+        event.type === "permission.asked" || event.type === "permission.replied"
+      ) {
+        const id = event.properties.sessionID
+        promptRevisions.set(id, (promptRevisions.get(id) ?? 0) + 1)
+      }
       switch (event.type) {
         case "server.instance.disposed":
           if (restartPending) {
@@ -250,22 +364,20 @@ export const {
 
         case "question.replied":
         case "question.rejected": {
-          const requests = store.question[event.properties.sessionID]
-          if (!requests) break
-          const match = search(requests, event.properties.requestID, (r) => r.id)
-          if (!match.found) break
-          setStore(
-            "question",
-            event.properties.sessionID,
-            produce((draft) => {
-              draft.splice(match.index, 1)
-            }),
-          )
+          settledQuestions.add(event.properties.requestID)
+          const request = questionRequests.get(event.properties.requestID) ??
+            store.question[event.properties.sessionID]?.find((request) => request.id === event.properties.requestID)
+          if (request) dismissQuestion(request)
           break
         }
 
         case "question.asked": {
           const request = event.properties
+          questionRequests.set(request.id, request)
+          if (settledQuestions.has(request.id)) {
+            dismissQuestion(request)
+            break
+          }
           const requests = store.question[request.sessionID]
           if (!requests) {
             setStore("question", request.sessionID, [request])
@@ -338,7 +450,13 @@ export const {
         }
 
         case "session.status": {
+          statusRevisions.set(event.properties.sessionID, (statusRevisions.get(event.properties.sessionID) ?? 0) + 1)
+          setPromptReady(event.properties.sessionID, false)
           setStore("session_status", event.properties.sessionID, event.properties.status)
+          const session = result.session.get(event.properties.sessionID)
+          if (event.properties.status.type === "idle" && session && fullSyncedSessions.has(session.id)) {
+            void refreshPrompts(session, session.id)
+          }
           break
         }
 
@@ -401,6 +519,7 @@ export const {
           const part = event.properties.part
           touchPart(part.sessionID, part.id)
           if (part.type === "tool" && part.tool === "question" && part.state.status === "error") {
+            promptRevisions.set(part.sessionID, (promptRevisions.get(part.sessionID) ?? 0) + 1)
             const requests = store.question[part.sessionID]
             if (requests) {
               setStore(
@@ -650,16 +769,7 @@ export const {
               .list({ workspace })
               .then((x) => setStore("mcp_resource", reconcile(x.data ?? {}))),
             sdk.client.formatter.status({ workspace }).then((x) => setStore("formatter", reconcile(x.data ?? []))),
-            sdk.client.session.status({ workspace }).then((x) => {
-              setStore("session_status", reconcile(x.data ?? {}))
-            }),
-            // Restore prompts still pending on the server after a restart or reconnect.
-            sdk.client.question.list({ workspace }).then((x) =>
-              setStore("question", reconcile(groupBySession(x.data ?? []))),
-            ),
-            sdk.client.permission.list({ workspace }).then((x) =>
-              setStore("permission", reconcile(groupBySession(x.data ?? []))),
-            ),
+            refreshPrompts({ directory: sdk.directory, workspaceID: workspace }),
             sdk.client.provider.auth({ workspace }).then((x) => setStore("provider_auth", reconcile(x.data ?? {}))),
             sdk.client.vcs.get({ workspace }).then((x) => setStore("vcs", reconcile(x.data))),
             project.workspace.sync(),
@@ -701,6 +811,13 @@ export const {
       sdk.onReconnect(() => {
         if (restartPending) restartReconnected = true
         void recoverFromRestart()
+        if (!restartPending && route.data.type === "session") {
+          fullSyncedSessions.delete(route.data.sessionID)
+          setPromptReady(route.data.sessionID, false)
+          void result.session.sync(route.data.sessionID).catch((error) =>
+            console.error("Failed to refresh session prompts", error),
+          )
+        }
       }),
     )
 
@@ -758,6 +875,21 @@ export const {
         if (x.data) setStore("command", reconcile(x.data))
       },
       session: {
+        questions(sessionID: string): (QuestionRequest & { restored?: boolean })[] {
+          const live = [
+            sessionID,
+            ...store.session.filter((session) => session.parentID === sessionID).map((session) => session.id),
+          ]
+            .toSorted()
+            .flatMap((id) => store.question[id] ?? [])
+          if (live.length || !promptReady[sessionID]) return live
+          const status = store.session_status[sessionID]
+          if (status && status.type !== "idle") return []
+          const restored = restoredQuestion(store.message[sessionID] ?? [], store.part)
+          if (!restored || dismissedQuestions[sessionID]?.[questionToolKey(restored.tool)]) return []
+          return [restored]
+        },
+        dismissQuestion,
         get(sessionID: string) {
           const match = search(store.session, sessionID, (s) => s.id)
           if (match.found) return store.session[match.index]
@@ -778,9 +910,13 @@ export const {
           return last.time.completed ? "idle" : "working"
         },
         async sync(sessionID: string) {
-          if (fullSyncedSessions.has(sessionID)) return
           const syncing = syncingSessions.get(sessionID)
           if (syncing) return syncing
+          if (fullSyncedSessions.has(sessionID)) {
+            const session = result.session.get(sessionID)
+            if (session) await refreshPrompts(session, sessionID)
+            return
+          }
           const tracker = { messages: new Set<string>(), parts: new Set<string>() }
           hydratingSessions.set(sessionID, tracker)
           const task = (async () => {
@@ -790,6 +926,7 @@ export const {
               sdk.client.session.todo({ sessionID }),
               sdk.client.session.diff({ sessionID }),
             ])
+            await refreshPrompts(session.data!, sessionID)
             setStore(
               produce((draft) => {
                 const match = search(draft.session, sessionID, (s) => s.id)

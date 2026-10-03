@@ -76,11 +76,19 @@ export function resolveFilePath(filePath: string, cwd = process.cwd()) {
   return path.isAbsolute(filePath) ? path.normalize(filePath) : path.resolve(cwd, filePath)
 }
 
-export async function openFileAtLocation(input: { filePath: string; cwd?: string; editor?: string }) {
+export type OpenEditedWith = string | Record<string, string>
+
+// openEditedWith is one editor, or a map of lowercase ".ext" to editor with an optional "default".
+export function resolveEditorForFile(filePath: string, setting?: OpenEditedWith, env = process.env) {
+  if (typeof setting === "string") return setting || env.VISUAL || env.EDITOR
+  return setting?.[path.extname(filePath).toLowerCase()] || setting?.default || env.VISUAL || env.EDITOR
+}
+
+export async function openFileAtLocation(input: { filePath: string; cwd?: string; editor?: OpenEditedWith }) {
   const filePath = resolveFilePath(input.filePath, input.cwd)
   if (!existsSync(filePath)) throw new Error(`File does not exist: ${filePath}`)
 
-  const editor = input.editor || process.env.VISUAL || process.env.EDITOR
+  const editor = resolveEditorForFile(filePath, input.editor)
   if (!editor) throw new Error("No editor configured. Set openEditedWith, VISUAL, or EDITOR.")
 
   await new Promise<void>((resolve, reject) => {

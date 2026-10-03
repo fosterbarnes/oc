@@ -110,6 +110,100 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-03 (~06:10) - v0.2.78 - pwsh 7 is a required dependency; revert Windows PowerShell fallbacks - Claude Opus 5.5, low effort; Agent
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Agent; completed
+- Version: 0.2.78
+- Decision (user): PowerShell 7 (`pwsh`) is a required project dependency. Do not add Windows PowerShell 5.1 fallbacks. Recorded in `v0.3.0.md` audience rules.
+- Reverted to `pwsh`: `config/oc.ts` `spawnResident` hop and `ocProcesses` CIM listing; `core/src/util/launch-detached.ts` Start-Process hop and `.ps1` start; sidebar `helpers.ts` defaults and `script-runner.ts` wt path (removed `POWERSHELL_EXECUTABLE`); tests updated. Supersedes the "MISTAKE" note in the previous entry.
+- ERROR (not oc): user saw "'claude' is not recognized" on a Claude Code turn at 6:07 AM. Cause: Claude Code's npm auto-update rewrote `%APPDATA%\npm\claude*` at 6:07:42-46, the same minute. `claude --version` (2.1.288) resolves afterwards; retry the turn.
+- Verification: opencode config/ledger/revive 34/34; tui open-sidebar 71 pass + 2 existing skips; `tsc --noEmit` clean in tui, opencode, core.
+
+### User
+Dependencies
+- oc uses PowerShell 7 (`pwsh`) on Windows again everywhere; it is now an explicit requirement.
+
+Claude Code
+- The "claude is not recognized" error was Claude Code updating itself at that moment; retrying the turn works.
+
+---
+
+## 2026-10-03 (~06:03) - v0.2.78 - v0.3.0 waves 2-5: sidebar state, usage freshness, sub-agents, tab identifier, restored questions, scoped revive, Windows out of the box - Claude Opus 5.5, low effort; Agent (orchestrator)
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Agent orchestrating headless `oc run` workers (Sol 6.1 low/medium, free Muse, Composer, Grok 4.6 low); user away, ran without approvals per user; completed
+- Version: 0.2.78
+- Item 2: `sidebar-tools.tsx` model/reasoning rows read `local.model.current()` / `local.model.variant.current()`; removed `MODEL_STATE_PATH`, model.json readers, 500 ms poll, fs.watch, 50 ms reread. Reasoning row shows `default` when the model has variants; `onMouseUp` like the other rows.
+- Item 3: `usage.ts` `usageProviderForModel` (`claude-code-<account>` -> claude-code), `shouldRefreshUsageProvider` (45 s), `updateUsageSnapshot` (keep last good, mark stale); Claude probe returns `source: "cache"` + file mtime. `sidebar-tools.tsx` per-provider `refreshUsage(providers)`, refresh on assistant `message.updated` completion and on session select (>60 s), dims stale/cached rows. No TUI tooltip pattern, so no hover age.
+- Item 4: `feature-plugins/sidebar/subagents.tsx` (order 350): running + recently finished children (2 min or next root turn); aborts are not "failed". Plugin API `TuiState.session.children` / `agentLabel` (+ `adapters.tsx`, test fixture).
+- Item 5: `util/terminalTab.ts` `nearestAgentSquare`; app.tsx title effect prefixes the square, OSC 9;4 progress (error only if the last assistant turn failed, not aborts or the sticky failed mark), WezTerm `SetUserVar=oc_agent_color`; `util/renderer.ts` `writeTerminalEscape` via OpenTUI `writeOut`, clears on destroy; kv toggle `terminal_tab_agent_enabled`. WezTerm Lua snippet lives in `v0.3.0.md` item 5.
+- Item 6: `context/sync.tsx` `refreshPrompts` per session directory on session open/reconnect with revision guards; `restoredQuestion` rebuilds only when session idle, lists fetched cleanly, error is exactly "The user dismissed this question" or part `running`; dismissal keyed by messageID+callID; parent shows only its own restored question. `question.tsx` restored answers go out as `promptAsync` follow-up with `questionAnswerText` (copy of `tool/question.ts:30-36` format; keep in sync); live reply/reject awaited with toasts. Claude Code proxy: no deadline for `question`.
+- Item 8: `config/tuiLedger.ts` per-PID records in `<state>/oc-tuis`, written by `Tui.run` (non-fatal) and removed on exit; `shutdownAll` / `stopServer` scope to this instance (resolved executable identity across oc/occ/opencode hard links, one CIM listing via `powershell.exe`, 5 s start tolerance), `wezterm cli kill-pane` for panes; removed both `taskkill /IM wezterm-gui.exe`; production leaves ocdebug alone.
+- Item 11b: `script-runner.ts` `windowsTerminalArgs` / `windowsTerminalScriptArgs` (wt.exe tab/window/split, probe, native fallback); `helpers.ts` `scriptTerminals` / `resolveScriptTerminal`; neutral picker labels.
+- Item 11c: `config/revive.ts` + `oc --revive <context>`; `/revive-no-install` always available (revive.path still overrides): helper shuts down this instance, starts server, reopens in the same terminal kind via `launchDetached` (Start-Process, Normal window); wt `-w new`; Home revive returns Home; falls back to a console when wt/wezterm is not on PATH (checked before shutdown). `spawnResident` uses `powershell.exe`.
+- Item 11d: agentify Edge/Chrome path detection from env vars; Everything hint once per process as info; `POWERSHELL_EXECUTABLE` (pwsh else powershell) for script defaults, wt path, and `.ps1` launches in `launch-detached.ts`.
+- README: 4 rows added, 7 updated, counts 16 done / 25 high / 21 medium (62).
+- Verification: core terminal 5/5; opencode config/ledger/revive/claude-code proxy/agentify 147/147; tui editor/open-sidebar/usage-freshness/subagents/terminalTab/sync-questions/question-restored 114 pass + 2 existing Windows skips; `tsc --noEmit` clean in tui, opencode, core, plugin. Grok reviews per item + final cross-item review; findings fixed or recorded. Not built or installed; all live checks pending.
+- Risk: first revive after upgrade may leave pre-ledger TUIs open; force-killed TUI cannot clear its tab progress ring; process-listing failure leaves TUIs open (server still stops); a question answered in a second TUI can show restored here until reload; plugins and sub-agent rows do not see restored questions.
+- MISTAKE: Sol workers wrote `pwsh` into shipped paths (process lister, launcher) despite the Windows-out-of-the-box goal. Prevention: worker prompts must state "stock Windows has only `powershell.exe`".
+
+### User
+Sidebar
+- The model and reasoning rows now always match the session you are looking at, and clicking reasoning updates it right away.
+- Usage numbers refresh shortly after you use a provider and when you switch sessions; old or cached numbers are dimmed instead of looking current.
+- A new Sub-agents section shows running and just-finished sub-agents; click one to open it.
+
+Terminal tab
+- The tab title starts with a colored square for the current agent, and Windows Terminal (and WezTerm) show a progress ring while the agent works; turn it off with "Disable tab agent square and status".
+
+Questions
+- If you close oc while an agent is asking a question, reopening the session shows the question again; answering continues the agent.
+
+Revive and shutdown
+- `/revive-no-install` works without any setup and reopens oc in the same kind of terminal; revive and `--shutdown-all` now close only this oc's windows and leave ocdebug and your other terminals alone.
+
+Windows out of the box
+- Script launch offers tab, window, and split placements in Windows Terminal too; other terminals launch scripts normally.
+- oc no longer needs PowerShell 7 or WezTerm, finds Edge or Chrome for ChatGPT/Claude Web, and shows the Everything search hint only once.
+
+---
+
+## 2026-10-03 (~05:03) - v0.2.77 - v0.3.0 plan, Wave 0 scouting, Wave 1 (terminal helper, run_after_turn proxy, intro background, per-type editor) - Claude Opus 5.5, low effort; Agent (orchestrator)
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Agent orchestrating headless `oc run` workers (Sol 6.1 low, free Muse, Composer, Grok 4.6 low); completed
+- Version: 0.2.77
+- Added `v0.3.0.md` (repo root): milestone plan, 11 items with status/feature/implementation/refs, Windows-out-of-the-box capability-tier rule, orchestration section (worker flags, roster, patterns, waves, wave log). Work toward 0.3.0 ships as 0.2.x revisions.
+- Wave 0 (read-only): Composer + free Muse re-verified plan refs; Grok confirmed item 2/3 causes (reasoning row reads global `model.json`; only Claude usage silently serves cache), traced item 6 (likely `occ` attaches with home `--dir` so `question.list` hits the wrong instance; startup-only fetch), traced item 8 (WezTerm killed twice: `app.tsx:359` + `config/oc.ts:420`; `shutdownAll` also stops ocdebug and any `opencode.exe`).
+- Added `packages/core/src/util/terminal.ts` `detectTerminal(env)` -> `{ kind: wezterm | windows-terminal | generic, paneID? }` + `test/util/terminal.test.ts` (item 11a). Not wired yet; items 5, 8, 11b consume it.
+- Added `run_after_turn` Claude Code proxy tool: `proxy-tool-defs.ts` def (exe, args), `proxy-tool-selection.ts` map, `types.ts` `DEFAULT_PROXY_TOOL_NAMES`, read-only preset denies it; tests extended (item 9). An explicit `proxyTools` override must list it.
+- Added oc.json `intro.background` (`terminal` default | `black`): `startIntro(mode)` uses `\x1b[49m` unless black; `cli/cmd/oc.ts` reads settings before the intro (item 10).
+- Changed `openEditedWith` to string or `{ ".ext": editor, default }` map: `resolveEditorForFile(filePath, setting, env)` in `tui/src/editor.ts`; plugin `TuiConfigView` type updated (item 7).
+- Fixed worker output: item 7 tests mutated `process.env`; resolver now takes `env`. Removed redundant `?? "terminal"` at intro call sites.
+- Worker tooling (scratch only): `worker.ps1` + `summarize.ps1`. `oc run -f` is an array flag; put the message positional before `-f` or it is read as a file.
+- Verification: `bun test` terminal 5/5 (core), editor 8/8 (tui), config/oc 13/13 + claude-code proxy-mcp/permission-presets/subagent-hint 110/110 (opencode); `tsc --noEmit` clean in tui, opencode, core, plugin. Grok full-diff review: no bugs. Not built or installed; live checks pending.
+- ERROR: Python heredoc wrote `\r` into `v0.3.0.md` (`.scripts\revive.ps1` became CR). Fixed. Do not write backslash paths through Python string literals; use the Edit tool.
+- TODO: user's `~/.config/opencode/opencode.jsonc` `proxyTools: ["Task", "Question"]` hides `run_after_turn`; needs the user's OK to add it.
+
+### User
+Planning
+- Added `v0.3.0.md`, the roadmap for v0.3.0 with every item's status, design, and code references.
+
+Editor
+- `openEditedWith` in tui.json can now be a map, for example `{ "default": "code", ".md": "typora" }`, to open each file type in its own editor.
+
+Startup
+- The startup animation now draws over your normal terminal background; set `"intro": { "background": "black" }` in oc.json for the old black look.
+
+Claude Code
+- Claude Code sessions can now use `run_after_turn`, so `/agent-revive` can work there once `run_after_turn` is listed in your `proxyTools` setting.
+
+Under the hood
+- Added a shared terminal detector (WezTerm, Windows Terminal, other) for upcoming tab and revive work; no UI change yet.
+
+---
+
 ## 2026-10-03 (~04:14) - v0.2.76 - Avoid reusing the previous push message - GPT-6 Luna; default; Agent
 
 ### Agent

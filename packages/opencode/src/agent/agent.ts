@@ -264,7 +264,7 @@ const layer = Layer.effect(
             options: {},
             native: true,
             hidden: true,
-            model: Provider.parseModel("meta/muse-spark-1.3-contributor"),
+            model: Provider.parseModel("opencode/muse-spark-1.3-contributor-free"),
             variant: "low",
             permission: Permission.merge(
               defaults,

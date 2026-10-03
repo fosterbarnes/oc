@@ -27,12 +27,11 @@ export const PROXY_NO_DEADLINE_MS = 0
 //
 // `question` blocks on a human reading a TUI form, so the flat ceiling is
 // the wrong unit entirely: a question posed just before the operator steps
-// away would be rejected mid-answer. 30 min is jknlsn's original figure and
-// matches the "prefer fewer, high-signal questions" guidance in the def.
+// away would be rejected mid-answer. Wait for an answer or lifecycle cleanup.
 export const PROXY_PER_TOOL_DEFAULT_TIMEOUT_MS: Record<string, number> = {
   task: PROXY_NO_DEADLINE_MS,
   task_batch: PROXY_NO_DEADLINE_MS, // same reasoning: it IS task calls
-  question: 30 * 60 * 1000, // 30 min
+  question: PROXY_NO_DEADLINE_MS,
 }
 
 // Node's setTimeout delay is a signed 32-bit int; values above 2^31-1 ms

@@ -2,6 +2,7 @@ import { spawn } from "node:child_process"
 import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
+import { detectTerminal, type TerminalInfo } from "@opencode-ai/core/util/terminal"
 import { DEFAULT_USAGE_PROVIDERS, normalizeUsageProviders, type UsageProviderId } from "./usage.js"
 
 const IGNORED_DIRECTORIES = new Set([".git", "node_modules", "dist", "build", "coverage"])
@@ -50,6 +51,7 @@ export type SidebarSettings = {
   fileRoots: Record<string, { customRoots: string[]; activeRoot?: string }>
   usageProviders: UsageProviderId[]
 }
+
 
 const DEFAULT_SCRIPT_SETTINGS: ScriptSettings = {
   shell: { executable: "pwsh", args: ["-NoLogo", "-NoExit", "-Command"] },
@@ -114,6 +116,14 @@ export const WEZTERM_TERMINALS = [
   { id: "wezterm-horizontal", title: "Horizontal split (side-by-side)" },
   { id: "wezterm-vertical", title: "Vertical split (stacked)" },
 ] as const
+
+export function scriptTerminals(kind: TerminalInfo["kind"] = detectTerminal().kind) {
+  return kind === "generic" ? [] : WEZTERM_TERMINALS
+}
+
+export function resolveScriptTerminal(terminal: ScriptTerminal, kind: TerminalInfo["kind"] = detectTerminal().kind) {
+  return kind === "generic" ? "native" : terminal
+}
 
 function cloneSettings(settings: ScriptSettings): ScriptSettings {
   return {

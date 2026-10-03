@@ -5,6 +5,9 @@ import { spawn } from "child_process"
 import { randomBytes } from "crypto"
 import { Global } from "@opencode-ai/core/global"
 import { DebugConfig } from "@opencode-ai/core/debug-config"
+import { TuiLedger } from "./tuiLedger"
+import { Revive } from "./revive"
+import { launchDetached } from "@opencode-ai/core/util/launch-detached"
 
 export const RESIDENT_ENV = "OC_RESIDENT"
 
@@ -30,6 +33,7 @@ export type Settings = Partial<Record<Key, Value>> & {
   server?: { hostname?: string; port?: number; startOnWindowsUserStart?: boolean }
   // Exe or .ps1 paths behind the TUI /revive-no-install and /revive commands
   revive?: { path?: string; installPath?: string }
+  intro?: { background?: "terminal" | "black" }
 }
 
 export function defaultServerPort() {
@@ -331,28 +335,28 @@ export function spawnResident(
   })
 }
 
-const OC_PROCESS_NAMES = new Set([
-  "oc.exe",
-  "occ.exe",
-  "ocdebug.exe",
-  "ocbug.exe",
-  "oc-debug.exe",
-  "opencode.exe",
-  "opencode-debug.exe",
-])
-
-/** Lists oc process ids other than this one. */
-function ocProcessIds() {
+function ocProcesses(): TuiLedger.Process[] {
   if (process.platform !== "win32") return []
-  const list = Bun.spawnSync(["tasklist", "/FO", "CSV", "/NH"], { stdout: "pipe", stderr: "pipe" })
+  const list = Bun.spawnSync(["pwsh", "-NoProfile", "-NonInteractive", "-Command",
+    "$ErrorActionPreference = 'Stop'; ConvertTo-Json -InputObject @(Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -and (Split-Path -Parent $_.ExecutablePath) -eq $env:OC_PROCESS_DIRECTORY } | ForEach-Object { @{ pid = [int]$_.ProcessId; parentPid = [int]$_.ParentProcessId; executable = $_.ExecutablePath; startedAt = ([DateTimeOffset]$_.CreationDate).ToUnixTimeMilliseconds() } }) -Compress"],
+    { stdout: "pipe", stderr: "pipe", windowsHide: true,
+      env: { ...process.env, OC_PROCESS_DIRECTORY: path.normalize(path.dirname(executablePath())) } })
   if (list.exitCode !== 0) throw new Error(`Failed to list processes: ${list.stderr.toString()}`)
-  return list.stdout
-    .toString()
-    .split(/\r?\n/)
-    .map((line) => line.split('","'))
-    .filter((parts) => parts.length > 1 && OC_PROCESS_NAMES.has(parts[0].replace(/^"/, "").toLowerCase()))
-    .map((parts) => Number(parts[1]))
-    .filter((pid) => pid !== process.pid)
+  return TuiLedger.parseProcesses(list.stdout.toString())
+}
+
+function listOcProcesses(list = ocProcesses) {
+  try {
+    return list()
+  } catch (error) {
+    console.warn("Skipping oc terminal cleanup: failed to list processes", error)
+    return null
+  }
+}
+
+async function ocProcessIds(processes: TuiLedger.Process[], directory = Global.Path.state) {
+  return TuiLedger.select(await TuiLedger.read(directory, processes), processes,
+    Global.Path.app, executablePath(), process.pid)
 }
 
 // No /T: a revive helper descends from the TUI it is replacing, so tree kills would take it down too.
@@ -379,7 +383,11 @@ async function requestShutdown(directory: string, state: ResidentState) {
   }).catch(() => undefined)
 }
 
-export async function stopServer(directory = serverStateDirectory(), opts: { killTuis?: boolean } = {}) {
+export async function stopServer(directory = serverStateDirectory(), opts: {
+  killTuis?: boolean
+  processes?: TuiLedger.Process[] | null
+  listProcesses?: () => TuiLedger.Process[]
+} = {}) {
   const killTuis = opts.killTuis ?? true
   const file = serverStatePath(directory)
   let state: ResidentState | undefined
@@ -391,7 +399,12 @@ export async function stopServer(directory = serverStateDirectory(), opts: { kil
   }
   const pid = state?.pid
   const alive = pid !== undefined && isPidAlive(pid)
+  const processes = opts.processes === undefined ? listOcProcesses(opts.listProcesses) : opts.processes
   if (alive) {
+    if (process.platform === "win32" && processes !== null && !processes.some((item) =>
+      item.pid === pid && TuiLedger.sameExecutable(item.executable, executablePath()))) {
+      throw new Error(`Resident server ${pid} does not belong to this executable`)
+    }
     await requestShutdown(directory, state!)
     // Graceful exit is scheduled right after the response; force-kill only if it never happens.
     if (!(await waitForExit(pid, 5_000))) {
@@ -401,34 +414,59 @@ export async function stopServer(directory = serverStateDirectory(), opts: { kil
   }
   await clearServerState(directory)
   await fs.rm(`${serverStatePath(directory)}.lock`, { force: true }).catch(() => undefined)
-  if (killTuis) forceKill(ocProcessIds())
+  if (killTuis && processes !== null) forceKill(await ocProcessIds(processes, directory))
   return { stopped: alive, pid }
 }
 
-/** Closes all WezTerm windows and TUIs first, then stops production and debug resident servers gracefully. */
-export async function shutdownAll() {
-  const directories = ["opencode", "opencode-debug"].map((app) => path.join(path.dirname(serverStateDirectory()), app))
-  const serverPids = await Promise.all(
-    directories.map((directory) =>
-      fs
-        .readFile(serverStatePath(directory), "utf8")
-        .then((text) => (JSON.parse(text) as ResidentState).pid)
-        .catch(() => undefined),
-    ),
-  )
-  // TODO: close only WezTerm windows that hosted oc. Parent-process matching missed them, so kill all for now.
-  Bun.spawnSync(["taskkill", "/F", "/IM", "wezterm-gui.exe"], { stdout: "pipe", stderr: "pipe" })
+/** Closes this instance's oc terminals, then stops its resident server gracefully. */
+export async function shutdownAll(opts: { directory?: string; listProcesses?: () => TuiLedger.Process[] } = {}) {
+  const directory = opts.directory ?? serverStateDirectory()
+  const processes = listOcProcesses(opts.listProcesses)
+  const records = processes === null ? [] : await TuiLedger.read(directory, processes)
+  const pids = processes === null ? [] : TuiLedger.select(records, processes, Global.Path.app, executablePath(), process.pid)
+  const owned = records.filter((record) => pids.includes(record.pid))
+  for (const record of owned) {
+    if (!record.paneID) continue
+    // Missing panes and unavailable CLI are harmless; never kill the terminal GUI.
+    try { Bun.spawnSync(["wezterm", "cli", "kill-pane", "--pane-id", record.paneID], { stdout: "pipe", stderr: "pipe" }) } catch {}
+  }
   // TUIs have nothing to save; killing them up front avoids the "Unable to connect" screen while servers stop.
-  forceKill(ocProcessIds().filter((pid) => !serverPids.includes(pid)))
-  const stopped = await Promise.all(directories.map((directory) => stopServer(directory, { killTuis: false })))
-  const leftovers = ocProcessIds()
-  forceKill(leftovers)
-  return { servers: stopped, leftovers: leftovers.length }
+  forceKill(pids)
+  const stopped = await stopServer(directory, { killTuis: false, processes })
+  const leftovers = pids.filter(isPidAlive)
+  await Promise.all(owned.filter((record) => !isPidAlive(record.pid)).map((record) => TuiLedger.remove(directory, record.pid)))
+  return { servers: [stopped], leftovers: leftovers.length }
 }
 
 export async function restartServer() {
   await stopServer(undefined, { killTuis: false })
   return startServer()
+}
+
+export async function revive(context: Revive.ReviveContext) {
+  const launcher = Revive.resolveLauncher(executablePath(), Global.Path.debug)
+  // Check the terminal CLI before shutting down; without it, reopen in a plain console instead of stranding the user.
+  const cli = { wezterm: "wezterm", "windows-terminal": "wt.exe", generic: undefined }[context.terminal]
+  const terminal = cli && !Bun.which(cli) ? "generic" : context.terminal
+  const command = Revive.reopenCommand(launcher, { ...context, terminal },
+    /^bun(?:\.exe)?$/i.test(path.basename(launcher)) ? process.argv[1] : undefined)
+  await shutdownAll()
+  await startServer()
+  const child = launchDetached(command.file, command.args, {
+    cwd: os.homedir(),
+    env: command.env,
+    windowStyle: "Normal",
+    windowsVerbatimArguments: command.windowsVerbatimArguments,
+  })
+  child.ref()
+  await new Promise<void>((resolve, reject) => {
+    child.once("error", reject)
+    if (process.platform !== "win32") {
+      child.once("spawn", resolve)
+      return
+    }
+    child.once("exit", (code) => code === 0 ? resolve() : reject(new Error(`Terminal reopen failed: exit code ${code}`)))
+  }).finally(() => child.unref())
 }
 
 export async function startServer() {

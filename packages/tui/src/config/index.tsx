@@ -60,8 +60,11 @@ export const Prompt = Schema.Struct({
 
 export const Info = Schema.Struct({
   $schema: Schema.optional(Schema.String),
-  openEditedWith: Schema.optional(Schema.String).annotate({
-    description: "Editor executable used when opening file paths from the TUI",
+  openEditedWith: Schema.optional(
+    Schema.Union([Schema.String, Schema.Record(Schema.String, Schema.String)]),
+  ).annotate({
+    description:
+      'Editor used when opening file paths from the TUI, or a map of extension to editor with an optional default, e.g. { "default": "code", ".md": "typora" }',
   }),
   theme: Schema.optional(Schema.String),
   keybinds: Schema.optional(TuiKeybind.KeybindOverrides),

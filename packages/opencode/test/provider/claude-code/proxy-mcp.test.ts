@@ -49,7 +49,7 @@ import { resolvedProxyTools } from "@/provider/claude-code/spawn-planning.js"
 
 test("default proxy tools are oc-only and leave Claude Code's native tools on", () => {
   const defaults = resolvedProxyTools({ proxyTools: DEFAULT_PROXY_TOOL_NAMES })!
-  assert.deepEqual(defaults.map((tool) => tool.name), ["task", TASK_BATCH_TOOL_NAME])
+  assert.deepEqual(defaults.map((tool) => tool.name), ["task", TASK_BATCH_TOOL_NAME, "run_after_turn"])
   assert.deepEqual(disallowedToolFlags(defaults), ["Agent", "Task", "TaskOutput"])
   assert.deepEqual(filterProxyByModelTools(defaults, [modelTool("task")]).map((tool) => tool.name), [
     "task",
@@ -257,6 +257,38 @@ test("tools/list exposes the default proxy defs", async () => {
     assert.ok(names.includes("question"))
     assert.ok(names.includes("task"))
     assert.ok(names.includes("session_tail"))
+    const queued = res.json.result.tools.find((tool) => tool.name === "run_after_turn")
+    assert.deepEqual(queued.inputSchema, {
+      type: "object",
+      properties: {
+        exe: { type: "string", description: "Absolute path to the executable or .ps1 script" },
+        args: {
+          type: "array",
+          items: { type: "string" },
+          description: "Arguments for the executable",
+        },
+      },
+      required: ["exe"],
+    })
+  })
+})
+
+test("run_after_turn forwards its name and input to the oc broker and returns permission errors", async () => {
+  await withServer(async (srv) => {
+    const input = { exe: "C:\\tools\\revive.ps1", args: ["-NoInstall"] }
+    srv.calls.once("call", (call: ProxyToolCall) => {
+      assert.equal(call.toolName, "run_after_turn")
+      assert.deepEqual(call.input, input)
+      call.resolve({ kind: "error", message: "run_after_turn permission denied" })
+    })
+    const res = await authedPost(srv, {
+      jsonrpc: "2.0",
+      id: "revive-denied",
+      method: "tools/call",
+      params: { name: "run_after_turn", arguments: input },
+    })
+    assert.equal(res.json.result.isError, true)
+    assert.equal(res.json.result.content[0].text, "run_after_turn permission denied")
   })
 })
 
@@ -295,12 +327,12 @@ test("resolveProxyClientCeilingMs covers the largest effective deadline", () => 
   // the largest effective deadline so Claude's HTTP MCP client never aborts
   // before the broker deadline fires.
   assert.equal(
-    resolveProxyClientCeilingMs({ task: 90 * MIN, task_batch: 90 * MIN }),
+    resolveProxyClientCeilingMs({ task: 90 * MIN, task_batch: 90 * MIN, question: 30 * MIN }),
     90 * MIN,
   )
   // ...and it is the per-tool default that counts when it is the largest.
   assert.equal(
-    resolveProxyClientCeilingMs({ task: 5 * MIN, task_batch: 5 * MIN, bash: 1 * MIN }),
+    resolveProxyClientCeilingMs({ task: 5 * MIN, task_batch: 5 * MIN, question: 30 * MIN, bash: 1 * MIN }),
     30 * MIN,
   )
   // One unlimited tool is enough to need the maximum: overriding `task`
@@ -317,7 +349,7 @@ test("resolveProxyClientCeilingMs covers the largest effective deadline", () => 
     MAX_PROXY_TIMEOUT_MS,
   )
   assert.equal(
-    resolveProxyClientCeilingMs({ task: 5 * MIN, task_batch: 5 * MIN, bash: -1, edit: NaN }),
+    resolveProxyClientCeilingMs({ task: 5 * MIN, task_batch: 5 * MIN, question: 30 * MIN, bash: -1, edit: NaN }),
     30 * MIN,
   )
 })
@@ -378,7 +410,7 @@ test("resolveProxyCallTimeoutMs: invalid overrides are ignored", () => {
   )
   assert.equal(
     resolveProxyCallTimeoutMs("question", undefined, { question: -1 }),
-    30 * MIN,
+    PROXY_NO_DEADLINE_MS,
   )
   assert.equal(
     resolveProxyCallTimeoutMs("task", undefined, { task: "60" as any }),
@@ -493,11 +525,13 @@ test("tools/call bash timeout honours input.timeout over a shorter override", as
 
 // --- question proxy: version gate + description overlay ---------------------
 
-test("question gets a 30-min default deadline (a human has to read the form)", () => {
+test("question waits for a human answer without a default deadline", () => {
   assert.equal(
     resolveProxyCallTimeoutMs("question", undefined, undefined),
-    30 * MIN,
+    PROXY_NO_DEADLINE_MS,
   )
+  assert.equal(resolveProxyCallTimeoutMs("Question", undefined, undefined), PROXY_NO_DEADLINE_MS)
+  assert.equal(resolveProxyClientCeilingMs({ task: 5 * MIN, task_batch: 5 * MIN }), MAX_PROXY_TIMEOUT_MS)
 })
 
 test("resolveProxyClientCeilingMs is always a positive, timer-safe value", () => {
@@ -508,7 +542,7 @@ test("resolveProxyClientCeilingMs is always a positive, timer-safe value", () =>
     const ceiling = resolveProxyClientCeilingMs(overrides)
     assert.ok(ceiling > 0, `ceiling must be positive for ${JSON.stringify(overrides)}`)
     assert.ok(ceiling <= MAX_PROXY_TIMEOUT_MS)
-    assert.ok(ceiling >= 30 * MIN, "never below the longest positive per-tool default")
+    assert.ok(ceiling >= PROXY_DEFAULT_TIMEOUT_MS, "never below the flat default")
   }
 })
 
@@ -1531,4 +1565,3 @@ test("opencode MCP servers never reach --mcp-config; only the proxy does", async
   const full = await mcpConfigsForSpawn(["gamma", "delta"], ["gamma_thing", "delta_thing"])
   assert.deepEqual(full, { count: 1, proxyConfigs: 1, bridged: [] })
 })
-

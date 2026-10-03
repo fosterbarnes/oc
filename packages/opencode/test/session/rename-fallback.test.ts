@@ -12,7 +12,7 @@ import { Session } from "@/session/session"
 import { MessageID, PartID } from "@/session/schema"
 import { testEffect } from "../lib/effect"
 
-const primary = "meta/muse-spark-1.3-contributor"
+const primary = "opencode/muse-spark-1.3-contributor-free"
 const free = "opencode/mimo-v2.6-flash-free"
 const luna = "openai/gpt-6-luna"
 type Outcome = "success" | "failure" | "partial" | "empty" | "lookup" | "init" | "interrupt" | "defect"
