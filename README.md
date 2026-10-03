@@ -10,7 +10,7 @@ Last reviewed: 2026-10-03
 
 ## Progress
 
-[513,896](scc.txt) lines of code and counting...
+[513,924](scc.txt) lines of code and counting...
 
 <!-- code-count:start -->
 
@@ -25,8 +25,8 @@ Last reviewed: 2026-10-03
 | Powershell | 18 | 1,252 | 113 | 30 | 1,109 |
 | SQL | 95 | 592 | 0 | 17 | 575 |
 | Shell | 1 | 120 | 17 | 17 | 86 |
-| TypeScript | 2,711 | 527,151 | 42,867 | 14,891 | 469,393 |
-| **Total** | **3,028** | **578,545** | **49,018** | **15,631** | **513,896** |
+| TypeScript | 2,709 | 527,184 | 42,865 | 14,898 | 469,421 |
+| **Total** | **3,026** | **578,578** | **49,016** | **15,638** | **513,924** |
 
 <!-- code-count:end -->
 

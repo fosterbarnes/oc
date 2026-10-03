@@ -173,18 +173,8 @@ const scenarios: Scenario[] = [
     .global()
     .seeded(() =>
       Effect.gen(function* () {
+        // environment.ts points OPENCODE_DEBUG_LOGGING_PATH into the isolated exercise root.
         const logging = yield* Effect.promise(() => import("@opencode-ai/core/observability/logging"))
-        const originalPath = process.env.OPENCODE_DEBUG_LOGGING_PATH
-        yield* Effect.addFinalizer(() =>
-          Effect.sync(() => {
-            if (originalPath === undefined) {
-              delete process.env.OPENCODE_DEBUG_LOGGING_PATH
-              return
-            }
-            process.env.OPENCODE_DEBUG_LOGGING_PATH = originalPath
-          }),
-        )
-        process.env.OPENCODE_DEBUG_LOGGING_PATH = path.join(exerciseGlobalRoot, "debug-logging.json")
         return { enabled: logging.persistedDebug() }
       }),
     )

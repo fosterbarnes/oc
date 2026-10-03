@@ -79,17 +79,18 @@ test("reopening every terminal uses a normal-window Start-Process hop instead of
     const launch = detachedCommand(command.file, command.args, {
       windowStyle: "Normal", env: command.env, windowsVerbatimArguments: command.windowsVerbatimArguments,
     }, "win32")
+    const env: Record<string, string | undefined> = launch.options.env
     expect(launch.file).toBe("pwsh")
     expect(launch.args.at(-1)).toContain("Start-Process @parameters")
     expect(launch.args.at(-1)).toContain("WindowStyle = $env:OC_LAUNCH_STYLE")
-    expect(launch.options.env.OC_LAUNCH_STYLE).toBe("Normal")
-    expect(launch.options.env.OC_LAUNCH_EXE).toBe(command.file)
-    expect(launch.options.env.OC_LAUNCH_ARGS)
+    expect(env.OC_LAUNCH_STYLE).toBe("Normal")
+    expect(env.OC_LAUNCH_EXE).toBe(command.file)
+    expect(env.OC_LAUNCH_ARGS)
       .toBe(command.windowsVerbatimArguments ? command.args.join(" ") : windowsArguments(command.args))
     if (terminal === "generic") {
-      expect(launch.options.env.OC_REVIVE_ARG_0).toBe(executable)
-      expect(launch.options.env.OC_LAUNCH_ARGS).toContain('start "" "%OC_REVIVE_ARG_0%"')
-      expect(launch.options.env.OC_LAUNCH_ARGS).not.toContain('\\"')
+      expect(env.OC_REVIVE_ARG_0).toBe(executable)
+      expect(env.OC_LAUNCH_ARGS).toContain('start "" "%OC_REVIVE_ARG_0%"')
+      expect(env.OC_LAUNCH_ARGS).not.toContain('\\"')
     }
   }
   const helper = detachedCommand(executable, ["oc", "--revive", "context"], {}, "win32")
