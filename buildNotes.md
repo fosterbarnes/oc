@@ -110,6 +110,21 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-03 (~04:14) - v0.2.76 - Avoid reusing the previous push message - GPT-6 Luna; default; Agent
+
+### Agent
+- Meta: GPT-6 Luna; default; Agent; completed
+- Version: 0.2.76
+- Fixed `.scripts/push.ps1`: supplied message wins; use `buildNotes.txt` only when changed since HEAD or untracked, preventing reuse of the prior commit message.
+- Updated `AGENTS.md` and `SCRIPTS.md` to document message precedence and changed-file behavior.
+- Verification: not run; no script checks edited or introduced in this session.
+
+### User
+Scripts
+- Push messages now come from a newly changed `buildNotes.txt` only when no message is supplied, so the previous push's message is not reused.
+
+---
+
 ## 2026-10-03 (~04:08) - v0.2.76 - push.ps1 reads buildNotes.txt; agent-push skill - Claude Opus 5.5, low effort; Implementation
 
 ### Agent
@@ -120,7 +135,8 @@ Example compact Agent notes:
 - Changed `AGENTS.md`: replaced "Do not edit buildNotes.txt" with a `buildNotes.txt` section; agents write it when preparing a push (`agent-push`), commit-message format defined there. `SCRIPTS.md` push rows updated.
 - Note: older buildNotes.md lines (MISTAKES list, project invariants) still say agents never edit `buildNotes.txt`; insert-only file, so not edited. `AGENTS.md` now governs.
 - Added user-level: `~/.claude/skills/agent-push/SKILL.md` (message to buildNotes.txt, focused checks, prePush, push -DryRun, push); `principles.md` push and buildNotes.txt rules now name the `agent-push` exception.
-- Verification: `push.ps1 -DryRun` with no file (fallback subject), with a valid `buildNotes.txt` (subject + body), and with a non-blank line 2 (throws). Temporary `buildNotes.txt` removed. No real push run.
+- Verification: `push.ps1 -DryRun` with no file (fallback subject), with a valid `buildNotes.txt` (subject + body), and with a non-blank line 2 (throws). Temporary `buildNotes.txt` removed. First real push via `agent-push`: `97f3b63`.
+- Fixed (pass after that push): committed `buildNotes.txt` kept the pushed message, and base order let the file beat a passed message, so a later manual `push.ps1 "msg"` would reuse it. Now a passed message wins, and the file is used only when `git diff HEAD` shows it changed (or it is untracked); otherwise prompt. Dry-run checked: unchanged file (throws, no prompt in dry run), passed message, edited file.
 
 ### User
 Scripts

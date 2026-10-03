@@ -18,7 +18,7 @@
 
 ## buildNotes.txt (repo root)
 
-- Holds the next commit message. `.scripts/push.ps1` reads it: line 1 = commit subject, one blank line, remaining lines = commit body. With no file or an empty line 1, `push.ps1` uses its positional message (subject only) or prompts. `push.ps1 -DryRun` prints the commands without changing anything.
+- Holds the next commit message. `.scripts/push.ps1` reads it: line 1 = commit subject, one blank line, remaining lines = commit body. A positional message passed to `push.ps1` wins (subject only). The file is used only when it changed since the last commit; unchanged, it is the previous push's message, so `push.ps1` prompts instead. `push.ps1 -DryRun` prints the commands without changing anything.
 - Agents write it when preparing a push (the `agent-push` skill), replacing the previous push's message. UTF-8 without BOM.
 - Format follows the recent commits: line 1 `v<version>` from `.version/version`; then one block per area, each a lowercase label with a colon (`home prompt:`) followed by plain-English paragraphs about what the user sees; last paragraph starts with `Under the hood:` (internal fixes, tests, which checks passed). Cover every `buildNotes.md` entry since the last commit, merge related ones, leave out reverted work, and never claim a check that did not run.
 

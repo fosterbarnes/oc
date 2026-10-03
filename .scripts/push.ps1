@@ -9,9 +9,13 @@ $ErrorActionPreference = 'Stop'
 Set-Location -LiteralPath $repoRoot
 
 # buildNotes.txt holds the next commit: line 1 subject, one blank line, then the body.
+# A passed message wins. The file counts only when changed since the last commit;
+# unchanged, it is still the previous push's message.
 $subject = $Message.Trim()
 $body = ''
-if (Test-Path -LiteralPath $buildNotes) {
+& git diff --quiet HEAD -- $buildNotes 2>$null
+$notesChanged = $LASTEXITCODE -ne 0 -or -not (& git ls-files -- $buildNotes)
+if (-not $subject -and $notesChanged -and (Test-Path -LiteralPath $buildNotes)) {
     $lines = @([IO.File]::ReadAllLines($buildNotes))
     if ($lines.Count -gt 0 -and $lines[0].Trim()) {
         $subject = $lines[0].Trim()
@@ -22,7 +26,7 @@ if (Test-Path -LiteralPath $buildNotes) {
     }
 }
 if (-not $subject -and -not $DryRun) { $subject = (Read-Host 'Commit message').Trim() }
-if (-not $subject) { throw 'Provide a commit message or add a non-empty first line to buildNotes.txt.' }
+if (-not $subject) { throw 'Provide a commit message, or write a new one to buildNotes.txt (it is unchanged since the last commit).' }
 
 $branch = ((& git branch --show-current) | Out-String).Trim()
 if ($LASTEXITCODE -or -not $branch) { throw 'Could not determine a non-detached current branch.' }

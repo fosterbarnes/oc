@@ -1,9 +1,6 @@
 v0.2.76
 
 scripts:
-push.ps1 now takes the commit message from buildNotes.txt, like the base template: the first line is the title, then a blank line, then the description. Without the file it still uses the message you pass or asks for one. The new -DryRun option prints the add, commit and push commands without changing anything. UPSTREAM is still never staged.
+push.ps1 now uses a supplied commit subject first, then a changed buildNotes.txt, then a prompt. It no longer reuses the message committed by the previous push.
 
-agents:
-AGENTS.md now has a buildNotes.txt section: agents write it when preparing a push, in the same style as these commit messages. The new agent-push skill writes the message, runs quick checks and prePush, does a dry run, then pushes.
-
-Under the hood: added the buildNotes.txt path to scriptHelper.ps1 and updated SCRIPTS.md. push.ps1 -DryRun was checked with no file, a valid file and a malformed one (it stops with an error). This commit is the first push made through agent-push.
+Under the hood: updated AGENTS.md and SCRIPTS.md to document the message precedence. No checks run.
