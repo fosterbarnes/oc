@@ -45,7 +45,44 @@ async function attach(
   if (typeof settings.sessionModel === "string") args.push("--model", settings.sessionModel)
   if (typeof settings.sessionAgent === "string") args.push("--agent", settings.sessionAgent)
   await runNative(args, {
-    env: { OPENCODE_SERVER_PASSWORD: server.secret, OPENCODE_SERVER_USERNAME: "opencode" },
+    env: { OPENCODE_SERVER_PASSWORD: server.secret, OPENCODE_SERVER_USERNAME: "opencode",
+      OC_SUPERVISOR_PID: String(process.pid) },
+  })
+  const { Revive } = await import("@/config/revive")
+  const raw = await takeHandoff(Revive.handoffPath(process.pid))
+  if (raw === undefined) return
+  const handoff = Revive.parseContext(raw)
+  // This launcher owns the console, so the pipeline prints here. On success it exits and the
+  // terminal restarter closes this window; on failure the old TUI reopens in place.
+  const ignore = () => {}
+  process.on("SIGINT", ignore)
+  const context = Revive.encode({ ...handoff, supervisorPid: process.pid, shellPid: process.ppid })
+  const failed = await runNative(["oc", "--revive", context]).then(() => false, () => true)
+  if (failed) await waitForKey("Revive failed (details above). Press any key to reopen oc.")
+  process.off("SIGINT", ignore)
+  if (!failed) return
+  await attach(await OcConfig.startServer(), settings, { directory: handoff.directory, session: handoff.sessionID })
+}
+
+// Written by the TUI right before it exits for a revive.
+async function takeHandoff(file: string) {
+  const raw = await fs.readFile(file, "utf8").catch((error: NodeJS.ErrnoException) => {
+    if (error.code === "ENOENT") return undefined
+    throw error
+  })
+  if (raw === undefined) return
+  await fs.rm(file, { force: true })
+  return JSON.parse(raw) as unknown
+}
+
+async function waitForKey(prompt: string) {
+  console.log(prompt)
+  if (!process.stdin.isTTY) return
+  process.stdin.setRawMode(true)
+  process.stdin.resume()
+  await new Promise((resolve) => process.stdin.once("data", resolve)).finally(() => {
+    process.stdin.setRawMode(false)
+    process.stdin.pause()
   })
 }
 
@@ -232,7 +269,12 @@ export const OcCommand = cmd({
       .option("revive", {
         type: "string",
         hidden: true,
-        describe: "Restart this instance and reopen its terminal using an encoded context",
+        describe: "Run the revive pipeline for an encoded context",
+      })
+      .option("revive-terminal", {
+        type: "string",
+        hidden: true,
+        describe: "Close the old oc window and open a new terminal using an encoded context",
       })
       .command(ConfigCommand)
       .command({
@@ -249,7 +291,7 @@ export const OcCommand = cmd({
       .check((argv) => {
         const kill = Boolean(argv["kill-server"]) || Boolean(argv["shutdown-server"])
         const selected = [Boolean(argv["restart-server"]), kill, Boolean(argv["shutdown-all"]),
-          argv.revive !== undefined].filter(Boolean).length
+          argv.revive !== undefined, argv["revive-terminal"] !== undefined].filter(Boolean).length
         if (selected > 0 && argv._.length > 1)
           throw new Error("Server controls and --revive cannot be used with a launch target")
         if (selected > 1) throw new Error("Use only one server control or --revive")
@@ -258,15 +300,12 @@ export const OcCommand = cmd({
   handler: async (args) => {
     if (args.revive !== undefined) {
       const { Revive } = await import("@/config/revive")
-      const context = Revive.decodeContext(args.revive)
-      if (!context.reopen) {
-        await OcConfig.revive(context)
-        return
-      }
-      const server = await OcConfig.startServer()
-      await runNative(Revive.attachArguments(server.url, context), {
-        env: { OPENCODE_SERVER_PASSWORD: server.secret, OPENCODE_SERVER_USERNAME: "opencode" },
-      })
+      await OcConfig.revive(Revive.decodeContext(args.revive))
+      return
+    }
+    if (args["revive-terminal"] !== undefined) {
+      const { Revive } = await import("@/config/revive")
+      await OcConfig.restartTerminal(Revive.decodeRestart(args["revive-terminal"]))
       return
     }
     if ((args as Record<string, unknown>)["shutdown-all"]) {

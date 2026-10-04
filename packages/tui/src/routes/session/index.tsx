@@ -1541,6 +1541,13 @@ function UserMessage(props: {
     if (reply?.role !== "assistant") return
     return [reply.modelID, reply.variant].filter(Boolean).join(" ")
   })
+  // Written by the revive commands before launch (reviveCommands mark() in app.tsx).
+  const revive = createMemo(() => {
+    const part = props.parts.find((x) => x.type === "text" && x.synthetic && x.metadata?.kind === "revive")
+    if (part?.type !== "text") return
+    const time = new Date(Number(part.metadata?.at)).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })
+    return ` Revived . ${time} . ${part.metadata?.versions} `
+  })
 
   return (
     <>
@@ -1609,6 +1616,15 @@ function UserMessage(props: {
           marginTop={1}
           border={["top"]}
           title={summary() ? ` Compacted . ${summary()} ` : " Compaction "}
+          titleAlignment="center"
+          borderColor={theme.borderActive}
+        />
+      </Show>
+      <Show when={revive()}>
+        <box
+          marginTop={1}
+          border={["top"]}
+          title={revive()}
           titleAlignment="center"
           borderColor={theme.borderActive}
         />

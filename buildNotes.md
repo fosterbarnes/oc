@@ -110,6 +110,244 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-04 (~04:14) - v0.2.82 - Revive builds natively (no pwsh scripts), optional debug build, silent WezTerm reopen - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation (from spit); completed
+- Version: 0.2.82 (no extra bump; same session)
+- MISTAKE: `Revive.sourceBuild` ran `.scripts\build.ps1` (personal script; its `closeOut 3` printed "closing after 1 seconds..." in the revive window) despite user's rule not to model revive on pwsh scripts. Rule: native features call `packages/opencode/script/build.ts` directly; `.scripts\*` are the user's personal tools only.
+- Changed `revive.build` to `{ source, debug }` (`Revive.parseBuild`); removed `cwd`/`command`/`output` and `Revive.sourceBuild`. Added `Revive.buildSteps`: `bun install`, `bun run packages/opencode/script/build.ts --single` (+ `--with-debug` when `debug`), outputs `dist/opencode-<platform>-<arch>/bin` (+ `ocdebug` when `debug`). Added `Revive.BUILD_SCRIPT`.
+- Changed pipeline (`packages/opencode/src/config/oc.ts` `revive`): one logged step per build command, then "Checking build output". First-run choices save `{ source, debug: false }`.
+- Fixed console window on WezTerm reopen: `Revive.reopenCommand` launches `wezterm-gui` (GUI subsystem) instead of `wezterm` (console CLI that stays alive with `--always-new-process`, keeping a conhost window open). Terminal check uses `Bun.which("wezterm-gui")`.
+- Changed TUI existing-folder check (`packages/tui/src/app.tsx` `chooseSource`) to `packages\opencode\script\build.ts`.
+- Changed user `~\.config\opencode\oc.json` `revive.build` to `{ source: oc repo, debug: true }` (user request).
+- Risk: installed oc (pre-change build) cannot parse the new `revive.build` shape; first install of this build must be done another way.
+- Verification: `bun test test/config/revive.test.ts` 15 pass; `tsgo --noEmit` clean in opencode and tui.
+
+### User
+Revive
+- `/revive` now builds oc directly from its source folder instead of calling the personal build script, so the "closing after 1 seconds" countdown is gone.
+- `revive.build` in `oc.json` is now just the source folder plus an optional `debug` switch that also builds and installs `ocdebug`; it is off unless you turn it on.
+- Reopening in WezTerm no longer leaves an extra black console window behind.
+
+---
+
+## 2026-10-04 (~04:03) - v0.2.82 - Revive source picker: no search box, shorter hints - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation; completed
+- Version: 0.2.82 (no extra bump; same session)
+- Changed `chooseSource` `DialogSelect` (`packages/tui/src/app.tsx`): `renderFilter={false}`; short descriptions (old ones truncated at dialog width).
+- Verification: `tsgo --noEmit` clean in tui.
+
+### User
+Revive
+- The first-run source picker no longer shows a search box, and its option hints fit on one line.
+
+---
+
+## 2026-10-04 (~04:00) - v0.2.82 - Revive first run: use existing source, download to folder, or just restart - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation (follow-up to entry below); completed
+- Version: 0.2.82 (no extra bump; same session)
+- Changed first-run `/revive` (`packages/tui/src/app.tsx` `chooseSource`): `DialogSelect` with "Use my oc source folder" / "Download the oc source to..." / "Just restart", then `DialogPrompt` for the folder (download defaults to `Global.Path.data/source`). Existing folder must contain `.scripts\build.ps1` (toast otherwise). Escape or empty path cancels.
+- Changed `ReviveContext`: `source` = `existing | download | none` plus `sourceDir` (absolute, required exactly for existing/download; `parseContext` enforces).
+- Changed pipeline (`packages/opencode/src/config/oc.ts` `revive`): existing -> save `Revive.sourceBuild(dir)`; download -> `downloadSource(dir)` (clone, or one `pull --ff-only` if `.git` exists); none -> `revive.build: false`.
+- Supersedes the confirm dialog in the entry below.
+- Verification: `bun test test/config/revive.test.ts` 15 pass; `tsgo --noEmit` clean in opencode and tui.
+
+### User
+Revive
+- The first `/revive` now offers three choices: use an oc source folder you already have, download the oc source to a folder you pick, or just restart.
+- Using an existing folder checks that it is really oc's source before saving it.
+
+---
+
+## 2026-10-04 (~03:57) - v0.2.82 - Revive source prompt reworded; no auto-pull - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation (follow-up to entry below); completed
+- Version: 0.2.82 (no extra bump; same session)
+- Changed first-run `/revive` dialog (`packages/tui/src/app.tsx`): "Run oc from its source code?", states download folder (`Global.Path.data/source`, same as `downloadSource`) and that the copy is for editing.
+- Removed auto-pull: dropped `BuildConfig.repo` and the pre-build `git pull` (user decision). `downloadSource` (`packages/opencode/src/config/oc.ts`) clones once, or pulls `--ff-only` once if a clone already exists, only during the first-run choice.
+- Supersedes the "pulls before each build" bullets in the entry below.
+- Verification: `bun test test/config/revive.test.ts` 15 pass; `tsgo --noEmit` clean in opencode and tui.
+
+### User
+Revive
+- The first-run question now asks whether to run oc from its source code, says where the code is downloaded, and that the copy is yours to edit.
+- Revive downloads the source only once; later revives build whatever is in that folder and never pull from GitHub.
+
+---
+
+## 2026-10-04 (~03:53) - v0.2.82 - /revive always shown; first run asks to update from source - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation (follow-up to hard revive entry below); completed, live check pending
+- Version: 0.2.82 (no extra bump; same session)
+- Fixed `/revive` hidden without `revive.build` (`packages/tui/src/app.tsx` `reviveCommands`): always shown. First run (`revive.build` unset, read fresh via `readOcConfig().reviveSourceChosen`) shows `DialogConfirm`: confirm -> context `source: "download"`, "No" -> `source: "none"`, Escape -> cancel.
+- Added pipeline source setup (`packages/opencode/src/config/oc.ts` `revive`): `downloadSource` git-clones `Revive.SOURCE_REPO` into `Global.Path.data/source` (reuses existing `.git`), saves `revive.build = Revive.sourceBuild(dir)`; `none` saves `revive.build: false`. Build configs with `repo` run `git -C cwd pull --ff-only` before building. Visible output via `runVisible`.
+- Changed `Revive.parseBuild`: `undefined`/`false` -> no build; optional `repo`. Added `Revive.sourceBuild`, `ReviveContext.source`.
+- Changed `OcConfig.update`: shared generic `write` (used by `saveReviveBuild`). Note: writing oc.json drops `//` comments, same as existing `update`.
+- MISTAKE: first pass hid `/revive` behind `revive.build`, then proposed "restart only when unset" without asking; user wanted a first-run choice. Rule: when config is missing for a native feature, ask the user in-app once and persist the answer instead of hiding the command or silently defaulting.
+- Verification: `bun test test/config/revive.test.ts` 15 pass; `tsgo --noEmit` clean in opencode and tui.
+
+### User
+Revive
+- `/revive` is always in the command list now.
+- The first time you run it, oc asks whether to update itself from source; choose Yes to download the oc source and build and install the latest version on every revive, or No to only restart oc.
+- Your answer is saved as `revive.build` in `oc.json`; you can also point it at your own source folder.
+
+---
+
+## 2026-10-04 (~03:33) - v0.2.82 - Hard revive: in-window progress, terminal restart, built-in build and install - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation (imp from spit plan `revivePlan.md`); completed, live check pending
+- Version: 0.2.82
+- Added worker 1 in `attach()` (`packages/opencode/src/cli/cmd/oc.ts`): sets `OC_SUPERVISOR_PID` for the TUI; after TUI exit reads handoff `Revive.handoffPath(pid)`, runs `oc --revive <ctx>` child with inherited stdio (fresh exe code after install), ignores SIGINT through failure prompt; failure -> `waitForKey` -> `startServer` -> reattach old session.
+- Changed `OcConfig.revive` (`packages/opencode/src/config/oc.ts`) into pipeline: resolve launcher/terminal/shell before shutdown -> optional `revive.build` (Bun.spawn inherit) + `Revive.installSources` -> `shutdownAll` -> `Revive.install` -> `startServer` -> launch worker 2 detached. Steps logged to console + `Global.Path.log/revive.log`.
+- Added worker 2 `OcConfig.restartTerminal` + hidden `oc --revive-terminal`: waits for launcher pid, closes old window (WezTerm: kill every pane in the window holding `paneID`; else taskkill parent shell only if `Revive.isShell`), opens `Revive.reopenCommand` running `oc launch` or `oc previous --depth 1` (`revive.launcher`, default `occ`), then `Revive.removeLeftovers(installDir)`.
+- Added `Revive.install` (`packages/opencode/src/config/revive.ts`): rename existing targets to `.old-<stamp>` (running exes rename, never overwrite), copy outputs, relink same-inode aliases (oc.exe/occ.exe), retry EBUSY/EPERM/EACCES, full best-effort rollback with explicit "rollback incomplete" error.
+- Changed `ReviveContext`: `mode`, `paneID`, `supervisorPid`, `shellPid`; removed `reopen` and `attachArguments`. Added `RestartContext`, `decodeRestart`, `parseLauncher`, `parseBuild`.
+- Changed TUI `reviveCommands` (`packages/tui/src/app.tsx`): supervised -> write handoff + `exit()`; unsupervised -> hidden `oc --revive` helper (same pipeline; on post-shutdown failure it still reopens a terminal). `/revive` visible when `revive.build` set. Removed `revive.installPath`. `revive.path` still overrides `/revive-no-install`.
+- Kept: existing `mark()` revive divider before handoff.
+- Risk: renaming one hard-link name of a running exe then relinking not yet live-verified. WT tab close after shell taskkill depends on profile `closeOnExit`. `waitForKey` stdin resume/pause before reattaching TUI not live-verified.
+- Note: user `oc.json` still has `revive.path` (revive.ps1) which bypasses built-in `/revive-no-install`, and stale `revive.installPath`; needs `revive.build` for `/revive`.
+- Updated `FORK.md` revive row, `SCRIPTS.md` revive scripts, `revivePlan.md` status.
+- Verification: `bun test test/config/revive.test.ts` 14 pass (contexts, launcher args, build config, install swap/alias relink/rollback/leftovers on temp dirs). `tsgo --noEmit` clean in opencode and tui. Grok 4.6 review: fixed hidden-helper stranding, rollback abort, failure-prompt SIGINT/raw-mode; rejected close-on-timeout (worker 2 only runs after success) and build Ctrl+C (intended cancel).
+
+### User
+Revive
+- `/revive` and `/revive-no-install` now restart the terminal window too, so edited WezTerm bindings and similar terminal settings take effect.
+- When oc was opened with `oc` or `occ`, the oc screen closes and the same window shows each revive step before it closes and a fresh terminal opens.
+- The new terminal runs `occ` by default (reopens the revived session); set `"launcher": "oc"` under `revive` in `oc.json` to open the home screen instead.
+- `/revive` now builds and installs oc itself from `revive.build` in `oc.json` (working folder, build command, build output folders) instead of calling `reviveAndInstall.ps1`.
+- A failed build shows the error and waits for a key, then reopens the old oc in the same window; a failed install puts the old files back.
+- Every revive step and error is written to `revive.log` in oc's log folder.
+
+---
+
+## 2026-10-04 (~03:02) - v0.2.81 - Revive marker pass: keeps agent and model after reopen - Claude Opus 5.5, low effort; Pass
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Pass (session-scoped review); completed
+- Version: 0.2.81
+- Fixed: revive marker message was created with server defaults for agent/model (`createUserMessage`: default agent, `ag.model ?? SessionTable.model`). Reopened prompt seeds model from the last user message (`prompt/index.tsx` sync effect), which is now the marker, so a default agent with a pinned model could switch the user's model after revive. `mark()` (`packages/tui/src/app.tsx`) now passes `local.agent.current()?.name`, `local.model.current()`, `local.model.variant.current()`, same sources as prompt submit.
+- Fixed stale comment in `UserMessage` revive memo (`routes/session/index.tsx`) that still pointed at removed `Revive.markSession`.
+- Changed marker time to `hour: "numeric"` (2:51 AM, not 02:51 AM) in marker text and divider, matching chat timestamps.
+- Kept: home screen and `run_after_turn` agent revives write no marker; old test markers with `metadata.version` render `undefined` in the divider.
+- Verification: `tsc --noEmit` in `packages/tui` showed no errors in `app.tsx`, `routes/session/index.tsx`, or `sidebar-tools.tsx`.
+
+### User
+Revive
+- Reviving no longer risks switching the prompt to a different model or agent when oc comes back.
+- The revive time now reads "2:51 AM" instead of "02:51 AM", matching the rest of the chat.
+
+---
+
+## 2026-10-04 (~02:55) - v0.2.81 - Sidebar footer shows upstream OpenCode version - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation; completed
+- Version: 0.2.81
+- Changed sidebar footer (`packages/tui/src/routes/session/sidebar-tools/sidebar-tools.tsx`): `oc v<display version before "-"> ∙ OG v<InstallationVersion>`. Short `OG` label and U+2219 bullet operator separator per user, for sidebar width (user compared U+25CF, U+2022, and `-` live; picked U+2219). Revive marker keeps the long `. OpenCode v` form.
+- Verification: user live check confirmed revive marker text `oc v0.2.81 . OpenCode v1.18.29`. `tsc --noEmit` in `packages/tui` showed no errors in `sidebar-tools.tsx` with the earlier `. OpenCode v` text; the final `∙ OG v` text-only change was not re-run.
+
+### User
+Sidebar
+- The sidebar footer now reads like "oc v0.2.81 ∙ OG v1.18.29", showing the OpenCode version oc is built on.
+
+---
+
+## 2026-10-04 (~02:51) - v0.2.81 - Revive marker shows oc and OpenCode versions - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation; completed
+- Version: 0.2.81
+- Changed revive marker version text in `reviveCommands` `mark()` (`packages/tui/src/app.tsx`): `oc v<InstallationDisplayVersion before first "-"> . OpenCode v<InstallationVersion>` (same oc split as sidebar footer; `InstallationVersion` is upstream pkg version for local builds per `script/build.ts`). Metadata field `version` -> `versions`; divider in `routes/session/index.tsx` reads `versions`.
+- Kept: markers saved by the previous build (`metadata.version`) render `undefined` in the divider; only the user's test session has them.
+- Verification: user live check confirmed the agent receives the marker text; `tsc --noEmit` in `packages/tui` showed no errors in edited files after this change.
+
+### User
+Revive
+- The revive divider and agent note now read like "Revived . 2:51 AM . oc v0.2.81 . OpenCode v1.x" instead of the long build stamp.
+
+---
+
+## 2026-10-04 (~02:48) - v0.2.81 - Revive marker written at trigger time for every revive command - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation; completed
+- Version: 0.2.81
+- Fixed: prior entry's reopen-time marker never fired for `/revive` (and any `revive.path` override), because those launch the configured script directly and skip `oc --revive`. User live check with `reviveAndInstall` showed no marker.
+- Moved marker write into `reviveCommands` `mark()` (`packages/tui/src/app.tsx`): awaited `sdk.client.session.prompt` with `noReply: true` before any launch, in both `oc.revive_no_install` and `oc.revive`. Same synthetic text part + `metadata.kind: "revive"`; same divider in `UserMessage` (`packages/tui/src/routes/session/index.tsx`). Shows immediately and persists after reopen.
+- Removed `Revive.markSession` and its call in `oc --revive` reopen (`revive.ts`, `cli/cmd/oc.ts` back to committed state) so one revive = one marker.
+- Kept: no-reply message triggers no LLM call; it costs tokens only as history on the next prompt (consecutive user messages). Home screen (no session) writes nothing. Agent-queued revives via `run_after_turn` bypass the TUI commands and write no marker.
+- Verification: `tsc --noEmit` in `packages/tui` showed no errors in edited files. No live revive run.
+- MISTAKE: first version hooked only the built-in helper path though spitball had flagged that configured scripts bypass it. Put cross-path markers at the shared trigger point (the TUI command), not in one launcher.
+
+### User
+Revive
+- Running `/revive` or `/revive-no-install` in a session now immediately adds a "Revived . time . version" divider under the last message, and it is still there when oc comes back.
+- The marker costs nothing until you send your next message, and then the agent sees it as a short note.
+- Revives queued by an agent, or started from the home screen, do not add the marker.
+
+---
+
+## 2026-10-04 (~02:41) - v0.2.81 - Revive leaves a marker in the revived session - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation (after /spit); completed
+- Version: 0.2.81
+- Added `Revive.markSession` (`packages/opencode/src/config/revive.ts`): SDK `session.prompt` with `noReply: true`, one synthetic text part `[oc revived at HH:MM, vX]`, `metadata: { kind: "revive", version, at }`. Synthetic text reaches the model (`message-v2.ts` drops only `ignored`), so agents see it.
+- Added call in `oc --revive` reopen branch (`packages/opencode/src/cli/cmd/oc.ts`) after `startServer`, before attach, only when `context.sessionID` is set. Marker means new server came up. Failure logs to stderr, does not block reattach.
+- Added `revive` divider in `UserMessage` (`packages/tui/src/routes/session/index.tsx`), same style as compaction divider: ` Revived . HH:MM . vX `.
+- Kept: configured `revive.path` / `revive.installPath` scripts bypass the built-in helper, so they write no marker unless the script ends with `oc --revive <ctx>`. Home-screen revive (no session) writes none.
+- Verification: `tsc --noEmit` in `packages/opencode` and `packages/tui` showed no errors in edited files. No live revive run.
+
+### User
+Revive
+- After `/revive-no-install` reopens a session, the chat shows a centered "Revived . time . version" divider.
+- Agents see the same marker in the conversation, so they know a revive happened.
+- Revives started from the home screen, or through custom revive scripts in oc config, do not add the marker.
+
+---
+
+## 2026-10-04 (~02:31) - v0.2.80 - Startup intro now shows "oc" in a smaller frame - Claude Sonnet 5.5, default effort; Implementation
+
+### Agent
+- Meta: Claude Sonnet 5.5; default effort; Implementation; completed
+- Version: 0.2.80
+- Changed `packages/opencode/src/cli/intro.ts`: `logo` is now the 3-row block-font "oc"; `frame` shrunk from 57 to 21 columns (same rows); `codeStart` is `logoLeft + 5` so `o` keeps the open color and `c` the code color.
+- Changed `interior` fill from `#1c1c1c` to `#000000`.
+- Kept: sweep/resize/stdin-hold logic and 15ms tick unchanged; home-screen logo (`packages/tui/src/logo.ts`) untouched.
+- Verification: not run (visual change; user to check on next launch).
+
+### User
+Startup intro
+- The startup animation now draws "oc" inside a smaller box with a black interior instead of "opencode" in a wide one.
+
+---
+
+## 2026-10-03 (~15:51) - v0.2.79 - Public README; fork definition moved to FORK.md - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation; completed
+- Version: 0.2.79 (docs-only, no revision bump)
+- Moved: `README.md` -> `FORK.md` (`git mv`); dropped its Progress/code-count section; Related files table lists `FORK.md` + `README.md`
+- Added: barebones public `README.md` (description, doc links, requirements, versioning, Progress with `[n](scc.txt)` + `code-count:start/end`, license). `countCode.ps1` still reads `README.md` via `scriptHelper.ps1` `$readme`; unchanged
+- Updated refs: `AGENTS.md` project definition rule, `README.OG.md` (3 links), `UPSTREAM-SYNC.md` custom-file list, `publicReadiness.md` (4 README mentions -> FORK.md). Old buildNotes entries untouched
+- Verification: regex count of countCode patterns: README.md link=1 table=1, FORK.md 0/0. `prePush.ps1`/scc not run
+
+### User
+Docs
+- The old README is now `FORK.md`, the full list of oc features and how finished each one is.
+- `README.md` is a short public landing page with requirements, links, and the line-count table that `prePush.ps1` refreshes. No UI change.
+
+---
+
 ## 2026-10-03 (~15:28) - v0.2.79 - Tab title: plain ■ agent marker, no "OC |" prefix - Claude Opus 5.5, low effort; Agent
 
 ### Agent

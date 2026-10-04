@@ -39,9 +39,9 @@ Sources: `packages/opencode/src/provider/cursor/runtime.ts`, `packages/opencode/
 | **Plugins point to personal sibling checkouts** | The current global config references local files for session tooling, Copilot auto-model, and bgShell under `C:\Users\user\Documents\GitHub\...`. Those integrations are unavailable elsewhere; copying the config preserves invalid paths. | Which plugins should be distributed, optional, or excluded from the public defaults? |
 | **MCP integrations depend on local projects and binaries** | The Everything MCP points to a sibling checkout and an Everything SDK DLL in the Apps folder. Jev likewise points to a local CLI file. A copied configuration cannot start those servers. | Give each optional integration a portable setup recipe? |
 | **Instructions and skills use personal absolute paths** | Global instructions, model-specific prompts, and skill paths reference the author's user directory. A fresh installation does not contain them. | What is the smallest self-contained default configuration? |
-| **The tray is a separate project** | Installing this checkout does not provide `octray`, even though it is part of the README's daily-use story. | Is the tray part of the public offering or a separately installed companion? |
+| **The tray is a separate project** | Installing this checkout does not provide `octray`, even though it is part of the FORK.md daily-use story. | Is the tray part of the public offering or a separately installed companion? |
 
-Evidence: the current `~/.config/opencode/opencode.jsonc` and README sections 2, 5, and 6. This is a high-value inventory: some apparent app features are actually personal configuration.
+Evidence: the current `~/.config/opencode/opencode.jsonc` and FORK.md sections 2, 5, and 6. This is a high-value inventory: some apparent app features are actually personal configuration.
 
 ## 4. Restart, installation, and coexistence assumptions
 
@@ -49,9 +49,9 @@ Evidence: the current `~/.config/opencode/opencode.jsonc` and README sections 2,
 |---|---|---|
 | **Install scripts hardcode a personal destination** | Production/debug installers target `C:\Users\user\Apps\opencode`. On another account that can fail for permissions or install into the wrong user's tree. | Make the destination user-relative or configurable, regardless of eventual install method. |
 | **Revive hardcodes an executable and desktop shortcut** | Both revive scripts call the personal installed path and reopen `C:\Users\user\Desktop\occ.lnk`. That shortcut is not created by the inspected installer. Restarting fails on a fresh machine. | Can revive reopen oc directly using its actual executable and launch context? |
-| **Revive requires external scripts/configuration** | The palette commands are hidden when their configured paths are unset. Shipping the executable alone does not provide the README's restart workflow. | Is ordinary restart built in, with rebuild/reinstall kept as developer tooling? |
+| **Revive requires external scripts/configuration** | The palette commands are hidden when their configured paths are unset. Shipping the executable alone does not provide the FORK.md restart workflow. | Is ordinary restart built in, with rebuild/reinstall kept as developer tooling? |
 | **Shutdown affects unrelated applications** | `--shutdown-all` kills every `wezterm-gui.exe`. Other shutdown paths identify oc/OpenCode processes by executable name, which can include another installation or stock OpenCode. | How should oc identify and stop only the instances it owns? |
-| **Helper packaging varies by install path** | The canonical installer copies Agentify and Cursor folders. The README records that the combined sync installer may omit them. The resulting executable can launch normally while those providers fail. | Define one required application layout that every distribution path preserves. |
+| **Helper packaging varies by install path** | The canonical installer copies Agentify and Cursor folders. FORK.md records that the combined sync installer may omit them. The resulting executable can launch normally while those providers fail. | Define one required application layout that every distribution path preserves. |
 | **Build tooling can change the user's Bun installation** | The scripts can run `bun upgrade --canary` to avoid the known-bad runtime. Someone building the fork can unexpectedly alter their global tooling. | State the supported build version and decide how deliberately upgrades should happen. |
 
 Sources: `.scripts/install.ps1`, `.scripts/installDebug.ps1`, `.scripts/revive.ps1`, `.scripts/reviveAndInstall.ps1`, `.scripts/syncAndInstall.ps1`, `SCRIPTS.md`, and `packages/opencode/src/config/oc.ts`.

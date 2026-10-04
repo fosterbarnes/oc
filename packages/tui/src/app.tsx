@@ -118,7 +118,9 @@ function readOcConfig(): {
   homeDirSort: string
   serverStartOnWindowsUserStart: boolean
   revivePath: string
-  reviveInstallPath: string
+  // False until the first /revive saves the source choice (`revive.build` object or `false`).
+  // Without it, /revive asks first (`chooseSource` in `reviveCommands`).
+  reviveSourceChosen: boolean
 } {
   const fallbackDir = os.homedir()
   const fallbackSort = "name"
@@ -131,7 +133,7 @@ function readOcConfig(): {
         homeDir?: unknown
         homeDirSort?: unknown
         server?: { startOnWindowsUserStart?: unknown }
-        revive?: { path?: unknown; installPath?: unknown }
+        revive?: { path?: unknown; build?: unknown }
       }
     }
     const parsed = parse(ocConfigPath())
@@ -145,8 +147,8 @@ function readOcConfig(): {
     const homeDirSort = sortRaw === "modified" ? "modified" : "name"
     const serverStartOnWindowsUserStart = merged.server?.startOnWindowsUserStart === true
     const revivePath = typeof merged.revive?.path === "string" ? merged.revive.path.trim() : ""
-    const reviveInstallPath = typeof merged.revive?.installPath === "string" ? merged.revive.installPath.trim() : ""
-    return { executable, ocDir, homeDir, homeDirSort, serverStartOnWindowsUserStart, revivePath, reviveInstallPath }
+    const reviveSourceChosen = merged.revive?.build !== undefined
+    return { executable, ocDir, homeDir, homeDirSort, serverStartOnWindowsUserStart, revivePath, reviveSourceChosen }
   } catch {
     return {
       executable: "",
@@ -155,7 +157,7 @@ function readOcConfig(): {
       homeDirSort: fallbackSort,
       serverStartOnWindowsUserStart: false,
       revivePath: "",
-      reviveInstallPath: "",
+      reviveSourceChosen: false,
     }
   }
 }
@@ -349,43 +351,126 @@ function persistOcConfig(
   })
 }
 
-// Built-in revive uses a detached helper; configured scripts remain overrides.
+// Built-in revive restarts oc and its terminal (OcConfig.revive); `revive.path` still overrides /revive-no-install.
 function reviveCommands(toast: ToastContext) {
   const config = readOcConfig()
   const route = useRoute()
   const sync = useSync()
   const sdk = useSDK()
+  const local = useLocal()
+  const exit = useExit()
+  const dialog = useDialog()
+  // Saved before launch, while this server still runs. A no-reply message costs no tokens until
+  // the next prompt; synthetic text then reaches the model, and the session view draws a divider.
+  // Carries the current agent/model because the reopened prompt seeds them from the last user message.
+  const mark = async () => {
+    if (route.data.type !== "session") return
+    const at = new Date()
+    const time = at.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })
+    // Same oc version as the sidebar footer; InstallationVersion is the incorporated upstream release.
+    const versions = `oc v${InstallationDisplayVersion.split("-")[0]} . OpenCode v${InstallationVersion}`
+    const result = await sdk.client.session.prompt({
+      sessionID: route.data.sessionID,
+      directory: sync.session.get(route.data.sessionID)?.directory,
+      agent: local.agent.current()?.name,
+      model: local.model.current(),
+      variant: local.model.variant.current(),
+      noReply: true,
+      parts: [{
+        type: "text",
+        text: `[oc revived at ${time} . ${versions}]`,
+        synthetic: true,
+        metadata: { kind: "revive", versions, at: at.getTime() },
+      }],
+    })
+    if (result.error) toast.error(new Error(`Failed to mark revive: ${JSON.stringify(result.error)}`))
+  }
+  // First /revive: where oc's source comes from. Building and installing need git (download) and Bun.
+  const chooseSource = async (): Promise<Source | undefined> => {
+    const kind = await new Promise<Source["source"] | undefined>((resolve) => dialog.replace(() => (
+      <DialogSelect
+        title="Run oc from its source code?"
+        renderFilter={false}
+        options={[
+          { value: "existing" as const, title: "Use my oc source folder", description: "build from it" },
+          { value: "download" as const, title: "Download the oc source to...", description: "your copy to edit" },
+          { value: "none" as const, title: "Just restart", description: "no build" },
+        ]}
+        onSelect={(option) => resolve(option.value)}
+      />
+    ), () => resolve(undefined)))
+    if (kind === undefined) return
+    if (kind === "none") return { source: "none" }
+    const input = await DialogPrompt.show(dialog,
+      kind === "existing" ? "oc source folder" : "Download the oc source to", {
+        placeholder: "C:\\path\\to\\oc",
+        value: kind === "download" ? path.join(Global.Path.data, "source") : "",
+      })
+    if (!input?.trim()) return
+    const sourceDir = path.resolve(input.trim().replace(/^"(.*)"$/, "$1"))
+    // Revive.BUILD_SCRIPT: the build script /revive runs.
+    if (kind === "existing" && !fs.existsSync(path.join(sourceDir, "packages", "opencode", "script", "build.ts"))) {
+      toast.show({ message: `Not an oc source folder (no packages\\opencode\\script\\build.ts): ${sourceDir}`,
+        variant: "error" })
+      return
+    }
+    return { source: kind, sourceDir }
+  }
+  // Context shape: Revive.ReviveContext in packages/opencode/src/config/revive.ts.
+  type Source = { source: "existing" | "download"; sourceDir: string } | { source: "none" }
+  const revive = async (mode: "install" | "no-install", source?: Source) => {
+    await mark()
+    const sessionID = route.data.type === "session" ? route.data.sessionID : undefined
+    const terminal = detectTerminal()
+    const context = {
+      mode,
+      terminal: terminal.kind,
+      directory: (sessionID ? sync.session.get(sessionID)?.directory : undefined) ?? sdk.directory ?? process.cwd(),
+      ...(sessionID ? { sessionID } : {}),
+      ...(terminal.kind === "wezterm" && terminal.paneID ? { paneID: terminal.paneID } : {}),
+      ...source,
+    }
+    // Hosted by an `oc`/`occ` launcher: hand off and exit, so it shows revive progress in this window
+    // (Revive.handoffPath). Otherwise a hidden helper runs the same pipeline.
+    const supervisor = process.env.OC_SUPERVISOR_PID
+    if (supervisor) {
+      const file = path.join(Global.Path.state, "oc-revive", `${supervisor}.json`)
+      return fs.promises.mkdir(path.dirname(file), { recursive: true })
+        .then(() => fs.promises.writeFile(file, JSON.stringify(context)))
+        .then(() => exit(), (error) => toast.error(error))
+    }
+    launchDetached(process.execPath, [
+      ...(/^bun(?:\.exe)?$/i.test(path.basename(process.execPath)) ? [process.argv[1]] : []),
+      "oc", "--revive", Buffer.from(JSON.stringify(context)).toString("base64url"),
+    ]).once("error", (error) => toast.error(error))
+      .once("exit", (code) => {
+        if (code) toast.error(new Error(`Revive helper launch failed: exit code ${code}`))
+      })
+  }
   return [
     {
       name: "oc.revive_no_install",
       title: "Revive oc without installing",
       category: "System",
       slashName: "revive-no-install",
-      run: () => {
-        if (config.revivePath) return launchDetached(config.revivePath)
-        const sessionID = route.data.type === "session" ? route.data.sessionID : undefined
-        const context = Buffer.from(JSON.stringify({
-          terminal: detectTerminal().kind,
-          directory: (sessionID ? sync.session.get(sessionID)?.directory : undefined) ?? sdk.directory ?? process.cwd(),
-          ...(sessionID ? { sessionID } : {}),
-        })).toString("base64url")
-        launchDetached(process.execPath, [
-          ...(/^bun(?:\.exe)?$/i.test(path.basename(process.execPath)) ? [process.argv[1]] : []),
-          "oc", "--revive", context,
-        ]).once("error", (error) => toast.error(error))
-          .once("exit", (code) => {
-            if (code) toast.error(new Error(`Revive helper launch failed: exit code ${code}`))
-          })
+      run: async () => {
+        if (!config.revivePath) return revive("no-install")
+        await mark()
+        launchDetached(config.revivePath)
       },
     },
     {
       name: "oc.revive",
-      title: "Revive and install oc",
+      title: "Revive oc",
       category: "System",
-      hidden: !config.reviveInstallPath,
       slashName: "revive",
-      run: () => {
-        launchDetached(config.reviveInstallPath)
+      run: async () => {
+        // Read fresh: the first /revive saves the source choice to oc.json (revive.build).
+        if (readOcConfig().reviveSourceChosen) return revive("install")
+        const choice = await chooseSource()
+        if (!choice) return
+        dialog.clear()
+        return revive("install", choice)
       },
     },
   ]

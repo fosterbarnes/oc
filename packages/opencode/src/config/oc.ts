@@ -31,8 +31,9 @@ export type Value = string | boolean
 export type Settings = Partial<Record<Key, Value>> & {
   executable?: string
   server?: { hostname?: string; port?: number; startOnWindowsUserStart?: boolean }
-  // Exe or .ps1 paths behind the TUI /revive-no-install and /revive commands
-  revive?: { path?: string; installPath?: string }
+  // `path`: exe or .ps1 that replaces built-in /revive-no-install. `launcher`: what the restarted terminal runs.
+  // `build`: source build behind /revive (Revive.parseBuild); `false` = never build; unset = ask on first /revive.
+  revive?: { path?: string; launcher?: unknown; build?: unknown }
   intro?: { background?: "terminal" | "black" }
 }
 
@@ -71,10 +72,14 @@ export async function read() {
 export async function update(key: Key, value: string) {
   const parsed: Value = value === "true" ? true : value === "false" ? false : value
   const settings = await read()
-  const next =
+  return write(
     key === "serverStartOnWindowsUserStart"
       ? { ...settings, server: { ...settings.server, startOnWindowsUserStart: parsed } }
-      : { ...settings, [key]: parsed }
+      : { ...settings, [key]: parsed },
+  )
+}
+
+async function write<T extends object>(next: T) {
   const file = filePath()
   const temporary = `${file}.tmp-${process.pid}`
   await fs.mkdir(path.dirname(file), { recursive: true })
@@ -443,30 +448,150 @@ export async function restartServer() {
   return startServer()
 }
 
+/**
+ * Revive pipeline (worker 1). Runs as a child of the `oc`/`occ` launcher so its output shows in the
+ * window that hosted the TUI, or as a hidden detached helper when no launcher hosts the TUI.
+ * Everything that can fail runs before shutdown or before handing off to the terminal restarter.
+ */
 export async function revive(context: Revive.ReviveContext) {
-  const launcher = Revive.resolveLauncher(executablePath(), Global.Path.debug)
-  // Check the terminal CLI before shutting down; without it, reopen in a plain console instead of stranding the user.
-  const cli = { wezterm: "wezterm", "windows-terminal": "wt.exe", generic: undefined }[context.terminal]
-  const terminal = cli && !Bun.which(cli) ? "generic" : context.terminal
-  const command = Revive.reopenCommand(launcher, { ...context, terminal },
-    /^bun(?:\.exe)?$/i.test(path.basename(launcher)) ? process.argv[1] : undefined)
-  await shutdownAll()
-  await startServer()
-  const child = launchDetached(command.file, command.args, {
-    cwd: os.homedir(),
-    env: command.env,
-    windowStyle: "Normal",
-    windowsVerbatimArguments: command.windowsVerbatimArguments,
-  })
+  const log = reviveLog()
+  // First /revive source choice; parseContext guarantees `sourceDir` for "existing" and "download".
+  const sourceDir = context.sourceDir
+  if (context.source === "download" && sourceDir)
+    await log.step(`Downloading oc source to ${sourceDir}`, () => downloadSource(sourceDir))
+  if (context.source === "existing" && sourceDir)
+    await log.step(`Using oc source at ${sourceDir}`, () => saveReviveBuild({ source: sourceDir, debug: false }))
+  if (context.source === "none") await log.step("Saving revive without a source build", () => saveReviveBuild(false))
+  const settings = await read()
+  const bun = /^bun(?:\.exe)?$/i.test(path.basename(process.execPath))
+  const build = context.mode === "install" ? Revive.parseBuild(settings.revive?.build) : undefined
+  if (build && bun) throw new Error("Install revive needs an installed oc executable, not Bun")
+  const executable = Revive.resolveLauncher(executablePath(), Global.Path.debug)
+  // Without the terminal CLI, reopen in a plain console instead of stranding the user.
+  const cli = { wezterm: "wezterm-gui", "windows-terminal": "wt.exe", generic: undefined }[context.terminal]
+  const installDir = path.dirname(executablePath())
+  const restart: Revive.RestartContext = {
+    terminal: cli && !Bun.which(cli) ? "generic" : context.terminal,
+    launcher: Revive.parseLauncher(settings.revive?.launcher),
+    executable,
+    ...(bun ? { entrypoint: process.argv[1] } : {}),
+    ...(context.paneID ? { paneID: context.paneID } : {}),
+    ...(context.shellPid && shellProcess(context.shellPid) ? { shellPid: context.shellPid } : {}),
+    ...(context.supervisorPid ? { waitPid: context.supervisorPid } : {}),
+    ...(build ? { installDir } : {}),
+  }
+  const steps = build ? Revive.buildSteps(build) : undefined
+  for (const command of steps?.commands ?? [])
+    await log.step(command.join(" "), () => runVisible(command, build?.source))
+  const sources = steps ? await log.step("Checking build output", () => Revive.installSources(steps.output)) : undefined
+  // Ctrl+C from here would leave oc stopped or half installed.
+  const ignore = () => {}
+  process.on("SIGINT", ignore)
+  const failure = await (async () => {
+    await log.step("Stopping oc", () => shutdownAll())
+    if (sources) await log.step(`Installing into ${installDir}`, () => Revive.install(sources, installDir))
+    await log.step("Starting server", () => startServer())
+  })().then(() => undefined, (error: unknown) => ({ error }))
+  process.off("SIGINT", ignore)
+  // A hosting launcher shows the error and reattaches. A hidden helper has no window left, so it
+  // still reopens the terminal on the old version before reporting.
+  if (failure && context.supervisorPid) throw failure.error
+  if (failure) await log.step("Starting server again", () => startServer())
+  await log.step(`Handing off to the terminal restarter (log: ${log.file})`, () =>
+    awaitLaunch(launchDetached(process.execPath, [...(bun ? [process.argv[1]] : []),
+      "oc", "--revive-terminal", Revive.encode(restart)])))
+  if (failure) throw failure.error
+}
+
+// First /revive only: clone into `directory` (or update an earlier clone there once) and point
+// `revive.build` at it. Later revives build the folder as the user left it.
+async function downloadSource(directory: string) {
+  const cloned = await fs.stat(path.join(directory, ".git")).then(() => true, () => false)
+  await runVisible(cloned ? ["git", "-C", directory, "pull", "--ff-only"] : ["git", "clone", Revive.SOURCE_REPO, directory])
+  await saveReviveBuild({ source: directory, debug: false })
+}
+
+async function saveReviveBuild(build: false | Revive.BuildConfig) {
+  const settings = await read()
+  await write({ ...settings, revive: { ...settings.revive, build } })
+}
+
+// Output streams into the revive window (or the hidden helper's console).
+async function runVisible(command: string[], cwd?: string) {
+  const code = await Bun.spawn(command, { cwd, stdio: ["inherit", "inherit", "inherit"] }).exited
+  if (code !== 0) throw new Error(`${command[0]} exited with code ${code}`)
+}
+
+/** Terminal restarter (worker 2). Detached, so it outlives the window it closes. Output goes to revive.log. */
+export async function restartTerminal(restart: Revive.RestartContext) {
+  const log = reviveLog()
+  if (restart.waitPid && !(await waitForExit(restart.waitPid, 10_000)))
+    await log.write(`Launcher ${restart.waitPid} still running after 10s; closing its window anyway`)
+  // A failed close still opens the new terminal; a second window beats none.
+  await log.step("Closing the old window", () => closeWindow(restart)).catch(() => undefined)
+  const command = Revive.reopenCommand(restart)
+  await log.step(`Opening ${restart.terminal} with ${restart.launcher}`, () => awaitLaunch(launchDetached(command.file,
+    command.args, { cwd: os.homedir(), env: command.env, windowStyle: "Normal",
+      windowsVerbatimArguments: command.windowsVerbatimArguments })))
+  if (!restart.installDir) return
+  const kept = await Revive.removeLeftovers(restart.installDir)
+  if (kept.length) await log.write(`Kept in-use leftovers: ${kept.join(", ")}`)
+}
+
+function closeWindow(restart: Revive.RestartContext) {
+  if (restart.terminal === "wezterm" && restart.paneID) {
+    const list = Bun.spawnSync(["wezterm", "cli", "list", "--format", "json"], { stdout: "pipe", stderr: "pipe" })
+    if (list.exitCode !== 0) throw new Error(`wezterm cli list failed: ${list.stderr.toString().trim()}`)
+    const panes = JSON.parse(list.stdout.toString()) as Array<{ window_id: number; pane_id: number }>
+    const window = panes.find((pane) => String(pane.pane_id) === restart.paneID)?.window_id
+    for (const pane of panes.filter((pane) => window !== undefined && pane.window_id === window))
+      Bun.spawnSync(["wezterm", "cli", "kill-pane", "--pane-id", String(pane.pane_id)], { stdout: "pipe", stderr: "pipe" })
+    return
+  }
+  // The console or Windows Terminal tab closes once its shell and launcher are gone.
+  if (restart.shellPid) forceKill([restart.shellPid])
+}
+
+// Only a known shell is killed: oc may be the pane's own program, with the terminal itself as parent.
+function shellProcess(pid: number) {
+  if (process.platform !== "win32") return false
+  const result = Bun.spawnSync(["pwsh", "-NoProfile", "-NonInteractive", "-Command",
+    `(Get-CimInstance Win32_Process -Filter "ProcessId=${pid}").Name`], { stdout: "pipe", stderr: "pipe", windowsHide: true })
+  return result.exitCode === 0 && Revive.isShell(result.stdout.toString().trim())
+}
+
+// Resolves once the launched program exists; on Windows the Start-Process hop exits 0 after starting it.
+function awaitLaunch(child: ReturnType<typeof launchDetached>) {
   child.ref()
-  await new Promise<void>((resolve, reject) => {
+  return new Promise<void>((resolve, reject) => {
     child.once("error", reject)
     if (process.platform !== "win32") {
       child.once("spawn", resolve)
       return
     }
-    child.once("exit", (code) => code === 0 ? resolve() : reject(new Error(`Terminal reopen failed: exit code ${code}`)))
+    child.once("exit", (code) => code === 0 ? resolve() : reject(new Error(`Launch failed: exit code ${code}`)))
   }).finally(() => child.unref())
+}
+
+function reviveLog() {
+  const file = path.join(Global.Path.log, "revive.log")
+  const write = async (line: string) => {
+    console.log(`revive: ${line}`)
+    await fs.mkdir(path.dirname(file), { recursive: true })
+    await fs.appendFile(file, `${new Date().toISOString()} [${process.pid}] ${line}\n`)
+  }
+  const step = async <T>(label: string, action: () => T | Promise<T>) => {
+    const start = Date.now()
+    await write(`${label}...`)
+    const result = await Promise.resolve().then(action).then((value) => ({ value }), (error: unknown) => ({ error }))
+    if ("error" in result) {
+      await write(`${label}: failed: ${result.error instanceof Error ? result.error.message : String(result.error)}`)
+      throw result.error
+    }
+    await write(`${label}: done (${((Date.now() - start) / 1000).toFixed(1)}s)`)
+    return result.value
+  }
+  return { file, write, step }
 }
 
 export async function startServer() {

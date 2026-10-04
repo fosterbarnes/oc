@@ -9,7 +9,8 @@
 
 ## Project definition
 
-- `README.md` is the living definition of this fork. Statuses describe current state; they do not authorize work. `README.OG.md` tracks native OpenCode in this checkout (Now / Keep / Upstream). Keep fork-only work in `README.md`.
+- `FORK.md` is the living definition of this fork. Statuses describe current state; they do not authorize work. `README.OG.md` tracks native OpenCode in this checkout (Now / Keep / Upstream). Keep fork-only work in `FORK.md`.
+- `README.md` is the public landing page. `countCode.ps1` (via `prePush.ps1`) requires its single `[number](scc.txt)` link and `code-count:start/end` markers.
 
 ## Build notes
 

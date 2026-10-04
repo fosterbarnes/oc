@@ -1,25 +1,25 @@
 const logo = [
-  "            ⠀                                               ",
-  "            ⠀                                               ",
-  "            ⠀                                ▄              ",
-  "            █▀▀█ █▀▀█ █▀▀█ █▀▀▄ █▀▀▀ █▀▀█ █▀▀█ █▀▀█         ",
-  "            █  █ █  █ █▀▀▀ █  █ █    █  █ █  █ █▀▀▀         ",
-  "            ▀▀▀▀ █▀▀▀ ▀▀▀▀ ▀  ▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀         ",
-  "            ⠀                                               ",
-  "                                                            ",
-  "                ⠀                                           ",
+  "",
+  "",
+  "",
+  "          █▀▀█ █▀▀▀",
+  "          █  █ █",
+  "          ▀▀▀▀ ▀▀▀▀",
+  "",
+  "",
+  "",
 ]
 
 const frame = [
-  "            ⠀                                               ",
-  "    █▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀█ ",
-  "    █       ⠀                                             █ ",
-  "    █                                                     █ ",
-  "    █                                                     █ ",
-  "    █                                                     █ ",
-  "    █       ⠀                                             █ ",
-  "    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀ ",
-  "                ⠀                                           ",
+  "",
+  "    █▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀█ ",
+  "    █                   █ ",
+  "    █                   █ ",
+  "    █                   █ ",
+  "    █                   █ ",
+  "    █                   █ ",
+  "    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀ ",
+  "",
 ]
 
 function color(hex: string, plane = 38) {
@@ -46,7 +46,7 @@ function expandTabs(value: string) {
 }
 
 function blank(value: string | undefined) {
-  return value === undefined || value === " " || value === "\u2800"
+  return value === undefined || value === " " || value === "⠀"
 }
 
 export function startIntro(mode: "terminal" | "black" = "terminal") {
@@ -73,7 +73,7 @@ export function startIntro(mode: "terminal" | "black" = "terminal") {
     const first = [...line].findIndex((character) => !blank(character))
     return first === -1 ? value : Math.min(value, first)
   }, Number.POSITIVE_INFINITY)
-  const codeStart = logoLeft + 20
+  const codeStart = logoLeft + 5
   const frameWidth = right - left + 1
   const frameHeight = bottom - top + 1
   // Window managers (FancyZones) resize the window right after launch. Bun on Windows keeps
@@ -99,7 +99,7 @@ export function startIntro(mode: "terminal" | "black" = "terminal") {
   const codeColor = color("#5f566d")
   const borderColor = color("#3A2D5C")
   const background = mode === "black" ? "\x1b[48;2;0;0;0m" : "\x1b[49m"
-  const interior = color("#1c1c1c", 48)
+  const interior = color("#000000", 48)
   const reset = `\x1b[0m${background}`
   const write = (value: string) => output.write(value)
   const at = (column: number, row: number) =>

@@ -51,7 +51,7 @@ Protect these areas during synchronization:
 
 - `.install.ps1` and `.scripts\*` local automation
 - `.version\version` maintenance versioning
-- `AGENTS.md`, `SCRIPTS.md`, `buildNotes.md`, `README.md`, `README.OG.md`, and this guide
+- `AGENTS.md`, `SCRIPTS.md`, `buildNotes.md`, `README.md`, `FORK.md`, `README.OG.md`, and this guide
 - TUI maintenance display-version behavior in the core, build, plugin, and TUI
   adapter/sidebar paths
 - Custom declaration fixes in the app and enterprise packages

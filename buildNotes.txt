@@ -1,6 +1,19 @@
-v0.2.79
+v0.2.82
 
-checks:
-The pre-push typecheck caught two errors from the v0.2.79 work. The HttpApi exerciser's PUT /debug-logging scenario needed an Effect scope it could not get; the exerciser now points the debug logging file into its own temporary folder once at startup, so the scenario needs no cleanup and never touches your real setting. The revive test read an environment value through a type that no longer allowed it after the detached-launch fix.
+revive:
+/revive and /revive-no-install now restart the terminal window too, so edited WezTerm bindings and other terminal settings take effect. When oc was opened with oc or occ, the oc screen closes and the same window shows each revive step. Then that window closes and a fresh terminal opens on the revived session (occ, the default) or the home screen ("launcher": "oc" under revive in oc.json). WezTerm reopens without an extra console window.
 
-Under the hood: full typecheck passed 27/27, the revive tests passed 12/12, and HttpApi coverage passed 207 with nothing missing. Build notes record why the earlier typecheck run missed these.
+/revive also builds and installs oc itself, with no PowerShell scripts involved. The first time you run it, it asks where oc's source comes from: a source folder you already have, a fresh download to a folder you pick (your copy to edit; it is never pulled again), or just restart. The answer is saved as revive.build in oc.json: the source folder plus an optional debug switch that also builds ocdebug. The build output streams in the window. A failed build shows the error, waits for a key, and reopens the old oc. A failed install puts the old files back. Every step is logged to revive.log in oc's log folder.
+
+Each revive also leaves a "Revived . time . oc version . OpenCode version" divider in the session, which the agent sees as a short note on your next message. Reviving keeps the current agent and model.
+
+sidebar:
+The footer now reads like "oc v0.2.82 ∙ OG v1.18.29", showing the OpenCode version oc is built on.
+
+startup:
+The startup animation draws "oc" in a smaller box with a black interior.
+
+docs:
+The old README is now FORK.md, the full list of oc features and their status. README.md is a short public landing page.
+
+Under the hood: the new install swap renames running executables aside instead of overwriting them, relinks oc.exe and occ.exe, and rolls back on failure. revive.installPath is gone; revive.path still overrides /revive-no-install. The revive tests passed 15/15 and tsgo --noEmit was clean in opencode and tui. A Grok review of the revive pipeline led to fixes for rollback, the failure prompt, and revives started without the oc launcher. Hard revive with a native build was checked live in WezTerm.

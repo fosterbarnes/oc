@@ -18,7 +18,7 @@
 
 This file is the native-OpenCode map for this checkout (Now / Keep / Upstream). It records which stock surfaces still live here, whether they should stay stock, and whether they match isolated upstream or are pinned / lagging / gone on purpose.
 
-Fork-only OC work stays in [README.md](./README.md). Do not copy those rows here.
+Fork-only OC work stays in [FORK.md](./FORK.md). Do not copy those rows here.
 
 Last reviewed: 2026-09-21. Compared against isolated `UPSTREAM/opencode` at `5cd8e68` (same SHA as `.scripts/upstream-sync.state.json`). That nested checkout is the sync source of truth.
 
@@ -102,7 +102,7 @@ Official npm, brew, scoop, and `curl -fsSL https://opencode.ai/install | bash` p
 
 - Sessions, models, slash commands (`/new`, `/sessions`, `/models`, `/undo`, `/redo`, `/editor`, `/share`, `/compact`, `/connect`, `/init`)
 - `@filename` to attach files, `@agent-name` to invoke a subagent, `!command` for a one-line shell prompt
-- Native sidebar plugins: context, MCP, LSP, todos. Files, git-style diffs, usage, and script launch in the sidebar are OC (`README.md`).
+- Native sidebar plugins: context, MCP, LSP, todos. Files, git-style diffs, usage, and script launch in the sidebar are OC (`FORK.md`).
 
 The drawing layer is OpenTUI **0.4.5**, matching isolated upstream.
 
@@ -167,7 +167,7 @@ Add `"$schema": "https://opencode.ai/config.json"` (and `https://opencode.ai/tui
 
 Hosted OpenCode docs: [opencode.ai/docs](https://opencode.ai/docs) (upstream; may describe desktop and `opencode web`).
 
-This checkout: [README.md](./README.md) (OC extras), [SCRIPTS.md](./SCRIPTS.md) (build, install, sync), [CONTRIBUTING.md](./CONTRIBUTING.md) (upstream contribution guide).
+This checkout: [FORK.md](./FORK.md) (OC extras), [SCRIPTS.md](./SCRIPTS.md) (build, install, sync), [CONTRIBUTING.md](./CONTRIBUTING.md) (upstream contribution guide).
 
 ## Contributing
 

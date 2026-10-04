@@ -17,7 +17,7 @@ import { useDialog } from "../../../ui/dialog"
 import { useToast } from "../../../ui/toast"
 import { usePluginRuntime } from "../../../plugin/runtime"
 import { useOpencodeKeymap } from "../../../keymap"
-import { InstallationDisplayVersion } from "@opencode-ai/core/installation/version"
+import { InstallationDisplayVersion, InstallationVersion } from "@opencode-ai/core/installation/version"
 import {
   BUILTIN_SHELLS,
   clearCursorSessionToken,
@@ -1781,7 +1781,7 @@ export function SidebarToolsFooter(props: { sessionID: string }) {
     <box gap={1}>
       <text>{footerPath(directory, os.homedir(), branch)}</text>
       <text fg={theme.textMuted}>
-        <span style={{ fg: theme.success }}>-</span> oc v{InstallationDisplayVersion.split("-")[0]}
+        <span style={{ fg: theme.success }}>-</span> oc v{InstallationDisplayVersion.split("-")[0]} ∙ OG v{InstallationVersion}
       </text>
     </box>
   )
