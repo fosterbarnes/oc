@@ -64,6 +64,31 @@ async function attach(
   await attach(await OcConfig.startServer(), settings, { directory: handoff.directory, session: handoff.sessionID })
 }
 
+// Same steps as `session bootstrap`, sent to the resident server instead of a second instance.
+async function bootstrapSession(server: { url: string; secret: string }, directory: string) {
+  const stat = await fs.stat(directory).catch(() => undefined)
+  if (!stat?.isDirectory()) throw new Error(`Directory not found: ${directory}`)
+  await OcConfig.writeSidebar(directory)
+  const { createOpencodeClient } = await import("@opencode-ai/sdk/v2")
+  const client = createOpencodeClient({
+    baseUrl: server.url,
+    directory,
+    headers: { authorization: `Basic ${Buffer.from(`opencode:${server.secret}`).toString("base64")}` },
+  })
+  const sessions = await client.experimental.session.list({ roots: true, limit: 500 }, { throwOnError: true })
+  const title = OcConfig.nextProjectTitle(sessions.data.map((item) => item.title), directory)
+  const session = await client.session.create({ title }, { throwOnError: true })
+  await client.session.prompt(
+    {
+      sessionID: session.data.id,
+      noReply: true,
+      parts: [{ type: "text", text: `Working directory initialized: ${directory}`, synthetic: true }],
+    },
+    { throwOnError: true },
+  )
+  return session.data.id
+}
+
 // Written by the TUI right before it exits for a revive.
 async function takeHandoff(file: string) {
   const raw = await fs.readFile(file, "utf8").catch((error: NodeJS.ErrnoException) => {
@@ -163,12 +188,10 @@ const LaunchCommand = cmd({
       const ocDir = typeof settings.ocDir === "string" ? settings.ocDir : undefined
       const directory = resolveTargetDirectory(args.target, ocDir, homeDir)
       const server = await OcConfig.startServer()
-      stopIntro()
-
-      const session = args.target
-        ? JSON.parse(await runNative(["session", "bootstrap", directory], { capture: true }))
-        : undefined
-      await attach(server, settings, { directory, session: session?.sessionID })
+      const session = args.target ? await bootstrapSession(server, directory) : undefined
+      // Leave the intro frame up; the TUI's first alternate-screen frame replaces it.
+      stopIntro(false)
+      await attach(server, settings, { directory, session })
     } finally {
       stopIntro()
     }
@@ -209,7 +232,7 @@ const PreviousCommand = cmd({
         runNative(["session", "previous", "--depth", String(depth)], { capture: true }),
         OcConfig.startServer(),
       ])
-      stopIntro()
+      stopIntro(false)
       await attach(server, settings, { directory: os.homedir(), session })
     } finally {
       stopIntro()

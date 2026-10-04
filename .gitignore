@@ -34,3 +34,5 @@ tsconfig.tsbuildinfo
 .zed
 UPSTREAM/opencode/
 /.config
+.vscode
+desktop.ini

@@ -110,6 +110,98 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-04 (~05:17) - v0.2.87 - Startup debug source cleanup - GPT-6.1 Sol, reasoning; Debug
+
+### Agent
+- Meta: GPT-6.1 Sol; reasoning; Debug; live fix verified, binary cleanup pending user installation
+- Version: 0.2.87
+- Confirmed user live check: root-level IntroLogo preserves visible logo while provider children initialize.
+- Removed temporary startup-trace module/export, stdout hook, imports, calls, and diagnostic timer. Deleted temporary log; verified absent. Source marker search clean; git diff --check passed.
+- Corrected evidence: measured theme-mode wait was 10 ms; prior ConPTY timeout explanation was not confirmed. Nested logo instantiated about 1.25 s after render scheduling.
+- Verification: clean debug build passed, version check 0.2.87-main-202610040918. installDebug refused active-host installation; user must install clean binary from fresh PowerShell. Production executable untouched.
+- Kept unrelated user changes and handoff documents. Debug plan remains active pending installed-binary cleanup.
+
+### User
+Startup
+- Confirmed the intro logo now remains visible until the TUI appears; temporary source logging is removed.
+
+---
+
+## 2026-10-04 (~05:15) - v0.2.86 - TEMP startup trace instrumentation - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation; in progress (debug session pending)
+- Cause: 0.2.86 theme-wait cut did not remove ~1 s blank between intro and TUI per user.
+- Added TEMP `tui/src/startup-trace.ts` (`trace`, `traceStdout`; export `./startup-trace`). Gated by `OC_STARTUP_TRACE=1`; appends ms-since-launcher-start to `%TEMP%\oc-startup-trace.log`; child inherits `OC_STARTUP_T0`. `traceStdout` logs process start, first stdout write, and writes with `?1049h`/`?1049l`/`2J`/`?25l`.
+- Added TEMP `trace(...)` calls: `cli/cmd/oc.ts` launch/previous handlers, `cli/cmd/attach.ts` handler steps, `tui/src/app.tsx` renderer create/theme wait/render, `component/intro-logo.tsx` mount/cleanup.
+- TODO: remove all `trace`/`traceStdout` calls, `startup-trace.ts`, and its package.json export once diagnosed.
+- Note: OpenTUI native renderer may write to the console outside `process.stdout.write`; missing `?1049h` in log does not mean it wasn't sent.
+- Built debug `0.2.86-main-202610040909` (`buildDebug.ps1 -SkipInstall`); not installed.
+- Trace run 1 (`ocdebug oc previous`): launcher server+lookup 788 ms; attach proc start +797; `validateSession` 910->1945 ms (~1 s, logo still visible); `render()` 1992 -> first App component 3246 ms (~1.25 s blank). Cause: `createSimpleContext` (`context/helper.tsx`) gates children on `init.ready`; KV, Sync, Theme providers all gate, so App-level `IntroLogo` fallback could not paint.
+- MISTAKE: 0.2.85 fallback placed under gating providers. Prevention: anything meant to paint on the first TUI frame must sit outside `createSimpleContext` providers.
+- Changed: `IntroLogo` now rendered as sibling before `ExitProvider` in `render()` root fragment, self-gated by module signal; App calls `hideIntroLogo()` when plugin start settles (same point as `ready`). No theme dependency; edge row bg transparent.
+- Added TEMP traces: KV ready, theme loading/ready, sync ready (partial).
+- TODO: `validateSession` ~1 s in `attach` is a separate total-time cost; investigate after gap fixed.
+
+---
+
+## 2026-10-04 (~05:10) - v0.2.86 - Cut TUI theme-mode wait before first paint - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation; completed
+- Version: 0.2.86
+- Cause: user live test of 0.2.85 still showed ~1 s blank (terminal gray) between intro and TUI. `Tui.run` in `tui/src/app.tsx` creates renderer (enters/clears alt screen) then `await renderer.waitForThemeMode(1000)` before `render()`. OpenTUI resolves only on terminal reply or timeout; under WezTerm/ConPTY no reply, so full 1000 ms of blank screen every launch.
+- MISTAKE: 0.2.85 added `IntroLogo` fallback without checking what runs before `render()`; the fallback can't cover the gap if nothing renders. Prevention: trace renderer creation to first `render()` before adding paint-time fixes.
+- Changed timeout 1000 -> 100 ms; fallback stays `"dark"`.
+- Risk: terminals that answer slower than 100 ms get `dark` at start; `system` theme light users may see dark first.
+- Verification: not run live.
+
+### User
+Startup
+- Removed a one-second wait at startup where the app sat on a blank screen waiting for a reply from the terminal.
+
+---
+
+## 2026-10-04 (~05:10) - v0.2.85 - Intro on alternate screen and TUI loading logo - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation; completed (resumed after rate-limit cutoff)
+- Version: 0.2.85
+- Cause (from `handoffStartupCheckResult.md`, live check of 0.2.84): attach child erased main-screen logo before first frame (gray blank), then TUI held an empty `theme.background` box until `ready()` (black blank). 0.2.84 `stopIntro(false)` alone did not fix the gap.
+- Changed `cli/intro.ts`: intro now enters alternate screen (`?1049h`) before painting. `stop(false)` marks handoff; later `stop()` only restores cursor (TUI already left alt screen). Without handoff (error path) `stop()` writes `?1049l`. No more `2J` on exit; main screen restored as before launch.
+- Added shared art in `tui/src/logo.ts`: `introLogo`, `introFrame`, `introColors`, `introCells`. `cli/intro.ts` now imports art/colors from `@opencode-ai/tui/logo`.
+- Added `tui/src/component/intro-logo.tsx` `IntroLogo`: same art, same floor-centering as launcher. Used as `fallback` of `<Show when={ready()}>` in `app.tsx`.
+- Risk: bottom edge row uses `theme.background` vs launcher terminal default bg; slight mismatch possible under the edge row.
+- Risk: OpenTUI `?1049h` while already on alt screen may still clear for one frame; logo repaints on first TUI frame.
+- Resolved: 0.2.84 revive-over-logo risk; logo lives on alt screen now.
+- Verification: `tsc --noEmit` clean for touched files in tui and opencode. Not run live.
+
+### User
+Startup
+- The intro logo now carries straight into the app: the app shows the same logo while it loads, so the blank gray and black screens between them are gone.
+- Quitting leaves your terminal as it was before launch instead of a cleared screen.
+
+---
+
+## 2026-10-04 (~04:51) - v0.2.84 - Seamless intro-to-TUI handoff and server-side session bootstrap - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation; completed
+- Version: 0.2.84
+- Changed `cli/intro.ts` `startIntro` stop to `stop(clear = true)`: `clear=false` stops timer and releases stdin but keeps frame and hidden cursor; a later `stop()` clears once.
+- Changed `cli/cmd/oc.ts` `OcCommand` and `PreviousCommand`: `stopIntro(false)` right before `attach`; `finally` clears after TUI exit. Relies on the TUI's alternate screen covering the frame.
+- Added `bootstrapSession` in `cli/cmd/oc.ts`: launcher creates the target session through the resident server (SDK v2 `experimental.session.list`, `session.create`, `session.prompt` noReply) instead of spawning `oc session bootstrap` (a second full instance writing the same DB).
+- Moved `writeSidebar` and title numbering (`nextProjectTitle(titles, directory)`) into `config/oc.ts`; `session bootstrap` CLI (still used by TUI palette `app.tsx:291`) uses them.
+- Risk: revive pipeline output inside `attach` now prints over the leftover intro frame on the main screen.
+- Verification: `tsc --noEmit` shows no errors in touched files. Not run live; `session-bootstrap.test.ts` not run (unchanged behavior, not edited).
+
+### User
+Startup
+- The intro logo now stays on screen until the TUI draws, so there is no blank gap between them.
+- Opening `oc <project>` no longer starts a second copy of the app to create the session, so it gets to the TUI sooner.
+
+---
+
 ## 2026-10-04 (~04:32) - v0.2.83 - Moved the Bun workspace into src/ to shorten the GitHub root - Claude Opus 5.5, low effort; Implementation
 
 ### Agent

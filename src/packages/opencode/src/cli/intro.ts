@@ -1,26 +1,4 @@
-const logo = [
-  "",
-  "",
-  "",
-  "          █▀▀█ █▀▀▀",
-  "          █  █ █",
-  "          ▀▀▀▀ ▀▀▀▀",
-  "",
-  "",
-  "",
-]
-
-const frame = [
-  "",
-  "    █▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀█ ",
-  "    █                   █ ",
-  "    █                   █ ",
-  "    █                   █ ",
-  "    █                   █ ",
-  "    █                   █ ",
-  "    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀ ",
-  "",
-]
+import { introColors, introFrame as frame, introLogo as logo } from "@opencode-ai/tui/logo"
 
 function color(hex: string, plane = 38) {
   const red = Number.parseInt(hex.slice(1, 3), 16)
@@ -95,11 +73,11 @@ export function startIntro(mode: "terminal" | "black" = "terminal") {
     startRow: Math.max(0, Math.floor((current.rows - frameHeight) / 2)),
   })
   let placed = position()
-  const openColor = color("#a89bba")
-  const codeColor = color("#5f566d")
-  const borderColor = color("#3A2D5C")
+  const openColor = color(introColors.open)
+  const codeColor = color(introColors.code)
+  const borderColor = color(introColors.border)
   const background = mode === "black" ? "\x1b[48;2;0;0;0m" : "\x1b[49m"
-  const interior = color("#000000", 48)
+  const interior = color(introColors.interior, 48)
   const reset = `\x1b[0m${background}`
   const write = (value: string) => output.write(value)
   const at = (column: number, row: number) =>
@@ -121,7 +99,8 @@ export function startIntro(mode: "terminal" | "black" = "terminal") {
   let column = left
   let stopped = false
   let timer: ReturnType<typeof setInterval> | undefined
-  write(`${background}\x1b[2J\x1b[H\x1b[?25l`)
+  // Drawn on the alternate screen so a main-screen clear by the attach child is never visible.
+  write(`\x1b[?1049h${background}\x1b[2J\x1b[H\x1b[?25l`)
   const tick = () => {
     if (stopped) return
     const next = size()
@@ -137,14 +116,25 @@ export function startIntro(mode: "terminal" | "black" = "terminal") {
   tick()
   timer = setInterval(tick, 15)
 
-  return () => {
-    if (stopped) return
-    stopped = true
-    if (timer) clearInterval(timer)
-    if (holdInput) {
-      input.setRawMode(false)
-      input.pause()
+  // clear=false hands the alternate screen to the TUI with the frame still up; the TUI leaves it
+  // on exit, so a later stop() only restores the cursor. Without a handoff, stop() leaves it here.
+  let handedOff = false
+  let done = false
+  return (clear = true) => {
+    if (!stopped) {
+      stopped = true
+      if (timer) clearInterval(timer)
+      if (holdInput) {
+        input.setRawMode(false)
+        input.pause()
+      }
     }
-    write("\x1b[0m\x1b[?25h\x1b[2J\x1b[H")
+    if (!clear) {
+      handedOff = true
+      return
+    }
+    if (done) return
+    done = true
+    write(`\x1b[0m\x1b[?25h${handedOff ? "" : "\x1b[?1049l"}`)
   }
 }

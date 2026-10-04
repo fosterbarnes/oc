@@ -15,6 +15,7 @@ import path from "path"
 import fs from "fs/promises"
 import { which } from "@opencode-ai/core/util/which"
 import { SessionPrompt } from "@/session/prompt"
+import { OcConfig } from "@/config/oc"
 
 function pagerCmd(): string[] {
   const lessOptions = ["-R", "-S"]
@@ -80,13 +81,17 @@ const SessionBootstrapCommand = effectCmd({
     if (!exists) return yield* fail(`Directory not found: ${directory}`)
 
     yield* Effect.tryPromise({
-      try: () => writeSidebar(directory),
+      try: () => OcConfig.writeSidebar(directory),
       catch: (error) => new CliError({ message: `Failed to write sidebar config: ${String(error)}` }),
     })
 
     const title = args.title
       ? String(args.title)
-      : yield* Session.Service.use((service) => nextProjectTitle(service, directory))
+      : yield* Session.Service.use((service) =>
+          service
+            .listGlobal({ roots: true, limit: 500 })
+            .pipe(Effect.map((sessions) => OcConfig.nextProjectTitle(sessions.map((item) => item.title), directory))),
+        )
     const session = yield* Session.Service.use((service) => service.create({ title }))
     const prompt = yield* SessionPrompt.Service
     yield* prompt
@@ -106,43 +111,6 @@ const SessionBootstrapCommand = effectCmd({
     console.log(JSON.stringify({ sessionID: session.id, directory }))
   }),
 })
-
-function nextProjectTitle(service: Session.Interface, directory: string) {
-  const baseTitle = path.basename(directory) || directory
-  return service.listGlobal({ roots: true, limit: 500 }).pipe(
-    Effect.map((sessions) => {
-      const pattern = new RegExp(`^${baseTitle.replace(/[.*+?^${}()|[\\]\\]/g, "\\$&")}\\d*$`)
-      const numbers = sessions.flatMap((session) => {
-        if (!pattern.test(session.title)) return []
-        if (session.title === baseTitle) return [0]
-        return [Number(session.title.slice(baseTitle.length))]
-      })
-      return numbers.length === 0 ? baseTitle : `${baseTitle}${Math.max(...numbers) + 1}`
-    }),
-  )
-}
-
-async function writeSidebar(directory: string) {
-  const configDirectory = path.join(directory, ".config")
-  const sidebarPath = path.join(configDirectory, "openSidebar.json")
-  await fs.mkdir(configDirectory, { recursive: true })
-
-  const settings = (
-    (await Bun.file(sidebarPath).exists()) ? JSON.parse(await Bun.file(sidebarPath).text()) : {}
-  ) as Record<string, unknown>
-  if (settings === null || Array.isArray(settings) || typeof settings !== "object") {
-    throw new Error("sidebar config must contain a JSON object")
-  }
-  settings.projectDirectory = directory
-
-  const temporary = `${sidebarPath}.tmp-${process.pid}`
-  try {
-    await Bun.write(temporary, `${JSON.stringify(settings, null, 2)}\n`)
-    await fs.rename(temporary, sidebarPath)
-  } finally {
-    await fs.rm(temporary, { force: true })
-  }
-}
 
 export const SessionDeleteCommand = effectCmd({
   command: "delete <sessionID>",

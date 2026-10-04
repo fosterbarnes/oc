@@ -1,11 +1,6 @@
-v0.2.83
+v0.2.87
 
-project layout:
-The code now lives in src/. The packages, SDKs, scripts, lockfile, and workspace config moved there with git mv, so file history follows them. The GitHub root now shows mostly the docs, agent files, and config folders. Run bun commands from src or a package inside it.
+startup:
+The intro logo now carries straight through to the app with no blank screens between them. The launcher draws the intro on the alternate screen, and the app shows the same logo while it loads its data, so quitting leaves your terminal as it was before launch instead of a cleared screen. Opening `oc <project>` no longer starts a second copy of the app to create the session, so it reaches the app sooner.
 
-The .scripts entry points work the same from the repo root: build, run, install, push, pre-push, and upstream sync all find the workspace in src. Upstream sync places upstream files under src/, except a short list that stays at the root (.github, .husky, the READMEs, AGENTS.md, LICENSE and similar).
-
-revive:
-/revive now builds inside the source folder's src/ workspace. Your saved revive.build.source still points at the repo root and keeps working. When you choose an existing source folder, it must contain src/packages/opencode/script/build.ts.
-
-Under the hood: GitHub Actions and the shared Bun setup step run in src. The pre-push hook changes into src, and the prepare script runs husky from the repo root. Paths that read root files (.github/TEAM_MEMBERS, LICENSE, STATS.md, buildNotes.md) and .gitattributes entries were updated for the new layout; the TEAM_MEMBERS path had made the first build fail. The revive tests passed 15/15. All .scripts files parse. The sync self-check passed, and a sync dry run found every upstream file in its new place. You built and installed v0.2.83 after the move.
+Under the hood: the launcher creates the target session through the resident server instead of spawning `session bootstrap` as a second full instance writing the same database. The TUI theme-mode wait before first paint dropped from 1000 ms to 100 ms. Type checks pass on the touched files and the TUI lifecycle/theme suites pass 15/15. The `session-bootstrap` live CLI test times out on this machine identically with and without these changes, so that failure is pre-existing and environmental. The temporary startup-trace instrumentation used during diagnosis was fully removed.

@@ -35,6 +35,7 @@ import { EditorContextProvider } from "./context/editor"
 import { useEvent } from "./context/event"
 import { SDKProvider, useSDK } from "./context/sdk"
 import { StartupLoading } from "./component/startup-loading"
+import { IntroLogo, hideIntroLogo } from "./component/intro-logo"
 import { SyncProvider, useSync } from "./context/sync"
 import { DataProvider } from "./context/data"
 import { LocationProvider } from "./context/location"
@@ -657,11 +658,14 @@ export const run = Effect.fn("Tui.run")(function* (input: TuiInput) {
       yield* Effect.tryPromise(async () => {
         // Prewarm palette before ThemeProvider mounts so `system` theme avoids a first-paint fallback flash.
         void renderer.getPalette({ size: 16 }).catch(() => undefined)
-        const mode = (await renderer.waitForThemeMode(1000)) ?? "dark"
+        // Nothing paints until this resolves; ConPTY usually swallows the query, so keep it short.
+        const mode = (await renderer.waitForThemeMode(100)) ?? "dark"
         if (renderer.isDestroyed) return
 
         await render(() => {
           return (
+            <>
+            <IntroLogo />
             <ExitProvider
               exit={(reason) => {
                 if (renderer.isDestroyed) return
@@ -766,6 +770,7 @@ export const run = Effect.fn("Tui.run")(function* (input: TuiInput) {
                 </ErrorBoundary>
               </EpilogueProvider>
             </ExitProvider>
+            </>
           )
         }, renderer)
       })
@@ -900,6 +905,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
     })
     .finally(() => {
       setReady(true)
+      hideIntroLogo()
     })
 
   // Let selection copy/dismiss win ahead of normal bindings when explicit copy is required.
