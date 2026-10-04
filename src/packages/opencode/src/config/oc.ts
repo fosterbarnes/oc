@@ -482,7 +482,7 @@ export async function revive(context: Revive.ReviveContext) {
   }
   const steps = build ? Revive.buildSteps(build) : undefined
   for (const command of steps?.commands ?? [])
-    await log.step(command.join(" "), () => runVisible(command, build?.source))
+    await log.step(command.join(" "), () => runVisible(command, steps?.cwd))
   const sources = steps ? await log.step("Checking build output", () => Revive.installSources(steps.output)) : undefined
   // Ctrl+C from here would leave oc stopped or half installed.
   const ignore = () => {}

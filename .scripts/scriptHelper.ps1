@@ -2,10 +2,12 @@
 $ErrorActionPreference = 'Stop'
 
 $repoRoot = Split-Path -Path $PSScriptRoot -Parent
+# The Bun workspace lives in src; docs, agent files, and scripts stay at the repo root.
+$srcRoot = "$repoRoot\src"
 $projectName = 'opencode'
-$buildScript = "$repoRoot\packages\opencode\script\build.ts"
-$distFolder = "$repoRoot\packages\opencode\dist"
-$versionFolder = "$repoRoot\.version"
+$buildScript = "$srcRoot\packages\opencode\script\build.ts"
+$distFolder = "$srcRoot\packages\opencode\dist"
+$versionFolder = "$srcRoot\.version"
 $version = "$versionFolder\version"
 $readme = "$repoRoot\README.md"
 $buildNotes = "$repoRoot\buildNotes.txt"
@@ -151,4 +153,4 @@ function closeOut {
     [Environment]::Exit(0)
 }
 
-Set-Location -LiteralPath $repoRoot
+Set-Location -LiteralPath $srcRoot

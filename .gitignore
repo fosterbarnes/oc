@@ -17,7 +17,7 @@ ts-dist
 .serena/
 **/.omo
 .omo/
-/result
+/src/result
 refs
 Session.vim
 /opencode.json
@@ -37,3 +37,4 @@ logs/
 tsconfig.tsbuildinfo
 
 UPSTREAM/opencode/
+/.config

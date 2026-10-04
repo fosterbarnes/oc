@@ -110,6 +110,31 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-04 (~04:32) - v0.2.83 - Moved the Bun workspace into src/ to shorten the GitHub root - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation; completed, uncommitted
+- Version: 0.2.83
+- Moved (git mv) into `src/`: artifacts, github, infra, install, nix, packages, patches, perf, script, sdks, specs, package.json, bun.lock, bunfig.toml, tsconfig.json, turbo.json, sst.config.ts, sst-env.d.ts, flake.nix/.lock, .oxlintrc.json, .prettierignore, .dockerignore, .version. Moved untracked node_modules and .turbo too.
+- Kept at root: docs, buildNotes*, AGENTS.md, .github, .husky, .opencode, .config, .zed, .scripts, .editorconfig, git dotfiles, LICENSE, screenshot-uk.png.
+- Added `$srcRoot` in `.scripts/scriptHelper.ps1`; build/dist/version paths use it and the helper now `Set-Location`s to `src`. `countCode.ps1` returns to the repo root so scc.txt and README stay at root. `install.ps1`/`installDebug.ps1` use `$distFolder`.
+- Added `-ParentPrefix 'src/'` and `$rootPathPrefixes` to `syncAndInstall.ps1` `Classify-Trees`; rows carry `ParentPath` for reading, applying, reporting, `-PreservePath`, and diff checks. Typecheck verification uses `$srcRoot\packages`.
+- Updated CI: `defaults.run.working-directory: src` (generate, typecheck), `src/packages/...` step dirs (generate, test), setup-bun reads `src/package.json` and installs in `src`.
+- Updated `.husky/pre-push` (`cd src`), `src/package.json` prepare (`cd .. && husky`), `.gitattributes` paths, `.gitignore` `/src/result`, `plan-execute.test.ts` buildNotes path, `script/stats.ts` STATS.md path, AGENTS.md layout bullet, SCRIPTS.md dist path.
+- Fixed root-relative paths after the move: `.github/TEAM_MEMBERS` in `packages/script/src/index.ts` (broke `build.ps1` with ENOENT), `script/raw-changelog.ts`, `script/github/close-issues.ts`; `LICENSE` in `packages/opencode/script/publish.ts`. Checked: importing `packages/script/src/index.ts` from `src` now loads.
+- Added `Revive.WORKSPACE = "src"` in `config/revive.ts`; `buildSteps` returns `cwd` (source/src) and dist under it; `config/oc.ts` runs build commands in `steps.cwd`; TUI `/revive` source check in `tui/src/app.tsx` looks for `src/packages/opencode/script/build.ts`. Existing `revive.build.source` values (repo root) keep working.
+- Verification: `bun test test/config/revive.test.ts` 15/15 pass (from `src/packages/opencode`); all `.scripts/*.ps1` parse; `syncAndInstall.ps1 -SelfCheck -SkipInstall` passed; `-DryRun` maps every upstream path under `src/` (13 ambiguous, 222 upstream-only, 13 merged). Build, typecheck, CI not run.
+- Risk: `.github/actions/setup-bun/action.yml` now overlaps upstream (ambiguous in sync). Other 12 ambiguous paths are pending upstream overlaps unrelated to the move.
+- Risk: `bun install` from `src` should rewire husky via `cd .. && husky`; not run.
+
+### User
+Project layout
+- The code now lives in `src/`, so the GitHub repo root shows mostly docs and config folders.
+- Build, run, install, push, and upstream sync scripts work the same from the repo root.
+- Run `bun` commands from `src` (or a package inside it) instead of the repo root.
+
+---
+
 ## 2026-10-04 (~04:14) - v0.2.82 - Revive builds natively (no pwsh scripts), optional debug build, silent WezTerm reopen - Claude Opus 5.5, low effort; Implementation
 
 ### Agent

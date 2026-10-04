@@ -1,6 +1,7 @@
 #requires -Version 7.0
 $ErrorActionPreference = 'Stop'
 . "$PSScriptRoot\scriptHelper.ps1"
+Set-Location -LiteralPath $repoRoot
 
 if (-not (Get-Command scc -ErrorAction SilentlyContinue)) {
     throw 'scc is not on PATH. Install scc, then re-run.'

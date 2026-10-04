@@ -52,12 +52,28 @@ $CONFIG = @{
 $upstreamRepo = Join-Path $repoRoot $CONFIG.UpstreamRel
 $installPath = Join-Path $CONFIG.InstallDir $CONFIG.ExeName
 $backupPath = $installPath + $CONFIG.BackupSuffix
-$binary = Join-Path $repoRoot 'packages\opencode\dist\opencode-windows-x64\bin\opencode.exe'
+$binary = "$distFolder\opencode-windows-x64\bin\opencode.exe"
 $skipPathPrefixes = @('UPSTREAM/', '.git/', 'node_modules/', '.opencode/')
+# Upstream keeps its workspace at the repo root; this fork keeps it under src/.
+# These upstream paths stay at the parent root; every other upstream path maps to src/<path>.
+$rootPathPrefixes = @(
+    '.github/', '.husky/', '.vscode/', '.zed/', '.editorconfig', '.gitattributes', '.gitignore',
+    '.gitleaksignore', 'AGENTS.md', 'CONTEXT.md', 'CONTRIBUTING.md', 'LICENSE', 'README', 'SECURITY.md',
+    'STATS.md', 'screenshot-uk.png'
+)
 
 function Normalize-Rel {
     param([string]$Path)
     ($Path -replace '\\', '/').TrimStart('/')
+}
+
+function Get-ParentRel {
+    param([string]$Rel, [string]$Prefix)
+    if (-not $Prefix) { return $Rel }
+    foreach ($root in $rootPathPrefixes) {
+        if ($Rel.StartsWith($root, [StringComparison]::Ordinal)) { return $Rel }
+    }
+    return "$Prefix$Rel"
 }
 
 function Test-SkippedPath {
@@ -207,7 +223,8 @@ function Classify-Trees {
         [string]$ParentRoot,
         [string]$UpstreamRoot,
         [string]$BaselineSha,
-        [string]$UpstreamSha
+        [string]$UpstreamSha,
+        [string]$ParentPrefix = ''
     )
     $deltaPaths = @(Get-ChangedPaths $UpstreamRoot $BaselineSha $UpstreamSha)
     $parentTracked = Get-GitLines $ParentRoot @('ls-files') | ForEach-Object { Normalize-Rel $_ } | Where-Object { $_ -and -not (Test-SkippedPath $_) }
@@ -216,16 +233,18 @@ function Classify-Trees {
 
     $rows = [Collections.Generic.List[object]]::new()
     foreach ($rel in ($all | Sort-Object)) {
+        $parentRel = Get-ParentRel $rel $ParentPrefix
         $base = Get-BlobText $UpstreamRoot $BaselineSha $rel
         $up = Get-BlobText $UpstreamRoot $UpstreamSha $rel
-        $parent = Get-WorktreeText $ParentRoot $rel
-        if ($null -eq $parent -and $parentTracked -contains $rel) {
-            $parent = Get-BlobText $ParentRoot 'HEAD' $rel
+        $parent = Get-WorktreeText $ParentRoot $parentRel
+        if ($null -eq $parent -and $parentTracked -contains $parentRel) {
+            $parent = Get-BlobText $ParentRoot 'HEAD' $parentRel
         }
 
         $row = [ordered]@{
-            Path     = $rel
-            Class    = 'unchanged'
+            Path       = $rel
+            ParentPath = $parentRel
+            Class      = 'unchanged'
             Action   = 'none'
             Reason   = ''
             Merged   = $null
@@ -327,7 +346,7 @@ function Write-Report {
     }
     $interesting = $Rows | Where-Object { $_.Class -ne 'unchanged' }
     foreach ($row in $interesting) {
-        Write-Host ("[{0}] {1} ({2}) {3}" -f $row.Class, $row.Path, $row.Action, $row.Reason)
+        Write-Host ("[{0}] {1} ({2}) {3}" -f $row.Class, $row.ParentPath, $row.Action, $row.Reason)
     }
 }
 
@@ -461,7 +480,7 @@ function Invoke-PreservePaths {
     $set = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
     foreach ($p in $PreservePath) { [void]$set.Add((Normalize-Rel $p)) }
     foreach ($row in $Rows) {
-        if ($row.Action -eq 'stop' -and $set.Contains($row.Path)) {
+        if ($row.Action -eq 'stop' -and ($set.Contains($row.ParentPath) -or $set.Contains($row.Path))) {
             $row.Action = 'preserve'
             $row.Class = 'custom'
             $row.Reason = 'manually preserved (-PreservePath)'
@@ -471,7 +490,7 @@ function Invoke-PreservePaths {
 
 if ($DryRun) {
     Write-Host 'Dry run: classifying against the current isolated checkout. No fetch, apply, stop, backup, or install.'
-    $rows = Classify-Trees -ParentRoot $repoRoot -UpstreamRoot $upstreamRepo -BaselineSha $baselineSha -UpstreamSha $currentUpSha
+    $rows = Classify-Trees -ParentRoot $repoRoot -UpstreamRoot $upstreamRepo -BaselineSha $baselineSha -UpstreamSha $currentUpSha -ParentPrefix 'src/'
     Invoke-PreservePaths $rows
     Write-Report $rows
     $stops = @($rows | Where-Object { $_.Action -eq 'stop' })
@@ -500,7 +519,7 @@ if ($SkipFetch) {
     Write-Host "Upstream SHA $currentUpSha -> $newUpSha"
 }
 
-$rows = Classify-Trees -ParentRoot $repoRoot -UpstreamRoot $upstreamRepo -BaselineSha $baselineSha -UpstreamSha $newUpSha
+$rows = Classify-Trees -ParentRoot $repoRoot -UpstreamRoot $upstreamRepo -BaselineSha $baselineSha -UpstreamSha $newUpSha -ParentPrefix 'src/'
 Invoke-PreservePaths $rows
 Write-Report $rows
 $stops = @($rows | Where-Object { $_.Action -eq 'stop' })
@@ -510,7 +529,7 @@ if ($stops.Count -gt 0) {
 
 $apply = @($rows | Where-Object { $_.Action -in @('replace', 'delete') })
 foreach ($row in $apply) {
-    $full = Join-Path $repoRoot ($row.Path -replace '/', '\')
+    $full = Join-Path $repoRoot ($row.ParentPath -replace '/', '\')
     if ($row.Action -eq 'delete') {
         if (Test-Path -LiteralPath $full -PathType Leaf) {
             Remove-Item -LiteralPath $full -Force
@@ -518,9 +537,9 @@ foreach ($row in $apply) {
         continue
     }
     if ($row.Binary -or ($row.Merged -is [pscustomobject])) {
-        Write-BytesFile -Root $repoRoot -Rel $row.Path -Bytes $row.Merged.Bytes
+        Write-BytesFile -Root $repoRoot -Rel $row.ParentPath -Bytes $row.Merged.Bytes
     } else {
-        Write-TextFile -Root $repoRoot -Rel $row.Path -Text ([string]$row.Merged)
+        Write-TextFile -Root $repoRoot -Rel $row.ParentPath -Text ([string]$row.Merged)
     }
 }
 Write-Host ("Applied {0} upstream delta(s). Parent-only files and custom hunks were preserved. Changes are uncommitted." -f $apply.Count)
@@ -530,7 +549,7 @@ if ($newUpSha -ne $baselineSha) {
 }
 
 Write-Host 'Verification: git diff --check'
-$checkPaths = @($apply | ForEach-Object { $_.Path } | Where-Object { $_ -and $_ -notmatch '\.(mdx|md)$' })
+$checkPaths = @($apply | ForEach-Object { $_.ParentPath } | Where-Object { $_ -and $_ -notmatch '\.(mdx|md)$' })
 if ($checkPaths.Count -gt 0) {
     runNativeCommand git (@('-C', $repoRoot, 'diff', '--check', '--') + $checkPaths) 'git diff --check applied paths'
 } else {
@@ -554,7 +573,7 @@ foreach ($row in $apply) {
     if ($n -match '^packages/([^/]+)/') { [void]$packages.Add($Matches[1]) }
 }
 foreach ($pkg in ($packages | Sort-Object)) {
-    $pkgDir = Join-Path $repoRoot "packages\$pkg"
+    $pkgDir = Join-Path $srcRoot "packages\$pkg"
     if (-not (Test-Path -LiteralPath (Join-Path $pkgDir 'package.json'))) { continue }
     $pkgJson = Get-Content -LiteralPath (Join-Path $pkgDir 'package.json') -Raw | ConvertFrom-Json
     if (-not $pkgJson.scripts -or -not $pkgJson.scripts.typecheck) {

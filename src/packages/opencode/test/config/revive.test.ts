@@ -123,8 +123,9 @@ test("revive.build is a source folder with an optional debug build", () => {
 })
 
 test("build steps run build.ts in the source folder and add ocdebug only for debug builds", () => {
-  const dist = "C:\\src\\oc\\packages\\opencode\\dist"
+  const dist = "C:\\src\\oc\\src\\packages\\opencode\\dist"
   const release = Revive.buildSteps({ source: "C:\\src\\oc", debug: false })
+  expect(release.cwd).toBe("C:\\src\\oc\\src")
   expect(release.commands).toEqual([["bun", "install"],
     ["bun", "run", "packages/opencode/script/build.ts", "--single"]])
   expect(release.output).toEqual([`${dist}\\opencode-windows-${process.arch}\\bin`])

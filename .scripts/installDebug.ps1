@@ -8,8 +8,7 @@ $ErrorActionPreference = 'Stop'
 . "$PSScriptRoot\scriptHelper.ps1"
 assertExternalInstall -BuildCommand '.\.scripts\buildDebug.ps1' -InstallCommand '.\.scripts\installDebug.ps1 -NoBuild'
 # Debug-only install: copies only ocdebug.exe, never touches opencode.exe, oc.exe, or occ.exe hard links.
-$repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
-$binary = Join-Path $repoRoot 'packages\opencode\dist\opencode-debug-windows-x64\bin\ocdebug.exe'
+$binary = "$distFolder\opencode-debug-windows-x64\bin\ocdebug.exe"
 
 if (-not $NoBuild) {
     & (Join-Path $PSScriptRoot 'buildDebug.ps1') -SkipInstall

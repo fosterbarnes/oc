@@ -64,7 +64,7 @@ jobs:
           git config --global user.name "opencode"
 
       - name: Run unit tests
-        working-directory: packages/${{ matrix.package }}
+        working-directory: src/packages/${{ matrix.package }}
         run: bun test --timeout 30000 --only-failures
         env:
           GITHUB_ACTIONS: "false"
@@ -83,7 +83,7 @@ jobs:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
       - uses: ./.github/actions/setup-bun
       - name: Run provider tests
-        working-directory: packages/${{ matrix.package }}
+        working-directory: src/packages/${{ matrix.package }}
         run: bun run test
 
   httpapi:
@@ -93,5 +93,5 @@ jobs:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
       - uses: ./.github/actions/setup-bun
       - name: Run HttpApi exerciser gates
-        working-directory: packages/opencode
+        working-directory: src/packages/opencode
         run: bun run test:httpapi

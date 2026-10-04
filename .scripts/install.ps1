@@ -8,11 +8,10 @@ param(
 $ErrorActionPreference = 'Stop'
 . "$PSScriptRoot\scriptHelper.ps1"
 assertExternalInstall -BuildCommand '.\.scripts\build.ps1' -InstallCommand '.\.scripts\install.ps1 -NoBuild'
-$repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
-$binary = Join-Path $repoRoot 'packages\opencode\dist\opencode-windows-x64\bin\opencode.exe'
-$debugBinary = Join-Path $repoRoot 'packages\opencode\dist\opencode-debug-windows-x64\bin\ocdebug.exe'
-$runtime = Join-Path $repoRoot 'packages\opencode\dist\opencode-windows-x64\bin\agentify-runtime'
-$cursorRuntime = Join-Path $repoRoot 'packages\opencode\dist\opencode-windows-x64\bin\cursor-runtime'
+$binary = "$distFolder\opencode-windows-x64\bin\opencode.exe"
+$debugBinary = "$distFolder\opencode-debug-windows-x64\bin\ocdebug.exe"
+$runtime = "$distFolder\opencode-windows-x64\bin\agentify-runtime"
+$cursorRuntime = "$distFolder\opencode-windows-x64\bin\cursor-runtime"
 $processNames = @('opencode', 'oc', 'occ', 'ocdebug', 'ocbug')
 $running = @($processNames | ForEach-Object { Get-Process -Name $_ -ErrorAction SilentlyContinue })
 if ($running) {

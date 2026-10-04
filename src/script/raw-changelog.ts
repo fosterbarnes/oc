@@ -25,7 +25,7 @@ type Diff = {
 const repo = process.env.GH_REPO ?? "anomalyco/opencode"
 const bot = ["actions-user", "github-actions[bot]", "opencode", "opencode-agent[bot]"]
 const team = [
-  ...(await Bun.file(new URL("../.github/TEAM_MEMBERS", import.meta.url))
+  ...(await Bun.file(new URL("../../.github/TEAM_MEMBERS", import.meta.url))
     .text()
     .then((x) => x.split(/\r?\n/).map((x) => x.trim()))
     .then((x) => x.filter((x) => x && !x.startsWith("#")))),

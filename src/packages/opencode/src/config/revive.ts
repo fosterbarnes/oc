@@ -48,7 +48,9 @@ export type RestartContext = {
 
 // `source` is the user's oc source folder (chosen or downloaded on the first /revive); revive never pulls it.
 export type BuildConfig = { source: string; debug: boolean }
-// Relative to an oc source folder; also how the TUI recognizes one.
+// The Bun workspace inside an oc source folder; build commands run there.
+export const WORKSPACE = "src"
+// Relative to WORKSPACE; also how the TUI recognizes an oc source folder.
 export const BUILD_SCRIPT = "packages/opencode/script/build.ts"
 export type InstallSource = { name: string; path: string }
 
@@ -107,11 +109,13 @@ export function parseBuild(input: unknown): BuildConfig | undefined {
   return { source: value.source as string, debug: value.debug === true }
 }
 
-/** Commands run in `build.source` and the outputs they produce, from packages/opencode/script/build.ts --single. */
+/** Commands run in the source's workspace and the outputs they produce, from packages/opencode/script/build.ts --single. */
 export function buildSteps(build: BuildConfig) {
   const platform = process.platform === "win32" ? "windows" : process.platform
-  const dist = path.join(build.source, "packages", "opencode", "dist")
+  const cwd = path.join(build.source, WORKSPACE)
+  const dist = path.join(cwd, "packages", "opencode", "dist")
   return {
+    cwd,
     commands: [["bun", "install"],
       ["bun", "run", BUILD_SCRIPT, "--single", ...(build.debug ? ["--with-debug"] : [])]],
     output: [path.join(dist, `opencode-${platform}-${process.arch}`, "bin"),

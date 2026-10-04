@@ -15,6 +15,10 @@ concurrency:
 permissions:
   contents: read
 
+defaults:
+  run:
+    working-directory: src
+
 jobs:
   generate:
     name: generated ${{ matrix.target }}
@@ -33,7 +37,7 @@ jobs:
 
       - name: Check generated client
         if: matrix.target == 'client'
-        working-directory: packages/client
+        working-directory: src/packages/client
         run: bun run check:generated
 
       - name: Regenerate legacy SDK and OpenAPI

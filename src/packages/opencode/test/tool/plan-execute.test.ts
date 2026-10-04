@@ -159,7 +159,7 @@ describe("plan_execute questionnaire", () => {
 
 const PHASED_PLAN = "---\nsize: large\nphases: 3\n---\n# Plan\n"
 const plannerID = SessionID.make("ses_questionnaire")
-const TEST_PLAN_PATH = path.resolve(import.meta.dir, "../../../../buildNotes.md")
+const TEST_PLAN_PATH = path.resolve(import.meta.dir, "../../../../../buildNotes.md")
 const plannerModel = {
   providerID: ProviderV2.ID.make("openai"),
   modelID: ModelV2.ID.make("gpt-5.6-luna"),

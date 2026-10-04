@@ -408,9 +408,9 @@ function reviveCommands(toast: ToastContext) {
       })
     if (!input?.trim()) return
     const sourceDir = path.resolve(input.trim().replace(/^"(.*)"$/, "$1"))
-    // Revive.BUILD_SCRIPT: the build script /revive runs.
-    if (kind === "existing" && !fs.existsSync(path.join(sourceDir, "packages", "opencode", "script", "build.ts"))) {
-      toast.show({ message: `Not an oc source folder (no packages\\opencode\\script\\build.ts): ${sourceDir}`,
+    // Revive.WORKSPACE + Revive.BUILD_SCRIPT: the build script /revive runs.
+    if (kind === "existing" && !fs.existsSync(path.join(sourceDir, "src", "packages", "opencode", "script", "build.ts"))) {
+      toast.show({ message: `Not an oc source folder (no src\\packages\\opencode\\script\\build.ts): ${sourceDir}`,
         variant: "error" })
       return
     }
