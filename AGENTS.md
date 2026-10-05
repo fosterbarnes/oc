@@ -178,7 +178,7 @@ const table = sqliteTable("session", {
 - Avoid mocks as much as possible, you shouldn't be using globalThis.\* at all unless it's the only option.
 - Test actual implementation, do not duplicate logic into tests
 - Tests cannot run from repo root (root `test` script prints "do not run tests from root" and exits 1); run from package dirs like `packages/opencode`.
-- Only run checks you edit or introduce. If you edit a check, run that specific check afterward. Leave everything else to GitHub Actions.
+- Only run checks you edit or introduce. Run those specific checks locally afterward; broader suites are user-driven through `.scripts/test.ps1`. Cloud workflows are removed.
 
 ## Session Runtime (Hybrid V1/V2)
 

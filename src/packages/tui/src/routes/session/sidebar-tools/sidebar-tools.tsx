@@ -1,4 +1,5 @@
 import { For, Show, createEffect, createMemo, createSignal, onCleanup, type ParentProps } from "solid-js"
+import type { BoxRenderable } from "@opentui/core"
 import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
@@ -261,6 +262,29 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
   const [scriptsOpen, setScriptsOpen] = createSignal(true)
   const [filesOpen, setFilesOpen] = createSignal(true)
   const [hovered, setHovered] = createSignal<string>()
+  // OpenTUI's native truncate puts the ellipsis mid-text; clip at the end instead.
+  const clipEnd = (text: string, width: number) =>
+    width <= 0 || text.length <= width ? text : `${text.slice(0, Math.max(0, width - 3))}...`
+  // Overflowing hovered names scroll left one cell per tick, pause at both ends, then loop.
+  const [marqueeOffset, setMarqueeOffset] = createSignal(0)
+  let marqueeTimer: ReturnType<typeof setInterval> | undefined
+  const stopMarquee = () => {
+    clearInterval(marqueeTimer)
+    marqueeTimer = undefined
+    setMarqueeOffset(0)
+  }
+  const startMarquee = (text: string, width: number) => {
+    stopMarquee()
+    const max = text.length - width
+    if (width <= 0 || max <= 0) return
+    const startPause = 3
+    const endPause = 6
+    let tick = 0
+    marqueeTimer = setInterval(() => {
+      tick = (tick + 1) % (startPause + max + endPause)
+      setMarqueeOffset(Math.min(max, Math.max(0, tick - startPause)))
+    }, 150)
+  }
   const [usage, setUsage] = createSignal<UsageSnapshot<OpenAIUsage>>({ ok: false })
   const [goUsage, setGoUsage] = createSignal<UsageSnapshot<OpenCodeGoUsage>>({ ok: false })
   const [openRouterUsage, setOpenRouterUsage] = createSignal<UsageSnapshot<OpenRouterUsage>>({ ok: false })
@@ -1510,6 +1534,7 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
   const usageAgeTimer = setInterval(() => setUsageNow(Date.now()), 60_000)
   onCleanup(() => {
     clearInterval(usageAgeTimer)
+    clearInterval(marqueeTimer)
     usageAbort.abort()
     usageScheduler.dispose()
     rootPickerSearchGeneration += 1
@@ -1617,19 +1642,25 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
         </box>
         <Show when={scriptsOpen()}>
           <For each={visibleScripts()} fallback={<text fg={theme.textMuted}>No scripts found</text>}>
-            {(script) => (
-              <text
-                fg={
-                  hovered() === `script:${script.name}`
-                    ? hoverColor
-                    : pins.has(script.name)
-                      ? theme.primary
-                      : theme.text
-                }
+            {(script) => {
+              // Box, not text: OpenTUI text overrides onResize and never calls onSizeChange.
+              let row: BoxRenderable | undefined
+              // Row width minus 1-cell padding on each side and the 2-cell pin prefix.
+              const [nameWidth, setNameWidth] = createSignal(0)
+              return (
+              <box
+                ref={(el) => (row = el)}
+                onSizeChange={() => setNameWidth((row?.width ?? 0) - 4)}
                 paddingLeft={1}
                 paddingRight={1}
-                onMouseOver={() => setHovered(`script:${script.name}`)}
-                onMouseOut={() => setHovered()}
+                onMouseOver={() => {
+                  setHovered(`script:${script.name}`)
+                  startMarquee(script.name, nameWidth())
+                }}
+                onMouseOut={() => {
+                  setHovered()
+                  stopMarquee()
+                }}
                 onMouseDown={(event) => {
                   if (event.button === 2) {
                     pasteScript(props.sessionID, script)
@@ -1638,10 +1669,25 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
                   if (event.button === 0) void runScript(script)
                 }}
               >
-                {pins.has(script.name) ? "* " : "  "}
-                {script.name}
-              </text>
-            )}
+                <text
+                  wrapMode="none"
+                  fg={
+                    hovered() === `script:${script.name}`
+                      ? hoverColor
+                      : pins.has(script.name)
+                        ? theme.primary
+                        : theme.text
+                  }
+                >
+                  {pins.has(script.name) ? "* " : "  "}
+                  {clipEnd(
+                    hovered() === `script:${script.name}` ? script.name.slice(marqueeOffset()) : script.name,
+                    nameWidth(),
+                  )}
+                </text>
+              </box>
+              )
+            }}
           </For>
         </Show>
         <box
@@ -1682,13 +1728,25 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
           <text fg="#AC98C7">{displayPath(root, os.homedir())}</text>
           <box flexDirection="column" gap={1}>
             <For each={tree()} fallback={<text fg={theme.textMuted}>No visible files</text>}>
-              {(entry) => (
+              {(entry) => {
+                let row: BoxRenderable | undefined
+                // Row width minus 1-cell padding on each side, the indent, and the 2-cell marker.
+                const [nameWidth, setNameWidth] = createSignal(0)
+                return (
                 <box
+                  ref={(el) => (row = el)}
+                  onSizeChange={() => setNameWidth((row?.width ?? 0) - 4 - entry.depth * 2)}
                   flexDirection="row"
                   paddingLeft={1}
                   paddingRight={1}
-                  onMouseOver={() => setHovered(`tree:${entry.relativePath}`)}
-                  onMouseOut={() => setHovered()}
+                  onMouseOver={() => {
+                    setHovered(`tree:${entry.relativePath}`)
+                    startMarquee(entry.name, nameWidth())
+                  }}
+                  onMouseOut={() => {
+                    setHovered()
+                    stopMarquee()
+                  }}
                   onMouseDown={(event) => {
                     if (event.button === 2) {
                       insertPath(props.sessionID, entry.fullPath, true)
@@ -1700,6 +1758,7 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
                   }}
                 >
                   <text
+                    flexShrink={0}
                     fg={
                       hovered() === `tree:${entry.relativePath}`
                         ? hoverColor
@@ -1711,6 +1770,7 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
                     {"  ".repeat(entry.depth)}
                   </text>
                   <text
+                    flexShrink={0}
                     fg={
                       hovered() === `tree:${entry.relativePath}`
                         ? hoverColor
@@ -1722,6 +1782,9 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
                     {entry.directory ? (expanded().has(entry.relativePath) ? "- " : "+ ") : "  "}
                   </text>
                   <text
+                    flexShrink={1}
+                    minWidth={0}
+                    wrapMode="none"
                     fg={
                       hovered() === `tree:${entry.relativePath}`
                         ? hoverColor
@@ -1730,10 +1793,14 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
                           : theme.text
                     }
                   >
-                    {entry.name}
+                    {clipEnd(
+                      hovered() === `tree:${entry.relativePath}` ? entry.name.slice(marqueeOffset()) : entry.name,
+                      nameWidth(),
+                    )}
                   </text>
                 </box>
-              )}
+                )
+              }}
             </For>
             <Show when={tree().length >= MAX_TREE_ITEMS}>
               <text fg={theme.textMuted}>File list truncated. Use refresh or collapse folders.</text>

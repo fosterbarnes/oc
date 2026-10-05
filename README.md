@@ -33,6 +33,8 @@
 
 ## Windows specific stuff
 
+## Non-Standout small features
+
 
 ## Dev Docs
 
@@ -56,7 +58,7 @@
 
 ## Progress
 
-[514,480](scc.txt) lines of code and counting...
+[514,771](scc.txt) lines of code and counting...
 
 <!-- code-count:start -->
 
@@ -68,11 +70,11 @@
 | HTML | 1 | 1,161 | 79 | 0 | 1,082 |
 | JavaScript | 23 | 5,259 | 419 | 63 | 4,777 |
 | Nix | 3 | 258 | 23 | 26 | 209 |
-| Powershell | 18 | 1,272 | 114 | 33 | 1,125 |
+| Powershell | 20 | 1,519 | 127 | 38 | 1,354 |
 | SQL | 95 | 592 | 0 | 17 | 575 |
 | Shell | 1 | 120 | 17 | 17 | 86 |
-| TypeScript | 2,710 | 527,848 | 42,910 | 14,977 | 469,961 |
-| **Total** | **3,027** | **579,262** | **49,062** | **15,720** | **514,480** |
+| TypeScript | 2,710 | 527,915 | 42,910 | 14,982 | 470,023 |
+| **Total** | **3,029** | **579,576** | **49,075** | **15,730** | **514,771** |
 
 <!-- code-count:end -->
 

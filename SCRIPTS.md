@@ -11,6 +11,7 @@ Project automation lives in `.scripts/`. Scripts target PowerShell 7 and fail on
 | `.scripts/buildDebug.ps1` | Agent-safe debug-only build. It never touches the production dist artifact or installed runtime. |
 | `.scripts/.run.ps1` | Runs the repository's normal `bun dev .` entry point and forwards arguments. |
 | `.scripts/prePush.ps1` | Runs Turbo typecheck, then refreshes the README code count and `scc.txt`. It does not commit or push. |
+| `.scripts/test.ps1` | Runs local package tests, HttpApi gates, typechecking, or generated-file checks. Supports package, file, test-name, category, and all-check selection. |
 | `.scripts/countCode.ps1` | Uses `scc` on PATH to refresh the README code count and root `scc.txt` language report. Runnable independently. |
 | `.scripts/updateUpstream.ps1` | Fetches and fast-forwards the separate `UPSTREAM\opencode` checkout without modifying this customized parent checkout. |
 | `.scripts/syncAndInstall.ps1` | Fail-closed upstream sync into this custom fork, then verify, backup, stop `opencode.exe`, and install. |
@@ -59,6 +60,51 @@ non-install upstream sync/build path.
 
 `oc` is unchanged: production `opencode.exe`, resident server on port 4096. `ocdebug` is a native PATH command; bare and project/path invocations open `oc launch`, while explicit commands pass through. It uses `opencode-debug` data/config/state, a resident server on port **4097**, DEBUG logs, and copies production user settings/authentication on first run. The TUI can overwrite debug settings from production, then requires an `ocdebug` restart. Session handoff uses `opencode export <session-id>` followed by `ocdebug import <file>`. `.scripts\install.ps1` installs both exes. `.scripts\installDebug.ps1` only stops/replaces `ocdebug.exe`.
 
+
+## Local tests and checks
+
+Cloud workflows are removed. Run checks manually with PowerShell 7; Bun, Node 24+
+(provider tests), Git (generation checks), and workspace dependencies must already
+be installed. The runner does not install or upgrade tools.
+
+```powershell
+.\.scripts\test.ps1 -List
+.\.scripts\test.ps1 -Package core
+.\.scripts\test.ps1 -Package schema -File test/event.test.ts
+.\.scripts\test.ps1 -Package schema -File test/event.test.ts -Name 'definition is pure'
+.\.scripts\test.ps1 -Package core,schema
+.\.scripts\test.ps1 -Category unit,providers
+.\.scripts\test.ps1 -Category httpapi
+.\.scripts\test.ps1 -Category typecheck
+.\.scripts\test.ps1 -Category generated
+.\.scripts\test.ps1 -All
+.\.scripts\test.ps1 -All -DryRun | Format-Table Name,Category,Command
+```
+
+No arguments or `-Help` prints usage. `-File` is relative to the selected package;
+`-Name` is a native test-name regex. Both require exactly one `-Package`.
+`-DryRun` returns the selected commands without executing them.
+
+| Category | Checks |
+|----------|--------|
+| `unit` | The 20 former unit-matrix packages, using `bun test --timeout 30000 --only-failures`. |
+| `providers` | Node tests in `agentify-runtime` and `cursor-runtime`. |
+| `httpapi` | Existing coverage, authentication, and Effect exerciser gates in `opencode`. |
+| `typecheck` | Workspace Turbo typecheck, with `--continue=always`. |
+| `generated` | Regenerate client, legacy SDK, and OpenAPI; check tracked and untracked outputs. |
+
+`-All` includes every category, including generation. Generation rewrites output
+files and compiles the legacy SDK; it refuses staged, unstaged, or untracked changes
+in the client generated directories or SDK tree before starting. Resulting changes
+are left for inspection, never reset automatically.
+
+Checks run sequentially, stream their output, and stop on the first failing command
+with a nonzero exit status. The runner restores the caller's directory and the
+temporary Actions/file-watcher environment settings on success or failure. It can
+be invoked from any directory using its full path. Coverage is for the current OS;
+run separately on Linux with PowerShell to get Linux coverage.
+
+The runner's targeted verification is `.scripts/tests/testRunner.tests.ps1`.
 
 ## Upstream checkout
 

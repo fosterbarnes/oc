@@ -1,6 +1,9 @@
-v0.2.87
+v0.2.89
 
-startup:
-The intro animation is confirmed working on the installed oc: the logo flows straight into the app with no blank gap. The earlier report of the gap coming back was the production oc still running a 0.2.86 build from before the fix; only the debug build had it. No code changed in this push.
+sidebar:
+Long script, file and folder names in the sidebar stay on one line and end in "..." instead of wrapping onto a second line. Hovering a cut-off name scrolls it after a short pause so you can read the whole name, pauses at the end, then loops; moving the mouse away resets it. Where the name is cut follows the sidebar width.
 
-Under the hood: FORK.md now records the startup handoff as confirmed on 0.2.87, and the finished startup-check handoff documents were removed. No checks were run because only docs changed. Production 0.2.87 was built with build.ps1 and installed by you.
+local checks:
+The GitHub cloud workflows are removed. Run tests locally with .scripts/test.ps1 for a package, file, test-name filter, category, or everything. Use -List to see the choices and -DryRun to see the commands without running them. Generation checks need clean output paths and leave their changes visible. Misspelled runner options now fail right away instead of silently running a broader package suite.
+
+Under the hood: OpenTUI's built-in truncate puts the ellipsis mid-text and text elements never fire onSizeChange, so each sidebar row is measured on a box and clipped in code. The test runner has its own check script (.scripts/tests/testRunner.tests.ps1), which passed on Windows along with git diff --check; the latest cloud runs had been blocked by GitHub billing before executing. The previous build notes were archived to buildNotes.archive6.md. Type checks were clean on sidebar-tools.tsx and you confirmed the sidebar clipping and scrolling live. Full suites, full typecheck, HttpApi and generation checks were not run.
