@@ -574,11 +574,12 @@ export function Session() {
           toast.show({ message: result.error ? errorMessage(result.error) : "Failed to rename session", variant: "error" })
           return
         }
-        if (result.data.title === before) {
-          toast.show({ message: "Title unchanged", variant: "info" })
+        const model = result.data.model ? `\nModel used: ${result.data.model}` : ""
+        if (result.data.session.title === before) {
+          toast.show({ message: `Title unchanged${model}`, variant: "info" })
           return
         }
-        toast.show({ message: `Renamed: ${result.data.title}`, variant: "success" })
+        toast.show({ message: `Renamed: ${result.data.session.title}${model}`, variant: "success" })
       },
     },
     {

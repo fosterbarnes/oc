@@ -1,9 +1,6 @@
-v0.2.89
+v0.2.90
 
-sidebar:
-Long script, file and folder names in the sidebar stay on one line and end in "..." instead of wrapping onto a second line. Hovering a cut-off name scrolls it after a short pause so you can read the whole name, pauses at the end, then loops; moving the mouse away resets it. Where the name is cut follows the sidebar width.
+rename:
+The /rename toast now shows the model that wrote the new title on a second line, as "Model used: provider/model". It names the model that actually succeeded, so you can see when a fallback model stepped in. The "Title unchanged" toast shows it too.
 
-local checks:
-The GitHub cloud workflows are removed. Run tests locally with .scripts/test.ps1 for a package, file, test-name filter, category, or everything. Use -List to see the choices and -DryRun to see the commands without running them. Generation checks need clean output paths and leave their changes visible. Misspelled runner options now fail right away instead of silently running a broader package suite.
-
-Under the hood: OpenTUI's built-in truncate puts the ellipsis mid-text and text elements never fire onSizeChange, so each sidebar row is measured on a box and clipped in code. The test runner has its own check script (.scripts/tests/testRunner.tests.ps1), which passed on Windows along with git diff --check; the latest cloud runs had been blocked by GitHub billing before executing. The previous build notes were archived to buildNotes.archive6.md. Type checks were clean on sidebar-tools.tsx and you confirmed the sidebar clipping and scrolling live. Full suites, full typecheck, HttpApi and generation checks were not run.
+Under the hood: the session.rename endpoint now returns { session, model } instead of the bare session, and the legacy JS SDK types were regenerated. The rename fallback suite passes 14/14 with a new check that the returned model is the one that succeeded, and type checks were clean on the touched files. Full suites were not run.

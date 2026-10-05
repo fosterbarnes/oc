@@ -126,6 +126,7 @@ function check(input: {
       expect(lookups).toEqual(input.expected)
       const success = input.outcomes.includes("success")
       expect(Exit.isSuccess(result)).toBe(success)
+      if (Exit.isSuccess(result)) expect(result.value.model).toBe(input.expected.at(-1))
       expect((yield* sessions.get(session.id)).title).toBe(success ? "project - recovered title" : "Original title")
       for (const request of requests) {
         const key = `${request.model.providerID}/${request.model.id}`

@@ -321,7 +321,10 @@ export const SessionApi = HttpApi.make("session")
         HttpApiEndpoint.post("rename", SessionPaths.rename, {
           params: { sessionID: SessionID },
           query: WorkspaceRoutingQuery,
-          success: described(Session.Info, "Renamed session"),
+          success: described(
+            Schema.Struct({ session: Session.Info, model: Schema.optional(Schema.String) }),
+            "Renamed session and the provider/model that wrote the title",
+          ),
           error: [HttpApiError.BadRequest, ApiNotFoundError],
         }).annotateMerge(
           OpenApi.annotations({

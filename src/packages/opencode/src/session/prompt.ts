@@ -114,7 +114,7 @@ export interface Interface {
   readonly shell: (input: ShellInput) => Effect.Effect<SessionV1.WithParts, Session.BusyError>
   readonly command: (input: CommandInput) => Effect.Effect<SessionV1.WithParts, Image.Error>
   readonly resolvePromptParts: (template: string) => Effect.Effect<PromptInput["parts"]>
-  readonly rename: (sessionID: SessionID) => Effect.Effect<Session.Info>
+  readonly rename: (sessionID: SessionID) => Effect.Effect<{ session: Session.Info; model?: string }>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/SessionPrompt") {}
@@ -270,7 +270,7 @@ const layer = Layer.effect(
       const history = yield* sessions.messages({ sessionID })
       const lastUser = history.findLast((m) => m.info.role === "user")?.info
       const ag = yield* agents.get("rename")
-      if (!lastUser || lastUser.role !== "user" || !ag) return yield* sessions.get(sessionID)
+      if (!lastUser || lastUser.role !== "user" || !ag) return { session }
       const small = ag.model ? undefined : yield* provider.getSmallModel(lastUser.model.providerID)
       const attempts = [
         {
@@ -313,7 +313,7 @@ const layer = Layer.effect(
               .pipe(Stream.filter(LLMEvent.is.textDelta), Stream.map((e) => e.text), Stream.mkString)
             const title = cleanTitle(text)
             if (!title) return yield* Effect.fail(new Error("Rename model returned an empty title"))
-            return title
+            return { title, model: `${mdl.providerID}/${mdl.id}` }
           }).pipe(
             // SDK initialization surfaces its known provider error as a defect.
             Effect.catchDefect((error) =>
@@ -325,8 +325,8 @@ const layer = Layer.effect(
           ),
         ),
       )
-      yield* sessions.setTitle({ sessionID, title: t })
-      return yield* sessions.get(sessionID)
+      yield* sessions.setTitle({ sessionID, title: t.title })
+      return { session: yield* sessions.get(sessionID), model: t.model }
     }, Effect.orDie)
 
     const handleSubtask = Effect.fn("SessionPrompt.handleSubtask")(function* (input: {

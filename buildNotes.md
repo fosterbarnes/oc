@@ -119,6 +119,22 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-05 (~17:46) - v0.2.90 - /rename toast shows the model that wrote the title - Opus 5.5, low reasoning; Implementation
+
+### Agent
+- Meta: Opus 5.5; low reasoning; Implementation; completed
+- Version: 0.2.90
+- Changed `SessionPrompt.rename` (`opencode/src/session/prompt.ts`) to return `{ session, model? }`; `model` is `providerID/modelID` of the attempt that won (fallbacks included), absent on the early no-user/no-agent return.
+- Changed `session.rename` HttpApi success schema (`groups/session.ts`) to that struct; regenerated legacy SDK (`sdk/js/src/v2/gen/types.gen.ts`). `packages/client` generate produced no diff.
+- Updated TUI `session.rename.auto` (`tui/src/routes/session/index.tsx`) to read `result.data.session.title` and append `\nModel used: <model>` to both "Renamed" and "Title unchanged" toasts.
+- Verification: `test/session/rename-fallback.test.ts` 14 pass, with new assertion that `model` equals the last attempted model; tsc on opencode and tui showed no errors in touched files.
+
+### User
+Session rename
+- The `/rename` toast now shows the model that generated the title on a second line, including when a fallback model was used.
+
+---
+
 ## 2026-10-05 (~17:30) - v0.2.89 - Sidebar script and file names clip with ... and scroll on hover - Opus 5.5, low reasoning; Implementation
 
 ### Agent
