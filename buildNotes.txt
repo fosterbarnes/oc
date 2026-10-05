@@ -1,6 +1,6 @@
 v0.2.87
 
 startup:
-The intro logo now carries straight through to the app with no blank screens between them. The launcher draws the intro on the alternate screen, and the app shows the same logo while it loads its data, so quitting leaves your terminal as it was before launch instead of a cleared screen. Opening `oc <project>` no longer starts a second copy of the app to create the session, so it reaches the app sooner.
+The intro animation is confirmed working on the installed oc: the logo flows straight into the app with no blank gap. The earlier report of the gap coming back was the production oc still running a 0.2.86 build from before the fix; only the debug build had it. No code changed in this push.
 
-Under the hood: the launcher creates the target session through the resident server instead of spawning `session bootstrap` as a second full instance writing the same database. The TUI theme-mode wait before first paint dropped from 1000 ms to 100 ms. Type checks pass on the touched files and the TUI lifecycle/theme suites pass 15/15. The `session-bootstrap` live CLI test times out on this machine identically with and without these changes, so that failure is pre-existing and environmental. The temporary startup-trace instrumentation used during diagnosis was fully removed.
+Under the hood: FORK.md now records the startup handoff as confirmed on 0.2.87, and the finished startup-check handoff documents were removed. No checks were run because only docs changed. Production 0.2.87 was built with build.ps1 and installed by you.

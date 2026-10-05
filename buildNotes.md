@@ -110,6 +110,23 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-05 (~17:04) - v0.2.87 - Startup intro handoff closed out - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation; completed (docs only, no version bump)
+- Version: 0.2.87
+- Built production `0.2.87-main-202610052052` via `.scripts\build.ps1`; user installed. Installed `oc.exe` reports `0.2.87-main-202610052100`; user confirmed intro-to-TUI handoff has no gap.
+- Cause of "gap came back": production `oc.exe` was `0.2.86-main-202610040906`, built before the root-level `IntroLogo` fix; only `ocdebug` had it. No regression.
+- Verified: no `startup-trace`/`OC_STARTUP_T`/`traceStdout` remnants in `src/packages`; `IntroLogo`/`hideIntroLogo` present in `tui/src/app.tsx`.
+- Removed finished `handoffStartupCheck.md` and `handoffStartupCheckResult.md`. Updated `FORK.md` Startup loading animation row.
+- Known: revive banner shows pre-install version by design (user declined change).
+
+### User
+Startup
+- The intro animation now flows straight into the app on the installed `oc`; no UI change in this entry.
+
+---
+
 ## 2026-10-04 (~05:17) - v0.2.87 - Startup debug source cleanup - GPT-6.1 Sol, reasoning; Debug
 
 ### Agent
