@@ -277,6 +277,7 @@ export const {
     let restartDisposed = false
     let restartReconnected = false
     const [recoveryEpoch, setRecoveryEpoch] = createSignal(0)
+    const [configReloadEpoch, setConfigReloadEpoch] = createSignal(0)
     let recovering = false
     let bootstrapInFlight: Promise<boolean> | undefined
     const recoverRetryDelay = 50
@@ -314,7 +315,9 @@ export const {
             void recoverFromRestart()
             break
           }
-          void bootstrap()
+          void bootstrap().then((ok) => {
+            if (ok && directory === "global") setConfigReloadEpoch((value) => value + 1)
+          })
           break
         case "permission.replied": {
           const requests = store.permission[event.properties.sessionID]
@@ -824,6 +827,9 @@ export const {
     const result = {
       data: store,
       set: setStore,
+      get configReloadEpoch() {
+        return configReloadEpoch()
+      },
       restart: {
         begin() {
           restartEpoch++

@@ -71,9 +71,8 @@ export function filterProxyByModelTools(
 }
 
 /**
- * Claude Code built-ins behind each oc tool. Only tools oc always registers
- * are listed, so a missing one means the agent was denied it, not that the
- * host lacks it (websearch and skill depend on host config, so they are not).
+ * Claude Code built-ins behind each oc tool. Missing tools are permission-denied
+ * or disabled capabilities. Websearch and skill have separate provider settings.
  */
 const NATIVE_TOOLS_BY_HOST_TOOL: Record<string, string[]> = {
   bash: ["Bash", "PowerShell"],
@@ -83,6 +82,7 @@ const NATIVE_TOOLS_BY_HOST_TOOL: Record<string, string[]> = {
   glob: ["Glob"],
   grep: ["Grep"],
   webfetch: ["WebFetch"],
+  todowrite: ["TodoWrite", "TaskCreate", "TaskUpdate", "TaskGet", "TaskList"],
 }
 
 /**
@@ -98,7 +98,7 @@ export function nativeToolsDeniedByHost(
   if (!offered) return []
   return Object.entries(NATIVE_TOOLS_BY_HOST_TOOL).flatMap(([id, natives]) => {
     const name = toolNameForHost(id, dialect)
-    return name !== null && offered.has(name) ? [] : natives
+    return name === null || offered.has(name) ? [] : natives
   })
 }
 

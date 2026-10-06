@@ -287,7 +287,8 @@ const layer = Layer.effect(
 
     const all: Interface["all"] = Effect.fn("ToolRegistry.all")(function* () {
       const s = yield* InstanceState.get(state)
-      return [...s.builtin, ...s.custom] as Tool.Def[]
+      const cfg = yield* config.get()
+      return [...s.builtin, ...s.custom].filter((tool) => cfg.todos === true || tool.id !== TodoWriteTool.id)
     })
 
     const ids: Interface["ids"] = Effect.fn("ToolRegistry.ids")(function* () {

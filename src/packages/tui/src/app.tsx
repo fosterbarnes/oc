@@ -60,6 +60,7 @@ import { FrecencyProvider } from "./component/prompt/frecency"
 import { PromptStashProvider } from "./component/prompt/stash"
 import { DialogAlert } from "./ui/dialog-alert"
 import { DialogConfirm } from "./ui/dialog-confirm"
+import { createTodoCommand } from "./todos"
 import { ToastProvider, useToast, type ToastContext } from "./ui/toast"
 import { isDefaultTitle } from "./util/session"
 import { KVProvider, useKV } from "./context/kv"
@@ -495,6 +496,7 @@ const appGlobalBindingCommands = [
 const appBindingCommands = [
   "command.palette.show",
   "oc.settings_palette",
+  "oc.todos.toggle",
   "oc.new_session",
   "model.default",
   "oc.reasoning_effort",
@@ -1068,6 +1070,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
   )
 
   const connected = useConnected()
+  const todoCommand = createTodoCommand()
   const currentWorktreeWorkspace = createMemo(() => {
     const workspaceID = project.workspace.current()
     if (!workspaceID) return
@@ -1095,6 +1098,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
           dialog.replace(() => <CommandPaletteDialog category="oc" />)
         },
       },
+      todoCommand,
       ...reviveCommands(toast),
       {
         name: "session.list",

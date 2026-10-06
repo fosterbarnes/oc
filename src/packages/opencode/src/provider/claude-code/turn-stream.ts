@@ -138,6 +138,7 @@ class ClaudeTurn {
   private readonly turn: TurnContext
   private readonly sk: string
   private readonly options: LanguageModelV3CallOptions
+  private readonly todosEnabled: boolean
 
   private activeProcess: ActiveProcess | undefined
   private proc!: ChildProcess
@@ -213,6 +214,7 @@ class ClaudeTurn {
     this.turn = input.turn
     this.sk = input.turn.sessionKey
     this.options = input.options
+    this.todosEnabled = input.options.tools?.some((tool) => tool.name === "todowrite") === true
     this.autoContinue = {
       enabled: autoContinueEnabledFor(this.turn.compactionMode, this.config.autoContinueIncompleteTurns),
       attempts: 0,
@@ -718,12 +720,12 @@ class ClaudeTurn {
       log.debug("ignoring proxy tool_use; broker handles it", { name, id })
       return
     }
-    if (name === "TaskCreate" || name === "TaskUpdate") this.usedTaskTools = true
+    if (this.todosEnabled && (name === "TaskCreate" || name === "TaskUpdate")) this.usedTaskTools = true
     const mapped = mapTool(name, input, this.mapToolOptions())
     log.info("tool call complete", { name, mappedName: mapped.name, id, executed: mapped.executed })
     if (mapped.skip) return
     if (isTodoMirror(mapped.name)) {
-      this.heldTodo = { id, input: mapped.input }
+      if (this.todosEnabled) this.heldTodo = { id, input: mapped.input }
       return
     }
     this.toolCallNames.set(id, mapped.name)
@@ -797,6 +799,7 @@ class ClaudeTurn {
    * (one item per call, so the saved list is the only whole one).
    */
   private flushTodo() {
+    if (!this.todosEnabled) return
     const claudeSessionId = this.usedTaskTools ? getClaudeSessionId(this.sk) : undefined
     const saved = claudeSessionId ? readClaudeTaskList(this.config.configDir, claudeSessionId) : undefined
     const held = this.heldTodo ?? (saved ? { id: `todowrite_${generateId()}`, input: saved } : undefined)

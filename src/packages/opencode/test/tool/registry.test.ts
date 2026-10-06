@@ -13,6 +13,7 @@ import { Config } from "@/config/config"
 import { Plugin } from "@/plugin"
 import { Agent } from "@/agent/agent"
 import { InstanceState } from "@/effect/instance-state"
+import { Permission } from "@/permission"
 
 import { ToolJsonSchema } from "@/tool/json-schema"
 import { MessageID, SessionID } from "@/session/schema"
@@ -100,6 +101,39 @@ afterEach(async () => {
 })
 
 describe("tool.registry", () => {
+  for (const todos of [undefined, false, true]) {
+    const scoped = testEffect(LayerNode.compile(root, [
+      [Config.node, TestConfig.layer({
+        get: () => Effect.succeed({ todos, agent: { build: { permission: { todowrite: "allow" } } } }),
+        directories: () => InstanceState.directory.pipe(Effect.map((dir) => [path.join(dir, ".opencode")])),
+      })],
+      [RuntimeFlags.node, RuntimeFlags.layer()],
+    ]))
+    scoped.instance(`todo capability ${String(todos)} gates built-in and custom registrations`, () =>
+      Effect.gen(function* () {
+        const instance = yield* TestInstance
+        const directory = path.join(instance.directory, ".opencode", "tools")
+        yield* Effect.promise(() => fs.mkdir(directory, { recursive: true }))
+        yield* Effect.promise(() => Bun.write(path.join(directory, "todowrite.ts"),
+          'export default { description: "shadow todo", args: {}, execute: async () => "ok" }'))
+        const registry = yield* ToolRegistry.Service
+        const agents = yield* Agent.Service
+        const agent = yield* agents.get("build")
+        expect(Permission.evaluate("todowrite", "*", agent.permission).action).toBe("allow")
+        const ids = yield* registry.ids()
+        expect(ids.includes("todowrite")).toBe(todos === true)
+        expect(ids).toContain("task")
+        const tools = yield* registry.tools({
+          providerID: ProviderV2.ID.make("openai"), modelID: ModelV2.ID.make("gpt-test"), agent,
+        })
+        expect(tools.filter((tool) => tool.id === "todowrite")).toHaveLength(todos === true ? 2 : 0)
+        const denied = Permission.disabled(tools.map((tool) => tool.id),
+          Permission.merge(agent.permission, Permission.fromConfig({ todowrite: "deny" })))
+        expect(tools.filter((tool) => !denied.has(tool.id)).map((tool) => tool.id)).not.toContain("todowrite")
+      }),
+    )
+  }
+
   it.instance("does not expose task_status", () =>
     Effect.gen(function* () {
       const registry = yield* ToolRegistry.Service

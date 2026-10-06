@@ -111,6 +111,19 @@ One sidebar for usage, files, scripts, search, and status.
 | Choose which usage meters to show | medium | Sidebar can show Codex, Cursor, Go, and OpenRouter usage. Defaults are on. | Latest installed picker interaction is not recorded. |
 | Everything Search (Windows) | high | Starts the Everything daemon when needed, reconnects if it drops, does not try to own shutdown. Friendly sort names work in the local checkout. | Full start/reconnect acceptance is incomplete. Lives partly in `mcp-everything-search`. |
 
+### Todos
+
+Todos are off by default. The command palette's **oc** category offers **Enable todos**
+or **Disable todos** and saves the global `todos` preference in `opencode.jsonc`.
+Project configuration can override that default with `"todos": true` or `false`.
+The toggle confirms a configuration reload because active sessions may stop.
+
+When disabled, oc does not offer `todowrite`, Claude Code's native todo tools are
+disabled, provider todo mirroring stops, and the built-in sidebar list is hidden.
+Saved lists and historical tool rows remain. Enabling still respects agent and
+session permissions. Palette persistence and installed provider/sidebar behavior
+need a live check after rebuilding.
+
 ---
 
 ## 5. Agents, planning, and who does the work
@@ -141,7 +154,7 @@ Timestamps, copy, keys, diffs, plugins, and the terminal itself.
 | Agent square and status in the terminal tab | high | Terminal title starts with a `■` for the active agent. WezTerm colors it with the agent color through a tab-title snippet (in `v0.3.0.md`); other terminals show it uncolored. OSC progress shows busy, idle, and error states where the terminal supports it. | Live check on Windows Terminal (square and progress ring), conhost (square), WezTerm (square color follows the agent). |
 | Response timestamps | medium | Local date/time, then duration. Uses start time while the reply is still streaming. | Final look in the installed UI is not recorded. |
 | Text selection and copying | high | Double-click selects a word; triple-click selects a logical line including wrapped rows; dragging after those clicks extends by words or lines. Copy-on-release and Ctrl+C both retain the highlight; Escape clears it. Message actions, tool expand/collapse, and file-open controls are separate from selectable bodies. Clipboard writes finish in gesture order. | Focused renderer checks pass. Installed WezTerm gestures, message Actions, tool controls, and resize/scroll acceptance remain. Triple-click selects lines, not linguistic sentences. |
-| Keys and command palette | high | Context-sensitive Ctrl+D, Ctrl+Shift+Up/Down, Ctrl+N for a new OC session. OC commands use a source order and friendly labels. `command_palette.order` in `opencode.jsonc` can reorder commands inside a category; unlisted commands keep source order. Shut down and restart sit in the `oc` section. Slash-menu Ctrl+F toggles persistent favorites for skills, commands, MCP prompts, and oc actions; small solid-diamond favorites lead the empty search, while typed search keeps fuzzy ranking. The session slash menu reserves space above the prompt so current output stays visible; shorter terminals use a smaller menu. | Ordering, favorite identity, Ctrl+F input ownership, and slash-menu layout/bottom-follow are tested. Installed slash-menu streaming visibility, toggling, selection retention, and restart persistence need a live check. A full palette click-through is not recorded. |
+| Keys and command palette | high | Context-sensitive Ctrl+D, Ctrl+Shift+Up/Down, Ctrl+N for a new OC session. OC commands use a source order and friendly labels. `command_palette.order` in `opencode.jsonc` can reorder commands inside a category; unlisted commands keep source order. Shut down and restart sit in the `oc` section. Slash-menu Ctrl+F toggles persistent favorites for skills, commands, MCP prompts, and oc actions; small solid-diamond favorites lead the empty search, while typed search keeps fuzzy ranking. The session slash menu reserves space above the prompt so current output stays visible; shorter terminals use a smaller menu. Multiple prompt commands such as `/spit /think` combine as labeled instructions in one turn; later pickers preserve existing text. The first command controls agent/model routing; secondary routing commands must run first or separately. | Ordering, favorite identity, Ctrl+F input ownership, slash-menu layout/bottom-follow, composition delivery, and multiline/Unicode completion and Escape are tested. Installed `/spit /think` plan delivery, slash-menu streaming visibility, toggling, selection retention, and restart persistence need a live check. A full palette click-through is not recorded. |
 | Don't crash on odd tool text | medium | Coerces non-string OpenTUI text nodes (numbers become strings; null/boolean and other `add()` explosions are skipped) so nested tool output does not take down the UI. | Live "no regression" check is not recorded. |
 | Diff hover colors | ~done~ | Neutral diff regions share one hover background; add/remove colors stay. | None realistic. |
 | Crow session lock | medium | Each Crow tab stays on one OpenCode session via `CROW_SESSION_HANDLE`. Targeted commands only run on that handle. Optional `CROW_SESSION_ROUTE_URL` reports session changes. | Live Crow integration is limited. |

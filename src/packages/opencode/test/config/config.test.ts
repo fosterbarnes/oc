@@ -296,6 +296,35 @@ it.instance("loads config with defaults when no files exist", () =>
   }),
 )
 
+it.live("todo capability preserves JSONC and persists both boolean states", () =>
+  withGlobalConfig({}, ({ dir }) => Effect.gen(function* () {
+    const file = path.join(dir, "opencode.jsonc")
+    yield* FSUtil.use.writeWithDirs(file, '// Keep this comment\n{ "model": "test/model" }\n')
+    expect((yield* Config.use.getGlobal()).todos).toBeUndefined()
+    for (const todos of [true, false]) {
+      const result = yield* Config.use.updateGlobal({ todos })
+      expect(result.changed).toBe(true)
+      expect(result.info.todos).toBe(todos)
+      const text = yield* FSUtil.use.readFileString(file)
+      expect(text).toContain("// Keep this comment")
+      expect(ConfigParse.schema(ConfigV1.Info, ConfigParse.jsonc(text, file), file)).toMatchObject({
+        model: "test/model", todos,
+      })
+      expect((yield* Config.use.getGlobal()).todos).toBe(todos)
+      expect((yield* Config.use.updateGlobal({ todos })).changed).toBe(false)
+    }
+    expect(() => ConfigParse.schema(ConfigV1.Info, { todos: "true" }, "test:todos")).toThrow()
+  })),
+)
+
+for (const project of [{}, { todos: false }, { todos: true }]) {
+  it.live(`todo capability project precedence ${JSON.stringify(project)}`, () =>
+    withConfigTree({ global: { todos: true }, project }, Effect.gen(function* () {
+      expect((yield* Config.use.get()).todos).toBe("todos" in project ? project.todos : true)
+    })),
+  )
+}
+
 it.instance("falls back to generic username when system user info is unavailable", () =>
   Effect.gen(function* () {
     const userInfo = spyOn(os, "userInfo").mockImplementation(() => {

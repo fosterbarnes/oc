@@ -1451,64 +1451,110 @@ const layer = Layer.effect(
         command: input.command,
         agent: input.agent,
       })
-      const cmd = yield* commands.get(input.command)
-      if (!cmd) {
-        const available = (yield* commands.list()).map((c) => c.name)
-        const hint = available.length ? ` Available commands: ${available.join(", ")}` : ""
-        const error = new NamedError.Unknown({ message: `Command not found: "${input.command}".${hint}` })
+      const names = [...new Set([input.command, ...(input.additionalCommands ?? [])])]
+      const available = yield* commands.list()
+      const byName = new Map(available.map((definition) => [definition.name, definition]))
+      const definitions = names.map((name) => byName.get(name))
+      const missing = names.find((_, index) => !definitions[index])
+      if (missing !== undefined) {
+        const hint = available.length ? ` Available commands: ${available.map((c) => c.name).join(", ")}` : ""
+        const error = new NamedError.Unknown({ message: `Command not found: "${missing}".${hint}` })
         yield* events.publish(Session.Event.Error, { sessionID: input.sessionID, error: error.toObject() })
         throw error
       }
+      const selected = definitions.filter((definition) => definition !== undefined)
+      const incompatible = selected
+        .slice(1)
+        .find(
+          (definition) =>
+            definition.agent !== undefined || definition.model !== undefined || definition.subtask === true,
+        )
+      if (incompatible) {
+        const error = new NamedError.Unknown({
+          message: `Command "/${incompatible.name}" selects an agent, model, or subtask. Run it first or separately.`,
+        })
+        yield* events.publish(Session.Event.Error, { sessionID: input.sessionID, error: error.toObject() })
+        throw error
+      }
+      const cmd = selected[0]
       const agentName = cmd.agent ?? input.agent
 
       const raw = input.arguments.match(argsRegex) ?? []
       const args = raw.map((arg) => arg.replace(quoteTrimRegex, ""))
-      const templateCommand = yield* Effect.promise(async () => cmd.template)
+      const templates = yield* Effect.forEach(
+        selected,
+        Effect.fnUntraced(function* (definition) {
+          const templateCommand = yield* Effect.promise(async () => definition.template)
 
-      const placeholders = templateCommand.match(placeholderRegex) ?? []
-      let last = 0
-      for (const item of placeholders) {
-        const value = Number(item.slice(1))
-        if (value > last) last = value
-      }
+          const placeholders = templateCommand.match(placeholderRegex) ?? []
+          let last = 0
+          for (const item of placeholders) {
+            const value = Number(item.slice(1))
+            if (value > last) last = value
+          }
 
-      const withArgs = templateCommand.replaceAll(placeholderRegex, (_, index) => {
-        const position = Number(index)
-        const argIndex = position - 1
-        if (argIndex >= args.length) return ""
-        if (position === last) return args.slice(argIndex).join(" ")
-        return args[argIndex]
-      })
-      const usesArgumentsPlaceholder = templateCommand.includes("$ARGUMENTS")
-      let template = withArgs.replaceAll("$ARGUMENTS", input.arguments)
+          const withArgs = templateCommand.replaceAll(placeholderRegex, (_, index) => {
+            const position = Number(index)
+            const argIndex = position - 1
+            if (argIndex >= args.length) return ""
+            if (position === last) return args.slice(argIndex).join(" ")
+            return args[argIndex]
+          })
+          const usesArgumentsPlaceholder = templateCommand.includes("$ARGUMENTS")
+          let template = withArgs.replaceAll("$ARGUMENTS", input.arguments)
 
-      if (placeholders.length === 0 && !usesArgumentsPlaceholder && input.arguments.trim()) {
-        template = template + "\n\n" + input.arguments
-      }
+          if (
+            selected.length === 1 &&
+            placeholders.length === 0 &&
+            !usesArgumentsPlaceholder &&
+            input.arguments.trim()
+          ) {
+            template = template + "\n\n" + input.arguments
+          }
 
-      const shellMatches = ConfigMarkdown.shell(template)
-      if (shellMatches.length > 0) {
-        const cfg = yield* config.get()
-        const sh = Shell.preferred(cfg.shell)
-        const results = yield* Effect.forEach(
-          shellMatches,
-          ([, cmd]) => Effect.gen(function* () {
-            const handle = yield* spawner.spawn(ChildProcess.make(sh, Shell.args(sh, cmd, process.cwd()), {
-              stdin: "ignore",
-              stdout: "pipe",
-              stderr: "ignore",
-              forceKillAfter: "3 seconds",
-            }))
-            const text = yield* Stream.mkString(Stream.decodeText(handle.stdout))
-            yield* handle.exitCode
-            return text
-          }).pipe(Effect.scoped, Effect.catch(() => Effect.succeed(""))),
-          { concurrency: "unbounded" },
-        )
-        let index = 0
-        template = template.replace(bashRegex, () => results[index++])
-      }
-      template = template.trim()
+          const shellMatches = ConfigMarkdown.shell(template)
+          if (shellMatches.length > 0) {
+            const cfg = yield* config.get()
+            const sh = Shell.preferred(cfg.shell)
+            const results = yield* Effect.forEach(
+              shellMatches,
+              ([, cmd]) =>
+                Effect.gen(function* () {
+                  const handle = yield* spawner.spawn(
+                    ChildProcess.make(sh, Shell.args(sh, cmd, process.cwd()), {
+                      stdin: "ignore",
+                      stdout: "pipe",
+                      stderr: "ignore",
+                      forceKillAfter: "3 seconds",
+                    }),
+                  )
+                  const text = yield* Stream.mkString(Stream.decodeText(handle.stdout))
+                  yield* handle.exitCode
+                  return text
+                }).pipe(
+                  Effect.scoped,
+                  Effect.catch(() => Effect.succeed("")),
+                ),
+              { concurrency: "unbounded" },
+            )
+            let index = 0
+            template = template.replace(bashRegex, () => results[index++])
+          }
+          return template.trim()
+        }),
+      )
+      const template =
+        selected.length === 1
+          ? templates[0]
+          : [
+              "Apply all listed slash commands together to the user request below.",
+              "They are complementary unless their instructions directly conflict.",
+              "For direct conflicts at the same instruction priority, later command instructions take precedence.",
+              "Follow higher-priority instructions and permission restrictions. Writing a plan does not authorize implementing it.",
+              "",
+              ...selected.map((definition, index) => `[/${definition.name}]\n${templates[index]}\n`),
+              `[User request]\n${input.arguments}`,
+            ].join("\n")
 
       const taskModel = yield* Effect.gen(function* () {
         if (cmd.model) return Provider.parseModel(cmd.model)
@@ -1669,6 +1715,7 @@ export const CommandInput = Schema.Struct({
   arguments: Schema.String,
   command: Schema.String,
   variant: Schema.optional(Schema.String),
+  additionalCommands: Schema.optional(Schema.Array(Schema.String)),
   // Inlined (no identifier annotation) to keep the original SDK output - the
   // PromptInput call site below references FilePartInput by ref via the
   // Schema export in message-v2.ts.

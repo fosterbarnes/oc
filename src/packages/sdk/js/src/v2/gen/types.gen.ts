@@ -1967,6 +1967,7 @@ export type Config = {
     ignore?: Array<string>
   }
   snapshot?: boolean
+  todos?: boolean
   plugin?: Array<
     | string
     | [
@@ -11033,6 +11034,7 @@ export type SessionCommandData = {
     arguments: string
     command: string
     variant?: string
+    additionalCommands?: Array<string>
     parts?: Array<{
       id?: string
       type: "file"

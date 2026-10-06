@@ -25,20 +25,22 @@ import { TestTuiContexts } from "../fixture/tui-environment"
 import { createTuiResolvedConfig } from "../fixture/tui-runtime"
 import { createFetch, directory, eventSource, json } from "../fixture/tui-sdk"
 import { wait } from "../cli/cmd/tui/sync-fixture"
+import { promptOffsetWidth } from "../../src/prompt/display"
 
-test("session slash menu reserves space, follows output, and preserves manual scrolling", async () => {
+test("slash composition preserves command tokens and session menu layout", async () => {
   await using tmp = await tmpdir()
   await Bun.write(`${tmp.path}/kv.json`, "{}")
   const config = createTuiResolvedConfig()
   const calls = createFetch((url) => {
-    if (url.pathname === "/command") return json(
-      Array.from({ length: 15 }, (_, index) => ({
-        name: `action${index.toString().padStart(2, "0")}`,
-        description: "Command",
-        template: "Command",
-        source: "command",
-      })),
-    )
+    if (url.pathname === "/command")
+      return json(
+        Array.from({ length: 15 }, (_, index) => ({
+          name: `action${index.toString().padStart(2, "0")}`,
+          description: "Command",
+          template: "Command",
+          source: "command",
+        })),
+      )
     if (url.pathname === "/api/fs/find") return json({ location: { directory }, data: [] })
   })
   const [lines, setLines] = createSignal(Array.from({ length: 60 }, (_, index) => `Output ${index}`))
@@ -54,8 +56,13 @@ test("session slash menu reserves space, follows output, and preserves manual sc
   function Layout() {
     return (
       <box width="100%" height="100%" minHeight={0} gap={1}>
-        <scrollbox ref={(r: ScrollBoxRenderable) => (chat = r)} flexGrow={1}
-          stickyScroll stickyStart="bottom" scrollbarOptions={{ visible: false }}>
+        <scrollbox
+          ref={(r: ScrollBoxRenderable) => (chat = r)}
+          flexGrow={1}
+          stickyScroll
+          stickyStart="bottom"
+          scrollbarOptions={{ visible: false }}
+        >
           <For each={lines()}>{(line) => <text flexShrink={0}>{line}</text>}</For>
         </scrollbox>
         <box ref={(r: BoxRenderable) => (dock = r)} flexShrink={0}>
@@ -78,11 +85,15 @@ test("session slash menu reserves space, follows output, and preserves manual sc
             promptPartTypeId={() => 0}
           />
           <box ref={(r: BoxRenderable) => (anchor = r)} height={4} visible={visible()}>
-            <textarea focused height={1} ref={(r: TextareaRenderable) => (input = r)}
+            <textarea
+              focused
+              height={1}
+              ref={(r: TextareaRenderable) => (input = r)}
               onContentChange={() => {
                 setValue(input.plainText)
                 autocomplete?.onInput(input.plainText)
-              }} />
+              }}
+            />
             <text>Prompt status</text>
           </box>
         </box>
@@ -103,14 +114,20 @@ test("session slash menu reserves space, follows output, and preserves manual sc
                 <SDKProvider url="http://test" directory={directory} fetch={calls.fetch} events={eventSource()}>
                   <PermissionProvider>
                     <ProjectProvider>
-                      <ExitProvider exit={(error) => { throw error }}>
+                      <ExitProvider
+                        exit={(error) => {
+                          throw error
+                        }}
+                      >
                         <RouteProvider initialRoute={{ type: "home" }}>
                           <SyncProvider>
                             <DataProvider>
                               <ThemeProvider mode="dark">
                                 <EditorContextProvider integration={{ connection: () => undefined }}>
                                   <FrecencyProvider>
-                                    <LocationProvider><Layout /></LocationProvider>
+                                    <LocationProvider>
+                                      <Layout />
+                                    </LocationProvider>
                                   </FrecencyProvider>
                                 </EditorContextProvider>
                               </ThemeProvider>
@@ -169,6 +186,39 @@ test("session slash menu reserves space, follows output, and preserves manual sc
     await app.waitForVisualIdle()
     expect(autocomplete.visible).toBe(false)
     expect(chat.viewport.height).toBe(originalHeight)
+
+    await edit("/action00 /action14")
+    await app.waitForFrame((frame) => frame.includes("/action14:(command)"))
+    app.mockInput.pressTab()
+    await app.waitForVisualIdle()
+    expect(input.plainText).toBe("/action00 /action14 ")
+    expect(autocomplete.visible).toBe(false)
+
+    await edit("/action00\n界 /act14 trailing request")
+    input.cursorOffset = promptOffsetWidth("/action00\n界 /act14")
+    autocomplete.onInput(input.plainText)
+    await app.waitForFrame((frame) => frame.includes("/action14:(command)"))
+    app.mockInput.pressTab()
+    await app.waitForVisualIdle()
+    expect(input.plainText).toBe("/action00\n界 /action14 trailing request")
+    expect(input.cursorOffset).toBe(promptOffsetWidth("/action00\n界 /action14 "))
+    expect(autocomplete.visible).toBe(false)
+
+    await edit("/action00\n界 /act14")
+    expect(autocomplete.visible).toBe("/")
+    await edit("/action00 /action14")
+    app.mockInput.pressEscape()
+    await app.waitForVisualIdle()
+    expect(input.plainText).toBe("/action00 ")
+    expect(autocomplete.visible).toBe(false)
+
+    await edit("/action00 /action14 ")
+    app.mockInput.pressBackspace()
+    await app.waitForVisualIdle()
+    expect(autocomplete.visible).toBe("/")
+    app.mockInput.pressTab()
+    await app.waitForVisualIdle()
+    expect(input.plainText).toBe("/action00 /action14 ")
 
     chat.scrollTo(10)
     await app.waitForVisualIdle()

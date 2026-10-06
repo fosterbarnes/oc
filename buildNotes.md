@@ -119,6 +119,56 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-06 (~19:38) - v0.2.102 - Compose slash commands and finish picker recovery - GPT-6.1 Sol, effort not exposed; Implementation
+
+### Agent
+- Meta: GPT-6.1 Sol; effort not exposed; Implementation; completed, installed acceptance pending
+- Version: 0.2.102
+- Added legacy SessionPrompt.CommandInput.additionalCommands and generated SDK field; TUI submits command names with remaining user request instead of concatenating later templates into primary arguments. Authoritative registry snapshot resolves ordered unique definitions; validates missing names and secondary agent/model/subtask routing before expansion. Primary routing/plugin/event identity retained.
+- Composed original command bodies in labeled user-level blocks for one prompt turn; shared arguments independently expand each template. Preserved single-command append behavior, shell expansion, and existing attachment resolution. No current Protocol/packages/server contract changed.
+- Fixed cursor-local picker completion and Escape through shared slashTriggerIndex: fresh text/cursor offsets prevent stale Unicode/multiline ranges. Open menu retargets on replacement; invalid triggers close without deleting text. Completion moves past existing space and closes rather than reopening the same token. Later pickers exclude native TUI actions.
+- Added rejected-command toast/draft recovery and exact-token extraction with ordered deduplication and preserved whitespace/unknown paths. Updated existing FORK.md palette row. Archived completed plan at `.opencode/plans/archive/slashCommandComposition.md`; Grok source-grounded diagnosis and corrected offset arithmetic retained.
+- Verification: final `bun test --timeout 30000 test/component/slashMenuLayout.test.tsx test/prompt/slash.test.ts` from `src/packages/tui`: 3 pass, 0 fail, 56 assertions. Real Autocomplete renderer covers multi-token selection, Unicode/multiline cursor completion, open-buffer replacement, unchanged Escape assertion, backspace/reopen, layout/scrolling, Home and mention modes.
+- Verification: final `bun test --timeout 30000 test/session/prompt.test.ts --test-name-pattern "slash composition"` from `src/packages/opencode`: 3 pass, 61 filtered, 0 fail, 37 assertions. Actual model input covers ordering, deduplication, shared placeholders, shell expansion, primary model/variant, single-command behavior, and validation before shell side effects.
+- Regenerated legacy SDK earlier through canonical `packages/sdk/js/script/build.ts`: generation and included SDK TypeScript compilation succeeded. Preserved concurrent todo-capability output; no oc build/install/push or broader checks run.
+- Coverage limit: production extraction and server model delivery checked separately; no full Prompt mount, lazy MCP-specific regression, or installed model-adherence acceptance claimed. User live check: pick `/spit`, then `/think`, submit concrete issue, confirm discussion plus plan and no implementation.
+- MISTAKE: initial renderer used pressKey("tab"), inserting literal text; replaced with dedicated key methods. Fuzzy-ranking assumption replaced with unique partial query. Server fixture names spit/think collided with global user commands; use unique names. Initial work stopped at verification limit, then resumed with user authorization; do not weaken assertions to bypass failure.
+
+### User
+Slash command combinations
+- `/spit /think` combines both instructions into one agent turn, with your request kept separate.
+- Picking another slash command preserves earlier commands and surrounding text.
+- Completion and Escape now work after multiline or Unicode input without leaving command fragments.
+- All six focused checks passed; installed discussion-and-plan behavior remains a live check after rebuilding.
+
+---
+
+## 2026-10-06 (~19:32) - v0.2.101 - Default-off todos and palette toggle - GPT-6.1 Sol, effort not exposed; Implementation
+
+### Agent
+- Meta: GPT-6.1 Sol; effort not exposed; Implementation; completed, installed acceptance pending
+- Version: 0.2.101
+- Added optional native config `todos`; only true enables. `ToolRegistry.all()` filters exact `todowrite` from built-in/custom entries before model permission filtering. Explicit agent allow cannot bypass disabled capability; enabled capability retains existing permissions.
+- Added reactive `oc.todos.toggle` in full/oc palettes through `tui/src/todos.ts`. Confirmed global SDK patch preserves normal config precedence; pending guard waits for successful global-disposal bootstrap, including SSE-before-PATCH-response ordering. Unchanged global defaults refresh directly and report project overrides. Cancel/write errors preserve effective state.
+- Disabled Claude TodoWrite/TaskCreate/TaskUpdate/TaskGet/TaskList when v1 host omits todowrite; skipped saved-task reads and synthetic mirrors. Existing catalog hash already retires old enabled process; no new lifecycle mechanism. Kept v2 host dialect behavior, dispatch tools, Cursor plan paths, stored lists, and transcript rows. Cursor advertisement guard verified unchanged.
+- Gated built-in todo sidebar on same reactive config; documented scope/reload behavior in FORK.md. Plan `.opencode/plans/ses_eecb91537ffeIWQKJRaJofI9a9.md` records implementation and installed acceptance.
+- Verification: from `src/packages/opencode`, `bun test --timeout 30000 test/tool/registry.test.ts test/config/config.test.ts test/provider/claude-code/subagent-hint.test.ts test/provider/claude-code/fundamental-tools.test.ts test/provider/cursor.test.ts --test-name-pattern "todo capability|todo native tools|native tools follow|disabled todos|TodoWrite calls|task tool turns|oc-only proxies execute|todo display updates"`: 14 pass, 177 filtered, 0 fail, 79 Bun assertions plus node assertions.
+- Verification: from `src/packages/tui`, final `bun test --timeout 30000 test/todos.test.tsx`: 1 pass, 0 fail, 26 assertions. Mounted production command, both palettes, SDK/sync, and confirmation with real renderer; covered cancel, save failure, duplicate guard, reload-before-response, confirmation-time unrelated reload, project override/no-op, and another TUI's config event.
+- Generated clients with `bun run generate` from `src/packages/client` (no tracked output changes). Regenerated legacy SDK through isolated temp adaptation of canonical generator; added `Config.todos`, preserved concurrent agent's additionalCommands output. Skipped SDK tsc/dist build tail; no builds, installs, broader checks, or pushes run.
+- Coverage limit: registry test exercises real registry plus existing permission helper, not a complete remote model request. Sidebar condition, installed persistence, real Claude CLI flags, and Cursor service behavior still need user's installed acceptance.
+- MISTAKE: first isolated SDK attempt expected another agent's transient openapi.json, which disappeared during their regeneration; second used replacement text containing `$\`` and JavaScript expanded the replacement prefix, producing invalid scratch code. Corrected optional preservation and callback replacement; final generation passed without touching shared OpenAPI path. Use callback replacement for generated shell template strings.
+- MISTAKE: issued invalid noop Task call; tool rejected unknown agent type and no subagent ran. Do not call Task without user/rules authorization or a real assignment.
+
+### User
+Todos
+- Todos are disabled by default, including for agents that explicitly allow the todo tool.
+- Enable todos or Disable todos is available in the command palette's oc category and persists the global preference.
+- Disabling hides the sidebar list and stops todo tools and provider mirroring without deleting saved lists.
+- The toggle confirms a configuration reload; project settings can override the global default.
+- All 15 focused checks passed. Rebuild/install, then confirm the toggle and persistence in the installed TUI.
+
+---
+
 ## 2026-10-06 (~19:05) - v0.2.100 - Word and line mouse selection - GPT-6.1 Sol, effort not exposed; Implementation
 
 ### Agent

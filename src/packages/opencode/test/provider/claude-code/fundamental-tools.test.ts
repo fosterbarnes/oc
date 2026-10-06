@@ -217,7 +217,7 @@ test("oc-only proxies execute once, refresh between turns, and leave native tool
   })
   const options: LanguageModelV3CallOptions = {
     prompt: [{ role: "user", content: [{ type: "text", text: "Run tools." }] }],
-    tools: ["session_tail", "read", "glob", "grep", "bash", "edit", "write", "webfetch"].map((name) => ({
+    tools: ["session_tail", "read", "glob", "grep", "bash", "edit", "write", "webfetch", "todowrite"].map((name) => ({
       type: "function", name, description: name, inputSchema: { type: "object", properties: {} },
     })),
     providerOptions: { "claude-code": { opencodeSessionID: session, opencodeAgent: "build" } },
@@ -395,6 +395,49 @@ test("a turn's TodoWrite calls become one in-stream, provider-executed todowrite
     // The result arrives before the finish, so oc never sees an unanswered call.
     expect(events.findIndex((event) => event.type === "tool-result"))
       .toBeLessThan(events.findIndex((event) => event.type === "finish"))
+  } finally {
+    hostToolExecutors.delete(session)
+    await deleteActiveProcessAndWait(key)
+    deleteClaudeSessionId(key)
+  }
+}, 20_000)
+
+test("disabled todos skip native mirrors and retire the enabled Claude process", async () => {
+  await using directory = await tmpdir()
+  const session = randomUUID()
+  const key = sessionKey(directory.path, `tools::${session}::context=["claude-code"]`)
+  const calls: string[] = []
+  hostToolExecutors.set(session, async (name) => {
+    calls.push(name)
+    return { output: "ok", metadata: {} }
+  })
+  const model = new ClaudeCodeLanguageModel(`todo-toggle-${randomUUID()}`, {
+    provider: "claude-code", cliPath: await fakeCli(directory.path), cwd: directory.path,
+    configDir: path.join(directory.path, ".claudeConfig"), autoContinueIncompleteTurns: false,
+  })
+  const turn = (text: string, enabled: boolean) => model.doStream({
+    prompt: [{ role: "user", content: [{ type: "text", text }] }],
+    tools: (enabled ? ["read", "todowrite"] : ["read"]).map((name) => ({
+      type: "function", name, inputSchema: { type: "object", properties: {} },
+    })),
+    providerOptions: { "claude-code": { opencodeSessionID: session, opencodeAgent: "build" } },
+  })
+  try {
+    await drain((await turn("Track this.", true)).stream)
+    const enabled = getActiveProcess(key)
+    expect(calls).toEqual(["todowrite"])
+    expect(enabled?.cliArgs).not.toContain("TodoWrite")
+
+    for (const text of ["Track this.", "Plan tasks."]) {
+      const events = await drain((await turn(text, false)).stream)
+      expect(events.some((event) => event.type === "tool-call" || event.type === "tool-input-start" || event.type === "tool-result")).toBe(false)
+      expect(events.at(-1)).toMatchObject({ type: "finish" })
+      expect(calls).toEqual(["todowrite"])
+    }
+    expect(getActiveProcess(key)).not.toBe(enabled)
+    expect(getActiveProcess(key)?.cliArgs).toEqual(expect.arrayContaining([
+      "--disallowedTools", "TodoWrite", "TaskCreate", "TaskUpdate", "TaskGet", "TaskList",
+    ]))
   } finally {
     hostToolExecutors.delete(session)
     await deleteActiveProcessAndWait(key)

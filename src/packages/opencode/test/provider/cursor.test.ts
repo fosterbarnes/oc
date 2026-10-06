@@ -16,8 +16,23 @@ import {
 import { CURSOR_COMPACTION_OPTION } from "@/provider/cursor/shared"
 import { applyCursorCompactionOption } from "@/session/llm/request"
 import { resolveCreatePlanBridge } from "@/provider/cursor/protocol/create-plan"
+import { parseDisplayToolCall, resolveBridgedOpenCodeToolCall } from "@/provider/cursor/protocol/tool-call-bridge"
 
 describe("native Cursor provider", () => {
+  test("todo display updates require an advertised todo capability", () => {
+    for (const variant of ["update_todos_tool_call", "create_plan_tool_call"]) {
+      const display = parseDisplayToolCall("call_todo", {
+        [variant]: { args: { todos: [{ id: "1", content: "Check gating", status: "pending" }] } },
+      })
+      expect(display).toBeDefined()
+      if (!display) throw new Error("todo display call did not parse")
+      expect(resolveBridgedOpenCodeToolCall(display, ["read", "task"])).toBeUndefined()
+      expect(resolveBridgedOpenCodeToolCall(display, ["todowrite"])).toMatchObject({
+        toolName: "todowrite", args: { todos: [expect.objectContaining({ content: "Check gating" })] },
+      })
+    }
+  })
+
   test("includes the server reason in Connect errors", () => {
     expect(
       connectFrameError('{"error":{"code":"resource_exhausted","message":"Account limit reached"}}').message,

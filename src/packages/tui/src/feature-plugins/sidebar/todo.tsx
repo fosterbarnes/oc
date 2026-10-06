@@ -9,7 +9,9 @@ function View(props: { api: TuiPluginApi; session_id: string }) {
   const [open, setOpen] = createSignal(true)
   const theme = () => props.api.theme.current
   const list = createMemo(() => props.api.state.session.todo(props.session_id))
-  const show = createMemo(() => list().length > 0 && list().some((item) => item.status !== "completed"))
+  const show = createMemo(() =>
+    props.api.state.config.todos === true && list().some((item) => item.status !== "completed"),
+  )
 
   return (
     <Show when={show()}>

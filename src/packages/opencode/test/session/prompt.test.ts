@@ -731,9 +731,7 @@ noLLMServer.instance.skip(
       })
 
       const messages = yield* SessionV2.Service.use((session) => session.messages({ sessionID: chat.id })).pipe(
-        Effect.provide(
-          LayerNode.compile(SessionV2.node),
-        ),
+        Effect.provide(LayerNode.compile(SessionV2.node)),
       )
       const { db } = yield* Database.Service
       const row = yield* db
@@ -2288,9 +2286,7 @@ it.instance("default title triggers remote title stream for non-agentify provide
 
     expect(yield* llm.calls).toBe(2)
     const hits = yield* llm.hits
-    expect(
-      hits.some((hit) => JSON.stringify(hit.body).includes("Generate a title for this conversation")),
-    ).toBe(true)
+    expect(hits.some((hit) => JSON.stringify(hit.body).includes("Generate a title for this conversation"))).toBe(true)
   }),
 )
 
@@ -2412,6 +2408,123 @@ noLLMServer.instance(
 )
 
 // Agent / command resolution errors
+
+it.instance("slash composition delivers ordered unique command bodies in one model turn", () =>
+  Effect.gen(function* () {
+    const { llm } = yield* useServerConfig((url) => ({
+      ...providerCfg(url),
+      command: {
+        compositionSpit: { template: "Discuss strategies. No code changes." },
+        compositionThink: { template: "Choose a clean solution and write a Markdown plan." },
+        compositionConcise: { template: "Keep the explanation concise." },
+      },
+    }))
+    const { prompt, sessions } = yield* boot()
+    for (const names of [
+      ["compositionSpit", "compositionThink", "compositionConcise", "compositionSpit"],
+      ["compositionThink", "compositionSpit"],
+    ]) {
+      const chat = yield* sessions.create({ title: "Composition" })
+      yield* llm.text("done")
+      yield* prompt.command({
+        sessionID: chat.id,
+        command: names[0],
+        additionalCommands: names.slice(1),
+        arguments: "Fix queued messages\n\nPreserve cancellation",
+        agent: "build",
+        model: "test/test-model",
+        variant: "high",
+      })
+      const inputs = yield* llm.inputs
+      const messages = inputs.at(-1)?.messages
+      if (!Array.isArray(messages)) throw new Error("Expected model messages")
+      const text = messages.at(-1)?.content
+      expect(typeof text).toBe("string")
+      expect(text).toContain("Apply all listed slash commands together")
+      expect(text).toContain("Discuss strategies. No code changes.")
+      expect(text).toContain("Choose a clean solution and write a Markdown plan.")
+      expect(text).toContain("[User request]\nFix queued messages\n\nPreserve cancellation")
+      expect(text.indexOf(`[/${names[0]}]`)).toBeLessThan(text.indexOf(`[/${names[1]}]`))
+      expect(text.match(/\[\/compositionSpit\]/g)).toHaveLength(1)
+      const history = yield* sessions.messages({ sessionID: chat.id })
+      expect(history.filter((message) => message.info.role === "user")).toHaveLength(1)
+      expect(history[0].info).toMatchObject({ agent: "build", model: { ...ref, variant: "high" } })
+    }
+    expect(yield* llm.calls).toBe(2)
+  }),
+)
+
+it.instance("slash composition expands shared arguments and shell snippets without cross-template substitution", () =>
+  Effect.gen(function* () {
+    const { llm } = yield* useServerConfig((url) => ({
+      ...providerCfg(url),
+      shell: process.platform === "win32" ? "pwsh" : "/bin/sh",
+      command: {
+        first: { template: "First: $1 | $2" },
+        second: { template: "Second: $ARGUMENTS\n!`echo expanded`" },
+        plain: { template: "Plain body" },
+      },
+    }))
+    const { prompt, chat, sessions } = yield* boot()
+    yield* llm.text("done")
+    yield* prompt.command({
+      sessionID: chat.id,
+      command: "first",
+      additionalCommands: ["second", "plain"],
+      arguments: '"two words" remaining request',
+    })
+    const history = yield* sessions.messages({ sessionID: chat.id })
+    const text = history[0].parts.find((part) => part.type === "text")
+    if (text?.type !== "text") throw new Error("Expected composed text")
+    expect(text.text).toContain("First: two words | remaining request")
+    expect(text.text).toContain('Second: "two words" remaining request\nexpanded')
+    expect(text.text).toContain('[/plain]\nPlain body\n\n[User request]\n"two words" remaining request')
+    expect(text.text).not.toContain("$ARGUMENTS")
+    expect(text.text).not.toContain("!`")
+    expect(yield* llm.calls).toBe(1)
+    const single = yield* sessions.create({ title: "Single command" })
+    yield* llm.text("done")
+    yield* prompt.command({
+      sessionID: single.id,
+      command: "plain",
+      additionalCommands: ["plain"],
+      arguments: "request",
+    })
+    const singleHistory = yield* sessions.messages({ sessionID: single.id })
+    expect(singleHistory[0].parts.find((part) => part.type === "text")).toMatchObject({ text: "Plain body\n\nrequest" })
+  }),
+)
+
+it.instance("slash composition validates missing and routed secondary commands before shell effects", () =>
+  Effect.gen(function* () {
+    const test = yield* TestInstance
+    const marker = path.join(test.directory, "compositionMarker.txt")
+    const { llm } = yield* useServerConfig((url) => ({
+      ...providerCfg(url),
+      shell: process.platform === "win32" ? "pwsh" : "/bin/sh",
+      command: {
+        first: { template: `!\`echo expanded > "${marker}"\`` },
+        routed: { template: "Routed body", agent: "build" },
+        model: { template: "Model body", model: "test/test-model" },
+        task: { template: "Task body", subtask: true },
+      },
+    }))
+    const { prompt, chat, sessions } = yield* boot()
+    for (const name of ["missing", "routed", "model", "task"]) {
+      const exit = yield* prompt
+        .command({ sessionID: chat.id, command: "first", additionalCommands: [name], arguments: "request" })
+        .pipe(Effect.exit)
+      if (Exit.isSuccess(exit)) throw new Error("Expected command rejection")
+      const error = Cause.squash(exit.cause)
+      expect(NamedError.Unknown.isInstance(error)).toBe(true)
+      if (NamedError.Unknown.isInstance(error)) expect(error.data.message).toContain(name)
+    }
+    const fs = yield* FSUtil.Service
+    expect(yield* fs.existsSafe(marker)).toBe(false)
+    expect(yield* sessions.messages({ sessionID: chat.id })).toHaveLength(0)
+    expect(yield* llm.calls).toBe(0)
+  }),
+)
 
 noLLMServer.instance(
   "unknown agent throws typed error",

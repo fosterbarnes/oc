@@ -22,7 +22,8 @@ import { Locale } from "../../util/locale"
 import type { PromptInfo } from "../../prompt/history"
 import { useFrecency } from "../../prompt/frecency"
 import { useBindings, useCommandShortcut, useCommandSlashes, useOpencodeModeStack } from "../../keymap"
-import { displayCharAt, mentionTriggerIndex } from "../../prompt/display"
+import { displayCharAt, promptOffsetWidth, mentionTriggerIndex } from "../../prompt/display"
+import { slashTriggerIndex } from "../../prompt/slash"
 import type { FileSystemEntry } from "@opencode-ai/sdk/v2"
 
 function removeLineRange(input: string) {
@@ -469,7 +470,7 @@ export function Autocomplete(props: {
   )
 
   const commands = createMemo((): AutocompleteOption[] => {
-    const results: AutocompleteOption[] = slashes().map((slash) => ({
+    const results: AutocompleteOption[] = (store.index === 0 ? slashes() : []).map((slash) => ({
       ...slash,
       display: `${slash.display}:(oc)`,
       kind: "tui" as const,
@@ -483,11 +484,20 @@ export function Autocomplete(props: {
         description: serverCommand.description,
         kind: serverCommand.source,
         onSelect: () => {
-          const newText = "/" + serverCommand.name + " "
-          const cursor = props.input().logicalCursor
-          props.input().deleteRange(0, 0, cursor.row, cursor.col)
-          props.input().insertText(newText)
-          props.input().cursorOffset = Bun.stringWidth(newText)
+          const input = props.input()
+          const offset = input.cursorOffset
+          const index = slashTriggerIndex(input.plainText, offset)
+          if (index === undefined) return
+          const suffix = input.getTextRange(offset, promptOffsetWidth(input.plainText))
+          const end = offset + promptOffsetWidth(suffix.match(/^\S*/)?.[0] ?? "")
+          input.cursorOffset = index
+          const startCursor = input.logicalCursor
+          input.cursorOffset = end
+          const endCursor = input.logicalCursor
+          input.deleteRange(startCursor.row, startCursor.col, endCursor.row, endCursor.col)
+          input.insertText("/" + serverCommand.name + (displayCharAt(input.plainText, index) === " " ? "" : " "))
+          if (displayCharAt(input.plainText, input.cursorOffset) === " ") input.cursorOffset += 1
+          setStore("visible", false)
         },
       })
     }
@@ -583,7 +593,9 @@ export function Autocomplete(props: {
   function select() {
     const selected = options()[store.selected]
     if (!selected) return
-    hide()
+    // Native actions consume their trigger; prompt commands and mentions replace it themselves.
+    if (selected.kind === "tui") hide()
+    else setStore("visible", false)
     selected.onSelect?.()
   }
 
@@ -703,10 +715,15 @@ export function Autocomplete(props: {
   }
 
   function hide() {
-    const text = props.input().plainText
-    if (store.visible === "/" && !text.endsWith(" ") && text.startsWith("/")) {
-      const cursor = props.input().logicalCursor
-      props.input().deleteRange(0, 0, cursor.row, cursor.col)
+    const input = props.input()
+    const index = store.visible === "/" ? slashTriggerIndex(input.plainText, input.cursorOffset) : undefined
+    if (index !== undefined) {
+      const offset = input.cursorOffset
+      input.cursorOffset = index
+      const start = input.logicalCursor
+      input.cursorOffset = offset
+      const end = input.logicalCursor
+      input.deleteRange(start.row, start.col, end.row, end.col)
       // Sync the prompt store immediately since onContentChange is async
       props.setPrompt((draft) => {
         draft.input = props.input().plainText
@@ -729,14 +746,23 @@ export function Autocomplete(props: {
         return store.visible
       },
       onInput(value) {
+        const offset = props.input().cursorOffset
+        const slash = slashTriggerIndex(value, offset)
+        if (store.visible === "/" || (!store.visible && slash !== undefined)) {
+          if (slash === undefined) {
+            setStore("visible", false)
+            return
+          }
+          if (!store.visible) show("/")
+          setStore("index", slash)
+          return
+        }
         if (store.visible) {
           if (
             // Typed text before the trigger
             props.input().cursorOffset <= store.index ||
             // There is a space between the trigger and the cursor
-            props.input().getTextRange(store.index, props.input().cursorOffset).match(/\s/) ||
-            // "/<command>" is not the sole content
-            (store.visible === "/" && value.match(/^\S+\s+\S+\s*$/))
+            props.input().getTextRange(store.index, props.input().cursorOffset).match(/\s/)
           ) {
             hide()
           }
@@ -744,15 +770,7 @@ export function Autocomplete(props: {
         }
 
         // Check if autocomplete should reopen (e.g., after backspace deleted a space)
-        const offset = props.input().cursorOffset
         if (offset === 0) return
-
-        // Check for "/" at position 0 - reopen slash commands
-        if (value.startsWith("/") && !value.slice(0, offset).match(/\s/)) {
-          show("/")
-          setStore("index", 0)
-          return
-        }
 
         // Check for "@" trigger - find the nearest "@" before cursor with no whitespace between
         const idx = mentionTriggerIndex(value, offset)

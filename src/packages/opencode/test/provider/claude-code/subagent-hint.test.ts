@@ -400,12 +400,22 @@ test("appended prompt is the agent prompt, the tool note and the multi-step hint
 // oc's per-agent permissions reach Claude Code's own tools only through
 // --disallowedTools: whatever oc left out of the agent's tool set is off.
 test("native tools follow the oc tools the agent was given", () => {
-  const all = ["bash", "edit", "write", "read", "glob", "grep", "webfetch"].map((name) => ({ name }))
+  const all = ["bash", "edit", "write", "read", "glob", "grep", "webfetch", "todowrite"].map((name) => ({ name }))
   assert.deepEqual(nativeToolsDeniedByHost(all), [])
-  const readOnly = ["read", "glob", "grep", "webfetch"].map((name) => ({ name }))
+  const readOnly = ["read", "glob", "grep", "webfetch", "todowrite"].map((name) => ({ name }))
   assert.deepEqual(nativeToolsDeniedByHost(readOnly), ["Bash", "PowerShell", "Edit", "MultiEdit", "NotebookEdit", "Write"])
   // V2 hosts name the shell tool `shell`.
   assert.deepEqual(nativeToolsDeniedByHost([{ name: "shell" }, ...all.filter((t) => t.name !== "bash")], "v2"), [])
   // No tool snapshot (direct AI SDK use) changes nothing.
   assert.deepEqual(nativeToolsDeniedByHost(undefined), [])
+})
+
+test("todo native tools are disabled only when the v1 host omits todowrite", () => {
+  const tools = ["bash", "edit", "write", "read", "glob", "grep", "webfetch"].map((name) => ({ name }))
+  const todos = ["TodoWrite", "TaskCreate", "TaskUpdate", "TaskGet", "TaskList"]
+  assert.deepEqual(nativeToolsDeniedByHost(tools), todos)
+  assert.deepEqual(nativeToolsDeniedByHost([...tools, { name: "todowrite" }]), [])
+  assert.deepEqual(nativeToolsDeniedByHost([{ name: "shell" }, ...tools.slice(1)], "v2"), [])
+  assert.deepEqual(nativeToolsDeniedByHost(undefined), [])
+  assert.ok(!nativeToolsDeniedByHost([]).some((name) => ["Agent", "Task", "TaskOutput", "TaskStop"].includes(name)))
 })
