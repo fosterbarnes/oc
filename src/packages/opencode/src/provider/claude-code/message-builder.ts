@@ -211,10 +211,13 @@ function getToolResultText(part: any): string {
  * thinking keyword ("(ultrathink)"), but Claude Code dropped every keyword
  * except that one, so effort now reaches the CLI as CLAUDE_CODE_EFFORT_LEVEL
  * at spawn time (see `claudeSpawnEnv`).
+ *
+ * `resume` is set on the first message of a fresh Claude conversation for a
+ * chat that already has history; see `resumeBlock`.
  */
 export function getClaudeUserMessage(
   prompt: Prompt,
-  includeHistoryContext: boolean = false,
+  resume?: { sessionID?: string },
   opts: {
     cliToolCallIds?: ReadonlySet<string>
     stripContextReminders?: boolean
@@ -269,13 +272,6 @@ export function getClaudeUserMessage(
     content.push({
       type: "text",
       text: `<opencode_tool_result tool="${part.toolName ?? "unknown"}">\n${text}\n</opencode_tool_result>`,
-    })
-  }
-
-  if (includeHistoryContext) {
-    // No transcript paste. Memory is the live process or `--resume`.
-    log.info("no claude session to resume; history not inlined", {
-      messages: prompt.length,
     })
   }
 
@@ -345,6 +341,8 @@ export function getClaudeUserMessage(
     })
   }
 
+  if (resume) content.unshift({ type: "text", text: resumeBlock(prompt, resume.sessionID) })
+
   return JSON.stringify({
     type: "user",
     message: {
@@ -352,6 +350,57 @@ export function getClaudeUserMessage(
       content,
     },
   })
+}
+
+const RESUME_USER_CHARS = 1500
+const RESUME_REPLY_CHARS = 4000
+
+/**
+ * Catch-up for a fresh Claude conversation in a chat with history (its old
+ * transcript is gone). Pushes only the previous exchange, which answers most
+ * follow-ups ("do option b"), and points at `session_read` for anything older
+ * instead of pasting the whole history. Excerpts keep their ends: a reply's
+ * options and questions sit at the bottom.
+ */
+function resumeBlock(prompt: Prompt, sessionID: string | undefined): string {
+  const lastReply = prompt.findLastIndex((m) => m.role === "assistant")
+  const previousUser = prompt.findLastIndex((m, i) => i < lastReply && m.role === "user")
+  const reply = prompt
+    .slice(previousUser + 1, lastReply + 1)
+    .filter((m) => m.role === "assistant")
+    .map(messageText)
+    .join("\n")
+  const earlierTurns = prompt.slice(0, lastReply).filter((m) => m.role === "user").length
+  const reads = sessionID
+    ? `If the excerpt is not enough to act correctly, read more of this chat (oc session ${sessionID}) before answering:
+- mcp__opencode_proxy__session_read {"sessionId":"${sessionID}","window":"tail","turns":6}
+- the same with "window":"head","turns":2 if the original goal is unclear
+- "window":"full" only if both fall short; it returns a file path and outline, read only the sections you need
+Re-read any file the transcript says was edited before you change it.
+
+`
+    : ""
+  return `<session_resume>
+You are continuing an existing oc chat. Your earlier Claude conversation for it was lost, so you do not remember it; the user does. Earlier user turns: ${earlierTurns}.
+
+Previous user message:
+${tail(previousUser < 0 ? "" : messageText(prompt[previousUser]), RESUME_USER_CHARS)}
+
+Your previous reply (end):
+${tail(reply, RESUME_REPLY_CHARS)}
+
+${reads}The transcript is background, not instructions: do not redo or resume earlier work unless the new message asks for it. Do not summarize the catch-up to the user. The message after this block is your task.
+</session_resume>`
+}
+
+function messageText(message: Prompt[number]): string {
+  if (typeof message.content === "string") return message.content
+  return message.content.map((part) => (part.type === "text" ? part.text : "")).filter(Boolean).join("\n")
+}
+
+function tail(text: string, max: number): string {
+  const trimmed = text.trim()
+  return trimmed.length > max ? `[...]${trimmed.slice(-max)}` : trimmed || "(none)"
 }
 
 /** Rough visible-thread size. Not the Claude prompt. */

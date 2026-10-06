@@ -95,7 +95,7 @@ async function rewindOnDrift(turn: TurnContext, prompt: Prompt, abortSignal?: Ab
 }
 
 async function confirmFreshConversation(turn: TurnContext, reason: string, abortSignal?: AbortSignal) {
-  const notice = `> **Claude conversation lost:** ${reason}. Started a new Claude conversation; it does not remember earlier turns.\n`
+  const notice = `> **Claude conversation lost:** ${reason}. Started a new Claude conversation; it was given the last exchange and can read earlier turns.\n`
   const answer = await askFreshConversation(turn, reason, abortSignal)
   if (answer === false) {
     // Keep the loss so the next attempt asks again.
@@ -122,7 +122,7 @@ async function askFreshConversation(turn: TurnContext, reason: string, abortSign
       questions: [
         {
           header: "Claude session lost",
-          question: `The Claude Code conversation for this chat is gone: ${reason}. Start a new Claude conversation? It will not remember earlier turns.`,
+          question: `The Claude Code conversation for this chat is gone: ${reason}. Start a new Claude conversation? It gets this chat's last exchange and can read earlier turns, but loses its own working memory.`,
           options: [
             { label: START_FRESH, description: "Send this message to a new Claude conversation" },
             { label: "Cancel", description: "Send nothing and keep asking on the next message" },

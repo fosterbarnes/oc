@@ -146,16 +146,22 @@ export class ClaudeCodeLanguageModel implements LanguageModelV3 {
           abortSignal: options.abortSignal,
         })
     const includeHistoryContext = !getClaudeSessionId(turn.sessionKey) && !hasActiveProcess && hasPriorConversation
+    // The catch-up may point at `session_read` only when it is proxied and there is a session to read.
+    const canReadSession = turn.affinity !== "default" && !!this.config.proxyOpencodeTools?.includes("session_read")
 
     // Only ids this CLI process issued may go back as `tool_result` blocks
     // (issue #29), so read them before building the envelope.
     const previousPendingProxyCalls = turn.compactionMode ? [] : getPendingProxyCalls(turn.sessionKey)
     const userMsg = turn.compactionMode
       ? COMPACT_COMMAND_MESSAGE
-      : getClaudeUserMessage(options.prompt, includeHistoryContext, {
-          cliToolCallIds: new Set(previousPendingProxyCalls.map((c) => c.toolCallId)),
-          stripContextReminders: stripContextRemindersEnabled(this.config),
-        })
+      : getClaudeUserMessage(
+          options.prompt,
+          includeHistoryContext ? { sessionID: canReadSession ? turn.affinity : undefined } : undefined,
+          {
+            cliToolCallIds: new Set(previousPendingProxyCalls.map((c) => c.toolCallId)),
+            stripContextReminders: stripContextRemindersEnabled(this.config),
+          },
+        )
     // A wake prompt whose CLI turn was already taken over by a user message
     // has nothing to attach to; sending it would hand Claude the marker text.
     if (userMsg.includes(WAKE_PROMPT_TEXT) && !getActiveProcess(turn.sessionKey)?.autonomousTurn) {

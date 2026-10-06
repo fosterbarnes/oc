@@ -139,7 +139,7 @@ test("no thinking keyword is appended to the user message", () => {
   // Effort reaches the CLI as CLAUDE_CODE_EFFORT_LEVEL at spawn; the message
   // itself must carry none of the retired "(ultrathink)"-style hints.
   const out = JSON.parse(
-    getClaudeUserMessage(p([{ role: "user", content: "hello" }]) as any, false),
+    getClaudeUserMessage(p([{ role: "user", content: "hello" }]) as any),
   )
   const texts = out.message.content
     .filter((b: any) => b.type === "text")
@@ -225,7 +225,7 @@ const subtaskPrompt = () =>
 
 test("a tool result this CLI process never asked for is sent as text, not an orphaned tool_result", () => {
   const out = JSON.parse(
-    getClaudeUserMessage(subtaskPrompt(), false, { cliToolCallIds: new Set<string>() }),
+    getClaudeUserMessage(subtaskPrompt(), undefined, { cliToolCallIds: new Set<string>() }),
   )
   const blocks = out.message.content
   assert.equal(
@@ -244,7 +244,7 @@ test("a tool result this CLI process never asked for is sent as text, not an orp
 
 test("a tool result this CLI process is waiting on is still a real tool_result block", () => {
   const out = JSON.parse(
-    getClaudeUserMessage(subtaskPrompt(), false, { cliToolCallIds: new Set(["call_X"]) }),
+    getClaudeUserMessage(subtaskPrompt(), undefined, { cliToolCallIds: new Set(["call_X"]) }),
   )
   const result = out.message.content.find((b: any) => b.type === "tool_result")
   assert.ok(result, "the proxy round-trip depends on this block, so the gate must let it through")
@@ -288,7 +288,7 @@ test("dcp reminders survive by default", () => {
 
 test("stripContextReminders removes the block and keeps everything else", () => {
   const out = JSON.parse(
-    getClaudeUserMessage(nudgedPrompt(), false, { stripContextReminders: true }),
+    getClaudeUserMessage(nudgedPrompt(), undefined, { stripContextReminders: true }),
   )
   const text = out.message.content.map((b: any) => b.text ?? "").join("\n")
   assert.doesNotMatch(text, /MAX CONTEXT LIMIT REACHED/)
@@ -308,7 +308,7 @@ test("the strip leaves opencode's own <system-reminder> blocks alone", () => {
     },
   ])
   const out = JSON.parse(
-    getClaudeUserMessage(prompt, false, { stripContextReminders: true }),
+    getClaudeUserMessage(prompt, undefined, { stripContextReminders: true }),
   )
   const text = out.message.content.map((b: any) => b.text ?? "").join("\n")
   assert.match(
@@ -325,7 +325,7 @@ test("a message whose only text was a reminder does not take the empty sentinel 
     { role: "user", content: [{ type: "text", text: DCP_NUDGE }] },
   ])
   const out = JSON.parse(
-    getClaudeUserMessage(prompt, false, { stripContextReminders: true }),
+    getClaudeUserMessage(prompt, undefined, { stripContextReminders: true }),
   )
   assert.doesNotMatch(JSON.stringify(out), /MAX CONTEXT LIMIT REACHED/)
   assert.ok(Array.isArray(out.message.content), "still a well-formed user message")
@@ -337,12 +337,55 @@ test("the fresh-session rebuild strips them too, where they all replay at once",
     { role: "assistant", content: [{ type: "text", text: `sure\n${DCP_NUDGE}` }] },
     { role: "user", content: [{ type: "text", text: "current question" }] },
   ])
-  const out = getClaudeUserMessage(prompt, true, { stripContextReminders: true })
+  const out = getClaudeUserMessage(prompt, {}, { stripContextReminders: true })
   assert.doesNotMatch(out, /<conversation_history>/)
-  assert.doesNotMatch(out, /old turn/)
+  assert.match(out, /old turn/, "the previous exchange is the catch-up excerpt")
   assert.doesNotMatch(out, /session_tail/)
   assert.match(out, /current question/)
   assert.doesNotMatch(out, /MAX CONTEXT LIMIT REACHED/)
+})
+
+const resumedPrompt = () =>
+  p([
+    { role: "user", content: [{ type: "text", text: "Working directory initialized" }] },
+    { role: "user", content: [{ type: "text", text: "compare the options" }] },
+    { role: "assistant", content: [{ type: "text", text: "a) rewrite\nb) patch" }] },
+    { role: "user", content: [{ type: "text", text: "do b" }] },
+  ])
+
+function resumedTexts(resume: any): string[] {
+  return JSON.parse(getClaudeUserMessage(resumedPrompt(), resume)).message.content.map((b: any) => b.text)
+}
+
+test("a fresh conversation in a chat with history leads with the catch-up block", () => {
+  const [block, message] = resumedTexts({ sessionID: "ses_abc" })
+  assert.match(block, /^<session_resume>/)
+  assert.match(block, /Previous user message:\ncompare the options/)
+  assert.match(block, /a\) rewrite\nb\) patch/)
+  assert.match(block, /Earlier user turns: 2/)
+  assert.match(block, /mcp__opencode_proxy__session_read \{"sessionId":"ses_abc"/)
+  assert.equal(message, "do b")
+})
+
+test("without a readable session the catch-up has the excerpt but no session_read", () => {
+  const [block] = resumedTexts({})
+  assert.match(block, /b\) patch/)
+  assert.doesNotMatch(block, /session_read/)
+})
+
+test("ordinary turns carry no catch-up block", () => {
+  assert.deepEqual(resumedTexts(undefined), ["do b"])
+})
+
+test("a long previous reply keeps its end", () => {
+  const prompt = p([
+    { role: "user", content: "go" },
+    { role: "assistant", content: [{ type: "text", text: `${"x".repeat(5000)}FINAL QUESTION` }] },
+    { role: "user", content: "yes" },
+  ])
+  const block = JSON.parse(getClaudeUserMessage(prompt, {})).message.content[0].text
+  assert.match(block, /\[\.\.\.\]x+FINAL QUESTION/)
+  assert.ok(block.length < 5000)
 })
 
 test("stripping switches itself off as soon as compress is reachable", () => {

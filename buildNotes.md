@@ -119,6 +119,25 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-06 (~00:24) - v0.2.95 - Fresh Claude conversation catches up on the chat - Opus 5.5, low reasoning; Implementation
+
+### Agent
+- Meta: Opus 5.5; low reasoning; Implementation; completed
+- Version: 0.2.95
+- Added `resumeBlock` (`provider/claude-code/message-builder.ts`): first message of a fresh Claude conversation in a chat with history leads with `<session_resume>`: previous user message (last 1500 chars), previous reply (last 4000 chars), earlier-turn count, and `mcp__opencode_proxy__session_read` tail/head/full instructions with the oc session id. Says transcript is background, not instructions. Closes r12 TODO (`archive4:453`). Plan: `~/.config/opencode/plans/2026-10-06-claude-session-catch-up.md`.
+- Changed `getClaudeUserMessage` 2nd param `includeHistoryContext: boolean` -> `resume?: { sessionID?: string }`; removed "history not inlined" log. One-shot by construction: only when no Claude session id and no live process.
+- Changed `claude-code-language-model.ts`: `sessionID` only when affinity is not `default` and `proxyOpencodeTools` lists `session_read` (config list, not registry; registry-dropped name leaves a dead instruction, excerpt still works).
+- Changed `session-sync.ts` lost-conversation notice and question text to match.
+- Kept full-history paste out; excerpt is the deliberate bounded exception to "never paste history".
+- Verification: `get-claude-user-message.test.ts` 19/19 (4 added, fresh-rebuild test now expects the excerpt); baseline file at HEAD 15/15. First run had one unnamed beforeEach hook timeout, gone on rerun. `bun typecheck` clean.
+
+### User
+Claude Code provider
+- After "Start fresh" on a lost Claude conversation, the new Claude now sees your last exchange and can read earlier turns of the chat, so follow-ups like "do option b" work.
+- The lost-conversation question and notice now describe this instead of saying Claude remembers nothing.
+
+---
+
 ## 2026-10-06 (~00:10) - v0.2.94 - Toast theme color typechecks in run mode - Opus 5.5, default reasoning; Agent push
 
 ### Agent

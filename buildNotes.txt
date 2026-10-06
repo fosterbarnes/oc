@@ -1,15 +1,6 @@
-v0.2.94
-
-startup intro:
-A purple Knight Rider scanner now runs under the oc logo while oc starts. Its first sweep moves with the frame as the frame draws in, then it bounces until oc is ready, and it continues where it left off when the launcher hands over to the app. The separate "Loading plugins…" spinner at the bottom no longer shows during startup.
-
-toasts:
-Toast backgrounds are now controlled by the theme through a new optional backgroundToast color. Themes that leave it out use their panel background; the drac theme uses dusty purple. Status-colored borders stay as they were.
+v0.2.95
 
 claude code provider:
-Choosing "Start fresh" (or "Cancel") on the "Claude conversation is gone" question now works instead of leaving the chat stuck. The question was being registered with a different project than the one answering it.
+When a chat's Claude conversation is lost and you choose "Start fresh", the new Claude no longer starts blind. Its first message now carries your previous message and the end of its last reply, so follow-ups like "do option b" work, plus instructions to read older turns of the chat through session_read when it needs more. It is told to treat the old transcript as background and not to redo earlier work. The lost-conversation question and notice now describe this instead of saying Claude remembers nothing.
 
-docs:
-The README now has a filled-in feature list and a "How it works" section covering Claude Code and Cursor models, the shared background server, oc and occ, the session list and markers, the sidebar, and the script runner, plus a table of the changed keys. FORK.md describes the Cursor provider accurately: it signs in through Cursor's browser login and talks to Cursor directly through a small local relay, so the Cursor app does not need to be open. A draft plan for publishing oc as a proper fork of upstream OpenCode was added (publicForkPlan.md); nothing in it has been carried out.
-
-Under the hood: the intro is now a pure function of a tick (introCellsAt in tui/src/logo.ts), and the scanner math moved out of spinner.ts into a dependency-free ui/scanner.ts so the launcher can use it without loading OpenTUI. The launcher passes the current frame to the app through OC_INTRO_FRAME. The plugin theme type and the run-mode theme resolver gained backgroundToast, which fixed the typecheck errors left by the toast work. The new logo test and the theme test pass (12/12) and the full prePush typecheck passed 27/27. The intro handoff between launcher and app has not been checked live yet, and the intro ignores the animations setting.
+Under the hood: the catch-up block is built in message-builder.ts (resumeBlock) and sent only on the first message of the new conversation. Excerpts are capped at 1500 and 4000 characters and keep their ends. The session_read pointer is included only when the chat has a real session id and session_read is in proxyOpencodeTools. The message builder tests pass 19/19 with 4 new cases, and typecheck is clean. Not yet checked live.
