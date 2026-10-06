@@ -14,13 +14,14 @@ import { getScrollAcceleration } from "../../util/scroll"
 import { useTuiPaths } from "../../context/runtime"
 import { useTuiConfig } from "../../config"
 import { useLocation } from "../../context/location"
+import { useKV } from "../../context/kv"
 import { useTheme, selectedForeground } from "../../context/theme"
 import { SplitBorder } from "../../ui/border"
 import { useTerminalDimensions } from "@opentui/solid"
 import { Locale } from "../../util/locale"
 import type { PromptInfo } from "../../prompt/history"
 import { useFrecency } from "../../prompt/frecency"
-import { useBindings, useCommandSlashes, useOpencodeModeStack } from "../../keymap"
+import { useBindings, useCommandShortcut, useCommandSlashes, useOpencodeModeStack } from "../../keymap"
 import { displayCharAt, mentionTriggerIndex } from "../../prompt/display"
 import type { FileSystemEntry } from "@opencode-ai/sdk/v2"
 
@@ -62,6 +63,7 @@ export type AutocompleteRef = {
 }
 
 export type AutocompleteOption = {
+  favoriteKey?: string
   display: string
   value?: string
   aliases?: string[]
@@ -108,6 +110,10 @@ export function Autocomplete(props: {
   const tuiConfig = useTuiConfig()
   const paths = useTuiPaths()
   const location = useLocation()
+  const kv = useKV()
+  const favorites = createMemo<string[]>(() => kv.get("slash.favorites", []))
+  const favoriteKeys = createMemo(() => new Set(favorites()))
+  const favoriteShortcut = useCommandShortcut("prompt.autocomplete.favorite")
   const [store, setStore] = createStore({
     index: 0,
     selected: 0,
@@ -465,6 +471,7 @@ export function Autocomplete(props: {
     for (const serverCommand of sync.data.command) {
       const label = serverCommand.source ? `:(${serverCommand.source})` : ""
       results.push({
+        favoriteKey: `${serverCommand.source ?? "command"}:${serverCommand.name}`,
         display: "/" + serverCommand.name + label,
         description: serverCommand.description,
         kind: serverCommand.source,
@@ -507,6 +514,7 @@ export function Autocomplete(props: {
       store.visible === "@" ? [...referenceAliasesValue, ...agentsValue, ...mcpResources()] : [...commandsValue]
 
     if (!searchValue) {
+      if (store.visible === "/") return orderSlashFavorites(nonFileOptions, favoriteKeys())
       return [...nonFileOptions, ...fileOptions]
     }
 
@@ -592,6 +600,30 @@ export function Autocomplete(props: {
 
     setStore("selected", 0)
   }
+
+  useBindings(() => ({
+    target: props.input,
+    enabled: () => store.visible === "/",
+    priority: 1,
+    commands: [
+      {
+        name: "prompt.autocomplete.favorite",
+        title: "Toggle slash favorite",
+        category: "Autocomplete",
+        run() {
+          const key = options()[store.selected]?.favoriteKey
+          if (!key) return
+          setStore("input", "keyboard")
+          kv.set(
+            "slash.favorites",
+            favoriteKeys().has(key) ? favorites().filter((item) => item !== key) : [...favorites(), key],
+          )
+          moveTo(options().findIndex((item) => item.favoriteKey === key))
+        },
+      },
+    ],
+    bindings: tuiConfig.keybinds.gather("prompt.autocomplete.favorite", ["prompt.autocomplete.favorite"]),
+  }))
 
   useBindings(() => ({
     target: props.input,
@@ -725,11 +757,13 @@ export function Autocomplete(props: {
     })
   })
 
+  const footerHeight = () => store.visible === "/" && Boolean(favoriteShortcut()) && props.anchor().y > 1 ? 1 : 0
+
   const height = createMemo(() => {
     const count = options().length || 1
     if (!store.visible) return Math.min(10, count)
     positionTick()
-    return Math.min(10, count, Math.max(1, props.anchor().y))
+    return Math.min(10, count, Math.max(1, props.anchor().y - footerHeight()))
   })
 
   let scroll: ScrollBoxRenderable
@@ -739,7 +773,7 @@ export function Autocomplete(props: {
     <box
       visible={store.visible !== false}
       position="absolute"
-      top={position().y - height()}
+      top={position().y - height() - footerHeight()}
       left={position().x}
       width={position().width}
       zIndex={100}
@@ -780,6 +814,14 @@ export function Autocomplete(props: {
               }}
               onMouseUp={() => select()}
             >
+              <Show when={store.visible === "/"}>
+                <text
+                  fg={index === store.selected ? selectedForeground(theme) : theme.warning}
+                  flexShrink={0}
+                >
+                  {favoriteKeys().has(option().favoriteKey ?? "") ? "\u2b29 " : "  "}
+                </text>
+              </Show>
               <text
                 fg={index === store.selected ? selectedForeground(theme) : kindColor(option().kind)}
                 flexShrink={0}
@@ -795,6 +837,21 @@ export function Autocomplete(props: {
           )}
         </Index>
       </scrollbox>
+      <Show when={footerHeight()}>
+        <box backgroundColor={theme.backgroundMenu} paddingLeft={1} height={1}>
+          <text fg={theme.textMuted} wrapMode="none">
+            {favoriteShortcut()} {favoriteKeys().has(options()[store.selected]?.favoriteKey ?? "") ? "unfavorite" : "favorite"}
+          </text>
+        </box>
+      </Show>
     </box>
   )
+}
+
+export function orderSlashFavorites(options: AutocompleteOption[], favorites: ReadonlySet<string>) {
+  // Commands are already alphabetical; keep that order within each group.
+  return [
+    ...options.filter((option) => favorites.has(option.favoriteKey ?? "")),
+    ...options.filter((option) => !favorites.has(option.favoriteKey ?? "")),
+  ]
 }

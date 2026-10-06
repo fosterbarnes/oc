@@ -1,11 +1,19 @@
 /** @jsxImportSource @opentui/solid */
 import { createDefaultOpenTuiKeymap } from "@opentui/keymap/opentui"
 import { createBindingLookup } from "@opentui/keymap/extras"
+import { TextareaRenderable } from "@opentui/core"
 import { testRender, useRenderer } from "@opentui/solid"
 import { expect, test } from "bun:test"
-import { onCleanup } from "solid-js"
+import { createSignal, onCleanup } from "solid-js"
 import { TuiKeybind } from "../src/config/keybind"
-import { getOpencodeModeStack, OPENCODE_BASE_MODE, OpencodeKeymapProvider, registerOpencodeKeymap } from "../src/keymap"
+import {
+  getOpencodeModeStack,
+  OPENCODE_BASE_MODE,
+  OpencodeKeymapProvider,
+  registerOpencodeKeymap,
+  useBindings,
+  useCommandSlashes,
+} from "../src/keymap"
 
 function createResolvedKeymapConfig(input: TuiKeybind.KeybindOverrides = {}) {
   const keybinds = TuiKeybind.parse(input)
@@ -134,6 +142,97 @@ test("mode-less bindings stay active when opencode mode changes", async () => {
         "session.first": 2,
         "model.list": 0,
       },
+    })
+  } finally {
+    app.renderer.destroy()
+  }
+})
+
+test("slash favorite binding consumes Ctrl+F only while slash autocomplete is open", async () => {
+  const config = createResolvedKeymapConfig()
+  const [visible, setVisible] = createSignal<false | "/" | "@">("/")
+  const [target, setTarget] = createSignal<TextareaRenderable>()
+  const runs: string[] = []
+
+  function Prompt() {
+    useBindings(() => ({
+      target,
+      enabled: () => visible() === "/",
+      priority: 1,
+      commands: [{ name: "prompt.autocomplete.favorite", run: () => void runs.push("favorite") }],
+      bindings: config.keybinds.gather("prompt.autocomplete.favorite", ["prompt.autocomplete.favorite"]),
+    }))
+    return <textarea focused initialValue="/alpha" ref={setTarget} />
+  }
+
+  function Harness() {
+    const renderer = useRenderer()
+    const keymap = createDefaultOpenTuiKeymap(renderer)
+    onCleanup(registerOpencodeKeymap(keymap, renderer, config))
+    return (
+      <OpencodeKeymapProvider keymap={keymap}>
+        <Prompt />
+      </OpencodeKeymapProvider>
+    )
+  }
+
+  const app = await testRender(() => <Harness />)
+  try {
+    await app.renderOnce()
+    target()!.cursorOffset = 1
+    app.mockInput.pressKey("f", { ctrl: true })
+    expect(runs).toEqual(["favorite"])
+    expect(target()!.cursorOffset).toBe(1)
+    expect(target()!.plainText).toBe("/alpha")
+    setVisible("@")
+    await app.renderOnce()
+    app.mockInput.pressKey("f", { ctrl: true })
+    expect(runs).toEqual(["favorite"])
+    expect(target()!.cursorOffset).toBe(2)
+    setVisible(false)
+    await app.renderOnce()
+    app.mockInput.pressKey("f", { ctrl: true })
+    expect(runs).toEqual(["favorite"])
+    expect(target()!.cursorOffset).toBe(3)
+  } finally {
+    app.renderer.destroy()
+  }
+})
+
+test("native slash favorite identity follows command ID rather than label or alias", async () => {
+  let slashes: ReturnType<typeof useCommandSlashes>
+
+  function Slashes() {
+    slashes = useCommandSlashes()
+    return <box />
+  }
+
+  function Harness() {
+    const keymap = createDefaultOpenTuiKeymap(useRenderer())
+    onCleanup(keymap.registerLayer({
+      commands: [{
+        namespace: "palette",
+        name: "session.new",
+        title: "New session",
+        slashName: "new",
+        slashAliases: ["fresh"],
+        run() {},
+      }],
+    }))
+    return (
+      <OpencodeKeymapProvider keymap={keymap}>
+        <Slashes />
+      </OpencodeKeymapProvider>
+    )
+  }
+
+  const app = await testRender(() => <Harness />)
+  try {
+    await app.renderOnce()
+    expect(slashes!()[0]).toMatchObject({
+      favoriteKey: "tui:session.new",
+      display: "/new",
+      aliases: ["/fresh"],
     })
   } finally {
     app.renderer.destroy()

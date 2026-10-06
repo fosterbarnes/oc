@@ -234,6 +234,7 @@ export const Definitions = {
   "prompt.autocomplete.hide": keybind("escape", "Hide autocomplete"),
   "prompt.autocomplete.select": keybind("return", "Select autocomplete item"),
   "prompt.autocomplete.complete": keybind("tab", "Complete autocomplete item"),
+  "prompt.autocomplete.favorite": keybind("ctrl+f", "Toggle slash entry favorite status"),
   "permission.prompt.fullscreen": keybind("ctrl+f", "Toggle permission prompt fullscreen"),
   "plugins.toggle": keybind("space", "Toggle plugin"),
   "dialog.plugins.install": keybind("shift+i", "Install plugin from plugin dialog"),

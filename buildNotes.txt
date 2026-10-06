@@ -1,9 +1,9 @@
-v0.2.97
+v0.2.98
 
-command markers:
-Command markers are now a native alpha feature, off by default. When enabled, agents can run your preset commands by writing a named marker on its own line, without a tool call. Commands can return output in the reply, open a visible PowerShell window, or run after the turn finishes. The global markers.json file controls the commands and whether permission is required for each one. The command palette includes an on/off switch and shows an alpha warning before enabling the feature.
+slash favorites:
+Press Ctrl+F on a skill, command, MCP prompt, or oc action in the slash menu to favorite or unfavorite it without running it. Favorites use a small solid diamond indicator and appear first when you type just /. Typed search keeps its existing fuzzy ranking. The menu shows a favorite/unfavorite shortcut hint, keeps the highlighted entry when toggling, and saves favorites across projects and restarts.
 
-personal terminal commands:
-Added and live-checked personal /zoom-in and /zoom-out commands that change WezTerm text size without an AI reply. These live in personal oc and WezTerm configuration outside this repository; this commit records the completed work.
+sidebar settings:
+Includes the existing saved sidebar settings update, with crow2 recorded as a recent and active file root and the explicit script-launch settings removed from the saved file.
 
-Under the hood: native marker handling replaces the project-local proof of concept, skips fenced code, deduplicates names, bounds displayed inline output, and logs execution. Configured commands are advertised to native models and Claude Code, and agents must ask before editing the global marker file. Prior implementation verification recorded 74 passing marker, agent, processor, and run-after-turn checks, plus 47 passing prompt checks with 14 skips. This push's focused marker and agent checks passed 55 tests with 149 assertions; prePush passed all 27 typecheck tasks (24 cached) and refreshed the README and scc.txt code count to 515,348. The personal zoom plugin check passed with 14 assertions, and scoped review found no actionable defects. Native marker behavior has not been confirmed live.
+Under the hood: favorites reuse existing KV persistence and stable source/name or native command IDs rather than display labels. A targeted slash-only binding takes priority over Ctrl+F cursor movement. Favorites reuse the list's alphabetical order through a stable partition instead of a second sort. Scoped review found no confirmed functional defect. This push's three focused checks passed with 14 assertions; prePush passed all 27 typecheck tasks (26 cached) and refreshed the README and scc.txt code count to 515,518. Full autocomplete toggle selection retention and disk reload remain live checks.

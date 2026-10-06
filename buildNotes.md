@@ -119,6 +119,88 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-06 (~18:08) - v0.2.98 - Scoped slash-favorites review and cleanup - GPT-6.1 Sol, effort not exposed; Cleanup
+
+### Agent
+- Meta: GPT-6.1 Sol; effort not exposed; Cleanup; completed, session-scoped
+- Version: 0.2.98; retained once-per-session revision bump
+- Reviewed session-owned slash favorite identities, KV reads/writes, targeted keyboard layer, ordering, marker/footer layout, caller integration, tests, and documentation. No confirmed functional defect found; unrelated sidebar changes excluded.
+- Simplified `orderSlashFavorites`: stable favorites-first partition replaces redundant second alphabetical sort; `commands` already sorts input. Updated test to use caller's alphabetical order; added empty/all-favorite checks. Kept U+2B29 indicator and fuzzy-search path.
+- Verification: `bun test --timeout 30000 test/component/autocomplete.test.ts test/keymap.test.tsx --test-name-pattern "slash favorite|native slash favorite"` from `src/packages/tui`: 3 pass, 2 filtered out, 0 fail, 14 assertions.
+- Push verification: same focused checks passed again (3 tests, 14 assertions); `.scripts/prePush.ps1` passed 27/27 typecheck tasks (26 cached) and refreshed README/scc.txt to 515,518 code lines.
+- Coverage limit: keyboard check exercises real keymap/textarea with a test handler, not full `Autocomplete`; toggle selection retention and disk reload remain live checks. No build run. Shared KV inter-instance behavior predates session and was not changed.
+
+### User
+Slash-favorites cleanup
+- Favorites now reuse the menu's existing alphabetical order instead of sorting twice.
+- Scoped checks passed; no confirmed functional bug was found.
+- The full live check remains: toggle a favorite twice, confirm the highlight stays on it, then restart and confirm a saved favorite remains.
+
+---
+
+## 2026-10-06 (~18:05) - v0.2.98 - Smaller solid diamond for slash favorites - GPT-6.1 Sol, effort not exposed; Implementation
+
+### Agent
+- Meta: GPT-6.1 Sol; effort not exposed; Implementation; completed
+- Version: 0.2.98; retained once-per-session revision bump
+- Changed slash favorite marker from U+25C6 to small black diamond U+2B29 (`⬩`) at user request; updated FORK.md wording. Supersedes solid-diamond glyph choice below.
+- Verification: literal-only replacement; no checks introduced or run. Installed glyph size depends on terminal font; appearance pending rebuild.
+
+### User
+Slash-menu favorites
+- Favorites now use the smaller solid diamond (`⬩`).
+
+---
+
+## 2026-10-06 (~18:03) - v0.2.98 - Solid diamond for slash favorites - GPT-6.1 Sol, effort not exposed; Implementation
+
+### Agent
+- Meta: GPT-6.1 Sol; effort not exposed; Implementation; completed
+- Version: 0.2.98; retained once-per-session revision bump
+- Changed slash favorite marker from hollow diamond U+25C7 to solid diamond U+25C6; user found installed hollow glyph odd. Updated FORK.md wording; supersedes hollow-diamond choice below.
+- Verification: literal-only replacement; no checks introduced or run. Installed solid-diamond appearance pending rebuild.
+
+### User
+Slash-menu favorites
+- Favorites now use a solid diamond (`◆`).
+
+---
+
+## 2026-10-06 (~18:01) - v0.2.98 - Hollow diamond for slash favorites - GPT-6.1 Sol, effort not exposed; Implementation
+
+### Agent
+- Meta: GPT-6.1 Sol; effort not exposed; Implementation; completed
+- Version: 0.2.98; retained once-per-session revision bump
+- Changed slash favorite marker in `tui/src/component/prompt/autocomplete.tsx` from star U+2605 to hollow diamond U+25C7 at user request; updated FORK.md wording. Follows slash-favorites entry below.
+- Verification: inspected literal replacement; no checks introduced or run for glyph-only change. Installed appearance pending rebuild.
+
+### User
+Slash-menu favorites
+- Favorites now use a hollow diamond (`◇`) instead of a star.
+
+---
+
+## 2026-10-06 (~17:57) - v0.2.98 - Favorite slash-menu skills and commands - GPT-6.1 Sol, effort not exposed; Implementation
+
+### Agent
+- Meta: GPT-6.1 Sol; effort not exposed; Implementation; completed, live check pending
+- Version: 0.2.98
+- Added `prompt.autocomplete.favorite` (Ctrl+F) in TUI keybind definitions; targeted priority-1 slash-only layer consumes key before textarea cursor movement.
+- Added `favoriteKey` to autocomplete entries: server source/name, native registered command ID through `useCommandSlashes`. All slash entry kinds supported; display padding/labels/aliases do not define identity.
+- Added `slash.favorites` in existing KV state; starred gutter, configured shortcut favorite/unfavorite footer, alphabetical favorites first on empty slash query, unchanged fuzzy search path. Toggle keeps highlighted entry and scroll position via `moveTo` after reordering; missing entries retain saved keys.
+- Updated FORK.md keys/palette row. Preserved unrelated `.config/openSidebar.json` edits.
+- Verification: `bun test --timeout 30000 test/component/autocomplete.test.ts test/keymap.test.tsx` from `src/packages/tui`: 5 pass, 0 fail, 14 assertions. Covered ordering/deduplication/source-specific identity and actual keyboard ownership against textarea cursor movement. Build, typecheck, installed appearance, toggle selection retention, and restart persistence not run.
+- MISTAKE: identity test initially put `namespace` on keymap layer; API expects command namespace. Moved field to command and reran targeted checks successfully.
+
+### User
+Slash-menu favorites
+- Press Ctrl+F on a skill, command, MCP prompt, or oc action in the `/` menu to favorite or unfavorite it without running it.
+- Favorites show a star and appear first when you type just `/`; typed search keeps its existing ranking.
+- Favorites are saved across projects and restarts, with a favorite/unfavorite shortcut hint in the menu.
+- After rebuilding, check that toggling keeps the same entry highlighted and that favorites remain after restarting oc.
+
+---
+
 ## 2026-10-06 (~09:10) - v0.2.97 - Personal WezTerm zoom commands - GPT-6.1 Sol, effort not exposed; Implementation
 
 ### Agent
