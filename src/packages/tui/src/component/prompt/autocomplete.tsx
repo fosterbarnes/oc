@@ -79,6 +79,8 @@ export type AutocompleteOption = {
 export function Autocomplete(props: {
   value: string
   sessionID?: string
+  inlineSlashMenu?: boolean
+  visible?: boolean
   setPrompt: (input: (prompt: PromptInfo) => void) => void
   setExtmark: (partIndex: number, extmarkId: number) => void
   anchor: () => BoxRenderable
@@ -131,11 +133,16 @@ export function Autocomplete(props: {
 
   createEffect(() => {
     if (store.visible) {
-      let lastPos = { x: 0, y: 0, width: 0 }
+      let lastPos = { x: 0, y: 0, width: 0, parentX: 0, parentY: 0 }
       const interval = setInterval(() => {
         const anchor = props.anchor()
-        if (anchor.x !== lastPos.x || anchor.y !== lastPos.y || anchor.width !== lastPos.width) {
-          lastPos = { x: anchor.x, y: anchor.y, width: anchor.width }
+        const parentX = anchor.parent?.x ?? 0
+        const parentY = anchor.parent?.y ?? 0
+        if (
+          anchor.x !== lastPos.x || anchor.y !== lastPos.y || anchor.width !== lastPos.width ||
+          parentX !== lastPos.parentX || parentY !== lastPos.parentY
+        ) {
+          lastPos = { x: anchor.x, y: anchor.y, width: anchor.width, parentX, parentY }
           setPositionTick((t) => t + 1)
         }
       }, 50)
@@ -757,13 +764,22 @@ export function Autocomplete(props: {
     })
   })
 
-  const footerHeight = () => store.visible === "/" && Boolean(favoriteShortcut()) && props.anchor().y > 1 ? 1 : 0
+  const inline = () => Boolean(props.inlineSlashMenu) && store.visible === "/"
+  const menuBudget = () => Math.max(1, Math.floor(dimensions().height / 3))
+  const footerHeight = () =>
+    store.visible === "/" && Boolean(favoriteShortcut()) && props.anchor().y > 1 &&
+    (!inline() || menuBudget() > 1) ? 1 : 0
 
   const height = createMemo(() => {
     const count = options().length || 1
     if (!store.visible) return Math.min(10, count)
     positionTick()
-    return Math.min(10, count, Math.max(1, props.anchor().y - footerHeight()))
+    return Math.min(
+      10,
+      count,
+      Math.max(1, props.anchor().y - footerHeight()),
+      inline() ? Math.max(1, menuBudget() - footerHeight()) : 10,
+    )
   })
 
   let scroll: ScrollBoxRenderable
@@ -771,11 +787,12 @@ export function Autocomplete(props: {
 
   return (
     <box
-      visible={store.visible !== false}
-      position="absolute"
-      top={position().y - height() - footerHeight()}
-      left={position().x}
-      width={position().width}
+      visible={props.visible !== false && store.visible !== false}
+      position={inline() ? "relative" : "absolute"}
+      top={inline() ? "auto" : position().y - height() - footerHeight()}
+      left={inline() ? "auto" : position().x}
+      width={inline() ? "100%" : position().width}
+      flexShrink={0}
       zIndex={100}
       {...SplitBorder}
       borderColor={theme.border}

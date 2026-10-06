@@ -1,9 +1,9 @@
-v0.2.98
+v0.2.99
 
-slash favorites:
-Press Ctrl+F on a skill, command, MCP prompt, or oc action in the slash menu to favorite or unfavorite it without running it. Favorites use a small solid diamond indicator and appear first when you type just /. Typed search keeps its existing fuzzy ranking. The menu shows a favorite/unfavorite shortcut hint, keeps the highlighted entry when toggling, and saves favorites across projects and restarts.
+slash menu:
+Opening / in a session now reserves space above the prompt so the latest agent output and completion stay visible. Closing the menu restores the chat area without forcing a jump when reading older messages. Short terminals use a smaller menu. Home slash commands and mention pickers keep their overlay layout.
 
-sidebar settings:
-Includes the existing saved sidebar settings update, with crow2 recorded as a recent and active file root and the explicit script-launch settings removed from the saved file.
+shortcuts:
+Includes the existing markers.json shortcut under !SHORTCUTS.
 
-Under the hood: favorites reuse existing KV persistence and stable source/name or native command IDs rather than display labels. A targeted slash-only binding takes priority over Ctrl+F cursor movement. Favorites reuse the list's alphabetical order through a stable partition instead of a second sort. Scoped review found no confirmed functional defect. This push's three focused checks passed with 14 assertions; prePush passed all 27 typecheck tasks (26 cached) and refreshed the README and scc.txt code count to 515,518. Full autocomplete toggle selection retention and disk reload remain live checks.
+Under the hood: one autocomplete instance uses normal flex flow for the session slash menu, with its favorites footer included in the height budget. Overlay tracking now follows parent movement as well as prompt movement, and inline positioning explicitly clears old Yoga offsets. The focused renderer check passed with 37 assertions covering streaming completion, filtering, Escape, manual scrolling, resizing, overlay behavior, and hidden prompts. prePush passed all 27 typecheck tasks (26 cached) and refreshed README and scc.txt to 515,743 code lines. Installed appearance remains a live check after rebuilding.

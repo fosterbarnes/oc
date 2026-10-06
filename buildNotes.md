@@ -119,6 +119,30 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-06 (~18:40) - v0.2.99 - Keep chat above the slash menu - GPT-6.1 Sol, effort not exposed; Implementation
+
+### Agent
+- Meta: GPT-6.1 Sol; effort not exposed; Implementation; completed, installed acceptance pending
+- Version: 0.2.99
+- Moved single `Autocomplete` before prompt anchor; session `/` uses normal flex flow so chat viewport shrinks above menu. Kept Home `/` and session `@` as overlays; hidden prompt hides menu. No server or session-route changes.
+- Capped inline menu including favorites footer at one third of terminal height; retained ten-option maximum and one-row no-match result; suppressed footer when budget only fits one option row.
+- Fixed overlay tracker to include anchor-parent coordinates; parent can move while anchor stays at same screen position. Reused existing 50ms timer.
+- ERROR: installed OpenTUI `updateYogaPosition` ignores undefined edges; inline top/left must use `"auto"` to clear old overlay offsets.
+- MISTAKE: initial regression used `pressKey("escape")`, which sends literal text. Replaced with `pressEscape()` and explicit Kitty keyboard test mode; failure was test input, not a confirmed production Escape defect. Renderer pass-count wait also did not wait for async provider mount; reused existing fixture wait helper.
+- Added real `Autocomplete` renderer regression with actual context providers and existing SDK transport fixtures. Covered geometry, appended completion, filtering/no matches, Escape/restored space, manual scroll preservation, short-terminal resize, Home/mention overlays, and hidden prompt.
+- Verification: `bun test --timeout 30000 test/component/slashMenuLayout.test.tsx` from `src/packages/tui`: 1 pass, 0 fail, 37 assertions. No broader checks, build, install, or push run for this fix. Earlier agent-push stopped at failed check.
+- Push verification: focused renderer check passed again (1 test, 37 assertions); `.scripts/prePush.ps1` passed 27/27 typecheck tasks (26 cached) and refreshed README/scc.txt to 515,743 code lines.
+- Coverage limit: bounded chat/dock fixture mounts production autocomplete, not full session route or prompt; installed streaming/sidebar/favorites appearance remains user live check. Plan `.opencode/plans/ses_eecb7836dffe9C8pfxuxyhDYEQ.md` records prior stop and resolution.
+
+### User
+Slash-menu layout
+- Opening `/` in a session leaves the latest agent output visible above the menu instead of covering it.
+- The chat area restores when the menu closes, and reading older messages does not force a jump to the bottom.
+- The menu is shorter on small terminals; Home and mention pickers retain their overlay layout.
+- The focused renderer check passed; installed appearance still needs a live check after rebuilding.
+
+---
+
 ## 2026-10-06 (~18:08) - v0.2.98 - Scoped slash-favorites review and cleanup - GPT-6.1 Sol, effort not exposed; Cleanup
 
 ### Agent

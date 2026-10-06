@@ -1437,6 +1437,30 @@ export function Prompt(props: PromptProps) {
 
   return (
     <>
+      <Autocomplete
+        sessionID={props.sessionID}
+        inlineSlashMenu={Boolean(props.sessionID)}
+        visible={props.visible !== false}
+        ref={(r) => {
+          setAuto(() => r)
+        }}
+        anchor={() => anchor}
+        input={() => input}
+        setPrompt={(cb) => {
+          setStore("prompt", produce(cb))
+        }}
+        setExtmark={(partIndex, extmarkId) => {
+          setStore("extmarkToPartIndex", (map: Map<number, number>) => {
+            const newMap = new Map(map)
+            newMap.set(extmarkId, partIndex)
+            return newMap
+          })
+        }}
+        value={store.prompt.input}
+        fileStyleId={fileStyleId}
+        agentStyleId={agentStyleId}
+        promptPartTypeId={() => promptPartTypeId}
+      />
       <box ref={(r: BoxRenderable) => (anchor = r)} visible={props.visible !== false} width="100%">
         <box
           width="100%"
@@ -1789,28 +1813,6 @@ export function Prompt(props: PromptProps) {
           </Show>
         </box>
       </box>
-      <Autocomplete
-        sessionID={props.sessionID}
-        ref={(r) => {
-          setAuto(() => r)
-        }}
-        anchor={() => anchor}
-        input={() => input}
-        setPrompt={(cb) => {
-          setStore("prompt", produce(cb))
-        }}
-        setExtmark={(partIndex, extmarkId) => {
-          setStore("extmarkToPartIndex", (map: Map<number, number>) => {
-            const newMap = new Map(map)
-            newMap.set(extmarkId, partIndex)
-            return newMap
-          })
-        }}
-        value={store.prompt.input}
-        fileStyleId={fileStyleId}
-        agentStyleId={agentStyleId}
-        promptPartTypeId={() => promptPartTypeId}
-      />
     </>
   )
 }
