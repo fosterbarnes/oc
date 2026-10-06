@@ -7,7 +7,7 @@ import { useToast } from "./toast"
 import { useBindings, useOpencodeModeStack } from "../keymap"
 import { useClipboard } from "../context/clipboard"
 import { useKV } from "../context/kv"
-import * as Selection from "../util/selection"
+import { Selection } from "../util/selection"
 
 export function Dialog(
   props: ParentProps<{
@@ -28,10 +28,11 @@ export function Dialog(
 
   return (
     <box
-      onMouseDown={() => {
-        dismiss = !!renderer.getSelection()
+      onMouseDown={(evt) => {
+        dismiss = evt.target !== evt.currentTarget && !!renderer.getSelection()
       }}
-      onMouseUp={() => {
+      onMouseUp={(evt) => {
+        if (evt.button !== MouseButton.LEFT) return
         if (dismiss) {
           dismiss = false
           return
@@ -226,17 +227,6 @@ export function DialogProvider(props: ParentProps) {
   const kv = useKV()
   const copyOnSelect = () => kv.get(Selection.COPY_ON_SELECT_KEY, Selection.defaultCopyOnSelect()) as boolean
 
-  function copySelection() {
-    const text = renderer.getSelection()?.getSelectedText()
-    if (!text || !clipboard.write) return false
-    void clipboard.write(text).then(
-      () => toast.show({ message: "Copied to clipboard", variant: "info" }),
-      (error) => toast.error(error),
-    )
-    renderer.clearSelection()
-    return true
-  }
-
   return (
     <ctx.Provider value={value}>
       {props.children}
@@ -245,13 +235,9 @@ export function DialogProvider(props: ParentProps) {
         zIndex={3000}
         onMouseDown={(evt: { button: number; preventDefault(): void; stopPropagation(): void }) => {
           if (copyOnSelect()) return
-          if (evt.button !== MouseButton.RIGHT) return
-
-          if (!copySelection()) return
-          evt.preventDefault()
-          evt.stopPropagation()
+          Selection.copyOnMouseDown(renderer, toast, evt, clipboard)
         }}
-        onMouseUp={copyOnSelect() ? copySelection : undefined}
+        onMouseUp={copyOnSelect() ? (evt) => Selection.copyOnMouseUp(renderer, toast, evt, clipboard) : undefined}
       >
         <Show when={value.stack.length}>
           <Dialog onClose={() => value.clear()} size={value.size}>

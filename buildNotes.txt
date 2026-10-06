@@ -1,9 +1,9 @@
-v0.2.99
+v0.2.100
 
-slash menu:
-Opening / in a session now reserves space above the prompt so the latest agent output and completion stay visible. Closing the menu restores the chat area without forcing a jump when reading older messages. Short terminals use a smaller menu. Home slash commands and mention pickers keep their overlay layout.
+text selection:
+Double-click selects a word, triple-click selects a logical line including its wrapped rows, and dragging after those clicks extends by whole words or lines. Copy-on-release and Ctrl+C both keep the highlight visible. Escape clears selection before closing a dialog or interrupting a session. Triple-click selects lines, not linguistic sentences.
 
-shortcuts:
-Includes the existing markers.json shortcut under !SHORTCUTS.
+message and tool controls:
+User messages have a visible Actions control. Tool expand/collapse and file-open actions use separate controls or headers, and inline tool actions use their icon. Text bodies stay selectable without the first click opening a dialog or changing the layout. Explicit links and loaded paths remain action controls.
 
-Under the hood: one autocomplete instance uses normal flex flow for the session slash menu, with its favorites footer included in the height budget. Overlay tracking now follows parent movement as well as prompt movement, and inline positioning explicitly clears old Yoga offsets. The focused renderer check passed with 37 assertions covering streaming completion, filtering, Escape, manual scrolling, resizing, overlay behavior, and hidden prompts. prePush passed all 27 typecheck tasks (26 cached) and refreshed README and scc.txt to 515,743 code lines. Installed appearance remains a live check after rebuilding.
+Under the hood: matched OpenTUI packages move to 0.5.14 for native selection gestures, with SolidJS 1.9.12 and a version-specific cleanup patch. Root and modal selection use shared copy handling, and clipboard writes finish in gesture order. This push's five focused checks passed with 92 assertions covering native gestures, both copy modes, modal key ownership, prompt replacement, streaming Markdown, Unicode, inline tool controls, clipboard errors and ordering, and the migrated Solid patch. prePush passed all 27 typecheck tasks (17 cached) and refreshed README and scc.txt to 516,043 code lines. Full session controls, paste-placeholder transformation, and installed resize/scroll behavior remain live checks after rebuilding.

@@ -1,4 +1,6 @@
+import { MouseButton, type MouseEvent } from "@opentui/core"
 import type { ClipboardService } from "../context/clipboard"
+import type { OpenTuiKeymap } from "../keymap"
 
 export const COPY_ON_SELECT_KEY = "copy_on_select"
 
@@ -39,6 +41,7 @@ type SelectionKeyEvent = {
 }
 
 export function copy(renderer: Renderer, toast: Toast, clipboard: ClipboardService): boolean {
+  if (!clipboard.write) return false
   const selection = renderer.getSelection()
   if (!selection) return false
 
@@ -49,13 +52,40 @@ export function copy(renderer: Renderer, toast: Toast, clipboard: ClipboardServi
   const clipboardText =
     focus?.getClipboardText && selection.selectedRenderables.includes(focus) ? focus.getClipboardText(text) : text
 
-  clipboard
-    ?.write?.(clipboardText)
-    .then(() => toast.show({ message: "Copied to clipboard", variant: "info" }))
-    .catch(toast.error)
+  // Native clipboard processes can finish out of order during double/triple clicks.
+  const pending = (copies.get(clipboard) ?? Promise.resolve())
+    .then(() => clipboard.write!(clipboardText))
+    .then(() => toast.show({ message: "Copied to clipboard", variant: "info" }), toast.error)
+  copies.set(clipboard, pending)
 
-  renderer.clearSelection()
   return true
+}
+
+const copies = new WeakMap<ClipboardService, Promise<void>>()
+
+export function registerKeys(keymap: OpenTuiKeymap, renderer: Renderer, toast: Toast, clipboard: ClipboardService) {
+  return keymap.intercept("key", ({ event }) => handleSelectionKey(renderer, toast, event, clipboard), { priority: 1 })
+}
+
+export function copyOnMouseUp(
+  renderer: Renderer,
+  toast: Toast,
+  event: Pick<MouseEvent, "button" | "isDragging">,
+  clipboard: ClipboardService,
+) {
+  if (event.button !== MouseButton.LEFT || !event.isDragging) return false
+  return copy(renderer, toast, clipboard)
+}
+
+export function copyOnMouseDown(
+  renderer: Renderer,
+  toast: Toast,
+  event: Pick<MouseEvent, "button" | "preventDefault" | "stopPropagation">,
+  clipboard: ClipboardService,
+) {
+  if (event.button !== MouseButton.RIGHT || !copy(renderer, toast, clipboard)) return
+  event.preventDefault()
+  event.stopPropagation()
 }
 
 export function handleSelectionKey(
@@ -66,12 +96,13 @@ export function handleSelectionKey(
 ) {
   const selection = renderer.getSelection()
   if (!selection) return
+  if (!selection.getSelectedText()) {
+    renderer.clearSelection()
+    return
+  }
 
   if (event.ctrl && event.name === "c") {
-    if (!copy(renderer, toast, clipboard)) {
-      renderer.clearSelection()
-      return
-    }
+    copy(renderer, toast, clipboard)
 
     event.preventDefault()
     event.stopPropagation()

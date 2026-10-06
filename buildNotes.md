@@ -119,6 +119,30 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-06 (~19:05) - v0.2.100 - Word and line mouse selection - GPT-6.1 Sol, effort not exposed; Implementation
+
+### Agent
+- Meta: GPT-6.1 Sol; effort not exposed; Implementation; completed, installed acceptance pending
+- Version: 0.2.100
+- Upgraded matched OpenTUI core/keymap/Solid to 0.5.14 for native double-click words, triple-click logical lines, and granularity-aware dragging. Upgraded SolidJS to required 1.9.12; migrated cleanup patch, removed transition hunk now provided upstream. Lockfile changes limited to dependency graph.
+- Fixed shared selection copy: retains highlight, serializes native clipboard writes per service, checks public MouseEvent.isDragging for automatic release copying, intercepts selection Ctrl+C/Escape in both modes. Dialogs reuse shared policy; outside click dismisses retained selection correctly.
+- Moved user-message dialog action to visible Actions control; expand/collapse to explicit tool controls; block file actions to headers/Open file; inline tool actions to icon. Kept bodies selectable and explicit links/path controls nonselectable. Triple-click selects logical lines, not linguistic sentences.
+- Added focused real-renderer coverage: native words/wrapped lines/word dragging/repeat timeout, root copy helpers, both modes, modal copy/dismissal, prompt replacement, streaming Markdown, wide/combining Unicode, production InlineToolRow body/action separation, clipboard ordering/errors, all six patched Solid runtime files' syntax and reentrant cleanup.
+- Verification: `bun test --timeout 30000 test/component/textSelection.test.tsx` from `src/packages/tui`: 5 pass, 0 fail, 92 assertions. Dependency installation completed with lifecycle scripts disabled. No broader checks, builds, installs, or pushes run.
+- Push verification: focused selection checks passed again (5 tests, 92 assertions); `.scripts/prePush.ps1` passed 27/27 typecheck tasks (17 cached) and refreshed README/scc.txt to 516,043 code lines.
+- Coverage limit: root fixture exercises production helpers/registration, not full App. Full Session/UserMessage/BlockTool and full prompt paste-placeholder transform remain live checks; installed resize/scroll/streaming interaction needs acceptance. Plan `.opencode/plans/textSelection.md` records execution and pending acceptance.
+- MISTAKE: stale Solid patch offsets inserted cleanup statements into unrelated code despite successful dependency installation. Corrected version-specific offsets; syntax checks now cover all six patched files. Do not migrate Bun patches by changing package version alone.
+- MISTAKE: fixture accessed KV before async mount and used binding `run` instead of `cmd`; corrected readiness wait and actual keymap API before final passing run.
+
+### User
+Text selection
+- Double-click selects a word, triple-click selects a wrapped logical line, and dragging can extend by whole words or lines.
+- Copying keeps the highlight visible; Ctrl+C copies and Escape clears selection in either copy mode.
+- Message actions and tool controls are separate from selectable text so the first click does not interrupt selection.
+- Focused renderer checks passed. Rebuild/install and confirm the gestures and new controls in WezTerm.
+
+---
+
 ## 2026-10-06 (~18:40) - v0.2.99 - Keep chat above the slash menu - GPT-6.1 Sol, effort not exposed; Implementation
 
 ### Agent

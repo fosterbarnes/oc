@@ -25,7 +25,7 @@ import { SplitBorder } from "../../ui/border"
 import { useTuiPaths, useTuiTerminalEnvironment } from "../../context/runtime"
 import { Spinner } from "../../component/spinner"
 import { createSyntaxStyleMemo, generateSubtleSyntax, selectedForeground, useTheme } from "../../context/theme"
-import { BoxRenderable, ScrollBoxRenderable, addDefaultParsers, TextAttributes, RGBA } from "@opentui/core"
+import { BoxRenderable, ScrollBoxRenderable, addDefaultParsers, MouseButton, TextAttributes, RGBA } from "@opentui/core"
 import { Prompt, type PromptRef } from "../../component/prompt"
 import type {
   AssistantMessage,
@@ -1399,8 +1399,7 @@ export function Session() {
                       <Match when={message.role === "user"}>
                         <UserMessage
                           index={index()}
-                          onMouseUp={() => {
-                            if (renderer.getSelection()?.getSelectedText()) return
+                          onAction={() => {
                             dialog.replace(() => (
                               <DialogMessage
                                 messageID={message.id}
@@ -1506,7 +1505,7 @@ export function Session() {
 function UserMessage(props: {
   message: UserMessage
   parts: Part[]
-  onMouseUp: () => void
+  onAction: () => void
   index: number
   pending?: number
 }) {
@@ -1568,7 +1567,6 @@ function UserMessage(props: {
             onMouseOut={() => {
               setHover(false)
             }}
-            onMouseUp={props.onMouseUp}
             paddingTop={1}
             paddingBottom={1}
             paddingLeft={2}
@@ -1609,6 +1607,17 @@ function UserMessage(props: {
                 <span style={{ bg: color(), fg: queuedFg(), bold: true }}> QUEUED </span>
               </text>
             </Show>
+            <text
+              selectable={false}
+              fg={theme.textMuted}
+              onMouseUp={(evt) => {
+                if (evt.button !== MouseButton.LEFT) return
+                evt.stopPropagation()
+                props.onAction()
+              }}
+            >
+              Actions
+            </text>
           </box>
         </box>
       </Show>
@@ -1991,15 +2000,19 @@ function GenericTool(props: ToolProps) {
         </InlineTool>
       }
     >
-      <BlockTool
-        title={`# ${props.tool} ${input(props.input)}`}
-        part={props.part}
-        onClick={collapsed().overflow ? () => setExpanded((prev) => !prev) : undefined}
-      >
+      <BlockTool title={`# ${props.tool} ${input(props.input)}`} part={props.part}>
         <box gap={1}>
           <text fg={theme.text}>{limited()}</text>
           <Show when={collapsed().overflow}>
-            <text fg={theme.textMuted}>{expanded() ? "Click to collapse" : "Click to expand"}</text>
+            <text
+              selectable={false}
+              fg={theme.textMuted}
+              onMouseUp={(evt) => {
+                if (evt.button === MouseButton.LEFT) setExpanded((prev) => !prev)
+              }}
+            >
+              {expanded() ? "Collapse" : "Expand"}
+            </text>
           </Show>
         </box>
       </BlockTool>
@@ -2111,7 +2124,6 @@ export function InlineToolRow(props: {
       paddingLeft={3}
       onMouseOver={props.onMouseOver}
       onMouseOut={props.onMouseOut}
-      onMouseUp={props.onMouseUp}
       ref={(el: BoxRenderable) => {
         if (props.separate) alwaysSeparate.add(el)
         setPreLayoutSiblingMargin(el, (previous) => {
@@ -2124,7 +2136,17 @@ export function InlineToolRow(props: {
     >
       <Switch>
         <Match when={props.spinner}>
-          <Spinner color={props.color} children={props.children} />
+          <box flexDirection="row">
+            <text
+              width={INLINE_TOOL_ICON_WIDTH}
+              fg={props.iconColor ?? props.color}
+              selectable={!props.onMouseUp}
+              onMouseUp={props.onMouseUp}
+            >
+              {props.icon}
+            </text>
+            <Spinner color={props.color} children={props.children} />
+          </box>
         </Match>
         <Match when={true}>
           <Show
@@ -2142,6 +2164,8 @@ export function InlineToolRow(props: {
             <box flexDirection="row">
               <text
                 width={INLINE_TOOL_ICON_WIDTH}
+                selectable={!props.onMouseUp}
+                onMouseUp={props.onMouseUp}
                 fg={props.failed ? props.errorColor : (props.iconColor ?? props.color)}
                 attributes={props.denied ? TextAttributes.STRIKETHROUGH : undefined}
               >
@@ -2175,7 +2199,6 @@ function BlockTool(props: {
   spinner?: boolean
 }) {
   const { theme } = useTheme()
-  const renderer = useRenderer()
   const [hover, setHover] = createSignal(false)
   const error = createMemo(() => (props.part?.state.status === "error" ? props.part.state.error : undefined))
   return (
@@ -2192,23 +2215,25 @@ function BlockTool(props: {
       borderColor={theme.background}
       onMouseOver={() => props.onClick && setHover(true)}
       onMouseOut={() => setHover(false)}
-      onMouseUp={() => {
-        if (renderer.getSelection()?.getSelectedText()) return
-        props.onClick?.()
-      }}
     >
       <Show when={props.title}>
         {(title) => (
-          <Show
-            when={props.spinner}
-            fallback={
-              <text paddingLeft={3} fg={theme.textMuted}>
-                {title()}
-              </text>
-            }
+          <box
+            onMouseUp={(evt) => {
+              if (evt.button === MouseButton.LEFT) props.onClick?.()
+            }}
           >
-            <Spinner color={theme.textMuted}>{title().replace(/^# /, "")}</Spinner>
-          </Show>
+            <Show
+              when={props.spinner}
+              fallback={
+                <text selectable={!props.onClick} paddingLeft={3} fg={theme.textMuted}>
+                  {title()}
+                </text>
+              }
+            >
+              <Spinner color={theme.textMuted}>{title().replace(/^# /, "")}</Spinner>
+            </Show>
+          </box>
         )}
       </Show>
       {props.children}
@@ -2251,11 +2276,7 @@ function Shell(props: ToolProps) {
   return (
     <Switch>
       <Match when={stringValue(props.metadata.output) !== undefined}>
-        <BlockTool
-          title={title()}
-          part={props.part}
-          onClick={collapsed().overflow ? () => setExpanded((prev) => !prev) : undefined}
-        >
+        <BlockTool title={title()} part={props.part}>
           <box gap={1}>
             <Show when={isRunning()} fallback={<text fg={theme.text}>$ {stringValue(props.input.command)}</text>}>
               <Spinner color={theme.text}>{stringValue(props.input.command)}</Spinner>
@@ -2264,7 +2285,15 @@ function Shell(props: ToolProps) {
               <text fg={theme.text}>{limited()}</text>
             </Show>
             <Show when={collapsed().overflow}>
-              <text fg={theme.textMuted}>{expanded() ? "Click to collapse" : "Click to expand"}</text>
+              <text
+                selectable={false}
+                fg={theme.textMuted}
+                onMouseUp={(evt) => {
+                  if (evt.button === MouseButton.LEFT) setExpanded((prev) => !prev)
+                }}
+              >
+                {expanded() ? "Collapse" : "Expand"}
+              </text>
             </Show>
           </box>
         </BlockTool>
@@ -2380,7 +2409,7 @@ function Read(props: ToolProps) {
       <For each={loaded()}>
         {(filepath) => (
           <box paddingLeft={3}>
-            <text paddingLeft={3} fg={theme.textMuted} onMouseUp={() => ctx.openFile(filepath)}>
+            <text selectable={false} paddingLeft={3} fg={theme.textMuted} onMouseUp={() => ctx.openFile(filepath)}>
               ↳ Loaded {pathFormatter.format(filepath)}
             </text>
           </box>
@@ -2625,13 +2654,18 @@ function Edit(props: ToolProps) {
     <Switch>
       <Match when={stringValue(props.metadata.diff) !== undefined}>
         <BlockTool title={"← Edit " + pathFormatter.format(stringValue(props.input.filePath))} part={props.part}>
-          <box
-            paddingLeft={1}
-            onMouseUp={() => {
-              const filePath = stringValue(props.input.filePath)
-              if (filePath) ctx.openFile(filePath)
-            }}
-          >
+          <box paddingLeft={1}>
+            <text
+              selectable={false}
+              fg={theme.textMuted}
+              onMouseUp={(evt) => {
+                if (evt.button !== MouseButton.LEFT) return
+                const filePath = stringValue(props.input.filePath)
+                if (filePath) ctx.openFile(filePath)
+              }}
+            >
+              Open file
+            </text>
             <diff
               diff={diffContent()}
               view={view()}

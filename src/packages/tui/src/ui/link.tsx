@@ -20,6 +20,7 @@ export function Link(props: LinkProps) {
 
   return (
     <text
+      selectable={false}
       fg={props.fg}
       bg={props.bg}
       width={props.width}

@@ -10,8 +10,8 @@ import { InstallationDisplayVersion, InstallationVersion } from "@opencode-ai/co
 import { ClipboardProvider, useClipboard } from "./context/clipboard"
 import { ExitProvider, useExit } from "./context/exit"
 import { EpilogueProvider } from "./context/epilogue"
-import * as Selection from "./util/selection"
-import { createCliRenderer, MouseButton } from "@opentui/core"
+import { Selection } from "./util/selection"
+import { createCliRenderer } from "@opentui/core"
 import { RouteProvider, useRoute } from "./context/route"
 import {
   Switch,
@@ -907,15 +907,8 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
       hideIntroLogo()
     })
 
-  // Let selection copy/dismiss win ahead of normal bindings when explicit copy is required.
-  const offSelectionKeys = keymap.intercept(
-    "key",
-    ({ event }) => {
-      if (copyOnSelect()) return
-      Selection.handleSelectionKey(renderer, toast, event, clipboard)
-    },
-    { priority: 1 },
-  )
+  // Retained selection owns copy/dismiss before modal-close or session-abort bindings.
+  const offSelectionKeys = Selection.registerKeys(keymap, renderer, toast, clipboard)
   onCleanup(() => {
     offSelectionKeys()
     attention.dispose()
@@ -2019,13 +2012,9 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
       backgroundColor={theme.background}
       onMouseDown={(evt) => {
         if (copyOnSelect()) return
-        if (evt.button !== MouseButton.RIGHT) return
-
-        if (!Selection.copy(renderer, toast, clipboard)) return
-        evt.preventDefault()
-        evt.stopPropagation()
+        Selection.copyOnMouseDown(renderer, toast, evt, clipboard)
       }}
-      onMouseUp={copyOnSelect() ? () => Selection.copy(renderer, toast, clipboard) : undefined}
+      onMouseUp={copyOnSelect() ? (evt) => Selection.copyOnMouseUp(renderer, toast, evt, clipboard) : undefined}
     >
       <Show when={Flag.OPENCODE_SHOW_TTFD}>
         <TimeToFirstDraw />
