@@ -83,6 +83,17 @@ it.instance("plan agent denies edits except .opencode/plans/*", () =>
   }),
 )
 
+it.instance("agents must ask before editing global markers.json, without loosening denies", () =>
+  Effect.gen(function* () {
+    const build = yield* load((svc) => svc.get("build"))
+    const plan = yield* load((svc) => svc.get("plan"))
+    const markers = `../../.config/${path.basename(Global.Path.config)}/markers.json`
+    expect(Permission.evaluate("edit", markers, build!.permission).action).toBe("ask")
+    expect(Permission.evaluate("edit", "src/index.ts", build!.permission).action).toBe("allow")
+    expect(Permission.evaluate("edit", markers, plan!.permission).action).toBe("deny")
+  }),
+)
+
 it.instance("plan agent denies the general subagent by default", () =>
   Effect.gen(function* () {
     const plan = yield* load((svc) => svc.get("plan"))
@@ -792,3 +803,4 @@ it.instance(
     },
   },
 )
+

@@ -1,6 +1,9 @@
-v0.2.95
+v0.2.97
 
-claude code provider:
-When a chat's Claude conversation is lost and you choose "Start fresh", the new Claude no longer starts blind. Its first message now carries your previous message and the end of its last reply, so follow-ups like "do option b" work, plus instructions to read older turns of the chat through session_read when it needs more. It is told to treat the old transcript as background and not to redo earlier work. The lost-conversation question and notice now describe this instead of saying Claude remembers nothing.
+command markers:
+Command markers are now a native alpha feature, off by default. When enabled, agents can run your preset commands by writing a named marker on its own line, without a tool call. Commands can return output in the reply, open a visible PowerShell window, or run after the turn finishes. The global markers.json file controls the commands and whether permission is required for each one. The command palette includes an on/off switch and shows an alpha warning before enabling the feature.
 
-Under the hood: the catch-up block is built in message-builder.ts (resumeBlock) and sent only on the first message of the new conversation. Excerpts are capped at 1500 and 4000 characters and keep their ends. The session_read pointer is included only when the chat has a real session id and session_read is in proxyOpencodeTools. The message builder tests pass 19/19 with 4 new cases, and typecheck is clean. Not yet checked live.
+personal terminal commands:
+Added and live-checked personal /zoom-in and /zoom-out commands that change WezTerm text size without an AI reply. These live in personal oc and WezTerm configuration outside this repository; this commit records the completed work.
+
+Under the hood: native marker handling replaces the project-local proof of concept, skips fenced code, deduplicates names, bounds displayed inline output, and logs execution. Configured commands are advertised to native models and Claude Code, and agents must ask before editing the global marker file. Prior implementation verification recorded 74 passing marker, agent, processor, and run-after-turn checks, plus 47 passing prompt checks with 14 skips. This push's focused marker and agent checks passed 55 tests with 149 assertions; prePush passed all 27 typecheck tasks (24 cached) and refreshed the README and scc.txt code count to 515,348. The personal zoom plugin check passed with 14 assertions, and scoped review found no actionable defects. Native marker behavior has not been confirmed live.

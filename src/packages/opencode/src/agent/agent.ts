@@ -339,6 +339,17 @@ const layer = Layer.effect(
           )
         }
 
+        // Marker commands run without tool permission, so agents must ask before changing them.
+        // Applied last so user `edit: allow` rules cannot waive it. Edit patterns are worktree-relative.
+        const markersFile = `${path.basename(Global.Path.config)}/markers.json`
+        for (const name in agents) {
+          if (Permission.evaluate("edit", markersFile, agents[name].permission).action !== "allow") continue
+          agents[name].permission = Permission.merge(
+            agents[name].permission,
+            Permission.fromConfig({ edit: { "markers.json": "ask", [`*/${markersFile}`]: "ask", [markersFile]: "ask" } }),
+          )
+        }
+
         const get = Effect.fnUntraced(function* (agent: string) {
           return agents[agent]
         })

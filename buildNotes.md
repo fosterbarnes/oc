@@ -119,6 +119,77 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-06 (~09:10) - v0.2.97 - Personal WezTerm zoom commands - GPT-6.1 Sol, effort not exposed; Implementation
+
+### Agent
+- Meta: GPT-6.1 Sol; effort not exposed; Implementation; completed, scoped review clean
+- Version: 0.2.97
+- Added personal `/zoom-in` and `/zoom-out` outside repository: `~/.config/opencode/tuiPlugins/weztermZoom.ts`, loaded by global `tui.json`; renderer emits unique OSC 1337 `oc_font_zoom` requests. WezFig `wezterm.lua` handles requests through native font-size actions.
+- Recorded shared-file work in `C:\Users\user\buildNotes.md` and WezFig history. No oc runtime code changed; no revision bump. Plan: `.opencode/plans/ses_eeec0c98cffew7sbU36z7ke5Ir.md`.
+- Verification: personal plugin check passed (1 test, 14 assertions); user confirmed live zoom after 09:06 restart. Scoped cleanup review found no actionable defects. Separate Home/session, multi-window, and keyboard-reset checks not individually reported.
+- Push verification: `bun test --timeout 30000 test/marker/marker.test.ts test/agent/agent.test.ts` from `src/packages/opencode`: 55 pass, 0 fail, 149 assertions.
+- Pre-push verification: `.scripts/prePush.ps1` passed, 27/27 typecheck tasks (24 cached); refreshed README code-count table and `scc.txt` to 515,348 code lines.
+
+### User
+Terminal text size
+- Personal `/zoom-in` and `/zoom-out` commands now change WezTerm text size directly without an AI reply.
+- This uses personal configuration outside the oc repository and was confirmed working live.
+
+---
+
+## 2026-10-06 (~02:22) - v0.2.97 - Command markers are now a native, off-by-default oc feature - Opus 5.5, low reasoning; Implementation
+
+### Agent
+- Meta: Opus 5.5; low reasoning; Implementation; completed (picked up after previous Opus hit the Claude Code 5-hour limit mid-plan)
+- Version: 0.2.97
+- Plan: `~/.config/opencode/plans/2026-10-06-tokenless-markers.md` (both phases done; Progress has deviations). Replaces the v0.2.96 proof of concept below.
+- Added `core/src/util/markers-file.ts`: `markersFile()` = `Global.Path.config/markers.json` (global-only by design), `MARKERS_WARNING`, `markersEnabled`, `setMarkersEnabled` (regex-flips `"enabled"` in place so `//` comments and commands survive; creates warning template, off, if missing).
+- Added `opencode/src/marker/marker.ts`: `read` (needs `enabled: true`; validates name `^[A-Za-z]\w*$`, `run` string array, `mode` inline|window|afterTurn; per-command `ask` overrides top-level `ask`; `timeout` default 30 s), fence-aware `find`/`replace` (exact line `$#name`, trailing spaces ok, CRLF kept, deduped), `run` (inline: `Bun.spawn` argv, no shell, last 4000 chars; window: Windows `launchDetached("pwsh", -NoExit -EncodedCommand)` visible; non-Windows returns "window mode is Windows-only"), `queue`/`flush` for afterTurn, `prompt(config)`, `log` to `Global.Path.log/markers.log` (failures logged to console, never fail the reply).
+- Changed `session/processor.ts`: `runMarkers` at `text-end` before `experimental.text.complete` (fast path: skip unless text has `$#`); `ask` uses `Permission.ask` permission `marker`, pattern/always = name, `ruleset: []` so markers.json decides, not agent `*: allow`; reject -> `name: denied`. Layer listens for `SessionStatus` idle -> `Marker.flush`. Removed stale `no-self-assign` lint comment (assignment kept).
+- Changed `session/prompt.ts`: marker prompt pushed to `system` for native providers; for Claude Code appended to the agent prompt (only prompt CC receives). Absent when disabled or no valid commands.
+- Changed `agent/agent.ts`: last-applied edit `ask` for `markers.json`, `*/<configdir>/markers.json`, `<configdir>/markers.json`, only on agents where edit would otherwise be `allow` (plan agent keeps deny).
+- Added TUI palette `oc.markers` "Command markers (alpha)" (`/markers`) in `tui/src/app.tsx`: on/off select; turning on shows `DialogConfirm` with `MARKERS_WARNING`; toast shows file path.
+- Removed proof of concept: `.opencode/plugins/dollarHash.ts`, `.opencode/dollarHash/`, AGENTS.md `$#` section (AGENTS.md content back to pre-v0.2.96).
+- Added FORK.md row "Command markers (alpha)" (medium); counts medium 22, total 63.
+- Added `~/.config/opencode/markers.json` with user permission: `enabled: false`, `testCommand` (inline pwsh timestamp), `build`/`test` (window, `.ps1` path as `run[0]` so the kept-open pwsh runs it directly, like the proof of concept). `helloScript` dropped (script deleted). Checked: file reads as off; with enabled flipped on a temp copy, 3 commands parse and `testCommand` returns `markers ok <timestamp>`.
+- Risk: shell tools can write markers.json (edit guard covers edit/write/apply_patch only). Answering "always" on any edit prompt approves `*`, which also covers markers.json. An `ask: true` marker blocks the reply stream until answered.
+- Verification: from `packages/opencode`, `bun test --timeout 30000 test/marker/marker.test.ts test/agent/agent.test.ts test/session/processor test/tool/run-after-turn.test.ts` 74 pass; `test/session/prompt` 47 pass, 14 skip. `bun typecheck` clean in opencode, tui, core. Full suite skipped at user request. No processor-level marker test (no text-end harness); live check pending user build.
+- ERROR: background shell launch for the full suite failed ("OpenCode did not return a valid background shell process id"); user then asked to skip it.
+
+### User
+Agent commands
+- Command markers are now built into oc, off by default, and work in every session, not just ones started in the oc folder.
+- Your commands live in `~/.config/opencode/markers.json`; each one can run inline, open a PowerShell window, or run after the reply finishes.
+- Turn the feature on from the command palette ("Command markers (alpha)"), which shows an alpha warning first, or by editing the file.
+- Each command can ask permission before it runs, with a default for all commands in the same file.
+- Agents are told which commands you have, and they must ask before changing the file.
+- The old test plugin and its `AGENTS.md` instructions are gone.
+
+---
+
+## 2026-10-06 (~01:08) - v0.2.96 - `$#` markers run preset commands without a tool call - Opus 5.5, low reasoning; Implementation
+
+### Agent
+- Meta: Opus 5.5; low reasoning; Implementation; completed (proof of concept)
+- Version: 0.2.96
+- Added `.opencode/plugins/dollarHash.ts`: `experimental.text.complete` hook (`session/processor.ts` text-end) matches assistant lines exactly `$#name` (`/^\$#(\w+)[ \t]*$/gm`), runs `COMMANDS[name]` via `input.$` + `pwsh -NoProfile -NonInteractive`, replaces the line with stdout (or `exit N: stderr`). Only table names run; unknown names stay as text. Names: `testCommand` (hidden, read-only `Get-Date`), `helloScript` (visible, runs `.opencode/dollarHash/helloScript.ps1` via `& '<path>'`, path from `import.meta.dir`; prints path, pid, time).
+- Added per-command `hidden` flag: `hidden: false` launches `Start-Process pwsh -NoExit -EncodedCommand <base64 UTF-16LE>` (no nested quoting), returns immediately, line becomes `<name>: opened in a new window`. Output stays in that window, not the chat.
+- Added `build` (visible, `.scripts\build.ps1`) and `test` (visible, `.scripts\test.ps1 -Category unit`) markers; paths from `ROOT = import.meta.dir/../..`. AGENTS.md: use only when the user asks; logs never reach the model, ask the user for the result. `closeOut` no-ops under `-EncodedCommand` (no `-File` arg), so the `-NoExit` window stays open.
+- Added AGENTS.md section `$# command markers (proof of concept)`: bare line runs, `\$#name` mentions without running (also in code blocks).
+- Kept: project-local plugin only loads for sessions whose directory is the oc repo; "+" tabs open in `C:\Users\user` and do not load it. Global move (`~\.config\opencode\plugins`, rule in `principles.md`) deferred.
+- Risk: no fenced-code skip in the plugin; relies on the backslash rule. Model cannot see command output in the same turn; only useful for fire-and-forget or next-turn context.
+- Verification: direct hook run with `Bun.$` on sample text (bare line replaced, inline mention and unknown name untouched). Live: Claude Code provider fired (rewrote this session's reply); OpenAI GPT-6.1 Sol session in oc dir replaced the marker with a post-send timestamp; a second GPT-6.1 Sol session chose the `helloScript` marker on its own from the AGENTS.md rule (no tools). Visible mode: direct hook run returned `helloScript: opened in a new window`; user confirmed the window opened. `build`/`test`: only checked that the three script paths resolve (`Bun.file().exists()`); not launched.
+- MISTAKE: quoted a bare marker line in a code block while explaining the test, so the plugin rewrote the explanation and the first live test was a false pass. Prevention: use `\$#name` when mentioning markers.
+
+### User
+Agent commands
+- Agents in oc can now write a special `$#testCommand` line, and oc runs a preset PowerShell command and shows its output in place of that line, without a tool call.
+- To mention a marker without running it, agents put a backslash in front of it.
+- When you ask an agent for a build or the unit tests, it can now open them in their own PowerShell window instead of reading the whole log, which saves a lot of usage.
+- This only works in sessions started in the oc repo folder for now.
+
+---
+
 ## 2026-10-06 (~00:24) - v0.2.95 - Fresh Claude conversation catches up on the chat - Opus 5.5, low reasoning; Implementation
 
 ### Agent

@@ -4,6 +4,7 @@ import { createDefaultOpenTuiKeymap } from "@opentui/keymap/opentui"
 import { Deferred, Effect } from "effect"
 import { Global } from "@opencode-ai/core/global"
 import { DebugConfig } from "@opencode-ai/core/debug-config"
+import { MarkersFile } from "@opencode-ai/core/util/markers-file"
 import { Flag } from "@opencode-ai/core/flag/flag"
 import { InstallationDisplayVersion, InstallationVersion } from "@opencode-ai/core/installation/version"
 import { ClipboardProvider, useClipboard } from "./context/clipboard"
@@ -1482,6 +1483,45 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
               ]}
               onSelect={(option) => {
                 void persistOcConfig("serverStartOnWindowsUserStart", option.value, toast)
+                dialog.clear()
+              }}
+            />
+          ))
+        },
+      },
+      {
+        name: "oc.markers",
+        title: "Command markers (alpha)",
+        category: "oc",
+        slashName: "markers",
+        run: () => {
+          const current = MarkersFile.markersEnabled()
+          dialog.replace(() => (
+            <DialogSelect
+              title="Command markers (alpha)"
+              current={current ? "true" : "false"}
+              options={[
+                { value: "true", title: "on" },
+                { value: "false", title: "off" },
+              ]}
+              onSelect={async (option) => {
+                const on = option.value === "true"
+                if (on && !current) {
+                  const confirmed = await DialogConfirm.show(dialog, "Turn on command markers?", MarkersFile.MARKERS_WARNING)
+                  if (confirmed !== true) return
+                }
+                try {
+                  MarkersFile.setMarkersEnabled(on)
+                  toast.show({
+                    message: `Command markers ${on ? "on" : "off"} (${MarkersFile.markersFile()})`,
+                    variant: "success",
+                  })
+                } catch (error) {
+                  toast.show({
+                    message: `Failed to update ${MarkersFile.markersFile()}: ${error instanceof Error ? error.message : String(error)}`,
+                    variant: "error",
+                  })
+                }
                 dialog.clear()
               }}
             />

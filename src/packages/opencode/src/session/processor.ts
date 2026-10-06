@@ -25,6 +25,7 @@ import { isRecord } from "@/util/record"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { Database } from "@opencode-ai/core/database/database"
 import { Usage, type LLMEvent } from "@opencode-ai/llm"
+import { Marker } from "@/marker/marker"
 
 const DOOM_LOOP_THRESHOLD = 3
 export type Result = "compact" | "stop" | "continue"
@@ -97,6 +98,57 @@ const layer = Layer.effect(
     const events = yield* EventV2Bridge.Service
     const database = yield* Database.Service
     const question = yield* Question.Service
+
+    const unsubscribe = yield* events.listen((event) => {
+      if (event.type !== SessionStatus.Event.Status.type) return Effect.void
+      const data = event.data as { sessionID: string; status: { type: string } }
+      if (data.status.type !== "idle") return Effect.void
+      return Effect.sync(() => Marker.flush(data.sessionID))
+    })
+    yield* Effect.addFinalizer(() => unsubscribe)
+
+    // Marker permission is decided by markers.json, never by agent rules, so the ruleset is empty.
+    const runMarkers = Effect.fn("SessionProcessor.runMarkers")(function* (sessionID: SessionID, text: string) {
+      if (!text.includes("$#")) return text
+      const config = yield* Effect.promise(() => Marker.read())
+      if (!config) return text
+      const names = Marker.find(text).filter((name) => Object.hasOwn(config.commands, name))
+      if (names.length === 0) return text
+      const results = yield* Effect.forEach(
+        names,
+        (name) =>
+          Effect.gen(function* () {
+            const command = config.commands[name]
+            if (command.ask) {
+              const allowed = yield* permission
+                .ask({
+                  permission: "marker",
+                  patterns: [name],
+                  always: [name],
+                  sessionID,
+                  metadata: { command: command.run.join(" "), mode: command.mode },
+                  ruleset: [],
+                })
+                .pipe(
+                  Effect.as(true),
+                  Effect.catch(() => Effect.succeed(false)),
+                )
+              if (!allowed) {
+                yield* Effect.promise(() => Marker.log(`${sessionID} ${name} denied`))
+                return [name, `${name}: denied`] as const
+              }
+            }
+            const line = yield* Effect.promise(() =>
+              command.mode === "afterTurn"
+                ? Marker.queue(name, command, sessionID)
+                : Marker.run(name, command, sessionID),
+            )
+            return [name, line] as const
+          }),
+        { concurrency: "unbounded" },
+      )
+      return Marker.replace(text, new Map(results))
+    })
 
     const create = Effect.fn("SessionProcessor.create")(function* (input: Input) {
       // Pre-capture snapshot before the LLM stream starts. The AI SDK
@@ -531,8 +583,7 @@ const layer = Layer.effect(
 
           case "text-end":
             if (!ctx.currentText) return
-            // oxlint-disable-next-line no-self-assign -- reactivity trigger
-            ctx.currentText.text = ctx.currentText.text
+            ctx.currentText.text = yield* runMarkers(ctx.sessionID, ctx.currentText.text)
             ctx.currentText.text = (yield* plugin.trigger(
               "experimental.text.complete",
               {

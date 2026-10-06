@@ -28,10 +28,10 @@ Counts below are for **active** rows only. Retired work is listed separately and
 |---|---:|
 | ~done~ | 16 |
 | high | 25 |
-| medium | 21 |
+| medium | 22 |
 | low | 0 |
 | CRITICAL | 0 |
-| **Total** | **62** |
+| **Total** | **63** |
 
 ---
 
@@ -127,6 +127,7 @@ Drop in Markdown agents, share prompts, and run SuperPlan / SuperGo / Debug as a
 | Archive finished plans | ~done~ | Successful temp plans move to `plans/archive/`; failed or partial plans stay. | None realistic. |
 | Default child agent | medium | `default_subagent` is used when a task does not name a child type. | Installed command and live request still need confirmation. |
 | SuperGo, Debug, and Luna routing | high | Config `agents/` and `prompts/` set: Go, Debug family, SuperPlan aliases. Daily Luna sessions and Luna agents use `openai/gpt-6-luna` (live-checked). Luna stays off Max / `xhigh` unless asked. | Config-level, not fork source. Fresh restart is required after prompt edits. |
+| Command markers (alpha) | medium | Off by default. When on, a line in an agent's reply that is exactly `$#` plus a name runs that command from global `~/.config/opencode/markers.json` with no tool call, so build/test logs never enter the model's context. Modes: `inline` (output replaces the line), `window` (visible PowerShell window, Windows only), `afterTurn` (runs once the session is idle). Global `ask` default with per-command override uses oc's permission prompt. Only the global file is read; agents must ask before editing it. oc lists the configured commands in the agent prompt for native models and Claude Code. Palette "Command markers (alpha)" toggles it after an alpha warning. Runs log to `markers.log`. Proof of concept live-checked on Claude Code and GPT-6.1 Sol. | Native build not live-checked. Window mode on macOS/Linux. Shell tools can still write `markers.json`, and an "always" edit approval also covers it. |
 | Hide stock Plan agent | ~done~ | Built-in Plan is disabled in config (`disable`). Hidden is a different switch. | None realistic. |
 
 ---
