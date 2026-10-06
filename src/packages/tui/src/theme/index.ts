@@ -48,6 +48,7 @@ export type Theme = {
   readonly backgroundPanel: RGBA
   readonly backgroundElement: RGBA
   readonly backgroundMenu: RGBA
+  readonly backgroundToast: RGBA
   readonly border: RGBA
   readonly borderActive: RGBA
   readonly borderSubtle: RGBA
@@ -120,9 +121,10 @@ type ColorValue = HexColor | RefName | Variant | RGBA
 export type ThemeJson = {
   $schema?: string
   defs?: Record<string, HexColor | RefName>
-  theme: Omit<Record<ThemeColor, ColorValue>, "selectedListItemText" | "backgroundMenu"> & {
+  theme: Omit<Record<ThemeColor, ColorValue>, "selectedListItemText" | "backgroundMenu" | "backgroundToast"> & {
     selectedListItemText?: ColorValue
     backgroundMenu?: ColorValue
+    backgroundToast?: ColorValue
     thinkingOpacity?: number
   }
 }
@@ -270,6 +272,8 @@ export function resolveTheme(theme: ThemeJson, mode: "dark" | "light") {
         return [key, resolveColor(value as ColorValue)]
       }),
   ) as Partial<Record<ThemeColor, RGBA>>
+
+  resolved.backgroundToast ??= resolved.backgroundPanel
 
   // Handle selectedListItemText separately since it's optional
   const hasSelectedListItemText = theme.theme.selectedListItemText !== undefined

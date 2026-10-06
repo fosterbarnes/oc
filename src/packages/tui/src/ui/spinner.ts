@@ -1,141 +1,20 @@
 import type { ColorInput } from "@opentui/core"
 import { RGBA } from "@opentui/core"
 import type { ColorGenerator } from "opentui-spinner"
+import {
+  calculateColorIndex,
+  getScannerState,
+  scannerFade,
+  scannerTrail,
+  type ScannerOptions,
+  type ScannerState,
+} from "./scanner"
 
-interface AdvancedGradientOptions {
+interface AdvancedGradientOptions extends ScannerOptions {
   colors: ColorInput[]
-  trailLength: number
   defaultColor?: ColorInput
-  direction?: "forward" | "backward" | "bidirectional"
-  holdFrames?: { start?: number; end?: number }
   enableFading?: boolean
   minAlpha?: number
-}
-
-interface ScannerState {
-  activePosition: number
-  isHolding: boolean
-  holdProgress: number
-  holdTotal: number
-  movementProgress: number
-  movementTotal: number
-  isMovingForward: boolean
-}
-
-function getScannerState(
-  frameIndex: number,
-  totalChars: number,
-  options: Pick<AdvancedGradientOptions, "direction" | "holdFrames">,
-): ScannerState {
-  const { direction = "forward", holdFrames = {} } = options
-
-  if (direction === "bidirectional") {
-    const forwardFrames = totalChars
-    const holdEndFrames = holdFrames.end ?? 0
-    const backwardFrames = totalChars - 1
-
-    if (frameIndex < forwardFrames) {
-      // Moving forward
-      return {
-        activePosition: frameIndex,
-        isHolding: false,
-        holdProgress: 0,
-        holdTotal: 0,
-        movementProgress: frameIndex,
-        movementTotal: forwardFrames,
-        isMovingForward: true,
-      }
-    } else if (frameIndex < forwardFrames + holdEndFrames) {
-      // Holding at end
-      return {
-        activePosition: totalChars - 1,
-        isHolding: true,
-        holdProgress: frameIndex - forwardFrames,
-        holdTotal: holdEndFrames,
-        movementProgress: 0,
-        movementTotal: 0,
-        isMovingForward: true,
-      }
-    } else if (frameIndex < forwardFrames + holdEndFrames + backwardFrames) {
-      // Moving backward
-      const backwardIndex = frameIndex - forwardFrames - holdEndFrames
-      return {
-        activePosition: totalChars - 2 - backwardIndex,
-        isHolding: false,
-        holdProgress: 0,
-        holdTotal: 0,
-        movementProgress: backwardIndex,
-        movementTotal: backwardFrames,
-        isMovingForward: false,
-      }
-    } else {
-      // Holding at start
-      return {
-        activePosition: 0,
-        isHolding: true,
-        holdProgress: frameIndex - forwardFrames - holdEndFrames - backwardFrames,
-        holdTotal: holdFrames.start ?? 0,
-        movementProgress: 0,
-        movementTotal: 0,
-        isMovingForward: false,
-      }
-    }
-  } else if (direction === "backward") {
-    return {
-      activePosition: totalChars - 1 - (frameIndex % totalChars),
-      isHolding: false,
-      holdProgress: 0,
-      holdTotal: 0,
-      movementProgress: frameIndex % totalChars,
-      movementTotal: totalChars,
-      isMovingForward: false,
-    }
-  } else {
-    return {
-      activePosition: frameIndex % totalChars,
-      isHolding: false,
-      holdProgress: 0,
-      holdTotal: 0,
-      movementProgress: frameIndex % totalChars,
-      movementTotal: totalChars,
-      isMovingForward: true,
-    }
-  }
-}
-
-function calculateColorIndex(
-  frameIndex: number,
-  charIndex: number,
-  totalChars: number,
-  options: Pick<AdvancedGradientOptions, "direction" | "holdFrames" | "trailLength">,
-  state?: ScannerState,
-): number {
-  const { trailLength } = options
-  const { activePosition, isHolding, holdProgress, isMovingForward } =
-    state ?? getScannerState(frameIndex, totalChars, options)
-
-  // Calculate directional distance (positive means trailing behind)
-  const directionalDistance = isMovingForward
-    ? activePosition - charIndex // For forward: trail is to the left (lower indices)
-    : charIndex - activePosition // For backward: trail is to the right (higher indices)
-
-  // Handle hold frame fading: keep the lead bright, fade the trail
-  if (isHolding) {
-    // Shift the color index by how long we've been holding
-    return directionalDistance + holdProgress
-  }
-
-  // Normal movement - show gradient trail only behind the movement direction
-  if (directionalDistance > 0 && directionalDistance < trailLength) {
-    return directionalDistance
-  }
-
-  // At the active position, show the brightest color
-  if (directionalDistance === 0) {
-    return 0
-  }
-
-  return -1
 }
 
 function createKnightRiderTrail(options: AdvancedGradientOptions): ColorGenerator {
@@ -162,25 +41,9 @@ function createKnightRiderTrail(options: AdvancedGradientOptions): ColorGenerato
 
     const index = calculateColorIndex(frameIndex, charIndex, totalChars, options, state)
 
-    // Calculate global fade for inactive dots during hold or movement
-    const { isHolding, holdProgress, holdTotal, movementProgress, movementTotal } = state
-
-    let fadeFactor = 1.0
-    if (enableFading) {
-      if (isHolding && holdTotal > 0) {
-        // Fade out linearly to minAlpha
-        const progress = Math.min(holdProgress / holdTotal, 1)
-        fadeFactor = Math.max(minAlpha, 1 - progress * (1 - minAlpha))
-      } else if (!isHolding && movementTotal > 0) {
-        // Fade in linearly from minAlpha during movement
-        const progress = Math.min(movementProgress / Math.max(1, movementTotal - 1), 1)
-        fadeFactor = minAlpha + progress * (1 - minAlpha)
-      }
-    }
-
     // Combine base inactive alpha with the fade factor
     // This ensures inactiveFactor is respected while still allowing fading animation
-    defaultRgba.a = baseInactiveAlpha * fadeFactor
+    defaultRgba.a = baseInactiveAlpha * (enableFading ? scannerFade(state, minAlpha) : 1)
 
     if (index === -1) {
       return defaultRgba
@@ -199,35 +62,14 @@ function createKnightRiderTrail(options: AdvancedGradientOptions): ColorGenerato
 export function deriveTrailColors(brightColor: ColorInput, steps: number = 6): RGBA[] {
   const baseRgba = brightColor instanceof RGBA ? brightColor : RGBA.fromHex(brightColor as string)
 
-  const colors: RGBA[] = []
-
-  for (let i = 0; i < steps; i++) {
-    // Alpha-based falloff with optional bloom effect
-    let alpha: number
-    let brightnessFactor: number
-
-    if (i === 0) {
-      // Lead position: full brightness and opacity
-      alpha = 1.0
-      brightnessFactor = 1.0
-    } else if (i === 1) {
-      // Slight bloom/glare effect: brighten color but reduce opacity slightly
-      alpha = 0.9
-      brightnessFactor = 1.15
-    } else {
-      // Exponential alpha decay for natural-looking trail fade
-      alpha = Math.pow(0.65, i - 1)
-      brightnessFactor = 1.0
-    }
-
-    const r = Math.min(1.0, baseRgba.r * brightnessFactor)
-    const g = Math.min(1.0, baseRgba.g * brightnessFactor)
-    const b = Math.min(1.0, baseRgba.b * brightnessFactor)
-
-    colors.push(RGBA.fromValues(r, g, b, alpha))
-  }
-
-  return colors
+  return scannerTrail(steps).map((level) =>
+    RGBA.fromValues(
+      Math.min(1.0, baseRgba.r * level.brightness),
+      Math.min(1.0, baseRgba.g * level.brightness),
+      Math.min(1.0, baseRgba.b * level.brightness),
+      level.alpha,
+    ),
+  )
 }
 
 /**

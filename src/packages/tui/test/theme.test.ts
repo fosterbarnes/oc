@@ -44,6 +44,19 @@ test("resolveTheme rejects circular color refs", () => {
   expect(() => resolveTheme(item, "dark")).toThrow("Circular color reference")
 })
 
+test("resolveTheme resolves backgroundToast overrides and panel defaults", () => {
+  const item = structuredClone(DEFAULT_THEMES.opencode)
+  for (const mode of ["dark", "light"] as const) {
+    const resolved = resolveTheme(item, mode)
+    expect(resolved.backgroundToast).toEqual(resolved.backgroundPanel)
+  }
+
+  item.defs = { ...item.defs, toastPurple: "#423B52" }
+  item.theme.backgroundToast = { dark: "toastPurple", light: "#E8E2EF" }
+  expect(resolveTheme(item, "dark").backgroundToast.toInts()).toEqual([66, 59, 82, 255])
+  expect(resolveTheme(item, "light").backgroundToast.toInts()).toEqual([232, 226, 239, 255])
+})
+
 function terminalColors(defaultBackground: string | null, palette: Array<string | null> = []): TerminalColors {
   return {
     palette,

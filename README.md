@@ -4,35 +4,112 @@
 
 ## Standout features
 
-- out of the box claude-code support (needs CAREFUL wording)
-- out of the box cursor support (needs CAREFUL wording)
-- (needs re-wording) Explain in simple terms how the app's backend server and lifecycle work
-- (needs re-wording) oc, occ, occc, occccc, etc. explain this and why it's useful
-- (needs re-wording) Full session list everywhere
-- (needs re-wording) session 'markers' (complete, failed, etc)
-- (needs expansion) custom sidebar
-- (needs expansion) script runner and settings
-- (needs expansion) crow
-- (needs expansion) ocDebug
+- Claude Code models in `/models`, using your existing Claude Code login ([how](#claude-code))
+- Cursor models in `/models`, using your existing Cursor login ([how](#cursor))
+- One background server shared by every oc window, so launches after the first are fast ([how](#background-server))
+- `occ` reopens your last session in one command ([how](#oc-and-occ) while `oc` is the default way to opencode 'normally'.
+- One session list for every project, open from anywhere ([how](#session-list-and-markers))
+- Mark sessions complete, failed, or in progress, and pin the ones you keep coming back to ([how](#session-list-and-markers))
+- A sidebar with usage meters, a file tree, changed files, and sub-agents, all clickable ([how](#sidebar))
+- Run your project's scripts from the sidebar in one click ([how](#script-runner))
 
 
 ## Fix
 
 - Faster app startup (initial, and across sessions)
-- (needs re-wording) Flaws with question tool
-- Start a session with no model call (check if this is really true for og opencode)
+- Agent questions survive closing the window or restarting the server: reopen the session, answer, and the agent carries on
+- Stopping a session clears any open question instead of leaving the chat stuck on it
+- `oc <folder>` opens a ready session named after the folder (`oc`, `oc2`, ...), so OpenCode skips the model call it normally spends naming a new session
 
 
 ## Custom skills and commands
 
 ## Behavior changes
 
-- (needs expansion) keybinds and key combos
+- `ctrl+c` and `ctrl+d` no longer quit. Quit with `ctrl+x q` or `/exit`.
+- New keys (`ctrl+x` is the leader key: press it, then the next key):
+
+| Key | Where | Action |
+|---|---|---|
+| `ctrl+return` | Home | Send the prompt to a new session and stay on Home |
+| `ctrl+n` | Anywhere | Pick a folder in your home directory and start a session there |
+| `ctrl+o` | Anywhere | List oc commands |
+| `ctrl+x d` / `v` / `w` | Anywhere | Set the default model / reasoning effort / agent |
+| `ctrl+x j` / `k` | Anywhere | Set the default sub-agent / sub-agent model |
+| `ctrl+x o` / `i` | Anywhere | Set the home directory / how its folders are sorted in the `ctrl+n` list |
+| `ctrl+s`, `ctrl+f`, `ctrl+shift+return` / `backspace` / `i` | Session list | Filter, pin, and mark sessions ([how](#session-list-and-markers)) |
+| `shift+up` / `shift+down` | Model list | Move a favorite model up or down |
+| `ctrl+h` | Model list | Hide or show a model |
+| `ctrl+shift+up` / `ctrl+shift+down` | Prompt | Move the cursor up or down a line |
+
+- Rebind any key in `tui.json`. `command_palette.order` in `opencode.jsonc` reorders commands inside a palette category.
 
 ## Windows specific stuff
 
 ## Non-Standout small features
 
+
+## How it works
+
+### Claude Code
+
+oc runs the Claude Code CLI installed on your machine, signed in with your own account. Claude Code keeps its own system prompt, built-in tools, transcript, and `/compact`. oc streams the replies into the session and offers oc's skills, subagents, questions, and MCP servers as tools Claude can load.
+
+### Cursor
+
+oc signs in through Cursor's browser login and talks to Cursor's service directly, so the Cursor app does not need to be open. A small local relay (`cursor-runtime`, needs Node.js on PATH) carries the connection. Based on [oakimov/cursor-opencode-provider](https://github.com/oakimov/cursor-opencode-provider).
+
+### Background server
+
+The first `oc` you run starts one OpenCode server in the background (port 4096, this machine only, password-protected). Every `oc` window after that connects to the same server instead of starting its own, and the server keeps running after you close the last window. Stop or restart it from the command palette, with `oc --kill-server` or `oc --restart-server`, or from the tray app. OC settings can also start it when you sign in to Windows.
+
+### oc and occ
+
+- `oc` opens oc in your OC directory (your home folder by default).
+- `oc <folder>` opens a project: an absolute path, or a folder name under your home folder.
+- `occ` reopens your most recent session, from any project.
+- `oc previous --depth <n>` goes further back: `--depth 2` is the session before that, up to 50.
+
+### Session list and markers
+
+Stock OpenCode lists only the current project's sessions. oc's session list shows sessions from every project, and picking one opens it in its own project folder.
+
+| Key (in the session list) | Action |
+|---|---|
+| `ctrl+shift+return` | Mark complete (✓) or clear |
+| `ctrl+shift+backspace` | Mark failed (✗) or clear |
+| `ctrl+shift+i` | Mark in progress (-) or clear |
+| `ctrl+f` | Pin to the top of the list, or unpin |
+| `ctrl+s` | Filter by: unmarked, in progress, pinned, complete, failed |
+
+A session holds one mark at a time. By default, agents can mark their own session in progress, must ask before marking it complete or reopening a complete or failed one, and cannot mark it failed. Change this with the `session_in_progress`, `session_complete`, `session_reopen`, and `session_failed` permissions.
+
+### Sidebar
+
+Top to bottom:
+
+- **Session, model, and reasoning:** click to switch session, change model, or cycle reasoning level. These follow the current session.
+- **Usage:** weekly usage for Codex, Cursor, Go, and OpenRouter. Stale numbers are dimmed; hover for their age. Pick providers with `Configure weekly usage providers`.
+- **Context, MCP, and LSP** (from stock OpenCode).
+- **Sub-agents:** the session's running and recently finished sub-agents. Click one to open it.
+- **Todos** (from stock OpenCode).
+- **Scripts:** see [Script runner](#script-runner).
+- **Files:** a tree of the project, or any folder you set as the file root. Click a file to put its path in your prompt; right-click to also copy it. Search uses [Everything](https://www.voidtools.com/) (needs `es.exe` on PATH and Everything running).
+- **Changed files:** click to open in your editor (`openEditedWith`, set per file extension).
+- **Footer:** project path and git branch.
+
+Settings are saved to `~/.config/openSidebar/config.json`, or `.config/openSidebar.json` in a project to override them there.
+
+### Script runner
+
+The sidebar lists two kinds of scripts:
+
+- `package.json` scripts, run with the project's package manager (bun, pnpm, yarn, or npm, from the lock file).
+- Files in the project's `.scripts` folder, run by extension: PowerShell, sh, Bash, Zsh, Python, Node, TypeScript, cmd, Ruby, and PHP by default.
+
+Click a script to run it. Right-click to paste it into your prompt and copy it. Pinned scripts (`*`) sort first.
+
+`Configure project scripts` sets the shell, which languages and extensions count (add your own), and where scripts open. In WezTerm or Windows Terminal that can be a new tab, a new window, or a split; elsewhere they open in their own window.
 
 ## Dev Docs
 
@@ -56,7 +133,7 @@
 
 ## Progress
 
-[514,776](scc.txt) lines of code and counting...
+[514,822](scc.txt) lines of code and counting...
 
 <!-- code-count:start -->
 
@@ -71,8 +148,8 @@
 | Powershell | 20 | 1,519 | 127 | 38 | 1,354 |
 | SQL | 95 | 592 | 0 | 17 | 575 |
 | Shell | 1 | 120 | 17 | 17 | 86 |
-| TypeScript | 2,710 | 527,920 | 42,910 | 14,982 | 470,028 |
-| **Total** | **3,029** | **579,581** | **49,075** | **15,730** | **514,776** |
+| TypeScript | 2,712 | 527,986 | 42,916 | 14,996 | 470,074 |
+| **Total** | **3,031** | **579,647** | **49,081** | **15,744** | **514,822** |
 
 <!-- code-count:end -->
 
@@ -89,7 +166,9 @@ example:
 
 Another thing you may not be used to lol... if you have an existing Cursor AI subscription plan or Claude Code subscription plan (not talking API keys, monthly/yearly subscriptions), oc knows how to interact with Cursor and Claude Code harnesses. At the end of the day, this means that you may select any model from any subscription you already pay for under the same exact /models menu where your native-to-OpenCode models live. While this may FEEL like you are 'hacking' around the system to somehow get external-harnessed-models to somehow 'expose' the underlying model API or system to 'get in'.... that's not how it works at all lmao.
 
-It's really just a simple deterministic system designed around harness interaction, skills, and tool translation. The intention is not to replace the products it works with, or break any TOS while doing so. The intention is to give a user a more streamlined, simplified general solution, while leaving harness-specific features like computer use to their respective 'host' harness.
+It's really just a simple deterministic system designed around harness interaction, skills, and tool translation. The intention is not to replace the products it works with, or break any TOS while operating with them. The intention is to give a user a more streamlined, simplified general workflow solution, while leaving harness-specific features like computer use and others to their respective 'host' harness.
+
+While you may have tried or used various OpenCode plugins whose end goals are similar regarding third-party harness 'connections', while using these I found minor problems at seemingly every turn. A lot of effort went into trying to figure out how these plugins worked, what to keep and iterate on, and what to start over from scratch. This is not a dig on any of those existing open-source plugins, they have been a crucial resource and have implicit contribution to some of oc's features. If you are working on a similar idea and have found some flaws in my system, please consider submitting either an issue or a pull request. I kindly ask that PRs may be intentional, tested, and scoped to the general intentions of this project.
 
 Beyond this, I've added features that help my everyday workflow, and I hope that they help yours too. Thank you for reading this if you did, and I hope you have some use for what I'm offering. If not, that's okay too. If you'd like to help out, issues and PRs are always open.
 

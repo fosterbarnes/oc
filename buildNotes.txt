@@ -1,6 +1,15 @@
-v0.2.90
+v0.2.94
 
-rename:
-The /rename toast now shows the model that wrote the new title on a second line, as "Model used: provider/model". It names the model that actually succeeded, so you can see when a fallback model stepped in. The "Title unchanged" toast shows it too.
+startup intro:
+A purple Knight Rider scanner now runs under the oc logo while oc starts. Its first sweep moves with the frame as the frame draws in, then it bounces until oc is ready, and it continues where it left off when the launcher hands over to the app. The separate "Loading plugins…" spinner at the bottom no longer shows during startup.
 
-Under the hood: the session.rename endpoint now returns { session, model } instead of the bare session, and the legacy JS SDK types were regenerated. The rename fallback suite passes 14/14 with a new check that the returned model is the one that succeeded, and type checks were clean on the touched files. Full suites were not run.
+toasts:
+Toast backgrounds are now controlled by the theme through a new optional backgroundToast color. Themes that leave it out use their panel background; the drac theme uses dusty purple. Status-colored borders stay as they were.
+
+claude code provider:
+Choosing "Start fresh" (or "Cancel") on the "Claude conversation is gone" question now works instead of leaving the chat stuck. The question was being registered with a different project than the one answering it.
+
+docs:
+The README now has a filled-in feature list and a "How it works" section covering Claude Code and Cursor models, the shared background server, oc and occ, the session list and markers, the sidebar, and the script runner, plus a table of the changed keys. FORK.md describes the Cursor provider accurately: it signs in through Cursor's browser login and talks to Cursor directly through a small local relay, so the Cursor app does not need to be open. A draft plan for publishing oc as a proper fork of upstream OpenCode was added (publicForkPlan.md); nothing in it has been carried out.
+
+Under the hood: the intro is now a pure function of a tick (introCellsAt in tui/src/logo.ts), and the scanner math moved out of spinner.ts into a dependency-free ui/scanner.ts so the launcher can use it without loading OpenTUI. The launcher passes the current frame to the app through OC_INTRO_FRAME. The plugin theme type and the run-mode theme resolver gained backgroundToast, which fixed the typecheck errors left by the toast work. The new logo test and the theme test pass (12/12) and the full prePush typecheck passed 27/27. The intro handoff between launcher and app has not been checked live yet, and the intro ignores the animations setting.

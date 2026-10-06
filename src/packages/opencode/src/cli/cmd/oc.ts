@@ -38,7 +38,7 @@ export function resolveTargetDirectory(target: string | undefined, ocDir = os.ho
 async function attach(
   server: { url: string; secret: string },
   settings: OcConfig.Settings,
-  options: { session?: string; directory: string },
+  options: { session?: string; directory: string; introFrame?: number },
 ) {
   const args = ["attach", server.url, "--dir", options.directory]
   if (options.session) args.push("--session", options.session)
@@ -46,7 +46,8 @@ async function attach(
   if (typeof settings.sessionAgent === "string") args.push("--agent", settings.sessionAgent)
   await runNative(args, {
     env: { OPENCODE_SERVER_PASSWORD: server.secret, OPENCODE_SERVER_USERNAME: "opencode",
-      OC_SUPERVISOR_PID: String(process.pid) },
+      OC_SUPERVISOR_PID: String(process.pid),
+      ...(options.introFrame === undefined ? {} : { OC_INTRO_FRAME: String(options.introFrame) }) },
   })
   const { Revive } = await import("@/config/revive")
   const raw = await takeHandoff(Revive.handoffPath(process.pid))
@@ -189,9 +190,8 @@ const LaunchCommand = cmd({
       const directory = resolveTargetDirectory(args.target, ocDir, homeDir)
       const server = await OcConfig.startServer()
       const session = args.target ? await bootstrapSession(server, directory) : undefined
-      // Leave the intro frame up; the TUI's first alternate-screen frame replaces it.
-      stopIntro(false)
-      await attach(server, settings, { directory, session })
+      // Leave the intro frame up; the TUI's first alternate-screen frame continues it.
+      await attach(server, settings, { directory, session, introFrame: stopIntro(false) })
     } finally {
       stopIntro()
     }
@@ -232,8 +232,7 @@ const PreviousCommand = cmd({
         runNative(["session", "previous", "--depth", String(depth)], { capture: true }),
         OcConfig.startServer(),
       ])
-      stopIntro(false)
-      await attach(server, settings, { directory: os.homedir(), session })
+      await attach(server, settings, { directory: os.homedir(), session, introFrame: stopIntro(false) })
     } finally {
       stopIntro()
     }

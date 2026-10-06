@@ -119,6 +119,102 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-06 (~00:10) - v0.2.94 - Toast theme color typechecks in run mode - Opus 5.5, default reasoning; Agent push
+
+### Agent
+- Meta: Opus 5.5; default reasoning; Agent push (agent-push skill); completed
+- Version: 0.2.94
+- Fixed typecheck errors from v0.2.92 `backgroundToast`: added `backgroundToast` to plugin `TuiThemeCurrent` (`plugin/src/tui.ts`); `opencode/src/cli/cmd/run/theme.ts` `ThemeJson` makes it optional and `resolveTheme` defaults it to `backgroundPanel` (same as tui resolver); added it to `test/fixture/tui-plugin.ts`.
+- Verification: tui `bun test test/logo.test.ts test/theme.test.ts` 12 pass; `.scripts\prePush.ps1` passed (turbo typecheck 27/27, code count refreshed).
+
+### User
+Themes
+- No visible change; plugins reading the current theme now also get the toast background color.
+
+---
+
+## 2026-10-05 (~23:36) - v0.2.93 - Knight Rider scanner in the startup intro - Opus 5.5, default reasoning; Implementation
+
+### Agent
+- Meta: Opus 5.5; default reasoning; Implementation (after /spit design: scanner row under logo, oc purple, first pass merged with reveal); completed
+- Version: 0.2.93
+- Added `tui/src/ui/scanner.ts`: dependency-free `getScannerState`/`calculateColorIndex` (moved verbatim from `ui/spinner.ts`) plus `scannerTrail` and `scannerFade` (extracted from `deriveTrailColors`/`createKnightRiderTrail`). `spinner.ts` imports them; prompt scanner output unchanged. Launcher must not load `@opentui/core`, hence the split.
+- Added `introCellsAt(tick)` + `INTRO_TICK_MS` (15ms) in `tui/src/logo.ts`: whole intro as a pure function of tick. Reveal shows column <= tick; scanner row under logo (logo width, 9 cells) uses prompt look (trail from `scannerTrail`, inactive 0.6 alpha fading to 0.3) with solid hex precomputed over black interior. First forward pass rides reveal edge; end hold = columns right of scanner, so it ends with the reveal; later steps every 3 ticks (45ms). `IntroCell` changed from `kind` to `fg`/`bg` hex (no `bg` = terminal background).
+- Changed `opencode/src/cli/intro.ts`: paints `introCellsAt` diffs per tick; resize clears and repaints current frame. Stop now returns last painted tick; removed duplicated geometry code (`expandTabs`, `blank`).
+- Changed `cli/cmd/oc.ts`: `attach` takes `introFrame`, passes `OC_INTRO_FRAME` env to the attach TUI; both `stopIntro(false)` call sites pass it. Revive re-attach passes none.
+- Changed `tui/src/component/intro-logo.tsx`: tick signal starts at `OC_INTRO_FRAME` (else fully revealed, as before), 15ms interval until `hideIntroLogo`, `Index` rendering so only changed scanner spans update.
+- Removed `StartupLoading` mount (and now-unused `useTuiStartup` use) from `tui/src/app.tsx`: it showed only while the intro was up. Kept upstream `component/startup-loading.tsx` unused to avoid sync churn.
+- Added `tui/test/logo.test.ts`: reveal per tick, head on reveal edge for first pass, later bouncing, non-scanner cells unchanged.
+- Verification: `bun test test/logo.test.ts` (tui) 3 pass; tui `tsgo --noEmit` clean; printed sample frames to confirm layout. opencode typecheck: only pre-existing errors in `cli/cmd/run/theme.ts` (`backgroundToast` missing from `SharedSyntaxTheme`, from the v0.2.92 toast work). Live launcher/TUI handoff not run; needs user check.
+- Risk: intro ignores `animations_enabled` (KV provider mounts below `IntroLogo`; launcher cannot read it).
+
+### User
+Startup intro
+- A purple Knight Rider scanner now runs under the oc logo while oc starts.
+- Its first sweep moves with the frame as the frame draws in, then it bounces until oc is ready.
+- The animation continues where it left off when the launcher hands over to the TUI.
+- The separate "Loading plugins…" spinner at the bottom no longer shows during startup.
+
+---
+
+## 2026-10-05 (~23:23) - v0.2.92 - Theme-controlled toast background - GPT-6.1 Sol, default reasoning; Implementation
+
+### Agent
+- Meta: GPT-6.1 Sol; default reasoning; Implementation; completed
+- Version: 0.2.92; retained once-per-session revision bump.
+- Added optional `backgroundToast` to TUI theme colors; resolver defaults omitted value to `backgroundPanel` and supports existing color references and dark/light variants.
+- Changed Toast to use theme color; removed fixed purple from shared UI.
+- Changed active custom theme `C:\Users\user\.config\opencode\themes\drac.json`: `backgroundToast` is dusty purple `#423B52`.
+- Verification: new targeted theme-resolution test passed, 1 pass, 0 fail; covers both mode defaults, color reference, and dark/light override. No build run.
+
+### User
+Toast appearance
+- Toast backgrounds are now theme-controlled. Your drac theme keeps dusty purple; other themes can choose their own toast color.
+
+---
+
+### Toast color selection follow-up (v0.2.92)
+
+### Agent
+- Changed `src/packages/tui/src/ui/toast.tsx`: replaced variant tint with user-selected dusty purple `#423B52`; removed unused tint import.
+- Verification: no tests or build run for static color change.
+
+### User
+Toast appearance
+- Selected dusty purple for toast backgrounds; status-colored borders remain.
+
+---
+
+## 2026-10-05 (~23:17) - v0.2.92 - Tint toast backgrounds - GPT-6.1 Sol, default reasoning; Implementation
+
+### Agent
+- Meta: GPT-6.1 Sol; default reasoning; Implementation; completed
+- Version: 0.2.92
+- Changed `src/packages/tui/src/ui/toast.tsx`: reused theme `tint` with 15% variant color over panel background; retained side borders and text colors.
+- Verification: inspected toast diff and existing tint implementation; no checks introduced or run for this styling-only change. Live appearance needs user verification.
+
+### User
+Toast appearance
+- Toast backgrounds now have a subtle tint matching their border color so they stand out from panels.
+
+---
+
+## 2026-10-05 (~23:16) - v0.2.91 - Claude "Start fresh" answer reaches the waiting question - Opus 5.5, low reasoning; Debug
+
+### Agent
+- Meta: Opus 5.5; low reasoning; Debug; completed
+- Version: 0.2.91
+- ERROR: "Start fresh" did nothing. Log: `asking id=que_10f31b536001...` then 4x `reply for unknown request` for the same id. `Question` pending map is per-instance (`InstanceState`); the claude-code plugin's shared client (`setOpencodeClient`, module-global) is bound to whichever instance booted last (`C:\Users\user` under the `oc` launcher), so `/question/ask` registered there while the TUI replied with the session's directory.
+- Fixed `askFreshConversation` (`provider/claude-code/session-sync.ts`): takes the `TurnContext`, posts `/question/ask?directory=<turn.cwd>`, same routing as `requestWakeTurn`.
+- Risk: other `getOpencodeClient()` callers (toast, `session.get`, `session.status`, `tool.list`, `mcp.status`) still use the last-booted instance's directory; not changed.
+- Verification: none run. No existing check covers the raw client ask (session-sync tests have no client, so ask returns undefined).
+
+### User
+Claude Code provider
+- Choosing "Start fresh" (or "Cancel") on the "Claude conversation is gone" question now works instead of leaving the chat stuck.
+
+---
+
 ## 2026-10-05 (~17:46) - v0.2.90 - /rename toast shows the model that wrote the title - Opus 5.5, low reasoning; Implementation
 
 ### Agent

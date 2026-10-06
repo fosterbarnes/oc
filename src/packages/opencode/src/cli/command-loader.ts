@@ -73,6 +73,8 @@ export function withExecutableDefault(args: readonly string[], execPath = proces
   const file = execPath.split(/[\\/]/).pop() ?? execPath
   const ext = file.includes(".") ? `.${file.split(".").pop()}` : ""
   const base = file.slice(0, file.length - ext.length).toLowerCase()
+  // TODO: bring back `occc`, `occcc`, ...: each extra `c` opens one session further back
+  // (`--depth` = count of `c` after `oc`). Needs installer hard links for each name.
   if (base !== "oc" && base !== "occ") return [...args]
   const helpOrVersion =
     args.includes("-h") ||

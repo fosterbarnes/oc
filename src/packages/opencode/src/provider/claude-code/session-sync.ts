@@ -96,7 +96,7 @@ async function rewindOnDrift(turn: TurnContext, prompt: Prompt, abortSignal?: Ab
 
 async function confirmFreshConversation(turn: TurnContext, reason: string, abortSignal?: AbortSignal) {
   const notice = `> **Claude conversation lost:** ${reason}. Started a new Claude conversation; it does not remember earlier turns.\n`
-  const answer = await askFreshConversation(turn.affinity, reason, abortSignal)
+  const answer = await askFreshConversation(turn, reason, abortSignal)
   if (answer === false) {
     // Keep the loss so the next attempt asks again.
     markClaudeSessionLost(turn.sessionKey, reason)
@@ -110,13 +110,15 @@ async function confirmFreshConversation(turn: TurnContext, reason: string, abort
 }
 
 /** True to start fresh, false when declined, undefined when no one can be asked. */
-async function askFreshConversation(sessionID: string, reason: string, abortSignal?: AbortSignal) {
+async function askFreshConversation(turn: TurnContext, reason: string, abortSignal?: AbortSignal) {
   const client = rawOpencodeClient()
-  if (!client || sessionID === "default") return undefined
+  if (!client || turn.affinity === "default") return undefined
+  // The shared client is bound to whichever instance booted last; the TUI
+  // replies to the session's own instance, so the question must live there.
   const response = await client.post({
-    url: "/question/ask",
+    url: `/question/ask?directory=${encodeURIComponent(turn.cwd)}`,
     body: {
-      sessionID,
+      sessionID: turn.affinity,
       questions: [
         {
           header: "Claude session lost",
