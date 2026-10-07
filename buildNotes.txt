@@ -1,9 +1,6 @@
-v0.2.102
+v0.2.104
 
-todos:
-Todos are disabled by default, including for agents that explicitly allow the todo tool. Enable todos or Disable todos is available in the command palette and persists the global preference. Disabling hides the sidebar list and stops todo tools and provider mirroring without deleting saved lists. The toggle confirms a configuration reload, and project settings can override the global default.
+bgrun tool:
+New "bgRun tool" toggle in the oc section of the command palette (or `/bgRun`) turns the background-job tool on or off for agents. Off hides bgRun, bgStatus, and bgKill from agents entirely.
 
-slash command combinations:
-Typing multiple slash commands such as `/spit /think` combines both instructions into one agent turn, with your request kept separate. Picking another slash command preserves earlier commands and surrounding text. Completion and Escape now work after multiline or Unicode input without leaving command fragments behind.
-
-Under the hood: command names travel separately to the server, which expands the original bodies into labeled blocks and rejects routed secondary commands before any shell effects run. The picker now derives its trigger from current text and cursor position and lands after completed tokens. This push's focused checks passed: 14 todo checks plus node assertions, 1 todo UI check with 26 assertions, 3 server composition checks with 37 assertions, and 3 picker checks with 56 assertions. Legacy SDK types were regenerated. prePush and installed acceptance details are covered by the push script output.
+Under the hood: the toggle writes allow/deny for bgRun, bgStatus, and bgKill together through the global config update, keeping comments in opencode.jsonc. The background-marker experiment from the unpushed v0.2.103 entries was abandoned and reverted, so markers behave as in v0.2.102. This push's focused check passed: typecheck clean in tui.

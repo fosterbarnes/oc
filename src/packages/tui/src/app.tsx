@@ -1526,6 +1526,41 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
         },
       },
       {
+        name: "oc.bgrun",
+        title: "bgRun tool",
+        category: "oc",
+        slashName: "bgRun",
+        run: () => {
+          // A "deny" permission removes the tool from the agent's tool list, not just its calls.
+          const permission = sync.data.config.permission
+          const current = typeof permission !== "object" || permission.bgRun !== "deny"
+          dialog.replace(() => (
+            <DialogSelect
+              title="bgRun tool"
+              current={current ? "true" : "false"}
+              options={[
+                { value: "true", title: "on" },
+                { value: "false", title: "off" },
+              ]}
+              onSelect={async (option) => {
+                dialog.clear()
+                const on = option.value === "true"
+                if (on === current) return
+                const action = on ? "allow" : "deny"
+                const result = await sdk.client.global.config.update({
+                  config: { permission: { bgRun: action, bgStatus: action, bgKill: action } },
+                })
+                toast.show(
+                  result.error
+                    ? { message: `Failed to update bgRun: ${String(result.error)}`, variant: "error" }
+                    : { message: `bgRun ${on ? "on" : "off"}`, variant: "success" },
+                )
+              }}
+            />
+          ))
+        },
+      },
+      {
         name: "server.shutdown",
         title: "Shut Down",
         category: "oc",

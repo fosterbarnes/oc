@@ -119,6 +119,88 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-06 (~22:02) - v0.2.104 - bgRun on/off toggle in the oc palette - Opus 5.5, low reasoning; Implementation
+
+### Agent
+- Meta: Opus 5.5; low reasoning; Implementation; completed
+- Version: 0.2.104. Skipped 0.2.103 because the user's installed build is labeled 0.2.103 and has the reverted bg-marker code, so reusing the number would hide which build is which.
+- Added palette entry `oc.bgrun` "bgRun tool" (`/bgRun`, category oc) in `tui/src/app.tsx` after `oc.markers`: on/off `DialogSelect`; writes global `permission.bgRun`, `bgStatus`, `bgKill` = `allow`/`deny` together through `sdk.client.global.config.update` (`patchJsonc` keeps comments in `opencode.jsonc`). Current state is read from merged `sync.data.config.permission`; a string `permission` counts as on.
+- On/off state is read from `bgRun` only.
+- Risk: `Permission.disabled` hides the tool only when the last matching rule is a `*` deny; an agent profile with its own `bgRun`/`*` allow after the global rules would keep it visible. Global config update reloads config, which can interrupt active sessions on this server (same as the todos toggle).
+- Verification: `bun typecheck` clean in tui. No live check (needs user build).
+
+### User
+oc settings
+- New "bgRun tool" toggle in the oc section of the command palette (or `/bgRun`) turns the background-job tool on or off for agents.
+- Off hides bgRun, bgStatus, and bgKill from agents entirely.
+
+---
+
+## 2026-10-06 (~21:59) - v0.2.102 - Background markers abandoned and reverted - Opus 5.5, low reasoning; Implementation
+
+### Agent
+- Meta: Opus 5.5; low reasoning; Implementation; completed (revert)
+- Version: 0.2.102 (the 0.2.103 bump below was undone; no net code change this session)
+- Removed: everything in the two v0.2.103 entries below (`bg` mode, `args`, `pointer`, batching, `Marker.setWake` in `prompt.ts`, `EffectBridge` in `processor.ts`, template comment, tests). `git checkout` restored `marker.ts`, `processor.ts`, `prompt.ts`, `markers-file.ts`, `marker.test.ts`, and `.version/version` to HEAD. Markers are back to v0.2.97-v0.2.102 behavior (inline / window / afterTurn).
+- Reason: user judged the token savings not worth pursuing. Live tests: answers right, no savings vs bash; wake turns often missed the prompt cache. Plan marked ABANDONED: `~/.config/opencode/plans/2026-10-06-marker-bg-pointers.md`.
+- Kept: `~/.config/opencode/markers.json` stray-`}` fix. Removed test markers (`timeBg`, `gitLogBg`, `diskBg`) and the bg/args header comments. Deleted the scratch script `plans/markerTokens.ts`.
+- Risk: markers.json names `build-oc`, `buildDebug-oc`, `prePush-oc` fail the `NAME` regex (no `-`) and are silently skipped.
+- Not done: the requested TUI shell-mode toggle and bash blocking, which the user cancelled mid-discovery.
+- Verification: `bun test test/marker/marker.test.ts` 9 pass on reverted code; `git status` shows only `buildNotes.md` modified.
+
+### User
+Agent commands
+- The background-marker experiment was removed. Command markers work exactly as before.
+- Your markers.json keeps the bracket fix, and the test commands were removed.
+- Commands with a `-` in their name (like `build-oc`) are still ignored; rename them (for example `buildOc`) if you want them to work.
+
+---
+
+## 2026-10-06 (~21:53) - v0.2.103 - Batch bg marker pointers and tighten pointer content - Opus 5.5, low reasoning; Implementation
+
+### Agent
+- Meta: Opus 5.5; low reasoning; Implementation; completed (follow-up to the v0.2.103 entry below, same session, no extra bump)
+- Version: 0.2.103
+- Live results (user build, 4 sessions via `~/.config/opencode/plans/markerTokens.ts`): bg markers worked and answers were correct, but saved no tokens. 3 of 5 wake turns had `cache.read = 0` (full uncached context). Two pointers 0.4 s apart gave 2 wake turns. git log pointer tail and error matches (commit text "fail") were useless. Agents ran the same command through bash next to the marker.
+- Added `deliver` in `marker.ts`: per-session 1.5 s sliding batch (`BATCH_MS`); pointers that finish together are joined into one wake message.
+- Changed `pointer`: shows first 2 + `...` + last 3 lines when more than 5 lines; error-line matches only when exit is not 0.
+- Changed marker prompt: use the marker instead of running the same command through a tool; after bg markers end the reply and wait for the pointer.
+- TODO: cause of wake-turn cache misses still unknown (possibly a request less than 1 s after the previous one, before the provider stores the cache). Re-measure after this batch change. Busy-session wake is still not live-tested (the test 3 pointer arrived after the reply ended).
+- Verification: `bun test test/marker/marker.test.ts` 13 pass (new: batching, pointer head/tail, no matches on exit 0); `bun typecheck` clean in opencode.
+
+### User
+Agent commands
+- Background commands that finish at the same time now report back in one message, so the agent answers once.
+- The result summary now shows the first and last lines of output, and only lists error lines when the command failed.
+- Agents are told to use a marker instead of also running the same command themselves, and to wait for the result before answering.
+
+---
+
+## 2026-10-06 (~20:57) - v0.2.103 - Background command markers with short pointer messages - Opus 5.5, low reasoning; Implementation
+
+### Agent
+- Meta: Opus 5.5; low reasoning; Implementation; completed
+- Version: 0.2.103
+- Plan: `~/.config/opencode/plans/2026-10-06-marker-bg-pointers.md` (Progress has deviations).
+- Added `marker.ts` mode `bg`: `runBg` spawns with stdout+stderr to one fd at `Global.Path.log/markers/<session>/<name>-<id>.log`; on exit builds `pointer()` (status line, last 3 lines, up to 5 `error|fail|exception` lines numbered, 160 chars/line, 600 total) and calls `done`. bg default timeout 600 s (inline stays 30 s).
+- Added `args: true` per command: `LINE` regex now captures `name args...`; `find` returns keys (full marker body), new `parse(key)` splits name + args (`"quoted"` or whitespace words, no shell). Args on a command without `args` -> `name: takes no arguments`.
+- Added wake path: `Marker.setWake/wake` registry; `SessionPrompt` layer registers a handler calling `prompt()` with a synthetic text part and the assistant's agent (model from `currentModel`). `processor.runMarkers` now takes agent, makes an `EffectBridge`, and forks `Marker.wake` from the bg exit callback. Busy loop picks the message up via `ensureRunning`; idle session restarts.
+- Updated marker agent prompt (bg, args, "trust pointer, grep log, never read whole log") and the markers.json template comment in `core/src/util/markers-file.ts`.
+- Changed user `~/.config/opencode/markers.json`: fixed extra trailing `}`, added `timeBg`, updated header comments.
+- Risk: markers.json names `build-oc`, `buildDebug-oc`, `prePush-oc` fail `NAME` (`-` not allowed) and are silently skipped. Not renamed (user file).
+- Risk: wake in a session that is busy relies on `ensureRunning` joining the running loop; not live-tested. No pointer batching for many bg runs finishing together.
+- Verification: `bun test test/marker/marker.test.ts` 12 pass (new: args parse, pointer format/cap, bg log + pointer); `test/session/processor` 17 pass; `bun typecheck` clean in opencode and core. No live check (needs user build).
+
+### User
+Agent commands
+- Markers have a new `bg` mode that runs a command in the background and saves its output to a log file.
+- When a background command finishes, the agent gets a short message with the exit code, the last few lines, any error lines, and the log path, so it does not have to read the whole output.
+- A command with `"args": true` lets the agent add words after the marker name, passed straight to the program without a shell.
+- Your markers.json had a stray `}` that is now fixed, and a `timeBg` test command was added.
+- Commands with a `-` in their name (like `build-oc`) are ignored; rename them (for example `buildOc`) to make them work.
+
+---
+
 ## 2026-10-06 (~19:38) - v0.2.102 - Compose slash commands and finish picker recovery - GPT-6.1 Sol, effort not exposed; Implementation
 
 ### Agent
