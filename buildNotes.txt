@@ -1,9 +1,6 @@
-v0.2.105
+v0.2.106
 
-work session:
-Type /work in a session to move the current session into a git worktree next to the repo (for example GitHub\oc.work-<name>), so the agent's edits stay out of your real checkout. If you have uncommitted changes it asks whether to bring them along, the same way the Move session dialog does.
+sidebar position:
+The oc section of the command palette has a new "Sidebar position (WIP)" setting (or /sidebarPosition) with right, top, left, and bottom choices, and the choice is remembered between sessions. At the top the sidebar becomes a horizontal bar above the messages; at the bottom the same bar sits below the messages and prompt. On the left the full sidebar sits beside the messages on wide terminals and opens as a panel on the left side on narrow ones. The top and bottom bars also show on narrow terminals where the right-hand sidebar stays hidden.
 
-done merge:
-Type /done to squash-merge everything from that worktree into your real checkout as staged, uncommitted changes, move the session back, and delete the worktree. It refuses if your real checkout has uncommitted changes to tracked files, and if the merge conflicts it undoes the attempt and keeps the session in the worktree so nothing is lost.
-
-Under the hood: the worktree is detached with no branch to clean up, and the merge snapshots the worktree with low-level git commands that skip commit hooks. This push's focused checks passed: typecheck clean in core, protocol, server, and tui, plus the core git worktree and merge tests. Live TUI behavior, the Claude Code provider folder switch, and Windows file-lock cleanup remain unchecked.
+Under the hood: the session view reads one saved sidebar_position key and places the sidebar through a single leading memo plus one trailing switch. The horizontal bar wraps its sections, caps at 12 rows with no drawn scrollbar, and keeps footer spacing consistent. This push's focused check passed: typecheck clean in tui. Live visual confirmation came from user screenshots.

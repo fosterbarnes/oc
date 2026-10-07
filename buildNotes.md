@@ -119,6 +119,27 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-06 (~22:27) - v0.2.106 - Sidebar top position toggle - Opus 5.5, low reasoning; Implementation
+
+### Agent
+- Meta: Opus 5.5; low reasoning; Implementation; completed, unverified
+- Version: 0.2.106
+- Added kv `sidebar_position` ("right" | "top") and palette command `session.sidebar.position` in `tui/src/routes/session/index.tsx`; top mode switches the session root box to column, renders `Sidebar` first, skips the narrow-overlay path, and no longer subtracts 42 from `contentWidth`.
+- Changed `sidebarVisible` auto rule: top mode shows even when not `wide()`.
+- Added `horizontal` prop to `Sidebar` (`sidebar.tsx`): full width, maxHeight 12, content box row + wrap, footer row. Vertical scrollbar hidden in horizontal mode (track clashed with message scrollbar, user screenshot).
+- Moved: toggle from Session command `session.sidebar.position` to oc settings command `oc.sidebar_position` ("Sidebar position", right/top select, `/sidebarPosition`) in `app.tsx`; session view reads the same kv key.
+- Added: positions `left` and `bottom`; command titled "Sidebar position (WIP)". Left renders before messages on wide terminals; narrow left falls back to the right-aligned overlay. Bottom renders the horizontal bar after the messages/prompt.
+- Cleaned: `index.tsx` placement collapsed to `sidebarLeading` memo (top, wide left) + one trailing Switch; narrow-left overlay now opens on the left (`alignItems` flex-start). `sidebar.tsx` horizontal: rowGap 1 between wrapped rows, no scrollbar padding, footer gap 3 to match sections. `bunx tsc --noEmit -p .` in `packages/tui`: exit 0.
+- TODO: `SidebarTools` fragment sections and the `sidebar_content` slot still stack plugin outputs in one column; give sections fixed widths if the bar looks cramped.
+- Verification: skipped; `tsc` unavailable in this worktree (no node_modules). Needs live check.
+
+### User
+Sidebar
+- The command palette has a new "Move sidebar to top" / "Move sidebar to right" toggle, and the choice is remembered.
+- At the top, the sidebar becomes a horizontal bar of at most 12 rows that scrolls when its content is taller.
+
+---
+
 ## 2026-10-06 (~22:18) - v0.2.105 - /work and /done session worktrees - Opus 5.5, low reasoning; Implementation
 
 ### Agent

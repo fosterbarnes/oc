@@ -263,6 +263,8 @@ export function Session() {
 
   const dimensions = useTerminalDimensions()
   const [sidebar, setSidebar] = kv.signal<"auto" | "hide">("sidebar", "auto")
+  // Set from the oc "Sidebar position" command in app.tsx
+  const [sidebarPosition] = kv.signal<"right" | "left" | "top" | "bottom">("sidebar_position", "right")
   const [sidebarOpen, setSidebarOpen] = createSignal(false)
   const [conceal, setConceal] = createSignal(true)
   const thinking = useThinkingMode()
@@ -277,14 +279,19 @@ export function Session() {
   const [showGenericToolOutput, setShowGenericToolOutput] = kv.signal("generic_tool_output_visibility", false)
 
   const wide = createMemo(() => dimensions().width > 120)
+  const sidebarHorizontal = createMemo(() => sidebarPosition() === "top" || sidebarPosition() === "bottom")
+  // Rendered before the messages; narrow left falls through to the overlay after them
+  const sidebarLeading = createMemo(
+    () => sidebarPosition() === "top" || (sidebarPosition() === "left" && wide()),
+  )
   const sidebarVisible = createMemo(() => {
     if (session()?.parentID) return false
     if (sidebarOpen()) return true
-    if (sidebar() === "auto" && wide()) return true
-    return false
+    // A top/bottom bar takes no columns, so narrow terminals can still show it
+    return sidebar() === "auto" && (wide() || sidebarHorizontal())
   })
   const showTimestamps = createMemo(() => timestamps() === "show")
-  const contentWidth = createMemo(() => dimensions().width - (sidebarVisible() ? 42 : 0) - 4)
+  const contentWidth = createMemo(() => dimensions().width - (sidebarVisible() && !sidebarHorizontal() ? 42 : 0) - 4)
   const providers = createMemo(() => Model.index(sync.data.provider))
 
   const scrollAcceleration = createMemo(() => getScrollAcceleration(tuiConfig))
@@ -1306,7 +1313,10 @@ export function Session() {
           openFile,
         }}
       >
-        <box flexDirection="row" flexGrow={1} minHeight={0}>
+        <box flexDirection={sidebarHorizontal() ? "column" : "row"} flexGrow={1} minHeight={0}>
+          <Show when={sidebarVisible() && sidebarLeading()}>
+            <Sidebar sessionID={route.sessionID} horizontal={sidebarHorizontal()} />
+          </Show>
           <box flexGrow={1} minHeight={0} paddingBottom={1} paddingLeft={2} paddingRight={2} gap={1}>
             <Show when={session()}>
               <scrollbox
@@ -1476,10 +1486,10 @@ export function Session() {
             </Show>
             <Toast />
           </box>
-          <Show when={sidebarVisible()}>
+          <Show when={sidebarVisible() && !sidebarLeading()}>
             <Switch>
-              <Match when={wide()}>
-                <Sidebar sessionID={route.sessionID} />
+              <Match when={sidebarHorizontal() || wide()}>
+                <Sidebar sessionID={route.sessionID} horizontal={sidebarHorizontal()} />
               </Match>
               <Match when={!wide()}>
                 <box
@@ -1488,7 +1498,7 @@ export function Session() {
                   left={0}
                   right={0}
                   bottom={0}
-                  alignItems="flex-end"
+                  alignItems={sidebarPosition() === "left" ? "flex-start" : "flex-end"}
                   backgroundColor={RGBA.fromInts(0, 0, 0, 70)}
                 >
                   <Sidebar sessionID={route.sessionID} />

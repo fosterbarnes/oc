@@ -1487,6 +1487,30 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
         },
       },
       {
+        name: "oc.sidebar_position",
+        title: "Sidebar position (WIP)",
+        category: "oc",
+        slashName: "sidebarPosition",
+        run: () => {
+          dialog.replace(() => (
+            <DialogSelect
+              title="Sidebar position (WIP)"
+              current={kv.get("sidebar_position", "right")}
+              options={[
+                { value: "right", title: "right" },
+                { value: "left", title: "left" },
+                { value: "top", title: "top" },
+                { value: "bottom", title: "bottom" },
+              ]}
+              onSelect={(option) => {
+                kv.set("sidebar_position", option.value)
+                dialog.clear()
+              }}
+            />
+          ))
+        },
+      },
+      {
         name: "oc.markers",
         title: "Command markers (alpha)",
         category: "oc",

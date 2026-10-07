@@ -9,7 +9,7 @@ import { usePluginRuntime } from "../../plugin/runtime"
 import { getScrollAcceleration } from "../../util/scroll"
 import { SidebarTools, SidebarToolsFooter } from "./sidebar-tools/sidebar-tools"
 
-export function Sidebar(props: { sessionID: string; overlay?: boolean }) {
+export function Sidebar(props: { sessionID: string; overlay?: boolean; horizontal?: boolean }) {
   const pluginRuntime = usePluginRuntime()
   const project = useProject()
   const sync = useSync()
@@ -27,8 +27,10 @@ export function Sidebar(props: { sessionID: string; overlay?: boolean }) {
     <Show when={session()}>
       <box
         backgroundColor={theme.backgroundPanel}
-        width={42}
-        height="100%"
+        width={props.horizontal ? "100%" : 42}
+        height={props.horizontal ? undefined : "100%"}
+        maxHeight={props.horizontal ? 12 : undefined}
+        flexShrink={0}
         paddingTop={1}
         paddingBottom={1}
         paddingLeft={2}
@@ -39,13 +41,22 @@ export function Sidebar(props: { sessionID: string; overlay?: boolean }) {
           flexGrow={1}
           scrollAcceleration={scrollAcceleration()}
           verticalScrollbarOptions={{
+            // The top bar's track would sit flush against the message scrollbar below it
+            visible: !props.horizontal,
             trackOptions: {
               backgroundColor: theme.background,
               foregroundColor: theme.borderActive,
             },
           }}
         >
-          <box flexShrink={0} gap={1} paddingRight={1}>
+          <box
+            flexShrink={0}
+            gap={props.horizontal ? 3 : 1}
+            rowGap={1}
+            paddingRight={props.horizontal ? 0 : 1}
+            flexDirection={props.horizontal ? "row" : "column"}
+            flexWrap={props.horizontal ? "wrap" : "no-wrap"}
+          >
             <pluginRuntime.Slot
               name="sidebar_title"
               mode="single_winner"
@@ -95,7 +106,12 @@ export function Sidebar(props: { sessionID: string; overlay?: boolean }) {
           </box>
         </scrollbox>
 
-        <box flexShrink={0} gap={1} paddingTop={1}>
+        <box
+          flexShrink={0}
+          gap={props.horizontal ? 3 : 1}
+          paddingTop={1}
+          flexDirection={props.horizontal ? "row" : "column"}
+        >
           <SidebarToolsFooter sessionID={props.sessionID} />
           <pluginRuntime.Slot name="sidebar_footer" session_id={props.sessionID} />
         </box>
