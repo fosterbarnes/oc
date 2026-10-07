@@ -2,6 +2,7 @@ import { Agent } from "@/agent/agent"
 import { Command } from "@/command"
 import { Format } from "@/format"
 import { LSP } from "@/lsp/lsp"
+import { Plugin } from "@/plugin"
 import { Vcs } from "@/project/vcs"
 import { Skill } from "@/skill"
 import { Schema } from "effect"
@@ -52,6 +53,7 @@ export const InstancePaths = {
   agent: "/agent",
   skill: "/skill",
   lsp: "/lsp",
+  plugin: "/plugin",
   formatter: "/formatter",
 } as const
 
@@ -174,6 +176,16 @@ export const InstanceApi = HttpApi.make("instance")
             identifier: "lsp.status",
             summary: "Get LSP status",
             description: "Get LSP server status",
+          }),
+        ),
+        HttpApiEndpoint.get("plugin", InstancePaths.plugin, {
+          query: WorkspaceRoutingQuery,
+          success: described(Schema.Array(Plugin.Status), "Plugin load status"),
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "plugin.status",
+            summary: "Get plugin status",
+            description: "Get load status for built-in and configured server plugins",
           }),
         ),
         HttpApiEndpoint.get("formatter", InstancePaths.formatter, {

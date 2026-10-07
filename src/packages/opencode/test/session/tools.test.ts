@@ -45,6 +45,7 @@ function fakeMcp() {
 const fakePlugin = Plugin.Service.of({
   init: () => Effect.void,
   list: () => Effect.succeed([]),
+  status: () => Effect.succeed([]),
   trigger: (_name, _input, output) => Effect.succeed(output),
 } satisfies Plugin.Interface)
 

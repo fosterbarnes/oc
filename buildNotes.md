@@ -119,6 +119,27 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-06 (~23:26) - v0.2.109 - Plugins section in the sidebar - Opus 5.5, low reasoning; Implementation
+
+### Agent
+- Meta: Opus 5.5; low reasoning; Implementation; completed, not live-checked
+- Version: 0.2.109
+- Added `Plugin.Status` schema and `Plugin.Service.status()` in `opencode/src/plugin/index.ts`: per-spec map filled from loader `missing` (no_entry), `error` (failed), `applyPlugin` success/failure; internal plugins recorded by function name minus `(Auth)Plugin`. Codex arrow wrapped as named `CodexPlugin` for that.
+- Added `GET /plugin` (`plugin.status`) to instance HttpApi group + handler; regenerated legacy SDK (`client.plugin.status()`, `PluginStatus` type).
+- Added `tui/src/feature-plugins/sidebar/plugins.tsx` (order 250, after MCP): merges server status with `api.plugins.list()` on `target`; TUI internals excluded; built-ins on one muted line; collapsed unless a plugin failed (open signal unset until clicked).
+- Updated test fakes in `test/session/tools.test.ts`, `test/tool/registry.test.ts` with `status`.
+- Added FORK.md row "Plugins in the sidebar" (low).
+- Risk: server status is read once per TUI mount; failure on install stage uses spec as target, so it will not merge with a TUI half.
+- Verification: `tsc --noEmit` clean in opencode and tui; `bun test` on the two edited test files: 21 pass. No live TUI check.
+
+### User
+Sidebar
+- New "Plugins" section under MCP lists every plugin from `opencode.jsonc` and `tui.json` with its version and whether its server and/or TUI part loaded.
+- Failed plugins show their error in red, and the section opens itself when anything failed; otherwise it stays collapsed as "Plugins (N)".
+- Built-in plugins (Codex, Copilot, Cursor, and others) are listed on one muted line at the bottom.
+
+---
+
 ## 2026-10-06 (~23:16) - v0.2.108 - Pass: live layout switch also updates prompt editing keys - Opus 5.5, low reasoning; Pass
 
 ### Agent

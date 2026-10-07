@@ -1,3 +1,4 @@
+import path from "path"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import type {
   Hooks,
@@ -21,12 +22,19 @@ import { DigitalOceanAuthPlugin } from "./digitalocean"
 import { XaiAuthPlugin } from "./xai"
 import { CerebrasPlugin } from "./cerebras"
 import { SnowflakeCortexAuthPlugin } from "./snowflake-cortex"
-import { Effect, Layer, Context } from "effect"
+import { Effect, Layer, Context, Schema } from "effect"
 import { EffectBridge } from "@/effect/bridge"
 import { InstanceState } from "@/effect/instance-state"
 import { errorMessage } from "@/util/error"
 import { PluginLoader } from "./loader"
-import { parsePluginSpecifier, readPluginId, readV1Plugin, resolvePluginId } from "./shared"
+import {
+  parsePluginSpecifier,
+  readPluginId,
+  readV1Plugin,
+  resolvePluginId,
+  type PluginPackage,
+  type PluginSource,
+} from "./shared"
 import { registerAdapter } from "@/control-plane/adapters"
 import type { WorkspaceAdapter } from "@/control-plane/types"
 import { RuntimeFlags } from "@/effect/runtime-flags"
@@ -35,8 +43,21 @@ import { InstallationChannel } from "@opencode-ai/core/installation/version"
 import { CursorPlugin } from "./cursor"
 import { ClaudeCodePlugin } from "@/provider/claude-code"
 
+// Load result for one plugin, shown in the TUI sidebar. `target` matches the TUI loader's target.
+export const Status = Schema.Struct({
+  name: Schema.String,
+  spec: Schema.String,
+  target: Schema.String,
+  source: Schema.Literals(["file", "npm", "internal"]),
+  version: Schema.optional(Schema.String),
+  status: Schema.Literals(["loaded", "failed", "no_entry"]),
+  error: Schema.optional(Schema.String),
+}).annotate({ identifier: "PluginStatus" })
+export type Status = typeof Status.Type
+
 type State = {
   hooks: Hooks[]
+  status: Status[]
 }
 
 // Hook names that follow the (input, output) => Promise<void> trigger pattern
@@ -55,10 +76,18 @@ export interface Interface {
     output: Output,
   ) => Effect.Effect<Output>
   readonly list: () => Effect.Effect<Hooks[]>
+  readonly status: () => Effect.Effect<Status[]>
   readonly init: () => Effect.Effect<void>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/Plugin") {}
+
+// "opencode-notify@0.3.1" -> "opencode-notify"; "C:\x\bgShell\bgShell.js" -> "bgShell"
+function pluginName(spec: string) {
+  const parsed = parsePluginSpecifier(spec)
+  if (parsed.version) return parsed.pkg
+  return path.parse(spec).name
+}
 
 export function experimentalWebSocketsEnabled(input: { enabled: boolean; channel?: string }) {
   return input.enabled || ["local", "dev", "beta"].includes(input.channel ?? InstallationChannel)
@@ -68,10 +97,11 @@ export function experimentalWebSocketsEnabled(input: { enabled: boolean; channel
 function internalPlugins(flags: RuntimeFlags.Info): PluginInstance[] {
   return [
     // Temporary rollout: pre-release builds use WebSockets by default; releases require explicit opt-in.
-    (input) =>
-      CodexAuthPlugin(input, {
+    function CodexPlugin(input) {
+      return CodexAuthPlugin(input, {
         experimentalWebSockets: experimentalWebSocketsEnabled({ enabled: flags.experimentalWebSockets }),
-      }),
+      })
+    },
     CopilotAuthPlugin,
     ModalPlugin,
     GitlabAuthPlugin,
@@ -136,6 +166,25 @@ const layer = Layer.effect(
     const state = yield* InstanceState.make<State>(
       Effect.fn("Plugin.state")(function* (ctx) {
         const hooks: Hooks[] = []
+        // Keyed by spec so a successful retry replaces an earlier failure.
+        const external = new Map<string, Status>()
+        const internal: Status[] = []
+        const record = (
+          item: { spec: string; source?: PluginSource; target?: string; pkg?: PluginPackage },
+          status: Status["status"],
+          error?: string,
+        ) => {
+          const version = item.pkg?.json.version
+          external.set(item.spec, {
+            name: pluginName(item.spec),
+            spec: item.spec,
+            target: item.target ?? item.spec,
+            source: item.source ?? (parsePluginSpecifier(item.spec).version ? "npm" : "file"),
+            version: typeof version === "string" ? version : undefined,
+            status,
+            error,
+          })
+        }
         const bridge = yield* EffectBridge.make()
 
         function publishPluginError(message: string) {
@@ -181,6 +230,14 @@ const layer = Layer.effect(
             ),
             Effect.option,
           )
+          const name = plugin.name.replace(/(Auth)?Plugin$/i, "")
+          internal.push({
+            name,
+            spec: name,
+            target: `internal:${name}`,
+            source: "internal",
+            status: init._tag === "Some" ? "loaded" : "failed",
+          })
           if (init._tag === "Some") hooks.push(init.value)
         }
 
@@ -195,11 +252,14 @@ const layer = Layer.effect(
             kind: "server",
             report: {
               start(candidate) {},
-              missing(candidate, _retry, message) {},
+              missing(_candidate, _retry, _message, resolved) {
+                record(resolved, "no_entry")
+              },
               error(candidate, _retry, stage, error, resolved) {
                 const spec = candidate.plan.spec
                 const cause = error instanceof Error ? (error.cause ?? error) : error
                 const message = stage === "load" ? errorMessage(error) : errorMessage(cause)
+                record(resolved ?? candidate.plan, "failed", message)
 
                 if (stage === "install") {
                   const parsed = parsePluginSpecifier(spec)
@@ -229,17 +289,16 @@ const layer = Layer.effect(
           // order remains deterministic across plugin runs.
           yield* Effect.tryPromise({
             try: () => applyPlugin(load, input, hooks),
-            catch: (err) => {
-              const message = errorMessage(err)
-              return message
-            },
+            catch: errorMessage,
           }).pipe(
+            Effect.tap(() => Effect.sync(() => record(load, "loaded"))),
             Effect.tapError((error) =>
               Effect.logError("failed to load plugin", { path: load.spec, error }).pipe(
                 Effect.annotateLogs({ channel: "plugin" }),
               ),
             ),
-            Effect.catch(() => {
+            Effect.catch((error) => {
+              record(load, "failed", error)
               // TODO: make proper events for this
               // events.publish(Session.Event.Error, {
               //   error: new NamedError.Unknown({
@@ -293,7 +352,7 @@ const layer = Layer.effect(
           ),
         )
 
-        return { hooks }
+        return { hooks, status: [...external.values(), ...internal] }
       }),
     )
 
@@ -317,11 +376,16 @@ const layer = Layer.effect(
       return s.hooks
     })
 
+    const status = Effect.fn("Plugin.status")(function* () {
+      const s = yield* InstanceState.get(state)
+      return s.status
+    })
+
     const init = Effect.fn("Plugin.init")(function* () {
       yield* InstanceState.get(state)
     })
 
-    return Service.of({ trigger, list, init })
+    return Service.of({ trigger, list, status, init })
   }),
 )
 

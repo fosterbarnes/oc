@@ -4,6 +4,7 @@ import HomeTips from "./home/tips"
 import SidebarContext from "./sidebar/context"
 import SidebarLsp from "./sidebar/lsp"
 import SidebarMcp from "./sidebar/mcp"
+import SidebarPlugins from "./sidebar/plugins"
 import SidebarTodo from "./sidebar/todo"
 import SidebarSubagents from "./sidebar/subagents"
 import DiffViewer from "./system/diff-viewer"
@@ -23,6 +24,7 @@ export function createBuiltinPlugins(options: { experimentalEventSystem: boolean
     HomeTips,
     SidebarContext,
     SidebarMcp,
+    SidebarPlugins,
     SidebarLsp,
     SidebarSubagents,
     SidebarTodo,

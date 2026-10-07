@@ -4,6 +4,7 @@ import * as InstanceState from "@/effect/instance-state"
 import { Format } from "@/format"
 import { Global } from "@opencode-ai/core/global"
 import { LSP } from "@/lsp/lsp"
+import { Plugin } from "@/plugin"
 import { Vcs } from "@/project/vcs"
 import { Skill } from "@/skill"
 import { Effect } from "effect"
@@ -18,6 +19,7 @@ export const instanceHandlers = HttpApiBuilder.group(InstanceHttpApi, "instance"
     const command = yield* Command.Service
     const format = yield* Format.Service
     const lsp = yield* LSP.Service
+    const plugin = yield* Plugin.Service
     const skill = yield* Skill.Service
     const vcs = yield* Vcs.Service
 
@@ -105,6 +107,7 @@ export const instanceHandlers = HttpApiBuilder.group(InstanceHttpApi, "instance"
       .handle("agent", getAgent)
       .handle("skill", getSkill)
       .handle("lsp", getLsp)
+      .handle("plugin", () => plugin.status())
       .handle("formatter", getFormatter)
   }),
 )

@@ -2454,6 +2454,16 @@ export type LspStatus = {
   status: "connected" | "error"
 }
 
+export type PluginStatus = {
+  name: string
+  spec: string
+  target: string
+  source: "file" | "npm" | "internal"
+  version?: string
+  status: "loaded" | "failed" | "no_entry"
+  error?: string
+}
+
 export type FormatterStatus = {
   name: string
   extensions: Array<string>
@@ -9166,6 +9176,34 @@ export type LspStatusResponses = {
 }
 
 export type LspStatusResponse = LspStatusResponses[keyof LspStatusResponses]
+
+export type PluginStatusData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/plugin"
+}
+
+export type PluginStatusErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type PluginStatusError = PluginStatusErrors[keyof PluginStatusErrors]
+
+export type PluginStatusResponses = {
+  /**
+   * Plugin load status
+   */
+  200: Array<PluginStatus>
+}
+
+export type PluginStatusResponse = PluginStatusResponses[keyof PluginStatusResponses]
 
 export type FormatterStatusData = {
   body?: never
