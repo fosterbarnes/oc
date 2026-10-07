@@ -2653,6 +2653,16 @@ export type ProjectCopiesRemoveInput = {
 
 export type ProjectCopiesRemoveOutput = void
 
+export type ProjectCopiesMergeInput = {
+  readonly projectID: { readonly projectID: string }["projectID"]
+  readonly location?: {
+    readonly location?: { readonly directory?: string | undefined; readonly workspace?: string | undefined } | undefined
+  }["location"]
+  readonly directory: { readonly directory: string }["directory"]
+}
+
+export type ProjectCopiesMergeOutput = { readonly directory: string }
+
 export type ProjectCopiesRefreshInput = {
   readonly projectID: { readonly projectID: string }["projectID"]
   readonly location?: {

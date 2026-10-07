@@ -589,6 +589,28 @@ export function Prompt(props: PromptProps) {
           move.open()
         },
       },
+      {
+        title: "Work in a worktree",
+        desc: "Move the session into a git worktree next to the repo",
+        name: "session.work",
+        category: "Session",
+        enabled: Boolean(props.sessionID),
+        slashName: "work",
+        run: () => {
+          move.work()
+        },
+      },
+      {
+        title: "Finish worktree work",
+        desc: "Squash-merge the worktree into the repo as staged changes, then delete it",
+        name: "session.work.done",
+        category: "Session",
+        enabled: Boolean(props.sessionID),
+        slashName: "done",
+        run: () => {
+          void move.done()
+        },
+      },
     ].map((entry) => ({
       namespace: "palette",
       ...entry,

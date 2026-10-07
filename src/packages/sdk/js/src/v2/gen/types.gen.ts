@@ -14146,6 +14146,40 @@ export type V2ProjectCopyCreateResponses = {
 
 export type V2ProjectCopyCreateResponse = V2ProjectCopyCreateResponses[keyof V2ProjectCopyCreateResponses]
 
+export type V2ProjectCopyMergeData = {
+  body?: {
+    directory: string
+  }
+  path: {
+    projectID: string
+  }
+  query?: {
+    location?: {
+      directory?: string
+      workspace?: string
+    }
+  }
+  url: "/experimental/project/{projectID}/copy/merge"
+}
+
+export type V2ProjectCopyMergeErrors = {
+  /**
+   * ProjectCopyError | InvalidRequestError
+   */
+  400: ProjectCopyError | InvalidRequestError
+}
+
+export type V2ProjectCopyMergeError = V2ProjectCopyMergeErrors[keyof V2ProjectCopyMergeErrors]
+
+export type V2ProjectCopyMergeResponses = {
+  /**
+   * ProjectCopy.Copy
+   */
+  200: ProjectCopyCopy
+}
+
+export type V2ProjectCopyMergeResponse = V2ProjectCopyMergeResponses[keyof V2ProjectCopyMergeResponses]
+
 export type V2ProjectCopyRefreshData = {
   body?: never
   path: {

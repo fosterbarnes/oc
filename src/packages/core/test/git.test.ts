@@ -108,6 +108,42 @@ describe("Git worktrees", () => {
       expect((yield* git.worktree.list(repo)).some((entry) => entry.directory.endsWith("-git-worktree"))).toBe(false)
     }),
   )
+
+  it.live("squash-merges committed and uncommitted copy changes into a clean main checkout", () =>
+    Effect.gen(function* () {
+      const root = yield* Effect.acquireRelease(
+        Effect.promise(() => tmpdir()),
+        (dir) => Effect.promise(() => dir[Symbol.asyncDispose]()),
+      )
+      yield* Effect.promise(() => initRepo(root.path))
+      const worktree = AbsolutePath.make(`${root.path}-git-merge`)
+      yield* Effect.addFinalizer(() =>
+        Effect.promise(() => fs.rm(worktree, { recursive: true, force: true })).pipe(Effect.ignore),
+      )
+      const git = yield* Git.Service
+      const main = yield* git.repo.discover(AbsolutePath.make(yield* Effect.promise(() => fs.realpath(root.path))))
+      if (!main) throw new Error("Repository not found")
+      const copy = yield* git.worktree.create({ repository: main, directory: worktree })
+      yield* Effect.promise(async () => {
+        await fs.writeFile(path.join(worktree, "committed.txt"), "one\n")
+        await $`git add .`.cwd(worktree).quiet()
+        await $`git commit -m copy`.cwd(worktree).quiet()
+        await fs.writeFile(path.join(worktree, "loose.txt"), "two\n")
+        await fs.writeFile(path.join(root.path, "dirty.txt"), "dirty\n")
+        await $`git add dirty.txt`.cwd(root.path).quiet()
+      })
+
+      const refused = yield* git.worktree.merge({ copy, main, message: "work" }).pipe(Effect.flip)
+      expect(refused.message).toContain("Uncommitted changes")
+
+      yield* Effect.promise(() => $`git rm -q --cached dirty.txt`.cwd(root.path).quiet())
+      yield* git.worktree.merge({ copy, main, message: "work" })
+      const status = yield* Effect.promise(() => $`git status --porcelain`.cwd(root.path).text())
+      expect(status).toContain("A  committed.txt")
+      expect(status).toContain("A  loose.txt")
+      expect(yield* Effect.promise(() => $`git rev-list --count HEAD`.cwd(root.path).text())).toBe("1\n")
+    }),
+  )
 })
 
 describe("Git trees", () => {

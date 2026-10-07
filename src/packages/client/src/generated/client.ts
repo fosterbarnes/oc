@@ -95,6 +95,8 @@ import type {
   ProjectCopiesCreateOutput,
   ProjectCopiesRemoveInput,
   ProjectCopiesRemoveOutput,
+  ProjectCopiesMergeInput,
+  ProjectCopiesMergeOutput,
   ProjectCopiesRefreshInput,
   ProjectCopiesRefreshOutput,
 } from "./types"
@@ -866,6 +868,19 @@ export function make(options: ClientOptions) {
             successStatus: 204,
             declaredStatuses: [400, 401],
             empty: true,
+          },
+          requestOptions,
+        ),
+      merge: (input: ProjectCopiesMergeInput, requestOptions?: RequestOptions) =>
+        request<ProjectCopiesMergeOutput>(
+          {
+            method: "POST",
+            path: `/experimental/project/${encodeURIComponent(input.projectID)}/copy/merge`,
+            query: { location: input["location"] },
+            body: { directory: input["directory"] },
+            successStatus: 200,
+            declaredStatuses: [400, 401],
+            empty: false,
           },
           requestOptions,
         ),

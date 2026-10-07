@@ -321,6 +321,8 @@ import type {
   V2PermissionSavedRemoveResponses,
   V2ProjectCopyCreateErrors,
   V2ProjectCopyCreateResponses,
+  V2ProjectCopyMergeErrors,
+  V2ProjectCopyMergeResponses,
   V2ProjectCopyRefreshErrors,
   V2ProjectCopyRefreshResponses,
   V2ProjectCopyRemoveErrors,
@@ -6968,6 +6970,41 @@ export class ProjectCopy2 extends HeyApiClient {
         },
       },
     )
+  }
+
+  public merge<ThrowOnError extends boolean = false>(
+    parameters: {
+      projectID: string
+      location?: {
+        directory?: string
+        workspace?: string
+      }
+      directory?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "projectID" },
+            { in: "query", key: "location" },
+            { in: "body", key: "directory" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<V2ProjectCopyMergeResponses, V2ProjectCopyMergeErrors, ThrowOnError>({
+      url: "/experimental/project/{projectID}/copy/merge",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
   }
 
   public refresh<ThrowOnError extends boolean = false>(

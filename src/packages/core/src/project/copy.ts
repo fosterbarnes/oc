@@ -25,6 +25,9 @@ export type CreateInput = typeof CreateInput.Type
 export const RemoveInput = ProjectCopy.RemoveInput
 export type RemoveInput = typeof RemoveInput.Type
 
+export const MergeInput = ProjectCopy.MergeInput
+export type MergeInput = typeof MergeInput.Type
+
 export const RefreshInput = Schema.Struct({
   projectID: Project.ID,
 }).annotate({ identifier: "ProjectCopy.RefreshInput" })
@@ -102,6 +105,8 @@ export interface Interface {
   readonly register: (strategy: Strategy) => Effect.Effect<void, DuplicateStrategyError>
   readonly create: (input: CreateInput) => Effect.Effect<Copy, Error>
   readonly remove: (input: RemoveInput) => Effect.Effect<void, Error>
+  /** Squash a git worktree copy into its main checkout; returns the main checkout directory. */
+  readonly merge: (input: MergeInput) => Effect.Effect<Copy, Error>
   readonly refresh: (input: RefreshInput) => Effect.Effect<RefreshResult, Error>
 }
 
@@ -212,6 +217,19 @@ const layer = Layer.effect(
       )
     })
 
+    const merge = Effect.fn("ProjectCopy.merge")(function* (input: MergeInput) {
+      const copyDirectory = yield* canonical(input.directory)
+      const stored = yield* directories.get({ projectID: input.projectID, directory: copyDirectory })
+      if (stored?.strategy !== "git_worktree") return yield* new InvalidDirectoryError({ directory: copyDirectory })
+      const copy = yield* git.repo.discover(copyDirectory)
+      if (!copy) return yield* new DirectoryUnavailableError({ directory: copyDirectory })
+      const root = (yield* git.worktree.list(copy)).find((entry) => entry.kind === "main")
+      const main = root ? yield* git.repo.discover(root.directory) : undefined
+      if (!main) return yield* new DirectoryUnavailableError({ directory: copyDirectory })
+      yield* git.worktree.merge({ copy, main, message: `work: ${path.basename(copyDirectory)}` })
+      return { directory: main.worktree }
+    })
+
     const refresh = Effect.fn("ProjectCopy.refresh")(function* (input: RefreshInput) {
       const stored = yield* directories.list(input.projectID)
       const checked = yield* Effect.forEach(
@@ -273,6 +291,7 @@ const layer = Layer.effect(
       register,
       create,
       remove,
+      merge,
       refresh,
     })
   }),

@@ -119,6 +119,27 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-06 (~22:18) - v0.2.105 - /work and /done session worktrees - Opus 5.5, low reasoning; Implementation
+
+### Agent
+- Meta: Opus 5.5; low reasoning; Implementation; completed
+- Version: 0.2.105
+- Added `/work` (`session.work`) in `tui/src/component/prompt/index.tsx`: `usePromptMove.work()` runs the existing new-copy move flow with `workFrom` = session directory, so `ProjectCopy` git_worktree creates `<parent>\<repo>.work-<generated name>` (detached HEAD) and the session moves there.
+- Added `/done` (`session.work.done`): `usePromptMove.done()` calls new `v2.projectCopy.merge`, moves the session back via extracted `moveTo`, then `projectCopy.remove` with force. Failure leaves the session in the copy and shows a toast.
+- Added `Git.worktree.merge` (core `git.ts`): refuses if main has tracked changes, snapshots the copy with `add -A` + `write-tree` + `commit-tree` (no hooks), runs `merge --squash` in main, and rolls back with `reset --merge` on failure. `WorktreeError.operation` gains `merge`.
+- Added `ProjectCopy.merge` (core `project/copy.ts`; only `git_worktree` copies), `ProjectCopy.MergeInput` (schema), the `projectCopy.merge` endpoint (protocol + server handler), and regenerated `packages/client` and the legacy JS SDK.
+- Kept: the old `opencode/src/worktree` service is unused by this feature; the TUI move flow already uses `ProjectCopy`.
+- Risk: the Claude Code subprocess cwd after a move is untested; Windows file locks can make the forced remove fail after a successful merge (changes are staged in main already; delete the copy from /move).
+- Verification: `tsgo --noEmit` in core, protocol, server, tui passed; new core `git.test.ts` merge test plus the existing worktree test pass. No live TUI run.
+
+### User
+Sessions
+- `/work` moves the current session into a git worktree next to the repo (for example `GitHub\oc.work-<name>`), so the agent's edits stay out of your real checkout.
+- `/done` squash-merges everything from that worktree into your real checkout as staged, uncommitted changes, moves the session back, and deletes the worktree.
+- `/done` refuses if your real checkout has uncommitted changes, and if the merge conflicts it changes nothing and keeps the session in the worktree.
+
+---
+
 ## 2026-10-06 (~22:02) - v0.2.104 - bgRun on/off toggle in the oc palette - Opus 5.5, low reasoning; Implementation
 
 ### Agent

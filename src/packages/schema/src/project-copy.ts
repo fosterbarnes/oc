@@ -24,7 +24,13 @@ export const RemoveInput = Schema.Struct({
 }).annotate({ identifier: "ProjectCopy.RemoveInput" })
 export interface RemoveInput extends Schema.Schema.Type<typeof RemoveInput> {}
 
-export const Copy = Schema.Struct({
+export const MergeInput = Schema.Struct({
+  projectID: ProjectID,
+  directory: AbsolutePath,
+}).annotate({ identifier: "ProjectCopy.MergeInput" })
+export interface MergeInput extends Schema.Schema.Type<typeof MergeInput> {}
+
+export const Copy =Schema.Struct({
   directory: AbsolutePath,
 }).annotate({ identifier: "ProjectCopy.Copy" })
 export interface Copy extends Schema.Schema.Type<typeof Copy> {}

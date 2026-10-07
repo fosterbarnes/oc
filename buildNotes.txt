@@ -1,6 +1,9 @@
-v0.2.104
+v0.2.105
 
-bgrun tool:
-New "bgRun tool" toggle in the oc section of the command palette (or `/bgRun`) turns the background-job tool on or off for agents. Off hides bgRun, bgStatus, and bgKill from agents entirely.
+work session:
+Type /work in a session to move the current session into a git worktree next to the repo (for example GitHub\oc.work-<name>), so the agent's edits stay out of your real checkout. If you have uncommitted changes it asks whether to bring them along, the same way the Move session dialog does.
 
-Under the hood: the toggle writes allow/deny for bgRun, bgStatus, and bgKill together through the global config update, keeping comments in opencode.jsonc. The background-marker experiment from the unpushed v0.2.103 entries was abandoned and reverted, so markers behave as in v0.2.102. This push's focused check passed: typecheck clean in tui.
+done merge:
+Type /done to squash-merge everything from that worktree into your real checkout as staged, uncommitted changes, move the session back, and delete the worktree. It refuses if your real checkout has uncommitted changes to tracked files, and if the merge conflicts it undoes the attempt and keeps the session in the worktree so nothing is lost.
+
+Under the hood: the worktree is detached with no branch to clean up, and the merge snapshots the worktree with low-level git commands that skip commit hooks. This push's focused checks passed: typecheck clean in core, protocol, server, and tui, plus the core git worktree and merge tests. Live TUI behavior, the Claude Code provider folder switch, and Windows file-lock cleanup remain unchecked.

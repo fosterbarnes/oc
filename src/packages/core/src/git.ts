@@ -47,7 +47,7 @@ export class Worktree extends Schema.Class<Worktree>("Git.Worktree")({
 }) {}
 
 export class WorktreeError extends Schema.TaggedErrorClass<WorktreeError>()("Git.WorktreeError", {
-  operation: Schema.Literals(["create", "remove", "list"]),
+  operation: Schema.Literals(["create", "remove", "list", "merge"]),
   message: Schema.String,
   directory: Schema.optional(AbsolutePath),
   forceRequired: Schema.optional(Schema.Boolean),
@@ -122,6 +122,8 @@ export interface Interface {
       force: boolean
     }) => Effect.Effect<void, WorktreeError>
     readonly list: (repository: Repository) => Effect.Effect<readonly Worktree[], WorktreeError>
+    /** Squash every change in `copy` (committed or not) into `main` as staged, uncommitted changes. */
+    readonly merge: (input: { copy: Repository; main: Repository; message: string }) => Effect.Effect<void, WorktreeError>
   }
   readonly index: {
     /** Refresh only the requested project-relative scope, preserving all other entries. */
@@ -853,7 +855,7 @@ const layer = Layer.effect(
     })
 
     const worktreeRun = Effect.fnUntraced(function* (
-      operation: "create" | "remove" | "list",
+      operation: WorktreeError["operation"],
       repository: Repository,
       args: string[],
       worktreeDirectory?: AbsolutePath,
@@ -909,6 +911,29 @@ const layer = Layer.effect(
       )
     })
 
+    // Snapshots the copy with plumbing (`write-tree`/`commit-tree`) so commit hooks never run on the
+    // throwaway commit. A failed squash is rolled back; `main` was clean, so nothing of the user's is lost.
+    const worktreeMerge = Effect.fn("Git.worktree.merge")(function* (input: {
+      copy: Repository
+      main: Repository
+      message: string
+    }) {
+      const status = yield* worktreeRun("merge", input.main, ["status", "--porcelain", "--untracked-files=no"])
+      if (status.trim())
+        return yield* new WorktreeError({
+          operation: "merge",
+          directory: input.main.worktree,
+          message: `Uncommitted changes in ${input.main.worktree}; commit or stash them first`,
+        })
+      yield* worktreeRun("merge", input.copy, ["add", "-A"])
+      const tree = (yield* worktreeRun("merge", input.copy, ["write-tree"])).trim()
+      const commit = (yield* worktreeRun("merge", input.copy, ["commit-tree", tree, "-p", "HEAD", "-m", input.message]))
+        .trim()
+      yield* worktreeRun("merge", input.main, ["merge", "--squash", commit]).pipe(
+        Effect.tapError(() => worktreeRun("merge", input.main, ["reset", "--merge"]).pipe(Effect.ignore)),
+      )
+    })
+
     const worktreeList = Effect.fn("Git.worktree.list")(function* (repository: Repository) {
       return (yield* worktreeRun("list", repository, ["worktree", "list", "--porcelain"]))
         .split("\n")
@@ -928,7 +953,7 @@ const layer = Layer.effect(
       history: { head, branch, defaultRemoteBranch: remoteHead, rootCommits: roots },
       sync: { fetchRemotes: fetch, fetchBranch, checkoutRemoteBranch: checkout, resetHard: reset },
       change: { capture, apply, discard },
-      worktree: { create: worktreeCreate, remove: worktreeRemove, list: worktreeList },
+      worktree: { create: worktreeCreate, remove: worktreeRemove, list: worktreeList, merge: worktreeMerge },
       index: { refresh, ignored },
       tree: {
         capture: captureTree,
