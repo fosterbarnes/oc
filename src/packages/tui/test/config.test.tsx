@@ -143,6 +143,24 @@ test("keeps cursor movement available with ctrl shift arrows", () => {
   expect(config.keybinds.get("input.move.down")).toMatchObject([{ key: "down,ctrl+shift+down" }])
 })
 
+test("applies the oc keybind preset by default and stock keys with the opencode preset", () => {
+  const oc = resolve({}, { terminalSuspend: true })
+  expect(oc.keybinds.get("app.exit")).toMatchObject([{ key: "<leader>q" }])
+  expect(oc.keybinds.get("model.list")).toMatchObject([{ key: "ctrl+m,<leader>m" }])
+
+  const opencode = resolve({ keybind_preset: "opencode" }, { terminalSuspend: true })
+  expect(opencode.keybinds.get("app.exit")).toMatchObject([{ key: "ctrl+c,ctrl+d,<leader>q" }])
+  expect(opencode.keybinds.get("model.list")).toMatchObject([{ key: "<leader>m" }])
+  expect(opencode.keybinds.get("input.move.up")).toMatchObject([{ key: "up" }])
+
+  oc.setKeybindPreset("opencode")
+  expect(oc.keybind_preset).toBe("opencode")
+  expect(oc.keybinds.get("model.list")).toMatchObject([{ key: "<leader>m" }])
+
+  const custom = resolve({ keybind_preset: "opencode", keybinds: { model_list: "ctrl+k" } }, { terminalSuspend: true })
+  expect(custom.keybinds.get("model.list")).toMatchObject([{ key: "ctrl+k" }])
+})
+
 test("disables suspend and assigns ctrl+z to undo when unsupported", () => {
   const config = resolve({}, { terminalSuspend: false })
 

@@ -45,7 +45,7 @@ const keybind = (value: Definition["default"], description: string): Definition 
 export const Definitions = {
   leader: keybind(LeaderDefault, "Leader key for keybind combinations"),
 
-  app_exit: keybind("<leader>q", "Exit the application"),
+  app_exit: keybind("ctrl+c,ctrl+d,<leader>q", "Exit the application"),
   app_debug: keybind("none", "Toggle debug panel"),
   app_console: keybind("none", "Toggle console"),
   app_heap_snapshot: keybind("none", "Write heap snapshot"),
@@ -181,8 +181,8 @@ export const Definitions = {
   input_newline: keybind("shift+return,ctrl+return,alt+return,ctrl+j", "Insert newline in input"),
   input_move_left: keybind("left,ctrl+b", "Move cursor left in input"),
   input_move_right: keybind("right,ctrl+f", "Move cursor right in input"),
-  input_move_up: keybind("up,ctrl+shift+up", "Move cursor up in input"),
-  input_move_down: keybind("down,ctrl+shift+down", "Move cursor down in input"),
+  input_move_up: keybind("up", "Move cursor up in input"),
+  input_move_down: keybind("down", "Move cursor down in input"),
   input_select_left: keybind("shift+left", "Select left in input"),
   input_select_right: keybind("shift+right", "Select right in input"),
   input_select_up: keybind("shift+up", "Select up in input"),

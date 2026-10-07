@@ -119,6 +119,79 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-06 (~23:16) - v0.2.108 - Pass: live layout switch also updates prompt editing keys - Opus 5.5, low reasoning; Pass
+
+### Agent
+- Meta: Opus 5.5; low reasoning; Pass over this session's keybind layout + revive mark work; completed
+- Version: 0.2.108 (bumped from 0.2.107 at user request to test the revive restamp; confirmed live: mark showed v0.2.108)
+- Fixed: `registerOpencodeKeymap` (`packages/tui/src/keymap.tsx`) registered the textarea `input` layer once, so the palette layout switch left prompt editing keys (`ctrl+a`, `ctrl+d` delete, `ctrl+shift+up/down`, `left`) on the old layout until restart. Now wrapped in `createRoot` + `createRenderEffect` so it re-registers when `config.keybinds` changes.
+- Reviewed, no change: preset resolution, jsonc persistence, keybind docs generator/check, revive restamp effect (verified live by user).
+- Verification: tui typecheck clean; config/keymap/prompt-background tests 21 pass. Live layout switch in prompt not run.
+
+### User
+Keybinds
+- Switching keybind layout from `ctrl+o` now also updates typing keys in the prompt right away, not only after a restart.
+
+---
+
+## 2026-10-06 (~23:11) - v0.2.107 - Revive mark shows the build that came back - Opus 5.5, low reasoning; Implementation
+
+### Agent
+- Meta: Opus 5.5; low reasoning; Implementation; completed
+- Version: 0.2.107 (same session; not bumped again)
+- Fixed: revive mark versions came from the old build (`mark()` in `reviveCommands`, app.tsx runs before exit), so after an install it showed the previous version (seen: "oc v0.2.106" after installing 0.2.107).
+- Added `packages/tui/src/util/revive.ts` (`reviveVersions`, `reviveText`); `mark()` uses them.
+- Added effect in `routes/session/index.tsx`: when the newest message is a user message with a revive part whose `metadata.versions` differs, `sdk.client.part.update` rewrites text + metadata. Older marks in history are left as is. Stops after one update (versions then match).
+- Verification: `bun run typecheck` in packages/tui clean. No test (needs live server + session sync). Live check not run.
+
+### User
+Revive
+- After a revive that installs a new build, the `[oc revived at ...]` line now shows the new version instead of the old one.
+
+---
+
+## 2026-10-06 (~23:06) - v0.2.107 - Keybind layout switch in oc palette - Opus 5.5, low reasoning; Implementation
+
+### Agent
+- Meta: Opus 5.5; low reasoning; Implementation; completed
+- Version: 0.2.107 (same session as the preset entry below; not bumped again)
+- Changed `TuiConfig.resolve` (`packages/tui/src/config/index.tsx`): builds both layouts up front (`resolveKeybinds`), `keybinds`/`keybind_preset` are getters over a solid signal, added `setKeybindPreset`. `useBindings` (`@opentui/keymap/solid`) re-registers inside `createEffect`, so the switch is live.
+- Added command `oc.keybind_preset` ("Keybind layout", `/keybindLayout`, category oc) in `app.tsx`; `persistKeybindPreset` writes `keybind_preset` to global `tui.jsonc` or `tui.json` with jsonc-parser `modify`/`applyEdits`.
+- Added `jsonc-parser` 3.3.1 to `packages/tui/package.json` (same version as core/opencode); `bun install` added one bun.lock line.
+- Risk: a project-level tui.json `keybind_preset` overrides the saved global value on next start.
+- Verification: tui config/keymap/prompt-background tests 21 pass; `bun run typecheck` clean in tui and opencode; keybind docs `--check` exit 0. Live palette check not run.
+
+### User
+Keybinds
+- `ctrl+o` now has **Keybind layout** to switch between the oc and opencode layouts; it takes effect at once and is remembered.
+
+---
+
+## 2026-10-06 (~23:01) - v0.2.107 - Keybind layouts (oc / opencode) and keybind docs - Opus 5.5, low reasoning; Implementation
+
+### Agent
+- Meta: Opus 5.5; low reasoning; Implementation (from spit plan `.opencode/plans/keybindPresets.md`); completed
+- Version: 0.2.107
+- Reverted `app_exit`, `input_move_up/down` in `packages/tui/src/config/keybind.ts` to upstream values; keybind.ts now differs from upstream only by oc-added commands (+ existing `selection_copy_mode` swap).
+- Added `packages/tui/src/config/keybindPreset.ts` (`TuiKeybindPreset.oc`, `Names`): user's tui.json layout minus `ctrl+c` exit; replaced leader keys kept alongside (`ctrl+m,<leader>m`, `ctrl+s,<leader>l`, `ctrl+b,<leader>down`).
+- Added `keybind_preset` (`oc` | `opencode`) to `TuiConfig.Info`; `resolve` spreads preset then user `keybinds`.
+- Kept `ctrl+d`: preset drops it from `input_delete`/`stash_delete`; session list dialog bindings use `priority: 1` (`ui/dialog-select.tsx`) so delete wins there.
+- Added `packages/tui/script/keybindDocs.ts` (writes tables between markers in `docs/keybinds.md`; `--check` exits 1 if stale) and `docs/keybinds.md` hand-written intro. `.scripts/prePush.ps1` runs the check.
+- Moved app_exit no-ctrl+c assertion from `test/terminal-win32.test.ts` to preset test in `test/config.test.tsx`.
+- Kept: oc-added defaults colliding with upstream in other scopes (`ctrl+return` newline vs background submit, `ctrl+n`, `ctrl+f`, `shift+up/down`) unchanged; pre-existing behavior.
+- Updated README keys section, FORK.md row "Keybind layouts".
+- TODO user: delete `keybinds` block from `~/.config/opencode/tui.json` (its `app_exit: ctrl+c,<leader>q` re-enables ctrl+c quit).
+- Verification: `bun test` config, terminal-win32, prompt-background, keymap (22 pass); `bun run typecheck` in packages/tui clean; generator write + `--check` exit 0. Live TUI check not run.
+
+### User
+Keybinds
+- oc now has two key layouts: `oc` (default, your layout) and `opencode` (stock OpenCode keys), chosen with `"keybind_preset"` in `tui.json`.
+- In the oc layout `ctrl+m` opens models, `ctrl+s` sessions, `ctrl+d` cycles the variant, and `ctrl+c` clears the prompt instead of quitting.
+- The opencode leader keys (`ctrl+x m`, `ctrl+x l`) still work in the oc layout.
+- New `docs/keybinds.md` lists every key for both layouts and stays in sync automatically.
+
+---
+
 ## 2026-10-06 (~22:27) - v0.2.106 - Sidebar top position toggle - Opus 5.5, low reasoning; Implementation
 
 ### Agent

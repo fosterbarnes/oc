@@ -1,5 +1,4 @@
 import { expect, test } from "bun:test"
-import { Definitions } from "../src/config/keybind"
 import { win32AssertRawMode } from "../src/terminal-win32"
 
 test("win32AssertRawMode does not start a recurring timer", () => {
@@ -15,8 +14,4 @@ test("win32AssertRawMode does not start a recurring timer", () => {
   } finally {
     globalThis.setInterval = original
   }
-})
-
-test("app.exit default does not include ctrl+c or ctrl+d", () => {
-  expect(Definitions.app_exit.default).not.toMatch(/ctrl\+[cd]/)
 })

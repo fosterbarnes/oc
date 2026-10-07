@@ -95,6 +95,8 @@ import { cliErrorMessage, errorFormat } from "./util/error"
 import { spawn } from "node:child_process"
 import { launchDetached } from "@opencode-ai/core/util/launch-detached"
 import fs from "node:fs"
+import { applyEdits, modify } from "jsonc-parser"
+import { reviveText, reviveVersions } from "./util/revive"
 import os from "node:os"
 import path from "node:path"
 
@@ -353,6 +355,16 @@ function persistOcConfig(
   })
 }
 
+// Saves the layout in the global tui.jsonc or tui.json (jsonc wins when loading), keeping comments.
+function persistKeybindPreset(preset: TuiConfig.KeybindPreset) {
+  const file =
+    ["tui.jsonc", "tui.json"].map((name) => path.join(Global.Path.config, name)).find((item) => fs.existsSync(item)) ??
+    path.join(Global.Path.config, "tui.json")
+  const text = fs.existsSync(file) ? fs.readFileSync(file, "utf8") : "{}"
+  const edits = modify(text, ["keybind_preset"], preset, { formattingOptions: { tabSize: 2, insertSpaces: true } })
+  fs.writeFileSync(file, applyEdits(text, edits))
+}
+
 // Built-in revive restarts oc and its terminal (OcConfig.revive); `revive.path` still overrides /revive-no-install.
 function reviveCommands(toast: ToastContext) {
   const config = readOcConfig()
@@ -367,10 +379,8 @@ function reviveCommands(toast: ToastContext) {
   // Carries the current agent/model because the reopened prompt seeds them from the last user message.
   const mark = async () => {
     if (route.data.type !== "session") return
-    const at = new Date()
-    const time = at.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })
-    // Same oc version as the sidebar footer; InstallationVersion is the incorporated upstream release.
-    const versions = `oc v${InstallationDisplayVersion.split("-")[0]} . OpenCode v${InstallationVersion}`
+    const at = Date.now()
+    const versions = reviveVersions()
     const result = await sdk.client.session.prompt({
       sessionID: route.data.sessionID,
       directory: sync.session.get(route.data.sessionID)?.directory,
@@ -380,9 +390,9 @@ function reviveCommands(toast: ToastContext) {
       noReply: true,
       parts: [{
         type: "text",
-        text: `[oc revived at ${time} . ${versions}]`,
+        text: reviveText(at, versions),
         synthetic: true,
-        metadata: { kind: "revive", versions, at: at.getTime() },
+        metadata: { kind: "revive", versions, at },
       }],
     })
     if (result.error) toast.error(new Error(`Failed to mark revive: ${JSON.stringify(result.error)}`))
@@ -1505,6 +1515,36 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
               onSelect={(option) => {
                 kv.set("sidebar_position", option.value)
                 dialog.clear()
+              }}
+            />
+          ))
+        },
+      },
+      {
+        name: "oc.keybind_preset",
+        title: "Keybind layout",
+        category: "oc",
+        slashName: "keybindLayout",
+        run: () => {
+          dialog.replace(() => (
+            <DialogSelect
+              title="Keybind layout"
+              current={tuiConfig.keybind_preset}
+              options={[
+                { value: "oc" as const, title: "oc", description: "ctrl+m models, ctrl+s sessions, ctrl+c never quits" },
+                { value: "opencode" as const, title: "opencode", description: "Stock OpenCode keys" },
+              ]}
+              onSelect={(option) => {
+                dialog.clear()
+                tuiConfig.setKeybindPreset(option.value)
+                try {
+                  persistKeybindPreset(option.value)
+                } catch (cause) {
+                  const message = cause instanceof Error ? cause.message : String(cause)
+                  toast.show({ message: `Keybind layout applied but not saved: ${message}`, variant: "error" })
+                  return
+                }
+                toast.show({ message: `Keybind layout: ${option.value}`, variant: "success" })
               }}
             />
           ))

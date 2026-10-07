@@ -2,8 +2,9 @@ export * as TuiConfig from "."
 
 import { createBindingLookup } from "@opentui/keymap/extras"
 import { Schema } from "effect"
-import { createContext, type JSX, useContext } from "solid-js"
+import { createContext, createSignal, type JSX, useContext } from "solid-js"
 import { TuiKeybind } from "./keybind"
+import { TuiKeybindPreset } from "./keybindPreset"
 
 export const AttentionSoundName = Schema.Literals([
   "default",
@@ -67,6 +68,9 @@ export const Info = Schema.Struct({
       'Editor used when opening file paths from the TUI, or a map of extension to editor with an optional default, e.g. { "default": "code", ".md": "typora" }',
   }),
   theme: Schema.optional(Schema.String),
+  keybind_preset: Schema.optional(Schema.Literals(TuiKeybindPreset.Names)).annotate({
+    description: "Keybind layout: 'oc' (default) or 'opencode' (stock OpenCode keys)",
+  }),
   keybinds: Schema.optional(TuiKeybind.KeybindOverrides),
   plugin: Schema.optional(Schema.Array(PluginSpec)),
   plugin_enabled: Schema.optional(Schema.Record(Schema.String, Schema.Boolean)),
@@ -81,7 +85,11 @@ export const Info = Schema.Struct({
 })
 export type Info = Schema.Schema.Type<typeof Info>
 
-export type Resolved = Omit<Info, "attention" | "keybinds" | "leader_timeout" | "mouse" | "cursor"> & {
+export type KeybindPreset = (typeof TuiKeybindPreset.Names)[number]
+
+export type Resolved = Omit<Info, "attention" | "keybind_preset" | "keybinds" | "leader_timeout" | "mouse" | "cursor"> & {
+  keybind_preset: KeybindPreset
+  setKeybindPreset: (preset: KeybindPreset) => void
   attention: {
     enabled: boolean
     notifications: boolean
@@ -105,19 +113,22 @@ export const ResolveOptions = Schema.Struct({
 export type ResolveOptions = Schema.Schema.Type<typeof ResolveOptions>
 
 export function resolve(input: Info, options: ResolveOptions): Resolved {
-  const keybinds: TuiKeybind.KeybindOverrides = { ...input.keybinds }
-  if (!options.terminalSuspend) {
-    keybinds.terminal_suspend = "none"
-    if (keybinds.input_undo === undefined) {
-      const inputUndo = TuiKeybind.defaultValue("input_undo")
-      keybinds.input_undo = ["ctrl+z", ...(typeof inputUndo === "string" ? inputUndo.split(",") : [])]
-        .filter((value, index, values) => values.indexOf(value) === index)
-        .join(",")
-    }
+  // Both layouts are built up front so switching is a signal flip; useBindings effects re-register.
+  const lookups = {
+    oc: resolveKeybinds(input, options, "oc"),
+    opencode: resolveKeybinds(input, options, "opencode"),
   }
+  const [preset, setPreset] = createSignal<KeybindPreset>(input.keybind_preset ?? "oc")
 
   return {
     ...input,
+    get keybind_preset() {
+      return preset()
+    },
+    get keybinds() {
+      return lookups[preset()]
+    },
+    setKeybindPreset: setPreset,
     attention: {
       enabled: input.attention?.enabled ?? false,
       notifications: input.attention?.notifications ?? true,
@@ -126,10 +137,6 @@ export function resolve(input: Info, options: ResolveOptions): Resolved {
       sound_pack: input.attention?.sound_pack ?? "opencode.default",
       sounds: input.attention?.sounds ?? {},
     },
-    keybinds: createBindingLookup(TuiKeybind.toBindingConfig(TuiKeybind.parse(keybinds)), {
-      commandMap: TuiKeybind.CommandMap,
-      bindingDefaults: TuiKeybind.bindingDefaults(),
-    }),
     leader_timeout: input.leader_timeout ?? LeaderTimeoutDefault,
     mouse: input.mouse ?? true,
     cursor: input.cursor
@@ -139,6 +146,26 @@ export function resolve(input: Info, options: ResolveOptions): Resolved {
         }
       : undefined,
   }
+}
+
+function resolveKeybinds(input: Info, options: ResolveOptions, preset: KeybindPreset) {
+  const keybinds: TuiKeybind.KeybindOverrides = {
+    ...(preset === "opencode" ? {} : TuiKeybindPreset.oc),
+    ...input.keybinds,
+  }
+  if (!options.terminalSuspend) {
+    keybinds.terminal_suspend = "none"
+    if (keybinds.input_undo === undefined) {
+      const inputUndo = TuiKeybind.defaultValue("input_undo")
+      keybinds.input_undo = ["ctrl+z", ...(typeof inputUndo === "string" ? inputUndo.split(",") : [])]
+        .filter((value, index, values) => values.indexOf(value) === index)
+        .join(",")
+    }
+  }
+  return createBindingLookup(TuiKeybind.toBindingConfig(TuiKeybind.parse(keybinds)), {
+    commandMap: TuiKeybind.CommandMap,
+    bindingDefaults: TuiKeybind.bindingDefaults(),
+  })
 }
 
 const ConfigContext = createContext<Resolved>()

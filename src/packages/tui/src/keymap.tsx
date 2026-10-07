@@ -13,7 +13,7 @@ import {
   formatKeySequence as formatKeySequenceExtra,
 } from "@opentui/keymap/extras"
 import { KeymapProvider, useKeymap, useKeymapSelector, useBindings } from "@opentui/keymap/solid"
-import { createMemo, type Accessor } from "solid-js"
+import { createMemo, createRenderEffect, createRoot, onCleanup, type Accessor } from "solid-js"
 import { useTuiConfig } from "./config"
 import { TuiKeybind } from "./config/keybind"
 
@@ -227,9 +227,16 @@ export function registerOpencodeKeymap(keymap: OpenTuiKeymap, renderer: CliRende
     : () => {}
   const offEscape = registerEscapeClearsPendingSequence(keymap)
   const offBackspace = registerBackspacePopsPendingSequence(keymap)
-  const offInputBindings = registerManagedTextareaLayer(keymap, renderer, {
-    enabled: () => hasManagedTextareaFocus(renderer),
-    bindings: config.keybinds.gather("input", inputCommands),
+  // Re-registers when the keybind layout changes (config.keybinds is signal-backed).
+  const offInputBindings = createRoot((dispose) => {
+    createRenderEffect(() => {
+      const off = registerManagedTextareaLayer(keymap, renderer, {
+        enabled: () => hasManagedTextareaFocus(renderer),
+        bindings: config.keybinds.gather("input", inputCommands),
+      })
+      onCleanup(off)
+    })
+    return dispose
   })
 
   return () => {

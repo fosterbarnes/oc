@@ -41,7 +41,10 @@
 | `shift+up` / `shift+down` | Model list | Move a favorite model up or down |
 | `ctrl+h` | Model list | Hide or show a model |
 | `ctrl+shift+up` / `ctrl+shift+down` | Prompt | Move the cursor up or down a line |
+| `ctrl+m` / `ctrl+s` / `ctrl+b` | Anywhere | Model list / session list / first child session |
+| `ctrl+d` | Prompt | Cycle the model variant |
 
+- All keys: [docs/keybinds.md](docs/keybinds.md). Switch to stock OpenCode keys with **Keybind layout** in `ctrl+o`.
 - Rebind any key in `tui.json`. `command_palette.order` in `opencode.jsonc` reorders commands inside a palette category.
 
 ## Windows specific stuff
@@ -133,7 +136,7 @@ Click a script to run it. Right-click to paste it into your prompt and copy it. 
 
 ## Progress
 
-[516,918](scc.txt) lines of code and counting...
+[517,093](scc.txt) lines of code and counting...
 
 <!-- code-count:start -->
 
@@ -145,11 +148,11 @@ Click a script to run it. Right-click to paste it into your prompt and copy it. 
 | HTML | 1 | 1,161 | 79 | 0 | 1,082 |
 | JavaScript | 23 | 5,259 | 419 | 63 | 4,777 |
 | Nix | 3 | 258 | 23 | 26 | 209 |
-| Powershell | 20 | 1,519 | 127 | 38 | 1,354 |
+| Powershell | 20 | 1,520 | 127 | 38 | 1,355 |
 | SQL | 95 | 592 | 0 | 17 | 575 |
 | Shell | 1 | 120 | 17 | 17 | 86 |
-| TypeScript | 2,722 | 530,230 | 43,033 | 15,027 | 472,170 |
-| **Total** | **3,041** | **581,891** | **49,198** | **15,775** | **516,918** |
+| TypeScript | 2,725 | 530,430 | 43,049 | 15,037 | 472,344 |
+| **Total** | **3,044** | **582,092** | **49,214** | **15,785** | **517,093** |
 
 <!-- code-count:end -->
 

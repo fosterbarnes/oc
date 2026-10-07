@@ -81,6 +81,7 @@ import { DialogRetryAction } from "../../component/dialog-retry-action"
 import { getRevertDiffFiles } from "../../util/revert-diff"
 import { OPENCODE_BASE_MODE, useBindings, useCommandShortcut, useOpencodeKeymap, useOpencodeModeStack } from "../../keymap"
 import { usePathFormatter } from "../../context/path-format"
+import { reviveText, reviveVersions } from "../../util/revive"
 import { LocationProvider } from "../../context/location"
 
 addDefaultParsers(parsers.parsers)
@@ -298,6 +299,31 @@ export function Session() {
   const toast = useToast()
   const sdk = useSDK()
   const editor = useEditorContext()
+
+  // The old build writes the revive mark before it exits. While the mark is still the newest
+  // message (not yet sent to the agent), restamp it with this build's versions.
+  createEffect(() => {
+    const last = messages().at(-1)
+    if (last?.role !== "user") return
+    const part = (sync.data.part[last.id] ?? []).find(
+      (x) => x.type === "text" && x.synthetic && x.metadata?.kind === "revive",
+    )
+    if (part?.type !== "text") return
+    const versions = reviveVersions()
+    if (part.metadata?.versions === versions) return
+    const at = Number(part.metadata?.at)
+    void sdk.client.part
+      .update({
+        sessionID: last.sessionID,
+        messageID: last.id,
+        partID: part.id,
+        directory: session()?.directory,
+        part: { ...part, text: reviveText(at, versions), metadata: { ...part.metadata, versions } },
+      })
+      .then((result) => {
+        if (result.error) toast.error(new Error(`Failed to update revive mark: ${JSON.stringify(result.error)}`))
+      })
+  })
 
   // ponytail: double-click gate, single click no-op to avoid accidental opens
   let _lastOpenPath = ""
