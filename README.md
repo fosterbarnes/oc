@@ -12,6 +12,8 @@
 - Mark sessions complete, failed, or in progress, and pin the ones you keep coming back to ([how](#session-list-and-markers))
 - A sidebar with usage meters, a file tree, changed files, and sub-agents, all clickable ([how](#sidebar))
 - Run your project's scripts from the sidebar in one click ([how](#script-runner))
+- /command and skill hot-reload
+- (needs work) explain the usefulness of combining /commands and skills C:\Users\user\Downloads\wezterm-gui_ENeKaRMapw.png
 
 ## Little day-to-day workflow features
 
@@ -140,7 +142,7 @@ Click a script to run it. Right-click to paste it into your prompt and copy it. 
 
 ## Progress
 
-[519,426](scc.txt) lines of code and counting...
+[519,877](scc.txt) lines of code and counting...
 
 <!-- code-count:start -->
 
@@ -155,8 +157,8 @@ Click a script to run it. Right-click to paste it into your prompt and copy it. 
 | Powershell | 22 | 1,682 | 137 | 55 | 1,490 |
 | SQL | 95 | 592 | 0 | 17 | 575 |
 | Shell | 1 | 120 | 17 | 17 | 86 |
-| TypeScript | 2,733 | 532,961 | 43,184 | 15,235 | 474,542 |
-| **Total** | **3,054** | **584,785** | **49,359** | **16,000** | **519,426** |
+| TypeScript | 2,737 | 533,440 | 43,209 | 15,238 | 474,993 |
+| **Total** | **3,058** | **585,264** | **49,384** | **16,003** | **519,877** |
 
 <!-- code-count:end -->
 

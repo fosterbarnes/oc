@@ -49,7 +49,7 @@ import { resolvedProxyTools } from "@/provider/claude-code/spawn-planning.js"
 
 test("default proxy tools are oc-only and leave Claude Code's native tools on", () => {
   const defaults = resolvedProxyTools({ proxyTools: DEFAULT_PROXY_TOOL_NAMES })!
-  assert.deepEqual(defaults.map((tool) => tool.name), ["task", TASK_BATCH_TOOL_NAME, "run_after_turn"])
+  assert.deepEqual(defaults.map((tool) => tool.name), ["task", TASK_BATCH_TOOL_NAME, "run_after_turn", "time"])
   assert.deepEqual(disallowedToolFlags(defaults), ["Agent", "Task", "TaskOutput"])
   assert.deepEqual(filterProxyByModelTools(defaults, [modelTool("task")]).map((tool) => tool.name), [
     "task",

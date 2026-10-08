@@ -402,4 +402,9 @@ export const DEFAULT_PROXY_TOOLS: ProxyToolDef[] = [
       required: ["exe"],
     },
   },
+  {
+    name: "time",
+    description: "Returns the user's current local date, time, and UTC offset.",
+    inputSchema: { type: "object", properties: {} },
+  },
 ]

@@ -21,7 +21,7 @@ cliIt.live("oc bootstrap marks automatic titles but respects explicit titles wit
     fixture.opencode.expectExit(custom, 0)
     const server = yield* fixture.opencode.serve({ env })
     const sdk = createOpencodeClient({ baseUrl: server.url, directory: project, throwOnError: true })
-    const sessions = (yield* Effect.promise(() => sdk.session.list())).data
+    const sessions = (yield* Effect.promise(() => sdk.session.list(undefined, { throwOnError: true }))).data
     expect(sessions).toHaveLength(2)
     expect(sessions.find((session) => session.title === "work")?.metadata).toEqual({
       ocAutoRename: { state: "pending", title: "work" },

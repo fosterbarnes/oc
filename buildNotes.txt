@@ -1,10 +1,9 @@
-v0.2.126
+v0.2.128
 
-session names:
-New oc sessions automatically use the configured rename agent after the first real prompt. Naming runs alongside the reply and produces a folder-prefixed task description. Project launches, the new-session picker, Home sessions, and standalone oc sessions are covered.
+time tool:
+Agents can call a compact native time tool to read the user's current local date, time, and UTC offset. Each call reads the clock directly without putting changing timestamps in the system prompt. Claude Code sessions receive the tool through the default oc proxy list, and the user's explicit global configuration includes it. Live use was confirmed.
 
-Manual titles are preserved, including edits made while naming runs. Later prompts and reopening a session keep its name. A failed naming attempt leaves the placeholder intact, with /rename available to try again. Initialization and shell-only input do not trigger naming, and forks do not inherit the request.
+test responses:
+Automatic-rename tests now specify throwing HTTP behavior on the six affected SDK requests so successful response data is correctly typed. Bootstrap, first-turn renaming, and session restart behavior remain covered.
 
-Under the hood: reused the existing rename model selection, variants, fallback chain, and title cleanup. Saved a one-time claim in session metadata and captured the first prompt before background generation. Updated the implementation plan and fork definition, and bumped the revision to 0.2.126. All 12 targeted service, bootstrap, Claude CLI, restart, and headless TUI checks passed (56 assertions).
-
-Pre-push typechecking failed with seven possibly-undefined SDK response errors: fake-model.test.ts lines 37, 54, 55, 58, and 65; autoRenameBootstrap.test.ts lines 26 and 29. The other 26 package typechecks passed. These test typing errors remain unresolved. Pushed at the user's explicit request despite the failed typecheck, with Git hooks bypassed for this push.
+Under the hood: registered the native tool and Claude proxy route, corrected the tool import and example weekday, added a Claude fake-model time round trip, and updated formatting and default proxy tests. Revision is 0.2.128. Targeted tests and pre-push checks passed. This push also includes the pending README hot-reload note, funding configuration, sidebar state, and test response typing plan.

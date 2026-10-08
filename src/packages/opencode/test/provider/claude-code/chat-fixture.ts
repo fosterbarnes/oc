@@ -12,7 +12,7 @@ import { testProviderConfig } from "../../lib/test-provider"
 
 // One oc chat on the Claude provider over `opencode serve`'s HTTP API, the way the TUI drives
 // it, in a git-inited `work` folder (see `initRepo`). `chatConfig` proxies Task and Question, as
-// the user's config does (the provider default is Task and run_after_turn), and turns on oc's
+// the user's config does (the provider default is Task, run_after_turn, and time), and turns on oc's
 // opt-in `todos`: without it oc also turns off Claude Code's TodoWrite, and the flow checks the
 // todo list. `resume` reopens
 // an existing chat on a new server, the way restarting oc does. `root` holds the project and

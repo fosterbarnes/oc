@@ -6,15 +6,10 @@
   },
   "scriptPins": [],
   "favoriteFileRoots": [],
-  "recentFileRoots": [
-    "C:\\Users\\user\\Documents\\GitHub\\crow2"
-  ],
+  "recentFileRoots": [],
   "fileRoots": {
     "ses_eee9f0e5dffe24DmsWMauWS6EF": {
-      "customRoots": [
-        "C:\\Users\\user\\Documents\\GitHub\\crow2"
-      ],
-      "activeRoot": "C:\\Users\\user\\Documents\\GitHub\\crow2"
+      "customRoots": []
     }
   }
 }

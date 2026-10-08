@@ -15,6 +15,29 @@ import { flowReport, stepRunner } from "./flowReport"
 const cliPath = process.env.CLAUDE_CLI_PATH ?? Bun.which("claude")
 
 describe.skipIf(!cliPath)("Claude Code CLI against TestLLMServer", () => {
+  cliIt.live("oc's claude-code provider returns local time through the default proxy", (fixture) =>
+    Effect.gen(function* () {
+      const project = path.join(fixture.home, "work")
+      yield* initRepo(project)
+      yield* fixture.llm.tool("mcp__opencode_proxy__time", {})
+      yield* fixture.llm.text("TIME-RECEIVED")
+      const result = yield* fixture.opencode.run("Call the time tool.", {
+        model: "claude-code/claude-sonnet-4-5",
+        env: claudeEnv(fixture.home, fixture.llm.url),
+        extraArgs: ["--dir", project],
+        timeoutMs: 60_000,
+      })
+      fixture.opencode.expectExit(result, 0)
+      expect(result.stdout).toContain("TIME-RECEIVED")
+      const inputs = yield* fixture.llm.inputs
+      expect(inputs).toHaveLength(2)
+      const returned = JSON.stringify((inputs[1].messages as unknown[]).at(-1))
+      expect(returned).toContain("tool_result")
+      expect(returned).toMatch(/\d{4}-\d{2}-\d{2} (Sun|Mon|Tue|Wed|Thu|Fri|Sat) \d{2}:\d{2} [+-]\d{2}:\d{2}/)
+      expectIsolated(inputs)
+    }), 90_000,
+  )
+
   cliIt.live(
     "oc automatic rename uses a separate model alongside the first Claude turn and survives restart",
     (fixture) => Effect.gen(function* () {
@@ -33,7 +56,7 @@ describe.skipIf(!cliPath)("Claude Code CLI against TestLLMServer", () => {
       const sdk = createOpencodeClient({ baseUrl: server.url, directory: project, throwOnError: true })
       const session = yield* Effect.promise(() => sdk.session.create({
         title: "work3", metadata: { ocAutoRename: { state: "pending", title: "work3" } },
-      }))
+      }, { throwOnError: true }))
       const sessionID = session.data.id
       const model = { providerID: "claude-code", modelID: "claude-sonnet-4-5" }
       yield* Effect.promise(() => sdk.session.prompt({
@@ -50,18 +73,18 @@ describe.skipIf(!cliPath)("Claude Code CLI against TestLLMServer", () => {
       yield* fixture.llm.textMatch((hit) => hit.url.pathname === "/v1/messages", "FIRST-CLAUDE-REPLY")
       const first = yield* Effect.promise(() => sdk.session.prompt({
         sessionID, model, parts: [{ type: "text", text: "Fix the first task" }],
-      }))
+      }, { throwOnError: true }))
       expect(JSON.stringify(first.data.parts)).toContain("FIRST-CLAUDE-REPLY")
-      expect((yield* Effect.promise(() => sdk.session.get({ sessionID }))).data.title).toBe("work3")
+      expect((yield* Effect.promise(() => sdk.session.get({ sessionID }, { throwOnError: true }))).data.title).toBe("work3")
       release.resolve()
-      yield* pollWithTimeout(Effect.promise(() => sdk.session.get({ sessionID })).pipe(
+      yield* pollWithTimeout(Effect.promise(() => sdk.session.get({ sessionID }, { throwOnError: true })).pipe(
         Effect.map((result) => result.data.title === "work - first task" ? result.data : undefined),
       ), "Claude session's automatic rename never landed", "30 seconds")
       expect((yield* fixture.llm.hits).filter((hit) => hit.body.model === "test-model")).toHaveLength(1)
       const claudeInputs = (yield* fixture.llm.hits).filter((hit) => hit.url.pathname === "/v1/messages")
       expect(claudeInputs).toHaveLength(1)
       expect(JSON.stringify(claudeInputs[0].body.messages)).not.toContain("Generate a concise title")
-      const messages = (yield* Effect.promise(() => sdk.session.messages({ sessionID }))).data
+      const messages = (yield* Effect.promise(() => sdk.session.messages({ sessionID }, { throwOnError: true }))).data
       expect(messages.filter((message) => message.info.role === "user")).toHaveLength(2)
 
       server.kill()

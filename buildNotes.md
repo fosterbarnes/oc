@@ -146,6 +146,57 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-08 (~19:21) - v0.2.128 - Time tool cleanup and Claude proxy verification - GPT-6.1 Sol, default reasoning; Pass
+
+### Agent
+- Meta: GPT-6.1 Sol; default reasoning; Pass; completed
+- Version: 0.2.128
+- Fixed new time tool's star import to use exported `Tool`; corrected example weekday.
+- Added fake-model scenario exercising default Claude proxy selection, native time execution, and formatted timestamp returned to the model. Passed: 1 scenario, 6 assertions.
+- Verification: user confirmed live time tool works and package typecheck plus both automatic-rename scenarios pass. Kept revision already bumped once this session.
+- Reviewed session's time tool, proxy wiring, formatting test, and six SDK request typing fixes; no functional defect found in reviewed changes.
+
+### User
+Time tool
+- Added an automated Claude Code check that calls the native time tool and confirms its timestamp reaches the model.
+- Confirmed the tool works in the running application and the earlier test typing errors are resolved.
+
+---
+
+## 2026-10-08 (~19:13) - v0.2.128 - Explicit SDK response typing in rename tests - GPT-6.1 Sol, default reasoning; Implementation
+
+### Agent
+- Meta: GPT-6.1 Sol; default reasoning; Implementation; completed
+- Version: 0.2.128
+- Fixed six SDK calls in `test/provider/claude-code/fake-model.test.ts` and `test/session/autoRenameBootstrap.test.ts`: request-level `throwOnError: true` infers required response data, addressing seven recorded optional-data diagnostics. Kept client configuration and scenario behavior.
+- Verification: edited bootstrap scenario passed (1 test, 4 assertions); edited Claude automatic-rename scenario passed against the real CLI and fake model (1 test, 12 assertions; 19 other scenarios filtered out).
+- Kept generated SDK and unrelated pending time-tool changes untouched. Package typecheck not run under the only-edited-checks rule; next user-requested pre-push must confirm diagnostics are cleared.
+
+### User
+Tests
+- Automatic-rename tests now declare their HTTP error behavior in each affected request so the SDK can correctly type successful responses.
+- Both affected scenarios passed, including Claude session renaming and restart.
+
+---
+
+## 2026-10-08 (~03:05) - v0.2.127 - Native time tool - Opus 5.5, low reasoning; Implementation
+
+### Agent
+- Meta: Opus 5.5; low reasoning; Implementation from `timeToolPlan.md`; completed
+- Version: 0.2.127
+- Added `src/tool/time.ts` (`TimeTool`, `formatTime`): zero-arg `time` tool, reads `DateTime.nowAsDate`, returns `YYYY-MM-DD Ddd HH:MM ±HH:MM` (~12 tokens). No permission ask. Registered in `tool/registry.ts` built-ins.
+- Added Claude Code proxy def `time` (`proxy-tool-defs.ts`), `PROXY_DEF_OPENCODE_TOOL.time` (`proxy-tool-selection.ts`), and `"time"` in `DEFAULT_PROXY_TOOL_NAMES` (`types.ts`).
+- Kept live time out of the system prompt: changing it each turn would break prompt caching. `Today's date` in `session/system.ts` unchanged.
+- Risk: the user's `opencode.jsonc` sets `proxyTools` explicitly (`["Task", "Question", "run_after_turn"]`), which overrides the default; `time` must be added there to reach Claude Code sessions.
+- Verification: `test/tool/time.test.ts` (new) and `test/provider/claude-code/proxy-mcp.test.ts` (default list updated) pass, 65/65. No fake-model scenario added; the proxy-mcp routing test covers the generic forward path. Not built or installed.
+
+### User
+Tools
+- Agents can call a new `time` tool to see your current local date, time, and time zone offset, at very low token cost.
+- In Claude Code sessions it appears as `mcp__opencode_proxy__time` once `time` is in your `proxyTools` list.
+
+---
+
 ## 2026-10-08 (~02:56) - v0.2.126 - Automatic first-prompt oc session names - GPT-6.1 Sol, default reasoning; Implementation
 
 ### Agent
