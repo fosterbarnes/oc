@@ -146,6 +146,168 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-08 (~02:11) - v0.2.122 - Verify sidebar refinements for push - GPT-6.1 Sol, default reasoning; Agent push
+
+### Agent
+- Meta: GPT-6.1 Sol; default reasoning; Agent push; verification passed
+- Version: 0.2.122
+- Prepared buildNotes.txt covering final Minimal prefixes/inline reasoning, palette shortcuts, border/selection fixes, cleanup, and concurrent oc-palette-entry skill.
+- Verification: HeaderButton renderer checks 5 pass, 25 assertions. Background prePush exit 0: 27/27 typechecks (26 cached), keybind docs check, code count 519,318. git diff --check passed.
+- Tooling: background pwsh process used because bgShell tools unavailable; scratch stdout/stderr and exit file confirmed success.
+
+### User
+Verification
+- Sidebar refinements passed five focused renderer checks and all pre-push checks.
+
+---
+
+## 2026-10-08 (~02:09) - v0.2.122 - Review and clean up sidebar controls - GPT-6.1 Sol, default reasoning; Cleanup
+
+### Agent
+- Meta: GPT-6.1 Sol; default reasoning; Cleanup; completed, session-scoped
+- Version: 0.2.122
+- Reviewed session-owned style schema/resolution/persistence, palette picker, sidebar wiring, HeaderButton, and regression checks against e4d73d1. No major issue found; trial styles and bracket width machinery absent from live code.
+- Changed labels to Command Palette and oc Palette. Consolidated repeated style comparison into outlinedButtons and expanded long JSX calls for readability; config description now covers all sidebar buttons.
+- Fixed long-model inline layout: secondary reasoning button does not shrink; model clips first. Added narrow inline model/reasoning regression.
+- Verification: seven targeted config/renderer checks passed, 32 assertions; scoped git diff --check passed. No build or typecheck run; complete sidebar dispatch/persistence remains installed acceptance, not covered by isolated HeaderButton tests. Kept once-per-session revision bump.
+
+### User
+Sidebar cleanup
+- Palette buttons now read Command Palette and oc Palette.
+- Long model names no longer squeeze the reasoning control; reviewed button behavior and removed redundant style comparisons.
+- All seven targeted checks passed; no larger redesign was needed.
+
+---
+
+## 2026-10-08 (~02:07) - v0.2.122 - Distinguish primary and secondary Minimal controls - GPT-6.1 Sol, default reasoning; Implementation
+
+### Agent
+- Meta: GPT-6.1 Sol; default reasoning; Implementation; completed
+- Version: 0.2.122
+- Changed Minimal primary prefix to >; secondary inline reasoning uses >> through HeaderButton.secondary. Outline stays unchanged.
+- Verification: HeaderButton renderer checks 5 pass, 22 assertions; updated primary/inline prefix assertions. Kept once-per-session revision bump.
+
+### User
+Sidebar
+- Minimal rows start with >; reasoning beside the model starts with >>.
+
+---
+
+## 2026-10-08 (~02:06) - v0.2.122 - Disable selection on sidebar buttons - GPT-6.1 Sol, default reasoning; Implementation
+
+### Agent
+- Meta: GPT-6.1 Sol; default reasoning; Implementation; completed
+- Version: 0.2.122
+- Set selectable=false on HeaderButton label and Minimal prefix; covers session, both palettes, model, and reasoning in both styles.
+- Verification: HeaderButton renderer checks 5 pass, 22 assertions. Double-clicks activate buttons without selecting labels/prefix; neighboring ordinary text remains selectable. Kept once-per-session revision bump.
+
+### User
+Sidebar
+- Double-clicking sidebar buttons no longer highlights their text.
+
+---
+
+## 2026-10-08 (~02:03) - v0.2.122 - Add sidebar command palette button - GPT-6.1 Sol, default reasoning; Implementation
+
+### Agent
+- Meta: GPT-6.1 Sol; default reasoning; Implementation; completed
+- Version: 0.2.122
+- Added command palette HeaderButton between Switch Session and oc palette; dispatches existing command.palette.show to open unfiltered palette.
+- Verification: inspected existing command handler; one-line wiring change, no tests or build run. Kept once-per-session revision bump.
+
+### User
+Sidebar
+- Click command palette above oc palette to open all commands.
+
+---
+
+## 2026-10-08 (~02:02) - v0.2.122 - Add sidebar oc palette button - GPT-6.1 Sol, default reasoning; Implementation
+
+### Agent
+- Meta: GPT-6.1 Sol; default reasoning; Implementation; completed
+- Version: 0.2.122
+- Added oc palette HeaderButton immediately below Switch Session; dispatches existing oc.settings_palette command, which opens CommandPaletteDialog filtered to oc.
+- Verification: inspected existing command handler; one-line wiring change, no tests or build run. Kept once-per-session revision bump.
+
+### User
+Sidebar
+- Click oc palette below Switch Session to open the command palette's oc section.
+
+---
+
+## 2026-10-08 (~02:02) - v0.2.122 - Put Minimal reasoning beside model - GPT-6.1 Sol, default reasoning; Implementation
+
+### Agent
+- Meta: GPT-6.1 Sol; default reasoning; Implementation; completed
+- Version: 0.2.122
+- Grouped model and reasoning in row for Minimal, column for Outline. Minimal HeaderButton uses auto width and can shrink; retains separate hover/click handlers.
+- Verification: HeaderButton renderer checks 3 pass, 15 assertions; inline model/reasoning geometry and independent mouse clicks added to existing hover/style/narrow-layout checks. Kept once-per-session revision bump.
+
+### User
+Sidebar
+- Minimal now shows model and reasoning on the same line, each separately clickable.
+
+---
+
+## 2026-10-08 (~02:00) - v0.2.122 - Use double-chevron Minimal controls - GPT-6.1 Sol, default reasoning; Implementation
+
+### Agent
+- Meta: GPT-6.1 Sol; default reasoning; Implementation; completed
+- Version: 0.2.122
+- Changed Minimal prefix to >> and removed closing brackets, shared longest-label width calculation, minimalWidth prop, and text-region growth. Kept explicit empty border sides for hover safety.
+- Verification: HeaderButton renderer checks 2 pass, 12 assertions; hover, clicks, style switching, aligned prefixes, and narrow-sidebar single-line clipping. Kept once-per-session revision bump.
+
+### User
+Sidebar
+- Minimal controls now use >> before each label instead of brackets.
+
+---
+
+## 2026-10-08 (~01:57) - v0.2.122 - Align Minimal closing brackets - GPT-6.1 Sol, default reasoning; Implementation
+
+### Agent
+- Meta: GPT-6.1 Sol; default reasoning; Implementation; completed
+- Version: 0.2.122
+- Added shared minimalButtonWidth from longest visible control label using Bun.stringWidth plus four bracket/padding cells; all Minimal controls share width and align closing brackets.
+- HeaderButton caps width at sidebar width and grows text region to reserve closing bracket. Outline stays full-width.
+- Verification: renderer checks 2 pass, 10 assertions; hover geometry, style switching, clicks, aligned brackets, and narrow-sidebar clipping checked. Kept once-per-session revision bump.
+
+### User
+Sidebar
+- Minimal buttons align their closing brackets using the longest visible label.
+
+---
+
+## 2026-10-08 (~01:55) - v0.2.122 - Keep Minimal buttons borderless on hover - GPT-6.1 Sol, default reasoning; Implementation
+
+### Agent
+- Meta: GPT-6.1 Sol; default reasoning; Implementation; completed
+- Version: 0.2.122
+- Fixed HeaderButton: Minimal uses explicit empty border sides, not false. OpenTUI BoxRenderable.borderColor calls initializeBorder, which turns false into true and adds Yoga border rows.
+- Moved shared production HeaderButton into sidebar-tools/headerButton.tsx for direct renderer testing; hover signal now belongs to each button.
+- Verification: headerButton renderer regression passed, seven assertions; real mouse enter/leave/click and Outline-to-Minimal switching preserve single-line geometry. No build or push run. Kept once-per-session revision bump.
+- MISTAKE: supplied reactive borderColor with border=false and assumed disabled borders stayed disabled; verify renderer setters and hover geometry, not only config decoding.
+
+### User
+Sidebar
+- Minimal buttons stay on one line when hovered, including after switching from Outline.
+
+---
+
+## 2026-10-08 (~01:49) - v0.2.122 - Add oc palette entry skill - Claude Opus 5.5, low effort; Agent
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Agent; completed
+- Version: 0.2.122 (not bumped: skill doc only, no code change)
+- Added `.opencode/skills/oc-palette-entry/SKILL.md`: how to add `category: "oc"` entries to `appCommands` in `packages/tui/src/app.tsx`; oc section only unless user asks otherwise.
+- Verification: temp `oc.tmp_skill_probe` entry with `slashName` added to `appCommands`, `bun run typecheck` in `packages/tui` exit 0, entry removed; worktree diff empty.
+
+### User
+Skills
+- New `oc-palette-entry` skill teaches agents how to add commands to the oc section of the command palette; no UI change.
+
+---
+
 ## 2026-10-08 (~01:46) - v0.2.122 - Verify sidebar and session changes for push - GPT-6.1 Sol, default reasoning; Agent push
 
 ### Agent

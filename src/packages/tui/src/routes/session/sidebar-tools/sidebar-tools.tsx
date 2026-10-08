@@ -8,6 +8,7 @@ import { useSync } from "../../../context/sync"
 import { useEvent } from "../../../context/event"
 import { useKV } from "../../../context/kv"
 import { useTuiConfig } from "../../../config"
+import { HeaderButton } from "./headerButton"
 import { useTheme } from "../../../context/theme"
 import { useTuiPaths } from "../../../context/runtime"
 import { useLocal } from "../../../context/local"
@@ -1566,42 +1567,51 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
       )
   }
 
-  function HeaderButton(props: { id: string; value: string; onClick: () => void }) {
-    const outlined = () => tuiConfig.sidebar_button_style === "outlined"
-    const color = () => (hovered() === props.id ? hoverColor : headerButtonColor)
-    return (
-      <box
-        width="100%"
-        flexShrink={0}
-        minWidth={0}
-        flexDirection="row"
-        justifyContent="flex-start"
-        border={outlined()}
-        borderStyle="single"
-        borderColor={color()}
-        paddingLeft={outlined() ? 1 : 0}
-        paddingRight={outlined() ? 1 : 0}
-        onMouseOver={() => setHovered(props.id)}
-        onMouseOut={() => setHovered()}
-        onMouseUp={(event) => {
-          if (event.button === 0) props.onClick()
-        }}
-      >
-        <Show when={!outlined()}><text flexShrink={0} fg={color()}>{"[ "}</text></Show>
-        <text minWidth={0} flexShrink={1} wrapMode="none" fg={color()}>{props.value}</text>
-        <Show when={!outlined()}><text flexShrink={0} fg={color()}>{" ]"}</text></Show>
-      </box>
-    )
-  }
+  const outlinedButtons = () => tuiConfig.sidebar_button_style === "outlined"
 
   return (
     <>
       <box flexDirection="column" gap={0}>
-        <HeaderButton id="header-button-session" value="Switch Session" onClick={() => keymap.dispatchCommand("session.list")} />
-        <HeaderButton id="header-button-model" value={modelLabel()} onClick={selectModel} />
-        <Show when={local.model.variant.list().length > 0}>
-          <HeaderButton id="header-button-reasoning" value={local.model.variant.current() ?? "default"} onClick={cycleVariant} />
-        </Show>
+        <HeaderButton
+          value="Switch Session"
+          outlined={outlinedButtons()}
+          color={headerButtonColor}
+          hoverColor={hoverColor}
+          onClick={() => keymap.dispatchCommand("session.list")}
+        />
+        <HeaderButton
+          value="Command Palette"
+          outlined={outlinedButtons()}
+          color={headerButtonColor}
+          hoverColor={hoverColor}
+          onClick={() => keymap.dispatchCommand("command.palette.show")}
+        />
+        <HeaderButton
+          value="oc Palette"
+          outlined={outlinedButtons()}
+          color={headerButtonColor}
+          hoverColor={hoverColor}
+          onClick={() => keymap.dispatchCommand("oc.settings_palette")}
+        />
+        <box flexDirection={outlinedButtons() ? "column" : "row"} gap={outlinedButtons() ? 0 : 1}>
+          <HeaderButton
+            value={modelLabel()}
+            outlined={outlinedButtons()}
+            color={headerButtonColor}
+            hoverColor={hoverColor}
+            onClick={selectModel}
+          />
+          <Show when={local.model.variant.list().length > 0}>
+            <HeaderButton
+              value={local.model.variant.current() ?? "default"}
+              secondary
+              outlined={outlinedButtons()}
+              color={headerButtonColor}
+              hoverColor={hoverColor}
+              onClick={cycleVariant}
+            />
+          </Show>
+        </box>
       </box>
       <box flexDirection="column" gap={0}>
         {usageRows()}

@@ -69,7 +69,7 @@ export const Info = Schema.Struct({
   }),
   theme: Schema.optional(Schema.String),
   sidebar_button_style: Schema.optional(Schema.Literals(["minimal", "outlined"])).annotate({
-    description: "Sidebar session/model/reasoning buttons: minimal (default) or outlined",
+    description: "Sidebar button style: minimal (default) or outlined",
   }),
   keybind_preset: Schema.optional(Schema.Literals(TuiKeybindPreset.Names)).annotate({
     description: "Keybind layout: 'oc' (default) or 'opencode' (stock OpenCode keys)",

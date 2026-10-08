@@ -1,12 +1,12 @@
 v0.2.122
 
-sidebar buttons:
-Session, model, and reasoning controls now look like buttons. Choose Outline or Minimal from Sidebar button style in the oc command palette, or /sidebarButtonStyle. Outline uses square rectangular borders with left-aligned text. Minimal fits each control on one line with brackets. Hover changes only the text and outline color. Switching applies immediately and saves your choice.
+sidebar controls:
+Minimal now uses > for each primary control and >> for reasoning beside the model. Model and reasoning share one row and stay separately clickable; long model names clip before squeezing reasoning. Command Palette and oc Palette buttons below Switch Session open all commands or just the oc section. Outline keeps its square, left-aligned buttons.
 
-session status:
-Sending a prompt automatically marks the session in progress, including reopening completed or failed sessions. The separate agent tool for marking sessions in progress was removed. Session completion is hidden from agents by default; /imp enables it for its own turn, with instructions to mark complete only after the main implementation goal and required checks are finished.
+mouse behavior:
+Minimal controls stay borderless and single-line on hover and after switching styles. Double-clicking button text or its prefix no longer selects it; ordinary text elsewhere stays selectable. Hover changes only text and outline colors.
 
-command permissions:
-Command files can now enable or disable tools through permission frontmatter using allow or deny. Overrides apply to that command's turn without changing the session's saved permissions.
+agent guidance:
+Added the oc-palette-entry skill with project-specific instructions for adding commands to the oc category and reusing the existing palette wiring.
 
-Under the hood: shared sidebar button rendering replaces duplicated text actions, discarded styles and hover backgrounds were removed, and resolved configuration owns the live style default. TUI setting writes preserve JSONC comments. Command permissions travel on the user message and are merged only for the active turn; noReply prompts leave status unchanged and subagent sessions are excluded from automatic marking. Build notes were rotated verbatim into archive7 with an updated cumulative summary. All eight targeted checks passed: two sidebar configuration tests and six session/status/permission tests, with 26 assertions. Pre-push passed all 27 typecheck tasks, the keybind documentation check, and the refreshed code count of 519,148 lines. git diff --check passed. The user confirmed the installed sidebar appearance and live style switching.
+Under the hood: the shared HeaderButton is directly covered by real renderer checks, uses explicit empty border sides to avoid OpenTUI re-enabling borders on color updates, and owns its hover state. Removed bracket alignment and longest-label sizing after settling on chevron prefixes. Consolidated repeated style comparisons and cleaned up the markup and configuration description. All five targeted renderer checks passed, with 25 assertions covering hover, style switching, clicks, selection blocking, and narrow layouts. Pre-push passed all 27 typecheck tasks and the keybind documentation check; code count refreshed to 519,318 lines. git diff --check passed.
