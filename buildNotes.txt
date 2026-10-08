@@ -1,6 +1,6 @@
-v0.2.123
+v0.2.124
 
-session completion:
-Successful agent-push runs now explicitly qualify for session completion after all required checks pass. Failed checks and failed pushes leave the session open.
+agent push:
+Agent pushes now use a three-call workflow with a compact context report and quiet check output unless something fails. The wrapper validates the commit message, runs the pre-push checks, pushes, and prints the resulting commit and files.
 
-Under the hood: updated the session_complete tool instructions and recorded the user-level agent-push command's turn-scoped completion permission fix. Bumped the revision to 0.2.123. Verified the declarative permission and tool wording by inspection; no targeted tests apply to these text-only changes. Pre-push passed all 27 typecheck tasks and the keybind documentation check; code count refreshed to 519,318 lines.
+Under the hood: added .scripts/agentPush.ps1 and documented it in AGENTS.md. Updated the user-level agent-push command and skill instructions. Bumped the revision to 0.2.124. Context reporting and rejection of unchanged notes, incorrect version lines, and missing blank lines passed. Pre-push checks and the live push path passed.

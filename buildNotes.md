@@ -146,6 +146,23 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-08 (~02:26) - v0.2.124 - Token-lean agent push - Claude Opus 5.5, low reasoning; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low reasoning; Implementation; completed
+- Version: 0.2.124
+- Added `.scripts/agentPush.ps1`: `-Context` dumps branch, status, new `buildNotes.md` lines, last 10 subjects, last message; default mode validates `buildNotes.txt` (changed, `v<version>`, blank line, body), runs `prePush.ps1` then `push.ps1` in-process (closeOut no-op), output captured and last 40 lines shown only on failure, then prints hash/message/files.
+- Rewrote user-level `~/.opencode/commands/agent-push.md` and `~/.claude/skills/agent-push/SKILL.md` bodies: 3 calls with agentPush.ps1, 3-call fallback for repos without it, no skill reload, no script reads, write message once, no dry run. Last run took ~12 calls.
+- Updated `AGENTS.md` buildNotes.txt section with agentPush.ps1.
+- Kept husky pre-push typecheck (turbo cache hit after prePush).
+- Verification: ran `-Context` (ok); default mode failed correctly for unchanged notes, wrong version line, missing blank line (temp edits restored). Real push path not run; first live `/agent-push` is the check.
+
+### User
+agent push
+- `/agent-push` now takes about 3 tool calls instead of about 12, with quiet check output unless something fails.
+
+---
+
 ## 2026-10-08 (~02:15) - v0.2.123 - Enable completion after agent push - GPT-6.1 Sol, default reasoning; Implementation
 
 ### Agent
