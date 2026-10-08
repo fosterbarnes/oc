@@ -26,7 +26,6 @@ import { ProviderV2 } from "@opencode-ai/core/provider"
 import { ModelV2 } from "@opencode-ai/core/model"
 import { Permission } from "../../src/permission"
 import { SessionCompleteTool } from "../../src/tool/session-complete"
-import { SessionInProgressTool } from "../../src/tool/session-in-progress"
 import { SessionFailedTool } from "../../src/tool/session-failed"
 
 afterEach(async () => {
@@ -173,86 +172,6 @@ function reply(
 }
 
 describe("tool.task", () => {
-  for (const mark of ["unmarked", "in_progress", "complete", "failed"] as const) {
-    it.instance(`session marking: in progress from ${mark}`, () =>
-      Effect.gen(function* () {
-        const sessions = yield* Session.Service
-        const { chat, assistant } = yield* seed()
-        if (mark === "complete") {
-          yield* sessions.setSessionComplete({ sessionID: chat.id, sessionComplete: true })
-        }
-        if (mark === "failed") yield* sessions.setSessionFailed({ sessionID: chat.id, sessionFailed: true })
-        if (mark === "in_progress") {
-          yield* sessions.setSessionInProgress({ sessionID: chat.id, sessionInProgress: true })
-        }
-        const agent = yield* Agent.Service
-        const build = yield* agent.get("build")
-        const permission = yield* Permission.Service
-        const tool = yield* SessionInProgressTool
-        const def = yield* tool.init()
-        const fiber = yield* def.execute({}, {
-          sessionID: chat.id,
-          messageID: assistant.id,
-          agent: "build",
-          abort: new AbortController().signal,
-          messages: [],
-          metadata: () => Effect.void,
-          ask: (input) => permission.ask({ ...input, sessionID: chat.id, ruleset: build.permission }).pipe(Effect.orDie),
-        }).pipe(Effect.forkChild)
-        if (mark === "complete" || mark === "failed") {
-          const request = yield* pollWithTimeout(
-            permission.list().pipe(Effect.map((items) => items.find((item) => item.sessionID === chat.id))),
-            "reopening never requested permission",
-          )
-          expect(request.permission).toBe("session_reopen")
-          expect(request.metadata.previous).toBe(mark)
-          expect((yield* sessions.get(chat.id)).sessionInProgress).toBe(false)
-          yield* permission.reply({ requestID: request.id, reply: "once" })
-        }
-        yield* Fiber.join(fiber)
-        expect(yield* permission.list()).toEqual([])
-        expect(yield* sessions.get(chat.id)).toMatchObject({
-          sessionInProgress: true, sessionComplete: false, sessionFailed: false,
-        })
-      }),
-    )
-  }
-
-  it.instance("session marking: reopening approval does not override a newer mark", () =>
-    Effect.gen(function* () {
-      const sessions = yield* Session.Service
-      const { chat, assistant } = yield* seed()
-      yield* sessions.setSessionComplete({ sessionID: chat.id, sessionComplete: true })
-      const agent = yield* Agent.Service
-      const build = yield* agent.get("build")
-      const permission = yield* Permission.Service
-      const tool = yield* SessionInProgressTool
-      const def = yield* tool.init()
-      const fiber = yield* def.execute({}, {
-        sessionID: chat.id,
-        messageID: assistant.id,
-        agent: "build",
-        abort: new AbortController().signal,
-        messages: [],
-        metadata: () => Effect.void,
-        ask: (input) => permission.ask({ ...input, sessionID: chat.id, ruleset: build.permission }).pipe(Effect.orDie),
-      }).pipe(Effect.forkChild)
-      const request = yield* pollWithTimeout(
-        permission.list().pipe(Effect.map((items) => items.find((item) => item.sessionID === chat.id))),
-        "reopening never requested permission",
-      )
-      yield* sessions.setSessionFailed({ sessionID: chat.id, sessionFailed: true })
-      yield* permission.reply({ requestID: request.id, reply: "once" })
-      const result = yield* Fiber.join(fiber)
-      expect(result.output).toBe("The session status changed while reopening was awaiting approval; left it unchanged.")
-      expect(yield* sessions.get(chat.id)).toMatchObject({
-        sessionInProgress: false,
-        sessionComplete: false,
-        sessionFailed: true,
-      })
-    }),
-  )
-
   for (const action of ["approve", "reject", "already complete"] as const) {
     it.instance(`session marking: completion ${action}`, () =>
       Effect.gen(function* () {
@@ -291,6 +210,7 @@ describe("tool.task", () => {
         })
         expect(yield* permission.list()).toEqual([])
       }),
+      { config: { agent: { build: { permission: { session_complete: "ask" } } } } },
     )
   }
 
@@ -373,11 +293,11 @@ describe("tool.task", () => {
     { config: { agent: { build: { permission: { session_failed: "allow" } } } } },
   )
 
-  it.instance("asks for session completion by default", () =>
+  it.instance("hides session completion by default", () =>
     Effect.gen(function* () {
       const agent = yield* Agent.Service
       const build = yield* agent.get("build")
-      expect(Permission.evaluate("session_complete", "*", build.permission).action).toBe("ask")
+      expect(Permission.evaluate("session_complete", "*", build.permission).action).toBe("deny")
     }),
   )
 

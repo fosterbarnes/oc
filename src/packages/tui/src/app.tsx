@@ -391,13 +391,13 @@ function updateClaudeCode(cliPath: string, toast: ToastContext) {
   })
 }
 
-// Saves the layout in the global tui.jsonc or tui.json (jsonc wins when loading), keeping comments.
-function persistKeybindPreset(preset: TuiConfig.KeybindPreset) {
+// Saves settings in global tui.jsonc or tui.json (jsonc wins when loading), keeping comments.
+function persistTuiSetting(key: "keybind_preset" | "sidebar_button_style", value: string) {
   const file =
     ["tui.jsonc", "tui.json"].map((name) => path.join(Global.Path.config, name)).find((item) => fs.existsSync(item)) ??
     path.join(Global.Path.config, "tui.json")
   const text = fs.existsSync(file) ? fs.readFileSync(file, "utf8") : "{}"
-  const edits = modify(text, ["keybind_preset"], preset, { formattingOptions: { tabSize: 2, insertSpaces: true } })
+  const edits = modify(text, [key], value, { formattingOptions: { tabSize: 2, insertSpaces: true } })
   fs.writeFileSync(file, applyEdits(text, edits))
 }
 
@@ -1574,13 +1574,43 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
                 dialog.clear()
                 tuiConfig.setKeybindPreset(option.value)
                 try {
-                  persistKeybindPreset(option.value)
+                  persistTuiSetting("keybind_preset", option.value)
                 } catch (cause) {
                   const message = cause instanceof Error ? cause.message : String(cause)
                   toast.show({ message: `Keybind layout applied but not saved: ${message}`, variant: "error" })
                   return
                 }
                 toast.show({ message: `Keybind layout: ${option.value}`, variant: "success" })
+              }}
+            />
+          ))
+        },
+      },
+      {
+        name: "oc.sidebar_button_style",
+        title: "Sidebar button style",
+        category: "oc",
+        slashName: "sidebarButtonStyle",
+        run: () => {
+          dialog.replace(() => (
+            <DialogSelect
+              title="Sidebar button style"
+              current={tuiConfig.sidebar_button_style}
+              options={[
+                { value: "outlined" as const, title: "Outline" },
+                { value: "minimal" as const, title: "Minimal" },
+              ]}
+              onSelect={(option) => {
+                dialog.clear()
+                tuiConfig.setSidebarButtonStyle(option.value)
+                try {
+                  persistTuiSetting("sidebar_button_style", option.value)
+                } catch (cause) {
+                  const message = cause instanceof Error ? cause.message : String(cause)
+                  toast.show({ message: `Sidebar button style applied but not saved: ${message}`, variant: "error" })
+                  return
+                }
+                toast.show({ message: `Sidebar button style: ${option.title}`, variant: "success" })
               }}
             />
           ))

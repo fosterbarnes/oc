@@ -1566,42 +1566,41 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
       )
   }
 
+  function HeaderButton(props: { id: string; value: string; onClick: () => void }) {
+    const outlined = () => tuiConfig.sidebar_button_style === "outlined"
+    const color = () => (hovered() === props.id ? hoverColor : headerButtonColor)
+    return (
+      <box
+        width="100%"
+        flexShrink={0}
+        minWidth={0}
+        flexDirection="row"
+        justifyContent="flex-start"
+        border={outlined()}
+        borderStyle="single"
+        borderColor={color()}
+        paddingLeft={outlined() ? 1 : 0}
+        paddingRight={outlined() ? 1 : 0}
+        onMouseOver={() => setHovered(props.id)}
+        onMouseOut={() => setHovered()}
+        onMouseUp={(event) => {
+          if (event.button === 0) props.onClick()
+        }}
+      >
+        <Show when={!outlined()}><text flexShrink={0} fg={color()}>{"[ "}</text></Show>
+        <text minWidth={0} flexShrink={1} wrapMode="none" fg={color()}>{props.value}</text>
+        <Show when={!outlined()}><text flexShrink={0} fg={color()}>{" ]"}</text></Show>
+      </box>
+    )
+  }
+
   return (
     <>
       <box flexDirection="column" gap={0}>
-        <text
-          fg={hovered() === "header-button-session" ? hoverColor : headerButtonColor}
-          paddingLeft={1}
-          paddingRight={1}
-          onMouseOver={() => setHovered("header-button-session")}
-          onMouseOut={() => setHovered()}
-          onMouseUp={(event) => {
-            if (event.button === 0) keymap.dispatchCommand("session.list")
-          }}
-        >
-          {"> Switch Session"}
-        </text>
-        <text
-          fg={hovered() === "header-button-model" ? hoverColor : headerButtonColor}
-          paddingLeft={1}
-          paddingRight={1}
-          onMouseOver={() => setHovered("header-button-model")}
-          onMouseOut={() => setHovered()}
-          onMouseUp={(event) => {
-            if (event.button === 0) selectModel()
-          }}
-        >{`> ${modelLabel()}`}</text>
+        <HeaderButton id="header-button-session" value="Switch Session" onClick={() => keymap.dispatchCommand("session.list")} />
+        <HeaderButton id="header-button-model" value={modelLabel()} onClick={selectModel} />
         <Show when={local.model.variant.list().length > 0}>
-          <text
-            fg={hovered() === "header-button-reasoning" ? hoverColor : headerButtonColor}
-            paddingLeft={1}
-            paddingRight={1}
-            onMouseOver={() => setHovered("header-button-reasoning")}
-            onMouseOut={() => setHovered()}
-            onMouseUp={(event) => {
-              if (event.button === 0) cycleVariant()
-            }}
-          >{`> ${local.model.variant.current() ?? "default"}`}</text>
+          <HeaderButton id="header-button-reasoning" value={local.model.variant.current() ?? "default"} onClick={cycleVariant} />
         </Show>
       </box>
       <box flexDirection="column" gap={0}>

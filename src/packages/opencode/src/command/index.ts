@@ -37,7 +37,11 @@ export const Info = Schema.Struct({
   hints: Schema.Array(Schema.String),
 }).annotate({ identifier: "Command" })
 
-export type Info = Omit<Schema.Schema.Type<typeof Info>, "template"> & { template: Promise<string> | string }
+// `permission` stays server-side (not in the public schema); `command()` applies it to that turn only.
+export type Info = Omit<Schema.Schema.Type<typeof Info>, "template"> & {
+  template: Promise<string> | string
+  permission?: Record<string, "allow" | "deny">
+}
 
 export function hints(template: string) {
   const result: string[] = []
@@ -125,6 +129,7 @@ const layer = Layer.effect(
             return command.template
           },
           subtask: command.subtask,
+          permission: command.permission,
           hints: hints(command.template),
         }
       }

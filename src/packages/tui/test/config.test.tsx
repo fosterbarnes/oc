@@ -16,6 +16,24 @@ import {
 const decodeInfo = Schema.decodeUnknownSync(Info)
 const decodePlugin = Schema.decodeUnknownSync(PluginSpec)
 
+test("accepts all sidebar button styles and rejects unknown styles", () => {
+  for (const style of ["minimal", "outlined"] as const) {
+    const config = resolve(decodeInfo({ sidebar_button_style: style }), { terminalSuspend: true })
+    expect(config.sidebar_button_style).toBe(style)
+  }
+  expect(() => decodeInfo({ sidebar_button_style: "unknown" })).toThrow()
+})
+
+test("switches sidebar button style live without mutating input", () => {
+  const input: TuiConfigInfo = { sidebar_button_style: "outlined" }
+  const config = resolve(input, { terminalSuspend: true })
+  expect(config.sidebar_button_style).toBe("outlined")
+  config.setSidebarButtonStyle("minimal")
+  expect(config.sidebar_button_style).toBe("minimal")
+  expect(input.sidebar_button_style).toBe("outlined")
+  expect(resolve({}, { terminalSuspend: true }).sidebar_button_style).toBe("minimal")
+})
+
 test("defines package-owned plugin specs and attention sound names", () => {
   expect(decodePlugin("example-plugin")).toBe("example-plugin")
   expect(decodePlugin(["example-plugin", { enabled: true }])).toEqual(["example-plugin", { enabled: true }])

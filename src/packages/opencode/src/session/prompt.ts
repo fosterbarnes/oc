@@ -710,7 +710,7 @@ const layer = Layer.effect(
       return yield* provider.defaultModel().pipe(Effect.orDie)
     })
 
-    const createUserMessage = Effect.fn("SessionPrompt.createUserMessage")(function* (input: PromptInput) {
+    const createUserMessage = Effect.fn("SessionPrompt.createUserMessage")(function* (input: TurnInput) {
       const agentName = input.agent
       const ag = agentName ? yield* agents.get(agentName) : yield* agents.defaultInfo()
       if (!ag) {
@@ -736,7 +736,7 @@ const layer = Layer.effect(
         role: "user",
         sessionID: input.sessionID,
         time: { created: Date.now() },
-        tools: input.tools,
+        tools: input.turnTools ?? input.tools,
         agent: ag.name,
         model: {
           providerID: model.providerID,
@@ -1127,9 +1127,9 @@ const layer = Layer.effect(
       return { info, parts }
     }, Effect.scoped)
 
-    const prompt: (input: PromptInput) => Effect.Effect<SessionV1.WithParts, Image.Error> = Effect.fn(
+    const prompt: (input: TurnInput) => Effect.Effect<SessionV1.WithParts, Image.Error> = Effect.fn(
       "SessionPrompt.prompt",
-    )(function* (input: PromptInput) {
+    )(function* (input: TurnInput) {
       const session = yield* sessions.get(input.sessionID).pipe(Effect.orDie)
       yield* revert.cleanup(session)
       const message = yield* createUserMessage(input)
@@ -1145,6 +1145,10 @@ const layer = Layer.effect(
       }
 
       if (input.noReply === true) return message
+      // Every real prompt (new session or reopening a complete/failed one) marks the root session in progress.
+      if (!session.parentID && !session.sessionInProgress) {
+        yield* sessions.setSessionInProgress({ sessionID: session.id, sessionInProgress: true })
+      }
       return yield* loop({ sessionID: input.sessionID })
     })
 
@@ -1301,9 +1305,18 @@ const layer = Layer.effect(
             const bypassAgentCheck = lastUserMsg?.parts.some((p) => p.type === "agent") ?? false
             const promptOps = yield* ops()
 
+            // Command frontmatter `permission` rides on the turn's user message as `tools`.
+            const turnPermission = Permission.merge(
+              session.permission ?? [],
+              Object.entries(lastUser.tools ?? {}).map(([tool, enabled]) => ({
+                permission: tool,
+                action: enabled ? ("allow" as const) : ("deny" as const),
+                pattern: "*",
+              })),
+            )
             const tools = yield* SessionTools.resolve({
               agent,
-              session,
+              session: { ...session, permission: turnPermission },
               model,
               processor: handle,
               bypassAgentCheck,
@@ -1363,7 +1376,7 @@ const layer = Layer.effect(
                   : base
                     ? { ...agent, prompt: base }
                     : agent,
-              permission: session.permission,
+              permission: turnPermission,
               sessionID,
               parentSessionID: session.parentID,
               system,
@@ -1618,6 +1631,9 @@ const layer = Layer.effect(
         agent: userAgent,
         parts,
         variant: input.variant,
+        turnTools:
+          cmd.permission &&
+          Object.fromEntries(Object.entries(cmd.permission).map(([tool, action]) => [tool, action === "allow"])),
       })
       yield* events.publish(Command.Event.Executed, {
         name: input.command,
@@ -1693,6 +1709,8 @@ export const PromptInput = Schema.Struct({
   ),
 })
 export type PromptInput = Schema.Schema.Type<typeof PromptInput>
+// Internal only: `turnTools` sets the user message's tools without persisting them to the session.
+type TurnInput = PromptInput & { turnTools?: Record<string, boolean> }
 
 export class LoopInput extends Schema.Class<LoopInput>("SessionPrompt.LoopInput")({
   sessionID: SessionID,

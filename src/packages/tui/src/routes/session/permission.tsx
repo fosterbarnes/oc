@@ -373,9 +373,7 @@ export function PermissionPrompt(props: { request: PermissionRequest; directory?
               icon: "⚙",
               title: permission === "session_complete"
                 ? "Mark this session complete?"
-                : permission === "session_reopen"
-                  ? `Reopen this ${props.request.metadata.previous === "failed" ? "failed" : "complete"} session as in progress?`
-                  : `Call tool ${permission}`,
+                : `Call tool ${permission}`,
               body: (
                 <box paddingLeft={1}>
                   <text fg={theme.textMuted}>{"Tool: " + permission}</text>

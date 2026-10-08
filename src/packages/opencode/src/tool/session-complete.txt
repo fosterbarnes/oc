@@ -1,1 +1,1 @@
-Request permission to mark the current session complete when the agreed work is finished. Already-complete sessions need no change or approval. This only labels the session and does not archive it or prevent future prompts.
+Mark the current session complete. Call once, as your last action, only when the main implementation goal the user asked for is fully implemented and required verification passed. Never for questions, plans, blockers, partial work, or failed checks. A later prompt reopens the session automatically.

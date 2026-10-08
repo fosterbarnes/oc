@@ -557,6 +557,30 @@ it.instance("loop calls LLM and returns assistant message", () =>
   }),
 )
 
+it.instance("prompt reopens a complete session as in progress; noReply leaves status alone", () =>
+  Effect.gen(function* () {
+    const { llm } = yield* useServerConfig(providerCfg)
+    const prompt = yield* SessionPrompt.Service
+    const sessions = yield* Session.Service
+    const chat = yield* sessions.create({
+      title: "Pinned",
+      permission: [{ permission: "*", pattern: "*", action: "allow" }],
+    })
+    yield* sessions.setSessionComplete({ sessionID: chat.id, sessionComplete: true })
+    yield* prompt.prompt({ sessionID: chat.id, agent: "build", noReply: true, parts: [{ type: "text", text: "a" }] })
+    expect(yield* sessions.get(chat.id)).toMatchObject({ sessionComplete: true, sessionInProgress: false })
+
+    yield* llm.hang
+    const fiber = yield* prompt
+      .prompt({ sessionID: chat.id, agent: "build", parts: [{ type: "text", text: "b" }] })
+      .pipe(Effect.forkChild)
+    yield* awaitWithTimeout(llm.wait(1), "timed out waiting for LLM request", "10 seconds")
+    expect(yield* sessions.get(chat.id)).toMatchObject({ sessionComplete: false, sessionInProgress: true })
+    yield* Fiber.interrupt(fiber)
+  }),
+  15_000,
+)
+
 withMcpInstructions.instance(
   "loop includes MCP instructions in model system context",
   () =>
@@ -2492,6 +2516,26 @@ it.instance("slash composition expands shared arguments and shell snippets witho
     })
     const singleHistory = yield* sessions.messages({ sessionID: single.id })
     expect(singleHistory[0].parts.find((part) => part.type === "text")).toMatchObject({ text: "Plain body\n\nrequest" })
+  }),
+)
+
+it.instance("command permission applies to its own turn only", () =>
+  Effect.gen(function* () {
+    const { llm } = yield* useServerConfig((url) => ({
+      ...providerCfg(url),
+      command: { imp: { template: "Implement", permission: { session_complete: "allow" } } },
+    }))
+    const { prompt, chat, sessions } = yield* boot()
+    yield* llm.text("done")
+    yield* prompt.command({ sessionID: chat.id, command: "imp", arguments: "" })
+    yield* llm.text("again")
+    yield* prompt.prompt({ sessionID: chat.id, agent: "build", parts: [{ type: "text", text: "follow up" }] })
+    const hits = yield* llm.hits
+    expect(JSON.stringify(hits[0]?.body)).toContain('"session_complete"')
+    expect(JSON.stringify(hits[1]?.body)).not.toContain('"session_complete"')
+    expect((yield* sessions.get(chat.id)).permission ?? []).not.toContainEqual(
+      expect.objectContaining({ permission: "session_complete" }),
+    )
   }),
 )
 

@@ -68,6 +68,9 @@ export const Info = Schema.Struct({
       'Editor used when opening file paths from the TUI, or a map of extension to editor with an optional default, e.g. { "default": "code", ".md": "typora" }',
   }),
   theme: Schema.optional(Schema.String),
+  sidebar_button_style: Schema.optional(Schema.Literals(["minimal", "outlined"])).annotate({
+    description: "Sidebar session/model/reasoning buttons: minimal (default) or outlined",
+  }),
   keybind_preset: Schema.optional(Schema.Literals(TuiKeybindPreset.Names)).annotate({
     description: "Keybind layout: 'oc' (default) or 'opencode' (stock OpenCode keys)",
   }),
@@ -86,10 +89,13 @@ export const Info = Schema.Struct({
 export type Info = Schema.Schema.Type<typeof Info>
 
 export type KeybindPreset = (typeof TuiKeybindPreset.Names)[number]
+export type SidebarButtonStyle = NonNullable<Info["sidebar_button_style"]>
 
-export type Resolved = Omit<Info, "attention" | "keybind_preset" | "keybinds" | "leader_timeout" | "mouse" | "cursor"> & {
+export type Resolved = Omit<Info, "attention" | "keybind_preset" | "sidebar_button_style" | "keybinds" | "leader_timeout" | "mouse" | "cursor"> & {
   keybind_preset: KeybindPreset
+  sidebar_button_style: SidebarButtonStyle
   setKeybindPreset: (preset: KeybindPreset) => void
+  setSidebarButtonStyle: (style: SidebarButtonStyle) => void
   attention: {
     enabled: boolean
     notifications: boolean
@@ -119,6 +125,9 @@ export function resolve(input: Info, options: ResolveOptions): Resolved {
     opencode: resolveKeybinds(input, options, "opencode"),
   }
   const [preset, setPreset] = createSignal<KeybindPreset>(input.keybind_preset ?? "oc")
+  const [sidebarButtonStyle, setSidebarButtonStyle] = createSignal<SidebarButtonStyle>(
+    input.sidebar_button_style ?? "minimal",
+  )
 
   return {
     ...input,
@@ -129,6 +138,10 @@ export function resolve(input: Info, options: ResolveOptions): Resolved {
       return lookups[preset()]
     },
     setKeybindPreset: setPreset,
+    get sidebar_button_style() {
+      return sidebarButtonStyle()
+    },
+    setSidebarButtonStyle,
     attention: {
       enabled: input.attention?.enabled ?? false,
       notifications: input.attention?.notifications ?? true,
