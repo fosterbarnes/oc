@@ -146,6 +146,22 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-08 (~02:15) - v0.2.123 - Enable completion after agent push - GPT-6.1 Sol, default reasoning; Implementation
+
+### Agent
+- Meta: GPT-6.1 Sol; default reasoning; Implementation; completed
+- Version: 0.2.123
+- Fixed user-level `C:\Users\user\.opencode\commands\agent-push.md`: added turn-scoped `session_complete: allow`; default deny previously hid completion on push turns.
+- Updated `src/packages/opencode/src/tool/session-complete.txt`: successful agent-push with required checks passed qualifies for completion; failed pushes do not.
+- Verification: read back command frontmatter and existing success-only final step; matched `/imp` permission pattern and traced command permissions into turn tools. No tests or build run for declarative permission/text changes. Command hot reload applies to the next invocation; tool wording requires a rebuilt runtime.
+
+### User
+Session completion
+- Successful `/agent-push` runs can now mark the session complete; failed checks or pushes leave it open.
+- Completion instructions now explicitly cover push closeout.
+
+---
+
 ## 2026-10-08 (~02:11) - v0.2.122 - Verify sidebar refinements for push - GPT-6.1 Sol, default reasoning; Agent push
 
 ### Agent

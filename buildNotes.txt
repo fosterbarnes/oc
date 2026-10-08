@@ -1,12 +1,6 @@
-v0.2.122
+v0.2.123
 
-sidebar controls:
-Minimal now uses > for each primary control and >> for reasoning beside the model. Model and reasoning share one row and stay separately clickable; long model names clip before squeezing reasoning. Command Palette and oc Palette buttons below Switch Session open all commands or just the oc section. Outline keeps its square, left-aligned buttons.
+session completion:
+Successful agent-push runs now explicitly qualify for session completion after all required checks pass. Failed checks and failed pushes leave the session open.
 
-mouse behavior:
-Minimal controls stay borderless and single-line on hover and after switching styles. Double-clicking button text or its prefix no longer selects it; ordinary text elsewhere stays selectable. Hover changes only text and outline colors.
-
-agent guidance:
-Added the oc-palette-entry skill with project-specific instructions for adding commands to the oc category and reusing the existing palette wiring.
-
-Under the hood: the shared HeaderButton is directly covered by real renderer checks, uses explicit empty border sides to avoid OpenTUI re-enabling borders on color updates, and owns its hover state. Removed bracket alignment and longest-label sizing after settling on chevron prefixes. Consolidated repeated style comparisons and cleaned up the markup and configuration description. All five targeted renderer checks passed, with 25 assertions covering hover, style switching, clicks, selection blocking, and narrow layouts. Pre-push passed all 27 typecheck tasks and the keybind documentation check; code count refreshed to 519,318 lines. git diff --check passed.
+Under the hood: updated the session_complete tool instructions and recorded the user-level agent-push command's turn-scoped completion permission fix. Bumped the revision to 0.2.123. Verified the declarative permission and tool wording by inspection; no targeted tests apply to these text-only changes. Pre-push passed all 27 typecheck tasks and the keybind documentation check; code count refreshed to 519,318 lines.
