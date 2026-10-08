@@ -1,6 +1,13 @@
 # Automatically rename new oc sessions after the first prompt
 
-Status: ready for implementation. Planning only; no runtime changes made.
+Status: implemented and verified on 2026-10-08, v0.2.126.
+
+Verification: 10 service/bootstrap checks, one real Claude CLI fake-model scenario,
+and one opt-in headless WezTerm TUI scenario passed (56 assertions). Initial service
+run lacked EventV2Bridge in its test root; corrected and rerun successfully.
+No build, installation, or broad typecheck ran. Installed launcher acceptance remains
+the user check below. Added `autoRenameBootstrap.test.ts` for actual CLI bootstrap
+metadata and explicit-title coverage. Existing rename fallback logic was reused.
 
 ## Goal
 
@@ -140,22 +147,22 @@ header, session picker, sidebar, and terminal title. Explicit `/rename` keeps it
 
 ## Implementation sequence
 
-- [ ] Read affected files in full and recheck current worktree before editing.
-- [ ] Add creation metadata and TUI-origin hint in `src/packages/opencode/src/cli/cmd/oc.ts`.
-- [ ] Add bootstrap metadata in `src/packages/opencode/src/cli/cmd/session.ts`.
-- [ ] Add conditional metadata to Home creation in
+- [x] Read affected files in full and recheck current worktree before editing.
+- [x] Add creation metadata and TUI-origin hint in `src/packages/opencode/src/cli/cmd/oc.ts`.
+- [x] Add bootstrap metadata in `src/packages/opencode/src/cli/cmd/session.ts`.
+- [x] Add conditional metadata to Home creation in
   `src/packages/tui/src/component/prompt/index.tsx`.
-- [ ] Remove only the rename marker from fork metadata in
+- [x] Remove only the rename marker from fork metadata in
   `src/packages/opencode/src/session/session.ts`.
-- [ ] Add synchronous claim at the existing loop hook and reuse guarded internal
+- [x] Add synchronous claim at the existing loop hook and reuse guarded internal
   rename in `src/packages/opencode/src/session/prompt.ts`.
-- [ ] Add focused service integration checks, preferably one
+- [x] Add focused service integration checks, preferably one
   `src/packages/opencode/test/session/autoRename.test.ts`, using existing `testEffect`
   and rename test fixture patterns. Exercise the real prompt/loop and stored metadata,
   not a copied eligibility function.
-- [ ] Add the Claude fake-model scenario described below.
-- [ ] Run only added or modified checks from `src/packages/opencode`.
-- [ ] Document completed behavior in `FORK.md`, bump `src/.version/version` once,
+- [x] Add the Claude fake-model scenario described below.
+- [x] Run only added or modified checks from `src/packages/opencode`.
+- [x] Document completed behavior in `FORK.md`, bump `src/.version/version` once,
   and record the implementation with the build-notes skill at final handoff.
 
 ## Acceptance checks

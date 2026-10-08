@@ -85,14 +85,17 @@ const SessionBootstrapCommand = effectCmd({
       catch: (error) => new CliError({ message: `Failed to write sidebar config: ${String(error)}` }),
     })
 
-    const title = args.title
+    const title = args.title !== undefined
       ? String(args.title)
       : yield* Session.Service.use((service) =>
           service
             .listGlobal({ roots: true, limit: 500 })
             .pipe(Effect.map((sessions) => OcConfig.nextProjectTitle(sessions.map((item) => item.title), directory))),
         )
-    const session = yield* Session.Service.use((service) => service.create({ title }))
+    const session = yield* Session.Service.use((service) => service.create({
+      title,
+      ...(args.title === undefined && { metadata: { ocAutoRename: { state: "pending", title } } }),
+    }))
     const prompt = yield* SessionPrompt.Service
     yield* prompt
       .prompt({

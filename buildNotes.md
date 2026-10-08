@@ -146,6 +146,28 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-08 (~02:56) - v0.2.126 - Automatic first-prompt oc session names - GPT-6.1 Sol, default reasoning; Implementation
+
+### Agent
+- Meta: GPT-6.1 Sol; default reasoning; Implementation from `autoRenamePlan.md`; completed
+- Version: 0.2.126
+- Added pending `metadata.ocAutoRename` on resident/CLI bootstrap; explicit bootstrap `--title` opts out. Added client-only `OC_AUTO_RENAME` on attach/stable/palette launches; Home session creation sends pending metadata under that hint.
+- Added `SessionPrompt.startTitle`: claims attempted state inside owning legacy loop before scoped, SessionWork-tracked rename; synthetic bootstrap/revive/shell messages do not count. Reused real-user predicate and internal `/rename` agent, cleanup, model/variant/fallback chain. Unmarked sessions keep native title generation.
+- Added automatic rename history snapshot and expected-title guards before model request/save; manual rename remains unconditional. Failures log without failing the conversation; consumed state prevents later prompts/restart retries.
+- Changed `Session.fork`: excludes only ocAutoRename from copied metadata. Updated FORK.md behavior and marked plan implemented.
+- Verification: `bun test test/session/autoRename.test.ts test/session/autoRenameBootstrap.test.ts --timeout 30000`: 10 pass, 40 assertions. Targeted `fake-model.test.ts` scenario: 1 pass, 12 assertions; real Claude CLI against TestLLMServer, reply overlap and server restart. Targeted `OC_TUI_PANE=1 tui-pane.test.ts` scenario: 1 pass, 4 assertions; isolated headless WezTerm Home title updates once. `git diff --check` passed. No build/install or broad typecheck ran; installed launch paths remain user acceptance.
+- MISTAKE: first service-test root omitted EventV2Bridge, used directly by update-event assertion; 8 passed, 1 failed. Added bridge node to test root; rerun all new service/bootstrap checks passed. Expose directly yielded services in LayerNode test roots, not only transitive dependencies.
+- Tooling: bgShell unavailable; independent checks ran in detached pwsh processes with scratch logs/exit files under approved temp/opencode directory.
+
+### User
+Session names
+- New oc sessions automatically use `/rename` after the first real prompt, alongside the reply.
+- Titles include the folder and task description; later prompts and reopening the session keep the name.
+- Manual names are preserved, and a failed naming attempt leaves `/rename` available to try again.
+- All 12 targeted checks passed, including Claude and on-screen TUI checks.
+
+---
+
 ## 2026-10-08 (~02:42) - v0.2.125 - Live context usage during Claude Code turns - Claude Opus 5.5, low reasoning; Implementation
 
 ### Agent

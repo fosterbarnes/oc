@@ -1102,6 +1102,7 @@ export function Prompt(props: PromptProps) {
         directory,
         workspace: workspaceID,
         agent: agent.name,
+        ...(process.env.OC_AUTO_RENAME === "1" && { metadata: { ocAutoRename: { state: "pending" } } }),
         model: {
           providerID: selectedModel.providerID,
           id: selectedModel.modelID,

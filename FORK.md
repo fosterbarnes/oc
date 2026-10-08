@@ -96,6 +96,19 @@ Move between projects, keep a session's model, and mark work without deleting it
 | Clear interrupted questions | high | Aborting a session rejects a pending question, tells the UI, and does not leave a Cursor-backed chat stuck on that prompt. | Covered by tests. Not signed off in the installed app. |
 | Questions survive closing the window | high | Pending questions reload when you open the session again (including via `occ`). If the live request is gone, the UI rebuilds from the saved tool call and your answer continues the agent as a normal follow-up. | Live check after close via `occ` and the session list; repeat after server restart (restored-question path). |
 
+### Automatic oc session names
+
+New oc project sessions, the New oc session picker, and Home sessions created in an
+oc-launched TUI use `/rename`'s configured agent and model fallbacks automatically
+after the first real prompt. Naming runs alongside the reply and uses the first
+prompt, with a `<folder> - <description>` title. Initialization and shell-only
+input do not trigger naming.
+
+The attempt is saved once per session. Reopening, later prompts, and naming failures
+do not repeat it; `/rename` remains available for another attempt. Explicit bootstrap
+titles and manual edits made before or during naming are preserved. Forks do not
+inherit the automatic naming request. Installed launcher acceptance remains a user check.
+
 ---
 
 ## 4. Workspace sidebar and files

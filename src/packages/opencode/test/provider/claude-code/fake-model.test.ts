@@ -3,17 +3,85 @@
 // CLI writes goes to a temp CLAUDE_CONFIG_DIR. Skipped when no `claude` CLI is installed.
 import { describe, expect, test } from "bun:test"
 import path from "node:path"
+import { createOpencodeClient } from "@opencode-ai/sdk/v2"
 import { Cause, Effect, Exit, Fiber } from "effect"
 import { tmpdir } from "../../fixture/fixture"
 import { cliIt } from "../../lib/cli-process"
 import { pollWithTimeout } from "../../lib/effect"
 import { reply, TestLLMServer } from "../../lib/llm-server"
-import { claudeEnv, expectIsolated, initRepo, openChat, outsideProfile } from "./chat-fixture"
+import { chatConfig, claudeEnv, expectIsolated, initRepo, openChat, outsideProfile } from "./chat-fixture"
 import { flowReport, stepRunner } from "./flowReport"
 
 const cliPath = process.env.CLAUDE_CLI_PATH ?? Bun.which("claude")
 
 describe.skipIf(!cliPath)("Claude Code CLI against TestLLMServer", () => {
+  cliIt.live(
+    "oc automatic rename uses a separate model alongside the first Claude turn and survives restart",
+    (fixture) => Effect.gen(function* () {
+      const project = path.join(fixture.home, "work")
+      yield* initRepo(project)
+      const env = {
+        ...claudeEnv(fixture.home, fixture.llm.url),
+        OPENCODE_DB: path.join(fixture.home, "opencode.db"),
+        OPENCODE_CONFIG_CONTENT: JSON.stringify({
+          ...chatConfig(fixture.llm.url),
+          enabled_providers: ["test", "claude-code"],
+          agent: { rename: { model: "test/test-model" } },
+        }),
+      }
+      const server = yield* fixture.opencode.serve({ env })
+      const sdk = createOpencodeClient({ baseUrl: server.url, directory: project, throwOnError: true })
+      const session = yield* Effect.promise(() => sdk.session.create({
+        title: "work3", metadata: { ocAutoRename: { state: "pending", title: "work3" } },
+      }))
+      const sessionID = session.data.id
+      const model = { providerID: "claude-code", modelID: "claude-sonnet-4-5" }
+      yield* Effect.promise(() => sdk.session.prompt({
+        sessionID, model, noReply: true,
+        parts: [{ type: "text", synthetic: true, text: `Working directory initialized: ${project}` }],
+      }))
+      expect(yield* fixture.llm.calls).toBe(0)
+      const release = Promise.withResolvers<void>()
+      yield* Effect.addFinalizer(() => Effect.sync(() => release.resolve()))
+      yield* fixture.llm.pushMatch(
+        (hit) => hit.body.model === "test-model",
+        reply().wait(release.promise).text("work - first task").stop(),
+      )
+      yield* fixture.llm.textMatch((hit) => hit.url.pathname === "/v1/messages", "FIRST-CLAUDE-REPLY")
+      const first = yield* Effect.promise(() => sdk.session.prompt({
+        sessionID, model, parts: [{ type: "text", text: "Fix the first task" }],
+      }))
+      expect(JSON.stringify(first.data.parts)).toContain("FIRST-CLAUDE-REPLY")
+      expect((yield* Effect.promise(() => sdk.session.get({ sessionID }))).data.title).toBe("work3")
+      release.resolve()
+      yield* pollWithTimeout(Effect.promise(() => sdk.session.get({ sessionID })).pipe(
+        Effect.map((result) => result.data.title === "work - first task" ? result.data : undefined),
+      ), "Claude session's automatic rename never landed", "30 seconds")
+      expect((yield* fixture.llm.hits).filter((hit) => hit.body.model === "test-model")).toHaveLength(1)
+      const claudeInputs = (yield* fixture.llm.hits).filter((hit) => hit.url.pathname === "/v1/messages")
+      expect(claudeInputs).toHaveLength(1)
+      expect(JSON.stringify(claudeInputs[0].body.messages)).not.toContain("Generate a concise title")
+      const messages = (yield* Effect.promise(() => sdk.session.messages({ sessionID }))).data
+      expect(messages.filter((message) => message.info.role === "user")).toHaveLength(2)
+
+      server.kill()
+      yield* Effect.promise(() => server.exited)
+      const restarted = yield* fixture.opencode.serve({ env })
+      const reopened = createOpencodeClient({ baseUrl: restarted.url, directory: project, throwOnError: true })
+      yield* fixture.llm.textMatch((hit) => hit.url.pathname === "/v1/messages", "SECOND-CLAUDE-REPLY")
+      yield* Effect.promise(() => reopened.session.prompt({
+        sessionID, model, parts: [{ type: "text", text: "A different second task" }],
+      }))
+      expect((yield* Effect.promise(() => reopened.session.get({ sessionID }))).data).toMatchObject({
+        title: "work - first task", metadata: { ocAutoRename: { state: "attempted", title: "work3" } },
+      })
+      expect((yield* fixture.llm.hits).filter((hit) => hit.body.model === "test-model")).toHaveLength(1)
+      expect((yield* fixture.llm.hits).filter((hit) => hit.url.pathname === "/v1/messages")).toHaveLength(2)
+      expectIsolated(yield* fixture.llm.inputs)
+    }),
+    120_000,
+  )
+
   test("streams scripted replies and round-trips a tool call", async () => {
     await using tmp = await tmpdir()
     const note = path.join(tmp.path, "work", "note.txt")

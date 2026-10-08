@@ -17,6 +17,32 @@ const muxPath = Bun.which("wezterm-mux-server")
 const opencodeRoot = path.resolve(import.meta.dir, "../../..")
 
 describe.skipIf(!process.env.OC_TUI_PANE || !cliPath || !muxPath)("oc TUI in a WezTerm pane", () => {
+  cliIt.live(
+    "oc automatic rename updates a Home-created Claude session title once",
+    (fixture) => Effect.gen(function* () {
+      const pane = yield* openPane(fixture, { autoRename: true })
+      const release = Promise.withResolvers<void>()
+      yield* Effect.addFinalizer(() => Effect.sync(() => release.resolve()))
+      yield* fixture.llm.pushMatch(
+        (hit) => hit.body.model === "test-model",
+        reply().wait(release.promise).text("work - first task").stop(),
+      )
+      yield* fixture.llm.textMatch((hit) => hit.url.pathname === "/v1/messages", "FIRST-CLAUDE-REPLY")
+      yield* pane.waitFor("Ask anything")
+      yield* pane.type("fix the first task\r")
+      yield* pane.waitFor("FIRST-CLAUDE-REPLY")
+      release.resolve()
+      yield* pane.waitFor("work - first task")
+      yield* fixture.llm.textMatch((hit) => hit.url.pathname === "/v1/messages", "SECOND-CLAUDE-REPLY")
+      yield* pane.type("a different second task\r")
+      const shown = yield* pane.waitFor("SECOND-CLAUDE-REPLY")
+      expect(shown).toContain("work - first task")
+      expect((yield* fixture.llm.hits).filter((hit) => hit.body.model === "test-model")).toHaveLength(1)
+      expectIsolated(yield* fixture.llm.inputs)
+    }),
+    180_000,
+  )
+
   if (process.platform === "win32") cliIt.live(
     "cleanup tolerates a test child that already exited",
     () => Effect.gen(function* () {
@@ -198,19 +224,24 @@ describe.skipIf(!process.env.OC_TUI_PANE || !cliPath || !muxPath)("oc TUI in a W
 // Starts the mux server with oc as its first pane, in a git-inited `work` folder under a root
 // outside the profile (see `outsideProfile`). Scoped: closing the pane and the server comes
 // before the root is removed.
-const openPane = Effect.fnUntraced(function* (fixture: CliFixture) {
+const openPane = Effect.fnUntraced(function* (fixture: CliFixture, options: { autoRename?: boolean } = {}) {
   const root = yield* outsideProfile
   const project = path.join(root, "work")
   yield* initRepo(project)
   const socket = path.join(root, "wezterm.sock")
   const configFile = path.join(root, "wezterm.lua")
-  const config = { ...chatConfig(fixture.llm.url), model: "claude-code/claude-sonnet-4-5" }
+  const config = {
+    ...chatConfig(fixture.llm.url),
+    model: "claude-code/claude-sonnet-4-5",
+    ...(options.autoRename && { agent: { rename: { model: "test/test-model" } } }),
+  }
   const db = path.join(fixture.home, "opencode.db")
   const paneEnv = {
     ...isolatedEnv(fixture.home, JSON.stringify(config)),
     ...claudeEnv(root, fixture.llm.url),
     // The test preload's in-memory database is per process; the pane is a separate process.
     OPENCODE_DB: db,
+    OC_AUTO_RENAME: options.autoRename ? "1" : "",
   }
   // On Windows WezTerm builds each pane's env from its own env overlaid with the registry's
   // (HKCU\Environment), so a user-level OPENCODE_DB there sent panes to the real database.

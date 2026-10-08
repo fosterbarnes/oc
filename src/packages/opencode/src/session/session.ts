@@ -725,7 +725,9 @@ const layer: Layer.Layer<
         path: sessionPath(ctx.worktree, ctx.directory),
         workspaceID: original.workspaceID,
         title,
-        metadata: structuredClone(original.metadata),
+        metadata: original.metadata
+          ? structuredClone(Object.fromEntries(Object.entries(original.metadata).filter(([key]) => key !== "ocAutoRename")))
+          : undefined,
       })
       const msgs = yield* messages({ sessionID: input.sessionID })
       const idMap = new Map<string, MessageID>()

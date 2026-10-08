@@ -46,6 +46,7 @@ async function attach(
   if (typeof settings.sessionAgent === "string") args.push("--agent", settings.sessionAgent)
   await runNative(args, {
     env: { OPENCODE_SERVER_PASSWORD: server.secret, OPENCODE_SERVER_USERNAME: "opencode",
+      OC_AUTO_RENAME: "1",
       OC_SUPERVISOR_PID: String(process.pid),
       ...(options.introFrame === undefined ? {} : { OC_INTRO_FRAME: String(options.introFrame) }) },
   })
@@ -78,7 +79,10 @@ async function bootstrapSession(server: { url: string; secret: string }, directo
   })
   const sessions = await client.experimental.session.list({ roots: true, limit: 500 }, { throwOnError: true })
   const title = OcConfig.nextProjectTitle(sessions.data.map((item) => item.title), directory)
-  const session = await client.session.create({ title }, { throwOnError: true })
+  const session = await client.session.create(
+    { title, metadata: { ocAutoRename: { state: "pending", title } } },
+    { throwOnError: true },
+  )
   await client.session.prompt(
     {
       sessionID: session.data.id,
@@ -174,6 +178,7 @@ const LaunchCommand = cmd({
       const exe = OcConfig.executablePath()
       const child = Bun.spawn([exe, "--palette", palette], {
         cwd: os.homedir(),
+        env: { ...process.env, OC_AUTO_RENAME: "1" },
         stdin: "inherit",
         stdout: "inherit",
         stderr: "inherit",
@@ -212,7 +217,9 @@ const StableCommand = cmd({
     const tui = [resolveTargetDirectory(args.target, ocDir, homeDir)]
     if (typeof settings.sessionModel === "string") tui.push("--model", settings.sessionModel)
     if (typeof settings.sessionAgent === "string") tui.push("--agent", settings.sessionAgent)
-    await runNative(tui, { env: { OC_STABLE: "1", ...(args.portable ? { OPENCODE_DB: "ocPortable.db" } : {}) } })
+    await runNative(tui, {
+      env: { OC_STABLE: "1", OC_AUTO_RENAME: "1", ...(args.portable ? { OPENCODE_DB: "ocPortable.db" } : {}) },
+    })
   },
 })
 

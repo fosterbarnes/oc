@@ -66,6 +66,10 @@ globalThis.AI_SDK_LOG_WARNINGS = false
 
 const decodeMessageInfo = Schema.decodeUnknownExit(SessionV1.Info)
 const decodeMessagePart = Schema.decodeUnknownExit(SessionV1.Part)
+const decodeAutoRename = Schema.decodeUnknownOption(Schema.Struct({
+  state: Schema.Literals(["pending", "attempted"]),
+  title: Schema.optional(Schema.String),
+}))
 // Tried in order after the rename agent's own model fails or returns an empty title.
 const RENAME_FALLBACKS = [
   { model: Provider.parseModel("opencode/mimo-v2.6-flash-free"), variant: undefined },
@@ -217,11 +221,9 @@ const layer = Layer.effect(
       if (shouldSkipRemoteTitleGeneration(input.providerID)) return
       if (!Session.isDefaultTitle(input.session.title)) return
 
-      const real = (m: SessionV1.WithParts) =>
-        m.info.role === "user" && !m.parts.every((p) => "synthetic" in p && p.synthetic)
-      const idx = input.history.findIndex(real)
+      const idx = input.history.findIndex(isRealUserMessage)
       if (idx === -1) return
-      if (input.history.filter(real).length !== 1) return
+      if (input.history.filter(isRealUserMessage).length !== 1) return
 
       const context = input.history.slice(0, idx + 1)
       const firstUser = context[idx]
@@ -266,9 +268,13 @@ const layer = Layer.effect(
     })
 
     // Re-titles a session from a digest of its history, for the /rename command.
-    const rename = Effect.fn("SessionPrompt.rename")(function* (sessionID: SessionID) {
+    const rename = Effect.fn("SessionPrompt.rename")(function* (
+      sessionID: SessionID,
+      automatic?: { title: string; history: SessionV1.WithParts[] },
+    ) {
       const session = yield* sessions.get(sessionID)
-      const history = yield* sessions.messages({ sessionID })
+      if (automatic && session.title !== automatic.title) return { session }
+      const history = automatic?.history ?? (yield* sessions.messages({ sessionID }))
       const lastUser = history.findLast((m) => m.info.role === "user")?.info
       const ag = yield* agents.get("rename")
       if (!lastUser || lastUser.role !== "user" || !ag) return { session }
@@ -326,9 +332,49 @@ const layer = Layer.effect(
           ),
         ),
       )
+      if (automatic) {
+        const current = yield* sessions.get(sessionID)
+        if (current.title !== automatic.title) return { session: current }
+      }
       yield* sessions.setTitle({ sessionID, title: t.title })
       return { session: yield* sessions.get(sessionID), model: t.model }
     }, Effect.orDie)
+
+    const startTitle = Effect.fn("SessionPrompt.startTitle")(function* (input: {
+      sessionID: SessionID
+      history: SessionV1.WithParts[]
+      providerID: ProviderV2.ID
+      modelID: ModelV2.ID
+    }) {
+      const session = yield* sessions.get(input.sessionID).pipe(Effect.orDie)
+      if (session.parentID) return
+      if (session.metadata?.ocAutoRename === undefined) {
+        yield* title({ ...input, session }).pipe(Effect.ignore, Effect.forkIn(scope))
+        return
+      }
+      const automatic = decodeAutoRename(session.metadata.ocAutoRename)
+      if (Option.isNone(automatic) || automatic.value.state !== "pending") return
+      const users = input.history.filter(isRealUserMessage)
+      if (users.length === 0) return
+
+      // Claim inside the owning loop, before forking, so reconnects cannot repeat naming.
+      yield* sessions.setMetadata({
+        sessionID: session.id,
+        metadata: { ...session.metadata, ocAutoRename: { ...automatic.value, state: "attempted" } },
+      })
+      if (users.length !== 1) return
+      if (automatic.value.title === undefined
+        ? !Session.isDefaultTitle(session.title)
+        : session.title !== automatic.value.title) return
+
+      const history = structuredClone(input.history.slice(0, input.history.indexOf(users[0]) + 1))
+      yield* work.run(rename(session.id, { title: session.title, history })).pipe(
+        Effect.catchCause((cause) => Cause.hasInterruptsOnly(cause)
+          ? Effect.failCause(cause)
+          : Effect.logWarning("automatic rename failed", { sessionID: session.id, error: Cause.squash(cause) })),
+        Effect.forkIn(scope),
+      )
+    })
 
     const handleSubtask = Effect.fn("SessionPrompt.handleSubtask")(function* (input: {
       task: SessionV1.SubtaskPart
@@ -1213,12 +1259,14 @@ const layer = Layer.effect(
 
           step++
           if (step === 1)
-            yield* title({
-              session,
+            yield* startTitle({
+              sessionID,
               modelID: lastUser.model.modelID,
               providerID: lastUser.model.providerID,
               history: msgs,
-            }).pipe(Effect.ignore, Effect.forkIn(scope))
+            }).pipe(Effect.catchCause((cause) => Cause.hasInterruptsOnly(cause)
+              ? Effect.failCause(cause)
+              : Effect.logWarning("failed to start title generation", { sessionID, error: Cause.squash(cause) })))
 
           const model = yield* getModel(lastUser.model.providerID, lastUser.model.modelID, sessionID)
           const task = tasks.pop()
@@ -1655,6 +1703,10 @@ const layer = Layer.effect(
     })
   }),
 )
+
+function isRealUserMessage(message: SessionV1.WithParts) {
+  return message.info.role === "user" && !message.parts.every((part) => "synthetic" in part && part.synthetic)
+}
 
 function cleanTitle(text: string) {
   const line = text
