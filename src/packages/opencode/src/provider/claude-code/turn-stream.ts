@@ -507,8 +507,13 @@ class ClaudeTurn {
       case "message_delta": {
         // The protocol-level stop reason is authoritative for why the turn
         // ended, bypassing the auto-continue keyword heuristic.
-        const stopReason = (msg as { delta?: { stop_reason?: unknown } }).delta?.stop_reason
+        const delta = msg as { delta?: { stop_reason?: unknown }; usage?: Record<string, unknown> }
+        const stopReason = delta.delta?.stop_reason
         if (this.gotPartialEvents && typeof stopReason === "string") this.lastStopReason = stopReason
+        // The call's `assistant` line came earlier with message_start's usage, whose output
+        // count is about 1; the final counts arrive here.
+        const counts = Object.entries(delta.usage ?? {}).filter((entry) => typeof entry[1] === "number")
+        if (this.gotPartialEvents && counts.length) this.lastCall = { ...this.lastCall, ...Object.fromEntries(counts) }
         return
       }
       case "assistant":
@@ -860,8 +865,15 @@ class ClaudeTurn {
     this.clearResultFallback()
     if (msg.session_id) setClaudeSessionId(this.sk, msg.session_id)
 
-    // Some CLI failures carry their only readable text in `result.result`.
-    if (!this.out.inText && msg.is_error && typeof msg.result === "string" && msg.result.trim()) {
+    // Some CLI failures carry their only readable text in `result.result`. Others (API errors,
+    // usage limits) already sent it as a synthetic assistant reply.
+    if (
+      !this.out.inText &&
+      msg.is_error &&
+      typeof msg.result === "string" &&
+      msg.result.trim() &&
+      !this.out.shown.includes(msg.result.trim())
+    ) {
       this.out.block(msg.result)
     }
 

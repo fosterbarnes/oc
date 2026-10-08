@@ -4,7 +4,7 @@ import { Deferred, Effect, Layer, Context, Stream } from "effect"
 import * as HttpServer from "effect/unstable/http/HttpServer"
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
 
-export type Usage = { input: number; output: number }
+export type Usage = { input: number; output: number; cacheRead?: number; cacheWrite?: number }
 
 type Line = Record<string, unknown>
 
@@ -57,12 +57,20 @@ function line(input: unknown) {
   return `data: ${JSON.stringify(input)}\n\n`
 }
 
+// The Anthropic SDK inside the Claude Code CLI dispatches on the SSE `event:` name.
+function eventLine(input: unknown) {
+  const type = input && typeof input === "object" && "type" in input ? input.type : "message"
+  return `event: ${type}\n${line(input)}`
+}
+
 function tokens(input?: Usage) {
   if (!input) return
   return {
     prompt_tokens: input.input,
     completion_tokens: input.output,
     total_tokens: input.input + input.output,
+    ...(input.cacheRead !== undefined && { cache_read_input_tokens: input.cacheRead }),
+    ...(input.cacheWrite !== undefined && { cache_creation_input_tokens: input.cacheWrite }),
   }
 }
 
@@ -129,8 +137,8 @@ function toolArgsLine(value: string) {
   })
 }
 
-function bytes(input: Iterable<unknown>) {
-  return Stream.fromIterable([...input].map(line)).pipe(Stream.encodeText)
+function bytes(input: Iterable<unknown>, encode = line) {
+  return Stream.fromIterable([...input].map(encode)).pipe(Stream.encodeText)
 }
 
 function responseCreated(model: string) {
@@ -321,7 +329,12 @@ function flow(item: Sse) {
       if (typeof raw.prompt_tokens === "number" && typeof raw.completion_tokens === "number") {
         out.push({
           type: "usage",
-          usage: { input: raw.prompt_tokens, output: raw.completion_tokens },
+          usage: {
+            input: raw.prompt_tokens,
+            output: raw.completion_tokens,
+            ...(typeof raw.cache_read_input_tokens === "number" && { cacheRead: raw.cache_read_input_tokens }),
+            ...(typeof raw.cache_creation_input_tokens === "number" && { cacheWrite: raw.cache_creation_input_tokens }),
+          },
         })
       }
     }
@@ -409,15 +422,94 @@ function responses(item: Sse, model: string) {
   return { ...item, head: lines, tail: [] } satisfies Sse
 }
 
+// Anthropic Messages stream (`POST /v1/messages`), the shape the Claude Code CLI reads when
+// `ANTHROPIC_BASE_URL` points here. Each run of text, reasoning, or one tool call is a block.
+// `toolId` comes from the server: `Reply` numbers tool calls from call_1 in every reply, and the
+// CLI drops history entries whose tool_use id repeats, as real ids never do.
+function messages(item: Sse, model: string, toolId: () => string) {
+  const parts = flow(item)
+  const usage = parts.flatMap((part) => (part.type === "usage" ? [part.usage] : [])).at(-1)
+  const lines: unknown[] = [
+    {
+      type: "message_start",
+      message: {
+        id: "msg_test",
+        type: "message",
+        role: "assistant",
+        model,
+        content: [],
+        stop_reason: null,
+        stop_sequence: null,
+        // The real API opens with the call's input and cache counts and an output count of
+        // about 1; the final output count comes only in message_delta.
+        usage: {
+          input_tokens: usage?.input ?? 0,
+          cache_read_input_tokens: usage?.cacheRead ?? 0,
+          cache_creation_input_tokens: usage?.cacheWrite ?? 0,
+          output_tokens: usage ? 1 : 0,
+        },
+      },
+    },
+  ]
+  let index = -1
+  let open: Flow["type"] | undefined
+  let tool = false
+  const delta = (value: Record<string, unknown>) => lines.push({ type: "content_block_delta", index, delta: value })
+  const close = () => {
+    // The CLI sends thinking blocks back on the next turn, which needs a signature.
+    if (open === "reason") delta({ type: "signature_delta", signature: "test-signature" })
+    if (open) lines.push({ type: "content_block_stop", index })
+    open = undefined
+  }
+
+  for (const part of parts) {
+    if (part.type === "usage") continue
+    if (part.type === "tool-args") {
+      if (open === "tool-start") delta({ type: "input_json_delta", partial_json: part.text })
+      continue
+    }
+    if (part.type !== open || part.type === "tool-start") {
+      close()
+      index += 1
+      open = part.type
+      lines.push({ type: "content_block_start", index, content_block: messageBlock(part, toolId) })
+    }
+    if (part.type === "text") delta({ type: "text_delta", text: part.text })
+    if (part.type === "reason") delta({ type: "thinking_delta", thinking: part.text })
+    if (part.type === "tool-start") tool = true
+  }
+
+  if (!item.hang && !item.error) {
+    close()
+    lines.push(
+      {
+        type: "message_delta",
+        delta: { stop_reason: tool ? "tool_use" : "end_turn", stop_sequence: null },
+        usage: { output_tokens: usage?.output ?? 0 },
+      },
+      { type: "message_stop" },
+    )
+  }
+  // message_start alone in the head, so a `Reply.wait` holds the content back.
+  return { ...item, head: lines.slice(0, 1), tail: lines.slice(1) } satisfies Sse
+}
+
+function messageBlock(part: Flow, toolId: () => string) {
+  if (part.type === "reason") return { type: "thinking", thinking: "", signature: "" }
+  if (part.type === "tool-start") return { type: "tool_use", id: toolId(), name: part.name, input: {} }
+  return { type: "text", text: "" }
+}
+
 function modelFrom(body: unknown) {
   if (!body || typeof body !== "object") return "test-model"
   if (!("model" in body) || typeof body.model !== "string") return "test-model"
   return body.model
 }
 
-function send(item: Sse) {
-  const head = bytes(item.head)
-  const tail = bytes([...item.tail, ...(item.hang || item.error ? [] : [done])])
+function send(item: Sse, anthropic = false) {
+  const encode = anthropic ? eventLine : line
+  const head = bytes(item.head, encode)
+  const tail = bytes([...item.tail, ...(item.hang || item.error || anthropic ? [] : [done])], encode)
   const empty = Stream.fromIterable<Uint8Array>([])
   const wait = item.wait
   const body: Stream.Stream<Uint8Array, unknown> = wait
@@ -654,6 +746,8 @@ export class TestLLMServer extends Context.Service<TestLLMServer, TestLLMServer.
         list = [...list, ...input.map((value) => ({ item: item(value), match }))]
       }
 
+      let toolCalls = 0
+
       const notify = Effect.fnUntraced(function* () {
         const ready = waits.filter((item) => hits.length >= item.count)
         if (!ready.length) return
@@ -669,38 +763,49 @@ export class TestLLMServer extends Context.Service<TestLLMServer, TestLLMServer.
         return first.item
       }
 
-      const handle = Effect.fn("TestLLMServer.handle")(function* (mode: "chat" | "responses") {
+      const handle = Effect.fn("TestLLMServer.handle")(function* (mode: "chat" | "responses" | "messages") {
         const req = yield* HttpServerRequest.HttpServerRequest
         const body = yield* req.json.pipe(Effect.orElseSucceed(() => ({})))
         const current = hit(req.originalUrl, body)
+        const sendAs = (item: Sse) => {
+          if (mode === "responses") return send(responses(item, modelFrom(body)))
+          if (mode === "messages") return send(messages(item, modelFrom(body), () => `toolu_${++toolCalls}`), true)
+          return send(item)
+        }
         if (isTitleRequest(body)) {
           hits = [...hits, current]
           yield* notify()
-          const auto: Sse = { type: "sse", head: [role()], tail: [textLine("E2E Title"), finishLine("stop")] }
-          if (mode === "responses") return send(responses(auto, modelFrom(body)))
-          return send(auto)
+          return sendAs({ type: "sse", head: [role()], tail: [textLine("E2E Title"), finishLine("stop")] })
         }
         const next = pull(current)
         if (!next) {
           hits = [...hits, current]
           yield* notify()
-          const auto: Sse = { type: "sse", head: [role()], tail: [textLine("ok"), finishLine("stop")] }
-          if (mode === "responses") return send(responses(auto, modelFrom(body)))
-          return send(auto)
+          return sendAs({ type: "sse", head: [role()], tail: [textLine("ok"), finishLine("stop")] })
         }
         hits = [...hits, current]
         yield* notify()
         if (next.type !== "sse") return fail(next)
-        if (mode === "responses") return send(responses(next, modelFrom(body)))
-        if (next.reset) {
+        if (mode === "chat" && next.reset) {
           yield* reset(next)
           return HttpServerResponse.empty()
         }
-        return send(next)
+        return sendAs(next)
       })
 
       yield* router.add("POST", "/v1/chat/completions", handle("chat"))
       yield* router.add("POST", "/v1/responses", handle("responses"))
+      yield* router.add("POST", "/v1/messages", handle("messages"))
+      // Anything else (such as the Claude CLI's `HEAD /api/hello` probe) is a miss: 404, recorded.
+      yield* router.add(
+        "*",
+        "/*",
+        Effect.gen(function* () {
+          const req = yield* HttpServerRequest.HttpServerRequest
+          misses = [...misses, hit(req.originalUrl, {})]
+          return HttpServerResponse.empty({ status: 404 })
+        }),
+      )
 
       yield* server.serve(router.asHttpEffect())
 

@@ -93,6 +93,7 @@ import { destroyRenderer, writeTerminalEscape } from "./util/renderer"
 import { detectTerminal } from "@opencode-ai/core/util/terminal"
 import { cliErrorMessage, errorFormat } from "./util/error"
 import { spawn } from "node:child_process"
+import stripAnsi from "strip-ansi"
 import { launchDetached } from "@opencode-ai/core/util/launch-detached"
 import fs from "node:fs"
 import { applyEdits, modify } from "jsonc-parser"
@@ -352,6 +353,41 @@ function persistOcConfig(
       toast.show({ message: `Failed to set oc setting: ${error.trim() || `exit code ${code}`}`, variant: "error" })
       finish(false)
     })
+  })
+}
+
+// `claude update` updates whichever install `cliPath` resolves to. A chat's live `claude` process
+// keeps its old binary; the next process oc starts uses the update. The shell resolves npm's
+// `claude.cmd` shim on Windows.
+function updateClaudeCode(cliPath: string, toast: ToastContext) {
+  toast.show({ message: "Updating Claude Code...", variant: "info", duration: 120_000 })
+  const shell = process.platform === "win32"
+  const child = spawn(shell && cliPath.includes(" ") ? `"${cliPath}"` : cliPath, ["update"], {
+    stdio: ["ignore", "pipe", "pipe"],
+    cwd: os.homedir(),
+    shell,
+  })
+  let output = ""
+  let failed = false
+  child.stdout?.on("data", (chunk) => {
+    output += String(chunk)
+  })
+  child.stderr?.on("data", (chunk) => {
+    output += String(chunk)
+  })
+  child.on("error", (cause) => {
+    failed = true
+    toast.show({ message: `Failed to update Claude Code: ${cause.message}`, variant: "error" })
+  })
+  // `close` waits for stdout and stderr to drain, so the last line is complete.
+  child.on("close", (code) => {
+    if (failed) return
+    const last = stripAnsi(output).trim().split("\n").at(-1)?.trim()
+    toast.show(
+      code === 0
+        ? { message: last || "Claude Code is up to date", variant: "success" }
+        : { message: `Failed to update Claude Code: ${last || `exit code ${code}`}`, variant: "error", duration: 15_000 },
+    )
   })
 }
 
@@ -1622,6 +1658,16 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
               }}
             />
           ))
+        },
+      },
+      {
+        name: "oc.update_claude_code",
+        title: "Update Claude Code",
+        category: "oc",
+        slashName: "updateClaudeCode",
+        run: () => {
+          const cliPath = sync.data.config.provider?.["claude-code"]?.options?.cliPath
+          updateClaudeCode(typeof cliPath === "string" ? cliPath : "claude", toast)
         },
       },
       {

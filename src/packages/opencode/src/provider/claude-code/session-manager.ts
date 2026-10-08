@@ -68,6 +68,12 @@ export interface ActiveProcess {
    * `noteTurnStarted`, cleared by `noteTurnLine` (see `interruptTurn`).
    */
   turnInFlight?: boolean
+  /**
+   * The in-flight turn was interrupted (`interruptTurn`). Until its `result`,
+   * whatever the CLI prints with no turn listening is that turn's tail (the
+   * cut-off reply), which the user stopped: it is dropped, not replayed.
+   */
+  turnAbandoned?: boolean
   turnIdleWaiters?: Array<() => void>
   /**
    * Tail of what the child last wrote to stderr, capped at
@@ -209,7 +215,7 @@ export function describeChildCrash(
 export interface SessionAnchor {
   /** Last main-chain assistant message uuid of the exchange. */
   uuid: string
-  /** `exchangeHash` of everything the exchange showed in opencode. */
+  /** `exchangeHash` of the exchange's position and everything it showed in opencode. */
   hash: string
 }
 
@@ -331,6 +337,7 @@ function isTerminalResultLine(line: string): boolean {
 
 function settleTurn(ap: ActiveProcess): void {
   ap.turnInFlight = false
+  ap.turnAbandoned = false
   const waiters = ap.turnIdleWaiters ?? []
   ap.turnIdleWaiters = []
   for (const wake of waiters) wake()
@@ -398,6 +405,7 @@ export function interruptTurn(
     })
     return Promise.resolve(false)
   }
+  ap.turnAbandoned = true
   return awaitTurnIdle(ap, timeoutMs)
 }
 
@@ -825,8 +833,11 @@ export function spawnClaudeProcess(
 
   const rl = createInterface({ input: proc.stdout! })
   rl.on("line", (line: string) => {
+    // Read before `noteTurnLine`, which clears it on the abandoned turn's own `result`.
+    const abandoned = ap.turnAbandoned === true
     noteTurnLine(ap, line)
     if (lineEmitter.listenerCount("line") === 0) {
+      if (abandoned) return
       bufferUnattendedLine(ap, line)
       if (!ap.autonomousTurn && isInitLine(line)) requestWakeTurn(ap)
       return

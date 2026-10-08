@@ -119,6 +119,401 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-08 (~01:09) - v0.2.120 - Final pass on the Claude flow verification work - Opus 5.5, medium reasoning; Pass
+
+### Agent
+- Meta: Opus 5.5; medium; Pass; completed. Review split across 6 read-only Grok 4.6 low oc subagents (4, then 2 reruns), every finding checked against the code before acting.
+- Version: 0.2.120
+- ERROR: the user's oc reinstall (opencode.exe written 01:05:02) killed two subagent runs (exit -1, no error event); reran them as smaller tasks. First blamed scope size; wrong.
+- Fixed `updateClaudeCode` (tui app.tsx): read output on `close` (stdio drained), one toast when spawn errors, quote a spaced cliPath only when `shell` (Windows).
+- Fixed `claudeRealFlow.ps1`: report path printed in `finally` (failing runs still write one); only a report newer than the run counts, else throws (skipped flow).
+- Fixed pane compact check: post-compact reply now unique (`AFTER-COMPACT`); the old wait matched the summary text itself.
+- Fixed fake checks: step 3 asserts the last message is the assistant's; token and API-error scenarios now call `expectIsolated`; round-trip scenario uses `fixture.` instead of destructuring; `runClaude` env filter now also drops `CLAUDECODE` (kept separate from `hostEnv`, which keeps the OAuth token).
+- Fixed stale `openChat` comment (proxyTools/todos). Removed `export` from `FlowBlockedError` (unused outside).
+- Rejected findings: `claudeTestFlow.md` is the manual flow, not stale; `new Set(null)` is valid; `hostEnv` needs no `BASH_ENV` (`claudeEnv` blanks it for every claude spawn); transcript JSON lines are complete after the turn.
+- Added `/claudeFlowReport-*.md` to `.gitignore`. Deleted `claudeFlowHandoff.md` and `claudeFlowRemainderHandoff.md` (user choice; content lives here). `.opencode/plans/claudeFlowReportChecks.md` still names them as history.
+- Updated `oc-subagent` skill (`~/.claude/skills`): one self-contained background call per subagent, single-quoted here-string prompt, never background inside a call.
+- Kept: README.md diff is the user's own writing; untouched.
+- Verification: 5 edited fake scenarios + pane compact pass; flowReport 6 pass; opencode and tui typecheck clean; script parses.
+
+### User
+Command palette
+- Update Claude Code shows exactly one toast with the full last line of the update, also when it fails.
+
+Testing
+- `claudeRealFlow.ps1` now always prints this run's report, even when the run fails, and says so when no report was written.
+- Real-model report files are no longer offered for commit, and the two handoff notes are gone.
+
+---
+
+## 2026-10-08 (~00:58) - v0.2.119 - Claude flow step 7 failure was a harness false alarm - Opus 5.5, medium reasoning; Debug
+
+### Agent
+- Meta: Opus 5.5; medium; Debug; completed. User asked the agent to run the step-7 real checks; ran `claudeRealFlow.ps1 -Step7` via `Start-Process pwsh -UseNewEnvironment` (clean env, script read the saved token; agent never saw it). 4 runs, about $0.25 total.
+- Fixed `switchModelStep` (real-model.test.ts): reused one `Bun.file` for before/after `exists()`; Bun 1.4.1 caches that answer on the object, so a real deletion read "present". Fresh BunFile per check. Classified: harness bug (a), not model, not oc. Reports 202610080413, 0453, 0455 step 7 FAILs were false.
+- Added: when the deletion check fails, the CLI transcript's `toolUseResult` for the step goes to Oddities (`cliToolResults`); oddity cells now 600 chars.
+- Fixed report name collisions: stamp now includes seconds (two step-7 runs in one minute overwrote).
+- Changed fake restart+switch scenario to the real command shape (quoted absolute path, `-Force`).
+- Observed: Haiku 4.5 first ran `rm C:\...` unquoted in Git Bash (backslashes stripped, exit 1), then `Remove-Item`; Haiku 5.5 read the file, then `Remove-Item -LiteralPath`. Both deleted it. Step 7 CLI cost: Haiku 4.5 $0.0175, Haiku 5.5 $0.0051.
+- Ruled out with fake runs: restart+switch path, PowerShell tool, real command shape, `turnStats`.
+- Verification: real step 7 passes 2/2 on Haiku 4.5 and Haiku 5.5 (report 202610080457, overwritten by the 5.5 run); fake scenario passes; flowReport 6 pass; typecheck clean.
+- MISTAKE: earlier entry's "likely model behavior" guess was wrong; the evidence (tool completed, file present) pointed at the check itself. Rule: when a tool reports success and the check disagrees, verify the check first.
+
+### User
+Claude test flow
+- Step 7 (switch model, delete the file) passes on both Haiku 4.5 and Haiku 5.5; the earlier failures were a bug in the test's file check, not in oc.
+- Report files now include seconds in their names, so two quick runs no longer overwrite each other.
+
+---
+
+## 2026-10-08 (~00:49) - v0.2.119 - Update Claude Code from the oc command palette - Opus 5.5, medium reasoning; Implementation
+
+### Agent
+- Meta: Opus 5.5; medium; Implementation; completed
+- Version: 0.2.119 (same session as the entry below; one bump per session)
+- Added `oc.update_claude_code` ("Update Claude Code", slash `/updateClaudeCode`) to the `oc` palette section in `tui/src/app.tsx`, with `updateClaudeCode(cliPath, toast)` next to `persistOcConfig`. Runs `<cliPath> update` (provider `claude-code.options.cliPath`, else `claude`), shell on Windows for npm's `.cmd` shim; toasts progress, then the CLI's last output line, or the failure with exit code.
+- Kept: no server-side change. Live `claude` children keep their binary until respawn. `detectCliVersion` caches per process, so version-gated flags follow the old version until oc restarts (all gates <= 2.1.263 today, so no effect now).
+- Risk: on Windows, npm replacing `claude.exe` while an oc chat's `claude` process runs may fail (file in use); the error toast shows npm's message. Not exercised.
+- Verification: tui typecheck clean. No pane check: it would run a real `claude update` on the user's install. Live check is the user's.
+
+### User
+Command palette
+- The `oc` section has a new "Update Claude Code" command (also `/updateClaudeCode`) that updates the Claude Code CLI and shows the result in a toast.
+- Chats that are already running keep the old Claude Code until their process restarts; new ones use the update.
+
+---
+
+## 2026-10-08 (~00:44) - v0.2.119 - Haiku 5.5 in the Claude catalog, pane DB leak fixed, step 7 diagnostics - Opus 5.5, medium reasoning; Implementation
+
+### Agent
+- Meta: Opus 5.5; medium; Implementation; completed. Took over as leader from Sol/grok sessions; grok review fork held no review (copied history only).
+- Version: 0.2.119
+- Added `claude-haiku-5-5` to `models.ts` (1M/128K, reasoning, $0.10/$0.50, cache 0.01/0.125, `0.1×`). Base card only: config-path loader (`provider.ts` ~1557, also upstream) drops `cost.tiers`, so >100K prompts under-report 5x. User chose base-only.
+- Fixed Sonnet 5 price: was $3/$15 (`3×`), CLI `tier_2_10` says $2/$10 (`2×`). Sonnet 5.5 cache read 0.2 -> 0.1 (halved at Haiku 5.5 launch, 2026-10-07).
+- ERROR: pane suite wrote ~71 sessions into the user's real `opencode.db`. Cause: WezTerm `get_base_env` overlays `HKCU\Environment` (holds `OPENCODE_DB`) on every pane env. Fixed: `openPane` writes isolation vars to `set_environment_variables`; hello test asserts the fixture DB has a session. Leaked sessions left in place (user's choice).
+- Added `hostEnv()` in `test/lib/cli-process.ts`: drops inherited `CLAUDE*`/`ANTHROPIC*` (keeps `CLAUDE_CODE_OAUTH_TOKEN`) at all spawn sites; `spawn` now `extendEnv: false`. Run from Claude Desktop, the entrypoint var added a background status request to the fake.
+- Added `toolSummary` (flowReport.ts); step 7 deletion detail now shows before/after and each tool's command and result. Shared `switchModelStep`/`reportOnExit` in real-model.test.ts.
+- Added `OC_REAL_ONLY=7` step-7-only real run (setup turn, restart, switch) and `OC_REAL_SWITCH_MODEL_ID`; defaults now Sonnet 5.5 / Haiku 5.5. `claudeRealFlow.ps1`: `-Step7`, `-SwitchModel`; token check on Haiku 5.5.
+- Added fake scenario: restart, switch to Haiku 5.5, delete with PowerShell tool (Bash off Windows). Passes, so oc's restart+switch+shell path works; real step 7 failure (report 202610080413, Haiku 4.5) still unclassified, likely model behavior.
+- Risk: installed CLI 2.1.288 has no Haiku 5.5 catalog entry; 2.1.294 (2026-10-08) likely does. Not verified.
+- Verification: config-models + bridge 37 pass; flowReport 6 pass; fake-model 18 (17 + round trip rerun after env fix); pane 8 pass, real-DB leak count unchanged (71); acp lifecycle 6 and run-process 13 pass (shared harness); typecheck clean.
+- MISTAKE: a debug-line restore copied from the wrong backup path; caught by grep, line removed, file confirmed identical to backup. Prevention: restore from the exact path used to back up, then check.
+
+### User
+Models
+- Claude Haiku 5.5 is now in the Claude Code model list, priced at $0.10/$0.50 per million tokens and labeled 0.1×.
+- Claude Sonnet 5 now shows its real price ($2/$10, 2×) instead of $3/$15, and Sonnet 5.5's cache reads cost $0.10 per million.
+- Haiku 5.5 costs for prompts over 100K tokens show 5x too low, because oc's config does not carry price tiers yet.
+
+Testing
+- The TUI pane checks no longer save test chats into your real oc history.
+- `.scripts\claudeRealFlow.ps1 -Step7` runs only the model-switch and file-delete step, for a few cents; `-SwitchModel` picks the model.
+- The real flow now defaults to Sonnet 5.5 with a switch to Haiku 5.5, and the report says exactly which tool tried to delete the file and what happened.
+
+---
+
+## 2026-10-07 (~22:29) - v0.2.118 - Verify Claude flow stopping and cost accounting with fake runs - GPT-6.1 Sol, reasoning effort not exposed; Implementation
+
+### Agent
+- Meta: GPT-6.1 Sol; reasoning effort not exposed; Implementation; completed
+- Version: 0.2.118
+- Added shared test-only `test/provider/claude-code/flowReport.ts`; real flow and fake scenarios use identical step runner, accounting, and Markdown writer. No test registration, auth reads, or process launch on import.
+- Fixed refusal timing: checked prompts retain responses before detecting auth/usage rejection; stop before revert or follow-up. Compaction summary checked before follow-up. Dedicated blocked request row preserves earlier independent failures; child refusals checked at step completion.
+- Fixed failure-path accounting: retain each prompt response before deletion, merge current SDK messages by ID, count latest version once even if body fails. Failed collection produces unavailable row and explicit error, preserving original failure; otherwise fails the step.
+- ERROR: CLI `total_cost_usd` footer accumulates across turns AND survives server restart with the conversation. Previous v0.2.117 description as whole-turn cost was incorrect. User approved delta accounting; per-session ledger subtracts rounded cumulative observations, includes reverted spend, and resynchronizes without guessing after missing/decreased counters. Missing cost is unavailable/partial, not zero; known spend >$0.25 still flagged.
+- Added 5 fast report checks and 3 fake report scenarios: refused step 5 does not revert or admit 6-8; reverted usage survives later failure; cumulative spend, compaction gaps, restart, and collection failures. Existing interrupt scenario now exercises checked prompts. Fake footer stats enabled explicitly without real mode.
+- Negative evidence: baseline shared implementation failed stop timing, reverted-token retention, missing-cost rendering, deduplication, and case-insensitive refusal checks before repairs. Restart scenario exposed incorrect process-scoped cost baseline; fixed ledger to follow session instead.
+- ERROR: pane verification twice failed cleanup after a child exited between CIM recheck and `Stop-Process`. User approved harness fix: tolerate only `NoProcessFoundForGivenId` with a confirming absent CIM lookup; other errors/reused IDs propagate. Added deterministic exited-child regression. Existing mux identity/tree checks kept.
+- Verification: report + fake suites 22 pass / 164 expects (~228s); final pane suite 8 pass / 24 expects (~137s); final `bun run typecheck` exit 0. No live test-owned process candidates in scoped command-line inspection. No real-model run, saved-token access, oc build/install, commit, or push.
+- Kept archive rotation deferred until user's commit, per handoff decision. Plan `.opencode/plans/claudeFlowReportChecks.md` completed; real-model steps 5-8 remain user acceptance.
+
+### User
+Claude flow reports
+- Usage-limit and login refusals stop the flow immediately, before later prompts or revert actions.
+- Tokens spent on reverted messages are retained even when a later operation fails.
+- Cost estimates use changes in Claude's cumulative total instead of counting earlier spend repeatedly.
+- Missing accounting is clearly marked unavailable or partial rather than shown as free.
+
+Testing
+- Fake runs verify the same reporting code used by the real flow, with no real tokens.
+- Pane cleanup handles a test process exiting naturally while preserving its ownership checks.
+
+---
+
+## 2026-10-07 (~21:25) - v0.2.117 - Triage of real-model report 202610080054: token counts, duplicate error, usage-limit stop - Opus 5.5, low reasoning; Implementation
+
+### Agent
+- Meta: Opus 5.5; low reasoning; Implementation; completed
+- Version: 0.2.117
+- Report `claudeFlowReport-202610080054.md` (sonnet-4-5): steps 0-4 all pass. ERROR: 5-hour usage window ran out during step 5; steps 5-8 failures are Claude refusals, not oc. oc cost total $0.154 (step 0 $0.087 = first-turn cache write 23k; rest $0.01-0.03). Nothing expensive. Risk: those costs are last-call only, so step 1 (~10 calls) is understated.
+- Fixed `turn-stream.ts` `message_delta`: numeric `usage` counts now merge into `lastCall`. Before, oc stored message_start's usage (output ~1-6 tokens; report showed output 3-6 for long replies). Fake scenario "claudeTestFlow tokens..." fails before, passes after.
+- Fixed `turn-stream.ts` result handling: failed result's `result` text skipped when the turn already showed it (CLI sends API errors/usage limits as synthetic assistant reply AND result text). Report step 7 showed "You've hit your session limit" twice. Fake scenario "an API error the CLI reports twice shows once" + pane check of same name; both fail before, pass after.
+- Changed `real-model.test.ts`: `BLOCKED` regex (auth 401/403, `out of usage`, `hit your X limit`) checked after every step, not only step 0; marks that step's failed checks `blocked`, adds oddity, stops the run. Report now has a `CLI cost` column (from `turnStats` footer, enabled for real runs via `chatConfig(..., { turnStats })`), a CLI cost total, and an `expensive:` oddity above $0.25 per step. Not run against the real model (user-triggered).
+- ERROR (harness): fake step 7 failed under the Cursor/OpenCode agent shell: its `BASH_ENV` wrapper ran in front of the CLI's Bash tool (`rm` never ran; output `Select-String: command not found`). Fixed: `claudeEnv` sets `BASH_ENV: ""`. Not seen from a plain PowerShell.
+- MISTAKE: piping `git show HEAD:file | Set-Content` in PowerShell dropped newlines (file broke, restored from copy). Use `git stash push -- <file>` / `git stash pop` to test pre-fix behaviour.
+- Verification: fake-model 14 pass; tui-pane 7 pass (`OC_TUI_PANE=1`); `bun run typecheck` clean.
+
+### User
+Claude Code provider
+- Token counts for each turn are now correct; before, output tokens showed as a handful even for long replies.
+- When Claude refuses a request (usage limit, bad login), the message now appears once instead of twice.
+
+Testing
+- The real-model run now stops at the first usage-limit or login refusal and marks those checks "blocked", and the report shows Claude Code's own cost per step.
+
+---
+
+## 2026-10-07 (~20:45) - v0.2.116 - Safe token check before the real-model Claude flow - Opus 5.5, low reasoning; Implementation
+
+### Agent
+- Meta: Opus 5.5; low reasoning; Implementation; completed
+- Version: 0.2.116
+- ERROR: first user real-model run (`claudeFlowReport-202610080040.md`) failed every step on `401 Invalid bearer token`; screenshot shows `CLAUDE_CODE_OAUTH_TOKEN='<token>'` literally. A well-formed fake token gets a different message ("OAuth access token is invalid"), consistent with the literal placeholder. Report is useless; user may delete it.
+- Added `.scripts/claudeRealFlow.ps1`: token from shell var, then DPAPI-saved copy (`%LOCALAPPDATA%\oc\claudeFlowToken`), then clipboard (whitespace stripped: setup-token wraps the token over two lines; clipboard blanked after), then `Read-Host -MaskInput`. Shape check `sk-ant-oat\d+-...`, refuses inside a Claude session or with `ANTHROPIC_BASE_URL/AUTH_TOKEN/API_KEY` set. One Haiku `claude -p --output-format json` in a temp `CLAUDE_CONFIG_DIR` proves login; saves token only after it passes. Then runs `real-model.test.ts` with `OC_REAL_MODEL=1`, restores env (`withEnv`), prints the newest report. Flags: `-CheckOnly`, `-NewToken`, `-Forget`, `-Model`.
+- Verification: in a child pwsh: inside-Claude refusal, `<token>` rejected by shape (7 characters), well-formed fake token rejected by Anthropic 401 ($0); no saved file, no `ocTokenCheck-*` temp left. User then ran `-CheckOnly` with a real token: "Token OK (the prompt, check cost $0.0165)".
+- Fixed: script no longer dot-sources `scriptHelper.ps1` (its `Set-Location $srcRoot` left the user's shell in `src`); caller's location now unchanged (checked).
+- Fixed `real-model.test.ts` soft checks: step 0 now fails the run on an auth error (`Failed to authenticate` / `API Error: 401|403`), so the report stops there instead of 8 more steps of noise; step 4 "summary under Compacted" fails when the summary message has an error or starts with "Error during compaction"; step 7 "ocToolCheck.txt deleted" requires the file to exist before the step. Verified: `bun run typecheck` exit 0, file still skips without `OC_REAL_MODEL`. Not run against the real model (user-triggered).
+
+### User
+Testing
+- New `.scripts\claudeRealFlow.ps1` checks your Claude token with one tiny request before the real-model flow, so a bad paste fails in seconds instead of producing a useless report.
+- The token is never shown or put in your command history; once it passes it is saved encrypted for your Windows account so later runs need no paste.
+
+---
+
+## 2026-10-07 (~20:34) - v0.2.115 - Pane test cleanup anchored to its own mux server; Claude test tidy-up - Opus 5.5, low reasoning; Implementation
+
+### Agent
+- Meta: Opus 5.5; low reasoning; Implementation; completed (review-and-tidy pass)
+- Version: 0.2.115
+- Fixed `tui-pane.test.ts` Windows cleanup gap: root was found by PID alone at cleanup time, so a mux server that exited early with its PID reused would anchor the walk on an unrelated process. Now records the mux server's CIM creation time (`ToFileTimeUtc`) at spawn; cleanup requires the same identity before walking descendants (child created no earlier than its live parent, identity rechecked before each `Stop-Process`, CIM compared to CIM).
+- Changed: mux server itself stopped via `server.proc.kill()` (Bun's process handle, PID-reuse-proof), not `Stop-Process`. Identity missing/changed, early mux exit, or script error: descendants left, release throws naming bun/claude as possibly still running.
+- Added `powershell(script)` (EncodedCommand, `$ErrorActionPreference='Stop'`, nothrow) and `cimProcess(pid)` helpers in the pane test; acquire never throws after spawn, so release always runs.
+- Added `chatConfig(llmUrl)` to `chat-fixture.ts`; `openChat` and pane test share it (removed duplicated proxyTools/todos config and double `testProviderConfig` call).
+- Reviewed diff: production `session-manager.ts`/`session-sync.ts` import nothing from tests; no dead code or stale comments found in `llm-server.ts`/`cli-process.ts`.
+- Added AGENTS.md Testing bullets: pane opt-in/launch/socket/160 cols/two-press Esc/`OPENCODE_DB`, cleanup rule, habit (fake-model scenario per Claude-provider feature, pane check when TUI output changes). Fixed stale "that file's `claudeEnv`" reference to `chat-fixture.ts`.
+- Updated `claudeFlowHandoff.md`: stale Plan bullet now records the built harness; cleanup review; version and entry counts.
+- Note: loud-failure path checked only by a read-only probe (missing PID -> pwsh exit 1 -> empty identity); not forced in a pane run.
+- Verification: pane suite (`OC_TUI_PANE=1`) 6 pass / 20 expects (~120s); fake-model 12 pass / 93 expects (~141s); `bun run typecheck` exit 0. After each run, only pre-existing `claude.exe` 31260 (this session's host) remained; no test bun/claude/mux; `C:\ocTestTmp` absent. No real-model run, build, install, commit, or push.
+
+### User
+Claude Code testing
+- The on-screen TUI checks now only stop processes they can prove they started, and fail loudly instead of guessing if they cannot.
+- Project rules now describe how to run the TUI checks safely and say every new Claude feature needs a fake-model check.
+- No change to oc itself.
+
+---
+
+## 2026-10-07 (~20:07) - v0.2.114 - Claude provider TUI pane targets verified - GPT-6.1 Sol, default reasoning; Implementation
+
+### Agent
+- Meta: GPT-6.1 Sol; default reasoning; Implementation; completed
+- Version: 0.2.114
+- Added five target tests to `test/provider/claude-code/tui-pane.test.ts`: Esc interrupt/clean next reply, question keys/answer delivery, todo sidebar, `/compact` divider, genuine rewind notice after `/undo` with identical replies. Kept original round-trip spike.
+- Verified lone `\x1b` reaches TUI; first press shows "again to interrupt", second within 5s aborts by design. Screen shows "interrupted"; next reply excludes abandoned text. Fake-model TUI evidence for v0.2.110 `turnAbandoned`; real-model check pending.
+- Verified v0.2.111 rewind notice through TUI `/undo`; no product fix needed this session.
+- Changed pane fixture to `todos: true`, Question proxy, 160 columns; sidebar auto-hides at <=120. Todo assertions inspect rightmost 42 columns, not chat tool rows.
+- Fixed Windows cleanup: snapshot live mux descendants, filter parent creation times, recheck CIM identity before stopping each leaf-first. Removed pane-only cleanup that left Claude holding cwd after hanging streams. Catch full timeout causes for screen diagnostics.
+- MISTAKE: intermediate `taskkill /T` followed reused parent PIDs into unrelated test/shell processes; interrupted concurrent verification. Removed PID-only tree termination; reran both suites afterward.
+- ERROR: comparing Get-Process.StartTime to lower-precision CIM CreationDate skipped termination and hung cleanup. Compare CIM creation times to CIM creation times. Stopped test-owned tree and reran successfully.
+- Updated `claudeFlowHandoff.md`: target evidence, two-Esc behavior, cleanup lessons, 8 earlier entries plus this session. Open user decisions unchanged.
+- Verification: pane suite 6 pass / 20 expects (~136s); fake-model suite 12 pass / 93 expects (~166s); `bun run typecheck` exit 0. No test mux/bun/claude processes or `C:\ocTestTmp` after completed runs. No real-model run, build, install, commit, or push.
+
+### User
+Claude Code testing
+- Five new checks drive oc's real TUI against the fake model and verify interruption, question answers, todos, compaction, and provider notices on screen.
+- Esc is a two-press action: the first press asks for confirmation, and the second interrupts.
+- Test cleanup now stops its own child processes reliably without following reused process IDs into unrelated processes.
+- No change to oc's provider behavior or your personal configuration.
+
+---
+
+## 2026-10-07 (~19:46) - v0.2.113 - TUI checks through a WezTerm pane (spike) and a skill-leak test fix - Opus 5.5, low reasoning; Implementation
+
+### Agent
+- Meta: Opus 5.5; low reasoning; Implementation; completed (spike approved by user via question form)
+- Version: 0.2.113
+- No `claudeFlowReport-*.md` yet; real-model run still pending, nothing to triage.
+- Added `test/provider/claude-code/tui-pane.test.ts` (opt-in `OC_TUI_PANE=1`, skips without `wezterm-mux-server` or `claude`): test-owned headless `wezterm-mux-server --config-file` with `unix_domains` socket under `C:\ocTestTmp`; first pane runs `bun run --cwd packages/opencode src/index.ts <project>`; env = `isolatedEnv` + `claudeEnv` + file `OPENCODE_DB`, panes inherit it. `type` = `send-text --no-paste`; `waitFor` polls `get-text`, error carries the screen. `exit_behavior='Hold'` keeps crashes readable. Cleanup kills panes, then server.
+- Exported `isolatedEnv` from `test/lib/cli-process.ts`.
+- Fixed `fake-model.test.ts` "oc's claude-code provider round-trips a tool call": ran `opencode run` in bare fixture home (no git), skill walk reached real `~/.agents/skills/jev`, `expectIsolated` failed. Now `initRepo(home/work)` + `--dir`. This is the v0.2.110 "not reproduced under `opencode run`" leak.
+- ERROR: bun must start in `packages/opencode` (bunfig preload for Solid JSX); from the project cwd oc dies with "Cannot find package 'react'".
+- ERROR: oc sessions can inherit a dead GUI's `WEZTERM_UNIX_SOCKET` (`gui-sock-13932`); `wezterm cli` then auto-spawns `wezterm-mux-server --daemonize` and hangs. Use `--no-auto-start` and an explicit socket; drop `WEZTERM_PANE`.
+- MISTAKE: ran `wezterm cli list` without `--no-auto-start`, which spawned a stray mux server (PID 25348). Stopped it and confirmed gone. Rule: always `--no-auto-start`.
+- TODO: per-target pane checks (notices, Compacted divider, todo panel, question form, Esc interrupted); lone `\x1b` with kitty keyboard unverified.
+- Verification: `tui-pane.test.ts` 1 pass (~16s, no leftover mux/bun/claude processes or `C:\ocTestTmp`); `fake-model.test.ts` 12 pass; `session-sync.test.ts` 4 pass; `bun run typecheck` clean.
+
+### User
+Claude Code testing
+- A new opt-in check opens oc's real TUI in a hidden WezTerm pane, types a message, and confirms the fake model's reply shows on screen, without touching your WezTerm window or real database.
+- A fake-model check that sometimes picked up your personal `jev` skill now runs in its own isolated project folder.
+- No app or UI change.
+
+---
+
+## 2026-10-07 (~19:21) - v0.2.112 - Opt-in real-model run of the Claude test flow with a report - Opus 5.5, low reasoning; Implementation
+
+### Agent
+- Meta: Opus 5.5; low reasoning; Implementation; completed (real run not done: user-triggered only)
+- Version: 0.2.112
+- Added `test/provider/claude-code/real-model.test.ts`: skipped unless `OC_REAL_MODEL=1`. One chat through claudeTestFlow steps 0-8 on the real model (`OC_REAL_MODEL_ID`, default `claude-sonnet-4-5`; step 7 switches to `claude-haiku-4-5`). Soft checks per step; writes `claudeFlowReport-<yyyymmddhhmm>.md` at repo root (checks, tokens in/out/cache read/write, cost, seconds, oddities: notices, unexpected message errors, harness failures). Only harness failures fail the test; report written in a finalizer, so partial runs still report.
+- Auth: user chose `claude setup-token` -> `CLAUDE_CODE_OAUTH_TOKEN`; temp `CLAUDE_CONFIG_DIR` under `C:\ocTestTmp`, real `~/.claude` untouched. `requireRealAuth` throws when the token is missing or `ANTHROPIC_BASE_URL`/`AUTH_TOKEN`/`API_KEY` are set.
+- Decided against copying `~/.claude/.credentials.json`: OAuth refresh in the copy may invalidate the real login (unconfirmed, avoided).
+- Kept step 1 without the flow's skill (1.6) and MCP (1.7) items; isolated home has neither. Step 1 answers the question "No" via `question.reply`; step 3 aborts after 2 tool rows; step 6 kills serve and resumes.
+- Moved `openChat`, `claudeEnv`, `initRepo`, `outsideProfile`, `expectIsolated` to `chat-fixture.ts` (shared). `openChat` gained `real` and `modelID`; `claudeEnv(dir, llmUrl?)` omits fake URL/key when no URL.
+- Note: fake `/v1/messages` reports 0 usage unless scripted, so token columns are 0 against the fake.
+- Risk: run from a plain PowerShell; host `CLAUDE_*` vars from a Claude session would reach the child.
+- TODO: user real run; maybe gitignore `claudeFlowReport-*.md`; WezTerm pane TUI checks.
+- Verification: dry run of a scratch copy pointed at the fake (all 9 steps ran, report written, `C:\ocTestTmp` removed; scratch file and report deleted). Default run skips (1 skip). `fake-model.test.ts` 12 pass / 93 expects; `session-sync.test.ts` 4 pass; `bun run typecheck` exit 0. No real-model run.
+
+### User
+Testing
+- A new opt-in test runs your whole Claude test flow against the real Claude model and writes a pass/fail report with token and cost numbers to the repo root.
+- It only runs when you set `OC_REAL_MODEL=1` and a `CLAUDE_CODE_OAUTH_TOKEN` from `claude setup-token`; normal test runs skip it.
+- No change to oc itself.
+
+---
+
+## 2026-10-07 (~19:12) - v0.2.112 - Claude test flow step 0 (CLAUDE.md reaches Claude) now automatic - Opus 5.5, low reasoning; Implementation
+
+### Agent
+- Meta: Opus 5.5; low reasoning; Implementation; completed (task 1 of 2; task 2 `OC_REAL_MODEL` design awaits user)
+- Version: 0.2.112
+- Added step 0 scenario to `test/provider/claude-code/fake-model.test.ts` (12 total): user CLAUDE.md at `<root>/claude/CLAUDE.md` (CLAUDE_CONFIG_DIR) and project `<root>/work/CLAUDE.md`; asserts both rule texts in request 1 and `expectIsolated` (real profile files absent).
+- Added `outsideProfile` scoped temp root: Windows `C:\ocTestTmp\oc-*` (user approved this path 2026-10-07), parent removed when empty; else `os.tmpdir()`.
+- Changed `claudeEnv`: sets `CLAUDE_CODE_DISABLE_CLAUDE_MDS` only when dir is under `os.homedir()`; outside the profile the CLI's parent-folder CLAUDE.md walk stays on.
+- Changed `openChat(fixture, { resume?, root? })`: `root` holds `work` and Claude config dir; oc data/DB stay in fixture home.
+- ERROR: cleanup EBUSY on `<root>/work`. Cause: serve finalizer `p.kill()` kills only bun; its `claude` child keeps project cwd ~0.5s. Bun `fs.rm` ignores `maxRetries`. Fixed with Effect retry 100ms x 50.
+- Note: Claude Code reads user memory from `CLAUDE_CONFIG_DIR/CLAUDE.md` (confirmed by this scenario).
+- Note: drive root `C:\` has no CLAUDE.md/AGENTS.md; keep it that way or step 0 will see extra files.
+- Verification: `fake-model.test.ts` 12 pass, 93 expects (~120s); `session-sync.test.ts` 4 pass; `bun run typecheck` exit 0; `C:\ocTestTmp` absent after run. No real-model run.
+
+### User
+Testing
+- The first step of your Claude test flow (your CLAUDE.md instructions reach Claude) now runs automatically against the fake model.
+- That check uses a temporary `C:\ocTestTmp` folder during the run and deletes it afterward.
+- No change to oc itself.
+
+---
+
+## 2026-10-07 (~18:54) - v0.2.111 - Revert now rewinds Claude even when replies repeat; flow steps 4-8 as fake-model scenarios - Opus 5.5, low reasoning; Implementation
+
+### Agent
+- Meta: Opus 5.5; low reasoning; Implementation; completed
+- Version: 0.2.111
+- Fixed `session-sync.ts`: exchange hashes are now `<position>:<hash>` (position = finished exchanges oc showed before it; `exchangePosition` map set in `syncClaudeSession` on a new exchange, read by `currentExchangeHash`). Before: a revert of a turn whose reply text equaled the previous reply ("noted", "noted") left oc's latest hash equal to the CLI's newest anchor, so no rewind and Claude kept the reverted message. Drift from anything else (compaction window, plugin pruning) still only skips the rewind.
+- Risk: anchors saved in `claude-code/sessions.json` by older builds have no position, so the first revert after upgrading does not rewind (logs "no shared exchange"). New anchors are written from the next turn on.
+- Added scenarios to `test/provider/claude-code/fake-model.test.ts` (11 total):
+  - step 4 compact: `session.summarize`; asserts the summary request carries the codeword, next turn carries the summary, summary is the `summary` assistant message text, no "no conversation to compact".
+  - step 5 revert: identical replies, `session.revert` on the second user message; asserts next request has no OSPREY-12, "Claude conversation rewound" notice, TodoWrite mirrored into `session.todo`. Failed before the fix.
+  - step 6 restart: kill serve, reopen same session on a new serve; asserts history is real user/assistant/user (resumed, not a catch-up), no "conversation lost".
+  - step 7 switch: second prompt on `claude-opus-4-5` variant `low`; Bash `rm` deletes the file; request models sonnet, opus, opus; codeword carried.
+  - step 8 cache: two identical turns; system, tools, and message prefix of request 2 equal request 1 with `cache_control` stripped.
+- Changed `openChat`: `todos: true` (opt-in config; without it oc disallows Claude's TodoWrite/Task* too), `OPENCODE_DB` file in fixture home (preload sets `:memory:`, which lost the session on restart), optional `resume` session id, returns `server`, `prompt(text, { modelID, variant })`.
+- Found: user's shell has `OPENCODE_DB` = real `~\.local\share\opencode\opencode.db`; test preload overrides it to `:memory:` and the scenario now sets a fixture path, so the real DB is not touched.
+- Found: user's `opencode.jsonc` has no `todos` key, so flow step 1.5/5 todo checks cannot pass live unless todos are enabled.
+- TODO: step 0 still blocked (needs non-profile temp root); `OC_REAL_MODEL=1` report mode; WezTerm pane TUI checks.
+- Verification: `fake-model.test.ts` 11 pass, 88 expects (~118s), no leftover `claude.exe`; `session-sync.test.ts` + `get-claude-user-message.test.ts` 23 pass; `bun run typecheck` exit 0. Negative-checked the revert fix (same scenario failed with OSPREY-12 still in history). Not live-checked in the TUI.
+
+### User
+Claude chats
+- Undoing a message now always rewinds Claude's memory, even when Claude gave the same short reply ("Noted.") before and after it.
+- The first undo after installing this build may not rewind Claude, because older saved chats lack the new position info.
+
+Testing
+- The rest of your Claude test flow now runs automatically against the fake model: compact, revert, restarting oc, switching model and effort, and a cache-friendliness check.
+- Note: todo lists from Claude only show in oc when `"todos": true` is set, and your config does not set it.
+
+---
+
+## 2026-10-07 (~18:41) - v0.2.110 - Interrupted Claude replies no longer leak into the next turn; more flow scenarios - Opus 5.5, low reasoning; Implementation
+
+### Agent
+- Meta: Opus 5.5; low reasoning; Implementation; completed (same session as v0.2.110, no second bump)
+- Version: 0.2.110
+- Fixed `session-manager.ts`: added `ActiveProcess.turnAbandoned`, set in `interruptTurn` after the interrupt write, cleared in `settleTurn`. The stdout `rl` handler drops lines that arrive with no listener while it is set (read before `noteTurnLine` so the abandoned turn's own `result` is dropped too). Before: after Esc, the CLI's cut-off assistant text arrived with no listener, went to `unattendedLines`, and `replayUnattendedOutput` printed it at the start of the next turn's reply (claudeTestFlow step 3 "no leftover summary text"). Unattended output of non-interrupted turns (MCP client gave up, autonomous wake) still buffers and replays.
+- Added scenarios to `test/provider/claude-code/fake-model.test.ts` (shared `openChat`: serve, git-inited `work`, `proxyTools: ["Task", "Question"]` like the user's config):
+  - step 2 subagents: `mcp__opencode_proxy__task_batch` with two explore tasks; children routed by `pushMatch` on a token in their last message; each child reply `wait`s on `llm.wait(3)`, so it only finishes if both children call the model at once. Negative-checked (`wait(4)` hangs and fails). Asserts both results in one tool result, 2 child sessions.
+  - step 1.8 question: proxied `question` tool, test polls `sdk.question.list`, replies `[["No"]]`; asserts `"Should I delete ocToolCheck.txt?"="No"` in the tool result Claude got.
+  - step 3 interrupt: Read, then a reply that streams text and hangs; `session.abort` after 2 calls, then a new prompt. Asserts aborted message is `MessageAbortedError`, next request still has codeword and Read result, next reply is only the new text. Failed before the fix.
+- Changed `TestLLMServer` `messages()`: returns `message_start` as head and the rest as tail, so `Reply.wait` holds content back (before, all lines were in head and `wait` held nothing).
+- TODO: flow steps 4-8 (compact, revert, restart, model switch, cache); step 0 still blocked (needs non-profile temp root).
+- Verification: `fake-model.test.ts` 6 pass (~46s); `unattended-replay`, `autonomous-turn`, `process-lifecycle`, `session-manager` tests 31 pass; `bun run typecheck` exit 0. Not live-checked in the TUI.
+
+### User
+Claude chats
+- Pressing Esc mid-reply and then sending a new message no longer shows the cut-off reply's text at the start of the next answer.
+
+Testing
+- Three more steps of your Claude test flow now run automatically against the fake model: two subagents at once, Claude's question answered through oc's question form, and interrupting a reply then continuing the chat.
+
+---
+
+## 2026-10-07 (~00:12) - v0.2.110 - claudeTestFlow steps 1-2 as a fake-model scenario - Opus 5.5, low reasoning; Implementation
+
+### Agent
+- Meta: Opus 5.5; low reasoning; Implementation; completed (step 3 of agent-driven verification; same session as v0.2.110, no second bump)
+- Version: 0.2.110
+- Added flow case to `test/provider/claude-code/fake-model.test.ts`: `opencode.serve()` + `@opencode-ai/sdk/v2` client, `session.create` then two `session.prompt` turns on `claude-code/claude-sonnet-4-5`. Turn 1 scripts Write, Edit, Read, Bash; turn 2 asks the codeword. Asserts file on disk edited, 6 model calls, each tool result reaches the next call, turn 2 continues the same Claude conversation, CLI cwd = session directory, last text part, no "conversation lost", oc tool rows `write`/`edit`/`read`/`bash` completed.
+- Fixed `TestLLMServer` Anthropic encoder: tool_use ids now `toolu_N` from a per-server counter. `Reply` numbers tools from `call_1` in every reply; the CLI dropped repeated-id history entries, so later tool results never reached the model. OpenAI paths unchanged (`processor-effect.test.ts` expects `call_1`).
+- Fixed leak: CLI walks every parent of its cwd for CLAUDE.md (git repo or not; probed 2.1.288), and Windows temp is under the profile, so real `C:\Users\user\.claude\CLAUDE.md` reached requests. `claudeEnv` sets `CLAUDE_CODE_DISABLE_CLAUDE_MDS=1`.
+- Fixed leak: under `serve`, oc's skill walk (`src/skill/index.ts` `.up` to worktree) found real `~/.agents/skills/jev` (seen as `oc:jev` in the CLI skill list). Flow case runs in a git-inited `work` subfolder. Not reproduced under `opencode run`; cause not traced.
+- Added `expectIsolated(inputs)`: fails on real CLAUDE.md/AGENTS.md paths or real `~/.agents|.claude/skills` names as `oc:<name>:`. Negative-checked both leaks (removed the fix, saw the failure, restored).
+- Found: git-init at the fixture home made each turn ~20s (snapshot scans `.cache/bun` transpiler cache in that home); subfolder fixes it. Test artifact, not a product slowdown.
+- Added AGENTS.md Testing bullet on the Windows leak and the helpers to reuse.
+- Risk: step 0 of claudeTestFlow (CLAUDE.md reaches Claude) cannot run under `CLAUDE_CODE_DISABLE_CLAUDE_MDS`; needs a different isolation (for example a project-level CLAUDE.md with a non-profile temp root).
+- TODO: next flow steps (parallel subagents via proxy Task, question form, interrupt, compact, revert, restart, model switch); `OC_REAL_MODEL=1` report mode.
+- Verification: `bun test test/provider/claude-code/fake-model.test.ts` 3 pass, 25 expects, ~21s; `bun run typecheck` exit 0. Scratch probes and dumps deleted, `Test-Path` False.
+
+### User
+Testing
+- The first two steps of your Claude test flow now run automatically against the fake model: one chat, two messages, file write, edit, read, a shell command, and the codeword remembered on the second message.
+- Fixed the fake model reusing the same tool id, which made Claude lose later tool results in multi-tool turns.
+- Fixed the tests picking up your real `~/.claude/CLAUDE.md` and your personal skills; a check now fails if that ever happens again.
+
+---
+
+## 2026-10-06 (~23:52) - v0.2.110 - oc's Claude provider runs against the fake model - Opus 5.5, low reasoning; Implementation
+
+### Agent
+- Meta: Opus 5.5; low reasoning; Implementation; completed (step 2 of agent-driven verification; same session as v0.2.110 spike, no second bump)
+- Version: 0.2.110
+- Added `cliIt.live` case to `test/provider/claude-code/fake-model.test.ts`: `opencode run --model claude-code/claude-sonnet-4-5` in the CLI fixture's isolated home (`XDG_*`, `OPENCODE_CONFIG_CONTENT`, `OPENCODE_PURE`); built-in `ClaudeCodePlugin` still loads (only `OPENCODE_DISABLE_DEFAULT_PLUGINS` drops it) and spawns real `claude` against `TestLLMServer`. Asserts exit 0, final text, exactly 2 model calls (no title or side spawn consumed a scripted reply), tool result round trip, no unknown side requests.
+- Added `claudeEnv()` shared by both cases: `ANTHROPIC_BASE_URL`, dummy key, temp `CLAUDE_CONFIG_DIR`, `DISABLE_AUTOUPDATER`, `USERPROFILE` (Windows `os.homedir()`; fixture sets only `HOME`, so `skill-plugin.ts`/`mcp-bridge.ts` would read real `~/.claude`/`~/.config`).
+- Kept `opencode run` rather than `serve` for this step: same in-process server path, one call. `serve` + HTTP comes with step 3 (multi-turn).
+- Risk: fixture uses `extendEnv: true`, so shell `ANTHROPIC_AUTH_TOKEN`/`CLAUDE_CODE_*` still reach the child; forced `ANTHROPIC_BASE_URL` keeps any real credential off api.anthropic.com.
+- TODO: step 3 (claudeTestFlow.md steps 1-2 over `opencode.serve()` HTTP API).
+- Verification: `bun test test/provider/claude-code/fake-model.test.ts` 2 pass, 10 expects (~10s); `bun run typecheck` exit 0.
+
+### User
+Testing
+- A test now runs oc itself with the Claude provider against the fake model, so a full oc-to-Claude-to-tool-and-back turn is checked with no login and no tokens.
+- That test keeps your real oc database, `~/.claude`, and home-folder settings out of the run.
+
+---
+
+## 2026-10-06 (~23:47) - v0.2.110 - Fake Anthropic model for Claude Code CLI checks - Opus 5.5, low reasoning; Implementation
+
+### Agent
+- Meta: Opus 5.5; low reasoning; Implementation; completed (step 1 spike of agent-driven verification)
+- Version: 0.2.110
+- Added `messages()` + `messageBlock()` in `test/lib/llm-server.ts`: Anthropic `/v1/messages` SSE (message_start, content blocks for text/thinking/tool_use, input_json_delta, signature_delta, message_delta stop_reason tool_use|end_turn, message_stop) from the same `Reply` flow; `eventLine` adds the `event:` name the Anthropic SDK dispatches on; no `[DONE]`.
+- Changed `TestLLMServer.handle` to share one `sendAs` per mode; `reset` stays chat-only (as before, responses never supported it).
+- Added catch-all `*` `/*` route that records `misses` (field was declared but never filled) and returns 404.
+- Added `test/provider/claude-code/fake-model.test.ts`: real `claude -p` (2.1.288) against the fake via `ANTHROPIC_BASE_URL`, dummy `ANTHROPIC_API_KEY`, temp `CLAUDE_CONFIG_DIR`, shell `ANTHROPIC_*`/`CLAUDE_*` stripped; scripts thinking + Read tool + text; asserts result text, tool_result round trip, no unknown side requests. Skips without a CLI.
+- Found: CLI side requests are only `HEAD /api/hello` (404 is fine); main call is `POST /v1/messages?beta=true`, stream true, 30 tools. Dummy key accepted. Tool ids `call_N` (no `toolu_` prefix) accepted.
+- Added AGENTS.md Testing rule: agents may run fake-model scenarios unprompted; real-model runs user-triggered.
+- TODO: step 2 (`opencode.serve()` + `CLAUDE_CONFIG_DIR` isolation for oc's Claude provider), step 3 (claudeTestFlow.md steps 1-2 as an HTTP-driven scenario). Later: rest of flow, `OC_REAL_MODEL=1` report mode, scenario-per-feature habit, WezTerm pane TUI checks.
+- Verification: `bun test test/provider/claude-code/fake-model.test.ts` 1 pass; `bun test test/cli/run/run-process.test.ts` 13 pass; `bun run typecheck` exit 0.
+
+### User
+Testing
+- The real Claude Code CLI can now run against a scripted fake model in tests, with no login and no tokens used.
+- A new test proves a Claude turn can think, read a file with a tool, and reply, all inside a temporary folder that leaves your real `~/.claude` alone.
+- Agents are now allowed to run these fake-model tests on their own; real-model runs still only happen when you start them.
+
+---
+
 ## 2026-10-06 (~23:26) - v0.2.109 - Plugins section in the sidebar - Opus 5.5, low reasoning; Implementation
 
 ### Agent
@@ -641,7 +1036,7 @@ Startup intro
 - A purple Knight Rider scanner now runs under the oc logo while oc starts.
 - Its first sweep moves with the frame as the frame draws in, then it bounces until oc is ready.
 - The animation continues where it left off when the launcher hands over to the TUI.
-- The separate "Loading plugins…" spinner at the bottom no longer shows during startup.
+- The separate "Loading plugins..." spinner at the bottom no longer shows during startup.
 
 ---
 

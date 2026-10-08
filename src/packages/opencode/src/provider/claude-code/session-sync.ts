@@ -8,10 +8,11 @@
  *   the CLI is rewound to the last exchange both still share and only the new
  *   message is sent.
  *
- * Exchanges are compared by hash: everything one user message produced, as
- * opencode shows it (text and reasoning), against what this provider emitted
- * for that exchange. A mismatch never rewinds unless opencode's latest
- * exchange equals an older one the CLI recorded.
+ * Exchanges are compared by position and hash: everything one user message
+ * produced, as opencode shows it (text and reasoning), against what this
+ * provider emitted for that exchange. The position keeps two identical replies
+ * ("Noted.") apart, so a reverted one is still seen as gone. A mismatch never
+ * rewinds unless opencode's latest exchange equals an older one the CLI recorded.
  */
 import type { LanguageModelV3CallOptions } from "@ai-sdk/provider"
 import type { TurnContext } from "./turn-context.js"
@@ -34,13 +35,15 @@ const START_FRESH = "Start fresh"
 
 /** Text this provider emitted for the exchange in progress, per session key. */
 const exchangeText = new Map<string, string>()
+/** How many finished exchanges opencode showed before the one in progress, per session key. */
+const exchangePosition = new Map<string, number>()
 
 export function appendExchangeText(key: string, text: string): void {
   if (text) exchangeText.set(key, (exchangeText.get(key) ?? "") + text)
 }
 
 export function currentExchangeHash(key: string): string {
-  return exchangeHash(exchangeText.get(key) ?? "")
+  return exchangeHash(exchangePosition.get(key) ?? 0, exchangeText.get(key) ?? "")
 }
 
 /**
@@ -56,7 +59,10 @@ export async function syncClaudeSession(input: {
 }): Promise<string | undefined> {
   const key = input.turn.sessionKey
   const newExchange = input.prompt.at(-1)?.role === "user"
-  if (newExchange) exchangeText.delete(key)
+  if (newExchange) {
+    exchangeText.delete(key)
+    exchangePosition.set(key, promptExchangeHashes(input.prompt).length)
+  }
   const loss = takeClaudeSessionLoss(key)
   if (!getClaudeSessionId(key)) {
     if (!input.hasPriorConversation) return undefined
@@ -150,20 +156,20 @@ function promptExchangeHashes(prompt: Prompt): string[] {
   let current: string | undefined
   for (const message of prompt) {
     if (message.role === "user") {
-      if (current !== undefined) exchanges.push(exchangeHash(current))
+      if (current !== undefined) exchanges.push(exchangeHash(exchanges.length, current))
       current = undefined
       continue
     }
     if (message.role !== "assistant") continue
     current = (current ?? "") + message.content.map((part) => ("text" in part ? part.text : "")).join("")
   }
-  if (current !== undefined) exchanges.push(exchangeHash(current))
+  if (current !== undefined) exchanges.push(exchangeHash(exchanges.length, current))
   return exchanges
 }
 
 // Whitespace is dropped: opencode may trim part text it stores.
-function exchangeHash(text: string): string {
-  return Bun.hash(text.replace(/\s+/g, "")).toString(36)
+function exchangeHash(position: number, text: string): string {
+  return `${position}:${Bun.hash(text.replace(/\s+/g, "")).toString(36)}`
 }
 
 

@@ -29,9 +29,9 @@ function defineModel(opts: {
   output: number
   cost: { input: number; output: number; cacheRead: number; cacheWrite: number }
   releaseDate: string
-  // List-price multiplier relative to Haiku (the cheapest model). Derived
-  // exactly from published per-token pricing: input AND output ratios both come
-  // out to haiku 1, sonnet 3, opus 5 (opus 5.5: 4), fable/mythos 10. Rendered
+  // List-price multiplier relative to Haiku 4.5. Derived exactly from published
+  // per-token pricing: input AND output ratios both come out to haiku 1 (haiku
+  // 5.5: 0.1), sonnet 3 (sonnet 5/5.5: 2), opus 5 (opus 5.5: 4), fable/mythos 10. Rendered
   // as an `(N×)` suffix so it surfaces in opencode's model picker, which has no
   // dedicated multiplier field.
   // Display-only: model resolution keys off `id`.
@@ -104,8 +104,17 @@ export function passthroughModel(id: string): OpenCodeModel {
 // tier would misreport the real price. Re-check only if Anthropic introduces
 // one. Verified against the pricing docs 2026-07-26.
 const haikuCost = { input: 1, output: 5, cacheRead: 0.1, cacheWrite: 1.25 }
+// Haiku 5.5 bills $0.10/$0.50 (cache read 0.01, write 0.125) for prompts up to
+// 100K tokens and 5x that above. Only the base card is registered: opencode's
+// config-path loader drops `cost.tiers`, so prompts over 100K under-report 5x.
+// Launch pricing, 2026-10-07.
+const haiku55Cost = { input: 0.1, output: 0.5, cacheRead: 0.01, cacheWrite: 0.125 }
 const sonnetCost = { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 }
-const sonnet55Cost = { input: 2, output: 10, cacheRead: 0.2, cacheWrite: 2.5 }
+// Sonnet 5 is the CLI's `tier_2_10` (verified against Claude Code 2.1.288).
+// Sonnet 5.5 keeps that card, but its cache reads were halved to $0.10/M at
+// the Haiku 5.5 launch, 2026-10-07.
+const sonnet5Cost = { input: 2, output: 10, cacheRead: 0.2, cacheWrite: 2.5 }
+const sonnet55Cost = { input: 2, output: 10, cacheRead: 0.1, cacheWrite: 2.5 }
 // Opus 4.5+ standard pricing is $5/M in, $25/M out (the price cut at 4.5; held
 // through 4.6/4.7/4.8/5). Cache read 0.1x input, cache write 1.25x input.
 const opusCost = { input: 5, output: 25, cacheRead: 0.5, cacheWrite: 6.25 }
@@ -189,6 +198,17 @@ export const defaultModels: Record<string, OpenCodeModel> = {
     multiplier: 1,
     releaseDate: "2025-10-01",
   }),
+  "claude-haiku-5-5": defineModel({
+    id: "claude-haiku-5-5",
+    name: "Claude Haiku 5.5",
+    family: "haiku",
+    reasoning: true,
+    context: 1_000_000,
+    output: 128_000,
+    cost: haiku55Cost,
+    multiplier: 0.1,
+    releaseDate: "2026-10-07",
+  }),
   "claude-sonnet-4-5": defineModel({
     id: "claude-sonnet-4-5",
     name: "Claude Sonnet 4.5",
@@ -218,8 +238,8 @@ export const defaultModels: Record<string, OpenCodeModel> = {
     reasoning: true,
     context: 1_000_000,
     output: 128_000,
-    cost: sonnetCost,
-    multiplier: 3,
+    cost: sonnet5Cost,
+    multiplier: 2,
     releaseDate: "2026-06-30",
   }),
   "claude-sonnet-5-5": defineModel({

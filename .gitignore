@@ -27,6 +27,7 @@ target
 .scripts/grepbench/grepbench.json
 .scripts/grepbench/grepbench-report.md
 .scripts/grepbench/grepbench.exe
+/claudeFlowReport-*.md
 opencode-dev
 logs/
 *.bun-build

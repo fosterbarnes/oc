@@ -13,6 +13,10 @@
 - A sidebar with usage meters, a file tree, changed files, and sub-agents, all clickable ([how](#sidebar))
 - Run your project's scripts from the sidebar in one click ([how](#script-runner))
 
+## Little day-to-day workflow features
+
+- Ability to favorite `/commands`
+- 
 
 ## Fix
 
@@ -79,8 +83,8 @@ Stock OpenCode lists only the current project's sessions. oc's session list show
 
 | Key (in the session list) | Action |
 |---|---|
-| `ctrl+shift+return` | Mark complete (✓) or clear |
-| `ctrl+shift+backspace` | Mark failed (✗) or clear |
+| `ctrl+shift+return` | Mark complete (:white_check_mark:) or clear |
+| `ctrl+shift+backspace` | Mark failed (:x:) or clear |
 | `ctrl+shift+i` | Mark in progress (-) or clear |
 | `ctrl+f` | Pin to the top of the list, or unpin |
 | `ctrl+s` | Filter by: unmarked, in progress, pinned, complete, failed |
@@ -136,7 +140,7 @@ Click a script to run it. Right-click to paste it into your prompt and copy it. 
 
 ## Progress
 
-[517,297](scc.txt) lines of code and counting...
+[519,173](scc.txt) lines of code and counting...
 
 <!-- code-count:start -->
 
@@ -148,28 +152,59 @@ Click a script to run it. Right-click to paste it into your prompt and copy it. 
 | HTML | 1 | 1,161 | 79 | 0 | 1,082 |
 | JavaScript | 23 | 5,259 | 419 | 63 | 4,777 |
 | Nix | 3 | 258 | 23 | 26 | 209 |
-| Powershell | 20 | 1,520 | 127 | 38 | 1,355 |
+| Powershell | 21 | 1,634 | 133 | 50 | 1,451 |
 | SQL | 95 | 592 | 0 | 17 | 575 |
 | Shell | 1 | 120 | 17 | 17 | 86 |
-| TypeScript | 2,726 | 530,649 | 43,060 | 15,041 | 472,548 |
-| **Total** | **3,045** | **582,311** | **49,225** | **15,789** | **517,297** |
+| TypeScript | 2,732 | 532,715 | 43,171 | 15,216 | 474,328 |
+| **Total** | **3,052** | **584,491** | **49,342** | **15,976** | **519,173** |
 
 <!-- code-count:end -->
 
 ## Writeup
 
-oc came about naturally. I had been toying around with OpenCode v1 TUI for a few weeks, and was very impressed with how it worked compared to alternative mainstream options (Codex desktop app, Claude Code desktop app, Cursor AI desktop app). At this point, my custom modifications and lite 'enhancements' to OpenCode were scoped to plugins. This worked for a time, but I found my goals becoming larger and larger in scope and ambition. At this point I found that source code edits were required to achieve my goals in way of getting the features and behavior I imagined and desired. There is not much documentation or version-tracking of this era of oc, considering it was intended to be a completely self-contained personal project. However, my goals are much different now.
+oc came about naturally. I had been toying around with OpenCode v1 TUI for a few weeks, and was very impressed with how it worked compared to alternative mainstream options (Codex desktop app, Claude Code desktop app, Cursor AI desktop app). At this point, my custom modifications and lite 'enhancements' to OpenCode were scoped to plugins. This worked for a time, but I found my goals becoming larger and larger in scope and ambition. At this point I found that source code edits were required to achieve my goals in way of getting the features and behavior I imagined and desired. There's not much documentation or version-tracking of this era of oc, considering it was intended to be a completely self-contained personal project. However, my goals are much different now.
 
-As I chipped away towards adding new 'native' features to the OpenCode TUI, and stripping some that I had no intention of using at the moment like the built-in web GUI, I realized that I may be creating something that other people may have great use for, just as I have found. This project won't be for everyone, but I hope some may find that it is exactly for them.
+As I chipped away towards adding new 'native' features to the OpenCode TUI, and stripping some that I had no intention of using at the moment like the built-in web GUI, I realized that I may be creating something that other people may have frequent if not daily use for, as I have found myself. This project won't be for everyone, but I hope some may find that it is exactly for them : )
 
-In its current state, I believe oc to be a faster, smarter, more performant take on OpenCode version 1, with some ideas stolen from OpenCode v2. (todo: put the top 'benchmarks' and comparisons to OpenCode v1 Windows vs oc Windows. I don't have these yet). Instead of having to remember how each mainstream harness's quirks work while writing every prompt, managing skills and plugins across apps, and losing time with sluggish, bloated app launches frequently, I kind of just wanted a simple system that allows me to interact with each of these things under the same general workflow under OpenCode. This project's intended workflow is rooted in native OpenCode practices, but you may find that certain things work a little bit differently than you may be used to.
+Native OpenCode presents you with a raw, blank canvas to inspire your own ideas. I love that philosophy of open source software, and how v2 expands on it further by making everything a plugin. 
 
-example:
-(todo)
+oc is not a replacement for the native, stable experience. Native OpenCode will continue (in my eyes) to be the best 'start from here' custom harness project. oc intends to give you a slight 'push' in a targeted direction, giving you more of a jumping-off point if that's something you're into. 
 
-Another thing you may not be used to lol... if you have an existing Cursor AI subscription plan or Claude Code subscription plan (not talking API keys, monthly/yearly subscriptions), oc knows how to interact with Cursor and Claude Code harnesses. At the end of the day, this means that you may select any model from any subscription you already pay for under the same exact /models menu where your native-to-OpenCode models live. While this may FEEL like you are 'hacking' around the system to somehow get external-harnessed-models to somehow 'expose' the underlying model API or system to 'get in'.... that's not how it works at all lmao.
+The goal is for oc to be a competent, feature-rich tool out of the box that a certain type of person will get a lot of real-world use out of. Users are and always will be encouraged to change things to their liking and add features, but the idea is to offer a project that hopefully lets users focus on the things they truly want, the things that truly interest and inspire them. 
+
+The intent is for users to reinvent the wheel as infrequently as possible if they'd like to, or to switch direction and change how the wheel works, which is also a completely acceptable approach.
+
+In its current state, I believe oc to be a faster, smarter, more performant take on OpenCode version 1, with some ideas taken from OpenCode v2. (todo: put the top 'benchmarks' and comparisons to OpenCode v1 Windows vs oc Windows. I don't have these yet). 
+
+Instead of having to remember how each mainstream harness's quirks work while writing every prompt, managing skills and plugins across apps, and losing time with sluggish, bloated app launches frequently, I just wanted a simple system that allows me to interact with each of these things under the same general workflow under OpenCode. This project's intended workflow is rooted in native OpenCode practices, but you may find that certain things work a little bit differently than you may be used to.
+
+For example:
+
+- Keybinds/keyboard combos are generally designed very differently. There is a config option to use binds closer to what OpenCode native designed, so keep that in mind if you find yourself unhappy with the keyboard shortcuts.
+- Closing the last window doesn't stop the running session. The oc server keeps running in the background, so your next launch opens fast and exactly where you left off.
+- The session list shows sessions from every project, not just the folder you're `cd`'d into. Picking a session still opens it in its own folder, synced by config.
+- `oc <folder>` names the new session after the folder (`oc`, `oc2`, ...) instead of asking a model to come up with a name. After the first prompt, you can have the session auto-named with `/rename`. Sessions that weren't started with `oc <folder>` or the `oc new session` command palette entry are still auto-renamed by native OpenCode.
+- Agents can mark their own session as in progress, and mark it complete when done. If more work comes up after supposed completion, they re-mark it as in progress.
+- More info can be found in the (future wiki goes here)
+
+Another thing you may not be used to lol... if you have an existing Cursor AI subscription plan or Claude Code subscription plan, oc knows how to interact with Cursor and Claude Code harnesses. (not talking API keys. those work out of the box with OpenCode. I'm talking monthly/yearly subscriptions)
+At the end of the day, this means that you may select any model from some subscriptions you already pay for under the same exact /models menu where your native-to-OpenCode models live. While this may FEEL like you are 'hacking' around the system to somehow get external-harnessed-models to somehow 'expose' the underlying model API or system to 'get in'.... that's not how it works at all lmao.
 
 It's really just a simple deterministic system designed around harness interaction, skills, and tool translation. The intention is not to replace the products it works with, or break any TOS while operating with them. The intention is to give a user a more streamlined, simplified general workflow solution, while leaving harness-specific features like computer use and others to their respective 'host' harness.
+
+That's also why, to get the full experience, oc assumes the user has:
+
+- OpenAI ChatGPT Codex $20 monthly plan
+- Claude Code $20 monthly plan
+- Cursor AI $20 monthly plan
+
+You may have one, two, all three, or none and oc will still work, but oc was designed for this model access environment. Many of its tools were built to make efficient use of three separate $20 desktop app plans under one simple coding harness.
+
+Day to day, I find my usage goes like this (written while Opus 5.5 is leading):
+
+- Exhaust the 5-hour Claude Code usage with Opus 5.5. Offload some work to Sol 6.1 (native OpenCode Codex connection) and Muse 1.3 free (native OpenCode connection). Occasionally use Grok 4.6 for review and debugging (Cursor AI integration).
+- Exhaust the Codex session usage limit. Same workflow as above, minus Opus as the forerunner: swap scope and prompting style a bit and use Sol 6.1 low-med as main, with Luna or Muse when difficulty/scope allows.
+- By this point, either my Claude Code or OpenAI usage has reset to 0% for the current window, so the main workflow stays the same. On very, very heavy work days, however, I may exhaust both Claude Code and Codex usage for the current window. This is where Cursor comes in. Cursor provides very, very generous Grok 4.6 usage, which can be used as a main in a pinch, or if you allocate your Cursor API usage carefully, you can resume using Opus 5.5 under Cursor's $20 plan. Because Cursor's usage window is monthly, it naturally fills in the gaps when you exhaust other temporary limits. If you keep all platforms in mind from the get-go and become less reactive to usage windows, you'll rarely run into usage issues that block you from working at any given moment.
 
 While you may have tried or used various OpenCode plugins whose end goals are similar regarding third-party harness 'connections', while using these I found minor problems at seemingly every turn. A lot of effort went into trying to figure out how these plugins worked, what to keep and iterate on, and what to start over from scratch. This is not a dig on any of those existing open-source plugins, they have been a crucial resource and have implicit contribution to some of oc's features. If you are working on a similar idea and have found some flaws in my system, please consider submitting either an issue or a pull request. I kindly ask that PRs may be intentional, tested, and scoped to the general intentions of this project.
 

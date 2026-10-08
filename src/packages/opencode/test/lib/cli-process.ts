@@ -59,7 +59,16 @@ function forkStderrDrain(stream: ReadableStream<Uint8Array>, into: string[]) {
   )
 }
 
-function isolatedEnv(home: string, configJson: string): Record<string, string> {
+// The shell env for a spawned oc. A test run from inside a Claude Code session (an agent host)
+// inherits its CLAUDE_*/ANTHROPIC_* variables, which reach every `claude` child and change what
+// it sends (the desktop entrypoint adds a background status request). The real-model token stays.
+export function hostEnv() {
+  return Object.fromEntries(
+    Object.entries(process.env).filter(([key]) => key === "CLAUDE_CODE_OAUTH_TOKEN" || !/^(CLAUDE|ANTHROPIC)/.test(key)),
+  )
+}
+
+export function isolatedEnv(home: string, configJson: string): Record<string, string> {
   return {
     OPENCODE_TEST_HOME: home,
     HOME: home,
@@ -213,8 +222,8 @@ export function withCliFixture<A, E>(
       // ignore; ChildProcess.make defaults to pipe, so we set it explicitly.
       const command = ChildProcess.make("bun", ["run", cliEntry, ...args], {
         cwd: home,
-        env: { ...env, ...opts?.env },
-        extendEnv: true,
+        env: { ...hostEnv(), ...env, ...opts?.env },
+        extendEnv: false,
         stdin: "ignore",
       })
       // Pass timeout to appProc.run rather than wrapping with
@@ -285,7 +294,7 @@ export function withCliFixture<A, E>(
         Effect.sync(() =>
           Bun.spawn(["bun", "run", cliEntry, ...runArgs(message, opts)], {
             cwd: home,
-            env: { ...process.env, ...env, ...options?.env },
+            env: { ...hostEnv(), ...env, ...options?.env },
             stdin: "ignore",
             stdout: "pipe",
             stderr: "pipe",
@@ -326,7 +335,7 @@ export function withCliFixture<A, E>(
         Effect.sync(() =>
           Bun.spawn(["bun", "run", cliEntry, ...argv], {
             cwd: home,
-            env: { ...process.env, ...env, ...opts?.env },
+            env: { ...hostEnv(), ...env, ...opts?.env },
             stdout: "pipe",
             stderr: "pipe",
           }),
@@ -397,7 +406,7 @@ export function withCliFixture<A, E>(
         Effect.sync(() =>
           Bun.spawn(["bun", "run", cliEntry, ...argv], {
             cwd: opts?.cwd ?? home,
-            env: { ...process.env, ...env, ...opts?.env },
+            env: { ...hostEnv(), ...env, ...opts?.env },
             stdin: "pipe",
             stdout: "pipe",
             stderr: "pipe",

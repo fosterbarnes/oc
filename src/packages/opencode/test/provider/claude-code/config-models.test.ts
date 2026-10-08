@@ -110,17 +110,17 @@ test("configModelsForProvider registers Sonnet 5 and Opus 5 metadata", () => {
   const models = configModelsForProvider({}, "claude-code")
 
   const sonnet = models["claude-sonnet-5"] as Record<string, unknown>
-  assert.equal(sonnet.name, "Claude Sonnet 5 (3×)")
+  assert.equal(sonnet.name, "Claude Sonnet 5 (2×)")
   assert.equal(sonnet.family, "sonnet")
   assert.equal(sonnet.release_date, "2026-06-30")
   assert.equal(sonnet.reasoning, true)
   assert.deepEqual(sonnet.limit, { context: 1_000_000, output: 128_000 })
   // Dollars per million tokens, the unit opencode/models.dev expect.
   assert.deepEqual(sonnet.cost, {
-    input: 3,
-    output: 15,
-    cache_read: 0.3,
-    cache_write: 3.75,
+    input: 2,
+    output: 10,
+    cache_read: 0.2,
+    cache_write: 2.5,
   })
 
   const opus = models["claude-opus-5"] as Record<string, unknown>
@@ -148,7 +148,19 @@ test("configModelsForProvider registers Sonnet 5.5 metadata", () => {
   assert.equal(model.release_date, "2026-09-28")
   assert.equal(model.reasoning, true)
   assert.deepEqual(model.limit, { context: 1_000_000, output: 128_000 })
-  assert.deepEqual(model.cost, { input: 2, output: 10, cache_read: 0.2, cache_write: 2.5 })
+  assert.deepEqual(model.cost, { input: 2, output: 10, cache_read: 0.1, cache_write: 2.5 })
+  assert.ok("max" in (model.variants as Record<string, unknown>))
+})
+
+// Base (<=100K prompt) card only; see `haiku55Cost`.
+test("configModelsForProvider registers Haiku 5.5 metadata", () => {
+  const model = configModelsForProvider({}, "claude-code")["claude-haiku-5-5"] as Record<string, unknown>
+  assert.ok(model, "claude-haiku-5-5 should be present")
+  assert.equal(model.name, "Claude Haiku 5.5 (0.1×)")
+  assert.equal(model.family, "haiku")
+  assert.equal(model.release_date, "2026-10-07")
+  assert.equal(model.reasoning, true)
+  assert.deepEqual(model.cost, { input: 0.1, output: 0.5, cache_read: 0.01, cache_write: 0.125 })
   assert.ok("max" in (model.variants as Record<string, unknown>))
 })
 
@@ -255,6 +267,7 @@ test("configModelsForProvider reports the published context and output limits", 
 
   // 4.6 and later: full 1M context, 128k output.
   for (const id of [
+    "claude-haiku-5-5",
     "claude-sonnet-4-6",
     "claude-sonnet-5",
     "claude-sonnet-5-5",
