@@ -555,6 +555,12 @@ const layer = Layer.effect(
             return
           }
 
+          // Live context only; cost is added once by step-finish.
+          case "usage":
+            ctx.assistantMessage.tokens = Session.getUsage({ model: ctx.model, usage: value.usage }).tokens
+            yield* session.updateMessage(ctx.assistantMessage)
+            return
+
           case "text-start":
             ctx.currentText = {
               id: PartID.ascending(),

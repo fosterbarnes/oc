@@ -146,6 +146,29 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-08 (~02:42) - v0.2.125 - Live context usage during Claude Code turns - Claude Opus 5.5, low reasoning; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low reasoning; Implementation (imp) from `liveContextPlan.md`; completed
+- Version: 0.2.125
+- Cause: Claude Code runs the whole agent loop as one AI SDK step; usage only reached `assistantMessage.tokens` at the final `finish`, so footer `usage()` (`tui/.../prompt/index.tsx`) and sidebar Context stayed empty (first turn) or stale all turn.
+- Added `LLMEvent.usage` (`UsageUpdate`, tag `usage`) in `llm/src/schema/events.ts`: interim usage of a running step.
+- Added `ClaudeTurn.reportLiveUsage` (`provider/claude-code/turn-stream.ts`): after each main-thread `message_delta`/`assistant` line, enqueues `raw` chunk `{ claudeCodeUsage }` in AI SDK flat usage shape. Skips `parent_tool_use_id` subagent lines.
+- `session/llm.ts`: `includeRawChunks` also on for `isClaudeCodeProvider`.
+- `session/llm/ai-sdk.ts` `raw`: maps `claudeCodeUsage` to `LLMEvent.usage`; Copilot handling kept.
+- `session/processor.ts` `usage` case: sets tokens via `Session.getUsage`, `updateMessage`; no cost (step-finish adds it once), no parts/snapshot/overflow.
+- Added fake-model test `live context: tokens update before the turn finishes` (holds 2nd call with `reply().wait`, polls messages mid-turn).
+- Verification: `bun run typecheck` in `packages/opencode` and `packages/llm` clean; full `fake-model.test.ts` 19 pass. Pane check not added.
+- MISTAKE: first test draft used `reply().text().usage()` without `.stop()`; fake then sends zero final usage. Use `.stop()` (as `llm.text` does) for scripted final replies.
+- TODO: cost still updates only at turn end (would need per-call pricing).
+
+### User
+Claude Code context display
+- The context token count and % in the prompt footer and sidebar now update while a Claude Code turn is still running, instead of staying empty or showing the previous turn.
+- Cost still updates when the turn finishes.
+
+---
+
 ## 2026-10-08 (~02:26) - v0.2.124 - Token-lean agent push - Claude Opus 5.5, low reasoning; Implementation
 
 ### Agent

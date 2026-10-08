@@ -3,6 +3,7 @@ import { Effect, Schema } from "effect"
 import { type streamText } from "ai"
 import { errorMessage } from "@/util/error"
 import { ProviderError } from "@/provider/error"
+import { isRecord } from "@/util/record"
 
 type Result = Awaited<ReturnType<typeof streamText>>
 type AISDKEvent = Result["fullStream"] extends AsyncIterable<infer T> ? T : never
@@ -277,7 +278,10 @@ export function toLLMEvents(
     case "raw":
       return Effect.sync(() => {
         state.copilotTotalNanoAiu = copilotTotalNanoAiu(event.rawValue) ?? state.copilotTotalNanoAiu
-        return []
+        // The Claude Code provider runs a whole agent loop in one step and reports each
+        // model call's usage here so context stays live until the step finishes.
+        const live = isRecord(event.rawValue) ? usage(event.rawValue.claudeCodeUsage) : undefined
+        return live ? [LLMEvent.usage({ usage: live })] : []
       })
 
     default: {

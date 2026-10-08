@@ -663,6 +663,44 @@ describe.skipIf(!cliPath)("Claude Code CLI against TestLLMServer", () => {
     120_000,
   )
 
+  // The whole agent loop is one oc step, so without live usage the footer and sidebar context
+  // stay empty until the turn ends. Hold the second call and read tokens mid-turn.
+  cliIt.live(
+    "live context: tokens update before the turn finishes",
+    (fixture) =>
+      Effect.gen(function* () {
+        const llm = fixture.llm
+        const chat = yield* openChat(fixture)
+        const file = path.join(chat.project, "a.txt")
+        yield* Effect.promise(() => Bun.write(file, "file a"))
+        const release = Promise.withResolvers<void>()
+        yield* llm.push(reply().tool("Read", { file_path: file }).usage({ input: 4, output: 30, cacheRead: 900, cacheWrite: 100 }))
+        yield* llm.push(reply().wait(release.promise).text("read a.txt").stop().usage({ input: 6, output: 42, cacheRead: 1000, cacheWrite: 20 }))
+
+        const turn = yield* chat.prompt("Read a.txt.").pipe(Effect.forkScoped)
+        yield* llm.wait(2)
+        const live = yield* pollWithTimeout(
+          Effect.promise(() => chat.sdk.session.messages({ sessionID: chat.sessionID })).pipe(
+            Effect.map((result) => {
+              const info = result.data?.at(-1)?.info
+              return info?.role === "assistant" && !info.time.completed && info.tokens.output > 0 ? info : undefined
+            }),
+          ),
+          "no live tokens while the turn was running",
+          "30 seconds",
+        )
+        expect(live.tokens).toMatchObject({ input: 4, output: 30, cache: { read: 900, write: 100 } })
+        expect(live.cost).toBe(0)
+
+        release.resolve()
+        yield* Fiber.join(turn)
+        const last = (yield* Effect.promise(() => chat.sdk.session.messages({ sessionID: chat.sessionID }))).data!.at(-1)!
+        expect(last.info.role === "assistant" && last.info.tokens).toMatchObject({ input: 6, output: 42 })
+        expectIsolated(yield* llm.inputs)
+      }),
+    120_000,
+  )
+
   // claudeTestFlow report steps 5-8 (usage limit) and the auth-failure run: an API error the
   // CLI reports both as a synthetic assistant reply and as the failed result's text.
   cliIt.live(

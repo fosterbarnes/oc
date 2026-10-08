@@ -140,7 +140,7 @@ Click a script to run it. Right-click to paste it into your prompt and copy it. 
 
 ## Progress
 
-[519,357](scc.txt) lines of code and counting...
+[519,426](scc.txt) lines of code and counting...
 
 <!-- code-count:start -->
 
@@ -155,8 +155,8 @@ Click a script to run it. Right-click to paste it into your prompt and copy it. 
 | Powershell | 22 | 1,682 | 137 | 55 | 1,490 |
 | SQL | 95 | 592 | 0 | 17 | 575 |
 | Shell | 1 | 120 | 17 | 17 | 86 |
-| TypeScript | 2,733 | 532,874 | 43,178 | 15,223 | 474,473 |
-| **Total** | **3,054** | **584,698** | **49,353** | **15,988** | **519,357** |
+| TypeScript | 2,733 | 532,961 | 43,184 | 15,235 | 474,542 |
+| **Total** | **3,054** | **584,785** | **49,359** | **16,000** | **519,426** |
 
 <!-- code-count:end -->
 

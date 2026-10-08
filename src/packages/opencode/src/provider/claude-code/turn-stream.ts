@@ -513,16 +513,43 @@ class ClaudeTurn {
         // The call's `assistant` line came earlier with message_start's usage, whose output
         // count is about 1; the final counts arrive here.
         const counts = Object.entries(delta.usage ?? {}).filter((entry) => typeof entry[1] === "number")
-        if (this.gotPartialEvents && counts.length) this.lastCall = { ...this.lastCall, ...Object.fromEntries(counts) }
+        if (this.gotPartialEvents && counts.length) {
+          this.lastCall = { ...this.lastCall, ...Object.fromEntries(counts) }
+          this.reportLiveUsage(outer)
+        }
         return
       }
       case "assistant":
-        return this.onAssistant(msg)
+        this.onAssistant(msg)
+        return this.reportLiveUsage(outer)
       case "user":
         return this.onUser(msg)
       case "result":
         return this.onResult(msg)
     }
+  }
+
+  /**
+   * The whole agent loop is one opencode step, so the final `finish` is the only
+   * usage opencode would see. Send each main-thread call's usage as a raw chunk
+   * (AI SDK flat shape) so the context display stays live during the turn.
+   */
+  private reportLiveUsage(outer: ClaudeStreamMessage) {
+    if (outer.parent_tool_use_id || !this.lastCall) return
+    const usage = toUsage(contextUsage(this.lastCall))
+    this.out.enqueue({
+      type: "raw",
+      rawValue: {
+        claudeCodeUsage: {
+          inputTokens: usage.inputTokens.total,
+          outputTokens: usage.outputTokens.total,
+          inputTokenDetails: {
+            cacheReadTokens: usage.inputTokens.cacheRead,
+            cacheWriteTokens: usage.inputTokens.cacheWrite,
+          },
+        },
+      },
+    })
   }
 
   private onSystem(msg: ClaudeStreamMessage) {
