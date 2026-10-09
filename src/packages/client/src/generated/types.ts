@@ -2635,9 +2635,30 @@ export type ProjectCopiesCreateInput = {
   readonly location?: {
     readonly location?: { readonly directory?: string | undefined; readonly workspace?: string | undefined } | undefined
   }["location"]
-  readonly strategy: { readonly strategy: string; readonly directory: string; readonly name?: string }["strategy"]
-  readonly directory: { readonly strategy: string; readonly directory: string; readonly name?: string }["directory"]
-  readonly name?: { readonly strategy: string; readonly directory: string; readonly name?: string }["name"]
+  readonly strategy: {
+    readonly strategy: string
+    readonly directory: string
+    readonly name?: string
+    readonly state?: boolean
+  }["strategy"]
+  readonly directory: {
+    readonly strategy: string
+    readonly directory: string
+    readonly name?: string
+    readonly state?: boolean
+  }["directory"]
+  readonly name?: {
+    readonly strategy: string
+    readonly directory: string
+    readonly name?: string
+    readonly state?: boolean
+  }["name"]
+  readonly state?: {
+    readonly strategy: string
+    readonly directory: string
+    readonly name?: string
+    readonly state?: boolean
+  }["state"]
 }
 
 export type ProjectCopiesCreateOutput = { readonly directory: string }

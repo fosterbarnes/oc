@@ -6975,6 +6975,7 @@ export class ProjectCopy2 extends HeyApiClient {
       strategy?: string
       directory?: string
       name?: string
+      state?: boolean
     },
     options?: Options<never, ThrowOnError>,
   ) {
@@ -6988,6 +6989,7 @@ export class ProjectCopy2 extends HeyApiClient {
             { in: "body", key: "strategy" },
             { in: "body", key: "directory" },
             { in: "body", key: "name" },
+            { in: "body", key: "state" },
           ],
         },
       ],

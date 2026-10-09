@@ -1,9 +1,12 @@
-v0.2.135
+v0.2.137
 
 work directories:
-/work creates its project copy from the session checkout, including when the TUI was launched from home. /done uses the copy directory for merge and removal. Both commands ignore repeat requests while work is in progress.
+/work copies staged, unstaged, and untracked contents without changing the source checkout or index. /done brings only the copy's changes back into its original parent as unstaged edits, preserving the parent's own work and newer commits. Nested copies return to their recorded parent. Conflicts list affected paths and leave the parent unchanged.
 
-work diagnostics:
-Added temporary workDebug logging for copy creation, source lookup, session moves, change transfer, and merge cleanup to trace reproduction failures.
+work cleanup:
+The copy instance is disposed before its folder is removed. State copies install dependencies when a root package.json exists, with installation failures reported as warnings. Removed temporary work diagnostics and the change-transfer dialog.
 
-Under the hood: corrected location payloads in the prompt move flow and added diagnostic logging across the TUI, project-copy handler, and core services. No targeted tests apply to changed test files. Pre-push checks passed.
+git checkouts:
+Git operations respect the repository's autocrlf setting, preserving CRLF checkout contents without phantom changes.
+
+Under the hood: added snapshot-based copies and explicit-base merges with temporary indexes, retained parent/base metadata, and regenerated the client variants and legacy SDK for optional copy state. Increased the nested-copy test timeout for sequential Windows Git operations. Targeted Git tests and pre-push checks passed.

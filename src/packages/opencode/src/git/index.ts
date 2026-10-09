@@ -3,10 +3,10 @@ import { AppProcess } from "@opencode-ai/core/process"
 import { Effect, Layer, Context, Stream } from "effect"
 import { ChildProcess } from "effect/unstable/process"
 
+// No core.autocrlf override: this runs on the user's repo, and forcing it off makes every CRLF
+// checkout of an LF-indexed file read as fully modified when the user has autocrlf=true.
 const cfg = [
   "--no-optional-locks",
-  "-c",
-  "core.autocrlf=false",
   "-c",
   "core.fsmonitor=false",
   "-c",

@@ -14155,6 +14155,7 @@ export type V2ProjectCopyCreateData = {
     strategy: string
     directory: string
     name?: string
+    state?: boolean
   }
   path: {
     projectID: string

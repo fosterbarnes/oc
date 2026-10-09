@@ -116,14 +116,19 @@ export interface Interface {
       repository: Repository
       directory: AbsolutePath
     }) => Effect.Effect<Repository, WorktreeError>
+    readonly copy: (input: {
+      repository: Repository
+      directory: AbsolutePath
+      name: string
+    }) => Effect.Effect<Repository, WorktreeError>
     readonly remove: (input: {
       repository: Repository
       directory: AbsolutePath
       force: boolean
     }) => Effect.Effect<void, WorktreeError>
     readonly list: (repository: Repository) => Effect.Effect<readonly Worktree[], WorktreeError>
-    /** Squash every change in `copy` (committed or not) into `main` as staged, uncommitted changes. */
-    readonly merge: (input: { copy: Repository; main: Repository; message: string }) => Effect.Effect<void, WorktreeError>
+    /** Merge only the copy's changes into its recorded parent, preserving the real index. */
+    readonly merge: (input: { copy: Repository }) => Effect.Effect<AbsolutePath, WorktreeError>
   }
   readonly index: {
     /** Refresh only the requested project-relative scope, preserving all other entries. */
@@ -860,15 +865,27 @@ const layer = Layer.effect(
       args: string[],
       worktreeDirectory?: AbsolutePath,
       cwd = repository.worktree,
+      options?: { env?: Record<string, string>; stdin?: string },
     ) {
       const result = yield* proc
-        .run(ChildProcess.make("git", args, { cwd, extendEnv: true, stdin: "ignore" }))
+        .run(ChildProcess.make("git", args, { cwd, env: options?.env, extendEnv: true, stdin: "ignore" }), {
+          stdin: options?.stdin,
+        })
         .pipe(
           Effect.mapError(
             (cause) => new WorktreeError({ operation, directory: worktreeDirectory, message: cause.message, cause }),
           ),
         )
       if (result.exitCode === 0) return result.stdout.toString("utf8")
+      if (result.exitCode === 1 && args[0] === "merge-tree") {
+        const sections = result.stdout.toString("utf8").split("\0")
+        const conflicts = sections.slice(1, sections.indexOf("", 1))
+        return yield* new WorktreeError({
+          operation,
+          directory: worktreeDirectory,
+          message: `Work merge conflicts: ${conflicts.join(", ") || result.stdout.toString("utf8")}`,
+        })
+      }
       const message = result.stderr.toString("utf8").trim() || result.stdout.toString("utf8").trim() || "Git failed"
       return yield* new WorktreeError({
         operation,
@@ -911,27 +928,159 @@ const layer = Layer.effect(
       )
     })
 
-    // Snapshots the copy with plumbing (`write-tree`/`commit-tree`) so commit hooks never run on the
-    // throwaway commit. A failed squash is rolled back; `main` was clean, so nothing of the user's is lost.
-    const worktreeMerge = Effect.fn("Git.worktree.merge")(function* (input: {
-      copy: Repository
-      main: Repository
-      message: string
+    const snapshot = Effect.fn("Git.worktree.snapshot")(function* (
+      repository: Repository,
+      operation: "create" | "merge",
+    ) {
+      const index = path.join(repository.gitDirectory, `work-${randomUUID()}.index`)
+      return yield* Effect.gen(function* () {
+        const original = path.join(repository.gitDirectory, "index")
+        if (yield* fs.existsSafe(original)) yield* fs.copyFile(original, index)
+        const options = { env: { GIT_INDEX_FILE: index } }
+        yield* worktreeRun(operation, repository, ["add", "-A"], repository.worktree, repository.worktree, options)
+        const tree = (yield* worktreeRun(
+          operation,
+          repository,
+          ["write-tree"],
+          repository.worktree,
+          repository.worktree,
+          options,
+        )).trim()
+        const parent = yield* head(repository)
+        return (yield* worktreeRun(operation, repository, [
+          "commit-tree",
+          tree,
+          ...(parent ? ["-p", parent] : []),
+          "-m",
+          "oc work snapshot",
+        ])).trim()
+      }).pipe(
+        Effect.mapError((cause) =>
+          cause instanceof WorktreeError
+            ? cause
+            : new WorktreeError({
+                operation,
+                directory: repository.worktree,
+                message: "Failed to snapshot checkout",
+                cause,
+              }),
+        ),
+        Effect.ensuring(fs.remove(index, { force: true }).pipe(Effect.orDie)),
+      )
+    })
+
+    const worktreeCopy = Effect.fn("Git.worktree.copy")(function* (input: {
+      repository: Repository
+      directory: AbsolutePath
+      name: string
     }) {
-      const status = yield* worktreeRun("merge", input.main, ["status", "--porcelain", "--untracked-files=no"])
-      if (status.trim())
+      const base = yield* snapshot(input.repository, "create")
+      yield* worktreeRun("create", input.repository, ["update-ref", `refs/oc/work/${input.name}`, base])
+      yield* worktreeRun(
+        "create",
+        input.repository,
+        ["worktree", "add", "--detach", input.directory, base],
+        input.directory,
+      )
+      yield* worktreeRun("create", input.repository, [
+        "config",
+        `oc.work.${input.name}.parent`,
+        input.repository.worktree,
+      ])
+      yield* worktreeRun("create", input.repository, ["config", `oc.work.${input.name}.base`, base])
+      const repository = yield* discover(input.directory)
+      if (repository) return repository
+      return yield* new WorktreeError({
+        operation: "create",
+        directory: input.directory,
+        message: "Created worktree could not be opened",
+      })
+    })
+
+    const worktreeMerge = Effect.fn("Git.worktree.merge")(function* (input: { copy: Repository }) {
+      const name = path.basename(input.copy.worktree)
+      const config = (key: string) =>
+        worktreeRun("merge", input.copy, ["config", "--get", `oc.work.${name}.${key}`]).pipe(
+          Effect.map((value) => value.trim()),
+          Effect.catch(() =>
+            Effect.fail(
+              new WorktreeError({
+                operation: "merge",
+                directory: input.copy.worktree,
+                message: `Missing recorded work copy ${key}: ${input.copy.worktree}`,
+              }),
+            ),
+          ),
+        )
+      const parentDirectory = AbsolutePath.make(yield* config("parent"))
+      const base = yield* config("base")
+      const parent = yield* discover(parentDirectory)
+      if (!parent)
         return yield* new WorktreeError({
           operation: "merge",
-          directory: input.main.worktree,
-          message: `Uncommitted changes in ${input.main.worktree}; commit or stash them first`,
+          directory: parentDirectory,
+          message: "Recorded parent repository not found",
         })
-      yield* worktreeRun("merge", input.copy, ["add", "-A"])
-      const tree = (yield* worktreeRun("merge", input.copy, ["write-tree"])).trim()
-      const commit = (yield* worktreeRun("merge", input.copy, ["commit-tree", tree, "-p", "HEAD", "-m", input.message]))
-        .trim()
-      yield* worktreeRun("merge", input.main, ["merge", "--squash", commit]).pipe(
-        Effect.tapError(() => worktreeRun("merge", input.main, ["reset", "--merge"]).pipe(Effect.ignore)),
+      const copy = yield* snapshot(input.copy, "merge")
+      const current = yield* snapshot(parent, "merge")
+      // NUL-delimited conflict names are separate from Git's human-readable messages.
+      const merged = yield* worktreeRun(
+        "merge",
+        parent,
+        ["merge-tree", "--write-tree", "--name-only", "-z", "--merge-base", base, current, copy],
+        parentDirectory,
       )
+      const tree = merged.split("\0")[0].trim()
+      const changes = (yield* worktreeRun("merge", parent, [
+        "diff",
+        "--name-status",
+        "--no-renames",
+        "-z",
+        current,
+        tree,
+      ])).split("\0")
+      const paths = changes.flatMap((status, index) =>
+        index % 2 === 0 && status ? [{ status, file: changes[index + 1] }] : [],
+      )
+      const index = path.join(parent.gitDirectory, `work-${randomUUID()}.index`)
+      yield* Effect.gen(function* () {
+        const options = { env: { GIT_INDEX_FILE: index } }
+        yield* worktreeRun("merge", parent, ["read-tree", tree], parentDirectory, parentDirectory, options)
+        // Remove first to allow file/directory replacements; checkout applies smudge/autocrlf.
+        yield* Effect.forEach(
+          paths.filter((item) => item.status === "D"),
+          (item) => fs.remove(path.join(parentDirectory, item.file), { force: true }),
+          { discard: true },
+        )
+        const checkout = paths.filter((item) => item.status !== "D").map((item) => item.file)
+        if (checkout.length)
+          yield* worktreeRun(
+            "merge",
+            parent,
+            ["checkout-index", "-f", "--stdin", "-z"],
+            parentDirectory,
+            parentDirectory,
+            {
+              ...options,
+              stdin: checkout.join("\0") + "\0",
+            },
+          )
+      }).pipe(
+        Effect.mapError((cause) =>
+          cause instanceof WorktreeError
+            ? cause
+            : new WorktreeError({
+                operation: "merge",
+                directory: parentDirectory,
+                message: "Failed to write merged files",
+                cause,
+              }),
+        ),
+        Effect.ensuring(fs.remove(index, { force: true }).pipe(Effect.orDie)),
+      )
+      yield* worktreeRun("merge", parent, ["update-ref", "-d", `refs/oc/work/${name}`])
+      yield* worktreeRun("merge", parent, ["config", "--remove-section", `oc.work.${name}`])
+      return parentDirectory
     })
 
     const worktreeList = Effect.fn("Git.worktree.list")(function* (repository: Repository) {
@@ -953,7 +1102,13 @@ const layer = Layer.effect(
       history: { head, branch, defaultRemoteBranch: remoteHead, rootCommits: roots },
       sync: { fetchRemotes: fetch, fetchBranch, checkoutRemoteBranch: checkout, resetHard: reset },
       change: { capture, apply, discard },
-      worktree: { create: worktreeCreate, remove: worktreeRemove, list: worktreeList, merge: worktreeMerge },
+      worktree: {
+        create: worktreeCreate,
+        copy: worktreeCopy,
+        remove: worktreeRemove,
+        list: worktreeList,
+        merge: worktreeMerge,
+      },
       index: { refresh, ignored },
       tree: {
         capture: captureTree,

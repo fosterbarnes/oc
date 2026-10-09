@@ -571,12 +571,13 @@ type Endpoint17_0Input = {
   readonly strategy: Endpoint17_0Request["payload"]["strategy"]
   readonly directory: Endpoint17_0Request["payload"]["directory"]
   readonly name?: Endpoint17_0Request["payload"]["name"]
+  readonly state?: Endpoint17_0Request["payload"]["state"]
 }
 const Endpoint17_0 = (raw: RawClient["server.projectCopy"]) => (input: Endpoint17_0Input) =>
   raw["projectCopy.create"]({
     params: { projectID: input["projectID"] },
     query: { location: input["location"] },
-    payload: { strategy: input["strategy"], directory: input["directory"], name: input["name"] },
+    payload: { strategy: input["strategy"], directory: input["directory"], name: input["name"], state: input["state"] },
   }).pipe(Effect.mapError(mapClientError))
 
 type Endpoint17_1Request = Parameters<RawClient["server.projectCopy"]["projectCopy.remove"]>[0]

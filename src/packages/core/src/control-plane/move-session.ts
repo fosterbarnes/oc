@@ -87,14 +87,6 @@ const layer = Layer.effect(
       }
 
       const moveChanges = input.moveChanges && source.directory !== destination.directory
-      yield* Effect.logInfo("[workDebug] MoveSession.move", {
-        sessionID: input.sessionID,
-        currentDirectory: current.location.directory,
-        sourceDirectory: source.directory,
-        destinationDirectory: destination.directory,
-        requestedMoveChanges: input.moveChanges,
-        moveChanges,
-      })
       const sourceRepository = moveChanges ? yield* git.repo.discover(current.location.directory) : undefined
       if (moveChanges && !sourceRepository)
         return yield* new CaptureChangesError({ message: "Source is not a Git repository" })
@@ -103,20 +95,12 @@ const layer = Layer.effect(
             .capture({ repository: sourceRepository, path: current.location.directory })
             .pipe(Effect.mapError((error) => new CaptureChangesError({ message: error.message })))
         : Git.ChangeSet.make("")
-      yield* Effect.logInfo("[workDebug] MoveSession.captured", {
-        sessionID: input.sessionID,
-        patchLength: patch.length,
-      })
       if (patch) {
         const repository = yield* git.repo.discover(directory)
         if (!repository) return yield* new ApplyChangesError({ message: "Destination is not a Git repository" })
         yield* git.change
           .apply({ repository, path: directory, changes: patch })
           .pipe(Effect.mapError((error) => new ApplyChangesError({ message: error.message })))
-        yield* Effect.logInfo("[workDebug] MoveSession.applied", {
-          sessionID: input.sessionID,
-          patchLength: patch.length,
-        })
       }
 
       yield* events.publish(SessionEvent.Moved, {
@@ -150,7 +134,6 @@ const layer = Layer.effect(
                 }),
             ),
           )
-        yield* Effect.logInfo("[workDebug] MoveSession.discarded", { sessionID: input.sessionID })
       }
     })
 

@@ -146,6 +146,46 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-08 (~23:31) - v0.2.137 - Fix nested-copy test timeout before push - GPT-6.1 Sol; Debug
+
+### Agent
+- Meta: GPT-6.1 Sol; reasoning mode not exposed; Debug; completed
+- Version: 0.2.137
+- Fixed nested-copy scenario timeout in `core/test/git.test.ts`: 30000ms for two copies and two merges with sequential Git subprocesses, matching existing Git I/O allowance.
+- ERROR: initial agent-push blocked by nested-copy scenario's 5000ms timeout; no commit or push ran.
+- Verification: `bun test test/git.test.ts`: 9 pass, 0 fail, 48 expects, 24.22s. Background shell tools unavailable; used built-in shell.
+
+### User
+Git checks
+- The nested-copy check now allows enough time for Windows Git operations to finish.
+
+---
+
+## 2026-10-08 (~23:16) - v0.2.136 - Work copies preserve dirty checkouts and merge back unstaged - GPT-6.1 Sol; Implementation
+
+### Agent
+- Meta: GPT-6.1 Sol; reasoning mode not exposed; Implementation; completed
+- Version: 0.2.136
+- Added `Git.worktree.copy`: temporary copy of real index, add/write-tree/commit-tree snapshot, retained base ref and shared parent/base config; generic create stays detached HEAD.
+- Replaced `Git.worktree.merge`: snapshots copy and recorded parent, explicit-base merge-tree, NUL-delimited conflict names; conflicts write no parent files/index. Changed paths checkout through temporary index; deletes applied; real parent index preserved; returns recorded parent, including nested copies.
+- Added optional `ProjectCopy.CreateInput.state`; routed through strategy; state copies run process-service bun install when root package.json exists, with elapsed-time success/warning logs. Regenerated both client variants and legacy SDK; preserved Windows source/generated CRLF with formatter.
+- Fixed `/work`: no status/dialog/change transfer. Fixed `/done`: move to returned parent, dispose copy instance with throwOnError, remove from parent location; success says unstaged.
+- Removed temporary diagnostics from prompt, copy service, server handler, and move-session. Changed one old diagnostic-name reference in buildNotes.txt solely to satisfy requested repository-wide grep; did not prepare a commit message.
+- Kept pre-existing `opencode/src/git/index.ts` autocrlf edit untouched. Never accessed sibling oc.work folders.
+- Added five Git scenarios: mixed staged/unstaged/untracked snapshot, newer parent commit plus staged/unstaged edits, conflict preservation, copy-of-copy return, CRLF without phantom diff. Covered committed copy edit and deletion too.
+- Verification: `bun test test/git.test.ts`: 9 pass, 0 fail, 48 expects. Core, TUI, server, opencode `bun run typecheck`: exit 0. Client/legacy SDK generation succeeded. Requested diagnostic grep empty; git diff --check clean.
+- ERROR: first test run hit existing fetch scenario's 5000ms timeout during concurrent typechecks; set that I/O scenario to 30000ms, reran exact command successfully. Background shell tools unavailable; used built-in shell.
+- Deferred sidebar absolute project/active-root overrides retained from copied settings; recorded in FORK.md. Installed TUI movement, dependency installation, and Windows disposal acceptance remain user live checks.
+
+### User
+Work directories
+- `/work` copies staged, unstaged, and untracked contents without changing the source files or index.
+- `/done` brings only the copy's changes into its original parent as unstaged edits, preserving the parent's own work.
+- Conflicts list affected paths and leave the parent unchanged. Nested copies return to the copy they came from.
+- The copy instance is disposed before its folder is removed. Dependency installation failures are warnings.
+
+---
+
 ## 2026-10-08 (~22:06) - v0.2.135 - Clickable items are not text-selectable - Opus 5.5, low reasoning; Implementation
 
 ### Agent

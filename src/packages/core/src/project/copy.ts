@@ -15,6 +15,8 @@ import { Database } from "../database/database"
 import { Location } from "../location"
 import { Event } from "@opencode-ai/schema/project-directories"
 import { ProjectCopy } from "@opencode-ai/schema/project-copy"
+import { AppProcess } from "../process"
+import { ChildProcess } from "effect/unstable/process"
 
 export const StrategyID = ProjectCopy.StrategyID
 export type StrategyID = typeof StrategyID.Type
@@ -91,6 +93,7 @@ export interface Strategy {
   readonly create: (input: {
     sourceDirectory: AbsolutePath
     directory: AbsolutePath
+    state?: boolean
   }) => Effect.Effect<Copy, Git.WorktreeError | DirectoryUnavailableError>
   readonly remove: (input: {
     directory: AbsolutePath
@@ -105,7 +108,7 @@ export interface Interface {
   readonly register: (strategy: Strategy) => Effect.Effect<void, DuplicateStrategyError>
   readonly create: (input: CreateInput) => Effect.Effect<Copy, Error>
   readonly remove: (input: RemoveInput) => Effect.Effect<void, Error>
-  /** Squash a git worktree copy into its main checkout; returns the main checkout directory. */
+  /** Merge a state copy into its recorded parent as unstaged changes. */
   readonly merge: (input: MergeInput) => Effect.Effect<Copy, Error>
   readonly refresh: (input: RefreshInput) => Effect.Effect<RefreshResult, Error>
 }
@@ -135,6 +138,7 @@ const layer = Layer.effect(
   Effect.gen(function* () {
     const fs = yield* FSUtil.Service
     const git = yield* Git.Service
+    const proc = yield* AppProcess.Service
     const directories = yield* ProjectDirectories.Service
     const db = (yield* Database.Service).db
     const events = yield* EventV2.Service
@@ -164,18 +168,7 @@ const layer = Layer.effect(
     const source = Effect.fnUntraced(function* (input: AbsolutePath, projectID: Project.ID) {
       const sourceDirectory = yield* canonical(input)
       const contained = yield* directories.contains({ projectID, directory: sourceDirectory })
-      yield* Effect.logInfo("[workDebug] ProjectCopy.source", {
-        input,
-        sourceDirectory,
-        projectID,
-        contained,
-      })
       if (!contained) {
-        const stored = yield* directories.list(projectID)
-        yield* Effect.logInfo("[workDebug] ProjectCopy.source.miss", {
-          projectID,
-          directories: stored.map((item) => item.directory),
-        })
         return yield* new SourceDirectoryNotFoundError({ directory: sourceDirectory })
       }
       return sourceDirectory
@@ -203,7 +196,30 @@ const layer = Layer.effect(
       const result = yield* selected.create({
         directory: copyDirectory,
         sourceDirectory,
+        state: input.state,
       })
+      if (input.state && (yield* fs.existsSafe(path.join(result.directory, "package.json")))) {
+        // User may later replace installation with a node_modules junction, or no installation.
+        const start = Date.now()
+        yield* proc
+          .run(ChildProcess.make("bun", ["install"], { cwd: result.directory, extendEnv: true, stdin: "ignore" }))
+          .pipe(
+            Effect.flatMap(AppProcess.requireSuccess),
+            Effect.tap(() =>
+              Effect.logInfo("work copy dependencies installed", {
+                directory: result.directory,
+                ms: Date.now() - start,
+              }),
+            ),
+            Effect.catch((cause) =>
+              Effect.logWarning("work copy dependency installation failed", {
+                directory: result.directory,
+                ms: Date.now() - start,
+                cause,
+              }),
+            ),
+          )
+      }
       yield* changed(
         input.projectID,
         yield* directories.create({
@@ -236,11 +252,7 @@ const layer = Layer.effect(
       if (stored?.strategy !== "git_worktree") return yield* new InvalidDirectoryError({ directory: copyDirectory })
       const copy = yield* git.repo.discover(copyDirectory)
       if (!copy) return yield* new DirectoryUnavailableError({ directory: copyDirectory })
-      const root = (yield* git.worktree.list(copy)).find((entry) => entry.kind === "main")
-      const main = root ? yield* git.repo.discover(root.directory) : undefined
-      if (!main) return yield* new DirectoryUnavailableError({ directory: copyDirectory })
-      yield* git.worktree.merge({ copy, main, message: `work: ${path.basename(copyDirectory)}` })
-      return { directory: main.worktree }
+      return { directory: yield* git.worktree.merge({ copy }) }
     })
 
     const refresh = Effect.fn("ProjectCopy.refresh")(function* (input: RefreshInput) {
@@ -314,7 +326,7 @@ export const locationLayer = layer
 export const node = makeLocationNode({
   service: Service,
   layer: layer,
-  deps: [FSUtil.node, Git.node, ProjectDirectories.node, EventV2.node, Database.node],
+  deps: [FSUtil.node, Git.node, AppProcess.node, ProjectDirectories.node, EventV2.node, Database.node],
 })
 
 export const refreshNode = makeLocationNode({

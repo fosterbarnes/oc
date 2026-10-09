@@ -32,26 +32,29 @@ describe("Git", () => {
     ),
   )
 
-  it.live("fetches, checks out, and resets remote changes", () =>
-    withRemote((fixture) =>
-      Effect.gen(function* () {
-        const git = yield* Git.Service
-        const target = AbsolutePath.make(path.join(fixture.root, "checkout"))
-        const repository = yield* git.repo.clone({ remote: fixture.remote, directory: target })
+  it.live(
+    "fetches, checks out, and resets remote changes",
+    () =>
+      withRemote((fixture) =>
+        Effect.gen(function* () {
+          const git = yield* Git.Service
+          const target = AbsolutePath.make(path.join(fixture.root, "checkout"))
+          const repository = yield* git.repo.clone({ remote: fixture.remote, directory: target })
 
-        yield* Effect.promise(() => commit(fixture.source, "two\n", "second"))
-        yield* git.sync.fetchRemotes(repository)
-        yield* git.sync.resetHard(repository, "origin/main")
-        expect(yield* read(path.join(target, "README.md"))).toBe("two\n")
+          yield* Effect.promise(() => commit(fixture.source, "two\n", "second"))
+          yield* git.sync.fetchRemotes(repository)
+          yield* git.sync.resetHard(repository, "origin/main")
+          expect(yield* read(path.join(target, "README.md"))).toBe("two\n")
 
-        yield* Effect.promise(() => branch(fixture.source, "feature/docs", "feature\n"))
-        yield* git.sync.fetchBranch(repository, { branch: "feature/docs" })
-        yield* git.sync.checkoutRemoteBranch(repository, { branch: "feature/docs" })
-        yield* git.sync.resetHard(repository, "origin/feature/docs")
-        expect(yield* git.history.branch(repository)).toBe("feature/docs")
-        expect(yield* read(path.join(target, "README.md"))).toBe("feature\n")
-      }),
-    ),
+          yield* Effect.promise(() => branch(fixture.source, "feature/docs", "feature\n"))
+          yield* git.sync.fetchBranch(repository, { branch: "feature/docs" })
+          yield* git.sync.checkoutRemoteBranch(repository, { branch: "feature/docs" })
+          yield* git.sync.resetHard(repository, "origin/feature/docs")
+          expect(yield* git.history.branch(repository)).toBe("feature/docs")
+          expect(yield* read(path.join(target, "README.md"))).toBe("feature\n")
+        }),
+      ),
+    30_000,
   )
 })
 
@@ -73,6 +76,7 @@ function read(file: string) {
 async function initRepo(directory: string) {
   await $`git init`.cwd(directory).quiet()
   await $`git config core.fsmonitor false`.cwd(directory).quiet()
+  await $`git config core.autocrlf false`.cwd(directory).quiet()
   await $`git config commit.gpgsign false`.cwd(directory).quiet()
   await $`git config user.email test@opencode.test`.cwd(directory).quiet()
   await $`git config user.name Test`.cwd(directory).quiet()
@@ -109,42 +113,174 @@ describe("Git worktrees", () => {
     }),
   )
 
-  it.live("squash-merges committed and uncommitted copy changes into a clean main checkout", () =>
-    Effect.gen(function* () {
-      const root = yield* Effect.acquireRelease(
-        Effect.promise(() => tmpdir()),
-        (dir) => Effect.promise(() => dir[Symbol.asyncDispose]()),
-      )
-      yield* Effect.promise(() => initRepo(root.path))
-      const worktree = AbsolutePath.make(`${root.path}-git-merge`)
-      yield* Effect.addFinalizer(() =>
-        Effect.promise(() => fs.rm(worktree, { recursive: true, force: true })).pipe(Effect.ignore),
-      )
-      const git = yield* Git.Service
-      const main = yield* git.repo.discover(AbsolutePath.make(yield* Effect.promise(() => fs.realpath(root.path))))
-      if (!main) throw new Error("Repository not found")
-      const copy = yield* git.worktree.create({ repository: main, directory: worktree })
-      yield* Effect.promise(async () => {
-        await fs.writeFile(path.join(worktree, "committed.txt"), "one\n")
-        await $`git add .`.cwd(worktree).quiet()
-        await $`git commit -m copy`.cwd(worktree).quiet()
-        await fs.writeFile(path.join(worktree, "loose.txt"), "two\n")
-        await fs.writeFile(path.join(root.path, "dirty.txt"), "dirty\n")
-        await $`git add dirty.txt`.cwd(root.path).quiet()
-      })
+  it.live("copies staged, unstaged, and untracked contents without changing source files or index", () =>
+    withWorkRepo((git, main, directory) =>
+      Effect.gen(function* () {
+        const files = ["staged.txt", "unstaged.txt", "untracked.txt"]
+        yield* Effect.promise(async () => {
+          await fs.writeFile(path.join(main.worktree, files[0]), "staged\n")
+          await $`git add staged.txt`.cwd(main.worktree).quiet()
+          await fs.writeFile(path.join(main.worktree, files[0]), "staged plus unstaged\n")
+          await fs.writeFile(path.join(main.worktree, files[1]), "unstaged\n")
+          await fs.writeFile(path.join(main.worktree, files[2]), "untracked\n")
+        })
+        const before = yield* checkoutState(main, files)
+        const copy = yield* git.worktree.copy({ repository: main, directory, name: path.basename(directory) })
+        expect(yield* checkoutState(main, files)).toEqual(before)
+        expect(
+          yield* Effect.promise(() => Promise.all(files.map((file) => fs.readFile(path.join(copy.worktree, file))))),
+        ).toEqual(before.files)
+      }),
+    ),
+  )
 
-      const refused = yield* git.worktree.merge({ copy, main, message: "work" }).pipe(Effect.flip)
-      expect(refused.message).toContain("Uncommitted changes")
+  it.live("merges only copy changes into a parent with newer commits and staged and unstaged edits", () =>
+    withWorkRepo((git, main, directory) =>
+      Effect.gen(function* () {
+        // The dirty source is part of the base, not a change owned by the copy.
+        yield* Effect.promise(() => fs.writeFile(path.join(main.worktree, "unstaged.txt"), "source edit\n"))
+        const copy = yield* git.worktree.copy({ repository: main, directory, name: path.basename(directory) })
+        yield* Effect.promise(async () => {
+          await fs.writeFile(path.join(main.worktree, "parent.txt"), "parent commit\n")
+          await $`git add parent.txt`.cwd(main.worktree).quiet()
+          await $`git commit -m parent`.cwd(main.worktree).quiet()
+          await fs.writeFile(path.join(main.worktree, "unstaged.txt"), "parent edit\n")
+          await fs.writeFile(path.join(main.worktree, "staged.txt"), "parent staged\n")
+          await $`git add staged.txt`.cwd(main.worktree).quiet()
+          await fs.writeFile(path.join(copy.worktree, "copy.txt"), "copy committed\n")
+          await $`git add copy.txt`.cwd(copy.worktree).quiet()
+          await $`git commit -m copy`.cwd(copy.worktree).quiet()
+          await fs.writeFile(path.join(copy.worktree, "new.txt"), "new\n")
+          await fs.unlink(path.join(copy.worktree, "deleted.txt"))
+        })
+        const index = yield* Effect.promise(() => fs.readFile(path.join(main.gitDirectory, "index")))
+        const cached = yield* Effect.promise(() => $`git diff --cached`.cwd(main.worktree).text())
+        expect(yield* git.worktree.merge({ copy })).toBe(main.worktree)
+        expect(yield* read(path.join(main.worktree, "parent.txt"))).toBe("parent commit\n")
+        expect(yield* read(path.join(main.worktree, "unstaged.txt"))).toBe("parent edit\n")
+        expect(yield* read(path.join(main.worktree, "copy.txt"))).toBe("copy committed\n")
+        expect(yield* read(path.join(main.worktree, "new.txt"))).toBe("new\n")
+        expect(yield* Effect.promise(() => fs.readFile(path.join(main.gitDirectory, "index")))).toEqual(index)
+        expect(yield* Effect.promise(() => $`git diff --cached`.cwd(main.worktree).text())).toBe(cached)
+        const status = yield* Effect.promise(() => $`git status --porcelain`.cwd(main.worktree).text())
+        expect(status).toContain(" M copy.txt")
+        expect(status).toContain(" D deleted.txt")
+        expect(status).toContain("?? new.txt")
+        expect(
+          yield* Effect.promise(() =>
+            $`git config --get ${`oc.work.${path.basename(directory)}.base`}`
+              .cwd(main.worktree)
+              .nothrow()
+              .quiet()
+              .then((result) => result.exitCode),
+          ),
+        ).toBe(1)
+      }),
+    ),
+  )
 
-      yield* Effect.promise(() => $`git rm -q --cached dirty.txt`.cwd(root.path).quiet())
-      yield* git.worktree.merge({ copy, main, message: "work" })
-      const status = yield* Effect.promise(() => $`git status --porcelain`.cwd(root.path).text())
-      expect(status).toContain("A  committed.txt")
-      expect(status).toContain("A  loose.txt")
-      expect(yield* Effect.promise(() => $`git rev-list --count HEAD`.cwd(root.path).text())).toBe("1\n")
-    }),
+  it.live("reports conflict paths without changing parent files, status, or index", () =>
+    withWorkRepo((git, main, directory) =>
+      Effect.gen(function* () {
+        const copy = yield* git.worktree.copy({ repository: main, directory, name: path.basename(directory) })
+        yield* Effect.promise(async () => {
+          await fs.writeFile(path.join(main.worktree, "copy.txt"), "parent\n")
+          await fs.writeFile(path.join(copy.worktree, "copy.txt"), "copy\n")
+          await fs.writeFile(path.join(copy.worktree, "new.txt"), "must not land\n")
+        })
+        const before = yield* checkoutState(main, ["copy.txt"])
+        const error = yield* git.worktree.merge({ copy }).pipe(Effect.flip)
+        expect(error.message).toContain("copy.txt")
+        expect(yield* checkoutState(main, ["copy.txt"])).toEqual(before)
+        expect(
+          yield* Effect.promise(() =>
+            fs.access(path.join(main.worktree, "new.txt")).then(
+              () => true,
+              () => false,
+            ),
+          ),
+        ).toBe(false)
+      }),
+    ),
+  )
+
+  it.live(
+    "merges an inner copy into its outer copy without touching main",
+    () =>
+      withWorkRepo((git, main, directory) =>
+        Effect.gen(function* () {
+          const outer = yield* git.worktree.copy({ repository: main, directory, name: path.basename(directory) })
+          const innerDirectory = AbsolutePath.make(path.join(path.dirname(directory), "inner"))
+          const inner = yield* git.worktree.copy({ repository: outer, directory: innerDirectory, name: "inner" })
+          const before = yield* checkoutState(main, ["copy.txt"])
+          yield* Effect.promise(() => fs.writeFile(path.join(inner.worktree, "copy.txt"), "inner\n"))
+          expect(yield* git.worktree.merge({ copy: inner })).toBe(outer.worktree)
+          expect(yield* read(path.join(outer.worktree, "copy.txt"))).toBe("inner\n")
+          expect(yield* checkoutState(main, ["copy.txt"])).toEqual(before)
+          expect(yield* git.worktree.merge({ copy: outer })).toBe(main.worktree)
+          expect(yield* read(path.join(main.worktree, "copy.txt"))).toBe("inner\n")
+        }),
+      ),
+    30_000,
+  )
+
+  it.live("preserves CRLF checkout bytes and does not introduce phantom changes", () =>
+    withWorkRepo((git, main, directory) =>
+      Effect.gen(function* () {
+        yield* Effect.promise(async () => {
+          await $`git config core.autocrlf true`.cwd(main.worktree).quiet()
+          await fs.writeFile(path.join(main.worktree, "copy.txt"), "base\r\n")
+        })
+        const before = yield* checkoutState(main, ["copy.txt"])
+        const copy = yield* git.worktree.copy({ repository: main, directory, name: path.basename(directory) })
+        expect(yield* checkoutState(main, ["copy.txt"])).toEqual(before)
+        expect(yield* Effect.promise(() => fs.readFile(path.join(copy.worktree, "copy.txt"), "utf8"))).toBe("base\r\n")
+        yield* Effect.promise(() => fs.writeFile(path.join(copy.worktree, "copy.txt"), "changed\r\n"))
+        yield* git.worktree.merge({ copy })
+        expect(yield* Effect.promise(() => fs.readFile(path.join(main.worktree, "copy.txt"), "utf8"))).toBe(
+          "changed\r\n",
+        )
+        expect(yield* Effect.promise(() => $`git diff --name-only`.cwd(main.worktree).text())).toBe("copy.txt\n")
+      }),
+    ),
   )
 })
+
+function checkoutState(repository: Git.Repository, files: string[]) {
+  return Effect.promise(async () => ({
+    // status --no-optional-locks must not refresh the index under test.
+    status: await $`git --no-optional-locks status --porcelain`.cwd(repository.worktree).text(),
+    index: await fs.readFile(path.join(repository.gitDirectory, "index")),
+    files: await Promise.all(files.map((file) => fs.readFile(path.join(repository.worktree, file)))),
+  }))
+}
+
+function withWorkRepo<A, E, R>(
+  body: (git: Git.Interface, main: Git.Repository, directory: AbsolutePath) => Effect.Effect<A, E, R>,
+) {
+  return Effect.gen(function* () {
+    const root = yield* Effect.acquireRelease(
+      Effect.promise(() => tmpdir()),
+      (dir) => Effect.promise(() => dir[Symbol.asyncDispose]()),
+    )
+    const mainDirectory = AbsolutePath.make(path.join(root.path, "main"))
+    yield* Effect.promise(async () => {
+      await fs.mkdir(mainDirectory)
+      await initRepo(mainDirectory)
+      await Promise.all(
+        ["staged.txt", "unstaged.txt", "copy.txt", "deleted.txt"].map((file) =>
+          fs.writeFile(path.join(mainDirectory, file), "base\n"),
+        ),
+      )
+      await $`git add .`.cwd(mainDirectory).quiet()
+      await $`git commit -m initial`.cwd(mainDirectory).quiet()
+    })
+    const git = yield* Git.Service
+    const main = yield* git.repo.discover(mainDirectory)
+    if (!main) throw new Error("Repository not found")
+    return yield* body(git, main, AbsolutePath.make(path.join(root.path, "copy")))
+  })
+}
 
 describe("Git trees", () => {
   it.live("captures, compares, previews, and restores scoped trees", () =>

@@ -14,6 +14,7 @@ export const CreateInput = Schema.Struct({
   sourceDirectory: AbsolutePath,
   directory: AbsolutePath,
   name: optional(Schema.String),
+  state: optional(Schema.Boolean),
 }).annotate({ identifier: "ProjectCopy.CreateInput" })
 export interface CreateInput extends Schema.Schema.Type<typeof CreateInput> {}
 
@@ -30,7 +31,7 @@ export const MergeInput = Schema.Struct({
 }).annotate({ identifier: "ProjectCopy.MergeInput" })
 export interface MergeInput extends Schema.Schema.Type<typeof MergeInput> {}
 
-export const Copy =Schema.Struct({
+export const Copy = Schema.Struct({
   directory: AbsolutePath,
 }).annotate({ identifier: "ProjectCopy.Copy" })
 export interface Copy extends Schema.Schema.Type<typeof Copy> {}

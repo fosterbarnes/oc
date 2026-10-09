@@ -851,7 +851,12 @@ export function make(options: ClientOptions) {
             method: "POST",
             path: `/experimental/project/${encodeURIComponent(input.projectID)}/copy`,
             query: { location: input["location"] },
-            body: { strategy: input["strategy"], directory: input["directory"], name: input["name"] },
+            body: {
+              strategy: input["strategy"],
+              directory: input["directory"],
+              name: input["name"],
+              state: input["state"],
+            },
             successStatus: 200,
             declaredStatuses: [400, 401],
             empty: false,
