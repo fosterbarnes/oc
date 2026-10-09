@@ -18,6 +18,7 @@ import { COMPACTION_BOUNDARY_OPTION, CURSOR_COMPACTION_OPTION, CURSOR_PROVIDER_I
 import {
   CLAUDE_CODE_AGENT_OPTION,
   CLAUDE_CODE_AGENT_PROMPT_OPTION,
+  CLAUDE_CODE_COMMAND_PERMISSION_OPTION,
   CLAUDE_CODE_SESSION_OPTION,
   isClaudeCodeProvider,
 } from "@/provider/claude-code/shared"
@@ -120,6 +121,7 @@ export const prepare = Effect.fn("LLMRequestPrep.prepare")(function* (input: Pre
     options[CLAUDE_CODE_SESSION_OPTION] = input.sessionID
     options[CLAUDE_CODE_AGENT_OPTION] = input.agent.name
     if (input.agent.prompt) options[CLAUDE_CODE_AGENT_PROMPT_OPTION] = input.agent.prompt
+    if (input.user.permission !== undefined) options[CLAUDE_CODE_COMMAND_PERMISSION_OPTION] = "true"
   }
   if (
     input.model.api.npm === "@ai-sdk/azure" &&

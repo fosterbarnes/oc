@@ -1,6 +1,7 @@
 export * as ConfigCommandV1 from "./command"
 
 import { Schema } from "effect"
+import { ConfigPermissionV1 } from "./permission"
 
 export const Info = Schema.Struct({
   template: Schema.String,
@@ -9,7 +10,7 @@ export const Info = Schema.Struct({
   model: Schema.optional(Schema.String),
   variant: Schema.optional(Schema.String),
   subtask: Schema.optional(Schema.Boolean),
-  // Tool permissions for the command's own turn only (stored on its user message as `tools`).
-  permission: Schema.optional(Schema.Record(Schema.String, Schema.Literals(["allow", "deny"]))),
+  // Permissions for the command's own turn only, not the persistent session.
+  permission: Schema.optional(ConfigPermissionV1.Info),
 })
 export type Info = Schema.Schema.Type<typeof Info>

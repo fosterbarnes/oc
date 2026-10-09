@@ -15,7 +15,7 @@ import { log } from "./logger.js"
 import { detectCliVersion } from "./cli-version.js"
 import { setProxyDeadlineGuard } from "./proxy-deadline.js"
 import { findPendingProxyCall, getPendingProxyCalls } from "./proxy-broker.js"
-import { hasNewUserContent } from "./call-options.js"
+import { hasCommandPermission, hasNewUserContent } from "./call-options.js"
 import {
   createLiveToolInfoLoader,
   resolvedProxyTools,
@@ -198,7 +198,7 @@ export class ClaudeCodeLanguageModel implements LanguageModelV3 {
       userMsg,
       visibleTokens: visibleThreadTokens(options.prompt),
       previousPendingProxyCalls,
-      catalogHash: toolCatalogHash(this.config, options.tools),
+      catalogHash: toolCatalogHash(this.config, options.tools, hasCommandPermission(options.providerOptions, this.config.provider)),
       runtimeStatus,
       cliVersion,
       proxyTools,

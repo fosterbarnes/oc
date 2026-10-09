@@ -1,6 +1,6 @@
-v0.2.132
+v0.2.133
 
-home:
-The native New session command palette entry is now Home. Ctrl+Shift+H returns to the Home screen.
+command permissions:
+Commands now support ordered file-path permission rules. Spitball mode can create and edit Markdown plans in the configured plans directory while other writes and execution routes are denied. Restrictions stay with the command turn and do not change permissions for the next ordinary turn.
 
-Under the hood: updated the default shortcut description and keybind documentation while preserving the command identity and slash aliases. Targeted keybind configuration and slash-favorite identity checks passed. Pre-push checks passed.
+Under the hood: preserved structured permissions on user messages and through compaction and subtasks, checked resolved Windows paths and patch rename destinations before writes, and routed constrained Claude turns through oc's permission-checked tools. Updated generated SDK fields. Command permission unit, native CLI flow, and isolated Claude fake-model checks passed. Pre-push checks passed.

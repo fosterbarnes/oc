@@ -55,13 +55,20 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
   const mcp = yield* MCP.Service
   const truncate = yield* Truncate.Service
   const flags = yield* RuntimeFlags.Service
+  const user = input.messages.findLast((message) => message.info.role === "user")?.info
+  const turnPermission = user?.role === "user" ? user.permission : undefined
 
   const context = (args: Record<string, unknown>, options: ToolExecutionOptions): Tool.Context => ({
     sessionID: input.session.id,
     abort: options.abortSignal!,
     messageID: input.processor.message.id,
     callID: options.toolCallId,
-    extra: { model: input.model, bypassAgentCheck: input.bypassAgentCheck, promptOps: input.promptOps },
+    extra: {
+      model: input.model,
+      bypassAgentCheck: input.bypassAgentCheck && !turnPermission,
+      turnPermission,
+      promptOps: input.promptOps,
+    },
     agent: input.agent.name,
     messages: input.messages,
     metadata: (val) =>

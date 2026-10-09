@@ -4,6 +4,8 @@ import { InstanceState } from "@/effect/instance-state"
 import { Wildcard } from "@opencode-ai/core/util/wildcard"
 import { Deferred, Effect, Layer, Context } from "effect"
 import os from "os"
+import path from "path"
+import { realpathSync } from "node:fs"
 import { PermissionV1 } from "@opencode-ai/core/v1/permission"
 import { EventV2Bridge } from "@/event-v2-bridge"
 
@@ -37,6 +39,29 @@ export function evaluate(permission: string, pattern: string, ...rulesets: Permi
   )
 }
 
+// File tools submit worktree-relative paths; absolute rules must match the actual target.
+export function evaluateFile(pattern: string, worktree: string, ...rulesets: PermissionV1.Ruleset[]): PermissionV1.Rule {
+  const absolute = path.resolve(worktree, pattern)
+  const relative = path.relative(worktree, absolute)
+  return rulesets.flat().findLast((rule) => {
+    if (!Wildcard.match("edit", rule.permission)) return false
+    const target = path.isAbsolute(rule.pattern) ? absolute : relative
+    // In file globs **/ includes zero directories, unlike a command wildcard.
+    return Wildcard.match(target, rule.pattern.replaceAll("**/", "*").replaceAll("**\\", "*"))
+  }) ?? { permission: "edit", pattern: "*", action: "ask" }
+}
+
+function actualFilePath(file: string): string {
+  try {
+    return realpathSync.native(file)
+  } catch (error) {
+    if (!(error instanceof Error) || !("code" in error) || error.code !== "ENOENT") throw error
+    const parent = path.dirname(file)
+    if (parent === file) throw error
+    return path.join(actualFilePath(parent), path.basename(file))
+  }
+}
+
 export class Service extends Context.Service<Service, Interface>()("@opencode/Permission") {}
 
 const layer = Layer.effect(
@@ -67,12 +92,23 @@ const layer = Layer.effect(
     const ask = Effect.fn("Permission.ask")(function* (input: PermissionV1.AskInput) {
       const { approved, pending } = yield* InstanceState.get(state)
       const { ruleset, ...request } = input
+      const instance = yield* InstanceState.context
       let needsAsk = false
 
       for (const pattern of request.patterns) {
-        const rule = evaluate(request.permission, pattern, ruleset, approved)
+        const file = request.permission === "edit" ? path.resolve(instance.worktree, pattern) : undefined
+        // Explicit denials cannot be bypassed by an earlier "always" approval.
+        const configured = file ? evaluateFile(file, instance.worktree, ruleset) : evaluate(request.permission, pattern, ruleset)
+        const rule = configured.action === "deny"
+          ? configured
+          : file
+            ? evaluateFile(file, instance.worktree, ruleset, approved)
+            : evaluate(request.permission, pattern, ruleset, approved)
+        const resolved = file ? actualFilePath(file) : undefined
+        const escaped = resolved && evaluateFile(resolved, instance.worktree, ruleset).action === "deny"
+        const stream = file && process.platform === "win32" && file.slice(path.parse(file).root.length).includes(":")
         yield* Effect.logInfo("evaluated", { permission: request.permission, pattern, action: rule })
-        if (rule.action === "deny") {
+        if (rule.action === "deny" || escaped || stream) {
           return yield* new PermissionV1.DeniedError({
             ruleset: ruleset.filter((rule) => Wildcard.match(request.permission, rule.permission)),
           })
@@ -207,7 +243,9 @@ export function disabled(tools: string[], ruleset: PermissionV1.Ruleset): Set<st
   return new Set(
     tools.filter((tool) => {
       const permission = edits.includes(tool) ? "edit" : reads.includes(tool) ? "read" : tool
-      const rule = ruleset.findLast((rule) => Wildcard.match(permission, rule.permission))
+      const rule = ruleset.findLast((rule) =>
+        Wildcard.match(permission, rule.permission) || Wildcard.match(tool, rule.permission),
+      )
       return rule?.pattern === "*" && rule.action === "deny"
     }),
   )

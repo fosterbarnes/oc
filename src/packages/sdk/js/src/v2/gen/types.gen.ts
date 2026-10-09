@@ -263,6 +263,7 @@ export type UserMessage = {
   tools?: {
     [key: string]: boolean
   }
+  permission?: PermissionRuleset
 }
 
 export type ProviderAuthError = {
@@ -1946,6 +1947,7 @@ export type Config = {
       model?: string
       variant?: string
       subtask?: boolean
+      permission?: PermissionConfig
     }
   }
   command_palette?: {

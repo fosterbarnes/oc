@@ -40,8 +40,9 @@ import {
 import { queuePendingProxyCall } from "./proxy-broker.js"
 import { log } from "./logger.js"
 import { createHash } from "node:crypto"
+import { hasCommandPermission } from "./call-options.js"
 
-export function toolCatalogHash(config: ClaudeCodeConfig, tools: readonly ModelToolEntry[] | undefined) {
+export function toolCatalogHash(config: ClaudeCodeConfig, tools: readonly ModelToolEntry[] | undefined, commandPermission = false) {
   return createHash("sha256").update(JSON.stringify({
     tools: tools?.map((tool) => ({
       name: tool.name,
@@ -57,6 +58,7 @@ export function toolCatalogHash(config: ClaudeCodeConfig, tools: readonly ModelT
     mcpConfig: config.mcpConfig,
     permissionMode: config.permissionMode,
     skipPermissions: config.skipPermissions,
+    commandPermission,
   }, (_: string, value: unknown) => value !== null && typeof value === "object" && !Array.isArray(value)
     ? Object.fromEntries(Object.entries(value).toSorted(([a], [b]) => a.localeCompare(b)))
     : value)).digest("hex")
@@ -299,6 +301,7 @@ export async function planSpawn(input: {
 }) {
   const config = input.config
   const turn = input.turn
+  const commandPermission = hasCommandPermission(input.options.providerOptions, config.provider)
   const spawnModel = parseModelId(turn.effectiveModelId)
   const systemPrompt = (toolEnvironment?: string) =>
     input.reusing
@@ -343,8 +346,10 @@ export async function planSpawn(input: {
       skipPermissions: config.skipPermissions !== false,
       model: spawnModel.model,
       permissionMode: config.permissionMode,
-      mcpConfig: mcp.paths,
-      strictMcpConfig: config.strictMcpConfig,
+      // Command turns execute exclusively through oc's permission-checked tools.
+      tools: commandPermission ? [] : undefined,
+      mcpConfig: commandPermission ? proxyServer?.configPath() : mcp.paths,
+      strictMcpConfig: commandPermission || config.strictMcpConfig,
       disallowedTools: tools.disallowed.length > 0 ? tools.disallowed : undefined,
       appendSystemPromptFile: systemPromptFile,
       pluginDir: skills ? ensureSkillPlugin(skills) : undefined,
@@ -366,6 +371,22 @@ async function assembleProxyTools(input: Parameters<typeof planSpawn>[0]) {
   const config = input.config
   const modelTools = input.options.tools as readonly ModelToolEntry[] | undefined
   const dialect = config.hostApi === "v2" ? "v2" : "v1"
+  if (hasCommandPermission(input.options.providerOptions, config.provider)) {
+    // No CLI built-ins or directly configured MCP servers can bypass turn rules.
+    const staticDefs = filterProxyByModelTools(input.proxyTools ?? [], modelTools, dialect)
+    const taken = new Set(staticDefs.map((tool) => tool.name))
+    return {
+      combined: [
+        ...staticDefs,
+        ...(modelTools ?? []).flatMap((tool): ProxyToolDef[] =>
+          tool.name && !taken.has(tool.name) && (tool.type === undefined || tool.type === "function")
+            ? [{ name: tool.name, description: tool.description ?? "", inputSchema: tool.inputSchema as Record<string, unknown> }]
+            : [],
+        ),
+      ],
+      disallowed: config.extraDisallowedTools ?? [],
+    }
+  }
 
   // opencode's MCP tools reach Claude only as proxy defs, one per tool of
   // each connected server.

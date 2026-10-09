@@ -165,7 +165,7 @@ const layer = Layer.effect(
       return {
         cancel: (sessionID: SessionID) => cancel(sessionID),
         resolvePromptParts: (template: string) => resolvePromptParts(template),
-        prompt: (input: PromptInput) => work.run(prompt(input)).pipe(Effect.catch(Effect.die)),
+        prompt: (input: TurnInput) => work.run(prompt(input)).pipe(Effect.catch(Effect.die)),
       } satisfies TaskPromptOps
     })
 
@@ -452,7 +452,7 @@ const layer = Layer.effect(
           sessionID,
           abort: taskAbort.signal,
           callID: part.callID,
-          extra: { bypassAgentCheck: true, promptOps },
+          extra: { bypassAgentCheck: !lastUser.permission, turnPermission: lastUser.permission, promptOps },
           messages: msgs,
           metadata: (val: { title?: string; metadata?: Record<string, any> }) =>
             Effect.gen(function* () {
@@ -467,7 +467,7 @@ const layer = Layer.effect(
               .ask({
                 ...req,
                 sessionID,
-                ruleset: Permission.merge(taskAgent.permission, session.permission ?? []),
+                ruleset: Permission.merge(taskAgent.permission, session.permission ?? [], lastUser.permission ?? []),
               })
               .pipe(Effect.orDie),
         })
@@ -560,6 +560,7 @@ const layer = Layer.effect(
         time: { created: Date.now() },
         agent: lastUser.agent,
         model: lastUser.model,
+        permission: lastUser.permission,
       }
       yield* sessions.updateMessage(summaryUserMsg)
       yield* sessions.updatePart({
@@ -782,7 +783,8 @@ const layer = Layer.effect(
         role: "user",
         sessionID: input.sessionID,
         time: { created: Date.now() },
-        tools: input.turnTools ?? input.tools,
+        tools: input.tools,
+        permission: input.turnPermission?.map((rule) => ({ ...rule })),
         agent: ag.name,
         model: {
           providerID: model.providerID,
@@ -1353,7 +1355,7 @@ const layer = Layer.effect(
             const bypassAgentCheck = lastUserMsg?.parts.some((p) => p.type === "agent") ?? false
             const promptOps = yield* ops()
 
-            // Command frontmatter `permission` rides on the turn's user message as `tools`.
+            // Command rules stay on this user message; legacy boolean tools still work.
             const turnPermission = Permission.merge(
               session.permission ?? [],
               Object.entries(lastUser.tools ?? {}).map(([tool, enabled]) => ({
@@ -1361,6 +1363,7 @@ const layer = Layer.effect(
                 action: enabled ? ("allow" as const) : ("deny" as const),
                 pattern: "*",
               })),
+              lastUser.permission ?? [],
             )
             const tools = yield* SessionTools.resolve({
               agent,
@@ -1401,7 +1404,7 @@ const layer = Layer.effect(
               claudeCode ? Effect.succeed([]) : sys.environment(model),
               claudeCode ? Effect.succeed([]) : instruction.system(modelKey).pipe(Effect.orDie),
               agent.prompt ? Effect.succeed(undefined) : instruction.base(modelKey).pipe(Effect.orDie),
-              claudeCode ? Effect.succeed(undefined) : sys.mcp(agent, session.permission),
+              claudeCode ? Effect.succeed(undefined) : sys.mcp(agent, turnPermission),
               MessageV2.toModelMessagesEffect(msgs, model),
             ])
             const system = [
@@ -1539,6 +1542,9 @@ const layer = Layer.effect(
       }
       const cmd = selected[0]
       const agentName = cmd.agent ?? input.agent
+      const turnPermission = selected.some((definition) => definition.permission !== undefined)
+        ? Permission.merge(...selected.map((definition) => Permission.fromConfig(definition.permission ?? {})))
+        : undefined
 
       const raw = input.arguments.match(argsRegex) ?? []
       const args = raw.map((arg) => arg.replace(quoteTrimRegex, ""))
@@ -1581,6 +1587,18 @@ const layer = Layer.effect(
               shellMatches,
               ([, cmd]) =>
                 Effect.gen(function* () {
+                  if (turnPermission) {
+                    const session = yield* sessions.get(input.sessionID).pipe(Effect.orDie)
+                    const agent = agentName ? yield* agents.get(agentName) : yield* agents.defaultInfo()
+                    yield* permission.ask({
+                      sessionID: input.sessionID,
+                      permission: "bash",
+                      patterns: [cmd],
+                      always: [cmd],
+                      metadata: { command: cmd },
+                      ruleset: Permission.merge(agent?.permission ?? [], session.permission ?? [], turnPermission),
+                    }).pipe(Effect.orDie)
+                  }
                   const handle = yield* spawner.spawn(
                     ChildProcess.make(sh, Shell.args(sh, cmd, process.cwd()), {
                       stdin: "ignore",
@@ -1679,9 +1697,7 @@ const layer = Layer.effect(
         agent: userAgent,
         parts,
         variant: input.variant,
-        turnTools:
-          cmd.permission &&
-          Object.fromEntries(Object.entries(cmd.permission).map(([tool, action]) => [tool, action === "allow"])),
+        turnPermission,
       })
       yield* events.publish(Command.Event.Executed, {
         name: input.command,
@@ -1761,8 +1777,8 @@ export const PromptInput = Schema.Struct({
   ),
 })
 export type PromptInput = Schema.Schema.Type<typeof PromptInput>
-// Internal only: `turnTools` sets the user message's tools without persisting them to the session.
-type TurnInput = PromptInput & { turnTools?: Record<string, boolean> }
+// Internal only: command rules are saved on the user message, never the session.
+export type TurnInput = PromptInput & { turnPermission?: PermissionV1.Ruleset }
 
 export class LoopInput extends Schema.Class<LoopInput>("SessionPrompt.LoopInput")({
   sessionID: SessionID,

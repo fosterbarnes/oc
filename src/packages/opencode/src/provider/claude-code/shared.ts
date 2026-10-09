@@ -4,6 +4,7 @@ import type { SessionV1 } from "@opencode-ai/core/v1/session"
 export const CLAUDE_CODE_PROVIDER_ID = "claude-code"
 export const CLAUDE_CODE_SESSION_OPTION = "opencodeSessionID"
 export const CLAUDE_CODE_AGENT_OPTION = "opencodeAgent"
+export const CLAUDE_CODE_COMMAND_PERMISSION_OPTION = "opencodeCommandPermission"
 // The agent's own prompt (custom agent prompt, or the `instructionsByModel` base). The only oc
 // system text Claude Code gets; its own prompt, CLAUDE.md and AGENTS.md cover the rest.
 export const CLAUDE_CODE_AGENT_PROMPT_OPTION = "opencodeAgentPrompt"

@@ -1,4 +1,5 @@
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
+import { ConfigPermissionV1 } from "@opencode-ai/core/v1/config/permission"
 import path from "path"
 import { InstanceState } from "@/effect/instance-state"
 import { EffectBridge } from "@/effect/bridge"
@@ -40,7 +41,7 @@ export const Info = Schema.Struct({
 // `permission` stays server-side (not in the public schema); `command()` applies it to that turn only.
 export type Info = Omit<Schema.Schema.Type<typeof Info>, "template"> & {
   template: Promise<string> | string
-  permission?: Record<string, "allow" | "deny">
+  permission?: ConfigPermissionV1.Info
 }
 
 export function hints(template: string) {

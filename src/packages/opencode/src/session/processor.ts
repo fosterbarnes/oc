@@ -107,8 +107,9 @@ const layer = Layer.effect(
     })
     yield* Effect.addFinalizer(() => unsubscribe)
 
-    // Marker permission is decided by markers.json, never by agent rules, so the ruleset is empty.
-    const runMarkers = Effect.fn("SessionProcessor.runMarkers")(function* (sessionID: SessionID, text: string) {
+    const runMarkers = Effect.fn("SessionProcessor.runMarkers")(function* (
+      sessionID: SessionID, text: string, turnPermission?: PermissionV1.Ruleset,
+    ) {
       if (!text.includes("$#")) return text
       const config = yield* Effect.promise(() => Marker.read())
       if (!config) return text
@@ -119,6 +120,13 @@ const layer = Layer.effect(
         (name) =>
           Effect.gen(function* () {
             const command = config.commands[name]
+            if (turnPermission) {
+              const allowed = yield* permission.ask({
+                permission: "marker", patterns: [name], always: [name], sessionID,
+                metadata: { command: command.run.join(" "), mode: command.mode }, ruleset: turnPermission,
+              }).pipe(Effect.as(true), Effect.catch(() => Effect.succeed(false)))
+              if (!allowed) return [name, `${name}: denied`] as const
+            }
             if (command.ask) {
               const allowed = yield* permission
                 .ask({
@@ -168,6 +176,7 @@ const layer = Layer.effect(
         reasoningMap: {},
       }
       let aborted = false
+      let turnPermission: PermissionV1.Ruleset | undefined
       const partReady: Record<string, Deferred.Deferred<void>> = {}
       const readyFor = (toolCallID: string) => (partReady[toolCallID] ??= Deferred.makeUnsafe<void>())
 
@@ -589,7 +598,7 @@ const layer = Layer.effect(
 
           case "text-end":
             if (!ctx.currentText) return
-            ctx.currentText.text = yield* runMarkers(ctx.sessionID, ctx.currentText.text)
+            ctx.currentText.text = yield* runMarkers(ctx.sessionID, ctx.currentText.text, turnPermission)
             ctx.currentText.text = (yield* plugin.trigger(
               "experimental.text.complete",
               {
@@ -703,6 +712,7 @@ const layer = Layer.effect(
       })
 
       const process = Effect.fn("SessionProcessor.process")(function* (streamInput: LLM.StreamInput) {
+        turnPermission = streamInput.user.permission
         yield* Effect.logInfo("process", {
           "session.id": input.sessionID,
           messageID: input.assistantMessage.id,

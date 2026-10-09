@@ -146,6 +146,27 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-08 (~21:46) - v0.2.133 - Command path permissions for plan-only edits - GPT-6.1 Sol, default reasoning; Implementation
+
+### Agent
+- Meta: GPT-6.1 Sol; default reasoning; Implementation; completed with Sol medium subagent
+- Version: 0.2.133
+- Fixed pre-push compaction type error: automatic message lookup uses `Effect.orDie` to preserve the existing error-free create interface. Initial push stopped before commit; retry runs targeted tests and pre-push checks.
+- Added structured command permissions using existing ConfigPermissionV1 schema; persisted ordered turn rules on user messages without changing session permissions. Kept scalar configuration compatibility.
+- Fixed shared edit checks for absolute/relative Windows paths, resolved junction targets, alternate streams, explicit denials after prior approvals, and patch rename destinations before writes.
+- Carried turn rules through subtasks and compaction; gated custom tools, command interpolation, and execution markers. Claude command turns use oc proxy tools exclusively and ordinary turns restore native tools.
+- Updated external `C:/Users/user/.opencode/commands/spit.md`: Markdown writes only under global plans directory; read/research allowlist; execution/delegation denied.
+- Generated legacy SDK permission fields; client generation completed without diff. No build/install or broader typecheck. Compaction/subtask propagation traced but not independently exercised.
+- Verification: parent reran three new command-permission test files: 7 pass, 0 fail, 72 assertions; includes source CLI persistence/next-turn and isolated Claude fake-model checks. `git diff --check` passed.
+
+### User
+Plan-only command edits
+- `/spit` can create and edit Markdown plans in the configured plans directory while other file writes and execution routes are denied.
+- Restrictions belong to the command turn and do not carry into the following ordinary turn.
+- Requires rebuilding and restarting oc to activate the updated source.
+
+---
+
 ## 2026-10-08 (~20:38) - v0.2.132 - Home palette name and shortcut - GPT-6.1 Sol, default reasoning; Implementation
 
 ### Agent

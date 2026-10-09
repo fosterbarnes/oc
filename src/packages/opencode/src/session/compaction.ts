@@ -481,6 +481,7 @@ const layer = Layer.effect(
             model: original.model,
             format: original.format,
             tools: original.tools,
+            permission: original.permission,
             system: original.system,
           })
           for (const part of replay.parts) {
@@ -527,6 +528,7 @@ const layer = Layer.effect(
               time: { created: Date.now() },
               agent: userMessage.agent,
               model: userMessage.model,
+              permission: userMessage.permission,
             })
             const text =
               (input.overflow
@@ -567,12 +569,16 @@ const layer = Layer.effect(
       auto: boolean
       overflow?: boolean
     }) {
+      const previous = input.auto
+        ? (yield* session.messages({ sessionID: input.sessionID }).pipe(Effect.orDie)).findLast((message) => message.info.role === "user")
+        : undefined
       const msg = yield* session.updateMessage({
         id: MessageID.ascending(),
         role: "user",
         model: input.model,
         sessionID: input.sessionID,
         agent: input.agent,
+        permission: previous?.info.role === "user" ? previous.info.permission : undefined,
         time: { created: Date.now() },
       })
       yield* session.updatePart({

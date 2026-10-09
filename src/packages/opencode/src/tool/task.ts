@@ -18,7 +18,7 @@ import { Database } from "@opencode-ai/core/database/database"
 export interface TaskPromptOps {
   cancel(sessionID: SessionID): Effect.Effect<void>
   resolvePromptParts(template: string): Effect.Effect<SessionPrompt.PromptInput["parts"]>
-  prompt(input: SessionPrompt.PromptInput): Effect.Effect<SessionV1.WithParts>
+  prompt(input: SessionPrompt.TurnInput): Effect.Effect<SessionV1.WithParts>
 }
 
 const id = "task"
@@ -219,6 +219,7 @@ export const TaskTool = Tool.define(
           variant: next.model ? undefined : variant,
           agent: next.name,
           parts,
+          turnPermission: ctx.extra?.turnPermission,
         })
         if (result.info.role === "assistant" && result.info.error) {
           const message =
