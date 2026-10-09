@@ -1284,11 +1284,14 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
             toast.show({ message: `No folders found in ${homeDir}`, variant: "error" })
             return
           }
+          // Bootstrapping takes seconds; ignore repeat selections until it settles.
+          let creating = false
           dialog.replace(() => (
             <DialogSelect
               title="New oc session"
               options={dirs.map((dir) => ({ value: dir.fullPath, title: dir.name }))}
               onSelect={async (option) => {
+                if (creating) return
                 const directory = path.normalize(option.value)
                 let isDir = false
                 try {
@@ -1305,11 +1308,13 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
                   toast.show({ message: "OpenCode executable is not configured", variant: "error" })
                   return
                 }
+                creating = true
                 try {
                   const sessionID = await bootstrapOcSession(executable, directory, os.homedir())
                   dialog.clear()
                   route.navigate({ type: "session", sessionID })
                 } catch (error) {
+                  creating = false
                   toast.show({
                     message: `Failed to create oc session: ${error instanceof Error ? error.message : String(error)}`,
                     variant: "error",

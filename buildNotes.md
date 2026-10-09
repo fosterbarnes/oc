@@ -146,6 +146,20 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-08 (~21:57) - v0.2.134 - New oc session ignores repeat Enter while creating - Opus 5.5, low reasoning; Implementation
+
+### Agent
+- Meta: Opus 5.5; low reasoning; Implementation; completed
+- Version: 0.2.134
+- Fixed `oc.new_session` in `packages/tui/src/app.tsx`: `onSelect` awaited `bootstrapOcSession` with dialog open, so each extra Enter spawned another session. Added closure flag `creating`, set before the await, reset in `catch` so retry works after failure. Sync stat/config checks run before the flag, no race.
+- Verification: `tsc --noEmit` in `packages/tui` reported no `app.tsx` errors. Live check is user-side.
+
+### User
+New oc session
+- Pressing Enter several times while a new oc session is being created now makes only one session.
+
+---
+
 ## 2026-10-08 (~21:46) - v0.2.133 - Command path permissions for plan-only edits - GPT-6.1 Sol, default reasoning; Implementation
 
 ### Agent
