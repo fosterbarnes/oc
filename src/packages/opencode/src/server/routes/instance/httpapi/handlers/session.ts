@@ -343,9 +343,12 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
         Effect.catchCause((cause) =>
           Effect.gen(function* () {
             yield* Effect.logError("prompt_async failed", { sessionID: ctx.params.sessionID, cause })
+            const error = Cause.squash(cause)
             yield* events.publish(Session.Event.Error, {
               sessionID: ctx.params.sessionID,
-              error: new NamedError.Unknown({ message: Cause.pretty(cause) }).toObject(),
+              error: new NamedError.Unknown({
+                message: error instanceof SessionRunState.HeldElsewhereError ? error.message : Cause.pretty(cause),
+              }).toObject(),
             })
           }),
         ),

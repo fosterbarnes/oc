@@ -6,6 +6,7 @@ import { detachedCommand, windowsArguments } from "@opencode-ai/core/util/launch
 import { Global } from "@opencode-ai/core/global"
 import { TuiLedger } from "../../src/config/tuiLedger"
 import { tmpdir } from "../fixture/fixture"
+import { OcConfig } from "../../src/config/oc"
 
 const executable = "C:\\Apps\\oc\\opencode.exe"
 const context = { mode: "no-install", terminal: "generic", directory: "C:\\Projects\\a %PATH% & b; c",
@@ -42,6 +43,10 @@ test("the configured launcher picks the previous session (occ) or the home scree
     .toEqual(["start", "--always-new-process", "--", executable, "oc", "previous", "--depth", "1"])
   expect(Revive.reopenCommand({ ...restart, terminal: "wezterm", launcher: "oc" }).args)
     .toEqual(["start", "--always-new-process", "--", executable, "oc", "launch"])
+  expect(Revive.reopenCommand({ ...restart, terminal: "wezterm", single: true, portable: true,
+    directory: context.directory, sessionID: context.sessionID }).args)
+    .toEqual(["start", "--always-new-process", "--", executable, "oc", "single", context.directory,
+      "--session", context.sessionID, "--portable"])
   expect(Revive.parseLauncher(undefined)).toBe("occ")
   expect(Revive.parseLauncher("oc")).toBe("oc")
   expect(() => Revive.parseLauncher("opencode")).toThrow()
@@ -96,20 +101,60 @@ test("occ-started TUI identity matches its resolved helper", () => {
 
 test("revive and restart contexts round-trip and reject bad input before shutdown", () => {
   const full = { ...context, mode: "install", paneID: "3", supervisorPid: 40, shellPid: 30, source: "existing",
-    sourceDir: "C:\\src\\oc" } as const
+    sourceDir: "C:\\src\\oc", single: true, portable: true, tuiPid: 50 } as const
   expect(Revive.decodeContext(Revive.encode(full))).toEqual(full)
   for (const input of [null, [], {}, { ...context, mode: "other" }, { ...context, terminal: "other" },
     { ...context, directory: "" }, { ...context, directory: "bad\0path" }, { ...context, sessionID: 5 },
     { ...context, supervisorPid: 0 }, { ...context, shellPid: 1.5 }, { ...context, source: "maybe" },
     { ...context, source: "download" }, { ...context, source: "existing", sourceDir: "relative" },
-    { ...context, source: "none", sourceDir: "C:\\src\\oc" }]) {
+    { ...context, source: "none", sourceDir: "C:\\src\\oc" }, { ...context, single: "yes" }, { ...context, tuiPid: 0 }]) {
     expect(() => Revive.decodeContext(Buffer.from(JSON.stringify(input)).toString("base64url"))).toThrow()
   }
   expect(() => Revive.decodeContext("not-json")).toThrow()
-  const worker = { ...restart, paneID: "3", shellPid: 30, waitPid: 40, installDir: "C:\\Apps\\oc" } as const
+  const worker = { ...restart, paneID: "3", shellPid: 30, waitPid: 40, installDir: "C:\\Apps\\oc", single: true, portable: true,
+    directory: context.directory, sessionID: context.sessionID } as const
   expect(Revive.decodeRestart(Revive.encode(worker))).toEqual(worker)
-  for (const input of [{ ...restart, launcher: "opencode" }, { ...restart, executable: "" }, { ...restart, waitPid: -1 }])
+  for (const input of [{ ...restart, launcher: "opencode" }, { ...restart, executable: "" }, { ...restart, waitPid: -1 },
+    { ...worker, directory: undefined }, { ...worker, sessionID: 1 }])
     expect(() => Revive.decodeRestart(Buffer.from(JSON.stringify(input)).toString("base64url"))).toThrow()
+})
+
+test("single revive keeps the exact session or Home and directory in every new-window command", () => {
+  for (const terminal of ["wezterm", "windows-terminal", "generic"] as const) {
+    for (const launcher of ["oc", "occ"] as const) {
+      const input = { ...restart, terminal, launcher, single: true, portable: true,
+        directory: context.directory, sessionID: context.sessionID }
+      const command = Revive.reopenCommand(input)
+      const args = terminal === "generic" ? Object.values(command.env) : command.args
+      expect(args).toContain("single")
+      expect(args).toContain(terminal === "windows-terminal" ? context.directory.replaceAll(";", "\\;") : context.directory)
+      expect(args).toContain(context.sessionID)
+      expect(args).toContain("--portable")
+      expect(args).not.toContain("previous")
+      const home = Revive.reopenCommand({ ...input, sessionID: undefined })
+      expect(terminal === "generic" ? Object.values(home.env) : home.args).toContain("--home")
+    }
+  }
+})
+
+test.skipIf(process.platform !== "win32")("single terminal restart preserves the live hosting shell", async () => {
+  const shell = Bun.spawn(["pwsh", "-NoProfile", "-NonInteractive", "-Command", "[Console]::ReadLine()"],
+    { stdin: "pipe", stdout: "ignore", stderr: "ignore", windowsHide: true })
+  try {
+    const launched: string[][] = []
+    for (const terminal of ["wezterm", "windows-terminal", "generic"] as const) {
+      await OcConfig.restartTerminal({ ...restart, terminal, single: true, shellPid: shell.pid,
+        directory: context.directory, sessionID: context.sessionID }, async (command) => {
+        launched.push(terminal === "generic" ? Object.values(command.env) : command.args)
+      })
+      expect(OcConfig.isPidAlive(shell.pid)).toBe(true)
+    }
+    expect(launched).toHaveLength(3)
+    expect(launched.every((args) => args.includes(context.sessionID))).toBe(true)
+  } finally {
+    shell.kill()
+    await shell.exited
+  }
 })
 
 test("revive.build is a source folder with an optional debug build", () => {

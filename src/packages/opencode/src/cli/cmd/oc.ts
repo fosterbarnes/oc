@@ -4,7 +4,7 @@ import path from "path"
 import fs from "fs/promises"
 import { spawn } from "child_process"
 import { cmd } from "./cmd"
-import * as OcConfig from "@/config/oc"
+import { OcConfig } from "@/config/oc"
 import { startIntro } from "../intro"
 
 function runtimeArgs(args: string[]) {
@@ -44,18 +44,51 @@ async function attach(
   if (options.session) args.push("--session", options.session)
   if (typeof settings.sessionModel === "string") args.push("--model", settings.sessionModel)
   if (typeof settings.sessionAgent === "string") args.push("--agent", settings.sessionAgent)
-  await runNative(args, {
-    env: { OPENCODE_SERVER_PASSWORD: server.secret, OPENCODE_SERVER_USERNAME: "opencode",
-      OC_AUTO_RENAME: "1",
-      OC_SUPERVISOR_PID: String(process.pid),
-      ...(options.introFrame === undefined ? {} : { OC_INTRO_FRAME: String(options.introFrame) }) },
-  })
+  await host(args, { OPENCODE_SERVER_PASSWORD: server.secret, OPENCODE_SERVER_USERNAME: "opencode" },
+    options.introFrame, async (handoff) =>
+      attach(await OcConfig.startServer(), settings, { directory: handoff.directory, session: handoff.sessionID }))
+}
+
+// Single-instance window: native in-process TUI (server in a worker), no resident server or port.
+async function single(
+  settings: OcConfig.Settings,
+  options: { session?: string; directory: string; portable?: boolean; introFrame?: number },
+) {
+  const args = [options.directory]
+  if (options.session) args.push("--session", options.session)
+  if (typeof settings.sessionModel === "string") args.push("--model", settings.sessionModel)
+  if (typeof settings.sessionAgent === "string") args.push("--agent", settings.sessionAgent)
+  await host(args, { OC_SINGLE: "1", ...(options.portable ? { OPENCODE_DB: "ocPortable.db" } : {}) },
+    options.introFrame, (handoff) =>
+      single(settings, { directory: handoff.directory, session: handoff.sessionID, portable: options.portable }))
+}
+
+// Runs the TUI as a child of this launcher, then hosts any /revive the TUI handed off.
+// `reopen` restores the old TUI in place when revive fails.
+async function host(
+  args: string[],
+  env: Record<string, string>,
+  introFrame: number | undefined,
+  reopen: (handoff: { directory: string; sessionID?: string }) => Promise<void>,
+) {
+  const stopped = await runNative(args, {
+    env: { ...env, OC_AUTO_RENAME: "1", OC_SUPERVISOR_PID: String(process.pid),
+      ...(introFrame === undefined ? {} : { OC_INTRO_FRAME: String(introFrame) }) },
+  }).then(() => undefined, (error: unknown) => ({ error }))
   const { Revive } = await import("@/config/revive")
   const raw = await takeHandoff(Revive.handoffPath(process.pid))
-  if (raw === undefined) return
+  if (raw === undefined) {
+    if (stopped) throw stopped.error
+    return
+  }
   const handoff = Revive.parseContext(raw)
-  // This launcher owns the console, so the pipeline prints here. On success it exits and the
-  // terminal restarter closes this window; on failure the old TUI reopens in place.
+  if (stopped) {
+    console.error(stopped.error)
+    await waitForKey("Shutdown failed. Press any key to reopen oc without building.")
+    await reopen(handoff)
+    return
+  }
+  // This launcher shows pipeline output. Single keeps its shell; failures reopen in place.
   const ignore = () => {}
   process.on("SIGINT", ignore)
   const context = Revive.encode({ ...handoff, supervisorPid: process.pid, shellPid: process.ppid })
@@ -63,7 +96,7 @@ async function attach(
   if (failed) await waitForKey("Revive failed (details above). Press any key to reopen oc.")
   process.off("SIGINT", ignore)
   if (!failed) return
-  await attach(await OcConfig.startServer(), settings, { directory: handoff.directory, session: handoff.sessionID })
+  await reopen(handoff)
 }
 
 // Same steps as `session bootstrap`, sent to the resident server instead of a second instance.
@@ -167,7 +200,9 @@ const LaunchCommand = cmd({
       .option("palette", {
         type: "string",
         describe: 'open palette entry by title, e.g. "New session (oc)"',
-      }),
+      })
+      .option("single", { type: "boolean", describe: "open in a single-instance window" })
+      .option("portable", { type: "boolean", describe: "single-instance window on ocPortable.db" }),
   handler: async (args) => {
     const palette = typeof args.palette === "string" ? args.palette.trim() : ""
     if (palette && args.target) throw new Error("--palette cannot be used with a launch target")
@@ -176,9 +211,11 @@ const LaunchCommand = cmd({
     if (palette) {
       // Direct link to TUI palette entry, no clack intermediate (Image 2 not Image 1)
       const exe = OcConfig.executablePath()
+      const single = args.single || args.portable || (await OcConfig.read()).mode === "single"
       const child = Bun.spawn([exe, "--palette", palette], {
         cwd: os.homedir(),
-        env: { ...process.env, OC_AUTO_RENAME: "1" },
+        env: { ...process.env, OC_AUTO_RENAME: "1", ...(single ? { OC_SINGLE: "1" } : {}),
+          ...(args.portable ? { OPENCODE_DB: "ocPortable.db" } : {}) },
         stdin: "inherit",
         stdout: "inherit",
         stderr: "inherit",
@@ -187,46 +224,61 @@ const LaunchCommand = cmd({
       return
     }
 
-    const settings = await OcConfig.read()
-    const stopIntro = startIntro(settings.intro?.background)
-    try {
-      const homeDir = typeof settings.homeDir === "string" ? settings.homeDir : os.homedir()
-      const ocDir = typeof settings.ocDir === "string" ? settings.ocDir : undefined
-      const directory = resolveTargetDirectory(args.target, ocDir, homeDir)
-      const server = await OcConfig.startServer()
-      const session = args.target ? await bootstrapSession(server, directory) : undefined
-      // Leave the intro frame up; the TUI's first alternate-screen frame continues it.
-      await attach(server, settings, { directory, session, introFrame: stopIntro(false) })
-    } finally {
-      stopIntro()
-    }
+    await launchProject(args.target, { single: Boolean(args.single || args.portable), portable: Boolean(args.portable) })
   },
 })
 
-const StableCommand = cmd({
-  command: "stable [target]",
-  describe: "open a standalone session in this window, independent of the resident server",
+const SingleCommand = cmd({
+  command: "single [target]",
+  describe: "open a single-instance session in this window, independent of the resident server",
   builder: (yargs: Argv) =>
     yargs
       .positional("target", { type: "string", describe: "project path or home-directory child" })
+      .option("session", { type: "string", describe: "resume this session without creating another" })
+      .option("home", { type: "boolean", describe: "open the home screen in the target directory" })
       .option("portable", { type: "boolean", describe: "use a separate session database (ocPortable.db)" }),
   handler: async (args) => {
-    const settings = await OcConfig.read()
-    const homeDir = typeof settings.homeDir === "string" ? settings.homeDir : os.homedir()
-    const ocDir = typeof settings.ocDir === "string" ? settings.ocDir : undefined
-    const tui = [resolveTargetDirectory(args.target, ocDir, homeDir)]
-    if (typeof settings.sessionModel === "string") tui.push("--model", settings.sessionModel)
-    if (typeof settings.sessionAgent === "string") tui.push("--agent", settings.sessionAgent)
-    await runNative(tui, {
-      env: { OC_STABLE: "1", OC_AUTO_RENAME: "1", ...(args.portable ? { OPENCODE_DB: "ocPortable.db" } : {}) },
-    })
+    await launchProject(args.target, { single: true, portable: Boolean(args.portable), session: args.session, home: args.home })
   },
 })
+
+// A target gets a fresh bootstrapped session; no target opens the home screen.
+async function launchProject(target: string | undefined, options: {
+  single: boolean; portable?: boolean; session?: string; home?: boolean
+}) {
+  const settings = await OcConfig.read()
+  const stopIntro = startIntro(settings.intro?.background)
+  try {
+    const homeDir = typeof settings.homeDir === "string" ? settings.homeDir : os.homedir()
+    const ocDir = typeof settings.ocDir === "string" ? settings.ocDir : undefined
+    const directory = resolveTargetDirectory(target, ocDir, homeDir)
+    if (options.single || settings.mode === "single") {
+      const session = options.session ?? (target && !options.home
+        // The JSON result is the command's last stdout line; plugins may print before it.
+        ? (JSON.parse((await runNative(["session", "bootstrap", directory], {
+            capture: true, env: options.portable ? { OPENCODE_DB: "ocPortable.db" } : {} })).split("\n").at(-1) ?? "") as
+            { sessionID: string }).sessionID
+        : undefined)
+      await single(settings, { directory, session, portable: options.portable, introFrame: stopIntro(false) })
+      return
+    }
+    const server = await OcConfig.startServer()
+    const session = target ? await bootstrapSession(server, directory) : undefined
+    // Leave the intro frame up; the TUI's first alternate-screen frame continues it.
+    await attach(server, settings, { directory, session, introFrame: stopIntro(false) })
+  } finally {
+    stopIntro()
+  }
+}
 
 const PreviousCommand = cmd({
   command: "previous",
   describe: "open a previous global session",
-  builder: (yargs: Argv) => yargs.option("depth", { type: "number", default: 1 }),
+  builder: (yargs: Argv) =>
+    yargs
+      .option("depth", { type: "number", default: 1 })
+      .option("single", { type: "boolean", describe: "open in a single-instance window" })
+      .option("portable", { type: "boolean", describe: "single-instance window on ocPortable.db" }),
   handler: async (args) => {
     const depth = Number(args.depth)
     if (!Number.isInteger(depth) || depth < 1 || depth > 50)
@@ -234,11 +286,15 @@ const PreviousCommand = cmd({
     const settings = await OcConfig.read()
     const stopIntro = startIntro(settings.intro?.background)
     try {
+      const portable = Boolean(args.portable)
+      const lookup = runNative(["session", "previous", "--depth", String(depth)],
+        { capture: true, env: portable ? { OPENCODE_DB: "ocPortable.db" } : {} })
+      if (args.single || portable || settings.mode === "single") {
+        await single(settings, { directory: os.homedir(), session: await lookup, portable, introFrame: stopIntro(false) })
+        return
+      }
       // Independent startup work: the session lookup is its own process, so overlap it with server startup.
-      const [session, server] = await Promise.all([
-        runNative(["session", "previous", "--depth", String(depth)], { capture: true }),
-        OcConfig.startServer(),
-      ])
+      const [session, server] = await Promise.all([lookup, OcConfig.startServer()])
       await attach(server, settings, { directory: os.homedir(), session, introFrame: stopIntro(false) })
     } finally {
       stopIntro()
@@ -315,7 +371,7 @@ export const OcCommand = cmd({
       })
       .command(LaunchCommand)
       .command(PreviousCommand)
-      .command(StableCommand)
+      .command(SingleCommand)
       .command(DiagnosticsCommand)
       .check((argv) => {
         const kill = Boolean(argv["kill-server"]) || Boolean(argv["shutdown-server"])

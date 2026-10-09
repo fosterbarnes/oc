@@ -227,8 +227,25 @@ export const TuiThreadCommand = cmd({
         if (stopped) return
         stopped = true
         process.off("SIGUSR2", reload)
-        await withTimeout(client.call("shutdown", undefined), 5000).catch(() => {})
-        worker.terminate()
+        const { captureDescendants, stopDescendants } = await import("../tui/descendants")
+        const single = process.env.OC_SINGLE === "1"
+        const snapshot = await (single ? captureDescendants() : Promise.resolve([]))
+          .then((records) => ({ records }), (error: unknown) => ({ error }))
+        try {
+          await withTimeout(client.call("shutdown", undefined), 4500).catch((error) => {
+            if (single) throw error
+          })
+        } finally {
+          worker.terminate()
+          if ("error" in snapshot) throw snapshot.error
+          await stopDescendants(snapshot.records)
+        }
+        if (process.env.OC_SINGLE === "1" && !process.env.OC_SUPERVISOR_PID) {
+          const { Revive } = await import("@/config/revive")
+          if (await Bun.file(Revive.handoffPath(process.pid)).exists()) {
+            await Bun.write(Revive.shutdownPath(process.pid), "stopped\n")
+          }
+        }
       }
 
       const prompt = await input(args.prompt)

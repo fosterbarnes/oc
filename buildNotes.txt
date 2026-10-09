@@ -1,9 +1,12 @@
-v0.2.128
+v0.2.131
 
-time tool:
-Agents can call a compact native time tool to read the user's current local date, time, and UTC offset. Each call reads the clock directly without putting changing timestamps in the system prompt. Claude Code sessions receive the tool through the default oc proxy list, and the user's explicit global configuration includes it. Live use was confirmed.
+single mode:
+Use oc single for a session independent of the resident server, or configure single mode for ordinary launches. Single windows share the session database, show a distinct tab marker, stop running work on close, and report when another window owns the session. Portable launches retain their database through revive, and session creation tolerates earlier plugin output.
 
-test responses:
-Automatic-rename tests now specify throwing HTTP behavior on the six affected SDK requests so successful response data is correctly typed. Bootstrap, first-turn renaming, and session restart behavior remain covered.
+single revive:
+Reviving a single window leaves its hosting shell, tab, other oc windows, and resident server alone. It shuts down its own runtime and verified descendants, builds and installs, then opens a new window on the same session and directory. Portable mode and Home are preserved, with install rollback and failure recovery. The new behavior was confirmed live.
 
-Under the hood: registered the native tool and Claude proxy route, corrected the tool import and example weekday, added a Claude fake-model time round trip, and updated formatting and default proxy tests. Revision is 0.2.128. Targeted tests and pre-push checks passed. This push also includes the pending README hot-reload note, funding configuration, sidebar state, and test response typing plan.
+claude subagents:
+Claude models inside oc prefer oc skills and use native subagents so delegated work appears in the TUI. The environment guidance remains present even when no proxy tools are available.
+
+Under the hood: added bounded worker drain, scoped Windows descendant identity checks, exact-session revive context, portable reopen support, shared busy-session error handling, and single-aware palette launches. Targeted revive, descendant, shutdown, error middleware, and changed Claude environment checks passed. Pre-push checks passed. Revision is 0.2.131.

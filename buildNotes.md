@@ -146,6 +146,136 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-08 (~20:30) - v0.2.131 - Keep single revive scoped to its runtime - GPT-6.1 Sol, default reasoning; Implementation
+
+### Agent
+- Meta: GPT-6.1 Sol; default reasoning; Implementation; completed
+- Version: 0.2.131
+- Fixed `config/oc.ts` revive: single never calls `shutdownAll`, including source installs; retained rename/install/alias rollback. Restarter skips old-window/pane/shell close for single. Supersedes install exception in v0.2.129 single-mode notes.
+- Added `cli/tui/descendants.ts`: capture CIM identities while own TUI lives; select creation-ordered descendants, exclude other oc/terminal/revive-helper subtrees; recheck CIM identity after obtaining process handle before stopping leftovers. No tree kill. `cli/cmd/tui.ts` drains worker first, then terminates worker and cleans verified children; cleanup/shutdown failures block hosted build.
+- Fixed `cli/cmd/oc.ts` host: failed TUI shutdown reopens old single in place without building. Added single `--session` and `--home`; restart carries exact session/directory/portable through `config/revive.ts`, bypassing global previous-session races and fresh bootstrap.
+- Fixed unhosted single revive in `tui/src/app.tsx`: exit only after detached helper launch succeeds; helper waits for TUI exit plus successful cleanup acknowledgement before build. Failed builds log to revive.log and reopen single; hosted failures retain existing key-to-reopen recovery. Reused missing-terminal plain-console fallback.
+- Verification: `bun test test/config/revive.test.ts test/cli/descendants.test.ts --timeout 30000` passed: 19 tests, 145 assertions. Covered exact session/Home commands across three terminals, portable context, live hosting-shell preservation with injected launcher, disposable Windows descendants, mismatched creation identity, unrelated-process survival, and existing temporary install rollback. Scoped `git diff --check` passed.
+- Limits: no app run/build/live install/typecheck. Installed terminal handoff, worker drain, and unhosted acknowledgement remain user acceptance. Descendant cleanup is Windows-only; unknown identities are not killed. In-use old install files may remain until other runtimes exit. Kept unrelated dirty work.
+
+### User
+Single revive
+- `/revive` in a single window leaves your shell, hosting tab, other oc windows, and background server alone, including when installing a build.
+- The replacement opens in a new window with the same chat, folder, and portable mode; Home stays Home.
+- Shutdown and build failures stop the install and preserve recovery; leftover children are stopped only after their ownership is verified.
+
+---
+
+## 2026-10-08 (~20:13) - v0.2.130 - Claude Code under oc uses oc skills and native subagents - Opus 5.5, low; Implementation
+
+### Agent
+- Meta: Opus 5.5; low; Implementation; completed
+- Version: 0.2.130
+- Fixed: Claude Code in oc used desktop-only `~/.claude/skills/oc-subagent`, which shells `opencode.exe run` (detached, not in TUI). Plan: `~/.config/opencode/plans/2026-10-08-oc-subagent-native-task.md`.
+- Changed `buildToolEnvironmentNote` (provider/claude-code/prompts.ts): now always returns a note for tool-enabled spawns with two rules: prefer `oc:<name>` skills over `~/.claude/skills` (built-ins fine), and never start subagents via `opencode run`/shell. Proxy-prefix paragraph only when proxies exist; task/question sections unchanged. Reason: Sol review (`general-gpt-6.1-sol-medium`, dispatched natively) found both rules vanished with no proxies or `task` denied.
+- Added (outside repo) Dispatch + output-shape lines to `~/.config/opencode/skills/user/subagents/SKILL.md`, new description; copied to `opencode-debug`. `oc-subagent` description now "Claude Code desktop app only".
+- Fixed (user config, outside repo): no `general-*` agents registered because `~/.config/opencode/agents/sub/general.md` line 32 had an unquoted `: ` in the grok-4.6-medium description ("Weak at citations: omits"), so YAML parse failed and `ConfigAgent.scan` skipped the whole file (diagnostic only). Changed to " - " in both `opencode` and `opencode-debug` trees; `scan()` now returns all 11, diagnostics empty. Needs oc restart.
+- Risk: one bad YAML char silently drops every agent in a family file; the diagnostic is easy to miss.
+- Verification: test covers `[]`, `["session_tail"]`, `["task"]`. `bun test test/provider/claude-code/subagent-hint.test.ts` 25 pass, 1 fail. The fail (`proxy defs follow the tools opencode offered the agent`, extra `time` tool) predates this change (same fail with change stashed).
+- MISTAKE: ran `git stash` on the user's dirty worktree to compare baseline; popped cleanly. Prevention: compare baselines with a worktree copy, never stash user work.
+
+### User
+Claude Code in oc
+- Claude models running inside oc now use oc's own skills instead of your Claude desktop skills, and start subagents through oc so they show up in the TUI.
+
+---
+
+## 2026-10-08 (~20:10) - v0.2.129 - Sol review fixes for single mode - Opus 5.5, low; Implementation
+
+### Agent
+- Meta: Opus 5.5; low; Implementation; completed. Review by GPT-6.1 Sol medium via `opencode run` (oc-subagent skill); proxy `task` rejected every `general-*` name after revive
+- Version: 0.2.129 (same session)
+- Fixed: lock refusal only handled on `promptAsync`; TUI sends sync `session.prompt`, so it surfaced as 500 "Unexpected server error". `middleware/error.ts` now maps `SessionRunState.HeldElsewhereError` defects to 409 `UnknownError` with its message (covers prompt, command, shell)
+- Fixed: `oc launch --palette` ignored single mode/`--portable`; now sets `OC_SINGLE=1` (and `OPENCODE_DB=ocPortable.db`) for the spawned TUI
+- Sol confirmed: no issue in revive recursion, intro handoff, worker shutdown order, Lua handler; hosted revive drops the exiting TUI's ledger record so `shutdownAll` does not hit its own launcher
+- Verification: `httpapi-error-middleware.test.ts` 5 pass (added 409 case); `tsgo --noEmit` opencode passed
+- TODO: TUI shell submission discards the HTTP response, so a refused `!shell` shows nothing (Sol); not changed
+
+### User
+Single-instance mode
+- Sending a message to a session another oc window is running now shows "Session is running in another oc window" instead of "Unexpected server error".
+- Opening the new-session palette from the launcher respects single mode and `--portable`.
+
+---
+
+## 2026-10-08 (~20:00) - v0.2.129 - Robust single bootstrap parse - Opus 5.5, low; Implementation
+
+### Agent
+- Meta: Opus 5.5; low; Implementation; completed
+- Version: 0.2.129 (same session)
+- Fixed risk from the entry below: `launchProject` parses only the last stdout line of `session bootstrap` (`runNative` trims; `JSON.parse` tolerates a trailing `\r`), so earlier plugin output no longer breaks `oc single <folder>`
+- Verification: `tsgo --noEmit` opencode passed
+
+### User
+Single-instance mode
+- `oc single <folder>` no longer fails if a plugin prints something while the session is created.
+
+---
+
+## 2026-10-08 (~19:56) - v0.2.129 - Single-instance review fixes - Opus 5.5, low; Implementation
+
+### Agent
+- Meta: Opus 5.5; low; Implementation; completed. Review by `review-grok-4.6-medium`; Sol requested but `review-gpt-6.1-sol-medium` and `general-gpt-6.1-sol-medium` were rejected as unknown agent types by the running oc registry (entry exists in `agents/sub/general.md`; likely needs an oc restart)
+- Version: 0.2.129 (same session)
+- Grok confirmed: worker `SessionWork` is the server's instance (shared memoMap, same layer object); `session bootstrap` prints one JSON line; `--single` survives command-loader; Lua byte prefix match is correct
+- Fixed drain budget: worker drain 3 s -> 2.5 s so drain + dispose fit `tui.ts` 4.5 s stop
+- Fixed `--portable` lost on revive: `portable` added to `ReviveContext`/`RestartContext` (validated), TUI sets it when `OC_SINGLE=1` and `OPENCODE_DB=ocPortable.db`, `reopenCommand` appends `--portable`; `oc launch`/`oc previous` accept `--portable` (implies single; `previous` looks up on the portable DB)
+- Verification: `tsgo --noEmit` opencode + tui passed; revive.test.ts 15 pass, shutdown.test.ts 3 pass
+- Risk: `JSON.parse` of `session bootstrap` stdout breaks if a plugin ever writes to stdout during that command
+
+### User
+Single-instance mode
+- `oc single --portable` windows now come back as portable after `/revive`.
+- Closing a single window leaves a bit more time for plugins and MCP servers to shut down.
+
+---
+
+## 2026-10-08 (~19:50) - v0.2.129 - Single-instance tab marker - Opus 5.5, low; Implementation
+
+### Agent
+- Meta: Opus 5.5; low; Implementation; completed. Follow-up to the v0.2.129 single-instance entry below; user confirmed `oc single` close worked live
+- Version: 0.2.129 (same session; not bumped again)
+- Changed `tui/src/app.tsx` title effect: with `OC_SINGLE=1` the agent prefix is `⦿ ` instead of `■ ` (same `oc_agent_color`). User picked `⦿` from offered options
+- Updated wezFig `wezterm.lua` `format-tab-title` to draw `⦿` in the agent color for those titles (wezFig build notes appended)
+- Verification: none run (one-line prefix change); needs a live look at a single tab and a normal tab in WezTerm
+
+### User
+Terminal tabs
+- Single-instance tabs show ⦿ in the agent color instead of the square, so you can tell them apart at a glance.
+
+---
+
+## 2026-10-08 (~19:39) - v0.2.129 - Single-instance mode (`oc single`) - Opus 5.5, low; Implementation
+
+### Agent
+- Meta: Opus 5.5; low; Implementation; completed. Plan: `singleInstancePlan.md` (repo root)
+- Version: 0.2.129
+- Renamed `oc stable` -> `oc single` (`cli/cmd/oc.ts` `SingleCommand`), env `OC_STABLE` -> `OC_SINGLE` (`index.ts`, `tui/app.tsx`, `footer.tsx`), footer label `single`. No `stable` alias
+- Added `mode` key to `config/oc.ts` `keys` (`single|resident`, validated in `update`). `launchProject` (shared by `oc launch`/`oc single`) and `oc previous` open single when `mode=single` or `--single`. Single + target bootstraps via child `session bootstrap` (JSON stdout) then `--session`
+- Moved launcher handoff tail from `attach` into `host(args, env, introFrame, reopen)`; single windows now get `OC_SUPERVISOR_PID` so `/revive` is hosted in-window
+- Added `single` to `Revive.ReviveContext`/`RestartContext` (validated); `reopenCommand` appends `--single`; `OcConfig.revive` skips `shutdownAll` (unless installing) and `startServer` for single
+- Fixed unsafe close: worker `rpc.shutdown` now runs `ServerShutdown.drain(work, "3 seconds")` (split out of `prepare`) before disposing instances. `SessionWork` reached via `makeRuntime(SessionWork.Service, SessionWork.layer)`: shared memoMap + no-deps node compiles to the same layer object, so it is the server's instance. `tui.ts` stop timeout 5000 -> 4500
+- Added `SessionRunState.HeldElsewhereError` for the cross-process lock; `promptAsync` error event shows its message instead of `Cause.pretty`
+- Kept Ctrl+N unchanged: it navigates the current window (no new process), so it already follows the window's runtime
+- Added FORK.md row "Single-instance mode"
+- Verification: `tsgo --noEmit` passed for opencode and tui; `test/config/revive.test.ts` 15 pass (added `--single` reopen and `single` round-trip/reject); `test/server/shutdown.test.ts` 3 pass (added drain-timeout test)
+- Risk: Windows console close (X) relies on Bun emitting `SIGHUP` (TUI handler at `app.tsx` ~698); unverified. `--portable` is dropped on revive reopen. `oc single <target>` now creates a fresh session (old `oc stable <target>` opened the home screen)
+
+### User
+Single-instance mode
+- `oc stable` is now `oc single`; it runs a whole oc session in one window with no background server, using the same session list.
+- `oc config set mode single` makes `oc` and `occ` open single-instance windows; `--single` does it for one launch.
+- Closing a single window stops running work cleanly (up to 3 seconds) instead of cutting it off.
+- `/revive` from a single window reopens a single window and leaves the background server alone.
+- Prompting a session that another oc window is running shows "Session is running in another oc window" instead of a stack trace.
+
+---
+
 ## 2026-10-08 (~19:21) - v0.2.128 - Time tool cleanup and Claude proxy verification - GPT-6.1 Sol, default reasoning; Pass
 
 ### Agent

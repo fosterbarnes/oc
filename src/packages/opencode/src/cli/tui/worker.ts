@@ -10,6 +10,11 @@ import { Heap } from "@/cli/heap"
 import { AppRuntime } from "@/effect/app-runtime"
 import { Effect } from "effect"
 import { disposeAllInstancesAndEmitGlobalDisposed } from "@/server/global-lifecycle"
+import { ServerShutdown } from "@/server/shutdown"
+import { SessionWork } from "@opencode-ai/core/session/work"
+import { makeRuntime } from "@/effect/run-service"
+
+const sessionWork = makeRuntime(SessionWork.Service, SessionWork.layer)
 
 Heap.start()
 
@@ -70,7 +75,10 @@ export const rpc = {
     )
   },
   async shutdown() {
-    await InstanceRuntime.disposeAllInstances()
+    // Same drain as the resident server (shared memoMap, so the server's SessionWork instance),
+    // capped so drain plus dispose fit the ~5 s Windows console-close window (tui.ts stop: 4.5 s).
+    await sessionWork.runPromise((work) => ServerShutdown.drain(work, "2500 millis"))
+    await AppRuntime.runPromise(disposeAllInstancesAndEmitGlobalDisposed({ swallowErrors: true }))
     if (server) await server.stop(true)
     process.off("unhandledRejection", onUnhandledRejection)
     process.off("uncaughtException", onUncaughtException)

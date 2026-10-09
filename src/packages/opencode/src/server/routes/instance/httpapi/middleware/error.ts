@@ -1,6 +1,7 @@
 import { NamedError } from "@opencode-ai/core/util/error"
 import { ConfigErrorV1 } from "@opencode-ai/core/v1/config/error"
 import { Cause, Effect } from "effect"
+import { SessionRunState } from "@/session/run-state"
 import { HttpRouter, HttpServerError, HttpServerRespondable, HttpServerResponse } from "effect/unstable/http"
 
 // Keep typed HttpApi failures on their declared error path; this boundary only replaces defect-only empty 500s.
@@ -23,6 +24,12 @@ export const errorLayer = HttpRouter.middleware<{ handles: unknown }>()((effect)
         ConfigErrorV1.DirectoryTypoError.isInstance(error)
       ) {
         return Effect.succeed(HttpServerResponse.jsonUnsafe(error.toObject(), { status: 400 }))
+      }
+      // Expected cross-process refusal (another oc window runs this session): show its message, not a 500.
+      if (error instanceof SessionRunState.HeldElsewhereError) {
+        return Effect.succeed(
+          HttpServerResponse.jsonUnsafe(new NamedError.Unknown({ message: error.message }).toObject(), { status: 409 }),
+        )
       }
 
       const ref = `err_${crypto.randomUUID().slice(0, 8)}`

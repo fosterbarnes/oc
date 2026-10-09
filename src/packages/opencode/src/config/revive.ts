@@ -27,10 +27,16 @@ export type ReviveContext = {
   supervisorPid?: number
   // The launcher's parent. Worker 2 kills it to close Windows Terminal tabs and plain consoles.
   shellPid?: number
+  // Unhosted single TUI: the helper waits for its graceful shutdown before building.
+  tuiPid?: number
   // First /revive answer when oc.json has no `revive.build`: build from an existing source folder,
   // download the source into `sourceDir`, or never build.
   source?: "existing" | "download" | "none"
   sourceDir?: string
+  // Revived from a single-instance window: reopen single and leave the resident server alone.
+  single?: boolean
+  // Single window on ocPortable.db (`--portable`); reopen keeps it.
+  portable?: boolean
 }
 
 /** Handed from the revive pipeline to the detached terminal restarter (worker 2). */
@@ -44,6 +50,10 @@ export type RestartContext = {
   waitPid?: number
   // Set after an install; worker 2 removes `.old-*` leftovers there once the old processes exit.
   installDir?: string
+  single?: boolean
+  portable?: boolean
+  directory?: string
+  sessionID?: string
 }
 
 // `source` is the user's oc source folder (chosen or downloaded on the first /revive); revive never pulls it.
@@ -59,6 +69,11 @@ export function handoffPath(supervisorPid: number) {
   return path.join(Global.Path.state, "oc-revive", `${supervisorPid}.json`)
 }
 
+// Only the exiting unhosted TUI writes this acknowledgement, after worker/descendant cleanup.
+export function shutdownPath(tuiPid: number) {
+  return path.join(Global.Path.state, "oc-revive", `${tuiPid}.stopped`)
+}
+
 export function encode(value: ReviveContext | RestartContext) {
   return Buffer.from(JSON.stringify(value)).toString("base64url")
 }
@@ -71,7 +86,8 @@ export function parseContext(input: unknown): ReviveContext {
   const value = record(input)
   if ((value.mode !== "install" && value.mode !== "no-install") || !TERMINALS.includes(value.terminal as string) ||
     !text(value.directory) || !optional(value.sessionID, text) || !optional(value.paneID, text) ||
-    !optional(value.supervisorPid, pid) || !optional(value.shellPid, pid) ||
+    !optional(value.supervisorPid, pid) || !optional(value.shellPid, pid) || !optional(value.single, flag) ||
+    !optional(value.portable, flag) || !optional(value.tuiPid, pid) ||
     !optional(value.source, (item) => item === "existing" || item === "download" || item === "none") ||
     ((value.source === "existing" || value.source === "download") !==
       (text(value.sourceDir) && path.isAbsolute(value.sourceDir as string)))) {
@@ -84,7 +100,10 @@ export function decodeRestart(encoded: string): RestartContext {
   const value = record(JSON.parse(Buffer.from(encoded, "base64url").toString("utf8")))
   if (!TERMINALS.includes(value.terminal as string) || !LAUNCHERS.includes(value.launcher as Launcher) ||
     !text(value.executable) || !optional(value.entrypoint, text) || !optional(value.paneID, text) ||
-    !optional(value.shellPid, pid) || !optional(value.waitPid, pid) || !optional(value.installDir, text)) {
+    !optional(value.shellPid, pid) || !optional(value.waitPid, pid) || !optional(value.installDir, text) ||
+    !optional(value.single, flag) || !optional(value.portable, flag) ||
+    !optional(value.directory, text) || !optional(value.sessionID, text) ||
+    (value.single === true && !text(value.directory))) {
     throw new Error("Invalid revive restart context")
   }
   return value as RestartContext
@@ -142,7 +161,10 @@ export function resolveLauncher(executable: string, debug: boolean, exists: (fil
 /** Opens a fresh terminal running the configured launcher, so the next revive is hosted in place again. */
 export function reopenCommand(restart: RestartContext) {
   const command = [restart.executable, ...(restart.entrypoint ? [restart.entrypoint] : []), "oc",
-    ...(restart.launcher === "occ" ? ["previous", "--depth", "1"] : ["launch"])]
+    ...(restart.single
+      ? ["single", restart.directory!, ...(restart.sessionID ? ["--session", restart.sessionID] : ["--home"])]
+      : restart.launcher === "occ" ? ["previous", "--depth", "1"] : ["launch"]),
+    ...(restart.portable ? ["--portable"] : [])]
   if (restart.terminal === "wezterm") {
     // A fresh GUI process reloads wezterm.lua and inherits this environment instead of an unrelated mux server's.
     // wezterm-gui, not the console-subsystem wezterm CLI: that one would show its own console window
@@ -262,6 +284,10 @@ function text(value: unknown) {
 
 function pid(value: unknown) {
   return Number.isInteger(value) && (value as number) > 0
+}
+
+function flag(value: unknown) {
+  return typeof value === "boolean"
 }
 
 function optional(value: unknown, check: (value: unknown) => boolean) {

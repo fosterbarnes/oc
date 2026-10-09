@@ -36,6 +36,18 @@ test("subagent dispatch hint names the OpenCode proxy tools", () => {
   assert.match(SUBAGENT_DISPATCH_HINT, /config files/i)
 })
 
+// Claude Code once used a desktop-only ~/.claude skill that shelled out to
+// `opencode.exe run`. Both rules hold even with no proxy or `task` denied:
+// oc skills still load and Bash can still run.
+test("tool environment note always prefers oc skills and forbids shell subagents", () => {
+  for (const tools of [[], ["session_tail"], ["task"]]) {
+    const note = buildToolEnvironmentNote(tools)
+    assert.match(note, /prefer OpenCode skills \(`oc:<name>`\) over .*`~\/\.claude\/skills`/)
+    assert.match(note, /Skills built into Claude Code are fine/)
+    assert.match(note, /Never start an OpenCode subagent through a shell \(`opencode run`/)
+  }
+})
+
 test("static task proxy def carries the disambiguation note", () => {
   const task = DEFAULT_PROXY_TOOLS.find((t) => t.name === "task")
   assert.ok(task, "task def missing from DEFAULT_PROXY_TOOLS")
@@ -365,19 +377,19 @@ test("forwarded opencode proxy defs follow the allowed host tool set", () => {
 })
 
 test("tool environment note names the proxy prefix and how to load a deferred tool", () => {
-  const note = buildToolEnvironmentNote(["session_tail"])!
+  const note = buildToolEnvironmentNote(["session_tail"])
   assert.match(note, /mcp__opencode_proxy__<name>/)
   assert.match(note, /ToolSearch \(`select:mcp__opencode_proxy__<name>`\)/)
-  assert.equal(buildToolEnvironmentNote([]), undefined)
+  assert.doesNotMatch(buildToolEnvironmentNote([]), /mcp__opencode_proxy__<name>/)
 })
 
 // The dispatch and question sections live inside the one note and appear
 // only for a live proxy: a gated or permission-denied tool must not be
 // advertised, or the model calls a tool that does not exist.
 test("tool environment note carries the task and question sections only when live", () => {
-  const both = buildToolEnvironmentNote(["task", "question"])!
+  const both = buildToolEnvironmentNote(["task", "question"])
   assert.ok(both.includes(SUBAGENT_DISPATCH_HINT) && both.includes(QUESTION_PROXY_HINT))
-  const neither = buildToolEnvironmentNote(["session_tail"])!
+  const neither = buildToolEnvironmentNote(["session_tail"])
   assert.ok(!neither.includes("### Subagents") && !neither.includes("### Asking"))
 })
 
@@ -387,7 +399,7 @@ test("appended prompt is the agent prompt, the tool note and the multi-step hint
   const file = buildAppendedSystemPrompt({
     agentPrompt: "AGENT PROMPT",
     multiStepHint: true,
-    toolEnvironment: buildToolEnvironmentNote(["task"])!,
+    toolEnvironment: buildToolEnvironmentNote(["task"]),
   })!
   const text = readFileSync(file, "utf8")
   assert.ok(text.startsWith("AGENT PROMPT"))

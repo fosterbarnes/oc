@@ -145,13 +145,18 @@ const cancelBackgroundJobs = Effect.fn("SessionRunState.cancelBackgroundJobs")(f
   }
 })
 
-// Cross-process guard so the resident server and `oc stable` never drive the same session at once.
+/** Defect raised when another oc process holds the session lock; callers show `message` as is. */
+export class HeldElsewhereError extends Error {
+  override readonly name = "HeldElsewhereError"
+}
+
+// Cross-process guard so the resident server and `oc single` never drive the same session at once.
 // Held only while work runs; a crashed holder goes stale once its heartbeat stops.
 function owned<A>(sessionID: SessionID, work: Effect.Effect<A>) {
   return Effect.acquireRelease(
     Effect.tryPromise({
       try: () => Flock.acquire(`session:${sessionID}`, { timeoutMs: 0, staleMs: 15_000 }),
-      catch: (cause) => new Error("Session is running in another oc instance", { cause }),
+      catch: (cause) => new HeldElsewhereError("Session is running in another oc window", { cause }),
     }).pipe(Effect.orDie),
     (lock) => Effect.promise(() => lock.release().catch(() => undefined)),
   ).pipe(Effect.andThen(work), Effect.scoped)

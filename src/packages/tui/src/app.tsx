@@ -476,6 +476,8 @@ function reviveCommands(toast: ToastContext) {
       directory: (sessionID ? sync.session.get(sessionID)?.directory : undefined) ?? sdk.directory ?? process.cwd(),
       ...(sessionID ? { sessionID } : {}),
       ...(terminal.kind === "wezterm" && terminal.paneID ? { paneID: terminal.paneID } : {}),
+      ...(process.env.OC_SINGLE === "1" ? { single: true, tuiPid: process.pid } : {}),
+      ...(process.env.OC_SINGLE === "1" && process.env.OPENCODE_DB === "ocPortable.db" ? { portable: true } : {}),
       ...source,
     }
     // Hosted by an `oc`/`occ` launcher: hand off and exit, so it shows revive progress in this window
@@ -487,12 +489,19 @@ function reviveCommands(toast: ToastContext) {
         .then(() => fs.promises.writeFile(file, JSON.stringify(context)))
         .then(() => exit(), (error) => toast.error(error))
     }
+    if (context.single) {
+      const file = path.join(Global.Path.state, "oc-revive", `${process.pid}.json`)
+      await fs.promises.mkdir(path.dirname(file), { recursive: true })
+      await fs.promises.rm(path.join(path.dirname(file), `${process.pid}.stopped`), { force: true })
+      await fs.promises.writeFile(file, JSON.stringify(context))
+    }
     launchDetached(process.execPath, [
       ...(/^bun(?:\.exe)?$/i.test(path.basename(process.execPath)) ? [process.argv[1]] : []),
       "oc", "--revive", Buffer.from(JSON.stringify(context)).toString("base64url"),
     ]).once("error", (error) => toast.error(error))
       .once("exit", (code) => {
         if (code) toast.error(new Error(`Revive helper launch failed: exit code ${code}`))
+        if (!code && context.single) exit()
       })
   }
   return [
@@ -1006,7 +1015,8 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
     }
     if (!titleEnabled) return
     // Plain ■ renders everywhere; WezTerm (with the oc tab snippet) colors it via oc_agent_color.
-    const prefix = color ? "■ " : ""
+    // A single-instance (`oc single`) window uses ⦿ in place of ■, same agent color.
+    const prefix = color ? (process.env.OC_SINGLE === "1" ? "⦿ " : "■ ") : ""
 
     if (route.data.type === "home") {
       renderer.setTerminalTitle(`${prefix}OpenCode`)
@@ -1704,14 +1714,14 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
         name: "server.shutdown",
         title: "Shut Down",
         category: "oc",
-        hidden: process.env.OC_STABLE === "1",
+        hidden: process.env.OC_SINGLE === "1",
         run: () => void controlServer("shutdown"),
       },
       {
         name: "server.restart",
         title: "Restart",
         category: "oc",
-        hidden: process.env.OC_STABLE === "1",
+        hidden: process.env.OC_SINGLE === "1",
         run: () => void controlServer("restart"),
       },
       {

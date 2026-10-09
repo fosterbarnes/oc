@@ -97,4 +97,35 @@ describe("ServerShutdown", () => {
       expect(yield* status.get(chat.id)).toEqual({ type: "idle" })
     }),
   )
+
+  // The single-instance worker drains with a short cap so window close stays inside Windows' ~5 s grace.
+  it.instance("drain gives up on stuck cleanup after its timeout", () =>
+    Effect.gen(function* () {
+      const session = yield* Session.Service
+      const state = yield* SessionRunState.Service
+      const work = yield* SessionWork.Service
+      const chat = yield* session.create({})
+      const message = {
+        info: yield* session.updateMessage({
+          id: MessageID.ascending(), sessionID: chat.id, role: "user", agent: "build",
+          model: { providerID: ProviderV2.ID.make("test"), modelID: ModelV2.ID.make("test") },
+          time: { created: Date.now() },
+        }),
+        parts: [],
+      }
+      const started = yield* Deferred.make<void>()
+      const finish = yield* Deferred.make<void>()
+      const active = yield* state.ensureRunning(chat.id, Effect.succeed(message),
+        Deferred.succeed(started, undefined).pipe(
+          Effect.andThen(Effect.never),
+          Effect.ensuring(Deferred.await(finish)),
+        ),
+      ).pipe(Effect.forkChild)
+      yield* Deferred.await(started)
+      yield* ServerShutdown.drain(work, "200 millis")
+      expect(active.pollUnsafe()).toBeUndefined()
+      yield* Deferred.succeed(finish, undefined)
+      yield* Fiber.await(active)
+    }),
+  )
 })

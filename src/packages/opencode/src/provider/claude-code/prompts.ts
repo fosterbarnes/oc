@@ -56,18 +56,27 @@ Structured questions in this environment go through exactly one tool: \`mcp__ope
 - Claude Code's built-in \`AskUserQuestion\` is disabled in this environment; the proxy is the only way to ask structured questions.`
 
 /**
- * The oc-only tool note for one spawn, or undefined when nothing is proxied.
- * Proxy tools are deferred MCP tools, so their schemas cost nothing until
- * Claude loads one; the note only says where they live. The task and
- * question sections ride along only when that proxy is live, so a gated or
- * permission-denied tool is never advertised.
+ * The oc-only environment note for one tool-enabled spawn. The skills and
+ * no-shell-subagent rules always apply: oc skills load and Bash may run even
+ * when no proxy survives. Proxy tools are deferred MCP tools, so their
+ * schemas cost nothing until Claude loads one; the note only says where they
+ * live. The task and question sections ride along only when that proxy is
+ * live, so a gated or permission-denied tool is never advertised.
  */
-export function buildToolEnvironmentNote(proxyTools: string[]): string | undefined {
-  if (proxyTools.length === 0) return undefined
+export function buildToolEnvironmentNote(proxyTools: string[]): string {
   return [
     "## OpenCode tools",
     "",
-    "You are running inside OpenCode, which shows this conversation to the user. OpenCode-only tools are MCP tools named `mcp__opencode_proxy__<name>`. Load one with ToolSearch (`select:mcp__opencode_proxy__<name>`) if it is deferred, and always call it by its full name.",
+    "You are running inside OpenCode, which shows this conversation to the user.",
+    "",
+    "- Skills: prefer OpenCode skills (`oc:<name>`) over the user's own Claude Code skills from `~/.claude/skills`; those are for the Claude Code desktop app and may do oc-like things in a way that bypasses OpenCode. Skills built into Claude Code are fine.",
+    "- Never start an OpenCode subagent through a shell (`opencode run`, `opencode.exe`): it bypasses the TUI and the native subagent lifecycle.",
+    ...(proxyTools.length > 0
+      ? [
+          "",
+          "OpenCode-only tools are MCP tools named `mcp__opencode_proxy__<name>`. Load one with ToolSearch (`select:mcp__opencode_proxy__<name>`) if it is deferred, and always call it by its full name.",
+        ]
+      : []),
     ...(proxyTools.includes("task") ? ["", SUBAGENT_DISPATCH_HINT] : []),
     ...(proxyTools.includes("question") ? ["", QUESTION_PROXY_HINT] : []),
   ].join("\n")

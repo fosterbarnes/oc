@@ -15,11 +15,11 @@ import {
 } from "./cli/command-loader"
 
 const rawArgs = hideBin(process.argv)
-// `oc stable` children run the vanilla in-process TUI, so they must skip the resident-attach rewrites.
+// `oc single` children run the vanilla in-process TUI, so they must skip the resident-attach rewrites.
 const args =
-  process.env.OC_STABLE === "1"
+  process.env.OC_SINGLE === "1"
     ? rawArgs
-    : rawArgs[0] === "stable"
+    : rawArgs[0] === "single"
       ? ["oc", ...rawArgs]
       : withOcLaunchDefault(withExecutableDefault(rawArgs, process.execPath), isDebugExecutable())
 

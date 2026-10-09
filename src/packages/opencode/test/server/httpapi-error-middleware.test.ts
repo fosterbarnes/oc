@@ -6,6 +6,7 @@ import { Effect, Layer } from "effect"
 import { HttpClient, HttpClientRequest, HttpRouter } from "effect/unstable/http"
 import { errorLayer } from "../../src/server/routes/instance/httpapi/middleware/error"
 import { NotFoundError } from "../../src/storage/storage"
+import { SessionRunState } from "../../src/session/run-state"
 import { testEffect } from "../lib/effect"
 
 const it = testEffect(Layer.mergeAll(NodeHttpServer.layerTest, NodeServices.layer))
@@ -50,6 +51,24 @@ describe("HttpApi error middleware", () => {
       expect(response.status).toBe(500)
       expectUnknownErrorBody(body)
       expect(JSON.stringify(body)).not.toContain("secret named marker")
+    }),
+  )
+
+  it.live("returns the cross-window session lock refusal as a 409 with its message", () =>
+    Effect.gen(function* () {
+      yield* HttpRouter.add(
+        "GET",
+        "/held",
+        Effect.die(new SessionRunState.HeldElsewhereError("Session is running in another oc window")),
+      ).pipe(Layer.provide(errorLayer), HttpRouter.serve, Layer.build)
+
+      const response = yield* HttpClientRequest.get("/held").pipe(HttpClient.execute)
+
+      expect(response.status).toBe(409)
+      expect(yield* response.json).toMatchObject({
+        name: "UnknownError",
+        data: { message: "Session is running in another oc window" },
+      })
     }),
   )
 
