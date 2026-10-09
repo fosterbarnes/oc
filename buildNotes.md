@@ -146,6 +146,25 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-08 (~22:06) - v0.2.135 - Clickable items are not text-selectable - Opus 5.5, low reasoning; Implementation
+
+### Agent
+- Meta: Opus 5.5; low reasoning; Implementation (imp, delegated to general subagent); completed
+- Version: 0.2.135
+- Rule: clickable items are selectable=false and click runs the action; ordinary text keeps double-click selection. FORK.md text-selection row updated.
+- UserMessage (routes/session/index.tsx): inner box left-click -> onAction again; body, file chips, timestamp/QUEUED not selectable. Actions label kept.
+- InlineToolRow: onMouseUp moved from icon text to row box (left only); icon/label/pending/Spinner selectable={!onMouseUp}. InlineTool passes onMouseUp only when clickable(). Removed "any selection exists" guard that blocked subagent clicks while a highlight lingered.
+- Redo banner texts not selectable; left-button only. Spinner gained optional selectable prop.
+- Verification: textSelection.test.tsx 6 pass, 100 expects (new clickable-row cases). tui typecheck clean.
+
+### User
+Session view
+- Clicking a sent message opens its Actions menu again (undo is there).
+- Clicking a subagent row opens it even when text is highlighted elsewhere.
+- Clickable rows and messages no longer highlight on double-click; normal text still does.
+
+---
+
 ## 2026-10-08 (~21:57) - v0.2.134 - New oc session ignores repeat Enter while creating - Opus 5.5, low reasoning; Implementation
 
 ### Agent

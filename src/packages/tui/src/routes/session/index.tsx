@@ -1388,7 +1388,10 @@ export function Session() {
                             <box
                               onMouseOver={() => setHover(true)}
                               onMouseOut={() => setHover(false)}
-                              onMouseUp={handleUnrevert}
+                              onMouseUp={(evt) => {
+                                if (evt.button !== MouseButton.LEFT) return
+                                handleUnrevert()
+                              }}
                               marginTop={1}
                               flexShrink={0}
                               border={["left"]}
@@ -1401,15 +1404,15 @@ export function Session() {
                                 paddingLeft={2}
                                 backgroundColor={hover() ? theme.backgroundElement : theme.backgroundPanel}
                               >
-                                <text fg={theme.textMuted}>{`${revert()!.reverted.length} message reverted`}</text>
-                                <text fg={theme.textMuted}>
+                                <text selectable={false} fg={theme.textMuted}>{`${revert()!.reverted.length} message reverted`}</text>
+                                <text selectable={false} fg={theme.textMuted}>
                                   <span style={{ fg: theme.text }}>{redoShortcut()}</span> or /redo to restore
                                 </text>
                                 <Show when={revert()!.diffFiles?.length}>
                                   <box marginTop={1}>
                                     <For each={revert()!.diffFiles}>
                                       {(file) => (
-                                        <text fg={theme.text}>
+                                        <text selectable={false} fg={theme.text}>
                                           {file.filename}
                                           <Show when={file.additions > 0}>
                                             <span style={{ fg: theme.diffAdded }}>{` +${file.additions}`}</span>
@@ -1603,20 +1606,24 @@ function UserMessage(props: {
             onMouseOut={() => {
               setHover(false)
             }}
+            onMouseUp={(evt) => {
+              if (evt.button !== MouseButton.LEFT) return
+              props.onAction()
+            }}
             paddingTop={1}
             paddingBottom={1}
             paddingLeft={2}
             backgroundColor={hover() ? theme.backgroundElement : theme.backgroundPanel}
             flexShrink={0}
           >
-            <text fg={theme.text}>{text()}</text>
+            <text selectable={false} fg={theme.text}>{text()}</text>
             <Show when={files().length}>
               <box flexDirection="row" paddingBottom={metadataVisible() ? 1 : 0} paddingTop={1} gap={1} flexWrap="wrap">
                 <For each={files()}>
                   {(file) => {
                     const directory = file.mime === "application/x-directory"
                     return (
-                      <text fg={theme.text}>
+                      <text selectable={false} fg={theme.text}>
                         <span style={{ bg: theme.secondary, fg: theme.background }}>
                           {directory ? " Directory " : " File "}
                         </span>
@@ -1631,7 +1638,7 @@ function UserMessage(props: {
               when={queued()}
               fallback={
                 <Show when={ctx.showTimestamps()}>
-                  <text fg={theme.textMuted}>
+                  <text selectable={false} fg={theme.textMuted}>
                     <span style={{ fg: theme.textMuted }}>
                       {Locale.todayTimeOrDateTime(props.message.time.created)}
                     </span>
@@ -1639,7 +1646,7 @@ function UserMessage(props: {
                 </Show>
               }
             >
-              <text fg={theme.textMuted}>
+              <text selectable={false} fg={theme.textMuted}>
                 <span style={{ bg: color(), fg: queuedFg(), bold: true }}> QUEUED </span>
               </text>
             </Show>
@@ -2073,7 +2080,6 @@ function InlineTool(props: {
   const { theme } = useTheme()
   const ctx = use()
   const sync = useSync()
-  const renderer = useRenderer()
   const [hover, setHover] = createSignal(false)
   const [errorExpanded, setErrorExpanded] = createSignal(false)
 
@@ -2121,15 +2127,18 @@ function InlineTool(props: {
       separate={props.separate}
       onMouseOver={() => clickable() && setHover(true)}
       onMouseOut={() => setHover(false)}
-      onMouseUp={() => {
-        if (renderer.getSelection()?.getSelectedText()) return
-        if (failed()) {
-          setErrorExpanded((value) => !value)
-          return
-        }
-        if (props.onClick) props.onClick()
-        else if (props.filePath) ctx.openFile(props.filePath)
-      }}
+      onMouseUp={
+        clickable()
+          ? () => {
+              if (failed()) {
+                setErrorExpanded((value) => !value)
+                return
+              }
+              if (props.onClick) props.onClick()
+              else if (props.filePath) ctx.openFile(props.filePath)
+            }
+          : undefined
+      }
     >
       {props.children}
     </InlineToolRow>
@@ -2160,6 +2169,10 @@ export function InlineToolRow(props: {
       paddingLeft={3}
       onMouseOver={props.onMouseOver}
       onMouseOut={props.onMouseOut}
+      onMouseUp={(evt) => {
+        if (evt.button !== MouseButton.LEFT) return
+        props.onMouseUp?.()
+      }}
       ref={(el: BoxRenderable) => {
         if (props.separate) alwaysSeparate.add(el)
         setPreLayoutSiblingMargin(el, (previous) => {
@@ -2177,11 +2190,12 @@ export function InlineToolRow(props: {
               width={INLINE_TOOL_ICON_WIDTH}
               fg={props.iconColor ?? props.color}
               selectable={!props.onMouseUp}
-              onMouseUp={props.onMouseUp}
             >
               {props.icon}
             </text>
-            <Spinner color={props.color} children={props.children} />
+            <Spinner color={props.color} selectable={!props.onMouseUp}>
+              {props.children}
+            </Spinner>
           </box>
         </Match>
         <Match when={true}>
@@ -2190,6 +2204,7 @@ export function InlineToolRow(props: {
               <text
                 paddingLeft={3}
                 fg={props.color}
+                selectable={!props.onMouseUp}
                 attributes={props.denied ? TextAttributes.STRIKETHROUGH : undefined}
               >
                 ~ {props.pending}
@@ -2201,7 +2216,6 @@ export function InlineToolRow(props: {
               <text
                 width={INLINE_TOOL_ICON_WIDTH}
                 selectable={!props.onMouseUp}
-                onMouseUp={props.onMouseUp}
                 fg={props.failed ? props.errorColor : (props.iconColor ?? props.color)}
                 attributes={props.denied ? TextAttributes.STRIKETHROUGH : undefined}
               >
@@ -2209,6 +2223,7 @@ export function InlineToolRow(props: {
               </text>
               <text
                 flexGrow={1}
+                selectable={!props.onMouseUp}
                 fg={props.failed ? props.errorColor : props.color}
                 attributes={props.denied ? TextAttributes.STRIKETHROUGH : undefined}
               >

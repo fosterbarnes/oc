@@ -1,6 +1,9 @@
-v0.2.134
+v0.2.135
 
-new oc session:
-Pressing Enter repeatedly while New oc session is creating a session now creates only one session. If creation fails, the folder selection can be retried.
+message actions:
+Clicking a sent message opens its Actions menu again, including undo. Clickable messages no longer select text on double-click.
 
-Under the hood: added a dialog-local creation guard around session bootstrap and reset it on failure. Reviewed the guard and synchronous validation paths. Pre-push checks passed. Live TUI verification remains user-side.
+tool rows:
+Clicking anywhere on an actionable tool or subagent row runs its action, even when another part of the conversation has a highlight. Clickable rows and the redo banner are not text-selectable; ordinary text keeps double-click selection.
+
+Under the hood: moved tool click handling onto the whole row, removed the lingering-selection guard, and added selectable control to spinner text. Updated the fork definition and renderer selection checks. Targeted textSelection tests and pre-push checks passed.

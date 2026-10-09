@@ -190,10 +190,10 @@ test.each([true, false])("selection copy mode %s retains gestures and respects m
     app.renderer.clearSelection()
     const tool = app.renderer.root.findDescendantById("tool")!
     await app.mockMouse.doubleClick(tool.x + 11, tool.y)
-    expect(actions).toBe(0)
-    expect(selected()).toBe("alpha")
+    expect(selected()).toBe("")
+    expect(actions).toBe(2)
     await app.mockMouse.click(tool.x + 3, tool.y)
-    expect(actions).toBe(1)
+    expect(actions).toBe(3)
 
     app.renderer.clearSelection()
     dialog.replace(() => <text id="modal-text">modal alpha beta</text>)
@@ -224,6 +224,53 @@ test.each([true, false])("selection copy mode %s retains gestures and respects m
   } finally {
     app.renderer.destroy()
     syntax.destroy()
+  }
+})
+
+test("clickable tool rows are not selectable and fire despite existing selection", async () => {
+  let actions = 0
+  const app = await testRender(() => (
+    <box width="100%" height="100%">
+      <text id="prose" position="absolute" top={0} width={30}>alpha beta gamma</text>
+      <box id="tool" position="absolute" top={2} width={40}>
+        <InlineToolRow icon="+" complete pending="Working" onMouseUp={() => { actions++ }}>tool alpha beta</InlineToolRow>
+      </box>
+      <box id="pending" position="absolute" top={4} width={40}>
+        <InlineToolRow icon="+" complete={undefined} pending="Working hard" onMouseUp={() => { actions++ }}>tool alpha beta</InlineToolRow>
+      </box>
+      <box id="plain" position="absolute" top={6} width={40}>
+        <InlineToolRow icon="+" complete pending="Working">plain alpha beta</InlineToolRow>
+      </box>
+    </box>
+  ), { width: 80, height: 10, autoFocus: false })
+  try {
+    await app.renderOnce()
+    const selected = () => app.renderer.getSelection()?.getSelectedText() ?? ""
+
+    const tool = app.renderer.root.findDescendantById("tool")!
+    await app.mockMouse.doubleClick(tool.x + 11, tool.y)
+    expect(selected()).toBe("")
+    expect(actions).toBe(2)
+
+    const pending = app.renderer.root.findDescendantById("pending")!
+    app.renderer.clearSelection()
+    await app.mockMouse.doubleClick(pending.x + 11, pending.y)
+    expect(selected()).toBe("")
+    expect(actions).toBe(4)
+
+    await app.mockMouse.doubleClick(7, 0)
+    expect(selected()).toBe("beta")
+    const before = actions
+    await app.mockMouse.click(tool.x + 3, tool.y)
+    expect(actions).toBe(before + 1)
+
+    const plain = app.renderer.root.findDescendantById("plain")!
+    app.renderer.clearSelection()
+    await app.mockMouse.doubleClick(plain.x + 11, plain.y)
+    expect(selected()).toBe("alpha")
+    expect(actions).toBe(before + 1)
+  } finally {
+    app.renderer.destroy()
   }
 })
 
