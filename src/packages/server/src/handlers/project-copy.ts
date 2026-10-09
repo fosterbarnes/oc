@@ -13,6 +13,11 @@ export const ProjectCopyHandler = HttpApiBuilder.group(Api, "server.projectCopy"
         Effect.gen(function* () {
           const copies = yield* ProjectCopy.Service
           const location = yield* Location.Service
+          yield* Effect.logInfo("[workDebug] projectCopy.create", {
+            locationDirectory: location.project.directory,
+            locationProjectID: location.project.id,
+            payload: ctx.payload,
+          })
           return yield* badRequest(
             copies.create({
               ...ctx.payload,

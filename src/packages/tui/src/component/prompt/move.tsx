@@ -15,6 +15,11 @@ function moveReminderText(directory: string) {
   return `<system-reminder>The user has changed the current working directory to "${directory}". This is still the same project but at a possibly new location; take this into account when working with any files from now on.</system-reminder>`
 }
 
+// Temporary /work reproduction logging; remove by grepping `[workDebug]`.
+function workDebug(name: string, data: Record<string, unknown>) {
+  console.debug(`[workDebug] ${name} ${JSON.stringify(data)}`)
+}
+
 export function usePromptMove(input: { projectID: () => string | undefined; sessionID: () => string | undefined }) {
   const dialog = useDialog()
   const sdk = useSDK()
@@ -28,20 +33,33 @@ export function usePromptMove(input: { projectID: () => string | undefined; sess
   const [progress, setProgress] = createSignal<string>()
 
   // `workFrom` (/work) places the copy next to that checkout as `<repo>.work-<name>`.
+  // The copy source is the session checkout (`workFrom`), not the TUI launch dir:
+  // `sdk.directory` is often home, which fails `ProjectCopy.source()` with SourceDirectoryNotFoundError.
   async function create(context?: string, workFrom?: string) {
     const projectID = input.projectID()
     if (!projectID) return
     setCreating(true)
     setProgress("Creating copy")
+    workDebug("create", { projectID, workFrom, sdkDirectory: sdk.directory })
     try {
+      const start = Date.now()
       const generated = await sdk.client.experimental.projectCopy.generateName(
         { projectID, context },
         { throwOnError: true },
       )
+      workDebug("create.generateName", { name: generated.data.name, ms: Date.now() - start })
+      // Non-/work callers pass no `workFrom`, keeping the previous `sdk.directory` location.
+      const locationDirectory = workFrom ?? sdk.directory
+      workDebug("create.payload", {
+        projectID,
+        locationDirectory,
+        parent: workFrom ? path.dirname(workFrom) : path.join(paths.worktree, projectID.slice(0, 6)),
+        name: workFrom ? `${path.basename(workFrom)}.work-${generated.data.name}` : generated.data.name,
+      })
       const result = await sdk.client.v2.projectCopy.create(
         {
           projectID,
-          location: { directory: sdk.directory },
+          location: { directory: locationDirectory },
           strategy: "git_worktree",
           directory: workFrom ? path.dirname(workFrom) : path.join(paths.worktree, projectID.slice(0, 6)),
           name: workFrom ? `${path.basename(workFrom)}.work-${generated.data.name}` : generated.data.name,
@@ -49,6 +67,7 @@ export function usePromptMove(input: { projectID: () => string | undefined; sess
         { throwOnError: true },
       )
       const directory = result.data?.directory
+      workDebug("create.result", { directory })
       if (!directory) throw new Error("No project copy directory returned")
 
       // Call a location-based route to make sure it's bootstrapped
@@ -58,6 +77,7 @@ export function usePromptMove(input: { projectID: () => string | undefined; sess
       setProgress("Creating session")
       return directory
     } catch (err) {
+      workDebug("create.error", { message: errorMessage(err) })
       homeDestination?.clear()
       setProgress(undefined)
       setCreating(false)
@@ -116,6 +136,8 @@ export function usePromptMove(input: { projectID: () => string | undefined; sess
   }
 
   async function moveTo(sessionID: string, directory: string, moveChanges: boolean) {
+    const start = Date.now()
+    workDebug("moveTo", { sessionID, directory, moveChanges })
     await sdk.client.experimental.controlPlane.moveSession(
       {
         sessionID,
@@ -137,13 +159,30 @@ export function usePromptMove(input: { projectID: () => string | undefined; sess
           },
         ],
       })
-      .catch(() => undefined)
+      .catch((error) => {
+        workDebug("moveTo.promptAsync.error", { sessionID, message: errorMessage(error) })
+        return undefined
+      })
+    workDebug("moveTo.done", { sessionID, ms: Date.now() - start })
   }
 
   async function moveExistingSession(sessionID: string, selection: MoveSessionSelection, workFrom?: string) {
     const session = sync.session.get(sessionID)
-    const status = await sdk.client.vcs.status({ directory: session?.directory }).catch(() => undefined)
+    workDebug("moveExistingSession", {
+      sessionID,
+      sessionDirectory: session?.directory,
+      sdkDirectory: sdk.directory,
+      projectID: input.projectID(),
+      selectionType: selection.type,
+      workFrom,
+    })
+    const status = await sdk.client.vcs.status({ directory: session?.directory }).catch((error) => {
+      workDebug("moveExistingSession.status.error", { sessionID, message: errorMessage(error) })
+      return undefined
+    })
+    workDebug("moveExistingSession.status", { sessionID, count: status?.data?.length ?? 0 })
     const choice = status?.data?.length ? await DialogWorkspaceFileChanges.show(dialog, status.data) : "no"
+    workDebug("moveExistingSession.choice", { sessionID, choice })
     if (!choice) return
     dialog.clear()
     const directory =
@@ -158,6 +197,7 @@ export function usePromptMove(input: { projectID: () => string | undefined; sess
       await moveTo(sessionID, directory, choice === "yes")
       dialog.clear()
     } catch (error) {
+      workDebug("moveExistingSession.moveTo.error", { sessionID, directory, message: errorMessage(error) })
       toast.error(error)
       dialog.clear()
     } finally {
@@ -167,32 +207,47 @@ export function usePromptMove(input: { projectID: () => string | undefined; sess
   }
 
   function work() {
+    if (progress()) {
+      workDebug("work.busy", { progress: progress() })
+      return
+    }
     const sessionID = input.sessionID()
     const directory = sessionID ? sync.session.get(sessionID)?.directory : undefined
+    workDebug("work", { sessionID, directory, sdkDirectory: sdk.directory })
     if (!sessionID || !directory) return
     void moveExistingSession(sessionID, { type: "new" }, directory)
   }
 
   // Squash the copy into its main checkout (left staged, uncommitted), move back, then delete the copy.
   // On failure the session stays in the copy so the work can be fixed there.
+  // Merge/remove handlers ignore `location.project`, so the copy's own directory is a valid location;
+  // it stays on disk and registered until `remove` runs, so layer resolution succeeds for both calls.
   async function done() {
+    if (progress()) {
+      workDebug("done.busy", { progress: progress() })
+      return
+    }
     const projectID = input.projectID()
     const sessionID = input.sessionID()
     const copy = sessionID ? sync.session.get(sessionID)?.directory : undefined
+    workDebug("done", { projectID, sessionID, copy, sdkDirectory: sdk.directory })
     if (!projectID || !sessionID || !copy) return
     setProgress("Merging work")
     try {
       const merged = await sdk.client.v2.projectCopy.merge(
-        { projectID, location: { directory: sdk.directory }, directory: copy },
+        { projectID, location: { directory: copy }, directory: copy },
         { throwOnError: true },
       )
+      workDebug("done.merged", { sessionID, directory: merged.data.directory })
       await moveTo(sessionID, merged.data.directory, false)
       await sdk.client.v2.projectCopy.remove(
-        { projectID, location: { directory: sdk.directory }, directory: copy, force: true },
+        { projectID, location: { directory: copy }, directory: copy, force: true },
         { throwOnError: true },
       )
+      workDebug("done.removed", { sessionID, copy })
       toast.show({ message: `Work merged and staged in ${merged.data.directory}`, variant: "success" })
     } catch (error) {
+      workDebug("done.error", { sessionID, message: errorMessage(error) })
       toast.error(error)
     } finally {
       setProgress(undefined)

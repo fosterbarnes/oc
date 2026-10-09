@@ -163,8 +163,21 @@ const layer = Layer.effect(
 
     const source = Effect.fnUntraced(function* (input: AbsolutePath, projectID: Project.ID) {
       const sourceDirectory = yield* canonical(input)
-      if (!(yield* directories.contains({ projectID, directory: sourceDirectory })))
+      const contained = yield* directories.contains({ projectID, directory: sourceDirectory })
+      yield* Effect.logInfo("[workDebug] ProjectCopy.source", {
+        input,
+        sourceDirectory,
+        projectID,
+        contained,
+      })
+      if (!contained) {
+        const stored = yield* directories.list(projectID)
+        yield* Effect.logInfo("[workDebug] ProjectCopy.source.miss", {
+          projectID,
+          directories: stored.map((item) => item.directory),
+        })
         return yield* new SourceDirectoryNotFoundError({ directory: sourceDirectory })
+      }
       return sourceDirectory
     })
 
