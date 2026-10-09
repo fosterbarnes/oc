@@ -496,7 +496,10 @@ it.instance("resolves keybind lookup from canonical keybinds", () =>
       expect(config.leader_timeout).toBe(1234)
       expect(config.keybinds.get("command.palette.show")?.[0]?.key).toBe("alt+p")
       expect(config.keybinds.get("diff.open")?.[0]?.key).toBe("ctrl+j")
-      expect(config.keybinds.get("session.new")?.[0]?.key).toBe("<leader>n")
+      expect(config.keybinds.get("session.new")?.[0]).toMatchObject({
+        key: "ctrl+shift+h",
+        desc: "Go to Home",
+      })
       expect(config.keybinds.get("which-key.toggle")?.[0]?.key).toBe("alt+k")
       expect(config.keybinds.get("which-key.layout.toggle")?.[0]?.key).toBe("ctrl+alt+shift+k")
       expect(config.keybinds.get("which-key.pending.toggle")?.[0]?.key).toBe("ctrl+alt+shift+p")

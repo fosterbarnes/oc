@@ -213,7 +213,7 @@ test("native slash favorite identity follows command ID rather than label or ali
       commands: [{
         namespace: "palette",
         name: "session.new",
-        title: "New session",
+        title: "Home",
         slashName: "new",
         slashAliases: ["fresh"],
         run() {},

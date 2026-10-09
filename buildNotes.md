@@ -146,6 +146,21 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-08 (~20:38) - v0.2.132 - Home palette name and shortcut - GPT-6.1 Sol, default reasoning; Implementation
+
+### Agent
+- Meta: GPT-6.1 Sol; default reasoning; Implementation; completed
+- Version: 0.2.132
+- Changed native `session.new` palette title in `tui/src/app.tsx` to Home; default `session_new` binding in `tui/src/config/keybind.ts` to Ctrl+Shift+H with Go to Home description. Retained existing Home navigation, command ID, and slash aliases.
+- Updated `docs/keybinds.md` row and affected config/keymap checks.
+- Verification: scoped canonical-keybind config test and native slash-favorite identity test passed: 2 tests, 18 assertions. No build/install/live TUI verification.
+
+### User
+Home
+- The native New session palette entry is now Home, with Ctrl+Shift+H to return to the Home screen.
+
+---
+
 ## 2026-10-08 (~20:30) - v0.2.131 - Keep single revive scoped to its runtime - GPT-6.1 Sol, default reasoning; Implementation
 
 ### Agent

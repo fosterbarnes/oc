@@ -88,7 +88,7 @@ export const Definitions = {
   session_export: keybind("<leader>x", "Export session to editor"),
   session_copy: keybind("none", "Copy session transcript"),
   session_move: keybind("none", "Move session"),
-  session_new: keybind("<leader>n", "Create a new session"),
+  session_new: keybind("ctrl+shift+h", "Go to Home"),
   session_list: keybind("<leader>l", "List all sessions"),
   oc_new_session: keybind("ctrl+n", "New session (oc)"),
   model_default: keybind("<leader>d", "Default model"),

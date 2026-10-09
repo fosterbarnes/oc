@@ -118,7 +118,7 @@ Bold marks keys where the oc layout differs from opencode. `-` means unbound.
 | Action | oc | opencode |
 |---|---|---|
 | Export session to editor | `ctrl+x x` | `ctrl+x x` |
-| Create a new session | `ctrl+x n` | `ctrl+x n` |
+| Go to Home | `ctrl+shift+h` | `ctrl+shift+h` |
 | List all sessions | **`ctrl+s`, `ctrl+x l`** | `ctrl+x l` |
 | Show session timeline | `ctrl+x g` | `ctrl+x g` |
 | Rename session | `ctrl+r` | `ctrl+r` |

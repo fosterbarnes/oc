@@ -1169,7 +1169,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
       },
       {
         name: "session.new",
-        title: "New session",
+        title: "Home",
         suggested: route.data.type === "session",
         category: "Session",
         slashName: "new",

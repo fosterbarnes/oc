@@ -1,12 +1,6 @@
-v0.2.131
+v0.2.132
 
-single mode:
-Use oc single for a session independent of the resident server, or configure single mode for ordinary launches. Single windows share the session database, show a distinct tab marker, stop running work on close, and report when another window owns the session. Portable launches retain their database through revive, and session creation tolerates earlier plugin output.
+home:
+The native New session command palette entry is now Home. Ctrl+Shift+H returns to the Home screen.
 
-single revive:
-Reviving a single window leaves its hosting shell, tab, other oc windows, and resident server alone. It shuts down its own runtime and verified descendants, builds and installs, then opens a new window on the same session and directory. Portable mode and Home are preserved, with install rollback and failure recovery. The new behavior was confirmed live.
-
-claude subagents:
-Claude models inside oc prefer oc skills and use native subagents so delegated work appears in the TUI. The environment guidance remains present even when no proxy tools are available.
-
-Under the hood: added bounded worker drain, scoped Windows descendant identity checks, exact-session revive context, portable reopen support, shared busy-session error handling, and single-aware palette launches. Targeted revive, descendant, shutdown, error middleware, and changed Claude environment checks passed. Pre-push checks passed. Revision is 0.2.131.
+Under the hood: updated the default shortcut description and keybind documentation while preserving the command identity and slash aliases. Targeted keybind configuration and slash-favorite identity checks passed. Pre-push checks passed.
