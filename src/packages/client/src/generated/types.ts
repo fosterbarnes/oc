@@ -2682,7 +2682,7 @@ export type ProjectCopiesMergeInput = {
   readonly directory: { readonly directory: string }["directory"]
 }
 
-export type ProjectCopiesMergeOutput = { readonly directory: string }
+export type ProjectCopiesMergeOutput = { readonly directory: string; readonly conflicts: ReadonlyArray<string> }
 
 export type ProjectCopiesRefreshInput = {
   readonly projectID: { readonly projectID: string }["projectID"]

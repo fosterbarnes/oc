@@ -155,7 +155,7 @@ describe("Git worktrees", () => {
         })
         const index = yield* Effect.promise(() => fs.readFile(path.join(main.gitDirectory, "index")))
         const cached = yield* Effect.promise(() => $`git diff --cached`.cwd(main.worktree).text())
-        expect(yield* git.worktree.merge({ copy })).toBe(main.worktree)
+        expect(yield* git.worktree.merge({ copy })).toEqual({ directory: main.worktree, conflicts: [] })
         expect(yield* read(path.join(main.worktree, "parent.txt"))).toBe("parent commit\n")
         expect(yield* read(path.join(main.worktree, "unstaged.txt"))).toBe("parent edit\n")
         expect(yield* read(path.join(main.worktree, "copy.txt"))).toBe("copy committed\n")
@@ -179,29 +179,57 @@ describe("Git worktrees", () => {
     ),
   )
 
-  it.live("reports conflict paths without changing parent files, status, or index", () =>
-    withWorkRepo((git, main, directory) =>
-      Effect.gen(function* () {
-        const copy = yield* git.worktree.copy({ repository: main, directory, name: path.basename(directory) })
-        yield* Effect.promise(async () => {
-          await fs.writeFile(path.join(main.worktree, "copy.txt"), "parent\n")
-          await fs.writeFile(path.join(copy.worktree, "copy.txt"), "copy\n")
-          await fs.writeFile(path.join(copy.worktree, "new.txt"), "must not land\n")
-        })
-        const before = yield* checkoutState(main, ["copy.txt"])
-        const error = yield* git.worktree.merge({ copy }).pipe(Effect.flip)
-        expect(error.message).toContain("copy.txt")
-        expect(yield* checkoutState(main, ["copy.txt"])).toEqual(before)
-        expect(
-          yield* Effect.promise(() =>
-            fs.access(path.join(main.worktree, "new.txt")).then(
-              () => true,
-              () => false,
+  it.live(
+    "writes conflicts into the copy and merges its resolution without changing real indexes",
+    () =>
+      withWorkRepo((git, main, directory) =>
+        Effect.gen(function* () {
+          const copy = yield* git.worktree.copy({ repository: main, directory, name: path.basename(directory) })
+          yield* Effect.promise(async () => {
+            await fs.writeFile(path.join(main.worktree, "copy.txt"), "parent\n")
+            await fs.writeFile(path.join(copy.worktree, "copy.txt"), "copy\n")
+            await fs.writeFile(path.join(copy.worktree, "new.txt"), "must not land\n")
+          })
+          const before = yield* checkoutState(main, ["copy.txt"])
+          const copyIndex = yield* Effect.promise(() => fs.readFile(path.join(copy.gitDirectory, "index")))
+          expect(yield* git.worktree.merge({ copy })).toEqual({ directory: copy.worktree, conflicts: ["copy.txt"] })
+          const marked = yield* read(path.join(copy.worktree, "copy.txt"))
+          expect(marked).toContain("<<<<<<<")
+          expect(marked).toContain("=======")
+          expect(marked).toContain(">>>>>>>")
+          expect(marked).toContain("parent\n")
+          expect(marked).toContain("copy\n")
+          expect(yield* Effect.promise(() => fs.readFile(path.join(copy.gitDirectory, "index")))).toEqual(copyIndex)
+          expect(yield* checkoutState(main, ["copy.txt"])).toEqual(before)
+          expect(
+            yield* Effect.promise(() =>
+              fs.access(path.join(main.worktree, "new.txt")).then(
+                () => true,
+                () => false,
+              ),
             ),
-          ),
-        ).toBe(false)
-      }),
-    ),
+          ).toBe(false)
+          const base = yield* Effect.promise(() =>
+            $`git config --get ${`oc.work.${path.basename(directory)}.base`}`.cwd(copy.worktree).text(),
+          )
+          expect(
+            yield* Effect.promise(() =>
+              $`git rev-parse ${`refs/oc/work/${path.basename(directory)}`}`.cwd(copy.worktree).text(),
+            ),
+          ).toBe(base)
+          expect(yield* Effect.promise(() => $`git show ${`${base.trim()}:copy.txt`}`.cwd(copy.worktree).text())).toBe(
+            "parent\n",
+          )
+          yield* Effect.promise(() => fs.writeFile(path.join(copy.worktree, "copy.txt"), "parent and copy\n"))
+          expect(yield* git.worktree.merge({ copy })).toEqual({ directory: main.worktree, conflicts: [] })
+          expect(yield* read(path.join(main.worktree, "copy.txt"))).toBe("parent and copy\n")
+          expect(yield* Effect.promise(() => fs.readFile(path.join(main.gitDirectory, "index")))).toEqual(before.index)
+          expect(yield* Effect.promise(() => $`git status --porcelain`.cwd(main.worktree).text())).toContain(
+            " M copy.txt",
+          )
+        }),
+      ),
+    30_000,
   )
 
   it.live(
@@ -214,14 +242,28 @@ describe("Git worktrees", () => {
           const inner = yield* git.worktree.copy({ repository: outer, directory: innerDirectory, name: "inner" })
           const before = yield* checkoutState(main, ["copy.txt"])
           yield* Effect.promise(() => fs.writeFile(path.join(inner.worktree, "copy.txt"), "inner\n"))
-          expect(yield* git.worktree.merge({ copy: inner })).toBe(outer.worktree)
+          expect(yield* git.worktree.merge({ copy: inner })).toEqual({ directory: outer.worktree, conflicts: [] })
           expect(yield* read(path.join(outer.worktree, "copy.txt"))).toBe("inner\n")
           expect(yield* checkoutState(main, ["copy.txt"])).toEqual(before)
-          expect(yield* git.worktree.merge({ copy: outer })).toBe(main.worktree)
+          expect(yield* git.worktree.merge({ copy: outer })).toEqual({ directory: main.worktree, conflicts: [] })
           expect(yield* read(path.join(main.worktree, "copy.txt"))).toBe("inner\n")
         }),
       ),
     30_000,
+  )
+
+  it.live("ignores final-newline differences when both sides change the same line", () =>
+    withWorkRepo((git, main, directory) =>
+      Effect.gen(function* () {
+        const copy = yield* git.worktree.copy({ repository: main, directory, name: path.basename(directory) })
+        yield* Effect.promise(async () => {
+          await fs.writeFile(path.join(main.worktree, "copy.txt"), "main")
+          await fs.writeFile(path.join(copy.worktree, "copy.txt"), "main\n")
+        })
+        expect(yield* git.worktree.merge({ copy })).toEqual({ directory: main.worktree, conflicts: [] })
+        expect((yield* read(path.join(main.worktree, "copy.txt"))).trimEnd()).toBe("main")
+      }),
+    ),
   )
 
   it.live("preserves CRLF checkout bytes and does not introduce phantom changes", () =>

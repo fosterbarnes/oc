@@ -146,6 +146,28 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-09 (~00:06) - v0.2.138 - /done ignores whitespace and hands real conflicts to the agent - Claude Opus 5.5, default reasoning; Debug
+
+### Agent
+- Meta: Claude Opus 5.5; default reasoning; Debug; completed (session resumed after lost Claude context)
+- Version: 0.2.138
+- Fixed: `/done` failed on `a.txt` with only an EOF-newline difference. `Git.worktree.merge` (`core/src/git.ts`) now runs `merge-tree -X ignore-space-at-eol`.
+- Changed: `merge-tree` exit 1 no longer throws. `merge` returns `{ directory, conflicts }`. On conflicts it writes the conflicted tree (with markers) into the copy, not the parent, and leaves the parent untouched.
+- Added `ProjectCopy.MergeResult` schema (`schema/src/project-copy.ts`); protocol group and `copy.ts` return it. Regenerated client `generated/types.ts` and SDK `v2/gen/types.gen.ts`.
+- Changed `tui/src/component/prompt/move.tsx`: `done()` prompts the session (`promptAsync`) to resolve the listed conflict files, shows a warning toast, and keeps the session in the copy. The user then reruns `/done`.
+- Fixed: `/work` and `/done` take `projectID` from the session, not the TUI launch project (launch dir is often home).
+- Added `core/test/git.test.ts` cases: EOF-newline-only difference merges; conflict writes markers to copy, then resolve and merge.
+- Verification: `bun test test/git.test.ts` in core: 10 pass, 0 fail. Subagent ran typecheck in core, tui, server, opencode: passed. User live-checked /done after reinstall: worked.
+- Note: `a.txt`, `b.txt`, `c.txt` in repo root are user test files; user deletes them.
+
+### User
+work copies
+- `/done` no longer fails when the only difference is whitespace, line endings, or a missing newline at the end of a file.
+- When main and the copy changed the same lines, main is left alone, the copy gets conflict markers, and the agent is asked to fix them; run `/done` again when it finishes.
+- `/work` and `/done` now use the session's project even when oc was launched from another folder.
+
+---
+
 ## 2026-10-08 (~23:31) - v0.2.137 - Fix nested-copy test timeout before push - GPT-6.1 Sol; Debug
 
 ### Agent

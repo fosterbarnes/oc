@@ -49,7 +49,7 @@ export const ProjectCopyGroup = HttpApiGroup.make("server.projectCopy")
       params: { projectID: Project.ID },
       query: LocationQuery,
       payload: MergePayload,
-      success: ProjectCopy.Copy,
+      success: ProjectCopy.MergeResult,
       error: ProjectCopyError,
     })
       .annotateMerge(locationQueryOpenApi)

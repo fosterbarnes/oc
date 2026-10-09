@@ -128,7 +128,9 @@ export interface Interface {
     }) => Effect.Effect<void, WorktreeError>
     readonly list: (repository: Repository) => Effect.Effect<readonly Worktree[], WorktreeError>
     /** Merge only the copy's changes into its recorded parent, preserving the real index. */
-    readonly merge: (input: { copy: Repository }) => Effect.Effect<AbsolutePath, WorktreeError>
+    readonly merge: (input: {
+      copy: Repository
+    }) => Effect.Effect<{ readonly directory: AbsolutePath; readonly conflicts: readonly string[] }, WorktreeError>
   }
   readonly index: {
     /** Refresh only the requested project-relative scope, preserving all other entries. */
@@ -876,16 +878,8 @@ const layer = Layer.effect(
             (cause) => new WorktreeError({ operation, directory: worktreeDirectory, message: cause.message, cause }),
           ),
         )
-      if (result.exitCode === 0) return result.stdout.toString("utf8")
-      if (result.exitCode === 1 && args[0] === "merge-tree") {
-        const sections = result.stdout.toString("utf8").split("\0")
-        const conflicts = sections.slice(1, sections.indexOf("", 1))
-        return yield* new WorktreeError({
-          operation,
-          directory: worktreeDirectory,
-          message: `Work merge conflicts: ${conflicts.join(", ") || result.stdout.toString("utf8")}`,
-        })
-      }
+      if (result.exitCode === 0 || (result.exitCode === 1 && args[0] === "merge-tree"))
+        return result.stdout.toString("utf8")
       const message = result.stderr.toString("utf8").trim() || result.stdout.toString("utf8").trim() || "Git failed"
       return yield* new WorktreeError({
         operation,
@@ -1027,60 +1021,73 @@ const layer = Layer.effect(
       const merged = yield* worktreeRun(
         "merge",
         parent,
-        ["merge-tree", "--write-tree", "--name-only", "-z", "--merge-base", base, current, copy],
+        [
+          "merge-tree",
+          "--write-tree",
+          "--name-only",
+          "-z",
+          "-X",
+          "ignore-space-at-eol",
+          "--merge-base",
+          base,
+          current,
+          copy,
+        ],
         parentDirectory,
       )
-      const tree = merged.split("\0")[0].trim()
-      const changes = (yield* worktreeRun("merge", parent, [
+      const sections = merged.split("\0")
+      const tree = sections[0].trim()
+      const conflicts = sections.slice(1, sections.indexOf("", 1)).filter(Boolean)
+      const target = conflicts.length ? input.copy : parent
+      const directory = target.worktree
+      const changes = (yield* worktreeRun("merge", target, [
         "diff",
         "--name-status",
         "--no-renames",
         "-z",
-        current,
+        conflicts.length ? copy : current,
         tree,
       ])).split("\0")
       const paths = changes.flatMap((status, index) =>
         index % 2 === 0 && status ? [{ status, file: changes[index + 1] }] : [],
       )
-      const index = path.join(parent.gitDirectory, `work-${randomUUID()}.index`)
+      const index = path.join(target.gitDirectory, `work-${randomUUID()}.index`)
       yield* Effect.gen(function* () {
         const options = { env: { GIT_INDEX_FILE: index } }
-        yield* worktreeRun("merge", parent, ["read-tree", tree], parentDirectory, parentDirectory, options)
+        yield* worktreeRun("merge", target, ["read-tree", tree], directory, directory, options)
         // Remove first to allow file/directory replacements; checkout applies smudge/autocrlf.
         yield* Effect.forEach(
           paths.filter((item) => item.status === "D"),
-          (item) => fs.remove(path.join(parentDirectory, item.file), { force: true }),
+          (item) => fs.remove(path.join(directory, item.file), { force: true }),
           { discard: true },
         )
         const checkout = paths.filter((item) => item.status !== "D").map((item) => item.file)
         if (checkout.length)
-          yield* worktreeRun(
-            "merge",
-            parent,
-            ["checkout-index", "-f", "--stdin", "-z"],
-            parentDirectory,
-            parentDirectory,
-            {
-              ...options,
-              stdin: checkout.join("\0") + "\0",
-            },
-          )
+          yield* worktreeRun("merge", target, ["checkout-index", "-f", "--stdin", "-z"], directory, directory, {
+            ...options,
+            stdin: checkout.join("\0") + "\0",
+          })
       }).pipe(
         Effect.mapError((cause) =>
           cause instanceof WorktreeError
             ? cause
             : new WorktreeError({
                 operation: "merge",
-                directory: parentDirectory,
+                directory,
                 message: "Failed to write merged files",
                 cause,
               }),
         ),
         Effect.ensuring(fs.remove(index, { force: true }).pipe(Effect.orDie)),
       )
+      if (conflicts.length) {
+        yield* worktreeRun("merge", input.copy, ["update-ref", `refs/oc/work/${name}`, current])
+        yield* worktreeRun("merge", input.copy, ["config", `oc.work.${name}.base`, current])
+        return { directory, conflicts }
+      }
       yield* worktreeRun("merge", parent, ["update-ref", "-d", `refs/oc/work/${name}`])
       yield* worktreeRun("merge", parent, ["config", "--remove-section", `oc.work.${name}`])
-      return parentDirectory
+      return { directory, conflicts }
     })
 
     const worktreeList = Effect.fn("Git.worktree.list")(function* (repository: Repository) {

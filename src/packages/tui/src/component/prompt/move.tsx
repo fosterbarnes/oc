@@ -30,8 +30,9 @@ export function usePromptMove(input: { projectID: () => string | undefined; sess
   // `workFrom` (/work) places the copy next to that checkout as `<repo>.work-<name>`.
   // The copy source is the session checkout (`workFrom`), not the TUI launch dir:
   // `sdk.directory` is often home, which fails `ProjectCopy.source()` with SourceDirectoryNotFoundError.
-  async function create(context?: string, workFrom?: string) {
-    const projectID = input.projectID()
+  // `/work` passes the session's project: the TUI's own project follows its launch dir and can differ.
+  async function create(context?: string, workFrom?: string, sessionProjectID?: string) {
+    const projectID = sessionProjectID ?? input.projectID()
     if (!projectID) return
     setCreating(true)
     setProgress("Creating copy")
@@ -173,10 +174,10 @@ export function usePromptMove(input: { projectID: () => string | undefined; sess
   async function work() {
     if (progress()) return
     const sessionID = input.sessionID()
-    const directory = sessionID ? sync.session.get(sessionID)?.directory : undefined
-    if (!sessionID || !directory) return
+    const session = sessionID ? sync.session.get(sessionID) : undefined
+    if (!sessionID || !session?.directory) return
     try {
-      const copy = await create(sessionContext(sessionID), directory)
+      const copy = await create(sessionContext(sessionID), session.directory, session.projectID)
       if (!copy) return
       setProgress("Moving session")
       await moveTo(sessionID, copy, false)
@@ -192,9 +193,10 @@ export function usePromptMove(input: { projectID: () => string | undefined; sess
   // On merge failure the session stays in the copy so the work can be fixed there.
   async function done() {
     if (progress()) return
-    const projectID = input.projectID()
     const sessionID = input.sessionID()
-    const copy = sessionID ? sync.session.get(sessionID)?.directory : undefined
+    const session = sessionID ? sync.session.get(sessionID) : undefined
+    const projectID = session?.projectID
+    const copy = session?.directory
     if (!projectID || !sessionID || !copy) return
     setProgress("Merging work")
     try {
@@ -202,6 +204,26 @@ export function usePromptMove(input: { projectID: () => string | undefined; sess
         { projectID, location: { directory: copy }, directory: copy },
         { throwOnError: true },
       )
+      if (merged.data.conflicts.length) {
+        toast.show({
+          message: `Main changed the same lines in ${merged.data.conflicts.length} file(s); the agent is resolving them. Run /done when it finishes.`,
+          variant: "warning",
+        })
+        await sdk.client.session.promptAsync(
+          {
+            sessionID,
+            directory: copy,
+            parts: [
+              {
+                type: "text",
+                text: `The parent checkout changed the same lines while you worked. These files now contain git conflict markers (<<<<<<< ======= >>>>>>>):\n${merged.data.conflicts.join("\n")}\nKeep both sides' intent, remove all conflict markers, do not commit, then stop.`,
+              },
+            ],
+          },
+          { throwOnError: true },
+        )
+        return
+      }
       await moveTo(sessionID, merged.data.directory, false)
       await sdk.client.instance.dispose({ directory: copy }, { throwOnError: true })
       await sdk.client.v2.projectCopy.remove(

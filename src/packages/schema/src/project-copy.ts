@@ -31,6 +31,12 @@ export const MergeInput = Schema.Struct({
 }).annotate({ identifier: "ProjectCopy.MergeInput" })
 export interface MergeInput extends Schema.Schema.Type<typeof MergeInput> {}
 
+export const MergeResult = Schema.Struct({
+  directory: AbsolutePath,
+  conflicts: Schema.Array(Schema.String),
+}).annotate({ identifier: "ProjectCopy.MergeResult" })
+export interface MergeResult extends Schema.Schema.Type<typeof MergeResult> {}
+
 export const Copy = Schema.Struct({
   directory: AbsolutePath,
 }).annotate({ identifier: "ProjectCopy.Copy" })

@@ -6770,6 +6770,11 @@ export type ProjectCopyCopy = {
   directory: string
 }
 
+export type ProjectCopyMergeResult = {
+  directory: string
+  conflicts: Array<string>
+}
+
 export type EventModelsDevRefreshed = {
   id: string
   type: "models-dev.refreshed"
@@ -14214,9 +14219,9 @@ export type V2ProjectCopyMergeError = V2ProjectCopyMergeErrors[keyof V2ProjectCo
 
 export type V2ProjectCopyMergeResponses = {
   /**
-   * ProjectCopy.Copy
+   * ProjectCopy.MergeResult
    */
-  200: ProjectCopyCopy
+  200: ProjectCopyMergeResult
 }
 
 export type V2ProjectCopyMergeResponse = V2ProjectCopyMergeResponses[keyof V2ProjectCopyMergeResponses]

@@ -30,6 +30,9 @@ export type RemoveInput = typeof RemoveInput.Type
 export const MergeInput = ProjectCopy.MergeInput
 export type MergeInput = typeof MergeInput.Type
 
+export const MergeResult = ProjectCopy.MergeResult
+export type MergeResult = typeof MergeResult.Type
+
 export const RefreshInput = Schema.Struct({
   projectID: Project.ID,
 }).annotate({ identifier: "ProjectCopy.RefreshInput" })
@@ -109,7 +112,7 @@ export interface Interface {
   readonly create: (input: CreateInput) => Effect.Effect<Copy, Error>
   readonly remove: (input: RemoveInput) => Effect.Effect<void, Error>
   /** Merge a state copy into its recorded parent as unstaged changes. */
-  readonly merge: (input: MergeInput) => Effect.Effect<Copy, Error>
+  readonly merge: (input: MergeInput) => Effect.Effect<MergeResult, Error>
   readonly refresh: (input: RefreshInput) => Effect.Effect<RefreshResult, Error>
 }
 
@@ -247,12 +250,12 @@ const layer = Layer.effect(
     })
 
     const merge = Effect.fn("ProjectCopy.merge")(function* (input: MergeInput) {
+      // The copy's git config (written by `worktree.copy`) is the source of truth; `merge` fails clearly
+      // without it, so no project-directory record is required here.
       const copyDirectory = yield* canonical(input.directory)
-      const stored = yield* directories.get({ projectID: input.projectID, directory: copyDirectory })
-      if (stored?.strategy !== "git_worktree") return yield* new InvalidDirectoryError({ directory: copyDirectory })
       const copy = yield* git.repo.discover(copyDirectory)
       if (!copy) return yield* new DirectoryUnavailableError({ directory: copyDirectory })
-      return { directory: yield* git.worktree.merge({ copy }) }
+      return yield* git.worktree.merge({ copy })
     })
 
     const refresh = Effect.fn("ProjectCopy.refresh")(function* (input: RefreshInput) {

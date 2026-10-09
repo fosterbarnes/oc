@@ -1,12 +1,8 @@
-v0.2.137
+v0.2.138
 
-work directories:
-/work copies staged, unstaged, and untracked contents without changing the source checkout or index. /done brings only the copy's changes back into its original parent as unstaged edits, preserving the parent's own work and newer commits. Nested copies return to their recorded parent. Conflicts list affected paths and leave the parent unchanged.
+work copies:
+/done ignores end-of-line whitespace and missing final newlines when merging work back. When the parent and copy change the same lines, the parent stays untouched, the copy receives conflict markers, and the agent is asked to resolve them. Run /done again after the agent finishes.
 
-work cleanup:
-The copy instance is disposed before its folder is removed. State copies install dependencies when a root package.json exists, with installation failures reported as warnings. Removed temporary work diagnostics and the change-transfer dialog.
+/work and /done use the session's project even when oc was launched from another folder.
 
-git checkouts:
-Git operations respect the repository's autocrlf setting, preserving CRLF checkout contents without phantom changes.
-
-Under the hood: added snapshot-based copies and explicit-base merges with temporary indexes, retained parent/base metadata, and regenerated the client variants and legacy SDK for optional copy state. Increased the nested-copy test timeout for sequential Windows Git operations. Targeted Git tests and pre-push checks passed.
+Under the hood: added a merge result with conflict paths, updated the copy merge API, and regenerated client and legacy SDK types. Conflict resolution advances the copy's merge base while preserving real indexes. Targeted Git tests and pre-push checks passed.
