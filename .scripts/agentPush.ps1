@@ -6,11 +6,13 @@ $ErrorActionPreference = 'Stop'
 . "$PSScriptRoot\scriptHelper.ps1"
 Set-Location -LiteralPath $repoRoot
 $current = requireVersion
+$tagWord = requireVersionTag
 & git diff --quiet HEAD -- $buildNotes 2>$null
 $notesChanged = $LASTEXITCODE -ne 0
 
 if ($Context) {
-    Write-Host "branch: $(git branch --show-current)  version: $current"
+    Write-Host "branch: $(git branch --show-current)  version: $current $tagWord"
+    Write-Host "line 1: v$current $tagWord"
     Write-Host '--- status'
     git status --short 2>$null
     Write-Host '--- new buildNotes.md lines'
@@ -26,7 +28,7 @@ if ($Context) {
 # Fail on a bad message before the slow checks run.
 if (-not $notesChanged) { throw 'buildNotes.txt is unchanged since the last commit; write the new message first.' }
 $lines = @([IO.File]::ReadAllLines($buildNotes))
-if ($lines[0].Trim() -ne "v$current") { throw "buildNotes.txt line 1 must be v$current." }
+if ($lines[0].Trim() -ne "v$current $tagWord") { throw "buildNotes.txt line 1 must be v$current $tagWord." }
 if ($lines.Count -lt 3 -or $lines[1].Trim() -or -not ($lines[2..($lines.Count - 1)] -join '').Trim()) {
     throw 'buildNotes.txt needs line 1, one blank line, then a non-empty body.'
 }

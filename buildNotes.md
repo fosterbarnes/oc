@@ -146,6 +146,46 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-10 (~01:15) - v0.2.140 howardRecruit - Random two-word version tag - Opus 5.5, low reasoning; Implementation
+
+### Agent
+- Meta: Opus 5.5; low reasoning; Implementation (plan `~/.config/opencode/plans/ocVersionTag.md`, executed by general-muse-1.3-high); completed
+- Version: 0.2.140 howardRecruit
+- Added `src/.version/versionTag` (one camelCase line, no BOM) and `.res/yapBot.json` (byte copy of musicApp `.res/exe/YapBot.json`). Ported yapCli to `scriptHelper.ps1` `newVersionTag`: letters-only words, `RandomNumberGenerator.GetInt32`, word1 lower + word2 capitalized. Added `requireVersionTag`.
+- Changed `incrementMaintenancePatch` to roll the tag too (still returns only the version), so `syncAndInstall.ps1:548` bumps roll it as well. Added `.scripts/bumpVersion.ps1` (`-RerollTag` = tag only); AGENTS.md Revision now says agents run it instead of editing the file.
+- Changed `pushRelease.ps1`: `-DryRun`, title `opencode v<ver> <tag>`, uploads temp copies named `opencode-v<ver>-<tag>-<rest>.<ext>`; git tag stays `v<ver>`; `dist` untouched.
+- Changed `agentPush.ps1`: buildNotes.txt line 1 must be `v<ver> <tag>`; `-Context` prints the expected line 1.
+- Removed (user request): TUI display of the tag. Reverted `build.ts`, core `version.ts`, plugin `tui.ts`, `adapters.tsx`, `app.tsx`, `tui-plugin.ts` fixture, `footer.tsx`, `sidebar-tools.tsx` to HEAD; the tag is scripts-only.
+- Fixed UPSTREAM-SYNC.md/SCRIPTS.md: they claimed `syncAndInstall.ps1` does not bump the version; it does via `incrementMaintenancePatch`.
+- Kept `countCode.ps1` as is: scc `--include-ext` has no json, so yapBot.json is not counted.
+- Verification: `newVersionTag` x10 all matched `^[a-z]+[A-Z][a-z]*$`; ps1 ParseFile 0 errors; `bumpVersion.ps1` 0.2.139 -> 0.2.140 (howardRecruit), exit 0, no BOM; `agentPush.ps1 -Context` printed the tag; `renameReleaseAsset` checked on `.zip` and `.tar.gz` names (no dist archives, so `pushRelease -DryRun` stops at "No release archives"); TUI files restored to HEAD, so no TS change remains.
+
+### User
+Versioning
+- Every version bump now also picks a random two-word name like `howardRecruit` from the same YapBot word list musicApp uses.
+- The name appears in GitHub release titles, in release download file names, and in commit subjects.
+- `.scripts\bumpVersion.ps1` bumps the version, and `-RerollTag` picks a new name if you dislike the current one; `pushRelease.ps1 -DryRun` previews the release title and file names.
+
+---
+
+## 2026-10-09 (~00:10) - v0.2.139 - Real-model Claude runs need a typed yes - Opus 5.5, low reasoning; Implementation
+
+### Agent
+- Meta: Opus 5.5; low reasoning; Implementation; completed (spitball audit, then imp via general-composer-2.5)
+- Version: 0.2.139
+- Audit: no automatic real spend. `real-model.test.ts` skips without `OC_REAL_MODEL=1`; only `claudeRealFlow.ps1` sets it (scoped `withEnv`); `test.ps1`/`prePush.ps1` never do. Fake/pane tests force `ANTHROPIC_BASE_URL` to `TestLLMServer` via `claudeEnv`; other claude-code tests use `fake-claude.cjs`. setup-token spend is Claude plan usage; report costs are API-equivalent.
+- Risk found: agent bypassed the `CLAUDECODE` guard with `Start-Process pwsh -UseNewEnvironment` (archive7:152, user-approved) and the script read the saved token silently.
+- Added `.scripts\claudeRealFlow.ps1`: usage/cost header; per-mode spend line and mandatory `Read-Host` "yes" before `readToken` (before any spend, incl. `-CheckOnly`); no skip switch by design. Anything else throws `Cancelled: nothing was spent.`
+- Changed AGENTS.md Testing bullet: fake/pane free; agents never run the script or set `OC_REAL_MODEL` by any route unless asked that turn, state cost first.
+- Verification: PowerShell `Parser.ParseFile` on the script, 0 errors. Script not run (spends usage). Line endings LF, matching index and other `.scripts`.
+
+### User
+Testing
+- The real-model Claude check now says what it will cost and waits for you to type yes, so it can never spend your plan usage without you at the keyboard.
+- Agent rules now say plainly that the fake-model and screen tests are free and that agents must not start a real-model run unless you ask for it that turn.
+
+---
+
 ## 2026-10-09 (~00:06) - v0.2.138 - /done ignores whitespace and hands real conflicts to the agent - Claude Opus 5.5, default reasoning; Debug
 
 ### Agent

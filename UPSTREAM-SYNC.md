@@ -38,10 +38,11 @@ changes to the customized parent only after a content comparison.
 7. Review every overlapping hunk. Rework custom code only when required for
    upstream compatibility, and keep the smallest necessary change.
 8. After a successful apply that advances the isolated `dev` SHA, bump the
-   last number of `.version/version` (for example `0.0.8` to `0.0.9`). Do this
-   before the Windows dist build so the TUI display version matches. Do not bump
-   OpenCode's package version. `syncAndInstall.ps1` does not bump it; the agent
-   running the sync does, per `AGENTS.md` Revision.
+   last number of `.version/version` (for example `0.0.8` to `0.0.9`) and roll
+   a new tag into `.version/versionTag`. `syncAndInstall.ps1` does this itself
+   through `incrementMaintenancePatch`; a manual sync runs
+   `.scripts\bumpVersion.ps1`. Do this before the Windows dist build so the TUI
+   display version matches. Do not bump OpenCode's package version.
 9. Leave the parent changes uncommitted for review. Do not reset, stash, commit,
    or push unless the user explicitly requests it.
 
@@ -50,7 +51,7 @@ changes to the customized parent only after a content comparison.
 Protect these areas during synchronization:
 
 - `.install.ps1` and `.scripts\*` local automation
-- `.version\version` maintenance versioning
+- `.version\version` and `.version\versionTag` maintenance versioning
 - `AGENTS.md`, `SCRIPTS.md`, `buildNotes.md`, `README.md`, `FORK.md`, `README.OG.md`, and this guide
 - TUI maintenance display-version behavior in the core, build, plugin, and TUI
   adapter/sidebar paths

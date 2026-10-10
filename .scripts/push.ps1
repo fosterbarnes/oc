@@ -30,7 +30,7 @@ if (-not $subject) { throw 'Provide a commit message, or write a new one to buil
 
 $branch = ((& git branch --show-current) | Out-String).Trim()
 if ($LASTEXITCODE -or -not $branch) { throw 'Could not determine a non-detached current branch.' }
-# Leave .version/version to incrementMaintenancePatch. Do not stage the isolated upstream checkout.
+# Leave .version/version and versionTag to incrementMaintenancePatch. Do not stage the isolated upstream checkout.
 $addArgs = @('add', '-A', '--', '.', ':(exclude)UPSTREAM')
 $commitArgs = @('commit', '-m', $subject)
 if ($body) { $commitArgs += @('-m', $body) }

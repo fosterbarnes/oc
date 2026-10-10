@@ -1,9 +1,16 @@
 #requires -Version 7.0
-# Runs claudeTestFlow against the real Claude model (real tokens) after checking the
-# `claude setup-token` token with one tiny Haiku call. The token comes from, in order:
-# CLAUDE_CODE_OAUTH_TOKEN in this shell, the saved copy, the clipboard, a masked prompt.
-# It never reaches the console or history, and wrapped pastes are rejoined. A token that
-# passes is saved DPAPI-encrypted (readable only by this Windows user on this machine).
+# Runs claudeTestFlow against the real Claude model. This spends the Claude plan usage of the
+# account behind the `claude setup-token` token (cost figures are API-equivalent):
+#   default   token check + steps 0-8, about $0.20-1.00
+#   -Step7    token check + step 7 only, about $0.05-0.15
+#   -CheckOnly one Haiku reply, about $0.01
+# Run it after a `claude` CLI update or a Claude provider change, not every session. Fake-model
+# and pane tests are free. It always asks you to type yes before spending; there is no switch to
+# skip that, so an agent cannot start a run without you at the keyboard.
+# The token comes from, in order: CLAUDE_CODE_OAUTH_TOKEN in this shell, the saved copy, the
+# clipboard, a masked prompt. It never reaches the console or history, and wrapped pastes are
+# rejoined. A token that passes is saved DPAPI-encrypted (readable only by this Windows user on
+# this machine).
 [CmdletBinding()]
 param(
     [switch]$CheckOnly,   # check the token, do not run the flow
@@ -77,6 +84,20 @@ if ($env:CLAUDECODE) { throw 'Run this from a plain PowerShell, not inside a Cla
 $stray = 'ANTHROPIC_BASE_URL', 'ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_API_KEY' | Where-Object { Test-Path "env:$_" }
 if ($stray) { throw "Unset $($stray -join ', ') first: they override the token." }
 $claude = (Get-Command claude -ErrorAction Stop).Source
+
+$flowModel = if ($Model) { $Model } else { 'claude-sonnet-5-5' }
+$switchModel = if ($SwitchModel) { $SwitchModel } else { 'claude-haiku-5-5' }
+if ($CheckOnly) {
+    $spendDesc = 'token check only (one Haiku reply), about $0.01'
+} elseif ($Step7) {
+    $spendDesc = "step 7 on $switchModel after a setup turn on $flowModel, about `$0.05-0.15"
+} else {
+    $spendDesc = "steps 0-8 on $flowModel, about `$0.20-1.00"
+}
+Write-Host "This spends real Claude plan usage: $spendDesc."
+# No switch to skip: only a human typing yes can authorize spend.
+$answer = Read-Host 'Type yes to continue'
+if ($answer -ne 'yes') { throw 'Cancelled: nothing was spent.' }
 
 $token, $source = readToken
 if ($token -notmatch $tokenPattern) {

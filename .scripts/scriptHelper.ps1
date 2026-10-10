@@ -9,6 +9,8 @@ $buildScript = "$srcRoot\packages\opencode\script\build.ts"
 $distFolder = "$srcRoot\packages\opencode\dist"
 $versionFolder = "$srcRoot\.version"
 $version = "$versionFolder\version"
+$versionTag = "$versionFolder\versionTag"
+$yapWords = "$repoRoot\.res\yapBot.json"
 $readme = "$repoRoot\README.md"
 $buildNotes = "$repoRoot\buildNotes.txt"
 $ghRepo = 'fosterbarnes/oc'
@@ -107,8 +109,31 @@ function incrementMaintenancePatch {
     $parts = $current.Split('.')
     $next = '{0}.{1}.{2}' -f $parts[0], $parts[1], ([int]$parts[2] + 1)
     [IO.File]::WriteAllText($version, "$next`n")
-    Write-Host "Maintenance version $current -> $next"
+    $tag = newVersionTag
+    Write-Host "Maintenance version $current -> $next ($tag)"
     $next
+}
+
+function newVersionTag {
+    $raw = Get-Content -LiteralPath $yapWords -Raw | ConvertFrom-Json
+    $words = @($raw | Where-Object { $_ -match '^[A-Za-z]+$' })
+    if (-not $words.Count) { throw "No usable words found in $yapWords." }
+    $first = $words[[Security.Cryptography.RandomNumberGenerator]::GetInt32($words.Count)]
+    $second = $words[[Security.Cryptography.RandomNumberGenerator]::GetInt32($words.Count)]
+    $tag = $first.ToLowerInvariant() + $second.Substring(0, 1).ToUpperInvariant() + $second.Substring(1).ToLowerInvariant()
+    [IO.File]::WriteAllText($versionTag, "$tag`n", [Text.UTF8Encoding]::new($false))
+    $tag
+}
+
+function requireVersionTag {
+    if (-not (Test-Path -LiteralPath $versionTag)) {
+        throw "Missing $versionTag`: run .scripts\bumpVersion.ps1 -RerollTag to generate one."
+    }
+    $contents = [IO.File]::ReadAllText($versionTag).Trim()
+    if ($contents -notmatch '^[a-z]+[A-Z][a-z]*$') {
+        throw "Invalid $versionTag`: expected one camelCase two-word tag"
+    }
+    $contents
 }
 
 function writeClearedLine {

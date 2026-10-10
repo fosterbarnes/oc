@@ -1,8 +1,11 @@
-v0.2.138
+v0.2.140 howardRecruit
 
-work copies:
-/done ignores end-of-line whitespace and missing final newlines when merging work back. When the parent and copy change the same lines, the parent stays untouched, the copy receives conflict markers, and the agent is asked to resolve them. Run /done again after the agent finishes.
+versioning:
+Every version bump now picks a random two-word name from the YapBot word list. The name appears in commit subjects, GitHub release titles, and release download file names.
 
-/work and /done use the session's project even when oc was launched from another folder.
+The bumpVersion script bumps the version and name together; -RerollTag picks only a new name. Release -DryRun previews the title and file names. Version names remain scripts-only.
 
-Under the hood: added a merge result with conflict paths, updated the copy merge API, and regenerated client and legacy SDK types. Conflict resolution advances the copy's merge base while preserving real indexes. Targeted Git tests and pre-push checks passed.
+testing:
+Real-model Claude checks now show their expected usage cost and require typing yes before reading the saved token or spending usage. Agent rules require an explicit request for real-model runs and clarify that isolated fake-model and pane checks are free.
+
+Under the hood: added cryptographic random word selection and version-tag validation, updated agent-push message validation, and corrected synchronization documentation to reflect version bumps. PowerShell parsing, version-tag format and bump checks, release-asset naming checks, and pre-push checks passed.
