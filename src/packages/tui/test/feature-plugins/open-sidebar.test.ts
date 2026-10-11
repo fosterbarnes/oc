@@ -45,6 +45,7 @@ import {
   DEFAULT_USAGE_PROVIDERS,
   normalizeUsageProviders,
   orderUsageWindows,
+  probeClaudeCodePool,
   probeClaudeCodeUsage,
   probeCursorUsage,
   probeOpenAIUsage,
@@ -76,6 +77,7 @@ test("keeps retained sidebar builtins while replacing files and footer", () => {
     [
       "internal:sidebar-context",
       "internal:sidebar-mcp",
+      "internal:sidebar-plugins",
       "internal:sidebar-lsp",
       "internal:sidebar-subagents",
       "internal:sidebar-todo",
@@ -105,8 +107,8 @@ test("reads sorted package scripts", () => {
 })
 
 test("orders usage windows from shortest to longest", () => {
-  const short = { usedPercent: 12, resetAt: "short", minutes: 24 * 60 }
-  const long = { usedPercent: 34, resetAt: "long", minutes: 30 * 24 * 60 }
+  const short = { usedPercent: 12, resetAt: "short", resetMs: null, minutes: 24 * 60 }
+  const long = { usedPercent: 34, resetAt: "long", resetMs: null, minutes: 30 * 24 * 60 }
   assert.deepEqual(orderUsageWindows([long, short]), [short, long])
 })
 
@@ -548,13 +550,32 @@ test("maps Windows Terminal placements and percentage sizes to CLI arguments", (
   assert.deepEqual(windowsTerminalArgs("wezterm-tab", cwd), ["-w", "0", "new-tab", "-d", cwd])
   assert.deepEqual(windowsTerminalArgs("wezterm-window", cwd), ["-w", "new", "new-tab", "-d", cwd])
   assert.deepEqual(windowsTerminalArgs("wezterm-horizontal", cwd, { Percent: 30 }), [
-    "-w", "0", "split-pane", "-V", "--size", "0.3", "-d", cwd,
+    "-w",
+    "0",
+    "split-pane",
+    "-V",
+    "--size",
+    "0.3",
+    "-d",
+    cwd,
   ])
   assert.deepEqual(windowsTerminalArgs("wezterm-vertical", cwd, { Percent: 70 }), [
-    "-w", "0", "split-pane", "-H", "--size", "0.7", "-d", cwd,
+    "-w",
+    "0",
+    "split-pane",
+    "-H",
+    "--size",
+    "0.7",
+    "-d",
+    cwd,
   ])
   assert.deepEqual(windowsTerminalArgs("wezterm-vertical", cwd, { Cells: 20 }), [
-    "-w", "0", "split-pane", "-H", "-d", cwd,
+    "-w",
+    "0",
+    "split-pane",
+    "-H",
+    "-d",
+    cwd,
   ])
 })
 
@@ -584,16 +605,26 @@ test("runs the WezTerm command in Windows Terminal from the script directory", (
   }
   const args = windowsTerminalScriptArgs(script, "C:\\other")
   assert.deepEqual(args.slice(0, -1), [
-    "-w", "0", "new-tab", "-d", path.dirname(script.filePath),
-    "pwsh", "-NoLogo", "-NoExit", "-EncodedCommand",
+    "-w",
+    "0",
+    "new-tab",
+    "-d",
+    path.dirname(script.filePath),
+    "pwsh",
+    "-NoLogo",
+    "-NoExit",
+    "-EncodedCommand",
   ])
   assert.equal(Buffer.from(args.at(-1)!, "base64").toString("utf16le"), weztermSendArgs(script, "7", false).at(-1))
 })
 
 test("falls back to native when wt.exe is unavailable without changing the saved target", async () => {
   const script = {
-    name: "build", command: "npm run build", terminal: "wezterm-tab" as const,
-    launcher: { executable: "pwsh", args: [] }, weztermSize: { Percent: 50 },
+    name: "build",
+    command: "npm run build",
+    terminal: "wezterm-tab" as const,
+    launcher: { executable: "pwsh", args: [] },
+    weztermSize: { Percent: 50 },
   }
   const probed: string[] = []
   const launched: Array<{ command: string; args: string[]; cwd: string }> = []
@@ -603,34 +634,49 @@ test("falls back to native when wt.exe is unavailable without changing the saved
       probed.push(command)
       return command !== "wt.exe"
     },
-    runCommand: async () => { throw new Error("WT must not run when unavailable") },
+    runCommand: async () => {
+      throw new Error("WT must not run when unavailable")
+    },
     spawnCommand: async (command, args, cwd) => {
       launched.push({ command, args, cwd })
       return { target: command }
     },
   })
   assert.deepEqual(probed, ["wt.exe", "pwsh"])
-  assert.deepEqual(launched, [{
-    command: process.platform === "win32" ? "cmd.exe" : "pwsh",
-    args: process.platform === "win32" ? ["/d", "/c", "start", "", "pwsh", script.command] : [script.command],
-    cwd: "C:\\work",
-  }])
+  assert.deepEqual(launched, [
+    {
+      command: process.platform === "win32" ? "cmd.exe" : "pwsh",
+      args: process.platform === "win32" ? ["/d", "/c", "start", "", "pwsh", script.command] : [script.command],
+      cwd: "C:\\work",
+    },
+  ])
   assert.equal(result.error, undefined)
   assert.equal(script.terminal, "wezterm-tab")
 })
 
 test("placing a script in Windows Terminal uses native instead of reporting unsupported placement", async () => {
   const script = {
-    name: "build", command: "npm run build", terminal: "wezterm-horizontal" as const,
-    launcher: { executable: "pwsh", args: [] }, weztermSize: { Percent: 50 },
+    name: "build",
+    command: "npm run build",
+    terminal: "wezterm-horizontal" as const,
+    launcher: { executable: "pwsh", args: [] },
+    weztermSize: { Percent: 50 },
   }
   const probed: string[] = []
   let nativeLaunches = 0
   const result = await placeScript(script, "C:\\work", {
     kind: "windows-terminal",
-    available: async (command) => { probed.push(command); return true },
-    runCommand: async () => { throw new Error("Placement must use native") },
-    spawnCommand: async (command) => { nativeLaunches++; return { target: command } },
+    available: async (command) => {
+      probed.push(command)
+      return true
+    },
+    runCommand: async () => {
+      throw new Error("Placement must use native")
+    },
+    spawnCommand: async (command) => {
+      nativeLaunches++
+      return { target: command }
+    },
   })
   assert.deepEqual(probed, ["pwsh"])
   assert.equal(nativeLaunches, 1)
@@ -1008,14 +1054,24 @@ test("loads user sidebar visibility with nested, legacy and partial project over
     const settings = loadSidebarSettings(root, root, paths.user, paths.project)
     assert.deepEqual(settings.visibility, { showMcp: true, showLsp: true })
     assert.equal(settings.scripts.terminal, "native")
-    writeFileSync(paths.user, JSON.stringify({
-      showMcp: true, showLsp: true, visibility: { showMcp: false, showLsp: false },
-    }))
+    writeFileSync(
+      paths.user,
+      JSON.stringify({
+        showMcp: true,
+        showLsp: true,
+        visibility: { showMcp: false, showLsp: false },
+      }),
+    )
     writeFileSync(paths.project, JSON.stringify({ visibility: { showMcp: true } }))
     assert.deepEqual(loadSidebarSettings(root, root).visibility, { showMcp: true, showLsp: false })
-    writeFileSync(paths.project, JSON.stringify({
-      showMcp: false, showLsp: false, visibility: { showMcp: true, showLsp: "invalid" },
-    }))
+    writeFileSync(
+      paths.project,
+      JSON.stringify({
+        showMcp: false,
+        showLsp: false,
+        visibility: { showMcp: true, showLsp: "invalid" },
+      }),
+    )
     assert.deepEqual(loadSidebarSettings(root, root).visibility, { showMcp: true, showLsp: false })
     for (const visibility of [null, "invalid", { showMcp: 0, showLsp: null }]) {
       writeFileSync(paths.project, JSON.stringify({ visibility, showMcp: "invalid" }))
@@ -1121,7 +1177,9 @@ test("writes complete sidebar settings as JSON", () => {
     const filePath = path.join(root, ".config", "openSidebar.json")
     const settings = defaultScriptSettings()
     const sidebar = normalizeSidebarSettings({
-      scripts: settings, scriptPins: ["build"], visibility: { showMcp: false, showLsp: false },
+      scripts: settings,
+      scriptPins: ["build"],
+      visibility: { showMcp: false, showLsp: false },
     })
     saveSidebarSettings(filePath, sidebar)
     assert.deepEqual(loadSidebarSettings(root, root, path.join(root, "missing-user.json"), filePath), sidebar)
@@ -1203,11 +1261,45 @@ test("reads Claude Code usage with its OAuth login and falls back to the cached 
     const reset = await probeClaudeCodeUsage({ ...options, nowMs: Date.parse("2027-01-21T00:00:00Z") })
     assert.equal(reset.ok && reset.source, "cache")
     assert.deepEqual(reset.ok && [reset.fiveHour, reset.weekly], [
-      { usedPercent: 0, resetAt: null, minutes: null },
-      { usedPercent: 100, resetAt: null, minutes: null },
+      { usedPercent: 0, resetAt: null, resetMs: null, minutes: null },
+      { usedPercent: 100, resetAt: null, resetMs: null, minutes: null },
     ])
+    rmSync(claudeUsageCachePath)
+    assert.deepEqual(await probeClaudeCodeUsage(options), { ok: false, reason: "expired" })
     rmSync(credentialsPath)
-    assert.deepEqual(await probeClaudeCodeUsage(options), { ok: false })
+    assert.deepEqual(await probeClaudeCodeUsage(options), { ok: false, reason: "signed-out" })
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test("a Claude pool with one live account reads as live even when another is cached", async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "sidebar-claude-pool-"))
+  try {
+    const nowMs = 1_800_000_000_000
+    const login = (dir: string, expiresAt: number) => {
+      mkdirSync(path.join(root, dir), { recursive: true })
+      writeFileSync(
+        path.join(root, dir, ".credentials.json"),
+        JSON.stringify({ claudeAiOauth: { accessToken: "tok", expiresAt } }),
+      )
+    }
+    login(".claude", nowMs + 1)
+    login(".claudeSecond", nowMs)
+    const body = { five_hour: { utilization: 1, resets_at: null }, seven_day: { utilization: 0, resets_at: null } }
+    mkdirSync(path.join(root, ".cache", "opencode"), { recursive: true })
+    writeFileSync(path.join(root, ".cache", "opencode", "claude-usage-claudeSecond.json"), JSON.stringify(body))
+    const result = await probeClaudeCodePool(["~/.claude", "~/.claudeSecond"], {
+      homeDir: root,
+      nowMs,
+      fetchImpl: async () => Response.json(body),
+    })
+    assert.equal(result.ok && result.source, "live")
+    assert.equal(result.ok && result.fetchedAt, nowMs)
+    assert.deepEqual(result.ok && result.accounts?.map((account) => account.usage.ok && account.usage.source), [
+      "live",
+      "cache",
+    ])
   } finally {
     rmSync(root, { recursive: true, force: true })
   }

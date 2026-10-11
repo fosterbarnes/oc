@@ -442,7 +442,7 @@ development history in `buildNotes.md`.
 
 ## Progress
 
-[518,503](scc.txt) lines of code and counting...
+[518,755](scc.txt) lines of code and counting...
 
 <!-- code-count:start -->
 
@@ -457,8 +457,8 @@ development history in `buildNotes.md`.
 | Powershell | 23 | 1,762 | 141 | 64 | 1,557 |
 | SQL | 95 | 592 | 0 | 17 | 575 |
 | Shell | 1 | 120 | 17 | 17 | 86 |
-| TypeScript | 2,743 | 535,383 | 43,269 | 15,363 | 476,751 |
-| **Total** | **3,052** | **583,794** | **49,161** | **16,130** | **518,503** |
+| TypeScript | 2,743 | 535,654 | 43,275 | 15,376 | 477,003 |
+| **Total** | **3,052** | **584,065** | **49,167** | **16,143** | **518,755** |
 
 <!-- code-count:end -->
 

@@ -14,7 +14,7 @@ import { useTuiPaths } from "../../../context/runtime"
 import { useLocal } from "../../../context/local"
 import { usePromptRef } from "../../../context/prompt"
 import { DialogPrompt } from "../../../ui/dialog-prompt"
-import { DialogSelect, type DialogSelectProps } from "../../../ui/dialog-select"
+import { DialogSelect, type DialogSelectOption, type DialogSelectProps } from "../../../ui/dialog-select"
 import { useDialog } from "../../../ui/dialog"
 import { useToast } from "../../../ui/toast"
 import { usePluginRuntime } from "../../../plugin/runtime"
@@ -59,6 +59,7 @@ import {
 import {
   cursorSessionCookie,
   createUsageRefreshScheduler,
+  fullResetDate,
   orderUsageWindows,
   probeClaudeCodePool,
   probeClaudeCodeUsage,
@@ -72,6 +73,7 @@ import {
   usageProviderForModel,
   USAGE_PROVIDER_OPTIONS,
   windowLabel,
+  windowName,
   type CursorUsage,
   type ClaudeCodeUsage,
   type OpenAIUsage,
@@ -293,10 +295,8 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
   const [openRouterUsage, setOpenRouterUsage] = createSignal<UsageSnapshot<OpenRouterUsage>>({ ok: false })
   const [cursorUsage, setCursorUsage] = createSignal<UsageSnapshot<CursorUsage>>({ ok: false })
   const [claudeCodeUsage, setClaudeCodeUsage] = createSignal<UsageSnapshot<ClaudeCodeUsage>>({ ok: false })
+  // Sidebar usage shows used or remaining percent for every provider; toggled from the Usage menu.
   const [showRemaining, setShowRemaining] = createSignal(false)
-  const [showGoRemaining, setShowGoRemaining] = createSignal(false)
-  const [showOrRemaining, setShowOrRemaining] = createSignal(false)
-  const [showCursorRemaining, setShowCursorRemaining] = createSignal(false)
   const [usageProviders, setUsageProviders] = createSignal<UsageProviderId[]>([...sidebarSettings.usageProviders])
   const [expanded, setExpanded] = createSignal<Set<string>>(new Set(["."]))
   const [tree, setTree] = createSignal(readTree(root, expanded()))
@@ -425,48 +425,58 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
   }
 
   const refreshUsage = async (providers = usageProviders()) => {
-    await Promise.all(providers.filter((provider) => usageProviders().includes(provider)).map(async (provider) => {
-      if (usageRunning.has(provider) || usageAbort.signal.aborted) return
-      usageRunning.add(provider)
-      usageRequestedAt[provider] = Date.now()
-      try {
-        const options = { signal: usageAbort.signal }
-        if (provider === "openai") {
-          const next = await probeOpenAIUsage(options)
-          if (!usageAbort.signal.aborted) setUsage((previous) => updateUsageSnapshot(previous, next, Date.now()))
-          return
-        }
-        if (provider === "opencode-go") {
-          const next = await probeOpenCodeGoUsage(options)
-          if (!usageAbort.signal.aborted) setGoUsage((previous) => updateUsageSnapshot(previous, next, Date.now()))
-          return
-        }
-        if (provider === "openrouter") {
-          const next = await probeOpenRouterUsage(options)
-          if (!usageAbort.signal.aborted) setOpenRouterUsage((previous) => updateUsageSnapshot(previous, next, Date.now()))
-          return
-        }
-        if (provider === "claude-code") {
-          // Pooled accounts (the provider's `accounts` option) show as one meter.
-          const accounts = sync.data.config.provider?.["claude-code"]?.options?.accounts
-          const dirs = Array.isArray(accounts) ? accounts.filter((dir): dir is string => typeof dir === "string") : []
-          const next = dirs.length > 1 ? await probeClaudeCodePool(dirs, options) : await probeClaudeCodeUsage(options)
-          if (!usageAbort.signal.aborted) setClaudeCodeUsage((previous) => updateUsageSnapshot(previous, next, Date.now()))
-          return
-        }
-        const next = await probeCursorUsage({ ...options, cursorSessionToken })
-        const retry = !next.ok && next.reason === "reauthenticate" && !!cursorSessionToken
-        if (retry) {
-          clearCursorSessionToken(os.homedir())
-          cursorSessionToken = undefined
-        }
-        const cursor = retry ? await probeCursorUsage(options) : next
-        if (!usageAbort.signal.aborted) setCursorUsage((previous) => updateUsageSnapshot(previous, cursor, Date.now()))
-      } finally {
-        usageRunning.delete(provider)
-        setUsageNow(Date.now())
-      }
-    }))
+    await Promise.all(
+      providers
+        .filter((provider) => usageProviders().includes(provider))
+        .map(async (provider) => {
+          if (usageRunning.has(provider) || usageAbort.signal.aborted) return
+          usageRunning.add(provider)
+          usageRequestedAt[provider] = Date.now()
+          try {
+            const options = { signal: usageAbort.signal }
+            if (provider === "openai") {
+              const next = await probeOpenAIUsage(options)
+              if (!usageAbort.signal.aborted) setUsage((previous) => updateUsageSnapshot(previous, next, Date.now()))
+              return
+            }
+            if (provider === "opencode-go") {
+              const next = await probeOpenCodeGoUsage(options)
+              if (!usageAbort.signal.aborted) setGoUsage((previous) => updateUsageSnapshot(previous, next, Date.now()))
+              return
+            }
+            if (provider === "openrouter") {
+              const next = await probeOpenRouterUsage(options)
+              if (!usageAbort.signal.aborted)
+                setOpenRouterUsage((previous) => updateUsageSnapshot(previous, next, Date.now()))
+              return
+            }
+            if (provider === "claude-code") {
+              // Pooled accounts (the provider's `accounts` option) show as one meter.
+              const accounts = sync.data.config.provider?.["claude-code"]?.options?.accounts
+              const dirs = Array.isArray(accounts)
+                ? accounts.filter((dir): dir is string => typeof dir === "string")
+                : []
+              const next =
+                dirs.length > 1 ? await probeClaudeCodePool(dirs, options) : await probeClaudeCodeUsage(options)
+              if (!usageAbort.signal.aborted)
+                setClaudeCodeUsage((previous) => updateUsageSnapshot(previous, next, Date.now()))
+              return
+            }
+            const next = await probeCursorUsage({ ...options, cursorSessionToken })
+            const retry = !next.ok && next.reason === "reauthenticate" && !!cursorSessionToken
+            if (retry) {
+              clearCursorSessionToken(os.homedir())
+              cursorSessionToken = undefined
+            }
+            const cursor = retry ? await probeCursorUsage(options) : next
+            if (!usageAbort.signal.aborted)
+              setCursorUsage((previous) => updateUsageSnapshot(previous, cursor, Date.now()))
+          } finally {
+            usageRunning.delete(provider)
+            setUsageNow(Date.now())
+          }
+        }),
+    )
   }
   const refreshOldUsage = () => {
     const snapshots = {
@@ -476,9 +486,7 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
       cursor: cursorUsage(),
       "claude-code": claudeCodeUsage(),
     }
-    void refreshUsage(usageProviders().filter((provider) =>
-      Date.now() - (snapshots[provider].fetchedAt ?? 0) > 60_000,
-    ))
+    void refreshUsage(usageProviders().filter((provider) => Date.now() - (snapshots[provider].fetchedAt ?? 0) > 60_000))
   }
   const usageColor = (snapshot: UsageSnapshot<{ ok: boolean }>) =>
     snapshot.stale || snapshot.source === "cache" || usageNow() - (snapshot.fetchedAt ?? 0) > 600_000
@@ -622,7 +630,7 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
     const codexSide = (window: UsageWindow | undefined) =>
       window?.usedPercent === null || window?.usedPercent === undefined
         ? "unavailable"
-        : `${windowLabel(window.minutes)}${showRemaining() ? 100 - window.usedPercent : window.usedPercent}%`
+        : `${showRemaining() ? 100 - window.usedPercent : window.usedPercent}%${windowLabel(window.minutes)}`
     const codexHasData = Boolean(codex.weekly || codex.monthly)
     const codexValue = codex.reauthenticate
       ? "run /connect"
@@ -639,7 +647,7 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
     const goSide = (window: UsageWindow) =>
       window.usedPercent === null
         ? "unavailable"
-        : `${windowLabel(window.minutes)}${showGoRemaining() ? 100 - window.usedPercent : window.usedPercent}%`
+        : `${showRemaining() ? 100 - window.usedPercent : window.usedPercent}%${windowLabel(window.minutes)}`
     const goValue = !goOk
       ? "unavailable"
       : goOk.monthly
@@ -650,34 +658,44 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
       : ""
     const orSnapshot = openRouterUsage()
     const orOk = orSnapshot.ok ? orSnapshot : undefined
-    const orValue = orOk ? `${showOrRemaining() ? orOk.remainingPercent : orOk.usedPercent}%` : "unavailable"
+    const orValue = orOk ? `${showRemaining() ? orOk.remainingPercent : orOk.usedPercent}%` : "unavailable"
     const cursorSnapshot = cursorUsage()
     const cursorOk = cursorSnapshot.ok ? cursorSnapshot.monthly : undefined
     const cursorSide = (label: string, used: number | null | undefined) =>
-      used === null || used === undefined ? "unavailable" : `${label}${showCursorRemaining() ? 100 - used : used}%`
+      used === null || used === undefined ? "unavailable" : `${showRemaining() ? 100 - used : used}%${label}`
     const cursorValue = `${cursorSide("m", cursorOk?.usedPercent)}; ${cursorSide("api", cursorOk?.apiUsedPercent)}`
     const cursorNeedsToken =
       !cursorSnapshot.ok && (cursorSnapshot.reason === "need-token" || cursorSnapshot.reason === "reauthenticate")
     const claudeSnapshot = claudeCodeUsage()
     const claudeOk = claudeSnapshot.ok ? claudeSnapshot : undefined
-    const claudeValue = claudeOk
-      ? `5h${claudeOk.fiveHour.usedPercent}%, w${(claudeOk.weeklyEach ?? [claudeOk.weekly.usedPercent]).join("%/")}%`
-      : "unavailable"
-    const claudeDates = claudeOk
-      ? [claudeOk.fiveHour.resetAt, claudeOk.weekly.resetAt].filter(Boolean).join(" / ")
-      : "unavailable"
+    // Pooled accounts list each readable account's own percent: "30%h, 1%h / 3%w, 0%w".
+    const shown = (used: number | null) => (used !== null && showRemaining() ? 100 - used : used)
+    const claudeKnown = claudeOk?.accounts?.flatMap((account) => (account.usage.ok ? [account.usage] : []))
+    const claudeValue = !claudeOk
+      ? "unavailable"
+      : claudeKnown
+        ? `${claudeKnown.map((usage) => `${shown(usage.fiveHour.usedPercent)}%h`).join(", ")} / ${claudeKnown.map((usage) => `${shown(usage.weekly.usedPercent)}%w`).join(", ")}`
+        : `${shown(claudeOk.fiveHour.usedPercent)}%h,${shown(claudeOk.weekly.usedPercent)}%w`
+    // Pooled accounts show each account's hourly reset; a single account shows hourly / weekly.
+    const claudeDates = !claudeOk
+      ? "unavailable"
+      : claudeKnown && claudeKnown.length > 1
+        ? claudeKnown
+            .map((usage) => usage.fiveHour.resetAt)
+            .filter(Boolean)
+            .join(", ")
+        : [claudeOk.fiveHour.resetAt, claudeOk.weekly.resetAt].filter(Boolean).join(" / ")
     return (
-      <>
-        <box
-          flexDirection="row"
-          gap={1}
-          onMouseOver={() => setHovered("usage-settings")}
-          onMouseOut={() => setHovered()}
-          onMouseUp={(event) => {
-            if (event.button === 0) openUsageSettings()
-          }}
-        >
-          <text fg={hovered() === "usage-settings" ? hoverColor : theme.text}>Weekly Usage:</text>
+      <box
+        flexDirection="column"
+        onMouseOver={() => setHovered("usage")}
+        onMouseOut={() => setHovered()}
+        onMouseUp={(event) => {
+          if (event.button === 0) openUsageMenu()
+        }}
+      >
+        <box flexDirection="row" gap={1}>
+          <text fg={hovered() === "usage" ? hoverColor : theme.text}>Usage:</text>
         </box>
         <Show when={usageProviders().length === 0}>
           <box flexDirection="row" gap={1}>
@@ -685,18 +703,8 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
           </box>
         </Show>
         <Show when={usageProviders().includes("openai")}>
-          <box
-            flexDirection="row"
-            gap={1}
-            onMouseOver={() => setHovered("usage")}
-            onMouseOut={() => setHovered()}
-            onMouseUp={(event) => {
-              if (event.button === 0) setShowRemaining((value) => !value)
-            }}
-          >
-            <text fg={usageColor(usage())}>
-              {!codex.reauthenticate && codexHasData && showRemaining() ? "Codex remaining:" : "Codex:"}
-            </text>
+          <box flexDirection="row" gap={1}>
+            <text fg={usageColor(usage())}>Codex:</text>
             <text fg={theme.textMuted}>{codexValue}</text>
           </box>
           <box flexDirection="row" gap={1}>
@@ -715,23 +723,8 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
           </box>
         </Show>
         <Show when={usageProviders().includes("cursor")}>
-          <box
-            flexDirection="row"
-            gap={1}
-            onMouseOver={() => setHovered("cursor-usage")}
-            onMouseOut={() => setHovered()}
-            onMouseUp={(event) => {
-              if (event.button === 2) {
-                promptCursorToken()
-                return
-              }
-              if (event.button === 0) {
-                if (cursorNeedsToken) promptCursorToken()
-                else setShowCursorRemaining((value) => !value)
-              }
-            }}
-          >
-            <text fg={usageColor(cursorSnapshot)}>{showCursorRemaining() && !cursorNeedsToken ? "Cursor remaining:" : "Cursor:"}</text>
+          <box flexDirection="row" gap={1}>
+            <text fg={usageColor(cursorSnapshot)}>Cursor:</text>
             <text fg={theme.textMuted}>{cursorNeedsToken ? "sign in" : cursorValue}</text>
           </box>
           <box flexDirection="row" gap={1}>
@@ -741,21 +734,13 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
           </box>
           <Show when={!cursorSnapshot.ok && cursorSnapshot.reason === "reauthenticate"}>
             <box flexDirection="row" gap={1}>
-              <text fg={theme.textMuted}>click Cursor: to paste a new cookie</text>
+              <text fg={theme.textMuted}>open Usage to paste a new cookie</text>
             </box>
           </Show>
         </Show>
         <Show when={usageProviders().includes("opencode-go")}>
-          <box
-            flexDirection="row"
-            gap={1}
-            onMouseOver={() => setHovered("go-usage")}
-            onMouseOut={() => setHovered()}
-            onMouseUp={(event) => {
-              if (event.button === 0) setShowGoRemaining((value) => !value)
-            }}
-          >
-            <text fg={usageColor(goSnapshot)}>{showGoRemaining() ? "OpenCode Go remaining:" : "OpenCode Go:"}</text>
+          <box flexDirection="row" gap={1}>
+            <text fg={usageColor(goSnapshot)}>OpenCode Go:</text>
             <text fg={theme.textMuted}>{goValue}</text>
           </box>
           <box flexDirection="row" gap={1}>
@@ -763,16 +748,8 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
           </box>
         </Show>
         <Show when={usageProviders().includes("openrouter")}>
-          <box
-            flexDirection="row"
-            gap={1}
-            onMouseOver={() => setHovered("or-usage")}
-            onMouseOut={() => setHovered()}
-            onMouseUp={(event) => {
-              if (event.button === 0) setShowOrRemaining((value) => !value)
-            }}
-          >
-            <text fg={usageColor(orSnapshot)}>{orOk && showOrRemaining() ? "OpenRouter remaining:" : "OpenRouter:"}</text>
+          <box flexDirection="row" gap={1}>
+            <text fg={usageColor(orSnapshot)}>OpenRouter:</text>
             <text fg={theme.textMuted}>{orValue}</text>
           </box>
           <Show when={orOk}>
@@ -781,7 +758,7 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
             </box>
           </Show>
         </Show>
-      </>
+      </box>
     )
   }
   const toggleDirectory = (relativePath: string) => {
@@ -1296,17 +1273,18 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
           : undefined
     const placements = scriptTerminals()
     const selectedTarget = resolveScriptTerminal(scriptSettings.terminal)
-    const splitSizeOptions = splitDirection && placements.length > 0
-      ? [
-          { title: "Split size", value: WEZTERM_SIZE_SECTION, disabled: true },
-          {
-            title: `${splitDirection === "horizontal" ? "Horizontal" : "Vertical"} split size`,
-            value: `wezterm-size:${splitDirection}`,
-            category: "Split size",
-            footer: splitSizeLabel(scriptSettings.wezterm[splitDirection]),
-          },
-        ]
-      : []
+    const splitSizeOptions =
+      splitDirection && placements.length > 0
+        ? [
+            { title: "Split size", value: WEZTERM_SIZE_SECTION, disabled: true },
+            {
+              title: `${splitDirection === "horizontal" ? "Horizontal" : "Vertical"} split size`,
+              value: `wezterm-size:${splitDirection}`,
+              category: "Split size",
+              footer: splitSizeLabel(scriptSettings.wezterm[splitDirection]),
+            },
+          ]
+        : []
     const options = [
       { title: "Shell", value: SCRIPT_SHELL_SECTION, disabled: true },
       ...BUILTIN_SHELLS.map((shell) => ({
@@ -1352,8 +1330,7 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
       { title: "Add custom extension...", value: ADD_SCRIPT_EXTENSION },
       { title: "Reset global script settings", value: RESET_SCRIPT_SETTINGS },
     ]
-    const selectedTerminal =
-      selectedTarget === "native" ? "terminal:native" : `terminal:${selectedTarget}`
+    const selectedTerminal = selectedTarget === "native" ? "terminal:native" : `terminal:${selectedTarget}`
     const dialogProps = {
       title: `Global script settings`,
       skipFilter: true,
@@ -1400,7 +1377,7 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
   const selectUsageSettings = () => {
     const selected = new Set(usageProviders())
     const dialogProps = {
-      title: "Weekly usage providers",
+      title: "Usage providers",
       options: USAGE_PROVIDER_OPTIONS.map((provider) => ({
         title: provider.title,
         value: provider.id,
@@ -1426,6 +1403,104 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
   }
   const openUsageSettings = () => setTimeout(selectUsageSettings, 100)
 
+  const usageMenuOptions = () => {
+    const nowMs = Date.now()
+    const reset = (resetMs: number | null) =>
+      resetMs === null ? "Reset date unavailable" : fullResetDate(resetMs, nowMs)
+    const row = (category: string, name: string, used: number | null, details: string[]) => ({
+      category,
+      inert: true,
+      title: used === null ? `${name}: Unavailable` : `${name}: ${used}% used, ${100 - used}% remaining`,
+      details,
+    })
+    const unavailable = (category: string) => ({ category, title: "Unavailable", inert: true })
+    const signIn = (category: string, detail: string) => ({ category, title: "Sign in required", details: [detail] })
+    const providerRows = (id: UsageProviderId, category: string): Omit<DialogSelectOption<string>, "value">[] => {
+      if (id === "openai") {
+        const codex = codexWindows()
+        if (codex.reauthenticate) return [signIn(category, "Run /connect")]
+        const windows = [codex.weekly, codex.monthly].filter((window) => window !== undefined)
+        if (!windows.length) return [unavailable(category)]
+        return windows.map((window) =>
+          row(category, windowName(window.minutes) || "Usage", window.usedPercent, [reset(window.resetMs)]),
+        )
+      }
+      if (id === "opencode-go") {
+        const snapshot = goUsage()
+        if (!snapshot.ok) return [unavailable(category)]
+        return [snapshot.weekly, snapshot.monthly]
+          .filter((window) => window !== null)
+          .map((window) => row(category, windowName(window.minutes), window.usedPercent, [reset(window.resetMs)]))
+      }
+      if (id === "openrouter") {
+        const snapshot = openRouterUsage()
+        if (!snapshot.ok) return [unavailable(category)]
+        return [
+          row(category, "Credit", snapshot.usedPercent, [
+            `$${snapshot.usedUsd.toFixed(2)} of $${snapshot.limitUsd.toFixed(2)} used`,
+          ]),
+        ]
+      }
+      if (id === "cursor") {
+        const snapshot = cursorUsage()
+        if (!snapshot.ok) {
+          const needsToken = snapshot.reason === "need-token" || snapshot.reason === "reauthenticate"
+          if (!needsToken) return [unavailable(category)]
+          return [
+            { ...signIn(category, "Select to paste a Cursor session cookie"), onSelect: () => promptCursorToken() },
+          ]
+        }
+        const monthly = snapshot.monthly
+        return [
+          row(category, "Monthly", monthly.usedPercent, [reset(monthly.resetMs)]),
+          row(category, "API", monthly.apiUsedPercent, [reset(monthly.resetMs)]),
+        ]
+      }
+      const claudeRows = (usage: ClaudeCodeUsage, group: string) =>
+        usage.ok
+          ? [
+              row(group, "5-hour", usage.fiveHour.usedPercent, [reset(usage.fiveHour.resetMs)]),
+              row(group, "Weekly", usage.weekly.usedPercent, [reset(usage.weekly.resetMs)]),
+            ]
+          : usage.reason === "signed-out"
+            ? [{ category: group, title: "Not signed in", inert: true }]
+            : usage.reason === "expired"
+              ? [
+                  {
+                    category: group,
+                    title: "Login expired",
+                    details: ["Use this account in Claude Code once"],
+                    inert: true,
+                  },
+                ]
+              : [unavailable(group)]
+      const snapshot = claudeCodeUsage()
+      // Pooled logins each get their own group so an unreadable account still shows up.
+      if (snapshot.ok && snapshot.accounts)
+        return snapshot.accounts.flatMap((account) => claudeRows(account.usage, `${category} (${account.name})`))
+      return claudeRows(snapshot, category)
+    }
+    const providers = usageProviders().flatMap((id) => USAGE_PROVIDER_OPTIONS.filter((item) => item.id === id))
+    const rows = [
+      ...providers.flatMap((provider) => providerRows(provider.id, provider.title)),
+      {
+        category: "Settings",
+        title: showRemaining() ? "Toggle: % remaining" : "Toggle: % used",
+        onSelect: () => {
+          setShowRemaining((value) => !value)
+          selectUsageMenu()
+        },
+      },
+      { category: "Settings", title: "Configure usage providers", onSelect: () => openUsageSettings() },
+    ]
+    // Values must be unique per row: identical titles such as "Weekly: 0% used" appear under several providers.
+    return rows.map((option) => ({ ...option, value: `${option.category}: ${option.title}` }))
+  }
+  const selectUsageMenu = () => {
+    dialog.replace(() => <DialogSelect title="Usage" options={usageMenuOptions()} />)
+  }
+  const openUsageMenu = () => setTimeout(selectUsageMenu, 100)
+
   const sidebarCommands = createMemo(() => {
     const rootCommands = rootSections(sidebarSettings.recentFileRoots, [...favorites])
     const commands = [
@@ -1444,8 +1519,15 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
         run: selectScriptSettings,
       },
       {
+        name: "sidebar.usage",
+        title: "Show usage",
+        category: "Sidebar",
+        namespace: "sidebar",
+        run: selectUsageMenu,
+      },
+      {
         name: "sidebar.usage-settings",
-        title: "Configure weekly usage providers",
+        title: "Configure usage providers",
         category: "Sidebar",
         namespace: "sidebar",
         run: selectUsageSettings,
@@ -1524,18 +1606,24 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
   }
   onCleanup(() => commandDisposer?.())
   onCleanup(event.on("file.watcher.updated", refresh))
-  onCleanup(event.on("tui.session.select", () => queueMicrotask(() => {
-    refresh()
-    refreshOldUsage()
-  })))
-  onCleanup(event.on("message.updated", (evt) => {
-    queueMicrotask(refresh)
-    const info = evt.properties.info
-    if (info.role !== "assistant" || info.time.completed === undefined) return
-    const provider = usageProviderForModel(info.providerID)
-    if (!provider || !shouldRefreshUsageProvider(usageRequestedAt[provider], Date.now())) return
-    void refreshUsage([provider])
-  }))
+  onCleanup(
+    event.on("tui.session.select", () =>
+      queueMicrotask(() => {
+        refresh()
+        refreshOldUsage()
+      }),
+    ),
+  )
+  onCleanup(
+    event.on("message.updated", (evt) => {
+      queueMicrotask(refresh)
+      const info = evt.properties.info
+      if (info.role !== "assistant" || info.time.completed === undefined) return
+      const provider = usageProviderForModel(info.providerID)
+      if (!provider || !shouldRefreshUsageProvider(usageRequestedAt[provider], Date.now())) return
+      void refreshUsage([provider])
+    }),
+  )
   onCleanup(
     event.on("session.status", (evt) => {
       if (!shouldRefreshUsageAfterIdle(evt.properties, props.sessionID)) return
@@ -1668,44 +1756,44 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
               // Row width minus 1-cell padding on each side and the 2-cell pin prefix.
               const [nameWidth, setNameWidth] = createSignal(0)
               return (
-              <box
-                ref={(el) => (row = el)}
-                onSizeChange={() => setNameWidth((row?.width ?? 0) - 4)}
-                paddingLeft={1}
-                paddingRight={1}
-                onMouseOver={() => {
-                  setHovered(`script:${script.name}`)
-                  startMarquee(script.name, nameWidth())
-                }}
-                onMouseOut={() => {
-                  setHovered()
-                  stopMarquee()
-                }}
-                onMouseDown={(event) => {
-                  if (event.button === 2) {
-                    pasteScript(props.sessionID, script)
-                    void copyText(scriptClipboardText(script))
-                  }
-                  if (event.button === 0) void runScript(script)
-                }}
-              >
-                <text
-                  wrapMode="none"
-                  fg={
-                    hovered() === `script:${script.name}`
-                      ? hoverColor
-                      : pins.has(script.name)
-                        ? theme.primary
-                        : theme.text
-                  }
+                <box
+                  ref={(el) => (row = el)}
+                  onSizeChange={() => setNameWidth((row?.width ?? 0) - 4)}
+                  paddingLeft={1}
+                  paddingRight={1}
+                  onMouseOver={() => {
+                    setHovered(`script:${script.name}`)
+                    startMarquee(script.name, nameWidth())
+                  }}
+                  onMouseOut={() => {
+                    setHovered()
+                    stopMarquee()
+                  }}
+                  onMouseDown={(event) => {
+                    if (event.button === 2) {
+                      pasteScript(props.sessionID, script)
+                      void copyText(scriptClipboardText(script))
+                    }
+                    if (event.button === 0) void runScript(script)
+                  }}
                 >
-                  {pins.has(script.name) ? "* " : "  "}
-                  {clipEnd(
-                    hovered() === `script:${script.name}` ? script.name.slice(marqueeOffset()) : script.name,
-                    nameWidth(),
-                  )}
-                </text>
-              </box>
+                  <text
+                    wrapMode="none"
+                    fg={
+                      hovered() === `script:${script.name}`
+                        ? hoverColor
+                        : pins.has(script.name)
+                          ? theme.primary
+                          : theme.text
+                    }
+                  >
+                    {pins.has(script.name) ? "* " : "  "}
+                    {clipEnd(
+                      hovered() === `script:${script.name}` ? script.name.slice(marqueeOffset()) : script.name,
+                      nameWidth(),
+                    )}
+                  </text>
+                </box>
               )
             }}
           </For>
@@ -1753,72 +1841,72 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
                 // Row width minus 1-cell padding on each side, the indent, and the 2-cell marker.
                 const [nameWidth, setNameWidth] = createSignal(0)
                 return (
-                <box
-                  ref={(el) => (row = el)}
-                  onSizeChange={() => setNameWidth((row?.width ?? 0) - 4 - entry.depth * 2)}
-                  flexDirection="row"
-                  paddingLeft={1}
-                  paddingRight={1}
-                  onMouseOver={() => {
-                    setHovered(`tree:${entry.relativePath}`)
-                    startMarquee(entry.name, nameWidth())
-                  }}
-                  onMouseOut={() => {
-                    setHovered()
-                    stopMarquee()
-                  }}
-                  onMouseDown={(event) => {
-                    if (event.button === 2) {
-                      insertPath(props.sessionID, entry.fullPath, true)
-                      void copyText(fileClipboardText(entry.fullPath))
-                      return
-                    }
-                    if (entry.directory) toggleDirectory(entry.relativePath)
-                    else insertPath(props.sessionID, entry.fullPath, true)
-                  }}
-                >
-                  <text
-                    flexShrink={0}
-                    fg={
-                      hovered() === `tree:${entry.relativePath}`
-                        ? hoverColor
-                        : entry.directory
-                          ? directoryColor(entry.depth, DIRECTORY_INDICATOR_COLORS)
-                          : theme.text
-                    }
+                  <box
+                    ref={(el) => (row = el)}
+                    onSizeChange={() => setNameWidth((row?.width ?? 0) - 4 - entry.depth * 2)}
+                    flexDirection="row"
+                    paddingLeft={1}
+                    paddingRight={1}
+                    onMouseOver={() => {
+                      setHovered(`tree:${entry.relativePath}`)
+                      startMarquee(entry.name, nameWidth())
+                    }}
+                    onMouseOut={() => {
+                      setHovered()
+                      stopMarquee()
+                    }}
+                    onMouseDown={(event) => {
+                      if (event.button === 2) {
+                        insertPath(props.sessionID, entry.fullPath, true)
+                        void copyText(fileClipboardText(entry.fullPath))
+                        return
+                      }
+                      if (entry.directory) toggleDirectory(entry.relativePath)
+                      else insertPath(props.sessionID, entry.fullPath, true)
+                    }}
                   >
-                    {"  ".repeat(entry.depth)}
-                  </text>
-                  <text
-                    flexShrink={0}
-                    fg={
-                      hovered() === `tree:${entry.relativePath}`
-                        ? hoverColor
-                        : entry.directory
-                          ? directoryColor(entry.depth, DIRECTORY_INDICATOR_COLORS)
-                          : theme.text
-                    }
-                  >
-                    {entry.directory ? (expanded().has(entry.relativePath) ? "- " : "+ ") : "  "}
-                  </text>
-                  <text
-                    flexShrink={1}
-                    minWidth={0}
-                    wrapMode="none"
-                    fg={
-                      hovered() === `tree:${entry.relativePath}`
-                        ? hoverColor
-                        : entry.directory
-                          ? directoryColor(entry.depth, DIRECTORY_COLORS)
-                          : theme.text
-                    }
-                  >
-                    {clipEnd(
-                      hovered() === `tree:${entry.relativePath}` ? entry.name.slice(marqueeOffset()) : entry.name,
-                      nameWidth(),
-                    )}
-                  </text>
-                </box>
+                    <text
+                      flexShrink={0}
+                      fg={
+                        hovered() === `tree:${entry.relativePath}`
+                          ? hoverColor
+                          : entry.directory
+                            ? directoryColor(entry.depth, DIRECTORY_INDICATOR_COLORS)
+                            : theme.text
+                      }
+                    >
+                      {"  ".repeat(entry.depth)}
+                    </text>
+                    <text
+                      flexShrink={0}
+                      fg={
+                        hovered() === `tree:${entry.relativePath}`
+                          ? hoverColor
+                          : entry.directory
+                            ? directoryColor(entry.depth, DIRECTORY_INDICATOR_COLORS)
+                            : theme.text
+                      }
+                    >
+                      {entry.directory ? (expanded().has(entry.relativePath) ? "- " : "+ ") : "  "}
+                    </text>
+                    <text
+                      flexShrink={1}
+                      minWidth={0}
+                      wrapMode="none"
+                      fg={
+                        hovered() === `tree:${entry.relativePath}`
+                          ? hoverColor
+                          : entry.directory
+                            ? directoryColor(entry.depth, DIRECTORY_COLORS)
+                            : theme.text
+                      }
+                    >
+                      {clipEnd(
+                        hovered() === `tree:${entry.relativePath}` ? entry.name.slice(marqueeOffset()) : entry.name,
+                        nameWidth(),
+                      )}
+                    </text>
+                  </box>
                 )
               }}
             </For>
@@ -1868,7 +1956,8 @@ export function SidebarToolsFooter(props: { sessionID: string }) {
     <box gap={1}>
       <text>{footerPath(directory, os.homedir(), branch)}</text>
       <text fg={theme.textMuted}>
-        <span style={{ fg: theme.success }}>-</span> oc v{InstallationDisplayVersion.split("-")[0]} ∙ OG v{InstallationVersion}
+        <span style={{ fg: theme.success }}>-</span> oc v{InstallationDisplayVersion.split("-")[0]} ∙ OG v
+        {InstallationVersion}
       </text>
     </box>
   )

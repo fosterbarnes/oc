@@ -146,6 +146,95 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-10 (~22:23) - v0.2.147 gammyLikaaa - Usage menu: say why a Claude account is unavailable - Opus 5.5, low reasoning; Debug
+
+### Agent
+- Meta: Opus 5.5; low reasoning; Debug; completed
+- Version: 0.2.147 gammyLikaaa
+- Root cause (config/state, not a bug): `~/.claudeSecond/.credentials.json` has `claudeAiOauth.accessToken`, but `expiresAt` was ~12h past and `~/.cache/opencode/claude-usage-claudeSecond.json` never existed, so no live read and no fallback. Pool always uses `~/.claude` first, so the second login never refreshes. Paths agree: provider `poolAccountIds` (accounts.ts) and `probeClaudeCodePool` resolve the same dir.
+- Added `reason?: "signed-out" | "expired"` to `ClaudeCodeUsage` failure in usage.ts; `probeClaudeCodeUsage` sets it (no token / expired token with no cache).
+- Changed sidebar-tools.tsx `claudeRows`: shows "Not signed in" or "Login expired" (detail: use the account in Claude Code once) instead of "Unavailable".
+- Changed sidebar Claude line for pooled accounts: per-account percents, `30%h, 1%h / 3%w, 0%w` (was pool-average hour plus `77%/0%w`). Single account unchanged. Dates line with 2+ readable accounts lists each account's 5-hour reset (`, `-joined) instead of soonest hourly / weekly. No test covers these lines; typecheck clean.
+- Fixed `probeClaudeCodePool` (usage.ts): pool `source` is `live` when any account is live and `fetchedAt` is the newest, so an expired account's cache no longer dims the `Claude:` label. Added pool test in open-sidebar.test.ts (71 pass, known failure only).
+- Changed sidebar-tools.tsx usage block: one column box opens the Usage menu on any left click; removed per-provider click toggles (Codex/Cursor/Go/OpenRouter) and Cursor right-click paste (menu has the sign-in row). Merged four show-remaining signals into one `showRemaining`, now also applied to Claude, toggled by a Settings row titled with the current mode ("Toggle: % used" / "Toggle: % remaining"); sidebar labels no longer add "remaining" in the Usage menu (session-only, as before). Typecheck clean.
+- Fixed stale tests: usage-freshness.test.ts window labels now expect `h` (v0.2.146 `windowLabel`); open-sidebar.test.ts "keeps retained sidebar builtins..." now includes `internal:sidebar-plugins` (feature-plugins/sidebar/plugins.tsx). Both files: 79 pass, 0 fail.
+- Pass: fixed stale `probeClaudeCodeUsage` comment (expired login with no cache now reports a reason). TODO (not done): pool returns plain `{ ok: false }` when no account is readable, so the menu shows one generic "Unavailable" instead of per-account reasons.
+- Verification: open-sidebar.test.ts extended (expired, signed-out); 70 pass, only known failure "keeps retained sidebar builtins..."; `bun run typecheck` clean.
+
+### User
+Usage menu
+- A pooled Claude account that cannot be read now says "Not signed in" or "Login expired" instead of just "Unavailable".
+- With pooled Claude accounts the sidebar shows each account's own hour and weekly percent, like "30%h, 1%h / 3%w, 0%w", and the line below lists each account's hourly reset time.
+- Clicking anywhere in the sidebar Usage block opens the Usage menu; switching between used and remaining percent is now a row in that menu instead of clicking each provider.
+- The "Claude:" label no longer greys out just because one pooled account is showing saved usage.
+- claudeSecond showed Unavailable because its login expired before oc ever cached its usage; using that account in Claude Code once fixes it.
+
+---
+
+## 2026-10-10 (~22:19) - v0.2.146 tightenBinks - Sidebar usage: hour windows label as h - Opus 5.5, low reasoning; Implementation
+
+### Agent
+- Meta: Opus 5.5; low reasoning; Implementation; completed
+- Version: 0.2.146 tightenBinks
+- Changed `windowLabel` in `usage.ts`: sub-day windows return `h` (no hour count); Claude sidebar string `%5h` -> `%h` in `sidebar-tools.tsx`.
+- Verification: `tsgo --noEmit` exit 0. Live TUI not checked.
+
+### User
+Sidebar usage
+- Hour-based limits now show as "2%h" instead of "2%5h".
+
+---
+
+## 2026-10-10 (~22:18) - v0.2.145 rideMothafucken - Sidebar usage: window labels after percent - Opus 5.5, low reasoning; Implementation
+
+### Agent
+- Meta: Opus 5.5; low reasoning; Implementation; completed
+- Version: 0.2.145 rideMothafucken
+- Changed `usageRows` in `sidebar-tools.tsx`: window label now follows percent (`67%w`, `42%5h`, `18%m`, `100%api`) for Codex, Go, Cursor, Claude.
+- Verification: `tsgo --noEmit` exit 0. Live TUI not checked.
+
+### User
+Sidebar usage
+- Usage percentages now read like "67%w" instead of "w67%".
+
+---
+
+## 2026-10-10 (~22:16) - v0.2.144 permissionCohibas - Usage menu: per-account Claude groups, read-only stat rows - Opus 5.5, low reasoning; Implementation
+
+### Agent
+- Meta: Opus 5.5; low reasoning; Implementation; completed
+- Version: 0.2.144 permissionCohibas
+- Replaced `ClaudeCodeUsage.weeklyEach` with `accounts: { name, usage }[]` in `usage.ts` `probeClaudeCodePool`; keeps unreadable accounts (previously dropped silently, so the second login vanished). Name = config dir basename without leading dot.
+- Usage menu: pooled Claude shows one group per account ("Claude Code (claude)", "Claude Code (claudeSecond)") with its own 5-hour/weekly rows and resets, or "Unavailable".
+- Added `DialogSelectOption.inert` in `ui/dialog-select.tsx`: rendered, excluded from `flat()` (no select/keyboard/hover), click ignored; `rows()` counts all rendered rows; `scrollToSelection` maps flat index past inert rows. Usage stat and "Unavailable" rows set `inert`.
+- Verification: `tsgo --noEmit` exit 0; usage tests 77 pass, 1 pre-existing fail (same as v0.2.143); `dialog-select-session-marker-actions.test.tsx` 1 pass. Live TUI not checked.
+
+### User
+Sidebar usage
+- The Usage menu now lists each connected Claude account separately with its own limits and reset dates, and shows an account as unavailable instead of hiding it.
+- Usage numbers in the menu are read-only: they no longer highlight on hover or react to clicks; only sign-in and settings rows are selectable.
+
+---
+
+## 2026-10-10 (~22:12) - v0.2.143 editSexyblittle - Sidebar Usage menu with full reset dates - Opus 5.5, low reasoning; Implementation
+
+### Agent
+- Meta: Opus 5.5 (imp) + general-haiku-5.5-medium subagent; low reasoning; Implementation; completed
+- Version: 0.2.143 editSexyblittle
+- Added `UsageWindow.resetMs` (epoch ms) in `tui/.../sidebar-tools/usage.ts`, filled at every parse site (Claude, pool, OpenAI `resetTimestamp`, Go, Cursor); errors/passed resets null. Removed redundant `ClaudeWindow` alias.
+- Added `windowName(minutes)` and `fullResetDate(ms, nowMs)` (Intl en-US long date + spelled-out relative time).
+- Changed sidebar header `Weekly Usage:` -> `Usage:`; click opens `selectUsageMenu` (DialogSelect, category per provider, `details` line holds full date, last row opens provider settings). Added `sidebar.usage` "Show usage" command; renamed settings title/command to "Usage providers"/"Configure usage providers".
+- Kept: Claude pool per-account rows show "Reset date unavailable" (`weeklyEach` has percents only).
+- Verification: `tsgo --noEmit` exit 0; `usage-freshness.test.ts` + `open-sidebar.test.ts` 77 pass, 1 fail. The fail ("keeps retained sidebar builtins while replacing files and footer") also fails on stashed main: pre-existing. Live TUI not checked.
+
+### User
+Sidebar usage
+- The sidebar section is now called "Usage".
+- Clicking "Usage:" opens a menu listing every provider's limits with used and remaining percent and the full reset date and time, plus how long until it resets.
+- The menu is also available from the command palette as "Show usage".
+
+---
+
 ## 2026-10-10 (~22:00) - v0.2.142 vapingIntoxicating - Sidebar usage: pooled average, per-account weekly, window labels - Sonnet 5.5, low reasoning; Implementation
 
 ### Agent

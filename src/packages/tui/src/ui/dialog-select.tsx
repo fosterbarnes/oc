@@ -77,6 +77,8 @@ export interface DialogSelectOption<T = any> {
   category?: string
   categoryView?: JSX.Element
   disabled?: boolean
+  /** Shown but never selected, hovered, or clicked (read-only info rows). */
+  inert?: boolean
   bg?: RGBA
   gutter?: () => JSX.Element
   margin?: JSX.Element
@@ -182,6 +184,7 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
     return pipe(
       grouped(),
       flatMap(([_, options]) => options),
+      filter((option) => !option.inert),
     )
   })
 
@@ -190,7 +193,7 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
       if (!category) return acc
       return acc + (i > 0 ? 2 : 1)
     }, 0)
-    return flat().reduce((acc, option) => acc + 1 + (option.details?.length ?? 0), headers)
+    return grouped().flatMap(([_, options]) => options).reduce((acc, option) => acc + 1 + (option.details?.length ?? 0), headers)
   })
 
   const dimensions = useTerminalDimensions()
@@ -330,12 +333,14 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
     // Locate the row by position because a unique renderable ID cannot currently be ensured.
     for (const [category, options] of grouped()) {
       if (category) index++
-      if (remaining < options.length) {
-        index += remaining
+      // Inert rows render but are not in flat(), so skip them when mapping the flat index to a row.
+      const selectable = options.flatMap((option, row) => (option.inert ? [] : [row]))
+      if (remaining < selectable.length) {
+        index += selectable[remaining]
         break
       }
       index += options.length
-      remaining -= options.length
+      remaining -= selectable.length
     }
     const target = scroll.getChildren()[index]
     if (!target) return
@@ -676,7 +681,7 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
                             setFocusedAction(undefined)
                           }}
                           onMouseUp={() => {
-                            if (props.locked) return
+                            if (props.locked || option.inert) return
                             option.onSelect?.(dialog)
                             props.onSelect?.(option)
                           }}

@@ -65,17 +65,60 @@ export function normalizeUsageProviders(value: unknown, fallback = DEFAULT_USAGE
 export type UsageWindow = {
   usedPercent: number | null
   resetAt: string | null
+  /** Epoch milliseconds of the reset, for the full date in the usage menu. */
+  resetMs: number | null
   minutes: number | null
 }
 
-/** Sidebar prefix for a window of this length: `5h`, `d`, `w`, `m`; empty when the length is unknown or unusual. */
+/** Sidebar suffix for a window of this length: `h`, `d`, `w`, `m`; empty when the length is unknown or unusual. */
 export function windowLabel(minutes: number | null | undefined): string {
   if (!minutes || minutes <= 0) return ""
   const days = minutes / 1440
-  if (days < 1) return `${Math.round(minutes / 60)}h`
+  if (days < 1) return "h"
   if (days === 1) return "d"
   if (days === 7) return "w"
   return days >= 28 && days <= 31 ? "m" : ""
+}
+
+/** Spelled-out window name for the usage menu: `5-hour`, `Weekly`, `Monthly`, or `N-day`; empty when unknown. */
+export function windowName(minutes: number | null | undefined): string {
+  if (!minutes || minutes <= 0) return ""
+  if (minutes === 10_080) return "Weekly"
+  const days = minutes / 1440
+  if (days >= 28 && days <= 31) return "Monthly"
+  if (days < 1) return `${Math.round(minutes / 60)}-hour`
+  return `${Math.round(days)}-day`
+}
+
+const RESET_DATE_FORMAT = new Intl.DateTimeFormat("en-US", {
+  weekday: "long",
+  month: "long",
+  day: "numeric",
+  year: "numeric",
+  hour: "numeric",
+  minute: "2-digit",
+})
+
+/** Full reset date in local time with the time left, e.g. `Sunday, October 11, 2026 at 2:58 AM (in 1 day, 4 hours)`. */
+export function fullResetDate(ms: number, nowMs: number): string {
+  const date = RESET_DATE_FORMAT.format(new Date(ms))
+  const remaining = ms - nowMs
+  if (remaining <= 0) return `${date} (reset passed)`
+  const totalMinutes = Math.floor(remaining / 60_000)
+  if (totalMinutes === 0) return `${date} (in less than a minute)`
+  const days = Math.floor(totalMinutes / 1440)
+  const hours = Math.floor((totalMinutes % 1440) / 60)
+  const minutes = totalMinutes % 60
+  const parts = (
+    [
+      [days, "day"],
+      [hours, "hour"],
+      [minutes, "minute"],
+    ] as const
+  )
+    .filter(([count]) => count > 0)
+    .map(([count, unit]) => `${count} ${unit}${count === 1 ? "" : "s"}`)
+  return `${date} (in ${parts.join(", ")})`
 }
 
 export function orderUsageWindows(windows: [UsageWindow, UsageWindow]): [UsageWindow, UsageWindow] {
@@ -136,20 +179,20 @@ export type CursorUsage =
       reason?: "need-token" | "reauthenticate"
     }
 
-type ClaudeWindow = UsageWindow & { resetMs?: number }
-
 export type ClaudeCodeUsage =
   | {
       ok: true
       fetchedAt: number
       source: "live" | "cache"
-      fiveHour: ClaudeWindow
-      weekly: ClaudeWindow
-      /** Pooled accounts: each account's own weekly used percent, in pool order. */
-      weeklyEach?: number[]
+      fiveHour: UsageWindow
+      weekly: UsageWindow
+      /** Pooled accounts: each account's own usage, in pool order, including unreadable ones. */
+      accounts?: { name: string; usage: ClaudeCodeUsage }[]
     }
   | {
       ok: false
+      /** Why no usage could be read: no login in the config dir, or an expired login with no cached result. */
+      reason?: "signed-out" | "expired"
     }
 
 type UsageOptions = {
@@ -261,7 +304,7 @@ function compactResetDate(date: Date): string {
 
 // Reads Claude Code's own OAuth login but never refreshes it; refreshing would rotate the token out from under Claude Code.
 // The token expires between Claude Code runs and the endpoint rate-limits hard, so the last good response is cached on
-// disk and shown whenever a live read fails. Only a missing login reports unavailable.
+// disk and shown whenever a live read fails. With no cache, a missing or expired login reports why.
 export async function probeClaudeCodeUsage(options: UsageOptions = {}): Promise<ClaudeCodeUsage> {
   const homeDir = options.homeDir ?? os.homedir()
   const nowMs = options.nowMs ?? Date.now()
@@ -270,17 +313,19 @@ export async function probeClaudeCodeUsage(options: UsageOptions = {}): Promise<
     options.claudeCredentialsPath ?? path.join(homeDir, ".claude", ".credentials.json"),
     "utf8",
   )
-    .then((raw) => (JSON.parse(raw) as { claudeAiOauth?: { accessToken?: unknown; expiresAt?: unknown } }).claudeAiOauth)
+    .then(
+      (raw) => (JSON.parse(raw) as { claudeAiOauth?: { accessToken?: unknown; expiresAt?: unknown } }).claudeAiOauth,
+    )
     .catch(() => undefined)
-  if (typeof oauth?.accessToken !== "string" || !oauth.accessToken) return { ok: false }
-  const live =
-    typeof oauth.expiresAt === "number" && oauth.expiresAt <= nowMs
-      ? undefined
-      : await fetchUsageResponse(options, CLAUDE_USAGE_URL, {
-          Authorization: `Bearer ${oauth.accessToken}`,
-          "anthropic-beta": "oauth-2025-04-20",
-          accept: "application/json",
-        }).catch(() => undefined)
+  if (typeof oauth?.accessToken !== "string" || !oauth.accessToken) return { ok: false, reason: "signed-out" }
+  const expired = typeof oauth.expiresAt === "number" && oauth.expiresAt <= nowMs
+  const live = expired
+    ? undefined
+    : await fetchUsageResponse(options, CLAUDE_USAGE_URL, {
+        Authorization: `Bearer ${oauth.accessToken}`,
+        "anthropic-beta": "oauth-2025-04-20",
+        accept: "application/json",
+      }).catch(() => undefined)
   const liveUsage = parseClaudeUsage(live, nowMs)
   if (liveUsage.ok) {
     await mkdir(path.dirname(cachePath), { recursive: true })
@@ -294,7 +339,7 @@ export async function probeClaudeCodeUsage(options: UsageOptions = {}): Promise<
       .catch(() => undefined),
     nowMs,
   )
-  if (!cached.ok) return cached
+  if (!cached.ok) return expired ? { ok: false, reason: "expired" } : cached
   const cache = await stat(cachePath).catch(() => undefined)
   return { ...cached, source: "cache", fetchedAt: cache?.mtimeMs ?? 0 }
 }
@@ -302,8 +347,8 @@ export async function probeClaudeCodeUsage(options: UsageOptions = {}): Promise<
 /**
  * Usage of the pooled Claude accounts (the claude-code provider's `accounts`
  * option, a list of config dirs) as one meter: the used percentages are
- * averaged, so the pool reads as one 100% bar. Weekly also keeps each
- * account's own value (`weeklyEach`). Each reset
+ * averaged, so the pool reads as one 100% bar. Each account's own usage is
+ * kept in `accounts`. Each reset
  * shown is the soonest among the accounts. Accounts whose usage cannot be read
  * are left out, never counted as unused.
  */
@@ -326,22 +371,23 @@ export async function probeClaudeCodePool(configDirs: string[], options: UsageOp
   )
   const known = results.filter((result) => result.ok)
   if (!known.length) return { ok: false }
-  const sum = (windows: ClaudeWindow[]): ClaudeWindow => {
+  const sum = (windows: UsageWindow[]): UsageWindow => {
     const next = windows.filter((window) => window.resetMs).sort((a, b) => a.resetMs! - b.resetMs!)[0]
     return {
       usedPercent: Math.round(windows.reduce((total, window) => total + (window.usedPercent ?? 0), 0) / windows.length),
       resetAt: next?.resetAt ?? null,
-      resetMs: next?.resetMs,
+      resetMs: next?.resetMs ?? null,
       minutes: null,
     }
   }
   return {
     ok: true,
-    fetchedAt: Math.min(...known.map((result) => result.fetchedAt)),
-    source: known.some((result) => result.source === "cache") ? "cache" : "live",
+    // The pool reads as fresh while any account is live; an idle account's cached usage does not dim it.
+    fetchedAt: Math.max(...known.map((result) => result.fetchedAt)),
+    source: known.some((result) => result.source === "live") ? "live" : "cache",
     fiveHour: sum(known.map((result) => result.fiveHour)),
     weekly: sum(known.map((result) => result.weekly)),
-    weeklyEach: known.map((result) => result.weekly.usedPercent ?? 0),
+    accounts: dirs.map((dir, index) => ({ name: path.basename(dir).replace(/^\./, ""), usage: results[index] })),
   }
 }
 
@@ -353,22 +399,22 @@ function parseClaudeUsage(value: unknown, nowMs: number): ClaudeCodeUsage {
   return { ok: true, fiveHour, weekly, fetchedAt: nowMs, source: "live" }
 }
 
-function claudeWindow(value: unknown, nowMs: number): ClaudeWindow | undefined {
+function claudeWindow(value: unknown, nowMs: number): UsageWindow | undefined {
   const item = value as { utilization?: unknown; resets_at?: unknown } | null
   if (typeof item?.utilization !== "number" || !Number.isFinite(item.utilization)) return
   const date = typeof item.resets_at === "string" ? new Date(item.resets_at) : undefined
   const valid = date && !Number.isNaN(date.valueOf())
   // A cached window whose reset has passed is known to be back at zero.
-  if (valid && date.valueOf() <= nowMs) return { usedPercent: 0, resetAt: null, minutes: null }
+  if (valid && date.valueOf() <= nowMs) return { usedPercent: 0, resetAt: null, resetMs: null, minutes: null }
   return {
     usedPercent: Math.round(Math.max(0, Math.min(100, item.utilization))),
     resetAt: valid ? compactResetDate(date) : null,
-    ...(valid ? { resetMs: date.valueOf() } : {}),
+    resetMs: valid ? date.valueOf() : null,
     minutes: null,
   }
 }
 
-function resetDate(resetAt: unknown, resetAfterSeconds: unknown, nowMs: number): string | null {
+function resetTimestamp(resetAt: unknown, resetAfterSeconds: unknown, nowMs: number): number | null {
   const timestamp =
     typeof resetAt === "number" && Number.isFinite(resetAt)
       ? resetAt
@@ -376,8 +422,8 @@ function resetDate(resetAt: unknown, resetAfterSeconds: unknown, nowMs: number):
         ? nowMs / 1000 + resetAfterSeconds
         : null
   if (timestamp === null) return null
-  const date = new Date(timestamp > 1_000_000_000_000 ? timestamp : timestamp * 1000)
-  return Number.isNaN(date.valueOf()) ? null : compactResetDate(date)
+  const ms = timestamp > 1_000_000_000_000 ? timestamp : timestamp * 1000
+  return Number.isNaN(new Date(ms).valueOf()) ? null : ms
 }
 
 function windowFromUsage(value: unknown, nowMs: number): UsageWindow | null {
@@ -391,7 +437,13 @@ function windowFromUsage(value: unknown, nowMs: number): UsageWindow | null {
   if (typeof window.used_percent !== "number" || !Number.isFinite(window.used_percent)) return null
   const usedPercent = Math.round(Math.max(0, Math.min(100, window.used_percent)))
   const minutes = typeof window.limit_window_seconds === "number" ? Math.round(window.limit_window_seconds / 60) : null
-  return { usedPercent, resetAt: resetDate(window.reset_at, window.reset_after_seconds, nowMs), minutes }
+  const resetMs = resetTimestamp(window.reset_at, window.reset_after_seconds, nowMs)
+  return {
+    usedPercent,
+    resetAt: resetMs === null ? null : compactResetDate(new Date(resetMs)),
+    resetMs,
+    minutes,
+  }
 }
 
 function parseUsageResponse(value: unknown, nowMs: number): OpenAIUsage {
@@ -401,6 +453,7 @@ function parseUsageResponse(value: unknown, nowMs: number): OpenAIUsage {
   const secondary = windowFromUsage(body.rate_limit?.secondary_window, nowMs) ?? {
     usedPercent: null,
     resetAt: null,
+    resetMs: null,
     minutes: null,
   }
   if (!primary) return errorResult()
@@ -504,6 +557,7 @@ function goWindow(value: unknown, minutes: number): UsageWindow | null {
   return {
     usedPercent: Math.round(Math.max(0, Math.min(100, window.percent))),
     resetAt: compactResetDate(reset),
+    resetMs: reset.valueOf(),
     minutes,
   }
 }
@@ -694,6 +748,7 @@ function parseCursorUsageResponse(value: unknown, nowMs: number): CursorUsage {
       usedPercent,
       apiUsedPercent: clampPercent(window.apiPercentUsed),
       resetAt: compactResetDate(resetAt),
+      resetMs: resetAt.valueOf(),
       minutes: null,
     },
   }

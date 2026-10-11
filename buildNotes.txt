@@ -1,15 +1,9 @@
-v0.2.142 vapingIntoxicating
+v0.2.147 gammyLikaaa
 
-claude accounts:
-Your second Claude login can now be pooled with the main one through a new `accounts` option on the Claude provider (a list of Claude config folders). oc stays on one account until Claude Code rejects a request for usage, then carries on with the next, even in the middle of a reply. The chat shows a short "Claude account switched" line, and the new account picks up from the last exchange plus what the reply had already done, so tools that ran are not run again. Moving a chat to another account does not ask "Start fresh?".
+usage menu:
+Clicking "Usage:" in the sidebar opens a Usage menu listing every provider's limits with used and remaining percent, the full reset date and time, and how long until it resets. It is also in the command palette as "Show usage". Each pooled Claude account gets its own group, and an account that cannot be read says "Not signed in" or "Login expired" instead of disappearing or showing a bare "Unavailable". Usage numbers in the menu are read-only; only sign-in and settings rows react.
 
 usage sidebar:
-Claude usage with several accounts reads as one combined 100%, with the weekly value shown separately for each account. Every usage value now starts with its window: 5h for five hours, d for daily, w for weekly, m for monthly (for example `5h24%, w74%/30%`). Codex labels come from each window's reported length instead of assuming the shorter one is weekly.
+The section is now called "Usage". Clicking anywhere in it opens the Usage menu, and switching between used and remaining percent is a single "Toggle" row in that menu (it shows the current mode) instead of clicking each provider. Window labels follow the percent, for example "67%w" and "30%h". With pooled Claude accounts the line shows each account's own numbers, like "30%h, 1%h / 3%w, 0%w", and the line below lists each account's hourly reset time. The "Claude:" label no longer greys out just because one account is showing saved usage.
 
-removed providers:
-ChatGPT Web and Claude Web are gone from the model list, and oc no longer opens an Edge window for them. The installer no longer copies the browser helper folder.
-
-docs:
-The README now covers every oc feature with install steps, behavior changes, configuration, troubleshooting and an FAQ. CONTRIBUTING, SECURITY and the issue and pull request templates describe oc instead of stock OpenCode.
-
-Under the hood: added the account pool (`accounts.ts`), per-child `CLAUDE_CONFIG_DIR`, conversation ownership per account, and a bounded in-turn switch that reuses the existing no-context catch-up. Fixed the session-lock middleware test routes to return HTTP responses without changing their contention and safe-error assertions. Pool and switch tests with a fake Claude CLI (6), the related Claude provider suites, and the usage tests passed; opencode typecheck and all five middleware tests passed after the route fix; a pre-existing sidebar builtins test still fails and is unrelated. Not checked against a real usage limit.
+Under the hood: the second Claude account showed Unavailable because its login had expired before oc ever cached its usage; oc never refreshes Claude Code's token, so using that account in Claude Code once fixes it. Added a failure reason to Claude usage results, per-account results to the pool, pool freshness taken from the newest live account, inert (non-selectable) rows in the select dialog, and one shared used/remaining setting. Fixed two stale test expectations (hour label, plugins sidebar section). Sidebar and usage tests and the tui typecheck passed. Not checked in the live TUI.
