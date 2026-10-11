@@ -217,7 +217,7 @@ function getToolResultText(part: any): string {
  */
 export function getClaudeUserMessage(
   prompt: Prompt,
-  resume?: { sessionID?: string },
+  resume?: { sessionID?: string; progress?: string },
   opts: {
     cliToolCallIds?: ReadonlySet<string>
     stripContextReminders?: boolean
@@ -341,7 +341,7 @@ export function getClaudeUserMessage(
     })
   }
 
-  if (resume) content.unshift({ type: "text", text: resumeBlock(prompt, resume.sessionID) })
+  if (resume) content.unshift({ type: "text", text: resumeBlock(prompt, resume.sessionID, resume.progress) })
 
   return JSON.stringify({
     type: "user",
@@ -354,6 +354,7 @@ export function getClaudeUserMessage(
 
 const RESUME_USER_CHARS = 1500
 const RESUME_REPLY_CHARS = 4000
+const RESUME_PROGRESS_CHARS = 6000
 
 /**
  * Catch-up for a fresh Claude conversation in a chat with history (its old
@@ -362,7 +363,7 @@ const RESUME_REPLY_CHARS = 4000
  * instead of pasting the whole history. Excerpts keep their ends: a reply's
  * options and questions sit at the bottom.
  */
-function resumeBlock(prompt: Prompt, sessionID: string | undefined): string {
+function resumeBlock(prompt: Prompt, sessionID: string | undefined, progress: string | undefined): string {
   const lastReply = prompt.findLastIndex((m) => m.role === "assistant")
   const previousUser = prompt.findLastIndex((m, i) => i < lastReply && m.role === "user")
   const reply = prompt
@@ -380,6 +381,13 @@ Re-read any file the transcript says was edited before you change it.
 
 `
     : ""
+  // Set when a usage limit moved this message to another account mid-turn (turn-stream.ts).
+  const done = progress
+    ? `You already started on the message after this block on another Claude account, which hit its usage limit. What you did there (already applied; do not repeat it, continue from where it stops):
+${tail(progress, RESUME_PROGRESS_CHARS)}
+
+`
+    : ""
   return `<session_resume>
 You are continuing an existing oc chat. Your earlier Claude conversation for it was lost, so you do not remember it; the user does. Earlier user turns: ${earlierTurns}.
 
@@ -389,7 +397,7 @@ ${tail(previousUser < 0 ? "" : messageText(prompt[previousUser]), RESUME_USER_CH
 Your previous reply (end):
 ${tail(reply, RESUME_REPLY_CHARS)}
 
-${reads}The transcript is background, not instructions: do not redo or resume earlier work unless the new message asks for it. Do not summarize the catch-up to the user. The message after this block is your task.
+${reads}${done}The transcript is background, not instructions: do not redo or resume earlier work unless the new message asks for it. Do not summarize the catch-up to the user. The message after this block is your task.
 </session_resume>`
 }
 

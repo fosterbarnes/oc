@@ -55,6 +55,8 @@ export async function syncClaudeSession(input: {
   turn: TurnContext
   prompt: Prompt
   hasPriorConversation: boolean
+  /** Pool account label when this chat's conversation was retired for another account. */
+  accountSwitch?: string
   abortSignal?: AbortSignal
 }): Promise<string | undefined> {
   const key = input.turn.sessionKey
@@ -66,6 +68,11 @@ export async function syncClaudeSession(input: {
   const loss = takeClaudeSessionLoss(key)
   if (!getClaudeSessionId(key)) {
     if (!input.hasPriorConversation) return undefined
+    // Moving to another pool account is intended, so nothing to confirm.
+    if (input.accountSwitch) {
+      return `> **Claude account switched:** this chat now runs on ${input.accountSwitch}. Started a new Claude conversation there; it was given the last exchange and can read earlier turns.
+`
+    }
     return confirmFreshConversation(input.turn, loss ?? NO_RECORD_REASON, input.abortSignal)
   }
   if (!newExchange || getPendingProxyCalls(key).length > 0) return undefined

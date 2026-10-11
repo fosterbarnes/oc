@@ -21,14 +21,14 @@ $unit = @(& $runner -Category unit -DryRun)
 assert ($unit.Count -eq 20) 'Unit category must select the 20 existing package suites.'
 assert (@($unit | Where-Object Command -ne bun).Count -eq 0) 'Unit suites must use Bun.'
 $providers = @(& $runner -Category providers -DryRun)
-assert ($providers.Count -eq 2) 'Provider category must select both runtimes.'
+assert ($providers.Count -eq 1) 'Provider category must select the Cursor runtime.'
 assert (@($providers | Where-Object Command -ne node).Count -eq 0) 'Providers must use Node.'
 $all = @(& $runner -All -DryRun)
-assert ($all.Count -eq 30) 'All must include package tests, HttpApi, typecheck, and generation steps.'
+assert ($all.Count -eq 29) 'All must include package tests, HttpApi, typecheck, and generation steps.'
 assert (@($all | Where-Object { $_.Name -eq 'httpapi' }).Count -eq 1) 'All must include HttpApi.'
 assert (@($all | Where-Object { $_.Name -eq 'typecheck' }).Count -eq 1) 'All must include typecheck.'
 assert (@(& $runner -Package core,core -DryRun).Count -eq 1) 'Duplicate selections must run once.'
-assert (@(& $runner -Category unit,providers,unit -DryRun).Count -eq 22) 'Categories must deduplicate.'
+assert (@(& $runner -Category unit,providers,unit -DryRun).Count -eq 21) 'Categories must deduplicate.'
 
 $filtered = @(& $runner -Package cursor-runtime -File test/main.test.mjs -Name '^forwardData preserves ordered data' -DryRun)
 assert ($filtered.Count -eq 1) 'File selection must run one check.'

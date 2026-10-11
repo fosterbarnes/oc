@@ -1,6 +1,8 @@
 import { createStore } from "solid-js/store"
 import { createSimpleContext } from "./helper"
-import { batch, createEffect, createMemo } from "solid-js"
+import { batch, createEffect, createMemo, createSignal } from "solid-js"
+import fs from "node:fs"
+import { Global } from "@opencode-ai/core/global"
 import { useSync } from "./sync"
 import { useEvent } from "./event"
 import path from "path"
@@ -100,6 +102,32 @@ export function resolveSessionAgent(
 
 export function pruneSessionAgents(overrides: Record<string, string>, sessionID: string) {
   return pruneSessionModelOverrides(overrides, sessionID)
+}
+
+export function createReasoningDefault(filePath = path.join(Global.Path.config, "oc.json")) {
+  const read = () => {
+    try {
+      const value = JSON.parse(fs.readFileSync(filePath, "utf8").replace(/^\s*\/\/.*$/gm, ""))?.reasoningEffort
+      return typeof value === "string" && ["default", "low", "medium", "high", "xhigh", "max"].includes(value)
+        ? value
+        : "default"
+    } catch {
+      return "default"
+    }
+  }
+  const [current, set] = createSignal(read())
+  return { current, set }
+}
+
+export function resolveVariant(
+  variants: readonly string[],
+  session: { variant?: string } | undefined,
+  model: string | undefined,
+  fallback: string,
+) {
+  const selected = session ? session.variant ?? "default" : model ?? fallback
+  if (selected === "default") return "default"
+  return variants.includes(selected) ? selected : "default"
 }
 
 export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
@@ -296,6 +324,7 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
     const agent = createAgent()
 
     function createModel() {
+      const reasoningDefault = createReasoningDefault()
       const [modelStore, setModelStore] = createStore<{
         ready: boolean
         model: Record<
@@ -448,10 +477,15 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
       }
 
       function variantFor(model: { providerID: string; modelID: string }) {
-        const variant = modelStore.variant[`${model.providerID}/${model.modelID}`]
         const provider = sync.data.provider.find((item) => item.id === model.providerID)
-        if (!variant || !provider?.models[model.modelID]?.variants?.[variant]) return undefined
-        return variant
+        const id = sessionID()
+        const override = id ? modelStore.session[id] : undefined
+        return resolveVariant(
+          Object.keys(provider?.models[model.modelID]?.variants ?? {}),
+          override?.providerID === model.providerID && override.modelID === model.modelID ? override : undefined,
+          modelStore.variant[`${model.providerID}/${model.modelID}`],
+          reasoningDefault.current(),
+        )
       }
 
       async function persistSessionOverride(id: string, override: SessionModelOverride) {
@@ -476,6 +510,7 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
 
       return {
         current: currentModel,
+        reasoningDefault,
         hasSessionOverride(id = sessionID()) {
           const override = id && modelStore.session[id]
           return !!override && isModelValid(override)
@@ -484,7 +519,8 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
           const pending = modelStore.pending
           if (!pending) return
           setModelStore("pending", undefined)
-          await persistSessionOverride(id, { ...pending, variant: variantFor(pending) })
+          const variant = variantFor(pending)
+          await persistSessionOverride(id, { ...pending, variant: variant === "default" ? undefined : variant })
         },
         get ready() {
           return modelStore.ready
@@ -590,7 +626,8 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
             })
             return
           }
-          const override = { ...model, variant: variantFor(model) }
+          const variant = variantFor(model)
+          const override = { ...model, variant: variant === "default" ? undefined : variant }
           const id = sessionID()
           if (!id) {
             const key = modelSelectionKey()
@@ -655,13 +692,9 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
         },
         variant: {
           selected() {
-            const id = sessionID()
-            const override = id && modelStore.session[id]
-            if (override && isModelValid(override)) return override.variant ?? "default"
             const m = currentModel()
             if (!m) return undefined
-            const key = `${m.providerID}/${m.modelID}`
-            return modelStore.variant[key]
+            return variantFor(m)
           },
           current() {
             const v = this.selected()

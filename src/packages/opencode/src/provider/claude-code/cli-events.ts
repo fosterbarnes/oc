@@ -1,4 +1,3 @@
-import { homedir } from "node:os"
 import { log } from "./logger.js"
 import { DEFAULT_ACCOUNT, normalizeAccountName } from "./accounts.js"
 import type { ClaudeStreamMessage } from "./types.js"
@@ -576,21 +575,23 @@ export function accountBlockKind(msg: { type?: string; error?: unknown }): Accou
     : null
 }
 
-export function loginCommandFor(configDir: string | undefined, home = homedir()): string {
+export function loginCommandFor(configDir: string | undefined, platform: NodeJS.Platform = process.platform): string {
   if (!configDir) return "claude auth login"
-  const shown = configDir === home || configDir.startsWith(`${home}/`) ? `~${configDir.slice(home.length)}` : configDir
-  return `CLAUDE_CONFIG_DIR=${shown} claude auth login`
+  if (platform === "win32")
+    return `$env:CLAUDE_CONFIG_DIR = '${configDir.replaceAll("'", "''")}'; claude auth login`
+  return `CLAUDE_CONFIG_DIR='${configDir.replaceAll("'", "'\\''")}' claude auth login`
 }
 
 export function formatAccountBlockNote(input: {
   kind: AccountBlockKind
   account: string
   configDir?: string
+  platform?: NodeJS.Platform
 }): string {
   const block = ACCOUNT_BLOCKS[input.kind]
   const account = normalizeAccountName(input.account || DEFAULT_ACCOUNT)
   const fix = block.login
-    ? `Log in again with \`${loginCommandFor(input.configDir)}\`, then resend your message.`
+    ? `Log in again with \`${loginCommandFor(input.configDir, input.platform)}\`, then resend your message.`
     : "Check the account at claude.ai, then resend your message."
   return `\n${ACCOUNT_BLOCK_MARKER} the Claude account "${account}" ${block.what}. ${fix}\n`
 }

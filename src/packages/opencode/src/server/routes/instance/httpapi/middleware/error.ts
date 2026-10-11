@@ -25,7 +25,7 @@ export const errorLayer = HttpRouter.middleware<{ handles: unknown }>()((effect)
       ) {
         return Effect.succeed(HttpServerResponse.jsonUnsafe(error.toObject(), { status: 400 }))
       }
-      // Expected cross-process refusal (another oc window runs this session): show its message, not a 500.
+      // Expected cross-process refusal: show its message, not a 500.
       if (error instanceof SessionRunState.HeldElsewhereError) {
         return Effect.succeed(
           HttpServerResponse.jsonUnsafe(new NamedError.Unknown({ message: error.message }).toObject(), { status: 409 }),

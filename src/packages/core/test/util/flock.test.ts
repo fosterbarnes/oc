@@ -114,6 +114,26 @@ async function readJson<T>(p: string): Promise<T> {
 }
 
 describe("util.flock", () => {
+  test("identifies contention without classifying filesystem or cancellation failures", async () => {
+    await using tmp = await tmpdir()
+    const dir = path.join(tmp.path, "locks")
+    await using held = await Flock.acquire("held", { dir })
+    const contention = await Flock.acquire("held", { dir, timeoutMs: 0 }).catch((error: unknown) => error)
+    expect(contention).toBeInstanceOf(Flock.ContentionError)
+    expect(contention).toMatchObject({ key: "held", name: "FlockContentionError" })
+    const file = path.join(tmp.path, "file")
+    await fs.writeFile(file, "not a directory")
+    const filesystem = await Flock.acquire("failure", { dir: path.join(file, "locks") })
+      .catch((error: unknown) => error)
+    expect(filesystem).toBeInstanceOf(Error)
+    expect(filesystem).not.toBeInstanceOf(Flock.ContentionError)
+    const controller = new AbortController()
+    const cancelled = new Error("cancelled")
+    const aborted = Flock.acquire("held", {
+      dir, signal: controller.signal, onWait: () => controller.abort(cancelled),
+    }).catch((error: unknown) => error)
+    expect(await aborted).toBe(cancelled)
+  })
   test("enforces mutual exclusion under process contention", async () => {
     await using tmp = await tmpdir()
     const dir = path.join(tmp.path, "locks")

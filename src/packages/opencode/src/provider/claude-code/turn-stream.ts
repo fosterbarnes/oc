@@ -24,19 +24,31 @@ import {
   formatResultFailureNote,
   formatSilentTurnNote,
   formatStreamTimeoutNote,
+  isRateLimitRejected,
+  parseRateLimitEvent,
   reportCompactBoundary,
   reportConversationReset,
   reportRateLimitEvent,
+  resetsAtToMs,
   reportSystemInit,
   type AccountBlockKind,
 } from "./cli-events.js"
-import { DEFAULT_ACCOUNT, normalizeAccountName } from "./accounts.js"
+import {
+  DEFAULT_ACCOUNT,
+  markAccountLimited,
+  nextUsableAccount,
+  normalizeAccountName,
+  poolAccountIds,
+  poolAccountLabel,
+  poolConfigDir,
+} from "./accounts.js"
 import { extractTurnStats, formatTurnStatsBlock, turnStatsLogPayload } from "./turn-stats.js"
 import {
   getActiveProcess,
   spawnClaudeProcess,
   setClaudeSessionId,
   getClaudeSessionId,
+  deleteClaudeSessionId,
   markClaudeSessionLost,
   recordSessionAnchor,
   clearSessionAnchors,
@@ -91,6 +103,10 @@ export interface TurnInput {
   turn: TurnContext
   options: LanguageModelV3CallOptions
   userMsg: string
+  /** Pool account (accounts.ts) this turn starts on. */
+  account: string
+  /** This turn's message for a fresh conversation on another account, given the work done so far. */
+  catchUpMessage: (progress: string) => string
   visibleTokens: number
   /** Proxy calls pending from the previous turn, read before `userMsg` was built. */
   previousPendingProxyCalls: PendingProxyCall[]
@@ -144,6 +160,13 @@ class ClaudeTurn {
   private proc!: ChildProcess
   private lineEmitter!: EventEmitter
   private cliArgs: string[] = []
+  /** Envelope this turn sends; replaced by the catch-up after an account switch. */
+  private userMsg: string
+  private account: string
+  /** Next pool account, set by a usage rejection; the rejected turn's tail is dropped until its `result`. */
+  private switchTo: string | undefined
+  /** Tools Claude called this turn, for the catch-up after an account switch. */
+  private readonly toolLog: string[] = []
 
   /** The ReadableStream was cancelled by its consumer. */
   private cancelled = false
@@ -214,6 +237,8 @@ class ClaudeTurn {
     this.turn = input.turn
     this.sk = input.turn.sessionKey
     this.options = input.options
+    this.userMsg = input.userMsg
+    this.account = input.account
     this.todosEnabled = input.options.tools?.some((tool) => tool.name === "todowrite") === true
     this.autoContinue = {
       enabled: autoContinueEnabledFor(this.turn.compactionMode, this.config.autoContinueIncompleteTurns),
@@ -266,19 +291,7 @@ class ClaudeTurn {
 
     if (this.activeProcess) log.debug("reusing active process", { sk: this.sk })
     if (!this.activeProcess) {
-      this.activeProcess = spawnClaudeProcess(
-        this.config.cliPath,
-        plan.cliArgs,
-        this.turn.cwd,
-        this.sk,
-        plan.proxyServer,
-        plan.mcpHash,
-        plan.systemPromptFile,
-        this.config.ignoreAnthropicApiKey,
-        this.turn.reasoningEffort,
-      )
-      this.activeProcess.toolCatalogHash = this.input.catalogHash
-      this.activeProcess.settings = this.turn.processSettings
+      this.activeProcess = this.spawn(plan)
     }
     this.proc = this.activeProcess.proc
     this.lineEmitter = this.activeProcess.lineEmitter
@@ -294,7 +307,7 @@ class ClaudeTurn {
     }
     // A wake prompt attaches to the turn the CLI started on its own; any
     // other turn takes over from it (interrupting it below if still running).
-    const attachAutonomous = this.activeProcess.autonomousTurn === true && this.input.userMsg.includes(WAKE_PROMPT_TEXT)
+    const attachAutonomous = this.activeProcess.autonomousTurn === true && this.userMsg.includes(WAKE_PROMPT_TEXT)
     this.activeProcess.autonomousTurn = false
 
     // The CLI serves one turn at a time. If the previous one is still running
@@ -350,11 +363,118 @@ class ClaudeTurn {
     }
 
     noteTurnStarted(this.activeProcess)
-    this.proc.stdin?.write(this.input.userMsg + "\n")
-    log.debug("sent user message", { textLength: this.input.userMsg.length })
+    this.proc.stdin?.write(this.userMsg + "\n")
+    log.debug("sent user message", { textLength: this.userMsg.length })
     // A reused child that goes silent after the envelope write (seen after a
     // long proxy-blocked tool call) is respawned instead of hanging the turn.
     this.armStartWatchdog()
+  }
+
+  private spawn(plan: Awaited<ReturnType<typeof planSpawn>>) {
+    const ap = spawnClaudeProcess(
+      this.config.cliPath,
+      plan.cliArgs,
+      this.turn.cwd,
+      this.sk,
+      plan.proxyServer,
+      plan.mcpHash,
+      plan.systemPromptFile,
+      this.config.ignoreAnthropicApiKey,
+      this.turn.reasoningEffort,
+      this.account,
+    )
+    ap.toolCatalogHash = this.input.catalogHash
+    ap.settings = this.turn.processSettings
+    return ap
+  }
+
+  /** Point this turn's listeners at `ap`, after detaching them from the previous child. */
+  private attach(ap: ActiveProcess) {
+    this.lineEmitter.off("line", this.onLine)
+    this.lineEmitter.off("close", this.onClose)
+    this.proc.off("error", this.onProcError)
+    this.activeProcess = ap
+    this.proc = ap.proc
+    this.lineEmitter = ap.lineEmitter
+    this.lineEmitter.on("line", this.onLine)
+    this.lineEmitter.on("close", this.onClose)
+    this.proc.on("error", this.onProcError)
+  }
+
+  /**
+   * A usage rejection on a pool account: mark it limited and, when another
+   * account is usable, switch this turn to it at the rejected `result`.
+   * Compaction stays: it needs the conversation that lives on this account.
+   */
+  private beginAccountSwitch(msg: ClaudeStreamMessage): boolean {
+    const info = parseRateLimitEvent(msg)
+    if (!info || !isRateLimitRejected(info)) return false
+    markAccountLimited(this.account, resetsAtToMs(info.resetsAt ?? info.overageResetsAt))
+    if (this.turn.compactionMode) return false
+    const next = nextUsableAccount(poolAccountIds(this.config.accounts))
+    if (!next || next === this.account) return false
+    log.notice("claude account hit its usage limit; switching accounts", {
+      sessionKey: this.sk,
+      from: this.account,
+      to: next,
+      rateLimitType: info.rateLimitType,
+    })
+    this.switchTo = next
+    return true
+  }
+
+  /**
+   * Retire the limited account's child and conversation, then send this
+   * turn again on the next account as a fresh conversation, with the
+   * existing catch-up plus what this turn already did (so tools that ran are
+   * not run again). Another rejection there switches again; every switch
+   * marks an account limited, so the chain ends once all of them are.
+   */
+  private async switchAccount() {
+    const next = this.switchTo!
+    this.switchTo = undefined
+    const progress = this.progressSummary()
+    this.clearStartWatchdog()
+    // Detach first: the retired child's close is not this turn ending.
+    this.lineEmitter.off("line", this.onLine)
+    this.lineEmitter.off("close", this.onClose)
+    this.proc.off("error", this.onProcError)
+    await deleteActiveProcessAndWait(this.sk)
+    deleteClaudeSessionId(this.sk)
+    if (this.closed) return
+    const previous = this.account
+    this.account = next
+    this.out.note(
+      `\n> **Claude account switched:** ${poolAccountLabel(previous)} hit its usage limit; continuing on ${poolAccountLabel(next)}.\n`,
+    )
+    const plan = await planSpawn({
+      config: this.config,
+      turn: this.turn,
+      options: this.options,
+      reusing: false,
+      proxyServer: null,
+      proxyTools: this.input.proxyTools,
+      runtimeStatus: this.input.runtimeStatus,
+      cliVersion: this.input.cliVersion,
+      loadLiveToolInfo: this.input.loadLiveToolInfo,
+    })
+    if (this.closed) return
+    this.cliArgs = plan.cliArgs
+    const ap = this.spawn(plan)
+    this.attach(ap)
+    if (!this.turn.compactionMode) ap.opencodeSessionID = this.turn.affinity
+    this.respawnAttempted = false
+    this.userMsg = this.input.catchUpMessage(progress)
+    noteTurnStarted(ap)
+    this.proc.stdin?.write(this.userMsg + "\n")
+    log.debug("sent catch-up after account switch", { textLength: this.userMsg.length })
+    this.armStartWatchdog()
+  }
+
+  private progressSummary() {
+    const text = this.out.shown.trim()
+    const tools = this.toolLog.length ? `Tool calls you made:\n${this.toolLog.join("\n")}` : ""
+    return [text && `Your reply so far:\n${text}`, tools].filter(Boolean).join("\n\n")
   }
 
   /**
@@ -442,7 +562,7 @@ class ClaudeTurn {
         continue
       }
       if (msg.type === "result") {
-        if (outer.session_id) setClaudeSessionId(this.sk, outer.session_id)
+        if (outer.session_id) setClaudeSessionId(this.sk, outer.session_id, this.account)
         if (msg.is_error && msg.result) this.out.append(msg.result)
       }
     }
@@ -474,6 +594,8 @@ class ClaudeTurn {
     // same content_block_* / message_* shape.
     const msg: ClaudeStreamMessage =
       outer.type === "stream_event" && outer.event ? { ...outer.event, session_id: outer.session_id } : outer
+    // The limited account's own "you've hit your limit" reply is not shown.
+    if (this.switchTo && msg.type !== "result") return
 
     if (isModelProgress(msg)) {
       this.hasReceivedProgress = true
@@ -493,6 +615,7 @@ class ClaudeTurn {
       case "system":
         return this.onSystem(msg)
       case "rate_limit_event": {
+        if (this.beginAccountSwitch(msg)) return
         // A rejection is why the turn is about to fail; put it in the transcript.
         const note = reportRateLimitEvent(msg)
         if (note) this.out.note(note)
@@ -555,7 +678,7 @@ class ClaudeTurn {
   private onSystem(msg: ClaudeStreamMessage) {
     if (msg.subtype === "init") {
       if (msg.session_id) {
-        setClaudeSessionId(this.sk, msg.session_id)
+        setClaudeSessionId(this.sk, msg.session_id, this.account)
         log.info("session initialized", { claudeSessionId: msg.session_id })
       }
       reportSystemInit(msg, { ignoreAnthropicApiKey: this.config.ignoreAnthropicApiKey })
@@ -736,6 +859,7 @@ class ClaudeTurn {
    * broker; everything else becomes an opencode tool call.
    */
   private completeToolUse(id: string, name: string, input: Record<string, unknown>, emitStart: boolean) {
+    this.toolLog.push(`${name} ${JSON.stringify(input).slice(0, 300)}`)
     if (isAskUserQuestionTool(name)) {
       // Latch: the model handed control to the operator, so no auto-continue
       // nudge may proceed on its behalf for the rest of the turn.
@@ -833,7 +957,7 @@ class ClaudeTurn {
   private flushTodo() {
     if (!this.todosEnabled) return
     const claudeSessionId = this.usedTaskTools ? getClaudeSessionId(this.sk) : undefined
-    const saved = claudeSessionId ? readClaudeTaskList(this.config.configDir, claudeSessionId) : undefined
+    const saved = claudeSessionId ? readClaudeTaskList(poolConfigDir(this.account) ?? this.config.configDir, claudeSessionId) : undefined
     const held = this.heldTodo ?? (saved ? { id: `todowrite_${generateId()}`, input: saved } : undefined)
     this.heldTodo = undefined
     this.usedTaskTools = false
@@ -890,7 +1014,15 @@ class ClaudeTurn {
 
   private onResult(msg: ClaudeStreamMessage) {
     this.clearResultFallback()
-    if (msg.session_id) setClaudeSessionId(this.sk, msg.session_id)
+    if (this.switchTo) {
+      void this.switchAccount().catch((err) => {
+        const message = err instanceof Error ? err.message : String(err)
+        log.error("account switch failed", { sessionKey: this.sk, error: message })
+        if (!this.closed) this.failTurn(`Switching Claude accounts failed: ${message}`)
+      })
+      return
+    }
+    if (msg.session_id) setClaudeSessionId(this.sk, msg.session_id, this.account)
 
     // Some CLI failures carry their only readable text in `result.result`. Others (API errors,
     // usage limits) already sent it as a synthetic assistant reply.
@@ -908,9 +1040,11 @@ class ClaudeTurn {
     // The CLI labels this result `success` with `is_error: true`, so this is
     // also what marks the turn failed.
     if (this.accountBlock && msg.is_error) {
-      const account = normalizeAccountName(this.config.account ?? DEFAULT_ACCOUNT)
+      const poolDir = poolConfigDir(this.account)
+      const account = poolDir ? poolAccountLabel(this.account) : normalizeAccountName(this.config.account ?? DEFAULT_ACCOUNT)
+      const configDir = poolDir ?? this.config.configDir
       this.resultFailure ??= this.accountBlock
-      this.out.note(formatAccountBlockNote({ kind: this.accountBlock, account, configDir: this.config.configDir }))
+      this.out.note(formatAccountBlockNote({ kind: this.accountBlock, account, configDir }))
       log.warn(`Claude account "${account}" cannot serve requests`, { sessionKey: this.sk, kind: this.accountBlock })
     }
 
@@ -1407,9 +1541,6 @@ class ClaudeTurn {
       sessionKey: this.sk,
       startWatchdogMs: this.startWatchdogMs,
     })
-    this.lineEmitter.off("line", this.onLine)
-    this.lineEmitter.off("close", this.onClose)
-    this.proc.off("error", this.onProcError)
     const respawned = respawnActiveProcess(
       this.sk,
       this.config.cliPath,
@@ -1421,16 +1552,11 @@ class ClaudeTurn {
       log.error("no active process to respawn (start watchdog); ending turn", { sessionKey: this.sk })
       return this.failTurn("No active claude process to respawn after start watchdog timeout.")
     }
-    this.activeProcess = respawned
-    this.proc = respawned.proc
-    this.lineEmitter = respawned.lineEmitter
-    this.lineEmitter.on("line", this.onLine)
-    this.lineEmitter.on("close", this.onClose)
-    this.proc.on("error", this.onProcError)
+    this.attach(respawned)
     try {
       noteTurnStarted(respawned)
-      this.proc.stdin?.write(this.input.userMsg + "\n")
-      log.debug("re-sent user message after respawn", { textLength: this.input.userMsg.length })
+      this.proc.stdin?.write(this.userMsg + "\n")
+      log.debug("re-sent user message after respawn", { textLength: this.userMsg.length })
     } catch (err) {
       log.error("failed to re-send envelope after respawn", { error: err instanceof Error ? err.message : String(err) })
     }

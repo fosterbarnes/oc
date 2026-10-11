@@ -26,12 +26,12 @@ Counts below are for **active** rows only. Retired work is listed separately and
 
 | Level | Count |
 |---|---:|
-| ~done~ | 16 |
-| high | 26 |
-| medium | 21 |
-| low | 0 |
+| ~done~ | 15 |
+| high | 25 |
+| medium | 22 |
+| low | 2 |
 | CRITICAL | 0 |
-| **Total** | **63** |
+| **Total** | **64** |
 
 ---
 
@@ -47,16 +47,14 @@ Counts below are for **active** rows only. Retired work is listed separately and
 
 ## 1. Models and providers
 
-Use ChatGPT, Claude, or Cursor from OpenCode without treating them as ordinary API-only vendors.
+Use Claude Code or Cursor from OpenCode without treating them as ordinary API-only vendors.
 
 | Feature | Level | What it does | What's left |
 |---|---|---|---|
-| ChatGPT Web | ~done~ | Uses a normal ChatGPT website login as a built-in model. Starts a managed Edge window only when needed. | None realistic. |
-| Claude Web | medium | Same browser-backed idea for Claude. | Live login and a real Claude request are still unconfirmed. |
-| Claude Code as the agent | high | Claude chats run in the Claude Code CLI with its own prompt, native tools, transcript and `/compact`; oc streams it live. oc sends only the agent's own prompt. oc skills load natively through a generated `--plugin-dir` of links, and oc-only tools (subagents, questions, session tools, MCP servers) are deferred proxy tools Claude loads with ToolSearch. Claude's own task list fills oc's todo list at the end of each turn, and an oc agent's missing tools turn off the matching Claude built-ins. Live-checked with `claudeTestFlow.md` (tools, memory, interrupt, compact, revert, restart, effort switch, cache). | No Claude-backed restricted agent exists yet to live-check the agent tool limits. The task-list folder layout is undocumented Claude Code behavior. Extra Claude accounts are Mac/Linux only (the per-account wrapper is a bash script). |
+| Claude Code as the agent | high | Claude chats run in the Claude Code CLI with its own prompt, native tools, transcript and `/compact`; oc streams it live. oc sends only the agent's own prompt. oc skills load natively through a generated `--plugin-dir` of links, and oc-only tools (subagents, questions, session tools, MCP servers) are deferred proxy tools Claude loads with ToolSearch. Claude's own task list fills oc's todo list at the end of each turn, and an oc agent's missing tools turn off the matching Claude built-ins. Several Claude logins can pool as one account (`accounts`: a list of Claude config dirs): a chat stays on one until the CLI rejects a request for usage, then continues the same turn on the next with oc's catch-up and what the turn already did, and the sidebar meter sums them (200% for two). Live-checked with `claudeTestFlow.md` (tools, memory, interrupt, compact, revert, restart, effort switch, cache). | No Claude-backed restricted agent exists yet to live-check the agent tool limits. The task-list folder layout is undocumented Claude Code behavior. The account pool is covered by fake-CLI tests only, not yet a real limit. Extra Claude accounts (the older per-account providers) are Mac/Linux only (the per-account wrapper is a bash script). |
 | Cursor as a native model | medium | Uses a Cursor account login (browser sign-in) and talks to Cursor's service directly as an OpenCode model (tools, reasoning). The Cursor app does not need to be open. A small local Node HTTP/2 relay (`cursor-runtime`) carries the connection because Bun's client fails Cursor's TLS handshake. The picker can show live multi-tier models (Grok 4.7 base, Fast, 500k, and Claude Opus 5.5 metadata) with matching context, wire params, and pricing. | Live auth/request proof is thin. Git/shell protocol parity is deferred. Compaction and "this is OpenCode, not Cursor IDE" guidance were added later and look solid in tests. |
 | Hide Cursor's own plan mode | ~done~ | Cursor-backed chats no longer open Cursor's native plan/spec flow. OpenCode planning agents stay available. | None realistic. |
-| Start helpers only when needed | high | Browser and Cursor helpers start on first use and shut down with the server. | Not every provider has a live start/stop check. |
+| Start Cursor helper only when needed | high | The Cursor helper starts on first use and shuts down with the server. | Live Cursor start/stop check remains. |
 
 ---
 
@@ -73,7 +71,7 @@ Get into a project quickly, keep a local server running, and control it from the
 | Startup loading animation | high | Column-sweep animation while the server and session come up. `intro.background` in `oc.json` uses your terminal background (default) or paints black. Fills and re-centers when the window is snapped or resized. Runs on the alternate screen; the TUI shows the same logo until it is ready, so there is no blank gap at handoff and quitting restores the terminal. | Handoff confirmed live on 0.2.87. Live look with `intro.background: "black"` and resize through `occ` not fully checked. |
 | Resident background server | medium | Local server stays up between launches (production port **4096**). Palette can shut down or restart it. Server shutdown and restart close session admission, wait up to 30 seconds for active-work cancellation, then dispose project resources before scheduling exit. Attach can forward model/agent. A stale server record no longer adds a 10-second wait on the first `oc` launch; a launch during an active restart still waits for the replacement. On Windows the server starts through a hidden `Start-Process` hop, so it has a hidden console (no flashing windows from its child processes) and outlives the launcher. | Full installed shutdown/restart flow is not fully signed off. The hidden PowerShell hop costs about a second; a direct native launch waits on the Bun Windows FFI fix. |
 | Single-instance mode | medium | `oc single [folder] [--portable]` runs a whole oc session inside one window, like native OpenCode: same session database, no resident server or port. `oc config set mode single` makes `oc launch` and `oc previous` (and so `oc`/`occ`) open single windows; `--single` does it once. Closing the window stops running work (up to 3 seconds of cleanup) before exit. `/revive` reopens single. The footer shows `single`; server Shut Down/Restart are hidden. A session running in another window is refused with "Session is running in another oc window". | Window close (X) mid-turn, revive, and the busy-session message need a live check. A single window does not see live updates when another window runs the same session. Each window starts its own plugins and MCP servers. |
-| Start server at Windows sign-in | high | OC settings can turn sign-in auto-start on or off. | Final installed palette click is not recorded. |
+| Start server at Windows sign-in | low | OC settings can turn sign-in auto-start on or off; the palette saves `server.startOnWindowsUserStart` in `oc.json`. | Nothing registers a sign-in startup entry: no reader of the setting exists outside the palette (checked 2026-10-10). Only the archived `oc.ps1` wrapper implemented it. Docs no longer advertise it. |
 | `oc --kill-server` / `--restart-server` / `--shutdown-all` | high | Simple flags for the tray and CLI to stop or bounce the resident server without a full TUI. `--shutdown-all` stops only this instance's TUIs and server (TUI ledger), not `ocdebug` or unrelated terminals; revive uses the same scoping. | Tray wiring exists; treat as nearly done once it is used from a cold start. |
 | Faster command startup | ~done~ | Only the command asked for is loaded. `--version` is much quicker. | None realistic. |
 | Windows tray (`octray`) | medium | Separate tray app: open OC, open the project picker, start the server if it is down, restart/shut down the server. | Logs, live status, and settings menu items are still thin. Not inside this git checkout. |
@@ -90,7 +88,7 @@ Move between projects, keep a session's model, and mark work without deleting it
 | All-projects session list | ~done~ | Browse sessions from every project and jump back to that project's folder. | None realistic. |
 | Send prompt and stay on Home | high | On Home, Ctrl+Enter sends the prompt to a new session and keeps you on Home so you can start several in a row. On a session screen Ctrl+Enter still inserts a newline. | Unit tests cover the command; installed Home Ctrl+Enter streak is not recorded. |
 | Start a session with no model call | medium | Opens a project session without spending tokens. | Installed "it feels right" check is incomplete. |
-| Session marks | medium | Mark a session complete, failed, or in progress (exclusive), or pin it. Agents can mark in progress; completion and reopening complete/failed sessions ask permission by default. Themed markers in lists and the sidebar. | Installed end-to-end confirmation is missing. |
+| Session marks | medium | Mark a session complete, failed, or in progress (exclusive), or pin it. Sending a prompt marks the session in progress, reopening complete/failed ones. Agents cannot mark complete or failed unless `session_complete`/`session_failed` is allowed (default `deny`; a command can allow it for its own turn). Themed markers in lists and the sidebar. | Installed end-to-end confirmation is missing. |
 | Remember this session's model | ~done~ | Each session keeps its model and reasoning choice across agent changes and restarts. | None realistic. |
 | Don't lose the attached session | medium | Refreshing the global list should not drop the session you are in. | Manual installed check was left pending. |
 | Recover after server restart | high | After the resident server bounces, the TUI should reconnect, restore the prompt, and not resubmit what was typed. | Still treat as high until daily reconnect after a bounce is trusted. |
@@ -155,7 +153,7 @@ Drop in Markdown agents, share prompts, and run SuperPlan / SuperGo / Debug as a
 | Archive finished plans | ~done~ | Successful temp plans move to `plans/archive/`; failed or partial plans stay. | None realistic. |
 | Default child agent | medium | `default_subagent` is used when a task does not name a child type. | Installed command and live request still need confirmation. |
 | SuperGo, Debug, and Luna routing | high | Config `agents/` and `prompts/` set: Go, Debug family, SuperPlan aliases. Daily Luna sessions and Luna agents use `openai/gpt-6-luna` (live-checked). Luna stays off Max / `xhigh` unless asked. | Config-level, not fork source. Fresh restart is required after prompt edits. |
-| Command markers (alpha) | medium | Off by default. When on, a line in an agent's reply that is exactly `$#` plus a name runs that command from global `~/.config/opencode/markers.json` with no tool call, so build/test logs never enter the model's context. Modes: `inline` (output replaces the line), `window` (visible PowerShell window, Windows only), `afterTurn` (runs once the session is idle). Global `ask` default with per-command override uses oc's permission prompt. Only the global file is read; agents must ask before editing it. oc lists the configured commands in the agent prompt for native models and Claude Code. Palette "Command markers (alpha)" toggles it after an alpha warning. Runs log to `markers.log`. Proof of concept live-checked on Claude Code and GPT-6.1 Sol. | Native build not live-checked. Window mode on macOS/Linux. Shell tools can still write `markers.json`, and an "always" edit approval also covers it. |
+| Command markers (alpha) | medium | Off by default. When on, a line in an agent's reply that is exactly `$#` plus a name runs that command from global `~/.config/opencode/markers.json` with no tool call. Modes: `inline` (the last 4,000 characters of output replace the line, so they do enter the reply), `window` (visible PowerShell window, Windows only), `afterTurn` (runs once the session is idle). Global `ask` default with per-command override uses oc's permission prompt. Only the global file is read; agents must ask before editing it. oc lists the configured commands in the agent prompt for native models and Claude Code. Palette "Command markers (alpha)" toggles it after an alpha warning. Runs log to `markers.log`. Proof of concept live-checked on Claude Code and GPT-6.1 Sol. | Native build not live-checked. Window mode on macOS/Linux. Shell tools can still write `markers.json`, and an "always" edit approval also covers it. |
 | Hide stock Plan agent | ~done~ | Built-in Plan is disabled in config (`disable`). Hidden is a different switch. | None realistic. |
 
 ---
@@ -201,7 +199,7 @@ Build safely, install without fighting locks, and keep logs.
 | Stop processes before rebuild | ~done~ | Installer stops managed processes *before* build so `ocdebug.exe` cannot lock cleanup. | None realistic. |
 | Refuse crashing Bun 1.4.0 | high | Will not compile the Windows TUI with the known-bad Bun. Can upgrade to a canary. | Automatic global Bun upgrades are an operational risk. |
 | Cleaner hidden Windows commands | medium | Runs the Windows shell more directly and hides extra `taskkill` windows. | Escape-to-cancel confirmation is missing. |
-| Packaged ChatGPT/Cursor helpers | high | Agentify and Cursor files sit next to the exe so they work outside the source tree. Canonical installer copies them. | Combined upstream-sync installer still may omit those folders. |
+| Packaged Cursor helper | high | Cursor files sit next to the exe so they work outside the source tree. Canonical installer copies them. | Combined upstream-sync installer still may omit that folder. |
 | On-disk debug logs | medium | Channel-aware logs, 20 MB rotate, palette and HTTP toggle. | Live restart and installed palette acceptance are not recorded. |
 
 ---
@@ -222,6 +220,7 @@ Stay close to upstream without losing custom work.
 
 These used to be customizations. They are history, not a backlog.
 
+- ChatGPT Web and Claude Web browser providers (Agentify runtime), removed 2026-10-10
 - Standalone `oc.config.json` / `OPENCODE_OC_CONFIG` wrapper
 - External intro-script setting
 - Initial model / agent / reasoning palette settings (native session setup replaced them)
@@ -241,7 +240,7 @@ These used to be customizations. They are history, not a backlog.
 
 ## Caveats
 
-- This checkout does not share a Git merge base with upstream. "Custom" is judged from notes, `Custom fork:` markers, isolated packages (`agentify-runtime`, `cursor-runtime`), `.scripts`, and `~/.config/opencode` agents.
+- This checkout does not share a Git merge base with upstream. "Custom" is judged from notes, `Custom fork:` markers, isolated packages (`cursor-runtime`), `.scripts`, and `~/.config/opencode` agents.
 - Several "high" rows are source-complete and waiting on a rebuild (`install` stops the running app).
 - Small wording, generated-client, and selector fixes are support for the features above, not their own product rows.
 - `octray`, Everything Search, and `bgShell` are sibling checkouts. They still shape daily OC use.

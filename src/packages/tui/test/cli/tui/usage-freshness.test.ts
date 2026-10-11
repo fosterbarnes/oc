@@ -7,9 +7,15 @@ import {
   shouldRefreshUsageProvider,
   updateUsageSnapshot,
   usageProviderForModel,
+  windowLabel,
   type OpenAIUsage,
   type UsageSnapshot,
 } from "../../../src/routes/session/sidebar-tools/usage"
+
+test("window labels follow the window length and stay empty when it is unknown or unusual", () => {
+  expect([300, 60, 1440, 10080, 30 * 1440, 43200].map(windowLabel)).toEqual(["5h", "1h", "d", "w", "m", "m"])
+  expect([null, undefined, 0, 3 * 1440, 90 * 1440].map(windowLabel)).toEqual(["", "", "", "", ""])
+})
 
 test("finished-message provider mapping ignores unknown and inherited names", () => {
   for (const provider of ["openai", "claude-code", "opencode-go", "openrouter", "cursor"] as const)

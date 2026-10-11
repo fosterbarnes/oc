@@ -19,10 +19,18 @@ body:
       required: false
 
   - type: input
-    id: opencode-version
+    id: oc-version
     attributes:
-      label: OpenCode version
-      description: What version of OpenCode are you using?
+      label: oc version
+      description: Shown in the sidebar footer as `oc vX ∙ OG vY`
+    validations:
+      required: false
+
+  - type: input
+    id: model
+    attributes:
+      label: Model
+      description: Which provider and model, for example claude-code/opus or cursor/grok
     validations:
       required: false
 
@@ -41,9 +49,9 @@ body:
   - type: textarea
     id: screenshot-or-link
     attributes:
-      label: Screenshot and/or share link
-      description: Run `/share` to get a share link, or attach a screenshot
-      placeholder: Paste link or drag and drop screenshot here
+      label: Screenshot or log
+      description: Attach a screenshot, or the relevant lines from %USERPROFILE%\.local\share\opencode\log\opencode.log
+      placeholder: Drag and drop a screenshot or paste log lines here
     validations:
       required: false
 
@@ -52,7 +60,7 @@ body:
     attributes:
       label: Operating System
       description: what OS are you using?
-      placeholder: e.g., macOS 26.0.1, Ubuntu 22.04, Windows 11
+      placeholder: e.g., Windows 11 24H2, Windows 10 22H2
     validations:
       required: false
 
@@ -61,6 +69,6 @@ body:
     attributes:
       label: Terminal
       description: what terminal are you using?
-      placeholder: e.g., iTerm2, Ghostty, Alacritty, Windows Terminal
+      placeholder: e.g., WezTerm, Windows Terminal, conhost
     validations:
       required: false

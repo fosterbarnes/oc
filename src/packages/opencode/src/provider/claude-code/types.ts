@@ -16,6 +16,12 @@ export interface ClaudeCodeConfig {
   cwd?: string
   account?: string
   configDir?: string
+  /**
+   * Claude config dirs pooled as one account, in order (`["~/.claude",
+   * "~/.claudeSecond"]`). Work stays on one account until the CLI rejects a
+   * request for usage, then moves to the next. See the pool in accounts.ts.
+   */
+  accounts?: string[]
   providerID?: string
   skipPermissions?: boolean
   /**
@@ -86,6 +92,12 @@ export interface ClaudeCodeProviderSettings {
   providerID?: string
   account?: string
   configDir?: string
+  /**
+   * Claude config dirs pooled as one account, in order (`["~/.claude",
+   * "~/.claudeSecond"]`). Work stays on one account until the CLI rejects a
+   * request for usage, then moves to the next. See the pool in accounts.ts.
+   */
+  accounts?: string[]
   /**
    * Model that subagents run on when their own definition pins nothing.
    * Unset means no implicit override at all, so an agent keeps inheriting the

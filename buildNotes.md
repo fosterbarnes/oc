@@ -146,6 +146,94 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-10 (~22:00) - v0.2.142 vapingIntoxicating - Sidebar usage: pooled average, per-account weekly, window labels - Sonnet 5.5, low reasoning; Implementation
+
+### Agent
+- Meta: Sonnet 5.5; low reasoning; Implementation (follow-up to the account pool entry below); completed
+- Version: 0.2.142 vapingIntoxicating
+- Handoff completion (GPT-6.1 Sol): fixed `httpapi-error-middleware.test.ts` routes to map successful session results to empty HTTP 200 responses; kept real contention 409 and redacted filesystem 500 assertions. Verification: `bun run typecheck` in opencode clean; middleware test 5 pass, 0 fail. Continued existing v0.2.142 work; no build or install.
+- Changed `probeClaudeCodePool` (`sidebar-tools/usage.ts`): used percent is the rounded average across readable accounts (one 100% bar, not 200%); added `weeklyEach` (each account's weekly used percent). Removed the `accounts`/`known` fields and the `(n/m accounts)` suffix. Supersedes the "sums used %, 200%" and "(1/2 accounts)" lines of the pool entry below.
+- Added `windowLabel(minutes)` in `usage.ts` (under 1d `<n>h`, 1d `d`, 7d `w`, 28-31d `m`, else empty). `sidebar-tools.tsx` prefixes every usage value: Codex from each window's `minutes` (replaces assuming shortest = weekly), Claude `5h` and `w` (pooled weekly `w74%/30%`, accounts order), Go from its window minutes, Cursor `m` and `api`. OpenRouter unchanged.
+- Verification: `usage-freshness.test.ts` (new `windowLabel` test) 5 pass; `tsgo --noEmit` in `packages/tui` clean. Sidebar not viewed live.
+- ERROR: tui `open-sidebar.test.ts` "keeps retained sidebar builtins" still fails (pre-existing, unrelated).
+
+### User
+Usage sidebar
+- Claude usage with two accounts now reads as one combined 100%, with the weekly value shown separately for each account.
+- Every usage value now starts with its window: 5h for five hours, d for daily, w for weekly, m for monthly (for example `5h24%, w74%/30%`).
+
+---
+
+## 2026-10-10 (~21:42) - v0.2.142 vapingIntoxicating - Claude account pool: switch on usage limit, pooled meter - Opus 5.5, low reasoning; Implementation
+
+### Agent
+- Meta: Opus 5.5; low reasoning; Implementation (finished plan `~/.config/opencode/plans/2026-10-10-claudeAccountPool.md` after the gpt-6.1-sol subagent died at its usage limit with no edits); completed
+- Version: 0.2.142 vapingIntoxicating
+- Added pool in `provider/claude-code/accounts.ts` (`poolAccountIds`, `nextUsableAccount`, `poolAccount`, `markAccountLimited`, `poolConfigDir`, `poolAccountLabel`): provider option `accounts` = ordered Claude config dirs; `~/.claude` = `default` (inherited env). Sticky current account; limited until `resetsAt` (1h if unknown); all limited = stay put, CLI note shows.
+- Added `configDir` to `claudeSpawnEnv`: sets `CLAUDE_CONFIG_DIR`, drops `ANTHROPIC_API_KEY`/`ANTHROPIC_AUTH_TOKEN`/`CLAUDE_CODE_OAUTH_TOKEN` (same as `claudeSecond` launcher).
+- Added `account` to `ActiveProcess`, `ClaudeSessionRecord` (persisted in sessions.json), `spawnClaudeProcess`/`respawnActiveProcess`, `setClaudeSessionId(key, id, account)`. Added `retireOtherAccount`: language model retires a chat's process+conversation on another account before sync; `syncClaudeSession({accountSwitch})` skips the Start-fresh question for it and returns a notice. Catch-up path is the existing `resumeBlock`.
+- Added in-turn failover in `turn-stream.ts`: rejected `rate_limit_event` -> `beginAccountSwitch` (not compaction); rest of rejected turn dropped until `result`; `switchAccount` detaches, kills child, drops id, `planSpawn` fresh, sends `input.catchUpMessage(progressSummary())` (reply text so far + tool log). `resumeBlock` got `progress` paragraph (do not repeat). Bounded: every switch marks an account limited. Refactored spawn into `spawn()`, listener swap into `attach()` (also used by start watchdog).
+- Removed `delete result.accounts` in `index.ts` `cleanProviderOptions`; `accounts` passed to config.
+- Added `probeClaudeCodePool` in tui `sidebar-tools/usage.ts` (sums used %, soonest reset, per-account cache `claude-usage-<dir>.json`, default keeps old cache) and sidebar shows `120/200%, 40/200%` plus `(1/2 accounts)` when one is unreadable. Reads `sync.data.config.provider["claude-code"].options.accounts`.
+- Added `"accounts": ["~/.claude", "~/.claudeSecond"]` to user `opencode.jsonc`. Updated FORK.md Claude row.
+- Verification: new `test/provider/claude-code/account-pool.test.ts` (pool rules + fake CLI by `CLAUDE_CONFIG_DIR`: switch before work, switch after tool work with tool once, all limited) 6/6; claude-code suites cli-events-stream, session-sync, spawn-env, respawn, session-manager, get-claude-user-message pass (88 total); tui usage tests pass; opencode + tui `tsgo` clean except pre-existing errors in `test/server/httpapi-error-middleware.test.ts`. No real-limit live check.
+- ERROR: tui `open-sidebar.test.ts` "keeps retained sidebar builtins" fails (unexpected `internal:sidebar-plugins`); pre-existing, unrelated, file already modified by another session.
+- Risk: mid-turn switch loses Claude's working memory beyond the reply text and tool log; non-CLI-executed proxy results are only named in the log.
+
+### User
+Claude accounts
+- Your second Claude login (`claudeSecond`) is now pooled with the main one: oc uses one until it hits its usage limit, then carries on with the other automatically, even in the middle of a reply.
+- When a switch happens the chat shows a short "Claude account switched" line instead of the limit error, and the new account picks up from what was already done.
+- The sidebar Claude usage now counts both accounts, out of 200%.
+
+---
+
+## 2026-10-10 (~02:39) - v0.2.141 angelUnnecessarily - Documentation overhaul phase 1, formal docs, wiki drafts - Opus 5.5, low reasoning; Agent
+
+### Agent
+- Meta: Opus 5.5; low reasoning; Agent (docs plan `~/.config/opencode/plans/ocDocs.md`); sections 1-6 user-reviewed, rest done autonomously while user away; research/wiki drafts by general-gpt-6.1-sol-low and general-gpt-6-luna-high
+- Version: 0.2.141 angelUnnecessarily (docs-only; no bump, same session as the agentify removal)
+- Changed README.md to the approved 15-section outline: standout list, "Quality of life", Requirements table, Install (`TODO(release)`), Behavior changes, How it works (oc/occ, server, single, sessions, `/work`/`/done`, sidebar, scripts, Claude Code, Cursor, commands and skills, command markers, revive, Windows), Configuration, Troubleshooting, FAQ, Companion tools, Developing, writeup in `<details>`, License and credits. Count markers untouched.
+- Kept user-written parts as `<!-- TODO(user) -->`: hook, commands+skills explanation, writeup stale-bullet notes, Claude FAQ answer review, companion tool links. Writeup text unchanged.
+- Rewrote CONTRIBUTING.md and SECURITY.md for oc (were upstream text pointing at anomalyco). Updated `.github/ISSUE_TEMPLATE/config.yml` (Discord -> README FAQ), `bug-report.yml` (oc version, model, log, Windows placeholders), PR template wording.
+- Fixed FORK.md: "Start server at Windows sign-in" high -> low (setting saved, no reader registers startup; only archived oc.ps1 did); Session marks text (prompt marks in progress, complete/failed default deny); Command markers inline output does enter the reply (last 4000 chars). Counts 15/25/22/2/0 = 64.
+- Risk: opt-in Claude usage meter reads `~/.claude/.credentials.json` OAuth token (`tui/.../sidebar-tools/usage.ts:248-269`); conflicts with Anthropic third-party token terms. Disclosed in README FAQ/sidebar and SECURITY.md; removal is user decision.
+- Added outside repo: `plans/ocDocsInventory.md` (decisions, deferred list, findings), `plans/portableInstall.md` (proposed `opencode install` command; not approved), `plans/ocWiki/` (14 wiki pages, `_Sidebar.md`, `README.phase2.md` staged pitch README, `_research/config.md`, `_research/troubleshooting.md`).
+- TODO: user wiki bootstrap (ocDocs.md D7), then Phase 2 swap, LICENSE copyright line, `.github/TEAM_MEMBERS`, root planning files, screenshots. Findings list in ocDocsInventory.md (`/done` palette text says staged; POSIX login hint on Windows; unused oc.json keys).
+- Verification: README check script: 0 em dashes, 1 scc link, 2 count markers, all `#` anchors and relative file links resolve. Wiki drafts: 0 em dashes, 0 UNVERIFIED, page links resolve. FORK.md level recount matches table. prePush/countCode not run.
+
+### User
+Documentation
+- The README now covers every oc feature: what stands out, quality-of-life extras, requirements, install steps, behavior changes, how each part works, settings, troubleshooting, and an FAQ.
+- Your writeup sits at the bottom in a collapsible block, and a few spots are marked for you to write yourself.
+- CONTRIBUTING and SECURITY now describe oc instead of stock OpenCode, and the bug report form asks for the oc version and model.
+- Wiki pages and a shorter README for after the wiki exists are drafted in the plans folder, waiting for you to create the wiki.
+- No UI change.
+
+---
+
+## 2026-10-10 (~01:52) - v0.2.141 angelUnnecessarily - Remove ChatGPT Web and Claude Web providers - Opus 5.5, low reasoning; Implementation
+
+### Agent
+- Meta: Opus 5.5 (imp); low reasoning; Implementation; completed via subagent general-gpt-6.1-sol-low (general-haiku-5.5-medium not loaded in running instance)
+- Version: 0.2.141 angelUnnecessarily
+- Removed `agentify` provider (`chatgpt-web`, `claude-web`): deleted `provider/agentify.ts`, `packages/agentify-runtime/`, `test/provider/agentify.test.ts`. Dropped refs in `provider.ts` (registration, timeout, `wrapFetch`), `serve.ts` (`stopAgentify`), `session/system.ts`, `session/retry.ts`, `session/prompt.ts` (`shouldSkipRemoteTitleGeneration`, agentify-only), `session/llm/request.ts`.
+- Removed runtime packaging: `script/build.ts`, `.scripts/install.ps1` (no longer requires `bin/agentify-runtime`), `.scripts/test.ps1` providers map; `testRunner.tests.ps1` counts updated. `bun.lock` regenerated. Cursor runtime untouched.
+- FORK.md: web rows retired, Cursor-only rewording, level counts recounted (15/26/22/1/0 = 64; prior table was stale, missed the `low` row). SCRIPTS.md mention removed.
+- Kept: old `agentify/*` sessions resolve to normal `ModelNotFoundError` (`provider.ts` ~1892) shown as toast; no guard added. Leftover `<data>/agentify-runtime` state and installed `agentify-runtime` folder stay on disk.
+- Plan: `~/.config/opencode/plans/removeWebProviders.md`. Part of docs overhaul `ocDocs.md` (D2/D6).
+- Verification: `bun typecheck` (packages/opencode) exit 0; `bun test` system/retry/prompt 116 pass, 14 skip, 0 fail; `.scripts/tests/testRunner.tests.ps1` passed; grep for agentify/chatgpt-web/claude-web/msedge only hits FORK.md retired line.
+
+### User
+Models
+- ChatGPT Web and Claude Web are gone from the model list, and oc no longer opens an Edge window for them.
+- Opening an old ChatGPT Web session shows a "model not found" message; pick another model to continue.
+
+Install
+- The installer no longer copies the browser helper folder; an existing copy in the install folder is left alone and can be deleted.
+
+---
+
 ## 2026-10-10 (~01:15) - v0.2.140 howardRecruit - Random two-word version tag - Opus 5.5, low reasoning; Implementation
 
 ### Agent

@@ -60,6 +60,7 @@ import {
   cursorSessionCookie,
   createUsageRefreshScheduler,
   orderUsageWindows,
+  probeClaudeCodePool,
   probeClaudeCodeUsage,
   probeCursorUsage,
   probeOpenAIUsage,
@@ -70,6 +71,7 @@ import {
   updateUsageSnapshot,
   usageProviderForModel,
   USAGE_PROVIDER_OPTIONS,
+  windowLabel,
   type CursorUsage,
   type ClaudeCodeUsage,
   type OpenAIUsage,
@@ -445,7 +447,10 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
           return
         }
         if (provider === "claude-code") {
-          const next = await probeClaudeCodeUsage(options)
+          // Pooled accounts (the provider's `accounts` option) show as one meter.
+          const accounts = sync.data.config.provider?.["claude-code"]?.options?.accounts
+          const dirs = Array.isArray(accounts) ? accounts.filter((dir): dir is string => typeof dir === "string") : []
+          const next = dirs.length > 1 ? await probeClaudeCodePool(dirs, options) : await probeClaudeCodeUsage(options)
           if (!usageAbort.signal.aborted) setClaudeCodeUsage((previous) => updateUsageSnapshot(previous, next, Date.now()))
           return
         }
@@ -614,28 +619,32 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
     ))
   const usageRows = () => {
     const codex = codexWindows()
-    const codexSide = (used: number | null | undefined) =>
-      used === null || used === undefined ? "unavailable" : `${showRemaining() ? 100 - used : used}%`
+    const codexSide = (window: UsageWindow | undefined) =>
+      window?.usedPercent === null || window?.usedPercent === undefined
+        ? "unavailable"
+        : `${windowLabel(window.minutes)}${showRemaining() ? 100 - window.usedPercent : window.usedPercent}%`
     const codexHasData = Boolean(codex.weekly || codex.monthly)
     const codexValue = codex.reauthenticate
       ? "run /connect"
       : !codexHasData
         ? "unavailable"
         : codex.monthly
-          ? `${codexSide(codex.weekly?.usedPercent)}, ${codexSide(codex.monthly?.usedPercent)}`
-          : codexSide(codex.weekly?.usedPercent)
+          ? `${codexSide(codex.weekly)}, ${codexSide(codex.monthly)}`
+          : codexSide(codex.weekly)
     const codexDates = [codex.weekly?.resetAt, ...(codex.monthly?.resetAt ? [codex.monthly.resetAt] : [])]
       .filter(Boolean)
       .join(", ")
     const goSnapshot = goUsage()
     const goOk = goSnapshot.ok ? goSnapshot : undefined
-    const goSide = (used: number | null | undefined) =>
-      used === null || used === undefined ? "unavailable" : `${showGoRemaining() ? 100 - used : used}%`
+    const goSide = (window: UsageWindow) =>
+      window.usedPercent === null
+        ? "unavailable"
+        : `${windowLabel(window.minutes)}${showGoRemaining() ? 100 - window.usedPercent : window.usedPercent}%`
     const goValue = !goOk
       ? "unavailable"
       : goOk.monthly
-        ? `${goSide(goOk.weekly.usedPercent)}, ${goSide(goOk.monthly.usedPercent)}`
-        : goSide(goOk.weekly.usedPercent)
+        ? `${goSide(goOk.weekly)}, ${goSide(goOk.monthly)}`
+        : goSide(goOk.weekly)
     const goDates = goOk
       ? [goOk.weekly.resetAt, ...(goOk.monthly?.resetAt ? [goOk.monthly.resetAt] : [])].filter(Boolean).join(", ")
       : ""
@@ -644,14 +653,16 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
     const orValue = orOk ? `${showOrRemaining() ? orOk.remainingPercent : orOk.usedPercent}%` : "unavailable"
     const cursorSnapshot = cursorUsage()
     const cursorOk = cursorSnapshot.ok ? cursorSnapshot.monthly : undefined
-    const cursorSide = (used: number | null | undefined) =>
-      used === null || used === undefined ? "unavailable" : `${showCursorRemaining() ? 100 - used : used}%`
-    const cursorValue = `${cursorSide(cursorOk?.usedPercent)}; ${cursorSide(cursorOk?.apiUsedPercent)} api`
+    const cursorSide = (label: string, used: number | null | undefined) =>
+      used === null || used === undefined ? "unavailable" : `${label}${showCursorRemaining() ? 100 - used : used}%`
+    const cursorValue = `${cursorSide("m", cursorOk?.usedPercent)}; ${cursorSide("api", cursorOk?.apiUsedPercent)}`
     const cursorNeedsToken =
       !cursorSnapshot.ok && (cursorSnapshot.reason === "need-token" || cursorSnapshot.reason === "reauthenticate")
     const claudeSnapshot = claudeCodeUsage()
     const claudeOk = claudeSnapshot.ok ? claudeSnapshot : undefined
-    const claudeValue = claudeOk ? `${claudeOk.fiveHour.usedPercent}%, ${claudeOk.weekly.usedPercent}%` : "unavailable"
+    const claudeValue = claudeOk
+      ? `5h${claudeOk.fiveHour.usedPercent}%, w${(claudeOk.weeklyEach ?? [claudeOk.weekly.usedPercent]).join("%/")}%`
+      : "unavailable"
     const claudeDates = claudeOk
       ? [claudeOk.fiveHour.resetAt, claudeOk.weekly.resetAt].filter(Boolean).join(" / ")
       : "unavailable"

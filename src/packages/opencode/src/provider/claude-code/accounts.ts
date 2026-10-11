@@ -189,3 +189,63 @@ function shellSingleQuote(value: string): string {
 function shellDoubleQuote(value: string): string {
   return value.replace(/[$`"\\]/g, "\\$&")
 }
+
+// ---------------------------------------------------------------------------
+// Account pool
+//
+// The `accounts` provider option lists Claude config dirs in order, e.g.
+// `["~/.claude", "~/.claudeSecond"]`. Every chat uses the current account
+// until the CLI rejects a request for usage, then moves to the next account
+// whose limit has not been hit (turn-stream.ts). An account's id is its
+// resolved config dir, or `default` for the CLI's own `~/.claude`, which
+// spawns with the inherited environment.
+// ---------------------------------------------------------------------------
+
+/** How long an account sits out when its rejection carried no reset time. */
+const UNKNOWN_RESET_MS = 60 * 60 * 1000
+
+const limitedUntil = new Map<string, number>()
+let currentAccount: string | undefined
+
+export function poolAccountIds(accounts: string[] | undefined): string[] {
+  const defaultDir = path.resolve(expandHome("~/.claude"))
+  const ids = (accounts ?? []).map((dir) => {
+    const resolved = path.resolve(expandHome(dir))
+    return resolved === defaultDir ? DEFAULT_ACCOUNT : resolved
+  })
+  return ids.length ? [...new Set(ids)] : [DEFAULT_ACCOUNT]
+}
+
+/** The current account while usable, else the next usable one after it; undefined when all are limited. */
+export function nextUsableAccount(ids: string[], now = Date.now()): string | undefined {
+  const usable = (id: string) => (limitedUntil.get(id) ?? 0) <= now
+  if (currentAccount && ids.includes(currentAccount) && usable(currentAccount)) return currentAccount
+  const start = currentAccount ? ids.indexOf(currentAccount) + 1 : 0
+  const next = [...ids.slice(start), ...ids.slice(0, start)].find(usable)
+  if (next) currentAccount = next
+  return next
+}
+
+/** The account new work goes to. With every account limited it stays put, and the CLI reports the limit. */
+export function poolAccount(ids: string[], now = Date.now()): string {
+  return nextUsableAccount(ids, now) ?? (currentAccount && ids.includes(currentAccount) ? currentAccount : ids[0]!)
+}
+
+export function markAccountLimited(id: string, resetsAtMs: number | undefined, now = Date.now()): void {
+  limitedUntil.set(id, resetsAtMs !== undefined && resetsAtMs > now ? resetsAtMs : now + UNKNOWN_RESET_MS)
+}
+
+/** `CLAUDE_CONFIG_DIR` for a pool account; undefined keeps the inherited environment. */
+export function poolConfigDir(id: string): string | undefined {
+  return id === DEFAULT_ACCOUNT ? undefined : id
+}
+
+export function poolAccountLabel(id: string): string {
+  return id === DEFAULT_ACCOUNT ? ".claude" : path.basename(id)
+}
+
+/** Test-only. */
+export function _resetAccountPool(): void {
+  limitedUntil.clear()
+  currentAccount = undefined
+}

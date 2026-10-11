@@ -31,7 +31,6 @@ import { ModelV2 } from "@opencode-ai/core/model"
 import { ModelStatus } from "./model-status"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { ProviderError } from "./error"
-import { PROVIDER_ID, providerInfo, wrapFetch } from "./agentify"
 
 const OPENAI_HEADER_TIMEOUT_DEFAULT = 300_000
 
@@ -1662,10 +1661,6 @@ const layer = Layer.effect(
           mergeProvider(providerID, partial)
         }
 
-        if (isProviderAllowed(PROVIDER_ID) && !providers[PROVIDER_ID]) {
-          providers[PROVIDER_ID] = providerInfo() as Info
-        }
-
         const gitlab = ProviderV2.ID.make("gitlab")
         if (discoveryLoaders[gitlab] && providers[gitlab] && isProviderAllowed(gitlab)) {
           yield* Effect.promise(async () => {
@@ -1813,12 +1808,8 @@ const layer = Layer.effect(
         delete options["chunkTimeout"]
         delete options["headerTimeout"]
 
-        if (model.providerID === PROVIDER_ID) {
-          options["timeout"] = options["timeout"] ?? 900_000
-        }
-
         options["fetch"] = async (input: any, init?: BunFetchRequestInit) => {
-          const fetchFn = model.providerID === PROVIDER_ID ? wrapFetch(customFetch ?? fetch) : (customFetch ?? fetch)
+          const fetchFn = customFetch ?? fetch
           const opts = init ?? {}
           const chunkAbortCtl = typeof chunkTimeout === "number" && chunkTimeout > 0 ? new AbortController() : undefined
           const headerTimeoutMs = headerTimeout === false ? undefined : headerTimeout

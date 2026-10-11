@@ -33,7 +33,6 @@ $unit = @(
     'llm', 'opencode', 'protocol', 'schema', 'sdk/js', 'session-ui', 'stats/core', 'tui', 'ui'
 )
 $providers = @{
-    'agentify-runtime' = 'tests/*.test.mjs'
     'cursor-runtime' = 'test/main.test.mjs'
 }
 $categories = @('unit', 'providers', 'httpapi', 'typecheck', 'generated')

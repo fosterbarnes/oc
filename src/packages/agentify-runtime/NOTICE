@@ -1,4 +1,0 @@
-This package contains an adaptation of Agentify Desktop (MPL-2.0).
-Source: https://github.com/agentify-sh/desktop
-License: see LICENSE in this directory.
-OpenCode owns process lifecycle. Electron, MCP, control center, watch folders, and extra vendors are not included.

@@ -10,7 +10,14 @@ import type { ClaudeCodeConfig } from "./types.js"
 import { translateStreamForHost } from "./host-tools.js"
 import { getClaudeUserMessage, visibleThreadTokens } from "./message-builder.js"
 import { getRuntimeMcpStatus, fetchSessionRunState } from "./runtime-status.js"
-import { getActiveProcess, getClaudeSessionId, describeSessionKey, WAKE_PROMPT_TEXT } from "./session-manager.js"
+import {
+  getActiveProcess,
+  getClaudeSessionId,
+  describeSessionKey,
+  retireOtherAccount,
+  WAKE_PROMPT_TEXT,
+} from "./session-manager.js"
+import { poolAccount, poolAccountIds, poolAccountLabel } from "./accounts.js"
 import { log } from "./logger.js"
 import { detectCliVersion } from "./cli-version.js"
 import { setProxyDeadlineGuard } from "./proxy-deadline.js"
@@ -131,6 +138,8 @@ export class ClaudeCodeLanguageModel implements LanguageModelV3 {
     // session` and plugins add user messages that never get one ("Working directory initialized").
     const hasPriorConversation = options.prompt.some((m) => m.role === "assistant")
     resetStaleSession(turn, hasPriorConversation)
+    const account = poolAccount(poolAccountIds(this.config.accounts))
+    const accountSwitched = await retireOtherAccount(turn.sessionKey, account)
     const hasActiveProcess = !!getActiveProcess(turn.sessionKey)
     // oc's compaction prompt is never sent: Claude Code compacts its own
     // conversation, which needs one to exist.
@@ -143,6 +152,7 @@ export class ClaudeCodeLanguageModel implements LanguageModelV3 {
           turn,
           prompt: options.prompt,
           hasPriorConversation,
+          accountSwitch: accountSwitched ? poolAccountLabel(account) : undefined,
           abortSignal: options.abortSignal,
         })
     const includeHistoryContext = !getClaudeSessionId(turn.sessionKey) && !hasActiveProcess && hasPriorConversation
@@ -152,16 +162,14 @@ export class ClaudeCodeLanguageModel implements LanguageModelV3 {
     // Only ids this CLI process issued may go back as `tool_result` blocks
     // (issue #29), so read them before building the envelope.
     const previousPendingProxyCalls = turn.compactionMode ? [] : getPendingProxyCalls(turn.sessionKey)
+    const sessionID = canReadSession ? turn.affinity : undefined
+    const stripContextReminders = stripContextRemindersEnabled(this.config)
     const userMsg = turn.compactionMode
       ? COMPACT_COMMAND_MESSAGE
-      : getClaudeUserMessage(
-          options.prompt,
-          includeHistoryContext ? { sessionID: canReadSession ? turn.affinity : undefined } : undefined,
-          {
-            cliToolCallIds: new Set(previousPendingProxyCalls.map((c) => c.toolCallId)),
-            stripContextReminders: stripContextRemindersEnabled(this.config),
-          },
-        )
+      : getClaudeUserMessage(options.prompt, includeHistoryContext ? { sessionID } : undefined, {
+          cliToolCallIds: new Set(previousPendingProxyCalls.map((c) => c.toolCallId)),
+          stripContextReminders,
+        })
     // A wake prompt whose CLI turn was already taken over by a user message
     // has nothing to attach to; sending it would hand Claude the marker text.
     if (userMsg.includes(WAKE_PROMPT_TEXT) && !getActiveProcess(turn.sessionKey)?.autonomousTurn) {
@@ -196,6 +204,13 @@ export class ClaudeCodeLanguageModel implements LanguageModelV3 {
       turn,
       options,
       userMsg,
+      account,
+      // A fresh conversation on the next account: no CLI tool ids carry over.
+      catchUpMessage: (progress) =>
+        getClaudeUserMessage(options.prompt, progress || hasPriorConversation ? { sessionID, progress } : undefined, {
+          cliToolCallIds: new Set(),
+          stripContextReminders,
+        }),
       visibleTokens: visibleThreadTokens(options.prompt),
       previousPendingProxyCalls,
       catalogHash: toolCatalogHash(this.config, options.tools, hasCommandPermission(options.providerOptions, this.config.provider)),

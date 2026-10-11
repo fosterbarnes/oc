@@ -32,6 +32,8 @@ export function claudeSpawnEnv(opts?: {
   ignoreAnthropicApiKey?: boolean
   /** Reasoning effort for this spawn; wins over a shell-level override. */
   effort?: ReasoningEffort
+  /** Pool account config dir (accounts.ts); undefined keeps the inherited one. */
+  configDir?: string
 }): Record<string, string | undefined> {
   const env: Record<string, string | undefined> = {
     ...process.env,
@@ -58,6 +60,15 @@ export function claudeSpawnEnv(opts?: {
   if (opts?.ignoreAnthropicApiKey) {
     delete env.ANTHROPIC_API_KEY
     delete env.ANTHROPIC_AUTH_TOKEN
+  }
+
+  // A pool account must log in from its own config dir; any credential
+  // override in the shell would quietly bill the default account instead.
+  if (opts?.configDir) {
+    env.CLAUDE_CONFIG_DIR = opts.configDir
+    delete env.ANTHROPIC_API_KEY
+    delete env.ANTHROPIC_AUTH_TOKEN
+    delete env.CLAUDE_CODE_OAUTH_TOKEN
   }
 
   // Default-on thinking summaries for opus-4-7 (which omits thinking by

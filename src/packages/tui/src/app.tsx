@@ -311,8 +311,6 @@ function persistOcConfig(
     | "homeDirSort"
     | "sessionModel"
     | "sessionAgent"
-    | "defaultSubagent"
-    | "defaultSubagentModel"
     | "reasoningEffort"
     | "serverStartOnWindowsUserStart",
   value: string,
@@ -1350,15 +1348,18 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
           dialog.replace(() => (
             <DialogSelect
               title="Default reasoning effort"
+              current={local.model.reasoningDefault.current()}
               options={[
+                { value: "default", title: "Default" },
                 { value: "low", title: "low" },
                 { value: "medium", title: "medium" },
                 { value: "high", title: "high" },
                 { value: "xhigh", title: "xhigh" },
                 { value: "max", title: "max" },
               ]}
-              onSelect={(option) => {
-                void persistOcConfig("reasoningEffort", option.value, toast)
+              onSelect={async (option) => {
+                if (!(await persistOcConfig("reasoningEffort", option.value, toast))) return
+                local.model.reasoningDefault.set(option.value)
                 dialog.clear()
               }}
             />
@@ -1408,7 +1409,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
                   })
                   return
                 }
-                await persistOcConfig("defaultSubagentModel", model, toast)
+                toast.show({ message: `Saved default sub-agent model: ${model}`, variant: "success" })
               }}
             />
           ))
@@ -1445,7 +1446,8 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
                   })
                   return
                 }
-                if (await persistOcConfig("defaultSubagent", option.value, toast)) dialog.clear()
+                toast.show({ message: `Saved default sub-agent: ${option.value}`, variant: "success" })
+                dialog.clear()
               }}
             />
           ))
@@ -1526,22 +1528,21 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
       },
       {
         name: "oc.server_startup",
-        title: "Server auto-start",
+        title: "Start server at Windows sign-in",
         category: "oc",
         slashName: "serverStartOnWindowsUserStart",
         run: () => {
           const current = readOcConfig().serverStartOnWindowsUserStart
           dialog.replace(() => (
             <DialogSelect
-              title="Server auto-start"
+              title="Start server at Windows sign-in"
               current={current ? "true" : "false"}
               options={[
                 { value: "true", title: "on" },
                 { value: "false", title: "off" },
               ]}
-              onSelect={(option) => {
-                void persistOcConfig("serverStartOnWindowsUserStart", option.value, toast)
-                dialog.clear()
+              onSelect={async (option) => {
+                if (await persistOcConfig("serverStartOnWindowsUserStart", option.value, toast)) dialog.clear()
               }}
             />
           ))

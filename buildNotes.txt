@@ -1,11 +1,15 @@
-v0.2.140 howardRecruit
+v0.2.142 vapingIntoxicating
 
-versioning:
-Every version bump now picks a random two-word name from the YapBot word list. The name appears in commit subjects, GitHub release titles, and release download file names.
+claude accounts:
+Your second Claude login can now be pooled with the main one through a new `accounts` option on the Claude provider (a list of Claude config folders). oc stays on one account until Claude Code rejects a request for usage, then carries on with the next, even in the middle of a reply. The chat shows a short "Claude account switched" line, and the new account picks up from the last exchange plus what the reply had already done, so tools that ran are not run again. Moving a chat to another account does not ask "Start fresh?".
 
-The bumpVersion script bumps the version and name together; -RerollTag picks only a new name. Release -DryRun previews the title and file names. Version names remain scripts-only.
+usage sidebar:
+Claude usage with several accounts reads as one combined 100%, with the weekly value shown separately for each account. Every usage value now starts with its window: 5h for five hours, d for daily, w for weekly, m for monthly (for example `5h24%, w74%/30%`). Codex labels come from each window's reported length instead of assuming the shorter one is weekly.
 
-testing:
-Real-model Claude checks now show their expected usage cost and require typing yes before reading the saved token or spending usage. Agent rules require an explicit request for real-model runs and clarify that isolated fake-model and pane checks are free.
+removed providers:
+ChatGPT Web and Claude Web are gone from the model list, and oc no longer opens an Edge window for them. The installer no longer copies the browser helper folder.
 
-Under the hood: added cryptographic random word selection and version-tag validation, updated agent-push message validation, and corrected synchronization documentation to reflect version bumps. PowerShell parsing, version-tag format and bump checks, release-asset naming checks, and pre-push checks passed.
+docs:
+The README now covers every oc feature with install steps, behavior changes, configuration, troubleshooting and an FAQ. CONTRIBUTING, SECURITY and the issue and pull request templates describe oc instead of stock OpenCode.
+
+Under the hood: added the account pool (`accounts.ts`), per-child `CLAUDE_CONFIG_DIR`, conversation ownership per account, and a bounded in-turn switch that reuses the existing no-context catch-up. Fixed the session-lock middleware test routes to return HTTP responses without changing their contention and safe-error assertions. Pool and switch tests with a fake Claude CLI (6), the related Claude provider suites, and the usage tests passed; opencode typecheck and all five middleware tests passed after the route fix; a pre-existing sidebar builtins test still fails and is unrelated. Not checked against a real usage limit.

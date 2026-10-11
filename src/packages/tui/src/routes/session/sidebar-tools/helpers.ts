@@ -281,6 +281,7 @@ export function normalizeSidebarSettings(value: unknown, base = defaultSidebarSe
     }
   const input = value as {
     projectDirectory?: unknown
+    visibility?: unknown
     showMcp?: unknown
     showLsp?: unknown
     scripts?: unknown
@@ -291,6 +292,10 @@ export function normalizeSidebarSettings(value: unknown, base = defaultSidebarSe
     fileRoots?: unknown
     usageProviders?: unknown
   }
+  const visibility =
+    input.visibility && typeof input.visibility === "object"
+      ? (input.visibility as { showMcp?: unknown; showLsp?: unknown })
+      : {}
   const fileRoots: SidebarSettings["fileRoots"] = { ...base.fileRoots }
   const migratedRecentRoots: string[] = []
   if (input.fileRoots && typeof input.fileRoots === "object") {
@@ -326,8 +331,12 @@ export function normalizeSidebarSettings(value: unknown, base = defaultSidebarSe
         ? input.projectDirectory
         : base.projectDirectory,
     visibility: {
-      showMcp: typeof input.showMcp === "boolean" ? input.showMcp : base.visibility.showMcp,
-      showLsp: typeof input.showLsp === "boolean" ? input.showLsp : base.visibility.showLsp,
+      showMcp: typeof visibility.showMcp === "boolean"
+        ? visibility.showMcp
+        : typeof input.showMcp === "boolean" ? input.showMcp : base.visibility.showMcp,
+      showLsp: typeof visibility.showLsp === "boolean"
+        ? visibility.showLsp
+        : typeof input.showLsp === "boolean" ? input.showLsp : base.visibility.showLsp,
     },
     scripts: normalizeScriptSettings(input.scripts, base.scripts),
     scriptPins: Array.isArray(input.scriptPins)

@@ -68,6 +68,16 @@ export type UsageWindow = {
   minutes: number | null
 }
 
+/** Sidebar prefix for a window of this length: `5h`, `d`, `w`, `m`; empty when the length is unknown or unusual. */
+export function windowLabel(minutes: number | null | undefined): string {
+  if (!minutes || minutes <= 0) return ""
+  const days = minutes / 1440
+  if (days < 1) return `${Math.round(minutes / 60)}h`
+  if (days === 1) return "d"
+  if (days === 7) return "w"
+  return days >= 28 && days <= 31 ? "m" : ""
+}
+
 export function orderUsageWindows(windows: [UsageWindow, UsageWindow]): [UsageWindow, UsageWindow] {
   return [...windows].sort(
     (first, second) => (first.minutes ?? Number.POSITIVE_INFINITY) - (second.minutes ?? Number.POSITIVE_INFINITY),
@@ -126,13 +136,17 @@ export type CursorUsage =
       reason?: "need-token" | "reauthenticate"
     }
 
+type ClaudeWindow = UsageWindow & { resetMs?: number }
+
 export type ClaudeCodeUsage =
   | {
       ok: true
       fetchedAt: number
       source: "live" | "cache"
-      fiveHour: UsageWindow
-      weekly: UsageWindow
+      fiveHour: ClaudeWindow
+      weekly: ClaudeWindow
+      /** Pooled accounts: each account's own weekly used percent, in pool order. */
+      weeklyEach?: number[]
     }
   | {
       ok: false
@@ -285,6 +299,52 @@ export async function probeClaudeCodeUsage(options: UsageOptions = {}): Promise<
   return { ...cached, source: "cache", fetchedAt: cache?.mtimeMs ?? 0 }
 }
 
+/**
+ * Usage of the pooled Claude accounts (the claude-code provider's `accounts`
+ * option, a list of config dirs) as one meter: the used percentages are
+ * averaged, so the pool reads as one 100% bar. Weekly also keeps each
+ * account's own value (`weeklyEach`). Each reset
+ * shown is the soonest among the accounts. Accounts whose usage cannot be read
+ * are left out, never counted as unused.
+ */
+export async function probeClaudeCodePool(configDirs: string[], options: UsageOptions = {}): Promise<ClaudeCodeUsage> {
+  const homeDir = options.homeDir ?? os.homedir()
+  const defaultDir = path.join(homeDir, ".claude")
+  const dirs = configDirs.map((dir) => path.resolve(dir.replace(/^~(?=$|[\\/])/, homeDir)))
+  const results = await Promise.all(
+    dirs.map((dir) =>
+      probeClaudeCodeUsage({
+        ...options,
+        claudeCredentialsPath: path.join(dir, ".credentials.json"),
+        // The default account keeps the cache it always had.
+        claudeUsageCachePath:
+          dir === defaultDir
+            ? undefined
+            : path.join(homeDir, ".cache", "opencode", `claude-usage-${path.basename(dir).replace(/^\./, "")}.json`),
+      }),
+    ),
+  )
+  const known = results.filter((result) => result.ok)
+  if (!known.length) return { ok: false }
+  const sum = (windows: ClaudeWindow[]): ClaudeWindow => {
+    const next = windows.filter((window) => window.resetMs).sort((a, b) => a.resetMs! - b.resetMs!)[0]
+    return {
+      usedPercent: Math.round(windows.reduce((total, window) => total + (window.usedPercent ?? 0), 0) / windows.length),
+      resetAt: next?.resetAt ?? null,
+      resetMs: next?.resetMs,
+      minutes: null,
+    }
+  }
+  return {
+    ok: true,
+    fetchedAt: Math.min(...known.map((result) => result.fetchedAt)),
+    source: known.some((result) => result.source === "cache") ? "cache" : "live",
+    fiveHour: sum(known.map((result) => result.fiveHour)),
+    weekly: sum(known.map((result) => result.weekly)),
+    weeklyEach: known.map((result) => result.weekly.usedPercent ?? 0),
+  }
+}
+
 function parseClaudeUsage(value: unknown, nowMs: number): ClaudeCodeUsage {
   const body = value as { five_hour?: unknown; seven_day?: unknown } | undefined
   const fiveHour = claudeWindow(body?.five_hour, nowMs)
@@ -293,7 +353,7 @@ function parseClaudeUsage(value: unknown, nowMs: number): ClaudeCodeUsage {
   return { ok: true, fiveHour, weekly, fetchedAt: nowMs, source: "live" }
 }
 
-function claudeWindow(value: unknown, nowMs: number): UsageWindow | undefined {
+function claudeWindow(value: unknown, nowMs: number): ClaudeWindow | undefined {
   const item = value as { utilization?: unknown; resets_at?: unknown } | null
   if (typeof item?.utilization !== "number" || !Number.isFinite(item.utilization)) return
   const date = typeof item.resets_at === "string" ? new Date(item.resets_at) : undefined
@@ -303,6 +363,7 @@ function claudeWindow(value: unknown, nowMs: number): UsageWindow | undefined {
   return {
     usedPercent: Math.round(Math.max(0, Math.min(100, item.utilization))),
     resetAt: valid ? compactResetDate(date) : null,
+    ...(valid ? { resetMs: date.valueOf() } : {}),
     minutes: null,
   }
 }

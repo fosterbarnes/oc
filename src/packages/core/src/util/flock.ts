@@ -10,6 +10,14 @@ export type FlockGlobal = {
 }
 
 export namespace Flock {
+  export class ContentionError extends Error {
+    override readonly name = "FlockContentionError"
+
+    constructor(readonly key: string) {
+      super(`Timed out waiting for lock: ${key}`)
+    }
+  }
+
   let global: FlockGlobal | undefined
 
   export function setGlobal(g: FlockGlobal) {
@@ -290,7 +298,7 @@ export namespace Flock {
       }
 
       if (mono() > stop) {
-        throw new Error(`Timed out waiting for lock: ${input.key}`)
+        throw new ContentionError(input.key)
       }
 
       attempt += 1

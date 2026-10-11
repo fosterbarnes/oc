@@ -89,7 +89,7 @@ No arguments or `-Help` prints usage. `-File` is relative to the selected packag
 | Category | Checks |
 |----------|--------|
 | `unit` | The 20 former unit-matrix packages, using `bun test --timeout 30000 --only-failures`. |
-| `providers` | Node tests in `agentify-runtime` and `cursor-runtime`. |
+| `providers` | Node tests in `cursor-runtime`. |
 | `httpapi` | Existing coverage, authentication, and Effect exerciser gates in `opencode`. |
 | `typecheck` | Workspace Turbo typecheck, with `--continue=always`. |
 | `generated` | Regenerate client, legacy SDK, and OpenAPI; check tracked and untracked outputs. |

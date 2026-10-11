@@ -997,7 +997,7 @@ test("formats displayed paths relative to the home directory", () => {
   assert.equal(displayPath("C:\\Work\\openSidebar", "C:\\Users\\user"), "C:/Work/openSidebar")
 })
 
-test("loads user sidebar settings with project overrides", () => {
+test("loads user sidebar visibility with nested, legacy and partial project overrides", () => {
   const root = mkdtempSync(path.join(os.tmpdir(), "sidebar-config-"))
   try {
     const paths = sidebarConfigPaths(root, root)
@@ -1008,6 +1008,19 @@ test("loads user sidebar settings with project overrides", () => {
     const settings = loadSidebarSettings(root, root, paths.user, paths.project)
     assert.deepEqual(settings.visibility, { showMcp: true, showLsp: true })
     assert.equal(settings.scripts.terminal, "native")
+    writeFileSync(paths.user, JSON.stringify({
+      showMcp: true, showLsp: true, visibility: { showMcp: false, showLsp: false },
+    }))
+    writeFileSync(paths.project, JSON.stringify({ visibility: { showMcp: true } }))
+    assert.deepEqual(loadSidebarSettings(root, root).visibility, { showMcp: true, showLsp: false })
+    writeFileSync(paths.project, JSON.stringify({
+      showMcp: false, showLsp: false, visibility: { showMcp: true, showLsp: "invalid" },
+    }))
+    assert.deepEqual(loadSidebarSettings(root, root).visibility, { showMcp: true, showLsp: false })
+    for (const visibility of [null, "invalid", { showMcp: 0, showLsp: null }]) {
+      writeFileSync(paths.project, JSON.stringify({ visibility, showMcp: "invalid" }))
+      assert.deepEqual(loadSidebarSettings(root, root).visibility, { showMcp: false, showLsp: false })
+    }
   } finally {
     rmSync(root, { recursive: true, force: true })
   }
@@ -1107,11 +1120,12 @@ test("writes complete sidebar settings as JSON", () => {
   try {
     const filePath = path.join(root, ".config", "openSidebar.json")
     const settings = defaultScriptSettings()
-    const sidebar = normalizeSidebarSettings({ scripts: settings, scriptPins: ["build"] })
+    const sidebar = normalizeSidebarSettings({
+      scripts: settings, scriptPins: ["build"], visibility: { showMcp: false, showLsp: false },
+    })
     saveSidebarSettings(filePath, sidebar)
-    assert.deepEqual(loadSidebarSettings(root, root, path.join(root, "missing-user.json"), filePath).scriptPins, [
-      "build",
-    ])
+    assert.deepEqual(loadSidebarSettings(root, root, path.join(root, "missing-user.json"), filePath), sidebar)
+    assert.deepEqual(JSON.parse(readFileSync(filePath, "utf8")).visibility, { showMcp: false, showLsp: false })
   } finally {
     rmSync(root, { recursive: true, force: true })
   }

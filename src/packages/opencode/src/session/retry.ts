@@ -4,7 +4,6 @@ import { Cause, Clock, Duration, Effect, Schedule } from "effect"
 import { MessageV2 } from "./message-v2"
 import { iife } from "@/util/iife"
 import { isRecord } from "@/util/record"
-import { PROVIDER_ID } from "@/provider/agentify"
 
 export type Err = ReturnType<NamedError["toObject"]>
 
@@ -84,7 +83,6 @@ function exponential(attempt: number, random: number) {
 }
 
 export function retryable(error: Err, provider: string) {
-  if (provider === PROVIDER_ID) return undefined
   // context overflow errors should not be retried
   if (SessionV1.ContextOverflowError.isInstance(error)) return undefined
   if (SessionV1.APIError.isInstance(error)) {

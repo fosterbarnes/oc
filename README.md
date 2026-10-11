@@ -1,39 +1,99 @@
 # oc
 
+<!-- TODO(user): write the hook yourself (1-2 sentences on what oc is). Current text kept until then. -->
 'Snapshot' of OpenCode version 1.18.29. oc aims to add new features, and enhancements to existing ones. Its base functionality has elements of v2's codebase, while still remaining rooted fundamentally in v1 practices.
 
 ## Standout features
 
-- Claude Code models in `/models`, using your existing Claude Code login ([how](#claude-code))
-- Cursor models in `/models`, using your existing Cursor login ([how](#cursor))
-- One background server shared by every oc window, so launches after the first are fast ([how](#background-server))
-- `occ` reopens your last session in one command ([how](#oc-and-occ) while `oc` is the default way to opencode 'normally'.
-- One session list for every project, open from anywhere ([how](#session-list-and-markers))
-- Mark sessions complete, failed, or in progress, and pin the ones you keep coming back to ([how](#session-list-and-markers))
-- A sidebar with usage meters, a file tree, changed files, and sub-agents, all clickable ([how](#sidebar))
+- Claude Code models in `/models`, using your own Claude Code login ([how](#claude-code))
+- Cursor models in `/models`, using your Cursor login (beta) ([how](#cursor))
+- `oc <folder>` opens a ready session; `occ` reopens your last one ([how](#oc-and-occ))
+- One background server shared by every window, so launches after the first are fast (beta) ([how](#background-server))
+- One session list for every project ([how](#session-list-and-markers))
+- Mark sessions complete, failed, or in progress, and pin them (beta) ([how](#session-list-and-markers))
+- `/work` moves a session into a git copy of the project; `/done` merges the changes back ([how](#work-and-done))
+- A sidebar with usage meters, sub-agents, a file tree, and changed files, all clickable ([how](#sidebar))
 - Run your project's scripts from the sidebar in one click ([how](#script-runner))
-- /command and skill hot-reload
-- (needs work) explain the usefulness of combining /commands and skills C:\Users\user\Downloads\wezterm-gui_ENeKaRMapw.png
+- `/commands` and skills reload as you edit them, no restart needed ([how](#commands-and-skills))
+- Combine commands and skills in one prompt, like `/spit /think` ([how](#commands-and-skills))
 
-## Little day-to-day workflow features
+## Quality of life
 
-- Ability to favorite `/commands`
-- 
+### Sessions
+- `ctrl+return` on Home sends the prompt and keeps you on Home, so you can start several in a row
+- New sessions name themselves after your first prompt (`<folder> - <task>`)
+- Each session remembers its own model and reasoning level
+- Agent questions survive closing the window: reopen the session and answer
 
-## Fix
+### Launching
+- `ctrl+n` picks a folder and starts a session there
+- Startup animation with no blank gap before the app appears
+- Faster startup for every command
+- `/revive` restarts or rebuilds oc in place
+- `oc single` runs everything in one window with no background server, like stock OpenCode (beta)
 
-- Faster app startup (initial, and across sessions)
-- Agent questions survive closing the window or restarting the server: reopen the session, answer, and the agent carries on
-- Stopping a session clears any open question instead of leaving the chat stuck on it
-- `oc <folder>` opens a ready session named after the folder (`oc`, `oc2`, ...), so OpenCode skips the model call it normally spends naming a new session
+### Claude Code
+- The context % updates live during Claude Code turns
+- Update Claude Code from the oc menu
 
+### Commands and tools
+- Favorite `/commands` and skills with `ctrl+f`
+- A `time` tool tells agents your local time for about 12 tokens
+- Command markers: agents run your preset commands with one line instead of a tool call, and long output is cut to its end (alpha)
 
-## Custom skills and commands
+### Look and feel
+- The terminal tab shows a square in the agent's color, plus busy and idle progress
+- Replies show a timestamp and how long they took (beta)
+- Double-click selects a word, triple-click a line, and copying keeps the highlight
+- Reorder favorite models and hide models you never use
+- Changed files open in the editor you pick for each file type
+
+## Requirements
+
+- Windows 10 or 11, x64
+- PowerShell 7 (`pwsh`) on PATH
+
+Some features need extra software:
+
+| Feature | Needs |
+|---|---|
+| Claude Code models | Claude Code CLI (`claude`), installed and signed in |
+| Cursor models | Node.js on PATH and a Cursor account |
+| `/work` and `/done` | Git, and the project must be a git repository |
+| Sidebar file search | [Everything](https://www.voidtools.com/) running, with `es.exe` on PATH |
+| Scripts opening in a new tab or split | WezTerm or Windows Terminal |
+| `/revive` rebuilding oc | Bun (not 1.4.0) and a copy of oc's source |
+
+## Install
+
+<!-- TODO(release): there is no public installer yet. The release zip has no oc.exe/occ.exe,
+and .scripts/install.ps1 targets a fixed personal folder. Update these steps when that is fixed. -->
+
+1. Download the latest `windows-x64` zip from [Releases](https://github.com/fosterbarnes/oc/releases).
+2. Extract it to a folder you keep, for example `%LOCALAPPDATA%\oc`.
+3. Add that folder to your PATH.
+4. Open a new PowerShell 7 window and run `oc`.
+
+The first launch starts the background server. Later launches connect to it, so they open faster.
+
+To use Claude Code models, install and sign in to the Claude Code CLI first. To use Cursor
+models, pick a Cursor model in `/models` and sign in through your browser.
 
 ## Behavior changes
 
-- `ctrl+c` and `ctrl+d` no longer quit. Quit with `ctrl+x q` or `/exit`.
-- New keys (`ctrl+x` is the leader key: press it, then the next key):
+Things that work differently from stock OpenCode:
+
+- **Quitting:** `ctrl+c` clears the prompt and never quits. Quit with `ctrl+x q` or `/exit`.
+- **Keys:** many keys differ (table below). Switch to stock OpenCode keys with **Keybind layout** in `ctrl+o`.
+- **Closing the last window doesn't stop oc:** the background server keeps running, so the next
+  launch opens where you left off. Stop it with `oc --kill-server` or from `ctrl+o`.
+- **The session list shows every project,** not just the folder you're in. Picking a session opens
+  it in its own folder.
+- **oc sessions are named `<folder> - <task>`** after your first prompt, using `/rename`'s model.
+- **Sending a prompt marks the session in progress.** Agents can't mark it complete or failed
+  unless you allow it ([how](#session-list-and-markers)).
+
+New keys (`ctrl+x` is the leader key: press it, then the next key):
 
 | Key | Where | Action |
 |---|---|---|
@@ -49,39 +109,55 @@
 | `ctrl+shift+up` / `ctrl+shift+down` | Prompt | Move the cursor up or down a line |
 | `ctrl+m` / `ctrl+s` / `ctrl+b` | Anywhere | Model list / session list / first child session |
 | `ctrl+d` | Prompt | Cycle the model variant |
+| `ctrl+shift+h` | Anywhere | Go to Home |
 
 - All keys: [docs/keybinds.md](docs/keybinds.md). Switch to stock OpenCode keys with **Keybind layout** in `ctrl+o`.
 - Rebind any key in `tui.json`. `command_palette.order` in `opencode.jsonc` reorders commands inside a palette category.
 
-## Windows specific stuff
-
-## Non-Standout small features
-
-
 ## How it works
-
-### Claude Code
-
-oc runs the Claude Code CLI installed on your machine, signed in with your own account. Claude Code keeps its own system prompt, built-in tools, transcript, and `/compact`. oc streams the replies into the session and offers oc's skills, subagents, questions, and MCP servers as tools Claude can load.
-
-### Cursor
-
-oc signs in through Cursor's browser login and talks to Cursor's service directly, so the Cursor app does not need to be open. A small local relay (`cursor-runtime`, needs Node.js on PATH) carries the connection. Based on [oakimov/cursor-opencode-provider](https://github.com/oakimov/cursor-opencode-provider).
-
-### Background server
-
-The first `oc` you run starts one OpenCode server in the background (port 4096, this machine only, password-protected). Every `oc` window after that connects to the same server instead of starting its own, and the server keeps running after you close the last window. Stop or restart it from the command palette, with `oc --kill-server` or `oc --restart-server`, or from the tray app. OC settings can also start it when you sign in to Windows.
 
 ### oc and occ
 
 - `oc` opens oc in your OC directory (your home folder by default).
-- `oc <folder>` opens a project: an absolute path, or a folder name under your home folder.
+- `oc <folder>` opens a project: an absolute path, or a folder name under your home folder. The
+  session is ready before the window appears.
 - `occ` reopens your most recent session, from any project.
 - `oc previous --depth <n>` goes further back: `--depth 2` is the session before that, up to 50.
 
+### Background server
+
+The first `oc` you run starts one OpenCode server in the background (port 4096, this machine
+only, password-protected). Every `oc` window after that connects to the same server instead of
+starting its own, and the server keeps running after you close the last window.
+
+- `oc --restart-server` restarts it and keeps your windows open.
+- `oc --kill-server` stops it and closes this instance's oc windows.
+- `oc --shutdown-all` closes this instance's oc windows and terminal panes, then stops the server.
+  Other programs and the debug instance are left alone.
+- Shut down and restart are also in `ctrl+o`.
+
+Change the port with `server.port` in `~/.config/opencode/oc.json`.
+
+**Start server at Windows sign-in** in `ctrl+o` registers startup for your Windows account.
+It starts the background server without opening a window. Turn it off to remove that startup
+entry. Production and debug have separate entries. If you enabled the old, inactive setting,
+select on again after updating to register it.
+
+### Single mode
+
+`oc single [folder]` runs a whole oc session inside one window, like stock OpenCode: same session
+list, no background server. `oc config set mode single` makes `oc` and `occ` always open single
+windows; `--single` does it once. `--portable` uses a separate `ocPortable.db` database. Closing a
+single window stops running work cleanly. Single windows show `single` in the footer and a `⦿`
+instead of a square in the terminal tab. (beta)
+
+A session can only run in one oc process at a time; another process gets "Session is running in
+another oc process".
+
 ### Session list and markers
 
-Stock OpenCode lists only the current project's sessions. oc's session list shows sessions from every project, and picking one opens it in its own project folder.
+Stock OpenCode lists only the current project's sessions. oc's session list shows sessions from
+every project, and picking one opens it in its own project folder.
 
 | Key (in the session list) | Action |
 |---|---|
@@ -91,14 +167,36 @@ Stock OpenCode lists only the current project's sessions. oc's session list show
 | `ctrl+f` | Pin to the top of the list, or unpin |
 | `ctrl+s` | Filter by: unmarked, in progress, pinned, complete, failed |
 
-A session holds one mark at a time. By default, agents can mark their own session in progress, must ask before marking it complete or reopening a complete or failed one, and cannot mark it failed. Change this with the `session_in_progress`, `session_complete`, `session_reopen`, and `session_failed` permissions.
+A session holds one mark at a time. Sending a prompt marks the session in progress, including a
+session that was complete or failed. Agents can't mark a session complete or failed unless you
+allow the `session_complete` or `session_failed` permission, for example only for one command
+(see [Commands and skills](#commands-and-skills)).
+
+**Names:** sessions opened with `oc <folder>`, the `ctrl+n` picker, or Home in an oc window are
+named `<folder> - <task>` after your first prompt, using `/rename`'s model. Names you set yourself
+are kept. `/rename` tries again at any time.
+
+**Questions:** if an agent asks a question and you close the window or the server restarts,
+reopen the session and answer; the agent carries on. Stopping a session clears an open question.
+
+### `/work` and `/done`
+
+`/work` copies the project into a git worktree next to it and moves the session there. The copy
+includes your staged, unstaged, and untracked changes; your own folder and git index are not
+touched. If the project has a `package.json`, the copy gets a `bun install`.
+
+`/done` brings the copy's changes back into the original folder as unstaged edits, leaves your
+own work there alone, and deletes the copy. Differences in whitespace or line endings alone are
+ignored. If both sides changed the same lines, your folder is left untouched, the copy gets
+conflict markers, and the agent is asked to fix them; run `/done` again when it finishes. A copy
+made from a copy returns to the copy it came from.
 
 ### Sidebar
 
 Top to bottom:
 
 - **Session, model, and reasoning:** click to switch session, change model, or cycle reasoning level. These follow the current session.
-- **Usage:** weekly usage for Codex, Cursor, Go, and OpenRouter. Stale numbers are dimmed; hover for their age. Pick providers with `Configure weekly usage providers`.
+- **Usage:** weekly usage for Codex, Cursor, Go, and OpenRouter, plus Claude if you turn it on (it reads Claude Code's saved login token to fetch the numbers). Stale numbers are dimmed; hover for their age. Pick providers with `Configure weekly usage providers`.
 - **Context, MCP, and LSP** (from stock OpenCode).
 - **Sub-agents:** the session's running and recently finished sub-agents. Click one to open it.
 - **Todos** (from stock OpenCode).
@@ -120,29 +218,231 @@ Click a script to run it. Right-click to paste it into your prompt and copy it. 
 
 `Configure project scripts` sets the shell, which languages and extensions count (add your own), and where scripts open. In WezTerm or Windows Terminal that can be a new tab, a new window, or a split; elsewhere they open in their own window.
 
-## Dev Docs
+### Claude Code
 
-- Fork features and status: [FORK.md](FORK.md)
+oc runs the Claude Code CLI installed on your machine, signed in with your own account. Claude
+Code keeps its own system prompt, built-in tools, transcript, and `/compact`. oc streams the
+replies into the session, and the context % updates while a turn is still running.
+
+- **Skills:** oc's skills load as native Claude Code skills.
+- **oc tools:** oc offers some of its own tools to Claude through the `proxyTools` setting. The
+  default is subagents (`Task`), `run_after_turn`, and `time`; add `Question` for oc's question
+  prompts. Subagents started this way show up in oc's sidebar.
+- **Todos:** with todos on, Claude's task list fills oc's todo list at the end of each turn.
+- **Start fresh:** a new Claude conversation in an existing chat gets your last exchange, so it
+  isn't starting blind.
+- **Update:** `ctrl+o` has an **Update Claude Code** entry that runs `claude update`.
+
+If Claude says your account isn't logged in, run `claude auth login` and resend your message.
+Extra Claude accounts (`account` option) only work on macOS and Linux for now.
+
+### Cursor
+
+oc signs in through Cursor's browser login and talks to Cursor's service directly, so the Cursor
+app does not need to be open. A small local relay (`cursor-runtime`, needs Node.js on PATH)
+carries the connection; it starts the first time you use a Cursor model and stops with the
+server. Cursor's own plan mode is turned off so oc's planning agents stay in charge. Based on
+[oakimov/cursor-opencode-provider](https://github.com/oakimov/cursor-opencode-provider). (beta)
+
+### Commands and skills
+
+<!-- TODO(user): explain why combining /commands and skills is useful. Screenshot:
+C:\Users\user\Downloads\wezterm-gui_ENeKaRMapw.png -> move to docs/assets/. -->
+
+- **Hot reload:** edit a command or skill file and the next `/` menu has the change. If a file
+  breaks, oc keeps the last version that worked and shows a toast.
+- **Labels:** the `/` menu marks where each entry comes from: `:(oc)`, `:(command)`, `:(mcp)`,
+  `:(skill)`. A command wins over a skill with the same name.
+- **Favorites:** `ctrl+f` in the `/` menu pins an entry to the top of the empty search.
+- **Combining:** type several, like `/spit /think`, and they are sent as one turn with labeled
+  instructions. The first command decides the agent and model.
+- **Per-command permissions:** a `permission:` block in a command file's frontmatter (`allow` or
+  `deny` per tool) applies only to that command's turn. For example, a planning command can allow
+  writing plan files and nothing else, or a command can allow `session_complete`.
+
+### Command markers (alpha)
+
+Off by default. Turn them on with **Command markers (alpha)** in `ctrl+o`, then list your commands
+in `~/.config/opencode/markers.json`:
+
+```json
+{
+  "enabled": true,
+  "ask": false,
+  "commands": {
+    "build": { "run": ["pwsh", "-File", ".scripts/build.ps1"], "mode": "inline", "description": "Build the project" }
+  }
+}
+```
+
+When an agent writes a line that is just `$#build`, oc runs it with no tool call:
+
+- `inline`: the last 4,000 characters of output replace the line (30-second timeout by default).
+- `window`: opens a visible PowerShell window (Windows only).
+- `afterTurn`: runs once the session is idle.
+
+`ask: true` (globally or per command) asks you first. Runs are logged to `markers.log`.
+
+### Revive
+
+`/revive` restarts this oc instance and its terminal window, then reopens `occ` (your last
+session) or `oc` (set `revive.launcher`). The first time, it asks where oc's source is: an
+existing folder, a fresh download of this repo, or no source (restart only). With a source, it
+runs `bun install` and builds oc, swaps in the new files with rollback if anything fails, and
+then restarts. `/revive-no-install` only restarts. Progress goes to `revive.log`.
+
+### Windows integration
+
+- **Terminal tab:** the title starts with `■` in the active agent's color, and busy, idle, and
+  error states show as tab progress where the terminal supports it. WezTerm colors the square
+  through a tab-title snippet in [v0.3.0.md](v0.3.0.md).
+- **WezTerm and Windows Terminal:** scripts can open in a new tab, window, or split.
+- **File search:** the sidebar uses [Everything](https://www.voidtools.com/) through `es.exe`.
+- **No flashing consoles:** the background server and its child processes run hidden.
+- **PowerShell 7** is required; the launcher uses `pwsh` to start the server.
+
+## Configuration
+
+oc reads stock OpenCode settings as usual. These are the ones oc adds. Config files live in
+`%USERPROFILE%\.config\opencode\`.
+
+**`oc.json`** (launcher; `oc config get` / `oc config set <key> <value>`):
+
+| Key | Values | What it does |
+|---|---|---|
+| `ocDir` | folder | Where bare `oc` opens. Default: your home folder |
+| `homeDir` | folder | Parent folder for `oc <name>` and the `ctrl+n` list. Default: your home folder |
+| `homeDirSort` | `name`, `modified` | How the `ctrl+n` list is sorted |
+| `reasoningEffort` | `low`, `medium`, `high`, `xhigh`, `max`, `default` | Default reasoning for models supporting that variant; explicit session and model choices win |
+| `mode` | `resident`, `single` | Background server (default) or single windows |
+| `server.port` | number | Background server port. Default 4096 (debug 4097) |
+| `server.startOnWindowsUserStart` | boolean | Sign-in startup preference; use the palette or `oc config set serverStartOnWindowsUserStart true/false` to update registration |
+| `revive.launcher` | `occ`, `oc` | What `/revive` reopens. Default `occ` |
+| `revive.build` | `false` or `{ "source": "<folder>", "debug": false }` | Where `/revive` builds from; `false` = restart only |
+| `intro.background` | `terminal`, `black` | Startup animation background |
+
+**`opencode.jsonc`**:
+
+| Key | What it does |
+|---|---|
+| `todos` | `true` turns on todo tools and the sidebar todo list. Default `false` |
+| `command_palette.order` | Reorders commands inside a palette category: `{ "command.name": 1 }` |
+| `instructionsByModel` | Extra instruction files per model glob, e.g. `{ "openai/gpt-*": ["~/prompts/gpt.md"] }` |
+| `default_subagent` | Subagent used when a task doesn't name one |
+| `agent.<name>.tab_order` / `display_name` | Tab order and readable label for custom agents |
+| `permission.session_complete` / `session_failed` | Let agents mark sessions. Default `deny` |
+| `permission.run_after_turn` | Let agents queue a program to run after their turn. Default `allow` |
+| `provider.claude-code.options.proxyTools` | oc tools offered to Claude. Default `["Task", "run_after_turn", "time"]` |
+| `provider.claude-code.options.cliPath` | Path to the `claude` executable |
+| `provider.claude-code.options.turnStats` | Show cost, time, and tokens under each Claude reply |
+| `provider.claude-code.options.webSearch` | `claude`, `disabled`, or an oc tool name for web search |
+
+**`tui.json`**:
+
+| Key | What it does |
+|---|---|
+| `keybind_preset` | `oc` (default) or `opencode` keys |
+| `keybinds` | Rebind any key; see [docs/keybinds.md](docs/keybinds.md) |
+| `openEditedWith` | Editor for clicked files: a command, or `{ "default": "...", ".md": "..." }` per extension |
+| `sidebar_button_style` | `minimal` (default) or `outlined` |
+
+**`~/.config/openSidebar/config.json`** (sidebar; a project can override it with
+`.config/openSidebar.json`): `usageProviders` (`openai`, `cursor`, `opencode-go`, `openrouter`,
+`claude-code`), `scripts.shell`, `scripts.terminal` (`native`, `wezterm-tab`, `wezterm-window`,
+`wezterm-horizontal`, `wezterm-vertical`), and `scripts.languages` (add your own extensions and
+launchers). Most of these are easier to set through the sidebar's configure entries.
+
+## Troubleshooting
+
+**"Resident port 127.0.0.1:4096 is occupied..."** Another program, or an oc server this launcher
+doesn't own, is using the port. Close it, or set a different `server.port` in `oc.json`.
+
+**"Database was migrated by a different OpenCode build"** oc and stock OpenCode share the same
+data folder by default, and a newer stock OpenCode changed the database. Restore a backup of
+`opencode.db` and give the other build its own folders (see below).
+
+**Running oc next to stock OpenCode:** both use `%USERPROFILE%\.local\share\opencode` (data) and
+`%USERPROFILE%\.config\opencode` (config). To keep them apart, start one of them with different
+`XDG_DATA_HOME`, `XDG_CONFIG_HOME`, and `XDG_STATE_HOME` values, and make sure `OPENCODE_DB` isn't
+set to a shared path.
+
+**"Cursor requires Node.js for its HTTP/2 transport"** Install Node.js and make sure `node` is on
+PATH.
+
+**"Install es.exe and add it to PATH for file search"** or **"Everything search needs es.exe..."**
+Install [Everything](https://www.voidtools.com/) and its command-line tool, keep Everything
+running, and put `es.exe` on PATH.
+
+**Claude account "is not logged in"** Run `claude auth login`, then resend your message.
+
+**"Session is running in another oc process"** Another oc process holds this session's lock.
+Use its window, or wait for its running work to finish.
+
+**Logs** are in `%USERPROFILE%\.local\share\opencode\log`: `opencode.log`, `revive.log`, and
+`markers.log`. Turn on debug logging from `ctrl+o`.
+
+## FAQ
+
+**Do I need Claude Code, Cursor, and ChatGPT subscriptions?** No. oc works with any model stock
+OpenCode supports. The Claude Code and Cursor models are extras for people who already pay for
+those plans.
+
+**Does this replace OpenCode?** No. oc is a fork of OpenCode 1.18.29 with extra features. Stock
+OpenCode is still the stable, general option.
+
+**Is using my Claude subscription this way allowed?**
+<!-- TODO(user): review this answer before publishing. Sources: https://code.claude.com/docs/en/legal-and-compliance
+and https://www.theregister.com/software/2026/02/20/anthropic-clarifies-ban-on-third-party-tool-access-to-claude/5014546 -->
+For chat, oc runs the official, unmodified Claude Code CLI, which you sign in to through
+Anthropic's own login. Anthropic's Claude Code terms describe signing in to the unmodified Claude
+Code CLI with your own subscription as allowed, and forbid third-party apps that use subscription
+credentials directly. One exception to be aware of: the optional Claude usage meter in the sidebar
+(off by default) reads the CLI's saved token to fetch your usage numbers. The Cursor provider talks to Cursor's service in an
+unofficial way. oc is not affiliated with Anthropic, Cursor, or OpenAI; you are responsible for
+following each provider's terms.
+
+**Why doesn't `ctrl+c` quit?** In oc's key layout it clears the prompt. Quit with `ctrl+x q` or
+`/exit`, or switch to stock keys with **Keybind layout** in `ctrl+o`.
+
+**Why is oc still running after I closed the window?** That's the background server; it makes the
+next launch fast. Stop it with `oc --kill-server`, or use `oc single` if you'd rather not have it.
+
+**Is there a macOS or Linux version?** Not currently. oc is built and tested on Windows only.
+
+## Companion tools
+
+These are separate projects that work with oc. They are not bundled with it.
+
+<!-- TODO(user): add links once these are public, or remove any you won't publish. -->
+
+- **octray:** Windows tray app to open oc, open the project picker, and start, restart, or stop
+  the background server.
+- **SuperPlan, SuperGo, and Debug agents:** planning and execution agent profiles that use oc's
+  plan tools (`plan_execute`, `plan_next_phase`, `plan_closeout`).
+- **bgShell:** plugin that runs independent commands as parallel background jobs.
+- **Crow:** keeps each Crow tab on one oc session.
+- **Everything search MCP:** MCP server for fast file search through Everything.
+
+## Developing
+
+- What oc adds and how complete each part is: [FORK.md](FORK.md)
 - Stock OpenCode in this checkout: [README.OG.md](README.OG.md)
-- Build, install, and upstream sync: [SCRIPTS.md](SCRIPTS.md)
+- Build, install, test, and release scripts: [SCRIPTS.md](SCRIPTS.md)
+- Keeping up with upstream OpenCode: [UPSTREAM-SYNC.md](UPSTREAM-SYNC.md)
 
-## Requirements
+The Bun workspace lives in `src/`; run `bun` from `src` or a package under it. You'll need:
 
-- Windows 10/11 x64
-- PowerShell 7
-- Bun (not 1.4.0; see [SCRIPTS.md](SCRIPTS.md))
-- scc for `prePush.ps1` line counts
-- GitHub CLI for release scripts
+- Bun, but not 1.4.0: it crashes the Windows TUI. The build scripts upgrade Bun to a canary
+  release automatically if they find 1.4.0.
+- scc, for the line counts `prePush.ps1` writes into this README.
+- GitHub CLI, for the release scripts.
 
-## Versioning
-
-- Version: `.version/version`
-- Next commit message: `buildNotes.txt`
-- Agent history: `buildNotes.md`
+The version is in `src/.version/version`, the next commit message in `buildNotes.txt`, and the
+development history in `buildNotes.md`.
 
 ## Progress
 
-[521,168](scc.txt) lines of code and counting...
+[518,503](scc.txt) lines of code and counting...
 
 <!-- code-count:start -->
 
@@ -152,17 +452,28 @@ Click a script to run it. Right-click to paste it into your prompt and copy it. 
 | CSS | 163 | 40,551 | 5,296 | 574 | 34,681 |
 | Go | 5 | 902 | 54 | 3 | 845 |
 | HTML | 1 | 1,161 | 79 | 0 | 1,082 |
-| JavaScript | 23 | 5,259 | 419 | 63 | 4,777 |
+| JavaScript | 10 | 1,766 | 132 | 56 | 1,578 |
 | Nix | 3 | 258 | 23 | 26 | 209 |
-| Powershell | 23 | 1,769 | 142 | 64 | 1,563 |
+| Powershell | 23 | 1,762 | 141 | 64 | 1,557 |
 | SQL | 95 | 592 | 0 | 17 | 575 |
 | Shell | 1 | 120 | 17 | 17 | 86 |
-| TypeScript | 2,742 | 534,750 | 43,259 | 15,280 | 476,211 |
-| **Total** | **3,064** | **586,661** | **49,439** | **16,054** | **521,168** |
+| TypeScript | 2,743 | 535,383 | 43,269 | 15,363 | 476,751 |
+| **Total** | **3,052** | **583,794** | **49,161** | **16,130** | **518,503** |
 
 <!-- code-count:end -->
 
-## Writeup
+## Why I made oc
+
+<!-- TODO(user): some writeup bullets no longer match the app. "`oc <folder>` names the new session
+after the folder (`oc`, `oc2`, ...)": oc sessions are now named `<folder> - <task>` automatically.
+"Agents can mark their own session as in progress, and mark it complete": sending a prompt marks
+in progress; agents can't mark complete unless the session_complete permission allows it.
+"break any TOS": see the FAQ answer instead of asserting this. "(future wiki goes here)": wiki
+link once it exists. The OpenAI/ChatGPT plan bullet refers to Codex through stock OpenCode, which
+still works; ChatGPT Web was removed in v0.2.141. -->
+
+<details>
+<summary>Read the writeup</summary>
 
 oc came about naturally. I had been toying around with OpenCode v1 TUI for a few weeks, and was very impressed with how it worked compared to alternative mainstream options (Codex desktop app, Claude Code desktop app, Cursor AI desktop app). At this point, my custom modifications and lite 'enhancements' to OpenCode were scoped to plugins. This worked for a time, but I found my goals becoming larger and larger in scope and ambition. At this point I found that source code edits were required to achieve my goals in way of getting the features and behavior I imagined and desired. There's not much documentation or version-tracking of this era of oc, considering it was intended to be a completely self-contained personal project. However, my goals are much different now.
 
@@ -212,6 +523,14 @@ While you may have tried or used various OpenCode plugins whose end goals are si
 
 Beyond this, I've added features that help my everyday workflow, and I hope that they help yours too. Thank you for reading this if you did, and I hope you have some use for what I'm offering. If not, that's okay too. If you'd like to help out, issues and PRs are always open. 
 
-## License
+</details>
 
-MIT, see [LICENSE](LICENSE). Based on OpenCode.
+## License and credits
+
+MIT, see [LICENSE](LICENSE). oc is based on [OpenCode](https://github.com/anomalyco/opencode)
+(MIT). The Cursor provider is derived from
+[oakimov/cursor-opencode-provider](https://github.com/oakimov/cursor-opencode-provider) 0.6.7
+(MIT); its license and notices are kept in `src/packages/opencode/src/provider/cursor/`.
+
+oc is an unofficial project. It is not affiliated with or endorsed by the OpenCode team,
+Anthropic, Cursor, or OpenAI. You are responsible for following each provider's terms.

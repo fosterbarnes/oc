@@ -11,7 +11,6 @@ import { SessionRevert } from "./revert"
 import { Session } from "./session"
 import { Agent } from "../agent/agent"
 import { Provider } from "@/provider/provider"
-import { PROVIDER_ID } from "@/provider/agentify"
 
 import { type Tool as AITool, tool, jsonSchema } from "ai"
 import type { JSONSchema7 } from "@ai-sdk/provider"
@@ -124,10 +123,6 @@ export interface Interface {
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/SessionPrompt") {}
 
-export function shouldSkipRemoteTitleGeneration(providerID: ProviderV2.ID) {
-  return providerID === PROVIDER_ID
-}
-
 const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
@@ -218,7 +213,6 @@ const layer = Layer.effect(
       modelID: ModelV2.ID
     }) {
       if (input.session.parentID) return
-      if (shouldSkipRemoteTitleGeneration(input.providerID)) return
       if (!Session.isDefaultTitle(input.session.title)) return
 
       const idx = input.history.findIndex(isRealUserMessage)

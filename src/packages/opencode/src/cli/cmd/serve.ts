@@ -3,7 +3,6 @@ import { effectCmd } from "../effect-cmd"
 import { withNetworkOptions, resolveNetworkOptions } from "../network"
 import { Flag } from "@opencode-ai/core/flag/flag"
 import { ServerLifecycle } from "@/server/lifecycle"
-import { stop as stopAgentify } from "@/provider/agentify"
 import { stopCursorProxy } from "@/provider/cursor/runtime"
 import fs from "node:fs/promises"
 import path from "node:path"
@@ -87,7 +86,6 @@ function stopAndExit(server: { hostname: string; port: number; stop: (close?: bo
   const prepare = restart ? markResidentRestart({ hostname: server.hostname, port: server.port }) : Promise.resolve()
   void prepare
     .then(() => server.stop(true))
-    .then(() => stopAgentify())
     .then(() => stopCursorProxy())
     .then(() => (shouldClearResidentState(restart) ? clearResidentStateForRestart() : undefined))
     .then(() => (restart ? restartProcess() : undefined))

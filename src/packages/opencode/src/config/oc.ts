@@ -7,6 +7,7 @@ import { Global } from "@opencode-ai/core/global"
 import { DebugConfig } from "@opencode-ai/core/debug-config"
 import { TuiLedger } from "./tuiLedger"
 import { Revive } from "./revive"
+import { Startup } from "./startup"
 import { launchDetached } from "@opencode-ai/core/util/launch-detached"
 
 export const RESIDENT_ENV = "OC_RESIDENT"
@@ -15,13 +16,8 @@ export const keys = [
   "ocDir",
   "homeDir",
   "homeDirSort",
-  "initModel",
-  "initAgent",
-  "initReasoningEffort",
   "sessionModel",
   "sessionAgent",
-  "defaultSubagent",
-  "defaultSubagentModel",
   "reasoningEffort",
   "serverStartOnWindowsUserStart",
   // "single" makes `oc launch` / `oc previous` open single-instance windows; default resident.
@@ -71,16 +67,19 @@ export async function read() {
   }
 }
 
-export async function update(key: Key, value: string) {
+export async function update(key: Key, value: string, startup?: Parameters<typeof Startup.update>[2]) {
   if (key === "mode" && value !== "single" && value !== "resident")
     throw new Error(`mode must be "single" or "resident": ${value}`)
   const parsed: Value = value === "true" ? true : value === "false" ? false : value
+  if (key === "serverStartOnWindowsUserStart") {
+    if (typeof parsed !== "boolean") throw new Error("serverStartOnWindowsUserStart must be true or false")
+    return Startup.update(parsed, async () => {
+      const settings = await read()
+      return write({ ...settings, server: { ...settings.server, startOnWindowsUserStart: parsed } })
+    }, startup)
+  }
   const settings = await read()
-  return write(
-    key === "serverStartOnWindowsUserStart"
-      ? { ...settings, server: { ...settings.server, startOnWindowsUserStart: parsed } }
-      : { ...settings, [key]: parsed },
-  )
+  return write({ ...settings, [key]: parsed })
 }
 
 async function write<T extends object>(next: T) {
@@ -90,8 +89,9 @@ async function write<T extends object>(next: T) {
   try {
     await fs.writeFile(temporary, `${JSON.stringify(next, null, 2)}\n`, "utf8")
     await fs.rename(temporary, file)
-  } finally {
+  } catch (error) {
     await fs.rm(temporary, { force: true })
+    throw error
   }
   return next
 }

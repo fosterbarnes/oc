@@ -168,6 +168,7 @@ export function createClaudeCode(
       cwd: settings.cwd,
       account: settings.account,
       configDir: settings.configDir,
+      accounts: settings.accounts?.filter((dir) => typeof dir === "string" && dir.trim()),
       providerID: settings.providerID,
       skipPermissions: preset?.skipPermissions ?? settings.skipPermissions ?? true,
       permissionMode: preset?.permissionMode ?? settings.permissionMode,
@@ -212,7 +213,6 @@ function cleanProviderOptions(
   options: Record<string, unknown> = {},
 ): Record<string, unknown> {
   const result = { ...options }
-  delete result.accounts
   // Consumed by the config hook (agent registry), not by the language model.
   delete result.defaultSubagentModel
   return result

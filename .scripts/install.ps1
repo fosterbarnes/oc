@@ -10,7 +10,6 @@ $ErrorActionPreference = 'Stop'
 assertExternalInstall -BuildCommand '.\.scripts\build.ps1' -InstallCommand '.\.scripts\install.ps1 -NoBuild'
 $binary = "$distFolder\opencode-windows-x64\bin\opencode.exe"
 $debugBinary = "$distFolder\opencode-debug-windows-x64\bin\ocdebug.exe"
-$runtime = "$distFolder\opencode-windows-x64\bin\agentify-runtime"
 $cursorRuntime = "$distFolder\opencode-windows-x64\bin\cursor-runtime"
 $processNames = @('opencode', 'oc', 'occ', 'ocdebug', 'ocbug')
 $running = @($processNames | ForEach-Object { Get-Process -Name $_ -ErrorAction SilentlyContinue })
@@ -35,9 +34,6 @@ if (!(Test-Path -LiteralPath $binary)) {
 if (!(Test-Path -LiteralPath $debugBinary)) {
     throw "Debug binary not found: $debugBinary. Run build.ps1 first."
 }
-if (!(Test-Path -LiteralPath $runtime -PathType Container)) {
-    throw "Packaged Agentify runtime not found: $runtime. Run build.ps1 first."
-}
 if (!(Test-Path -LiteralPath $cursorRuntime -PathType Container)) {
     throw "Packaged Cursor runtime not found: $cursorRuntime. Run build.ps1 first."
 }
@@ -53,7 +49,6 @@ $obsoleteAliases = @('ocbug.exe', 'oc-debug.exe')
 try {
     Copy-Item -LiteralPath $binary -Destination $destination -Force
     Copy-Item -LiteralPath $debugBinary -Destination $debugDestination -Force
-    Copy-Item -LiteralPath $runtime -Destination $installDir -Recurse -Force
     Copy-Item -LiteralPath $cursorRuntime -Destination $installDir -Recurse -Force
     foreach ($alias in $obsoleteAliases) {
         $aliasPath = Join-Path $installDir $alias
@@ -99,4 +94,3 @@ if (-not $hasPath) {
     Write-Host "Added $installDir to user PATH"
 }
 if (-not $currentPathHas) { $env:Path = "$installDir;$env:Path" }
-

@@ -1,47 +1,55 @@
 # Security
 
-## IMPORTANT
+## Threat model
 
-We do not accept AI generated security reports. We receive a large number of
-these and we absolutely do not have the resources to review them all. If you
-submit one that will be an automatic ban from the project.
+oc is an AI coding agent that runs on your machine, based on OpenCode. Agents can run shell
+commands, edit files, and access the web.
 
-## Threat Model
+### No sandbox
 
-### Overview
+oc does not sandbox the agent. The permission system helps you see and approve what an agent
+does; it is not a security boundary. For real isolation, run oc in a VM or container.
 
-OpenCode is an AI-powered coding assistant that runs locally on your machine. It provides an agent system with access to powerful tools including shell execution, file operations, and web access.
+### Background server
 
-### No Sandbox
+oc starts a local background server (port 4096 by default, 4097 for the debug instance). It only
+listens on loopback (`127.0.0.1`, `localhost`, or `::1`) and requires HTTP Basic authentication
+with a random secret stored in `%USERPROFILE%\.local\state\opencode\oc-server.secret`. Anyone who
+can read that file as your user can use the server.
 
-OpenCode does **not** sandbox the agent. The permission system exists as a UX feature to help users stay aware of what actions the agent is taking - it prompts for confirmation before executing commands, writing files, etc. However, it is not designed to provide security isolation.
+### Provider helpers
 
-If you need true isolation, run OpenCode inside a Docker container or VM.
+- **Claude Code:** oc runs the Claude Code CLI installed on your machine, and the CLI keeps your
+  Claude login. One exception: if you turn on the optional Claude usage meter in the sidebar, oc
+  reads the CLI's saved token from `%USERPROFILE%\.claude\.credentials.json` to request your usage
+  numbers from Anthropic. It never refreshes or stores that token, and caches only the usage
+  response.
+- **Cursor:** oc signs in through Cursor's browser login and stores the session token locally. A
+  local Node relay (`cursor-runtime`) carries traffic to Cursor's service.
 
-### Server Mode
+### In scope
 
-Server mode is opt-in only. When enabled, set `OPENCODE_SERVER_PASSWORD` to require HTTP Basic Auth. Without this, the server runs unauthenticated (with a warning). It is the end user's responsibility to secure the server - any functionality it provides is not a vulnerability.
+- The background server accepting requests without valid credentials, or from other machines
+- Local files written with permissions that let other users read secrets or tokens
+- oc running commands or writing files that the configured permissions deny
+- Credential or token leaks in logs, transcripts, or crash output
 
-### Out of Scope
+### Out of scope
 
-| Category                        | Rationale                                                               |
-| ------------------------------- | ----------------------------------------------------------------------- |
-| **Server access when opted-in** | If you enable server mode, API access is expected behavior              |
-| **Sandbox escapes**             | The permission system is not a sandbox (see above)                      |
-| **LLM provider data handling**  | Data sent to your configured LLM provider is governed by their policies |
-| **MCP server behavior**         | External MCP servers you configure are outside our trust boundary       |
-| **Malicious config files**      | Users control their own config; modifying it is not an attack vector    |
+| Category | Why |
+| --- | --- |
+| Sandbox escapes | The permission system is not a sandbox |
+| Access by your own user account | Anything running as you can already read your files |
+| LLM provider data handling | Governed by each provider's policies |
+| MCP servers and plugins you add | Outside oc's trust boundary |
+| Malicious config files | You control your own config |
+| Upstream OpenCode issues not changed by oc | Report those to [anomalyco/opencode](https://github.com/anomalyco/opencode/security) |
 
----
+## Reporting a vulnerability
 
-# Reporting Security Issues
+Use GitHub's private ["Report a vulnerability"](https://github.com/fosterbarnes/oc/security/advisories/new)
+form. Please don't open a public issue. Describe what you found, how to reproduce it, and what
+version of oc you used. Reports must be written and checked by you; unverified AI-generated
+reports will be closed.
 
-We appreciate your efforts to responsibly disclose your findings, and will make every effort to acknowledge your contributions.
-
-To report a security issue, please use the GitHub Security Advisory ["Report a Vulnerability"](https://github.com/anomalyco/opencode/security/advisories/new) tab.
-
-The team will send a response indicating the next steps in handling your report. After the initial reply to your report, the security team will keep you informed of the progress towards a fix and full announcement, and may ask for additional information or guidance.
-
-## Escalation
-
-If you do not receive an acknowledgement of your report within 6 business days, you may send an email to security@anoma.ly
+oc is maintained by one person, so replies may take a few days.

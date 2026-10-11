@@ -34,7 +34,7 @@ import { SessionCompaction } from "../../src/session/compaction"
 import { SessionSummary } from "../../src/session/summary"
 import { Instruction } from "../../src/session/instruction"
 import { SessionProcessor } from "../../src/session/processor"
-import { SessionPrompt, shouldSkipRemoteTitleGeneration } from "../../src/session/prompt"
+import { SessionPrompt } from "../../src/session/prompt"
 import { SessionRevert } from "../../src/session/revert"
 import { SessionRunState } from "../../src/session/run-state"
 import { MessageID, PartID, SessionID } from "../../src/session/schema"
@@ -299,11 +299,6 @@ function providerCfg(url: string) {
       },
     },
   }
-}
-
-const agentifyRef = {
-  providerID: ProviderV2.ID.make("agentify"),
-  modelID: ModelV2.ID.make("chatgpt-web"),
 }
 
 const writeText = Effect.fn("test.writeText")(function* (file: string, text: string) {
@@ -2290,34 +2285,6 @@ it.instance("does not loop empty assistant turns for a simple reply", () =>
     const msgs = yield* sessions.messages({ sessionID: session.id })
     expect(msgs.filter((msg) => msg.info.role === "assistant")).toHaveLength(1)
     expect(yield* llm.calls).toBe(1)
-  }),
-)
-
-it.instance("default title triggers remote title stream for non-agentify providers", () =>
-  Effect.gen(function* () {
-    const { llm } = yield* useServerConfig(providerCfg)
-    const prompt = yield* SessionPrompt.Service
-    const sessions = yield* Session.Service
-    const session = yield* sessions.create({})
-
-    yield* llm.text("main reply")
-
-    yield* prompt.prompt({
-      sessionID: session.id,
-      agent: "build",
-      parts: [{ type: "text", text: "hello" }],
-    })
-
-    expect(yield* llm.calls).toBe(2)
-    const hits = yield* llm.hits
-    expect(hits.some((hit) => JSON.stringify(hit.body).includes("Generate a title for this conversation"))).toBe(true)
-  }),
-)
-
-it.instance("agentify provider skips remote title stream on first loop step", () =>
-  Effect.gen(function* () {
-    expect(shouldSkipRemoteTitleGeneration(agentifyRef.providerID)).toBe(true)
-    expect(shouldSkipRemoteTitleGeneration(ref.providerID)).toBe(false)
   }),
 )
 

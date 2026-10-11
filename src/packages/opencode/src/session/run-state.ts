@@ -155,8 +155,10 @@ export class HeldElsewhereError extends Error {
 function owned<A>(sessionID: SessionID, work: Effect.Effect<A>) {
   return Effect.acquireRelease(
     Effect.tryPromise({
-      try: () => Flock.acquire(`session:${sessionID}`, { timeoutMs: 0, staleMs: 15_000 }),
-      catch: (cause) => new HeldElsewhereError("Session is running in another oc window", { cause }),
+      try: (signal) => Flock.acquire(`session:${sessionID}`, { timeoutMs: 0, staleMs: 15_000, signal }),
+      catch: (cause) => cause instanceof Flock.ContentionError
+        ? new HeldElsewhereError("Session is running in another oc process", { cause })
+        : cause,
     }).pipe(Effect.orDie),
     (lock) => Effect.promise(() => lock.release().catch(() => undefined)),
   ).pipe(Effect.andThen(work), Effect.scoped)

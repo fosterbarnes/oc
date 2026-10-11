@@ -85,16 +85,6 @@ const it = testEffect(
 )
 
 describe("session.system", () => {
-  test("selects the Anthropic prompt for Agentify web models", () => {
-    for (const id of ["chatgpt-web", "claude-web"]) {
-      const prompt = SystemPrompt.provider({
-        providerID: "agentify",
-        api: { id },
-      } as Provider.Model)[0]
-      expect(prompt).toContain("You are OpenCode, the best coding agent on the planet.")
-    }
-  })
-
   test("selects the Meta prompt for Muse Spark model IDs", () => {
     for (const id of ["meta/muse-spark-preview", "muse-spark-1.1", "muse-spark-1.2"]) {
       const prompt = SystemPrompt.provider({ api: { id } } as Provider.Model)[0]

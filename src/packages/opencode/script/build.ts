@@ -8,7 +8,6 @@ import { createSolidTransformPlugin } from "@opentui/solid/bun-plugin"
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 const dir = path.resolve(__dirname, "..")
-const runtimeSource = path.resolve(dir, "../agentify-runtime")
 const cursorRuntimeSource = path.resolve(dir, "../cursor-runtime")
 
 process.chdir(dir)
@@ -209,11 +208,6 @@ for (const variant of variants) {
       },
     })
 
-    const runtimeTarget = `dist/${name}/bin/agentify-runtime`
-    await $`mkdir -p ${runtimeTarget}`
-    for (const file of await Array.fromAsync(new Bun.Glob("**/*").scan({ cwd: runtimeSource, onlyFiles: true }))) {
-      await Bun.write(path.join(runtimeTarget, file), Bun.file(path.join(runtimeSource, file)))
-    }
     const cursorRuntimeTarget = `dist/${name}/bin/cursor-runtime`
     await $`mkdir -p ${cursorRuntimeTarget}`
     for (const file of await Array.fromAsync(

@@ -296,9 +296,24 @@ test("account blocks come from the CLI error kind and name the login command", a
   assert.equal(accountBlockKind({ type: "result", error: "authentication_failed" }), null)
   assert.equal(loginCommandFor(undefined), "claude auth login")
   assert.equal(
-    loginCommandFor("/Users/me/.claude-work", "/Users/me"),
-    "CLAUDE_CONFIG_DIR=~/.claude-work claude auth login",
+    loginCommandFor("/Users/me/.claude-work", "darwin"),
+    "CLAUDE_CONFIG_DIR='/Users/me/.claude-work' claude auth login",
   )
+  assert.equal(loginCommandFor("/home/me/work team's", "linux"),
+    "CLAUDE_CONFIG_DIR='/home/me/work team'\\''s' claude auth login")
+  const configDir = "C:\\Users\\O'Brien\\Claude Work"
+  const windowsCommand = "$env:CLAUDE_CONFIG_DIR = 'C:\\Users\\O''Brien\\Claude Work'; claude auth login"
+  assert.equal(loginCommandFor(configDir, "win32"), windowsCommand)
+  assert.equal(loginCommandFor(undefined, "win32"), "claude auth login")
+  assert.equal(loginCommandFor(configDir), process.platform === "win32"
+    ? windowsCommand
+    : "CLAUDE_CONFIG_DIR='C:\\Users\\O'\\''Brien\\Claude Work' claude auth login")
+  assert.ok(formatAccountBlockNote({
+    kind: "authentication_failed", account: "work", configDir, platform: "win32",
+  }).includes(`Log in again with \`${windowsCommand}\`, then resend your message.`))
+  assert.ok(formatAccountBlockNote({
+    kind: "authentication_failed", account: "work", configDir: "/home/me/work team's", platform: "linux",
+  }).includes("`CLAUDE_CONFIG_DIR='/home/me/work team'\\''s' claude auth login`"))
   const note = formatAccountBlockNote({
     kind: "authentication_failed",
     account: "default",

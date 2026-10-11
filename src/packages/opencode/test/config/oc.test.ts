@@ -3,7 +3,8 @@ import fs from "fs/promises"
 import os from "os"
 import path from "path"
 import { Global, resolveAppName } from "@opencode-ai/core/global"
-import * as OcConfig from "@/config/oc"
+import { OcConfig } from "@/config/oc"
+import { Startup } from "@/config/startup"
 import { tmpdir } from "../fixture/fixture"
 
 const originalConfigPath = Global.Path.config
@@ -133,6 +134,23 @@ describe("canonical child executable", () => {
 })
 
 describe("OC config", () => {
+  test("retires unsupported CLI keys while preserving saved fields", async () => {
+    const directory = await fs.mkdtemp(path.join(os.tmpdir(), "opencode-oc-"))
+    temporaryDirectories.push(directory)
+    ;(Global.Path as { config: string }).config = directory
+    const retired = { initModel: "old", initAgent: "old", initReasoningEffort: "high",
+      defaultSubagent: "old", defaultSubagentModel: "old" }
+    await Bun.write(path.join(directory, "oc.json"), JSON.stringify(retired))
+    expect(OcConfig.keys).toContain("reasoningEffort")
+    for (const key of Object.keys(retired)) expect(OcConfig.keys).not.toContain(key)
+    await OcConfig.update("reasoningEffort", "high")
+    expect(await OcConfig.read()).toEqual({ ...retired, reasoningEffort: "high" })
+  })
+
+  test("rejects nonboolean startup settings before registration or persistence", async () => {
+    await expect(OcConfig.update("serverStartOnWindowsUserStart", "yes")).rejects.toThrow("must be true or false")
+  })
+
   test("reads launcher settings only from the native config", async () => {
     const directory = await fs.mkdtemp(path.join(os.tmpdir(), "opencode-oc-"))
     temporaryDirectories.push(directory)
@@ -155,7 +173,16 @@ describe("OC config", () => {
       path.join(directory, "oc.json"),
       `${JSON.stringify({ homeDirSort: "modified", server: { hostname: "127.0.0.1", port: 4096 } }, null, 2)}\n`,
     )
-    await OcConfig.update("serverStartOnWindowsUserStart", "true")
+    let registration: string | undefined
+    const startup = {
+      context: { ...Startup.context(), platform: "win32" as const, powershell: "C:\\pwsh.exe", state: directory },
+      registry: {
+        read: async () => registration,
+        write: async (_name: string, value: string | undefined) => { registration = value },
+      },
+    }
+    await OcConfig.update("serverStartOnWindowsUserStart", "true", startup)
+    expect(registration).toContain("-WindowStyle Hidden")
     await OcConfig.update("ocDir", "C:/Users/user")
 
     expect(await OcConfig.read()).toEqual({
@@ -163,5 +190,8 @@ describe("OC config", () => {
       homeDirSort: "modified",
       server: { hostname: "127.0.0.1", port: 4096, startOnWindowsUserStart: true },
     })
+    await OcConfig.update("serverStartOnWindowsUserStart", "false", startup)
+    expect(registration).toBeUndefined()
+    expect((await OcConfig.read()).server?.startOnWindowsUserStart).toBe(false)
   })
 })

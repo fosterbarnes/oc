@@ -17,6 +17,7 @@ import {
 import type { ReasoningEffort } from "./types.js"
 import { claudeSpawnEnv } from "./spawn-env.js"
 import { cliCommand } from "./cli-executable.js"
+import { DEFAULT_ACCOUNT, poolConfigDir } from "./accounts.js"
 
 export interface ActiveProcess {
   proc: ChildProcess
@@ -49,6 +50,8 @@ export interface ActiveProcess {
    */
   cliPath?: string
   cliArgs?: string[]
+  /** Pool account (accounts.ts) the child is logged in as. */
+  account?: string
   /**
    * stdout lines the child emitted while no turn had a line listener
    * attached (between opencode turns). Bounded; see `bufferUnattendedLine`.
@@ -223,6 +226,8 @@ interface ClaudeSessionRecord {
   sessionId: string
   /** Oldest first; the last entry is the newest completed exchange. */
   anchors: SessionAnchor[]
+  /** Pool account the conversation lives on; absent means the default account. */
+  account?: string
 }
 
 // One active CLI process per session key. Keyed by a composite
@@ -652,7 +657,8 @@ function parseSessionsFile(text: string): [string, ClaudeSessionRecord][] | unde
       const anchors = Array.isArray(record.anchors)
         ? record.anchors.filter((a) => typeof a?.uuid === "string" && typeof a?.hash === "string")
         : []
-      return [[key, { sessionId: record.sessionId, anchors }]]
+      const account = typeof record.account === "string" ? record.account : undefined
+      return [[key, { sessionId: record.sessionId, anchors, account }]]
     })
   } catch {
     return undefined
@@ -712,16 +718,32 @@ function capClaudeSessions(): void {
   }
 }
 
-export function setClaudeSessionId(key: string, sessionId: string): void {
+export function setClaudeSessionId(key: string, sessionId: string, account?: string): void {
   const sessions = loadedSessions()
   const existing = sessions.get(key)
   // Re-inserting moves the key to the back, so the cap sheds the conversation
   // that has been quiet longest rather than the one that started first. A
   // forked id keeps its anchors: `--fork-session` preserves message uuids.
   sessions.delete(key)
-  sessions.set(key, { sessionId, anchors: existing?.anchors ?? [] })
+  sessions.set(key, { sessionId, anchors: existing?.anchors ?? [], account: account ?? existing?.account })
   capClaudeSessions()
-  if (existing?.sessionId !== sessionId) persistSessions()
+  if (existing?.sessionId !== sessionId || (account && existing?.account !== account)) persistSessions()
+}
+
+/**
+ * Retire the key's process and conversation when they belong to a pool
+ * account other than `account`: a transcript cannot resume across accounts.
+ * True when a conversation was dropped, which the caller replaces with the
+ * catch-up envelope instead of asking (session-sync.ts).
+ */
+export async function retireOtherAccount(key: string, account: string): Promise<boolean> {
+  const ap = activeProcesses.get(key)
+  if (ap && (ap.account ?? DEFAULT_ACCOUNT) !== account) await deleteActiveProcessAndWait(key)
+  const record = loadedSessions().get(key)
+  if (!record || (record.account ?? DEFAULT_ACCOUNT) === account) return false
+  deleteClaudeSessionId(key)
+  lostSessions.delete(key)
+  return true
 }
 
 export function deleteClaudeSessionId(key: string): void {
@@ -797,6 +819,7 @@ export function spawnClaudeProcess(
   systemPromptFile?: string,
   ignoreAnthropicApiKey?: boolean,
   effort?: ReasoningEffort,
+  account?: string,
 ): ActiveProcess {
   evictIfNeeded()
   log.info("spawning new claude process", {
@@ -805,13 +828,14 @@ export function spawnClaudeProcess(
     cwd,
     sessionKey,
     effort,
+    account,
   })
 
   const command = cliCommand(cliPath, cliArgs)
   const proc = launch(command.command, command.args, {
     cwd,
     stdio: ["pipe", "pipe", "pipe"],
-    env: claudeSpawnEnv({ ignoreAnthropicApiKey, effort }),
+    env: claudeSpawnEnv({ ignoreAnthropicApiKey, effort, configDir: account && poolConfigDir(account) }),
     windowsHide: true,
   })
 
@@ -827,6 +851,7 @@ export function spawnClaudeProcess(
     startedAt: Date.now(),
     cliPath,
     cliArgs: [...cliArgs],
+    account,
     unattendedLines: [],
     unattendedDropped: 0,
   }
@@ -1018,6 +1043,7 @@ export function respawnActiveProcess(
     old.systemPromptFile,
     ignoreAnthropicApiKey,
     old.effort,
+    old.account,
   )
   if (turnWasInFlight) noteTurnStarted(replacement)
   replacement.toolCatalogHash = old.toolCatalogHash
