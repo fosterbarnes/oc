@@ -50,6 +50,7 @@ export type SidebarSettings = {
   recentFileRoots: string[]
   fileRoots: Record<string, { customRoots: string[]; activeRoot?: string }>
   usageProviders: UsageProviderId[]
+  usageSpacing: boolean
 }
 
 
@@ -228,6 +229,7 @@ export function defaultSidebarSettings(): SidebarSettings {
     recentFileRoots: [],
     fileRoots: {},
     usageProviders: [...DEFAULT_USAGE_PROVIDERS],
+    usageSpacing: false,
   }
 }
 
@@ -278,6 +280,7 @@ export function normalizeSidebarSettings(value: unknown, base = defaultSidebarSe
       recentFileRoots: [...base.recentFileRoots],
       fileRoots: structuredClone(base.fileRoots),
       usageProviders: [...base.usageProviders],
+      usageSpacing: base.usageSpacing,
     }
   const input = value as {
     projectDirectory?: unknown
@@ -291,6 +294,7 @@ export function normalizeSidebarSettings(value: unknown, base = defaultSidebarSe
     recentFileRoots?: unknown
     fileRoots?: unknown
     usageProviders?: unknown
+    usageSpacing?: unknown
   }
   const visibility =
     input.visibility && typeof input.visibility === "object"
@@ -349,6 +353,7 @@ export function normalizeSidebarSettings(value: unknown, base = defaultSidebarSe
       "usageProviders" in input
         ? normalizeUsageProviders(input.usageProviders, base.usageProviders)
         : [...base.usageProviders],
+    usageSpacing: typeof input.usageSpacing === "boolean" ? input.usageSpacing : base.usageSpacing,
   }
 }
 
@@ -440,6 +445,13 @@ export function saveUserUsageProviders(homeDirectory: string, usageProviders: Us
   const existing = readJsonFile(filePath)
   const base = existing && typeof existing === "object" ? (existing as Record<string, unknown>) : {}
   writeJsonObject(filePath, { ...base, usageProviders: [...usageProviders] })
+}
+
+export function saveUserUsageSpacing(homeDirectory: string, usageSpacing: boolean): void {
+  const filePath = path.join(homeDirectory, ".config", "openSidebar", "config.json")
+  const existing = readJsonFile(filePath)
+  const base = existing && typeof existing === "object" ? (existing as Record<string, unknown>) : {}
+  writeJsonObject(filePath, { ...base, usageSpacing })
 }
 
 function cursorSettingsPath(homeDirectory: string): string {

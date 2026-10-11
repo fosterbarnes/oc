@@ -1,6 +1,7 @@
 import type { TuiPlugin, TuiPluginApi } from "@opencode-ai/plugin/tui"
+import { sectionOpen } from "./open"
 import type { BuiltinTuiPlugin } from "../builtins"
-import { createMemo, createResource, createSignal, For, Show } from "solid-js"
+import { createMemo, createResource, For, Show } from "solid-js"
 import path from "path"
 
 const id = "internal:sidebar-plugins"
@@ -16,7 +17,7 @@ type Row = {
 
 function View(props: { api: TuiPluginApi }) {
   // Unset until clicked, so the section follows the failure state until the user chooses.
-  const [open, setOpen] = createSignal<boolean>()
+  const [open, setOpen] = sectionOpen(props.api, "plugins", undefined)
   const theme = () => props.api.theme.current
   const [server] = createResource(() => props.api.client.plugin.status().then((x) => x.data ?? []))
   const builtin = createMemo(() => (server() ?? []).filter((item) => item.source === "internal"))

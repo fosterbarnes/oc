@@ -34,6 +34,17 @@ test("switches sidebar button style live without mutating input", () => {
   expect(resolve({}, { terminalSuspend: true }).sidebar_button_style).toBe("minimal")
 })
 
+test("resolves subagent tab defaults and switches them live without mutating input", () => {
+  expect(resolve({}, { terminalSuspend: true }).subagent_tabs).toEqual({ click: "inline", auto_open: false })
+  const input: TuiConfigInfo = decodeInfo({ subagent_tabs: { click: "tab" } })
+  const config = resolve(input, { terminalSuspend: true })
+  expect(config.subagent_tabs).toEqual({ click: "tab", auto_open: false })
+  config.setSubagentTabs({ click: "inline", auto_open: true })
+  expect(config.subagent_tabs).toEqual({ click: "inline", auto_open: true })
+  expect(input.subagent_tabs).toEqual({ click: "tab" })
+  expect(() => decodeInfo({ subagent_tabs: { click: "window" } })).toThrow()
+})
+
 test("defines package-owned plugin specs and attention sound names", () => {
   expect(decodePlugin("example-plugin")).toBe("example-plugin")
   expect(decodePlugin(["example-plugin", { enabled: true }])).toEqual(["example-plugin", { enabled: true }])

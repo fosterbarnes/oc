@@ -1,4 +1,5 @@
 import type { TuiPlugin, TuiPluginApi, TuiState } from "@opencode-ai/plugin/tui"
+import { sectionOpen } from "./open"
 import type { BuiltinTuiPlugin } from "../builtins"
 import { createMemo, createSignal, For, onCleanup, Show } from "solid-js"
 import { Locale } from "../../util/locale"
@@ -33,7 +34,7 @@ export function visibleSubagents(
 }
 
 function View(props: { api: TuiPluginApi; session_id: string }) {
-  const [open, setOpen] = createSignal(true)
+  const [open, setOpen] = sectionOpen(props.api, "subagents", true)
   const [now, setNow] = createSignal(Date.now())
   const timer = setInterval(() => setNow(Date.now()), 5_000)
   onCleanup(() => clearInterval(timer))
@@ -55,7 +56,6 @@ function View(props: { api: TuiPluginApi; session_id: string }) {
               <text fg={item.label === "failed" ? theme().error
                 : item.label === "done" ? theme().success
                   : item.label === "working" ? theme().warning : theme().accent}>
-                [{item.label === "done" ? "+" : item.label === "failed" ? "!" : "-"}]{" "}
                 {props.api.state.session.agentLabel(item.child.agent ?? "subagent")} . {item.label}
               </text>
               <text fg={theme().textMuted}>{Locale.truncate(item.child.title, 36)}</text>

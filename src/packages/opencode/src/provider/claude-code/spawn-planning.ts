@@ -274,9 +274,10 @@ export async function ensureProxyServer(
   config: ClaudeCodeConfig,
   tools: ProxyToolDef[],
   sessionKeyForCalls: string,
+  options: { alwaysLoad?: boolean } = {},
 ): Promise<ProxyMcpServer> {
   const timeoutOverrides = config.proxyToolTimeoutMs
-  const srv = await createProxyMcpServer(tools, timeoutOverrides)
+  const srv = await createProxyMcpServer(tools, timeoutOverrides, options)
   srv.calls.on("call", (call: ProxyToolCall) => {
     queuePendingProxyCall(sessionKeyForCalls, call, timeoutOverrides)
   })
@@ -337,9 +338,11 @@ export async function planSpawn(input: {
   const [tools, skills] = await Promise.all([assembleProxyTools(input), fetchOpencodeSkills(turn.cwd)])
   const proxyServer =
     input.proxyServer ??
-    (tools.combined.length > 0 ? await ensureProxyServer(config, tools.combined, turn.sessionKey) : null)
+    (tools.combined.length > 0
+      ? await ensureProxyServer(config, tools.combined, turn.sessionKey, { alwaysLoad: commandPermission })
+      : null)
   const mcp = effectiveMcpConfig(config, turn.cwd, proxyServer?.configPath(), input.runtimeStatus)
-  const systemPromptFile = systemPrompt(buildToolEnvironmentNote(tools.combined.map((t) => t.name)))
+  const systemPromptFile = systemPrompt(buildToolEnvironmentNote(tools.combined.map((t) => t.name), commandPermission))
   return {
     cliArgs: buildCliArgs({
       sessionKey: turn.sessionKey,
@@ -347,6 +350,7 @@ export async function planSpawn(input: {
       model: spawnModel.model,
       permissionMode: config.permissionMode,
       // Command turns execute exclusively through oc's permission-checked tools.
+      // `--tools ""` strips Claude built-ins; proxy schemas load via alwaysLoad.
       tools: commandPermission ? [] : undefined,
       mcpConfig: commandPermission ? proxyServer?.configPath() : mcp.paths,
       strictMcpConfig: commandPermission || config.strictMcpConfig,

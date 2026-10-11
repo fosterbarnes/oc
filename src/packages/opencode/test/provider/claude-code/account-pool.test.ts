@@ -4,12 +4,14 @@
  * `CLAUDE_CONFIG_DIR` it was spawned with.
  */
 import type { LanguageModelV3StreamPart } from "@ai-sdk/provider"
-import { afterEach, expect, test } from "bun:test"
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { afterEach, beforeEach, expect, test } from "bun:test"
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import {
   _resetAccountPool,
+  _setAccountPoolFile,
+  _setUsageCacheDir,
   DEFAULT_ACCOUNT,
   markAccountLimited,
   nextUsableAccount,
@@ -20,6 +22,7 @@ import { _resetRateLimitReports } from "@/provider/claude-code/cli-events.js"
 import { createClaudeCode } from "@/provider/claude-code/index.js"
 import { deleteActiveProcessAndWait, sessionKey } from "@/provider/claude-code/session-manager.js"
 
+beforeEach(() => _resetAccountPool())
 afterEach(() => _resetAccountPool())
 
 test("pool ids: the default dir inherits the environment, no option means one default account", () => {
@@ -50,6 +53,65 @@ test("a rejection without a reset time sits the account out for an hour", () => 
   markAccountLimited("a", undefined, 0)
   expect(nextUsableAccount(["a"], 60 * 60 * 1000 - 1)).toBeUndefined()
   expect(nextUsableAccount(["a"], 60 * 60 * 1000)).toBe("a")
+})
+
+test("pool pointer round-trips through the persist file and ignores expired limits", () => {
+  const root = mkdtempSync(path.join(tmpdir(), "oc-account-pool-file-"))
+  const file = path.join(root, "account-pool.json")
+  const now = Date.now()
+  try {
+    _setAccountPoolFile(file)
+    expect(poolAccount(["a", "b"], now)).toBe("a")
+    markAccountLimited("a", now + 60_000, now)
+    expect(poolAccount(["a", "b"], now + 10)).toBe("b")
+    const saved = JSON.parse(readFileSync(file, "utf8")) as { currentAccount?: string; limitedUntil?: Record<string, number> }
+    expect(saved.currentAccount).toBe("b")
+    expect(saved.limitedUntil?.["a"]).toBe(now + 60_000)
+
+    _resetAccountPool()
+    _setAccountPoolFile(file)
+    expect(poolAccount(["a", "b"], now + 10)).toBe("b")
+    expect(poolAccount(["a", "b"], now + 120_000)).toBe("b")
+
+    writeFileSync(file, JSON.stringify({ limitedUntil: { a: now - 1000 } }))
+    _resetAccountPool()
+    _setAccountPoolFile(file)
+    expect(poolAccount(["a", "b"], now)).toBe("a")
+  } finally {
+    rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 })
+  }
+})
+
+test("a 100% usage cache with a future reset skips that account; 99% and missing files do not", () => {
+  const root = mkdtempSync(path.join(tmpdir(), "oc-account-pool-cache-"))
+  const cache = path.join(root, "cache")
+  mkdirSync(cache)
+  const second = path.join(root, ".claudeSecond")
+  const now = Date.now()
+  const future = new Date(now + 60_000).toISOString()
+  const usage = (utilization: number, resetsAt: string | null) =>
+    JSON.stringify({
+      five_hour: { utilization, resets_at: resetsAt },
+      seven_day: { utilization: 9, resets_at: new Date(now + 86_400_000).toISOString() },
+    })
+  try {
+    writeFileSync(path.join(cache, "claude-usage.json"), usage(100, future))
+    writeFileSync(path.join(cache, "claude-usage-claudeSecond.json"), usage(0, null))
+    _setUsageCacheDir(cache)
+    expect(poolAccount([DEFAULT_ACCOUNT, second], now)).toBe(second)
+
+    _resetAccountPool()
+    writeFileSync(path.join(cache, "claude-usage.json"), usage(99, future))
+    _setUsageCacheDir(cache)
+    expect(poolAccount([DEFAULT_ACCOUNT, second], now)).toBe(DEFAULT_ACCOUNT)
+
+    _resetAccountPool()
+    rmSync(path.join(cache, "claude-usage.json"))
+    _setUsageCacheDir(cache)
+    expect(poolAccount([DEFAULT_ACCOUNT, second], now)).toBe(DEFAULT_ACCOUNT)
+  } finally {
+    rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 })
+  }
 })
 
 const init = { type: "system", subtype: "init", session_id: "fake-session", tools: ["Read"] }
@@ -162,4 +224,50 @@ test("with every account limited the turn ends on the limit after one switch", a
   const turn = await poolTurn({ first: limited, second: limited })
   expect(turn.body.match(/Claude account switched/g)).toHaveLength(1)
   expect(turn.body).toContain("**rate limit:**")
+})
+
+test("session-limit result text without a rate_limit_event still switches and hides the limit reply", async () => {
+  const turn = await poolTurn({
+    first: [
+      init,
+      endTurn,
+      {
+        type: "result",
+        subtype: "success",
+        session_id: "fake-session",
+        is_error: true,
+        result: "You've hit your session limit . resets 11:20pm",
+      },
+    ],
+    second: served,
+  })
+  expect(turn.body).toContain("**Claude account switched:** first hit its usage limit; continuing on second.")
+  expect(turn.body).toContain("resumed=false tools=false")
+  expect(turn.body).not.toContain("You've hit your session limit")
+  expect(turn.parts.at(-1)).toMatchObject({ type: "finish", finishReason: { unified: "stop" } })
+})
+
+test("an allowed_warning rate limit event does not switch accounts", async () => {
+  const turn = await poolTurn({
+    first: [
+      init,
+      {
+        type: "rate_limit_event",
+        session_id: "fake-session",
+        rate_limit_info: {
+          status: "allowed_warning",
+          rateLimitType: "five_hour",
+          utilization: 0.99,
+          overageStatus: "rejected",
+          overageDisabledReason: "org_level_disabled",
+        },
+      },
+      text("still served"),
+      endTurn,
+      result(false),
+    ],
+    second: served,
+  })
+  expect(turn.body).toContain("still served")
+  expect(turn.body).not.toContain("Claude account switched")
 })

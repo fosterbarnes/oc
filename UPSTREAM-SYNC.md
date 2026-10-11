@@ -1,21 +1,22 @@
 # Upstream Synchronization
 
-This fork keeps upstream source in a separate checkout and applies upstream
-changes to the customized parent only after a content comparison.
+This fork keeps upstream source in a separate checkout as a reference. The fork
+has drifted too far from upstream for an automated or whole-delta apply, so
+upstream fixes are cherry-picked into the customized parent by hand.
 
 ## Checkouts
 
 - Parent custom fork: `C:\Users\user\Documents\GitHub\oc`
 - Isolated upstream source: `C:\Users\user\Documents\GitHub\oc\UPSTREAM\opencode`
 - Upstream remote: `https://github.com/anomalyco/opencode`
-- Upstream branch: `dev`
+- Upstream branch: `v1`
 - Parent remote: `https://github.com/fosterbarnes/oc`
 - Parent branch: `main`
 
 ## Workflow
 
 1. Confirm the parent has no source changes and the isolated checkout is clean.
-   An agent-created plan file is allowed in the parent during a planned sync.
+   An agent-created plan file is allowed in the parent during a planned port.
 2. Record the current parent SHA and upstream SHA.
 3. From the parent root, refresh only the isolated checkout:
 
@@ -25,30 +26,32 @@ changes to the customized parent only after a content comparison.
 
 4. Confirm the refresh did not modify parent source and record the new upstream
    SHA.
-5. Establish the parent snapshot baseline by comparing tracked-file hashes with
-   upstream history. This repository was uploaded as a snapshot and has no Git
-   merge base with upstream. Do not use `--allow-unrelated-histories` as the
-   normal synchronization method.
-6. Generate the upstream delta from the validated baseline to the refreshed
-   upstream tip, then apply it to the parent with a content-level three-way
-   merge. Preserve parent-only files and custom behavior by default. The delta
-   is every file that changed on `dev`, including `feat`, `fix`, `docs`, and
-   `chore`. Do not filter to bugfixes only. Do not merge unmerged GitHub
-   feature branches; those land on `dev` when upstream ships them.
-7. Review every overlapping hunk. Rework custom code only when required for
-   upstream compatibility, and keep the smallest necessary change.
-8. After a successful apply that advances the isolated `dev` SHA, bump the
-   last number of `.version/version` (for example `0.0.8` to `0.0.9`) and roll
-   a new tag into `.version/versionTag`. `syncAndInstall.ps1` does this itself
-   through `incrementMaintenancePatch`; a manual sync runs
-   `.scripts\bumpVersion.ps1`. Do this before the Windows dist build so the TUI
-   display version matches. Do not bump OpenCode's package version.
+5. Diff upstream from `baselineSha` in `.scripts\upstream-sync.state.json`,
+   the last upstream SHA ported into this fork, to see what changed since.
+   `snapshotSha` in the same file is the fixed original snapshot and never
+   changes. Record what was ported in the `buildNotes.md` session entry.
+   This repository was uploaded as a snapshot and has no Git merge
+   base with upstream. Do not use `--allow-unrelated-histories` as the normal
+   synchronization method.
+6. Pick the upstream changes worth porting and cherry-pick them into the
+   parent by hand, adapting paths to this layout (the Bun workspace lives in
+   `src/`). Preserve parent-only files and custom behavior by default. Do not
+   port unmerged GitHub feature branches; wait until upstream ships them.
+7. Review every place a ported change overlaps custom code. Rework custom code
+   only when required for upstream compatibility, and keep the smallest
+   necessary change.
+8. After hand-porting upstream changes, run `.scripts\bumpVersion.ps1` to
+   bump the last number of `.version/version` (for example `0.0.8` to
+   `0.0.9`) and roll a new tag into `.version/versionTag`. Do this before
+   the Windows dist build so the TUI display version matches. Do not bump
+   OpenCode's package version. After porting up to an upstream release, update
+   `baselineSha` by hand to that release's upstream SHA.
 9. Leave the parent changes uncommitted for review. Do not reset, stash, commit,
    or push unless the user explicitly requests it.
 
 ## Custom Behavior
 
-Protect these areas during synchronization:
+Protect these areas when porting upstream changes:
 
 - `.install.ps1` and `.scripts\*` local automation
 - `.version\version` and `.version\versionTag` maintenance versioning
@@ -59,8 +62,8 @@ Protect these areas during synchronization:
 
 These are examples, not an exhaustive allowlist. Compare the validated
 baseline, current parent, and refreshed upstream before deciding whether any
-overlap is upstream drift or intentional fork behavior. After a successful
-apply, walk the Tracking table in `README.OG.md`. Update **Upstream** and the
+overlap is upstream drift or intentional fork behavior. After porting, walk the
+Tracking table in `README.OG.md`. Update **Upstream** and the
 compared-against SHA when native behavior moved. Do not replace that table
 with upstream's README.
 

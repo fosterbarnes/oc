@@ -1,6 +1,7 @@
 import type { TuiPlugin, TuiPluginApi } from "@opencode-ai/plugin/tui"
+import { sectionOpen } from "./open"
 import type { BuiltinTuiPlugin } from "../builtins"
-import { createMemo, For, Show, createSignal } from "solid-js"
+import { createMemo, For, Show } from "solid-js"
 import { Locale } from "../../util/locale"
 
 const id = "internal:sidebar-files"
@@ -12,7 +13,7 @@ function changeCountWidth(item: { additions: number; deletions: number }) {
 }
 
 function View(props: { api: TuiPluginApi; session_id: string }) {
-  const [open, setOpen] = createSignal(true)
+  const [open, setOpen] = sectionOpen(props.api, "files", true)
   const theme = () => props.api.theme.current
   const list = createMemo(() => props.api.state.session.diff(props.session_id))
 

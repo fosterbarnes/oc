@@ -1227,6 +1227,12 @@ test("normalizes usage providers by filtering, deduplicating, and preserving an 
   ])
 })
 
+test("usage spacing defaults off and accepts only booleans", () => {
+  assert.equal(normalizeSidebarSettings({}).usageSpacing, false)
+  assert.equal(normalizeSidebarSettings({ usageSpacing: true }).usageSpacing, true)
+  assert.equal(normalizeSidebarSettings({ usageSpacing: "yes" }).usageSpacing, false)
+})
+
 test("reads Claude Code usage with its OAuth login and falls back to the cached result", async () => {
   const root = mkdtempSync(path.join(os.tmpdir(), "sidebar-claude-usage-"))
   try {

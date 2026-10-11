@@ -25,6 +25,35 @@ function runNativeCommand {
     if ($LASTEXITCODE) { throw "$Name failed (exit $LASTEXITCODE)." }
 }
 
+# Converts bare LF to CRLF in modified and untracked files. Binary and non-UTF-8 files are left alone.
+function setCrlf {
+    $paths = git -C $repoRoot ls-files -m -o --exclude-standard
+    if ($LASTEXITCODE) { throw "git ls-files failed (exit $LASTEXITCODE)." }
+    $strictUtf8 = [Text.UTF8Encoding]::new($false, $true)
+    $count = 0
+    foreach ($path in $paths) {
+        $full = Join-Path $repoRoot $path
+        if (-not (Test-Path -LiteralPath $full -PathType Leaf)) { continue }
+        $bytes = [IO.File]::ReadAllBytes($full)
+        if ([Array]::IndexOf($bytes, [byte]0) -ge 0) { continue }
+        $bom = [byte[]]@()
+        if ($bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF) {
+            $bom = [byte[]](0xEF, 0xBB, 0xBF)
+        }
+        try {
+            $text = $strictUtf8.GetString($bytes, $bom.Length, $bytes.Length - $bom.Length)
+        } catch {
+            continue
+        }
+        $fixed = [regex]::Replace($text, '(?<!\r)\n', "`r`n")
+        if ($fixed -ceq $text) { continue }
+        $body = [Text.UTF8Encoding]::new($false).GetBytes($fixed)
+        [IO.File]::WriteAllBytes($full, [byte[]]($bom + $body))
+        $count++
+    }
+    if ($count) { Write-Host "Converted $count file(s) to CRLF." }
+}
+
 function getBunVersion {
     if (-not (Get-Command bun -ErrorAction SilentlyContinue)) {
         throw 'bun is not on PATH. Install Bun, then re-run.'

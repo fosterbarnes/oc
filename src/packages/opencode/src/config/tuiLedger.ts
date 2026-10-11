@@ -4,7 +4,16 @@ import fs from "node:fs/promises"
 import path from "node:path"
 import { Global } from "@opencode-ai/core/global"
 
-export type Record = { pid: number; instance: string; executable: string; startedAt: number; paneID?: string }
+export type Record = {
+  pid: number
+  instance: string
+  executable: string
+  startedAt: number
+  paneID?: string
+  // The session this TUI shows and its working directory, rewritten on route change; revive reopens the tab from them.
+  sessionID?: string
+  directory?: string
+}
 export type Process = { pid: number; parentPid: number; executable: string; startedAt: number }
 
 export function sameExecutable(left: string, right: string) {
@@ -45,6 +54,8 @@ export async function read(directory: string, processes: Process[]) {
       "executable" in record && typeof record.executable === "string" &&
       "startedAt" in record && typeof record.startedAt === "number" &&
       (!("paneID" in record) || typeof record.paneID === "string" && /^\d+$/.test(record.paneID)) &&
+      (!("sessionID" in record) || typeof record.sessionID === "string" && record.sessionID !== "") &&
+      (!("directory" in record) || typeof record.directory === "string" && record.directory !== "") &&
       processes.some((item) => item.pid === record.pid &&
         Math.abs(item.startedAt - (record.startedAt as number)) <= 5000 &&
         sameExecutable(item.executable, record.executable as string))

@@ -1,11 +1,12 @@
 import type { TuiPlugin, TuiPluginApi } from "@opencode-ai/plugin/tui"
+import { sectionOpen } from "./open"
 import type { BuiltinTuiPlugin } from "../builtins"
-import { createMemo, For, Match, Show, Switch, createSignal } from "solid-js"
+import { createMemo, For, Match, Show, Switch } from "solid-js"
 
 const id = "internal:sidebar-mcp"
 
 function View(props: { api: TuiPluginApi }) {
-  const [open, setOpen] = createSignal(true)
+  const [open, setOpen] = sectionOpen(props.api, "mcp", true)
   const theme = () => props.api.theme.current
   const list = createMemo(() => props.api.state.mcp())
   const on = createMemo(() => list().filter((item) => item.status === "connected").length)

@@ -44,6 +44,7 @@ import {
   saveSidebarSettings,
   saveUserScriptSettings,
   saveUserUsageProviders,
+  saveUserUsageSpacing,
   sessionProjectDirectory,
   sidebarConfigPaths,
   updateLanguage,
@@ -60,6 +61,10 @@ import {
   cursorSessionCookie,
   createUsageRefreshScheduler,
   fullResetDate,
+  formatUsagePercent,
+  formatUsageRows,
+  formatClaudeUsageRows,
+  usageColumns,
   orderUsageWindows,
   probeClaudeCodePool,
   probeClaudeCodeUsage,
@@ -297,7 +302,10 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
   const [claudeCodeUsage, setClaudeCodeUsage] = createSignal<UsageSnapshot<ClaudeCodeUsage>>({ ok: false })
   // Sidebar usage shows used or remaining percent for every provider; toggled from the Usage menu.
   const [showRemaining, setShowRemaining] = createSignal(false)
+  const [usageWidth, setUsageWidth] = createSignal(0)
+  let usageBox: BoxRenderable | undefined
   const [usageProviders, setUsageProviders] = createSignal<UsageProviderId[]>([...sidebarSettings.usageProviders])
+  const [usageSpacing, setUsageSpacing] = createSignal(sidebarSettings.usageSpacing)
   const [expanded, setExpanded] = createSignal<Set<string>>(new Set(["."]))
   const [tree, setTree] = createSignal(readTree(root, expanded()))
   let pins = new Set(sidebarSettings.scriptPins)
@@ -316,6 +324,7 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
     const projectSettings = { ...sidebarSettings }
     delete (projectSettings as { scripts?: ScriptSettings }).scripts
     delete (projectSettings as { usageProviders?: UsageProviderId[] }).usageProviders
+    delete (projectSettings as { usageSpacing?: boolean }).usageSpacing
     saveSidebarSettings(paths.project, projectSettings)
   }
 
@@ -411,6 +420,7 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
     root = rootState.activeRoot ? normalizeRootPath(rootState.activeRoot) : project
     pins = new Set(sidebarSettings.scriptPins)
     setUsageProviders([...sidebarSettings.usageProviders])
+    setUsageSpacing(sidebarSettings.usageSpacing)
     void syncSidebarVisibility()
   }
 
@@ -488,8 +498,9 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
     }
     void refreshUsage(usageProviders().filter((provider) => Date.now() - (snapshots[provider].fetchedAt ?? 0) > 60_000))
   }
+  // Dim by age only: a cached read carries its file's mtime, and another oc instance may have just refreshed it.
   const usageColor = (snapshot: UsageSnapshot<{ ok: boolean }>) =>
-    snapshot.stale || snapshot.source === "cache" || usageNow() - (snapshot.fetchedAt ?? 0) > 600_000
+    snapshot.stale || usageNow() - (snapshot.fetchedAt ?? 0) > 600_000
       ? theme.textMuted
       : theme.text
   usageScheduler = createUsageRefreshScheduler({
@@ -627,67 +638,77 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
     ))
   const usageRows = () => {
     const codex = codexWindows()
-    const codexSide = (window: UsageWindow | undefined) =>
-      window?.usedPercent === null || window?.usedPercent === undefined
-        ? "unavailable"
-        : `${showRemaining() ? 100 - window.usedPercent : window.usedPercent}%${windowLabel(window.minutes)}`
     const codexHasData = Boolean(codex.weekly || codex.monthly)
-    const codexValue = codex.reauthenticate
-      ? "run /connect"
-      : !codexHasData
-        ? "unavailable"
-        : codex.monthly
-          ? `${codexSide(codex.weekly)}, ${codexSide(codex.monthly)}`
-          : codexSide(codex.weekly)
-    const codexDates = [codex.weekly?.resetAt, ...(codex.monthly?.resetAt ? [codex.monthly.resetAt] : [])]
-      .filter(Boolean)
-      .join(", ")
     const goSnapshot = goUsage()
     const goOk = goSnapshot.ok ? goSnapshot : undefined
-    const goSide = (window: UsageWindow) =>
-      window.usedPercent === null
-        ? "unavailable"
-        : `${showRemaining() ? 100 - window.usedPercent : window.usedPercent}%${windowLabel(window.minutes)}`
-    const goValue = !goOk
-      ? "unavailable"
-      : goOk.monthly
-        ? `${goSide(goOk.weekly)}, ${goSide(goOk.monthly)}`
-        : goSide(goOk.weekly)
-    const goDates = goOk
-      ? [goOk.weekly.resetAt, ...(goOk.monthly?.resetAt ? [goOk.monthly.resetAt] : [])].filter(Boolean).join(", ")
-      : ""
     const orSnapshot = openRouterUsage()
     const orOk = orSnapshot.ok ? orSnapshot : undefined
-    const orValue = orOk ? `${showRemaining() ? orOk.remainingPercent : orOk.usedPercent}%` : "unavailable"
+    const orValue = orOk ? formatUsagePercent(orOk.usedPercent, showRemaining()) : "unavailable"
     const cursorSnapshot = cursorUsage()
     const cursorOk = cursorSnapshot.ok ? cursorSnapshot.monthly : undefined
-    const cursorSide = (label: string, used: number | null | undefined) =>
-      used === null || used === undefined ? "unavailable" : `${showRemaining() ? 100 - used : used}%${label}`
-    const cursorValue = `${cursorSide("m", cursorOk?.usedPercent)}; ${cursorSide("api", cursorOk?.apiUsedPercent)}`
     const cursorNeedsToken =
       !cursorSnapshot.ok && (cursorSnapshot.reason === "need-token" || cursorSnapshot.reason === "reauthenticate")
     const claudeSnapshot = claudeCodeUsage()
     const claudeOk = claudeSnapshot.ok ? claudeSnapshot : undefined
-    // Pooled accounts list each readable account's own percent: "30%h, 1%h / 3%w, 0%w".
-    const shown = (used: number | null) => (used !== null && showRemaining() ? 100 - used : used)
-    const claudeKnown = claudeOk?.accounts?.flatMap((account) => (account.usage.ok ? [account.usage] : []))
-    const claudeValue = !claudeOk
-      ? "unavailable"
-      : claudeKnown
-        ? `${claudeKnown.map((usage) => `${shown(usage.fiveHour.usedPercent)}%h`).join(", ")} / ${claudeKnown.map((usage) => `${shown(usage.weekly.usedPercent)}%w`).join(", ")}`
-        : `${shown(claudeOk.fiveHour.usedPercent)}%h,${shown(claudeOk.weekly.usedPercent)}%w`
-    // Pooled accounts show each account's hourly reset; a single account shows hourly / weekly.
-    const claudeDates = !claudeOk
-      ? "unavailable"
-      : claudeKnown && claudeKnown.length > 1
-        ? claudeKnown
-            .map((usage) => usage.fiveHour.resetAt)
-            .filter(Boolean)
-            .join(", ")
-        : [claudeOk.fiveHour.resetAt, claudeOk.weekly.resetAt].filter(Boolean).join(" / ")
+    const cell = (window: UsageWindow, suffix = windowLabel(window.minutes)) => ({
+      usedPercent: window.usedPercent,
+      resetAt: window.resetAt,
+      suffix,
+    })
+    const providers = usageProviders()
+    // Laid out twice: the first pass finds each window slot's widest date start, flipped clock, and flipped
+    // day; the second shares them across providers so later-slot dates end in one column.
+    const layout = (shared?: ReturnType<typeof usageColumns>) => {
+      const rows = (
+        show: unknown,
+        options: Omit<Parameters<typeof formatUsageRows>[0], "remaining" | "width" | "columns" | "clocks" | "days">,
+      ) => (show ? formatUsageRows({ ...options, remaining: showRemaining(), width: usageWidth(), columns: shared?.starts, clocks: shared?.clocks, days: shared?.days }) : [])
+      return {
+        codex: rows(providers.includes("openai") && codexHasData, {
+          label: "Codex :",
+          windows: [codex.weekly, codex.monthly].flatMap((window) => (window ? [cell(window)] : [])),
+        }),
+        claude:
+          providers.includes("claude-code") && claudeOk
+            ? formatClaudeUsageRows(claudeOk, showRemaining(), usageWidth(), shared?.starts, shared?.clocks, shared?.days)
+            : [],
+        cursor: rows(providers.includes("cursor") && cursorOk, {
+          label: "Cursor:",
+          windows: cursorOk
+            ? [cell(cursorOk, "m"), { usedPercent: cursorOk.apiUsedPercent, resetAt: "", suffix: " api", compact: true }]
+            : [],
+        }),
+        go: rows(providers.includes("opencode-go") && goOk, {
+          label: "OpenCode Go:",
+          windows: goOk ? [goOk.weekly, goOk.monthly].flatMap((window) => (window ? [cell(window)] : [])) : [],
+        }),
+      }
+    }
+    const rows = layout(usageColumns(Object.values(layout()).flat()))
+    const aligned = (
+      label: string,
+      snapshot: UsageSnapshot<{ ok: boolean }>,
+      rows: (ReturnType<typeof formatUsageRows>[number] & { spaced?: boolean })[],
+    ) => (
+      <For each={rows}>
+        {(row) => (
+          <box flexDirection="column" marginTop={"spaced" in row && row.spaced && usageSpacing() ? 1 : 0}>
+            <text fg={theme.textMuted} wrapMode="none">
+              <span style={{ fg: usageColor(snapshot) }}>{row.usage.startsWith(label) ? label : ""}</span>
+              {row.usage.startsWith(label) ? row.usage.slice(label.length) : row.usage}
+            </text>
+            <text fg={theme.textMuted} wrapMode="none">
+              {row.reset}
+            </text>
+          </box>
+        )}
+      </For>
+    )
     return (
       <box
         flexDirection="column"
+        ref={(el) => (usageBox = el)}
+        onSizeChange={() => setUsageWidth(usageBox?.width ?? 0)}
         onMouseOver={() => setHovered("usage")}
         onMouseOut={() => setHovered()}
         onMouseUp={(event) => {
@@ -697,57 +718,104 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
         <box flexDirection="row" gap={1}>
           <text fg={hovered() === "usage" ? hoverColor : theme.text}>Usage:</text>
         </box>
+        {/* Each visible provider is one flex child, so gap spaces only providers that render. */}
+        <box flexDirection="column" gap={usageSpacing() ? 1 : 0}>
         <Show when={usageProviders().length === 0}>
           <box flexDirection="row" gap={1}>
             <text fg={theme.textMuted}>No usage providers selected</text>
           </box>
         </Show>
         <Show when={usageProviders().includes("openai")}>
-          <box flexDirection="row" gap={1}>
-            <text fg={usageColor(usage())}>Codex:</text>
-            <text fg={theme.textMuted}>{codexValue}</text>
-          </box>
-          <box flexDirection="row" gap={1}>
-            <text fg={theme.textMuted}>
-              {codexDates || (codex.reauthenticate ? "OpenAI auth required" : "unavailable")}
-            </text>
+          <box flexDirection="column">
+          <Show
+            when={codexHasData}
+            fallback={
+              <>
+                <box flexDirection="row" gap={1}>
+                  <text fg={usageColor(usage())}>Codex :</text>
+                  <text fg={theme.textMuted}>{codex.reauthenticate ? "run /connect" : "unavailable"}</text>
+                </box>
+                <box flexDirection="row" gap={1}>
+                  <text fg={theme.textMuted}>
+                    {codex.reauthenticate ? "OpenAI auth required" : "unavailable"}
+                  </text>
+                </box>
+              </>
+            }
+          >
+            {aligned("Codex :", usage(), rows.codex)}
+          </Show>
           </box>
         </Show>
         <Show when={usageProviders().includes("claude-code")}>
-          <box flexDirection="row" gap={1}>
-            <text fg={usageColor(claudeSnapshot)}>Claude:</text>
-            <text fg={theme.textMuted}>{claudeValue}</text>
-          </box>
-          <box flexDirection="row" gap={1}>
-            <text fg={theme.textMuted}>{claudeDates}</text>
+          <box flexDirection="column">
+          <Show
+            when={claudeOk}
+            fallback={
+              <>
+                <box flexDirection="row" gap={1}>
+                  <text fg={usageColor(claudeSnapshot)}>Claude:</text>
+                  <text fg={theme.textMuted}>unavailable</text>
+                </box>
+                <box flexDirection="row" gap={1}>
+                  <text fg={theme.textMuted}>unavailable</text>
+                </box>
+              </>
+            }
+          >
+            {aligned("Claude:", claudeSnapshot, rows.claude)}
+          </Show>
           </box>
         </Show>
         <Show when={usageProviders().includes("cursor")}>
-          <box flexDirection="row" gap={1}>
-            <text fg={usageColor(cursorSnapshot)}>Cursor:</text>
-            <text fg={theme.textMuted}>{cursorNeedsToken ? "sign in" : cursorValue}</text>
-          </box>
-          <box flexDirection="row" gap={1}>
-            <text fg={theme.textMuted}>
-              {cursorOk?.resetAt || (cursorNeedsToken ? "Cursor auth required" : "unavailable")}
-            </text>
-          </box>
+          <box flexDirection="column">
+          <Show
+            when={cursorOk}
+            fallback={
+              <>
+                <box flexDirection="row" gap={1}>
+                  <text fg={usageColor(cursorSnapshot)}>Cursor:</text>
+                  <text fg={theme.textMuted}>{cursorNeedsToken ? "sign in" : "unavailable"}</text>
+                </box>
+                <box flexDirection="row" gap={1}>
+                  <text fg={theme.textMuted}>
+                    {cursorOk?.resetAt || (cursorNeedsToken ? "Cursor auth required" : "unavailable")}
+                  </text>
+                </box>
+              </>
+            }
+          >
+            {aligned("Cursor:", cursorSnapshot, rows.cursor)}
+          </Show>
           <Show when={!cursorSnapshot.ok && cursorSnapshot.reason === "reauthenticate"}>
             <box flexDirection="row" gap={1}>
               <text fg={theme.textMuted}>open Usage to paste a new cookie</text>
             </box>
           </Show>
+          </box>
         </Show>
         <Show when={usageProviders().includes("opencode-go")}>
-          <box flexDirection="row" gap={1}>
-            <text fg={usageColor(goSnapshot)}>OpenCode Go:</text>
-            <text fg={theme.textMuted}>{goValue}</text>
-          </box>
-          <box flexDirection="row" gap={1}>
-            <text fg={theme.textMuted}>{goDates || "unavailable"}</text>
+          <box flexDirection="column">
+          <Show
+            when={goOk}
+            fallback={
+              <>
+                <box flexDirection="row" gap={1}>
+                  <text fg={usageColor(goSnapshot)}>OpenCode Go:</text>
+                  <text fg={theme.textMuted}>unavailable</text>
+                </box>
+                <box flexDirection="row" gap={1}>
+                  <text fg={theme.textMuted}>unavailable</text>
+                </box>
+              </>
+            }
+          >
+            {aligned("OpenCode Go:", goSnapshot, rows.go)}
+          </Show>
           </box>
         </Show>
         <Show when={usageProviders().includes("openrouter")}>
+          <box flexDirection="column">
           <box flexDirection="row" gap={1}>
             <text fg={usageColor(orSnapshot)}>OpenRouter:</text>
             <text fg={theme.textMuted}>{orValue}</text>
@@ -757,7 +825,9 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
               <text fg={theme.textMuted}>{`$${orOk?.usedUsd.toFixed(2)} / $${orOk?.limitUsd.toFixed(2)}`}</text>
             </box>
           </Show>
+          </box>
         </Show>
+        </box>
       </box>
     )
   }
@@ -1488,6 +1558,17 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
         title: showRemaining() ? "Toggle: % remaining" : "Toggle: % used",
         onSelect: () => {
           setShowRemaining((value) => !value)
+          selectUsageMenu()
+        },
+      },
+      {
+        category: "Settings",
+        title: usageSpacing() ? "Toggle: provider spacing on" : "Toggle: provider spacing off",
+        onSelect: () => {
+          const next = !usageSpacing()
+          sidebarSettings.usageSpacing = next
+          saveUserUsageSpacing(os.homedir(), next)
+          setUsageSpacing(next)
           selectUsageMenu()
         },
       },

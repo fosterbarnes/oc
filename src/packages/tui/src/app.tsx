@@ -390,12 +390,15 @@ function updateClaudeCode(cliPath: string, toast: ToastContext) {
 }
 
 // Saves settings in global tui.jsonc or tui.json (jsonc wins when loading), keeping comments.
-function persistTuiSetting(key: "keybind_preset" | "sidebar_button_style", value: string) {
+function persistTuiSetting(
+  key: ["keybind_preset" | "sidebar_button_style"] | ["subagent_tabs", "click" | "auto_open"],
+  value: string | boolean,
+) {
   const file =
     ["tui.jsonc", "tui.json"].map((name) => path.join(Global.Path.config, name)).find((item) => fs.existsSync(item)) ??
     path.join(Global.Path.config, "tui.json")
   const text = fs.existsSync(file) ? fs.readFileSync(file, "utf8") : "{}"
-  const edits = modify(text, [key], value, { formattingOptions: { tabSize: 2, insertSpaces: true } })
+  const edits = modify(text, key, value, { formattingOptions: { tabSize: 2, insertSpaces: true } })
   fs.writeFileSync(file, applyEdits(text, edits))
 }
 
@@ -621,6 +624,26 @@ function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : String(error)
 }
 
+// Read by revive and shutdown (packages/opencode/src/config/tuiLedger.ts). Session fields follow the route.
+type Ledger = {
+  pid: number
+  instance: string
+  executable: string
+  startedAt: number
+  paneID?: string
+  sessionID?: string
+  directory?: string
+}
+
+// The ledger only scopes revive/shutdown to this instance; failing to write it must not stop the TUI.
+function writeLedger(record: Ledger) {
+  try {
+    const file = path.join(Global.Path.state, "oc-tuis", `${process.pid}.json`)
+    fs.mkdirSync(path.dirname(file), { recursive: true })
+    fs.writeFileSync(file, JSON.stringify(record))
+  } catch {}
+}
+
 function isVersionGreater(left: string, right: string) {
   const parse = (value: string) => {
     const [core, prerelease] = value.replace(/^v/, "").split("-", 2)
@@ -668,21 +691,15 @@ export const run = Effect.fn("Tui.run")(function* (input: TuiInput) {
       )
       const terminal = detectTerminal()
       const ledgerPath = path.join(global.state, "oc-tuis", `${process.pid}.json`)
-      // The ledger only scopes revive/shutdown to this instance; failing to write it must not stop the TUI.
+      const ledger: Ledger = {
+        pid: process.pid,
+        instance: Global.Path.app,
+        executable: Global.resolveExecutablePath(process.execPath),
+        startedAt: Date.now() - process.uptime() * 1000,
+        ...(terminal.kind === "wezterm" && terminal.paneID ? { paneID: terminal.paneID } : {}),
+      }
       yield* Effect.acquireRelease(
-        Effect.try({
-          try: () => {
-            fs.mkdirSync(path.dirname(ledgerPath), { recursive: true })
-            fs.writeFileSync(ledgerPath, JSON.stringify({
-              pid: process.pid,
-              instance: Global.Path.app,
-              executable: Global.resolveExecutablePath(process.execPath),
-              startedAt: Date.now() - process.uptime() * 1000,
-              ...(terminal.kind === "wezterm" && terminal.paneID ? { paneID: terminal.paneID } : {}),
-            }))
-          },
-          catch: (error) => error,
-        }).pipe(Effect.ignore),
+        Effect.sync(() => writeLedger(ledger)),
         () => Effect.sync(() => fs.rmSync(ledgerPath, { force: true })),
       )
       win32AssertRawMode()
@@ -796,6 +813,7 @@ export const run = Effect.fn("Tui.run")(function* (input: TuiInput) {
                                                                     <App
                                                                       onSnapshot={input.onSnapshot}
                                                                       pluginHost={input.pluginHost}
+                                                                      ledger={ledger}
                                                                     />
                                                                   </LocationProvider>
                                                                 </EditorContextProvider>
@@ -840,7 +858,7 @@ export const run = Effect.fn("Tui.run")(function* (input: TuiInput) {
   })
 })
 
-function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPluginHost }) {
+function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPluginHost; ledger: Ledger }) {
   const tuiConfig = useTuiConfig()
   const route = useRoute()
   const dimensions = useTerminalDimensions()
@@ -862,6 +880,15 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
   const attention = createTuiAttention({ renderer, config: tuiConfig, kv })
   const clipboard = useClipboard()
   const copyOnSelect = () => kv.get(Selection.COPY_ON_SELECT_KEY, Selection.defaultCopyOnSelect()) as boolean
+  // Keeps the ledger on the session this tab shows, so a revive reopens this tab on it.
+  createEffect(() => {
+    const sessionID = route.data.type === "session" ? route.data.sessionID : undefined
+    writeLedger({
+      ...props.ledger,
+      directory: (sessionID ? sync.session.get(sessionID)?.directory : undefined) ?? sdk.directory,
+      ...(sessionID ? { sessionID } : {}),
+    })
+  })
   createEffect(() => {
     sync.restart.recoveryEpoch
     if (!sync.restart.pending) promptRef.requestFocus()
@@ -1590,7 +1617,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
                 dialog.clear()
                 tuiConfig.setKeybindPreset(option.value)
                 try {
-                  persistTuiSetting("keybind_preset", option.value)
+                  persistTuiSetting(["keybind_preset"], option.value)
                 } catch (cause) {
                   const message = cause instanceof Error ? cause.message : String(cause)
                   toast.show({ message: `Keybind layout applied but not saved: ${message}`, variant: "error" })
@@ -1620,7 +1647,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
                 dialog.clear()
                 tuiConfig.setSidebarButtonStyle(option.value)
                 try {
-                  persistTuiSetting("sidebar_button_style", option.value)
+                  persistTuiSetting(["sidebar_button_style"], option.value)
                 } catch (cause) {
                   const message = cause instanceof Error ? cause.message : String(cause)
                   toast.show({ message: `Sidebar button style applied but not saved: ${message}`, variant: "error" })
@@ -1630,6 +1657,48 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
               }}
             />
           ))
+        },
+      },
+      {
+        name: "oc.subagent_tabs",
+        title: "Subagent tabs",
+        category: "oc",
+        slashName: "subagentTabs",
+        run: () => {
+          // Each pick flips one setting, then reopens on the same row so both can change in one visit.
+          const show = (current?: "click" | "auto_open") => {
+            const settings = tuiConfig.subagent_tabs
+            dialog.replace(() => (
+              <DialogSelect
+                title="Subagent tabs"
+                current={current}
+                options={[
+                  {
+                    value: "click" as const,
+                    title: `Click opens: ${settings.click === "tab" ? "Tab" : "Inline"}`,
+                    description: "Where a clicked subagent opens",
+                  },
+                  {
+                    value: "auto_open" as const,
+                    title: `Auto-open new subagents: ${settings.auto_open ? "On" : "Off"}`,
+                    description: "Open each new subagent of the viewed session in its own tab",
+                  },
+                ]}
+                onSelect={(option) => {
+                  const value = option.value === "click" ? (settings.click === "tab" ? "inline" : "tab") : !settings.auto_open
+                  tuiConfig.setSubagentTabs({ ...settings, [option.value]: value })
+                  try {
+                    persistTuiSetting(["subagent_tabs", option.value], value)
+                  } catch (cause) {
+                    const message = cause instanceof Error ? cause.message : String(cause)
+                    toast.show({ message: `Subagent tabs applied but not saved: ${message}`, variant: "error" })
+                  }
+                  show(option.value)
+                }}
+              />
+            ))
+          }
+          show()
         },
       },
       {
@@ -2236,3 +2305,4 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
     </box>
   )
 }
+

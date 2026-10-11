@@ -345,6 +345,13 @@ oc reads stock OpenCode settings as usual. These are the ones oc adds. Config fi
 | `keybinds` | Rebind any key; see [docs/keybinds.md](docs/keybinds.md) |
 | `openEditedWith` | Editor for clicked files: a command, or `{ "default": "...", ".md": "..." }` per extension |
 | `sidebar_button_style` | `minimal` (default) or `outlined` |
+| `subagent_tabs.click` | `inline` (default) opens a clicked subagent in place; `tab` opens it in a new WezTerm or Windows Terminal tab |
+| `subagent_tabs.auto_open` | Open each new subagent of the viewed session in its own tab. Default `false` |
+| `keybinds.session_child_tabs` | Open the running subagents that have no tab yet. Unbound by default |
+
+Subagent tabs attach to the resident oc server, so they don't work in `oc single` windows. The oc
+palette's **Subagent tabs** entry (`/subagentTabs`) toggles both `subagent_tabs` settings and saves
+them; **Open running subagents in tabs** runs the keybind's action from the palette.
 
 **`~/.config/openSidebar/config.json`** (sidebar; a project can override it with
 `.config/openSidebar.json`): `usageProviders` (`openai`, `cursor`, `opencode-go`, `openrouter`,
@@ -442,7 +449,7 @@ development history in `buildNotes.md`.
 
 ## Progress
 
-[518,755](scc.txt) lines of code and counting...
+[519,459](scc.txt) lines of code and counting...
 
 <!-- code-count:start -->
 
@@ -454,11 +461,11 @@ development history in `buildNotes.md`.
 | HTML | 1 | 1,161 | 79 | 0 | 1,082 |
 | JavaScript | 10 | 1,766 | 132 | 56 | 1,578 |
 | Nix | 3 | 258 | 23 | 26 | 209 |
-| Powershell | 23 | 1,762 | 141 | 64 | 1,557 |
+| Powershell | 22 | 1,146 | 81 | 61 | 1,004 |
 | SQL | 95 | 592 | 0 | 17 | 575 |
 | Shell | 1 | 120 | 17 | 17 | 86 |
-| TypeScript | 2,743 | 535,654 | 43,275 | 15,376 | 477,003 |
-| **Total** | **3,052** | **584,065** | **49,167** | **16,143** | **518,755** |
+| TypeScript | 2,746 | 537,071 | 43,370 | 15,441 | 478,260 |
+| **Total** | **3,054** | **584,866** | **49,202** | **16,205** | **519,459** |
 
 <!-- code-count:end -->
 

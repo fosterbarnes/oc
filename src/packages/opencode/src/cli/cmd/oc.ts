@@ -5,6 +5,7 @@ import fs from "fs/promises"
 import { spawn } from "child_process"
 import { cmd } from "./cmd"
 import { OcConfig } from "@/config/oc"
+import type { Revive } from "@/config/revive"
 import { startIntro } from "../intro"
 
 function runtimeArgs(args: string[]) {
@@ -197,6 +198,7 @@ const LaunchCommand = cmd({
   builder: (yargs: Argv) =>
     yargs
       .positional("target", { type: "string", describe: "project path or home-directory child" })
+      .option("session", { type: "string", describe: "resume this session without creating another" })
       .option("palette", {
         type: "string",
         describe: 'open palette entry by title, e.g. "New session (oc)"',
@@ -224,7 +226,11 @@ const LaunchCommand = cmd({
       return
     }
 
-    await launchProject(args.target, { single: Boolean(args.single || args.portable), portable: Boolean(args.portable) })
+    await launchProject(args.target, {
+      single: Boolean(args.single || args.portable),
+      portable: Boolean(args.portable),
+      session: args.session,
+    })
   },
 })
 
@@ -263,7 +269,7 @@ async function launchProject(target: string | undefined, options: {
       return
     }
     const server = await OcConfig.startServer()
-    const session = target ? await bootstrapSession(server, directory) : undefined
+    const session = options.session ?? (target ? await bootstrapSession(server, directory) : undefined)
     // Leave the intro frame up; the TUI's first alternate-screen frame continues it.
     await attach(server, settings, { directory, session, introFrame: stopIntro(false) })
   } finally {
@@ -301,6 +307,47 @@ const PreviousCommand = cmd({
     }
   },
 })
+
+const ReviveTabsCommand = cmd({
+  command: "revive-tabs <tabs>",
+  describe: false,
+  builder: (yargs: Argv) => yargs.positional("tabs", { type: "string", demandOption: true }),
+  handler: async (args) => {
+    const { Revive } = await import("@/config/revive")
+    const tabs = Revive.decodeTabs(args.tabs)
+    const pane = process.env.WEZTERM_PANE
+    if (!pane) throw new Error("oc revive-tabs must run in a WezTerm pane")
+    // Each spawn appends a tab; waiting preserves the saved order.
+    for (const tab of tabs.slice(1)) {
+      await spawnTab(pane, tab).catch((error: unknown) =>
+        console.error(`Tab not restored: ${error instanceof Error ? error.message : String(error)}`))
+    }
+    const [first] = tabs
+    if (first.kind === "oc") {
+      await launchProject(first.sessionID ? first.directory : undefined, {
+        single: false,
+        session: first.sessionID,
+      })
+      return
+    }
+    const code = await Bun.spawn(["pwsh", "-NoLogo"], { cwd: first.cwd, stdio: ["inherit", "inherit", "inherit"] }).exited
+    if (code !== 0) throw new Error(`pwsh exited with code ${code}`)
+  },
+})
+
+async function spawnTab(pane: string, tab: Revive.Tab) {
+  const args = tab.kind === "oc"
+    ? ["--cwd", tab.directory, "--", OcConfig.executablePath(),
+      ...runtimeArgs(["oc", "launch",
+        ...(tab.sessionID ? [tab.directory, "--session", tab.sessionID] : [])])]
+    : ["--cwd", tab.cwd]
+  const child = Bun.spawn(["wezterm", "cli", "spawn", "--pane-id", pane, ...args],
+    { stdout: "ignore", stderr: "pipe" })
+  const [code, stderr] = await Promise.all([child.exited, new Response(child.stderr).text()])
+  if (code !== 0) {
+    throw new Error(`wezterm cli spawn exited with code ${code}: ${stderr.trim()}`)
+  }
+}
 
 const ConfigCommand = cmd({
   command: "config",
@@ -373,6 +420,7 @@ export const OcCommand = cmd({
       .command(PreviousCommand)
       .command(SingleCommand)
       .command(DiagnosticsCommand)
+      .command(ReviveTabsCommand)
       .check((argv) => {
         const kill = Boolean(argv["kill-server"]) || Boolean(argv["shutdown-server"])
         const selected = [Boolean(argv["restart-server"]), kill, Boolean(argv["shutdown-all"]),
@@ -409,3 +457,4 @@ export const OcCommand = cmd({
     }
   },
 })
+

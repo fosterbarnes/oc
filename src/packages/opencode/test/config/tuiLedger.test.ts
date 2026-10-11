@@ -90,6 +90,20 @@ test("keeps records within five seconds and rejects timestamps beyond that", asy
   expect(await TuiLedger.read(tmp.path, beyond)).toEqual([])
 })
 
+test("accepts a record's session and directory and removes a record with a bad type", async () => {
+  await using tmp = await tmpdir()
+  const root = path.join(tmp.path, "oc-tuis")
+  await fs.mkdir(root)
+  const routed = { ...record, sessionID: "ses_1", directory: "C:\\Projects\\a" }
+  await Bun.write(path.join(root, "10.json"), JSON.stringify(routed))
+  expect(await TuiLedger.read(tmp.path, processes)).toEqual([routed])
+  for (const bad of [{ sessionID: 5 }, { sessionID: "" }, { directory: null }, { directory: "" }]) {
+    await Bun.write(path.join(root, "10.json"), JSON.stringify({ ...record, ...bad }))
+    expect(await TuiLedger.read(tmp.path, processes)).toEqual([])
+    expect(await fs.readdir(root)).toEqual([])
+  }
+})
+
 test("parses array JSON when the filtered process listing contains one match", () => {
   expect(TuiLedger.parseProcesses(JSON.stringify([processes[0]]))).toEqual([processes[0]])
   expect(TuiLedger.parseProcesses("[]")).toEqual([])

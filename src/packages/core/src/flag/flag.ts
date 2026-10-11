@@ -63,6 +63,11 @@ export const Flag = {
   get OPENCODE_CONFIG_DIR() {
     return process.env["OPENCODE_CONFIG_DIR"]
   },
+  // Skips the background `@opencode-ai/plugin` install into config dirs. Set by test preload: the
+  // detached install outlives the test and re-creates its deleted temp folder.
+  get OPENCODE_DISABLE_CONFIG_INSTALL() {
+    return truthy("OPENCODE_DISABLE_CONFIG_INSTALL")
+  },
   get OPENCODE_PURE() {
     return truthy("OPENCODE_PURE")
   },

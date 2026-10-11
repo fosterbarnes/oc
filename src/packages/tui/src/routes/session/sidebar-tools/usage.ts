@@ -70,6 +70,136 @@ export type UsageWindow = {
   minutes: number | null
 }
 
+export function formatUsagePercent(used: number | null | undefined, remaining = false, compact = false): string {
+  if (used === null || used === undefined || !Number.isFinite(used)) return "unavailable"
+  const value = remaining ? 100 - used : used
+  return `${compact ? Math.round(value) : Number(value.toFixed(value < 10 ? 2 : value < 100 ? 1 : 0))}%`
+}
+
+/**
+ * Both rows share an origin; each value starts at its reset's first clock digit. `columns[i]` is the minimum date
+ * start of the i-th window in a row; `starts` reports each row's actual date starts so callers can share columns.
+ * `clocks`/`days` report each row's flipped clock/day widths so callers can share those too; the shared maxima
+ * come back in as options to right-align later-slot dates.
+ */
+export function formatUsageRows(options: {
+  label: string
+  windows: { usedPercent: number | null; resetAt: string | null; suffix: string; compact?: boolean }[]
+  remaining: boolean
+  width?: number
+  columns?: number[]
+  clocks?: number[]
+  days?: number[]
+}) {
+  const rows: { usage: string; reset: string; starts: number[]; clocks: number[]; days: number[] }[] = []
+  // Later windows flip `M/D/YY ~time` to `~time M/D/YY` so the value sits under the clock digit.
+  const dates = options.windows.map((window, index) => {
+    const raw = window.resetAt ?? "reset unavailable"
+    if (index > 0 && window.resetAt) {
+      const flipped = raw.match(/^(\S+) (~\S+)$/)
+      if (flipped) return `${flipped[2]} ${flipped[1]}`
+    }
+    return raw
+  })
+  // Clock/day parts of each flipped date, by window index; only row positions past the first are ever padded.
+  const parts = dates.map((date, index) => {
+    if (index === 0) return undefined
+    const part = date.match(/^~(\S+) (\S+)$/)
+    return part ? { clock: part[1], day: part[2] } : undefined
+  })
+  let usage = options.label
+  let reset = ""
+  let starts: number[] = []
+  let clocks: number[] = []
+  let days: number[] = []
+  options.windows.forEach((window, index) => {
+    const date = dates[index]
+    const emptyDate = date === ""
+    const clock = date.indexOf("~") + 1
+    // An empty date carries no clock; offset 1 keeps it in the shared column.
+    const offset = window.resetAt === "" ? 1 : window.resetAt && clock > 0 ? clock : 0
+    const value = `${formatUsagePercent(window.usedPercent, options.remaining, window.compact)}${window.usedPercent === null ? "" : window.suffix}`
+    const position = starts.length
+    const part = position > 0 ? parts[index] : undefined
+    // Pad the clock to the shared width and right-align the day, so later-slot dates end in one column.
+    const display = part
+      ? `~${part.clock.padEnd(Math.max(part.clock.length, options.clocks?.[position] ?? 0))} ${part.day.padStart(Math.max(part.day.length, options.days?.[position] ?? 0))}`
+      : date
+    // A comma ends the previous value when another window shares the row.
+    const base = position ? `${usage},` : usage
+    const start = Math.max(
+      position ? reset.length + 2 : 0,
+      base.length + 1 - offset,
+      position ? (options.columns?.[position] ?? 0) : 0,
+    )
+    const column = start + offset
+    const gap = column - base.length
+    const candidate = base + " ".repeat(gap) + value
+    const prefix = position && reset.length ? `${reset}, ` : reset
+    const nextReset = emptyDate ? reset : prefix.padEnd(start) + display
+    if (position && Math.max(candidate.length, nextReset.length) > (options.width || Infinity)) {
+      rows.push({ usage, reset, starts, clocks, days })
+      const localStart = Math.max(0, options.label.length + 1 - offset)
+      usage = options.label + " ".repeat(localStart + offset - options.label.length) + value
+      reset = emptyDate ? "" : " ".repeat(localStart) + date
+      starts = [localStart]
+      clocks = [0]
+      days = [0]
+      return
+    }
+    usage = candidate
+    reset = nextReset
+    starts = [...starts, start]
+    clocks = [...clocks, part ? part.clock.length : 0]
+    days = [...days, part ? part.day.length : 0]
+  })
+  if (usage) rows.push({ usage, reset, starts, clocks, days })
+  return rows
+}
+
+/** Shared per-slot widths: the widest date start, flipped clock, and flipped day of each window slot across rows. */
+export function usageColumns(rows: { starts: number[]; clocks?: number[]; days?: number[] }[]) {
+  const widest = (pick: (row: (typeof rows)[number]) => number[] | undefined) =>
+    rows.reduce<number[]>(
+      (shared, row) => {
+        const widths = pick(row) ?? []
+        return widths.map((width, index) => Math.max(width, shared[index] ?? 0)).concat(shared.slice(widths.length))
+      },
+      [],
+    )
+  return { starts: widest((row) => row.starts), clocks: widest((row) => row.clocks), days: widest((row) => row.days) }
+}
+
+export function formatClaudeUsageRows(
+  usage: Extract<ClaudeCodeUsage, { ok: true }>,
+  remaining: boolean,
+  width?: number,
+  columns?: number[],
+  clocks?: number[],
+  days?: number[],
+) {
+  const accounts = usage.accounts?.flatMap((account) => (account.usage.ok ? [account.usage] : []))
+  const known = accounts?.length ? accounts : [usage]
+  const cell = (window: UsageWindow, suffix: string, compact = false) => ({
+    usedPercent: window.usedPercent,
+    resetAt: window.resetAt,
+    suffix,
+    compact,
+  })
+  if (known.length === 1)
+    return formatUsageRows({
+      label: "Claude:", remaining, width, columns, clocks, days,
+      windows: [cell(known[0].fiveHour, "h"), cell(known[0].weekly, "w")],
+    })
+  return [
+    ...formatUsageRows({ label: "Claude:", remaining, width, columns, clocks, days, windows: known.map((account) => cell(account.fiveHour, "h")) })
+      .map((row, index) => index === 0 ? row : { ...row, usage: "       " + row.usage.slice(7) }),
+    // `spaced` marks where the sidebar's provider spacing splits the hourly rows from the weekly rows.
+    ...formatUsageRows({ label: "", remaining, width, columns, clocks, days, windows: known.map((account) => cell(account.weekly, "w", true)) })
+      .map((row, index) => (index === 0 ? { ...row, spaced: true } : row)),
+  ]
+}
+
 /** Sidebar suffix for a window of this length: `h`, `d`, `w`, `m`; empty when the length is unknown or unusual. */
 export function windowLabel(minutes: number | null | undefined): string {
   if (!minutes || minutes <= 0) return ""

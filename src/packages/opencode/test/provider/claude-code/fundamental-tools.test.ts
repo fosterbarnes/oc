@@ -63,6 +63,7 @@ test("catalog identity ignores object key order but tracks capabilities and poli
   expect(toolCatalogHash(config, [])).not.toBe(hash)
   expect(toolCatalogHash(config, [{ ...tools[0], description: "changed" }])).not.toBe(hash)
   expect(toolCatalogHash({ ...config, extraDisallowedTools: ["Read"] }, tools)).not.toBe(hash)
+  expect(toolCatalogHash(config, tools, true)).not.toBe(hash)
 })
 
 test("image bytes reach the MCP client, and unsupported attachments fail explicitly", async () => {
@@ -199,6 +200,40 @@ readline.createInterface({ input: process.stdin }).on("line", async (line) => {
   if (process.platform !== "win32") await chmod(filename, 0o755)
   return filename
 }
+
+test("command-permission turns alwaysLoad proxy tools and name them in the prompt", async () => {
+  await using directory = await tmpdir()
+  const session = randomUUID()
+  const key = sessionKey(directory.path, `tools::${session}::context=["claude-code"]`)
+  hostToolExecutors.set(session, async (name) => ({ output: name, title: name, metadata: {} }))
+  const model = new ClaudeCodeLanguageModel(`cmd-${randomUUID()}`, {
+    provider: "claude-code", cliPath: await fakeCli(directory.path), cwd: directory.path,
+    autoContinueIncompleteTurns: false,
+  })
+  try {
+    await drain((await model.doStream({
+      prompt: [{ role: "user", content: [{ type: "text", text: "Read files." }] }],
+      tools: ["read", "edit", "grep", "bash"].map((name) => ({
+        type: "function" as const, name, description: name, inputSchema: { type: "object", properties: {} },
+      })),
+      providerOptions: { "claude-code": {
+        opencodeSessionID: session, opencodeAgent: "build", opencodeCommandPermission: "true",
+      } },
+    })).stream)
+    const args = getActiveProcess(key)?.cliArgs
+    expect(args).toEqual(expect.arrayContaining(["--tools", "", "--strict-mcp-config"]))
+    const mcp = JSON.parse(await readFile(args![args!.indexOf("--mcp-config") + 1], "utf8"))
+    expect(mcp.mcpServers.opencode_proxy.alwaysLoad).toBe(true)
+    const prompt = await readFile(args![args!.indexOf("--append-system-prompt-file") + 1], "utf8")
+    expect(prompt).toContain("built-in file, shell and web tools are off this turn")
+    expect(prompt).toContain("read, edit, grep, bash")
+    expect(prompt).not.toContain("ToolSearch")
+  } finally {
+    hostToolExecutors.delete(session)
+    await deleteActiveProcessAndWait(key)
+    deleteClaudeSessionId(key)
+  }
+}, 20_000)
 
 test("oc-only proxies execute once, refresh between turns, and leave native tools on", async () => {
   await using directory = await tmpdir()

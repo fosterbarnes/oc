@@ -24,6 +24,7 @@ import {
   formatResultFailureNote,
   formatSilentTurnNote,
   formatStreamTimeoutNote,
+  isAccountLimitError,
   isRateLimitRejected,
   parseRateLimitEvent,
   reportCompactBoundary,
@@ -409,7 +410,23 @@ class ClaudeTurn {
   private beginAccountSwitch(msg: ClaudeStreamMessage): boolean {
     const info = parseRateLimitEvent(msg)
     if (!info || !isRateLimitRejected(info)) return false
-    markAccountLimited(this.account, resetsAtToMs(info.resetsAt ?? info.overageResetsAt))
+    return this.queueAccountSwitch(resetsAtToMs(info.resetsAt ?? info.overageResetsAt), info.rateLimitType)
+  }
+
+  /** Same failover when the CLI only put the limit in result/assistant text. */
+  private beginTextAccountSwitch(resultText: string | undefined): boolean {
+    if (this.switchTo) return false
+    if (
+      !isAccountLimitError({ resultText: resultText ?? null }) &&
+      !isAccountLimitError({ resultText: this.out.shown })
+    ) {
+      return false
+    }
+    return this.queueAccountSwitch(undefined, "text")
+  }
+
+  private queueAccountSwitch(resetsAtMs: number | undefined, rateLimitType: string | undefined): boolean {
+    markAccountLimited(this.account, resetsAtMs)
     if (this.turn.compactionMode) return false
     const next = nextUsableAccount(poolAccountIds(this.config.accounts))
     if (!next || next === this.account) return false
@@ -417,7 +434,7 @@ class ClaudeTurn {
       sessionKey: this.sk,
       from: this.account,
       to: next,
-      rateLimitType: info.rateLimitType,
+      rateLimitType,
     })
     this.switchTo = next
     return true
@@ -1014,6 +1031,7 @@ class ClaudeTurn {
 
   private onResult(msg: ClaudeStreamMessage) {
     this.clearResultFallback()
+    this.beginTextAccountSwitch(typeof msg.result === "string" ? msg.result : undefined)
     if (this.switchTo) {
       void this.switchAccount().catch((err) => {
         const message = err instanceof Error ? err.message : String(err)

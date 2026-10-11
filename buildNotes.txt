@@ -1,9 +1,9 @@
-v0.2.147 gammyLikaaa
+v0.2.153 dwellingWassup
 
-usage menu:
-Clicking "Usage:" in the sidebar opens a Usage menu listing every provider's limits with used and remaining percent, the full reset date and time, and how long until it resets. It is also in the command palette as "Show usage". Each pooled Claude account gets its own group, and an account that cannot be read says "Not signed in" or "Login expired" instead of disappearing or showing a bare "Unavailable". Usage numbers in the menu are read-only; only sign-in and settings rows react.
+slash commands:
+Running a new slash command now clearly replaces the previous command's mode, so `/impS` after `/spitS` no longer keeps acting like spitball. On Claude Code turns started by a command with permissions, file tools such as read and edit are available right away instead of looking missing.
 
-usage sidebar:
-The section is now called "Usage". Clicking anywhere in it opens the Usage menu, and switching between used and remaining percent is a single "Toggle" row in that menu (it shows the current mode) instead of clicking each provider. Window labels follow the percent, for example "67%w" and "30%h". With pooled Claude accounts the line shows each account's own numbers, like "30%h, 1%h / 3%w, 0%w", and the line below lists each account's hourly reset time. The "Claude:" label no longer greys out just because one account is showing saved usage.
+session titles:
+Automatic and `/rename` titles ignore the slash-command instruction header, so the title follows the actual subject.
 
-Under the hood: the second Claude account showed Unavailable because its login had expired before oc ever cached its usage; oc never refreshes Claude Code's token, so using that account in Claude Code once fixes it. Added a failure reason to Claude usage results, per-account results to the pool, pool freshness taken from the newest live account, inert (non-selectable) rows in the select dialog, and one shared used/remaining setting. Fixed two stale test expectations (hour label, plugins sidebar section). Sidebar and usage tests and the tui typecheck passed. Not checked in the live TUI.
+Under the hood: `SessionPrompt.command` prefixes the command header and `withoutCommandHeader` strips it for naming; `createProxyMcpServer` takes `alwaysLoad`, set by `planSpawn` only for command-permission spawns; `buildToolEnvironmentNote` has a command-turn variant; the baseline docs, editorconfig, gitattributes, and push scripts were updated, and `syncAndInstall.ps1` was removed. Usage sidebar files were also touched with their freshness test. Checks passed: claude-code provider tests plus rename-digest (one known failure in subagent-hint "proxy defs follow the tools opencode offered the agent", unrelated to this change) and the prompt.test.ts slash composition tests. Live command-permission and TUI checks were not run.

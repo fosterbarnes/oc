@@ -51,10 +51,10 @@ Evidence: the current `~/.config/opencode/opencode.jsonc` and FORK.md sections 2
 | **Revive hardcodes an executable and desktop shortcut** | Both revive scripts call the personal installed path and reopen `C:\Users\user\Desktop\occ.lnk`. That shortcut is not created by the inspected installer. Restarting fails on a fresh machine. | Can revive reopen oc directly using its actual executable and launch context? |
 | **Revive requires external scripts/configuration** | The palette commands are hidden when their configured paths are unset. Shipping the executable alone does not provide the FORK.md restart workflow. | Is ordinary restart built in, with rebuild/reinstall kept as developer tooling? |
 | **Shutdown affects unrelated applications** | `--shutdown-all` kills every `wezterm-gui.exe`. Other shutdown paths identify oc/OpenCode processes by executable name, which can include another installation or stock OpenCode. | How should oc identify and stop only the instances it owns? |
-| **Helper packaging varies by install path** | The canonical installer copies Agentify and Cursor folders. FORK.md records that the combined sync installer may omit them. The resulting executable can launch normally while those providers fail. | Define one required application layout that every distribution path preserves. |
+| **Helper packaging varies by install path** | The canonical installer copies Agentify and Cursor folders. Any other distribution path that skips them produces an executable that launches normally while those providers fail. | Define one required application layout that every distribution path preserves. |
 | **Build tooling can change the user's Bun installation** | The scripts can run `bun upgrade --canary` to avoid the known-bad runtime. Someone building the fork can unexpectedly alter their global tooling. | State the supported build version and decide how deliberately upgrades should happen. |
 
-Sources: `.scripts/install.ps1`, `.scripts/installDebug.ps1`, `.scripts/revive.ps1`, `.scripts/reviveAndInstall.ps1`, `.scripts/syncAndInstall.ps1`, `SCRIPTS.md`, and `packages/opencode/src/config/oc.ts`.
+Sources: `.scripts/install.ps1`, `.scripts/installDebug.ps1`, `.scripts/revive.ps1`, `.scripts/reviveAndInstall.ps1`, `SCRIPTS.md`, and `packages/opencode/src/config/oc.ts`.
 
 ## Suggested review order
 

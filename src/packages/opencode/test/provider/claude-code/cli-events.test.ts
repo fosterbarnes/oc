@@ -325,5 +325,16 @@ test("account blocks come from the CLI error kind and name the login command", a
     isAccountLimitError({ resultText: "You've hit your individual spend limit." }),
     true,
   )
+  assert.equal(isAccountLimitError({ resultText: "You've hit your session limit . resets 11:20pm" }), true)
+  assert.equal(isAccountLimitError({ resultText: "You've hit your usage limit" }), true)
+  assert.equal(isAccountLimitError({ resultText: "You've hit your weekly limit" }), true)
   assert.equal(isAccountLimitError({ resultText: "API Error: 400 invalid model name" }), false)
+  assert.equal(
+    isAccountLimitError({
+      rateLimit: { status: "allowed_warning", overageStatus: "rejected" },
+      resultText: "still served",
+    }),
+    false,
+  )
 })
+

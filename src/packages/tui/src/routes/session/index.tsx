@@ -83,6 +83,8 @@ import { OPENCODE_BASE_MODE, useBindings, useCommandShortcut, useOpencodeKeymap,
 import { usePathFormatter } from "../../context/path-format"
 import { reviveText, reviveVersions } from "../../util/revive"
 import { LocationProvider } from "../../context/location"
+import { openSessionTab, unavailable as tabUnavailable } from "../../util/session-tab"
+import { detectTerminal } from "@opencode-ai/core/util/terminal"
 
 addDefaultParsers(parsers.parsers)
 
@@ -94,6 +96,9 @@ const GO_UPSELL_WINDOW = 86_400_000 // 24 hrs
 const GO_UPSELL_PROVIDERS = new Set(["opencode", "opencode-go"])
 
 export const alwaysSeparate = new WeakSet<BoxRenderable>()
+
+// Subagent sessions this TUI already opened in tabs: auto-open and the keybind skip them, a click reopens.
+const tabbed = new Set<string>()
 
 type RetryAction = Extract<SessionStatus, { type: "retry" }>["action"]
 
@@ -142,6 +147,7 @@ const sessionBindingCommands = [
   "session.copy",
   "session.export",
   "session.child.first",
+  "session.child.tabs",
   "session.parent",
   "session.child.next",
   "session.child.previous",
@@ -172,6 +178,7 @@ const context = createContext<{
   sync: ReturnType<typeof useSync>
   tui: ReturnType<typeof useTuiConfig>
   openFile: (filePath: string) => void
+  openTab: (sessionID: string) => void
 }>()
 
 function use() {
@@ -538,6 +545,32 @@ export function Session() {
       func()
     }
   }
+
+  function openTabs(sessionIDs: string[]) {
+    const reason = tabUnavailable(sdk.url, detectTerminal().kind)
+    if (reason) return toast.show({ message: reason, variant: "error" })
+    for (const sessionID of sessionIDs) {
+      tabbed.add(sessionID)
+      const directory = sync.session.get(sessionID)?.directory ?? session()?.directory ?? paths.cwd
+      void openSessionTab({ url: sdk.url, directory, sessionID }).then((error) => {
+        if (error) toast.show({ message: error, variant: "error" })
+      })
+    }
+  }
+  const openTab = (sessionID: string) => openTabs([sessionID])
+
+  const subagents = createMemo(() => sync.data.session.filter((x) => x.parentID === route.sessionID))
+  // Only subagents created after entering this session, so opening an old session opens no tabs.
+  const autoOpenFrom = createMemo(on(() => route.sessionID, () => Date.now()))
+  createEffect(() => {
+    if (!tuiConfig.subagent_tabs.auto_open) return
+    const from = autoOpenFrom()
+    const fresh = subagents().filter((x) => x.time.created >= from && !tabbed.has(x.id)).map((x) => x.id)
+    if (fresh.length === 0) return
+    // Marked first so an unavailable terminal warns once per subagent, not on every list update.
+    for (const id of fresh) tabbed.add(id)
+    untrack(() => openTabs(fresh))
+  })
 
   const sessionCommandList = createMemo(() => [
     {
@@ -1207,6 +1240,19 @@ export function Session() {
       },
     },
     {
+      title: "Open running subagents in tabs",
+      value: "session.child.tabs",
+      category: "Session",
+      run: () => {
+        dialog.clear()
+        const running = subagents()
+          .filter((x) => !tabbed.has(x.id) && (sync.data.session_status[x.id]?.type ?? "idle") !== "idle")
+          .map((x) => x.id)
+        if (running.length === 0) return toast.show({ message: "No running subagents without a tab", variant: "info" })
+        openTabs(running)
+      },
+    },
+    {
       title: "Go to parent session",
       value: "session.parent",
       category: "Session",
@@ -1337,6 +1383,7 @@ export function Session() {
           sync,
           tui: tuiConfig,
           openFile,
+          openTab,
         }}
       >
         <box flexDirection={sidebarHorizontal() ? "column" : "row"} flexGrow={1} minHeight={0}>
@@ -2511,6 +2558,7 @@ function WebSearch(props: ToolProps) {
 }
 
 function Task(props: ToolProps) {
+  const ctx = use()
   const { theme } = useTheme()
   const { navigate } = useRoute()
   const sync = useSync()
@@ -2596,9 +2644,9 @@ function Task(props: ToolProps) {
       pending="Delegating…"
       part={props.part}
       onClick={() => {
-        if (sessionID()) {
-          navigate({ type: "session", sessionID: sessionID()! })
-        }
+        const id = sessionID()
+        if (id && ctx.tui.subagent_tabs.click === "tab") ctx.openTab(id)
+        else if (id) navigate({ type: "session", sessionID: id })
         const status = retry()
         if (status) void DialogAlert.show(dialog, "Retry Error", status.message)
       }}

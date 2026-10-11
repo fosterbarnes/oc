@@ -2432,6 +2432,7 @@ it.instance("slash composition delivers ordered unique command bodies in one mod
       const text = messages.at(-1)?.content
       expect(typeof text).toBe("string")
       expect(text).toContain("Apply all listed slash commands together")
+      expect(text).toContain("replace any earlier slash command's persona, mode, and rules")
       expect(text).toContain("Discuss strategies. No code changes.")
       expect(text).toContain("Choose a clean solution and write a Markdown plan.")
       expect(text).toContain("[User request]\nFix queued messages\n\nPreserve cancellation")
@@ -2482,7 +2483,9 @@ it.instance("slash composition expands shared arguments and shell snippets witho
       arguments: "request",
     })
     const singleHistory = yield* sessions.messages({ sessionID: single.id })
-    expect(singleHistory[0].parts.find((part) => part.type === "text")).toMatchObject({ text: "Plain body\n\nrequest" })
+    expect(singleHistory[0].parts.find((part) => part.type === "text")).toMatchObject({
+      text: "[/plain is active: its instructions replace any earlier slash command's persona, mode, and rules from this conversation.]\n\nPlain body\n\nrequest",
+    })
   }),
 )
 

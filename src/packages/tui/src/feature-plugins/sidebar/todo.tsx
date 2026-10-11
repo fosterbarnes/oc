@@ -1,12 +1,13 @@
 import type { TuiPlugin, TuiPluginApi } from "@opencode-ai/plugin/tui"
+import { sectionOpen } from "./open"
 import type { BuiltinTuiPlugin } from "../builtins"
-import { createMemo, For, Show, createSignal } from "solid-js"
+import { createMemo, For, Show } from "solid-js"
 import { TodoItem } from "../../component/todo-item"
 
 const id = "internal:sidebar-todo"
 
 function View(props: { api: TuiPluginApi; session_id: string }) {
-  const [open, setOpen] = createSignal(true)
+  const [open, setOpen] = sectionOpen(props.api, "todo", true)
   const theme = () => props.api.theme.current
   const list = createMemo(() => props.api.state.session.todo(props.session_id))
   const show = createMemo(() =>

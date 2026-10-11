@@ -61,13 +61,19 @@ function exists(dir: string) {
     .catch(() => false)
 }
 
-function clean(dir: string) {
-  return fs.rm(dir, {
-    recursive: true,
-    force: true,
-    maxRetries: 5,
-    retryDelay: 100,
-  })
+// Background work such as config's detached plugin install can keep writing into the folder after a
+// test ends, so retry until the folder is really gone and fail loudly instead of leaking it into Temp.
+async function clean(dir: string) {
+  const deadline = Date.now() + 10_000
+  while (true) {
+    const error = await fs.rm(dir, { recursive: true, force: true }).then(
+      () => undefined,
+      (error: unknown) => error,
+    )
+    if (!error && !(await exists(dir))) return
+    if (Date.now() > deadline) throw error ?? new Error(`test temp dir still exists: ${dir}`)
+    await Bun.sleep(100)
+  }
 }
 
 async function stop(dir: string) {
@@ -109,7 +115,7 @@ export async function tmpdir<T>(options?: TmpDirOptions<T>) {
         await options?.dispose?.(realpath)
       } finally {
         if (options?.git) await stop(realpath).catch(() => undefined)
-        await clean(realpath).catch(() => undefined)
+        await clean(realpath)
       }
     },
     path: realpath,
@@ -133,7 +139,7 @@ export function tmpdirScoped<E = never, R = never>(options?: {
     yield* Effect.addFinalizer(() =>
       Effect.promise(async () => {
         if (options?.git) await stop(dir).catch(() => undefined)
-        await clean(dir).catch(() => undefined)
+        await clean(dir)
       }),
     )
 

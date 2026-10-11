@@ -556,6 +556,7 @@ export const ACCOUNT_BLOCK_MARKER = "▌ **claude account:**"
 const ACCOUNT_LIMIT_PATTERNS: RegExp[] = [
   /third-party apps now draw from your extra usage/i,
   /you[''`]?ve hit your individual spend limit/i,
+  /you[''`]?ve hit your (session|usage|weekly) limit/i,
 ]
 
 const ACCOUNT_BLOCKS = {
@@ -605,3 +606,4 @@ export function isAccountLimitError(input: {
   if (typeof text !== "string" || text.length === 0) return false
   return ACCOUNT_LIMIT_PATTERNS.some((pattern) => pattern.test(text))
 }
+

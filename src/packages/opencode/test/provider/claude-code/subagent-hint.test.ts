@@ -380,7 +380,14 @@ test("tool environment note names the proxy prefix and how to load a deferred to
   const note = buildToolEnvironmentNote(["session_tail"])
   assert.match(note, /mcp__opencode_proxy__<name>/)
   assert.match(note, /ToolSearch \(`select:mcp__opencode_proxy__<name>`\)/)
+  assert.doesNotMatch(note, /built-in file, shell and web tools are off this turn/)
   assert.doesNotMatch(buildToolEnvironmentNote([]), /mcp__opencode_proxy__<name>/)
+  const command = buildToolEnvironmentNote(["read", "edit", "grep", "bash"], true)
+  assert.match(command, /built-in file, shell and web tools are off this turn/)
+  assert.match(command, /mcp__opencode_proxy__\*/)
+  assert.match(command, /read, edit, grep, bash/)
+  assert.match(command, /called by full name/)
+  assert.doesNotMatch(command, /ToolSearch/)
 })
 
 // The dispatch and question sections live inside the one note and appear

@@ -34,7 +34,11 @@ const setup = Effect.fnUntraced(function* () {
     snapshot: false,
     shell: process.platform === "win32" ? "pwsh" : "/bin/sh",
     agent: { rename: { model: "test/rename-model" } },
-    command: { check: { template: "Inspect $ARGUMENTS" } },
+    command: {
+      check: { template: "Inspect $ARGUMENTS" },
+      spit: { template: "Spitballing instructions. ".repeat(100) + "$ARGUMENTS" },
+      think: { template: "Thinking instructions. ".repeat(100) },
+    },
     provider: {
       test: {
         ...config.provider.test,
@@ -167,7 +171,13 @@ it.instance("oc automatic rename names a Home session's first command and drops 
       Effect.map((current) => current.title === "project - command task" ? current : undefined),
     ), "Home session was not renamed")
     expect((yield* fixture.llm.hits).filter(naming)).toHaveLength(1)
-    expect(JSON.stringify((yield* fixture.llm.hits).find(naming)?.body.messages)).toContain("Inspect the cache")
+    const request = JSON.stringify((yield* fixture.llm.hits).find(naming)?.body.messages)
+    expect(request).toContain("user: the cache")
+    expect(request).not.toContain("Inspect the cache")
+    const saved = (yield* fixture.sessions.messages({ sessionID: session.id })).find((message) => message.info.role === "user")
+    expect(saved?.parts).toContainEqual(expect.objectContaining({
+      type: "text", text: "Inspect the cache", metadata: { ocCommandArguments: "the cache" },
+    }))
     yield* fixture.llm.textMatch(conversation, "fork reply")
     yield* fixture.prompt.prompt({ sessionID: fork.id, model: ref, parts: [{ type: "text", text: "fork task" }] })
     expect((yield* fixture.llm.hits).filter(naming)).toHaveLength(1)
@@ -191,6 +201,37 @@ it.instance("oc automatic rename failure keeps the placeholder and never retries
     expect(current.title).toBe("project2")
     expect(current.metadata?.ocAutoRename.state).toBe("attempted")
     expect((yield* fixture.llm.hits).filter(naming)).toHaveLength(1)
+  }), { git: true }, 30_000,
+)
+
+it.instance("native titles and manual rename use the request behind long composed commands", () =>
+  Effect.gen(function* () {
+    const fixture = yield* setup()
+    const session = yield* fixture.sessions.create()
+    yield* fixture.llm.textMatch(conversation, "Require approval at the plan execution boundary.")
+    yield* fixture.prompt.command({
+      sessionID: session.id, model: "test/test-model", command: "spit", additionalCommands: ["think"],
+      arguments: "Require approval before plan execution",
+    })
+    yield* pollWithTimeout(fixture.sessions.get(session.id).pipe(
+      Effect.map((current) => current.title === "E2E Title" ? current : undefined),
+    ), "native title was not generated")
+    const native = (yield* fixture.llm.hits).find((hit) =>
+      JSON.stringify(hit.body.messages).includes("Generate a title for this conversation"))
+    expect(native).toBeDefined()
+    expect(JSON.stringify(native?.body.messages)).toContain("Require approval before plan execution")
+    expect(JSON.stringify(native?.body.messages)).not.toContain("Spitballing instructions.")
+    expect(JSON.stringify(native?.body.messages)).not.toContain("Thinking instructions.")
+
+    yield* fixture.llm.textMatch(naming, "project - Approval before plan execution")
+    const renamed = yield* fixture.prompt.rename(session.id)
+    expect(renamed.session.title).toBe("project - Approval before plan execution")
+    const request = JSON.stringify((yield* fixture.llm.hits).find(naming)?.body.messages)
+    expect(request).toContain("user: Require approval before plan execution")
+    expect(request).toContain("Require approval at the plan execution boundary.")
+    expect(request).toContain("Name the concrete feature, problem, or decision")
+    expect(request).not.toContain("Spitballing instructions.")
+    expect(request).not.toContain("Thinking instructions.")
   }), { git: true }, 30_000,
 )
 

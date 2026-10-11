@@ -232,7 +232,7 @@ const layer = Layer.effect(
     const npm = yield* Npm.Service
     const data = yield* loadState({ directory })
     const deps = yield* Effect.forEach(
-      data.dirs,
+      Flag.OPENCODE_DISABLE_CONFIG_INSTALL ? [] : data.dirs,
       (dir) =>
         npm
           .install(dir, {

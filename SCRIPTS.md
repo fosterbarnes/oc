@@ -14,7 +14,6 @@ Project automation lives in `.scripts/`. Scripts target PowerShell 7 and fail on
 | `.scripts/test.ps1` | Runs local package tests, HttpApi gates, typechecking, or generated-file checks. Supports package, file, test-name, category, and all-check selection. |
 | `.scripts/countCode.ps1` | Uses `scc` on PATH to refresh the README code count and root `scc.txt` language report. Runnable independently. |
 | `.scripts/updateUpstream.ps1` | Fetches and fast-forwards the separate `UPSTREAM\opencode` checkout without modifying this customized parent checkout. |
-| `.scripts/syncAndInstall.ps1` | Fail-closed upstream sync into this custom fork, then verify, backup, stop `opencode.exe`, and install. |
 | `.scripts/push.ps1` | Commits parent changes with a supplied subject, else the message in `buildNotes.txt` (line 1 subject, blank line, body) when it changed since the last commit, else a prompted subject, then pushes the current branch. It does not rewrite `.version/version` or `versionTag` and does not stage `UPSTREAM/`. `-DryRun` prints the commands only; `-Force` is explicit. |
 | `.scripts/pushRelease.ps1` | Tags and publishes archives from `src/packages/opencode/dist` to `fosterbarnes/oc` using the `.version/version` maintenance version and the `.version/versionTag` tag. The release title is `opencode v<version> <tag>`; uploaded copies are renamed to `opencode-v<version>-<tag>-<rest>.<ext>`. Existing tags are not force-moved. `-DryRun` prints the title and renames only. |
 | `.scripts/bumpVersion.ps1` | Bumps the `.version/version` patch and rolls a new random tag into `.version/versionTag`. `-RerollTag` regenerates only the tag. |
@@ -34,9 +33,6 @@ Project automation lives in `.scripts/`. Scripts target PowerShell 7 and fail on
 .\.scripts\.run.ps1
 .\.scripts\prePush.ps1
 .\.scripts\updateUpstream.ps1
-.\.scripts\syncAndInstall.ps1 -DryRun
-.\.scripts\syncAndInstall.ps1 -AllowDirtyParent -SkipFetch -SkipInstall
-.\.scripts\syncAndInstall.ps1
 .\.scripts\install.ps1
 .\.scripts\install.ps1 -NoBuild
 .\.scripts\installDebug.ps1
@@ -44,8 +40,7 @@ Project automation lives in `.scripts/`. Scripts target PowerShell 7 and fail on
 ```
 
 Agents may run `build.ps1` and `buildDebug.ps1`. They must not run
-`install.ps1`, `installDebug.ps1`, `.install.ps1`, or normal
-`syncAndInstall.ps1`: those scripts can stop the OpenCode host that launched the
+`install.ps1`, `installDebug.ps1`, or `.install.ps1`: those scripts can stop the OpenCode host that launched the
 agent. A successful agent build should report the dist artifact paths, then ask
 the user to exit OpenCode and run the install command from a fresh PowerShell:
 
@@ -56,8 +51,7 @@ the user to exit OpenCode and run the install command from a fresh PowerShell:
 ```
 
 The installers refuse inherited OpenCode processes before building, stopping,
-backing up, or copying files. `syncAndInstall.ps1 -SkipInstall` remains the
-non-install upstream sync/build path.
+backing up, or copying files.
 
 `oc` is unchanged: production `opencode.exe`, resident server on port 4096. `ocdebug` is a native PATH command; bare and project/path invocations open `oc launch`, while explicit commands pass through. It uses `opencode-debug` data/config/state, a resident server on port **4097**, DEBUG logs, and copies production user settings/authentication on first run. The TUI can overwrite debug settings from production, then requires an `ocdebug` restart. Session handoff uses `opencode export <session-id>` followed by `ocdebug import <file>`. `.scripts\install.ps1` installs both exes. `.scripts\installDebug.ps1` only stops/replaces `ocdebug.exe`.
 
@@ -122,7 +116,7 @@ checkout. Preserve dirty parent work. Do not commit, reset, stash, or merge as
 part of this operation; classify normal upstream age drift separately from
 confirmed custom behavior.
 
-`syncAndInstall.ps1` is the combined updater. Install directory, executable name, backup suffix, and the snapshot baseline live in the `CONFIG` block at the top of that script (default install `C:\Users\user\Apps\opencode\opencode.exe`). It refuses a dirty parent unless `-AllowDirtyParent` is passed after review. `Custom fork:` comments are review metadata only; overlapping hunks always stop. Text compare treats CRLF and LF as the same so Windows checkouts are not fake overlaps. `-DryRun` classifies and reports without fetch, source application, `Stop-Process`, backup, or install. `-SkipFetch` applies against the current isolated checkout. `-SkipInstall` stops after verify/build without touching the installed exe. After a clean apply it runs `git diff --check`, parses changed PowerShell files, `bun typecheck` from each affected package directory (never the repo root), then the existing Windows single-executable build. Only then (unless `-SkipInstall`) does it stop all `opencode.exe` processes, copy the current install to `opencode.exe.bak`, and install the new binary. If that `.bak` already exists, the previous backup is renamed with a timestamp unless `-OverwriteBackup` replaces it in place. Source changes stay uncommitted.
+There is no automated upstream apply. This fork has drifted too far from upstream for a hunk-based merge to be safe, so `updateUpstream.ps1` and the `UPSTREAM\opencode` checkout are kept only as a reference for cherry-picking upstream fixes by hand.
 
 The standalone build is the repository's `packages/opencode/script/build.ts --single` flow. A normal `build.ps1` run emits `dist/opencode-windows-x64/bin/opencode.exe` and `dist/opencode-debug-windows-x64/bin/ocdebug.exe`; `buildDebug.ps1` emits only the latter. The install script only supports the current Windows architecture and does not alter PATH.
 
@@ -130,7 +124,7 @@ The standalone build is the repository's `packages/opencode/script/build.ts --si
 
 ## Version and release
 
-`.version\version` is a maintenance-only semantic version for these local scripts, and `.version\versionTag` is the random camelCase two-word tag rolled on every bump. They are intentionally separate from OpenCode's package version. The agent runs `.scripts\bumpVersion.ps1` once per code-changing session, and `syncAndInstall.ps1` bumps through `incrementMaintenancePatch` when an upstream apply advances isolated `dev` (`0.0.8` -> `0.0.9`); `-RerollTag` regenerates only the tag (see `AGENTS.md` Revision). `pushRelease.ps1` titles the release `opencode v<maintenance-version> <tag>`, keeps the git tag at `v<maintenance-version>`, and uploads copies of the archives under `packages/opencode/dist` renamed to `opencode-v<ver>-<tag>-<rest>.<ext>`; `-DryRun` prints the title and renames without tagging or uploading. It does not force-move an existing tag. `push.ps1` does not rewrite these files.
+`.version\version` is a maintenance-only semantic version for these local scripts, and `.version\versionTag` is the random camelCase two-word tag rolled on every bump. They are intentionally separate from OpenCode's package version. The agent runs `.scripts\bumpVersion.ps1` once per code-changing session, including one that hand-ports upstream changes (`0.0.8` -> `0.0.9`); `-RerollTag` regenerates only the tag (see `AGENTS.md` Revision). `pushRelease.ps1` titles the release `opencode v<maintenance-version> <tag>`, keeps the git tag at `v<maintenance-version>`, and uploads copies of the archives under `packages/opencode/dist` renamed to `opencode-v<ver>-<tag>-<rest>.<ext>`; `-DryRun` prints the title and renames without tagging or uploading. It does not force-move an existing tag. `push.ps1` does not rewrite these files.
 
 Do not run `push.ps1` or `pushRelease.ps1` during ordinary validation. They create commits, push branches or tags, and publish GitHub releases. `push.ps1` reads `buildNotes.txt` for the commit message (see `AGENTS.md`); it never modifies it.
 

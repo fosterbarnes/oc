@@ -2,9 +2,12 @@ export * as Revive from "./revive"
 
 import fs from "node:fs"
 import fsp from "node:fs/promises"
+import os from "node:os"
 import path from "node:path"
+import { fileURLToPath } from "node:url"
 import { Global } from "@opencode-ai/core/global"
 import type { TerminalInfo } from "@opencode-ai/core/util/terminal"
+import { TuiLedger } from "./tuiLedger"
 
 type Terminal = TerminalInfo["kind"]
 const TERMINALS: readonly string[] = ["wezterm", "windows-terminal", "generic"]
@@ -39,6 +42,9 @@ export type ReviveContext = {
   portable?: boolean
 }
 
+/** One tab of the revived WezTerm window: an oc session, or a plain shell in its working directory. */
+export type Tab = { kind: "oc"; directory: string; sessionID?: string } | { kind: "shell"; cwd: string }
+
 /** Handed from the revive pipeline to the detached terminal restarter (worker 2). */
 export type RestartContext = {
   terminal: Terminal
@@ -54,6 +60,8 @@ export type RestartContext = {
   portable?: boolean
   directory?: string
   sessionID?: string
+  // Every tab of the window, in order (WezTerm only). More than one entry restores them all.
+  tabs?: Tab[]
 }
 
 // `source` is the user's oc source folder (chosen or downloaded on the first /revive); revive never pulls it.
@@ -74,7 +82,7 @@ export function shutdownPath(tuiPid: number) {
   return path.join(Global.Path.state, "oc-revive", `${tuiPid}.stopped`)
 }
 
-export function encode(value: ReviveContext | RestartContext) {
+export function encode(value: unknown) {
   return Buffer.from(JSON.stringify(value)).toString("base64url")
 }
 
@@ -102,11 +110,46 @@ export function decodeRestart(encoded: string): RestartContext {
     !text(value.executable) || !optional(value.entrypoint, text) || !optional(value.paneID, text) ||
     !optional(value.shellPid, pid) || !optional(value.waitPid, pid) || !optional(value.installDir, text) ||
     !optional(value.single, flag) || !optional(value.portable, flag) ||
-    !optional(value.directory, text) || !optional(value.sessionID, text) ||
+    !optional(value.directory, text) || !optional(value.sessionID, text) || !optional(value.tabs, tabList) ||
     (value.single === true && !text(value.directory))) {
     throw new Error("Invalid revive restart context")
   }
   return value as RestartContext
+}
+
+/** Reads the tabs `oc revive-tabs` receives from reopenCommand. */
+export function decodeTabs(encoded: string) {
+  const value: unknown = JSON.parse(Buffer.from(encoded, "base64url").toString("utf8"))
+  if (!tabList(value) || value.length === 0) throw new Error("Invalid revive tabs")
+  return value
+}
+
+/**
+ * Maps the panes of the window that holds `paneID` to restorable tabs. Rows keep `wezterm cli list` order,
+ * which is tab order; a split tab contributes only its first pane. A pane with a ledger record is an oc tab.
+ */
+export function windowTabs(listJson: string, records: Pick<TuiLedger.Record, "paneID" | "directory" | "sessionID">[],
+  paneID: string): Tab[] {
+  const panes = JSON.parse(listJson) as Array<{ window_id: number; tab_id: number; pane_id: number; cwd: string }>
+  const window = panes.find((pane) => String(pane.pane_id) === paneID)?.window_id
+  if (window === undefined) return []
+  const tabs = panes.filter((pane) => pane.window_id === window)
+    .filter((pane, index, all) => all.findIndex((other) => other.tab_id === pane.tab_id) === index)
+  return tabs.map((pane): Tab => {
+    const record = records.find((item) => item.paneID === String(pane.pane_id) && item.directory !== undefined)
+    return record?.directory
+      ? { kind: "oc", directory: record.directory, ...(record.sessionID ? { sessionID: record.sessionID } : {}) }
+      : { kind: "shell", cwd: cwdPath(pane.cwd) }
+  })
+}
+
+// WezTerm reports the working directory as a file:// URL; a missing or unreadable one falls back to home.
+function cwdPath(url: string) {
+  try {
+    return fileURLToPath(url)
+  } catch {
+    return os.homedir()
+  }
 }
 
 export function parseLauncher(input: unknown): Launcher {
@@ -160,11 +203,14 @@ export function resolveLauncher(executable: string, debug: boolean, exists: (fil
 
 /** Opens a fresh terminal running the configured launcher, so the next revive is hosted in place again. */
 export function reopenCommand(restart: RestartContext) {
+  // Several WezTerm tabs restart from tab 0, which spawns the rest into this window (`oc revive-tabs`).
+  const tabs = restart.terminal === "wezterm" && restart.tabs && restart.tabs.length > 1 ? restart.tabs : undefined
   const command = [restart.executable, ...(restart.entrypoint ? [restart.entrypoint] : []), "oc",
     ...(restart.single
       ? ["single", restart.directory!, ...(restart.sessionID ? ["--session", restart.sessionID] : ["--home"])]
+      : tabs ? ["revive-tabs", encode(tabs)]
       : restart.launcher === "occ" ? ["previous", "--depth", "1"] : ["launch"]),
-    ...(restart.portable ? ["--portable"] : [])]
+    ...(restart.portable && !tabs ? ["--portable"] : [])]
   if (restart.terminal === "wezterm") {
     // A fresh GUI process reloads wezterm.lua and inherits this environment instead of an unrelated mux server's.
     // wezterm-gui, not the console-subsystem wezterm CLI: that one would show its own console window
@@ -288,6 +334,17 @@ function pid(value: unknown) {
 
 function flag(value: unknown) {
   return typeof value === "boolean"
+}
+
+function tabList(value: unknown): value is Tab[] {
+  return Array.isArray(value) && value.every(tab)
+}
+
+function tab(value: unknown) {
+  if (typeof value !== "object" || value === null) return false
+  const item = value as Record<string, unknown>
+  if (item.kind === "oc") return text(item.directory) && optional(item.sessionID, text)
+  return item.kind === "shell" && text(item.cwd)
 }
 
 function optional(value: unknown, check: (value: unknown) => boolean) {

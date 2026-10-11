@@ -59,6 +59,17 @@ export const Prompt = Schema.Struct({
   }),
 }).annotate({ description: "Prompt size settings" })
 
+export const SubagentTabs = Schema.Struct({
+  click: Schema.optional(Schema.Literals(["inline", "tab"])).annotate({
+    description: "Clicking a subagent: 'inline' (default) opens it in this view, 'tab' in a new terminal tab",
+  }),
+  auto_open: Schema.optional(Schema.Boolean).annotate({
+    description: "Open each new subagent of the viewed session in its own terminal tab (default: false)",
+  }),
+}).annotate({
+  description: "Open subagents in WezTerm or Windows Terminal tabs; needs the resident oc server",
+})
+
 export const Info = Schema.Struct({
   $schema: Schema.optional(Schema.String),
   openEditedWith: Schema.optional(
@@ -80,6 +91,7 @@ export const Info = Schema.Struct({
   leader_timeout: Schema.optional(LeaderTimeout),
   attention: Schema.optional(Attention),
   prompt: Schema.optional(Prompt),
+  subagent_tabs: Schema.optional(SubagentTabs),
   scroll_speed: Schema.optional(ScrollSpeed).annotate({ description: "TUI scroll speed" }),
   scroll_acceleration: Schema.optional(ScrollAcceleration),
   diff_style: Schema.optional(DiffStyle),
@@ -90,12 +102,15 @@ export type Info = Schema.Schema.Type<typeof Info>
 
 export type KeybindPreset = (typeof TuiKeybindPreset.Names)[number]
 export type SidebarButtonStyle = NonNullable<Info["sidebar_button_style"]>
+export type SubagentTabsSettings = { click: "inline" | "tab"; auto_open: boolean }
 
-export type Resolved = Omit<Info, "attention" | "keybind_preset" | "sidebar_button_style" | "keybinds" | "leader_timeout" | "mouse" | "cursor"> & {
+export type Resolved = Omit<Info, "attention" | "keybind_preset" | "sidebar_button_style" | "subagent_tabs" | "keybinds" | "leader_timeout" | "mouse" | "cursor"> & {
   keybind_preset: KeybindPreset
   sidebar_button_style: SidebarButtonStyle
+  subagent_tabs: SubagentTabsSettings
   setKeybindPreset: (preset: KeybindPreset) => void
   setSidebarButtonStyle: (style: SidebarButtonStyle) => void
+  setSubagentTabs: (settings: SubagentTabsSettings) => void
   attention: {
     enabled: boolean
     notifications: boolean
@@ -128,6 +143,10 @@ export function resolve(input: Info, options: ResolveOptions): Resolved {
   const [sidebarButtonStyle, setSidebarButtonStyle] = createSignal<SidebarButtonStyle>(
     input.sidebar_button_style ?? "minimal",
   )
+  const [subagentTabs, setSubagentTabs] = createSignal<SubagentTabsSettings>({
+    click: input.subagent_tabs?.click ?? "inline",
+    auto_open: input.subagent_tabs?.auto_open ?? false,
+  })
 
   return {
     ...input,
@@ -142,6 +161,10 @@ export function resolve(input: Info, options: ResolveOptions): Resolved {
       return sidebarButtonStyle()
     },
     setSidebarButtonStyle,
+    get subagent_tabs() {
+      return subagentTabs()
+    },
+    setSubagentTabs,
     attention: {
       enabled: input.attention?.enabled ?? false,
       notifications: input.attention?.notifications ?? true,

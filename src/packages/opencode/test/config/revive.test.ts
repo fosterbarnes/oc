@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test"
 import fs from "fs/promises"
 import path from "path"
+import os from "node:os"
 import { Revive } from "../../src/config/revive"
 import { detachedCommand, windowsArguments } from "@opencode-ai/core/util/launch-detached"
 import { Global } from "@opencode-ai/core/global"
@@ -155,6 +156,66 @@ test.skipIf(process.platform !== "win32")("single terminal restart preserves the
     shell.kill()
     await shell.exited
   }
+})
+
+const windowList = JSON.stringify([
+  { window_id: 0, tab_id: 9, pane_id: 1, cwd: "file:///C:/Projects/crow" },
+  { window_id: 0, tab_id: 1, pane_id: 2, cwd: "file:///C:/Users/user/Projects%20A" },
+  { window_id: 0, tab_id: 2, pane_id: 3, cwd: "file:///C:/Work" },
+  { window_id: 0, tab_id: 2, pane_id: 4, cwd: "file:///C:/Work" },
+  { window_id: 0, tab_id: 3, pane_id: 5, cwd: "file:///C:/Projects/b" },
+  { window_id: 1, tab_id: 4, pane_id: 6, cwd: "file:///C:/Window2" },
+])
+const ledgerRecords = [
+  { paneID: "1", directory: "C:\\Projects\\crow", sessionID: "ses_a" },
+  { paneID: "4", directory: "C:\\Split", sessionID: "ses_split" },
+  { paneID: "5", directory: "C:\\Projects\\b" },
+  { paneID: "6", directory: "C:\\Window2" },
+]
+
+test("windowTabs keeps one window in list order, one pane per tab, oc panes from the ledger", () => {
+  expect(Revive.windowTabs(windowList, ledgerRecords, "1")).toEqual([
+    { kind: "oc", directory: "C:\\Projects\\crow", sessionID: "ses_a" },
+    { kind: "shell", cwd: "C:\\Users\\user\\Projects A" },
+    { kind: "shell", cwd: "C:\\Work" },
+    { kind: "oc", directory: "C:\\Projects\\b" },
+  ])
+  expect(Revive.windowTabs(windowList, ledgerRecords, "6")).toEqual([{ kind: "oc", directory: "C:\\Window2" }])
+  expect(Revive.windowTabs(windowList, ledgerRecords, "99")).toEqual([])
+  expect(Revive.windowTabs(JSON.stringify([
+    { window_id: 0, tab_id: 0, pane_id: 1, cwd: "https://example.com" },
+    { window_id: 0, tab_id: 1, pane_id: 2 },
+  ]), [], "1")).toEqual([
+    { kind: "shell", cwd: os.homedir() },
+    { kind: "shell", cwd: os.homedir() },
+  ])
+})
+
+test("restart tabs round-trip, and a bad tab rejects the restart context", () => {
+  const tabs: Revive.Tab[] = [{ kind: "oc", directory: context.directory, sessionID: context.sessionID }, { kind: "shell", cwd: "C:\\Work" }]
+  const worker = { ...restart, paneID: "3", tabs }
+  expect(Revive.decodeRestart(Revive.encode(worker))).toEqual(worker)
+  expect(Revive.decodeTabs(Revive.encode(tabs))).toEqual(tabs)
+  expect(() => Revive.decodeTabs(Revive.encode([]))).toThrow()
+  for (const tab of [{ kind: "oc" }, { kind: "shell", cwd: "" }, { kind: "other", cwd: "C:\\Work" }, null, "C:\\Work"]) {
+    expect(() => Revive.decodeRestart(Revive.encode({ ...restart, tabs: [tab] }))).toThrow()
+  }
+  expect(() => Revive.decodeRestart(Revive.encode({ ...restart, tabs: "C:\\Work" }))).toThrow()
+})
+
+test("wezterm restores several tabs through revive-tabs; one tab and other terminals keep previous", () => {
+  const tabs: Revive.Tab[] = [{ kind: "oc", directory: context.directory, sessionID: context.sessionID }, { kind: "shell", cwd: "C:\\Work" }]
+  const command = Revive.reopenCommand({ ...restart, terminal: "wezterm", portable: true, tabs })
+  expect(command.file).toBe("wezterm-gui")
+  expect(command.args).toEqual(["start", "--always-new-process", "--", executable, "oc", "revive-tabs",
+    Revive.encode(tabs)])
+  expect(Revive.reopenCommand({ ...restart, terminal: "wezterm", entrypoint: "C:\\src\\index.ts", tabs }).args)
+    .toEqual(["start", "--always-new-process", "--", executable, "C:\\src\\index.ts", "oc", "revive-tabs",
+      Revive.encode(tabs)])
+  expect(Revive.reopenCommand({ ...restart, terminal: "wezterm", tabs: [tabs[0]] }).args)
+    .toEqual(["start", "--always-new-process", "--", executable, "oc", "previous", "--depth", "1"])
+  expect(Revive.reopenCommand({ ...restart, terminal: "windows-terminal", tabs }).args)
+    .toContain("previous")
 })
 
 test("revive.build is a source folder with an optional debug build", () => {

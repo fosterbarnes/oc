@@ -526,6 +526,9 @@ async function revivePipeline(context: Revive.ReviveContext) {
   // Ctrl+C from here would leave oc stopped or half installed.
   const ignore = () => {}
   process.on("SIGINT", ignore)
+  const tabs = context.paneID && restart.terminal === "wezterm" && !context.single
+    ? await windowTabsSnapshot(context.paneID, context)
+    : undefined
   const failure = await (async () => {
     // Single's TUI/worker already shut down before handoff; installs rename running files aside.
     if (!context.single) await log.step("Stopping oc", () => shutdownAll())
@@ -539,8 +542,24 @@ async function revivePipeline(context: Revive.ReviveContext) {
   if (failure && !context.single) await log.step("Starting server again", () => startServer())
   await log.step(`Handing off to the terminal restarter (log: ${log.file})`, () =>
     awaitLaunch(launchDetached(process.execPath, [...(bun ? [process.argv[1]] : []),
-      "oc", "--revive-terminal", Revive.encode(restart)])))
+      "oc", "--revive-terminal", Revive.encode({ ...restart, tabs })])))
   if (failure) throw failure.error
+}
+
+async function windowTabsSnapshot(paneID: string, self: Pick<Revive.ReviveContext, "directory" | "sessionID">) {
+  try {
+    const list = Bun.spawnSync(["wezterm", "cli", "list", "--format", "json"], { stdout: "pipe", stderr: "pipe" })
+    if (list.exitCode !== 0) throw new Error(`wezterm cli list failed: ${list.stderr.toString().trim()}`)
+    const processes = listOcProcesses()
+    const records = processes === null ? [] : await TuiLedger.read(serverStateDirectory(), processes)
+    const pids = processes === null ? [] : TuiLedger.select(records, processes, Global.Path.app, executablePath(), process.pid)
+    // A hosted revive's TUI has already exited, so its ledger record is gone; its pane comes from the context.
+    const owned = records.filter((record) => pids.includes(record.pid))
+    return Revive.windowTabs(list.stdout.toString(),
+      [{ paneID, directory: self.directory, sessionID: self.sessionID }, ...owned], paneID)
+  } catch (error) {
+    await reviveLog().write(`Window tabs not restored: ${error instanceof Error ? error.message : String(error)}`)
+  }
 }
 
 function reviveTerminal(terminal: Revive.ReviveContext["terminal"]) {
@@ -708,3 +727,4 @@ export function nextProjectTitle(titles: string[], directory: string) {
 }
 
 export * as OcConfig from "./oc"
+

@@ -193,13 +193,13 @@ Build safely, install without fighting locks, and keep logs.
 
 | Feature | Level | What it does | What's left |
 |---|---|---|---|
-| PowerShell build / install / release | ~done~ | Scripts for build, debug build, install, pre-push check, push, release, upstream sync, and revive (`revive.ps1`, `reviveAndInstall.ps1`). Installer rebuilds by default, stops running OC first, can keep a timestamped backup. | Agents must not run installers (they can kill the host). |
+| PowerShell build / install / release | ~done~ | Scripts for build, debug build, install, pre-push check, push, release, upstream refresh, and revive (`revive.ps1`, `reviveAndInstall.ps1`). Installer rebuilds by default, stops running OC first, can keep a timestamped backup. | Agents must not run installers (they can kill the host). |
 | Agent-safe build vs user install | ~done~ | Agents can build. Install later with `-NoBuild`. Debug-only install does not touch production. | None realistic. |
 | `oc.exe` / `occ.exe` hard links | ~done~ | Installer links those names to the same production binary and accepts a valid link set. | None realistic. |
 | Stop processes before rebuild | ~done~ | Installer stops managed processes *before* build so `ocdebug.exe` cannot lock cleanup. | None realistic. |
 | Refuse crashing Bun 1.4.0 | high | Will not compile the Windows TUI with the known-bad Bun. Can upgrade to a canary. | Automatic global Bun upgrades are an operational risk. |
 | Cleaner hidden Windows commands | medium | Runs the Windows shell more directly and hides extra `taskkill` windows. | Escape-to-cancel confirmation is missing. |
-| Packaged Cursor helper | high | Cursor files sit next to the exe so they work outside the source tree. Canonical installer copies them. | Combined upstream-sync installer still may omit that folder. |
+| Packaged Cursor helper | high | Cursor files sit next to the exe so they work outside the source tree. Canonical installer copies them. | None realistic. |
 | On-disk debug logs | medium | Channel-aware logs, 20 MB rotate, palette and HTTP toggle. | Live restart and installed palette acceptance are not recorded. |
 
 ---
@@ -210,7 +210,7 @@ Stay close to upstream without losing custom work.
 
 | Feature | Level | What it does | What's left |
 |---|---|---|---|
-| Safe upstream sync | medium | Isolated upstream checkout, content compare, preserve custom files, stop on overlap, bump maintenance version, optional build/install. | No shared Git merge base. Combined installer can omit provider runtimes. |
+| Manual upstream porting | medium | Isolated upstream checkout kept as a reference. Upstream fixes are cherry-picked by hand, custom files are preserved, and the maintenance version is bumped. | No shared Git merge base, so every port is manual. |
 | Separate display version | ~done~ | Fork version in the TUI footer is independent of OpenCode's package version. Compatible plugins can read the current model, preferred editor, and this display version. | None realistic. |
 | Windows-safe generated paths | ~done~ | Fixes Windows migration path generation and invalid custom-element declarations. | None realistic. |
 

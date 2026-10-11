@@ -234,8 +234,18 @@ const layer = Layer.effect(
         : ((yield* provider.getSmallModel(input.providerID)) ??
           (yield* provider.getModel(input.providerID, input.modelID)))
       const msgs = onlySubtasks
-        ? [{ role: "user" as const, content: subtasks.map((p) => p.prompt).join("\n") }]
-        : yield* MessageV2.toModelMessagesEffect(context, mdl)
+        ? [{ role: "user" as const, content: subtasks.map((p) => withoutCommandHeader(p.prompt)).join("\n") }]
+        : yield* MessageV2.toModelMessagesEffect(
+            context.map((message) => ({
+              ...message,
+              parts: message.parts.map((part) =>
+                message.info.role === "user" && part.type === "text"
+                  ? { ...part, text: namingText(part) }
+                  : part,
+              ),
+            })),
+            mdl,
+          )
       const text = yield* llm
         .stream({
           agent: ag,
@@ -1618,11 +1628,12 @@ const layer = Layer.effect(
       )
       const template =
         selected.length === 1
-          ? templates[0]
+          ? `[/${cmd.name} is active: its instructions replace any earlier slash command's persona, mode, and rules from this conversation.]\n\n${templates[0]}`
           : [
               "Apply all listed slash commands together to the user request below.",
               "They are complementary unless their instructions directly conflict.",
               "For direct conflicts at the same instruction priority, later command instructions take precedence.",
+              "These commands replace any earlier slash command's persona, mode, and rules from this conversation.",
               "Follow higher-priority instructions and permission restrictions. Writing a plan does not authorize implementing it.",
               "",
               ...selected.map((definition, index) => `[/${definition.name}]\n${templates[index]}\n`),
@@ -1654,9 +1665,13 @@ const layer = Layer.effect(
       const inputFiles = new Set(
         input.parts?.filter((part) => new URL(part.url).protocol === "file:").map((part) => fileURLToPath(part.url)),
       )
-      const uniqueTemplateParts = templateParts.filter(
-        (part) => part.type !== "file" || !inputFiles.has(fileURLToPath(part.url)),
-      )
+      const uniqueTemplateParts = templateParts
+        .filter((part) => part.type !== "file" || !inputFiles.has(fileURLToPath(part.url)))
+        .map((part) =>
+          part.type === "text"
+            ? { ...part, metadata: { ...part.metadata, ocCommandArguments: input.arguments } }
+            : part,
+        )
       const isSubtask = (agent.mode === "subagent" && cmd.subtask !== false) || cmd.subtask === true
       const parts = isSubtask
         ? [
@@ -1733,7 +1748,7 @@ export function renameDigest(history: SessionV1.WithParts[]) {
   const lines = history.flatMap((m) => {
     const text = m.parts
       .filter((p): p is SessionV1.TextPart => p.type === "text" && !p.synthetic)
-      .map((p) => p.text.trim())
+      .map((p) => (m.info.role === "user" ? namingText(p) : p.text).trim())
       .join("\n")
       .slice(0, 1500)
     return text ? [`${m.info.role}: ${text}`] : []
@@ -1741,6 +1756,18 @@ export function renameDigest(history: SessionV1.WithParts[]) {
   const first = lines.find((l) => l.startsWith("user: "))
   const recent = lines.slice(-6)
   return (first && !recent.includes(first) ? [first, "...", ...recent] : recent).join("\n\n")
+}
+
+function namingText(part: SessionV1.TextPart | SessionV1.TextPartInput) {
+  // Argument-free commands can themselves describe a concrete task, such as reviewing a diff.
+  const request = part.metadata?.ocCommandArguments
+  if (typeof request === "string" && request.trim()) return request
+  return withoutCommandHeader(part.text)
+}
+
+// Single-command runs prepend an active-command header; titles use the task text.
+function withoutCommandHeader(text: string) {
+  return text.replace(/^\[[^\n]* is active:[^\n]*\]\n\n/, "")
 }
 
 const ModelRef = Schema.Struct({
