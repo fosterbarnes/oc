@@ -22,6 +22,7 @@ export interface Interface {
   readonly reload: (input: LoadInput) => Effect.Effect<InstanceContext>
   readonly dispose: (ctx: InstanceContext) => Effect.Effect<void>
   readonly disposeDirectory: (directory: string) => Effect.Effect<void>
+  readonly disposeWithin: (directory: string) => Effect.Effect<readonly string[]>
   readonly disposeAll: () => Effect.Effect<void>
   readonly provide: <A, E, R>(input: LoadInput, effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>
 }
@@ -181,6 +182,13 @@ const layer: Layer.Layer<Service, never, Project.Service | InstanceBootstrap.Ser
       )
     })
 
+    const disposeWithin = Effect.fn("InstanceStore.disposeWithin")(function* (input: string) {
+      const directory = FSUtil.resolve(input)
+      const children = [...cache.keys()].filter((item) => FSUtil.contains(directory, item))
+      yield* Effect.forEach(children, disposeDirectory, { discard: true })
+      return children
+    })
+
     const cachedDisposeAll = yield* Effect.cachedWithTTL(disposeAllOnce(), Duration.zero)
     const disposeAll = Effect.fn("InstanceStore.disposeAll")(function* () {
       return yield* cachedDisposeAll
@@ -196,6 +204,7 @@ const layer: Layer.Layer<Service, never, Project.Service | InstanceBootstrap.Ser
       reload,
       dispose,
       disposeDirectory,
+      disposeWithin,
       disposeAll,
       provide,
     })

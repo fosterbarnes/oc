@@ -183,13 +183,21 @@ reopen the session and answer; the agent carries on. Stopping a session clears a
 
 `/work` copies the project into a git worktree next to it and moves the session there. The copy
 includes your staged, unstaged, and untracked changes; your own folder and git index are not
-touched. If the project has a `package.json`, the copy gets a `bun install`.
+touched. Ignored regular root `.env*` files are copied; other ignored files are not. If the
+project has a `package.json`, the copy gets a `bun install`. `/work` waits until the current turn
+is idle. The agent is told it is in a copy: changes merge back unstaged, it must not commit, and
+it should call `work_done` when finished (or you can run `/done`). `/work` is user-only.
 
-`/done` brings the copy's changes back into the original folder as unstaged edits, leaves your
-own work there alone, and deletes the copy. Differences in whitespace or line endings alone are
+`/done` queues merge-back until the current turn succeeds, then brings the copy's changes into
+the original folder as unstaged edits, leaves your own work there alone, moves the session back,
+and deletes the copy. It never commits. Differences in whitespace or line endings alone are
 ignored. If both sides changed the same lines, your folder is left untouched, the copy gets
-conflict markers, and the agent is asked to fix them; run `/done` again when it finishes. A copy
-made from a copy returns to the copy it came from.
+conflict markers (binaries, deletions, and renames have none), and the agent is asked to inspect
+both sides, resolve every listed path, and call `work_done` with those paths. The server retries
+after that turn; at most two resolution rounds. A bare `/done` does not certify pending
+conflicts. A copy made from a copy returns to the copy it came from; finish nested copies before
+their parent. If cleanup fails after a successful merge, `/done` again from the parent finishes
+it. After a server restart, run `/done` again to resume.
 
 ### Sidebar
 
@@ -449,7 +457,7 @@ development history in `buildNotes.md`.
 
 ## Progress
 
-[519,459](scc.txt) lines of code and counting...
+[522,628](scc.txt) lines of code and counting...
 
 <!-- code-count:start -->
 
@@ -464,8 +472,8 @@ development history in `buildNotes.md`.
 | Powershell | 22 | 1,146 | 81 | 61 | 1,004 |
 | SQL | 95 | 592 | 0 | 17 | 575 |
 | Shell | 1 | 120 | 17 | 17 | 86 |
-| TypeScript | 2,746 | 537,071 | 43,370 | 15,441 | 478,260 |
-| **Total** | **3,054** | **584,866** | **49,202** | **16,205** | **519,459** |
+| TypeScript | 2,756 | 540,512 | 43,556 | 15,527 | 481,429 |
+| **Total** | **3,064** | **588,307** | **49,388** | **16,291** | **522,628** |
 
 <!-- code-count:end -->
 

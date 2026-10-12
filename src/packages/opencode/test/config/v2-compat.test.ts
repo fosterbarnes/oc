@@ -60,6 +60,28 @@ describe("V2 compatibility read fixtures", () => {
 })
 
 describe("ConfigV2Compat.lower", () => {
+  test("keeps compaction.limit from native config", () => {
+    const config = lower({
+      compaction: { auto: true, limit: { tokens: 200000, action: "handoff" } },
+    })
+    expect(config.compaction?.limit).toEqual({ tokens: 200000, action: "handoff" })
+  })
+
+  test("keeps compaction.limit providers from native config", () => {
+    const config = lower({
+      compaction: {
+        limit: {
+          tokens: 200000,
+          providers: { "claude-code": { tokens: 150000, action: "handoff" }, cursor: { action: "off" } },
+        },
+      },
+    })
+    expect(config.compaction?.limit).toEqual({
+      tokens: 200000,
+      providers: { "claude-code": { tokens: 150000, action: "handoff" }, cursor: { action: "off" } },
+    })
+  })
+
   test("returns structured invalid diagnostics while retaining supported siblings", () => {
     const result = ConfigV2Compat.lower({
       mcp: {

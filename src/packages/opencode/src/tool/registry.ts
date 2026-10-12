@@ -10,6 +10,10 @@ import { SessionFailedTool } from "./session-failed"
 import { SessionTailTool } from "./session-tail"
 import { RunAfterTurnTool } from "./run-after-turn"
 import { TimeTool } from "./time"
+import { WorkDoneTool } from "./work-done"
+import { WorkHandoff } from "@/session/work-handoff"
+import { Git } from "@opencode-ai/core/git"
+import { AbsolutePath } from "@opencode-ai/core/schema"
 import { Session } from "@/session/session"
 import { QuestionTool } from "./question"
 import { ShellTool } from "./shell"
@@ -105,6 +109,7 @@ const layer = Layer.effect(
     const truncate = yield* Truncate.Service
     const flags = yield* RuntimeFlags.Service
     const mcp = yield* MCP.Service
+    const git = yield* Git.Service
 
     const invalid = yield* InvalidTool
     const task = yield* TaskTool
@@ -121,6 +126,7 @@ const layer = Layer.effect(
     const sessionTail = yield* SessionTailTool
     const runAfterTurn = yield* RunAfterTurnTool
     const time = yield* TimeTool
+    const workDone = yield* WorkDoneTool
     const webfetch = yield* WebFetchTool
     const websearch = yield* WebSearchTool
     const shell = yield* ShellTool
@@ -141,7 +147,7 @@ const layer = Layer.effect(
         function fromPlugin(id: string, def: ToolDefinition): Tool.Def {
           // Plugin tools still expose Zod args publicly; keep that compatibility
           // boxed at the registry boundary and give the LLM the original JSON Schema.
-          // Normalize missing args to `{}` once — pre-1.14.49 the code was
+          // Normalize missing args to `{}` once - pre-1.14.49 the code was
           // `z.object(def.args)` and Zod silently tolerated undefined (#27451, #27630).
           const args = def.args ?? {}
           const entries = Object.entries(args)
@@ -248,6 +254,7 @@ const layer = Layer.effect(
           sessionTail: Tool.init(sessionTail),
           runAfterTurn: Tool.init(runAfterTurn),
           time: Tool.init(time),
+          workDone: Tool.init(workDone),
           ...(codeModeTool ? { execute: Tool.init(codeModeTool) } : {}),
         })
 
@@ -268,6 +275,7 @@ const layer = Layer.effect(
             tool.sessionTail,
             tool.runAfterTurn,
             tool.time,
+            tool.workDone,
             tool.fetch,
             tool.todo,
             tool.search,
@@ -289,7 +297,12 @@ const layer = Layer.effect(
     const all: Interface["all"] = Effect.fn("ToolRegistry.all")(function* () {
       const s = yield* InstanceState.get(state)
       const cfg = yield* config.get()
-      return [...s.builtin, ...s.custom].filter((tool) => cfg.todos === true || tool.id !== TodoWriteTool.id)
+      const directory = yield* InstanceState.directory
+      const repository = yield* git.repo.discover(AbsolutePath.make(directory))
+      const parent = repository ? yield* git.worktree.parent(repository) : undefined
+      return [...s.builtin, ...s.custom].filter((tool) =>
+        (cfg.todos === true || tool.id !== TodoWriteTool.id) && (tool.id !== WorkDoneTool.id || parent !== undefined),
+      )
     })
 
     const ids: Interface["ids"] = Effect.fn("ToolRegistry.ids")(function* () {
@@ -483,7 +496,10 @@ export const node = LayerNode.make({
     MCP.node,
     Database.node,
     Ripgrep.node,
+    Git.node,
+    WorkHandoff.node,
   ],
 })
 
 export * as ToolRegistry from "./registry"
+

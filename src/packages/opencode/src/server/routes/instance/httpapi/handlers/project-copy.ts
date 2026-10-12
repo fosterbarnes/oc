@@ -4,9 +4,12 @@ import { LLM } from "@/session/llm"
 import { MessageID, SessionID } from "@/session/schema"
 import { Slug } from "@opencode-ai/core/util/slug"
 import { LLMEvent } from "@opencode-ai/llm"
-import { Effect, Stream } from "effect"
+import { Cause, Effect, Stream } from "effect"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { InstanceHttpApi } from "../api"
+import { ApiWorkHandoffError } from "../groups/project-copy"
+import { WorkHandoff } from "@/session/work-handoff"
+import { SessionPrompt } from "@/session/prompt"
 
 const COPY_NAME_AGENT: Agent.Info = {
   name: "project-copy-name",
@@ -21,6 +24,15 @@ export const projectCopyHandlers = HttpApiBuilder.group(InstanceHttpApi, "projec
   Effect.gen(function* () {
     const llm = yield* LLM.Service
     const provider = yield* Provider.Service
+    const handoff = yield* WorkHandoff.Service
+    const prompt = yield* SessionPrompt.Service
+    const resolve = (input: SessionPrompt.TurnInput) => prompt.prompt(input).pipe(Effect.orDie)
+    const failure = (cause: Cause.Cause<never>) => {
+      const error = Cause.squash(cause)
+      return Effect.fail(new ApiWorkHandoffError({ name: "WorkHandoffError", data: {
+        message: error instanceof Error ? error.message : String(error),
+      } }))
+    }
 
     const generateName = Effect.fn("ProjectCopyHttpApi.generateName")(function* (context: string | undefined) {
       const text = context?.trim()
@@ -59,7 +71,9 @@ export const projectCopyHandlers = HttpApiBuilder.group(InstanceHttpApi, "projec
       return output ? slugify(output.split(/\s+/).slice(0, 3).join(" ")) : Slug.create()
     })
 
-    return handlers.handle("generateName", (ctx) =>
+    return handlers.handle("work", (ctx) => handoff.start(ctx.params.sessionID, ctx.payload.name, resolve).pipe(Effect.map((directory) => ({ directory })), Effect.catchCause(failure)))
+      .handle("done", (ctx) => handoff.request(ctx.params.sessionID, resolve, [], ctx.query.directory).pipe(Effect.as({ queued: true }), Effect.catchCause(failure)))
+      .handle("generateName", (ctx) =>
       generateName(ctx.payload.context).pipe(
         Effect.catchCause((cause) =>
           Effect.logWarning("project copy name generation failed", {

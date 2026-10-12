@@ -76,6 +76,36 @@ describe("Config", () => {
     }),
   )
 
+  it.effect("migrates v1 compaction limit into v2 compaction", () =>
+    Effect.sync(() => {
+      const parsed = Schema.decodeUnknownSync(ConfigV1.Info)({
+        compaction: { limit: { tokens: 200000, action: "handoff" } },
+      })
+      expect(parsed.compaction?.limit).toMatchObject({ tokens: 200000, action: "handoff" })
+      expect(ConfigMigrateV1.migrate(parsed).compaction?.limit).toMatchObject({ tokens: 200000, action: "handoff" })
+      expect(Schema.decodeUnknownSync(Config.Info)(ConfigMigrateV1.migrate(parsed)).compaction?.limit).toMatchObject({
+        tokens: 200000,
+        action: "handoff",
+      })
+    }),
+  )
+
+  it.effect("migrates v1 compaction limit providers into v2 compaction", () =>
+    Effect.sync(() => {
+      const limit = {
+        tokens: 200000,
+        action: "compact",
+        providers: { "claude-code": { tokens: 150000, action: "handoff" }, cursor: { action: "off" } },
+      }
+      const parsed = Schema.decodeUnknownSync(ConfigV1.Info)({ compaction: { limit } })
+      expect(parsed.compaction?.limit).toMatchObject(limit)
+      expect(ConfigMigrateV1.migrate(parsed).compaction?.limit).toMatchObject(limit)
+      expect(Schema.decodeUnknownSync(Config.Info)(ConfigMigrateV1.migrate(parsed)).compaction?.limit).toMatchObject(
+        limit,
+      )
+    }),
+  )
+
   it.effect("parses command palette order from v1 config", () =>
     Effect.sync(() => {
       const command_palette = { order: { "oc.new_session": 1, "model.default": 3 } }
@@ -810,3 +840,4 @@ describe("Config", () => {
     ),
   )
 })
+

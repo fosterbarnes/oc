@@ -176,11 +176,15 @@ export function usePromptMove(input: { projectID: () => string | undefined; sess
     const sessionID = input.sessionID()
     const session = sessionID ? sync.session.get(sessionID) : undefined
     if (!sessionID || !session?.directory) return
+    if (sync.data.session_status[sessionID] && sync.data.session_status[sessionID].type !== "idle") {
+      toast.show({ message: "Wait for the current turn to finish before /work", variant: "warning" })
+      return
+    }
     try {
-      const copy = await create(sessionContext(sessionID), session.directory, session.projectID)
-      if (!copy) return
-      setProgress("Moving session")
-      await moveTo(sessionID, copy, false)
+      setProgress("Creating work copy")
+      const generated = await sdk.client.experimental.projectCopy.generateName({ projectID: session.projectID, directory: session.directory, context: sessionContext(sessionID) }, { throwOnError: true })
+      const result = await sdk.client.experimental.projectCopy.work({ sessionID, directory: session.directory, name: generated.data.name }, { throwOnError: true })
+      toast.show({ message: `Work copy ready: ${result.data.directory}`, variant: "success" })
     } catch (error) {
       toast.error(error)
     } finally {
@@ -189,8 +193,7 @@ export function usePromptMove(input: { projectID: () => string | undefined; sess
     }
   }
 
-  // Merge into the recorded parent as unstaged changes, move back, then release and delete the copy.
-  // On merge failure the session stays in the copy so the work can be fixed there.
+  // The server owns waiting, conflict turns, movement, and retryable cleanup.
   async function done() {
     if (progress()) return
     const sessionID = input.sessionID()
@@ -200,37 +203,8 @@ export function usePromptMove(input: { projectID: () => string | undefined; sess
     if (!projectID || !sessionID || !copy) return
     setProgress("Merging work")
     try {
-      const merged = await sdk.client.v2.projectCopy.merge(
-        { projectID, location: { directory: copy }, directory: copy },
-        { throwOnError: true },
-      )
-      if (merged.data.conflicts.length) {
-        toast.show({
-          message: `Main changed the same lines in ${merged.data.conflicts.length} file(s); the agent is resolving them. Run /done when it finishes.`,
-          variant: "warning",
-        })
-        await sdk.client.session.promptAsync(
-          {
-            sessionID,
-            directory: copy,
-            parts: [
-              {
-                type: "text",
-                text: `The parent checkout changed the same lines while you worked. These files now contain git conflict markers (<<<<<<< ======= >>>>>>>):\n${merged.data.conflicts.join("\n")}\nKeep both sides' intent, remove all conflict markers, do not commit, then stop.`,
-              },
-            ],
-          },
-          { throwOnError: true },
-        )
-        return
-      }
-      await moveTo(sessionID, merged.data.directory, false)
-      await sdk.client.instance.dispose({ directory: copy }, { throwOnError: true })
-      await sdk.client.v2.projectCopy.remove(
-        { projectID, location: { directory: merged.data.directory }, directory: copy, force: true },
-        { throwOnError: true },
-      )
-      toast.show({ message: `Work merged as unstaged changes in ${merged.data.directory}`, variant: "success" })
+      await sdk.client.experimental.projectCopy.done({ sessionID, directory: copy }, { throwOnError: true })
+      toast.show({ message: "Work completion queued for after the current turn", variant: "info" })
     } catch (error) {
       toast.error(error)
     } finally {

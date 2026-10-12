@@ -76,6 +76,10 @@ describe("resident launch policy", () => {
     expect(OcConfig.residentLaunchAction({ ...restarting, healthy: true, hasState: true, matches: true, alive: false })).toBe("wait")
   })
 
+  test("waits for a live matching server while health is down", () => {
+    expect(OcConfig.residentLaunchAction({ ...idle, healthy: false, hasState: true, matches: true, alive: true })).toBe("wait")
+  })
+
   test("starts immediately when a stale record's pid is dead and the port is down", () => {
     expect(OcConfig.residentLaunchAction({ ...idle, healthy: false, hasState: true, matches: true, alive: false })).toBe("clear-spawn")
   })
@@ -99,6 +103,131 @@ describe("resident launch policy", () => {
     expect(OcConfig.residentRestartFresh(new Date(now - 1_000).toISOString(), now)).toBe(true)
     expect(OcConfig.residentRestartFresh(new Date(now - 31_000).toISOString(), now)).toBe(false)
     expect(OcConfig.residentRestartFresh(undefined, now)).toBe(false)
+  })
+})
+
+describe("adopt resident server", () => {
+  test("adopts a listener owned by our executable and records it", async () => {
+    let written: { pid: number; hostname: string; port: number; executable?: string } | undefined
+    const result = await OcConfig.adoptResidentServer("127.0.0.1", 4096, {
+      findListenerPid: () => 1234,
+      listProcesses: () => [{ pid: 1234, parentPid: 1, executable: OcConfig.executablePath(), startedAt: Date.now() }],
+      writeState: async (input) => { written = input },
+      readState: async () => undefined,
+    })
+    expect(result).toEqual({ ok: true, pid: 1234 })
+    expect(written).toMatchObject({ pid: 1234, hostname: "127.0.0.1", port: 4096 })
+  })
+
+  test("refuses when the listener is missing or foreign", async () => {
+    expect(await OcConfig.adoptResidentServer("127.0.0.1", 4096, {
+      findListenerPid: () => undefined,
+      readState: async () => undefined,
+    })).toEqual({ ok: false })
+    expect(await OcConfig.adoptResidentServer("127.0.0.1", 4096, {
+      findListenerPid: () => 1234,
+      listProcesses: () => [{ pid: 1234, parentPid: 1, executable: "/elsewhere/other.exe", startedAt: Date.now() }],
+      writeState: async () => { throw new Error("must not write state for a foreign server") },
+      readState: async () => undefined,
+    })).toEqual({ ok: false, pid: 1234, executable: "/elsewhere/other.exe" })
+  })
+
+  test("reuses matching state that appears before a write and does not overwrite it", async () => {
+    let writes = 0
+    const reads = [
+      undefined,
+      { pid: 99, hostname: "127.0.0.1", port: 4096 },
+    ]
+    const result = await OcConfig.adoptResidentServer("127.0.0.1", 4096, {
+      findListenerPid: () => 1234,
+      listProcesses: () => [{ pid: 1234, parentPid: 1, executable: OcConfig.executablePath(), startedAt: Date.now() }],
+      writeState: async () => { writes++ },
+      readState: async () => reads.shift(),
+      pidAlive: (pid) => pid === 99,
+    })
+    expect(result).toEqual({ ok: true, pid: 99 })
+    expect(writes).toBe(0)
+  })
+
+  test("refuses when state appears for a different owner during adoption", async () => {
+    let writes = 0
+    const reads = [
+      undefined,
+      { pid: 50, hostname: "127.0.0.1", port: 4096 },
+    ]
+    const result = await OcConfig.adoptResidentServer("127.0.0.1", 4096, {
+      findListenerPid: () => 1234,
+      listProcesses: () => [{ pid: 1234, parentPid: 1, executable: OcConfig.executablePath(), startedAt: Date.now() }],
+      writeState: async () => { writes++ },
+      readState: async () => reads.shift(),
+      pidAlive: () => false,
+    })
+    expect(result).toEqual({ ok: false, pid: 50 })
+    expect(writes).toBe(0)
+  })
+
+  test("propagates resident state write failures", async () => {
+    await expect(OcConfig.adoptResidentServer("127.0.0.1", 4096, {
+      findListenerPid: () => 1234,
+      listProcesses: () => [{ pid: 1234, parentPid: 1, executable: OcConfig.executablePath(), startedAt: Date.now() }],
+      writeState: async () => { throw new Error("disk full") },
+      readState: async () => undefined,
+    })).rejects.toThrow("disk full")
+  })
+
+  test("keeps a matching live record without rewriting it", async () => {
+    let writes = 0
+    const result = await OcConfig.adoptResidentServer("127.0.0.1", 4096, {
+      findListenerPid: () => { throw new Error("must not scan listeners when state exists") },
+      writeState: async () => { writes++ },
+      readState: async () => ({ pid: 77, hostname: "127.0.0.1", port: 4096 }),
+      pidAlive: () => true,
+    })
+    expect(result).toEqual({ ok: true, pid: 77 })
+    expect(writes).toBe(0)
+  })
+})
+
+describe("resident listener selection", () => {
+  test("selects the listener on the requested hostname, not another socket on the same port", () => {
+    const rows = [
+      { address: "::1", port: 4096, pid: 11 },
+      { address: "127.0.0.1", port: 4096, pid: 22 },
+      { address: "0.0.0.0", port: 4096, pid: 33 },
+    ]
+    expect(OcConfig.uniqueListenerPid("127.0.0.1", 4096, rows)).toBe(22)
+    expect(OcConfig.uniqueListenerPid("::1", 4096, rows)).toBe(11)
+    expect(OcConfig.uniqueListenerPid("127.0.0.1", 4096, [
+      { address: "127.0.0.1", port: 4096, pid: 22 },
+      { address: "::ffff:127.0.0.1", port: 4096, pid: 22 },
+    ])).toBe(22)
+    expect(OcConfig.uniqueListenerPid("127.0.0.1", 4096, [
+      { address: "127.0.0.1", port: 4096, pid: 22 },
+      { address: "127.0.0.1", port: 4096, pid: 44 },
+    ])).toBeUndefined()
+    expect(OcConfig.uniqueListenerPid("localhost", 4096, rows)).toBeUndefined()
+    expect(OcConfig.uniqueListenerPid("localhost", 4096, [
+      { address: "127.0.0.1", port: 4096, pid: 22 },
+      { address: "::1", port: 4096, pid: 22 },
+    ])).toBe(22)
+  })
+})
+
+describe("resident state write", () => {
+  test("replaces an existing record by rename without leaving a temp file", async () => {
+    await using tmp = await tmpdir()
+    await OcConfig.writeResidentState({ pid: 10, hostname: "127.0.0.1", port: 4096, directory: tmp.path })
+    await OcConfig.writeResidentState({
+      pid: 11,
+      hostname: "127.0.0.1",
+      port: 4096,
+      executable: "oc",
+      directory: tmp.path,
+    })
+    const written = JSON.parse(await fs.readFile(OcConfig.serverStatePath(tmp.path), "utf8"))
+    expect(written.pid).toBe(11)
+    expect(written.executable).toBe("oc")
+    expect((await fs.readdir(tmp.path)).filter((name) => name.includes(".tmp-"))).toEqual([])
   })
 })
 

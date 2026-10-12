@@ -1,0 +1,17 @@
+{
+  "extends": "../../tsconfig.json",
+  "include": [],
+  "files": [
+    "../../src/audio.d.ts",
+    "../../../core/src/git.ts",
+    "../../src/session/work-handoff.ts",
+    "../../src/session/run-state.ts",
+    "../../src/tool/work-done.ts",
+    "../../src/tool/registry.ts",
+    "../../src/provider/claude-code/session-manager.ts",
+    "../../src/provider/claude-code/session-sync.ts",
+    "../../src/provider/claude-code/spawn-planning.ts",
+    "../../src/server/routes/instance/httpapi/handlers/project-copy.ts",
+    "../../src/server/routes/instance/httpapi/groups/project-copy.ts"
+  ]
+}

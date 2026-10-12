@@ -8,7 +8,7 @@ import { resolveAgentEffort, resolveAgentModel } from "./agent-models.js"
 import { resolveOpencodeAgent, resolveOpencodeAgentPrompt, resolveSessionAffinity } from "./call-options.js"
 import { resolveSpawnCwdForSession } from "./runtime-status.js"
 import { deleteActiveProcess, deleteClaudeSessionId, sessionKey } from "./session-manager.js"
-import { requestScope } from "./title.js"
+import { requestScope, isNamingAgent } from "./title.js"
 
 export type TurnContext = Awaited<ReturnType<typeof resolveTurnContext>>
 
@@ -25,6 +25,12 @@ export async function resolveTurnContext(
   const agent = resolveOpencodeAgent(options.providerOptions, config.provider)
   // An oc compaction runs Claude Code's own `/compact` inside the live conversation.
   const compactionMode = agent === "compaction"
+  // A tool-less turn still continues the chat conversation unless it only
+  // names text (title stubs never spawn): e.g. a context-limit handoff
+  // summary runs denied under the session agent and must reach the live
+  // conversation, not a fresh key that stalls waiting for operator
+  // confirmation.
+  const continuesChat = scope === "tools" || (agent !== undefined && !isNamingAgent(agent))
   // An agent may run on a different model than the one opencode routed here
   // (see agent-models.ts), so the spawn uses the effective model.
   const effectiveModelId = resolveAgentModel(agent, modelId)
@@ -52,7 +58,7 @@ export async function resolveTurnContext(
     // yet it must reach the chat's own conversation, not the tool-less one.
     sessionKey: sessionKey(
       cwd,
-      `${compactionMode ? "tools" : scope}::${affinity}::context=${JSON.stringify([config.provider])}`,
+      `${compactionMode || continuesChat ? "tools" : scope}::${affinity}::context=${JSON.stringify([config.provider])}`,
     ),
     processSettings: JSON.stringify([effectiveModelId, agent ?? null, reasoningEffort ?? null]),
   }

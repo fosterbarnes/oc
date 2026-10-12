@@ -38,6 +38,23 @@ export function updateUsageSnapshot<T extends { ok: boolean }>(
   return { ...next, fetchedAt: next.fetchedAt ?? nowMs, source: next.source ?? "live", stale: false }
 }
 
+/** Explicit Claude merge for partial reads: unknown windows keep the in-memory snapshot's known values. */
+export function updateClaudeSnapshot(
+  previous: UsageSnapshot<ClaudeCodeUsage>,
+  next: UsageSnapshot<ClaudeCodeUsage>,
+  nowMs: number,
+): UsageSnapshot<ClaudeCodeUsage> {
+  if (!next.ok && previous.ok) return { ...previous, stale: true }
+  if (!next.ok) return next
+  if (!previous.ok) return { ...next, fetchedAt: next.fetchedAt ?? nowMs, source: next.source ?? "live", stale: false }
+  return {
+    ...withClaudeFallback(next, previous, nowMs),
+    fetchedAt: next.fetchedAt ?? nowMs,
+    source: next.source ?? "live",
+    stale: false,
+  }
+}
+
 export const DEFAULT_USAGE_PROVIDERS: UsageProviderId[] = ["openai", "cursor", "opencode-go", "openrouter"]
 
 export const USAGE_PROVIDER_OPTIONS: { id: UsageProviderId; title: string }[] = [
@@ -68,6 +85,12 @@ export type UsageWindow = {
   /** Epoch milliseconds of the reset, for the full date in the usage menu. */
   resetMs: number | null
   minutes: number | null
+  /** True when 0% comes from a passed reset, not a live reading. */
+  expired?: boolean
+  /** True when the value is last-known from disk, not the current live response. */
+  cached?: boolean
+  /** Epoch milliseconds the percent was read; per-window age for merged cache writes. */
+  fetchedAt?: number
 }
 
 export function formatUsagePercent(used: number | null | undefined, remaining = false, compact = false): string {
@@ -180,12 +203,13 @@ export function formatClaudeUsageRows(
 ) {
   const accounts = usage.accounts?.flatMap((account) => (account.usage.ok ? [account.usage] : []))
   const known = accounts?.length ? accounts : [usage]
-  const cell = (window: UsageWindow, suffix: string, compact = false) => ({
-    usedPercent: window.usedPercent,
-    resetAt: window.resetAt,
-    suffix,
-    compact,
-  })
+  const cell = (window: UsageWindow, suffix: string, compact = false) => {
+    const idle = suffix === "h" && window.usedPercent === 0 ? "-" : ""
+    // Unknown percent -> null ("reset unavailable"); hourly 0% with no reset ->
+    // shows `-` (no 5-hour window running yet); other known percents without a reset leave a blank slot.
+    const resetAt = window.resetAt ?? (window.usedPercent === null ? null : idle)
+    return { usedPercent: window.usedPercent, resetAt, suffix, compact }
+  }
   if (known.length === 1)
     return formatUsageRows({
       label: "Claude:", remaining, width, columns, clocks, days,
@@ -449,29 +473,30 @@ export async function probeClaudeCodeUsage(options: UsageOptions = {}): Promise<
     .catch(() => undefined)
   if (typeof oauth?.accessToken !== "string" || !oauth.accessToken) return { ok: false, reason: "signed-out" }
   const expired = typeof oauth.expiresAt === "number" && oauth.expiresAt <= nowMs
-  const live = expired
+  const liveRaw = expired
     ? undefined
     : await fetchUsageResponse(options, CLAUDE_USAGE_URL, {
         Authorization: `Bearer ${oauth.accessToken}`,
         "anthropic-beta": "oauth-2025-04-20",
         accept: "application/json",
       }).catch(() => undefined)
-  const liveUsage = parseClaudeUsage(live, nowMs)
+  const liveUsage = parseClaudeUsage(liveRaw, nowMs)
+  const cachedRaw = await readFile(cachePath, "utf8")
+    .then((raw) => JSON.parse(raw) as unknown)
+    .catch(() => undefined)
+  const prevStat = await stat(cachePath).catch(() => undefined)
+  const prevMtime = prevStat?.mtimeMs ?? nowMs
+  const cachedUsage = parseClaudeUsage(cachedRaw, nowMs)
+  const cachedTimed = cachedUsage.ok ? attachClaudeTimes(cachedUsage, claudeCacheTimes(cachedRaw), prevMtime) : cachedUsage
   if (liveUsage.ok) {
+    const merged = withClaudeFallback(liveUsage, cachedTimed.ok ? cachedTimed : undefined, nowMs)
     await mkdir(path.dirname(cachePath), { recursive: true })
-      .then(() => writeFile(cachePath, JSON.stringify(live)))
+      .then(() => writeFile(cachePath, JSON.stringify(mergeClaudeCache(liveRaw, cachedRaw, merged, nowMs))))
       .catch(() => undefined)
-    return liveUsage
+    return merged
   }
-  const cached = parseClaudeUsage(
-    await readFile(cachePath, "utf8")
-      .then((raw) => JSON.parse(raw) as unknown)
-      .catch(() => undefined),
-    nowMs,
-  )
-  if (!cached.ok) return expired ? { ok: false, reason: "expired" } : cached
-  const cache = await stat(cachePath).catch(() => undefined)
-  return { ...cached, source: "cache", fetchedAt: cache?.mtimeMs ?? 0 }
+  if (!cachedTimed.ok) return expired ? { ok: false, reason: "expired" } : cachedTimed
+  return { ...cachedTimed, source: "cache", fetchedAt: prevMtime }
 }
 
 /**
@@ -501,47 +526,191 @@ export async function probeClaudeCodePool(configDirs: string[], options: UsageOp
   )
   const known = results.filter((result) => result.ok)
   if (!known.length) return { ok: false }
-  const sum = (windows: UsageWindow[]): UsageWindow => {
-    const next = windows.filter((window) => window.resetMs).sort((a, b) => a.resetMs! - b.resetMs!)[0]
-    return {
-      usedPercent: Math.round(windows.reduce((total, window) => total + (window.usedPercent ?? 0), 0) / windows.length),
-      resetAt: next?.resetAt ?? null,
-      resetMs: next?.resetMs ?? null,
-      minutes: null,
-    }
-  }
   return {
     ok: true,
     // The pool reads as fresh while any account is live; an idle account's cached usage does not dim it.
     fetchedAt: Math.max(...known.map((result) => result.fetchedAt)),
     source: known.some((result) => result.source === "live") ? "live" : "cache",
-    fiveHour: sum(known.map((result) => result.fiveHour)),
-    weekly: sum(known.map((result) => result.weekly)),
+    fiveHour: averageClaudeWindows(known.map((result) => result.fiveHour)),
+    weekly: averageClaudeWindows(known.map((result) => result.weekly)),
     accounts: dirs.map((dir, index) => ({ name: path.basename(dir).replace(/^\./, ""), usage: results[index] })),
   }
 }
 
 function parseClaudeUsage(value: unknown, nowMs: number): ClaudeCodeUsage {
   const body = value as { five_hour?: unknown; seven_day?: unknown } | undefined
+  if (!body || typeof body !== "object") return { ok: false }
   const fiveHour = claudeWindow(body?.five_hour, nowMs)
   const weekly = claudeWindow(body?.seven_day, nowMs)
-  if (!fiveHour || !weekly) return { ok: false }
+  // Windows read independently: a valid weekly survives a missing hourly and vice versa.
+  // A malformed window stays unknown (null), never zero, unless its known reset proves expiry.
+  if (fiveHour.usedPercent === null && weekly.usedPercent === null) return { ok: false }
   return { ok: true, fiveHour, weekly, fetchedAt: nowMs, source: "live" }
 }
 
-function claudeWindow(value: unknown, nowMs: number): UsageWindow | undefined {
+function claudeWindow(value: unknown, nowMs: number): UsageWindow {
   const item = value as { utilization?: unknown; resets_at?: unknown } | null
-  if (typeof item?.utilization !== "number" || !Number.isFinite(item.utilization)) return
+  if (typeof item?.utilization !== "number" || !Number.isFinite(item.utilization))
+    return { usedPercent: null, resetAt: null, resetMs: null, minutes: null }
   const date = typeof item.resets_at === "string" ? new Date(item.resets_at) : undefined
   const valid = date && !Number.isNaN(date.valueOf())
   // A cached window whose reset has passed is known to be back at zero.
-  if (valid && date.valueOf() <= nowMs) return { usedPercent: 0, resetAt: null, resetMs: null, minutes: null }
+  if (valid && date.valueOf() <= nowMs)
+    return { usedPercent: 0, resetAt: null, resetMs: null, minutes: null, expired: true, fetchedAt: nowMs }
   return {
     usedPercent: Math.round(Math.max(0, Math.min(100, item.utilization))),
     resetAt: valid ? compactResetDate(date) : null,
     resetMs: valid ? date.valueOf() : null,
     minutes: null,
+    fetchedAt: nowMs,
   }
+}
+
+function isClaudeWindowRawValid(value: unknown): boolean {
+  const item = value as { utilization?: unknown } | null
+  return typeof item?.utilization === "number" && Number.isFinite(item.utilization)
+}
+
+/** Per-window reading times stored alongside the cached raw response. */
+function claudeCacheTimes(value: unknown): { five_hour?: number; seven_day?: number } {
+  const body = value as { _fetchedAt?: unknown } | null
+  const times = body && typeof body === "object" ? (body._fetchedAt as Record<string, unknown> | undefined) : undefined
+  const pick = (item: unknown) => (typeof item === "number" && Number.isFinite(item) ? item : undefined)
+  return { five_hour: pick(times?.five_hour), seven_day: pick(times?.seven_day) }
+}
+
+/** Mark a disk read as last-known, keeping each window's original reading time. */
+function attachClaudeTimes(
+  usage: Extract<ClaudeCodeUsage, { ok: true }>,
+  times: { five_hour?: number; seven_day?: number },
+  fallbackMs: number,
+): Extract<ClaudeCodeUsage, { ok: true }> {
+  const at = (item: number | undefined) => item ?? fallbackMs
+  return {
+    ...usage,
+    fiveHour:
+      usage.fiveHour.usedPercent === null
+        ? usage.fiveHour
+        : { ...usage.fiveHour, cached: true, fetchedAt: at(times.five_hour) },
+    weekly:
+      usage.weekly.usedPercent === null
+        ? usage.weekly
+        : { ...usage.weekly, cached: true, fetchedAt: at(times.seven_day) },
+  }
+}
+
+/** Merge raw responses so a partial live read never drops a good cached sibling from disk. */
+function mergeClaudeCache(
+  liveRaw: unknown,
+  cachedRaw: unknown,
+  merged: Extract<ClaudeCodeUsage, { ok: true }>,
+  nowMs: number,
+): unknown {
+  if (!liveRaw || typeof liveRaw !== "object") return liveRaw
+  const live = liveRaw as Record<string, unknown>
+  const cached = (cachedRaw && typeof cachedRaw === "object" ? cachedRaw : {}) as Record<string, unknown>
+  const out: Record<string, unknown> = { ...live }
+  for (const key of ["five_hour", "seven_day"] as const) {
+    if (!isClaudeWindowRawValid(live[key]) && isClaudeWindowRawValid(cached[key])) out[key] = cached[key]
+  }
+  // Per-window ages travel with the file so the old sibling is not laundered as fresh after restart.
+  out._fetchedAt = {
+    five_hour: merged.fiveHour.fetchedAt ?? nowMs,
+    seven_day: merged.weekly.fetchedAt ?? nowMs,
+  }
+  return out
+}
+
+function mergeClaudeWindow(live: UsageWindow, fallback: UsageWindow | undefined, nowMs: number): UsageWindow {
+  if (live.usedPercent !== null) return live
+  if (!fallback) return live
+  if (fallback.usedPercent !== null && fallback.resetMs !== null && fallback.resetMs <= nowMs)
+    return { ...fallback, usedPercent: 0, resetAt: null, resetMs: null, minutes: null, expired: true, cached: true }
+  if (fallback.usedPercent !== null) return { ...fallback, cached: true }
+  return live
+}
+
+/** Fill unknown windows in `primary` from `fallback` (disk cache or in-memory snapshot). */
+export function withClaudeFallback(
+  primary: Extract<ClaudeCodeUsage, { ok: true }>,
+  fallback: ClaudeCodeUsage | undefined,
+  nowMs: number,
+): Extract<ClaudeCodeUsage, { ok: true }> {
+  const fallbackOk = fallback?.ok ? fallback : undefined
+  const byName = new Map(
+    (fallbackOk?.accounts ?? []).flatMap((account) => (account.usage.ok ? [[account.name, account.usage] as const] : [])),
+  )
+  const accounts = primary.accounts?.map((account) => {
+    const previous = byName.get(account.name)
+    if (account.usage.ok && previous?.ok) return { name: account.name, usage: withClaudeFallback(account.usage, previous, nowMs) }
+    if (!account.usage.ok && previous?.ok) return { name: account.name, usage: markClaudeCached(previous) }
+    return account
+  })
+  const merged: Extract<ClaudeCodeUsage, { ok: true }> = {
+    ...primary,
+    fiveHour: mergeClaudeWindow(primary.fiveHour, fallbackOk?.fiveHour, nowMs),
+    weekly: mergeClaudeWindow(primary.weekly, fallbackOk?.weekly, nowMs),
+    ...(accounts ? { accounts } : {}),
+  }
+  return merged
+}
+
+function markClaudeCached(usage: Extract<ClaudeCodeUsage, { ok: true }>): Extract<ClaudeCodeUsage, { ok: true }> {
+  return {
+    ...usage,
+    source: "cache",
+    fiveHour: usage.fiveHour.usedPercent === null ? usage.fiveHour : { ...usage.fiveHour, cached: true },
+    weekly: usage.weekly.usedPercent === null ? usage.weekly : { ...usage.weekly, cached: true },
+  }
+}
+
+/** Pool average over known windows only; unknown windows are left out, never zero. */
+function averageClaudeWindows(windows: UsageWindow[]): UsageWindow {
+  const known = windows.filter((window) => window.usedPercent !== null)
+  if (!known.length) return { usedPercent: null, resetAt: null, resetMs: null, minutes: null }
+  const next = known
+    .filter((window) => window.resetMs !== null)
+    .sort((a, b) => (a.resetMs as number) - (b.resetMs as number))[0]
+  const expired = known.every((window) => window.expired) ? { expired: true } as const : {}
+  const cached = known.every((window) => window.cached) ? { cached: true } as const : {}
+  const timed = known.every((window) => window.fetchedAt !== undefined)
+    ? { fetchedAt: Math.max(...known.map((window) => window.fetchedAt as number)) } as const
+    : {}
+  return {
+    usedPercent: Math.round(known.reduce((total, window) => total + (window.usedPercent as number), 0) / known.length),
+    resetAt: next?.resetAt ?? null,
+    resetMs: next?.resetMs ?? null,
+    minutes: null,
+    ...expired,
+    ...cached,
+    ...timed,
+  }
+}
+
+/** Expire known windows against the local clock; pooled accounts expire individually then re-aggregate. */
+export function projectClaudeUsage(snapshot: ClaudeCodeUsage, nowMs: number): ClaudeCodeUsage {
+  if (!snapshot.ok) return snapshot
+  if (snapshot.accounts) {
+    const accounts = snapshot.accounts.map((account) => ({
+      name: account.name,
+      usage: projectClaudeUsage(account.usage, nowMs),
+    }))
+    const known = accounts.map((account) => account.usage).filter((usage) => usage.ok)
+    return {
+      ...snapshot,
+      fiveHour: averageClaudeWindows(known.map((usage) => usage.fiveHour)),
+      weekly: averageClaudeWindows(known.map((usage) => usage.weekly)),
+      accounts,
+    }
+  }
+  return { ...snapshot, fiveHour: projectClaudeWindow(snapshot.fiveHour, nowMs), weekly: projectClaudeWindow(snapshot.weekly, nowMs) }
+}
+
+function projectClaudeWindow(window: UsageWindow, nowMs: number): UsageWindow {
+  // Only a known reading can expire; a genuinely unknown window stays unknown.
+  if (window.usedPercent !== null && window.resetMs !== null && window.resetMs <= nowMs)
+    return { ...window, usedPercent: 0, resetAt: null, resetMs: null, minutes: null, expired: true }
+  return window
 }
 
 function resetTimestamp(resetAt: unknown, resetAfterSeconds: unknown, nowMs: number): number | null {

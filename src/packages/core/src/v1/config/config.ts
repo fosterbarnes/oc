@@ -29,6 +29,15 @@ const LogLevelRef = Schema.Literals(["DEBUG", "INFO", "WARN", "ERROR"]).annotate
   description: "Log level",
 })
 
+const CompactionLimitEntryV1 = Schema.Struct({
+  tokens: Schema.optional(PositiveInt).annotate({
+    description: "Token threshold for this provider. Falls back to the global limit tokens, then 200000.",
+  }),
+  action: Schema.optional(Schema.Literals(["compact", "handoff", "off"])).annotate({
+    description: "Action for this provider when it crosses its threshold. Overrides the global limit action. off disables it for this provider.",
+  }),
+})
+
 export const Info = Schema.Struct({
   $schema: Schema.optional(Schema.String).annotate({
     description: "JSON schema reference for configuration validation",
@@ -186,6 +195,20 @@ export const Info = Schema.Struct({
       reserved: Schema.optional(NonNegativeInt).annotate({
         description: "Token buffer for compaction. Leaves enough window to avoid overflow during compaction.",
       }),
+      limit: Schema.optional(
+        Schema.Struct({
+          tokens: Schema.optional(PositiveInt).annotate({
+            description: "Token threshold for the context limit action (default: 200000)",
+          }),
+          action: Schema.optional(Schema.Literals(["compact", "handoff", "off"])).annotate({
+            description: "When the session crosses the token threshold: compact in place, hand off to a new session, or do nothing",
+          }),
+          providers: Schema.optional(Schema.Record(Schema.String, CompactionLimitEntryV1)).annotate({
+            description:
+              "Per-provider overrides keyed by provider ID. claude-code-<account> uses the claude-code key. A provider entry alone enables the limit for that provider only.",
+          }),
+        }),
+      ),
     }),
   ),
   experimental: Schema.optional(
@@ -212,4 +235,5 @@ export const Info = Schema.Struct({
 }).annotate({ identifier: "Config" })
 
 export type Info = DeepMutable<Schema.Schema.Type<typeof Info>>
+
 

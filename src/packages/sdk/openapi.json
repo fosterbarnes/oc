@@ -21513,6 +21513,37 @@
               "reserved": {
                 "type": "integer",
                 "minimum": 0
+              },
+              "limit": {
+                "type": "object",
+                "properties": {
+                  "tokens": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0
+                  },
+                  "action": {
+                    "type": "string",
+                    "enum": ["compact", "handoff", "off"]
+                  },
+                  "providers": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "object",
+                      "properties": {
+                        "tokens": {
+                          "type": "integer",
+                          "exclusiveMinimum": 0
+                        },
+                        "action": {
+                          "type": "string",
+                          "enum": ["compact", "handoff", "off"]
+                        }
+                      },
+                      "additionalProperties": false
+                    }
+                  }
+                },
+                "additionalProperties": false
               }
             },
             "additionalProperties": false

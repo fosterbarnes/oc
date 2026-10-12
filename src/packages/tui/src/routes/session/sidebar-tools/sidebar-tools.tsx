@@ -9,6 +9,7 @@ import { useEvent } from "../../../context/event"
 import { useKV } from "../../../context/kv"
 import { useTuiConfig } from "../../../config"
 import { HeaderButton } from "./headerButton"
+import { SidebarToggle } from "../../../feature-plugins/sidebar/toggle"
 import { useTheme } from "../../../context/theme"
 import { useTuiPaths } from "../../../context/runtime"
 import { useLocal } from "../../../context/local"
@@ -23,6 +24,7 @@ import { InstallationDisplayVersion, InstallationVersion } from "@opencode-ai/co
 import {
   BUILTIN_SHELLS,
   clearCursorSessionToken,
+  clipEnd,
   defaultScriptSettings,
   defaultSidebarSettings,
   dedupeRootPaths,
@@ -38,6 +40,8 @@ import {
   readCursorSessionToken,
   readScripts,
   readTree,
+  reconcileScripts,
+  reconcileTree,
   rootSections,
   runEverythingSearch,
   sameRootPath,
@@ -72,8 +76,10 @@ import {
   probeOpenAIUsage,
   probeOpenCodeGoUsage,
   probeOpenRouterUsage,
+  projectClaudeUsage,
   shouldRefreshUsageAfterIdle,
   shouldRefreshUsageProvider,
+  updateClaudeSnapshot,
   updateUsageSnapshot,
   usageProviderForModel,
   USAGE_PROVIDER_OPTIONS,
@@ -272,9 +278,6 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
   const [scriptsOpen, setScriptsOpen] = createSignal(true)
   const [filesOpen, setFilesOpen] = createSignal(true)
   const [hovered, setHovered] = createSignal<string>()
-  // OpenTUI's native truncate puts the ellipsis mid-text; clip at the end instead.
-  const clipEnd = (text: string, width: number) =>
-    width <= 0 || text.length <= width ? text : `${text.slice(0, Math.max(0, width - 3))}...`
   // Overflowing hovered names scroll left one cell per tick, pause at both ends, then loop.
   const [marqueeOffset, setMarqueeOffset] = createSignal(0)
   let marqueeTimer: ReturnType<typeof setInterval> | undefined
@@ -306,6 +309,9 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
   let usageBox: BoxRenderable | undefined
   const [usageProviders, setUsageProviders] = createSignal<UsageProviderId[]>([...sidebarSettings.usageProviders])
   const [usageSpacing, setUsageSpacing] = createSignal(sidebarSettings.usageSpacing)
+  // Same kv key as the sidebar section state in feature-plugins/sidebar/open.ts.
+  const usageOpen = () => kv.get("sidebar_open_usage", true)
+  const setUsageOpen = (next: boolean) => kv.set("sidebar_open_usage", next)
   const [expanded, setExpanded] = createSignal<Set<string>>(new Set(["."]))
   const [tree, setTree] = createSignal(readTree(root, expanded()))
   let pins = new Set(sidebarSettings.scriptPins)
@@ -469,7 +475,7 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
               const next =
                 dirs.length > 1 ? await probeClaudeCodePool(dirs, options) : await probeClaudeCodeUsage(options)
               if (!usageAbort.signal.aborted)
-                setClaudeCodeUsage((previous) => updateUsageSnapshot(previous, next, Date.now()))
+                setClaudeCodeUsage((previous) => updateClaudeSnapshot(previous, next, Date.now()))
               return
             }
             const next = await probeCursorUsage({ ...options, cursorSessionToken })
@@ -525,16 +531,16 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
     setScriptsOpen(true)
     setFilesOpen(true)
     setExpanded(new Set(["."]))
-    setScripts(readScripts(project, root, scriptSettings))
-    setTree(readTree(root, expanded()))
+    setScripts((prev) => reconcileScripts(prev, readScripts(project, root, scriptSettings)))
+    setTree((prev) => reconcileTree(prev, readTree(root, expanded())))
     refreshCommands()
     refreshOldUsage()
   }
   const refresh = () => {
     const nextSessionID = currentSessionID()
     syncSession(nextSessionID)
-    setScripts(readScripts(project, root, scriptSettings))
-    setTree(readTree(root, expanded()))
+    setScripts((prev) => reconcileScripts(prev, readScripts(project, root, scriptSettings)))
+    setTree((prev) => reconcileTree(prev, readTree(root, expanded())))
     refreshCommands()
     void syncSidebarVisibility()
   }
@@ -561,8 +567,8 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
     syncStoredRootState()
     saveProjectSettings()
     setExpanded(new Set(["."]))
-    setScripts(readScripts(project, root, scriptSettings))
-    setTree(readTree(root, expanded()))
+    setScripts((prev) => reconcileScripts(prev, readScripts(project, root, scriptSettings)))
+    setTree((prev) => reconcileTree(prev, readTree(root, expanded())))
     refreshCommands()
   }
   const savePins = () => {
@@ -649,7 +655,9 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
     const cursorNeedsToken =
       !cursorSnapshot.ok && (cursorSnapshot.reason === "need-token" || cursorSnapshot.reason === "reauthenticate")
     const claudeSnapshot = claudeCodeUsage()
-    const claudeOk = claudeSnapshot.ok ? claudeSnapshot : undefined
+    // Expire known windows against the local minute clock; no new request, no timestamp refresh.
+    const claudeProjected = claudeSnapshot.ok ? projectClaudeUsage(claudeSnapshot, usageNow()) : claudeSnapshot
+    const claudeOk = claudeProjected.ok ? claudeProjected : undefined
     const cell = (window: UsageWindow, suffix = windowLabel(window.minutes)) => ({
       usedPercent: window.usedPercent,
       resetAt: window.resetAt,
@@ -716,8 +724,19 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
         }}
       >
         <box flexDirection="row" gap={1}>
+          {/* Stops propagation on mouseUp so the outer box does not open the usage menu. */}
+          <SidebarToggle
+            open={usageOpen()}
+            fg={hovered() === "usage" ? hoverColor : theme.text}
+            onMouseDown={(event) => {
+              event.stopPropagation()
+              if (event.button === 0) setUsageOpen(!usageOpen())
+            }}
+            onMouseUp={(event) => event.stopPropagation()}
+          />
           <text fg={hovered() === "usage" ? hoverColor : theme.text}>Usage:</text>
         </box>
+        <Show when={usageOpen()}>
         {/* Each visible provider is one flex child, so gap spaces only providers that render. */}
         <box flexDirection="column" gap={usageSpacing() ? 1 : 0}>
         <Show when={usageProviders().length === 0}>
@@ -763,7 +782,7 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
               </>
             }
           >
-            {aligned("Claude:", claudeSnapshot, rows.claude)}
+            {aligned("Claude:", claudeProjected, rows.claude)}
           </Show>
           </box>
         </Show>
@@ -828,6 +847,7 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
           </box>
         </Show>
         </box>
+        </Show>
       </box>
     )
   }
@@ -836,7 +856,7 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
     if (next.has(relativePath)) next.delete(relativePath)
     else next.add(relativePath)
     setExpanded(next)
-    setTree(readTree(root, next))
+    setTree((prev) => reconcileTree(prev, readTree(root, next)))
   }
   const insertChatText = (sessionID: string, text: string) => {
     const ref = sessionID === currentSessionID() ? promptRef.current : undefined
@@ -1145,7 +1165,7 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
     scriptSettings = normalizeScriptSettings(next, sidebarSettings.scripts)
     sidebarSettings.scripts = scriptSettings
     saveUserScriptSettings(os.homedir(), scriptSettings)
-    setScripts(readScripts(project, root, scriptSettings))
+    setScripts((prev) => reconcileScripts(prev, readScripts(project, root, scriptSettings)))
     refreshCommands()
     toast.show({ variant: "success", message })
   }
@@ -1153,7 +1173,7 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
     scriptSettings = normalizeScriptSettings(null, sidebarSettings.scripts)
     sidebarSettings.scripts = scriptSettings
     saveUserScriptSettings(os.homedir(), scriptSettings)
-    setScripts(readScripts(project, root, scriptSettings))
+    setScripts((prev) => reconcileScripts(prev, readScripts(project, root, scriptSettings)))
     refreshCommands()
     toast.show({ variant: "success", message: "Global script settings reset" })
   }
@@ -1526,11 +1546,20 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
           row(category, "API", monthly.apiUsedPercent, [reset(monthly.resetMs)]),
         ]
       }
+      const claudeDetail = (window: UsageWindow): string[] => {
+        if (window.resetMs !== null) {
+          const base = reset(window.resetMs)
+          return window.cached ? [base, "Last known reading"] : [base]
+        }
+        if (window.expired) return ["Reset passed, showing 0%"]
+        if (window.usedPercent !== null) return window.cached ? ["Last known reading"] : []
+        return ["Reset date unavailable"]
+      }
       const claudeRows = (usage: ClaudeCodeUsage, group: string) =>
         usage.ok
           ? [
-              row(group, "5-hour", usage.fiveHour.usedPercent, [reset(usage.fiveHour.resetMs)]),
-              row(group, "Weekly", usage.weekly.usedPercent, [reset(usage.weekly.resetMs)]),
+              row(group, "5-hour", usage.fiveHour.usedPercent, claudeDetail(usage.fiveHour)),
+              row(group, "Weekly", usage.weekly.usedPercent, claudeDetail(usage.weekly)),
             ]
           : usage.reason === "signed-out"
             ? [{ category: group, title: "Not signed in", inert: true }]
@@ -1544,7 +1573,8 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
                   },
                 ]
               : [unavailable(group)]
-      const snapshot = claudeCodeUsage()
+      const rawClaude = claudeCodeUsage()
+      const snapshot = rawClaude.ok ? projectClaudeUsage(rawClaude, nowMs) : rawClaude
       // Pooled logins each get their own group so an unreadable account still shows up.
       if (snapshot.ok && snapshot.accounts)
         return snapshot.accounts.flatMap((account) => claudeRows(account.usage, `${category} (${account.name})`))
@@ -1809,18 +1839,18 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
             if (event.button === 0) openScriptSettings()
           }}
         >
-          <text
+          <SidebarToggle
+            open={scriptsOpen()}
             fg={hovered() === "scripts" ? hoverColor : theme.text}
             onMouseDown={(event) => {
               event.stopPropagation()
               if (event.button === 0) setScriptsOpen((open) => !open)
             }}
             onMouseUp={(event) => event.stopPropagation()}
-          >
-            {scriptsOpen() ? "-" : "+"}
-          </text>
+          />
           <text
             fg={hovered() === "scripts" ? hoverColor : theme.accent}
+            selectable={false}
             onMouseDown={(event) => {
               event.stopPropagation()
               if (event.button === 0) openScriptSettings()
@@ -1890,18 +1920,18 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
             if (event.button === 0) openRootPicker()
           }}
         >
-          <text
+          <SidebarToggle
+            open={filesOpen()}
             fg={hovered() === "files" ? hoverColor : theme.text}
             onMouseDown={(event) => {
               event.stopPropagation()
               setFilesOpen((open) => !open)
             }}
             onMouseUp={(event) => event.stopPropagation()}
-          >
-            {filesOpen() ? "-" : "+"}
-          </text>
+          />
           <text
             fg={hovered() === "files" ? hoverColor : theme.accent}
+            selectable={false}
             onMouseDown={(event) => {
               if (event.button === 0) {
                 event.stopPropagation()

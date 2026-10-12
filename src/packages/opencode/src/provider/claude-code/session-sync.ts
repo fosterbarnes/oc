@@ -26,6 +26,7 @@ import {
   markClaudeSessionLost,
   rewindClaudeSession,
   takeClaudeSessionLoss,
+  takeSessionDirectoryMove,
 } from "./session-manager.js"
 
 type Prompt = LanguageModelV3CallOptions["prompt"]
@@ -67,6 +68,9 @@ export async function syncClaudeSession(input: {
   }
   const loss = takeClaudeSessionLoss(key)
   if (!getClaudeSessionId(key)) {
+    if (takeSessionDirectoryMove(input.turn.affinity, input.turn.cwd)) {
+      return "> **Working directory changed:** started Claude Code in the session's new directory with the last exchange. Earlier turns remain in oc history.\n"
+    }
     if (!input.hasPriorConversation) return undefined
     // Moving to another pool account is intended, so nothing to confirm.
     if (input.accountSwitch) {

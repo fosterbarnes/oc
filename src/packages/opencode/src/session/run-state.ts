@@ -3,7 +3,7 @@ import { InstanceState } from "@/effect/instance-state"
 import { SessionV1 } from "@opencode-ai/core/v1/session"
 import { Runner } from "@/effect/runner"
 import { BackgroundJob } from "@/background/job"
-import { Effect, Latch, Layer, Scope, Context } from "effect"
+import { Deferred, Effect, Exit, Fiber, Latch, Layer, Scope, Context } from "effect"
 import { Session } from "./session"
 import { SessionID } from "./schema"
 import { SessionStatus } from "./status"
@@ -11,6 +11,10 @@ import { Flock } from "@opencode-ai/core/util/flock"
 import { SessionWork } from "@opencode-ai/core/session/work"
 
 export interface Interface {
+  readonly completion: (sessionID: SessionID) => Effect.Effect<Effect.Effect<boolean>>
+  readonly maintenance: <A, E, R>(sessionID: SessionID, effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E | Session.BusyError, R>
+  readonly assertAvailable: (sessionID: SessionID) => Effect.Effect<void, Session.BusyError>
+  readonly cancellation: (sessionID: SessionID) => Effect.Effect<number>
   readonly assertNotBusy: (sessionID: SessionID) => Effect.Effect<void, Session.BusyError>
   readonly cancel: (sessionID: SessionID) => Effect.Effect<void>
   readonly ensureRunning: (
@@ -28,12 +32,21 @@ export interface Interface {
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/SessionRunState") {}
 
+export function successfulTurn(result: SessionV1.WithParts) {
+  return result.info.role === "assistant" && !result.info.error &&
+    typeof result.info.finish === "string" && result.info.finish.length > 0 &&
+    !["tool-calls", "unknown", "error", "content-filter"].includes(result.info.finish)
+}
+
 const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
     const background = yield* BackgroundJob.Service
     const status = yield* SessionStatus.Service
     const workBoundary = yield* SessionWork.Service
+    const held = new Set<SessionID>()
+    const cancellations = new Map<SessionID, number>()
+    const assertAvailable = (sessionID: SessionID) => held.has(sessionID) ? Effect.fail(busyError(sessionID)) : Effect.void
 
     const state = yield* InstanceState.make(
       Effect.fn("SessionRunState.state")(function* () {
@@ -57,6 +70,7 @@ const layer = Layer.effect(
       onInterrupt: Effect.Effect<SessionV1.WithParts>,
     ) {
       const data = yield* InstanceState.get(state)
+      yield* assertAvailable(sessionID).pipe(Effect.orDie)
       const existing = data.runners.get(sessionID)
       if (existing) return existing
       const next = Runner.make<SessionV1.WithParts>(data.scope, {
@@ -72,12 +86,14 @@ const layer = Layer.effect(
     })
 
     const assertNotBusy = Effect.fn("SessionRunState.assertNotBusy")(function* (sessionID: SessionID) {
+      yield* assertAvailable(sessionID)
       const data = yield* InstanceState.get(state)
       const existing = data.runners.get(sessionID)
       if (existing?.busy) yield* busyError(sessionID)
     })
 
     const cancel = Effect.fn("SessionRunState.cancel")(function* (sessionID: SessionID) {
+      cancellations.set(sessionID, (cancellations.get(sessionID) ?? 0) + 1)
       yield* cancelBackgroundJobs(background, sessionID)
       const data = yield* InstanceState.get(state)
       const existing = data.runners.get(sessionID)
@@ -107,7 +123,33 @@ const layer = Layer.effect(
         .pipe(Effect.catchTag("RunnerBusy", () => Effect.fail(busyError(sessionID))))
     })
 
-    return Service.of({ assertNotBusy, cancel, ensureRunning, startShell })
+    const completion = Effect.fn("SessionRunState.completion")(function* (sessionID: SessionID) {
+      const data = yield* InstanceState.get(state)
+      const current = data.runners.get(sessionID)?.state
+      if (!current || current._tag === "Idle") return Effect.succeed(true)
+      if (current._tag === "Running") return Fiber.await(current.run.fiber).pipe(
+        Effect.map((exit) => Exit.isSuccess(exit) && successfulTurn(exit.value)),
+      )
+      if (current._tag === "ShellThenRun") return Deferred.await(current.run.done).pipe(
+        Effect.map(successfulTurn),
+        Effect.catchCause(() => Effect.succeed(false)),
+      )
+      return Effect.gen(function* () {
+        const exit = yield* Fiber.await(current.shell.fiber)
+        return Exit.isSuccess(exit) && !(yield* Deferred.isDone(current.shell.cancelled))
+      })
+    })
+    const maintenance: Interface["maintenance"] = (sessionID, effect) => Effect.gen(function* () {
+      yield* assertNotBusy(sessionID)
+      return yield* Effect.acquireUseRelease(
+        Effect.suspend(() => held.has(sessionID) ? Effect.fail(busyError(sessionID)) : Effect.sync(() => held.add(sessionID))),
+        () => effect,
+        () => Effect.sync(() => { held.delete(sessionID) }),
+      )
+    })
+    return Service.of({ assertNotBusy, assertAvailable, completion, maintenance, cancel, ensureRunning, startShell,
+      cancellation: (sessionID) => Effect.sync(() => cancellations.get(sessionID) ?? 0),
+    })
   }),
 )
 

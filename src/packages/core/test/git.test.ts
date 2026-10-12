@@ -132,9 +132,10 @@ describe("Git worktrees", () => {
         ).toEqual(before.files)
       }),
     ),
+    30_000,
   )
 
-  it.live("merges only copy changes into a parent with newer commits and staged and unstaged edits", () =>
+  it.live("handoff preserves staged and unstaged parent edits through merge retry and removal", () =>
     withWorkRepo((git, main, directory) =>
       Effect.gen(function* () {
         // The dirty source is part of the base, not a change owned by the copy.
@@ -174,13 +175,19 @@ describe("Git worktrees", () => {
               .quiet()
               .then((result) => result.exitCode),
           ),
-        ).toBe(1)
+        ).toBe(0)
+        expect(yield* git.worktree.merge({ copy })).toEqual({ directory: main.worktree, conflicts: [] })
+        expect(yield* read(path.join(main.worktree, "copy.txt"))).toBe("copy committed\n")
+        yield* git.worktree.remove({ repository: main, directory, force: true })
+        yield* git.worktree.remove({ repository: main, directory, force: true })
+        expect(yield* Effect.promise(() => $`git for-each-ref refs/oc/`.cwd(main.worktree).text())).toBe("")
       }),
     ),
+    30_000,
   )
 
   it.live(
-    "writes conflicts into the copy and merges its resolution without changing real indexes",
+    "handoff rejects unresolved markers and merges explicit resolution without changing real indexes",
     () =>
       withWorkRepo((git, main, directory) =>
         Effect.gen(function* () {
@@ -199,6 +206,8 @@ describe("Git worktrees", () => {
           expect(marked).toContain(">>>>>>>")
           expect(marked).toContain("parent\n")
           expect(marked).toContain("copy\n")
+          expect((yield* git.worktree.merge({ copy, resolved: ["copy.txt"] })).conflicts).toEqual(["copy.txt"])
+          expect(yield* checkoutState(main, ["copy.txt"])).toEqual(before)
           expect(yield* Effect.promise(() => fs.readFile(path.join(copy.gitDirectory, "index")))).toEqual(copyIndex)
           expect(yield* checkoutState(main, ["copy.txt"])).toEqual(before)
           expect(
@@ -221,7 +230,7 @@ describe("Git worktrees", () => {
             "parent\n",
           )
           yield* Effect.promise(() => fs.writeFile(path.join(copy.worktree, "copy.txt"), "parent and copy\n"))
-          expect(yield* git.worktree.merge({ copy })).toEqual({ directory: main.worktree, conflicts: [] })
+          expect(yield* git.worktree.merge({ copy, resolved: ["copy.txt"] })).toEqual({ directory: main.worktree, conflicts: [] })
           expect(yield* read(path.join(main.worktree, "copy.txt"))).toBe("parent and copy\n")
           expect(yield* Effect.promise(() => fs.readFile(path.join(main.gitDirectory, "index")))).toEqual(before.index)
           expect(yield* Effect.promise(() => $`git status --porcelain`.cwd(main.worktree).text())).toContain(
@@ -252,6 +261,99 @@ describe("Git worktrees", () => {
     30_000,
   )
 
+  it.live("handoff keeps all conflict names and requires binary and deletion resolution", () =>
+    withWorkRepo((git, main, directory) => Effect.gen(function* () {
+      yield* Effect.promise(async () => {
+        await fs.writeFile(path.join(main.worktree, "binary.dat"), Buffer.from([0, 1]))
+        await $`git add binary.dat`.cwd(main.worktree).quiet()
+        await $`git commit -m binary`.cwd(main.worktree).quiet()
+      })
+      const copy = yield* git.worktree.copy({ repository: main, directory, name: path.basename(directory) })
+      yield* Effect.promise(async () => {
+        await fs.writeFile(path.join(main.worktree, "binary.dat"), Buffer.from([0, 2]))
+        await fs.writeFile(path.join(copy.worktree, "binary.dat"), Buffer.from([0, 3]))
+        await fs.writeFile(path.join(main.worktree, "deleted.txt"), "modified\n")
+        await fs.unlink(path.join(copy.worktree, "deleted.txt"))
+      })
+      const before = yield* checkoutState(main, ["binary.dat", "deleted.txt"])
+      const conflict = yield* git.worktree.merge({ copy })
+      expect(conflict.conflicts).toEqual(["binary.dat", "deleted.txt"])
+      expect((yield* git.worktree.merge({ copy })).conflicts).toEqual(conflict.conflicts)
+      expect(yield* checkoutState(main, ["binary.dat", "deleted.txt"])).toEqual(before)
+      yield* Effect.promise(async () => {
+        await fs.writeFile(path.join(copy.worktree, "binary.dat"), Buffer.from([0, 4]))
+        await fs.unlink(path.join(copy.worktree, "deleted.txt"))
+      })
+      expect((yield* git.worktree.merge({ copy, resolved: conflict.conflicts })).conflicts).toEqual([])
+      expect(yield* Effect.promise(() => fs.readFile(path.join(main.worktree, "binary.dat")))).toEqual(Buffer.from([0, 4]))
+      expect(yield* Effect.promise(() => fs.readFile(path.join(main.gitDirectory, "index")))).toEqual(before.index)
+    })), 30_000,
+  )
+
+  it.live("handoff copies only ignored regular root environment files without following links", () =>
+    withWorkRepo((git, main, directory) => Effect.gen(function* () {
+      yield* Effect.promise(async () => {
+        await fs.writeFile(path.join(main.worktree, ".gitignore"), ".env*\nignored/\n")
+        await fs.writeFile(path.join(main.worktree, ".env.local"), "LOCAL=1\n")
+        await fs.mkdir(path.join(main.worktree, ".envDirectory"))
+        await fs.writeFile(path.join(main.worktree, ".envDirectory", "secret"), "not copied")
+        await fs.mkdir(path.join(main.worktree, "ignored"))
+        await fs.writeFile(path.join(main.worktree, "ignored", ".env"), "not copied")
+        await fs.symlink(path.join(main.worktree, "ignored"), path.join(main.worktree, ".envEscape"), process.platform === "win32" ? "junction" : "dir")
+      })
+      const before = yield* checkoutState(main, ["copy.txt"])
+      const copy = yield* git.worktree.copy({ repository: main, directory, name: path.basename(directory) })
+      expect(yield* read(path.join(copy.worktree, ".env.local"))).toBe("LOCAL=1\n")
+      const files = yield* Effect.promise(() => fs.readdir(copy.worktree))
+      expect(files).not.toContain(".envDirectory")
+      expect(files).not.toContain(".envEscape")
+      expect(files).not.toContain("ignored")
+      expect(yield* checkoutState(main, ["copy.txt"])).toEqual(before)
+    })), 30_000,
+  )
+
+  it.live("handoff refuses removing a parent copy while nested copies remain", () =>
+    withWorkRepo((git, main, directory) => Effect.gen(function* () {
+      const outer = yield* git.worktree.copy({ repository: main, directory, name: path.basename(directory) })
+      const innerDirectory = AbsolutePath.make(path.join(path.dirname(directory), "inner"))
+      const inner = yield* git.worktree.copy({ repository: outer, directory: innerDirectory, name: "inner" })
+      expect((yield* git.worktree.remove({ repository: main, directory, force: true }).pipe(Effect.flip)).message).toContain("nested")
+      expect(yield* git.worktree.parent(outer)).toBe(main.worktree)
+      yield* git.worktree.remove({ repository: main, directory: inner.worktree, force: true })
+      yield* git.worktree.remove({ repository: main, directory, force: true })
+    })), 30_000,
+  )
+
+  it.live("handoff resumes a partially written merge without overwriting newer unrelated parent files", () =>
+    withWorkRepo((git, main, directory) => Effect.gen(function* () {
+      const copy = yield* git.worktree.copy({ repository: main, directory, name: path.basename(directory) })
+      yield* Effect.promise(async () => {
+        await fs.writeFile(path.join(copy.worktree, ".gitattributes"), "bad.txt filter=fail\n")
+        await fs.writeFile(path.join(copy.worktree, "a.txt"), "written before failure\n")
+        await fs.writeFile(path.join(copy.worktree, "bad.txt"), "written after retry\n")
+        await $`git config filter.fail.smudge ${"exit 1"}`.cwd(main.worktree).quiet()
+        await $`git config filter.fail.clean cat`.cwd(main.worktree).quiet()
+        await $`git config filter.fail.required true`.cwd(main.worktree).quiet()
+      })
+      const index = yield* Effect.promise(() => fs.readFile(path.join(main.gitDirectory, "index")))
+      const head = yield* git.history.head(main)
+      const failure = yield* git.worktree.merge({ copy }).pipe(Effect.flip)
+      expect(failure.operation).toBe("merge")
+      expect(yield* read(path.join(main.worktree, "a.txt"))).toBe("written before failure\n")
+      expect(yield* Effect.promise(() => $`git config --get oc.work.copy.writing`.cwd(main.worktree).text())).toContain('"tree"')
+      yield* Effect.promise(async () => {
+        await fs.writeFile(path.join(main.worktree, "outside.txt"), "new parent work\n")
+        await $`git config --unset filter.fail.smudge`.cwd(main.worktree).quiet()
+        await $`git config filter.fail.required false`.cwd(main.worktree).quiet()
+      })
+      expect((yield* git.worktree.merge({ copy })).conflicts).toEqual([])
+      expect(yield* read(path.join(main.worktree, "bad.txt"))).toBe("written after retry\n")
+      expect(yield* read(path.join(main.worktree, "outside.txt"))).toBe("new parent work\n")
+      expect(yield* Effect.promise(() => fs.readFile(path.join(main.gitDirectory, "index")))).toEqual(index)
+      expect(yield* git.history.head(main)).toBe(head)
+    })), 30_000,
+  )
+
   it.live("ignores final-newline differences when both sides change the same line", () =>
     withWorkRepo((git, main, directory) =>
       Effect.gen(function* () {
@@ -264,6 +366,7 @@ describe("Git worktrees", () => {
         expect((yield* read(path.join(main.worktree, "copy.txt"))).trimEnd()).toBe("main")
       }),
     ),
+    30_000,
   )
 
   it.live("preserves CRLF checkout bytes and does not introduce phantom changes", () =>
@@ -285,6 +388,7 @@ describe("Git worktrees", () => {
         expect(yield* Effect.promise(() => $`git diff --name-only`.cwd(main.worktree).text())).toBe("copy.txt\n")
       }),
     ),
+    30_000,
   )
 })
 
@@ -376,3 +480,4 @@ describe("Git trees", () => {
     }),
   )
 })
+

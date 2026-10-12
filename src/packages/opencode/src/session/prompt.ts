@@ -15,6 +15,8 @@ import { Provider } from "@/provider/provider"
 import { type Tool as AITool, tool, jsonSchema } from "ai"
 import type { JSONSchema7 } from "@ai-sdk/provider"
 import { SessionCompaction } from "./compaction"
+import { SessionHandoff } from "./handoff"
+import { limitAction, overLimit } from "./overflow"
 import { SystemPrompt } from "./system"
 import { Instruction } from "./instruction"
 import { Plugin } from "../plugin"
@@ -47,6 +49,7 @@ import { Cause, Effect, Exit, Latch, Layer, Option, Scope, Context, Schema, Type
 import { InstanceState } from "@/effect/instance-state"
 import { TaskTool, type TaskPromptOps } from "@/tool/task"
 import { SessionRunState } from "./run-state"
+import { WorkHandoff } from "./work-handoff"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { Database } from "@opencode-ai/core/database/database"
@@ -132,6 +135,7 @@ const layer = Layer.effect(
     const provider = yield* Provider.Service
     const processor = yield* SessionProcessor.Service
     const compaction = yield* SessionCompaction.Service
+    const handoff = yield* SessionHandoff.Service
     const plugin = yield* Plugin.Service
     const commands = yield* Command.Service
     const config = yield* Config.Service
@@ -146,6 +150,7 @@ const layer = Layer.effect(
     const scope = yield* Scope.Scope
     const instruction = yield* Instruction.Service
     const state = yield* SessionRunState.Service
+    const workHandoff = yield* WorkHandoff.Service
     const revert = yield* SessionRevert.Service
     const summary = yield* SessionSummary.Service
     const sys = yield* SystemPrompt.Service
@@ -1182,6 +1187,7 @@ const layer = Layer.effect(
     const prompt: (input: TurnInput) => Effect.Effect<SessionV1.WithParts, Image.Error> = Effect.fn(
       "SessionPrompt.prompt",
     )(function* (input: TurnInput) {
+      if (!input.noReply) yield* state.assertAvailable(input.sessionID).pipe(Effect.orDie)
       const session = yield* sessions.get(input.sessionID).pipe(Effect.orDie)
       yield* revert.cleanup(session)
       const message = yield* createUserMessage(input)
@@ -1248,6 +1254,40 @@ const layer = Layer.effect(
             !hasToolCalls &&
             lastAssistant.parentID === lastUser.id
           ) {
+            const lastUserMsg = msgs.findLast((message) => message.info.id === lastUser.id)
+            if (lastUserMsg && SessionHandoff.isHandoffMessage(lastUserMsg)) {
+              const lastAssistantFull = msgs.findLast((message) => message.info.id === lastAssistant.id)
+              if (
+                lastAssistantFull &&
+                !lastAssistant.error &&
+                lastAssistant.finish !== "error"
+              ) {
+                const summary = SessionHandoff.assistantText(lastAssistantFull)
+                if (summary) {
+                  const original = msgs.findLast(
+                    (message) => message.info.role === "user" && !SessionHandoff.isHandoffMessage(message),
+                  )
+                  const child = yield* handoff.finish({
+                    fromID: sessionID,
+                    summary,
+                    lastUser,
+                    origin: session,
+                    permission:
+                      original?.info.role === "user" ? (original.info.permission ?? session.permission) : session.permission,
+                  })
+                  if (child) {
+                    yield* loop({ sessionID: child.id }).pipe(
+                      Effect.catchCause((cause) =>
+                        Effect.logError("Handoff kickoff failed", { sessionID: child.id, cause }),
+                      ),
+                      Effect.forkDetach,
+                    )
+                  }
+                }
+              }
+              yield* Effect.logInfo("exiting loop after handoff", { "session.id": sessionID })
+              break
+            }
             const orphan = lastAssistantMsg?.parts.find(
               (part): part is SessionV1.ToolPart => part.type === "tool" && isOrphanedInterruptedTool(part),
             )
@@ -1258,6 +1298,29 @@ const layer = Layer.effect(
                 tool: orphan.tool,
                 callID: orphan.callID,
               })
+            }
+            if (lastFinished && lastFinished.summary !== true && !lastFinished.error) {
+              const model = yield* getModel(lastFinished.providerID, lastFinished.modelID, sessionID)
+              const cfg = yield* config.get()
+              const action = limitAction(cfg, model.providerID)
+              if (
+                action &&
+                action !== "off" &&
+                !(yield* workHandoff.isPending(sessionID)) &&
+                SessionHandoff.canAutoHandoff({ session, messages: msgs }) &&
+                overLimit({ cfg, tokens: lastFinished.tokens, model, outputTokenMax: flags.outputTokenMax })
+              ) {
+                if (action === "handoff") {
+                  yield* handoff.enqueue({
+                    sessionID,
+                    agent: lastUser.agent,
+                    model: lastUser.model,
+                  })
+                  continue
+                }
+                yield* compaction.create({ sessionID, agent: lastUser.agent, model: lastUser.model, auto: true })
+                continue
+              }
             }
             yield* Effect.logInfo("exiting loop", { "session.id": sessionID })
             break
@@ -1294,13 +1357,16 @@ const layer = Layer.effect(
             continue
           }
 
-          if (
-            lastFinished &&
-            lastFinished.summary !== true &&
-            (yield* compaction.isOverflow({ tokens: lastFinished.tokens, model }))
-          ) {
-            yield* compaction.create({ sessionID, agent: lastUser.agent, model: lastUser.model, auto: true })
-            continue
+          if (lastFinished && lastFinished.summary !== true) {
+            const cfg = yield* config.get()
+            const overflowed = yield* compaction.isOverflow({ tokens: lastFinished.tokens, model })
+            const limited =
+              limitAction(cfg, model.providerID) === "compact" &&
+              overLimit({ cfg, tokens: lastFinished.tokens, model, outputTokenMax: flags.outputTokenMax })
+            if (overflowed || limited) {
+              yield* compaction.create({ sessionID, agent: lastUser.agent, model: lastUser.model, auto: true })
+              continue
+            }
           }
 
           const agent = yield* agents.get(lastUser.agent)
@@ -1887,6 +1953,7 @@ export const node = LayerNode.make({
     Provider.node,
     SessionProcessor.node,
     SessionCompaction.node,
+    SessionHandoff.node,
     Plugin.node,
     Command.node,
     Config.node,
@@ -1900,6 +1967,7 @@ export const node = LayerNode.make({
     CrossSpawnSpawner.node,
     Instruction.node,
     SessionRunState.node,
+    WorkHandoff.node,
     SessionRevert.node,
     SessionSummary.node,
     SystemPrompt.node,
@@ -1913,3 +1981,4 @@ export const node = LayerNode.make({
 })
 
 export * as SessionPrompt from "./prompt"
+

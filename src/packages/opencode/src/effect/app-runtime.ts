@@ -24,8 +24,10 @@ import { Todo } from "@/session/todo"
 import { Session } from "@/session/session"
 import { SessionStatus } from "@/session/status"
 import { SessionRunState } from "@/session/run-state"
+import { WorkHandoff } from "@/session/work-handoff"
 import { SessionProcessor } from "@/session/processor"
 import { SessionCompaction } from "@/session/compaction"
+import { SessionHandoff } from "@/session/handoff"
 import { SessionRevert } from "@/session/revert"
 import { SessionSummary } from "@/session/summary"
 import { SessionPrompt } from "@/session/prompt"
@@ -83,8 +85,10 @@ export const AppLayer = AppNodeBuilderV1.build(
     RuntimeFlags.node,
     EventV2Bridge.node,
     SessionRunState.node,
+    WorkHandoff.node,
     SessionProcessor.node,
     SessionCompaction.node,
+    SessionHandoff.node,
     SessionRevert.node,
     SessionSummary.node,
     SessionPrompt.node,
@@ -111,7 +115,7 @@ export const AppLayer = AppNodeBuilderV1.build(
 const rt = ManagedRuntime.make(AppLayer, { memoMap })
 type Runtime = Pick<typeof rt, "runSync" | "runPromise" | "runPromiseExit" | "runFork" | "runCallback" | "dispose">
 
-/** Services provided by AppRuntime — i.e. what an Effect run via AppRuntime.runPromise can yield. */
+/** Services provided by AppRuntime - i.e. what an Effect run via AppRuntime.runPromise can yield. */
 export type AppServices = ManagedRuntime.ManagedRuntime.Services<typeof rt>
 const wrap = (effect: Parameters<typeof rt.runSync>[0]) => attach(effect as never) as never
 

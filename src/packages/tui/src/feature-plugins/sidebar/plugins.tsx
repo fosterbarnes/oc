@@ -1,5 +1,6 @@
 import type { TuiPlugin, TuiPluginApi } from "@opencode-ai/plugin/tui"
 import { sectionOpen } from "./open"
+import { SidebarToggle } from "./toggle"
 import type { BuiltinTuiPlugin } from "../builtins"
 import { createMemo, createResource, For, Show } from "solid-js"
 import path from "path"
@@ -63,8 +64,8 @@ function View(props: { api: TuiPluginApi }) {
     <Show when={rows().length + builtin().length > 0}>
       <box>
         <box flexDirection="row" gap={1} onMouseDown={() => setOpen(!expanded())}>
-          <text fg={theme().text}>{expanded() ? "▼" : "▶"}</text>
-          <text fg={theme().text}>
+          <SidebarToggle open={expanded()} fg={theme().text} />
+          <text fg={theme().text} selectable={false}>
             <b>Plugins</b>
             <Show when={!expanded()}>
               <span style={{ fg: theme().textMuted }}>

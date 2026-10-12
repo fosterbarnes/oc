@@ -9,6 +9,9 @@ import {
   formatClaudeUsageRows,
   usageColumns,
   probeClaudeCodeUsage,
+  probeClaudeCodePool,
+  projectClaudeUsage,
+  updateClaudeSnapshot,
   shouldRefreshUsageProvider,
   updateUsageSnapshot,
   usageProviderForModel,
@@ -141,11 +144,12 @@ test("Claude pooled missing reset still preserves the weekly value and account s
       { name: "second", usage: claudeAccounts[1] },
     ],
   }, true, 25)
+  // Genuine unknown hourly stays unavailable; the known weekly without a reset
+  // shares the row with a blank date slot instead of "reset unavailable".
   expect(rows).toMatchObject([
     { usage: "Claude: unavailable", reset: "        reset unavailable" },
     { usage: "        4%h", reset: "       ~3:20AM 10/11/26" },
-    { usage: " 92%w", reset: " reset unavailable" },
-    { usage: " 92%w", reset: "~12:30PM 10/18/26" },
+    { usage: " 92%w, 92%w", reset: "      ~12:30PM 10/18/26" },
   ])
 })
 
@@ -380,6 +384,368 @@ test("Claude fallback carries disk age and cache source", async () => {
     expect(cached.ok && cached.source).toBe("cache")
     expect(cached.ok && cached.fetchedAt).toBe((await stat(cache)).mtimeMs)
     expect(cached.ok && cached.fiveHour.usedPercent).toBe(25)
+    // A full cache read is last-known, never live: windows carry the original reading time.
+    if (cached.ok && live.ok) {
+      expect(cached.fiveHour.cached).toBe(true)
+      expect(cached.weekly.cached).toBe(true)
+      expect(cached.fiveHour.fetchedAt).toBe(live.fetchedAt)
+      expect(cached.weekly.fetchedAt).toBe(live.fetchedAt)
+    }
+  } finally {
+    await rm(directory, { recursive: true, force: true })
+  }
+})
+
+test("Claude partial body keeps the valid sibling and the cached missing reading", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "oc-usage-partial-"))
+  try {
+    const credentials = path.join(directory, "credentials.json")
+    const cache = path.join(directory, "usage.json")
+    await Bun.write(credentials, JSON.stringify({ claudeAiOauth: { accessToken: "test", expiresAt: 10_000 } }))
+    // Seed disk with both windows so the partial live read has a sibling to keep.
+    await Bun.write(
+      cache,
+      JSON.stringify({
+        five_hour: { utilization: 20, resets_at: new Date(60_000).toISOString() },
+        seven_day: { utilization: 40, resets_at: new Date(90_000).toISOString() },
+      }),
+    )
+    const merged = await probeClaudeCodeUsage({
+      claudeCredentialsPath: credentials,
+      claudeUsageCachePath: cache,
+      nowMs: 100,
+      fetchImpl: async () => Response.json({ five_hour: { utilization: "bad" }, seven_day: { utilization: 70 } }),
+    })
+    expect(merged.ok).toBe(true)
+    if (merged.ok) {
+      // Live weekly wins; missing hourly falls back to disk and is marked last-known.
+      expect(merged.weekly.usedPercent).toBe(70)
+      expect(merged.weekly.cached).toBeUndefined()
+      expect(merged.fiveHour.usedPercent).toBe(20)
+      expect(merged.fiveHour.cached).toBe(true)
+      expect(merged.source).toBe("live")
+      expect(merged.fetchedAt).toBe(100)
+    }
+    // Disk still holds both windows after the partial write, so a restart keeps the sibling.
+    const reread = await probeClaudeCodeUsage({
+      claudeCredentialsPath: credentials,
+      claudeUsageCachePath: cache,
+      nowMs: 100,
+      fetchImpl: async () => {
+        throw new Error("offline")
+      },
+    })
+    expect(reread.ok).toBe(true)
+    if (reread.ok) {
+      expect(reread.fiveHour.usedPercent).toBe(20)
+      expect(reread.weekly.usedPercent).toBe(70)
+    }
+  } finally {
+    await rm(directory, { recursive: true, force: true })
+  }
+})
+
+test("Claude partial write keeps the old sibling's age instead of laundering it fresh", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "oc-usage-age-"))
+  try {
+    const credentials = path.join(directory, "credentials.json")
+    const cache = path.join(directory, "usage.json")
+    await Bun.write(credentials, JSON.stringify({ claudeAiOauth: { accessToken: "test", expiresAt: 10_000 } }))
+    await Bun.write(
+      cache,
+      JSON.stringify({
+        five_hour: { utilization: 20, resets_at: new Date(60_000).toISOString() },
+        seven_day: { utilization: 40, resets_at: new Date(90_000).toISOString() },
+      }),
+    )
+    const seededMs = (await stat(cache)).mtimeMs
+    const merged = await probeClaudeCodeUsage({
+      claudeCredentialsPath: credentials,
+      claudeUsageCachePath: cache,
+      nowMs: 100,
+      fetchImpl: async () => Response.json({ five_hour: { utilization: "bad" }, seven_day: { utilization: 70 } }),
+    })
+    expect(merged.ok).toBe(true)
+    if (merged.ok) {
+      expect(merged.fiveHour.cached).toBe(true)
+      expect(merged.fiveHour.fetchedAt).toBe(seededMs)
+      expect(merged.weekly.usedPercent).toBe(70)
+      expect(merged.weekly.cached).toBeUndefined()
+    }
+    // After restart the cached sibling still reports its original reading time, not the live write's.
+    const reread = await probeClaudeCodeUsage({
+      claudeCredentialsPath: credentials,
+      claudeUsageCachePath: cache,
+      nowMs: 100,
+      fetchImpl: async () => {
+        throw new Error("offline")
+      },
+    })
+    expect(reread.ok && reread.source).toBe("cache")
+    if (reread.ok) {
+      expect(reread.fiveHour.usedPercent).toBe(20)
+      expect(reread.fiveHour.cached).toBe(true)
+      expect(reread.fiveHour.fetchedAt).toBe(seededMs)
+      expect(reread.weekly.usedPercent).toBe(70)
+      expect(reread.weekly.cached).toBe(true)
+    }
+  } finally {
+    await rm(directory, { recursive: true, force: true })
+  }
+})
+
+test("Claude snapshot update keeps the live sibling and the known memory sibling", () => {
+  const previous: UsageSnapshot<ClaudeCodeUsage> = {
+    ok: true, fetchedAt: 50, source: "live",
+    fiveHour: { usedPercent: 20, resetAt: "d", resetMs: 60_000, minutes: null, fetchedAt: 50 },
+    weekly: { usedPercent: 40, resetAt: "d", resetMs: 90_000, minutes: null, fetchedAt: 50 },
+  }
+  const next: UsageSnapshot<ClaudeCodeUsage> = {
+    ok: true, fetchedAt: 100, source: "live",
+    fiveHour: { usedPercent: null, resetAt: null, resetMs: null, minutes: null },
+    weekly: { usedPercent: 70, resetAt: null, resetMs: null, minutes: null, fetchedAt: 100 },
+  }
+  // Same explicit helper the sidebar calls for the Claude provider.
+  const merged = updateClaudeSnapshot(previous, next, 100)
+  expect(merged.ok).toBe(true)
+  if (merged.ok) {
+    expect(merged.weekly.usedPercent).toBe(70)
+    expect(merged.weekly.cached).toBeUndefined()
+    expect(merged.fiveHour.usedPercent).toBe(20)
+    expect(merged.fiveHour.cached).toBe(true)
+    expect(merged.fiveHour.fetchedAt).toBe(50)
+    expect(merged.fetchedAt).toBe(100)
+    expect(merged.source).toBe("live")
+    expect(merged.stale).toBe(false)
+  }
+  expect(updateClaudeSnapshot(previous, { ok: false }, 200)).toEqual({ ...previous, stale: true })
+})
+
+test("Claude snapshot update falls back a failed pooled account as cache", () => {
+  const remembered: Extract<ClaudeCodeUsage, { ok: true }> = {
+    ok: true, fetchedAt: 50, source: "live",
+    fiveHour: { usedPercent: 10, resetAt: null, resetMs: null, minutes: null, fetchedAt: 50 },
+    weekly: { usedPercent: 20, resetAt: null, resetMs: null, minutes: null, fetchedAt: 50 },
+  }
+  const previous: UsageSnapshot<ClaudeCodeUsage> = {
+    ok: true, fetchedAt: 50, source: "live",
+    fiveHour: { usedPercent: 10, resetAt: null, resetMs: null, minutes: null },
+    weekly: { usedPercent: 20, resetAt: null, resetMs: null, minutes: null },
+    accounts: [{ name: "work", usage: remembered }],
+  }
+  const failed: UsageSnapshot<ClaudeCodeUsage> = {
+    ok: true, fetchedAt: 100, source: "live",
+    fiveHour: { usedPercent: null, resetAt: null, resetMs: null, minutes: null },
+    weekly: { usedPercent: null, resetAt: null, resetMs: null, minutes: null },
+    accounts: [{ name: "work", usage: { ok: false, reason: "expired" } }],
+  }
+  const merged = updateClaudeSnapshot(previous, failed, 100)
+  expect(merged.ok).toBe(true)
+  if (merged.ok) {
+    const account = merged.accounts?.[0]?.usage
+    expect(account?.ok).toBe(true)
+    if (account?.ok) {
+      expect(account.source).toBe("cache")
+      expect(account.fetchedAt).toBe(50)
+      expect(account.fiveHour.usedPercent).toBe(10)
+      expect(account.fiveHour.cached).toBe(true)
+    }
+  }
+})
+
+test("Claude malformed body with no history stays unknown without fabricated values", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "oc-usage-unknown-"))
+  try {
+    const credentials = path.join(directory, "credentials.json")
+    const cache = path.join(directory, "usage.json")
+    await Bun.write(credentials, JSON.stringify({ claudeAiOauth: { accessToken: "test", expiresAt: 10_000 } }))
+    const result = await probeClaudeCodeUsage({
+      claudeCredentialsPath: credentials,
+      claudeUsageCachePath: cache,
+      nowMs: 100,
+      fetchImpl: async () => Response.json({ five_hour: { utilization: "bad" }, seven_day: null }),
+    })
+    expect(result).toEqual({ ok: false })
+  } finally {
+    await rm(directory, { recursive: true, force: true })
+  }
+})
+
+test("Claude expired deadlines reset to zero with metadata and no invented date", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "oc-usage-expired-"))
+  try {
+    const credentials = path.join(directory, "credentials.json")
+    const cache = path.join(directory, "usage.json")
+    await Bun.write(credentials, JSON.stringify({ claudeAiOauth: { accessToken: "test", expiresAt: 10_000_000 } }))
+    const live = await probeClaudeCodeUsage({
+      claudeCredentialsPath: credentials,
+      claudeUsageCachePath: cache,
+      nowMs: 200_000,
+      fetchImpl: async () =>
+        Response.json({
+          five_hour: { utilization: 25, resets_at: new Date(60_000).toISOString() },
+          seven_day: { utilization: 50, resets_at: new Date(300_000).toISOString() },
+        }),
+    })
+    expect(live.ok).toBe(true)
+    if (live.ok) {
+      expect(live.fiveHour).toMatchObject({ usedPercent: 0, resetAt: null, resetMs: null, expired: true })
+      expect(live.weekly.usedPercent).toBe(50)
+      expect(live.weekly.expired).toBeUndefined()
+    }
+    // Cached read past the hourly deadline expires the same way without a new request body.
+    const cached = await probeClaudeCodeUsage({
+      claudeCredentialsPath: credentials,
+      claudeUsageCachePath: cache,
+      nowMs: 400_000,
+      fetchImpl: async () => {
+        throw new Error("offline")
+      },
+    })
+    expect(cached.ok).toBe(true)
+    if (cached.ok) {
+      expect(cached.fiveHour.usedPercent).toBe(0)
+      expect(cached.fiveHour.expired).toBe(true)
+      expect(cached.weekly.usedPercent).toBe(0)
+      expect(cached.weekly.expired).toBe(true)
+    }
+  } finally {
+    await rm(directory, { recursive: true, force: true })
+  }
+})
+
+test("Claude hourly 0% without a reset shows a dash", () => {
+  const rows = formatClaudeUsageRows(claudeAccount(0, null, 8, "10/18/26 ~12:30PM"), false)
+  expect(rows).toHaveLength(1)
+  expect(rows).toMatchObject([{ usage: "Claude: 0%h, 8%w", reset: "        -,  ~12:30PM 10/18/26" }])
+  // Genuine unknown percentage still reads unavailable.
+  const unknown = formatClaudeUsageRows(
+    {
+      ok: true, fetchedAt: 100, source: "live",
+      fiveHour: { usedPercent: null, resetAt: null, resetMs: null, minutes: null },
+      weekly: { usedPercent: 8, resetAt: null, resetMs: null, minutes: null },
+    },
+    false,
+  )
+  expect(unknown.map((row) => row.usage).join("\n")).toContain("unavailable")
+})
+
+test("Claude pooled hourly dash and mixed reset slots", () => {
+  const bothIdle = formatClaudeUsageRows({
+    ...claudeAccount(0, null, 81, "1/2/26 ~1:05AM"),
+    accounts: [
+      claudeAccount(0, null, 81, "1/2/26 ~1:05AM"),
+      claudeAccount(0, null, 8, "10/18/26 ~12:30PM"),
+    ].map((usage, index) => ({ name: String(index), usage })),
+  }, false)
+  expect(bothIdle[0]).toMatchObject({ usage: "Claude: 0%h, 0%h", reset: "        -,   -" })
+  expect(bothIdle[0].reset.trim()).toBe("-,   -")
+  expect(bothIdle[1]).toMatchObject({
+    usage: "        81%w,    8%w",
+    reset: "1/2/26 ~1:05AM, ~12:30PM 10/18/26",
+  })
+
+  const mixedAccounts = [claudeAccounts[0], claudeAccount(0, null, 8, "10/18/26 ~12:30PM")].map((usage, index) => ({
+    name: String(index),
+    usage,
+  }))
+  const mixedRow = { usage: "Claude:   100%h,  0%h", reset: "10/11/26 ~2:30AM, -" }
+  for (const width of [undefined, 40] as const) {
+    const mixed = formatClaudeUsageRows({ ...claudeAccounts[0], accounts: mixedAccounts }, false, width)
+    expect(mixed).toHaveLength(2)
+    expect(mixed[0]).toMatchObject(mixedRow)
+    const { usage, reset } = mixed[0]
+    const percents = Array.from(usage.matchAll(/\d+(?:\.\d+)?%/g), (match) => match.index!)
+    expect(percents[0]).toBe(reset.indexOf("~") + 1)
+    expect(percents[1]).toBe(reset.indexOf("-"))
+  }
+
+  const nonzeroHour = formatClaudeUsageRows(claudeAccount(5, null, 8, "10/18/26 ~12:30PM"), false)
+  expect(nonzeroHour).toMatchObject([{ usage: "Claude: 5%h, 8%w", reset: "            ~12:30PM 10/18/26" }])
+  expect(nonzeroHour[0].reset).not.toContain("-")
+})
+
+test("local clock projection expires hourly, keeps weekly, metadata, and used/remaining", () => {
+  const resetMs = 10_000
+  const snapshot: Extract<ClaudeCodeUsage, { ok: true }> = {
+    ok: true, fetchedAt: 100, source: "live",
+    fiveHour: { usedPercent: 25, resetAt: "date", resetMs, minutes: null },
+    weekly: { usedPercent: 40, resetAt: "date", resetMs: 90_000, minutes: null },
+  }
+  // Same helper the sidebar uses with its minute clock: no request, timestamps untouched.
+  const projected = projectClaudeUsage(snapshot, resetMs)
+  expect(projected.ok).toBe(true)
+  if (projected.ok) {
+    expect(projected.fiveHour).toMatchObject({ usedPercent: 0, resetMs: null, expired: true })
+    expect(projected.weekly.usedPercent).toBe(40)
+    expect(projected.weekly.expired).toBeUndefined()
+    expect(projected.fetchedAt).toBe(100)
+    expect(projected.source).toBe("live")
+    const used = formatClaudeUsageRows(projected, false)
+    const remaining = formatClaudeUsageRows(projected, true)
+    expect(used.map((row) => row.usage).join("\n")).toContain("0%h")
+    expect(used.map((row) => row.usage).join("\n")).toContain("40%w")
+    expect(remaining.map((row) => row.usage).join("\n")).toContain("100%h")
+    expect(remaining.map((row) => row.usage).join("\n")).toContain("60%w")
+  }
+  const before = projectClaudeUsage(snapshot, resetMs - 1)
+  expect(before.ok && before.fiveHour.usedPercent).toBe(25)
+  expect(before.ok && before.fiveHour.expired).toBeUndefined()
+})
+
+test("pooled projection expires per account and never averages unknown as zero", () => {
+  const pooled: Extract<ClaudeCodeUsage, { ok: true }> = {
+    ok: true, fetchedAt: 100, source: "live",
+    fiveHour: { usedPercent: 50, resetAt: null, resetMs: 20_000, minutes: null },
+    weekly: { usedPercent: 50, resetAt: null, resetMs: 20_000, minutes: null },
+    accounts: [
+      {
+        name: "first",
+        usage: {
+          ok: true, fetchedAt: 100, source: "live",
+          fiveHour: { usedPercent: 100, resetAt: "d", resetMs: 10_000, minutes: null },
+          weekly: { usedPercent: 80, resetAt: "d", resetMs: 90_000, minutes: null },
+        },
+      },
+      {
+        name: "second",
+        usage: {
+          ok: true, fetchedAt: 100, source: "live",
+          fiveHour: { usedPercent: null, resetAt: null, resetMs: null, minutes: null },
+          weekly: { usedPercent: null, resetAt: null, resetMs: null, minutes: null },
+        },
+      },
+    ],
+  }
+  const projected = projectClaudeUsage(pooled, 10_000)
+  expect(projected.ok).toBe(true)
+  if (projected.ok) {
+    // Unknowns are left out of the average, not counted as unused:
+    // weekly averages [80] to 80, not (80 + 0) / 2 = 40.
+    expect(projected.fiveHour.usedPercent).toBe(0)
+    expect(projected.fiveHour.expired).toBe(true)
+    expect(projected.weekly.usedPercent).toBe(80)
+    const first = projected.accounts?.[0]?.usage
+    expect(first?.ok && first.fiveHour.expired).toBe(true)
+  }
+})
+
+test("pool average of all-unknown windows stay unknown", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "oc-usage-pool-unknown-"))
+  try {
+    const home = directory
+    for (const dir of [".claude", ".claudeSecond"]) {
+      await Bun.write(
+        path.join(home, dir, ".credentials.json"),
+        JSON.stringify({ claudeAiOauth: { accessToken: "test", expiresAt: 10_000 } }),
+      )
+    }
+    const result = await probeClaudeCodePool(["~/.claude", "~/.claudeSecond"], {
+      homeDir: home,
+      nowMs: 100,
+      fetchImpl: async () => Response.json({ five_hour: null, seven_day: null }),
+    })
+    expect(result).toEqual({ ok: false })
   } finally {
     await rm(directory, { recursive: true, force: true })
   }

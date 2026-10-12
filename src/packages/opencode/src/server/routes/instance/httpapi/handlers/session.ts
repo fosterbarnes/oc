@@ -7,6 +7,7 @@ import { Permission } from "@/permission"
 import { SessionShare } from "@/share/session"
 import { Session } from "@/session/session"
 import { SessionCompaction } from "@/session/compaction"
+import { SessionHandoff } from "@/session/handoff"
 import { MessageV2 } from "@/session/message-v2"
 import { SessionPrompt } from "@/session/prompt"
 import { SessionRevert } from "@/session/revert"
@@ -52,6 +53,7 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
     const promptSvc = yield* SessionPrompt.Service
     const revertSvc = yield* SessionRevert.Service
     const compactSvc = yield* SessionCompaction.Service
+    const handoffSvc = yield* SessionHandoff.Service
     const runState = yield* SessionRunState.Service
     const agentSvc = yield* Agent.Service
     const permissionSvc = yield* Permission.Service
@@ -272,10 +274,10 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       return true
     })
 
-    // share/unshare errors aren't all client-induced — storage and network
+    // share/unshare errors aren't all client-induced - storage and network
     // failures from SessionShare are real possibilities. Map to a typed 500
     // (matches the legacy route behavior which routed any failure through
-    // ErrorMiddleware → NamedError.Unknown 500) instead of blanket-mapping
+    // ErrorMiddleware -> NamedError.Unknown 500) instead of blanket-mapping
     // every failure to a 400 BadRequest.
     const share = Effect.fn("SessionHttpApi.share")(function* (ctx: { params: { sessionID: SessionID } }) {
       yield* requireSession(ctx.params.sessionID)
@@ -289,6 +291,33 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
         .unshare(ctx.params.sessionID)
         .pipe(Effect.mapError(() => new HttpApiError.InternalServerError({})))
       return yield* requireSession(ctx.params.sessionID)
+    })
+
+    const handoffNow = Effect.fn("SessionHttpApi.handoff")(function* (ctx: { params: { sessionID: SessionID } }) {
+      const current = yield* requireSession(ctx.params.sessionID)
+      yield* revertSvc.cleanup(current)
+      const messages = yield* SessionError.mapStorageNotFound(session.messages({ sessionID: ctx.params.sessionID }))
+      const lastUser = messages.findLast((message) => message.info.role === "user")?.info
+      const defaultAgent = yield* agentSvc.defaultAgent()
+      const agent = lastUser?.role === "user" ? lastUser.agent : (current.agent ?? defaultAgent)
+      const model =
+        lastUser?.role === "user"
+          ? lastUser.model
+          : current.model
+            ? {
+                providerID: current.model.providerID,
+                modelID: current.model.id,
+                variant: current.model.variant,
+              }
+            : undefined
+      if (!model) return yield* new HttpApiError.BadRequest({})
+      yield* handoffSvc.enqueue({
+        sessionID: ctx.params.sessionID,
+        agent,
+        model,
+      })
+      yield* promptSvc.loop({ sessionID: ctx.params.sessionID })
+      return true
     })
 
     const summarize = Effect.fn("SessionHttpApi.summarize")(function* (ctx: {
@@ -456,6 +485,7 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       .handle("init", init)
       .handle("share", share)
       .handle("unshare", unshare)
+      .handle("handoff", handoffNow)
       .handle("summarize", summarize)
       .handle("rename", rename)
       .handle("prompt", prompt)

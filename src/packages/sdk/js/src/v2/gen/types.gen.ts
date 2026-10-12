@@ -2084,6 +2084,16 @@ export type Config = {
     tail_turns?: number
     preserve_recent_tokens?: number
     reserved?: number
+    limit?: {
+      tokens?: number
+      action?: "compact" | "handoff" | "off"
+      providers?: {
+        [key: string]: {
+          tokens?: number
+          action?: "compact" | "handoff" | "off"
+        }
+      }
+    }
   }
   experimental?: {
     disable_paste_summary?: boolean
@@ -2526,6 +2536,13 @@ export type ProjectNotFoundError = {
   _tag: "ProjectNotFoundError"
   projectID: string
   message: string
+}
+
+export type WorkHandoffError = {
+  name: "WorkHandoffError"
+  data: {
+    message: string
+  }
 }
 
 export type PtyNotFoundError = {
@@ -9702,6 +9719,76 @@ export type ExperimentalProjectCopyGenerateNameResponses = {
 export type ExperimentalProjectCopyGenerateNameResponse =
   ExperimentalProjectCopyGenerateNameResponses[keyof ExperimentalProjectCopyGenerateNameResponses]
 
+export type ExperimentalProjectCopyWorkData = {
+  body?: {
+    name: string
+  }
+  path: {
+    sessionID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/experimental/session/{sessionID}/work"
+}
+
+export type ExperimentalProjectCopyWorkErrors = {
+  /**
+   * WorkHandoffError | InvalidRequestError
+   */
+  400: WorkHandoffError | InvalidRequestError
+}
+
+export type ExperimentalProjectCopyWorkError =
+  ExperimentalProjectCopyWorkErrors[keyof ExperimentalProjectCopyWorkErrors]
+
+export type ExperimentalProjectCopyWorkResponses = {
+  /**
+   * Success
+   */
+  200: {
+    directory: string
+  }
+}
+
+export type ExperimentalProjectCopyWorkResponse =
+  ExperimentalProjectCopyWorkResponses[keyof ExperimentalProjectCopyWorkResponses]
+
+export type ExperimentalProjectCopyDoneData = {
+  body?: never
+  path: {
+    sessionID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/experimental/session/{sessionID}/done"
+}
+
+export type ExperimentalProjectCopyDoneErrors = {
+  /**
+   * WorkHandoffError | InvalidRequestError
+   */
+  400: WorkHandoffError | InvalidRequestError
+}
+
+export type ExperimentalProjectCopyDoneError =
+  ExperimentalProjectCopyDoneErrors[keyof ExperimentalProjectCopyDoneErrors]
+
+export type ExperimentalProjectCopyDoneResponses = {
+  /**
+   * Success
+   */
+  200: {
+    queued: boolean
+  }
+}
+
+export type ExperimentalProjectCopyDoneResponse =
+  ExperimentalProjectCopyDoneResponses[keyof ExperimentalProjectCopyDoneResponses]
+
 export type PtyShellsData = {
   body?: never
   path?: never
@@ -10946,6 +11033,40 @@ export type SessionShareResponses = {
 }
 
 export type SessionShareResponse = SessionShareResponses[keyof SessionShareResponses]
+
+export type SessionHandoffData = {
+  body?: never
+  path: {
+    sessionID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/session/{sessionID}/handoff"
+}
+
+export type SessionHandoffErrors = {
+  /**
+   * BadRequest | InvalidRequestError
+   */
+  400: EffectHttpApiErrorBadRequest | InvalidRequestError
+  /**
+   * NotFoundError
+   */
+  404: NotFoundError
+}
+
+export type SessionHandoffError = SessionHandoffErrors[keyof SessionHandoffErrors]
+
+export type SessionHandoffResponses = {
+  /**
+   * Started session handoff
+   */
+  200: boolean
+}
+
+export type SessionHandoffResponse = SessionHandoffResponses[keyof SessionHandoffResponses]
 
 export type SessionSummarizeData = {
   body?: {

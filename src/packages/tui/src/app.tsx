@@ -61,6 +61,7 @@ import { PromptStashProvider } from "./component/prompt/stash"
 import { DialogAlert } from "./ui/dialog-alert"
 import { DialogConfirm } from "./ui/dialog-confirm"
 import { createTodoCommand } from "./todos"
+import { createContextLimitCommands } from "./context-limit"
 import { ToastProvider, useToast, type ToastContext } from "./ui/toast"
 import { isDefaultTitle } from "./util/session"
 import { KVProvider, useKV } from "./context/kv"
@@ -1152,6 +1153,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
 
   const connected = useConnected()
   const todoCommand = createTodoCommand()
+  const contextLimitCommands = createContextLimitCommands()
   const currentWorktreeWorkspace = createMemo(() => {
     const workspaceID = project.workspace.current()
     if (!workspaceID) return
@@ -1180,6 +1182,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
         },
       },
       todoCommand,
+      ...contextLimitCommands,
       ...reviveCommands(toast),
       {
         name: "session.list",

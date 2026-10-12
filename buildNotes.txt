@@ -1,9 +1,12 @@
-v0.2.153 dwellingWassup
+v0.2.156 crudFlick
 
-slash commands:
-Running a new slash command now clearly replaces the previous command's mode, so `/impS` after `/spitS` no longer keeps acting like spitball. On Claude Code turns started by a command with permissions, file tools such as read and edit are available right away instead of looking missing.
+claude usage sidebar:
+Known hourly and weekly Claude percentages stay visible when a reset date is missing or a usage refresh returns only part of the data. Windows that have passed update locally without sending Claude a message, and missing next-reset dates leave blank slots. Cached readings stay identified as last-known, including after a restart, and genuinely unknown percentages still show unavailable. A Claude account with no 5-hour window running yet shows "-" under its 0%h, and with several accounts idle ones show "-" while active ones keep their reset time, all on one row.
 
-session titles:
-Automatic and `/rename` titles ignore the slash-command instruction header, so the title follows the actual subject.
+sidebar scripts and files:
+Script and file rows keep their clipping stable when the same list refreshes during a response, real script settings and file-list changes still update, and extremely narrow rows stay within their text budget.
 
-Under the hood: `SessionPrompt.command` prefixes the command header and `withoutCommandHeader` strips it for naming; `createProxyMcpServer` takes `alwaysLoad`, set by `planSpawn` only for command-permission spawns; `buildToolEnvironmentNote` has a command-turn variant; the baseline docs, editorconfig, gitattributes, and push scripts were updated, and `syncAndInstall.ps1` was removed. Usage sidebar files were also touched with their freshness test. Checks passed: claude-code provider tests plus rename-digest (one known failure in subagent-hint "proxy defs follow the tools opencode offered the agent", unrelated to this change) and the prompt.test.ts slash composition tests. Live command-permission and TUI checks were not run.
+context limit handoff:
+When a session crosses the token threshold in Handoff mode, the follow-up session continues the work instead of stalling and keeps the permissions of the original turn. The work-preservation summary runs fully locked down while still reaching the live conversation. A non-numeric token threshold in the TUI dialog is rejected.
+
+Under the hood: usage.ts parses Claude hourly and weekly windows independently with projectClaudeUsage and updateClaudeSnapshot, and keeps per-window reading times in cache metadata; sidebar helpers reconcile script and tree rows by key; isTitleRequest keys on naming agents and tool-less turns under a session agent share the chat's tools:: conversation key; handoff.ts, work-handoff.ts and work-done.ts are new, along with the SDK regeneration and config changes. Checks passed: usage-freshness (31 pass), sidebarRows (5 pass), title/handoff/overflow/v2-compat tests, and the fake-model handoff tests. Live sidebar, TUI and Cursor checks were not run.

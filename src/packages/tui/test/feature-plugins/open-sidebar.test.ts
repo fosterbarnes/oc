@@ -1262,14 +1262,26 @@ test("reads Claude Code usage with its OAuth login and falls back to the cached 
     const cached = await probeClaudeCodeUsage(options)
     assert.equal(result.ok && result.source, "live")
     assert.equal(cached.ok && cached.source, "cache")
-    assert.deepEqual(cached.ok && [cached.fiveHour, cached.weekly], result.ok && [result.fiveHour, result.weekly])
+    if (cached.ok && result.ok) {
+      assert.deepEqual(
+        [cached.fiveHour.usedPercent, cached.weekly.usedPercent],
+        [result.fiveHour.usedPercent, result.weekly.usedPercent],
+      )
+      // Full cache reads stay last-known: windows read as cached with the original reading time.
+      assert.equal(cached.fiveHour.cached, true)
+      assert.equal(cached.weekly.cached, true)
+      assert.equal(cached.fiveHour.fetchedAt, result.fetchedAt)
+    }
     assert.equal(requests.length, 1)
     const reset = await probeClaudeCodeUsage({ ...options, nowMs: Date.parse("2027-01-21T00:00:00Z") })
     assert.equal(reset.ok && reset.source, "cache")
-    assert.deepEqual(reset.ok && [reset.fiveHour, reset.weekly], [
-      { usedPercent: 0, resetAt: null, resetMs: null, minutes: null },
-      { usedPercent: 100, resetAt: null, resetMs: null, minutes: null },
-    ])
+    assert.ok(reset.ok && reset.fiveHour.expired)
+    assert.ok(reset.ok && reset.fiveHour.cached)
+    if (reset.ok) {
+      assert.equal(reset.fiveHour.usedPercent, 0)
+      assert.equal(reset.weekly.usedPercent, 100)
+      assert.equal(reset.weekly.cached, true)
+    }
     rmSync(claudeUsageCachePath)
     assert.deepEqual(await probeClaudeCodeUsage(options), { ok: false, reason: "expired" })
     rmSync(credentialsPath)

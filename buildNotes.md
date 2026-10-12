@@ -112,6 +112,106 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-11 (~20:33) - v0.2.156 - Show "-" for idle Claude 5-hour windows - Claude Opus 5.5, default reasoning; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5 (impS orchestrator) + general-composer-2.5 subagent; default reasoning; Implementation; completed
+- Version: 0.2.156
+- Added: `formatClaudeUsageRows` `cell` (src/packages/tui/src/routes/session/sidebar-tools/usage.ts) maps hourly (`h`) window with `usedPercent === 0` and null reset to `"-"`. Cause: Claude API returns `resets_at: null` until first message opens a 5h window; also covers locally expired windows. Weekly null reset stays blank; non-zero percent without reset stays blank; null percent stays "reset unavailable".
+- MISTAKE: first pass used `"not started"`; mixed pooled case overflowed sidebar width and wrapped into extra rows. Rule: keep reset-slot placeholders 1-2 chars so pooled rows never wrap.
+- Updated tests in src/packages/tui/test/cli/tui/usage-freshness.test.ts: "Claude hourly 0% without a reset shows a dash" and "Claude pooled hourly dash and mixed reset slots" pin single, both-idle, mixed (default and width 40, one row), and non-zero-no-reset rows.
+- Verification: `bun test test/cli/tui/usage-freshness.test.ts` 31 pass, 0 fail. Sidebar not run live after the dash change.
+
+### User
+Usage sidebar
+- When a Claude account has no 5-hour window running yet, the sidebar shows "-" under its 0%h instead of a blank line.
+- With several Claude accounts, idle ones show "-" in their slot while active ones keep their reset time, all on one row.
+
+---
+
+## 2026-10-11 (~17:39) - v0.2.156 crudFlick - Keep Claude usage visible after resets without messages - GPT-6.1 Sol, default reasoning; Implementation
+
+### Agent
+- Meta: GPT-6.1 Sol; default reasoning; Implementation via Muse Spark 1.3 high subagent; completed
+- Version: 0.2.156 crudFlick
+- Fixed `src/packages/tui/src/routes/session/sidebar-tools/usage.ts`: parse Claude hourly/weekly independently; partial live responses keep known disk/memory siblings; genuine unknowns remain null instead of fabricated zero. Pool averages exclude unknown windows.
+- Added `projectClaudeUsage` and explicit `updateClaudeSnapshot`; sidebar uses existing minute clock to expire known deadlines without waiting for next message/probe. Usage menu shares projection. Generic provider snapshot updater unchanged.
+- Changed Claude date formatting: known percentages without next reset date leave blank slots; retained h/w labels, alignment, pooled rows and used/remaining toggle. Menu distinguishes cached readings and reset-derived zero.
+- Preserved raw cache siblings and per-window reading times in `_fetchedAt` cache metadata; partial writes cannot make old sibling readings newly fetched after restart. Existing cache files use file mtime. Cached account fallback preserves source/age.
+- Kept OAuth metadata GET/cache path; no automatic prompts, model calls, credential refresh/rotation, additional timers or account-switching changes. Preserved concurrent sidebar toggle/clipping and unrelated work.
+- Verification: parent reran `bun test test/cli/tui/usage-freshness.test.ts` in `src/packages/tui`: 30 pass, 0 fail, 166 assertions; `bun test test/feature-plugins/open-sidebar.test.ts --test-name-pattern "reads Claude Code usage"`: 1 pass, 74 filtered, 0 fail. Scoped diff whitespace check passed. bgShell unavailable; short checks used built-in shell. No broader checks/build/install/live TUI run.
+- Risk: reset-derived 0% expires old window locally, cannot measure new usage from other devices; menu labels inference. Live acceptance: leave Claude idle across deadline; hourly clears within minute, weekly remains, missing next-reset slot stays blank.
+- Note: network/computer restart interrupted worker; resumed persisted edits and reran checks. File tool left one LF-only boundary in usage-freshness test; Git attributes normalize CRLF, no broad worktree normalization performed.
+
+### User
+Claude usage
+- Known hourly and weekly percentages stay visible when a reset date is missing or a usage refresh returns only part of the data.
+- Passed windows update locally without sending Claude a message, and missing next-reset dates leave blank spaces.
+- Cached readings remain identified as last-known, including after a restart; genuinely unknown percentages still show unavailable.
+- After rebuilding and installing, leave Claude idle through a five-hour reset and confirm the hourly reading clears while weekly usage remains visible.
+
+---
+
+## 2026-10-11 (~17:28) - v0.2.155 unplayableBarbara - Stabilize sidebar script and file clipping - GPT-6.1 Sol, default reasoning; Implementation
+
+### Agent
+- Meta: GPT-6.1 Sol; default reasoning; Implementation via Muse Spark 1.3 high subagent; completed
+- Version: 0.2.155 unplayableBarbara
+- Fixed `sidebar-tools.tsx` refresh churn: all script/tree setters reconcile fresh snapshots against prior rows; equivalent rows retain object identity and measured clipping widths instead of remounting on `message.updated`.
+- Added `helpers.ts` reconciliation keyed by file path or package-script name and tree relative/full path; compare all current script launch settings and tree fields so changed targets replace stale rows. Kept actual refreshes and existing pin sorting.
+- Changed shared `clipEnd`: unmeasured rows render empty instead of flashing full paths; budgets below three cells cannot overflow with an ellipsis.
+- Added `test/component/sidebarRows.test.tsx`: equivalent snapshot retention, changed launch/tree fields, distinct script kinds and roots, add/delete/reorder, narrow clipping, repeated refresh frame stability and resizing.
+- Verification: `bun test test/component/sidebarRows.test.tsx` from `src/packages/tui`: 5 pass, 0 fail, 64 assertions. Render fixture uses production helpers and matching row geometry, not full `SidebarTools`; live sidebar, pin sorting UI and marquee not exercised. No build/install or broader checks.
+- Preserved pending sidebar toggle/usage edits and unrelated work. Network restart interrupted review; resumed against persisted patch and reran final check.
+- Note: edited helper/test files remain LF on disk; repository attributes normalize CRLF on checkout. File tools offered no line-ending normalization control.
+
+### User
+Sidebar
+- Script and file rows keep their clipping stable when the same list refreshes during a response.
+- Real script settings and file-list changes still update, and extremely narrow rows stay within their text budget.
+- After rebuilding and installing, check the scripts list during an active response, then resize the sidebar and hover a long script name.
+
+---
+
+## 2026-10-11 (~08:25) - v0.2.154 truerPseu - Correction: handoff summary keeps deny-all via CLI-conversation continuity fix - Muse Spark 1.3, default reasoning; Implementation
+
+### Agent
+- Meta: Muse Spark 1.3; default reasoning; Implementation; completed
+- Version: 0.2.154 truerPseu
+- Corrects the previous entry: the read-only summary permission was a workaround and is reverted; deny-all is restored.
+- Root cause was two-layered. Fixed `isTitleRequest` (title.ts) was necessary but not sufficient: with deny-all restored, the summary turn hung (empty assistant shell, zero model calls, 180s/240s timeouts) because a tool-less turn gets a fresh `no-tools::` CLI key with prior conversation, so `syncClaudeSession` stalls in `askFreshConversation` waiting for an operator answer.
+- Fixed continuity in turn-context.ts following the compaction precedent: a tool-less turn under a real session agent now shares the chat's `tools::` conversation key (`continuesChat`), so the summary resumes the live CLI conversation (hashes match, no rewind, no question). Naming agents (title/rename/project-copy-name) and compaction keep exact prior behavior; genuine loss still asks.
+- Added `isNamingAgent` (title.ts) plus continuity unit tests (title.test.ts: tool-less build shares `tools::` key, title stays `no-tools::`, compaction unchanged).
+- Verification: title/handoff/overflow/v2-compat `54 pass / 0 fail`; typecheck clean for all touched files (remaining errors pre-existing work-handoff/work-done WIP); fake-model manual handoff and auto-threshold handoff `1 pass` each with deny-all, real summary, continued child response, no /compact (12-13s, warm resume).
+- TODO: live Cursor acceptance remains user-side (no Cursor live harness; Cursor coverage unit-only plus shared overLimit/handoff tests).
+
+### User
+Handoff summary permissions
+- The work-preservation summary now runs fully locked down again while still reaching the live conversation, so follow-up sessions continue correctly.
+- Live Cursor acceptance still to do in a real Cursor session.
+
+---
+
+## 2026-10-11 (~08:19) - v0.2.154 truerPseu - Context-limit handoff corrections: title-detection fix, permission carryover, live auto-threshold coverage - Muse Spark 1.3, default reasoning; Implementation
+
+### Agent
+- Meta: Muse Spark 1.3; default reasoning; Implementation; completed
+- Version: 0.2.154 truerPseu
+- Fixed Claude title stub swallowing the handoff summary: `isTitleRequest` (provider/claude-code/title.ts) now keys on naming agents (title/rename/project-copy-name), so a tool-less session-agent turn reaches the model. Added provider/claude-code/title.test.ts (6 tests).
+- Restored read-only SUMMARY_PERMISSION after live proof deny-all stalls: a tool-less summary turn lands on a fresh CLI conversation key and hangs in the fresh-conversation confirmation gate (session-sync.ts `askFreshConversation`) with zero model calls. Deny `*` plus allow read/glob/grep keeps the turn on the parent conversation; mutations stay denied, prompt still says no tools.
+- Fixed `handoff.finish` to carry the original command-turn permission into the child kickoff (was session permission); moved child kickoff into the prompt loop (removes prompt/handoff layer cycle); `canAutoHandoff` needs 2 non-summary assistant turns (autonomous chains allowed, summary-only loops blocked); removed unused kickoff flag; strict TUI token parsing.
+- Verification: title/handoff/overflow/v2-compat `51 pass / 0 fail`; core config `17 pass / 0 fail`; fake-model manual handoff and auto-threshold handoff `1 pass` each with continued child response and no /compact; typecheck clean for all feature files (remaining errors pre-existing in work-handoff/work-done WIP); TUI pane check not run (OC_TUI_PANE unset).
+- ERROR: deny-all summary turn hangs headless (empty assistant shell, `llmCalls` stuck) and would pop a "Claude session lost" question in prod; read-only offer set required on Claude.
+- TODO: live Cursor acceptance remains user-side (no Cursor live harness exists; Cursor coverage is unit-only plus shared overLimit/handoff tests).
+
+### User
+Context limit handoff
+- When a session crosses the token threshold in Handoff mode, the follow-up session now actually continues the work instead of stalling, and it keeps the permissions the original turn had.
+- Typing a non-numeric token threshold in the TUI dialog is now rejected.
+- Live Cursor acceptance still to do in a real Cursor session.
+
+---
+
 ## 2026-10-11 (~06:20) - v0.2.153 dwellingWassup - Slash commands supersede earlier personas; command-turn proxy tools load up front - Claude Opus 5.5, default reasoning; Implementation
 
 ### Agent

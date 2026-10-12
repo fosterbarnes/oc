@@ -7,7 +7,9 @@ import { stopCursorProxy } from "@/provider/cursor/runtime"
 import fs from "node:fs/promises"
 import path from "node:path"
 import { Global } from "@opencode-ai/core/global"
-import { RESIDENT_ENV, spawnResident } from "@/config/oc"
+import { RESIDENT_ENV, spawnResident, writeResidentState } from "@/config/oc"
+
+export { writeResidentState }
 
 export function serveArguments() {
   const commandIndex = process.argv.indexOf("serve")
@@ -33,35 +35,6 @@ export async function clearResidentStateForRestart(directory = Global.Path.state
   try {
     await fs.rm(residentStatePath(directory), { force: true })
   } catch {}
-}
-
-export async function writeResidentState(input: {
-  pid: number
-  hostname: string
-  port: number
-  executable?: string
-  restarting?: string
-  directory?: string
-}) {
-  const file = residentStatePath(input.directory ?? Global.Path.state)
-  await fs.mkdir(path.dirname(file), { recursive: true })
-  const temporary = `${file}.tmp-${process.pid}-${Date.now()}`
-  const body = {
-    pid: input.pid,
-    hostname: input.hostname,
-    port: input.port,
-    executable: input.executable,
-    restarting: input.restarting,
-    started: new Date().toISOString(),
-  }
-  await fs.writeFile(temporary, `${JSON.stringify(body, null, 2)}\n`, "utf8")
-  await fs.rm(file, { force: true })
-  try {
-    await fs.rename(temporary, file)
-  } catch (error) {
-    await fs.rm(temporary, { force: true })
-    throw error
-  }
 }
 
 export async function markResidentRestart(input: { hostname: string; port: number; directory?: string }) {

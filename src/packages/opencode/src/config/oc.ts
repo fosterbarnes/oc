@@ -138,6 +138,34 @@ export async function clearServerState(directory = serverStateDirectory()) {
   } catch {}
 }
 
+export async function writeResidentState(input: {
+  pid: number
+  hostname: string
+  port: number
+  executable?: string
+  restarting?: string
+  directory?: string
+}) {
+  const file = serverStatePath(input.directory ?? serverStateDirectory())
+  await fs.mkdir(path.dirname(file), { recursive: true })
+  const temporary = `${file}.tmp-${process.pid}-${Date.now()}`
+  const body = {
+    pid: input.pid,
+    hostname: input.hostname,
+    port: input.port,
+    executable: input.executable,
+    restarting: input.restarting,
+    started: new Date().toISOString(),
+  }
+  await fs.writeFile(temporary, `${JSON.stringify(body, null, 2)}\n`, "utf8")
+  try {
+    await fs.rename(temporary, file)
+  } catch (error) {
+    await fs.rm(temporary, { force: true })
+    throw error
+  }
+}
+
 function serverSecretPath() {
   return path.join(serverStateDirectory(), "oc-server.secret")
 }
@@ -179,7 +207,7 @@ async function serverHealthy(url: string, secret: string) {
   }
 }
 
-type ResidentState = { pid?: number; hostname?: string; port?: number; restarting?: string }
+type ResidentState = { pid?: number; hostname?: string; port?: number; executable?: string; restarting?: string }
 
 export type ResidentObservation = {
   healthy: boolean
@@ -207,13 +235,24 @@ export function residentLaunchAction(observation: ResidentObservation): Resident
   if (observation.healthy && observation.hasState && (!observation.matches || !observation.alive)) return "refuse-foreign"
   if (observation.healthy) return "wait-unowned"
   if (!observation.hasState) return "spawn"
+  if (!observation.healthy && observation.hasState && observation.matches && observation.alive) return "wait"
   return "clear-spawn"
 }
 
-function residentRefusal(hostname: string, port: number, state: ResidentState | undefined, alive: boolean, matches: boolean) {
+function residentRefusal(
+  hostname: string,
+  port: number,
+  state: ResidentState | undefined,
+  alive: boolean,
+  matches: boolean,
+  listener?: { pid?: number; executable?: string },
+) {
   if (!state) {
+    const detail = listener?.pid
+      ? ` Listener pid ${listener.pid}${listener.executable ? ` (${listener.executable})` : ""}.`
+      : " No unique matching listener was found."
     return new Error(
-      `Resident port ${hostname}:${port} is occupied (health true) but no launcher state exists at ${serverStatePath()}. Not claiming ownership.`,
+      `Resident port ${hostname}:${port} is occupied (health true) but no launcher state exists at ${serverStatePath()}.${detail} Not claiming ownership.`,
     )
   }
   return new Error(
@@ -273,7 +312,9 @@ async function startServerUnlocked() {
     if (observed.action === "wait-unowned") {
       unownedAttempts++
       if (unownedAttempts >= unownedReadyAttempts) {
-        throw residentRefusal(hostname, port, observed.state, observed.alive, observed.matches)
+        const adopted = await adoptResidentServer(hostname, port)
+        if (adopted.ok) return { url, secret }
+        throw residentRefusal(hostname, port, observed.state, observed.alive, observed.matches, adopted)
       }
     }
     await Bun.sleep(100)
@@ -281,8 +322,14 @@ async function startServerUnlocked() {
   if (!ready) {
     const observed = await observeResident(url, secret, hostname, port)
     if (observed.action === "reuse") return { url, secret }
-    if (observed.healthy) throw residentRefusal(hostname, port, observed.state, observed.alive, observed.matches)
-    if (observed.state) await clearServerState()
+    if (observed.healthy) {
+      const adopted = await adoptResidentServer(hostname, port)
+      if (adopted.ok) return { url, secret }
+      throw residentRefusal(hostname, port, observed.state, observed.alive, observed.matches, adopted)
+    }
+    if (observed.state && observed.matches && observed.alive)
+      throw new Error(`Resident OpenCode server alive but not responding (pid ${observed.state.pid}): ${url}`)
+    if (observed.state && !observed.alive) await clearServerState()
   }
   const executable = executablePath()
   const command =
@@ -342,6 +389,90 @@ export function spawnResident(
       code === 0 ? resolve() : reject(new Error(`Resident server launch failed: pwsh exited ${code}`)),
     )
   })
+}
+
+function normalizeListenAddress(address: string) {
+  const trimmed = address.trim().toLowerCase().replace(/^\[(.*)\]$/, "$1")
+  return trimmed.startsWith("::ffff:") ? trimmed.slice(7) : trimmed
+}
+
+export function uniqueListenerPid(
+  hostname: string,
+  port: number,
+  rows: Array<{ address: string; port: number; pid: number }>,
+) {
+  const host = normalizeListenAddress(hostname)
+  const allowed = new Set(host === "localhost" ? ["127.0.0.1", "::1"] : [host])
+  const pids = [
+    ...new Set(
+      rows.flatMap((row) =>
+        row.port === port &&
+        Number.isInteger(row.pid) &&
+        row.pid > 0 &&
+        allowed.has(normalizeListenAddress(row.address))
+          ? [row.pid]
+          : [],
+      ),
+    ),
+  ]
+  return pids.length === 1 ? pids[0] : undefined
+}
+
+function residentListenerPid(hostname: string, port: number) {
+  if (process.platform !== "win32") return undefined
+  const result = Bun.spawnSync(["pwsh", "-NoProfile", "-NonInteractive", "-Command",
+    "$ErrorActionPreference = 'Stop'; ConvertTo-Json -InputObject @(Get-NetTCPConnection -State Listen -LocalPort $env:OC_LISTEN_PORT | ForEach-Object { @{ address = $_.LocalAddress; port = [int]$_.LocalPort; pid = [int]$_.OwningProcess } }) -Compress"],
+    { stdout: "pipe", stderr: "pipe", windowsHide: true,
+      env: { ...process.env, OC_LISTEN_PORT: String(port) } })
+  if (result.exitCode !== 0) return undefined
+  try {
+    const parsed: unknown = JSON.parse(result.stdout.toString())
+    if (!Array.isArray(parsed)) return undefined
+    const rows = parsed.flatMap((row: unknown) => {
+      if (typeof row !== "object" || row === null || !("address" in row) || !("port" in row) || !("pid" in row)) return []
+      if (typeof row.address !== "string" || typeof row.port !== "number" || typeof row.pid !== "number") return []
+      return [{ address: row.address, port: row.port, pid: row.pid }]
+    })
+    return uniqueListenerPid(hostname, port, rows)
+  } catch {
+    return undefined
+  }
+}
+
+export async function adoptResidentServer(hostname: string, port: number, opts: {
+  findListenerPid?: (hostname: string, port: number) => number | undefined
+  listProcesses?: () => TuiLedger.Process[]
+  writeState?: (input: { pid: number; hostname: string; port: number; executable?: string }) => Promise<void>
+  readState?: () => Promise<ResidentState | undefined>
+  pidAlive?: (pid: number) => boolean
+} = {}): Promise<{ ok: true; pid: number } | { ok: false; pid?: number; executable?: string }> {
+  const readState = opts.readState ?? readResidentState
+  const pidAlive = opts.pidAlive ?? isPidAlive
+  const existing = await readState()
+  if (existing) {
+    if (existing.hostname === hostname && existing.port === port && existing.pid && pidAlive(existing.pid))
+      return { ok: true, pid: existing.pid }
+    return { ok: false, pid: existing.pid }
+  }
+  const pid = (opts.findListenerPid ?? residentListenerPid)(hostname, port)
+  if (!pid) return { ok: false }
+  let processes: TuiLedger.Process[]
+  try {
+    processes = (opts.listProcesses ?? ocProcesses)()
+  } catch {
+    return { ok: false, pid }
+  }
+  const process = processes.find((item) => item.pid === pid)
+  if (!process || !TuiLedger.sameExecutable(process.executable, executablePath()))
+    return { ok: false, pid, executable: process?.executable }
+  const raced = await readState()
+  if (raced) {
+    if (raced.hostname === hostname && raced.port === port && raced.pid && pidAlive(raced.pid))
+      return { ok: true, pid: raced.pid }
+    return { ok: false, pid: raced.pid }
+  }
+  await (opts.writeState ?? writeResidentState)({ pid, hostname, port, executable: executablePath() })
+  return { ok: true, pid }
 }
 
 function ocProcesses(): TuiLedger.Process[] {

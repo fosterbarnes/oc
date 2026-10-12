@@ -7,6 +7,7 @@ import type { Permission } from "../permission"
 import type { SessionID, MessageID } from "../session/schema"
 import * as Truncate from "./truncate"
 import { Agent } from "@/agent/agent"
+import type { TaskPromptOps } from "./task"
 
 interface Metadata {
   [key: string]: any
@@ -39,7 +40,7 @@ export type Context<M extends Metadata = Metadata> = {
   agent: string
   abort: AbortSignal
   callID?: string
-  extra?: { turnPermission?: PermissionV1.Ruleset; [key: string]: unknown }
+  extra?: { turnPermission?: PermissionV1.Ruleset; promptOps?: TaskPromptOps; [key: string]: unknown }
   messages: SessionV1.WithParts[]
   metadata(input: { title?: string; metadata?: M }): Effect.Effect<void>
   ask(input: Omit<PermissionV1.Request, "id" | "sessionID" | "tool">): Effect.Effect<void>

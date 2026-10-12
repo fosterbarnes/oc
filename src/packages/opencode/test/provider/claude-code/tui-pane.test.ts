@@ -17,6 +17,23 @@ const muxPath = Bun.which("wezterm-mux-server")
 const opencodeRoot = path.resolve(import.meta.dir, "../../..")
 
 describe.skipIf(!process.env.OC_TUI_PANE || !cliPath || !muxPath)("oc TUI in a WezTerm pane", () => {
+  cliIt.live("work handoff: slash work and done return the Claude session to its parent", (fixture) => Effect.gen(function* () {
+    const pane = yield* openPane(fixture, { workCopy: true })
+    yield* fixture.llm.text("WORK-READY")
+    yield* pane.waitFor("Ask anything")
+    yield* pane.type("remember HANDOFF-77\r")
+    yield* pane.waitFor("WORK-READY", (shown) => !shown.includes("Wait for the current turn") && !/. \d+\.\d+s/.test(shown))
+    yield* pane.type("/work")
+    yield* pane.type("\r")
+    yield* pane.waitFor("Work copy ready")
+    yield* pane.type("/done")
+    yield* pane.type("\r")
+    yield* pane.waitFor("Work merged as unstaged changes")
+    yield* fixture.llm.text("PARENT-READY")
+    yield* pane.type("where are you now?\r")
+    yield* pane.waitFor("PARENT-READY")
+    expectIsolated(yield* fixture.llm.inputs)
+  }), 180_000)
   cliIt.live(
     "oc automatic rename updates a Home-created Claude session title once",
     (fixture) => Effect.gen(function* () {
@@ -156,6 +173,22 @@ describe.skipIf(!process.env.OC_TUI_PANE || !cliPath || !muxPath)("oc TUI in a W
     180_000,
   )
   cliIt.live(
+    "/contextLimit opens the Context limit action dialog",
+    (fixture) =>
+      Effect.gen(function* () {
+        const pane = yield* openPane(fixture)
+        yield* pane.waitFor("Ask anything")
+        yield* pane.type("/contextLimit")
+        yield* pane.type("\r")
+        const shown = yield* pane.waitFor("Context limit action")
+        expect(shown).toContain("Compact")
+        expect(shown).toContain("Handoff")
+        expect(shown).toContain("Off")
+        expectIsolated(yield* fixture.llm.inputs)
+      }),
+    180_000,
+  )
+  cliIt.live(
     "/compact shows the Compacted divider",
     (fixture) =>
       Effect.gen(function* () {
@@ -224,10 +257,17 @@ describe.skipIf(!process.env.OC_TUI_PANE || !cliPath || !muxPath)("oc TUI in a W
 // Starts the mux server with oc as its first pane, in a git-inited `work` folder under a root
 // outside the profile (see `outsideProfile`). Scoped: closing the pane and the server comes
 // before the root is removed.
-const openPane = Effect.fnUntraced(function* (fixture: CliFixture, options: { autoRename?: boolean } = {}) {
+const openPane = Effect.fnUntraced(function* (fixture: CliFixture, options: { autoRename?: boolean; workCopy?: boolean } = {}) {
   const root = yield* outsideProfile
   const project = path.join(root, "work")
   yield* initRepo(project)
+  if (options.workCopy) yield* Effect.promise(async () => {
+    await Bun.$`git config user.name Test`.cwd(project).quiet()
+    await Bun.$`git config user.email test@opencode.test`.cwd(project).quiet()
+    await Bun.write(path.join(project, "note.txt"), "BASE\n")
+    await Bun.$`git add note.txt`.cwd(project).quiet()
+    await Bun.$`git -c commit.gpgsign=false commit -m fixture`.cwd(project).quiet()
+  })
   const socket = path.join(root, "wezterm.sock")
   const configFile = path.join(root, "wezterm.lua")
   const config = {

@@ -1,5 +1,6 @@
 import type { TuiPlugin, TuiPluginApi } from "@opencode-ai/plugin/tui"
 import { sectionOpen } from "./open"
+import { SidebarToggle } from "./toggle"
 import type { BuiltinTuiPlugin } from "../builtins"
 import { createMemo, For, Match, Show, Switch } from "solid-js"
 
@@ -32,9 +33,9 @@ function View(props: { api: TuiPluginApi }) {
       <box>
         <box flexDirection="row" gap={1} onMouseDown={() => list().length > 2 && setOpen((x) => !x)}>
           <Show when={list().length > 2}>
-            <text fg={theme().text}>{open() ? "▼" : "▶"}</text>
+            <SidebarToggle open={open()} fg={theme().text} />
           </Show>
-          <text fg={theme().text}>
+          <text fg={theme().text} selectable={false}>
             <b>MCP</b>
             <Show when={!open()}>
               <span style={{ fg: theme().textMuted }}>

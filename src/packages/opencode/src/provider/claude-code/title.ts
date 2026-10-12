@@ -14,17 +14,34 @@ import { resolveOpencodeAgent } from "./call-options.js"
  * every new V2 session paid for a second `claude` process just to title
  * itself; for a V2 model the request kind, carried as the `title` agent,
  * decides instead.
+ *
+ * A tool-less turn is not automatically a title: a context-limit handoff
+ * summary runs under the session agent with tools denied, and must reach
+ * the model. Only the naming agents (title, rename, and the project-copy
+ * name generator in server/routes/instance/httpapi/handlers/project-copy.ts)
+ * synthesize; an unknown agent keeps the legacy stub.
  */
+const NAMING_AGENTS = new Set(["title", "rename", "project-copy-name"])
+
+/** Whether this agent only ever names text (see NAMING_AGENTS). */
+export function isNamingAgent(agent: string | undefined): boolean {
+  return agent !== undefined && NAMING_AGENTS.has(agent)
+}
+
 export function isTitleRequest(
   config: ClaudeCodeConfig,
   scope: "tools" | "no-tools",
   options: LanguageModelV3CallOptions,
 ): boolean {
-  if (scope === "no-tools") return true
-  return (
-    config.hostApi === "v2" &&
-    resolveOpencodeAgent(options.providerOptions, config.provider) === "title"
-  )
+  if (scope !== "no-tools") {
+    return (
+      config.hostApi === "v2" &&
+      resolveOpencodeAgent(options.providerOptions, config.provider) === "title"
+    )
+  }
+  const agent = resolveOpencodeAgent(options.providerOptions, config.provider)
+  if (agent === undefined) return true
+  return isNamingAgent(agent)
 }
 
 export function requestScope(

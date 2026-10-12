@@ -865,3 +865,79 @@ export function readTree(root: string, expanded: ReadonlySet<string>): TreeEntry
   visit(root, 0)
   return entries
 }
+
+// OpenTUI's native truncate puts the ellipsis mid-text; clip at the end instead.
+// Unmeasured rows (width <= 0) render empty so repeated refreshes do not flash full paths before clipping.
+export function clipEnd(text: string, width: number): string {
+  if (text.length <= width) return text
+  if (width <= 0) return ""
+  if (width < 3) return text.slice(0, width)
+  return `${text.slice(0, width - 3)}...`
+}
+
+function scriptKey(script: Script): string {
+  if (script.filePath) return `file:${script.filePath}`
+  return `package:${script.name}`
+}
+
+function treeKey(entry: TreeEntry): string {
+  return JSON.stringify([entry.relativePath, entry.fullPath])
+}
+
+export function reconcileScripts(prev: Script[], next: Script[]): Script[] {
+  return reconcileByKey(prev, next, scriptKey, scriptsEqual)
+}
+
+export function reconcileTree(prev: TreeEntry[], next: TreeEntry[]): TreeEntry[] {
+  return reconcileByKey(prev, next, treeKey, treeEntriesEqual)
+}
+
+function reconcileByKey<T>(
+  prev: T[],
+  next: T[],
+  key: (item: T) => string,
+  equal: (first: T, second: T) => boolean,
+): T[] {
+  const byKey = new Map<string, T>()
+  for (const item of prev) {
+    if (!byKey.has(key(item))) byKey.set(key(item), item)
+  }
+  const result = next.map((item) => {
+    const prior = byKey.get(key(item))
+    if (prior && equal(prior, item)) return prior
+    return item
+  })
+  if (result.length === prev.length && result.every((item, index) => item === prev[index])) return prev
+  return result
+}
+
+function scriptsEqual(first: Script, second: Script): boolean {
+  if (first.name !== second.name) return false
+  if (first.command !== second.command) return false
+  if (first.filePath !== second.filePath) return false
+  if (first.terminal !== second.terminal) return false
+  if (!launchersEqual(first.launcher, second.launcher)) return false
+  if (!weztermSizesEqual(first.weztermSize, second.weztermSize)) return false
+  return true
+}
+
+function treeEntriesEqual(first: TreeEntry, second: TreeEntry): boolean {
+  if (first.name !== second.name) return false
+  if (first.relativePath !== second.relativePath) return false
+  if (first.fullPath !== second.fullPath) return false
+  if (first.directory !== second.directory) return false
+  if (first.depth !== second.depth) return false
+  return true
+}
+
+function launchersEqual(first: ScriptLauncher, second: ScriptLauncher): boolean {
+  if (first.executable !== second.executable) return false
+  if (first.args.length !== second.args.length) return false
+  return first.args.every((arg, index) => arg === second.args[index])
+}
+
+function weztermSizesEqual(first: WezTermSplitSize, second: WezTermSplitSize): boolean {
+  if ("Percent" in first && "Percent" in second) return first.Percent === second.Percent
+  if ("Cells" in first && "Cells" in second) return first.Cells === second.Cells
+  return false
+}

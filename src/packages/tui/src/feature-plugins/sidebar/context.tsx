@@ -1,7 +1,9 @@
 import type { AssistantMessage } from "@opencode-ai/sdk/v2"
 import type { TuiPlugin, TuiPluginApi } from "@opencode-ai/plugin/tui"
 import type { BuiltinTuiPlugin } from "../builtins"
-import { createMemo } from "solid-js"
+import { createMemo, Show } from "solid-js"
+import { sectionOpen } from "./open"
+import { SidebarToggle } from "./toggle"
 
 const id = "internal:sidebar-context"
 
@@ -11,6 +13,7 @@ const money = new Intl.NumberFormat("en-US", {
 })
 
 function View(props: { api: TuiPluginApi; session_id: string }) {
+  const [open, setOpen] = sectionOpen(props.api, "context", true)
   const theme = () => props.api.theme.current
   const msg = createMemo(() => props.api.state.session.messages(props.session_id))
   const session = createMemo(() => props.api.state.session.get(props.session_id))
@@ -39,15 +42,25 @@ function View(props: { api: TuiPluginApi; session_id: string }) {
 
   return (
     <box>
-      <text fg={theme().text}>
-        <b>Context</b>
-      </text>
-      <text fg={theme().textMuted}>{`${state().tokens.toLocaleString()} tokens`}</text>
-      {state().visible != null ? (
-        <text fg={theme().textMuted}>{`${state().visible?.toLocaleString()} visible (estimate)`}</text>
-      ) : null}
-      <text fg={theme().textMuted}>{`${state().percent ?? 0}% used`}</text>
-      <text fg={theme().textMuted}>{money.format(cost())} spent</text>
+      <box flexDirection="row" gap={1} onMouseDown={() => setOpen((x) => !x)}>
+        <SidebarToggle open={open()} fg={theme().text} />
+        <text fg={theme().text} selectable={false}>
+          <b>Context</b>
+          <Show when={!open()}>
+            <span style={{ fg: theme().textMuted }}>
+              {` (${state().percent ?? 0}% used, ${money.format(cost())})`}
+            </span>
+          </Show>
+        </text>
+      </box>
+      <Show when={open()}>
+        <text fg={theme().textMuted}>{`${state().tokens.toLocaleString()} tokens`}</text>
+        {state().visible != null ? (
+          <text fg={theme().textMuted}>{`${state().visible?.toLocaleString()} visible (estimate)`}</text>
+        ) : null}
+        <text fg={theme().textMuted}>{`${state().percent ?? 0}% used`}</text>
+        <text fg={theme().textMuted}>{money.format(cost())} spent</text>
+      </Show>
     </box>
   )
 }

@@ -6,15 +6,232 @@ import path from "node:path"
 import { createOpencodeClient } from "@opencode-ai/sdk/v2"
 import { Cause, Effect, Exit, Fiber } from "effect"
 import { tmpdir } from "../../fixture/fixture"
-import { cliIt } from "../../lib/cli-process"
+import { cliIt, type CliFixture } from "../../lib/cli-process"
 import { pollWithTimeout } from "../../lib/effect"
 import { reply, TestLLMServer } from "../../lib/llm-server"
 import { chatConfig, claudeEnv, expectIsolated, initRepo, openChat, outsideProfile } from "./chat-fixture"
 import { flowReport, stepRunner } from "./flowReport"
 
+const handoff = (session: { metadata?: unknown }) =>
+  (session.metadata as { ocWorkHandoff?: { phase?: string; error?: string } } | undefined)?.ocWorkHandoff
+
 const cliPath = process.env.CLAUDE_CLI_PATH ?? Bun.which("claude")
 
+const conflictChat = Effect.fnUntraced(function* (fixture: CliFixture, name: string) {
+  const project = path.join(fixture.home, "work")
+  yield* initRepo(project)
+  yield* Effect.promise(async () => {
+    await Bun.$`git config user.name Test`.cwd(project).quiet()
+    await Bun.$`git config user.email test@opencode.test`.cwd(project).quiet()
+    await Bun.write(path.join(project, "note.txt"), "BASE\n")
+    await Bun.$`git add note.txt`.cwd(project).quiet()
+    await Bun.$`git -c commit.gpgsign=false commit -m fixture`.cwd(project).quiet()
+  })
+  const chat = yield* openChat(fixture)
+  yield* fixture.llm.text("NOTED")
+  yield* chat.prompt("Keep parent and copy intent.")
+  const result = yield* Effect.promise(() => chat.sdk.experimental.projectCopy.work({ sessionID: chat.sessionID, name }, { throwOnError: true }))
+  const copy = result.data.directory
+  yield* Effect.promise(async () => {
+    await Bun.write(path.join(project, "note.txt"), "PARENT\n")
+    await Bun.write(path.join(copy, "note.txt"), "COPY\n")
+  })
+  const sdk = createOpencodeClient({ baseUrl: chat.server.url, directory: copy, throwOnError: true })
+  return { chat, copy, sdk }
+})
+
 describe.skipIf(!cliPath)("Claude Code CLI against TestLLMServer", () => {
+  cliIt.live("work handoff: Claude cwd follows work and model completion after the tool turn", (fixture) => Effect.gen(function* () {
+    const project = path.join(fixture.home, "work")
+    yield* initRepo(project)
+    yield* Effect.promise(async () => {
+      await Bun.$`git config user.name Test`.cwd(project).quiet()
+      await Bun.$`git config user.email test@opencode.test`.cwd(project).quiet()
+      await Bun.write(path.join(project, "note.txt"), "BASE\n")
+      await Bun.$`git add note.txt`.cwd(project).quiet()
+      await Bun.$`git -c commit.gpgsign=false commit -m fixture`.cwd(project).quiet()
+    })
+    const chat = yield* openChat(fixture)
+    yield* fixture.llm.text("NOTED")
+    yield* chat.prompt("Remember the codeword HANDOFF-77.")
+    const moved = yield* Effect.promise(() => chat.sdk.experimental.projectCopy.work({ sessionID: chat.sessionID, name: "fake" }, { throwOnError: true }))
+    const copy = moved.data.directory
+    const sdk = createOpencodeClient({ baseUrl: chat.server.url, directory: copy, throwOnError: true })
+    yield* fixture.llm.tool("Read", { file_path: path.join(copy, "note.txt") })
+    yield* fixture.llm.tool("Write", { file_path: path.join(copy, "note.txt"), content: "COPY\n" })
+    yield* fixture.llm.tool("mcp__opencode_proxy__work_done", {})
+    const release = Promise.withResolvers<void>()
+    yield* Effect.addFinalizer(() => Effect.sync(() => release.resolve()))
+    yield* fixture.llm.push(reply().wait(release.promise).text("HANDOFF-END").stop())
+    const turn = yield* Effect.promise(() => sdk.session.prompt({ sessionID: chat.sessionID,
+      model: { providerID: "claude-code", modelID: "claude-sonnet-4-5" }, parts: [{ type: "text", text: "Update note.txt, finish work, then stop." }],
+    }, { throwOnError: true })).pipe(Effect.forkScoped)
+    yield* fixture.llm.wait(5)
+    expect((yield* Effect.promise(() => sdk.session.get({ sessionID: chat.sessionID }, { throwOnError: true }))).data.directory).toBe(copy)
+    expect(yield* Effect.promise(() => Bun.file(path.join(chat.project, "note.txt")).text())).toBe("BASE\n")
+    expect(yield* Effect.promise(() => Bun.file(path.join(copy, "note.txt")).text())).toBe("COPY\n")
+    release.resolve()
+    yield* Fiber.join(turn)
+    yield* pollWithTimeout(Effect.promise(() => chat.sdk.session.get({ sessionID: chat.sessionID }, { throwOnError: true })).pipe(
+      Effect.map((result) => handoff(result.data)?.phase === "complete" ? result.data : undefined),
+    ), "model work_done did not finish", "30 seconds")
+    expect((yield* Effect.promise(() => Bun.file(path.join(chat.project, "note.txt")).text())).replaceAll("\r\n", "\n")).toBe("COPY\n")
+    expect(yield* Effect.promise(() => Bun.file(path.join(copy, ".git")).exists())).toBe(false)
+    yield* fixture.llm.text("PARENT-AGAIN")
+    yield* chat.prompt("Which directory are you in now?")
+    const inputs = yield* fixture.llm.inputs
+    expect(inputs).toHaveLength(6)
+    expect(JSON.stringify(inputs[1].messages)).toContain(JSON.stringify(copy).slice(1, -1))
+    expect(JSON.stringify(inputs[5].messages)).toContain(JSON.stringify(chat.project).slice(1, -1))
+    expectIsolated(inputs)
+  }), 120_000)
+
+  cliIt.live("work handoff: queued done stops after cancel and busy work refuses", (fixture) => Effect.gen(function* () {
+    const project = path.join(fixture.home, "work")
+    yield* initRepo(project)
+    yield* Effect.promise(async () => {
+      await Bun.$`git config user.name Test`.cwd(project).quiet()
+      await Bun.$`git config user.email test@opencode.test`.cwd(project).quiet()
+      await Bun.write(path.join(project, "note.txt"), "BASE\n")
+      await Bun.$`git add note.txt`.cwd(project).quiet()
+      await Bun.$`git -c commit.gpgsign=false commit -m fixture`.cwd(project).quiet()
+    })
+    const chat = yield* openChat(fixture)
+    yield* fixture.llm.text("NOTED")
+    yield* chat.prompt("Remember HANDOFF-77.")
+    const moved = yield* Effect.promise(() => chat.sdk.experimental.projectCopy.work({ sessionID: chat.sessionID, name: "cancel" }, { throwOnError: true }))
+    const copy = moved.data.directory
+    const sdk = createOpencodeClient({ baseUrl: chat.server.url, directory: copy, throwOnError: true })
+    yield* fixture.llm.push(reply().text("RUNNING").hang())
+    const turn = yield* Effect.promise(() => sdk.session.prompt({ sessionID: chat.sessionID,
+      model: { providerID: "claude-code", modelID: "claude-sonnet-4-5" }, parts: [{ type: "text", text: "Work slowly." }],
+    })).pipe(Effect.forkScoped)
+    yield* fixture.llm.wait(2)
+    const busy = yield* Effect.promise(() => sdk.experimental.projectCopy.work({ sessionID: chat.sessionID, name: "refused" })).pipe(Effect.exit)
+    expect(Exit.isFailure(busy)).toBe(true)
+    yield* Effect.promise(() => sdk.experimental.projectCopy.done({ sessionID: chat.sessionID }, { throwOnError: true }))
+    yield* Effect.promise(() => sdk.session.abort({ sessionID: chat.sessionID }))
+    yield* Fiber.join(turn)
+    const stopped = yield* pollWithTimeout(Effect.promise(() => sdk.session.get({ sessionID: chat.sessionID }, { throwOnError: true })).pipe(
+      Effect.map((result) => handoff(result.data)?.phase === "stopped" ? result.data : undefined),
+    ), "queued handoff did not stop after cancellation", "30 seconds")
+    expect(stopped.directory).toBe(copy)
+    expect(yield* Effect.promise(() => Bun.file(path.join(chat.project, "note.txt")).text())).toBe("BASE\n")
+    yield* Effect.promise(() => sdk.experimental.projectCopy.done({ sessionID: chat.sessionID }, { throwOnError: true }))
+    yield* pollWithTimeout(Effect.promise(() => chat.sdk.session.get({ sessionID: chat.sessionID }, { throwOnError: true })).pipe(
+      Effect.map((result) => handoff(result.data)?.phase === "complete" ? result.data : undefined),
+    ), "explicit retry did not complete", "30 seconds")
+    expectIsolated(yield* fixture.llm.inputs)
+  }), 120_000)
+
+  cliIt.live("work handoff: server resolves conflicts and preserves the Claude agent model and permission", (fixture) => Effect.gen(function* () {
+    const project = path.join(fixture.home, "work")
+    yield* initRepo(project)
+    yield* Effect.promise(async () => {
+      await Bun.$`git config user.name Test`.cwd(project).quiet()
+      await Bun.$`git config user.email test@opencode.test`.cwd(project).quiet()
+      await Bun.write(path.join(project, "note.txt"), "BASE\n")
+      await Bun.$`git add note.txt`.cwd(project).quiet()
+      await Bun.$`git -c commit.gpgsign=false commit -m fixture`.cwd(project).quiet()
+    })
+    const chat = yield* openChat(fixture)
+    const permission = [{ permission: "bash", pattern: "*", action: "deny" as const }]
+    yield* Effect.promise(() => chat.sdk.session.update({ sessionID: chat.sessionID, permission }, { throwOnError: true }))
+    yield* fixture.llm.text("NOTED")
+    yield* chat.prompt("Remember HANDOFF-77.", { variant: "low" })
+    const before = (yield* Effect.promise(() => chat.sdk.session.get({ sessionID: chat.sessionID }, { throwOnError: true }))).data
+    const moved = yield* Effect.promise(() => chat.sdk.experimental.projectCopy.work({ sessionID: chat.sessionID, name: "resolve" }, { throwOnError: true }))
+    const copy = moved.data.directory
+    yield* Effect.promise(async () => {
+      await Bun.write(path.join(project, "note.txt"), "PARENT\n")
+      await Bun.write(path.join(copy, "note.txt"), "COPY\n")
+    })
+    yield* fixture.llm.tool("Read", { file_path: path.join(copy, "note.txt") })
+    yield* fixture.llm.tool("Write", { file_path: path.join(copy, "note.txt"), content: "PARENT and COPY\n" })
+    yield* fixture.llm.tool("mcp__opencode_proxy__work_done", { resolved: ["note.txt"] })
+    yield* fixture.llm.text("RESOLVED")
+    const sdk = createOpencodeClient({ baseUrl: chat.server.url, directory: copy, throwOnError: true })
+    yield* Effect.promise(() => sdk.experimental.projectCopy.done({ sessionID: chat.sessionID }, { throwOnError: true }))
+    const finished = yield* pollWithTimeout(Effect.promise(() => chat.sdk.session.get({ sessionID: chat.sessionID }, { throwOnError: true })).pipe(
+      Effect.map((result) => handoff(result.data)?.phase === "complete" ? result.data : undefined),
+    ), "server conflict resolution did not finish", "45 seconds")
+    expect(finished.directory).toBe(project)
+    expect(finished.agent).toBe(before.agent)
+    expect(finished.model).toEqual(before.model)
+    expect(finished.permission).toEqual(before.permission)
+    expect((yield* Effect.promise(() => Bun.file(path.join(project, "note.txt")).text())).replaceAll("\r\n", "\n")).toBe("PARENT and COPY\n")
+    const inputs = yield* fixture.llm.inputs
+    expect(inputs).toHaveLength(5)
+    expect(JSON.stringify(inputs[1].messages)).toContain("refs/oc/work-base/")
+    expect(JSON.stringify(inputs[2].messages)).toContain("<<<<<<<")
+    expectIsolated(inputs)
+  }), 120_000)
+
+  cliIt.live("work handoff: aborted conflict resolution never merges even after markers were removed", (fixture) => Effect.gen(function* () {
+    const work = yield* conflictChat(fixture, "abort-resolution")
+    yield* fixture.llm.tool("Read", { file_path: path.join(work.copy, "note.txt") })
+    yield* fixture.llm.tool("Write", { file_path: path.join(work.copy, "note.txt"), content: "PARENT and COPY\n" })
+    yield* fixture.llm.tool("mcp__opencode_proxy__work_done", { resolved: ["note.txt"] })
+    yield* fixture.llm.push(reply().text("RESOLVING").hang())
+    yield* Effect.promise(() => work.sdk.experimental.projectCopy.done({ sessionID: work.chat.sessionID }, { throwOnError: true }))
+    yield* fixture.llm.wait(5)
+    yield* Effect.promise(() => work.sdk.session.abort({ sessionID: work.chat.sessionID }, { throwOnError: true }))
+    const stopped = yield* pollWithTimeout(Effect.promise(() => work.sdk.session.get({ sessionID: work.chat.sessionID }, { throwOnError: true })).pipe(
+      Effect.map((result) => handoff(result.data)?.phase === "stopped" ? result.data : undefined),
+    ), "cancelled resolution did not stop", "30 seconds")
+    expect(stopped.directory).toBe(work.copy)
+    expect(yield* Effect.promise(() => Bun.file(path.join(work.chat.project, "note.txt")).text())).toBe("PARENT\n")
+    expect(yield* Effect.promise(() => Bun.file(path.join(work.copy, ".git")).exists())).toBe(true)
+    expect(yield* fixture.llm.calls).toBe(5)
+    expectIsolated(yield* fixture.llm.inputs)
+  }), 120_000)
+
+  cliIt.live("work handoff: unresolved conflicts stop after exactly two model rounds", (fixture) => Effect.gen(function* () {
+    const work = yield* conflictChat(fixture, "two-rounds")
+    for (const round of [1, 2]) {
+      yield* fixture.llm.tool("Read", { file_path: path.join(work.copy, "note.txt") })
+      yield* fixture.llm.tool("mcp__opencode_proxy__work_done", { resolved: ["note.txt"] })
+      yield* fixture.llm.text(`UNRESOLVED-${round}`)
+    }
+    yield* fixture.llm.text("MUST-NOT-START-THIRD-ROUND")
+    yield* Effect.promise(() => work.sdk.experimental.projectCopy.done({ sessionID: work.chat.sessionID }, { throwOnError: true }))
+    const stopped = yield* pollWithTimeout(Effect.promise(() => work.sdk.session.get({ sessionID: work.chat.sessionID }, { throwOnError: true })).pipe(
+      Effect.map((result) => handoff(result.data)?.phase === "stopped" ? result.data : undefined),
+    ), "two-round resolution did not stop", "45 seconds")
+    expect(stopped.directory).toBe(work.copy)
+    expect(yield* fixture.llm.calls).toBe(7)
+    expect(yield* fixture.llm.pending).toBe(1)
+    expect(yield* Effect.promise(() => Bun.file(path.join(work.chat.project, "note.txt")).text())).toBe("PARENT\n")
+    expect(yield* Effect.promise(() => Bun.file(path.join(work.copy, "note.txt")).text())).toContain("<<<<<<<")
+    expectIsolated(yield* fixture.llm.inputs)
+  }), 120_000)
+
+  cliIt.live("work handoff: a restarted server resumes failed cleanup without another model turn", (fixture) => Effect.gen(function* () {
+    const work = yield* conflictChat(fixture, "restart-cleanup")
+    yield* Effect.promise(() => Bun.$`git worktree lock ${work.copy}`.cwd(work.chat.project).quiet())
+    yield* fixture.llm.tool("Read", { file_path: path.join(work.copy, "note.txt") })
+    yield* fixture.llm.tool("Write", { file_path: path.join(work.copy, "note.txt"), content: "PARENT and COPY\n" })
+    yield* fixture.llm.tool("mcp__opencode_proxy__work_done", { resolved: ["note.txt"] })
+    yield* fixture.llm.text("RESOLVED")
+    yield* Effect.promise(() => work.sdk.experimental.projectCopy.done({ sessionID: work.chat.sessionID }, { throwOnError: true }))
+    yield* pollWithTimeout(Effect.promise(() => work.chat.sdk.session.get({ sessionID: work.chat.sessionID }, { throwOnError: true })).pipe(
+      Effect.map((result) => result.data.directory === work.chat.project && handoff(result.data)?.phase === "merged" && handoff(result.data)?.error ? result.data : undefined),
+    ), "cleanup did not reach the moved parent", "45 seconds")
+    work.chat.server.kill()
+    yield* Effect.promise(() => work.chat.server.exited)
+    yield* Effect.promise(() => Bun.$`git worktree unlock ${work.copy}`.cwd(work.chat.project).quiet())
+    const resumed = yield* openChat(fixture, { resume: work.chat.sessionID })
+    yield* Effect.promise(() => resumed.sdk.experimental.projectCopy.done({ sessionID: resumed.sessionID }, { throwOnError: true }))
+    const finished = yield* pollWithTimeout(Effect.promise(() => resumed.sdk.session.get({ sessionID: resumed.sessionID }, { throwOnError: true })).pipe(
+      Effect.map((result) => handoff(result.data)?.phase === "complete" ? result.data : undefined),
+    ), "restarted cleanup did not finish", "30 seconds")
+    expect(finished.directory).toBe(work.chat.project)
+    expect(yield* Effect.promise(() => Bun.file(path.join(work.copy, ".git")).exists())).toBe(false)
+    expect(yield* fixture.llm.calls).toBe(5)
+    expect((yield* Effect.promise(() => Bun.file(path.join(work.chat.project, "note.txt")).text())).replaceAll("\r\n", "\n")).toBe("PARENT and COPY\n")
+    expectIsolated(yield* fixture.llm.inputs)
+  }), 150_000)
+
   cliIt.live("oc's claude-code provider returns local time through the default proxy", (fixture) =>
     Effect.gen(function* () {
       const project = path.join(fixture.home, "work")
@@ -724,6 +941,132 @@ describe.skipIf(!cliPath)("Claude Code CLI against TestLLMServer", () => {
       expect(report.render()).toContain("| accounting after success | unavailable |")
       expectIsolated(yield* fixture.llm.inputs)
     }),
+    180_000,
+  )
+
+  cliIt.live(
+    "handoff now writes a linked session from a normal Claude turn, not CLI compact",
+    (fixture) =>
+      Effect.gen(function* () {
+        const chat = yield* openChat(fixture)
+        yield* fixture.llm.text("WORK-DONE")
+        yield* fixture.llm.text("HANDOFF-SUMMARY next: keep going")
+        yield* fixture.llm.text("CONTINUED-FROM-HANDOFF")
+        const first = yield* Effect.promise(() =>
+          chat.sdk.session.prompt(
+            {
+              sessionID: chat.sessionID,
+              model: { providerID: "claude-code", modelID: "claude-sonnet-4-5" },
+              parts: [{ type: "text", text: "Finish the first task" }],
+            },
+            { throwOnError: true },
+          ),
+        )
+        expect(JSON.stringify(first.data)).toContain("WORK-DONE")
+        const started = yield* Effect.promise(() =>
+          chat.sdk.session.handoff({ sessionID: chat.sessionID }, { throwOnError: true }),
+        )
+        expect(started.data).toBe(true)
+        const child = yield* pollWithTimeout(
+          Effect.promise(() => chat.sdk.session.children({ sessionID: chat.sessionID })).pipe(
+            Effect.map((result) => result.data?.[0]),
+          ),
+          "handoff child missing",
+          "30 seconds",
+        )
+        expect(child.parentID).toBe(chat.sessionID)
+        const messages = yield* pollWithTimeout(
+          Effect.promise(() => chat.sdk.session.messages({ sessionID: child.id })).pipe(
+            Effect.map((result) => {
+              const text = JSON.stringify(result.data)
+              if (!text.includes("Resume the next step from this handoff")) return
+              return result.data
+            }),
+          ),
+          "handoff child not ready",
+          "30 seconds",
+        )
+        expect(JSON.stringify(messages[0]?.parts)).toContain("Resume the next step from this handoff")
+        const continued = yield* pollWithTimeout(
+          Effect.promise(() => chat.sdk.session.messages({ sessionID: child.id })).pipe(
+            Effect.map((result) => {
+              if (!JSON.stringify(result.data).includes("CONTINUED-FROM-HANDOFF")) return
+              return result.data
+            }),
+          ),
+          "handoff child never continued",
+          "60 seconds",
+        )
+        expect(JSON.stringify(continued)).toContain("CONTINUED-FROM-HANDOFF")
+        const inputs = yield* fixture.llm.inputs
+        expect(JSON.stringify(inputs)).not.toContain("/compact")
+        expectIsolated(inputs)
+      }),
+    180_000,
+  )
+
+  cliIt.live(
+    "context limit handoff auto-triggers at the token threshold and the child continues",
+    (fixture) =>
+      Effect.gen(function* () {
+        const project = path.join(fixture.home, "work")
+        yield* initRepo(project)
+        const env = {
+          ...claudeEnv(fixture.home, fixture.llm.url),
+          OPENCODE_DB: path.join(fixture.home, "opencode.db"),
+          OPENCODE_CONFIG_CONTENT: JSON.stringify({
+            ...chatConfig(fixture.llm.url),
+            compaction: { limit: { tokens: 1, action: "handoff" } },
+          }),
+        }
+        const server = yield* fixture.opencode.serve({ env })
+        const sdk = createOpencodeClient({ baseUrl: server.url, directory: project, throwOnError: true })
+        const created = yield* Effect.promise(() => sdk.session.create({ title: "autoHandoff" }, { throwOnError: true }))
+        const sessionID = created.data.id
+        const model = { providerID: "claude-code", modelID: "claude-sonnet-4-5" }
+        yield* fixture.llm.text("WORK-AUTO", { usage: { input: 500, output: 50 } })
+        yield* fixture.llm.text("HANDOFF-SUMMARY-AUTO next: keep going")
+        yield* fixture.llm.text("CONTINUED-AUTO")
+        yield* Effect.promise(() =>
+          sdk.session.prompt(
+            { sessionID, model, parts: [{ type: "text", text: "Do the first task" }] },
+            { throwOnError: true },
+          ),
+        )
+        const child = yield* pollWithTimeout(
+          Effect.promise(() => sdk.session.children({ sessionID })).pipe(
+            Effect.map((result) => result.data?.[0]),
+          ),
+          "auto handoff child missing",
+          "30 seconds",
+        )
+        expect(child.parentID).toBe(sessionID)
+        const messages = yield* pollWithTimeout(
+          Effect.promise(() => sdk.session.messages({ sessionID: child.id })).pipe(
+            Effect.map((result) => {
+              if (!JSON.stringify(result.data).includes("Resume the next step from this handoff")) return
+              return result.data
+            }),
+          ),
+          "auto handoff child not ready",
+          "30 seconds",
+        )
+        expect(JSON.stringify(messages[0]?.parts)).toContain("Resume the next step from this handoff")
+        const continued = yield* pollWithTimeout(
+          Effect.promise(() => sdk.session.messages({ sessionID: child.id })).pipe(
+            Effect.map((result) => {
+              if (!JSON.stringify(result.data).includes("CONTINUED-AUTO")) return
+              return result.data
+            }),
+          ),
+          "auto handoff child never continued",
+          "60 seconds",
+        )
+        expect(JSON.stringify(continued)).toContain("CONTINUED-AUTO")
+        const inputs = yield* fixture.llm.inputs
+        expect(JSON.stringify(inputs)).not.toContain("/compact")
+        expectIsolated(inputs)
+      }),
     180_000,
   )
 

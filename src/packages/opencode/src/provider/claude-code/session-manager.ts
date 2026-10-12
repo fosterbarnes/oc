@@ -228,6 +228,7 @@ interface ClaudeSessionRecord {
   anchors: SessionAnchor[]
   /** Pool account the conversation lives on; absent means the default account. */
   account?: string
+  movedTo?: string
 }
 
 // One active CLI process per session key. Keyed by a composite
@@ -531,6 +532,31 @@ export function deleteActiveProcessesForSession(sessionID: string): string[] {
   return released
 }
 
+/** Called by the server only after the oc turn ends, before moving its cwd. */
+export async function prepareSessionDirectoryMove(sessionID: string, directory: string): Promise<void> {
+  const keys = [...activeProcesses].filter(([key, process]) =>
+    process.opencodeSessionID === sessionID || describeSessionKey(key).session === sessionID,
+  )
+  if (keys.some(([, process]) => isTurnInFlight(process))) throw new Error("Claude Code is still running in this session")
+  for (const [key] of keys) {
+    if (!(await deleteActiveProcessAndWait(key))) throw new Error("Claude Code did not release the old working directory")
+  }
+  for (const [key, record] of loadedSessions()) {
+    if (describeSessionKey(key).session === sessionID) record.movedTo = directory
+  }
+  persistSessions()
+}
+
+/** Consume a durable intentional-move marker; unrelated conversation loss still asks. */
+export function takeSessionDirectoryMove(sessionID: string, directory: string): boolean {
+  const keys = [...loadedSessions()].filter(([key, record]) =>
+    describeSessionKey(key).session === sessionID && record.movedTo === directory,
+  ).map(([key]) => key)
+  if (!keys.length) return false
+  for (const key of keys) deleteClaudeSessionId(key)
+  return true
+}
+
 /**
  * Synchronous best-effort sweep for host process exit. Node does not kill
  * children on exit, so without this a hard opencode shutdown reparents every
@@ -619,7 +645,8 @@ export async function deleteActiveProcessAndWait(
 }
 
 export function getClaudeSessionId(key: string): string | undefined {
-  return loadedSessions().get(key)?.sessionId
+  const record = loadedSessions().get(key)
+  return record?.movedTo ? undefined : record?.sessionId
 }
 
 function loadedSessions(): Map<string, ClaudeSessionRecord> {
@@ -658,7 +685,8 @@ function parseSessionsFile(text: string): [string, ClaudeSessionRecord][] | unde
         ? record.anchors.filter((a) => typeof a?.uuid === "string" && typeof a?.hash === "string")
         : []
       const account = typeof record.account === "string" ? record.account : undefined
-      return [[key, { sessionId: record.sessionId, anchors, account }]]
+      const movedTo = typeof record.movedTo === "string" ? record.movedTo : undefined
+      return [[key, { sessionId: record.sessionId, anchors, account, movedTo }]]
     })
   } catch {
     return undefined

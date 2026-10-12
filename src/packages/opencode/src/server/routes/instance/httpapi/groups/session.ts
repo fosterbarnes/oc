@@ -96,6 +96,7 @@ export const SessionPaths = {
   share: `${root}/:sessionID/share`,
   init: `${root}/:sessionID/init`,
   summarize: `${root}/:sessionID/summarize`,
+  handoff: `${root}/:sessionID/handoff`,
   rename: `${root}/:sessionID/rename`,
   prompt: `${root}/:sessionID/message`,
   promptAsync: `${root}/:sessionID/prompt_async`,
@@ -303,6 +304,18 @@ export const SessionApi = HttpApi.make("session")
             identifier: "session.unshare",
             summary: "Unshare session",
             description: "Remove the shareable link for a session, making it private again.",
+          }),
+        ),
+        HttpApiEndpoint.post("handoff", SessionPaths.handoff, {
+          params: { sessionID: SessionID },
+          query: WorkspaceRoutingQuery,
+          success: described(Schema.Boolean, "Started session handoff"),
+          error: [HttpApiError.BadRequest, ApiNotFoundError],
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "session.handoff",
+            summary: "Handoff session",
+            description: "Write a handoff summary in this session and continue in a linked new session.",
           }),
         ),
         HttpApiEndpoint.post("summarize", SessionPaths.summarize, {

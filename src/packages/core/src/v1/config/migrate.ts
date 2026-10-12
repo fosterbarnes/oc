@@ -59,6 +59,11 @@ export function migrate(info: typeof ConfigV1.Info.Type) {
         tokens: info.compaction.preserve_recent_tokens,
       },
       buffer: info.compaction.reserved,
+      limit: info.compaction.limit && {
+        tokens: info.compaction.limit.tokens,
+        action: info.compaction.limit.action,
+        providers: info.compaction.limit.providers,
+      },
     },
     skills: info.skills && [...(info.skills.paths ?? []), ...(info.skills.urls ?? [])],
     commands: info.command,
@@ -254,3 +259,4 @@ function migrateModel(info: typeof ConfigProviderV1.Model.Type, packageName?: st
 function int(value: number) {
   return Math.max(Number.MIN_SAFE_INTEGER, Math.min(Number.MAX_SAFE_INTEGER, Math.trunc(value)))
 }
+
