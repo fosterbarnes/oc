@@ -1,21 +1,6 @@
-v0.2.162 variationsHedio
+v0.2.163 sabotageCrowd
 
-claude accounts:
-Extra Claude usage accounts now have numbered labels with their hourly and weekly windows together. Switch Claude account in the palette selects the account for new turns and restarts session context on the next turn. Account failover now reacts to actual limit failures, preserves reset times, and does not switch after cancellation.
+context limits:
+Changing context limits or automatic compaction settings no longer interrupts running Claude sessions and subagents. The context-limit menu refreshes its settings after saving.
 
-auto-resume:
-An opt-in palette toggle resumes sessions after all Claude accounts reach their usage limits. Scheduled resumes shows pending times and lets you cancel them. The scheduler respects newer user messages, retries busy or failed starts, preserves bookkeeping across lock contention, and caps consecutive automatic resumes at five.
-
-harness updates:
-Manage Third Party Harnesses groups Claude Code, Cursor and Codex CLI updates with Claude, Cursor and ChatGPT Desktop updates on Windows. Updates validate package identity, signatures and confirmed versions, enforce timeouts, and show the actual failure message. Terminal documentation now includes capability differences and WezTerm agent tab colors.
-
-palette and sidebar:
-Top and bottom sidebars can use half the terminal height and close when you click outside the overlay. Palette hotkeys validate modifiers and conflicts, including bindings loaded from configuration, and respect typing and dialog focus. Script favorites and pins update immediately. The oc.json reasoningEffort setting was removed; reasoning follows the session pick, model pick, then model default.
-
-runtime reliability:
-Cursor relay requests require the private control token, cancellation stops the active run, and git diff and image targets stay within the workspace after realpath validation. Deleting a session clears its cached Cursor directory. Launcher cleanup verifies process identity before forced termination, restart health reflects draining, and detached launches preserve Windows quoting. Installers keep timestamped backups and restore them when installation fails. Session completion tools require explicit permission by name, and marker commands require an explicit marker allow rule to bypass confirmation.
-
-cleanup:
-Removed unused code and the legacy bash-only Claude account wrapper. Fork-owned files use camelCase filenames with updated imports, scripts and documentation. Concurrent TUI settings writes are serialized to avoid overlapping Windows renames.
-
-Under the hood: Added scheduler locking and retry bookkeeping, provider lifecycle and path-containment fixes, launcher identity checks, shared updater validation, permission filtering, and regression coverage. Checks passed: targeted scheduler, Cursor image mapping, git diff, provider cancellation, plugin cleanup and session-mark permission tests, plus the agent-push pre-push checks. Earlier implementation verification includes workspace typechecks and targeted provider, launcher, TUI, core and cursor-runtime checks. Known broader test failures remain recorded in buildNotes.md. No build, install, real-model run or live UI check was performed for this push.
+Under the hood: Compaction-only updates refresh configuration caches without disposing project or provider state. Other configuration changes retain their full reload. The keybind documentation check now accepts Windows line endings without reporting unchanged tables as stale. Checks passed: the context-limit HTTP regression with 48 assertions covering two open projects, provider overrides, local precedence, JSONC comments and mixed-update disposal, the keybind documentation check, plus the agent-push pre-push checks. No real-model or live pane check was performed for this push.

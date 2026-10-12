@@ -8,7 +8,7 @@ import { TuiKeybindPreset } from "../src/config/keybindPreset"
 const START = "<!-- keybinds:start -->"
 const END = "<!-- keybinds:end -->"
 const file = Bun.file(path.resolve(import.meta.dir, "../../../../docs/keybinds.md"))
-const doc = await file.text()
+const doc = (await file.text()).replaceAll("\r\n", "\n")
 const start = doc.indexOf(START)
 const end = doc.indexOf(END)
 if (start < 0 || end < start) throw new Error(`docs/keybinds.md needs one ${START} ... ${END} pair`)

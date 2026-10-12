@@ -1,6 +1,7 @@
 import { useSDK } from "./context/sdk"
 import { useSync } from "./context/sync"
 import { useRoute } from "./context/route"
+import { useProject } from "./context/project"
 import { useDialog } from "./ui/dialog"
 import { DialogSelect, type DialogSelectOption } from "./ui/dialog-select"
 import { DialogPrompt } from "./ui/dialog-prompt"
@@ -106,6 +107,23 @@ export function createContextLimitCommands() {
   const route = useRoute()
   const dialog = useDialog()
   const toast = useToast()
+  const project = useProject()
+
+  async function save(scope: string | undefined, limit: Limit) {
+    const patch: LimitPatch = scope === undefined ? limit : { providers: { [scope]: limit } }
+    const result = await sdk.client.global.config.update({
+      config: { compaction: { limit: patch } },
+    })
+    if (!result.error) {
+      const config = await sdk.client.config.get({ workspace: project.workspace.current() })
+      if (config.data) sync.set("config", config.data)
+    }
+    toast.show(
+      result.error
+        ? { message: `Failed to update context limit: ${String(result.error)}`, variant: "error" }
+        : { message: limitMessage(scope, limit), variant: "success" },
+    )
+  }
 
   function openAction(scope: string | undefined) {
     const limit = effectiveLimit(sync.data.config, scope)
@@ -134,12 +152,12 @@ export function createContextLimitCommands() {
           const choice = option.value
           if (choice === "reset") {
             dialog.clear()
-            void save(scope, globalLimit(sync.data.config), toast, sdk)
+            void save(scope, globalLimit(sync.data.config))
             return
           }
           if (choice === "off") {
             dialog.clear()
-            void save(scope, { action: "off", tokens: currentTokens }, toast, sdk)
+            void save(scope, { action: "off", tokens: currentTokens })
             return
           }
           dialog.replace(() => (
@@ -153,7 +171,7 @@ export function createContextLimitCommands() {
                   toast.show({ message: "Enter a token count in thousands, like 200k", variant: "error" })
                   return
                 }
-                void save(scope, { action: choice, tokens }, toast, sdk)
+                void save(scope, { action: choice, tokens })
               }}
             />
           ))
@@ -217,19 +235,3 @@ export function createContextLimitCommands() {
   ]
 }
 
-async function save(
-  scope: string | undefined,
-  limit: Limit,
-  toast: ReturnType<typeof useToast>,
-  sdk: ReturnType<typeof useSDK>,
-) {
-  const patch: LimitPatch = scope === undefined ? limit : { providers: { [scope]: limit } }
-  const result = await sdk.client.global.config.update({
-    config: { compaction: { limit: patch } },
-  })
-  toast.show(
-    result.error
-      ? { message: `Failed to update context limit: ${String(result.error)}`, variant: "error" }
-      : { message: limitMessage(scope, limit), variant: "success" },
-  )
-}

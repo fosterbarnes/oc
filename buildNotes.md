@@ -112,6 +112,28 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-12 (~18:31) - v0.2.163 sabotageCrowd - Preserve running agents when changing context limits - GPT-6.1 Sol, default reasoning; Implementation
+
+### Agent
+- Meta: GPT-6.1 Sol; default reasoning; Implementation; completed
+- Version: 0.2.163 sabotageCrowd
+- ERROR: Context-limit palette saved through global config PATCH, which disposed every project instance and interrupted running Claude sessions/subagents.
+- Fixed `Config.isCompactionUpdate` and global config handler: compaction-only patches invalidate global/config caches without disposing provider/session instances; mixed patches retain full reload.
+- Fixed `tui/src/contextLimit.tsx` save: refresh effective config for current workspace after saving; palette no longer relies on disposal/rebootstrap to update displayed settings.
+- Added `test/server/contextLimitUpdate.test.ts`: real HTTP updates preserve two project identities/disposal hooks across off/handoff/compact; configs refresh with local precedence, saved provider entries and JSONC comments intact; mixed update still disposes both.
+- Verification: `bun test ./test/server/contextLimitUpdate.test.ts` 1 pass, 0 fail, 48 assertions. Background shell unavailable; used built-in shell. No build, typecheck, real Claude run or pane check; installed acceptance remains user-owned.
+- Bumped revision once through `.scripts/bumpVersion.ps1`.
+- Fixed `tui/script/keybindDocs.ts`: normalize CRLF before comparing generated tables; Windows checkout line endings no longer fail pre-push with unchanged table content.
+- ERROR: First agent-push stopped before commit on keybind docs check; 27 workspace typechecks passed. Regenerated tables had no content diff; normalized comparison fixes repeat failure after checkout.
+
+### User
+Context limits
+- Changing context limits or automatic compaction settings no longer shuts down running agents.
+- The context-limit menu refreshes its settings after saving.
+- After updating, switch Context limit to Off while Claude and a subagent are replying and confirm both continue.
+
+---
+
 ## 2026-10-12 (~17:54) - v0.2.162 variationsHedio - Post-review fixes for the fork-wide pass - Claude Opus 5.5, default reasoning; Implementation
 
 ### Agent
