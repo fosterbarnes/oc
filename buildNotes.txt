@@ -1,12 +1,9 @@
-v0.2.157 discoloredDebt
+v0.2.158 bangHahah
 
-oc and opencode:
-oc and occ use the background server, while the separate native opencode program runs in its own window from the same source. The oc single command, single and portable launch flags, and mode setting are removed; use opencode for native sessions. Revive from a native window reopens opencode with the same directory and session.
+compact usage:
+After /compact with the Claude Code provider, the context meter now shows the compacted size instead of staying at the old value. The compaction turn makes no model call, so its finish event used to carry zero usage.
 
-build and install:
-Build and install scripts accept -Oc or -Native to handle either program. Installation breaks the old shared hard links, keeps occ linked to oc, and verifies that opencode is separate. The run script opens oc by default and accepts -Native for opencode. Project rules, the README, fork status, script reference, and native split plan reflect the two programs.
+work close-out:
+The /done message now says work merges into the parent repo when the turn ends. The agent is told to run its own checks and end with one summary line instead of asking you to run them, and the "Work merged" confirmation stays on screen for 8 seconds.
 
-palette launch:
-Launching a palette entry opens the sibling native opencode executable instead of repeatedly spawning the oc launcher. The native TUI keeps its executable-scoped ledger and revive shutdown acknowledgement.
-
-Under the hood: Global.native selects the build flavor; executable resolution maps only occ to oc; startup, TUI, footer, and revive paths use the native flavor instead of OC_SINGLE. Build outputs include separate oc and native executables, with ocdebug available for debug builds. Checks passed: core global.test.ts, opencode revive.test.ts, and git diff --check, plus the agent-push pre-push checks. Earlier session verification recorded clean opencode, tui, and core type checks and command-loader tests; the user verified distinct installed binaries after the second revive. Bun-dev native revive environment propagation through Windows Terminal remains unverified.
+Under the hood: ClaudeTurn keeps post_tokens from the compact_boundary message and reports it as the finish usage for compaction turns (provider/claude-code/turn-stream.ts). The /done toast (tui move.tsx), work_done tool output (tool/work-done.ts), and the /work synthetic reminder and merge toast duration (session/work-handoff.ts) changed wording only. Checks passed: opencode and tui typecheck, fundamental-tools.test.ts, work-handoff.test.ts, fake-model.test.ts, plus the agent-push pre-push checks. Not run live: /compact meter update and the /work then /done agent close-out.

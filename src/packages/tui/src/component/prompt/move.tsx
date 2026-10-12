@@ -204,7 +204,7 @@ export function usePromptMove(input: { projectID: () => string | undefined; sess
     setProgress("Merging work")
     try {
       await sdk.client.experimental.projectCopy.done({ sessionID, directory: copy }, { throwOnError: true })
-      toast.show({ message: "Work completion queued for after the current turn", variant: "info" })
+      toast.show({ message: "Closing out: work merges into the parent repo when this turn ends", variant: "info" })
     } catch (error) {
       toast.error(error)
     } finally {

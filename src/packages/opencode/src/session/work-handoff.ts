@@ -133,7 +133,7 @@ const layer = Layer.effect(Service, Effect.gen(function* () {
         sessionID, noReply: true, agent: session.agent,
         model: session.model ? { providerID: session.model.providerID, modelID: session.model.id } : undefined,
         variant: session.model?.variant,
-        parts: [{ type: "text", synthetic: true, text: `<system-reminder>You are in an isolated work copy at "${copy.directory}" of "${repository.worktree}". Changes merge back unstaged. Do not commit. When finished, call work_done as your last tool and end the turn, or the user can run /done. Only ignored regular root .env* files were copied; ignored files are not merged.</system-reminder>` }],
+        parts: [{ type: "text", synthetic: true, text: `<system-reminder>You are in an isolated work copy at "${copy.directory}" of "${repository.worktree}". Changes merge back unstaged. Do not commit. Run any needed checks yourself before finishing; never hand them to the user. When finished, call work_done as your last tool and end the turn, or the user can run /done. Only ignored regular root .env* files were copied; ignored files are not merged.</system-reminder>` }],
       }))
       return copy.directory
     }))
@@ -281,7 +281,7 @@ const layer = Layer.effect(Service, Effect.gen(function* () {
       }))
         yield* save(sessionID, { ...recovery, phase: "complete" })
       }))
-      yield* events.publish(TuiEvent.ToastShow, { message: `Work merged as unstaged changes in ${recovery.parent}`, variant: "success", duration: 5000 })
+      yield* events.publish(TuiEvent.ToastShow, { message: `Work merged as unstaged changes in ${recovery.parent}`, variant: "success", duration: 8000 })
     }).pipe(Effect.scoped, Effect.catchCause((cause) => Effect.gen(function* () {
       const current = yield* sessions.get(sessionID).pipe(Effect.orDie)
       const state = Schema.decodeUnknownOption(Recovery)(current.metadata?.ocWorkHandoff)

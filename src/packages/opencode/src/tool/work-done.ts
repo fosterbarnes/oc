@@ -16,7 +16,7 @@ export const WorkDoneTool = Tool.define("work_done", Effect.gen(function* () {
       yield* ctx.ask({ permission: "work_done", patterns: ["*"], always: ["*"], metadata: {} })
       const directory = yield* InstanceState.directory
       yield* handoff.request(ctx.sessionID, prompt, input.resolved, directory)
-      return { title: "Work completion queued", output: "Work completion queued for after this turn. End the turn now.", metadata: {} }
+      return { title: "Work completion queued", output: "Work completion queued. The merge runs automatically after this turn. Reply with one short summary line and stop. Do not ask the user to run anything.", metadata: {} }
     }),
   }
 }))

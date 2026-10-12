@@ -26,6 +26,7 @@ import {
   formatStreamTimeoutNote,
   isAccountLimitError,
   isRateLimitRejected,
+  parseCompactBoundary,
   parseRateLimitEvent,
   reportCompactBoundary,
   reportConversationReset,
@@ -219,6 +220,8 @@ class ClaudeTurn {
   private readonly autoContinue: AutoContinueState
 
   private lastCall: CallUsage | null = null
+  /** `post_tokens` of a `/compact` boundary: its turn makes no model call, so this is the only size it has. */
+  private compactedTokens: number | undefined
   private resultMeta: ReturnType<typeof resultMetadata> | Record<string, never> = {}
   /** Subtype of a failing `result`, so the finish reports an error rather than a clean stop. */
   private resultFailure: string | undefined
@@ -713,6 +716,7 @@ class ClaudeTurn {
     if (msg.subtype === "compact_boundary") {
       const note = reportCompactBoundary(msg)
       if (note) this.out.note(note)
+      this.compactedTokens = parseCompactBoundary(msg)?.postTokens
     }
   }
 
@@ -1139,7 +1143,11 @@ class ClaudeTurn {
     this.out.enqueue({
       type: "finish",
       finishReason: this.resultFailure ? { unified: "error", raw: this.resultFailure } : toFinishReason("stop"),
-      usage: toUsage(contextUsage(this.lastCall)),
+      // oc's context meter skips replies with no output tokens, so report the compacted size.
+      usage:
+        this.turn.compactionMode && !this.lastCall && this.compactedTokens
+          ? toUsage({ input_tokens: 0, output_tokens: this.compactedTokens })
+          : toUsage(contextUsage(this.lastCall)),
       providerMetadata: {
         "claude-code": {
           ...this.resultMeta,

@@ -112,6 +112,41 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-11 (~22:12) - v0.2.158 bangHahah - Clearer /done close-out wording - Claude Sonnet 5.5, low reasoning; Agent
+
+### Agent
+- Meta: Claude Sonnet 5.5; low reasoning; Agent; completed
+- Version: 0.2.158 bangHahah
+- Investigated: /work then /done merge worked (copy removed, changes unstaged on main); flaws were toast wording and the agent handing checks to the user after `work_done`.
+- Changed: `/done` queued toast in tui/component/prompt/move.tsx now reads "Closing out: work merges into the parent repo when this turn ends".
+- Changed: `work_done` tool output (tool/work-done.ts) tells the agent the merge is automatic, to reply with one summary line, and not to ask the user to run anything.
+- Changed: `/work` synthetic reminder (session/work-handoff.ts) tells the agent to run needed checks itself before finishing; merge success toast duration 5000 -> 8000 ms.
+- Verification: `bun run typecheck` clean in opencode and tui; `bun test test/session/work-handoff.test.ts` 5 pass; `bun test test/provider/claude-code/fake-model.test.ts` 29 pass. Not run live.
+- TODO: Claude Code session loses earlier context after the post-merge restart; not traced. `oc.work-generate-short-2-3` sibling dir may be a stale copy.
+
+### User
+Work close-out
+- The `/done` message now says the work will merge into the parent repo when the turn ends.
+- The agent is told to run its own checks and finish with one line instead of asking you to run them.
+- The "Work merged" confirmation stays on screen longer.
+
+---
+
+## 2026-10-11 (~21:49) - v0.2.158 bangHahah - Report compacted size after /compact - Claude Sonnet 5.5, low reasoning; Agent
+
+### Agent
+- Meta: Claude Sonnet 5.5; low reasoning; Agent; completed
+- Version: 0.2.158 bangHahah
+- Fixed: `/compact` turns make no model call, so the finish event carried zero usage and the context meter never updated. `ClaudeTurn` (provider/claude-code/turn-stream.ts) now keeps `post_tokens` from the `compact_boundary` message (`parseCompactBoundary`) and reports it as the finish usage when the turn is a compaction with no model call.
+- Added: assertion in test/provider/claude-code/fundamental-tools.test.ts that the compaction finish reports 10 output tokens.
+- Verification: `bun test test/provider/claude-code/fundamental-tools.test.ts` 14 pass, 0 fail; `bun run typecheck` clean. Not run live.
+
+### User
+Context meter
+- After running `/compact` with the Claude Code provider, the context meter now shows the compacted size instead of staying at the old value.
+
+---
+
 ## 2026-10-11 (~21:36) - v0.2.157 discoloredDebt - Pass on native split: palette launch loop - Claude Opus 5.5, low reasoning; Pass
 
 ### Agent

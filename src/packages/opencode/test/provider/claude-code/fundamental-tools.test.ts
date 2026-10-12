@@ -560,6 +560,8 @@ test("a compaction turn runs /compact in the live conversation and never spawns 
     expect(text(compacted)).toContain("SUMMARY OF EARLIER WORK")
     expect(text(compacted)).not.toContain("<local-command-stdout>")
     expect(compacted.some((event) => event.type === "tool-call")).toBe(false)
+    const finish = compacted.find((event) => event.type === "finish")
+    expect(finish?.type === "finish" ? finish.usage.outputTokens.total : undefined).toBe(10)
   } finally {
     await deleteActiveProcessAndWait(key)
     deleteClaudeSessionId(key)
