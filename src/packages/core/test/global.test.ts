@@ -16,15 +16,14 @@ describe("global paths", () => {
 })
 
 describe("resolveExecutablePath", () => {
-  test("maps oc and occ to sibling opencode", () => {
-    expect(Global.resolveExecutablePath("C:\\Apps\\opencode\\oc.exe")).toBe("C:\\Apps\\opencode\\opencode.exe")
-    expect(Global.resolveExecutablePath("C:\\Apps\\opencode\\occ.exe")).toBe("C:\\Apps\\opencode\\opencode.exe")
-    expect(Global.resolveExecutablePath("/usr/local/bin/oc")).toBe("/usr/local/bin/opencode")
-    expect(Global.resolveExecutablePath("/usr/local/bin/occ")).toBe("/usr/local/bin/opencode")
-    expect(Global.resolveExecutablePath("/opt/opencode/oc")).toBe("/opt/opencode/opencode")
+  test("maps the occ hard link to sibling oc", () => {
+    expect(Global.resolveExecutablePath("C:\\Apps\\opencode\\occ.exe")).toBe("C:\\Apps\\opencode\\oc.exe")
+    expect(Global.resolveExecutablePath("/usr/local/bin/occ")).toBe("/usr/local/bin/oc")
   })
 
-  test("leaves opencode, ocdebug, and bun unchanged", () => {
+  test("leaves oc, native opencode, ocdebug, and bun unchanged", () => {
+    expect(Global.resolveExecutablePath("C:\\Apps\\opencode\\oc.exe")).toBe("C:\\Apps\\opencode\\oc.exe")
+    expect(Global.resolveExecutablePath("/opt/opencode/oc")).toBe("/opt/opencode/oc")
     expect(Global.resolveExecutablePath("C:\\Apps\\opencode\\opencode.exe")).toBe("C:\\Apps\\opencode\\opencode.exe")
     expect(Global.resolveExecutablePath("C:\\Apps\\opencode\\ocdebug.exe")).toBe("C:\\Apps\\opencode\\ocdebug.exe")
     expect(Global.resolveExecutablePath("C:\\Apps\\opencode\\oc-debug.exe")).toBe("C:\\Apps\\opencode\\oc-debug.exe")

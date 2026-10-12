@@ -20,8 +20,6 @@ export const keys = [
   "sessionAgent",
   "reasoningEffort",
   "serverStartOnWindowsUserStart",
-  // "single" makes `oc launch` / `oc previous` open single-instance windows; default resident.
-  "mode",
 ] as const
 
 export type Key = (typeof keys)[number]
@@ -68,8 +66,6 @@ export async function read() {
 }
 
 export async function update(key: Key, value: string, startup?: Parameters<typeof Startup.update>[2]) {
-  if (key === "mode" && value !== "single" && value !== "resident")
-    throw new Error(`mode must be "single" or "resident": ${value}`)
   const parsed: Value = value === "true" ? true : value === "false" ? false : value
   if (key === "serverStartOnWindowsUserStart") {
     if (typeof parsed !== "boolean") throw new Error("serverStartOnWindowsUserStart must be true or false")
@@ -594,15 +590,14 @@ export async function revive(context: Revive.ReviveContext) {
     await revivePipeline(context)
   } catch (error) {
     await log.write(`Revive failed: ${error instanceof Error ? error.message : String(error)}`)
-    // Hosted revives recover in place. An unhosted single has already exited, even on build failure.
-    if (context.single && !context.supervisorPid && (!context.tuiPid || !isPidAlive(context.tuiPid))) {
-      await log.step("Reopening single after failure", () => restartTerminal({
+    // Hosted revives recover in place. A native window has already exited, even on build failure.
+    if (context.native && (!context.tuiPid || !isPidAlive(context.tuiPid))) {
+      await log.step("Reopening native after failure", () => restartTerminal({
         terminal: reviveTerminal(context.terminal),
         launcher: "occ",
         executable: executablePath(),
         ...(/^bun(?:\.exe)?$/i.test(path.basename(process.execPath)) ? { entrypoint: process.argv[1] } : {}),
-        single: true,
-        portable: context.portable,
+        native: true,
         directory: context.directory,
         sessionID: context.sessionID,
       }))
@@ -613,16 +608,14 @@ export async function revive(context: Revive.ReviveContext) {
 
 async function revivePipeline(context: Revive.ReviveContext) {
   const log = reviveLog()
-  if (context.single && context.tuiPid) {
+  if (context.native && context.tuiPid) {
     const tuiPid = context.tuiPid
-    await log.step("Waiting for single runtime shutdown", async () => {
-      if (!(await waitForExit(tuiPid, 30_000))) throw new Error("Single runtime did not shut down; build cancelled")
-      if (!context.supervisorPid) {
-        const stopped = await Bun.file(Revive.shutdownPath(tuiPid)).text().catch(() => "")
-        await fs.rm(Revive.shutdownPath(tuiPid), { force: true })
-        await fs.rm(Revive.handoffPath(tuiPid), { force: true })
-        if (stopped !== "stopped\n") throw new Error("Single runtime cleanup failed; build cancelled")
-      }
+    await log.step("Waiting for native window shutdown", async () => {
+      if (!(await waitForExit(tuiPid, 30_000))) throw new Error("Native window did not shut down; build cancelled")
+      const stopped = await Bun.file(Revive.shutdownPath(tuiPid)).text().catch(() => "")
+      await fs.rm(Revive.shutdownPath(tuiPid), { force: true })
+      await fs.rm(Revive.handoffPath(tuiPid), { force: true })
+      if (stopped !== "stopped\n") throw new Error("Native window cleanup failed; build cancelled")
     })
   }
   // First /revive source choice; parseContext guarantees `sourceDir` for "existing" and "download".
@@ -647,8 +640,7 @@ async function revivePipeline(context: Revive.ReviveContext) {
     ...(context.shellPid && shellProcess(context.shellPid) ? { shellPid: context.shellPid } : {}),
     ...(context.supervisorPid ? { waitPid: context.supervisorPid } : {}),
     ...(build ? { installDir } : {}),
-    ...(context.single ? { single: true, directory: context.directory, sessionID: context.sessionID } : {}),
-    ...(context.portable ? { portable: true } : {}),
+    ...(context.native ? { native: true, directory: context.directory, sessionID: context.sessionID } : {}),
   }
   const steps = build ? Revive.buildSteps(build) : undefined
   for (const command of steps?.commands ?? [])
@@ -657,20 +649,20 @@ async function revivePipeline(context: Revive.ReviveContext) {
   // Ctrl+C from here would leave oc stopped or half installed.
   const ignore = () => {}
   process.on("SIGINT", ignore)
-  const tabs = context.paneID && restart.terminal === "wezterm" && !context.single
+  const tabs = context.paneID && restart.terminal === "wezterm" && !context.native
     ? await windowTabsSnapshot(context.paneID, context)
     : undefined
   const failure = await (async () => {
-    // Single's TUI/worker already shut down before handoff; installs rename running files aside.
-    if (!context.single) await log.step("Stopping oc", () => shutdownAll())
+    // A native TUI/worker already shut down before handoff; installs rename running files aside.
+    if (!context.native) await log.step("Stopping oc", () => shutdownAll())
     if (sources) await log.step(`Installing into ${installDir}`, () => Revive.install(sources, installDir))
-    if (!context.single) await log.step("Starting server", () => startServer())
+    if (!context.native) await log.step("Starting server", () => startServer())
   })().then(() => undefined, (error: unknown) => ({ error }))
   process.off("SIGINT", ignore)
   // A hosting launcher shows the error and reattaches. A hidden helper has no window left, so it
   // still reopens the terminal on the old version before reporting.
-  if (failure && (context.supervisorPid || context.single)) throw failure.error
-  if (failure && !context.single) await log.step("Starting server again", () => startServer())
+  if (failure && (context.supervisorPid || context.native)) throw failure.error
+  if (failure && !context.native) await log.step("Starting server again", () => startServer())
   await log.step(`Handing off to the terminal restarter (log: ${log.file})`, () =>
     awaitLaunch(launchDetached(process.execPath, [...(bun ? [process.argv[1]] : []),
       "oc", "--revive-terminal", Revive.encode({ ...restart, tabs })])))
@@ -731,7 +723,7 @@ export async function restartTerminal(
   if (restart.waitPid && !(await waitForExit(restart.waitPid, 10_000)))
     await log.write(`Launcher ${restart.waitPid} still running after 10s; opening replacement anyway`)
   // A failed close still opens the new terminal; a second window beats none.
-  if (!restart.single) await log.step("Closing the old window", () => closeWindow(restart)).catch(() => undefined)
+  if (!restart.native) await log.step("Closing the old window", () => closeWindow(restart)).catch(() => undefined)
   const command = Revive.reopenCommand(restart)
   await log.step(`Opening ${restart.terminal} with ${restart.launcher}`, () => launch(command))
   if (!restart.installDir) return

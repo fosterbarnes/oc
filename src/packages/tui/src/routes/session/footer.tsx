@@ -53,9 +53,6 @@ export function Footer() {
     <box flexDirection="row" justifyContent="space-between" gap={1} flexShrink={0}>
       <text fg={theme.textMuted}>{directory()}</text>
       <box gap={2} flexDirection="row" flexShrink={0}>
-        <Show when={process.env.OC_SINGLE === "1"}>
-          <text fg={theme.textMuted}>single</text>
-        </Show>
         <Switch>
           <Match when={store.welcome}>
             <text fg={theme.text}>

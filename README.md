@@ -30,7 +30,7 @@
 - Startup animation with no blank gap before the app appears
 - Faster startup for every command
 - `/revive` restarts or rebuilds oc in place
-- `oc single` runs everything in one window with no background server, like stock OpenCode (beta)
+- `opencode` runs every oc feature in one window with no background server, like stock OpenCode (beta)
 
 ### Claude Code
 - The context % updates live during Claude Code turns
@@ -143,13 +143,13 @@ It starts the background server without opening a window. Turn it off to remove 
 entry. Production and debug have separate entries. If you enabled the old, inactive setting,
 select on again after updating to register it.
 
-### Single mode
+### oc and opencode
 
-`oc single [folder]` runs a whole oc session inside one window, like stock OpenCode: same session
-list, no background server. `oc config set mode single` makes `oc` and `occ` always open single
-windows; `--single` does it once. `--portable` uses a separate `ocPortable.db` database. Closing a
-single window stops running work cleanly. Single windows show `single` in the footer and a `⦿`
-instead of a square in the terminal tab. (beta)
+oc installs two programs built from the same source. `oc` (and `occ`) use the background server.
+`opencode [folder]` runs the whole session inside its own window, like stock OpenCode: same
+session list and every oc feature, but no background server, launcher, or server palette entries.
+Closing an `opencode` window stops running work cleanly, `/revive` reopens it as `opencode`, and
+its terminal tab shows `⦿` instead of a square. (beta)
 
 A session can only run in one oc process at a time; another process gets "Session is running in
 another oc process".
@@ -322,7 +322,6 @@ oc reads stock OpenCode settings as usual. These are the ones oc adds. Config fi
 | `homeDir` | folder | Parent folder for `oc <name>` and the `ctrl+n` list. Default: your home folder |
 | `homeDirSort` | `name`, `modified` | How the `ctrl+n` list is sorted |
 | `reasoningEffort` | `low`, `medium`, `high`, `xhigh`, `max`, `default` | Default reasoning for models supporting that variant; explicit session and model choices win |
-| `mode` | `resident`, `single` | Background server (default) or single windows |
 | `server.port` | number | Background server port. Default 4096 (debug 4097) |
 | `server.startOnWindowsUserStart` | boolean | Sign-in startup preference; use the palette or `oc config set serverStartOnWindowsUserStart true/false` to update registration |
 | `revive.launcher` | `occ`, `oc` | What `/revive` reopens. Default `occ` |
@@ -357,7 +356,7 @@ oc reads stock OpenCode settings as usual. These are the ones oc adds. Config fi
 | `subagent_tabs.auto_open` | Open each new subagent of the viewed session in its own tab. Default `false` |
 | `keybinds.session_child_tabs` | Open the running subagents that have no tab yet. Unbound by default |
 
-Subagent tabs attach to the resident oc server, so they don't work in `oc single` windows. The oc
+Subagent tabs attach to the resident oc server, so they don't work in `opencode` windows. The oc
 palette's **Subagent tabs** entry (`/subagentTabs`) toggles both `subagent_tabs` settings and saves
 them; **Open running subagents in tabs** runs the keybind's action from the palette.
 
@@ -420,7 +419,7 @@ following each provider's terms.
 `/exit`, or switch to stock keys with **Keybind layout** in `ctrl+o`.
 
 **Why is oc still running after I closed the window?** That's the background server; it makes the
-next launch fast. Stop it with `oc --kill-server`, or use `oc single` if you'd rather not have it.
+next launch fast. Stop it with `oc --kill-server`, or use `opencode` if you'd rather not have it.
 
 **Is there a macOS or Linux version?** Not currently. oc is built and tested on Windows only.
 
@@ -457,7 +456,7 @@ development history in `buildNotes.md`.
 
 ## Progress
 
-[522,628](scc.txt) lines of code and counting...
+[522,618](scc.txt) lines of code and counting...
 
 <!-- code-count:start -->
 
@@ -469,11 +468,11 @@ development history in `buildNotes.md`.
 | HTML | 1 | 1,161 | 79 | 0 | 1,082 |
 | JavaScript | 10 | 1,766 | 132 | 56 | 1,578 |
 | Nix | 3 | 258 | 23 | 26 | 209 |
-| Powershell | 22 | 1,146 | 81 | 61 | 1,004 |
+| Powershell | 22 | 1,178 | 82 | 66 | 1,030 |
 | SQL | 95 | 592 | 0 | 17 | 575 |
 | Shell | 1 | 120 | 17 | 17 | 86 |
-| TypeScript | 2,756 | 540,512 | 43,556 | 15,527 | 481,429 |
-| **Total** | **3,064** | **588,307** | **49,388** | **16,291** | **522,628** |
+| TypeScript | 2,756 | 540,488 | 43,557 | 15,538 | 481,393 |
+| **Total** | **3,064** | **588,315** | **49,390** | **16,307** | **522,618** |
 
 <!-- code-count:end -->
 

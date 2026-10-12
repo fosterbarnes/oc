@@ -30,16 +30,14 @@ export type ReviveContext = {
   supervisorPid?: number
   // The launcher's parent. Worker 2 kills it to close Windows Terminal tabs and plain consoles.
   shellPid?: number
-  // Unhosted single TUI: the helper waits for its graceful shutdown before building.
+  // Native (opencode) TUI: the helper waits for its graceful shutdown before building.
   tuiPid?: number
   // First /revive answer when oc.json has no `revive.build`: build from an existing source folder,
   // download the source into `sourceDir`, or never build.
   source?: "existing" | "download" | "none"
   sourceDir?: string
-  // Revived from a single-instance window: reopen single and leave the resident server alone.
-  single?: boolean
-  // Single window on ocPortable.db (`--portable`); reopen keeps it.
-  portable?: boolean
+  // Revived from a native window: reopen native and leave the resident server alone.
+  native?: boolean
 }
 
 /** One tab of the revived WezTerm window: an oc session, or a plain shell in its working directory. */
@@ -56,8 +54,8 @@ export type RestartContext = {
   waitPid?: number
   // Set after an install; worker 2 removes `.old-*` leftovers there once the old processes exit.
   installDir?: string
-  single?: boolean
-  portable?: boolean
+  // Reopen the native opencode executable beside `executable` in `directory`, not a launcher.
+  native?: boolean
   directory?: string
   sessionID?: string
   // Every tab of the window, in order (WezTerm only). More than one entry restores them all.
@@ -94,8 +92,8 @@ export function parseContext(input: unknown): ReviveContext {
   const value = record(input)
   if ((value.mode !== "install" && value.mode !== "no-install") || !TERMINALS.includes(value.terminal as string) ||
     !text(value.directory) || !optional(value.sessionID, text) || !optional(value.paneID, text) ||
-    !optional(value.supervisorPid, pid) || !optional(value.shellPid, pid) || !optional(value.single, flag) ||
-    !optional(value.portable, flag) || !optional(value.tuiPid, pid) ||
+    !optional(value.supervisorPid, pid) || !optional(value.shellPid, pid) || !optional(value.native, flag) ||
+    !optional(value.tuiPid, pid) ||
     !optional(value.source, (item) => item === "existing" || item === "download" || item === "none") ||
     ((value.source === "existing" || value.source === "download") !==
       (text(value.sourceDir) && path.isAbsolute(value.sourceDir as string)))) {
@@ -109,9 +107,9 @@ export function decodeRestart(encoded: string): RestartContext {
   if (!TERMINALS.includes(value.terminal as string) || !LAUNCHERS.includes(value.launcher as Launcher) ||
     !text(value.executable) || !optional(value.entrypoint, text) || !optional(value.paneID, text) ||
     !optional(value.shellPid, pid) || !optional(value.waitPid, pid) || !optional(value.installDir, text) ||
-    !optional(value.single, flag) || !optional(value.portable, flag) ||
+    !optional(value.native, flag) ||
     !optional(value.directory, text) || !optional(value.sessionID, text) || !optional(value.tabs, tabList) ||
-    (value.single === true && !text(value.directory))) {
+    (value.native === true && !text(value.directory))) {
     throw new Error("Invalid revive restart context")
   }
   return value as RestartContext
@@ -180,7 +178,10 @@ export function buildSteps(build: BuildConfig) {
     cwd,
     commands: [["bun", "install"],
       ["bun", "run", BUILD_SCRIPT, "--single", ...(build.debug ? ["--with-debug"] : [])]],
+    // The native build ships only its executable; it shares the oc build's support files.
     output: [path.join(dist, `opencode-${platform}-${process.arch}`, "bin"),
+      path.join(dist, `opencode-native-${platform}-${process.arch}`, "bin",
+        process.platform === "win32" ? "opencode.exe" : "opencode"),
       ...(build.debug ? [path.join(dist, `opencode-debug-${platform}-${process.arch}`, "bin",
         process.platform === "win32" ? "ocdebug.exe" : "ocdebug")] : [])],
   }
@@ -201,29 +202,39 @@ export function resolveLauncher(executable: string, debug: boolean, exists: (fil
   return executable
 }
 
+/** The native opencode executable installed beside an oc launcher; Bun dev runs reuse Bun. */
+export function nativeExecutable(executable: string) {
+  const mod = executable.includes("\\") ? path.win32 : path.posix
+  if (/^bun(?:\.exe)?$/i.test(mod.basename(executable))) return executable
+  return mod.join(mod.dirname(executable), `opencode${mod.extname(executable)}`)
+}
+
 /** Opens a fresh terminal running the configured launcher, so the next revive is hosted in place again. */
 export function reopenCommand(restart: RestartContext) {
   // Several WezTerm tabs restart from tab 0, which spawns the rest into this window (`oc revive-tabs`).
   const tabs = restart.terminal === "wezterm" && restart.tabs && restart.tabs.length > 1 ? restart.tabs : undefined
-  const command = [restart.executable, ...(restart.entrypoint ? [restart.entrypoint] : []), "oc",
-    ...(restart.single
-      ? ["single", restart.directory!, ...(restart.sessionID ? ["--session", restart.sessionID] : ["--home"])]
-      : tabs ? ["revive-tabs", encode(tabs)]
-      : restart.launcher === "occ" ? ["previous", "--depth", "1"] : ["launch"]),
-    ...(restart.portable && !tabs ? ["--portable"] : [])]
+  const entrypoint = restart.entrypoint ? [restart.entrypoint] : []
+  const command = restart.native
+    ? [nativeExecutable(restart.executable), ...entrypoint, restart.directory!,
+      ...(restart.sessionID ? ["--session", restart.sessionID] : [])]
+    : [restart.executable, ...entrypoint, "oc",
+      ...(tabs ? ["revive-tabs", encode(tabs)]
+        : restart.launcher === "occ" ? ["previous", "--depth", "1"] : ["launch"])]
+  // Compiled builds bake the flavor in; a Bun dev run needs it in the environment.
+  const flavor: Record<string, string> = { OC_FLAVOR: restart.native ? "native" : "oc" }
   if (restart.terminal === "wezterm") {
     // A fresh GUI process reloads wezterm.lua and inherits this environment instead of an unrelated mux server's.
     // wezterm-gui, not the console-subsystem wezterm CLI: that one would show its own console window
     // for as long as the new GUI runs.
     return { file: "wezterm-gui", args: ["start", "--always-new-process", "--", ...command],
-      env: {}, windowsVerbatimArguments: false }
+      env: flavor, windowsVerbatimArguments: false }
   }
   if (restart.terminal === "windows-terminal") {
     return { file: "wt.exe", args: ["-w", "new", "new-tab", ...command.map((arg) => arg.replaceAll(";", "\\;"))],
-      env: {}, windowsVerbatimArguments: false }
+      env: flavor, windowsVerbatimArguments: false }
   }
   // Expand paths once through env vars, so percent signs and shell metacharacters stay literal.
-  const env = Object.fromEntries(command.map((arg, index) => [`OC_REVIVE_ARG_${index}`, arg]))
+  const env = { ...flavor, ...Object.fromEntries(command.map((arg, index) => [`OC_REVIVE_ARG_${index}`, arg])) }
   return { file: "cmd.exe", args: ["/d", "/v:off", "/c",
     `start "" ${command.map((_, index) => `"%OC_REVIVE_ARG_${index}%"`).join(" ")}`],
     env, windowsVerbatimArguments: true }
@@ -249,7 +260,7 @@ export async function installSources(output: readonly string[]) {
 
 /**
  * Installs sources into `directory`. Current files are renamed aside (Windows allows renaming a running
- * executable, not overwriting it). Hard-link aliases of replaced files (oc.exe, occ.exe -> opencode.exe)
+ * executable, not overwriting it). Hard-link aliases of replaced files (occ.exe -> oc.exe)
  * are relinked to the new file. Any failure removes what was placed and restores the old names.
  */
 export async function install(sources: readonly InstallSource[], directory: string, stamp = Date.now()) {

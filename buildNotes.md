@@ -112,6 +112,49 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-11 (~21:36) - v0.2.157 discoloredDebt - Pass on native split: palette launch loop - Claude Opus 5.5, low reasoning; Pass
+
+### Agent
+- Meta: Claude Opus 5.5; low reasoning; Pass; completed
+- Version: 0.2.157
+- Fixed: `oc launch --palette` (cli/cmd/oc.ts) spawned `oc.exe --palette`, which the launch rewrite turned back into `oc launch` (spawn loop, was masked by OC_SINGLE). Now spawns the sibling native `opencode.exe` via `Revive.nativeExecutable`.
+- Fixed: stale `oc single` comment in session/run-state.ts; SCRIPTS.md duplicate `.run.ps1` row and build.ps1 row.
+- Kept: native writes oc-tuis ledger (scoped by executable); native revive stop-ack in tui.ts.
+- Verified live by user: installed `oc.exe`/`opencode.exe` now distinct after second revive. First revive hard-linked both to the oc build (old running code).
+- Verification: tsgo --noEmit opencode clean.
+
+### User
+Launcher
+- `oc launch --palette "<entry>"` opens that palette entry in a native opencode window instead of looping.
+
+---
+
+## 2026-10-11 (~21:10) - v0.2.157 discoloredDebt - Split oc and native opencode binaries; remove oc single - Claude Opus 5.5, low reasoning; Implementation
+
+### Agent
+- Meta: Opus 5.5; low; Implementation; completed. Plan: `nativeSplitPlan.md`
+- Version: 0.2.157
+- Added `Global.native` (`core/src/global.ts`): build define `OPENCODE_FLAVOR` ('oc'|'native'), `OC_FLAVOR` env for bun dev. Only gate for resident-server needs
+- Changed `resolveExecutablePath`: only `occ` -> `oc`; oc build is now `oc.exe`, so resident server/attach/ledger run as oc.exe and never match native `opencode.exe`
+- `build.ts`: variants production (`oc`), native (`opencode-native-*/bin/opencode.exe`), debug; flags `--oc-only`, `--native-only` (keep rest of dist); `--oc-only` honors `--with-debug`
+- `index.ts`: native skips launcher rewrites; `oc` loader errors in native (skipped for --help)
+- Removed `oc single`, `--single`/`--portable` on launch/previous, `mode` key, `OC_SINGLE` everywhere (tui.ts, app.tsx, footer label, startup scrub now `OC_FLAVOR`)
+- Revive: `single`/`portable` -> `native` in ReviveContext/RestartContext; `Revive.nativeExecutable`; `reopenCommand` native = `opencode.exe <dir> [--session]`, env `OC_FLAVOR`; buildSteps outputs native exe file (shares oc's cursor-runtime). Native TUI hands off to sibling `oc.exe oc --revive` with `OC_FLAVOR=oc`; ignores inherited `OC_SUPERVISOR_PID`
+- Scripts: `build.ps1 -Oc|-Native`, `install.ps1 -Oc|-Native` (removes each name before copy to break old opencode.exe hard links, relinks occ->oc, verifies opencode.exe has one link), `.install.ps1` passthrough, `.run.ps1` defaults to `oc launch`, `-Native`
+- Updated user `oc.json` `executable` -> `Apps\opencode\oc.exe` (already exists as old hard link)
+- Docs: README, FORK row "Native opencode binary", SCRIPTS, AGENTS rule
+- Verification: `tsgo --noEmit` opencode/tui/core clean; revive.test.ts + command-loader 29 pass; core global.test.ts 4 pass. No build/install run
+- Risk: first install must be full (not `-Native`): old oc.exe resolves to opencode.exe for server. External refs to opencode.exe as oc server (tray, shortcuts) need checking. wt `new-tab` env passthrough for bun-dev native revive unverified
+
+### User
+oc and opencode
+- oc now installs two programs from the same source: `oc`/`occ` with the background server, and `opencode`, which runs every oc feature in its own window like stock OpenCode.
+- `oc single`, `--single`, `--portable`, and the `mode` setting are gone; use `opencode` instead.
+- `/revive` from an `opencode` window reopens `opencode`.
+- `build.ps1` and `install.ps1` take `-Oc` or `-Native` to handle one program; `.run.ps1` opens oc by default and `-Native` runs the opencode flavor.
+
+---
+
 ## 2026-10-11 (~20:33) - v0.2.156 - Show "-" for idle Claude 5-hour windows - Claude Opus 5.5, default reasoning; Implementation
 
 ### Agent

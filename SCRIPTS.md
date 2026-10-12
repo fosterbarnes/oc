@@ -7,9 +7,8 @@ Project automation lives in `.scripts/`. Scripts target PowerShell 7 and fail on
 | Path | Purpose |
 |------|---------|
 | `.scripts/scriptHelper.ps1` | Shared repository paths, maintenance version validation, and native-command checks. |
-| `.scripts/build.ps1` | Agent-safe build of the current-platform production and debug executables. `-Release` builds the release executable and archives through the existing Bun build script. It never touches the installed runtime. |
+| `.scripts/build.ps1` | Agent-safe build of the current-platform `oc`, native `opencode`, and debug executables (`-Oc`/`-Native` for one flavor). `-Release` builds the release executable and archives through the existing Bun build script. It never touches the installed runtime. |
 | `.scripts/buildDebug.ps1` | Agent-safe debug-only build. It never touches the production dist artifact or installed runtime. |
-| `.scripts/.run.ps1` | Runs the repository's normal `bun dev .` entry point and forwards arguments. |
 | `.scripts/prePush.ps1` | Runs Turbo typecheck, then refreshes the README code count and `scc.txt`. It does not commit or push. |
 | `.scripts/test.ps1` | Runs local package tests, HttpApi gates, typechecking, or generated-file checks. Supports package, file, test-name, category, and all-check selection. |
 | `.scripts/countCode.ps1` | Uses `scc` on PATH to refresh the README code count and root `scc.txt` language report. Runnable independently. |
@@ -17,11 +16,12 @@ Project automation lives in `.scripts/`. Scripts target PowerShell 7 and fail on
 | `.scripts/push.ps1` | Commits parent changes with a supplied subject, else the message in `buildNotes.txt` (line 1 subject, blank line, body) when it changed since the last commit, else a prompted subject, then pushes the current branch. It does not rewrite `.version/version` or `versionTag` and does not stage `UPSTREAM/`. `-DryRun` prints the commands only; `-Force` is explicit. |
 | `.scripts/pushRelease.ps1` | Tags and publishes archives from `src/packages/opencode/dist` to `fosterbarnes/oc` using the `.version/version` maintenance version and the `.version/versionTag` tag. The release title is `opencode v<version> <tag>`; uploaded copies are renamed to `opencode-v<version>-<tag>-<rest>.<ext>`. Existing tags are not force-moved. `-DryRun` prints the title and renames only. |
 | `.scripts/bumpVersion.ps1` | Bumps the `.version/version` patch and rolls a new random tag into `.version/versionTag`. `-RerollTag` regenerates only the tag. |
-| `.scripts/install.ps1` | User-only build-and-install of both `opencode.exe` and `ocdebug.exe`. `-NoBuild`/`-nb` installs existing artifacts. It stops OpenCode processes and must not run from an agent. |
+| `.scripts/install.ps1` | User-only build-and-install of `oc.exe` (+ `occ.exe` hard link), `ocdebug.exe`, and native `opencode.exe`. `-Oc` or `-Native` installs one flavor. `-NoBuild`/`-nb` installs existing artifacts. It stops OpenCode processes and must not run from an agent. |
 | `.scripts/revive.ps1` | Replaces built-in `/revive-no-install` only when set as `oc.json` `revive.path`: `oc --shutdown-all`, start the resident server, reopen oc through `Desktop\occ.lnk`. No elevation. |
 | `.scripts/reviveAndInstall.ps1` | Manual build, `oc --shutdown-all`, `install.ps1 -NoBuild`, then reopen like `revive`. `/revive` no longer uses it or any `.scripts` file; it builds natively from `oc.json` `revive.build.source`. |
 | `.scripts/setReviveConsolePosition.ps1` | One-time: saves a centered `HKCU\Console\<title>` WindowPosition for the revive console windows. Rerun after a resolution change. |
 | `.scripts/installDebug.ps1` | User-only debug install. Builds (unless `-NoBuild`/`-nb`) and replaces only `ocdebug.exe`; production OpenCode processes are left alone. |
+| `.scripts/.run.ps1` | `bun dev` run. No arguments opens `oc launch` (resident); `-Native`/`-n` runs the native flavor (`OC_FLAVOR=native`). |
 | `.scripts/.runDebug.ps1` | Same as `.run.ps1`, with `OPENCODE_INSTANCE=debug` and DEBUG logs. |
 
 ## Common commands
@@ -53,7 +53,7 @@ the user to exit OpenCode and run the install command from a fresh PowerShell:
 The installers refuse inherited OpenCode processes before building, stopping,
 backing up, or copying files.
 
-`oc` is unchanged: production `opencode.exe`, resident server on port 4096. `ocdebug` is a native PATH command; bare and project/path invocations open `oc launch`, while explicit commands pass through. It uses `opencode-debug` data/config/state, a resident server on port **4097**, DEBUG logs, and copies production user settings/authentication on first run. The TUI can overwrite debug settings from production, then requires an `ocdebug` restart. Session handoff uses `opencode export <session-id>` followed by `ocdebug import <file>`. `.scripts\install.ps1` installs both exes. `.scripts\installDebug.ps1` only stops/replaces `ocdebug.exe`.
+`oc` is production `oc.exe` (`occ.exe` is a hard link), resident server on port 4096. `opencode` is the native build: same features, in-process TUI, no resident server. `ocdebug` is a native PATH command; bare and project/path invocations open `oc launch`, while explicit commands pass through. It uses `opencode-debug` data/config/state, a resident server on port **4097**, DEBUG logs, and copies production user settings/authentication on first run. The TUI can overwrite debug settings from production, then requires an `ocdebug` restart. Session handoff uses `opencode export <session-id>` followed by `ocdebug import <file>`. `.scripts\install.ps1` installs both exes. `.scripts\installDebug.ps1` only stops/replaces `ocdebug.exe`.
 
 
 ## Local tests and checks
@@ -118,7 +118,7 @@ confirmed custom behavior.
 
 There is no automated upstream apply. This fork has drifted too far from upstream for a hunk-based merge to be safe, so `updateUpstream.ps1` and the `UPSTREAM\opencode` checkout are kept only as a reference for cherry-picking upstream fixes by hand.
 
-The standalone build is the repository's `packages/opencode/script/build.ts --single` flow. A normal `build.ps1` run emits `dist/opencode-windows-x64/bin/opencode.exe` and `dist/opencode-debug-windows-x64/bin/ocdebug.exe`; `buildDebug.ps1` emits only the latter. The install script only supports the current Windows architecture and does not alter PATH.
+The standalone build is the repository's `packages/opencode/script/build.ts --single` flow. A normal `build.ps1` run emits `dist/opencode-windows-x64/bin/oc.exe`, `dist/opencode-native-windows-x64/bin/opencode.exe`, and `dist/opencode-debug-windows-x64/bin/ocdebug.exe`; `-Oc` skips native, `-Native` builds only native (`build.ts --oc-only` / `--native-only`), and `buildDebug.ps1` emits only `ocdebug.exe`. The install script only supports the current Windows architecture and does not alter PATH.
 
 `build.ps1`, `buildDebug.ps1`, `.run.ps1`, and `.runDebug.ps1` call `requireBunForCompile` in `scriptHelper.ps1` before invoking Bun. Stable Bun 1.4.0 (`34cbb9a40`) is rejected because it embeds the Windows TUI `bun:ffi` FTL segfault (oven-sh/bun#39829). When PATH bun is 1.4.0 or older, the script runs `bun upgrade --canary` and refuses to compile if the version is still 1.4.0. The compiled `opencode.exe` contains that Bun runtime; upgrading PATH bun after an old compile does not fix an already-installed exe.
 

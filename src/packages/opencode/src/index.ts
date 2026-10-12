@@ -6,7 +6,7 @@ import { FormatError } from "./cli/error"
 import { EOL } from "os"
 import { errorMessage } from "./util/error"
 import { Heap } from "./cli/heap"
-import { isDebugExecutable, resolveAppName } from "@opencode-ai/core/global"
+import { isDebugExecutable, native, resolveAppName } from "@opencode-ai/core/global"
 import {
   resolveCommandToLoad,
   withExecutableDefault,
@@ -15,13 +15,10 @@ import {
 } from "./cli/command-loader"
 
 const rawArgs = hideBin(process.argv)
-// `oc single` children run the vanilla in-process TUI, so they must skip the resident-attach rewrites.
-const args =
-  process.env.OC_SINGLE === "1"
-    ? rawArgs
-    : rawArgs[0] === "single"
-      ? ["oc", ...rawArgs]
-      : withOcLaunchDefault(withExecutableDefault(rawArgs, process.execPath), isDebugExecutable())
+// The native build runs the upstream in-process TUI; only oc builds rewrite to the resident launcher.
+const args = native
+  ? rawArgs
+  : withOcLaunchDefault(withExecutableDefault(rawArgs, process.execPath), isDebugExecutable())
 
 function needsAllCommands(args: readonly string[]) {
   return args.includes("-h") || args.includes("--help") || args.includes("completion")
@@ -175,6 +172,12 @@ const commandLoaders = {
     cli.command(DbCommand)
   },
   oc: async () => {
+    // Launcher, resident server, and revive host live only in oc builds; this branch drops them from opencode.
+    if (native) {
+      if (needsAllCommands(args)) return
+      UI.error("`oc` commands are only available in the oc executable")
+      process.exit(1)
+    }
     const { OcCommand } = await import("./cli/cmd/oc")
     cli.command(OcCommand)
   },

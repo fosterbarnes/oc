@@ -34,7 +34,11 @@ const baselineFlag = process.argv.includes("--baseline")
 const skipInstall = process.argv.includes("--skip-install")
 const sourcemapsFlag = process.argv.includes("--sourcemaps")
 const plugin = createSolidTransformPlugin()
+// Default builds oc + native; `--with-debug` adds ocdebug. An `--*-only` flag builds just that flavor
+// and keeps the rest of dist.
 const debugOnlyFlag = process.argv.includes("--debug-only")
+const ocOnlyFlag = process.argv.includes("--oc-only")
+const nativeOnlyFlag = process.argv.includes("--native-only")
 const withDebugFlag = process.argv.includes("--with-debug")
 const treeSitterWorker = await Bun.file(fileURLToPath(import.meta.resolve("@opentui/core/parser.worker"))).text()
 
@@ -101,8 +105,9 @@ const allTargets: {
   },
 ]
 
+const onlyFlag = debugOnlyFlag || ocOnlyFlag || nativeOnlyFlag
 const targets =
-  singleFlag || debugOnlyFlag
+  singleFlag || onlyFlag
     ? allTargets.filter((item) => {
         if (item.os !== process.platform || item.arch !== process.arch) {
           return false
@@ -123,13 +128,23 @@ const targets =
       })
     : allTargets
 
+// production = oc.exe (launcher + resident server), native = opencode.exe, debug = ocdebug.exe (oc flavor).
 const variants = debugOnlyFlag
   ? (["debug"] as const)
-  : withDebugFlag
-    ? (["production", "debug"] as const)
-    : (["production"] as const)
+  : ocOnlyFlag
+    ? withDebugFlag ? (["production", "debug"] as const) : (["production"] as const)
+    : nativeOnlyFlag
+      ? (["native"] as const)
+      : withDebugFlag
+        ? (["production", "native", "debug"] as const)
+        : (["production", "native"] as const)
+const variantInfo = {
+  production: { suffix: "", binary: "oc" },
+  native: { suffix: "-native", binary: "opencode" },
+  debug: { suffix: "-debug", binary: "ocdebug" },
+} as const
 
-if (!debugOnlyFlag) await $`rm -rf dist`
+if (!onlyFlag) await $`rm -rf dist`
 
 const binaries: Record<string, string> = {}
 if (!skipInstall) {
@@ -140,7 +155,7 @@ if (!skipInstall) {
 for (const variant of variants) {
   for (const item of targets) {
     const name = [
-      variant === "debug" ? `${pkg.name}-debug` : pkg.name,
+      pkg.name + variantInfo[variant].suffix,
       // changing to win32 flags npm for some reason
       item.os === "win32" ? "windows" : item.os,
       item.arch,
@@ -149,7 +164,7 @@ for (const variant of variants) {
     ]
       .filter(Boolean)
       .join("-")
-    const binaryName = variant === "debug" ? "ocdebug" : "opencode"
+    const binaryName = variantInfo[variant].binary
     const compileTarget = [
       "bun",
       item.os === "win32" ? "windows" : item.os,
@@ -160,7 +175,7 @@ for (const variant of variants) {
       .filter(Boolean)
       .join("-")
     console.log(`building ${name}`)
-    if (debugOnlyFlag) await $`rm -rf ${`dist/${name}`}`
+    if (onlyFlag) await $`rm -rf ${`dist/${name}`}`
     await $`mkdir -p dist/${name}/bin`
 
     const workerPath = "./src/cli/tui/worker.ts"
@@ -203,6 +218,7 @@ for (const variant of variants) {
         OTUI_TREE_SITTER_WORKER_PATH: bunfsRoot + treeSitterWorkerPath,
         OPENCODE_WORKER_PATH: workerPath,
         OPENCODE_CHANNEL: `'${Script.channel}'`,
+        OPENCODE_FLAVOR: variant === "native" ? "'native'" : "'oc'",
         OPENCODE_LIBC: item.os === "linux" ? `'${item.abi ?? "glibc"}'` : "",
         ...(item.os === "linux" ? { "process.env.OPENTUI_LIBC": JSON.stringify(item.abi ?? "glibc") } : {}),
       },

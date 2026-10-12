@@ -7,6 +7,16 @@ import { Flock } from "./util/flock"
 import { Flag } from "./flag/flag"
 import { makeGlobalNode } from "./effect/app-node"
 
+declare global {
+  const OPENCODE_FLAVOR: string
+}
+
+// Build flavor: `oc` (launcher, resident server, revive host) or `native` (opencode.exe: in-process
+// TUI + worker like upstream). Compiled builds bake it in; `bun dev` reads OC_FLAVOR.
+// Gate on this only where a feature needs the resident server; everything else is shared.
+export const native =
+  typeof OPENCODE_FLAVOR === "string" ? OPENCODE_FLAVOR === "native" : process.env.OC_FLAVOR === "native"
+
 export function isDebugExecutable(execPath = process.execPath) {
   const base = executableBasename(execPath)
   return base === "ocdebug" || base === "oc-debug" || base === "opencode-debug"
@@ -18,12 +28,11 @@ function executableBasename(execPath: string) {
   return file.slice(0, file.length - ext.length).toLowerCase()
 }
 
+// `occ.exe` is a hard link to `oc.exe`; process lookups and ledgers use the real name.
 export function resolveExecutablePath(execPath = process.execPath) {
-  const base = executableBasename(execPath)
-  if (base !== "oc" && base !== "occ") return execPath
-  const isWin = execPath.includes("\\")
-  const mod = isWin ? path.win32 : path.posix
-  return mod.join(mod.dirname(execPath), `opencode${mod.extname(execPath)}`)
+  if (executableBasename(execPath) !== "occ") return execPath
+  const mod = execPath.includes("\\") ? path.win32 : path.posix
+  return mod.join(mod.dirname(execPath), `oc${mod.extname(execPath)}`)
 }
 
 export function resolveAppName(input: { instance?: string; execPath?: string } = {}) {

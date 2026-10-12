@@ -14,6 +14,7 @@ import { writeHeapSnapshot } from "v8"
 import { ServerAuth } from "@/server/auth"
 import { validateSession } from "../tui/validate-session"
 import { win32AssertRawMode } from "@opencode-ai/tui/terminal-win32"
+import { native } from "@opencode-ai/core/global"
 
 declare global {
   const OPENCODE_WORKER_PATH: string
@@ -228,19 +229,18 @@ export const TuiThreadCommand = cmd({
         stopped = true
         process.off("SIGUSR2", reload)
         const { captureDescendants, stopDescendants } = await import("../tui/descendants")
-        const single = process.env.OC_SINGLE === "1"
-        const snapshot = await (single ? captureDescendants() : Promise.resolve([]))
+        const snapshot = await (native ? captureDescendants() : Promise.resolve([]))
           .then((records) => ({ records }), (error: unknown) => ({ error }))
         try {
           await withTimeout(client.call("shutdown", undefined), 4500).catch((error) => {
-            if (single) throw error
+            if (native) throw error
           })
         } finally {
           worker.terminate()
           if ("error" in snapshot) throw snapshot.error
           await stopDescendants(snapshot.records)
         }
-        if (process.env.OC_SINGLE === "1" && !process.env.OC_SUPERVISOR_PID) {
+        if (native) {
           const { Revive } = await import("@/config/revive")
           if (await Bun.file(Revive.handoffPath(process.pid)).exists()) {
             await Bun.write(Revive.shutdownPath(process.pid), "stopped\n")

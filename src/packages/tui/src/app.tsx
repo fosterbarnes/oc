@@ -478,32 +478,37 @@ function reviveCommands(toast: ToastContext) {
       directory: (sessionID ? sync.session.get(sessionID)?.directory : undefined) ?? sdk.directory ?? process.cwd(),
       ...(sessionID ? { sessionID } : {}),
       ...(terminal.kind === "wezterm" && terminal.paneID ? { paneID: terminal.paneID } : {}),
-      ...(process.env.OC_SINGLE === "1" ? { single: true, tuiPid: process.pid } : {}),
-      ...(process.env.OC_SINGLE === "1" && process.env.OPENCODE_DB === "ocPortable.db" ? { portable: true } : {}),
+      ...(Global.native ? { native: true, tuiPid: process.pid } : {}),
       ...source,
     }
     // Hosted by an `oc`/`occ` launcher: hand off and exit, so it shows revive progress in this window
     // (Revive.handoffPath). Otherwise a hidden helper runs the same pipeline.
-    const supervisor = process.env.OC_SUPERVISOR_PID
+    // A native window is never hosted, even if it inherited a launcher's variable from its shell.
+    const supervisor = Global.native ? undefined : process.env.OC_SUPERVISOR_PID
     if (supervisor) {
       const file = path.join(Global.Path.state, "oc-revive", `${supervisor}.json`)
       return fs.promises.mkdir(path.dirname(file), { recursive: true })
         .then(() => fs.promises.writeFile(file, JSON.stringify(context)))
         .then(() => exit(), (error) => toast.error(error))
     }
-    if (context.single) {
+    if (Global.native) {
       const file = path.join(Global.Path.state, "oc-revive", `${process.pid}.json`)
       await fs.promises.mkdir(path.dirname(file), { recursive: true })
       await fs.promises.rm(path.join(path.dirname(file), `${process.pid}.stopped`), { force: true })
       await fs.promises.writeFile(file, JSON.stringify(context))
     }
-    launchDetached(process.execPath, [
-      ...(/^bun(?:\.exe)?$/i.test(path.basename(process.execPath)) ? [process.argv[1]] : []),
+    // The revive pipeline lives in oc: a native window hands off to the oc executable beside it.
+    const bun = /^bun(?:\.exe)?$/i.test(path.basename(process.execPath))
+    const helper = Global.native && !bun
+      ? path.join(path.dirname(process.execPath), `oc${path.extname(process.execPath)}`)
+      : process.execPath
+    launchDetached(helper, [
+      ...(bun ? [process.argv[1]] : []),
       "oc", "--revive", Buffer.from(JSON.stringify(context)).toString("base64url"),
-    ]).once("error", (error) => toast.error(error))
+    ], { env: { OC_FLAVOR: "oc" } }).once("error", (error) => toast.error(error))
       .once("exit", (code) => {
         if (code) toast.error(new Error(`Revive helper launch failed: exit code ${code}`))
-        if (!code && context.single) exit()
+        if (!code && Global.native) exit()
       })
   }
   return [
@@ -1041,8 +1046,8 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
     }
     if (!titleEnabled) return
     // Plain ■ renders everywhere; WezTerm (with the oc tab snippet) colors it via oc_agent_color.
-    // A single-instance (`oc single`) window uses ⦿ in place of ■, same agent color.
-    const prefix = color ? (process.env.OC_SINGLE === "1" ? "⦿ " : "■ ") : ""
+    // A native (opencode) window uses ⦿ in place of ■, same agent color.
+    const prefix = color ? (Global.native ? "⦿ " : "■ ") : ""
 
     if (route.data.type === "home") {
       renderer.setTerminalTitle(`${prefix}OpenCode`)
@@ -1792,14 +1797,14 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
         name: "server.shutdown",
         title: "Shut Down",
         category: "oc",
-        hidden: process.env.OC_SINGLE === "1",
+        hidden: Global.native,
         run: () => void controlServer("shutdown"),
       },
       {
         name: "server.restart",
         title: "Restart",
         category: "oc",
-        hidden: process.env.OC_SINGLE === "1",
+        hidden: Global.native,
         run: () => void controlServer("restart"),
       },
       {

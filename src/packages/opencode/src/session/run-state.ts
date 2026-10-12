@@ -192,7 +192,7 @@ export class HeldElsewhereError extends Error {
   override readonly name = "HeldElsewhereError"
 }
 
-// Cross-process guard so the resident server and `oc single` never drive the same session at once.
+// Cross-process guard so the resident server and a native `opencode` window never drive the same session at once.
 // Held only while work runs; a crashed holder goes stale once its heartbeat stops.
 function owned<A>(sessionID: SessionID, work: Effect.Effect<A>) {
   return Effect.acquireRelease(

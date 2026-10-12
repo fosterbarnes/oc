@@ -1,12 +1,12 @@
-v0.2.156 crudFlick
+v0.2.157 discoloredDebt
 
-claude usage sidebar:
-Known hourly and weekly Claude percentages stay visible when a reset date is missing or a usage refresh returns only part of the data. Windows that have passed update locally without sending Claude a message, and missing next-reset dates leave blank slots. Cached readings stay identified as last-known, including after a restart, and genuinely unknown percentages still show unavailable. A Claude account with no 5-hour window running yet shows "-" under its 0%h, and with several accounts idle ones show "-" while active ones keep their reset time, all on one row.
+oc and opencode:
+oc and occ use the background server, while the separate native opencode program runs in its own window from the same source. The oc single command, single and portable launch flags, and mode setting are removed; use opencode for native sessions. Revive from a native window reopens opencode with the same directory and session.
 
-sidebar scripts and files:
-Script and file rows keep their clipping stable when the same list refreshes during a response, real script settings and file-list changes still update, and extremely narrow rows stay within their text budget.
+build and install:
+Build and install scripts accept -Oc or -Native to handle either program. Installation breaks the old shared hard links, keeps occ linked to oc, and verifies that opencode is separate. The run script opens oc by default and accepts -Native for opencode. Project rules, the README, fork status, script reference, and native split plan reflect the two programs.
 
-context limit handoff:
-When a session crosses the token threshold in Handoff mode, the follow-up session continues the work instead of stalling and keeps the permissions of the original turn. The work-preservation summary runs fully locked down while still reaching the live conversation. A non-numeric token threshold in the TUI dialog is rejected.
+palette launch:
+Launching a palette entry opens the sibling native opencode executable instead of repeatedly spawning the oc launcher. The native TUI keeps its executable-scoped ledger and revive shutdown acknowledgement.
 
-Under the hood: usage.ts parses Claude hourly and weekly windows independently with projectClaudeUsage and updateClaudeSnapshot, and keeps per-window reading times in cache metadata; sidebar helpers reconcile script and tree rows by key; isTitleRequest keys on naming agents and tool-less turns under a session agent share the chat's tools:: conversation key; handoff.ts, work-handoff.ts and work-done.ts are new, along with the SDK regeneration and config changes. Checks passed: usage-freshness (31 pass), sidebarRows (5 pass), title/handoff/overflow/v2-compat tests, and the fake-model handoff tests. Live sidebar, TUI and Cursor checks were not run.
+Under the hood: Global.native selects the build flavor; executable resolution maps only occ to oc; startup, TUI, footer, and revive paths use the native flavor instead of OC_SINGLE. Build outputs include separate oc and native executables, with ocdebug available for debug builds. Checks passed: core global.test.ts, opencode revive.test.ts, and git diff --check, plus the agent-push pre-push checks. Earlier session verification recorded clean opencode, tui, and core type checks and command-loader tests; the user verified distinct installed binaries after the second revive. Bun-dev native revive environment propagation through Windows Terminal remains unverified.

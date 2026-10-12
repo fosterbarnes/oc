@@ -1,6 +1,6 @@
 # Native split plan: `oc` + `opencode`
 
-Status: draft, awaiting approval. No source changed yet.
+Status: implemented in v0.2.157. Decisions: rename oc build to `oc.exe`; `.run.ps1` defaults to oc (`-Native` flag); native tab glyph `⦿`, no footer label; native `/revive` reopens native via the sibling `oc.exe`; `oc.json` `executable` set to `oc.exe`. Native windows still write the oc-tuis ledger (scoped by executable, so oc shutdown ignores them).
 
 ## Goal
 

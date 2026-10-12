@@ -46,7 +46,7 @@ export function plan(input: ReturnType<typeof context>) {
   const script = [
     "$ErrorActionPreference = 'Stop'",
     // Sign-in must not inherit another build's inline config or resident credentials.
-    "Remove-Item Env:OPENCODE_CONFIG_CONTENT, Env:OPENCODE_CONFIG, Env:OPENCODE_CONFIG_DIR, Env:OPENCODE_DB, Env:OPENCODE_SERVER_PASSWORD, Env:OPENCODE_SERVER_USERNAME, Env:OC_RESIDENT, Env:OC_SINGLE -ErrorAction SilentlyContinue",
+    "Remove-Item Env:OPENCODE_CONFIG_CONTENT, Env:OPENCODE_CONFIG, Env:OPENCODE_CONFIG_DIR, Env:OPENCODE_DB, Env:OPENCODE_SERVER_PASSWORD, Env:OPENCODE_SERVER_USERNAME, Env:OC_RESIDENT, Env:OC_FLAVOR -ErrorAction SilentlyContinue",
     ...Object.entries(env).map(([key, value]) => `$env:${key} = ${literal(value)}`),
     `Set-Location -LiteralPath ${literal(input.cwd)}`,
     `& ${literal(input.executable)} ${[...(input.entrypoint ? [path.resolve(input.entrypoint)] : []), "oc", "server", "start"].map(literal).join(" ")} | Out-Null`,

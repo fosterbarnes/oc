@@ -9,7 +9,8 @@ import { TuiLedger } from "../../src/config/tuiLedger"
 import { tmpdir } from "../fixture/fixture"
 import { OcConfig } from "../../src/config/oc"
 
-const executable = "C:\\Apps\\oc\\opencode.exe"
+const executable = "C:\\Apps\\oc\\oc.exe"
+const nativeExe = "C:\\Apps\\oc\\opencode.exe"
 const context = { mode: "no-install", terminal: "generic", directory: "C:\\Projects\\a %PATH% & b; c",
   sessionID: "ses_123" } as const
 const restart = { terminal: "generic", launcher: "occ", executable } as const
@@ -44,10 +45,9 @@ test("the configured launcher picks the previous session (occ) or the home scree
     .toEqual(["start", "--always-new-process", "--", executable, "oc", "previous", "--depth", "1"])
   expect(Revive.reopenCommand({ ...restart, terminal: "wezterm", launcher: "oc" }).args)
     .toEqual(["start", "--always-new-process", "--", executable, "oc", "launch"])
-  expect(Revive.reopenCommand({ ...restart, terminal: "wezterm", single: true, portable: true,
+  expect(Revive.reopenCommand({ ...restart, terminal: "wezterm", native: true,
     directory: context.directory, sessionID: context.sessionID }).args)
-    .toEqual(["start", "--always-new-process", "--", executable, "oc", "single", context.directory,
-      "--session", context.sessionID, "--portable"])
+    .toEqual(["start", "--always-new-process", "--", nativeExe, context.directory, "--session", context.sessionID])
   expect(Revive.parseLauncher(undefined)).toBe("occ")
   expect(Revive.parseLauncher("oc")).toBe("oc")
   expect(() => Revive.parseLauncher("opencode")).toThrow()
@@ -66,7 +66,8 @@ test("generic terminals use a new console with literal paths", () => {
   expect(command.windowsVerbatimArguments).toBe(true)
   expect(command.args).toEqual(["/d", "/v:off", "/c",
     'start "" "%OC_REVIVE_ARG_0%" "%OC_REVIVE_ARG_1%" "%OC_REVIVE_ARG_2%"'])
-  expect(command.env).toEqual({ OC_REVIVE_ARG_0: launcher, OC_REVIVE_ARG_1: "oc", OC_REVIVE_ARG_2: "launch" })
+  expect(command.env).toEqual({ OC_FLAVOR: "oc", OC_REVIVE_ARG_0: launcher, OC_REVIVE_ARG_1: "oc",
+    OC_REVIVE_ARG_2: "launch" })
 })
 
 test("reopening every terminal uses a normal-window Start-Process hop instead of a hidden target", () => {
@@ -102,17 +103,17 @@ test("occ-started TUI identity matches its resolved helper", () => {
 
 test("revive and restart contexts round-trip and reject bad input before shutdown", () => {
   const full = { ...context, mode: "install", paneID: "3", supervisorPid: 40, shellPid: 30, source: "existing",
-    sourceDir: "C:\\src\\oc", single: true, portable: true, tuiPid: 50 } as const
+    sourceDir: "C:\\src\\oc", native: true, tuiPid: 50 } as const
   expect(Revive.decodeContext(Revive.encode(full))).toEqual(full)
   for (const input of [null, [], {}, { ...context, mode: "other" }, { ...context, terminal: "other" },
     { ...context, directory: "" }, { ...context, directory: "bad\0path" }, { ...context, sessionID: 5 },
     { ...context, supervisorPid: 0 }, { ...context, shellPid: 1.5 }, { ...context, source: "maybe" },
     { ...context, source: "download" }, { ...context, source: "existing", sourceDir: "relative" },
-    { ...context, source: "none", sourceDir: "C:\\src\\oc" }, { ...context, single: "yes" }, { ...context, tuiPid: 0 }]) {
+    { ...context, source: "none", sourceDir: "C:\\src\\oc" }, { ...context, native: "yes" }, { ...context, tuiPid: 0 }]) {
     expect(() => Revive.decodeContext(Buffer.from(JSON.stringify(input)).toString("base64url"))).toThrow()
   }
   expect(() => Revive.decodeContext("not-json")).toThrow()
-  const worker = { ...restart, paneID: "3", shellPid: 30, waitPid: 40, installDir: "C:\\Apps\\oc", single: true, portable: true,
+  const worker = { ...restart, paneID: "3", shellPid: 30, waitPid: 40, installDir: "C:\\Apps\\oc", native: true,
     directory: context.directory, sessionID: context.sessionID } as const
   expect(Revive.decodeRestart(Revive.encode(worker))).toEqual(worker)
   for (const input of [{ ...restart, launcher: "opencode" }, { ...restart, executable: "" }, { ...restart, waitPid: -1 },
@@ -120,31 +121,31 @@ test("revive and restart contexts round-trip and reject bad input before shutdow
     expect(() => Revive.decodeRestart(Buffer.from(JSON.stringify(input)).toString("base64url"))).toThrow()
 })
 
-test("single revive keeps the exact session or Home and directory in every new-window command", () => {
+test("native revive reopens opencode with the exact session or Home and directory in every new-window command", () => {
   for (const terminal of ["wezterm", "windows-terminal", "generic"] as const) {
     for (const launcher of ["oc", "occ"] as const) {
-      const input = { ...restart, terminal, launcher, single: true, portable: true,
+      const input = { ...restart, terminal, launcher, native: true,
         directory: context.directory, sessionID: context.sessionID }
       const command = Revive.reopenCommand(input)
       const args = terminal === "generic" ? Object.values(command.env) : command.args
-      expect(args).toContain("single")
+      expect(args).toContain(nativeExe)
       expect(args).toContain(terminal === "windows-terminal" ? context.directory.replaceAll(";", "\\;") : context.directory)
       expect(args).toContain(context.sessionID)
-      expect(args).toContain("--portable")
-      expect(args).not.toContain("previous")
+      expect(args).not.toContain("oc")
+      expect(command.env.OC_FLAVOR).toBe("native")
       const home = Revive.reopenCommand({ ...input, sessionID: undefined })
-      expect(terminal === "generic" ? Object.values(home.env) : home.args).toContain("--home")
+      expect(terminal === "generic" ? Object.values(home.env) : home.args).not.toContain("--session")
     }
   }
 })
 
-test.skipIf(process.platform !== "win32")("single terminal restart preserves the live hosting shell", async () => {
+test.skipIf(process.platform !== "win32")("native terminal restart preserves the live hosting shell", async () => {
   const shell = Bun.spawn(["pwsh", "-NoProfile", "-NonInteractive", "-Command", "[Console]::ReadLine()"],
     { stdin: "pipe", stdout: "ignore", stderr: "ignore", windowsHide: true })
   try {
     const launched: string[][] = []
     for (const terminal of ["wezterm", "windows-terminal", "generic"] as const) {
-      await OcConfig.restartTerminal({ ...restart, terminal, single: true, shellPid: shell.pid,
+      await OcConfig.restartTerminal({ ...restart, terminal, native: true, shellPid: shell.pid,
         directory: context.directory, sessionID: context.sessionID }, async (command) => {
         launched.push(terminal === "generic" ? Object.values(command.env) : command.args)
       })
@@ -205,7 +206,7 @@ test("restart tabs round-trip, and a bad tab rejects the restart context", () =>
 
 test("wezterm restores several tabs through revive-tabs; one tab and other terminals keep previous", () => {
   const tabs: Revive.Tab[] = [{ kind: "oc", directory: context.directory, sessionID: context.sessionID }, { kind: "shell", cwd: "C:\\Work" }]
-  const command = Revive.reopenCommand({ ...restart, terminal: "wezterm", portable: true, tabs })
+  const command = Revive.reopenCommand({ ...restart, terminal: "wezterm", tabs })
   expect(command.file).toBe("wezterm-gui")
   expect(command.args).toEqual(["start", "--always-new-process", "--", executable, "oc", "revive-tabs",
     Revive.encode(tabs)])
@@ -234,10 +235,11 @@ test("build steps run build.ts in the source folder and add ocdebug only for deb
   expect(release.cwd).toBe("C:\\src\\oc\\src")
   expect(release.commands).toEqual([["bun", "install"],
     ["bun", "run", "packages/opencode/script/build.ts", "--single"]])
-  expect(release.output).toEqual([`${dist}\\opencode-windows-${process.arch}\\bin`])
+  const native = `${dist}\\opencode-native-windows-${process.arch}\\bin\\opencode.exe`
+  expect(release.output).toEqual([`${dist}\\opencode-windows-${process.arch}\\bin`, native])
   const debug = Revive.buildSteps({ source: "C:\\src\\oc", debug: true })
   expect(debug.commands[1]).toEqual(["bun", "run", "packages/opencode/script/build.ts", "--single", "--with-debug"])
-  expect(debug.output).toEqual([`${dist}\\opencode-windows-${process.arch}\\bin`,
+  expect(debug.output).toEqual([`${dist}\\opencode-windows-${process.arch}\\bin`, native,
     `${dist}\\opencode-debug-windows-${process.arch}\\bin\\ocdebug.exe`])
 })
 
