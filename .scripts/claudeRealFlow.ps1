@@ -122,7 +122,7 @@ if ($Step7) { $values.OC_REAL_ONLY = '7' }
 $start = Get-Date
 Push-Location "$repoRoot\src\packages\opencode"
 try {
-    withEnv $values { & bun test test/provider/claude-code/real-model.test.ts }
+    withEnv $values { & bun test test/provider/claude-code/realModel.test.ts }
     if ($LASTEXITCODE) { throw "real-model flow failed (exit $LASTEXITCODE)." }
 }
 finally {

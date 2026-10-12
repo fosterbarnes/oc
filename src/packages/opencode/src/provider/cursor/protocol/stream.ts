@@ -3,7 +3,11 @@ import { decodeMessage } from "./messages.js"
 export type StreamEvent =
   | { type: "text-delta"; text: string }
   | { type: "reasoning-delta"; text: string }
-  | { type: "finish"; usage: { input: number; output: number; cacheRead: number; cacheWrite: number }; finishReason: string }
+  | {
+      type: "finish"
+      usage: { input: number; output: number; cacheRead: number; cacheWrite: number }
+      finishReason: string
+    }
   | { type: "tool-call-started"; callId: string; toolName: string; args: string }
   | { type: "tool-call-completed"; callId: string; result: string }
   | { type: "tool-input-delta"; callId: string; delta: string }
@@ -49,11 +53,8 @@ export function parseInteractionUpdate(payload: Uint8Array): StreamEvent | null 
     const tc = iu.tool_call_started as Record<string, unknown>
     const toolCall = tc.tool_call as Record<string, unknown> | undefined
     const variant =
-      toolCall && typeof toolCall === "object"
-        ? Object.keys(toolCall).find((k) => k.endsWith("_tool_call"))
-        : undefined
-    const variantPayload =
-      variant && toolCall ? (toolCall[variant] as Record<string, unknown> | undefined) : undefined
+      toolCall && typeof toolCall === "object" ? Object.keys(toolCall).find((k) => k.endsWith("_tool_call")) : undefined
+    const variantPayload = variant && toolCall ? (toolCall[variant] as Record<string, unknown> | undefined) : undefined
     const args = variantPayload?.args ?? variantPayload
     return {
       type: "tool-call-started",

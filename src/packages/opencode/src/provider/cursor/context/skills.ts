@@ -31,10 +31,10 @@ function parseFrontmatter(raw: string): { name?: string; description?: string; b
     const m = line.match(/^(\w+):\s*(.*)$/)
     if (!m) continue
     const key = m[1]!
-    let val = m[2]!.trim()
-    if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
-      val = val.slice(1, -1)
-    }
+    const trimmed = m[2]!.trim()
+    const quoted =
+      (trimmed.startsWith('"') && trimmed.endsWith('"')) || (trimmed.startsWith("'") && trimmed.endsWith("'"))
+    const val = quoted ? trimmed.slice(1, -1) : trimmed
     if (key === "name") name = val
     if (key === "description") description = val
   }

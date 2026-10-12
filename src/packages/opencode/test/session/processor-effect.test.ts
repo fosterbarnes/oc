@@ -6,6 +6,7 @@ import { expect } from "bun:test"
 import { tool } from "ai"
 import { Cause, Effect, Exit, Fiber, Layer, Stream } from "effect"
 import path from "path"
+import fs from "node:fs/promises"
 import z from "zod"
 import type { Agent } from "../../src/agent/agent"
 import { Provider } from "@/provider/provider"
@@ -26,6 +27,8 @@ import { ProviderV2 } from "@opencode-ai/core/provider"
 import { ModelV2 } from "@opencode-ai/core/model"
 import { SessionProjector } from "@opencode-ai/core/session/projector"
 import { LLMEvent } from "@opencode-ai/llm"
+import { Marker } from "@/marker/marker"
+import { Permission } from "@/permission"
 
 const summary = Layer.succeed(
   SessionSummary.Service,
@@ -174,6 +177,7 @@ const root = LayerNode.group([
   EventV2Bridge.node,
   SessionStatus.node,
   CrossSpawnSpawner.node,
+  Permission.node,
 ])
 const replacements = [
   [SessionSummary.node, summary],
@@ -236,6 +240,93 @@ const boot = Effect.fn("test.boot")(function* () {
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
+
+it.live("marker execution merges agent session and command permissions", () =>
+  provideTmpdirServer(({ dir, llm }) => Effect.gen(function* () {
+    expect(yield* Effect.promise(() => Bun.file(Marker.file()).exists())).toBe(false)
+    yield* Effect.acquireRelease(
+      Effect.promise(() => Bun.write(Marker.file(), JSON.stringify({
+        enabled: true, ask: false,
+        commands: { regression: { mode: "inline", run: [process.execPath, "-e", "console.log('allowed')"] } },
+      }))),
+      () => Effect.promise(() => fs.unlink(Marker.file())),
+    )
+    const { processors, session, provider } = yield* boot()
+    const model = yield* provider.getModel(ref.providerID, ref.modelID)
+    for (const origin of ["agent", "session", "command", "override", "ordinary"] as const) {
+      const chat = yield* session.create({ title: origin })
+      const deny = Permission.fromConfig({ marker: "deny" })
+      const turn = origin === "ordinary" ? undefined : Permission.fromConfig(
+        origin === "command" ? { marker: "deny" } : origin === "override" ? { marker: "allow" } : { read: "allow" },
+      )
+      if (origin === "session") yield* session.setPermission({ sessionID: chat.id, permission: deny })
+      const parent = yield* user(chat.id, "run regression")
+      const msg = yield* assistant(chat.id, parent.id, path.resolve(dir))
+      const handle = yield* processors.create({ assistantMessage: msg, sessionID: chat.id, model })
+      yield* llm.text("$#regression")
+      yield* handle.process({
+        user: { ...parent, permission: turn },
+        sessionID: chat.id, model,
+        agent: {
+          ...agent(),
+          permission: Permission.merge(agent().permission, origin !== "session" && origin !== "command" ? deny : []),
+        },
+        permission: Permission.merge((yield* session.get(chat.id)).permission ?? [], turn ?? []),
+        system: [], messages: [{ role: "user", content: "run regression" }], tools: {},
+      })
+      const parts = yield* MessageV2.parts(msg.id)
+      expect(parts.find((part) => part.type === "text")).toMatchObject({
+        text: origin === "override" ? "allowed" : "regression: denied",
+      })
+    }
+  }), { config: (url) => providerCfg(url) }),
+)
+
+it.live("command ask prompts under wildcard allow and skips only for an explicit marker rule", () =>
+  provideTmpdirServer(({ dir, llm }) => Effect.gen(function* () {
+    yield* Effect.acquireRelease(
+      Effect.promise(() => Bun.write(Marker.file(), JSON.stringify({
+        enabled: true, ask: false,
+        commands: { regression: { mode: "inline", ask: true, run: [process.execPath, "-e", "console.log('allowed')"] } },
+      }))),
+      () => Effect.promise(() => fs.unlink(Marker.file())),
+    )
+    const { processors, session, provider } = yield* boot()
+    const permission = yield* Permission.Service
+    const model = yield* provider.getModel(ref.providerID, ref.modelID)
+    const cases = [
+      { turn: undefined, prompt: true, text: "regression: denied" },
+      { turn: Permission.fromConfig({ marker: "allow" }), prompt: false, text: "allowed" },
+      { turn: Permission.fromConfig({ marker: "deny" }), prompt: false, text: "regression: denied" },
+    ]
+    for (const item of cases) {
+      const chat = yield* session.create({ title: "ask" })
+      const parent = yield* user(chat.id, "run regression")
+      const msg = yield* assistant(chat.id, parent.id, path.resolve(dir))
+      const handle = yield* processors.create({ assistantMessage: msg, sessionID: chat.id, model })
+      yield* llm.text("$#regression")
+      const fiber = yield* handle
+        .process({
+          user: { ...parent, permission: item.turn },
+          sessionID: chat.id, model,
+          agent: agent(),
+          permission: item.turn ?? [],
+          system: [], messages: [{ role: "user", content: "run regression" }], tools: {},
+        })
+        .pipe(Effect.forkChild)
+      if (item.prompt) {
+        const request = yield* waitFor(
+          permission.list().pipe(Effect.map((list) => list.find((entry) => entry.permission === "marker"))),
+          "marker prompt never appeared",
+        )
+        yield* permission.reply({ requestID: request.id, reply: "reject" })
+      }
+      yield* Fiber.join(fiber)
+      const parts = yield* MessageV2.parts(msg.id)
+      expect(parts.find((part) => part.type === "text")).toMatchObject({ text: item.text })
+    }
+  }), { config: (url) => providerCfg(url) }),
+)
 
 it.live("session.processor effect tests capture llm input cleanly", () =>
   provideTmpdirServer(

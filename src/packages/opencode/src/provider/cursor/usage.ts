@@ -1,8 +1,5 @@
 import type { LanguageModelV3Usage } from "@ai-sdk/provider"
-import type {
-  CursorContextUsageSource,
-  CursorConversationTokenDetails,
-} from "./protocol/token-details.js"
+import type { CursorContextUsageSource, CursorConversationTokenDetails } from "./protocol/tokenDetails.js"
 
 export type CursorUsageCounters = {
   inputTokens: number
@@ -40,14 +37,10 @@ export type CursorCacheDiagnosticStats = {
 /** Non-negative integer counter from a Cursor `turn_ended` field. */
 export function turnEndedCounter(te: Record<string, unknown>, key: string): number {
   const value = te[key]
-  return typeof value === "number" && Number.isFinite(value) && value >= 0
-    ? Math.trunc(value)
-    : 0
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? Math.trunc(value) : 0
 }
 
-export function cursorUsageCountersFromTurnEnded(
-  te: Record<string, unknown>,
-): CursorUsageCounters {
+export function cursorUsageCountersFromTurnEnded(te: Record<string, unknown>): CursorUsageCounters {
   return {
     inputTokens: turnEndedCounter(te, "input_tokens"),
     outputTokens: turnEndedCounter(te, "output_tokens"),
@@ -68,14 +61,10 @@ export function buildLanguageModelV3UsageFromCounters(
   const rawInput = Math.max(0, Math.trunc(counters.inputTokens))
   const rawOutput = Math.max(0, Math.trunc(counters.outputTokens))
   const rawCacheRead = Math.min(Math.max(0, Math.trunc(counters.cacheRead)), rawInput)
-  const rawCacheWrite = Math.min(
-    Math.max(0, Math.trunc(counters.cacheWrite)),
-    rawInput - rawCacheRead,
-  )
+  const rawCacheWrite = Math.min(Math.max(0, Math.trunc(counters.cacheWrite)), rawInput - rawCacheRead)
   const rawReasoning = Math.min(Math.max(0, Math.trunc(counters.reasoningTokens)), rawOutput)
   const contextTotal = options.contextTotalTokens
-  const hasContextTotal =
-    typeof contextTotal === "number" && Number.isFinite(contextTotal) && contextTotal >= 0
+  const hasContextTotal = typeof contextTotal === "number" && Number.isFinite(contextTotal) && contextTotal >= 0
   const total = hasContextTotal ? Math.trunc(contextTotal) : rawInput + rawOutput
   const output = Math.min(rawOutput, total)
   const input = Math.max(0, total - output)
@@ -83,24 +72,18 @@ export function buildLanguageModelV3UsageFromCounters(
   // TurnEnded can aggregate several internal model calls, so its absolute input
   // and cache counts can exceed the final checkpoint occupancy. Preserve the
   // cache proportions while normalizing the partition to Cursor's context total.
-  const proportionalRead = rawInput > 0
-    ? Math.min(input, Math.round(input * rawCacheRead / rawInput))
-    : 0
+  const proportionalRead = rawInput > 0 ? Math.min(input, Math.round((input * rawCacheRead) / rawInput)) : 0
   const priorContext = options.priorContextTokens
   const prefixRead =
-    typeof priorContext === "number"
-    && Number.isFinite(priorContext)
-    && priorContext > 0
-    && rawCacheRead >= priorContext
+    typeof priorContext === "number" &&
+    Number.isFinite(priorContext) &&
+    priorContext > 0 &&
+    rawCacheRead >= priorContext
       ? Math.min(input, Math.trunc(priorContext))
       : 0
   const cacheRead = Math.min(input, Math.max(proportionalRead, prefixRead))
-  const cacheWrite = rawInput > 0
-    ? Math.min(input - cacheRead, Math.round(input * rawCacheWrite / rawInput))
-    : 0
-  const reasoning = rawOutput > 0
-    ? Math.min(output, Math.round(output * rawReasoning / rawOutput))
-    : 0
+  const cacheWrite = rawInput > 0 ? Math.min(input - cacheRead, Math.round((input * rawCacheWrite) / rawInput)) : 0
+  const reasoning = rawOutput > 0 ? Math.min(output, Math.round((output * rawReasoning) / rawOutput)) : 0
   return {
     inputTokens: {
       total: input,
@@ -124,18 +107,14 @@ export function buildLanguageModelV3UsageFromTurnEnded(
 }
 
 function usageCount(value: number | undefined): number {
-  return typeof value === "number" && Number.isFinite(value) && value >= 0
-    ? Math.trunc(value)
-    : 0
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? Math.trunc(value) : 0
 }
 
 function usageRatio(part: number, total: number): string {
-  return total > 0 ? `${(part / total * 100).toFixed(1)}%` : "n/a"
+  return total > 0 ? `${((part / total) * 100).toFixed(1)}%` : "n/a"
 }
 
-function categoryTokens(
-  details: CursorConversationTokenDetails | undefined,
-): Map<string, number> {
+function categoryTokens(details: CursorConversationTokenDetails | undefined): Map<string, number> {
   return new Map(
     details?.breakdown?.categories.map((category) => [
       category.id || category.label || "(unnamed)",
@@ -145,9 +124,7 @@ function categoryTokens(
 }
 
 /** Compact, parseable category snapshot for checkpoint-by-checkpoint traces. */
-export function formatCursorTokenCategories(
-  details: CursorConversationTokenDetails | undefined,
-): string {
+export function formatCursorTokenCategories(details: CursorConversationTokenDetails | undefined): string {
   const categories = Object.fromEntries(categoryTokens(details))
   return Object.keys(categories).length > 0 ? JSON.stringify(categories) : "unavailable"
 }
@@ -165,10 +142,7 @@ export function formatCursorCacheDiagnostics(
 ): string {
   const rawInput = Math.max(0, Math.trunc(counters.inputTokens))
   const rawRead = Math.min(rawInput, Math.max(0, Math.trunc(counters.cacheRead)))
-  const rawWrite = Math.min(
-    rawInput - rawRead,
-    Math.max(0, Math.trunc(counters.cacheWrite)),
-  )
+  const rawWrite = Math.min(rawInput - rawRead, Math.max(0, Math.trunc(counters.cacheWrite)))
   const rawUncached = Math.max(0, rawInput - rawRead - rawWrite)
   const priorCategories = categoryTokens(prior)
   const currentCategories = categoryTokens(current)
@@ -187,9 +161,7 @@ export function formatCursorCacheDiagnostics(
       }
     }
   }
-  const continuity = stats.startedWithCheckpoint
-    ? prior ? "warm" : "checkpoint-without-token-details"
-    : "cold"
+  const continuity = stats.startedWithCheckpoint ? (prior ? "warm" : "checkpoint-without-token-details") : "cold"
   const contextDelta = current && prior ? current.usedTokens - prior.usedTokens : undefined
 
   return [
@@ -250,23 +222,19 @@ export function formatTurnUsageValidation(
     : "unavailable"
   const totalMatch = tokenDetails ? String(sentTotal === tokenDetails.usedTokens) : "unavailable"
   const breakdown = tokenDetails?.breakdown
-  const categorySum = breakdown?.categories.reduce(
-    (sum, category) => sum + category.estimatedTokens,
-    0,
-  )
-  const breakdownMatch = breakdown && categorySum !== undefined
-    ? breakdown.totalUsedTokens === tokenDetails.usedTokens &&
-      categorySum === breakdown.totalUsedTokens
-    : undefined
+  const categorySum = breakdown?.categories.reduce((sum, category) => sum + category.estimatedTokens, 0)
+  const breakdownMatch =
+    breakdown && categorySum !== undefined
+      ? breakdown.totalUsedTokens === tokenDetails.usedTokens && categorySum === breakdown.totalUsedTokens
+      : undefined
   const rawCached = counters.cacheRead + counters.cacheWrite
   const sentCached = cacheRead + cacheWrite
-  const proportionalCached = counters.inputTokens > 0 && input > 0
-    ? Math.round(input * rawCached / counters.inputTokens)
-    : 0
+  const proportionalCached =
+    counters.inputTokens > 0 && input > 0 ? Math.round((input * rawCached) / counters.inputTokens) : 0
   const cacheRatioMatch = tokenDetails
     ? counters.inputTokens > 0 && input > 0
-      ? Math.abs(rawCached / counters.inputTokens - sentCached / input) <= 1 / input
-        || (sentCached >= proportionalCached && sentCached <= input)
+      ? Math.abs(rawCached / counters.inputTokens - sentCached / input) <= 1 / input ||
+        (sentCached >= proportionalCached && sentCached <= input)
       : rawCached === 0 && sentCached === 0
     : undefined
   const status =
@@ -282,7 +250,7 @@ export function formatTurnUsageValidation(
   return [
     "turn usage validation:",
     `status=${status}`,
-    `source=${tokenDetails ? contextSource ?? "checkpoint-current-run" : "unavailable"}`,
+    `source=${tokenDetails ? (contextSource ?? "checkpoint-current-run") : "unavailable"}`,
     `cursor=${cursor}`,
     `rawTotal=${rawTotal}`,
     `sentTotal=${sentTotal}`,

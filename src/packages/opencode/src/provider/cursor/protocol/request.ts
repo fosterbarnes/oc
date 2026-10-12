@@ -1,6 +1,6 @@
 import { encodeMessage, getMessageTypes } from "./messages.js"
 import { toolsToDescriptors, type OpencodeToolDef } from "./tools.js"
-import type { CursorImageInput } from "../image-input.js"
+import type { CursorImageInput } from "../imageInput.js"
 
 export type SeedHistoryMessage = {
   role: "system" | "user" | "assistant"
@@ -78,14 +78,14 @@ export function buildSeedConversationState(input?: {
 /**
  * Build an AgentClientMessage{run_request} for a conversation turn.
  *
- * Live `user_message.text` is the current prompt only — same as Cursor CLI.
+ * Live `user_message.text` is the current prompt only - same as Cursor CLI.
  * Cross-turn history is the last server checkpoint re-sent as conversation_state.
  */
 export function buildRunRequest(input: RunRequestInput): Uint8Array {
   const msgId = input.messageId ?? crypto.randomUUID()
 
   // Advertise opencode's tools on the LIVE path: UserMessageAction.request_context
-  // (#2). AgentRunRequest.mcp_tools (#4) is prewarm-only / empty on real turns —
+  // (#2). AgentRunRequest.mcp_tools (#4) is prewarm-only / empty on real turns  - 
   // putting tools only there is why the model fell back to native Grep/Read.
   const tools = input.tools ?? []
   const mcpTools = input.toolDescriptors ?? (tools.length > 0 ? toolsToDescriptors(tools) : [])
@@ -107,9 +107,7 @@ export function buildRunRequest(input: RunRequestInput): Uint8Array {
   }
   const userMessageAction: Record<string, unknown> = { user_message: userMessage }
   if (requestContext) userMessageAction.request_context = requestContext
-  const action = input.action === "resume"
-    ? { resume_action: {} }
-    : { user_message_action: userMessageAction }
+  const action = input.action === "resume" ? { resume_action: {} } : { user_message_action: userMessageAction }
 
   const conversationState =
     input.conversationState && input.conversationState.length > 0
@@ -126,7 +124,7 @@ export function buildRunRequest(input: RunRequestInput): Uint8Array {
     action,
     requested_model: {
       // The provider always selects a concrete model. Cursor's "default"
-      // pseudo-model (Auto) is never used here — we send the real id plus the
+      // pseudo-model (Auto) is never used here - we send the real id plus the
       // chosen variant's parameter values.
       model_id: input.modelId,
       max_mode: input.maxMode ?? false,

@@ -25,9 +25,7 @@ export const HANDOFF_FROM = "ocHandoffFrom"
 const HANDOFF_MARK = "ocHandoff"
 
 export function isHandoffMessage(message: SessionV1.WithParts) {
-  return message.parts.some(
-    (part) => part.type === "text" && part.metadata?.[HANDOFF_MARK] === true,
-  )
+  return message.parts.some((part) => part.type === "text" && part.metadata?.[HANDOFF_MARK] === true)
 }
 
 export function assistantText(message: SessionV1.WithParts) {

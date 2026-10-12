@@ -83,7 +83,7 @@ import { OPENCODE_BASE_MODE, useBindings, useCommandShortcut, useOpencodeKeymap,
 import { usePathFormatter } from "../../context/path-format"
 import { reviveText, reviveVersions } from "../../util/revive"
 import { LocationProvider } from "../../context/location"
-import { openSessionTab, unavailable as tabUnavailable } from "../../util/session-tab"
+import { openSessionTab, unavailable as tabUnavailable } from "../../util/sessionTab"
 import { detectTerminal } from "@opencode-ai/core/util/terminal"
 
 addDefaultParsers(parsers.parsers)
@@ -169,7 +169,6 @@ const context = createContext<{
   sessionID: string
   conceal: () => boolean
   thinkingMode: () => ThinkingMode
-  showThinking: () => boolean
   showTimestamps: () => boolean
   showDetails: () => boolean
   showGenericToolOutput: () => boolean
@@ -277,7 +276,6 @@ export function Session() {
   const [conceal, setConceal] = createSignal(true)
   const thinking = useThinkingMode()
   const thinkingMode = thinking.mode
-  const showThinking = createMemo(() => true)
   const [timestamps, setTimestamps] = kv.signal<"hide" | "show">("timestamps", "hide")
   const [showDetails, setShowDetails] = kv.signal("tool_details_visibility", true)
   const [showAssistantMetadata, _setShowAssistantMetadata] = kv.signal("assistant_metadata_visibility", true)
@@ -1126,7 +1124,7 @@ export function Session() {
             sessionData,
             sessionMessages.map((msg) => ({ info: msg, parts: sync.data.part[msg.id] ?? [] })),
             {
-              thinking: showThinking(),
+              thinking: true,
               toolDetails: showDetails(),
               assistantMetadata: showAssistantMetadata(),
               providers: sync.data.provider,
@@ -1158,7 +1156,7 @@ export function Session() {
           const options = await DialogExportOptions.show(
             dialog,
             defaultFilename,
-            showThinking(),
+            true,
             showDetails(),
             showAssistantMetadata(),
             false,
@@ -1374,7 +1372,6 @@ export function Session() {
           sessionID: route.sessionID,
           conceal,
           thinkingMode,
-          showThinking,
           showTimestamps,
           showDetails,
           showGenericToolOutput,
@@ -1576,6 +1573,12 @@ export function Session() {
                   bottom={0}
                   alignItems={sidebarPosition() === "left" ? "flex-start" : "flex-end"}
                   backgroundColor={RGBA.fromInts(0, 0, 0, 70)}
+                  onMouseDown={(evt) => {
+                    if (evt.button !== MouseButton.LEFT) return
+                    if (evt.target !== evt.currentTarget) return
+                    evt.stopPropagation()
+                    setSidebarOpen(false)
+                  }}
                 >
                   <Sidebar sessionID={route.sessionID} />
                 </box>

@@ -8,13 +8,12 @@ import {
   resolveCurrentModel,
   resolveSessionAgent,
   resolveSessionModel,
-  createReasoningDefault,
   resolveVariant,
   LocalProvider,
   useLocal,
 } from "../../src/context/local"
 import path from "node:path"
-import { createComponent, createRoot, createMemo } from "solid-js"
+import { createComponent } from "solid-js"
 import { testRender } from "@opentui/solid"
 import { tmpdir } from "../fixture/fixture"
 import { createFetch, createEventSource, directory, json } from "../fixture/tui-sdk"
@@ -34,46 +33,18 @@ import { TuiConfigProvider } from "../../src/config"
 import { createTuiResolvedConfig } from "../fixture/tui-runtime"
 import { wait } from "../cli/cmd/tui/sync-fixture"
 
-test("reasoning default reads persisted values once and updates reactively", async () => {
-  await using tmp = await tmpdir()
-  const file = path.join(tmp.path, "oc.json")
-  await Bun.write(file, '// saved preference\n{"reasoningEffort":"high","extra":"keep"}')
-  const state = createRoot((dispose) => {
-    const preference = createReasoningDefault(file)
-    return { preference, selected: createMemo(() => preference.current()), dispose }
-  })
-  try {
-    expect(state.selected()).toBe("high")
-    await Bun.write(file, '{"reasoningEffort":"low"}')
-    expect(state.selected()).toBe("high")
-    state.preference.set("default")
-    expect(state.selected()).toBe("default")
-    for (const reasoningEffort of ["default", "max", "unsupported", false, null]) {
-      await Bun.write(file, JSON.stringify({ reasoningEffort }))
-      const reopened = createRoot((dispose) => ({ value: createReasoningDefault(file).current(), dispose }))
-      expect(reopened.value).toBe(reasoningEffort === "max" ? "max" : "default")
-      reopened.dispose()
-    }
-    await Bun.write(file, "not json")
-    expect(createReasoningDefault(file).current()).toBe("default")
-    expect(createReasoningDefault(path.join(tmp.path, "missing.json")).current()).toBe("default")
-  } finally {
-    state.dispose()
-  }
-})
-
-test("reasoning resolution preserves explicit default and only matches exact supported variants", () => {
+test("variant resolution prefers the session pick, then the model pick, then default", () => {
   const variants = ["low", "high", "thinking"]
-  expect(resolveVariant(variants, { variant: "low" }, "high", "high")).toBe("low")
-  expect(resolveVariant(variants, {}, "high", "high")).toBe("default")
-  expect(resolveVariant(variants, { variant: "default" }, "high", "high")).toBe("default")
-  expect(resolveVariant(variants, undefined, "default", "high")).toBe("default")
-  expect(resolveVariant(variants, undefined, "thinking", "high")).toBe("thinking")
-  expect(resolveVariant(variants, undefined, undefined, "high")).toBe("high")
-  expect(resolveVariant(["highThinking"], undefined, undefined, "high")).toBe("default")
-  expect(resolveVariant([], undefined, undefined, "high")).toBe("default")
-  expect(resolveVariant(variants, { variant: "removed" }, "high", "high")).toBe("default")
-  expect(resolveVariant(variants, undefined, "removed", "high")).toBe("default")
+  expect(resolveVariant(variants, { variant: "low" }, "high")).toBe("low")
+  expect(resolveVariant(variants, {}, "high")).toBe("default")
+  expect(resolveVariant(variants, { variant: "default" }, "high")).toBe("default")
+  expect(resolveVariant(variants, undefined, "default")).toBe("default")
+  expect(resolveVariant(variants, undefined, "thinking")).toBe("thinking")
+  expect(resolveVariant(variants, undefined, undefined)).toBe("default")
+  expect(resolveVariant(["highThinking"], undefined, "high")).toBe("default")
+  expect(resolveVariant([], undefined, "high")).toBe("default")
+  expect(resolveVariant(variants, { variant: "removed" }, "high")).toBe("default")
+  expect(resolveVariant(variants, undefined, "removed")).toBe("default")
 })
 
 test("local model shares reasoning for display, outgoing selections and persisted session choices", async () => {
@@ -157,7 +128,8 @@ test("local model shares reasoning for display, outgoing selections and persiste
   }), { width: 100, height: 30 })
   try {
     await wait(() => !!local && local.model.ready && sync.status === "complete")
-    local.model.reasoningDefault.set("high")
+    await local.model.variant.set("high")
+    await wait(() => !fs.readdirSync(statePath).some((name) => name.endsWith(".tmp")))
     expect(local.model.variant.selected()).toBe("high")
     expect(local.model.variant.current()).toBe("high")
     await sdk.client.session.prompt({ sessionID: "new", model: local.model.current(),
@@ -184,14 +156,14 @@ test("local model shares reasoning for display, outgoing selections and persiste
     }
     route.navigate({ type: "home" })
     local.model.set({ providerID: "test", modelID: "first" })
-    local.model.reasoningDefault.set("default")
+    await local.model.variant.set(undefined)
     expect(local.model.variant.current()).toBeUndefined()
     await wait(() => {
       try { return JSON.parse(fs.readFileSync(path.join(statePath, "model.json"), "utf8"))
-        .session.providerDefault.modelID === "unsupported" } catch { return false }
+        .variant["test/first"] === "default" } catch { return false }
     })
     const persisted = await Bun.file(path.join(statePath, "model.json")).json()
-    expect(persisted.variant).toEqual(saved.variant)
+    expect(persisted.variant).toEqual({ ...saved.variant, "test/first": "default" })
     expect(persisted.session.explicit.variant).toBe("low")
     expect(persisted.session.providerDefault.variant).toBeUndefined()
   } finally {

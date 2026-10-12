@@ -7,15 +7,13 @@ export interface ClaudeCodeConfig {
   cliPath: string
   /**
    * Which opencode major this model was created by, which decides the tool
-   * vocabulary its stream uses (src/host-tools.ts). Set only by the V2
+   * vocabulary its stream uses (src/hostTools.ts). Set only by the V2
    * entrypoint's `sdk` hook; absent means opencode 1.x. Per model rather than
    * per process on purpose: opencode 1.18 also calls a dual export's `setup`,
    * so nothing process-wide may decide it.
    */
   hostApi?: "v1" | "v2"
   cwd?: string
-  account?: string
-  configDir?: string
   /**
    * Claude config dirs pooled as one account, in order (`["~/.claude",
    * "~/.claudeSecond"]`). Work stays on one account until the CLI rejects a
@@ -90,8 +88,6 @@ export interface ClaudeCodeProviderSettings {
   cwd?: string
   name?: string
   providerID?: string
-  account?: string
-  configDir?: string
   /**
    * Claude config dirs pooled as one account, in order (`["~/.claude",
    * "~/.claudeSecond"]`). Work stays on one account until the CLI rejects a
@@ -101,7 +97,7 @@ export interface ClaudeCodeProviderSettings {
   /**
    * Model that subagents run on when their own definition pins nothing.
    * Unset means no implicit override at all, so an agent keeps inheriting the
-   * caller's model exactly as opencode intends. See `src/agent-models.ts`.
+   * caller's model exactly as opencode intends. See `src/agentModels.ts`.
    */
   defaultSubagentModel?: string
   skipPermissions?: boolean
@@ -134,22 +130,22 @@ export interface ClaudeCodeProviderSettings {
    *     opencode's tool executor (with its native permission UI) and returns
    *     the result.
    *
-    * Supported: `bash`, `write`, `edit`, `webfetch`, `task`, `question`. Leave empty or unset to disable proxying.
-    *
-    * `task` proxies Claude CLI's `Agent` (subagent dispatch) tool through
-    * opencode's `task` tool, so subagent calls run under opencode's
-    * configured subagent set (build/general/custom) with opencode's
-    * permission and lifecycle handling, instead of Claude CLI's
-    * internal-only general-purpose / Explore / Plan options. The calling
-    * agent must have `permission.task: allow` for the target subagent
-    * (see opencode's agent docs).
-    *
-    * `question` proxies Claude CLI's `AskUserQuestion` through opencode's
-    * native `question` tool (TUI form with options + custom answer). The
-    * calling agent must have `permission.question: allow`. Version-gated:
-    * silently dropped on opencode builds that lack the `question` registry
-    * entry, in which case the deny/markdown fallback applies.
-    */
+   * Supported: `bash`, `write`, `edit`, `webfetch`, `task`, `question`. Leave empty or unset to disable proxying.
+   *
+   * `task` proxies Claude CLI's `Agent` (subagent dispatch) tool through
+   * opencode's `task` tool, so subagent calls run under opencode's
+   * configured subagent set (build/general/custom) with opencode's
+   * permission and lifecycle handling, instead of Claude CLI's
+   * internal-only general-purpose / Explore / Plan options. The calling
+   * agent must have `permission.task: allow` for the target subagent
+   * (see opencode's agent docs).
+   *
+   * `question` proxies Claude CLI's `AskUserQuestion` through opencode's
+   * native `question` tool (TUI form with options + custom answer). The
+   * calling agent must have `permission.question: allow`. Version-gated:
+   * silently dropped on opencode builds that lack the `question` registry
+   * entry, in which case the deny/markdown fallback applies.
+   */
   proxyTools?: string[]
 
   /**
@@ -319,7 +315,6 @@ export interface ClaudeCodeProviderSettings {
    */
   autoContinueIncompleteTurns?: boolean | "smart"
 
-
   /**
    * Logger configuration. See `LoggingConfig` for fields. Env vars
    * (`OPENCODE_CLAUDE_CODE_LOG_FILE`, `OPENCODE_CLAUDE_CODE_LOG_DIR`,
@@ -332,13 +327,7 @@ export interface ClaudeCodeProviderSettings {
 
 export type ReasoningEffort = "minimal" | "low" | "medium" | "high" | "xhigh" | "max"
 
-export type PermissionMode =
-  | "acceptEdits"
-  | "auto"
-  | "bypassPermissions"
-  | "default"
-  | "dontAsk"
-  | "plan"
+export type PermissionMode = "acceptEdits" | "auto" | "bypassPermissions" | "default" | "dontAsk" | "plan"
 
 /**
  * A named bundle of permission settings, so a safety posture is one option
@@ -346,7 +335,7 @@ export type PermissionMode =
  * `proxyTools` and `extraDisallowedTools`. Opt-in:
  * unset means today's behaviour, unchanged.
  *
- * `read-only` is the only preset so far. See `src/permission-presets.ts` for
+ * `read-only` is the only preset so far. See `src/permissionPresets.ts` for
  * what it resolves to and why each part is needed.
  */
 export type PermissionPreset = "read-only"
@@ -360,9 +349,7 @@ export type PermissionPreset = "read-only"
  */
 export const READ_ONLY_PERMISSION_MODE = "read-only"
 
-export type EffectivePermissionMode =
-  | PermissionMode
-  | typeof READ_ONLY_PERMISSION_MODE
+export type EffectivePermissionMode = PermissionMode | typeof READ_ONLY_PERMISSION_MODE
 
 /**
  * `Question` is deliberately absent: enabling it disables Claude Code's
@@ -373,10 +360,9 @@ export type EffectivePermissionMode =
  * in by listing it in `proxyTools`; see README "Question proxy tool".
  *
  * It lives here rather than in `index.ts` (which still re-exports it, so the
- * public name is unchanged) because `permission-presets.ts` needs it to say
- * which proxy tools a preset dropped, and `startup-diagnostics.ts` and
- * `doctor.ts` read that answer. Importing `index.ts` from any of the three
- * would be a cycle.
+ * public name is unchanged) because `permissionPresets.ts` needs it to say
+ * which proxy tools a preset dropped, and `startupDiagnostics.ts` reads
+ * that answer. Importing `index.ts` from either would be a cycle.
  *
  * Only oc-only tools are proxied: Claude Code's native file, shell and web
  * tools run in the CLI and render as oc tool rows.
@@ -445,7 +431,7 @@ export interface ClaudeStreamMessage {
     }>
   }
 
-  // `system`/`init` fields. Read by `reportSystemInit` in `cli-events.ts`;
+  // `system`/`init` fields. Read by `reportSystemInit` in `cliEvents.ts`;
   // shapes confirmed against the CLI's own zod schemas on 2.1.263.
   apiKeySource?: string
   permissionMode?: string
@@ -459,7 +445,7 @@ export interface ClaudeStreamMessage {
   compact_metadata?: Record<string, unknown>
   compactMetadata?: Record<string, unknown>
 
-  // `rate_limit_event`. See `RateLimitInfo` in `cli-events.ts`.
+  // `rate_limit_event`. See `RateLimitInfo` in `cliEvents.ts`.
   rate_limit_info?: Record<string, unknown>
 
   tool?: {

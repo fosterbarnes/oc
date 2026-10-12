@@ -6,6 +6,7 @@ import { spawn } from "child_process"
 import { cmd } from "./cmd"
 import { OcConfig } from "@/config/oc"
 import type { Revive } from "@/config/revive"
+import { TuiLedger } from "@/config/tuiLedger"
 import { startIntro } from "../intro"
 
 function runtimeArgs(args: string[]) {
@@ -45,9 +46,13 @@ async function attach(
   if (options.session) args.push("--session", options.session)
   if (typeof settings.sessionModel === "string") args.push("--model", settings.sessionModel)
   if (typeof settings.sessionAgent === "string") args.push("--agent", settings.sessionAgent)
-  await host(args, { OPENCODE_SERVER_PASSWORD: server.secret, OPENCODE_SERVER_USERNAME: "opencode" },
-    options.introFrame, async (handoff) =>
-      attach(await OcConfig.startServer(), settings, { directory: handoff.directory, session: handoff.sessionID }))
+  await host(
+    args,
+    { OPENCODE_SERVER_PASSWORD: server.secret, OPENCODE_SERVER_USERNAME: "opencode" },
+    options.introFrame,
+    async (handoff) =>
+      attach(await OcConfig.startServer(), settings, { directory: handoff.directory, session: handoff.sessionID }),
+  )
 }
 
 // Runs the TUI as a child of this launcher, then hosts any /revive the TUI handed off.
@@ -59,9 +64,16 @@ async function host(
   reopen: (handoff: { directory: string; sessionID?: string }) => Promise<void>,
 ) {
   const stopped = await runNative(args, {
-    env: { ...env, OC_AUTO_RENAME: "1", OC_SUPERVISOR_PID: String(process.pid),
-      ...(introFrame === undefined ? {} : { OC_INTRO_FRAME: String(introFrame) }) },
-  }).then(() => undefined, (error: unknown) => ({ error }))
+    env: {
+      ...env,
+      OC_AUTO_RENAME: "1",
+      OC_SUPERVISOR_PID: String(process.pid),
+      ...(introFrame === undefined ? {} : { OC_INTRO_FRAME: String(introFrame) }),
+    },
+  }).then(
+    () => undefined,
+    (error: unknown) => ({ error }),
+  )
   const { Revive } = await import("@/config/revive")
   const raw = await takeHandoff(Revive.handoffPath(process.pid))
   if (raw === undefined) {
@@ -78,8 +90,17 @@ async function host(
   // This launcher shows pipeline output; failures reopen in place.
   const ignore = () => {}
   process.on("SIGINT", ignore)
-  const context = Revive.encode({ ...handoff, supervisorPid: process.pid, shellPid: process.ppid })
-  const failed = await runNative(["oc", "--revive", context]).then(() => false, () => true)
+  const shellIdentity =
+    process.platform === "win32"
+      ? TuiLedger.listProcesses().find(
+          (item) => item.pid === process.ppid && item.created && Revive.isShell(path.win32.basename(item.executable)),
+        )
+      : undefined
+  const context = Revive.encode({ ...handoff, supervisorPid: process.pid, shellPid: process.ppid, shellIdentity })
+  const failed = await runNative(["oc", "--revive", context]).then(
+    () => false,
+    () => true,
+  )
   if (failed) await waitForKey("Revive failed (details above). Press any key to reopen oc.")
   process.off("SIGINT", ignore)
   if (!failed) return
@@ -98,7 +119,10 @@ async function bootstrapSession(server: { url: string; secret: string }, directo
     headers: { authorization: `Basic ${Buffer.from(`opencode:${server.secret}`).toString("base64")}` },
   })
   const sessions = await client.experimental.session.list({ roots: true, limit: 500 }, { throwOnError: true })
-  const title = OcConfig.nextProjectTitle(sessions.data.map((item) => item.title), directory)
+  const title = OcConfig.nextProjectTitle(
+    sessions.data.map((item) => item.title),
+    directory,
+  )
   const session = await client.session.create(
     { title, metadata: { ocAutoRename: { state: "pending", title } } },
     { throwOnError: true },
@@ -234,9 +258,7 @@ async function launchProject(target: string | undefined, options: { session?: st
 const PreviousCommand = cmd({
   command: "previous",
   describe: "open a previous global session",
-  builder: (yargs: Argv) =>
-    yargs
-      .option("depth", { type: "number", default: 1 }),
+  builder: (yargs: Argv) => yargs.option("depth", { type: "number", default: 1 }),
   handler: async (args) => {
     const depth = Number(args.depth)
     if (!Number.isInteger(depth) || depth < 1 || depth > 50)
@@ -266,26 +288,32 @@ const ReviveTabsCommand = cmd({
     // Each spawn appends a tab; waiting preserves the saved order.
     for (const tab of tabs.slice(1)) {
       await spawnTab(pane, tab).catch((error: unknown) =>
-        console.error(`Tab not restored: ${error instanceof Error ? error.message : String(error)}`))
+        console.error(`Tab not restored: ${error instanceof Error ? error.message : String(error)}`),
+      )
     }
     const [first] = tabs
     if (first.kind === "oc") {
-      await launchProject(first.sessionID ? first.directory : undefined, { session: first.sessionID })
+      await launchProject(first.directory, { session: first.sessionID })
       return
     }
-    const code = await Bun.spawn(["pwsh", "-NoLogo"], { cwd: first.cwd, stdio: ["inherit", "inherit", "inherit"] }).exited
+    const code = await Bun.spawn(["pwsh", "-NoLogo"], { cwd: first.cwd, stdio: ["inherit", "inherit", "inherit"] })
+      .exited
     if (code !== 0) throw new Error(`pwsh exited with code ${code}`)
   },
 })
 
 async function spawnTab(pane: string, tab: Revive.Tab) {
-  const args = tab.kind === "oc"
-    ? ["--cwd", tab.directory, "--", OcConfig.executablePath(),
-      ...runtimeArgs(["oc", "launch",
-        ...(tab.sessionID ? [tab.directory, "--session", tab.sessionID] : [])])]
-    : ["--cwd", tab.cwd]
-  const child = Bun.spawn(["wezterm", "cli", "spawn", "--pane-id", pane, ...args],
-    { stdout: "ignore", stderr: "pipe" })
+  const args =
+    tab.kind === "oc"
+      ? [
+          "--cwd",
+          tab.directory,
+          "--",
+          OcConfig.executablePath(),
+          ...runtimeArgs(["oc", "launch", tab.directory, ...(tab.sessionID ? ["--session", tab.sessionID] : [])]),
+        ]
+      : ["--cwd", tab.cwd]
+  const child = Bun.spawn(["wezterm", "cli", "spawn", "--pane-id", pane, ...args], { stdout: "ignore", stderr: "pipe" })
   const [code, stderr] = await Promise.all([child.exited, new Response(child.stderr).text()])
   if (code !== 0) {
     throw new Error(`wezterm cli spawn exited with code ${code}: ${stderr.trim()}`)
@@ -365,8 +393,13 @@ export const OcCommand = cmd({
       .command(ReviveTabsCommand)
       .check((argv) => {
         const kill = Boolean(argv["kill-server"]) || Boolean(argv["shutdown-server"])
-        const selected = [Boolean(argv["restart-server"]), kill, Boolean(argv["shutdown-all"]),
-          argv.revive !== undefined, argv["revive-terminal"] !== undefined].filter(Boolean).length
+        const selected = [
+          Boolean(argv["restart-server"]),
+          kill,
+          Boolean(argv["shutdown-all"]),
+          argv.revive !== undefined,
+          argv["revive-terminal"] !== undefined,
+        ].filter(Boolean).length
         if (selected > 0 && argv._.length > 1)
           throw new Error("Server controls and --revive cannot be used with a launch target")
         if (selected > 1) throw new Error("Use only one server control or --revive")
@@ -388,7 +421,9 @@ export const OcCommand = cmd({
       return
     }
     const doRestart = Boolean((args as Record<string, unknown>)["restart-server"])
-    const doKill = Boolean((args as Record<string, unknown>)["kill-server"] || (args as Record<string, unknown>)["shutdown-server"])
+    const doKill = Boolean(
+      (args as Record<string, unknown>)["kill-server"] || (args as Record<string, unknown>)["shutdown-server"],
+    )
     if (doRestart) {
       console.log(JSON.stringify(await OcConfig.restartServer()))
       return
@@ -399,4 +434,3 @@ export const OcCommand = cmd({
     }
   },
 })
-

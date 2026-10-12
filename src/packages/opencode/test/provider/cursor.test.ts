@@ -2,21 +2,103 @@ import { describe, expect, test } from "bun:test"
 import { createCursor } from "@/provider/cursor"
 import { resolveAgentOrigin } from "@/provider/cursor/transport/connect"
 import { mapCursorArgsToOpencode } from "@/provider/cursor/protocol/tools"
-import {
-  PLAN_ENTER_DISABLED_REASON,
-  resolveSwitchModeBridge,
-} from "@/provider/cursor/protocol/switch-mode"
+import { PLAN_ENTER_DISABLED_REASON, resolveSwitchModeBridge } from "@/provider/cursor/protocol/switchMode"
 import {
   buildOpenCodeInteractionGuidance,
   connectFrameError,
   isCursorCompactionTurn,
+  pumpWithRecovery,
   resetTurnStateForTests,
   resolveTurnConversationReset,
-} from "@/provider/cursor/language-model"
+} from "@/provider/cursor/languageModel"
 import { CURSOR_COMPACTION_OPTION } from "@/provider/cursor/shared"
 import { applyCursorCompactionOption } from "@/session/llm/request"
-import { resolveCreatePlanBridge } from "@/provider/cursor/protocol/create-plan"
-import { parseDisplayToolCall, resolveBridgedOpenCodeToolCall } from "@/provider/cursor/protocol/tool-call-bridge"
+import { resolveCreatePlanBridge } from "@/provider/cursor/protocol/createPlan"
+import { parseDisplayToolCall, resolveBridgedOpenCodeToolCall } from "@/provider/cursor/protocol/toolCallBridge"
+import { sessionManager, type CursorSession, type Frame } from "@/provider/cursor/session"
+
+test("aborting a continuation stops its waiting frame pump and closes the Run once", async () => {
+  const abort = new AbortController()
+  const ready = Promise.withResolvers<void>()
+  const frames = new ReadableStream<Frame>()
+  const reader = frames.getReader()
+  let destroyed = 0
+  let recovered = 0
+  const session: CursorSession = {
+    sessionId: crypto.randomUUID(),
+    conversationId: crypto.randomUUID(),
+    stream: {
+      write() {},
+      end() {},
+      async *frames() {},
+      destroy() {
+        destroyed++
+        void reader.cancel()
+      },
+      isClosed: () => destroyed > 0,
+      onTerminal: () => () => {},
+    },
+    frames: {
+      async next() {
+        ready.resolve()
+        const result = await reader.read()
+        return result.done ? { done: true, value: undefined } : { done: false, value: result.value }
+      },
+    },
+    pending: new Map(),
+    displayToolCalls: new Map(),
+    nextBridgedExecId: 900_000,
+    blobs: new Map(),
+    toolDescriptors: [],
+    requestContext: {},
+    allowTools: true,
+    usageEstimate: { inputTokens: 0, outputTokens: 0, cacheRead: 0, cacheWrite: 0, reasoningTokens: 0 },
+    pumpActive: false,
+    pumpOwner: null,
+    heartbeat: null,
+    heartbeatCancel: null,
+    hardDeadlineTimer: null,
+    semanticDeadlineCancel: null,
+    terminalUnsubscribe: null,
+    deferredTerminalReason: null,
+    policy: { semanticIdleMs: 120_000, hardCapMs: 600_000, heartbeatMs: 5_000 },
+    createdAt: Date.now(),
+    lastInboundAt: Date.now(),
+    lastHeartbeatWriteAt: Date.now(),
+    semanticDeadlineAt: Date.now() + 120_000,
+    closeError: null,
+    closed: false,
+  }
+  sessionManager.registerPending(1, session, "read_result", "read")
+  const claim = sessionManager.claim(session.sessionId, 1)
+  if ("kind" in claim) throw new Error("expected a pending continuation")
+  expect(sessionManager.deliverClaim(claim, [new Uint8Array([1])]).kind).toBe("delivered")
+  const output = new ReadableStream({
+    async start(controller) {
+      await pumpWithRecovery({
+        initialSession: session,
+        controller,
+        abortSignal: abort.signal,
+        recover: async () => {
+          recovered++
+          throw new Error("aborted continuations must not recover")
+        },
+      })
+      controller.close()
+    },
+  })
+  try {
+    await ready.promise
+    abort.abort()
+    expect(await output.getReader().read()).toEqual({ done: true, value: undefined })
+    expect(session.closed).toBe(true)
+    expect(session.semanticDeadlineCancel).toBeNull()
+    expect(destroyed).toBe(1)
+    expect(recovered).toBe(0)
+  } finally {
+    sessionManager.close(session)
+  }
+})
 
 describe("native Cursor provider", () => {
   test("todo display updates require an advertised todo capability", () => {
@@ -28,7 +110,8 @@ describe("native Cursor provider", () => {
       if (!display) throw new Error("todo display call did not parse")
       expect(resolveBridgedOpenCodeToolCall(display, ["read", "task"])).toBeUndefined()
       expect(resolveBridgedOpenCodeToolCall(display, ["todowrite"])).toMatchObject({
-        toolName: "todowrite", args: { todos: [expect.objectContaining({ content: "Check gating" })] },
+        toolName: "todowrite",
+        args: { todos: [expect.objectContaining({ content: "Check gating" })] },
       })
     }
   })
@@ -80,9 +163,10 @@ describe("Cursor SwitchMode plan enter is disabled", () => {
   })
 
   test("rejects plan enter even when the session is already in plan", () => {
-    expect(
-      resolveSwitchModeBridge("plan", { allowTools: true, advertised, activeModeId: "plan" }),
-    ).toEqual({ kind: "reject", reason: PLAN_ENTER_DISABLED_REASON })
+    expect(resolveSwitchModeBridge("plan", { allowTools: true, advertised, activeModeId: "plan" })).toEqual({
+      kind: "reject",
+      reason: PLAN_ENTER_DISABLED_REASON,
+    })
   })
 })
 
@@ -107,7 +191,9 @@ describe("Cursor host-identity guidance", () => {
     expect(text).toContain("A child task is a new OpenCode session, never a Cursor IDE session.")
     expect(text).toContain("never raises those Cursor interactions")
     expect(text).toContain("Do not decide it from the model name or from tool-namespace labels.")
-    expect(text!.indexOf("You are in OpenCode.")).toBeLessThan(text!.indexOf("OpenCode exposes exactly these executable tools"))
+    expect(text!.indexOf("You are in OpenCode.")).toBeLessThan(
+      text!.indexOf("OpenCode exposes exactly these executable tools"),
+    )
   })
 
   test("keeps the host preamble when the catalog is empty", () => {
@@ -124,12 +210,7 @@ describe("Cursor host-identity guidance", () => {
 
   test("bans Cursor plan SwitchMode and does not invite plan_enter", () => {
     const text = buildOpenCodeInteractionGuidance(
-      [
-        { name: "bash" },
-        { name: "read" },
-        { name: "plan_enter" },
-        { name: "plan_exit" },
-      ],
+      [{ name: "bash" }, { name: "read" }, { name: "plan_enter" }, { name: "plan_exit" }],
       false,
       "C:\\work",
     )
@@ -175,7 +256,9 @@ describe("Cursor compaction reset and rebase", () => {
       reset: true,
       reason: "post-compaction-rebase",
     })
-    expect(resolveTurnConversationReset({ sessionKey, isCompaction: false, allowTools: true })).toEqual({ reset: false })
+    expect(resolveTurnConversationReset({ sessionKey, isCompaction: false, allowTools: true })).toEqual({
+      reset: false,
+    })
   })
 
   test("no-tool turns after compaction do not spend the rebase token", () => {
@@ -185,7 +268,9 @@ describe("Cursor compaction reset and rebase", () => {
       reset: true,
       reason: "compaction",
     })
-    expect(resolveTurnConversationReset({ sessionKey, isCompaction: false, allowTools: false })).toEqual({ reset: false })
+    expect(resolveTurnConversationReset({ sessionKey, isCompaction: false, allowTools: false })).toEqual({
+      reset: false,
+    })
     expect(resolveTurnConversationReset({ sessionKey, isCompaction: false, allowTools: true })).toEqual({
       reset: true,
       reason: "post-compaction-rebase",

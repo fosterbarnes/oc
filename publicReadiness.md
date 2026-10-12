@@ -29,7 +29,7 @@ Sources: `packages/opencode/src/config/oc.ts`, `packages/core/src/global.ts`, an
 | **WezTerm actions require WezTerm and a compatible shell** | Tab/split actions need its CLI. Command placement sends `$env:SCRIPT_OWN_PANE=...` and PowerShell-style command quoting into the new pane without choosing its shell. A pane using `cmd` or another shell can reject the command. | Should these actions launch a known shell rather than inherit the user's WezTerm default? |
 | **Script entries assume installed interpreters** | Defaults enable PowerShell, Python, Node, Bash, Zsh, Ruby, PHP, and others. Entries may be visible even when their executable is absent; launching then fails. | Show only available launchers, or clearly mark missing ones? |
 
-Sources: `packages/opencode/src/provider/cursor/runtime.ts`, `packages/opencode/src/provider/agentify.ts`, `packages/opencode/src/provider/claude-code/index.ts`, and `packages/tui/src/routes/session/sidebar-tools/helpers.ts` and `script-runner.ts`.
+Sources: `packages/opencode/src/provider/cursor/runtime.ts`, `packages/opencode/src/provider/agentify.ts`, `packages/opencode/src/provider/claude-code/index.ts`, and `packages/tui/src/routes/session/sidebarTools/helpers.ts` and `scriptRunner.ts`.
 
 ## 3. The daily environment is not yet a portable product
 

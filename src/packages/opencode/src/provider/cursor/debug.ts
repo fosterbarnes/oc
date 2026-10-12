@@ -6,9 +6,7 @@ import path from "node:path"
 // Default path mirrors Cursor CLI: $TMPDIR/cursor-provider-logs-<uid>/debug-<pid>.log
 // with directory mode 0o700 and file mode 0o600. Override with CURSOR_PROVIDER_DEBUG_FILE.
 // Truncated once per process. Tokens / checksums should be redacted by callers.
-const DEBUG_ENABLED =
-  process.env.CURSOR_PROVIDER_DEBUG === "1" ||
-  process.env.CURSOR_PROVIDER_DEBUG === "true"
+const DEBUG_ENABLED = process.env.CURSOR_PROVIDER_DEBUG === "1" || process.env.CURSOR_PROVIDER_DEBUG === "true"
 
 let _traceInitialized = false
 let _debugFile: string | undefined
@@ -33,15 +31,10 @@ export function resolveDebugLogPath(): string {
  * Ensure the log directory is 0o700 and create/truncate the log file as 0o600.
  * Exported for tests; callers normally go through `trace`.
  */
-export function ensureSecureDebugLog(
-  filePath: string,
-  options: { secureParent?: boolean } = {},
-): void {
+export function ensureSecureDebugLog(filePath: string, options: { secureParent?: boolean } = {}): void {
   const dir = path.dirname(filePath)
   const secureParent = options.secureParent ?? true
-  fs.mkdirSync(dir, secureParent
-    ? { recursive: true, mode: 0o700 }
-    : { recursive: true })
+  fs.mkdirSync(dir, secureParent ? { recursive: true, mode: 0o700 } : { recursive: true })
   if (secureParent) {
     const stat = fs.lstatSync(dir)
     if (!stat.isDirectory() || stat.isSymbolicLink()) {
@@ -76,11 +69,9 @@ export function trace(msg: string): void {
     }
     if (!_traceInitialized) {
       ensureSecureDebugLog(_debugFile, { secureParent: _debugFileUsesManagedDirectory })
-      fs.writeFileSync(
-        _debugFile,
-        `--- cursor-provider debug (pid ${process.pid}) ${new Date().toISOString()} ---\n`,
-        { mode: 0o600 },
-      )
+      fs.writeFileSync(_debugFile, `--- cursor-provider debug (pid ${process.pid}) ${new Date().toISOString()} ---\n`, {
+        mode: 0o600,
+      })
       _traceInitialized = true
       announceLogPath(_debugFile)
       fs.appendFileSync(
@@ -98,20 +89,16 @@ export function trace(msg: string): void {
 
 /**
  * Compact path-advertising summary for RequestContext troubleshooting.
- * Safe: no tokens / file contents — only workspace vs metadata roots.
+ * Safe: no tokens / file contents - only workspace vs metadata roots.
  */
-export function traceRequestContextPaths(
-  label: string,
-  requestContext: Record<string, unknown> | undefined,
-): void {
+export function traceRequestContextPaths(label: string, requestContext: Record<string, unknown> | undefined): void {
   if (!DEBUG_ENABLED) return
   const env =
     requestContext?.env && typeof requestContext.env === "object"
       ? (requestContext.env as Record<string, unknown>)
       : undefined
   const mcp =
-    requestContext?.mcp_file_system_options &&
-    typeof requestContext.mcp_file_system_options === "object"
+    requestContext?.mcp_file_system_options && typeof requestContext.mcp_file_system_options === "object"
       ? (requestContext.mcp_file_system_options as Record<string, unknown>)
       : undefined
   trace(

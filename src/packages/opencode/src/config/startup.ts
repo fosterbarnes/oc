@@ -39,19 +39,23 @@ export function plan(input: ReturnType<typeof context>) {
     XDG_STATE_HOME: path.dirname(input.state),
     XDG_DATA_HOME: path.dirname(input.data),
     XDG_CACHE_HOME: path.dirname(input.cache),
-    ...Object.fromEntries(["OPENCODE_CONFIG", "OPENCODE_CONFIG_DIR"].flatMap((key) =>
-      input.env[key] ? [[key, path.resolve(input.env[key]!)]] : [])),
+    ...Object.fromEntries(
+      ["OPENCODE_CONFIG", "OPENCODE_CONFIG_DIR"].flatMap((key) =>
+        input.env[key] ? [[key, path.resolve(input.env[key]!)]] : [],
+      ),
+    ),
     ...(input.env.OPENCODE_DB ? { OPENCODE_DB: input.env.OPENCODE_DB } : {}),
   }
-  const script = [
-    "$ErrorActionPreference = 'Stop'",
-    // Sign-in must not inherit another build's inline config or resident credentials.
-    "Remove-Item Env:OPENCODE_CONFIG_CONTENT, Env:OPENCODE_CONFIG, Env:OPENCODE_CONFIG_DIR, Env:OPENCODE_DB, Env:OPENCODE_SERVER_PASSWORD, Env:OPENCODE_SERVER_USERNAME, Env:OC_RESIDENT, Env:OC_FLAVOR -ErrorAction SilentlyContinue",
-    ...Object.entries(env).map(([key, value]) => `$env:${key} = ${literal(value)}`),
-    `Set-Location -LiteralPath ${literal(input.cwd)}`,
-    `& ${literal(input.executable)} ${[...(input.entrypoint ? [path.resolve(input.entrypoint)] : []), "oc", "server", "start"].map(literal).join(" ")} | Out-Null`,
-    "if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }",
-  ].join("\r\n") + "\r\n"
+  const script =
+    [
+      "$ErrorActionPreference = 'Stop'",
+      // Sign-in must not inherit another build's inline config or resident credentials.
+      "Remove-Item Env:OPENCODE_CONFIG_CONTENT, Env:OPENCODE_CONFIG, Env:OPENCODE_CONFIG_DIR, Env:OPENCODE_DB, Env:OPENCODE_SERVER_PASSWORD, Env:OPENCODE_SERVER_USERNAME, Env:OC_RESIDENT, Env:OC_FLAVOR -ErrorAction SilentlyContinue",
+      ...Object.entries(env).map(([key, value]) => `$env:${key} = ${literal(value)}`),
+      `Set-Location -LiteralPath ${literal(input.cwd)}`,
+      `& ${literal(input.executable)} ${[...(input.entrypoint ? [path.resolve(input.entrypoint)] : []), "oc", "server", "start"].map(literal).join(" ")} | Out-Null`,
+      "if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }",
+    ].join("\r\n") + "\r\n"
   const identity = createHash("sha256").update(`${input.config}\0${input.state}`).digest("hex").slice(0, 16)
   const name = `oc-${input.app}-${identity}`
   // Immutable launchers let registration/config rollback restore the exact previous command.
@@ -59,7 +63,9 @@ export function plan(input: ReturnType<typeof context>) {
   const file = path.join(input.state, "startup", `${name}-${digest}.ps1`)
   const command = `"${input.powershell}" -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "${file}"`
   if (command.length > 260)
-    throw new Error("Windows Run commands cannot exceed 260 characters. Move the instance's XDG_STATE_HOME to a shorter path.")
+    throw new Error(
+      "Windows Run commands cannot exceed 260 characters. Move the instance's XDG_STATE_HOME to a shorter path.",
+    )
   return { name, file, command, script }
 }
 
@@ -80,11 +86,15 @@ async function registryCommand(name: string, value?: string, write = false) {
     "} finally { $key.Dispose() }",
   ].join("; ")
   const child = Bun.spawn(["pwsh", "-NoProfile", "-NonInteractive", "-Command", script], {
-    stdout: "pipe", stderr: "pipe", windowsHide: true,
+    stdout: "pipe",
+    stderr: "pipe",
+    windowsHide: true,
     env: { ...process.env, OC_STARTUP_NAME: name, OC_STARTUP_VALUE: value ?? "" },
   })
   const [stdout, stderr, code] = await Promise.all([
-    new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited,
+    new Response(child.stdout).text(),
+    new Response(child.stderr).text(),
+    child.exited,
   ])
   if (code !== 0) throw new Error(`Windows startup registration failed: ${stderr.trim()}`)
   if (!write) return (JSON.parse(stdout) as string | null) ?? undefined
@@ -92,15 +102,21 @@ async function registryCommand(name: string, value?: string, write = false) {
 
 export const registry: Registry = {
   read: (name) => registryCommand(name),
-  write: async (name, value) => { await registryCommand(name, value, true) },
+  write: async (name, value) => {
+    await registryCommand(name, value, true)
+  },
 }
 
 let pending = Promise.resolve()
 
-export function update<T>(enabled: boolean, persist: () => Promise<T>, options: {
-  context?: ReturnType<typeof context>
-  registry?: Registry
-} = {}) {
+export function update<T>(
+  enabled: boolean,
+  persist: () => Promise<T>,
+  options: {
+    context?: ReturnType<typeof context>
+    registry?: Registry
+  } = {},
+) {
   const run = pending.then(async () => {
     if (typeof enabled !== "boolean") throw new Error("Windows sign-in startup requires a boolean.")
     const next = plan(options.context ?? context())
@@ -118,9 +134,13 @@ export function update<T>(enabled: boolean, persist: () => Promise<T>, options: 
         })
         if (handle) {
           created = true
-          try { await handle.writeFile(next.script, "utf8") } finally { await handle.close() }
+          try {
+            await handle.writeFile(next.script, "utf8")
+          } finally {
+            await handle.close()
+          }
         }
-        if (!handle && await fs.readFile(next.file, "utf8") !== next.script)
+        if (!handle && (await fs.readFile(next.file, "utf8")) !== next.script)
           throw new Error(`Startup launcher contents do not match: ${next.file}`)
       }
       if (previous !== desired) {
@@ -134,11 +154,17 @@ export function update<T>(enabled: boolean, persist: () => Promise<T>, options: 
         if (registered) await registration.write(next.name, previous)
         if (created) await fs.rm(next.file, { force: true })
       } catch (rollback) {
-        throw new AggregateError([error, rollback], "Windows startup update failed and rollback failed. Check this instance's HKCU Run registration.")
+        throw new AggregateError(
+          [error, rollback],
+          "Windows startup update failed and rollback failed. Check this instance's HKCU Run registration.",
+        )
       }
       throw error
     }
   })
-  pending = run.then(() => undefined, () => undefined)
+  pending = run.then(
+    () => undefined,
+    () => undefined,
+  )
   return run
 }

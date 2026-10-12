@@ -1,4 +1,4 @@
-export function obfuscate(bytes: Uint8Array): Uint8Array {
+function obfuscate(bytes: Uint8Array): Uint8Array {
   const out = new Uint8Array(bytes)
   let a = 165
   for (let i = 0; i < out.length; i++) {
@@ -8,10 +8,7 @@ export function obfuscate(bytes: Uint8Array): Uint8Array {
   return out
 }
 
-export function createCursorChecksumHeader(
-  machineId: string,
-  macMachineId?: string,
-): string {
+export function createCursorChecksumHeader(machineId: string, macMachineId?: string): string {
   const n = Math.floor(Date.now() / 1e6)
   const ts = new Uint8Array([
     (n >> 40) & 0xff,

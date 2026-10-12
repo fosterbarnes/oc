@@ -19,47 +19,77 @@ import { SessionPrompt } from "../../src/session/prompt"
 import { TestInstance, testInstanceStoreLayer } from "../fixture/fixture"
 import { pollWithTimeout, testEffect } from "../lib/effect"
 
-const it = testEffect(AppNodeBuilder.build(
-  LayerNode.group([
-    SessionRunState.node, Session.node, SessionStatus.node, SessionWork.node, SessionPrompt.node,
-    Database.node, EventV2.node, SessionProjector.node, InstanceStore.node,
-  ]),
-  [[InstanceStore.node, testInstanceStoreLayer]],
-))
+const it = testEffect(
+  AppNodeBuilder.build(
+    LayerNode.group([
+      SessionRunState.node,
+      Session.node,
+      SessionStatus.node,
+      SessionWork.node,
+      SessionPrompt.node,
+      Database.node,
+      EventV2.node,
+      SessionProjector.node,
+      InstanceStore.node,
+    ]),
+    [[InstanceStore.node, testInstanceStoreLayer]],
+  ),
+)
 
 describe("ServerShutdown", () => {
-  it.instance("stops command-template subprocesses before shutdown completes", () =>
-    Effect.gen(function* () {
-      const session = yield* Session.Service
-      const prompt = yield* SessionPrompt.Service
-      const test = yield* TestInstance
-      const chat = yield* session.create({ title: "Shutdown probe" })
-      const command = yield* prompt.command({
-        sessionID: chat.id, command: "shutdownProbe", arguments: "", agent: "build",
-      }).pipe(Effect.forkChild)
-      const pid = yield* pollWithTimeout(Effect.promise(async () => {
-        const file = Bun.file(path.join(test.directory, "shutdown.pid"))
-        if (!(await file.exists())) return
-        const pid = Number(await file.text())
-        return Number.isInteger(pid) && pid > 0 ? pid : undefined
-      }), "command-template subprocess did not start")
-      yield* Effect.addFinalizer(() => Effect.try({
-        try: () => process.kill(pid),
-        catch: (error) => error,
-      }).pipe(Effect.ignore))
-      yield* ServerShutdown.prepare()
-      yield* Fiber.await(command)
-      expect(() => process.kill(pid, 0)).toThrow()
-    }),
+  it.instance(
+    "stops command-template subprocesses before shutdown completes",
+    () =>
+      Effect.gen(function* () {
+        const session = yield* Session.Service
+        const prompt = yield* SessionPrompt.Service
+        const test = yield* TestInstance
+        const chat = yield* session.create({ title: "Shutdown probe" })
+        const command = yield* prompt
+          .command({
+            sessionID: chat.id,
+            command: "shutdownProbe",
+            arguments: "",
+            agent: "build",
+          })
+          .pipe(Effect.forkChild)
+        const pid = yield* pollWithTimeout(
+          Effect.promise(async () => {
+            const file = Bun.file(path.join(test.directory, "shutdown.pid"))
+            if (!(await file.exists())) return
+            const pid = Number(await file.text())
+            return Number.isInteger(pid) && pid > 0 ? pid : undefined
+          }),
+          "command-template subprocess did not start",
+        )
+        yield* Effect.addFinalizer(() =>
+          Effect.try({
+            try: () => process.kill(pid),
+            catch: (error) => error,
+          }).pipe(Effect.ignore),
+        )
+        yield* ServerShutdown.prepare()
+        yield* Fiber.await(command)
+        expect(() => process.kill(pid, 0)).toThrow()
+      }),
     {
-      init: (directory) => Effect.promise(() => Bun.write(path.join(directory, "opencode.json"), JSON.stringify({
-        shell: "pwsh",
-        command: {
-          shutdownProbe: {
-            template: "!`[IO.File]::WriteAllText('" + path.join(directory, "shutdown.pid") + "', [string]$PID); Start-Sleep -Seconds 30`",
-          },
-        },
-      }))).pipe(Effect.asVoid),
+      init: (directory) =>
+        Effect.promise(() =>
+          Bun.write(
+            path.join(directory, "opencode.json"),
+            JSON.stringify({
+              shell: "pwsh",
+              command: {
+                shutdownProbe: {
+                  template:
+                    "!`[IO.File]::WriteAllText('" +
+                    path.join(directory, "shutdown.pid") +
+                    "', [string]$PID); Start-Sleep -Seconds 30`",
+                },
+              },
+            }),
+          ),
+        ).pipe(Effect.asVoid),
     },
     15_000,
   )
@@ -72,7 +102,10 @@ describe("ServerShutdown", () => {
       const chat = yield* session.create({})
       const message = {
         info: yield* session.updateMessage({
-          id: MessageID.ascending(), sessionID: chat.id, role: "user", agent: "build",
+          id: MessageID.ascending(),
+          sessionID: chat.id,
+          role: "user",
+          agent: "build",
           model: { providerID: ProviderV2.ID.make("test"), modelID: ModelV2.ID.make("test") },
           time: { created: Date.now() },
         }),
@@ -81,12 +114,16 @@ describe("ServerShutdown", () => {
       const started = yield* Deferred.make<void>()
       const cleaning = yield* Deferred.make<void>()
       const finish = yield* Deferred.make<void>()
-      const active = yield* state.ensureRunning(chat.id, Effect.succeed(message),
-        Deferred.succeed(started, undefined).pipe(
-          Effect.andThen(Effect.never),
-          Effect.ensuring(Deferred.succeed(cleaning, undefined).pipe(Effect.andThen(Deferred.await(finish)))),
-        ),
-      ).pipe(Effect.forkChild)
+      const active = yield* state
+        .ensureRunning(
+          chat.id,
+          Effect.succeed(message),
+          Deferred.succeed(started, undefined).pipe(
+            Effect.andThen(Effect.never),
+            Effect.ensuring(Deferred.succeed(cleaning, undefined).pipe(Effect.andThen(Deferred.await(finish)))),
+          ),
+        )
+        .pipe(Effect.forkChild)
       yield* Deferred.await(started)
       const shutdown = yield* ServerShutdown.prepare().pipe(Effect.forkChild)
       yield* Deferred.await(cleaning)
@@ -107,7 +144,10 @@ describe("ServerShutdown", () => {
       const chat = yield* session.create({})
       const message = {
         info: yield* session.updateMessage({
-          id: MessageID.ascending(), sessionID: chat.id, role: "user", agent: "build",
+          id: MessageID.ascending(),
+          sessionID: chat.id,
+          role: "user",
+          agent: "build",
           model: { providerID: ProviderV2.ID.make("test"), modelID: ModelV2.ID.make("test") },
           time: { created: Date.now() },
         }),
@@ -115,12 +155,16 @@ describe("ServerShutdown", () => {
       }
       const started = yield* Deferred.make<void>()
       const finish = yield* Deferred.make<void>()
-      const active = yield* state.ensureRunning(chat.id, Effect.succeed(message),
-        Deferred.succeed(started, undefined).pipe(
-          Effect.andThen(Effect.never),
-          Effect.ensuring(Deferred.await(finish)),
-        ),
-      ).pipe(Effect.forkChild)
+      const active = yield* state
+        .ensureRunning(
+          chat.id,
+          Effect.succeed(message),
+          Deferred.succeed(started, undefined).pipe(
+            Effect.andThen(Effect.never),
+            Effect.ensuring(Deferred.await(finish)),
+          ),
+        )
+        .pipe(Effect.forkChild)
       yield* Deferred.await(started)
       yield* ServerShutdown.drain(work, "200 millis")
       expect(active.pollUnsafe()).toBeUndefined()

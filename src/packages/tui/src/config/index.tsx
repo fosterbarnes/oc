@@ -5,6 +5,7 @@ import { Schema } from "effect"
 import { createContext, createSignal, type JSX, useContext } from "solid-js"
 import { TuiKeybind } from "./keybind"
 import { TuiKeybindPreset } from "./keybindPreset"
+import { validateHotkey } from "../hotkeyValidate"
 
 export const AttentionSoundName = Schema.Literals([
   "default",
@@ -92,6 +93,9 @@ export const Info = Schema.Struct({
   attention: Schema.optional(Attention),
   prompt: Schema.optional(Prompt),
   subagent_tabs: Schema.optional(SubagentTabs),
+  palette_keys: Schema.optional(Schema.Record(Schema.String, Schema.String)).annotate({
+    description: "Hotkeys for palette commands, keyed by command name",
+  }),
   scroll_speed: Schema.optional(ScrollSpeed).annotate({ description: "TUI scroll speed" }),
   scroll_acceleration: Schema.optional(ScrollAcceleration),
   diff_style: Schema.optional(DiffStyle),
@@ -104,13 +108,15 @@ export type KeybindPreset = (typeof TuiKeybindPreset.Names)[number]
 export type SidebarButtonStyle = NonNullable<Info["sidebar_button_style"]>
 export type SubagentTabsSettings = { click: "inline" | "tab"; auto_open: boolean }
 
-export type Resolved = Omit<Info, "attention" | "keybind_preset" | "sidebar_button_style" | "subagent_tabs" | "keybinds" | "leader_timeout" | "mouse" | "cursor"> & {
+export type Resolved = Omit<Info, "attention" | "keybind_preset" | "sidebar_button_style" | "subagent_tabs" | "palette_keys" | "keybinds" | "leader_timeout" | "mouse" | "cursor"> & {
   keybind_preset: KeybindPreset
   sidebar_button_style: SidebarButtonStyle
   subagent_tabs: SubagentTabsSettings
+  palette_keys: Record<string, string>
   setKeybindPreset: (preset: KeybindPreset) => void
   setSidebarButtonStyle: (style: SidebarButtonStyle) => void
   setSubagentTabs: (settings: SubagentTabsSettings) => void
+  setPaletteKey: (command: string, key: string | undefined) => void
   attention: {
     enabled: boolean
     notifications: boolean
@@ -147,6 +153,7 @@ export function resolve(input: Info, options: ResolveOptions): Resolved {
     click: input.subagent_tabs?.click ?? "inline",
     auto_open: input.subagent_tabs?.auto_open ?? false,
   })
+  const [paletteKeys, setPaletteKeys] = createSignal<Record<string, string>>(input.palette_keys ?? {})
 
   return {
     ...input,
@@ -165,6 +172,33 @@ export function resolve(input: Info, options: ResolveOptions): Resolved {
       return subagentTabs()
     },
     setSubagentTabs,
+    get palette_keys() {
+      return paletteKeys()
+    },
+    setPaletteKey(command, key) {
+      if (key === undefined && paletteKeys()[command] === undefined) return
+      if (key !== undefined) {
+        const leaderBinding = lookups[preset()].get("leader")[0]?.key
+        const leaderKey =
+          !leaderBinding ? "" : typeof leaderBinding === "string" ? leaderBinding.trim().toLowerCase() : ""
+        const result = validateHotkey({
+          key,
+          leaderKey,
+          ownerOf: (candidate) =>
+            Object.entries(paletteKeys()).find(
+              ([name, value]) => name !== command && value.trim().toLowerCase() === candidate,
+            )?.[0],
+          kittyKeyboard: true,
+        })
+        if (!result.ok) return
+      }
+      setPaletteKeys((current) => {
+        if (key !== undefined) return { ...current, [command]: key }
+        const next = { ...current }
+        delete next[command]
+        return next
+      })
+    },
     attention: {
       enabled: input.attention?.enabled ?? false,
       notifications: input.attention?.notifications ?? true,

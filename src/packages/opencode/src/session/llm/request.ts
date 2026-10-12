@@ -243,6 +243,7 @@ function resolveTools(input: Pick<PrepareInput, "tools" | "agent" | "permission"
   const disabled = Permission.disabled(
     Object.keys(input.tools),
     Permission.merge(input.agent.permission, input.permission ?? []),
+    input.user.permission,
   )
   return Record.filter(input.tools, (_, k) => input.user.tools?.[k] !== false && !disabled.has(k))
 }

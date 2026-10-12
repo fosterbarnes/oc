@@ -106,7 +106,7 @@ function rotateIfNeeded(logFile: string): void {
       renameSync(logFile, `${logFile}.1`)
     }
   } catch {
-    // file does not exist yet — nothing to rotate
+    // file does not exist yet - nothing to rotate
   }
 }
 

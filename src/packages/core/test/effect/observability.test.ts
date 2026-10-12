@@ -204,3 +204,20 @@ test("rotateLogFile renames oversized logs", async () => {
   expect(nodeFs.existsSync(file)).toBe(false)
   expect(nodeFs.readFileSync(`${file}.1`, "utf8").length).toBe(64)
 })
+
+test("rotateLogFile keeps appending when another process rotated first", async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "opencode-log-test-"))
+  await using _ = {
+    async [Symbol.asyncDispose]() {
+      await fs.rm(dir, { recursive: true, force: true })
+    },
+  }
+  const file = path.join(dir, "opencode.log")
+  nodeFs.writeFileSync(file, "x".repeat(64))
+  // Another process rotated first: the archive holds the log and the active file is gone.
+  nodeFs.renameSync(file, `${file}.1`)
+  expect(rotateLogFile(file, 32)).toBe(false)
+  nodeFs.appendFileSync(file, "new")
+  expect(nodeFs.readFileSync(file, "utf8")).toBe("new")
+  expect(nodeFs.readFileSync(`${file}.1`, "utf8").length).toBe(64)
+})

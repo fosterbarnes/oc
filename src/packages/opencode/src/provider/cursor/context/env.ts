@@ -50,12 +50,10 @@ export function buildEnv(workspaceRoot: string): Record<string, unknown> {
 
 /**
  * Real workspace root for path resolution (edits, reads, …).
- * Uses `env.workspace_paths[0]` — never `project_folder` /
+ * Uses `env.workspace_paths[0]` - never `project_folder` /
  * `mcp_file_system_options.workspace_project_dir` (those are Cursor metadata roots).
  */
-export function workspaceRootFromRequestContext(
-  requestContext: Record<string, unknown> | undefined,
-): string {
+export function workspaceRootFromRequestContext(requestContext: Record<string, unknown> | undefined): string {
   const env = requestContext?.env
   if (env && typeof env === "object") {
     const paths = (env as Record<string, unknown>).workspace_paths
@@ -66,8 +64,6 @@ export function workspaceRootFromRequestContext(
     }
   }
   const fallback = process.cwd()
-  trace(
-    `workspaceRootFromRequestContext: workspace_paths missing; fallback cwd=${fallback}`,
-  )
+  trace(`workspaceRootFromRequestContext: workspace_paths missing; fallback cwd=${fallback}`)
   return fallback
 }

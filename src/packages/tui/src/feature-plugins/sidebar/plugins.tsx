@@ -49,9 +49,7 @@ function View(props: { api: TuiPluginApi }) {
       )
     return [...merged, ...tuiOnly]
   })
-  const failed = createMemo(
-    () => [...rows(), ...builtin()].filter((item) => item.status === "failed").length,
-  )
+  const failed = createMemo(() => [...rows(), ...builtin()].filter((item) => item.status === "failed").length)
   const expanded = () => open() ?? failed() > 0
 
   const dot = (status: Row["status"]) => {

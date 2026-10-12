@@ -8,7 +8,7 @@ import {
   CURSOR_WEBSITE_HOST,
   CURSOR_API_HOST,
 } from "../provider/cursor/shared.js"
-import { cursorApiBaseURL, cursorGetServerConfigTelemetryEnabled } from "../provider/cursor/plugin-core.js"
+import { cursorApiBaseURL, cursorGetServerConfigTelemetryEnabled } from "../provider/cursor/pluginCore.js"
 import {
   pollForTokens,
   exchangeApiKey,
@@ -22,13 +22,13 @@ import {
 } from "../provider/cursor/auth.js"
 import { readCache, discoverModels, isCacheFresh } from "../provider/cursor/models.js"
 // Re-exported for API compatibility: tests and downstream code import these
-// from "./plugin.js". Canonical home is ./model-config.ts, which stays free of
+// from "./plugin.js". Canonical home is ./modelConfig.ts, which stays free of
 // host plugin imports so the OpenCode 2.0 entrypoint can share it.
-import { modelsToConfig } from "../provider/cursor/model-config.js"
-export { modelInfoToConfig, modelsToConfig, thinkingSuffixBaseNames } from "../provider/cursor/model-config.js"
+import { modelsToConfig } from "../provider/cursor/modelConfig.js"
+export { modelInfoToConfig, modelsToConfig, thinkingSuffixBaseNames } from "../provider/cursor/modelConfig.js"
 import { opencodeGlobalCacheDir, opencodeGlobalConfigDirs } from "../provider/cursor/context/paths.js"
-import { readStoredAuth, type StoredAuth } from "../provider/cursor/context/auth-store.js"
-import { resolveAgentUrl } from "../provider/cursor/agent-url.js"
+import { readStoredAuth, type StoredAuth } from "../provider/cursor/context/authStore.js"
+import { resolveAgentUrl } from "../provider/cursor/agentUrl.js"
 import {
   captureCursorShellResult,
   cursorShellEnvForCall,
@@ -37,11 +37,12 @@ import {
   releaseCursorShellEnv,
   sanitizeRegisteredCursorShellOutput,
   setCursorShellPath,
-} from "../provider/cursor/shell-timeout.js"
+} from "../provider/cursor/shellTimeout.js"
 import { sessionActivity } from "../provider/cursor/activity.js"
-import { createOpenCodeWebSearchTool, openCodeWebSearchTool } from "../provider/cursor/web-search-tool.js"
-import { createCursorImageSaveTool, cursorImageSaveTool } from "../provider/cursor/image-save-tool.js"
-import { createPlanExecutionKickoffText, setPlanExecutionKickoff } from "../provider/cursor/plan-execution-kickoff.js"
+import { markSessionDirectory, removeSessionDirectory } from "../provider/cursor/sessionDirectory.js"
+import { createOpenCodeWebSearchTool, openCodeWebSearchTool } from "../provider/cursor/webSearchTool.js"
+import { createCursorImageSaveTool, cursorImageSaveTool } from "../provider/cursor/imageSaveTool.js"
+import { createPlanExecutionKickoffText, setPlanExecutionKickoff } from "../provider/cursor/planExecutionKickoff.js"
 import { CURSOR_PROVIDER_NPM } from "../provider/cursor.js"
 
 export async function loadClassicTools(
@@ -113,7 +114,7 @@ export async function CursorPlugin(input: PluginInput): Promise<Hooks> {
   // OPENCODE_AUTH_CONTENT); auth.loader gets live credentials via getAuth().
   // Those usually match, but after a refresh where persistAuthBestEffort fails,
   // getAuth() may still see the old credentials while we already hold a usable
-  // token here — keep it so the loader can still discover models.
+  // token here - keep it so the loader can still discover models.
   let sessionAccessToken: string | undefined
   const refreshesByToken = new Map<string, Promise<TokenPair>>()
 
@@ -129,7 +130,7 @@ export async function CursorPlugin(input: PluginInput): Promise<Hooks> {
     try {
       await persistAuth(body)
     } catch {
-      // ignore — token is still usable for this process
+      // ignore - token is still usable for this process
     }
   }
 
@@ -181,7 +182,7 @@ export async function CursorPlugin(input: PluginInput): Promise<Hooks> {
             },
           })
         } catch {
-          // refresh failed — keep the existing key; the next call may still work
+          // refresh failed - keep the existing key; the next call may still work
         }
       }
       if (accessToken) sessionAccessToken = accessToken
@@ -234,7 +235,7 @@ export async function CursorPlugin(input: PluginInput): Promise<Hooks> {
           const models = await discoverModels(accessToken, cacheDir, { baseURL: apiBaseURL })
           return modelsToConfig(models)
         } catch {
-          // No usable cache and discovery failed — leave the list empty.
+          // No usable cache and discovery failed - leave the list empty.
         }
       }
     }
@@ -251,7 +252,7 @@ export async function CursorPlugin(input: PluginInput): Promise<Hooks> {
       custom_websearch: classicTools.webSearch,
       // Commits Cursor-generated image bytes, which cannot travel through the
       // host's text `write`. Handle-only, so its presence in the catalog does
-      // not give any model a way to write arbitrary files — see image-save.ts.
+      // not give any model a way to write arbitrary files - see imageSave.ts.
       cursor_image_save: classicTools.imageSave,
     },
 
@@ -260,12 +261,18 @@ export async function CursorPlugin(input: PluginInput): Promise<Hooks> {
         case "session.created":
           sessionActivity.linkSession(event.properties.info.id, event.properties.info.parentID)
           sessionActivity.recordActivity(event.properties.info.id)
+          // 2.0 runs one daemon across many projects: record this session's
+          // directory so the provider resolves its workspace per session id
+          // instead of the daemon's startup cwd (sessionDirectory.ts).
+          markSessionDirectory(event.properties.info.id, event.properties.info.directory)
           break
         case "session.updated":
           sessionActivity.linkSession(event.properties.info.id, event.properties.info.parentID)
+          markSessionDirectory(event.properties.info.id, event.properties.info.directory)
           break
         case "session.deleted":
           sessionActivity.removeSession(event.properties.info.id)
+          removeSessionDirectory(event.properties.info.id)
           break
         case "message.updated":
           sessionActivity.recordActivity(event.properties.info.sessionID)
@@ -280,8 +287,10 @@ export async function CursorPlugin(input: PluginInput): Promise<Hooks> {
       if (hookInput.tool !== "bash") return
       // bash/zsh retain the original display/permission command and wrap via
       // shell.env. sh/dash need a short wrapper-file command because their
-      // non-interactive `-c` path ignores BASH_ENV / ZDOTDIR.
-      prepareCursorShellArgs(hookInput.callID, output.args as Record<string, unknown>)
+      // non-interactive `-c` path ignores BASH_ENV / ZDOTDIR. A refusal (Windows
+      // background/soft-timeout) throws so the tool fails with that error.
+      const refusal = prepareCursorShellArgs(hookInput.callID, output.args as Record<string, unknown>)
+      if (refusal) throw new Error(refusal)
     },
 
     async "shell.env"(hookInput, output) {

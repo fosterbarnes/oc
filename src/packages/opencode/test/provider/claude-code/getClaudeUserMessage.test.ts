@@ -1,0 +1,387 @@
+// @ts-nocheck
+// WIP: ported from opencode-claude-code-plugin, which never typechecked its tests; type them as Phase 3 rewrites land.
+/**
+ * Unit tests for getClaudeUserMessage in src/messageBuilder.ts.
+ *
+ * Covers the v0.4.8 fix: tool-role messages (AI SDK V3 shape) must produce
+ * tool_result content blocks instead of falling through to the "(empty)"
+ * sentinel - otherwise opencode's outer agent loop hangs after every proxy
+ * tool call, forcing the user to press "continue".
+ */
+import { test } from "node:test"
+import assert from "node:assert/strict"
+
+import { getClaudeUserMessage, shouldStripContextReminders } from "@/provider/claude-code/messageBuilder.js"
+
+const p = (msgs: any[]) => msgs as any
+
+function parsed(prompt: any) {
+  return JSON.parse(getClaudeUserMessage(prompt))
+}
+
+test("tool-role tool-result produces tool_result block, not sentinel", () => {
+  const out = parsed(
+    p([
+      { role: "user", content: "run bash" },
+      { role: "assistant", content: [{ type: "text", text: "ok" }] },
+      {
+        role: "tool",
+        content: [
+          {
+            type: "tool-result",
+            toolCallId: "call_1",
+            output: { type: "text", value: "hello from bash" },
+          },
+        ],
+      },
+    ]),
+  )
+
+  const blocks = out.message.content
+  assert.equal(Array.isArray(blocks), true)
+  assert.equal(blocks.length, 1)
+  assert.equal(blocks[0].type, "tool_result")
+  assert.equal(blocks[0].tool_use_id, "call_1")
+  // Must NOT be the "(empty)" sentinel.
+  assert.notEqual(blocks[0].type, "text")
+})
+
+test("multiple tool-results in single tool-role message all flow through", () => {
+  const out = parsed(
+    p([
+      { role: "user", content: "do both" },
+      { role: "assistant", content: [{ type: "text", text: "running" }] },
+      {
+        role: "tool",
+        content: [
+          {
+            type: "tool-result",
+            toolCallId: "call_a",
+            output: { type: "text", value: "a result" },
+          },
+          {
+            type: "tool-result",
+            toolCallId: "call_b",
+            output: { type: "text", value: "b result" },
+          },
+        ],
+      },
+    ]),
+  )
+
+  const blocks = out.message.content
+  assert.equal(blocks.length, 2)
+  assert.deepEqual(
+    blocks.map((b: any) => [b.type, b.tool_use_id]),
+    [
+      ["tool_result", "call_a"],
+      ["tool_result", "call_b"],
+    ],
+  )
+})
+
+test("tool-role without tool-result parts still falls through to sentinel", () => {
+  const out = parsed(
+    p([
+      { role: "user", content: "x" },
+      { role: "assistant", content: [{ type: "text", text: "ok" }] },
+      {
+        role: "tool",
+        content: [{ type: "something-else" }],
+      },
+    ]),
+  )
+
+  // No tool-result extracted -> falls through to "(empty)" sentinel path
+  // (correct behavior, matches hasNewUserContent's symmetry).
+  const blocks = out.message.content
+  assert.equal(blocks.length, 1)
+  assert.equal(blocks[0].type, "text")
+  assert.equal(blocks[0].text, "(empty)")
+})
+
+test("mixed user-text + tool-role both flow into the same content array", () => {
+  const out = parsed(
+    p([
+      { role: "user", content: "first turn" },
+      { role: "assistant", content: [{ type: "text", text: "running tool" }] },
+      {
+        role: "tool",
+        content: [
+          {
+            type: "tool-result",
+            toolCallId: "call_1",
+            output: { type: "text", value: "tool output" },
+          },
+        ],
+      },
+      {
+        role: "user",
+        content: [{ type: "text", text: "follow-up question" }],
+      },
+    ]),
+  )
+
+  const blocks = out.message.content
+  // Should have both the tool_result and the follow-up text, no sentinel.
+  const types = blocks.map((b: any) => b.type)
+  assert.ok(types.includes("tool_result"), `expected tool_result in ${types}`)
+  assert.ok(types.includes("text"), `expected text in ${types}`)
+  // No "(empty)" sentinel injected.
+  const textBlock = blocks.find((b: any) => b.type === "text")
+  assert.notEqual(textBlock.text, "(empty)")
+})
+
+test("no thinking keyword is appended to the user message", () => {
+  // Effort reaches the CLI as CLAUDE_CODE_EFFORT_LEVEL at spawn; the message
+  // itself must carry none of the retired "(ultrathink)"-style hints.
+  const out = JSON.parse(getClaudeUserMessage(p([{ role: "user", content: "hello" }]) as any))
+  const texts = out.message.content
+    .filter((b: any) => b.type === "text")
+    .map((b: any) => b.text)
+    .join("\n")
+  assert.ok(texts.includes("hello"))
+  assert.ok(
+    !/\((think( hard(er)?)?|megathink|ultrathink)\)/.test(texts),
+    "no reasoning keyword may be injected into the message",
+  )
+})
+
+test("AI SDK v4 image part carries its binary in part.image", () => {
+  const png = Buffer.from([0x89, 0x50, 0x4e, 0x47])
+  const out = parsed(
+    p([
+      {
+        role: "user",
+        content: [
+          { type: "text", text: "what is in this screenshot?" },
+          { type: "image", image: png, mediaType: "image/png" },
+        ],
+      },
+    ]),
+  )
+
+  const image = out.message.content.find((b: any) => b.type === "image")
+  assert.ok(image, "image part must not be dropped")
+  assert.equal(image.source.media_type, "image/png")
+  assert.equal(image.source.data, png.toString("base64"))
+})
+
+test("part.data still wins when part.image is absent", () => {
+  const out = parsed(
+    p([
+      {
+        role: "user",
+        content: [{ type: "file", data: "aGVsbG8=", mediaType: "image/webp" }],
+      },
+    ]),
+  )
+
+  const image = out.message.content.find((b: any) => b.type === "image")
+  assert.ok(image, "data-carrying file part must still produce an image block")
+  assert.equal(image.source.media_type, "image/webp")
+  assert.equal(image.source.data, "aGVsbG8=")
+})
+
+// Issue #29 (@nic-lan): opencode runs some tools itself, notably the `task`
+// call a `subtask: true` command dispatches. The resumed CLI session never
+// emitted those `tool_use` blocks, so sending a `tool_result` for one is
+// orphaned: Claude cannot resolve the id and the payload sitting in the
+// envelope is unreachable. The result was a subagent that finished correctly
+// while the main session saw no output at all.
+const subtaskPrompt = () =>
+  p([
+    { role: "user", content: [{ type: "text", text: "Recall what we decided about X." }] },
+    {
+      role: "assistant",
+      content: [
+        { type: "text", text: "Dispatching the subagent." },
+        { type: "tool-call", toolCallId: "call_X", toolName: "task", input: { subagent_type: "general" } },
+      ],
+    },
+    {
+      role: "tool",
+      content: [
+        {
+          type: "tool-result",
+          toolCallId: "call_X",
+          toolName: "task",
+          output: { type: "text", value: "We decided X because of Y." },
+        },
+      ],
+    },
+    {
+      role: "user",
+      content: [{ type: "text", text: "Summarize the task tool output above and continue with your task." }],
+    },
+  ])
+
+test("a tool result this CLI process never asked for is sent as text, not an orphaned tool_result", () => {
+  const out = JSON.parse(getClaudeUserMessage(subtaskPrompt(), undefined, { cliToolCallIds: new Set<string>() }))
+  const blocks = out.message.content
+  assert.equal(
+    blocks.some((b: any) => b.type === "tool_result"),
+    false,
+    "an id the CLI never issued must not be sent back as a tool_result",
+  )
+  const rendered = blocks
+    .filter((b: any) => b.type === "text")
+    .map((b: any) => b.text)
+    .join("\n")
+  assert.match(rendered, /We decided X because of Y\./, "the subagent's answer still reaches the model")
+  assert.match(rendered, /<opencode_tool_result tool="task">/, "and it says what produced it")
+  assert.ok(
+    rendered.indexOf("We decided X because of Y.") < rendered.indexOf("Summarize the task tool output above"),
+    "the output has to precede the instruction that calls it 'above'",
+  )
+})
+
+test("a tool result this CLI process is waiting on is still a real tool_result block", () => {
+  const out = JSON.parse(getClaudeUserMessage(subtaskPrompt(), undefined, { cliToolCallIds: new Set(["call_X"]) }))
+  const result = out.message.content.find((b: any) => b.type === "tool_result")
+  assert.ok(result, "the proxy round-trip depends on this block, so the gate must let it through")
+  assert.equal(result.tool_use_id, "call_X")
+  assert.match(result.content, /We decided X because of Y\./)
+})
+
+// --- dcp context reminders -------------------------------------------------
+//
+// opencode-dcp anchors `<dcp-system-reminder>` blocks into message text, so
+// each one is re-sent with every message that carries it. The loudest orders
+// the model to call `compress`, which under this provider only exists when
+// the operator forwards it. Stripping is opt-in and must switch itself off
+// the moment the reminder becomes satisfiable.
+
+const DCP_NUDGE = `<dcp-system-reminder>
+CRITICAL WARNING: MAX CONTEXT LIMIT REACHED
+
+You MUST use the \`compress\` tool now. Do not continue normal exploration until compression is handled.
+</dcp-system-reminder>`
+
+function nudgedPrompt(): any {
+  return p([
+    {
+      role: "user",
+      content: [
+        { type: "text", text: "explain the broker" },
+        // dcp appends its own message marker after a block, which is why the
+        // strip cannot be anchored to the end of a part.
+        { type: "text", text: `${DCP_NUDGE}\n<dcp-message-id>msg_1</dcp-message-id>` },
+      ],
+    },
+  ])
+}
+
+test("dcp reminders survive by default", () => {
+  const out = JSON.parse(getClaudeUserMessage(nudgedPrompt()))
+  const text = out.message.content.map((b: any) => b.text ?? "").join("\n")
+  assert.match(text, /MAX CONTEXT LIMIT REACHED/, "an upgrade must change nothing")
+})
+
+test("stripContextReminders removes the block and keeps everything else", () => {
+  const out = JSON.parse(getClaudeUserMessage(nudgedPrompt(), undefined, { stripContextReminders: true }))
+  const text = out.message.content.map((b: any) => b.text ?? "").join("\n")
+  assert.doesNotMatch(text, /MAX CONTEXT LIMIT REACHED/)
+  assert.doesNotMatch(text, /dcp-system-reminder/)
+  assert.match(text, /explain the broker/, "the operator's own message is untouched")
+  assert.match(text, /<dcp-message-id>msg_1<\/dcp-message-id>/, "trailing metadata survives")
+})
+
+test("the strip leaves opencode's own <system-reminder> blocks alone", () => {
+  const prompt = p([
+    {
+      role: "user",
+      content: [
+        { type: "text", text: "do the thing" },
+        { type: "text", text: "<system-reminder>opencode says stay in plan mode</system-reminder>" },
+      ],
+    },
+  ])
+  const out = JSON.parse(getClaudeUserMessage(prompt, undefined, { stripContextReminders: true }))
+  const text = out.message.content.map((b: any) => b.text ?? "").join("\n")
+  assert.match(text, /stay in plan mode/, "those are opencode's instructions to the model, not an unsatisfiable order")
+})
+
+test("a message whose only text was a reminder does not take the empty sentinel path", () => {
+  const prompt = p([
+    { role: "user", content: [{ type: "text", text: "first question" }] },
+    { role: "assistant", content: [{ type: "text", text: "answered" }] },
+    { role: "user", content: [{ type: "text", text: DCP_NUDGE }] },
+  ])
+  const out = JSON.parse(getClaudeUserMessage(prompt, undefined, { stripContextReminders: true }))
+  assert.doesNotMatch(JSON.stringify(out), /MAX CONTEXT LIMIT REACHED/)
+  assert.ok(Array.isArray(out.message.content), "still a well-formed user message")
+})
+
+test("the fresh-session rebuild strips them too, where they all replay at once", () => {
+  const prompt = p([
+    { role: "user", content: [{ type: "text", text: `old turn\n${DCP_NUDGE}` }] },
+    { role: "assistant", content: [{ type: "text", text: `sure\n${DCP_NUDGE}` }] },
+    { role: "user", content: [{ type: "text", text: "current question" }] },
+  ])
+  const out = getClaudeUserMessage(prompt, {}, { stripContextReminders: true })
+  assert.doesNotMatch(out, /<conversation_history>/)
+  assert.match(out, /old turn/, "the previous exchange is the catch-up excerpt")
+  assert.doesNotMatch(out, /session_tail/)
+  assert.match(out, /current question/)
+  assert.doesNotMatch(out, /MAX CONTEXT LIMIT REACHED/)
+})
+
+const resumedPrompt = () =>
+  p([
+    { role: "user", content: [{ type: "text", text: "Working directory initialized" }] },
+    { role: "user", content: [{ type: "text", text: "compare the options" }] },
+    { role: "assistant", content: [{ type: "text", text: "a) rewrite\nb) patch" }] },
+    { role: "user", content: [{ type: "text", text: "do b" }] },
+  ])
+
+function resumedTexts(resume: any): string[] {
+  return JSON.parse(getClaudeUserMessage(resumedPrompt(), resume)).message.content.map((b: any) => b.text)
+}
+
+test("a fresh conversation in a chat with history leads with the catch-up block", () => {
+  const [block, message] = resumedTexts({ sessionID: "ses_abc" })
+  assert.match(block, /^<session_resume>/)
+  assert.match(block, /Previous user message:\ncompare the options/)
+  assert.match(block, /a\) rewrite\nb\) patch/)
+  assert.match(block, /Earlier user turns: 2/)
+  assert.match(block, /mcp__opencode_proxy__session_read \{"sessionId":"ses_abc"/)
+  assert.equal(message, "do b")
+})
+
+test("without a readable session the catch-up has the excerpt but no session_read", () => {
+  const [block] = resumedTexts({})
+  assert.match(block, /b\) patch/)
+  assert.doesNotMatch(block, /session_read/)
+})
+
+test("ordinary turns carry no catch-up block", () => {
+  assert.deepEqual(resumedTexts(undefined), ["do b"])
+})
+
+test("a long previous reply keeps its end", () => {
+  const prompt = p([
+    { role: "user", content: "go" },
+    { role: "assistant", content: [{ type: "text", text: `${"x".repeat(5000)}FINAL QUESTION` }] },
+    { role: "user", content: "yes" },
+  ])
+  const block = JSON.parse(getClaudeUserMessage(prompt, {})).message.content[0].text
+  assert.match(block, /\[\.\.\.\]x+FINAL QUESTION/)
+  assert.ok(block.length < 5000)
+})
+
+test("stripping switches itself off as soon as compress is reachable", () => {
+  assert.equal(shouldStripContextReminders({ enabled: true }), true)
+  assert.equal(shouldStripContextReminders({ enabled: false }), false, "default off")
+  assert.equal(
+    shouldStripContextReminders({ enabled: true, proxyTools: ["Task", "Compress"] }),
+    false,
+    "the plugin's own compress makes the reminder satisfiable",
+  )
+  assert.equal(
+    shouldStripContextReminders({ enabled: true, proxyOpencodeTools: ["compress"] }),
+    false,
+    "and so does forwarding opencode's",
+  )
+  assert.equal(shouldStripContextReminders({ enabled: true, proxyTools: ["Task", "Bash"] }), true)
+})

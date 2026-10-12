@@ -16,7 +16,7 @@ Features are written once. The only per-binary code is a gate on one build const
 ## Today (verified)
 
 - One compile. `install.ps1` installs `opencode.exe`, hard-links `oc.exe`/`occ.exe` to it (`.scripts/install.ps1:44-72`).
-- Behavior is picked by the started name: `withExecutableDefault` (`cli/command-loader.ts:72`) rewrites `oc`/`occ` to `oc launch`/`oc previous`. `opencode` is not rewritten and already runs the stock in-process TUI.
+- Behavior is picked by the started name: `withExecutableDefault` (`cli/commandLoader.ts:72`) rewrites `oc`/`occ` to `oc launch`/`oc previous`. `opencode` is not rewritten and already runs the stock in-process TUI.
 - The oc launcher spawns `opencode.exe` for the resident server and attach TUIs: `Global.resolveExecutablePath` maps `oc`/`occ` -> `opencode` (`core/src/global.ts:21`).
 - `oc single` = stock TUI + `OC_SINGLE=1` (`cli/cmd/oc.ts:54`). `OC_SINGLE` gates: index.ts rewrite skip, tui.ts close cleanup + revive handoff, app.tsx revive context/title glyph/Shut Down/Restart, footer label, startup.ts env scrub.
 - `oc.json` `executable` = `C:\Users\user\Apps\opencode\opencode.exe`; the TUI spawns it for `oc config set` (`tui/src/app.tsx:320`).
@@ -36,7 +36,7 @@ Features are written once. The only per-binary code is a gate on one build const
 - `cli/cmd/tui.ts`: on close, native does the descendant cleanup (today's single path). No revive handoff.
 - `tui/src/app.tsx`: native hides Shut Down, Restart, and revive entries; writes no oc-tuis ledger; title glyph `⦿`.
 - `footer.tsx`: native shows nothing extra (upstream look), or keep a label: see question 3.
-- `session-tab.ts`: unchanged (already toasts when there is no resident server).
+- `sessionTab.ts`: unchanged (already toasts when there is no resident server).
 - Settings palette `oc config set`: native runs the update in-process instead of spawning the oc exe (reuse `OcConfig.update`).
 
 ### 3. Remove single
@@ -71,5 +71,5 @@ Features are written once. The only per-binary code is a gate on one build const
 ## Checks
 
 - `tsgo --noEmit` for opencode, core, tui.
-- `revive.test.ts` and `command-loader` tests after removing single.
+- `revive.test.ts` and `commandLoader` tests after removing single.
 - User live check: install, then `oc` (resident, ■), `opencode` (native, ⦿, no Shut Down/Restart), `oc --shutdown-all` leaves the `opencode` window running.

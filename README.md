@@ -34,7 +34,16 @@
 
 ### Claude Code
 - The context % updates live during Claude Code turns
-- Update Claude Code from the oc menu
+- Update Claude Code from the oc menu under Manage Third Party Harnesses
+- Update Claude Desktop from the oc menu under Manage Third Party Harnesses (Windows only)
+
+### Cursor
+- Update Cursor CLI from the oc menu under Manage Third Party Harnesses
+- Update Cursor Desktop from the oc menu under Manage Third Party Harnesses (Windows only)
+
+### Codex
+- Update Codex CLI from the oc menu under Manage Third Party Harnesses
+- Update ChatGPT Desktop from the oc menu under Manage Third Party Harnesses (Windows only)
 
 ### Commands and tools
 - Favorite `/commands` and skills with `ctrl+f`
@@ -61,8 +70,20 @@ Some features need extra software:
 | Cursor models | Node.js on PATH and a Cursor account |
 | `/work` and `/done` | Git, and the project must be a git repository |
 | Sidebar file search | [Everything](https://www.voidtools.com/) running, with `es.exe` on PATH |
-| Scripts opening in a new tab or split | WezTerm or Windows Terminal |
+| Scripts opening in a new tab or split | WezTerm (first) or Windows Terminal; see [Terminal](#terminal) |
 | `/revive` rebuilding oc | Bun (not 1.4.0) and a copy of oc's source |
+
+## Terminal
+
+WezTerm is the recommended terminal for oc. It is what the maintainer uses daily, so it gets the most oc features. Windows Terminal and the classic console (conhost) work; features they cannot support are hidden or reduced, not broken. WezTerm tab-color setup is in [docs/wezterm.md](docs/wezterm.md).
+
+| Feature | WezTerm | Windows Terminal | Other |
+|---|---|---|---|
+| Colored tab square | Yes, with [tab-title setup](docs/wezterm.md) | Uncolored `■` in the title | Uncolored `■` in the title |
+| Scripts in a tab, split, or window | Tab, split, or window | Tab, split, or window | New window only |
+| Subagent session tabs | Yes | Yes | No |
+| `/revive` restores all tabs in the window | Yes | Reopens one tab | Reopens one console |
+| Shutdown of this instance | Closes owned WezTerm panes | Ends owned TUI processes | Ends owned TUI processes |
 
 ## Install
 
@@ -100,7 +121,7 @@ New keys (`ctrl+x` is the leader key: press it, then the next key):
 | `ctrl+return` | Home | Send the prompt to a new session and stay on Home |
 | `ctrl+n` | Anywhere | Pick a folder in your home directory and start a session there |
 | `ctrl+o` | Anywhere | List oc commands |
-| `ctrl+x d` / `v` / `w` | Anywhere | Set the default model / reasoning effort / agent |
+| `ctrl+x d` / `w` | Anywhere | Set the default model / agent |
 | `ctrl+x j` / `k` | Anywhere | Set the default sub-agent / sub-agent model |
 | `ctrl+x o` / `i` | Anywhere | Set the home directory / how its folders are sorted in the `ctrl+n` list |
 | `ctrl+s`, `ctrl+f`, `ctrl+shift+return` / `backspace` / `i` | Session list | Filter, pin, and mark sessions ([how](#session-list-and-markers)) |
@@ -303,7 +324,7 @@ then restarts. `/revive-no-install` only restarts. Progress goes to `revive.log`
 
 - **Terminal tab:** the title starts with `■` in the active agent's color, and busy, idle, and
   error states show as tab progress where the terminal supports it. WezTerm colors the square
-  through a tab-title snippet in [v0.3.0.md](v0.3.0.md).
+  through a tab-title snippet in [docs/wezterm.md](docs/wezterm.md).
 - **WezTerm and Windows Terminal:** scripts can open in a new tab, window, or split.
 - **File search:** the sidebar uses [Everything](https://www.voidtools.com/) through `es.exe`.
 - **No flashing consoles:** the background server and its child processes run hidden.
@@ -321,7 +342,6 @@ oc reads stock OpenCode settings as usual. These are the ones oc adds. Config fi
 | `ocDir` | folder | Where bare `oc` opens. Default: your home folder |
 | `homeDir` | folder | Parent folder for `oc <name>` and the `ctrl+n` list. Default: your home folder |
 | `homeDirSort` | `name`, `modified` | How the `ctrl+n` list is sorted |
-| `reasoningEffort` | `low`, `medium`, `high`, `xhigh`, `max`, `default` | Default reasoning for models supporting that variant; explicit session and model choices win |
 | `server.port` | number | Background server port. Default 4096 (debug 4097) |
 | `server.startOnWindowsUserStart` | boolean | Sign-in startup preference; use the palette or `oc config set serverStartOnWindowsUserStart true/false` to update registration |
 | `revive.launcher` | `occ`, `oc` | What `/revive` reopens. Default `occ` |
@@ -456,7 +476,7 @@ development history in `buildNotes.md`.
 
 ## Progress
 
-[522,626](scc.txt) lines of code and counting...
+[527,935](scc.txt) lines of code and counting...
 
 <!-- code-count:start -->
 
@@ -466,13 +486,13 @@ development history in `buildNotes.md`.
 | CSS | 163 | 40,551 | 5,296 | 574 | 34,681 |
 | Go | 5 | 902 | 54 | 3 | 845 |
 | HTML | 1 | 1,161 | 79 | 0 | 1,082 |
-| JavaScript | 10 | 1,766 | 132 | 56 | 1,578 |
+| JavaScript | 10 | 1,773 | 133 | 53 | 1,587 |
 | Nix | 3 | 258 | 23 | 26 | 209 |
-| Powershell | 22 | 1,178 | 82 | 66 | 1,030 |
+| Powershell | 22 | 1,234 | 83 | 73 | 1,078 |
 | SQL | 95 | 592 | 0 | 17 | 575 |
 | Shell | 1 | 120 | 17 | 17 | 86 |
-| TypeScript | 2,756 | 540,498 | 43,557 | 15,540 | 481,401 |
-| **Total** | **3,064** | **588,325** | **49,390** | **16,309** | **522,626** |
+| TypeScript | 2,774 | 546,007 | 43,736 | 15,618 | 486,653 |
+| **Total** | **3,082** | **593,897** | **49,571** | **16,391** | **527,935** |
 
 <!-- code-count:end -->
 

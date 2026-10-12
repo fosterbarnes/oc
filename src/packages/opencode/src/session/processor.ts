@@ -87,7 +87,6 @@ const layer = Layer.effect(
     const session = yield* Session.Service
     const config = yield* Config.Service
     const snapshot = yield* Snapshot.Service
-    const agents = yield* Agent.Service
     const llm = yield* LLM.Service
     const permission = yield* Permission.Service
     const plugin = yield* Plugin.Service
@@ -108,7 +107,9 @@ const layer = Layer.effect(
     yield* Effect.addFinalizer(() => unsubscribe)
 
     const runMarkers = Effect.fn("SessionProcessor.runMarkers")(function* (
-      sessionID: SessionID, text: string, turnPermission?: PermissionV1.Ruleset,
+      sessionID: SessionID,
+      text: string,
+      ruleset: PermissionV1.Ruleset,
     ) {
       if (!text.includes("$#")) return text
       const config = yield* Effect.promise(() => Marker.read())
@@ -120,13 +121,11 @@ const layer = Layer.effect(
         (name) =>
           Effect.gen(function* () {
             const command = config.commands[name]
-            if (turnPermission) {
-              const allowed = yield* permission.ask({
-                permission: "marker", patterns: [name], always: [name], sessionID,
-                metadata: { command: command.run.join(" "), mode: command.mode }, ruleset: turnPermission,
-              }).pipe(Effect.as(true), Effect.catch(() => Effect.succeed(false)))
-              if (!allowed) return [name, `${name}: denied`] as const
-            }
+            const permitted = yield* permission.ask({
+              permission: "marker", patterns: [name], always: [name], sessionID,
+              metadata: { command: command.run.join(" "), mode: command.mode }, ruleset,
+            }).pipe(Effect.as(true), Effect.catch(() => Effect.succeed(false)))
+            if (!permitted) return [name, `${name}: denied`] as const
             if (command.ask) {
               const allowed = yield* permission
                 .ask({
@@ -135,7 +134,8 @@ const layer = Layer.effect(
                   always: [name],
                   sessionID,
                   metadata: { command: command.run.join(" "), mode: command.mode },
-                  ruleset: [],
+                  // Only an explicit marker rule may skip this prompt; wildcard allows must not.
+                  ruleset: ruleset.filter((rule) => rule.permission === "marker"),
                 })
                 .pipe(
                   Effect.as(true),
@@ -176,7 +176,7 @@ const layer = Layer.effect(
         reasoningMap: {},
       }
       let aborted = false
-      let turnPermission: PermissionV1.Ruleset | undefined
+      let markerPermission: PermissionV1.Ruleset = []
       const partReady: Record<string, Deferred.Deferred<void>> = {}
       const readyFor = (toolCallID: string) => (partReady[toolCallID] ??= Deferred.makeUnsafe<void>())
 
@@ -435,14 +435,16 @@ const layer = Layer.effect(
               return
             }
 
-            const agent = yield* agents.get(ctx.assistantMessage.agent)
+            // markerPermission is the merged turn ruleset (agent + session +
+            // user), computed in process(); a command-level deny/allow for
+            // doom_loop must apply here, not agent rules alone.
             yield* permission.ask({
               permission: "doom_loop",
               patterns: [value.name],
               sessionID: ctx.assistantMessage.sessionID,
               metadata: { tool: value.name, input },
               always: [value.name],
-              ruleset: agent.permission,
+              ruleset: markerPermission,
             })
             return
           }
@@ -598,7 +600,9 @@ const layer = Layer.effect(
 
           case "text-end":
             if (!ctx.currentText) return
-            ctx.currentText.text = yield* runMarkers(ctx.sessionID, ctx.currentText.text, turnPermission)
+            ctx.currentText.text = yield* runMarkers(
+              ctx.sessionID, ctx.currentText.text, markerPermission,
+            )
             ctx.currentText.text = (yield* plugin.trigger(
               "experimental.text.complete",
               {
@@ -712,7 +716,9 @@ const layer = Layer.effect(
       })
 
       const process = Effect.fn("SessionProcessor.process")(function* (streamInput: LLM.StreamInput) {
-        turnPermission = streamInput.user.permission
+        markerPermission = Permission.merge(
+          streamInput.agent.permission, streamInput.permission ?? [], streamInput.user.permission ?? [],
+        )
         yield* Effect.logInfo("process", {
           "session.id": input.sessionID,
           messageID: input.assistantMessage.id,

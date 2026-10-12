@@ -52,10 +52,7 @@ describe("OC launcher settings CLI", () => {
         ["homeDirSort", "modified"],
         ["sessionModel", "openai/gpt-5.6-luna"],
         ["sessionAgent", "build"],
-        ["defaultSubagent", "general"],
-        ["defaultSubagentModel", "cursor/composer-2.5"],
-        ["reasoningEffort", "high"],
-        ["serverStartOnWindowsUserStart", "true"],
+        // serverStartOnWindowsUserStart is left out: enabling it registers a real sign-in entry.
       ] as const
       for (const [key, value] of settings) {
         const result = yield* opencode.spawn(["oc", "config", "set", key, value])
@@ -70,10 +67,6 @@ describe("OC launcher settings CLI", () => {
         homeDirSort: "modified",
         sessionModel: "openai/gpt-5.6-luna",
         sessionAgent: "build",
-        defaultSubagent: "general",
-        defaultSubagentModel: "cursor/composer-2.5",
-        reasoningEffort: "high",
-        server: { startOnWindowsUserStart: true },
       })
     }),
   )

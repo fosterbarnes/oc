@@ -4,7 +4,7 @@
  * and re-sends that structure as `AgentRunRequest.conversation_state` on the
  * next Run. We mirror that with an in-process store keyed by conversation_id.
  *
- * Checkpoints are kept as opaque protobuf bytes — CLI's structure uses blob-id
+ * Checkpoints are kept as opaque protobuf bytes - CLI's structure uses blob-id
  * fields (repeated bytes), not the seed JSON strings we invent on turn 1.
  */
 
@@ -27,7 +27,7 @@ export function clearCheckpoint(conversationId: string): void {
   byConversationId.delete(conversationId)
 }
 
-/** Test helper — wipe all stored checkpoints. */
+/** Test helper - wipe all stored checkpoints. */
 export function resetCheckpointsForTests(): void {
   byConversationId.clear()
 }

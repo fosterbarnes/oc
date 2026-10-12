@@ -3,6 +3,8 @@ import { Agent } from "@/agent/agent"
 import { SessionV1 } from "@opencode-ai/core/v1/session"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { Command } from "@/command"
+import { Config } from "@/config/config"
+import { pinSessionAccount, poolAccountIds, poolState, setCurrentAccount } from "@/provider/claude-code/accounts"
 import { Permission } from "@/permission"
 import { SessionShare } from "@/share/session"
 import { Session } from "@/session/session"
@@ -10,6 +12,7 @@ import { SessionCompaction } from "@/session/compaction"
 import { SessionHandoff } from "@/session/handoff"
 import { MessageV2 } from "@/session/message-v2"
 import { SessionPrompt } from "@/session/prompt"
+import { ScheduledResume } from "@/session/scheduledResume"
 import { SessionRevert } from "@/session/revert"
 import { SessionRunState } from "@/session/run-state"
 import { SessionStatus } from "@/session/status"
@@ -20,10 +23,13 @@ import { NamedError } from "@opencode-ai/core/util/error"
 import { Cause, Effect, Option, Schema, Scope } from "effect"
 import * as Stream from "effect/Stream"
 import { InstanceState } from "@/effect/instance-state"
+import { InstanceStore } from "@/project/instance-store"
 import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
 import { HttpApiBuilder, HttpApiError, HttpApiSchema } from "effect/unstable/httpapi"
 import { InstanceHttpApi } from "../api"
 import {
+  ClaudeAccountPayload,
+  ClaudeAccountQuery,
   CommandPayload,
   DiffQuery,
   ForkPayload,
@@ -32,6 +38,8 @@ import {
   MessagesQuery,
   PermissionResponsePayload,
   PromptPayload,
+  ResumeCancelPayload,
+  ResumeEnabledPayload,
   RevertPayload,
   ShellPayload,
   SummarizePayload,
@@ -61,7 +69,12 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
     const todoSvc = yield* Todo.Service
     const summary = yield* SessionSummary.Service
     const events = yield* EventV2Bridge.Service
+    const configSvc = yield* Config.Service
     const scope = yield* Scope.Scope
+    const busyResponse = (error: Session.BusyError) =>
+      SessionError.mapBusy(Effect.fail(error)).pipe(
+        Effect.catch((error) => Effect.succeed(HttpServerResponse.jsonUnsafe(error, { status: 409 }))),
+      )
 
     const list = Effect.fn("SessionHttpApi.list")(function* (ctx: { query: typeof ListQuery.Type }) {
       const directory = ctx.query.directory ? yield* InstanceState.directory : undefined
@@ -193,21 +206,15 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       if (ctx.payload.agent !== undefined) {
         yield* session.setAgent({ sessionID: ctx.params.sessionID, agent: ctx.payload.agent })
       }
-      if (ctx.payload.sessionComplete !== undefined) {
-        yield* session.setSessionComplete({
+      if (
+        ctx.payload.sessionComplete !== undefined ||
+        ctx.payload.sessionFailed !== undefined ||
+        ctx.payload.sessionInProgress !== undefined
+      ) {
+        yield* session.setSessionMarks({
           sessionID: ctx.params.sessionID,
           sessionComplete: ctx.payload.sessionComplete,
-        })
-      }
-      if (ctx.payload.sessionFailed !== undefined) {
-        yield* session.setSessionFailed({
-          sessionID: ctx.params.sessionID,
           sessionFailed: ctx.payload.sessionFailed,
-        })
-      }
-      if (ctx.payload.sessionInProgress !== undefined) {
-        yield* session.setSessionInProgress({
-          sessionID: ctx.params.sessionID,
           sessionInProgress: ctx.payload.sessionInProgress,
         })
       }
@@ -270,9 +277,11 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
           command: Command.Default.INIT,
           arguments: "",
         })
-        .pipe(Effect.mapError(() => new HttpApiError.BadRequest({})))
+        .pipe(
+          Effect.mapError((error) => error instanceof Session.BusyError ? error : new HttpApiError.BadRequest({})),
+        )
       return true
-    })
+    }, Effect.catchTag("SessionBusyError", busyResponse))
 
     // share/unshare errors aren't all client-induced - storage and network
     // failures from SessionShare are real possibilities. Map to a typed 500
@@ -357,11 +366,13 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
           ...ctx.payload,
           sessionID: ctx.params.sessionID,
         })
-        .pipe(Effect.mapError(() => new HttpApiError.BadRequest({})))
+        .pipe(
+          Effect.mapError((error) => error instanceof Session.BusyError ? error : new HttpApiError.BadRequest({})),
+        )
       return HttpServerResponse.stream(Stream.make(JSON.stringify(message)).pipe(Stream.encodeText), {
         contentType: "application/json",
       })
-    })
+    }, Effect.catchTag("SessionBusyError", busyResponse))
 
     const promptAsync = Effect.fn("SessionHttpApi.promptAsync")(function* (ctx: {
       params: { sessionID: SessionID }
@@ -393,8 +404,10 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       yield* requireSession(ctx.params.sessionID)
       return yield* promptSvc
         .command({ ...ctx.payload, sessionID: ctx.params.sessionID })
-        .pipe(Effect.mapError(() => new HttpApiError.BadRequest({})))
-    })
+        .pipe(
+          Effect.mapError((error) => error instanceof Session.BusyError ? error : new HttpApiError.BadRequest({})),
+        )
+    }, Effect.catchTag("SessionBusyError", busyResponse))
 
     const shell = Effect.fn("SessionHttpApi.shell")(function* (ctx: {
       params: { sessionID: SessionID }
@@ -468,6 +481,53 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       return yield* session.updatePart(payload)
     })
 
+    const resumeState = Effect.fn("SessionHttpApi.resumeState")(function* () {
+      return ScheduledResume.getState()
+    })
+
+    const resumeSet = Effect.fn("SessionHttpApi.resumeSet")(function* (ctx: {
+      payload: typeof ResumeEnabledPayload.Type
+    }) {
+      if (ctx.payload.prompt !== undefined) ScheduledResume.setPrompt(ctx.payload.prompt)
+      return ScheduledResume.setEnabled(ctx.payload.enabled)
+    })
+
+    const resumeCancel = Effect.fn("SessionHttpApi.resumeCancel")(function* (ctx: {
+      payload: typeof ResumeCancelPayload.Type
+    }) {
+      return ScheduledResume.cancel(ctx.payload.id)
+    })
+
+    const claudePool = Effect.fnUntraced(function* () {
+      const accounts = (yield* configSvc.get()).provider?.["claude-code"]?.options?.accounts
+      return poolAccountIds(Array.isArray(accounts) ? accounts.filter((dir) => typeof dir === "string") : undefined)
+    })
+
+    const claudeAccountState = Effect.fn("SessionHttpApi.claudeAccountState")(function* (ctx: {
+      query: typeof ClaudeAccountQuery.Type
+    }) {
+      return { accounts: poolState(yield* claudePool(), Date.now(), ctx.query.sessionID) }
+    })
+
+    const claudeAccountSet = Effect.fn("SessionHttpApi.claudeAccountSet")(function* (ctx: {
+      payload: typeof ClaudeAccountPayload.Type
+    }) {
+      const ids = yield* claudePool()
+      const { id, sessionID } = ctx.payload
+      const ok = sessionID
+        ? pinSessionAccount(sessionID, id, ids)
+        : id !== undefined && setCurrentAccount(id, ids)
+      if (!ok) return yield* new HttpApiError.BadRequest({})
+      return { accounts: poolState(ids, Date.now(), sessionID) }
+    })
+
+    // Usage-reset auto-resumes: drain overdue entries at startup, then poll.
+    // The loop forks into the app scope, like promptAsync above.
+    yield* ScheduledResume.pollLoop(
+      { session, status: statusSvc, prompt: promptSvc, store: yield* InstanceStore.Service },
+      ScheduledResume.store,
+    ).pipe(Effect.forkIn(scope))
+
     return handlers
       .handle("list", list)
       .handle("status", status)
@@ -498,5 +558,10 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       .handle("deleteMessage", deleteMessage)
       .handle("deletePart", deletePart)
       .handle("updatePart", updatePart)
+      .handle("resumeState", resumeState)
+      .handle("resumeSet", resumeSet)
+      .handle("resumeCancel", resumeCancel)
+      .handle("claudeAccountState", claudeAccountState)
+      .handle("claudeAccountSet", claudeAccountSet)
   }),
 )

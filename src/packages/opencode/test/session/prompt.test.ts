@@ -2,6 +2,7 @@ import { ConfigV1 } from "@opencode-ai/core/v1/config/config"
 import { SessionV1 } from "@opencode-ai/core/v1/session"
 import { Database } from "@opencode-ai/core/database/database"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
+import { AppNodeBuilder } from "@opencode-ai/core/effect/app-node-builder"
 import { SessionProjector } from "@opencode-ai/core/session/projector"
 import { eq } from "drizzle-orm"
 import { EventV2Bridge } from "@/event-v2-bridge"
@@ -55,6 +56,8 @@ import { reply, TestLLMServer } from "../lib/llm-server"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { ProviderV2 } from "@opencode-ai/core/provider"
 import { ModelV2 } from "@opencode-ai/core/model"
+import { InstanceStore } from "@/project/instance-store"
+import { InstanceBootstrap } from "@/project/bootstrap-service"
 
 const summary = Layer.succeed(
   SessionSummary.Service,
@@ -208,29 +211,31 @@ const promptRoot = LayerNode.group([
 
 function makePrompt(input?: { mcpInstructions?: MCP.ServerInstructions[]; processor?: "blocking" }) {
   const replacements = [
+    [InstanceStore.bootstrapNode, Layer.succeed(InstanceBootstrap.Service, { run: Effect.void })],
     [SessionSummary.node, summary],
     [LSP.node, lsp],
     [MCP.node, makeMcp(input?.mcpInstructions)],
     [RuntimeFlags.node, runtimeFlags],
   ] as const
   if (input?.processor === "blocking") {
-    return LayerNode.compile(promptRoot, [...replacements, [SessionProcessor.node, blockingProcessor]])
+    return AppNodeBuilder.build(promptRoot, [...replacements, [SessionProcessor.node, blockingProcessor]])
   }
-  return LayerNode.compile(promptRoot, replacements)
+  return AppNodeBuilder.build(promptRoot, replacements)
 }
 
 function makeHttp(input?: { mcpInstructions?: MCP.ServerInstructions[]; processor?: "blocking" }) {
   const root = LayerNode.group([promptRoot, testLLMServerNode])
   const replacements = [
+    [InstanceStore.bootstrapNode, Layer.succeed(InstanceBootstrap.Service, { run: Effect.void })],
     [SessionSummary.node, summary],
     [LSP.node, lsp],
     [MCP.node, makeMcp(input?.mcpInstructions)],
     [RuntimeFlags.node, runtimeFlags],
   ] as const
   if (input?.processor === "blocking") {
-    return LayerNode.compile(root, [...replacements, [SessionProcessor.node, blockingProcessor]])
+    return AppNodeBuilder.build(root, [...replacements, [SessionProcessor.node, blockingProcessor]])
   }
-  return LayerNode.compile(root, replacements)
+  return AppNodeBuilder.build(root, replacements)
 }
 
 function makeHttpNoLLMServer(input?: { mcpInstructions?: MCP.ServerInstructions[]; processor?: "blocking" }) {
@@ -2494,6 +2499,7 @@ it.instance("command permission applies to its own turn only", () =>
     const { llm } = yield* useServerConfig((url) => ({
       ...providerCfg(url),
       command: { imp: { template: "Implement", permission: { session_complete: "allow" } } },
+      permission: { "*": "allow" },
     }))
     const { prompt, chat, sessions } = yield* boot()
     yield* llm.text("done")
@@ -2506,6 +2512,24 @@ it.instance("command permission applies to its own turn only", () =>
     expect((yield* sessions.get(chat.id)).permission ?? []).not.toContainEqual(
       expect.objectContaining({ permission: "session_complete" }),
     )
+  }),
+)
+
+noLLMServer.instance("legacy tool flags preserve existing session permission rules", () =>
+  Effect.gen(function* () {
+    const sessions = yield* Session.Service
+    const prompt = yield* SessionPrompt.Service
+    const chat = yield* sessions.create({ title: "preserve permissions" })
+    const rules = Permission.fromConfig({ marker: "deny", edit: { "secrets/*": "deny" } })
+    yield* sessions.setPermission({ sessionID: chat.id, permission: rules })
+    yield* prompt.prompt({
+      sessionID: chat.id, agent: "build", noReply: true,
+      tools: { bash: false, read: true }, parts: [{ type: "text", text: "save only" }],
+    })
+    const saved = (yield* sessions.get(chat.id)).permission ?? []
+    expect(saved).toEqual(Permission.merge(rules, Permission.fromConfig({ bash: "deny", read: "allow" })))
+    expect(Permission.evaluate("marker", "example", saved).action).toBe("deny")
+    expect(Permission.evaluate("bash", "example", saved).action).toBe("deny")
   }),
 )
 

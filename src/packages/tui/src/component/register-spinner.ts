@@ -1,6 +1,6 @@
 import { getComponentCatalogue } from "@opentui/solid/components"
 import { registerSpinner } from "opentui-spinner/solid"
-import { installTextNodeCoerce } from "./patch-text-node"
+import { installTextNodeCoerce } from "./patchTextNode"
 
 export function registerOpencodeSpinner() {
   installTextNodeCoerce()

@@ -23,7 +23,7 @@ function pathBridge(): OpenCodePathBridge | undefined {
   if (!value || typeof value !== "object") return undefined
   const bridge = value as Partial<OpenCodePathBridge>
   return typeof bridge.projectConfigDirs === "function" && typeof bridge.globalConfigDirs === "function"
-    ? bridge as OpenCodePathBridge
+    ? (bridge as OpenCodePathBridge)
     : undefined
 }
 
@@ -49,9 +49,11 @@ function bridgeGlobalCacheDir(): string | undefined {
 }
 
 export function opencodeProjectConfigDirs(workspaceRoot: string): string[] {
-  return pathBridge()?.projectConfigDirs(path.resolve(workspaceRoot)) ?? [
-    path.join(path.resolve(workspaceRoot), ".opencode"),
-  ]
+  return (
+    pathBridge()?.projectConfigDirs(path.resolve(workspaceRoot)) ?? [
+      path.join(path.resolve(workspaceRoot), ".opencode"),
+    ]
+  )
 }
 
 export function opencodeGlobalConfigDirs(): string[] {
@@ -63,7 +65,6 @@ export function opencodeConfigFileNames(): string[] {
     ? [...pathBridge()!.configFileNames!]
     : ["opencode.json", "opencode.jsonc"]
 }
-
 
 /** Explicit host cache root (e.g. Effect v2 `Path.cache`, or `createCursor({ cacheDir })`). */
 let hostCacheDirOverride: string | undefined
@@ -123,15 +124,15 @@ export function hostGlobalDataDir(env: HostPathEnv = process.env): string {
 }
 
 /**
- * Directory for host plan files — always `<hostGlobalDataDir()>/plans`, and
+ * Directory for host plan files - always `<hostGlobalDataDir()>/plans`, and
  * never inside the user's repository.
  *
  * OpenCode's own `Session.plan` branches on VCS and puts plans in the worktree
  * (`<worktree>/.opencode/plans`) for a git project. The provider deliberately
  * does *not* mirror that branch. Writing there means a throwaway plan lands in
- * the user's tree untracked-but-unignored, and — because OpenCode installs
+ * the user's tree untracked-but-unignored, and - because OpenCode installs
  * `@opencode-ai/plugin` into every `.opencode` directory it discovers walking up
- * from the cwd — creating that directory also bootstraps a project-local
+ * from the cwd - creating that directory also bootstraps a project-local
  * `node_modules`. The provider must add nothing to a repository it did not
  * already contain.
  *
@@ -163,7 +164,7 @@ export function slugifyWorkspacePath(workspaceRoot: string): string {
  * Lives at `<host-cache>/projects/<slug>/` under the resolved OpenCode/host cache root.
  *
  * This is what Cursor's RequestContextEnv.project_folder / MCP
- * workspace_project_dir point at — agent-tools, terminals, transcripts, etc.
+ * workspace_project_dir point at - agent-tools, terminals, transcripts, etc.
  * Must NOT be the git workspace, or those dumps land in the repo.
  */
 export function opencodeProjectDir(workspaceRoot: string): string {

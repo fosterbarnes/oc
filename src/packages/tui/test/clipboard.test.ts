@@ -1,5 +1,7 @@
 import { expect, test } from "bun:test"
 import { copyCommand, read } from "../src/clipboard"
+import { existsSync } from "node:fs"
+import { rm, writeFile } from "node:fs/promises"
 import path from "node:path"
 import { tmpdir } from "node:os"
 
@@ -20,26 +22,35 @@ test("returns undefined when native clipboard is unavailable", () => {
   expect(copyCommand("linux", false, () => false)).toBeUndefined()
 })
 
-test("prefers an image file path from the Windows clipboard", async () => {
-  const file = path.join(tmpdir(), "clipboard-image.png")
-  let script = ""
-  const result = await read({
-    os: "win32",
-    command: async (_command, args) => {
-      script = args?.[3] ?? ""
-      return Buffer.from(`path:${file}`)
-    },
-  })
+const pngBytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
 
-  expect(script.indexOf("GetFileDropList")).toBeLessThan(script.indexOf("GetImage"))
-  expect(script).not.toContain("{;")
-  expect(script).not.toContain("-and;")
-  expect(result).toEqual({ data: file, mime: "text/plain" })
+test("returns the image file dropped on the Windows clipboard as image data", async () => {
+  const file = path.join(tmpdir(), `clipboard-drop-${process.pid}.png`)
+  await writeFile(file, pngBytes)
+  let script = ""
+  try {
+    const result = await read({
+      os: "win32",
+      command: async (_command, args) => {
+        script = args?.[3] ?? ""
+        return Buffer.from(`path:${file}`)
+      },
+    })
+
+    expect(script.indexOf("GetFileDropList")).toBeLessThan(script.indexOf("GetImage"))
+    expect(script).not.toContain("{;")
+    expect(script).not.toContain("-and;")
+    expect(result).toEqual({ data: pngBytes.toString("base64"), mime: "image/png" })
+    expect(existsSync(file)).toBe(true)
+  } finally {
+    await rm(file, { force: true })
+  }
 })
 
-test("returns a temporary path for image-only Windows clipboard data", async () => {
+test("returns and removes the temporary image for image-only Windows clipboard data", async () => {
   const outputPath = path.join(tmpdir(), `opencode-clipboard-${process.pid}.png`)
   const escapedOutputPath = outputPath.replace(/'/g, "''")
+  await writeFile(outputPath, pngBytes)
   const result = await read({
     os: "win32",
     command: async (_command, args) => {
@@ -51,10 +62,8 @@ test("returns a temporary path for image-only Windows clipboard data", async () 
     },
   })
 
-  expect(result).toEqual({
-    data: outputPath,
-    mime: "text/plain",
-  })
+  expect(result).toEqual({ data: pngBytes.toString("base64"), mime: "image/png" })
+  expect(existsSync(outputPath)).toBe(false)
 })
 
 test("keeps ordinary Windows clipboard text as the fallback", async () => {

@@ -442,6 +442,12 @@ export interface Interface {
   readonly setSessionComplete: (input: { sessionID: SessionID; sessionComplete: boolean }) => Effect.Effect<void>
   readonly setSessionFailed: (input: { sessionID: SessionID; sessionFailed: boolean }) => Effect.Effect<void>
   readonly setSessionInProgress: (input: { sessionID: SessionID; sessionInProgress: boolean }) => Effect.Effect<void>
+  readonly setSessionMarks: (input: {
+    sessionID: SessionID
+    sessionComplete?: boolean
+    sessionFailed?: boolean
+    sessionInProgress?: boolean
+  }) => Effect.Effect<void>
   readonly setMetadata: (input: typeof SetMetadataInput.Type) => Effect.Effect<void>
   readonly setAgentModel: (input: {
     sessionID: SessionID
@@ -792,34 +798,47 @@ const layer: Layer.Layer<
       yield* patch(input.sessionID, { time: { archived: input.time } }).pipe(Effect.orDie)
     })
 
+    const setSessionMarks: Interface["setSessionMarks"] = Effect.fn("Session.setSessionMarks")(function* (
+      input: Parameters<Interface["setSessionMarks"]>[0],
+    ) {
+      const active = input.sessionInProgress
+        ? "sessionInProgress"
+        : input.sessionFailed
+          ? "sessionFailed"
+          : input.sessionComplete
+            ? "sessionComplete"
+            : undefined
+      yield* patch(input.sessionID, {
+        ...(input.sessionComplete !== undefined && { sessionComplete: input.sessionComplete }),
+        ...(input.sessionFailed !== undefined && { sessionFailed: input.sessionFailed }),
+        ...(input.sessionInProgress !== undefined && { sessionInProgress: input.sessionInProgress }),
+        ...(active && {
+          sessionComplete: active === "sessionComplete",
+          sessionFailed: active === "sessionFailed",
+          sessionInProgress: active === "sessionInProgress",
+        }),
+      }).pipe(Effect.orDie)
+    })
+
     const setSessionComplete = Effect.fn("Session.setSessionComplete")(function* (input: {
       sessionID: SessionID
       sessionComplete: boolean
     }) {
-      yield* patch(input.sessionID, {
-        sessionComplete: input.sessionComplete,
-        ...(input.sessionComplete && { sessionFailed: false, sessionInProgress: false }),
-      }).pipe(Effect.orDie)
+      yield* setSessionMarks(input)
     })
 
     const setSessionFailed = Effect.fn("Session.setSessionFailed")(function* (input: {
       sessionID: SessionID
       sessionFailed: boolean
     }) {
-      yield* patch(input.sessionID, {
-        sessionFailed: input.sessionFailed,
-        ...(input.sessionFailed && { sessionComplete: false, sessionInProgress: false }),
-      }).pipe(Effect.orDie)
+      yield* setSessionMarks(input)
     })
 
     const setSessionInProgress = Effect.fn("Session.setSessionInProgress")(function* (input: {
       sessionID: SessionID
       sessionInProgress: boolean
     }) {
-      yield* patch(input.sessionID, {
-        sessionInProgress: input.sessionInProgress,
-        ...(input.sessionInProgress && { sessionComplete: false, sessionFailed: false }),
-      }).pipe(Effect.orDie)
+      yield* setSessionMarks(input)
     })
 
     const setMetadata = Effect.fn("Session.setMetadata")(function* (input: typeof SetMetadataInput.Type) {
@@ -978,6 +997,7 @@ const layer: Layer.Layer<
       setAgent,
       setArchived,
       setSessionComplete,
+      setSessionMarks,
       setSessionFailed,
       setSessionInProgress,
       setMetadata,

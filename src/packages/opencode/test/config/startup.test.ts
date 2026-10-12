@@ -16,8 +16,12 @@ function context(state: string) {
     data: "C:\\custom data\\opencode-debug",
     cache: "C:\\custom cache\\opencode-debug",
     cwd: "C:\\Users\\O'Brien",
-    env: { OPENCODE_CONFIG: "C:\\custom config\\chosen.jsonc", OPENCODE_DB: "custom.db",
-      OPENCODE_SERVER_PASSWORD: "SECRET", ANTHROPIC_API_KEY: "SECRET" },
+    env: {
+      OPENCODE_CONFIG: "C:\\custom config\\chosen.jsonc",
+      OPENCODE_DB: "custom.db",
+      OPENCODE_SERVER_PASSWORD: "SECRET",
+      ANTHROPIC_API_KEY: "SECRET",
+    },
   }
 }
 
@@ -51,9 +55,16 @@ test("startup launcher parses in PowerShell without running it", async () => {
   const next = Startup.plan(context(tmp.path))
   const file = path.join(tmp.path, "launcher.ps1")
   await Bun.write(file, next.script)
-  const result = Bun.spawnSync(["pwsh", "-NoProfile", "-NonInteractive", "-Command",
-    "$tokens = $null; $errors = $null; $null = [System.Management.Automation.Language.Parser]::ParseFile($env:OC_TEST_SCRIPT, [ref]$tokens, [ref]$errors); if ($errors.Count) { $errors | ForEach-Object { $_.Message }; exit 1 }"],
-    { stdout: "pipe", stderr: "pipe", windowsHide: true, env: { ...process.env, OC_TEST_SCRIPT: file } })
+  const result = Bun.spawnSync(
+    [
+      "pwsh",
+      "-NoProfile",
+      "-NonInteractive",
+      "-Command",
+      "$tokens = $null; $errors = $null; $null = [System.Management.Automation.Language.Parser]::ParseFile($env:OC_TEST_SCRIPT, [ref]$tokens, [ref]$errors); if ($errors.Count) { $errors | ForEach-Object { $_.Message }; exit 1 }",
+    ],
+    { stdout: "pipe", stderr: "pipe", windowsHide: true, env: { ...process.env, OC_TEST_SCRIPT: file } },
+  )
   expect(result.stdout.toString()).toBe("")
   expect(result.stderr.toString()).toBe("")
   expect(result.exitCode).toBe(0)
@@ -69,13 +80,22 @@ test("startup is idempotent and disables only the owned registration", async () 
     read: async (name) => values.get(name),
     write: async (name, value) => {
       writes++
-      if (value === undefined) { values.delete(name); return }
+      if (value === undefined) {
+        values.delete(name)
+        return
+      }
       values.set(name, value)
     },
   }
   const options = { context: input, registry }
   let saved = false
-  await Startup.update(true, async () => { saved = true }, options)
+  await Startup.update(
+    true,
+    async () => {
+      saved = true
+    },
+    options,
+  )
   expect(saved).toBe(true)
   expect(await Bun.file(next.file).text()).toBe(next.script)
   await Startup.update(true, async () => {}, options)
@@ -94,33 +114,75 @@ test("startup restores registration and launcher after persistence or registrati
   let value: string | undefined = "previous command"
   const registry: Startup.Registry = {
     read: async () => value,
-    write: async (_name, command) => { value = command },
+    write: async (_name, command) => {
+      value = command
+    },
   }
   const options = { context: input, registry }
-  await expect(Startup.update(true, async () => { throw new Error("save failed") }, options)).rejects.toThrow("save failed")
+  await expect(
+    Startup.update(
+      true,
+      async () => {
+        throw new Error("save failed")
+      },
+      options,
+    ),
+  ).rejects.toThrow("save failed")
   expect(value).toBe("previous command")
   expect(await Bun.file(next.file).exists()).toBe(false)
   let writes = 0
   let saved = false
-  await expect(Startup.update(true, async () => { saved = true }, {
-    context: input,
-    registry: { read: registry.read, write: async (_name, command) => {
-      value = command
-      if (++writes === 1) throw new Error("registry denied")
-    } },
-  })).rejects.toThrow("registry denied")
+  await expect(
+    Startup.update(
+      true,
+      async () => {
+        saved = true
+      },
+      {
+        context: input,
+        registry: {
+          read: registry.read,
+          write: async (_name, command) => {
+            value = command
+            if (++writes === 1) throw new Error("registry denied")
+          },
+        },
+      },
+    ),
+  ).rejects.toThrow("registry denied")
   expect(saved).toBe(false)
   expect(value).toBe("previous command")
   expect(await Bun.file(next.file).exists()).toBe(false)
   await Startup.update(true, async () => {}, options)
-  await expect(Startup.update(false, async () => { throw new Error("save failed") }, options)).rejects.toThrow("save failed")
+  await expect(
+    Startup.update(
+      false,
+      async () => {
+        throw new Error("save failed")
+      },
+      options,
+    ),
+  ).rejects.toThrow("save failed")
   expect(value).toBe(next.command)
   expect(await Bun.file(next.file).text()).toBe(next.script)
   await fs.rm(next.file)
-  await expect(Startup.update(true, async () => { saved = true }, {
-    context: { ...input, executable: "C:\\other.exe" },
-    registry: { read: registry.read, write: async () => { throw new Error("registry denied") } },
-  })).rejects.toThrow("rollback failed")
+  await expect(
+    Startup.update(
+      true,
+      async () => {
+        saved = true
+      },
+      {
+        context: { ...input, executable: "C:\\other.exe" },
+        registry: {
+          read: registry.read,
+          write: async () => {
+            throw new Error("registry denied")
+          },
+        },
+      },
+    ),
+  ).rejects.toThrow("rollback failed")
   expect(saved).toBe(false)
 })
 
@@ -130,10 +192,23 @@ test("launcher write failure leaves configuration unpersisted", async () => {
   await Bun.write(blocked, "file")
   let saved = false
   let writes = 0
-  await expect(Startup.update(true, async () => { saved = true }, {
-    context: context(blocked),
-    registry: { read: async () => undefined, write: async () => { writes++ } },
-  })).rejects.toThrow()
+  await expect(
+    Startup.update(
+      true,
+      async () => {
+        saved = true
+      },
+      {
+        context: context(blocked),
+        registry: {
+          read: async () => undefined,
+          write: async () => {
+            writes++
+          },
+        },
+      },
+    ),
+  ).rejects.toThrow()
   expect(saved).toBe(false)
   expect(writes).toBe(0)
 })

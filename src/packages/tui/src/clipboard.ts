@@ -99,8 +99,31 @@ async function runWindowsClipboard(run: Command) {
     Buffer.alloc(0),
   )
   const result = output.toString().trim()
-  if (result.startsWith("path:")) return { data: result.slice("path:".length), mime: "text/plain" }
-  if (result.startsWith("image:")) return { data: result.slice("image:".length), mime: "text/plain" }
+  if (result.startsWith("path:")) return readImageFile(result.slice("path:".length))
+  if (result.startsWith("image:")) {
+    const file = result.slice("image:".length)
+    const image = await readImageFile(file)
+    await rm(file, { force: true }).catch(() => {})
+    return image
+  }
+}
+
+const IMAGE_MIME: Record<string, string> = {
+  ".avif": "image/avif",
+  ".gif": "image/gif",
+  ".jpeg": "image/jpeg",
+  ".jpg": "image/jpeg",
+  ".png": "image/png",
+  ".svg": "image/svg+xml",
+  ".webp": "image/webp",
+}
+
+// Same shape as the macOS and Linux image reads: base64 bytes plus an image mime.
+async function readImageFile(file: string) {
+  const mime = IMAGE_MIME[path.extname(file).toLowerCase()]
+  const bytes = await readFile(file).catch(() => undefined)
+  if (!mime || !bytes) return
+  return { data: bytes.toString("base64"), mime }
 }
 
 export function copyCommand(

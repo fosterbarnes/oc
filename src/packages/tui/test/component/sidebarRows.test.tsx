@@ -143,27 +143,33 @@ test("repeated equivalent refreshes keep measured rows and frames; narrow width 
   const [rows, setRows] = createSignal<Script[]>(initial)
   const [width, setWidth] = createSignal(30)
   let creations = 0
-  const app = await testRender(() => (
-    <box flexDirection="column" width={width()}>
-      <For each={rows()}>
-        {(script) => {
-          creations++
-          let row: BoxRenderable | undefined
-          const [nameWidth, setNameWidth] = createSignal(0)
-          return (
-            <box
-              ref={(el) => (row = el)}
-              onSizeChange={() => setNameWidth((row?.width ?? 0) - 4)}
-              paddingLeft={1}
-              paddingRight={1}
-            >
-              <text wrapMode="none">{"  "}{clipEnd(script.name, nameWidth())}</text>
-            </box>
-          )
-        }}
-      </For>
-    </box>
-  ), { width: 40, height: 8 })
+  const app = await testRender(
+    () => (
+      <box flexDirection="column" width={width()}>
+        <For each={rows()}>
+          {(script) => {
+            creations++
+            let row: BoxRenderable | undefined
+            const [nameWidth, setNameWidth] = createSignal(0)
+            return (
+              <box
+                ref={(el) => (row = el)}
+                onSizeChange={() => setNameWidth((row?.width ?? 0) - 4)}
+                paddingLeft={1}
+                paddingRight={1}
+              >
+                <text wrapMode="none">
+                  {"  "}
+                  {clipEnd(script.name, nameWidth())}
+                </text>
+              </box>
+            )
+          }}
+        </For>
+      </box>
+    ),
+    { width: 40, height: 8 },
+  )
   try {
     await app.renderOnce()
     await new Promise((resolve) => setTimeout(resolve, 25))

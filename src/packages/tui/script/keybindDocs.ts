@@ -31,7 +31,9 @@ const tables = [...groups].map(([group, rows]) =>
     ...rows.map((row) => `| ${row.description} | ${row.oc === row.stock ? row.oc : `**${row.oc}**`} | ${row.stock} |`),
   ].join("\n"),
 )
-const next = `${doc.slice(0, start + START.length)}\n\n${tables.join("\n\n")}\n\n${doc.slice(end)}`
+const paletteNote =
+  "Palette command hotkeys are stored as `palette_keys` in tui.json. From the command list, **Set hotkey for the selected palette command** (`palette.set_hotkey`) captures a chord."
+const next = `${doc.slice(0, start + START.length)}\n\n${tables.join("\n\n")}\n\n${paletteNote}\n\n${doc.slice(end)}`
 
 if (next === doc) process.exit(0)
 if (process.argv.includes("--check")) {

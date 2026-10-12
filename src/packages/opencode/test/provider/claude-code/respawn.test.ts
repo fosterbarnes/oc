@@ -1,14 +1,14 @@
 // @ts-nocheck
 // WIP: ported from opencode-claude-code-plugin, which never typechecked its tests; type them as Phase 3 rewrites land.
 /**
- * Regressions for the reused-process respawn path in src/session-manager.ts.
+ * Regressions for the reused-process respawn path in src/sessionManager.ts.
  *
  * These cover the pure helpers (`appendResumeIfNeeded`) and the
  * undefined-when-no-active-process branch of `respawnActiveProcess`, plus
  * real Node fixtures that check the respawned child's launch configuration.
  *
  * Usage:
- *   npx tsx --test test-respawn.ts
+ *   bun test test/provider/claude-code/respawn.test.ts
  */
 import assert from "node:assert/strict"
 import { once } from "node:events"
@@ -31,7 +31,7 @@ import {
   bufferUnattendedLine,
   takeUnattendedLines,
   type ActiveProcess,
-} from "@/provider/claude-code/session-manager.js"
+} from "@/provider/claude-code/sessionManager.js"
 import { EventEmitter } from "node:events"
 import type { ChildProcess } from "node:child_process"
 import { createClaudeCode } from "@/provider/claude-code/index.js"
@@ -54,7 +54,9 @@ function createNodeFixture() {
   const promptPath = join(cwd, "system.txt")
   writeFileSync(configPath, JSON.stringify({ mcpServers: { preserved: { marker: "original MCP config" } } }))
   writeFileSync(promptPath, "original appended system prompt")
-  writeFileSync(cliPath, `
+  writeFileSync(
+    cliPath,
+    `
 const fs = require("node:fs")
 const readline = require("node:readline")
 const args = process.argv.slice(2)
@@ -75,12 +77,16 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   }) + "\\n")
 })
 process.stdout.write("ready\\n")
-`)
+`,
+  )
   const args = [
     cliPath,
-    "--mcp-config", configPath,
-    "--append-system-prompt-file", promptPath,
-    "--model", "claude-haiku-4-5",
+    "--mcp-config",
+    configPath,
+    "--append-system-prompt-file",
+    promptPath,
+    "--model",
+    "claude-haiku-4-5",
   ]
   return { cwd, args, configPath, promptPath }
 }
@@ -183,72 +189,67 @@ test("respawnActiveProcess: returns undefined when no active process exists for 
   const sk = `sk-empty-${Date.now()}`
   // No setActiveProcess(spawnClaudeProcess(...)) was done for this key, so
   // there is nothing to respawn; the watchdog treats this as "give up".
-  assert.equal(
-    respawnActiveProcess(sk, "/usr/bin/env", ["--print"], process.cwd()),
-    undefined,
-  )
+  assert.equal(respawnActiveProcess(sk, "/usr/bin/env", ["--print"], process.cwd()), undefined)
 })
 
-test("respawn preserves the original CLI args, config and prompt on a real child", {
-  timeout: 10_000,
-}, async () => {
-  const fixture = createNodeFixture()
-  // Run the child outside fixture.cwd: Windows locks a live process's cwd, so cleanup would EBUSY.
-  const sk = `respawn-${fixture.cwd}`
-  const original = spawnClaudeProcess(
-    process.execPath,
-    fixture.args,
-    tmpdir(),
-    sk,
-    undefined,
-    "original-mcp-hash",
-    fixture.promptPath,
-    false,
-    "high",
-  )
-  try {
-    assert.deepEqual(
-      await once(original.lineEmitter, "line", { signal: AbortSignal.timeout(5_000) }),
-      ["ready"],
+test(
+  "respawn preserves the original CLI args, config and prompt on a real child",
+  {
+    timeout: 10_000,
+  },
+  async () => {
+    const fixture = createNodeFixture()
+    // Run the child outside fixture.cwd: Windows locks a live process's cwd, so cleanup would EBUSY.
+    const sk = `respawn-${fixture.cwd}`
+    const original = spawnClaudeProcess(
+      process.execPath,
+      fixture.args,
+      tmpdir(),
+      sk,
+      undefined,
+      "original-mcp-hash",
+      fixture.promptPath,
+      false,
+      "high",
     )
-    assert.deepEqual(original.cliArgs, fixture.args)
-    setClaudeSessionId(sk, "existing-fixture-session")
-    const originalExit = once(original.proc, "close", { signal: AbortSignal.timeout(5_000) })
-    // A reattached doStream turn has no freshly built args. Respawn must use
-    // the original process's args, not launch Node (or Claude) with just resume.
-    const replacement = respawnActiveProcess(sk, process.execPath, [], tmpdir())
-    assert.ok(replacement)
-    assert.notEqual(replacement.proc.pid, original.proc.pid)
-    assert.deepEqual(
-      await once(replacement.lineEmitter, "line", { signal: AbortSignal.timeout(5_000) }),
-      ["ready"],
-    )
-    await originalExit
+    try {
+      assert.deepEqual(await once(original.lineEmitter, "line", { signal: AbortSignal.timeout(5_000) }), ["ready"])
+      assert.deepEqual(original.cliArgs, fixture.args)
+      setClaudeSessionId(sk, "existing-fixture-session")
+      const originalExit = once(original.proc, "close", { signal: AbortSignal.timeout(5_000) })
+      // A reattached doStream turn has no freshly built args. Respawn must use
+      // the original process's args, not launch Node (or Claude) with just resume.
+      const replacement = respawnActiveProcess(sk, process.execPath, [], tmpdir())
+      assert.ok(replacement)
+      assert.notEqual(replacement.proc.pid, original.proc.pid)
+      assert.deepEqual(await once(replacement.lineEmitter, "line", { signal: AbortSignal.timeout(5_000) }), ["ready"])
+      await originalExit
 
-    const envelope = {
-      type: "user",
-      message: { role: "user", content: [{ type: "text", text: "The task completed; continue from its result." }] },
+      const envelope = {
+        type: "user",
+        message: { role: "user", content: [{ type: "text", text: "The task completed; continue from its result." }] },
+      }
+      const reply = once(replacement.lineEmitter, "line", { signal: AbortSignal.timeout(5_000) })
+      replacement.proc.stdin!.write(JSON.stringify(envelope) + "\n")
+      const [line] = await reply
+      const received = JSON.parse(line)
+      assert.deepEqual(received.args, [...fixture.args.slice(1), "--resume", "existing-fixture-session"])
+      assert.deepEqual(received.envelope, envelope)
+      assert.deepEqual(received.config, JSON.parse(readFileSync(fixture.configPath, "utf8")))
+      assert.equal(received.prompt, "original appended system prompt")
+      assert.equal(received.effort, "high")
+      assert.equal(replacement.mcpHash, "original-mcp-hash")
+      assert.equal(replacement.systemPromptFile, fixture.promptPath)
+      assert.equal(getClaudeSessionId(sk), "existing-fixture-session")
+      assert.equal(getActiveProcess(sk), replacement)
+      assert.deepEqual(replacement.cliArgs, [...fixture.args, "--resume", "existing-fixture-session"])
+    } finally {
+      await deleteActiveProcessAndWait(sk)
+      deleteClaudeSessionId(sk)
+      rmSync(fixture.cwd, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 })
     }
-    const reply = once(replacement.lineEmitter, "line", { signal: AbortSignal.timeout(5_000) })
-    replacement.proc.stdin!.write(JSON.stringify(envelope) + "\n")
-    const [line] = await reply
-    const received = JSON.parse(line)
-    assert.deepEqual(received.args, [...fixture.args.slice(1), "--resume", "existing-fixture-session"])
-    assert.deepEqual(received.envelope, envelope)
-    assert.deepEqual(received.config, JSON.parse(readFileSync(fixture.configPath, "utf8")))
-    assert.equal(received.prompt, "original appended system prompt")
-    assert.equal(received.effort, "high")
-    assert.equal(replacement.mcpHash, "original-mcp-hash")
-    assert.equal(replacement.systemPromptFile, fixture.promptPath)
-    assert.equal(getClaudeSessionId(sk), "existing-fixture-session")
-    assert.equal(getActiveProcess(sk), replacement)
-    assert.deepEqual(replacement.cliArgs, [...fixture.args, "--resume", "existing-fixture-session"])
-  } finally {
-    await deleteActiveProcessAndWait(sk)
-    deleteClaudeSessionId(sk)
-    rmSync(fixture.cwd, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 })
-  }
-})
+  },
+)
 
 /**
  * Drive one doStream turn against a fake CLI that answers with a partial text
@@ -321,11 +322,7 @@ test("a child that dies without a result ends the turn as an error", async () =>
   const parts = await streamCrashingTurn({ exitDelayMs: 40 })
 
   const errors = parts.filter((part) => part.type === "error")
-  assert.equal(
-    errors.length,
-    1,
-    `expected one error part, got ${JSON.stringify(parts.map((part) => part.type))}`,
-  )
+  assert.equal(errors.length, 1, `expected one error part, got ${JSON.stringify(parts.map((part) => part.type))}`)
   const message = String((errors[0] as any).error?.message ?? "")
   assert.match(message, /exited with code 3/)
   assert.match(message, /ran out of memory/)
@@ -335,11 +332,7 @@ test("a child that dies without a result ends the turn as an error", async () =>
   assert.equal(finish.finishReason.unified, "error")
 
   // The partial answer the CLI did produce is still delivered.
-  assert.ok(
-    parts.some(
-      (part) => part.type === "text-delta" && String(part.delta).includes("Half an answ"),
-    ),
-  )
+  assert.ok(parts.some((part) => part.type === "text-delta" && String(part.delta).includes("Half an answ")))
 })
 
 // An abort is not a crash: the operator asked for it, and the CLI may well

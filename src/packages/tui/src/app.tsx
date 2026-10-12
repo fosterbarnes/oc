@@ -1,10 +1,11 @@
 import { render, TimeToFirstDraw, useRenderer, useTerminalDimensions } from "@opentui/solid"
 import { registerOpencodeSpinner } from "./component/register-spinner"
 import { createDefaultOpenTuiKeymap } from "@opentui/keymap/opentui"
+import { stringifyKeyStroke, type KeySequencePart } from "@opentui/keymap"
 import { Deferred, Effect } from "effect"
 import { Global } from "@opencode-ai/core/global"
-import { DebugConfig } from "@opencode-ai/core/debug-config"
-import { MarkersFile } from "@opencode-ai/core/util/markers-file"
+import { DebugConfig } from "@opencode-ai/core/debugConfig"
+import { MarkersFile } from "@opencode-ai/core/util/markersFile"
 import { Flag } from "@opencode-ai/core/flag/flag"
 import { InstallationDisplayVersion, InstallationVersion } from "@opencode-ai/core/installation/version"
 import { ClipboardProvider, useClipboard } from "./context/clipboard"
@@ -27,15 +28,15 @@ import {
   on,
 } from "solid-js"
 import { TuiPathsProvider, TuiStartupProvider, TuiTerminalEnvironmentProvider } from "./context/runtime"
-import { DialogProvider, useDialog } from "./ui/dialog"
+import { DialogProvider, useDialog, type DialogContext } from "./ui/dialog"
 import { DialogProvider as DialogProviderList } from "./component/dialog-provider"
 import { ErrorComponent } from "./component/error-component"
 import { PluginRouteMissing } from "./component/plugin-route-missing"
 import { ProjectProvider, useProject } from "./context/project"
 import { EditorContextProvider } from "./context/editor"
 import { useEvent } from "./context/event"
-import { SDKProvider, useSDK } from "./context/sdk"
-import { IntroLogo, hideIntroLogo } from "./component/intro-logo"
+import { SDKProvider, useSDK, type ScheduledResumeEntry } from "./context/sdk"
+import { IntroLogo, hideIntroLogo } from "./component/introLogo"
 import { SyncProvider, useSync } from "./context/sync"
 import { DataProvider } from "./context/data"
 import { LocationProvider } from "./context/location"
@@ -61,7 +62,7 @@ import { PromptStashProvider } from "./component/prompt/stash"
 import { DialogAlert } from "./ui/dialog-alert"
 import { DialogConfirm } from "./ui/dialog-confirm"
 import { createTodoCommand } from "./todos"
-import { createContextLimitCommands } from "./context-limit"
+import { createContextLimitCommands } from "./contextLimit"
 import { ToastProvider, useToast, type ToastContext } from "./ui/toast"
 import { isDefaultTitle } from "./util/session"
 import { KVProvider, useKV } from "./context/kv"
@@ -70,12 +71,15 @@ import { ArgsProvider, useArgs, type Args } from "./context/args"
 import open from "open"
 import { PromptRefProvider, usePromptRef } from "./context/prompt"
 import { TuiConfigProvider, useTuiConfig, type TuiConfig } from "./config"
+import { TuiKeybind } from "./config/keybind"
 import { createTuiApiAdapters } from "./plugin/adapters"
 import { createTuiApi } from "./plugin/api"
 import { createPluginRuntime, PluginRuntimeProvider, usePluginRuntime, type TuiPluginHost } from "./plugin/runtime"
 import { CommandPaletteDialog } from "./component/command-palette"
 import {
   COMMAND_PALETTE_COMMAND,
+  findPaletteEntry,
+  LEADER_TOKEN,
   OPENCODE_BASE_MODE,
   OpencodeKeymapProvider,
   registerOpencodeKeymap,
@@ -94,8 +98,12 @@ import { destroyRenderer, writeTerminalEscape } from "./util/renderer"
 import { detectTerminal } from "@opencode-ai/core/util/terminal"
 import { cliErrorMessage, errorFormat } from "./util/error"
 import { spawn } from "node:child_process"
-import stripAnsi from "strip-ansi"
-import { launchDetached } from "@opencode-ai/core/util/launch-detached"
+import { launchDetached } from "@opencode-ai/core/util/launchDetached"
+import { resolveCodexCli, resolveCursorCli, runCliUpdate, runVersionedCliUpdate } from "./cliUpdate"
+import { checkClaudeDesktop, installClaudeDesktop } from "./desktopUpdate"
+import { checkChatgptDesktop, installChatgptDesktop } from "./chatgptDesktopUpdate"
+import { checkCursorDesktop, installCursorDesktop } from "./cursorDesktopUpdate"
+import { validateHotkey } from "./hotkeyValidate"
 import fs from "node:fs"
 import { applyEdits, modify } from "jsonc-parser"
 import { reviveText, reviveVersions } from "./util/revive"
@@ -312,7 +320,6 @@ function persistOcConfig(
     | "homeDirSort"
     | "sessionModel"
     | "sessionAgent"
-    | "reasoningEffort"
     | "serverStartOnWindowsUserStart",
   value: string,
   toast: ToastContext,
@@ -360,47 +367,197 @@ function persistOcConfig(
 // `claude.cmd` shim on Windows.
 function updateClaudeCode(cliPath: string, toast: ToastContext) {
   toast.show({ message: "Updating Claude Code...", variant: "info", duration: 120_000 })
-  const shell = process.platform === "win32"
-  const child = spawn(shell && cliPath.includes(" ") ? `"${cliPath}"` : cliPath, ["update"], {
-    stdio: ["ignore", "pipe", "pipe"],
-    cwd: os.homedir(),
-    shell,
-  })
-  let output = ""
-  let failed = false
-  child.stdout?.on("data", (chunk) => {
-    output += String(chunk)
-  })
-  child.stderr?.on("data", (chunk) => {
-    output += String(chunk)
-  })
-  child.on("error", (cause) => {
-    failed = true
-    toast.show({ message: `Failed to update Claude Code: ${cause.message}`, variant: "error" })
-  })
-  // `close` waits for stdout and stderr to drain, so the last line is complete.
-  child.on("close", (code) => {
-    if (failed) return
-    const last = stripAnsi(output).trim().split("\n").at(-1)?.trim()
+  void runCliUpdate(cliPath).then((result) => {
+    if (result.alreadyRunning) {
+      toast.show({ message: "Claude Code update already running", variant: "info" })
+      return
+    }
+    if (result.error && result.code === null && !result.lastLine) {
+      toast.show({ message: `Failed to update Claude Code: ${result.error}`, variant: "error" })
+      return
+    }
     toast.show(
-      code === 0
-        ? { message: last || "Claude Code is up to date", variant: "success" }
-        : { message: `Failed to update Claude Code: ${last || `exit code ${code}`}`, variant: "error", duration: 15_000 },
+      result.ok
+        ? { message: result.lastLine || "Claude Code is up to date", variant: "success" }
+        : {
+            message: `Failed to update Claude Code: ${result.lastLine || result.error || `exit code ${result.code}`}`,
+            variant: "error",
+            duration: 15_000,
+          },
     )
   })
 }
 
+function updateCursorCli(toast: ToastContext) {
+  void (async () => {
+    const resolved = await resolveCursorCli()
+    if ("error" in resolved) {
+      toast.show({ message: resolved.error, variant: "error", duration: 15_000 })
+      return
+    }
+    toast.show({ message: "Updating Cursor CLI...", variant: "info", duration: 120_000 })
+    const result = await runVersionedCliUpdate("Cursor CLI", resolved.executable)
+    if (result.alreadyRunning) {
+      toast.show({ message: result.message, variant: "info" })
+      return
+    }
+    toast.show(
+      result.ok
+        ? { message: result.message, variant: "success" }
+        : { message: result.message, variant: "error", duration: 15_000 },
+    )
+  })()
+}
+
+function updateCodexCli(toast: ToastContext) {
+  void (async () => {
+    const resolved = await resolveCodexCli()
+    if ("error" in resolved) {
+      toast.show({ message: resolved.error, variant: "error", duration: 15_000 })
+      return
+    }
+    toast.show({ message: "Updating Codex CLI...", variant: "info", duration: 120_000 })
+    const result = await runVersionedCliUpdate("Codex CLI", resolved.executable)
+    if (result.alreadyRunning) {
+      toast.show({ message: result.message, variant: "info" })
+      return
+    }
+    toast.show(
+      result.ok
+        ? { message: result.message, variant: "success" }
+        : { message: result.message, variant: "error", duration: 15_000 },
+    )
+  })()
+}
+
+function updateClaudeDesktop(toast: ToastContext, dialog: DialogContext) {
+  void (async () => {
+    toast.show({ message: "Checking Claude Desktop...", variant: "info" })
+    const checked = await checkClaudeDesktop()
+    if (checked.alreadyRunning) {
+      toast.show({ message: checked.message, variant: "info" })
+      return
+    }
+    if (!checked.ok) {
+      toast.show({ message: checked.message, variant: "error", duration: 15_000 })
+      return
+    }
+    if (checked.upToDate) {
+      toast.show({ message: checked.message, variant: "success" })
+      return
+    }
+    const confirmed = await DialogConfirm.show(
+      dialog,
+      "Update Claude Desktop",
+      `Updating closes Claude Desktop and any Claude Code sessions started from it. Update ${checked.oldVersion} -> ${checked.newVersion}?`,
+    )
+    if (confirmed !== true) return
+    toast.show({ message: "Updating Claude Desktop...", variant: "info", duration: 120_000 })
+    const result = await installClaudeDesktop(checked.newVersion)
+    if (result.alreadyRunning) {
+      toast.show({ message: result.message, variant: "info" })
+      return
+    }
+    toast.show(
+      result.ok
+        ? { message: result.message, variant: "success" }
+        : { message: result.message, variant: "error", duration: 15_000 },
+    )
+  })()
+}
+
+function updateCursorDesktop(toast: ToastContext, dialog: DialogContext) {
+  void (async () => {
+    toast.show({ message: "Checking Cursor Desktop...", variant: "info" })
+    const checked = await checkCursorDesktop()
+    if (checked.alreadyRunning) {
+      toast.show({ message: checked.message, variant: "info" })
+      return
+    }
+    if (!checked.ok) {
+      toast.show({ message: checked.message, variant: "error", duration: 15_000 })
+      return
+    }
+    if (checked.upToDate) {
+      toast.show({ message: checked.message, variant: "success" })
+      return
+    }
+    const confirmed = await DialogConfirm.show(
+      dialog,
+      "Update Cursor Desktop",
+      `Updating closes Cursor and any terminals or agents running inside it. Update ${checked.oldVersion} -> ${checked.newVersion}?`,
+    )
+    if (confirmed !== true) return
+    toast.show({ message: "Updating Cursor Desktop...", variant: "info", duration: 120_000 })
+    const result = await installCursorDesktop(checked.newVersion)
+    if (result.alreadyRunning) {
+      toast.show({ message: result.message, variant: "info" })
+      return
+    }
+    toast.show(
+      result.ok
+        ? { message: result.message, variant: "success" }
+        : { message: result.message, variant: "error", duration: 15_000 },
+    )
+  })()
+}
+
+function updateChatgptDesktop(toast: ToastContext, dialog: DialogContext) {
+  void (async () => {
+    toast.show({ message: "Checking ChatGPT Desktop...", variant: "info" })
+    const checked = await checkChatgptDesktop()
+    if (checked.alreadyRunning) {
+      toast.show({ message: checked.message, variant: "info" })
+      return
+    }
+    if (!checked.ok) {
+      toast.show({ message: checked.message, variant: "error", duration: 15_000 })
+      return
+    }
+    if (checked.upToDate) {
+      toast.show({ message: checked.message, variant: "success" })
+      return
+    }
+    const confirmed = await DialogConfirm.show(
+      dialog,
+      "Update ChatGPT Desktop",
+      `Updating closes ChatGPT/Codex Desktop and any sessions running inside it. Update ${checked.oldVersion} -> ${checked.newVersion}?`,
+    )
+    if (confirmed !== true) return
+    toast.show({ message: "Updating ChatGPT Desktop...", variant: "info", duration: 120_000 })
+    const result = await installChatgptDesktop(checked.newVersion)
+    if (result.alreadyRunning) {
+      toast.show({ message: result.message, variant: "info" })
+      return
+    }
+    toast.show(
+      result.ok
+        ? { message: result.message, variant: "success" }
+        : { message: result.message, variant: "error", duration: 15_000 },
+    )
+  })()
+}
+
 // Saves settings in global tui.jsonc or tui.json (jsonc wins when loading), keeping comments.
+let persistTuiSettingQueue = Promise.resolve()
 function persistTuiSetting(
-  key: ["keybind_preset" | "sidebar_button_style"] | ["subagent_tabs", "click" | "auto_open"],
-  value: string | boolean,
+  key:
+    | ["keybind_preset" | "sidebar_button_style"]
+    | ["subagent_tabs", "click" | "auto_open"]
+    | ["palette_keys"],
+  value: string | boolean | Record<string, string> | undefined,
 ) {
-  const file =
-    ["tui.jsonc", "tui.json"].map((name) => path.join(Global.Path.config, name)).find((item) => fs.existsSync(item)) ??
-    path.join(Global.Path.config, "tui.json")
-  const text = fs.existsSync(file) ? fs.readFileSync(file, "utf8") : "{}"
-  const edits = modify(text, key, value, { formattingOptions: { tabSize: 2, insertSpaces: true } })
-  fs.writeFileSync(file, applyEdits(text, edits))
+  persistTuiSettingQueue = persistTuiSettingQueue
+    .then(() => {
+      const file =
+        ["tui.jsonc", "tui.json"].map((name) => path.join(Global.Path.config, name)).find((item) => fs.existsSync(item)) ??
+        path.join(Global.Path.config, "tui.json")
+      const text = fs.existsSync(file) ? fs.readFileSync(file, "utf8") : "{}"
+      const edits = modify(text, key, value, { formattingOptions: { tabSize: 2, insertSpaces: true } })
+      fs.writeFileSync(file, applyEdits(text, edits))
+    })
+    .catch(() => {})
+  return persistTuiSettingQueue
 }
 
 // Built-in revive restarts oc and its terminal (OcConfig.revive); `revive.path` still overrides /revive-no-install.
@@ -561,7 +718,6 @@ const appBindingCommands = [
   "oc.todos.toggle",
   "oc.new_session",
   "model.default",
-  "oc.reasoning_effort",
   "agent.session",
   "agent.default_subagent",
   "agent.default_subagent_model",
@@ -895,6 +1051,15 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
       ...(sessionID ? { sessionID } : {}),
     })
   })
+  let initialPaletteKeys = true
+  createEffect(() => {
+    const paletteKeys = tuiConfig.palette_keys
+    if (initialPaletteKeys) {
+      initialPaletteKeys = false
+      return
+    }
+    void persistTuiSetting(["palette_keys"], paletteKeys).catch(() => {})
+  })
   createEffect(() => {
     sync.restart.recoveryEpoch
     if (!sync.restart.pending) promptRef.requestFocus()
@@ -904,6 +1069,76 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
       .get()
       .then((enabled) => kv.set("debug_logging", enabled))
       .catch(() => {})
+    void sdk.resume
+      .state()
+      .then((state) => setResumeEnabled(state.enabled))
+      .catch(() => {})
+    const leaderBinding = tuiConfig.keybinds.get("leader")[0]?.key
+    const leaderKey =
+      !leaderBinding ? "" : typeof leaderBinding === "string" ? leaderBinding.trim().toLowerCase() : ""
+    const kittyKeyboard = renderer.capabilities?.kitty_keyboard === true
+    const entries = keymap.getCommandEntries({ visibility: "registered" })
+    const titles = new Map(entries.map((entry) => [
+      entry.command.name,
+      typeof entry.command.title === "string" ? entry.command.title : entry.command.name,
+    ]))
+    const sequenceKey = (sequence: readonly KeySequencePart[]) => {
+      const parts = sequence.map((part) => {
+        if (part.tokenName === LEADER_TOKEN) return "<leader>"
+        const stroke = stringifyKeyStroke(part.stroke).split("+")
+        const name = stroke.pop() ?? ""
+        const mods = new Set(stroke)
+        return [...new Set(
+          ["ctrl", "alt", "option", "meta", "shift", "super", "hyper"]
+            .filter((mod) => mods.has(mod))
+            .map((mod) => mod === "meta" || mod === "option" ? "alt" : mod),
+        ), name].join("+")
+      })
+      return parts[0] === "<leader>" ? "<leader>" + parts.slice(1).join(" ") : parts.join(" ")
+    }
+    const dropped: string[] = []
+    for (const [command, key] of Object.entries(tuiConfig.palette_keys)) {
+      const owned = new Map<string, string>()
+      const remember = (sequence: readonly KeySequencePart[], owner: string) => {
+        const normalized = sequenceKey(sequence).trim().toLowerCase()
+        if (normalized && !owned.has(normalized)) owned.set(normalized, titles.get(owner) ?? owner)
+      }
+      for (const [name, bindings] of keymap.getCommandBindings({
+        visibility: "registered",
+        commands: entries.map((entry) => entry.command.name),
+      })) {
+        if (name === command) continue
+        for (const binding of bindings) remember(binding.sequence, name)
+      }
+      for (const name of Object.values(TuiKeybind.CommandMap)) {
+        if (name === command) continue
+        for (const binding of tuiConfig.keybinds.get(name)) remember(keymap.parseKeySequence(binding.key), name)
+      }
+      let parsed = true
+      try {
+        keymap.parseKeySequence(key)
+      } catch {
+        parsed = false
+      }
+      const result = parsed
+        ? validateHotkey({
+            key,
+            leaderKey,
+            ownerOf: (key) => owned.get(key.trim().toLowerCase()),
+            kittyKeyboard,
+          })
+        : { ok: false as const, reason: "invalid key sequence" }
+      if (result.ok) continue
+      dropped.push(`${command}: ${result.reason}`)
+      tuiConfig.setPaletteKey(command, undefined)
+    }
+    if (dropped.length) {
+      toast.show({
+        message: `Ignored invalid palette hotkeys: ${dropped.join("; ")}`,
+        variant: "error",
+        duration: 15_000,
+      })
+    }
   })
   const controlServer = async (action: "shutdown" | "restart") => {
     const restart = action === "restart"
@@ -1014,6 +1249,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
     renderer.clearSelection()
   }
   const [terminalTitleEnabled, setTerminalTitleEnabled] = createSignal(kv.get("terminal_title_enabled", true))
+  const [resumeEnabled, setResumeEnabled] = createSignal(false)
   const terminal = detectTerminal()
   const terminalTabState = { progress: 0, color: "" }
   const [pasteSummaryEnabled, setPasteSummaryEnabled] = createSignal(
@@ -1089,17 +1325,15 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
       }
     })
     if (args.palette) {
-      const title = args.palette.trim()
+      const ref = args.palette.trim()
       setTimeout(() => {
         if (renderer.isDestroyed) return
-        const entry = keymap
-          .getCommandEntries({ namespace: "palette", visibility: "reachable" })
-          .find((e) => (e.command.hidden !== true && e.command.name !== COMMAND_PALETTE_COMMAND ? (e.command.title as string) === title : false))
+        const entry = findPaletteEntry(keymap, ref)
         if (entry) keymap.dispatchCommand(entry.command.name)
         else
           toast.show({
             variant: "error",
-            message: `Palette entry not found: ${title}`,
+            message: `Palette entry not found: ${ref}`,
             duration: 5000,
           })
       }, 0)
@@ -1375,33 +1609,6 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
         },
       },
       {
-        name: "oc.reasoning_effort",
-        title: "Set default reasoning",
-        category: "oc",
-        slashName: "reasoningEffort",
-        run: () => {
-          dialog.replace(() => (
-            <DialogSelect
-              title="Default reasoning effort"
-              current={local.model.reasoningDefault.current()}
-              options={[
-                { value: "default", title: "Default" },
-                { value: "low", title: "low" },
-                { value: "medium", title: "medium" },
-                { value: "high", title: "high" },
-                { value: "xhigh", title: "xhigh" },
-                { value: "max", title: "max" },
-              ]}
-              onSelect={async (option) => {
-                if (!(await persistOcConfig("reasoningEffort", option.value, toast))) return
-                local.model.reasoningDefault.set(option.value)
-                dialog.clear()
-              }}
-            />
-          ))
-        },
-      },
-      {
         name: "agent.session",
         title: "Set default agent",
         category: "oc",
@@ -1585,13 +1792,13 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
       },
       {
         name: "oc.sidebar_position",
-        title: "Sidebar position (WIP)",
+        title: "Sidebar position",
         category: "oc",
         slashName: "sidebarPosition",
         run: () => {
           dialog.replace(() => (
             <DialogSelect
-              title="Sidebar position (WIP)"
+              title="Sidebar position"
               current={kv.get("sidebar_position", "right")}
               options={[
                 { value: "right", title: "right" },
@@ -1784,13 +1991,42 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
         },
       },
       {
-        name: "oc.update_claude_code",
-        title: "Update Claude Code",
+        name: "oc.manage_third_party_harnesses",
+        title: "Manage Third Party Harnesses",
         category: "oc",
-        slashName: "updateClaudeCode",
+        slashName: "manageThirdPartyHarnesses",
+        submenu: true,
         run: () => {
-          const cliPath = sync.data.config.provider?.["claude-code"]?.options?.cliPath
-          updateClaudeCode(typeof cliPath === "string" ? cliPath : "claude", toast)
+          const desktop = process.platform === "win32"
+          const updates = [
+            {
+              value: "claude_code",
+              title: "Update Claude Code",
+              run: () => {
+                const cliPath = sync.data.config.provider?.["claude-code"]?.options?.cliPath
+                updateClaudeCode(typeof cliPath === "string" ? cliPath : "claude", toast)
+              },
+            },
+            { value: "cursor_cli", title: "Update Cursor CLI", run: () => updateCursorCli(toast) },
+            { value: "codex_cli", title: "Update Codex CLI", run: () => updateCodexCli(toast) },
+            ...(desktop
+              ? [
+                  { value: "claude_desktop", title: "Update Claude Desktop", run: () => updateClaudeDesktop(toast, dialog) },
+                  { value: "cursor_desktop", title: "Update Cursor Desktop", run: () => updateCursorDesktop(toast, dialog) },
+                  { value: "chatgpt_desktop", title: "Update ChatGPT Desktop", run: () => updateChatgptDesktop(toast, dialog) },
+                ]
+              : []),
+          ]
+          dialog.replace(() => (
+            <DialogSelect
+              title="Manage Third Party Harnesses"
+              options={updates.map((item) => ({ value: item.value, title: item.title }))}
+              onSelect={(option) => {
+                dialog.clear()
+                updates.find((item) => item.value === option.value)?.run()
+              }}
+            />
+          ))
         },
       },
       {
@@ -2136,6 +2372,149 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
           dialog.clear()
         },
       },
+      ...(((sync.data.config.provider?.["claude-code"]?.options?.accounts as unknown[] | undefined)?.length ?? 0) > 1
+        ? [
+            {
+              name: "claude.account",
+              title: "Switch Claude account",
+              slashName: "claude-account",
+              category: "oc",
+              run: async () => {
+                const accounts = await sdk.claudeAccount.state().catch((error) => {
+                  toast.error(error)
+                  return undefined
+                })
+                if (!accounts) return
+                dialog.replace(() => (
+                  <DialogSelect
+                    title="Switch Claude account (sessions restart their Claude context on the next turn)"
+                    current={accounts.find((account) => account.current)?.id}
+                    options={accounts.map((account) => ({
+                      title: account.label,
+                      description: account.limitedUntil
+                        ? `limited until ${new Date(account.limitedUntil).toLocaleString()}`
+                        : undefined,
+                      value: account.id,
+                      onSelect: () => {
+                        if (!account.current)
+                          void sdk.claudeAccount
+                            .set(account.id)
+                            .then(() => toast.show({ message: `Claude account: ${account.label}`, variant: "info" }))
+                            .catch(toast.error)
+                        dialog.clear()
+                      },
+                    }))}
+                  />
+                ))
+              },
+            },
+          ]
+        : []),
+      ...(((sync.data.config.provider?.["claude-code"]?.options?.accounts as unknown[] | undefined)?.length ?? 0) > 1 &&
+      route.data.type === "session"
+        ? [
+            {
+              name: "claude.sessionAccount",
+              title: "Switch Claude account (this session)",
+              slashName: "claude-session-account",
+              category: "oc",
+              run: async () => {
+                if (route.data.type !== "session") return
+                const sessionID = route.data.sessionID
+                const accounts = await sdk.claudeAccount.state(sessionID).catch((error) => {
+                  toast.error(error)
+                  return undefined
+                })
+                if (!accounts) return
+                const pinned = accounts.find((account) => account.pinned)
+                const choose = (id: string | undefined, message: string) => {
+                  void sdk.claudeAccount
+                    .set(id, sessionID)
+                    .then(() => toast.show({ message, variant: "info" }))
+                    .catch(toast.error)
+                  dialog.clear()
+                }
+                dialog.replace(() => (
+                  <DialogSelect
+                    title="Claude account for this session (its Claude context restarts on the next turn)"
+                    current={pinned?.id ?? "global"}
+                    options={[
+                      {
+                        title: "Use global account",
+                        description: "unpin this session",
+                        value: "global",
+                        onSelect: () => (pinned ? choose(undefined, "Claude account: global") : dialog.clear()),
+                      },
+                      ...accounts.map((account) => ({
+                        title: account.label,
+                        description: account.limitedUntil
+                          ? `limited until ${new Date(account.limitedUntil).toLocaleString()}`
+                          : undefined,
+                        value: account.id,
+                        onSelect: () =>
+                          account.pinned ? dialog.clear() : choose(account.id, `Session Claude account: ${account.label}`),
+                      })),
+                    ]}
+                  />
+                ))
+              },
+            },
+          ]
+        : []),
+      {
+        name: "resume.toggle",
+        title: resumeEnabled() ? "Disable auto-resume after usage reset" : "Enable auto-resume after usage reset",
+        category: "Session",
+        run: async () => {
+          try {
+            const state = await sdk.resume.set(!resumeEnabled())
+            setResumeEnabled(state.enabled)
+          } catch (error) {
+            toast.error(error)
+          }
+          dialog.clear()
+        },
+      },
+      {
+        name: "resume.list",
+        title: "Scheduled resumes",
+        category: "Session",
+        run: async () => {
+          let entries: ScheduledResumeEntry[] = []
+          try {
+            const state = await sdk.resume.state()
+            setResumeEnabled(state.enabled)
+            entries = state.entries
+          } catch (error) {
+            toast.error(error)
+            return
+          }
+          if (entries.length === 0) {
+            toast.show({ message: "No scheduled resumes", variant: "info" })
+            dialog.clear()
+            return
+          }
+          dialog.replace(() => (
+            <DialogSelect
+              title="Scheduled resumes"
+              options={entries.map((entry) => ({
+                title: sync.session.get(entry.sessionID)?.title ?? entry.sessionID,
+                description: new Date(entry.fireAt).toLocaleString(),
+                value: entry.id,
+                onSelect: () => {
+                  void sdk.resume
+                    .cancel(entry.id)
+                    .then((ok) => {
+                      if (ok) toast.show({ message: "Cancelled scheduled resume", variant: "info" })
+                    })
+                    .catch(toast.error)
+                  dialog.clear()
+                },
+              }))}
+            />
+          ))
+        },
+      },
     ].map((command) => ({
       namespace: "palette",
       ...command,
@@ -2154,6 +2533,39 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
   useBindings(() => ({
     bindings: tuiConfig.keybinds.gather("app.global", appGlobalBindingCommands),
   }))
+
+  useBindings(() => {
+    const commands = new Set(keymap.getCommands().map((command) => command.name))
+    const leaderBinding = tuiConfig.keybinds.get("leader")[0]?.key
+    const leaderKey =
+      !leaderBinding ? "" : typeof leaderBinding === "string" ? leaderBinding.trim().toLowerCase() : ""
+    const kittyKeyboard = renderer.capabilities?.kitty_keyboard === true
+    return {
+      mode: OPENCODE_BASE_MODE,
+      enabled: () => {
+        if (dialog.stack.length > 0) return false
+        const current = promptRef.current
+        if (!current?.focused) return true
+        return current.current.input === ""
+      },
+      bindings: Object.entries(tuiConfig.palette_keys)
+        .filter(([command, key]) => {
+          if (!commands.has(command) || !key.trim()) return false
+          try {
+            keymap.parseKeySequence(key)
+          } catch {
+            return false
+          }
+          return validateHotkey({
+            key,
+            leaderKey,
+            ownerOf: () => undefined,
+            kittyKeyboard,
+          }).ok
+        })
+        .map(([cmd, key]) => ({ key, cmd })),
+    }
+  })
 
   useBindings(() => ({
     mode: OPENCODE_BASE_MODE,

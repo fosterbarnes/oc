@@ -25,8 +25,8 @@ import { pollWithTimeout, testEffect } from "../lib/effect"
 import { ProviderV2 } from "@opencode-ai/core/provider"
 import { ModelV2 } from "@opencode-ai/core/model"
 import { Permission } from "../../src/permission"
-import { SessionCompleteTool } from "../../src/tool/session-complete"
-import { SessionFailedTool } from "../../src/tool/session-failed"
+import { SessionCompleteTool } from "../../src/tool/sessionComplete"
+import { SessionFailedTool } from "../../src/tool/sessionFailed"
 
 afterEach(async () => {
   await disposeAllInstances()

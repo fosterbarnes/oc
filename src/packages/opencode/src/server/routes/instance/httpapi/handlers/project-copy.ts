@@ -8,7 +8,7 @@ import { Cause, Effect, Stream } from "effect"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { InstanceHttpApi } from "../api"
 import { ApiWorkHandoffError } from "../groups/project-copy"
-import { WorkHandoff } from "@/session/work-handoff"
+import { WorkHandoff } from "@/session/workHandoff"
 import { SessionPrompt } from "@/session/prompt"
 
 const COPY_NAME_AGENT: Agent.Info = {

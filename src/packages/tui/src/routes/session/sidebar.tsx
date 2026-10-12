@@ -1,5 +1,6 @@
 import { InstallationChannel } from "@opencode-ai/core/installation/version"
 import { createMemo, Show } from "solid-js"
+import { useTerminalDimensions } from "@opentui/solid"
 import { useTuiConfig } from "../../config"
 import { useProject } from "../../context/project"
 import { useSync } from "../../context/sync"
@@ -7,14 +8,15 @@ import { useTheme } from "../../context/theme"
 import { WorkspaceLabel } from "../../component/workspace-label"
 import { usePluginRuntime } from "../../plugin/runtime"
 import { getScrollAcceleration } from "../../util/scroll"
-import { SidebarTools, SidebarToolsFooter } from "./sidebar-tools/sidebar-tools"
+import { SidebarTools, SidebarToolsFooter } from "./sidebar-tools/sidebarTools"
 
-export function Sidebar(props: { sessionID: string; overlay?: boolean; horizontal?: boolean }) {
+export function Sidebar(props: { sessionID: string; horizontal?: boolean }) {
   const pluginRuntime = usePluginRuntime()
   const project = useProject()
   const sync = useSync()
   const { theme } = useTheme()
   const tuiConfig = useTuiConfig()
+  const dimensions = useTerminalDimensions()
   const session = createMemo(() => sync.session.get(props.sessionID))
   const workspace = () => {
     const workspaceID = session()?.workspaceID
@@ -22,6 +24,7 @@ export function Sidebar(props: { sessionID: string; overlay?: boolean; horizonta
     return project.workspace.get(workspaceID)
   }
   const scrollAcceleration = createMemo(() => getScrollAcceleration(tuiConfig))
+  const horizontalMaxHeight = createMemo(() => Math.max(8, Math.floor(dimensions().height / 2)))
 
   return (
     <Show when={session()}>
@@ -29,13 +32,13 @@ export function Sidebar(props: { sessionID: string; overlay?: boolean; horizonta
         backgroundColor={theme.backgroundPanel}
         width={props.horizontal ? "100%" : 42}
         height={props.horizontal ? undefined : "100%"}
-        maxHeight={props.horizontal ? 12 : undefined}
+        maxHeight={props.horizontal ? horizontalMaxHeight() : undefined}
         flexShrink={0}
         paddingTop={1}
         paddingBottom={1}
         paddingLeft={2}
         paddingRight={2}
-        position={props.overlay ? "absolute" : "relative"}
+        position="relative"
       >
         <scrollbox
           flexGrow={1}

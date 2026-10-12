@@ -1,10 +1,6 @@
 import { encodeMessage } from "./messages.js"
 import type { CursorSession } from "../session.js"
-import {
-  getConversationBlob,
-  isBlobIdHash,
-  setConversationBlob,
-} from "./blob-store.js"
+import { getConversationBlob, isBlobIdHash, setConversationBlob } from "./blobStore.js"
 
 function hex(b: Uint8Array): string {
   let s = ""
@@ -21,7 +17,7 @@ function hex(b: Uint8Array): string {
  *    We return `get_blob_result{blob_data}` (empty if unknown hash).
  * The reply MUST be sent as `AgentClientMessage.kv_client_message` (field #3) on
  * the same Run stream, echoing `id`. If we don't reply, the server hangs the
- * turn (endless heartbeats, never any interaction_update) — the "no response"
+ * turn (endless heartbeats, never any interaction_update) - the "no response"
  * root cause.
  *
  * Returns the AgentClientMessage bytes to write back, or null if the message
@@ -47,7 +43,7 @@ export function handleKvServerMessage(
     const data = setArgs.blob_data ?? new Uint8Array(0)
     const key = hex(setArgs.blob_id)
     session.blobs.set(key, data)
-    // Survive across Run streams — required for checkpoint echo on turn 2+.
+    // Survive across Run streams - required for checkpoint echo on turn 2+.
     if (session.conversationId) {
       setConversationBlob(session.conversationId, setArgs.blob_id, data)
     }
@@ -67,9 +63,7 @@ export function handleKvServerMessage(
     const key = hex(getArgs.blob_id)
     const stored =
       session.blobs.get(key) ??
-      (session.conversationId
-        ? getConversationBlob(session.conversationId, getArgs.blob_id)
-        : undefined)
+      (session.conversationId ? getConversationBlob(session.conversationId, getArgs.blob_id) : undefined)
 
     let blobData: Uint8Array
     let echoed = false
@@ -79,7 +73,7 @@ export function handleKvServerMessage(
       found = true
     } else if (!isBlobIdHash(getArgs.blob_id)) {
       // Content-as-id: server sometimes sends blob_id as the literal payload
-      // (e.g. inline JSON). Echo it. Never do this for 32-byte hashes — that
+      // (e.g. inline JSON). Echo it. Never do this for 32-byte hashes - that
       // made the server JSON.parse binary and return "Unexpected token".
       blobData = getArgs.blob_id
       echoed = true

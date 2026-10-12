@@ -51,6 +51,18 @@ function isVisiblePaletteCommand(command: Command) {
   return command.hidden !== true && command.name !== COMMAND_PALETTE_COMMAND
 }
 
+export function findPaletteEntry(keymap: OpenTuiKeymap, ref: string) {
+  const needle = ref.trim()
+  if (!needle) return undefined
+  const entries = keymap
+    .getCommandEntries({ namespace: "palette", visibility: "reachable" })
+    .filter((entry) => isVisiblePaletteCommand(entry.command))
+  return (
+    entries.find((entry) => entry.command.name === needle) ??
+    entries.find((entry) => typeof entry.command.title === "string" && entry.command.title === needle)
+  )
+}
+
 export function createOpencodeModeStack(keymap: OpenTuiKeymap) {
   keymap.setData(OPENCODE_MODE_KEY, OPENCODE_BASE_MODE)
 

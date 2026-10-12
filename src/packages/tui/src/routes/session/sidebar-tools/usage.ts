@@ -183,13 +183,10 @@ export function formatUsageRows(options: {
 /** Shared per-slot widths: the widest date start, flipped clock, and flipped day of each window slot across rows. */
 export function usageColumns(rows: { starts: number[]; clocks?: number[]; days?: number[] }[]) {
   const widest = (pick: (row: (typeof rows)[number]) => number[] | undefined) =>
-    rows.reduce<number[]>(
-      (shared, row) => {
-        const widths = pick(row) ?? []
-        return widths.map((width, index) => Math.max(width, shared[index] ?? 0)).concat(shared.slice(widths.length))
-      },
-      [],
-    )
+    rows.reduce<number[]>((shared, row) => {
+      const widths = pick(row) ?? []
+      return widths.map((width, index) => Math.max(width, shared[index] ?? 0)).concat(shared.slice(widths.length))
+    }, [])
   return { starts: widest((row) => row.starts), clocks: widest((row) => row.clocks), days: widest((row) => row.days) }
 }
 
@@ -203,25 +200,25 @@ export function formatClaudeUsageRows(
 ) {
   const accounts = usage.accounts?.flatMap((account) => (account.usage.ok ? [account.usage] : []))
   const known = accounts?.length ? accounts : [usage]
-  const cell = (window: UsageWindow, suffix: string, compact = false) => {
+  const cell = (window: UsageWindow, suffix: string) => {
     const idle = suffix === "h" && window.usedPercent === 0 ? "-" : ""
     // Unknown percent -> null ("reset unavailable"); hourly 0% with no reset ->
     // shows `-` (no 5-hour window running yet); other known percents without a reset leave a blank slot.
     const resetAt = window.resetAt ?? (window.usedPercent === null ? null : idle)
-    return { usedPercent: window.usedPercent, resetAt, suffix, compact }
+    return { usedPercent: window.usedPercent, resetAt, suffix }
   }
-  if (known.length === 1)
+  return known.flatMap((account, index) => {
+    const label = index === 0 ? "Claude:" : `Claude${index + 1}:`
     return formatUsageRows({
-      label: "Claude:", remaining, width, columns, clocks, days,
-      windows: [cell(known[0].fiveHour, "h"), cell(known[0].weekly, "w")],
-    })
-  return [
-    ...formatUsageRows({ label: "Claude:", remaining, width, columns, clocks, days, windows: known.map((account) => cell(account.fiveHour, "h")) })
-      .map((row, index) => index === 0 ? row : { ...row, usage: "       " + row.usage.slice(7) }),
-    // `spaced` marks where the sidebar's provider spacing splits the hourly rows from the weekly rows.
-    ...formatUsageRows({ label: "", remaining, width, columns, clocks, days, windows: known.map((account) => cell(account.weekly, "w", true)) })
-      .map((row, index) => (index === 0 ? { ...row, spaced: true } : row)),
-  ]
+      label,
+      remaining,
+      width,
+      columns,
+      clocks,
+      days,
+      windows: [cell(account.fiveHour, "h"), cell(account.weekly, "w")],
+    }).map((row, rowIndex) => ({ ...row, label, spaced: index > 0 && rowIndex === 0 }))
+  })
 }
 
 /** Sidebar suffix for a window of this length: `h`, `d`, `w`, `m`; empty when the length is unknown or unusual. */
@@ -487,7 +484,9 @@ export async function probeClaudeCodeUsage(options: UsageOptions = {}): Promise<
   const prevStat = await stat(cachePath).catch(() => undefined)
   const prevMtime = prevStat?.mtimeMs ?? nowMs
   const cachedUsage = parseClaudeUsage(cachedRaw, nowMs)
-  const cachedTimed = cachedUsage.ok ? attachClaudeTimes(cachedUsage, claudeCacheTimes(cachedRaw), prevMtime) : cachedUsage
+  const cachedTimed = cachedUsage.ok
+    ? attachClaudeTimes(cachedUsage, claudeCacheTimes(cachedRaw), prevMtime)
+    : cachedUsage
   if (liveUsage.ok) {
     const merged = withClaudeFallback(liveUsage, cachedTimed.ok ? cachedTimed : undefined, nowMs)
     await mkdir(path.dirname(cachePath), { recursive: true })
@@ -638,11 +637,14 @@ export function withClaudeFallback(
 ): Extract<ClaudeCodeUsage, { ok: true }> {
   const fallbackOk = fallback?.ok ? fallback : undefined
   const byName = new Map(
-    (fallbackOk?.accounts ?? []).flatMap((account) => (account.usage.ok ? [[account.name, account.usage] as const] : [])),
+    (fallbackOk?.accounts ?? []).flatMap((account) =>
+      account.usage.ok ? [[account.name, account.usage] as const] : [],
+    ),
   )
   const accounts = primary.accounts?.map((account) => {
     const previous = byName.get(account.name)
-    if (account.usage.ok && previous?.ok) return { name: account.name, usage: withClaudeFallback(account.usage, previous, nowMs) }
+    if (account.usage.ok && previous?.ok)
+      return { name: account.name, usage: withClaudeFallback(account.usage, previous, nowMs) }
     if (!account.usage.ok && previous?.ok) return { name: account.name, usage: markClaudeCached(previous) }
     return account
   })
@@ -671,10 +673,10 @@ function averageClaudeWindows(windows: UsageWindow[]): UsageWindow {
   const next = known
     .filter((window) => window.resetMs !== null)
     .sort((a, b) => (a.resetMs as number) - (b.resetMs as number))[0]
-  const expired = known.every((window) => window.expired) ? { expired: true } as const : {}
-  const cached = known.every((window) => window.cached) ? { cached: true } as const : {}
+  const expired = known.every((window) => window.expired) ? ({ expired: true } as const) : {}
+  const cached = known.every((window) => window.cached) ? ({ cached: true } as const) : {}
   const timed = known.every((window) => window.fetchedAt !== undefined)
-    ? { fetchedAt: Math.max(...known.map((window) => window.fetchedAt as number)) } as const
+    ? ({ fetchedAt: Math.max(...known.map((window) => window.fetchedAt as number)) } as const)
     : {}
   return {
     usedPercent: Math.round(known.reduce((total, window) => total + (window.usedPercent as number), 0) / known.length),
@@ -703,7 +705,11 @@ export function projectClaudeUsage(snapshot: ClaudeCodeUsage, nowMs: number): Cl
       accounts,
     }
   }
-  return { ...snapshot, fiveHour: projectClaudeWindow(snapshot.fiveHour, nowMs), weekly: projectClaudeWindow(snapshot.weekly, nowMs) }
+  return {
+    ...snapshot,
+    fiveHour: projectClaudeWindow(snapshot.fiveHour, nowMs),
+    weekly: projectClaudeWindow(snapshot.weekly, nowMs),
+  }
 }
 
 function projectClaudeWindow(window: UsageWindow, nowMs: number): UsageWindow {
@@ -999,15 +1005,12 @@ function parseCursorUsageResponse(value: unknown, nowMs: number): CursorUsage {
   if (!value || typeof value !== "object") return { ok: false }
   const body = value as {
     billingCycleEnd?: unknown
-    billingCycleStart?: unknown
     isUnlimited?: unknown
     individualUsage?: unknown
   }
-  const resetAt = [body.billingCycleEnd, body.billingCycleStart]
-    .filter((item): item is string => typeof item === "string")
-    .map((iso) => new Date(iso))
-    .find((date) => !Number.isNaN(date.valueOf()))
-  if (!resetAt) return { ok: false }
+  // billingCycleStart is the start of the current cycle, not its reset, so it never stands in for the reset.
+  const resetAt = typeof body.billingCycleEnd === "string" ? new Date(body.billingCycleEnd) : undefined
+  if (!resetAt || Number.isNaN(resetAt.valueOf())) return { ok: false }
   const plan =
     body.individualUsage && typeof body.individualUsage === "object"
       ? (body.individualUsage as { plan?: unknown }).plan

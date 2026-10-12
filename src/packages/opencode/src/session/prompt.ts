@@ -49,7 +49,7 @@ import { Cause, Effect, Exit, Latch, Layer, Option, Scope, Context, Schema, Type
 import { InstanceState } from "@/effect/instance-state"
 import { TaskTool, type TaskPromptOps } from "@/tool/task"
 import { SessionRunState } from "./run-state"
-import { WorkHandoff } from "./work-handoff"
+import { WorkHandoff } from "./workHandoff"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { Database } from "@opencode-ai/core/database/database"
@@ -116,10 +116,10 @@ function isOrphanedInterruptedTool(part: SessionV1.ToolPart) {
 
 export interface Interface {
   readonly cancel: (sessionID: SessionID) => Effect.Effect<void>
-  readonly prompt: (input: PromptInput) => Effect.Effect<SessionV1.WithParts, Image.Error>
+  readonly prompt: (input: PromptInput) => Effect.Effect<SessionV1.WithParts, Image.Error | Session.BusyError>
   readonly loop: (input: LoopInput) => Effect.Effect<SessionV1.WithParts>
   readonly shell: (input: ShellInput) => Effect.Effect<SessionV1.WithParts, Session.BusyError>
-  readonly command: (input: CommandInput) => Effect.Effect<SessionV1.WithParts, Image.Error>
+  readonly command: (input: CommandInput) => Effect.Effect<SessionV1.WithParts, Image.Error | Session.BusyError>
   readonly resolvePromptParts: (template: string) => Effect.Effect<PromptInput["parts"]>
   readonly rename: (sessionID: SessionID) => Effect.Effect<{ session: Session.Info; model?: string }>
 }
@@ -1184,10 +1184,10 @@ const layer = Layer.effect(
       return { info, parts }
     }, Effect.scoped)
 
-    const prompt: (input: TurnInput) => Effect.Effect<SessionV1.WithParts, Image.Error> = Effect.fn(
+    const prompt: (input: TurnInput) => Effect.Effect<SessionV1.WithParts, Image.Error | Session.BusyError> = Effect.fn(
       "SessionPrompt.prompt",
     )(function* (input: TurnInput) {
-      if (!input.noReply) yield* state.assertAvailable(input.sessionID).pipe(Effect.orDie)
+      if (!input.noReply) yield* state.assertAvailable(input.sessionID)
       const session = yield* sessions.get(input.sessionID).pipe(Effect.orDie)
       yield* revert.cleanup(session)
       const message = yield* createUserMessage(input)
@@ -1198,8 +1198,8 @@ const layer = Layer.effect(
         permissions.push({ permission: t, action: enabled ? "allow" : "deny", pattern: "*" })
       }
       if (permissions.length > 0) {
-        session.permission = permissions
-        yield* sessions.setPermission({ sessionID: session.id, permission: permissions })
+        session.permission = Permission.merge(session.permission ?? [], permissions)
+        yield* sessions.setPermission({ sessionID: session.id, permission: session.permission })
       }
 
       if (input.noReply === true) return message

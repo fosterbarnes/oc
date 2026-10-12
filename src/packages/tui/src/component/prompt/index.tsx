@@ -603,6 +603,7 @@ export function Prompt(props: PromptProps) {
       {
         title: "Finish worktree work",
         desc: "Merge into the original parent as unstaged changes, then delete the worktree",
+
         name: "session.work.done",
         category: "Session",
         enabled: Boolean(props.sessionID),

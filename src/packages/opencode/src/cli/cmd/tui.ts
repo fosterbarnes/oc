@@ -192,7 +192,7 @@ export const TuiThreadCommand = cmd({
     }
 
     win32AssertRawMode()
-    try {
+    {
       const { TuiConfig } = await import("@/config/tui")
       if (args.fork && !args.continue && !args.session) {
         UI.error("--fork requires --continue or --session")
@@ -320,9 +320,7 @@ export const TuiThreadCommand = cmd({
       } finally {
         await stop()
       }
-    } finally {
     }
     process.exit(0)
   },
 })
-// scratch

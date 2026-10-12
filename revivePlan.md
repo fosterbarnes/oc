@@ -31,7 +31,7 @@ Decisions (user, 2026-10-04):
 
 ## Current flow (verified)
 
-- `oc` / `occ` -> `withExecutableDefault` (`packages/opencode/src/cli/command-loader.ts:72`) maps to
+- `oc` / `occ` -> `withExecutableDefault` (`packages/opencode/src/cli/commandLoader.ts:72`) maps to
   `oc launch` / `oc previous --depth 1`.
 - Both end in `attach()` (`packages/opencode/src/cli/cmd/oc.ts:38`, callers :134, :176), which calls
   `runNative` (:14): spawns the TUI child with `stdio: "inherit"`, waits, throws on non-zero exit.
@@ -47,7 +47,7 @@ Decisions (user, 2026-10-04):
 - `shutdownAll` (`oc.ts:422`): `wezterm cli kill-pane` for ledgered panes, force-kills this instance's
   ledgered TUIs **and their same-exe parent** (`TuiLedger.select`,
   `packages/opencode/src/config/tuiLedger.ts:58`), then graceful `stopServer`.
-- `launchDetached` (`packages/core/src/util/launch-detached.ts`): Start-Process hop puts the target
+- `launchDetached` (`packages/core/src/util/launchDetached.ts`): Start-Process hop puts the target
   outside the closing terminal's job. This is how worker 2 survives the window it kills.
 - TUI ledger written in `app.tsx:557` (pid, instance, executable, WezTerm `paneID`), removed on exit.
 - TUI exit: `useExit()` (`packages/tui/src/context/exit.tsx`).

@@ -78,6 +78,45 @@ export const RevertPayload = Schema.Struct(Struct.omit(SessionRevert.RevertInput
 export const PermissionResponsePayload = Schema.Struct({
   response: PermissionV1.Reply,
 })
+export const ResumeEntry = Schema.Struct({
+  id: Schema.String,
+  sessionID: SessionID,
+  directory: Schema.String,
+  fireAt: Schema.Number,
+  reason: Schema.String,
+  createdAt: Schema.Number,
+  attempts: Schema.Number,
+})
+export const ResumeState = Schema.Struct({
+  enabled: Schema.Boolean,
+  prompt: Schema.String,
+  entries: Schema.Array(ResumeEntry),
+})
+export const ResumeEnabledPayload = Schema.Struct({
+  enabled: Schema.Boolean,
+  prompt: Schema.optional(Schema.String),
+})
+export const ResumeCancelPayload = Schema.Struct({
+  id: Schema.String,
+})
+
+export const ClaudeAccount = Schema.Struct({
+  id: Schema.String,
+  label: Schema.String,
+  current: Schema.Boolean,
+  pinned: Schema.optional(Schema.Boolean),
+  limitedUntil: Schema.optional(Schema.Number),
+})
+export const ClaudeAccounts = Schema.Struct({ accounts: Schema.Array(ClaudeAccount) })
+// With `sessionID` the call pins/unpins that session (no `id` = unpin); without it, it sets the global account.
+export const ClaudeAccountPayload = Schema.Struct({
+  id: Schema.optional(Schema.String),
+  sessionID: Schema.optional(Schema.String),
+})
+export const ClaudeAccountQuery = Schema.Struct({
+  ...WorkspaceRoutingQueryFields,
+  sessionID: Schema.optional(Schema.String),
+})
 
 export const SessionPaths = {
   list: root,
@@ -108,6 +147,10 @@ export const SessionPaths = {
   deleteMessage: `${root}/:sessionID/message/:messageID`,
   deletePart: `${root}/:sessionID/message/:messageID/part/:partID`,
   updatePart: `${root}/:sessionID/message/:messageID/part/:partID`,
+  resumeState: `${root}/resume/state`,
+  resumeCancel: `${root}/resume/cancel`,
+  // Two segments, like the resume routes: a one-segment path is swallowed by `get` (`/session/:sessionID`).
+  claudeAccount: `${root}/claude/account`,
 } as const
 
 export const SessionApi = HttpApi.make("session")
@@ -473,6 +516,65 @@ export const SessionApi = HttpApi.make("session")
           OpenApi.annotations({
             identifier: "part.update",
             description: "Update a part in a message.",
+          }),
+        ),
+        HttpApiEndpoint.get("resumeState", SessionPaths.resumeState, {
+          query: WorkspaceRoutingQuery,
+          success: described(ResumeState, "Scheduled auto-resume state"),
+          error: HttpApiError.BadRequest,
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "session.resume.state",
+            summary: "Get scheduled resumes",
+            description: "Get the auto-resume toggle, prompt, and pending scheduled resume entries.",
+          }),
+        ),
+        HttpApiEndpoint.put("resumeSet", SessionPaths.resumeState, {
+          query: WorkspaceRoutingQuery,
+          payload: ResumeEnabledPayload,
+          success: described(ResumeState, "Updated scheduled auto-resume state"),
+          error: HttpApiError.BadRequest,
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "session.resume.set",
+            summary: "Set auto-resume",
+            description: "Enable or disable automatic resume prompts after usage-limit resets.",
+          }),
+        ),
+        HttpApiEndpoint.post("resumeCancel", SessionPaths.resumeCancel, {
+          query: WorkspaceRoutingQuery,
+          payload: ResumeCancelPayload,
+          success: described(Schema.Boolean, "Cancelled scheduled resume"),
+          error: HttpApiError.BadRequest,
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "session.resume.cancel",
+            summary: "Cancel scheduled resume",
+            description: "Cancel a pending scheduled resume entry by id.",
+          }),
+        ),
+        HttpApiEndpoint.get("claudeAccountState", SessionPaths.claudeAccount, {
+          query: ClaudeAccountQuery,
+          success: described(ClaudeAccounts, "Claude Code pool accounts"),
+          error: HttpApiError.BadRequest,
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "session.claudeAccount.state",
+            summary: "Get Claude accounts",
+            description: "List the Claude Code pool accounts, the active one, and any usage limits.",
+          }),
+        ),
+        HttpApiEndpoint.put("claudeAccountSet", SessionPaths.claudeAccount, {
+          query: WorkspaceRoutingQuery,
+          payload: ClaudeAccountPayload,
+          success: described(ClaudeAccounts, "Updated Claude Code pool accounts"),
+          error: HttpApiError.BadRequest,
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "session.claudeAccount.set",
+            summary: "Set Claude account",
+            description:
+              "Make a Claude Code pool account the active one for new turns, or pin/unpin it for one session when sessionID is given.",
           }),
         ),
       )

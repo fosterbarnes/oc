@@ -25,12 +25,19 @@ const idle = { restartingFresh: false }
 for (const control of ["stopServer", "shutdownAll"] as const) {
   test(`${control} still stops its resident server when the injected process lister fails`, async () => {
     await using tmp = await tmpdir()
-    const child = Bun.spawn([process.execPath, "-e", [
-      "const server = Bun.serve({ port: 0, fetch(request) {",
-      `if (request.method !== 'POST' || new URL(request.url).pathname !== '/global/shutdown' || request.headers.get('authorization') !== 'Basic ${Buffer.from("opencode:test-secret").toString("base64")}') return new Response('', { status: 403 });`,
-      "setTimeout(() => process.exit(0), 20); return new Response('{}'); } });",
-      "console.log(JSON.stringify({ pid: process.pid, hostname: '127.0.0.1', port: server.port }));",
-    ].join(" ")], { stdout: "pipe", stderr: "pipe", windowsHide: true })
+    const child = Bun.spawn(
+      [
+        process.execPath,
+        "-e",
+        [
+          "const server = Bun.serve({ port: 0, fetch(request) {",
+          `if (request.method !== 'POST' || new URL(request.url).pathname !== '/global/shutdown' || request.headers.get('authorization') !== 'Basic ${Buffer.from("opencode:test-secret").toString("base64")}') return new Response('', { status: 403 });`,
+          "setTimeout(() => process.exit(0), 20); return new Response('{}'); } });",
+          "console.log(JSON.stringify({ pid: process.pid, hostname: '127.0.0.1', port: server.port }));",
+        ].join(" "),
+      ],
+      { stdout: "pipe", stderr: "pipe", windowsHide: true },
+    )
     try {
       const reader = child.stdout.getReader()
       let output = ""
@@ -50,9 +57,10 @@ for (const control of ["stopServer", "shutdownAll"] as const) {
         listings++
         throw new Error("Injected CIM failure")
       }
-      const result = control === "stopServer"
-        ? await OcConfig.stopServer(tmp.path, { listProcesses })
-        : (await OcConfig.shutdownAll({ directory: tmp.path, listProcesses })).servers[0]
+      const result =
+        control === "stopServer"
+          ? await OcConfig.stopServer(tmp.path, { listProcesses })
+          : (await OcConfig.shutdownAll({ directory: tmp.path, listProcesses })).servers[0]
       expect(result.stopped).toBe(true)
       expect(listings).toBe(1)
       expect(await child.exited).toBe(0)
@@ -67,41 +75,63 @@ for (const control of ["stopServer", "shutdownAll"] as const) {
 
 describe("resident launch policy", () => {
   test("reuses a healthy server whose record matches a live pid", () => {
-    expect(OcConfig.residentLaunchAction({ ...idle, healthy: true, hasState: true, matches: true, alive: true })).toBe("reuse")
+    expect(OcConfig.residentLaunchAction({ ...idle, healthy: true, hasState: true, matches: true, alive: true })).toBe(
+      "reuse",
+    )
   })
 
   test("waits only while a restart mark is fresh", () => {
     const restarting = { restartingFresh: true }
-    expect(OcConfig.residentLaunchAction({ ...restarting, healthy: false, hasState: true, matches: true, alive: false })).toBe("wait")
-    expect(OcConfig.residentLaunchAction({ ...restarting, healthy: true, hasState: true, matches: true, alive: false })).toBe("wait")
+    expect(
+      OcConfig.residentLaunchAction({ ...restarting, healthy: false, hasState: true, matches: true, alive: false }),
+    ).toBe("wait")
+    expect(
+      OcConfig.residentLaunchAction({ ...restarting, healthy: true, hasState: true, matches: true, alive: false }),
+    ).toBe("wait")
   })
 
   test("waits for a live matching server while health is down", () => {
-    expect(OcConfig.residentLaunchAction({ ...idle, healthy: false, hasState: true, matches: true, alive: true })).toBe("wait")
+    expect(OcConfig.residentLaunchAction({ ...idle, healthy: false, hasState: true, matches: true, alive: true })).toBe(
+      "wait",
+    )
   })
 
   test("starts immediately when a stale record's pid is dead and the port is down", () => {
-    expect(OcConfig.residentLaunchAction({ ...idle, healthy: false, hasState: true, matches: true, alive: false })).toBe("clear-spawn")
+    expect(
+      OcConfig.residentLaunchAction({ ...idle, healthy: false, hasState: true, matches: true, alive: false }),
+    ).toBe("clear-spawn")
   })
 
   test("does not adopt a healthy server with a mismatched, dead, or missing record", () => {
-    expect(OcConfig.residentLaunchAction({ ...idle, healthy: true, hasState: true, matches: false, alive: true })).toBe("refuse-foreign")
-    expect(OcConfig.residentLaunchAction({ ...idle, healthy: true, hasState: true, matches: true, alive: false })).toBe("refuse-foreign")
-    expect(OcConfig.residentLaunchAction({ ...idle, healthy: true, hasState: false, matches: false, alive: false })).toBe("wait-unowned")
+    expect(OcConfig.residentLaunchAction({ ...idle, healthy: true, hasState: true, matches: false, alive: true })).toBe(
+      "refuse-foreign",
+    )
+    expect(OcConfig.residentLaunchAction({ ...idle, healthy: true, hasState: true, matches: true, alive: false })).toBe(
+      "refuse-foreign",
+    )
+    expect(
+      OcConfig.residentLaunchAction({ ...idle, healthy: true, hasState: false, matches: false, alive: false }),
+    ).toBe("wait-unowned")
   })
 
   test("starts when nothing is recorded and the port is down", () => {
-    expect(OcConfig.residentLaunchAction({ ...idle, healthy: false, hasState: false, matches: false, alive: false })).toBe("spawn")
+    expect(
+      OcConfig.residentLaunchAction({ ...idle, healthy: false, hasState: false, matches: false, alive: false }),
+    ).toBe("spawn")
   })
 
   test("drops a record for a different host or port when the port is down", () => {
-    expect(OcConfig.residentLaunchAction({ ...idle, healthy: false, hasState: true, matches: false, alive: false })).toBe("clear-spawn")
+    expect(
+      OcConfig.residentLaunchAction({ ...idle, healthy: false, hasState: true, matches: false, alive: false }),
+    ).toBe("clear-spawn")
   })
 
-  test("treats a restart mark as fresh for 30 seconds", () => {
+  // Covers a graceful stop (up to 35s) plus forced stop and respawn.
+  test("treats a restart mark as fresh for 120 seconds", () => {
     const now = Date.parse("2026-09-24T23:53:00.000Z")
     expect(OcConfig.residentRestartFresh(new Date(now - 1_000).toISOString(), now)).toBe(true)
-    expect(OcConfig.residentRestartFresh(new Date(now - 31_000).toISOString(), now)).toBe(false)
+    expect(OcConfig.residentRestartFresh(new Date(now - 119_000).toISOString(), now)).toBe(true)
+    expect(OcConfig.residentRestartFresh(new Date(now - 121_000).toISOString(), now)).toBe(false)
     expect(OcConfig.residentRestartFresh(undefined, now)).toBe(false)
   })
 })
@@ -112,7 +142,9 @@ describe("adopt resident server", () => {
     const result = await OcConfig.adoptResidentServer("127.0.0.1", 4096, {
       findListenerPid: () => 1234,
       listProcesses: () => [{ pid: 1234, parentPid: 1, executable: OcConfig.executablePath(), startedAt: Date.now() }],
-      writeState: async (input) => { written = input },
+      writeState: async (input) => {
+        written = input
+      },
       readState: async () => undefined,
     })
     expect(result).toEqual({ ok: true, pid: 1234 })
@@ -120,28 +152,33 @@ describe("adopt resident server", () => {
   })
 
   test("refuses when the listener is missing or foreign", async () => {
-    expect(await OcConfig.adoptResidentServer("127.0.0.1", 4096, {
-      findListenerPid: () => undefined,
-      readState: async () => undefined,
-    })).toEqual({ ok: false })
-    expect(await OcConfig.adoptResidentServer("127.0.0.1", 4096, {
-      findListenerPid: () => 1234,
-      listProcesses: () => [{ pid: 1234, parentPid: 1, executable: "/elsewhere/other.exe", startedAt: Date.now() }],
-      writeState: async () => { throw new Error("must not write state for a foreign server") },
-      readState: async () => undefined,
-    })).toEqual({ ok: false, pid: 1234, executable: "/elsewhere/other.exe" })
+    expect(
+      await OcConfig.adoptResidentServer("127.0.0.1", 4096, {
+        findListenerPid: () => undefined,
+        readState: async () => undefined,
+      }),
+    ).toEqual({ ok: false })
+    expect(
+      await OcConfig.adoptResidentServer("127.0.0.1", 4096, {
+        findListenerPid: () => 1234,
+        listProcesses: () => [{ pid: 1234, parentPid: 1, executable: "/elsewhere/other.exe", startedAt: Date.now() }],
+        writeState: async () => {
+          throw new Error("must not write state for a foreign server")
+        },
+        readState: async () => undefined,
+      }),
+    ).toEqual({ ok: false, pid: 1234, executable: "/elsewhere/other.exe" })
   })
 
   test("reuses matching state that appears before a write and does not overwrite it", async () => {
     let writes = 0
-    const reads = [
-      undefined,
-      { pid: 99, hostname: "127.0.0.1", port: 4096 },
-    ]
+    const reads = [undefined, { pid: 99, hostname: "127.0.0.1", port: 4096 }]
     const result = await OcConfig.adoptResidentServer("127.0.0.1", 4096, {
       findListenerPid: () => 1234,
       listProcesses: () => [{ pid: 1234, parentPid: 1, executable: OcConfig.executablePath(), startedAt: Date.now() }],
-      writeState: async () => { writes++ },
+      writeState: async () => {
+        writes++
+      },
       readState: async () => reads.shift(),
       pidAlive: (pid) => pid === 99,
     })
@@ -151,14 +188,13 @@ describe("adopt resident server", () => {
 
   test("refuses when state appears for a different owner during adoption", async () => {
     let writes = 0
-    const reads = [
-      undefined,
-      { pid: 50, hostname: "127.0.0.1", port: 4096 },
-    ]
+    const reads = [undefined, { pid: 50, hostname: "127.0.0.1", port: 4096 }]
     const result = await OcConfig.adoptResidentServer("127.0.0.1", 4096, {
       findListenerPid: () => 1234,
       listProcesses: () => [{ pid: 1234, parentPid: 1, executable: OcConfig.executablePath(), startedAt: Date.now() }],
-      writeState: async () => { writes++ },
+      writeState: async () => {
+        writes++
+      },
       readState: async () => reads.shift(),
       pidAlive: () => false,
     })
@@ -167,19 +203,29 @@ describe("adopt resident server", () => {
   })
 
   test("propagates resident state write failures", async () => {
-    await expect(OcConfig.adoptResidentServer("127.0.0.1", 4096, {
-      findListenerPid: () => 1234,
-      listProcesses: () => [{ pid: 1234, parentPid: 1, executable: OcConfig.executablePath(), startedAt: Date.now() }],
-      writeState: async () => { throw new Error("disk full") },
-      readState: async () => undefined,
-    })).rejects.toThrow("disk full")
+    await expect(
+      OcConfig.adoptResidentServer("127.0.0.1", 4096, {
+        findListenerPid: () => 1234,
+        listProcesses: () => [
+          { pid: 1234, parentPid: 1, executable: OcConfig.executablePath(), startedAt: Date.now() },
+        ],
+        writeState: async () => {
+          throw new Error("disk full")
+        },
+        readState: async () => undefined,
+      }),
+    ).rejects.toThrow("disk full")
   })
 
   test("keeps a matching live record without rewriting it", async () => {
     let writes = 0
     const result = await OcConfig.adoptResidentServer("127.0.0.1", 4096, {
-      findListenerPid: () => { throw new Error("must not scan listeners when state exists") },
-      writeState: async () => { writes++ },
+      findListenerPid: () => {
+        throw new Error("must not scan listeners when state exists")
+      },
+      writeState: async () => {
+        writes++
+      },
       readState: async () => ({ pid: 77, hostname: "127.0.0.1", port: 4096 }),
       pidAlive: () => true,
     })
@@ -197,19 +243,25 @@ describe("resident listener selection", () => {
     ]
     expect(OcConfig.uniqueListenerPid("127.0.0.1", 4096, rows)).toBe(22)
     expect(OcConfig.uniqueListenerPid("::1", 4096, rows)).toBe(11)
-    expect(OcConfig.uniqueListenerPid("127.0.0.1", 4096, [
-      { address: "127.0.0.1", port: 4096, pid: 22 },
-      { address: "::ffff:127.0.0.1", port: 4096, pid: 22 },
-    ])).toBe(22)
-    expect(OcConfig.uniqueListenerPid("127.0.0.1", 4096, [
-      { address: "127.0.0.1", port: 4096, pid: 22 },
-      { address: "127.0.0.1", port: 4096, pid: 44 },
-    ])).toBeUndefined()
+    expect(
+      OcConfig.uniqueListenerPid("127.0.0.1", 4096, [
+        { address: "127.0.0.1", port: 4096, pid: 22 },
+        { address: "::ffff:127.0.0.1", port: 4096, pid: 22 },
+      ]),
+    ).toBe(22)
+    expect(
+      OcConfig.uniqueListenerPid("127.0.0.1", 4096, [
+        { address: "127.0.0.1", port: 4096, pid: 22 },
+        { address: "127.0.0.1", port: 4096, pid: 44 },
+      ]),
+    ).toBeUndefined()
     expect(OcConfig.uniqueListenerPid("localhost", 4096, rows)).toBeUndefined()
-    expect(OcConfig.uniqueListenerPid("localhost", 4096, [
-      { address: "127.0.0.1", port: 4096, pid: 22 },
-      { address: "::1", port: 4096, pid: 22 },
-    ])).toBe(22)
+    expect(
+      OcConfig.uniqueListenerPid("localhost", 4096, [
+        { address: "127.0.0.1", port: 4096, pid: 22 },
+        { address: "::1", port: 4096, pid: 22 },
+      ]),
+    ).toBe(22)
   })
 })
 
@@ -242,11 +294,12 @@ describe("debug instance identity", () => {
 })
 
 describe("canonical child executable", () => {
-  test("maps oc and occ to sibling opencode", () => {
-    expect(OcConfig.executablePath("C:\\Apps\\opencode\\oc.exe")).toBe("C:\\Apps\\opencode\\opencode.exe")
-    expect(OcConfig.executablePath("C:\\Apps\\opencode\\occ.exe")).toBe("C:\\Apps\\opencode\\opencode.exe")
-    expect(OcConfig.executablePath("/usr/local/bin/oc")).toBe("/usr/local/bin/opencode")
-    expect(OcConfig.executablePath("/usr/local/bin/occ")).toBe("/usr/local/bin/opencode")
+  // The resident server runs as oc, never native opencode, so only the occ hard link is remapped.
+  test("maps occ to sibling oc and keeps oc", () => {
+    expect(OcConfig.executablePath("C:\\Apps\\opencode\\oc.exe")).toBe("C:\\Apps\\opencode\\oc.exe")
+    expect(OcConfig.executablePath("C:\\Apps\\opencode\\occ.exe")).toBe("C:\\Apps\\opencode\\oc.exe")
+    expect(OcConfig.executablePath("/usr/local/bin/oc")).toBe("/usr/local/bin/oc")
+    expect(OcConfig.executablePath("/usr/local/bin/occ")).toBe("/usr/local/bin/oc")
   })
 
   test("leaves bun, opencode, and ocdebug unchanged", () => {
@@ -267,13 +320,18 @@ describe("OC config", () => {
     const directory = await fs.mkdtemp(path.join(os.tmpdir(), "opencode-oc-"))
     temporaryDirectories.push(directory)
     ;(Global.Path as { config: string }).config = directory
-    const retired = { initModel: "old", initAgent: "old", initReasoningEffort: "high",
-      defaultSubagent: "old", defaultSubagentModel: "old" }
+    const retired = {
+      initModel: "old",
+      initAgent: "old",
+      initReasoningEffort: "high",
+      reasoningEffort: "high",
+      defaultSubagent: "old",
+      defaultSubagentModel: "old",
+    }
     await Bun.write(path.join(directory, "oc.json"), JSON.stringify(retired))
-    expect(OcConfig.keys).toContain("reasoningEffort")
     for (const key of Object.keys(retired)) expect(OcConfig.keys).not.toContain(key)
-    await OcConfig.update("reasoningEffort", "high")
-    expect(await OcConfig.read()).toEqual({ ...retired, reasoningEffort: "high" })
+    await OcConfig.update("sessionAgent", "build")
+    expect(await OcConfig.read()).toEqual({ ...retired, sessionAgent: "build" })
   })
 
   test("rejects nonboolean startup settings before registration or persistence", async () => {
@@ -307,7 +365,9 @@ describe("OC config", () => {
       context: { ...Startup.context(), platform: "win32" as const, powershell: "C:\\pwsh.exe", state: directory },
       registry: {
         read: async () => registration,
-        write: async (_name: string, value: string | undefined) => { registration = value },
+        write: async (_name: string, value: string | undefined) => {
+          registration = value
+        },
       },
     }
     await OcConfig.update("serverStartOnWindowsUserStart", "true", startup)

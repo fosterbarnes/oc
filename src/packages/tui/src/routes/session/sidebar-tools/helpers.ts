@@ -53,7 +53,6 @@ export type SidebarSettings = {
   usageSpacing: boolean
 }
 
-
 const DEFAULT_SCRIPT_SETTINGS: ScriptSettings = {
   shell: { executable: "pwsh", args: ["-NoLogo", "-NoExit", "-Command"] },
   terminal: "native",
@@ -217,7 +216,7 @@ export function ensureSessionScrollbarVisible(kv: {
   get: (key: string, fallback?: unknown) => unknown
   set: (key: string, value: unknown) => void
 }): void {
-  if (kv.get(OPENCODE_SESSION_SCROLLBAR_KEY) !== true) kv.set(OPENCODE_SESSION_SCROLLBAR_KEY, true)
+  if (kv.get(OPENCODE_SESSION_SCROLLBAR_KEY) === undefined) kv.set(OPENCODE_SESSION_SCROLLBAR_KEY, true)
 }
 
 export function defaultSidebarSettings(): SidebarSettings {
@@ -335,12 +334,18 @@ export function normalizeSidebarSettings(value: unknown, base = defaultSidebarSe
         ? input.projectDirectory
         : base.projectDirectory,
     visibility: {
-      showMcp: typeof visibility.showMcp === "boolean"
-        ? visibility.showMcp
-        : typeof input.showMcp === "boolean" ? input.showMcp : base.visibility.showMcp,
-      showLsp: typeof visibility.showLsp === "boolean"
-        ? visibility.showLsp
-        : typeof input.showLsp === "boolean" ? input.showLsp : base.visibility.showLsp,
+      showMcp:
+        typeof visibility.showMcp === "boolean"
+          ? visibility.showMcp
+          : typeof input.showMcp === "boolean"
+            ? input.showMcp
+            : base.visibility.showMcp,
+      showLsp:
+        typeof visibility.showLsp === "boolean"
+          ? visibility.showLsp
+          : typeof input.showLsp === "boolean"
+            ? input.showLsp
+            : base.visibility.showLsp,
     },
     scripts: normalizeScriptSettings(input.scripts, base.scripts),
     scriptPins: Array.isArray(input.scriptPins)

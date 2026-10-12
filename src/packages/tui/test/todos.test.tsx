@@ -31,7 +31,12 @@ test("todo palette persists confirmed changes and waits for configuration reload
   const config = createTuiResolvedConfig()
   const events = createEventSource()
   const writes: boolean[] = []
-  const state: { global?: boolean; project?: boolean; fail: boolean; response?: ReturnType<typeof Promise.withResolvers<Response>> } = {
+  const state: {
+    global?: boolean
+    project?: boolean
+    fail: boolean
+    response?: ReturnType<typeof Promise.withResolvers<Response>>
+  } = {
     fail: false,
   }
   const fallback = createFetch((url) => {
@@ -67,17 +72,39 @@ test("todo palette persists confirmed changes and waits for configuration reload
     onCleanup(registerOpencodeKeymap(keymap, useRenderer(), config))
     return (
       <TestTuiContexts paths={{ state: tmp.path, home: tmp.path }}>
-        <ArgsProvider><OpencodeKeymapProvider keymap={keymap}><TuiConfigProvider config={config}>
-          <KVProvider><SDKProvider url="http://test" directory={directory} fetch={fetcher} events={events.source}>
-            <PermissionProvider><ProjectProvider><ExitProvider exit={(error) => { throw error }}>
-              <RouteProvider initialRoute={{ type: "home" }}><SyncProvider><ThemeProvider mode="dark">
-                <ClipboardProvider value={{ write: async () => {} }}><ToastProvider>
-                  <DialogProvider><Probe /></DialogProvider>
-                </ToastProvider></ClipboardProvider>
-              </ThemeProvider></SyncProvider></RouteProvider>
-            </ExitProvider></ProjectProvider></PermissionProvider>
-          </SDKProvider></KVProvider>
-        </TuiConfigProvider></OpencodeKeymapProvider></ArgsProvider>
+        <ArgsProvider>
+          <OpencodeKeymapProvider keymap={keymap}>
+            <TuiConfigProvider config={config}>
+              <KVProvider>
+                <SDKProvider url="http://test" directory={directory} fetch={fetcher} events={events.source}>
+                  <PermissionProvider>
+                    <ProjectProvider>
+                      <ExitProvider
+                        exit={(error) => {
+                          throw error
+                        }}
+                      >
+                        <RouteProvider initialRoute={{ type: "home" }}>
+                          <SyncProvider>
+                            <ThemeProvider mode="dark">
+                              <ClipboardProvider value={{ write: async () => {} }}>
+                                <ToastProvider>
+                                  <DialogProvider>
+                                    <Probe />
+                                  </DialogProvider>
+                                </ToastProvider>
+                              </ClipboardProvider>
+                            </ThemeProvider>
+                          </SyncProvider>
+                        </RouteProvider>
+                      </ExitProvider>
+                    </ProjectProvider>
+                  </PermissionProvider>
+                </SDKProvider>
+              </KVProvider>
+            </TuiConfigProvider>
+          </OpencodeKeymapProvider>
+        </ArgsProvider>
       </TestTuiContexts>
     )
   }

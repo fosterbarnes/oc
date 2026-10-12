@@ -1,7 +1,7 @@
 // @ts-nocheck
 // WIP: ported from opencode-claude-code-plugin, which never typechecked its tests; type them as Phase 3 rewrites land.
 /**
- * Unit tests for src/proxy-broker.ts — the per-session pending-call
+ * Unit tests for src/proxyBroker.ts - the per-session pending-call
  * registry used to coordinate proxy-mcp HTTP handlers with the language
  * model's stream lifecycle.
  *
@@ -23,15 +23,15 @@ import {
   PROXY_DEADLINE_WARNING_FRACTION,
   PROXY_DEADLINE_WARNING_MIN_MS,
   type PendingProxyCall,
-} from "@/provider/claude-code/proxy-broker.js"
+} from "@/provider/claude-code/proxyBroker.js"
 import { configureLogger, _resetLoggerForTests } from "@/provider/claude-code/logger.js"
-import { type ProxyToolCall, type ProxyToolResult } from "@/provider/claude-code/proxy-mcp.js"
+import { type ProxyToolCall, type ProxyToolResult } from "@/provider/claude-code/proxyMcp.js"
 import {
   _setProxyDeadlineRecheckMs,
   armProxyDeadline,
   PROXY_NO_DEADLINE_MS,
   setProxyDeadlineGuard,
-} from "@/provider/claude-code/proxy-deadline.js"
+} from "@/provider/claude-code/proxyDeadline.js"
 
 type CallHandle = {
   id: string
@@ -160,7 +160,7 @@ test("onPendingProxyCall fires once per queued call for the matching session", (
 
   const a = makeCall("bash")
   const b = makeCall("write")
-  const c = makeCall("bash") // different session — should not fire
+  const c = makeCall("bash") // different session - should not fire
 
   queuePendingProxyCall(sk, a.call)
   queuePendingProxyCall(sk, b.call)
@@ -257,7 +257,7 @@ test("queuePendingProxyCall: a call with no deadline arms no timer and stays pen
 })
 
 test("queuePendingProxyCall: bash input.timeout keeps the call alive past a shorter override", async () => {
-  // Override 40ms, but the caller asked for a 30s bash timeout — the
+  // Override 40ms, but the caller asked for a 30s bash timeout - the
   // effective deadline is 30s, so resolving at ~80ms must succeed rather
   // than the call having already timed out.
   const sk = `sk-bash-input-${Date.now()}`
@@ -322,9 +322,7 @@ test("queuePendingProxyCall with a duplicate callId replaces the old entry clean
 // --- stall warning for calls with no deadline -----------------------------
 
 /** Like test-cli-args.ts's helper, but it spans awaits. */
-async function captureLogsAsync(
-  fn: (lines: readonly string[]) => Promise<void>,
-): Promise<string[]> {
+async function captureLogsAsync(fn: (lines: readonly string[]) => Promise<void>): Promise<string[]> {
   const lines: string[] = []
   const original = console.error
   console.error = (line: unknown) => {

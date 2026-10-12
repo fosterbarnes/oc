@@ -2,7 +2,7 @@
 param(
     [Alias('b', 'nb')]
     [switch]$NoBuild,
-    [switch]$SkipInstall,
+    [switch]$SkipBunInstall,
     # Install one flavor only. Default installs oc (+ occ link, ocdebug) and native opencode.
     [switch]$Oc,
     [switch]$Native
@@ -18,7 +18,7 @@ $ocBinary = "$distFolder\opencode-windows-x64\bin\oc.exe"
 $nativeBinary = "$distFolder\opencode-native-windows-x64\bin\opencode.exe"
 $debugBinary = "$distFolder\opencode-debug-windows-x64\bin\ocdebug.exe"
 $cursorRuntime = "$distFolder\opencode-windows-x64\bin\cursor-runtime"
-$processNames = @('opencode', 'oc', 'occ', 'ocdebug', 'ocbug')
+$processNames = @('opencode', 'oc', 'occ', 'ocdebug')
 $running = @($processNames | ForEach-Object { Get-Process -Name $_ -ErrorAction SilentlyContinue })
 if ($running) {
     Write-Host 'Stopping running oc, opencode, and ocdebug processes...'
@@ -32,7 +32,7 @@ if ($running) {
 
 if (-not $NoBuild) {
     $buildArgs = @()
-    if ($SkipInstall) { $buildArgs += '-SkipInstall' }
+    if ($SkipBunInstall) { $buildArgs += '-SkipInstall' }
     if ($Oc) { $buildArgs += '-Oc' }
     if ($Native) { $buildArgs += '-Native' }
     & (Join-Path $PSScriptRoot 'build.ps1') @buildArgs
@@ -61,7 +61,23 @@ $obsoleteAliases = @('ocbug.exe', 'oc-debug.exe')
 # (installs before the native split linked oc.exe and occ.exe to opencode.exe).
 function replaceFile([string]$Source, [string]$Destination) {
     if (Test-Path -LiteralPath $Destination) { Remove-Item -LiteralPath $Destination -Force }
+    if (Test-Path -LiteralPath $Destination -PathType Leaf) { throw "Could not remove $Destination before install." }
     Copy-Item -LiteralPath $Source -Destination $Destination
+}
+
+# Timestamped rollback copy of the current install (U16). Only the newest 3 backups are kept.
+$backupDir = Join-Path $installDir ('backup-' + (Get-Date -Format 'yyyyMMdd-HHmmss'))
+$backupTargets = @($ocDestination, $occLink, $nativeDestination, $debugDestination)
+$backedUp = @()
+foreach ($target in $backupTargets) {
+    if (Test-Path -LiteralPath $target -PathType Leaf) {
+        if (-not (Test-Path -LiteralPath $backupDir)) { New-Item -ItemType Directory -Path $backupDir -Force | Out-Null }
+        Copy-Item -LiteralPath $target -Destination (Join-Path $backupDir ([IO.Path]::GetFileName($target)))
+        $backedUp += $target
+    }
+}
+foreach ($old in @(Get-ChildItem -LiteralPath $installDir -Directory -Filter 'backup-*' | Sort-Object Name -Descending | Select-Object -Skip 3)) {
+    Remove-Item -LiteralPath $old.FullName -Recurse -Force
 }
 
 try {
@@ -71,6 +87,7 @@ try {
     }
     if ($installOc) {
         if (Test-Path -LiteralPath $occLink) { Remove-Item -LiteralPath $occLink -Force }
+        if (Test-Path -LiteralPath $occLink -PathType Leaf) { throw "Could not remove $occLink before install." }
         replaceFile $ocBinary $ocDestination
         replaceFile $debugBinary $debugDestination
         Copy-Item -LiteralPath $cursorRuntime -Destination $installDir -Recurse -Force
@@ -87,8 +104,16 @@ try {
         if ($nativeLinks.Count -ne 1) { throw "opencode.exe still shares a file with: $($nativeLinks -join ', '). Run a full install." }
     }
 } catch {
+    foreach ($target in $backedUp) {
+        $saved = Join-Path $backupDir ([IO.Path]::GetFileName($target))
+        if (Test-Path -LiteralPath $saved -PathType Leaf) { Copy-Item -LiteralPath $saved -Destination $target -Force }
+    }
+    if ($backedUp -contains $occLink) {
+        if (Test-Path -LiteralPath $occLink) { Remove-Item -LiteralPath $occLink -Force }
+        New-Item -ItemType HardLink -Path $occLink -Target $ocDestination -Force | Out-Null
+    }
     if ($_.Exception.Message -match 'being used by another process|cannot access') {
-        Write-Host 'Install failed. A target executable is in use.' -ForegroundColor Red
+        Write-Host 'Install failed. A target executable is in use. Previous files were restored.' -ForegroundColor Red
         exit 1
     }
     throw

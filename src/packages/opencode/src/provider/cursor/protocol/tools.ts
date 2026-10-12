@@ -3,12 +3,10 @@ import os from "node:os"
 import path from "node:path"
 import { encodeMessage } from "./messages.js"
 import { encodeJsonAsValue, decodeStructEntriesToJson, readAllFields } from "./struct.js"
-import { buildEnv } from "../context/env.js"
-import { ensureOpencodeProjectDir } from "../context/paths.js"
 import { trace, traceRequestContextPaths } from "../debug.js"
-import { cursorExecVariantByRequestName } from "./exec-variants.js"
-import { APPLY_PATCH_TOOL, buildAddFilePatch, buildUpdateFilePatch, planSubstringEdit } from "./apply-patch.js"
-import { BACKGROUND_SHELL_MARKER, buildBackgroundShellCommand, type CursorShellOutcome } from "../shell-timeout.js"
+import { cursorExecVariantByRequestName } from "./execVariants.js"
+import { APPLY_PATCH_TOOL, buildAddFilePatch, buildUpdateFilePatch, planSubstringEdit } from "./applyPatch.js"
+import { BACKGROUND_SHELL_MARKER, buildBackgroundShellCommand, type CursorShellOutcome } from "../shellTimeout.js"
 
 // Exec variant field number whose reply is the server-initiated request_context
 // probe (ExecServerMessage #10 -> ExecClientMessage #10). request/result share a
@@ -132,7 +130,7 @@ type WebAliasRule = {
 }
 
 // Despite the name, these rules cover any advertised OpenCode tool whose bare
-// name collides with a Cursor-native capability, not only web search/fetch —
+// name collides with a Cursor-native capability, not only web search/fetch  - 
 // see the MCP resource entries below and
 // tasks/plans/fix-cursor-mcp-resource-exec.md Phase 0/2.
 const WEB_ALIAS_RULES: readonly WebAliasRule[] = [
@@ -261,46 +259,10 @@ export function toolsToMcpDescriptors(
   }))
 }
 
-/**
- * @deprecated Prefer `buildRequestContext` from `../context/build.js`.
- * Kept as a sync tools-only fallback for unit tests that don't need collectors.
- */
-export function buildLiveRequestContext(
-  tools: OpencodeToolDef[],
-  providerIdentifier = "opencode",
-  knownMcpServers: Iterable<string> = [],
-): Record<string, unknown> {
-  const flat = toolsToDescriptors(tools, providerIdentifier, knownMcpServers)
-  const nested = toolsToMcpDescriptors(tools, providerIdentifier, knownMcpServers)
-  const cwd = process.cwd()
-  const ctx: Record<string, unknown> = {
-    env: buildEnv(cwd),
-    tools: flat,
-    mcp_file_system_options: {
-      enabled: true,
-      workspace_project_dir: ensureOpencodeProjectDir(cwd),
-      mcp_descriptors: nested,
-    },
-    mcp_meta_tool_options: {
-      enabled: true,
-      mcp_descriptors: nested,
-    },
-    web_search_enabled: false,
-    web_fetch_enabled: false,
-    rules_info_complete: true,
-    env_info_complete: true,
-    repository_info_complete: true,
-    mcp_file_system_info_complete: true,
-    git_status_info_complete: true,
-  }
-  traceRequestContextPaths("buildLiveRequestContext", ctx)
-  return ctx
-}
-
-// ── Cursor exec-variant → opencode tool name ──
+// -- Cursor exec-variant -> opencode tool name --
 
 // Native ExecServerMessage variants only (agent.v1). There is no edit_args or
-// glob_args on the exec channel — Cursor's EditToolCall is display-only, and
+// glob_args on the exec channel - Cursor's EditToolCall is display-only, and
 // glob/edit from opencode are advertised as MCP tools and arrive as mcp_args.
 //
 // Design note (F11): Cursor has native delete / background-shell tools; OpenCode
@@ -328,15 +290,6 @@ const cursorToolToOpencode: Record<string, string> = {
   background_shell_spawn_args: "bash",
   subagent_args: "task",
   mcp_args: "mcp",
-}
-
-const opencodeToolToCursor: Record<string, string> = {
-  read: "read_args",
-  write: "write_args",
-  grep: "grep_args",
-  bash: "shell_stream_args",
-  task: "subagent_args",
-  mcp: "mcp_args",
 }
 
 /** Cursor-only fields that must not be forwarded as OpenCode tool input. */
@@ -388,14 +341,6 @@ const PRESERVE_EMPTY_STRING_KEYS = new Set([
   "newString",
   "new_string",
 ])
-
-export function mapExecServerToToolName(execField: string): string | undefined {
-  return cursorToolToOpencode[execField]
-}
-
-export function mapToolNameToExecField(toolName: string): string | undefined {
-  return opencodeToolToCursor[toolName]
-}
 
 const CURSOR_SUBAGENT_TYPE_TO_OPENCODE: Record<string, string> = {
   generalPurpose: "general",
@@ -771,8 +716,8 @@ export function remapCorrelatedEditWriteForCatalog(
  * edit-tool family out from under us.
  *
  * OpenCode 1.x removes `edit` and `write` from the catalog for GPT models and
- * advertises `apply_patch` in their place — see the module comment in
- * `./apply-patch.ts` for the upstream reasoning and citations. Cursor keeps
+ * advertises `apply_patch` in their place - see the module comment in
+ * `./applyPatch.ts` for the upstream reasoning and citations. Cursor keeps
  * using its native write/edit exec channel regardless, so without this the
  * request is refused as an unavailable tool and the model loses the ability to
  * change files at all.
@@ -788,7 +733,7 @@ export function remapEditToolsForCatalog(
 ): void {
   if (parsed.toolName !== "write" && parsed.toolName !== "edit") return
   // `apply_patch` envelopes are text. A binary write has no patch form at all,
-  // so it must stay a write and reach the byte-preserving path — converting it
+  // so it must stay a write and reach the byte-preserving path - converting it
   // here would drop the bytes and report a patch-translation failure instead of
   // the image Cursor asked to save.
   if (binaryWritePayload(parsed)) return
@@ -828,7 +773,7 @@ export function remapEditToolsForCatalog(
       return
     }
     // apply_patch matches whole lines, so a substring edit has to be widened to
-    // the lines it touches — which requires the file the model is editing.
+    // the lines it touches - which requires the file the model is editing.
     const absolute = path.resolve(workspaceRoot ?? process.cwd(), filePath)
     let source: string
     try {
@@ -1150,7 +1095,7 @@ export function mapCursorArgsToOpencode(
       const filePath = str(cleaned.filePath) ?? str(cleaned.path) ?? str(cleaned.file_path)
       if (filePath) args.filePath = filePath
       // Cursor often sends offset=0/limit=0 as protobuf defaults. OpenCode's
-      // read treats limit=0 as "read zero lines" (empty content) — omit zeros.
+      // read treats limit=0 as "read zero lines" (empty content) - omit zeros.
       const offset = num(cleaned.offset)
       if (offset !== undefined && offset > 0) args.offset = offset
       const limit = num(cleaned.limit)
@@ -1212,7 +1157,7 @@ export function mapCursorArgsToOpencode(
       const include = str(cleaned.include) ?? str(cleaned.glob)
       // Cursor's native Grep often arrives with an empty pattern + a glob
       // (e.g. "**/*") when the model is really listing files. OpenCode's grep
-      // requires a non-empty string pattern — remap to glob instead of
+      // requires a non-empty string pattern - remap to glob instead of
       // forwarding a call that will fail and loop.
       if (!pattern) {
         const args: Record<string, unknown> = { pattern: include ?? "**/*" }
@@ -1277,7 +1222,7 @@ export function decodeWriteBytes(bytes: Uint8Array, encodingHint?: string): stri
       decoder = new TextDecoder(encoding, { fatal: true })
       label = encoding
     } catch {
-      trace(`write: unsupported encoding_hint ${JSON.stringify(encodingHint)} — decoding as utf-8`)
+      trace(`write: unsupported encoding_hint ${JSON.stringify(encodingHint)} - decoding as utf-8`)
     }
   }
   if (!decoder) decoder = new TextDecoder("utf-8", { fatal: true })
@@ -1294,7 +1239,7 @@ export function decodeWriteBytes(bytes: Uint8Array, encodingHint?: string): stri
 
 /**
  * True when a parsed `write` request carries bytes that are not text. Such a
- * request cannot go to OpenCode's `write` tool at all — it takes a string, and
+ * request cannot go to OpenCode's `write` tool at all - it takes a string, and
  * additionally BOM-splits, diffs, and runs `Format.file()` on what it writes.
  */
 export function binaryWritePayload(parsed: ParsedExecRequest): { path: string; data: Uint8Array } | undefined {
@@ -1431,7 +1376,7 @@ export function resolveReadTargetPath(requested: string, workspaceRoot: string):
  *  - socket/fifo/etc (not a file)      → invalid_file "Path is neither a file nor a directory"
  * EACCES/EPERM (exists but unreadable) and any other stat error return undefined
  * so the call proceeds to OpenCode and a genuine permission decision is never
- * masked. Never rejects a non-existent *write/edit* target — this is read-only.
+ * masked. Never rejects a non-existent *write/edit* target - this is read-only.
  */
 export function classifyMissingReadTarget(absolutePath: string): Record<string, unknown> | undefined {
   let stat: fs.Stats
@@ -1496,7 +1441,7 @@ export type ToolResultInput = {
   /**
    * Workspace root for result shapes that must name a directory
    * (grep_result workspace_results keys, ls_result directory_tree_root).
-   * Must not fall back to process.cwd() — the OpenCode 2.0 daemon's cwd is
+   * Must not fall back to process.cwd() - the OpenCode 2.0 daemon's cwd is
    * often $HOME and would re-advertise the wrong folder to the model.
    */
   workspaceRoot?: string
@@ -1504,8 +1449,8 @@ export type ToolResultInput = {
 
 /**
  * Build one or more ExecClientMessage frames for a tool result.
- * Shell replies are a sequence of ShellStream oneofs under the same id —
- * Start → stdout/stderr → exit — then an ACM #5 stream_close so the server
+ * Shell replies are a sequence of ShellStream oneofs under the same id  - 
+ * Start → stdout/stderr → exit - then an ACM #5 stream_close so the server
  * knows the client finished streaming (CLI always sends this; without it
  * shell execs hang on heartbeats forever).
  */
@@ -1575,7 +1520,7 @@ export function buildExecClientMessages(input: ToolResultInput): Uint8Array[] {
     )
   }
 
-  // Always close the exec stream — mirrors CLI agent-exec after every handler.
+  // Always close the exec stream - mirrors CLI agent-exec after every handler.
   frames.push(buildExecStreamClose(input.execId))
   return frames
 }
@@ -1597,14 +1542,14 @@ export function buildExecStreamClose(execId: number): Uint8Array {
  *   <path>{abs}</path>\n<type>file</type>\n<content>\n{N}: {line}\n…\n\n{footer}\n</content>
  * Forwarding that envelope verbatim made Cursor's model treat the wrapper as
  * literal file content and write `<path>`/`<content>` tags + `N:` line prefixes
- * back into files (silent corruption — the write still reports success; seen
- * across 8+ sessions, e.g. language-model.ts rewritten starting with
+ * back into files (silent corruption - the write still reports success; seen
+ * across 8+ sessions, e.g. languageModel.ts rewritten starting with
  * `<path>…</path>\n<type>file</type>\n<content>\n1: import fs…`).
  *
  * Returns the raw file body (line numbers + footer + `<system-reminder>` dropped).
  *
- * Deliberately exception-safe: if the expected envelope is absent — non-read
- * output, already-raw text, or a future opencode format change — it returns the
+ * Deliberately exception-safe: if the expected envelope is absent - non-read
+ * output, already-raw text, or a future opencode format change - it returns the
  * input unchanged, so a result is never broken and we never throw mid-turn.
  * Callers must still gate `mcp_result` on `toolName === "read"`; this helper
  * alone is not a tool-identity check.
@@ -1620,18 +1565,18 @@ export function unwrapReadOutput(output: string): string {
   const header = output.slice(0, contentHeaderIdx)
   const hasSkeleton = header.indexOf("<path>") !== -1 && header.indexOf("<type>file</type>") !== -1
   if (!hasSkeleton) {
-    // Saw "<content>" but not the read skeleton ahead of it — almost certainly
+    // Saw "<content>" but not the read skeleton ahead of it - almost certainly
     // a non-read payload, or an opencode format drift. Surface it so drift
     // can't silently resurrect the wrapper-corruption bug, but still fail
     // safe (no mutate).
     trace(
-      "unwrapReadOutput: <content> present without leading <path>/<type>file> skeleton — leaving output unchanged (possible non-read payload or opencode read format drift)",
+      "unwrapReadOutput: <content> present without leading <path>/<type>file> skeleton - leaving output unchanged (possible non-read payload or opencode read format drift)",
     )
     return output
   }
   // Body starts right after "<content>\n". opencode emits one numbered line per
   // file line ("N: <line>"), then a blank, a "(…)" footer, and a standalone
-  // "</content>". The body is a *contiguous run* of /^N: / lines — so we stop at
+  // "</content>". The body is a *contiguous run* of /^N: / lines - so we stop at
   // the first non-numbered line. Critically we do NOT search for a closing
   // "</content>" substring: a file line that literally contains "</content>"
   // is rendered as "N: </content>" (a body line), and a raw indexOf would
@@ -1935,7 +1880,7 @@ type OpenCodeReadMetadata = {
  * Isolate opencode's read footer: the last blank-line-separated block before
  * the closing `</content>`. Scanning the whole envelope would let a file that
  * merely *quotes* a footer (this repository's own docs and tests do) pass for a
- * truncated read. The body can never contain a blank line — every source line
+ * truncated read. The body can never contain a blank line - every source line
  * is rendered as `N: …`, so even an empty line keeps its `N: ` prefix.
  *
  * Falls back to the full string when the envelope is absent, preserving
@@ -2026,7 +1971,7 @@ function restoreCompleteReadTerminator(
  * `unwrapReadOutput` strips that footer along with the envelope, deliberately:
  * Cursor's model echoes whatever it is handed straight back into the next
  * write, so anything left in the content stream can end up written into the
- * file. But dropping the notice with no replacement is worse — the model then
+ * file. But dropping the notice with no replacement is worse - the model then
  * believes a capped read is the complete file, rewrites it from what it has,
  * and everything past the cap is destroyed.
  *
@@ -2056,7 +2001,7 @@ function readTruncationSummary(
  * Model-visible replacement for the stripped footer.
  *
  * Only for reads the model did not ask to bound. A caller that passed an
- * explicit offset/limit already knows it asked for a slice — warning there
+ * explicit offset/limit already knows it asked for a slice - warning there
  * would cry wolf on every deliberate paged read.
  */
 function readTruncationNotice(output: string, resultMetadata?: Record<string, unknown>): string | undefined {
@@ -2091,7 +2036,7 @@ function readTruncationMessage(output: string, content: string): Record<string, 
   }
 }
 
-/** `tool/read.ts` MAX_BYTES — mirrored only to report the cap, never to apply it. */
+/** `tool/read.ts` MAX_BYTES - mirrored only to report the cap, never to apply it. */
 const OPENCODE_READ_MAX_BYTES = 50 * 1024
 
 function readRangeApplied(resultMetadata: Record<string, unknown> | undefined, totalLines: number): boolean {
@@ -2200,7 +2145,7 @@ export function buildToolCallPart(
   sessionId: string,
 ): { toolCallId: string; toolName: string; input: string } {
   // Tag the toolCallId with the originating session's id so the result-bearing
-  // doStream call can disambiguate the Run stream — Cursor resets exec ids per
+  // doStream call can disambiguate the Run stream - Cursor resets exec ids per
   // stream, so two concurrent conversations would otherwise collide on `id`.
   return {
     toolCallId: `cursor_${sessionId}_${execMsg.id}`,
@@ -2346,15 +2291,20 @@ function mcpStateToolDefinition(
  * `list_mcp_resources`/`read_mcp_resource` execute through the ordinary
  * field-11 MCP path via the alias rules above, so any 17/18 that still reaches
  * this provider is Cursor emitting the native variant unsolicited (its own
- * client owns both executors unconditionally — there is no descriptor to
- * un-advertise). Cursor's executors are total; mirror that here rather than
- * guessing a generic success, which risks an endless heartbeat loop.
+ * client owns both executors unconditionally - there is no descriptor to
+ * un-advertise). This provider has no route for them, so answer with an
+ * explicit unsupported error rather than a fake empty success: the model can
+ * fall back to the field-11 MCP tools instead of trusting an empty listing.
  */
 export function buildListMcpResourcesFallback(execId: number): Uint8Array {
   return encodeMessage("AgentClientMessage", {
     exec_client_message: {
       id: execId,
-      list_mcp_resources_exec_result: { success: { resources: [] } },
+      list_mcp_resources_exec_result: {
+        error: {
+          error: "list_mcp_resources is not supported by this OpenCode provider; use the advertised MCP tools instead",
+        },
+      },
     },
   })
 }
@@ -2365,7 +2315,10 @@ export function buildReadMcpResourceFallback(execId: number, server: string, uri
     exec_client_message: {
       id: execId,
       read_mcp_resource_exec_result: {
-        error: { uri, error: `Server "${server}" not found` },
+        error: {
+          uri,
+          error: `read_mcp_resource is not supported by this OpenCode provider (server "${server}"); use the advertised MCP tools instead`,
+        },
       },
     },
   })

@@ -15,7 +15,6 @@ export const RemoteTargetedCommandID = Schema.Literals([
   "session.most_recent",
   "oc.new_session",
   "model.default",
-  "oc.reasoning_effort",
   "agent.session",
   "agent.default_subagent",
   "agent.default_subagent_model",

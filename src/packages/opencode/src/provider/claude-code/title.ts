@@ -4,7 +4,7 @@
  */
 import type { LanguageModelV3CallOptions } from "@ai-sdk/provider"
 import type { ClaudeCodeConfig } from "./types.js"
-import { resolveOpencodeAgent } from "./call-options.js"
+import { resolveOpencodeAgent } from "./callOptions.js"
 
 /**
  * Whether this call only names the session, which gets the synthetic stub
@@ -34,32 +34,23 @@ export function isTitleRequest(
   options: LanguageModelV3CallOptions,
 ): boolean {
   if (scope !== "no-tools") {
-    return (
-      config.hostApi === "v2" &&
-      resolveOpencodeAgent(options.providerOptions, config.provider) === "title"
-    )
+    return config.hostApi === "v2" && resolveOpencodeAgent(options.providerOptions, config.provider) === "title"
   }
   const agent = resolveOpencodeAgent(options.providerOptions, config.provider)
   if (agent === undefined) return true
   return isNamingAgent(agent)
 }
 
-export function requestScope(
-  options: { tools?: unknown },
-): "tools" | "no-tools" {
+export function requestScope(options: { tools?: unknown }): "tools" | "no-tools" {
   const tools = options?.tools
   if (Array.isArray(tools)) return "tools"
   if (tools && typeof tools === "object") {
-    return Object.keys(tools as Record<string, unknown>).length > 0
-      ? "tools"
-      : "no-tools"
+    return Object.keys(tools as Record<string, unknown>).length > 0 ? "tools" : "no-tools"
   }
   return "no-tools"
 }
 
-export function latestUserText(
-  prompt: LanguageModelV3CallOptions["prompt"],
-): string {
+export function latestUserText(prompt: LanguageModelV3CallOptions["prompt"]): string {
   for (let i = prompt.length - 1; i >= 0; i--) {
     const msg = prompt[i]
     if (msg.role !== "user") continue
@@ -81,9 +72,7 @@ export function latestUserText(
   return ""
 }
 
-export function synthesizeTitle(
-  prompt: LanguageModelV3CallOptions["prompt"],
-): string {
+export function synthesizeTitle(prompt: LanguageModelV3CallOptions["prompt"]): string {
   const source = latestUserText(prompt)
     .replace(/\s+/g, " ")
     .replace(/[^\p{L}\p{N}\s-]/gu, " ")

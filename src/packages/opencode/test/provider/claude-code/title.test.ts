@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { isTitleRequest, requestScope, synthesizeTitle, isNamingAgent } from "@/provider/claude-code/title"
-import { resolveTurnContext } from "@/provider/claude-code/turn-context"
+import { resolveTurnContext } from "@/provider/claude-code/turnContext"
 
 function options(agent?: string, tools?: unknown) {
   return {

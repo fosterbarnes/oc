@@ -22,10 +22,7 @@ import { encodeMessage } from "../protocol/messages.js"
  */
 
 const byConversationId = new Map<string, Record<string, unknown>>()
-const materializedByConversationId = new Map<
-  string,
-  { context: Record<string, unknown>; bytes: Uint8Array }
->()
+const materializedByConversationId = new Map<string, { context: Record<string, unknown>; bytes: Uint8Array }>()
 const buildsByConversationId = new Map<string, Promise<Record<string, unknown>>>()
 export const MAX_FROZEN_REQUEST_CONTEXTS = 256
 
@@ -54,9 +51,7 @@ function remember(conversationId: string, context: Record<string, unknown>): voi
 }
 
 /** Frozen stable RequestContext base for this conversation, if any. */
-export function getFrozenRequestContext(
-  conversationId: string,
-): Record<string, unknown> | undefined {
+export function getFrozenRequestContext(conversationId: string): Record<string, unknown> | undefined {
   const frozen = byConversationId.get(conversationId)
   if (!frozen) return undefined
   // Touch for LRU.
@@ -66,10 +61,7 @@ export function getFrozenRequestContext(
 }
 
 /** Replace the frozen stable base, stripping any live capability fields. */
-export function setFrozenRequestContext(
-  conversationId: string,
-  context: Record<string, unknown>,
-): void {
+export function setFrozenRequestContext(conversationId: string, context: Record<string, unknown>): void {
   if (!conversationId) return
   remember(conversationId, requestContextBase(context))
 }
@@ -88,10 +80,7 @@ export function clearFrozenRequestContext(conversationId: string): void {
  * comparison seed; getOrBuildRequestContext still rediscovers live capability
  * overlays and only reuses the complete context when those bytes also match.
  */
-export function transferFrozenRequestContext(
-  previousConversationId: string,
-  nextConversationId: string,
-): boolean {
+export function transferFrozenRequestContext(previousConversationId: string, nextConversationId: string): boolean {
   if (!previousConversationId || !nextConversationId) return false
   const base = byConversationId.get(previousConversationId)
   const materialized = materializedByConversationId.get(previousConversationId)
@@ -108,7 +97,7 @@ export function transferFrozenRequestContext(
   return true
 }
 
-/** Test helper — wipe all frozen contexts. */
+/** Test helper - wipe all frozen contexts. */
 export function resetFrozenRequestContextsForTests(): void {
   byConversationId.clear()
   materializedByConversationId.clear()
@@ -151,10 +140,7 @@ export async function getOrBuildRequestContext(
     const base = getFrozenRequestContext(conversationId)
     if (base) {
       const dynamic = await buildDynamicRequestContext(input)
-      const materialized = rememberMaterialized(
-        conversationId,
-        materializeRequestContext(base, dynamic),
-      )
+      const materialized = rememberMaterialized(conversationId, materializeRequestContext(base, dynamic))
       trace(
         `request_context: materialized conversationId=${conversationId} ` +
           `tools=${Array.isArray(materialized.context.tools) ? materialized.context.tools.length : 0} ` +

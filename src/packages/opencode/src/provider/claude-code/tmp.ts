@@ -22,10 +22,7 @@ import { log } from "./logger.js"
  */
 export const PLUGIN_TMP_PREFIX = "opencode-claude-code-"
 
-const PID_TMP_DIR = join(
-  tmpdir(),
-  `${PLUGIN_TMP_PREFIX}${process.pid}`,
-)
+const PID_TMP_DIR = join(tmpdir(), `${PLUGIN_TMP_PREFIX}${process.pid}`)
 
 /** The directory this process settled on, once resolved. */
 let currentDir: string | null = null

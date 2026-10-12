@@ -12,7 +12,7 @@ import {
   withExecutableDefault,
   withOcLaunchDefault,
   type CommandToLoad,
-} from "./cli/command-loader"
+} from "./cli/commandLoader"
 
 const rawArgs = hideBin(process.argv)
 // The native build runs the upstream in-process TUI; only oc builds rewrite to the resident launcher.

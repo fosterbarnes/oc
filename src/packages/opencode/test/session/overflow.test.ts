@@ -82,7 +82,9 @@ describe("overflow overLimit", () => {
 
   test("off and missing limit do not fire; auto=false still honors an explicit limit", () => {
     const off = { compaction: { auto: false, limit: { tokens: 100, action: "off" as const } } } as ConfigV1.Info
-    const explicit = { compaction: { auto: false, limit: { tokens: 100, action: "compact" as const } } } as ConfigV1.Info
+    const explicit = {
+      compaction: { auto: false, limit: { tokens: 100, action: "compact" as const } },
+    } as ConfigV1.Info
     const legacy = { compaction: { auto: false } } as ConfigV1.Info
     const mdl = model("openai")
     expect(overLimit({ cfg: off, tokens: tokens(150), model: mdl })).toBe(false)

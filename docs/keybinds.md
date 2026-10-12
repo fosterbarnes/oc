@@ -59,15 +59,18 @@ Bold marks keys where the oc layout differs from opencode. `-` means unbound.
 |---|---|---|
 | List available commands | `ctrl+p` | `ctrl+p` |
 
+### Palette
+
+| Action | oc | opencode |
+|---|---|---|
+| Set hotkey for the selected palette command | `ctrl+k` | `ctrl+k` |
+
 ### Oc
 
 | Action | oc | opencode |
 |---|---|---|
 | List oc commands | `ctrl+o` | `ctrl+o` |
 | New session (oc) | `ctrl+n` | `ctrl+n` |
-| Default reasoning effort | `ctrl+x v` | `ctrl+x v` |
-| Home directory | `ctrl+x o` | `ctrl+x o` |
-| Home directory sort order | `ctrl+x i` | `ctrl+x i` |
 
 ### Diff
 
@@ -145,11 +148,16 @@ Bold marks keys where the oc layout differs from opencode. `-` means unbound.
 | Switch to session in quick slot 8 | `ctrl+x 8` | `ctrl+x 8` |
 | Switch to session in quick slot 9 | `ctrl+x 9` | `ctrl+x 9` |
 
+### Stash
+
+| Action | oc | opencode |
+|---|---|---|
+| Delete stash entry | **-** | `ctrl+d` |
+
 ### Model
 
 | Action | oc | opencode |
 |---|---|---|
-| Default model | `ctrl+x d` | `ctrl+x d` |
 | Open provider list from model dialog | `ctrl+a` | `ctrl+a` |
 | Toggle model favorite status | `ctrl+f` | `ctrl+f` |
 | Move favorite model up | `shift+up` | `shift+up` |
@@ -163,18 +171,9 @@ Bold marks keys where the oc layout differs from opencode. `-` means unbound.
 
 | Action | oc | opencode |
 |---|---|---|
-| Default agent mode | `ctrl+x w` | `ctrl+x w` |
-| Default sub-agent mode | `ctrl+x j` | `ctrl+x j` |
-| Default sub-agent model | `ctrl+x k` | `ctrl+x k` |
 | List agents | `ctrl+x a` | `ctrl+x a` |
 | Next agent | `tab` | `tab` |
 | Previous agent | `shift+tab` | `shift+tab` |
-
-### Stash
-
-| Action | oc | opencode |
-|---|---|---|
-| Delete stash entry | **-** | `ctrl+d` |
 
 ### Variant
 
@@ -319,5 +318,7 @@ Bold marks keys where the oc layout differs from opencode. `-` means unbound.
 | Page which-key down | `ctrl+alt+pagedown` | `ctrl+alt+pagedown` |
 | Jump to first which-key binding | `ctrl+alt+home` | `ctrl+alt+home` |
 | Jump to last which-key binding | `ctrl+alt+end` | `ctrl+alt+end` |
+
+Palette command hotkeys are stored as `palette_keys` in tui.json. From the command list, **Set hotkey for the selected palette command** (`palette.set_hotkey`) captures a chord.
 
 <!-- keybinds:end -->

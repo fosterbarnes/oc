@@ -134,22 +134,23 @@ export function filterLogs<Message, Output>(logger: Logger.Logger<Message, Outpu
   })
 }
 
-export function filterByChannel<Message, Output>(
-  logger: Logger.Logger<Message, Output>,
-): Logger.Logger<Message, Output> {
-  return filterLogs(logger)
-}
-
 export function rotateLogFile(file: string, maxBytes = MAX_LOG_BYTES) {
   try {
     if (fs.statSync(file).size < maxBytes) return false
-    const previous = `${file}.1`
-    try {
-      fs.unlinkSync(previous)
-    } catch {}
+  } catch {
+    return false
+  }
+  const previous = `${file}.1`
+  try {
+    fs.unlinkSync(previous)
+  } catch {}
+  try {
     fs.renameSync(file, previous)
     return true
   } catch {
+    // Rotation race between processes: another process moved the log first, so the rename
+    // source vanished (ENOENT). Keep appending instead of losing the log; the file sink
+    // recreates the active file.
     return false
   }
 }

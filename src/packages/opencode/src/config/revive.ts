@@ -30,6 +30,7 @@ export type ReviveContext = {
   supervisorPid?: number
   // The launcher's parent. Worker 2 kills it to close Windows Terminal tabs and plain consoles.
   shellPid?: number
+  shellIdentity?: TuiLedger.Process
   // Native (opencode) TUI: the helper waits for its graceful shutdown before building.
   tuiPid?: number
   // First /revive answer when oc.json has no `revive.build`: build from an existing source folder,
@@ -51,6 +52,7 @@ export type RestartContext = {
   entrypoint?: string
   paneID?: string
   shellPid?: number
+  shellIdentity?: TuiLedger.Process
   waitPid?: number
   // Set after an install; worker 2 removes `.old-*` leftovers there once the old processes exit.
   installDir?: string
@@ -90,13 +92,22 @@ export function decodeContext(encoded: string) {
 
 export function parseContext(input: unknown): ReviveContext {
   const value = record(input)
-  if ((value.mode !== "install" && value.mode !== "no-install") || !TERMINALS.includes(value.terminal as string) ||
-    !text(value.directory) || !optional(value.sessionID, text) || !optional(value.paneID, text) ||
-    !optional(value.supervisorPid, pid) || !optional(value.shellPid, pid) || !optional(value.native, flag) ||
+  if (
+    (value.mode !== "install" && value.mode !== "no-install") ||
+    !TERMINALS.includes(value.terminal as string) ||
+    !text(value.directory) ||
+    !optional(value.sessionID, text) ||
+    !optional(value.paneID, text) ||
+    !optional(value.supervisorPid, pid) ||
+    !optional(value.shellPid, pid) ||
+    !optional(value.native, flag) ||
     !optional(value.tuiPid, pid) ||
+    !optional(value.shellIdentity, processIdentity) ||
+    (value.shellIdentity !== undefined && (value.shellIdentity as TuiLedger.Process).pid !== value.shellPid) ||
     !optional(value.source, (item) => item === "existing" || item === "download" || item === "none") ||
-    ((value.source === "existing" || value.source === "download") !==
-      (text(value.sourceDir) && path.isAbsolute(value.sourceDir as string)))) {
+    (value.source === "existing" || value.source === "download") !==
+      (text(value.sourceDir) && path.isAbsolute(value.sourceDir as string))
+  ) {
     throw new Error("Invalid revive context")
   }
   return value as ReviveContext
@@ -104,12 +115,23 @@ export function parseContext(input: unknown): ReviveContext {
 
 export function decodeRestart(encoded: string): RestartContext {
   const value = record(JSON.parse(Buffer.from(encoded, "base64url").toString("utf8")))
-  if (!TERMINALS.includes(value.terminal as string) || !LAUNCHERS.includes(value.launcher as Launcher) ||
-    !text(value.executable) || !optional(value.entrypoint, text) || !optional(value.paneID, text) ||
-    !optional(value.shellPid, pid) || !optional(value.waitPid, pid) || !optional(value.installDir, text) ||
+  if (
+    !TERMINALS.includes(value.terminal as string) ||
+    !LAUNCHERS.includes(value.launcher as Launcher) ||
+    !text(value.executable) ||
+    !optional(value.entrypoint, text) ||
+    !optional(value.paneID, text) ||
+    !optional(value.shellPid, pid) ||
+    !optional(value.waitPid, pid) ||
+    !optional(value.installDir, text) ||
     !optional(value.native, flag) ||
-    !optional(value.directory, text) || !optional(value.sessionID, text) || !optional(value.tabs, tabList) ||
-    (value.native === true && !text(value.directory))) {
+    !optional(value.shellIdentity, processIdentity) ||
+    (value.shellIdentity !== undefined && (value.shellIdentity as TuiLedger.Process).pid !== value.shellPid) ||
+    !optional(value.directory, text) ||
+    !optional(value.sessionID, text) ||
+    !optional(value.tabs, tabList) ||
+    (value.native === true && !text(value.directory))
+  ) {
     throw new Error("Invalid revive restart context")
   }
   return value as RestartContext
@@ -126,12 +148,16 @@ export function decodeTabs(encoded: string) {
  * Maps the panes of the window that holds `paneID` to restorable tabs. Rows keep `wezterm cli list` order,
  * which is tab order; a split tab contributes only its first pane. A pane with a ledger record is an oc tab.
  */
-export function windowTabs(listJson: string, records: Pick<TuiLedger.Record, "paneID" | "directory" | "sessionID">[],
-  paneID: string): Tab[] {
+export function windowTabs(
+  listJson: string,
+  records: Pick<TuiLedger.Record, "paneID" | "directory" | "sessionID">[],
+  paneID: string,
+): Tab[] {
   const panes = JSON.parse(listJson) as Array<{ window_id: number; tab_id: number; pane_id: number; cwd: string }>
   const window = panes.find((pane) => String(pane.pane_id) === paneID)?.window_id
   if (window === undefined) return []
-  const tabs = panes.filter((pane) => pane.window_id === window)
+  const tabs = panes
+    .filter((pane) => pane.window_id === window)
     .filter((pane, index, all) => all.findIndex((other) => other.tab_id === pane.tab_id) === index)
   return tabs.map((pane): Tab => {
     const record = records.find((item) => item.paneID === String(pane.pane_id) && item.directory !== undefined)
@@ -162,10 +188,12 @@ export function parseLauncher(input: unknown): Launcher {
  */
 export function parseBuild(input: unknown): BuildConfig | undefined {
   if (input === undefined || input === false) return undefined
-  const value = typeof input === "object" && input !== null && !Array.isArray(input) ? input as Record<string, unknown> : {}
+  const value =
+    typeof input === "object" && input !== null && !Array.isArray(input) ? (input as Record<string, unknown>) : {}
   if (!text(value.source) || !path.isAbsolute(value.source as string))
     throw new Error("revive.build.source must be the absolute path of an oc source folder")
-  if (!optional(value.debug, (item) => typeof item === "boolean")) throw new Error("revive.build.debug must be true or false")
+  if (!optional(value.debug, (item) => typeof item === "boolean"))
+    throw new Error("revive.build.debug must be true or false")
   return { source: value.source as string, debug: value.debug === true }
 }
 
@@ -176,14 +204,30 @@ export function buildSteps(build: BuildConfig) {
   const dist = path.join(cwd, "packages", "opencode", "dist")
   return {
     cwd,
-    commands: [["bun", "install"],
-      ["bun", "run", BUILD_SCRIPT, "--single", ...(build.debug ? ["--with-debug"] : [])]],
+    commands: [
+      ["bun", "install"],
+      ["bun", "run", BUILD_SCRIPT, "--single", ...(build.debug ? ["--with-debug"] : [])],
+    ],
     // The native build ships only its executable; it shares the oc build's support files.
-    output: [path.join(dist, `opencode-${platform}-${process.arch}`, "bin"),
-      path.join(dist, `opencode-native-${platform}-${process.arch}`, "bin",
-        process.platform === "win32" ? "opencode.exe" : "opencode"),
-      ...(build.debug ? [path.join(dist, `opencode-debug-${platform}-${process.arch}`, "bin",
-        process.platform === "win32" ? "ocdebug.exe" : "ocdebug")] : [])],
+    output: [
+      path.join(dist, `opencode-${platform}-${process.arch}`, "bin"),
+      path.join(
+        dist,
+        `opencode-native-${platform}-${process.arch}`,
+        "bin",
+        process.platform === "win32" ? "opencode.exe" : "opencode",
+      ),
+      ...(build.debug
+        ? [
+            path.join(
+              dist,
+              `opencode-debug-${platform}-${process.arch}`,
+              "bin",
+              process.platform === "win32" ? "ocdebug.exe" : "ocdebug",
+            ),
+          ]
+        : []),
+    ],
   }
 }
 
@@ -215,29 +259,51 @@ export function reopenCommand(restart: RestartContext) {
   const tabs = restart.terminal === "wezterm" && restart.tabs && restart.tabs.length > 1 ? restart.tabs : undefined
   const entrypoint = restart.entrypoint ? [restart.entrypoint] : []
   const command = restart.native
-    ? [nativeExecutable(restart.executable), ...entrypoint, restart.directory!,
-      ...(restart.sessionID ? ["--session", restart.sessionID] : [])]
-    : [restart.executable, ...entrypoint, "oc",
-      ...(tabs ? ["revive-tabs", encode(tabs)]
-        : restart.launcher === "occ" ? ["previous", "--depth", "1"] : ["launch"])]
+    ? [
+        nativeExecutable(restart.executable),
+        ...entrypoint,
+        restart.directory!,
+        ...(restart.sessionID ? ["--session", restart.sessionID] : []),
+      ]
+    : [
+        restart.executable,
+        ...entrypoint,
+        "oc",
+        ...(tabs
+          ? ["revive-tabs", encode(tabs)]
+          : restart.launcher === "occ"
+            ? ["previous", "--depth", "1"]
+            : ["launch"]),
+      ]
   // Compiled builds bake the flavor in; a Bun dev run needs it in the environment.
   const flavor: Record<string, string> = { OC_FLAVOR: restart.native ? "native" : "oc" }
   if (restart.terminal === "wezterm") {
     // A fresh GUI process reloads wezterm.lua and inherits this environment instead of an unrelated mux server's.
     // wezterm-gui, not the console-subsystem wezterm CLI: that one would show its own console window
     // for as long as the new GUI runs.
-    return { file: "wezterm-gui", args: ["start", "--always-new-process", "--", ...command],
-      env: flavor, windowsVerbatimArguments: false }
+    return {
+      file: "wezterm-gui",
+      args: ["start", "--always-new-process", "--", ...command],
+      env: flavor,
+      windowsVerbatimArguments: false,
+    }
   }
   if (restart.terminal === "windows-terminal") {
-    return { file: "wt.exe", args: ["-w", "new", "new-tab", ...command.map((arg) => arg.replaceAll(";", "\\;"))],
-      env: flavor, windowsVerbatimArguments: false }
+    return {
+      file: "wt.exe",
+      args: ["-w", "new", "new-tab", ...command.map((arg) => arg.replaceAll(";", "\\;"))],
+      env: flavor,
+      windowsVerbatimArguments: false,
+    }
   }
   // Expand paths once through env vars, so percent signs and shell metacharacters stay literal.
   const env = { ...flavor, ...Object.fromEntries(command.map((arg, index) => [`OC_REVIVE_ARG_${index}`, arg])) }
-  return { file: "cmd.exe", args: ["/d", "/v:off", "/c",
-    `start "" ${command.map((_, index) => `"%OC_REVIVE_ARG_${index}%"`).join(" ")}`],
-    env, windowsVerbatimArguments: true }
+  return {
+    file: "cmd.exe",
+    args: ["/d", "/v:off", "/c", `start "" ${command.map((_, index) => `"%OC_REVIVE_ARG_${index}%"`).join(" ")}`],
+    env,
+    windowsVerbatimArguments: true,
+  }
 }
 
 /** Lists what each build output provides: a directory's children, or a file itself. Runs before shutdown. */
@@ -264,11 +330,20 @@ export async function installSources(output: readonly string[]) {
  * are relinked to the new file. Any failure removes what was placed and restores the old names.
  */
 export async function install(sources: readonly InstallSource[], directory: string, stamp = Date.now()) {
-  const aliases = await aliasNames(directory, sources.map((source) => source.name))
+  const aliases = await aliasNames(
+    directory,
+    sources.map((source) => source.name),
+  )
   const moved: Array<{ from: string; to: string }> = []
   const placed: string[] = []
   const aside = async (target: string) => {
-    if (!(await fsp.lstat(target).then(() => true, () => false))) return
+    if (
+      !(await fsp.lstat(target).then(
+        () => true,
+        () => false,
+      ))
+    )
+      return
     const to = `${target}.old-${stamp}`
     await retry(() => fsp.rename(target, to))
     moved.push({ from: target, to })
@@ -293,8 +368,8 @@ export async function install(sources: readonly InstallSource[], directory: stri
       await retry(() => fsp.rm(target, { recursive: true, force: true })).catch(() => failed.push(target))
     for (const item of moved.toReversed())
       await retry(() => fsp.rename(item.to, item.from)).catch(() => failed.push(item.to))
-    if (failed.length) throw new Error(`Install failed and rollback is incomplete; fix by hand: ${failed.join(", ")}`,
-      { cause: error })
+    if (failed.length)
+      throw new Error(`Install failed and rollback is incomplete; fix by hand: ${failed.join(", ")}`, { cause: error })
     throw error
   }
 }
@@ -302,20 +377,29 @@ export async function install(sources: readonly InstallSource[], directory: stri
 /** Best-effort removal of `.old-*` files left by installs; returns names still in use. */
 export async function removeLeftovers(directory: string) {
   const names = (await fsp.readdir(directory)).filter((name) => LEFTOVER.test(name))
-  const results = await Promise.allSettled(names.map((name) => fsp.rm(path.join(directory, name), { recursive: true, force: true })))
+  const results = await Promise.allSettled(
+    names.map((name) => fsp.rm(path.join(directory, name), { recursive: true, force: true })),
+  )
   return names.filter((_, index) => results[index].status === "rejected")
 }
 
 // Other names in `directory` that share a file identity with a file being replaced.
 async function aliasNames(directory: string, targets: readonly string[]) {
   const lower = new Set(targets.map((name) => name.toLowerCase()))
-  const files = await Promise.all((await fsp.readdir(directory, { withFileTypes: true }))
-    .filter((entry) => entry.isFile() && !LEFTOVER.test(entry.name))
-    .map(async (entry) => ({ name: entry.name, stat: await fsp.stat(path.join(directory, entry.name), { bigint: true }) })))
+  const files = await Promise.all(
+    (await fsp.readdir(directory, { withFileTypes: true }))
+      .filter((entry) => entry.isFile() && !LEFTOVER.test(entry.name))
+      .map(async (entry) => ({
+        name: entry.name,
+        stat: await fsp.stat(path.join(directory, entry.name), { bigint: true }),
+      })),
+  )
   return files.flatMap((file) => {
     if (lower.has(file.name.toLowerCase())) return []
-    const target = files.find((other) => lower.has(other.name.toLowerCase()) &&
-      other.stat.ino === file.stat.ino && other.stat.dev === file.stat.dev)
+    const target = files.find(
+      (other) =>
+        lower.has(other.name.toLowerCase()) && other.stat.ino === file.stat.ino && other.stat.dev === file.stat.dev,
+    )
     return target ? [{ name: file.name, target: target.name }] : []
   })
 }
@@ -323,7 +407,10 @@ async function aliasNames(directory: string, targets: readonly string[]) {
 // Defender and indexers briefly hold freshly written executables.
 async function retry<T>(action: () => Promise<T>) {
   for (let attempt = 1; ; attempt++) {
-    const result = await action().then((value) => ({ value }), (error: NodeJS.ErrnoException) => ({ error }))
+    const result = await action().then(
+      (value) => ({ value }),
+      (error: NodeJS.ErrnoException) => ({ error }),
+    )
     if ("value" in result) return result.value
     if (attempt >= 5 || !["EBUSY", "EPERM", "EACCES"].includes(result.error.code ?? "")) throw result.error
     await Bun.sleep(200 * attempt)
@@ -345,6 +432,19 @@ function pid(value: unknown) {
 
 function flag(value: unknown) {
   return typeof value === "boolean"
+}
+
+function processIdentity(value: unknown) {
+  if (typeof value !== "object" || value === null) return false
+  const item = value as TuiLedger.Process
+  return (
+    pid(item.pid) &&
+    Number.isInteger(item.parentPid) &&
+    text(item.executable) &&
+    Number.isFinite(item.startedAt) &&
+    typeof item.created === "string" &&
+    /^\d+$/.test(item.created)
+  )
 }
 
 function tabList(value: unknown): value is Tab[] {

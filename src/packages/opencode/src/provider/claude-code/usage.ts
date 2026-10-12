@@ -2,10 +2,7 @@
  * Mapping the Claude CLI's own counters onto the AI SDK's usage and finish
  * shapes.
  */
-import type {
-  LanguageModelV3FinishReason,
-  LanguageModelV3Usage,
-} from "@ai-sdk/provider"
+import type { LanguageModelV3FinishReason, LanguageModelV3Usage } from "@ai-sdk/provider"
 import type { ClaudeStreamMessage } from "./types.js"
 
 type CallUsage = NonNullable<ClaudeStreamMessage["usage"]>
@@ -62,9 +59,7 @@ export function toUsage(rawUsage?: ClaudeStreamMessage["usage"]): LanguageModelV
   }
 }
 
-export function toFinishReason(
-  reason: "stop" | "tool-calls" | "error" = "stop",
-): LanguageModelV3FinishReason {
+export function toFinishReason(reason: "stop" | "tool-calls" | "error" = "stop"): LanguageModelV3FinishReason {
   return {
     unified: reason,
     raw: reason,

@@ -24,6 +24,8 @@ import * as HttpSessionError from "../../src/server/routes/instance/httpapi/hand
 import { ExperimentalPaths } from "../../src/server/routes/instance/httpapi/groups/experimental"
 import { SessionPaths } from "../../src/server/routes/instance/httpapi/groups/session"
 import { Session } from "@/session/session"
+import { SessionRunState } from "@/session/run-state"
+import { EventV2Bridge } from "@/event-v2-bridge"
 import { MessageID, PartID, SessionID, type SessionID as SessionIDType } from "../../src/session/schema"
 import { Database } from "@opencode-ai/core/database/database"
 import { SessionMessageTable, SessionTable } from "@opencode-ai/core/session/sql"
@@ -44,7 +46,10 @@ const noopBootstrapLayer = Layer.succeed(
   InstanceBootstrapService.Service.of({ run: Effect.void }),
 )
 const appLayer = AppNodeBuilder.build(
-  LayerNode.group([InstanceStore.node, Project.node, Session.node, Workspace.node, Database.node, Ripgrep.node]),
+  LayerNode.group([
+    InstanceStore.node, Project.node, Session.node, SessionRunState.node,
+    EventV2Bridge.node, Workspace.node, Database.node, Ripgrep.node,
+  ]),
   [[InstanceStore.bootstrapNode, noopBootstrapLayer]],
 )
 const servedRoutes: Layer.Layer<never, Config.ConfigError, HttpServer.HttpServer> = HttpRouter.serve(
@@ -235,6 +240,37 @@ afterEach(async () => {
 })
 
 describe("session HttpApi", () => {
+  it.instance("returns 409 for prompts and commands during session maintenance", () =>
+    Effect.gen(function* () {
+      const test = yield* TestInstance
+      const session = yield* createSession({ title: "maintenance" })
+      const state = yield* SessionRunState.Service
+      const headers = { "x-opencode-directory": test.directory, "content-type": "application/json" }
+      yield* state.maintenance(session.id, Effect.gen(function* () {
+        for (const [route, payload] of [
+          [SessionPaths.prompt, { model: { providerID: "test", modelID: "test-model" }, parts: [{ type: "text", text: "hello" }] }],
+          [SessionPaths.command, { command: "blocked", arguments: "", model: "test/test-model" }],
+        ] as const) {
+          const response = yield* request(pathFor(route, { sessionID: session.id }), {
+            method: "POST", headers, body: JSON.stringify(payload),
+          })
+          expect(response.status).toBe(409)
+          expect(yield* responseJson(response)).toMatchObject({
+            _tag: "SessionBusyError", sessionID: session.id, message: `Session is busy: ${session.id}`,
+          })
+        }
+        expect(yield* Session.use.messages({ sessionID: session.id })).toEqual([])
+      }))
+      const invalid = yield* request(pathFor(SessionPaths.prompt, { sessionID: session.id }), {
+        method: "POST", headers, body: JSON.stringify({ parts: "invalid" }),
+      })
+      expect(invalid.status).toBe(400)
+    }),
+    { git: true, config: {
+      ...testProviderConfig("http://127.0.0.1:1"), command: { blocked: { template: "hello" } },
+    } },
+  )
+
   it.effect("maps busy sessions to public session busy errors", () =>
     Effect.gen(function* () {
       const sessionID = SessionID.descending()
@@ -248,6 +284,47 @@ describe("session HttpApi", () => {
           message: `Session is busy: ${sessionID}`,
         })
       }
+    }),
+  )
+
+  it.instance("lists and switches Claude pool accounts", () =>
+    Effect.gen(function* () {
+      const test = yield* TestInstance
+      const headers = { "x-opencode-directory": test.directory, "content-type": "application/json" }
+
+      const state = yield* requestJson<{ accounts: { id: string; current: boolean }[] }>(SessionPaths.claudeAccount, {
+        headers,
+      })
+      expect(state.accounts.map((account) => account.id)).toEqual(["default"])
+
+      const set = yield* request(SessionPaths.claudeAccount, {
+        method: "PUT",
+        headers,
+        body: JSON.stringify({ id: "nope" }),
+      })
+      expect(set.status).toBe(400)
+
+      const picked = yield* request(SessionPaths.claudeAccount, {
+        method: "PUT",
+        headers,
+        body: JSON.stringify({ id: "default" }),
+      })
+      expect(picked.status).toBe(200)
+
+      const pinned = yield* request(SessionPaths.claudeAccount, {
+        method: "PUT",
+        headers,
+        body: JSON.stringify({ id: "default", sessionID: "ses_pin" }),
+      })
+      expect(pinned.status).toBe(200)
+      const unpinned = yield* request(SessionPaths.claudeAccount, {
+        method: "PUT",
+        headers,
+        body: JSON.stringify({ sessionID: "ses_pin" }),
+      })
+      expect(unpinned.status).toBe(200)
+      const noId = yield* request(SessionPaths.claudeAccount, { method: "PUT", headers, body: "{}" })
+      expect(noId.status).toBe(400)
     }),
   )
 
@@ -694,6 +771,15 @@ describe("session HttpApi", () => {
         })
         expect(created).toMatchObject({ sessionComplete: false, sessionFailed: false, sessionInProgress: false })
         const updatePath = pathFor(SessionPaths.update, { sessionID: created.id })
+        const events = yield* EventV2Bridge.Service
+        const updates: (typeof Session.Event.Updated.data.Type)["info"][] = []
+        const off = yield* events.listen((event) => {
+          if (event.type !== Session.Event.Updated.type) return Effect.void
+          const data = event.data as typeof Session.Event.Updated.data.Type
+          if (data.sessionID === created.id) updates.push(data.info)
+          return Effect.void
+        })
+        yield* Effect.addFinalizer(() => off)
         const transitions = [
           { payload: { sessionInProgress: true }, active: "sessionInProgress" },
           { payload: { title: "renamed" }, active: "sessionInProgress" },
@@ -708,12 +794,14 @@ describe("session HttpApi", () => {
           { payload: { sessionInProgress: false }, active: "sessionFailed" },
           { payload: { sessionFailed: false }, active: undefined },
           { payload: { sessionComplete: true, sessionFailed: true }, active: "sessionFailed" },
+          { payload: { sessionComplete: false, sessionFailed: true, sessionInProgress: false }, active: "sessionFailed" },
           {
             payload: { sessionComplete: true, sessionFailed: true, sessionInProgress: true },
             active: "sessionInProgress",
           },
         ]
         for (const transition of transitions) {
+          updates.length = 0
           const updated = yield* requestJson<Session.Info>(updatePath, {
             method: "PATCH",
             headers,
@@ -726,6 +814,8 @@ describe("session HttpApi", () => {
             time: { updated: created.time.updated },
           }
           expect(updated).toMatchObject(expected)
+          expect(updates).toHaveLength(1)
+          expect(updates[0]).toMatchObject(expected)
           expect(yield* requestJson<Session.Info>(updatePath, { headers })).toMatchObject(expected)
           expect(
             (yield* requestJson<{ data: Session.Info }>(`/api/session/${created.id}`, { headers })).data,

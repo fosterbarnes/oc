@@ -1,15 +1,17 @@
 import { createMemo } from "solid-js"
 import { DialogSelect, type DialogSelectRef } from "../ui/dialog-select"
-import { type DialogContext } from "../ui/dialog"
+import { type DialogContext, useDialog } from "../ui/dialog"
 import {
   COMMAND_PALETTE_COMMAND,
   formatKeyBindings,
   type OpenTuiKeymap,
+  useBindings,
   useKeymapSelector,
   useOpencodeKeymap,
 } from "../keymap"
 import { useTuiConfig } from "../config"
 import { useSync } from "../context/sync"
+import { DialogHotkey } from "./dialogHotkey"
 
 type PaletteCommandEntry = ReturnType<OpenTuiKeymap["getCommandEntries"]>[number]
 
@@ -62,6 +64,7 @@ function isSuggestedPaletteCommand(entry: PaletteCommandEntry) {
 export function CommandPaletteDialog(props: { category?: string } = {}) {
   const config = useTuiConfig()
   const sync = useSync()
+  const dialog = useDialog()
   const keymap = useOpencodeKeymap()
   const entries = useKeymapSelector((keymap: OpenTuiKeymap) => {
     const query = {
@@ -90,6 +93,7 @@ export function CommandPaletteDialog(props: { category?: string } = {}) {
       footer: formatKeyBindings(entry.bindings, config),
       value: entry.command.name,
       suggested: isSuggestedPaletteCommand(entry),
+      gutter: entry.command.submenu === true ? () => <text>▸</text> : undefined,
       onSelect: (dialog: DialogContext) => {
         dialog.clear()
         keymap.dispatchCommand(entry.command.name)
@@ -98,6 +102,24 @@ export function CommandPaletteDialog(props: { category?: string } = {}) {
   )
 
   let ref: DialogSelectRef<string>
+  useBindings(() => ({
+    mode: "modal",
+    commands: [
+      {
+        name: "palette.set_hotkey",
+        title: "Set hotkey for selected command",
+        category: "Dialog",
+        run() {
+          const selected = ref?.selected
+          if (!selected) return
+          const name = selected.value
+          if (!name) return
+          dialog.replace(() => <DialogHotkey command={name} title={selected.title} />)
+        },
+      },
+    ],
+    bindings: config.keybinds.gather("palette", ["palette.set_hotkey"]),
+  }))
   const list = () => {
     if (ref?.filter) return options()
     return [
@@ -105,7 +127,6 @@ export function CommandPaletteDialog(props: { category?: string } = {}) {
         .filter((option) => option.suggested)
         .map((option) => ({
           ...option,
-          value: `suggested:${option.value}`,
           category: "Suggested",
         })),
       ...options(),

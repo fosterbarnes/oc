@@ -7,12 +7,21 @@ import { HeaderButton } from "../../src/routes/session/sidebar-tools/headerButto
 test("minimal buttons stay single-line on hover and after changing styles", async () => {
   const [outlined, setOutlined] = createSignal(false)
   let clicks = 0
-  const app = await testRender(() => (
-    <box flexDirection="column">
-      <HeaderButton value="Switch Session" outlined={outlined()} color="#AC98C7" hoverColor="#FFFFFF" onClick={() => clicks++} />
-      <text>Next row</text>
-    </box>
-  ), { width: 40, height: 8 })
+  const app = await testRender(
+    () => (
+      <box flexDirection="column">
+        <HeaderButton
+          value="Switch Session"
+          outlined={outlined()}
+          color="#AC98C7"
+          hoverColor="#FFFFFF"
+          onClick={() => clicks++}
+        />
+        <text>Next row</text>
+      </box>
+    ),
+    { width: 40, height: 8 },
+  )
   try {
     await app.renderOnce()
     const minimal = app.captureCharFrame()
@@ -41,12 +50,21 @@ test("minimal buttons stay single-line on hover and after changing styles", asyn
 
 test.each([false, true])("button text cannot be selected in outlined=%s", async (outlined) => {
   let clicks = 0
-  const app = await testRender(() => (
-    <box flexDirection="column">
-      <HeaderButton value="Switch Session" outlined={outlined} color="#AC98C7" hoverColor="#FFFFFF" onClick={() => clicks++} />
-      <text>Selectable text</text>
-    </box>
-  ), { width: 40, height: 8 })
+  const app = await testRender(
+    () => (
+      <box flexDirection="column">
+        <HeaderButton
+          value="Switch Session"
+          outlined={outlined}
+          color="#AC98C7"
+          hoverColor="#FFFFFF"
+          onClick={() => clicks++}
+        />
+        <text>Selectable text</text>
+      </box>
+    ),
+    { width: 40, height: 8 },
+  )
   try {
     await app.renderOnce()
     const y = outlined ? 1 : 0
@@ -66,13 +84,22 @@ test.each([false, true])("button text cannot be selected in outlined=%s", async 
 
 test("minimal prefixes align and stay single-line within a narrow sidebar", async () => {
   const [width, setWidth] = createSignal(24)
-  const app = await testRender(() => (
-    <box flexDirection="column" width={width()}>
-      <HeaderButton value="Switch Session" outlined={false} color="#AC98C7" hoverColor="#FFFFFF" onClick={() => {}} />
-      <HeaderButton value="A longer model label" outlined={false} color="#AC98C7" hoverColor="#FFFFFF" onClick={() => {}} />
-      <HeaderButton value="low" outlined={false} color="#AC98C7" hoverColor="#FFFFFF" onClick={() => {}} />
-    </box>
-  ), { width: 40, height: 8 })
+  const app = await testRender(
+    () => (
+      <box flexDirection="column" width={width()}>
+        <HeaderButton value="Switch Session" outlined={false} color="#AC98C7" hoverColor="#FFFFFF" onClick={() => {}} />
+        <HeaderButton
+          value="A longer model label"
+          outlined={false}
+          color="#AC98C7"
+          hoverColor="#FFFFFF"
+          onClick={() => {}}
+        />
+        <HeaderButton value="low" outlined={false} color="#AC98C7" hoverColor="#FFFFFF" onClick={() => {}} />
+      </box>
+    ),
+    { width: 40, height: 8 },
+  )
   try {
     await app.renderOnce()
     const rows = app.captureCharFrame().split("\n")
@@ -95,12 +122,28 @@ test("inline model and reasoning buttons stay independently clickable", async ()
   const clicks: string[] = []
   const [width, setWidth] = createSignal(40)
   const [model, setModel] = createSignal("GPT-6.1 Sol")
-  const app = await testRender(() => (
-    <box flexDirection="row" gap={1} width={width()}>
-      <HeaderButton value={model()} outlined={false} color="#AC98C7" hoverColor="#FFFFFF" onClick={() => clicks.push("model")} />
-      <HeaderButton value="low" secondary outlined={false} color="#AC98C7" hoverColor="#FFFFFF" onClick={() => clicks.push("reasoning")} />
-    </box>
-  ), { width: 40, height: 8 })
+  const app = await testRender(
+    () => (
+      <box flexDirection="row" gap={1} width={width()}>
+        <HeaderButton
+          value={model()}
+          outlined={false}
+          color="#AC98C7"
+          hoverColor="#FFFFFF"
+          onClick={() => clicks.push("model")}
+        />
+        <HeaderButton
+          value="low"
+          secondary
+          outlined={false}
+          color="#AC98C7"
+          hoverColor="#FFFFFF"
+          onClick={() => clicks.push("reasoning")}
+        />
+      </box>
+    ),
+    { width: 40, height: 8 },
+  )
   try {
     await app.renderOnce()
     const initial = app.captureCharFrame()

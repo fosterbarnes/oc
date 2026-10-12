@@ -1,47 +1,10 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
-import { chmod, lstat, mkdir, readlink, symlink, writeFile } from "node:fs/promises"
 import path from "node:path"
 import { Global } from "@opencode-ai/core/global"
 import { log } from "./logger.js"
 
 export const BASE_PROVIDER_ID = "claude-code"
 export const DEFAULT_ACCOUNT = "default"
-
-const SHARED_CAPABILITY_ITEMS = [
-  "CLAUDE.md",
-  "settings.json",
-  "skills",
-  "agents",
-  "commands",
-  "plugins",
-]
-
-export function normalizeAccountName(account: string): string {
-  return account
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-}
-
-export function accountConfigDir(account: string): string | undefined {
-  const normalized = normalizeAccountName(account)
-
-  if (!normalized || normalized === DEFAULT_ACCOUNT) return undefined
-
-  return `~/.claude-${normalized}`
-}
-
-/**
- * Absolute `CLAUDE_CONFIG_DIR` for an account, or undefined for the default
- * account, which leaves the CLI on its own `~/.claude`. Used where a caller
- * needs to know what the *spawn* will read (skills, plugins) rather than to
- * set the variable itself.
- */
-export function accountConfigDirPath(account: string): string | undefined {
-  const dir = accountConfigDir(account)
-  return dir ? expandHome(dir) : undefined
-}
 
 export function expandHome(value: string): string {
   const home = process.env.HOME ?? process.env.USERPROFILE
@@ -55,151 +18,13 @@ export function expandHome(value: string): string {
   return value
 }
 
-export async function ensureAccountRuntime(
-  account: string,
-  baseCliPath: string,
-): Promise<{ cliPath: string; configDir?: string }> {
-  const configDir = accountConfigDir(account)
-
-  if (!configDir) return { cliPath: baseCliPath }
-
-  const expandedConfigDir = expandHome(configDir)
-  await mkdir(expandedConfigDir, { recursive: true })
-
-  try {
-    await ensureSharedCapabilities(expandedConfigDir)
-  } catch (err) {
-    log.warn("failed to symlink shared capabilities; continuing anyway", {
-      account,
-      configDir: expandedConfigDir,
-      error: String(err),
-    })
-  }
-
-  const cliPath = await writeAccountWrapper(
-    normalizeAccountName(account),
-    baseCliPath,
-    expandedConfigDir,
-  )
-
-  return { cliPath, configDir: expandedConfigDir }
-}
-
-async function ensureSharedCapabilities(targetRoot: string): Promise<void> {
-  const sourceRoot = expandHome("~/.claude")
-
-  for (const item of SHARED_CAPABILITY_ITEMS) {
-    await ensureSharedCapabilityItem(sourceRoot, targetRoot, item)
-  }
-}
-
-async function ensureSharedCapabilityItem(
-  sourceRoot: string,
-  targetRoot: string,
-  item: string,
-): Promise<void> {
-  const source = path.join(sourceRoot, item)
-  const target = path.join(targetRoot, item)
-
-  let sourceStat
-  try {
-    sourceStat = await lstat(source)
-  } catch {
-    return
-  }
-
-  try {
-    const targetStat = await lstat(target)
-
-    if (targetStat.isSymbolicLink()) {
-      const current = await readlink(target)
-      const resolvedCurrent = path.resolve(path.dirname(target), current)
-      const resolvedSource = path.resolve(source)
-
-      if (resolvedCurrent === resolvedSource) return
-    }
-
-    log.warn("shared Claude capability already exists; leaving untouched", {
-      item,
-      target,
-      source,
-    })
-
-    return
-  } catch {
-    // Missing target is expected.
-  }
-
-  const type = sourceStat.isDirectory()
-    ? process.platform === "win32"
-      ? "junction"
-      : "dir"
-    : "file"
-
-  await symlink(source, target, type)
-}
-
-// The wrapper is a bash script, so extra accounts are Mac/Linux only; Windows cannot exec it.
-async function writeAccountWrapper(
-  account: string,
-  baseCliPath: string,
-  configDir: string,
-): Promise<string> {
-  const cacheRoot = path.join(
-    process.env.XDG_CACHE_HOME ?? expandHome("~/.cache"),
-    "opencode-claude-code-plugin",
-  )
-  const wrapperPath = path.join(cacheRoot, `claude-${account}`)
-  const suffix = `@${account}`
-
-  await mkdir(cacheRoot, { recursive: true })
-
-  const script = `#!/usr/bin/env bash
-set -euo pipefail
-
-args=()
-while [[ $# -gt 0 ]]; do
-  if [[ "$1" == "--model" && $# -ge 2 ]]; then
-    model="$2"
-    if [[ "$model" == *${shellDoubleQuote(suffix)} ]]; then
-      model="\${model%${shellDoubleQuote(suffix)}}"
-    fi
-    args+=("$1" "$model")
-    shift 2
-  else
-    args+=("$1")
-    shift
-  fi
-done
-
-export CLAUDE_CONFIG_DIR=${shellSingleQuote(configDir)}
-# \${args[@]+...} keeps an empty array legal under \`set -u\` on bash 3.2,
-# which is the bash macOS ships and \`/usr/bin/env bash\` usually finds.
-exec ${shellSingleQuote(baseCliPath)} \${args[@]+"\${args[@]}"}
-`
-
-  await writeFile(wrapperPath, script, "utf8")
-  await chmod(wrapperPath, 0o755)
-
-  return wrapperPath
-}
-
-function shellSingleQuote(value: string): string {
-  return `'${value.replace(/'/g, `'"'"'`)}'`
-}
-
-function shellDoubleQuote(value: string): string {
-  return value.replace(/[$`"\\]/g, "\\$&")
-}
-
-
 // ---------------------------------------------------------------------------
 // Account pool
 //
 // The `accounts` provider option lists Claude config dirs in order, e.g.
 // `["~/.claude", "~/.claudeSecond"]`. Every chat uses the current account
 // until the CLI rejects a request for usage, then moves to the next account
-// whose limit has not been hit (turn-stream.ts). An account's id is its
+// whose limit has not been hit (turnStream.ts). An account's id is its
 // resolved config dir, or `default` for the CLI's own `~/.claude`, which
 // spawns with the inherited environment.
 // ---------------------------------------------------------------------------
@@ -212,6 +37,8 @@ const DEFAULT_USAGE_CACHE_DIR = path.join(expandHome("~/.cache"), "opencode")
 const IN_TEST = process.env.BUN_TEST != null
 
 const limitedUntil = new Map<string, number>()
+/** opencode session id -> pool account id. A pinned chat ignores the global current account. */
+const sessionAccounts = new Map<string, string>()
 let currentAccount: string | undefined
 let poolFile: string | null = IN_TEST ? null : DEFAULT_POOL_FILE
 let cacheDir: string | null = IN_TEST ? null : DEFAULT_USAGE_CACHE_DIR
@@ -220,9 +47,19 @@ let seeded = false
 
 export function poolAccountIds(accounts: string[] | undefined): string[] {
   const defaultDir = path.resolve(expandHome("~/.claude"))
+  const inherited = process.env.CLAUDE_CONFIG_DIR ? path.resolve(process.env.CLAUDE_CONFIG_DIR) : undefined
+  // Windows paths compare case-insensitively; elsewhere exactly.
+  const sameDir = (a: string, b: string) =>
+    process.platform === "win32" ? a.toLowerCase() === b.toLowerCase() : a === b
   const ids = (accounts ?? []).map((dir) => {
     const resolved = path.resolve(expandHome(dir))
-    return resolved === defaultDir ? DEFAULT_ACCOUNT : resolved
+    // The default account spawns with the inherited environment, so an
+    // explicit entry for the same dir (however cased, or via an inherited
+    // CLAUDE_CONFIG_DIR) is that account, not a second pool entry whose
+    // limit marks would never meet the default's.
+    if (sameDir(resolved, defaultDir)) return DEFAULT_ACCOUNT
+    if (inherited && sameDir(resolved, inherited)) return DEFAULT_ACCOUNT
+    return resolved
   })
   return ids.length ? [...new Set(ids)] : [DEFAULT_ACCOUNT]
 }
@@ -244,8 +81,14 @@ function readPersist(now: number): void {
     const raw = JSON.parse(readFileSync(poolFile, "utf8")) as {
       currentAccount?: unknown
       limitedUntil?: unknown
+      sessionAccounts?: unknown
     }
     if (typeof raw.currentAccount === "string" && raw.currentAccount) currentAccount = raw.currentAccount
+    if (raw.sessionAccounts && typeof raw.sessionAccounts === "object") {
+      for (const [session, id] of Object.entries(raw.sessionAccounts as Record<string, unknown>)) {
+        if (typeof id === "string" && id) sessionAccounts.set(session, id)
+      }
+    }
     if (!raw.limitedUntil || typeof raw.limitedUntil !== "object") return
     for (const [id, until] of Object.entries(raw.limitedUntil as Record<string, unknown>)) {
       if (typeof until !== "number" || !Number.isFinite(until) || until <= now) continue
@@ -269,6 +112,7 @@ function persistPool(now = Date.now()): void {
       JSON.stringify({
         ...(currentAccount ? { currentAccount } : {}),
         limitedUntil: limited,
+        ...(sessionAccounts.size ? { sessionAccounts: Object.fromEntries(sessionAccounts) } : {}),
       }),
       { encoding: "utf8", mode: 0o600 },
     )
@@ -332,6 +176,62 @@ export function poolAccount(ids: string[], now = Date.now()): string {
   return nextUsableAccount(ids, now) ?? (currentAccount && ids.includes(currentAccount) ? currentAccount : ids[0]!)
 }
 
+/** The account a session is pinned to, when it is still in the pool. Outside oc the session is "default": never pinned. */
+export function sessionPin(sessionID: string | undefined, ids: string[], now = Date.now()): string | undefined {
+  if (!sessionID || sessionID === "default") return undefined
+  ensureLoaded(ids, now)
+  const id = sessionAccounts.get(sessionID)
+  return id && ids.includes(id) ? id : undefined
+}
+
+/** Pin a session to a pool account, or clear its pin with `undefined`. The global current account is untouched. */
+export function pinSessionAccount(sessionID: string, id: string | undefined, ids: string[], now = Date.now()): boolean {
+  if (id !== undefined && !ids.includes(id)) return false
+  ensureLoaded(ids, now)
+  if (id === undefined) sessionAccounts.delete(sessionID)
+  else sessionAccounts.set(sessionID, id)
+  persistPool(now)
+  return true
+}
+
+/** Drop a deleted session's pin so `sessionAccounts` does not grow for the life of the pool file. */
+export function forgetSessionPin(sessionID: string, now = Date.now()): void {
+  ensureLoaded(undefined, now)
+  if (sessionAccounts.delete(sessionID)) persistPool(now)
+}
+
+/**
+ * Pool accounts with the active one flagged and any live limit. Selection mirrors `poolAccount`;
+ * with a session it is that session's pin when set (`pinned`), else the global pick.
+ */
+export function poolState(ids: string[], now = Date.now(), sessionID?: string) {
+  const pin = sessionPin(sessionID, ids, now)
+  const active = pin ?? poolAccount(ids, now)
+  return ids.map((id) => {
+    const until = limitedUntil.get(id) ?? 0
+    return {
+      id,
+      label: poolAccountLabel(id),
+      current: id === active,
+      ...(id === pin ? { pinned: true } : {}),
+      ...(until > now ? { limitedUntil: until } : {}),
+    }
+  })
+}
+
+/**
+ * Manual switch. A pick clears that account's limit mark, otherwise `nextUsableAccount` would move
+ * straight back off it; a still-limited account fails over again when the CLI rejects the turn.
+ */
+export function setCurrentAccount(id: string, ids: string[], now = Date.now()): boolean {
+  if (!ids.includes(id)) return false
+  ensureLoaded(ids, now)
+  limitedUntil.delete(id)
+  currentAccount = id
+  persistPool(now)
+  return true
+}
+
 export function markAccountLimited(id: string, resetsAtMs: number | undefined, now = Date.now()): void {
   ensureLoaded(undefined, now)
   const until = resetsAtMs !== undefined && resetsAtMs > now ? resetsAtMs : now + UNKNOWN_RESET_MS
@@ -345,6 +245,18 @@ export function poolConfigDir(id: string): string | undefined {
   return id === DEFAULT_ACCOUNT ? undefined : id
 }
 
+/** Earliest future `limitedUntil` over the given pool ids (all known ids when omitted). */
+export function earliestLimitedUntil(ids?: string[], now = Date.now()): number | undefined {
+  ensureLoaded(ids, now)
+  let earliest: number | undefined
+  for (const [id, until] of limitedUntil) {
+    if (until <= now) continue
+    if (ids && !ids.includes(id)) continue
+    if (earliest === undefined || until < earliest) earliest = until
+  }
+  return earliest
+}
+
 export function poolAccountLabel(id: string): string {
   return id === DEFAULT_ACCOUNT ? ".claude" : path.basename(id)
 }
@@ -352,6 +264,7 @@ export function poolAccountLabel(id: string): string {
 /** Test-only. Disables disk so tests cannot clobber the live pool file. */
 export function _resetAccountPool(): void {
   limitedUntil.clear()
+  sessionAccounts.clear()
   currentAccount = undefined
   loaded = false
   seeded = false
@@ -370,5 +283,4 @@ export function _setAccountPoolFile(file: string | null): void {
 export function _setUsageCacheDir(dir: string | null): void {
   cacheDir = dir
   seeded = false
-
 }

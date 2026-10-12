@@ -243,11 +243,11 @@ export function resolveVariantMaxMode(
 }
 
 // Cursor encodes a model's context window as a variant parameter `id: "context"`
-// whose value is a tier string — the same 200k / 272k / 300k / 1m the IDE's
+// whose value is a tier string - the same 200k / 272k / 300k / 1m the IDE's
 // picker shows. The base tier rides on the default non-max variant; the 1M
 // tier (when the model supports max mode) rides on the default max variant.
 // `context_token_limit` (#15) / `context_token_limit_for_max_mode` (#16) are
-// also defined on AvailableModel but the server often leaves them empty — the
+// also defined on AvailableModel but the server often leaves them empty - the
 // variant param is the primary source (request flags may still populate them).
 export function parseCursorContextLimit(value: unknown): number | undefined {
   if (typeof value !== "string") return undefined
@@ -385,9 +385,9 @@ export function mapAvailableModelsResponse(raw: Record<string, unknown>): ModelI
 /**
  * Resolve the parameter values to send in `requested_model.parameters` for a
  * given model + the variant opencode selected. Each variant already carries
- * the full `{id,value}` set (per-model vocabulary — effort, fast, thinking,
+ * the full `{id,value}` set (per-model vocabulary - effort, fast, thinking,
  * context, …), so we pick the matching variant and return its parameters
- * verbatim — the client never constructs these by hand.
+ * verbatim - the client never constructs these by hand.
  *
  * `picked` is the user-selected variant paramMap (opencode sends it under
  * `providerOptions.cursor`); when present it wins over effort/maxMode hints
@@ -425,7 +425,7 @@ export function resolveVariantParameters(
   const pool = model.variants.filter((v) => !isFast(v))
   const scoped = pool.length > 0 ? pool : model.variants
 
-  // 1. Variant explicitly picked by opencode (verbatim — preserves context, fast, …).
+  // 1. Variant explicitly picked by opencode (verbatim - preserves context, fast, …).
   if (picked !== undefined) {
     const pickedById = new Map(picked.map((parameter) => [parameter.id, parameter.value]))
     const exact = model.variants.find(
@@ -453,7 +453,6 @@ export function resolveVariantParameters(
     if (match) {
       return buildRequestedModelParams(match.parameterValues, {
         reasoningEffort: opts.reasoningEffort,
-        maxMode: wantMax,
       })
     }
   }
@@ -461,14 +460,13 @@ export function resolveVariantParameters(
   // 3. Max-mode hint → prefer the default max variant (1m context).
   if (wantMax) {
     const max = scoped.find((v) => v.isDefaultMax) ?? scoped.find(isMaxVariant)
-    if (max) return buildRequestedModelParams(max.parameterValues, { maxMode: true })
+    if (max) return buildRequestedModelParams(max.parameterValues)
   }
 
   // 4. Default non-max variant.
   const byDefault = scoped.find((v) => v.isDefaultNonMax) ?? scoped[0]
   return buildRequestedModelParams(byDefault.parameterValues, {
     reasoningEffort: opts.reasoningEffort,
-    maxMode: false,
   })
 }
 

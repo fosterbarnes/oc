@@ -28,7 +28,7 @@ export function tokenCount(tokens: SessionV1.Assistant["tokens"]) {
   )
 }
 
-// Account providers (claude-code-<account>) share the claude-code limit entry.
+// Providers named `claude-code-*` share the claude-code limit entry.
 export function limitProviderKey(providerID: string) {
   return isClaudeCodeProvider(providerID) ? CLAUDE_CODE_PROVIDER_ID : providerID
 }

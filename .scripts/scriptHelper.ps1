@@ -59,6 +59,7 @@ function getBunVersion {
         throw 'bun is not on PATH. Install Bun, then re-run.'
     }
     $value = (& bun --version 2>$null | Select-Object -First 1)
+    if ($LASTEXITCODE) { throw "bun --version failed (exit $LASTEXITCODE)." }
     if ([string]::IsNullOrWhiteSpace($value)) { throw 'bun --version returned nothing.' }
     $value.Trim()
 }
@@ -75,7 +76,9 @@ function testBunHasFfiFix {
     if ($minor -gt 4) { return $true }
     if ($minor -lt 4) { return $false }
     if ($patch -ge 1) { return $true }
-    return $Version.StartsWith('1.4.0-')
+    # `bun --version` carries no build date or revision, so no `1.4.0-*` suffix can be proven
+    # newer than the 2026-08-21 canary with the FFI fix (bad pin was 34cbb9a40). Fail closed: only 1.4.1+ counts.
+    return $false
 }
 
 function requireBunForCompile {
@@ -108,7 +111,7 @@ function assertExternalInstall {
     $hostProcess = Get-CimInstance Win32_Process -Filter "ProcessId = $hostPid" -ErrorAction SilentlyContinue
     if (-not $hostProcess) { return }
     $hostName = [IO.Path]::GetFileNameWithoutExtension([string]$hostProcess.Name).ToLowerInvariant()
-    if ($hostName -notin @('opencode', 'oc', 'occ', 'ocdebug', 'ocbug', 'oc-debug')) { return }
+    if ($hostName -notin @('opencode', 'oc', 'occ', 'ocdebug')) { return }
     throw @"
 Refusing to install from an active OpenCode process. The installer stops OpenCode before replacing its binaries.
 
@@ -170,8 +173,6 @@ function writeClearedLine {
     Write-Host "`r$Text$(' ' * [Math]::Max(0, $PadWidth - $Text.Length))" -NoNewline:$NoNewline
 }
 
-$weztermExe = (Get-Command wezterm.exe -ErrorAction SilentlyContinue)?.Source
-
 function closeOut {
     param([int]$Seconds = 5)
     $caller = $MyInvocation.PSCommandPath
@@ -199,11 +200,6 @@ function closeOut {
         }
         writeClearedLine -Text 'closing...' -PadWidth $pad.Length
     }
-    try {
-        if ($env:SCRIPT_OWN_PANE -and $env:WEZTERM_PANE -and $weztermExe) {
-            & $weztermExe @('cli', 'kill-pane', '--pane-id', $env:WEZTERM_PANE)
-        }
-    } catch { }
     [Environment]::Exit(0)
 }
 

@@ -11,27 +11,30 @@ export function visibleSubagents(
   now: number,
 ) {
   const root = state.session.get(sessionID)?.parentID ?? sessionID
-  const turn = state.session.messages(root).reduce(
-    (latest, message) => message.role === "user" ? Math.max(latest, message.time.created) : latest,
-    0,
-  )
-  return state.session.children(root).flatMap((child) => {
-    const status = state.session.status(child.id)?.type
-    const messages = state.session.messages(child.id)
-    const latest = messages.findLast((message) => message.role === "assistant")
-    const label = state.session.permission(child.id).length || state.session.question(child.id).length
-      ? "waiting"
-      : status === "retry"
-        ? "retrying"
-        : status === "busy"
-          ? "working"
-          : child.sessionFailed || (latest?.error && latest.error.name !== "MessageAbortedError")
-            ? "failed"
-            : "done"
-    const finished = latest?.time.completed ?? child.time.updated
-    if ((label === "done" || label === "failed") && (now - finished >= 120_000 || turn > finished)) return []
-    return [{ child, label }]
-  }).toSorted((a, b) => a.child.time.created - b.child.time.created)
+  const turn = state.session
+    .messages(root)
+    .reduce((latest, message) => (message.role === "user" ? Math.max(latest, message.time.created) : latest), 0)
+  return state.session
+    .children(root)
+    .flatMap((child) => {
+      const status = state.session.status(child.id)?.type
+      const messages = state.session.messages(child.id)
+      const latest = messages.findLast((message) => message.role === "assistant")
+      const label =
+        state.session.permission(child.id).length || state.session.question(child.id).length
+          ? "waiting"
+          : status === "retry"
+            ? "retrying"
+            : status === "busy"
+              ? "working"
+              : child.sessionFailed || (latest?.error && latest.error.name !== "MessageAbortedError")
+                ? "failed"
+                : "done"
+      const finished = latest?.time.completed ?? child.time.updated
+      if ((label === "done" || label === "failed") && (now - finished >= 120_000 || turn > finished)) return []
+      return [{ child, label }]
+    })
+    .toSorted((a, b) => a.child.time.created - b.child.time.created)
 }
 
 function View(props: { api: TuiPluginApi; session_id: string }) {
@@ -49,19 +52,31 @@ function View(props: { api: TuiPluginApi; session_id: string }) {
           <Show when={list().length > 2}>
             <SidebarToggle open={open()} fg={theme().text} />
           </Show>
-          <text fg={theme().text} selectable={false}><b>Sub-agents</b></text>
+          <text fg={theme().text} selectable={false}>
+            <b>Sub-agents</b>
+          </text>
         </box>
         <Show when={list().length <= 2 || open()}>
-          <For each={list()}>{(item) => (
-            <box onMouseUp={() => props.api.route.navigate("session", { sessionID: item.child.id })}>
-              <text fg={item.label === "failed" ? theme().error
-                : item.label === "done" ? theme().success
-                  : item.label === "working" ? theme().warning : theme().accent}>
-                {props.api.state.session.agentLabel(item.child.agent ?? "subagent")} . {item.label}
-              </text>
-              <text fg={theme().textMuted}>{Locale.truncate(item.child.title, 36)}</text>
-            </box>
-          )}</For>
+          <For each={list()}>
+            {(item) => (
+              <box onMouseUp={() => props.api.route.navigate("session", { sessionID: item.child.id })}>
+                <text
+                  fg={
+                    item.label === "failed"
+                      ? theme().error
+                      : item.label === "done"
+                        ? theme().success
+                        : item.label === "working"
+                          ? theme().warning
+                          : theme().accent
+                  }
+                >
+                  {props.api.state.session.agentLabel(item.child.agent ?? "subagent")} . {item.label}
+                </text>
+                <text fg={theme().textMuted}>{Locale.truncate(item.child.title, 36)}</text>
+              </box>
+            )}
+          </For>
         </Show>
       </box>
     </Show>

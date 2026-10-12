@@ -2,7 +2,6 @@
 
 export type EffortConfig = {
   reasoningEffort?: string
-  maxMode?: boolean
 }
 
 /**

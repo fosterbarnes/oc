@@ -1,8 +1,8 @@
 import fs from "fs/promises"
 import path from "path"
 import { Global } from "@opencode-ai/core/global"
-import { launchDetached } from "@opencode-ai/core/util/launch-detached"
-import { markersFile } from "@opencode-ai/core/util/markers-file"
+import { launchDetached } from "@opencode-ai/core/util/launchDetached"
+import { markersFile } from "@opencode-ai/core/util/markersFile"
 
 // Alpha: a line that is exactly `$#name` in an agent's reply runs the user's preset command for
 // `name`, with no tool call. Safety rests entirely on which commands the user lists.
@@ -33,7 +33,15 @@ export async function read(source = file()): Promise<Config | undefined> {
   const commands: Record<string, Command> = {}
   for (const [name, value] of Object.entries<any>(parsed.commands)) {
     if (!NAME.test(name) || !MODES.includes(value?.mode)) continue
-    if (!Array.isArray(value.run) || value.run.length === 0 || !value.run.every((arg: unknown) => typeof arg === "string"))
+    // `window` opens a pwsh window, so it only exists on Windows. Drop it
+    // while parsing elsewhere so the agent is never offered a command that
+    // fails when used; run() keeps its own guard as a backstop.
+    if (value.mode === "window" && process.platform !== "win32") continue
+    if (
+      !Array.isArray(value.run) ||
+      value.run.length === 0 ||
+      !value.run.every((arg: unknown) => typeof arg === "string")
+    )
       continue
     commands[name] = {
       run: value.run,
@@ -57,7 +65,9 @@ export function prompt(config: Config | undefined) {
     "- You cannot see the result this turn. inline: the output replaces the marker line, so you see it next turn. window: it opens a window for the user; ask the user for the result. afterTurn: it runs after your reply ends.",
     `- Never add or change commands in ${file()} without the user's explicit permission.`,
     "Commands:",
-    ...entries.map(([name, command]) => `- ${name} (${command.mode})${command.description ? `: ${command.description}` : ""}`),
+    ...entries.map(
+      ([name, command]) => `- ${name} (${command.mode})${command.description ? `: ${command.description}` : ""}`,
+    ),
   ].join("\n")
 }
 
@@ -111,7 +121,7 @@ async function runInline(name: string, command: Command) {
     child.exited,
   ]).finally(() => clearTimeout(timer))
   if (timedOut) return { line: `${name}: timed out after ${command.timeout}s`, exit }
-  if (exit !== 0) return { line: `${name}: exit ${exit}: ${tail((stderr.trim() || stdout.trim()))}`, exit }
+  if (exit !== 0) return { line: `${name}: exit ${exit}: ${tail(stderr.trim() || stdout.trim())}`, exit }
   return { line: tail(stdout.trim()) || `${name}: done`, exit }
 }
 
@@ -126,8 +136,9 @@ export function windowArgs(command: Command) {
 }
 
 function launch(file: string, args: readonly string[], windowStyle: "Hidden" | "Normal") {
-  launchDetached(file, args, { windowStyle }).on("error", (cause) =>
-    void log(`launch failed: ${file}: ${cause.message}`),
+  launchDetached(file, args, { windowStyle }).on(
+    "error",
+    (cause) => void log(`launch failed: ${file}: ${cause.message}`),
   )
 }
 

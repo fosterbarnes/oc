@@ -1,6 +1,6 @@
 import type { LanguageModelV3 } from "@ai-sdk/provider"
 import type { Plugin } from "@opencode-ai/plugin"
-import { ClaudeCodeLanguageModel } from "./claude-code-language-model.js"
+import { ClaudeCodeLanguageModel } from "./claudeCodeLanguageModel.js"
 import { defaultModels, passthroughModel, toConfigModel } from "./models.js"
 import type {
   OpenCodeConfig,
@@ -8,13 +8,10 @@ import type {
   OpenCodeModel,
   OpenCodePlugin,
   OpenCodeProvider,
-} from "./opencode-types.js"
+} from "./opencodeTypes.js"
 import { DEFAULT_PROXY_TOOL_NAMES } from "./types.js"
 import type { ClaudeCodeProviderSettings } from "./types.js"
-import {
-  BASE_PROVIDER_ID,
-  ensureAccountRuntime,
-} from "./accounts.js"
+import { BASE_PROVIDER_ID } from "./accounts.js"
 import {
   type AgentRecord,
   agentDirectories,
@@ -22,25 +19,17 @@ import {
   readAgentMarkdownRecords,
   setAgentRegistry,
   setDefaultSubagentModel,
-} from "./agent-models.js"
+} from "./agentModels.js"
 import { configureLogger, log } from "./logger.js"
-import {
-  isUnknownPreset,
-  resolvePermissionPreset,
-  type ResolvedPermissionPreset,
-} from "./permission-presets.js"
-import { deleteActiveProcessesForSession, ensureProcessExitCleanup } from "./session-manager.js"
+import { isUnknownPreset, resolvePermissionPreset, type ResolvedPermissionPreset } from "./permissionPresets.js"
+import { deleteActiveProcessesForSession, ensureProcessExitCleanup } from "./sessionManager.js"
 import {
   getOpencodeProjectDirectory,
   isUsableDirectory,
   setOpencodeClient,
   setOpencodeProjectDirectory,
-} from "./runtime-status.js"
-import {
-  logStartupDiagnostics,
-  pickOpencodeVersion,
-  type DiagnosticsProviderEntry,
-} from "./startup-diagnostics.js"
+} from "./runtimeStatus.js"
+import { logStartupDiagnostics, pickOpencodeVersion, type DiagnosticsProviderEntry } from "./startupDiagnostics.js"
 
 export interface ClaudeCodeProvider {
   specificationVersion: "v3"
@@ -95,7 +84,7 @@ export function warnIfPlanModeCannotExit(permissionMode: string | undefined): vo
   if (warnedPlanModeNoExit) return
   warnedPlanModeNoExit = true
   log.warn(
-    "permissionMode \"plan\" is enforced: claude cannot edit files or run commands, and --dangerously-skip-permissions is deliberately not passed so it stays that way. Headless Claude Code is not offered an ExitPlanMode tool, so nothing releases plan mode mid-session; approving a plan in chat does not unlock writes. Leaving plan mode means changing the config and restarting opencode.",
+    'permissionMode "plan" is enforced: claude cannot edit files or run commands, and --dangerously-skip-permissions is deliberately not passed so it stays that way. Headless Claude Code is not offered an ExitPlanMode tool, so nothing releases plan mode mid-session; approving a plan in chat does not unlock writes. Leaving plan mode means changing the config and restarting opencode.',
     { permissionMode, measuredOn: "claude-code 2.1.258" },
   )
 }
@@ -120,8 +109,7 @@ export function applyPermissionPreset(
   if (resolved === null) return null
   if (isUnknownPreset(resolved)) {
     log.warn(
-      "unknown permissionPreset; no preset applied and every permission" +
-        " setting is left exactly as configured",
+      "unknown permissionPreset; no preset applied and every permission" + " setting is left exactly as configured",
       { permissionPreset: resolved.unknown, known: ["read-only"] },
     )
     return null
@@ -138,9 +126,7 @@ export function applyPermissionPreset(
   return resolved
 }
 
-export function createClaudeCode(
-  settings: ClaudeCodeProviderSettings = {},
-): ClaudeCodeProvider {
+export function createClaudeCode(settings: ClaudeCodeProviderSettings = {}): ClaudeCodeProvider {
   if (settings.logging) {
     configureLogger({
       file: settings.logging.file ?? false,
@@ -154,11 +140,9 @@ export function createClaudeCode(
   // A preset drops any configured `permissionMode`, so the plan-mode warning
   // would be about a mode this provider is not running in.
   warnIfPlanModeCannotExit(preset ? undefined : settings.permissionMode)
-  const cliPath =
-    settings.cliPath ?? process.env.CLAUDE_CLI_PATH ?? "claude"
+  const cliPath = settings.cliPath ?? process.env.CLAUDE_CLI_PATH ?? "claude"
   const providerName = settings.providerID ?? settings.name ?? "claude-code"
-  const proxyTools =
-    preset?.proxyTools ?? settings.proxyTools ?? [...DEFAULT_PROXY_TOOL_NAMES]
+  const proxyTools = preset?.proxyTools ?? settings.proxyTools ?? [...DEFAULT_PROXY_TOOL_NAMES]
 
   const createModel = (modelId: string): LanguageModelV3 => {
     return new ClaudeCodeLanguageModel(modelId, {
@@ -166,8 +150,6 @@ export function createClaudeCode(
       cliPath,
       hostApi: settings.hostApi,
       cwd: settings.cwd,
-      account: settings.account,
-      configDir: settings.configDir,
       accounts: settings.accounts?.filter((dir) => typeof dir === "string" && dir.trim()),
       providerID: settings.providerID,
       skipPermissions: preset?.skipPermissions ?? settings.skipPermissions ?? true,
@@ -178,14 +160,12 @@ export function createClaudeCode(
       proxyTools,
       proxyOpencodeTools: settings.proxyOpencodeTools,
       stripContextReminders: settings.stripContextReminders === true,
-      extraDisallowedTools:
-        preset?.extraDisallowedTools ?? settings.extraDisallowedTools,
+      extraDisallowedTools: preset?.extraDisallowedTools ?? settings.extraDisallowedTools,
       proxyToolTimeoutMs: settings.proxyToolTimeoutMs,
       webSearch: settings.webSearch,
       hotReloadMcp: settings.hotReloadMcp ?? true,
       multiStepContinuation: settings.multiStepContinuation ?? true,
-      autoContinueIncompleteTurns:
-        settings.autoContinueIncompleteTurns ?? "smart",
+      autoContinueIncompleteTurns: settings.autoContinueIncompleteTurns ?? "smart",
       ignoreAnthropicApiKey: settings.ignoreAnthropicApiKey,
       idleProcessTimeoutMs: settings.idleProcessTimeoutMs,
       turnStats: settings.turnStats === true,
@@ -209,19 +189,14 @@ export function createClaudeCode(
 const PROVIDER_ID = BASE_PROVIDER_ID
 export const CLAUDE_CODE_PROVIDER_NPM = "@opencode-ai/claude-code"
 
-function cleanProviderOptions(
-  options: Record<string, unknown> = {},
-): Record<string, unknown> {
+function cleanProviderOptions(options: Record<string, unknown> = {}): Record<string, unknown> {
   const result = { ...options }
   // Consumed by the config hook (agent registry), not by the language model.
   delete result.defaultSubagentModel
   return result
 }
 
-function defaultModelsForProvider(
-  providerModels: OpenCodeProvider["models"],
-  providerID = PROVIDER_ID,
-) {
+function defaultModelsForProvider(providerModels: OpenCodeProvider["models"], providerID = PROVIDER_ID) {
   const models: Record<string, OpenCodeModel> = Object.fromEntries(
     Object.keys(defaultModels).map((id) => {
       const model = registeredModel(id, providerModels, providerID)
@@ -310,11 +285,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  * and `variants` merge key by key so a partial `limit: { context }` keeps the
  * template's `output`.
  */
-function completeUserModel(
-  id: string,
-  entry: unknown,
-  providerID: string,
-): Record<string, unknown> {
+function completeUserModel(id: string, entry: unknown, providerID: string): Record<string, unknown> {
   const record = isRecord(entry) ? entry : {}
   const runtimeShaped =
     isRecord(record.capabilities) &&
@@ -343,12 +314,14 @@ function completeUserModel(
 }
 
 async function providerConfig(
-  existing: {
-    name?: string
-    npm?: string
-    options?: Record<string, unknown>
-    models?: Record<string, unknown>
-  } | undefined,
+  existing:
+    | {
+        name?: string
+        npm?: string
+        options?: Record<string, unknown>
+        models?: Record<string, unknown>
+      }
+    | undefined,
   providerID = PROVIDER_ID,
   optionDefaults: Record<string, unknown> = {},
   displayName?: string,
@@ -362,18 +335,13 @@ async function providerConfig(
   }
 
   const cliPath = String(mergedOptions.cliPath ?? "claude")
-  const account =
-    typeof mergedOptions.account === "string" ? mergedOptions.account : undefined
-  const runtime = account
-    ? await ensureAccountRuntime(account, cliPath)
-    : { cliPath }
 
   return {
     name: displayName ?? existing?.name,
     npm: existing?.npm ?? CLAUDE_CODE_PROVIDER_NPM,
     options: {
       ...mergedOptions,
-      ...runtime,
+      cliPath,
     },
     // models is intentionally omitted: both callers overwrite it with
     // configModelsForProvider(), which emits the flat config schema
@@ -382,16 +350,16 @@ async function providerConfig(
 }
 
 /**
- * Narrow opencode's full provider map down to the ones this plugin owns
- * (`claude-code` plus every `claude-code-<account>` expansion) so startup
- * diagnostics never report another provider's options.
+ * Narrow opencode's full provider map down to the one this plugin owns
+ * (`claude-code`) so startup diagnostics never report another provider's
+ * options.
  */
 export function claudeCodeProviders(
   providers: Record<string, DiagnosticsProviderEntry> | undefined,
 ): Record<string, DiagnosticsProviderEntry> {
   const out: Record<string, DiagnosticsProviderEntry> = {}
   for (const [id, entry] of Object.entries(providers ?? {})) {
-    if (id === PROVIDER_ID || id.startsWith(`${PROVIDER_ID}-`)) out[id] = entry
+    if (id === PROVIDER_ID) out[id] = entry
   }
   return out
 }
@@ -408,17 +376,12 @@ export function claudeCodeProviders(
 export async function buildAgentRegistry(config: OpenCodeConfig): Promise<void> {
   const options = config.provider?.[PROVIDER_ID]?.options
   const configured = options?.defaultSubagentModel
-  setDefaultSubagentModel(
-    typeof configured === "string" ? configured : undefined,
-  )
+  setDefaultSubagentModel(typeof configured === "string" ? configured : undefined)
   // Markdown agents may or may not reach a plugin's config hook (undocumented
   // either way), so they are read from disk and then overlaid with whatever
   // config does carry, which is authoritative when both describe one agent.
   const records: Record<string, AgentRecord> = await readAgentMarkdownRecords(
-    agentDirectories(
-      process.env.HOME ?? process.env.USERPROFILE,
-      getOpencodeProjectDirectory(),
-    ),
+    agentDirectories(process.env.HOME ?? process.env.USERPROFILE, getOpencodeProjectDirectory()),
   )
 
   for (const [name, agent] of Object.entries(config.agent ?? {})) {
@@ -432,8 +395,7 @@ export async function buildAgentRegistry(config: OpenCodeConfig): Promise<void> 
       mode: pick("mode") ?? records[name]?.mode,
       model: pick("model") ?? records[name]?.model,
       forceModel: pick("forceModel") ?? records[name]?.forceModel,
-      reasoningEffort:
-        pick("reasoningEffort") ?? records[name]?.reasoningEffort,
+      reasoningEffort: pick("reasoningEffort") ?? records[name]?.reasoningEffort,
     }
   }
 
@@ -476,7 +438,7 @@ export const claudeCodeServer: OpenCodePlugin = async (input) => {
   // Claude CLI spawn time only when `process.cwd()` is unusable. Rescues
   // macOS GUI launches at `/` without freezing the value into provider
   // config, so opencode workspace switches mid-session still take effect.
-  // See `resolveSpawnCwd` in runtime-status.ts and issue #4.
+  // See `resolveSpawnCwd` in runtimeStatus.ts and issue #4.
   setOpencodeProjectDirectory(pickOpencodeDirectory(input))
 
   return {
@@ -489,18 +451,12 @@ export const claudeCodeServer: OpenCodePlugin = async (input) => {
       config.provider[PROVIDER_ID] = {
         ...existing,
         ...(await providerConfig(existing)),
-        models: configModelsForProvider(
-          (existing?.models ?? {}) as OpenCodeProvider["models"],
-          PROVIDER_ID,
-        ),
+        models: configModelsForProvider((existing?.models ?? {}) as OpenCodeProvider["models"], PROVIDER_ID),
       }
-      logStartupDiagnostics(
-        claudeCodeProviders(config.provider),
-        opencodeVersion,
-      )
+      logStartupDiagnostics(claudeCodeProviders(config.provider), opencodeVersion)
     },
     // Only `session.deleted` is acted on. MCP config drift is still detected
-    // at turn start by the hot-reload check in `turn-stream.ts`,
+    // at turn start by the hot-reload check in `turnStream.ts`,
     // which respawns claude safely between turns, and eviction on
     // `global.disposed` would kill an in-flight stream and abort the user's
     // current turn. A deleted session has no turn left to abort, and its
@@ -522,5 +478,5 @@ export const claudeCodeServer: OpenCodePlugin = async (input) => {
 }
 
 // Built-in plugin, registered in plugin/index.ts internalPlugins.
-// WIP: hooks still use the plugin-era loose types in opencode-types.ts; drop the cast when those go.
+// Hooks still use the plugin-era loose types in opencodeTypes.ts; drop the cast when those go.
 export const ClaudeCodePlugin = claudeCodeServer as unknown as Plugin

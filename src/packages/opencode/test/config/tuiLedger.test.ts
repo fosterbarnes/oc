@@ -30,7 +30,8 @@ test("reads per-pid records, removes dead, reused, malformed records and unlinks
 })
 
 test("selects only matching instance TUIs and their own launcher parent", () => {
-  const records = [record,
+  const records = [
+    record,
     { ...record, pid: 12, executable: processes[2].executable },
     { ...record, pid: 13, instance: "opencode-debug", executable: processes[3].executable },
     { ...record, pid: 99 },
@@ -42,13 +43,28 @@ test("selects only matching instance TUIs and their own launcher parent", () => 
 })
 
 test("does not kill shells, foreign launcher paths, or an unrecorded same-executable process", () => {
-  expect(TuiLedger.select([record], [
-    processes[0], { ...processes[1], executable: "C:\\Other\\occ.exe" },
-    { pid: 15, parentPid: 1, executable, startedAt: 10_000 },
-  ], "opencode", executable, 100)).toEqual([10])
-  expect(TuiLedger.select([record], [
-    processes[0], { ...processes[1], executable: "C:\\Windows\\pwsh.exe" },
-  ], "opencode", executable, 100)).toEqual([10])
+  expect(
+    TuiLedger.select(
+      [record],
+      [
+        processes[0],
+        { ...processes[1], executable: "C:\\Other\\occ.exe" },
+        { pid: 15, parentPid: 1, executable, startedAt: 10_000 },
+      ],
+      "opencode",
+      executable,
+      100,
+    ),
+  ).toEqual([10])
+  expect(
+    TuiLedger.select(
+      [record],
+      [processes[0], { ...processes[1], executable: "C:\\Windows\\pwsh.exe" }],
+      "opencode",
+      executable,
+      100,
+    ),
+  ).toEqual([10])
 })
 
 test("rejects reused TUI and launcher pids even at the same executable path", async () => {
@@ -59,8 +75,9 @@ test("rejects reused TUI and launcher pids even at the same executable path", as
   expect(TuiLedger.select([record], reused, "opencode", executable, 100)).toEqual([])
   expect(await TuiLedger.read(tmp.path, reused)).toEqual([])
   expect(await fs.readdir(path.join(tmp.path, "oc-tuis"))).toEqual([])
-  expect(TuiLedger.select([record], [processes[0], { ...processes[1], startedAt: 20_000 }],
-    "opencode", executable, 100)).toEqual([10])
+  expect(
+    TuiLedger.select([record], [processes[0], { ...processes[1], startedAt: 20_000 }], "opencode", executable, 100),
+  ).toEqual([10])
 })
 
 test("resolves production hard-link names in records, processes, and launcher parents", async () => {
@@ -70,10 +87,18 @@ test("resolves production hard-link names in records, processes, and launcher pa
   await Bun.write(path.join(tmp.path, "oc-tuis", "10.json"), JSON.stringify(alias))
   expect(await TuiLedger.read(tmp.path, processes)).toEqual([alias])
   expect(TuiLedger.select([alias], processes, "opencode", executable, 100)).toEqual([10, 11])
-  expect(TuiLedger.select([record], [
-    { ...processes[0], executable: "C:\\Apps\\oc\\occ.exe" },
-    { ...processes[1], executable },
-  ], "opencode", "C:\\Apps\\oc\\oc.exe", 100)).toEqual([10, 11])
+  expect(
+    TuiLedger.select(
+      [record],
+      [
+        { ...processes[0], executable: "C:\\Apps\\oc\\occ.exe" },
+        { ...processes[1], executable },
+      ],
+      "opencode",
+      "C:\\Apps\\oc\\oc.exe",
+      100,
+    ),
+  ).toEqual([10, 11])
   expect(TuiLedger.sameExecutable("C:\\Apps\\oc\\ocdebug.exe", executable)).toBe(false)
   expect(TuiLedger.sameExecutable("C:\\Other\\oc.exe", executable)).toBe(false)
 })

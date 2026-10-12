@@ -1,4 +1,4 @@
-import { createSdk } from "./plugin-core.js"
+import { createSdk } from "./pluginCore.js"
 import type { CursorContinuationOptions } from "./session.js"
 
 export type CursorRetryOptions = {

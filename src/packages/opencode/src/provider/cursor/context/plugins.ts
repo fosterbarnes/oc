@@ -32,10 +32,7 @@ async function listLocalPlugins(dir: string): Promise<CollectedPlugin[]> {
 }
 
 /** OpenCode plugins from config + local plugin directories (metadata only). */
-export async function collectPlugins(
-  workspaceRoot: string,
-  config: OpencodeJson,
-): Promise<CollectedPlugin[]> {
+export async function collectPlugins(workspaceRoot: string, config: OpencodeJson): Promise<CollectedPlugin[]> {
   const out: CollectedPlugin[] = []
   const seen = new Set<string>()
   for (const id of [...(config.plugin ?? []), ...(config.plugins ?? [])]) {

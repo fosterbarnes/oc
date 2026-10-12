@@ -58,7 +58,7 @@ bun test test\session\retry.test.ts
 
 `.scripts\test.ps1` runs selected package suites, typechecks, and generated-file checks
 (`-List` shows the options). Claude Code provider changes should come with a fake-model scenario
-(`test/provider/claude-code/fake-model.test.ts`); these run against a local fake server and cost
+(`test/provider/claude-code/fakeModel.test.ts`); these run against a local fake server and cost
 nothing.
 
 If you change the public server API, regenerate the clients with `bun run generate` in

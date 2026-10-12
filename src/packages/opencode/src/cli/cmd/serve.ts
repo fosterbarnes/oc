@@ -7,7 +7,7 @@ import { stopCursorProxy } from "@/provider/cursor/runtime"
 import fs from "node:fs/promises"
 import path from "node:path"
 import { Global } from "@opencode-ai/core/global"
-import { RESIDENT_ENV, spawnResident, writeResidentState } from "@/config/oc"
+import { RESIDENT_ENV, residentRestartFresh, spawnResident, writeResidentState } from "@/config/oc"
 
 export { writeResidentState }
 
@@ -33,13 +33,16 @@ export function shouldClearResidentState(restart: boolean) {
 
 export async function clearResidentStateForRestart(directory = Global.Path.state) {
   try {
+    const state = JSON.parse(await fs.readFile(residentStatePath(directory), "utf8")) as { restarting?: string }
+    // A CLI restart marks state before asking this process to shut down.
+    if (residentRestartFresh(state.restarting)) return
     await fs.rm(residentStatePath(directory), { force: true })
   } catch {}
 }
 
 export async function markResidentRestart(input: { hostname: string; port: number; directory?: string }) {
   const directory = input.directory ?? Global.Path.state
-  let existing: { pid?: number; executable?: string } = {}
+  let existing: { pid?: number; executable?: string; created?: string } = {}
   try {
     existing = JSON.parse(await fs.readFile(residentStatePath(directory), "utf8"))
   } catch {}
@@ -48,6 +51,7 @@ export async function markResidentRestart(input: { hostname: string; port: numbe
     hostname: input.hostname,
     port: input.port,
     executable: existing.executable,
+    created: existing.created,
     restarting: new Date().toISOString(),
     directory,
   })
@@ -84,6 +88,7 @@ export const ServeCommand = effectCmd({
     const opts = yield* resolveNetworkOptions(args)
     const server = yield* Effect.promise(() => Server.listen(opts))
     ServerLifecycle.setController({
+      markRestart: () => markResidentRestart({ hostname: server.hostname, port: server.port }),
       shutdown: () => stopAndExit(server, false),
       restart: () => stopAndExit(server, true),
     })

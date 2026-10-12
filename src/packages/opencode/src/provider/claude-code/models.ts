@@ -1,4 +1,4 @@
-import type { OpenCodeModel } from "./opencode-types.js"
+import type { OpenCodeModel } from "./opencodeTypes.js"
 
 const PROVIDER_ID = "claude-code"
 const NPM = "@opencode-ai/claude-code"
@@ -431,8 +431,9 @@ const FAST_SUFFIX = "-fast"
  *   \_____________/\___/\__/
  *     CLI model    ours  accounts.ts's
  *
- * `@work` must survive: the per-account wrapper script strips it at spawn
- * time to pick a CLAUDE_CONFIG_DIR. `-fast` must not: the CLI has no such
+ * `@work` must survive: it used to steer the per-account wrapper script at
+ * spawn time, and now nothing produces these ids (modelSuffix is never
+ * passed), so one only arrives hand-written in config. `-fast` must not: the CLI has no such
  * model (`claude-opus-4-6-fast` is retired and `claude-opus-4-7-fast` errors
  * outright), so it becomes `--settings {"fastMode":true}` instead.
  *

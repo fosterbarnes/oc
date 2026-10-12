@@ -36,7 +36,7 @@ export function createMessageTypes(): protobuf.Root {
 
   addType(root, "Heartbeat", [])
 
-  // Display ToolCall (interaction_update.tool_call_*) — agent.v1 oneof, not
+  // Display ToolCall (interaction_update.tool_call_*) - agent.v1 oneof, not
   // {tool_name,args} strings. Args-only wrappers are enough to bridge into
   // OpenCode; result payloads are ignored on decode.
   root.add(
@@ -216,7 +216,7 @@ export function createMessageTypes(): protobuf.Root {
     // #5/#6 drive Cursor's non-blocking AskQuestion: the client answers the
     // interaction with `async` right away and delivers the real answers later
     // through ConversationAction.async_ask_question_completion_action, keyed by
-    // the originating tool call id. See protocol/ask-question.ts.
+    // the originating tool call id. See protocol/askQuestion.ts.
     { id: 5, name: "run_async", type: "bool" },
     { id: 6, name: "async_original_tool_call_id", type: "string" },
   ])
@@ -427,7 +427,7 @@ export function createMessageTypes(): protobuf.Root {
     { id: 3, name: "model_call_id", type: "string" },
   ])
 
-  // agent.v1 ToolCallCompletedUpdate has no string result field — result lives
+  // agent.v1 ToolCallCompletedUpdate has no string result field - result lives
   // inside the typed ToolCall variant.
   addType(root, "ToolCallCompleted", [
     { id: 1, name: "call_id", type: "string" },
@@ -443,7 +443,7 @@ export function createMessageTypes(): protobuf.Root {
   ])
 
   // agent.v1 StepStartedUpdate / StepCompletedUpdate: step_id is uint64 (T:4),
-  // not string — wrong type made every step_completed frame throw
+  // not string - wrong type made every step_completed frame throw
   // "index out of range" in decodeMessage.
   addType(root, "StepStarted", [{ id: 1, name: "step_id", type: "uint64" }])
 
@@ -452,7 +452,7 @@ export function createMessageTypes(): protobuf.Root {
     { id: 2, name: "step_duration_ms", type: "int64" },
   ])
 
-  // InteractionUpdate — the core streaming update message
+  // InteractionUpdate - the core streaming update message
   addType(
     root,
     "InteractionUpdate",
@@ -496,7 +496,7 @@ export function createMessageTypes(): protobuf.Root {
     { id: 5, name: "limit", type: "uint32" },
   ])
 
-  // agent.v1 ReadResult is a oneof — flat {content,error} was rejected by the
+  // agent.v1 ReadResult is a oneof - flat {content,error} was rejected by the
   // server (endless heartbeats after read_result).
   addType(
     root,
@@ -1056,7 +1056,7 @@ export function createMessageTypes(): protobuf.Root {
     [{ name: "result", fields: ["success", "error"] }],
   )
 
-  // McpToolDefinition — agent.v1 shape for RequestContext.tools (#7) and
+  // McpToolDefinition - agent.v1 shape for RequestContext.tools (#7) and
   // AgentRunRequest.mcp_tools (#4). Defined early so RequestContext* can
   // reference it.
   addType(root, "McpToolDefinition", [
@@ -1140,7 +1140,7 @@ export function createMessageTypes(): protobuf.Root {
     { id: 1, name: "uri", type: "string" },
     { id: 2, name: "error", type: "string" },
   ])
-  // Cursor quirk: on `rejected` only `reason` is set — `uri` (field 1) is
+  // Cursor quirk: on `rejected` only `reason` is set - `uri` (field 1) is
   // deliberately left empty. Mirror this; do not backfill uri on encode.
   addType(root, "ReadMcpResourceRejected", [
     { id: 1, name: "uri", type: "string" },
@@ -1164,7 +1164,7 @@ export function createMessageTypes(): protobuf.Root {
   // {request_context_args} to ask the client for workspace/env/tool context.
   // The reply is ExecClientMessage {request_context_result{success{request_context}}}.
   // If we don't reply, the server blocks on heartbeats forever (the "times out,
-  // no response" symptom). We populate a minimal-but-real RequestContext — env
+  // no response" symptom). We populate a minimal-but-real RequestContext - env
   // (workspace/shell/os) plus the tool list echoed into #7 tools (same
   // McpToolDefinition shape as AgentRunRequest #4 mcp_tools) so the model keeps
   // the tools opencode advertised.
@@ -1452,7 +1452,7 @@ export function createMessageTypes(): protobuf.Root {
 
   // Client→server control (ACM #5). Distinct from ExecServerControlMessage (ASM #5).
   // After every exec result (especially multi-frame shell_stream), the real CLI
-  // sends stream_close{id} — without it the cloud waits forever on shell execs.
+  // sends stream_close{id} - without it the cloud waits forever on shell execs.
   addType(root, "ExecClientStreamClose", [{ id: 1, name: "id", type: "uint32" }])
   addType(root, "ExecClientThrow", [
     { id: 1, name: "id", type: "uint32" },
@@ -1513,7 +1513,7 @@ export function createMessageTypes(): protobuf.Root {
     { id: 3, name: "selected_context", type: "SelectedContext" },
   ])
 
-  // RequestContext — UserMessageAction #2. Live per-turn tools go here
+  // RequestContext - UserMessageAction #2. Live per-turn tools go here
   // (AgentRunRequest.mcp_tools #4 is prewarm-only / empty on real turns).
   addType(root, "RequestContext", [
     { id: 2, name: "rules", type: "CursorRule", repeated: true },
@@ -1557,7 +1557,7 @@ export function createMessageTypes(): protobuf.Root {
 
   // Deferred answers for an AskQuestion the client already replied to with
   // `async`. `original_args` is kept as raw bytes so the exact AskQuestionArgs
-  // Cursor sent — including fields this schema does not model — is echoed back
+  // Cursor sent - including fields this schema does not model - is echoed back
   // verbatim rather than re-encoded from a lossy decode.
   addType(root, "AsyncAskQuestionCompletionAction", [
     { id: 1, name: "original_tool_call_id", type: "string" },
@@ -1584,7 +1584,7 @@ export function createMessageTypes(): protobuf.Root {
 
   // Seed ConversationStateStructure for turn 1 (system prompt as JSON strings
   // in #1). After the first conversation_checkpoint_update we echo opaque
-  // server bytes instead — CLI's live structure uses blob-id bytes in #1/#8.
+  // server bytes instead - CLI's live structure uses blob-id bytes in #1/#8.
   addType(root, "AssistantMessage", [{ id: 1, name: "text", type: "string" }])
 
   addType(
@@ -1894,7 +1894,7 @@ export function createMessageTypes(): protobuf.Root {
   // Server sends KvServerMessage (AgentServerMessage #4); client MUST reply with
   // KvClientMessage (AgentClientMessage #3) on the same Run stream, echoing `id`.
   // If we don't ack set_blob / answer get_blob, the server hangs (endless
-  // heartbeats, no response) — this was the "no response" root cause.
+  // heartbeats, no response) - this was the "no response" root cause.
 
   addType(root, "GetBlobArgs", [{ id: 1, name: "blob_id", type: "bytes" }])
   addType(root, "GetBlobResult", [{ id: 1, name: "blob_data", type: "bytes" }])
@@ -2100,7 +2100,7 @@ function readRawFields(buf: Uint8Array): RawField[] {
  * `reasoning_tokens` question can be checked against the raw wire instead of
  * guessed. Confirmed field ids 1-5 (input/output/cache_read/cache_write/
  * reasoning) decode correctly. Live captures routinely include `f4` explicitly
- * as `0` while `f3` (cache_read) and `f5` (reasoning) are non-zero — Cursor's
+ * as `0` while `f3` (cache_read) and `f5` (reasoning) are non-zero - Cursor's
  * agent TurnEnded populates the field but does not report write counts here.
  */
 export function debugWalkTurnEnded(payload: Uint8Array): string {

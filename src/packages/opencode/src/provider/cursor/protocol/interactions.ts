@@ -6,11 +6,8 @@ import {
   decodeAskQuestionQuery,
   MISSING_ARGS_REASON,
   MISSING_QUERY_REASON,
-} from "./ask-question.js"
-import {
-  type DecodedGenerateImageQuery,
-  decodeGenerateImageQuery,
-} from "./generate-image.js"
+} from "./askQuestion.js"
+import { type DecodedGenerateImageQuery, decodeGenerateImageQuery } from "./generateImage.js"
 import {
   CURSOR_PLAN_STAGE_TOOL,
   type CreatePlanBridge,
@@ -20,7 +17,7 @@ import {
   renderPlanReviewMessage,
   resolveCreatePlanBridge,
   writeOpencodePlanFile,
-} from "./create-plan.js"
+} from "./createPlan.js"
 import {
   type DecodedSwitchModeQuery,
   type SwitchModeBridge,
@@ -30,7 +27,7 @@ import {
   MISSING_QUERY_REASON as SWITCH_MODE_MISSING_QUERY_REASON,
   resolveSwitchModeBridge,
   switchModeApprovedResult,
-} from "./switch-mode.js"
+} from "./switchMode.js"
 
 const HEADLESS_REASON =
   "This Cursor interaction requires UI approval and is not available through the OpenCode provider."
@@ -42,8 +39,8 @@ const HEADLESS_REASON =
  * keeps the model from concluding that asking is impossible in general.
  */
 const ASK_QUESTION_UNAVAILABLE_REASON =
-  "The OpenCode `question` tool is not available to the current agent, so questions "
-  + "cannot be shown to the user this turn. State the question in your reply instead."
+  "The OpenCode `question` tool is not available to the current agent, so questions " +
+  "cannot be shown to the user this turn. State the question in your reply instead."
 
 const variantNames: Record<number, string> = {
   2: "web_search_request_query",
@@ -157,9 +154,8 @@ export type HandleInteractionQueryOptions = {
 
 export class UnsupportedInteractionQueryError extends Error {
   constructor(info: InteractionQueryWireInfo) {
-    const variant = info.variantField === undefined
-      ? "missing variant"
-      : `unsupported variant field #${info.variantField}`
+    const variant =
+      info.variantField === undefined ? "missing variant" : `unsupported variant field #${info.variantField}`
     const id = info.id === undefined ? "missing id" : `id=${info.id}`
     super(`Cursor interaction query cannot be handled (${id}, ${variant})`)
     this.name = "UnsupportedInteractionQueryError"
@@ -171,11 +167,8 @@ export class UnsupportedInteractionQueryError extends Error {
  * fields introduced by newer Cursor schemas; raw inspection lets us fail fast
  * instead of accidentally restoring the heartbeat-only deadlock.
  */
-export function inspectInteractionQueryWire(
-  agentServerPayload: Uint8Array,
-): InteractionQueryWireInfo {
-  const queryBytes = readAllFields(agentServerPayload)
-    .find((field) => field.fn === 7 && field.wt === 2)?.bytes
+export function inspectInteractionQueryWire(agentServerPayload: Uint8Array): InteractionQueryWireInfo {
+  const queryBytes = readAllFields(agentServerPayload).find((field) => field.fn === 7 && field.wt === 2)?.bytes
   if (!queryBytes) return {}
 
   // InteractionQuery.id is a proto3 uint32. Cursor commonly uses id=0, whose
@@ -324,17 +317,12 @@ function handleAskQuestionQuery(
     // Async queries are unblocked now and answered later through a
     // ConversationAction; synchronous ones keep Cursor waiting, which is what
     // its CLI does while the user is still choosing.
-    reply: decoded.args.runAsync
-      ? buildAskQuestionInteractionReply(id, { async: {} })
-      : undefined,
+    reply: decoded.args.runAsync ? buildAskQuestionInteractionReply(id, { async: {} }) : undefined,
   }
 }
 
 /** `AgentClientMessage{interaction_response{ask_question_interaction_response}}`. */
-export function buildAskQuestionInteractionReply(
-  id: number,
-  result: AskQuestionResultMessage,
-): Uint8Array {
+export function buildAskQuestionInteractionReply(id: number, result: AskQuestionResultMessage): Uint8Array {
   return encodeMessage("AgentClientMessage", {
     interaction_response: {
       id,
@@ -407,10 +395,7 @@ function handleSwitchModeQuery(
 }
 
 /** `AgentClientMessage{interaction_response{switch_mode_request_response}}`. */
-export function buildSwitchModeInteractionReply(
-  id: number,
-  result: Record<string, unknown>,
-): Uint8Array {
+export function buildSwitchModeInteractionReply(id: number, result: Record<string, unknown>): Uint8Array {
   return encodeMessage("AgentClientMessage", {
     interaction_response: {
       id,
@@ -420,10 +405,7 @@ export function buildSwitchModeInteractionReply(
 }
 
 /** `AgentClientMessage{interaction_response{create_plan_request_response}}`. */
-export function buildCreatePlanInteractionReply(
-  id: number,
-  result: Record<string, unknown>,
-): Uint8Array {
+export function buildCreatePlanInteractionReply(id: number, result: Record<string, unknown>): Uint8Array {
   return encodeMessage("AgentClientMessage", {
     interaction_response: {
       id,
@@ -574,8 +556,8 @@ function handleGenerateImageQuery(
   if (!decoded) return reject("Missing generate image arguments")
   if (!options.canSaveGeneratedImage) {
     return reject(
-      "This OpenCode agent cannot save a generated image, so generating one would "
-      + "produce nothing. Describe the image in your reply instead.",
+      "This OpenCode agent cannot save a generated image, so generating one would " +
+        "produce nothing. Describe the image in your reply instead.",
     )
   }
 

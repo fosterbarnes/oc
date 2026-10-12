@@ -318,6 +318,7 @@ test("h2 forwarding retains strict https://*.cursor.sh origin validation", async
         ":method": "POST",
         ":path": "/",
         "x-cursor-h2-origin": origin,
+        "x-opencursor-control-token": token,
       })
       const status = await new Promise((resolve) => {
         req.on("response", (headers) => resolve(headers[":status"]))
@@ -338,6 +339,7 @@ test("h2 forwarding retains strict https://*.cursor.sh origin validation", async
       ":method": "POST",
       ":path": "/",
       "x-cursor-h2-origin": "https://api2.cursor.sh",
+      "x-opencursor-control-token": token,
     })
     const status = await new Promise((resolve) => {
       req.on("response", (headers) => resolve(headers[":status"]))
@@ -371,13 +373,12 @@ test("port 0 lets two sidecars run side by side and reports their ports", async 
   }
 })
 
-test("h2 data behavior stays compatible: h2 does not require control token", async () => {
+test("h2 stream requires control token", async () => {
   const [healthPort, h2Port] = await getTwoPorts()
   const token = crypto.randomUUID()
   const child = spawnSidecar({ healthPort, h2Port, token })
   try {
     await waitForHealth({ healthPort, token })
-    // h2 request without control token should still be processed (origin validation only)
     const client = http2.connect(`http://127.0.0.1:${h2Port}`)
     await new Promise((resolve, reject) => {
       client.on("error", reject)
@@ -387,15 +388,12 @@ test("h2 data behavior stays compatible: h2 does not require control token", asy
       ":method": "POST",
       ":path": "/",
       "x-cursor-h2-origin": "https://api2.cursor.sh",
-      // no control token header
     })
     const status = await new Promise((resolve) => {
       req.on("response", (headers) => resolve(headers[":status"]))
-      req.on("error", () => resolve(502))
-      setTimeout(() => resolve(502), 2000)
+      req.on("error", () => resolve(500))
     })
-    // should not be 401
-    assert.notEqual(status, 401)
+    assert.equal(status, 401)
     client.close()
     req.destroy()
   } finally {

@@ -35,10 +35,7 @@ export function* streamFrames(buffer: Uint8Array): Generator<Frame, void, void> 
   while (offset + 5 <= buffer.length) {
     const flags = buffer[offset]
     const len =
-      ((buffer[offset + 1] << 24) |
-        (buffer[offset + 2] << 16) |
-        (buffer[offset + 3] << 8) |
-        buffer[offset + 4]) >>> 0
+      ((buffer[offset + 1] << 24) | (buffer[offset + 2] << 16) | (buffer[offset + 3] << 8) | buffer[offset + 4]) >>> 0
     const start = offset + 5
     if (start + len > buffer.length) break
     yield { flags, payload: buffer.subarray(start, start + len) }
@@ -46,9 +43,7 @@ export function* streamFrames(buffer: Uint8Array): Generator<Frame, void, void> 
   }
 }
 
-export async function* asyncStreamFrames(
-  stream: ReadableStream<Uint8Array>,
-): AsyncGenerator<Frame, void, void> {
+export async function* asyncStreamFrames(stream: ReadableStream<Uint8Array>): AsyncGenerator<Frame, void, void> {
   const reader = stream.getReader()
   const chunks: Uint8Array[] = []
   let pendingLength = 0

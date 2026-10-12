@@ -2,7 +2,7 @@
 //
 // Cursor's per-turn tool descriptors carry the tool `input_schema` (a JSON
 // Schema object) as a `google.protobuf.Value` whose `struct_value` holds the
-// schema — NOT a JSON string. Verified against a live capture
+// schema - NOT a JSON string. Verified against a live capture
 // (request_context #7 → McpToolDefinition #3):
 //   2a 9a07  0a10 0a04 74797065 1208 1a06 6f626a656374 ...
 //   = Value{#5 struct_value: Struct{#1 fields: {"type": Value{#3 string "object"}}}}
@@ -10,7 +10,7 @@
 // Field numbers (well-known types):
 //   Value:     1 null_value, 2 number_value(double), 3 string_value,
 //              4 bool_value, 5 struct_value(Struct), 6 list_value(ListValue)
-//   Struct:    1 fields (map<string, Value>) — each entry msg{1 key, 2 value}
+//   Struct:    1 fields (map<string, Value>) - each entry msg{1 key, 2 value}
 //   ListValue: 1 values (repeated Value)
 
 function writeVarint(out: number[], n: number): void {
@@ -49,7 +49,8 @@ function writeDouble(out: number[], field: number, num: number): void {
 export type RawField = { fn: number; wt: number; varint: number; bytes?: Uint8Array; i64?: Uint8Array }
 
 function readVarintAt(b: Uint8Array, i: number): [number, number] {
-  let r = 0, s = 0
+  let r = 0,
+    s = 0
   while (i < b.length) {
     const x = b[i++]
     r |= (x & 0x7f) << s
@@ -66,7 +67,8 @@ export function readAllFields(b: Uint8Array): RawField[] {
   while (i < b.length) {
     let key: number
     ;[key, i] = readVarintAt(b, i)
-    const fn = key >>> 3, wt = key & 7
+    const fn = key >>> 3,
+      wt = key & 7
     if (wt === 0) {
       let v: number
       ;[v, i] = readVarintAt(b, i)
@@ -80,7 +82,7 @@ export function readAllFields(b: Uint8Array): RawField[] {
       out.push({ fn, wt, varint: 0, i64: b.subarray(i, i + 8) })
       i += 8
     } else if (wt === 5) {
-      i += 4 // i32 — not used by Value
+      i += 4 // i32 - not used by Value
     } else break
   }
   return out
@@ -106,11 +108,7 @@ const MAX_PROTOBUF_FIELD_NUMBER = 0x1fff_ffff
  * truncation. `maximum` also enforces the protocol width: tags and lengths are
  * uint32, while wire-type 0 scalar values may use the full uint64 range.
  */
-function readBoundedVarint(
-  bytes: Uint8Array,
-  offset: number,
-  maximum: bigint,
-): DecodedVarint | undefined {
+function readBoundedVarint(bytes: Uint8Array, offset: number, maximum: bigint): DecodedVarint | undefined {
   let value = 0n
   let shift = 0n
   for (let index = offset; index < bytes.length && index < offset + 10; index++) {
@@ -219,13 +217,20 @@ export function decodeValueToJson(bytes: Uint8Array): unknown {
   if (fs.length === 0) return null
   const f = fs[0]
   switch (f.fn) {
-    case 1: return null // null_value
-    case 2: return f.i64 ? new DataView(f.i64.buffer, f.i64.byteOffset, 8).getFloat64(0, true) : 0
-    case 3: return f.bytes ? new TextDecoder().decode(f.bytes) : ""
-    case 4: return f.varint !== 0
-    case 5: return f.bytes ? decodeStructBytes(f.bytes) : {}
-    case 6: return f.bytes ? decodeListBytes(f.bytes) : []
-    default: return null
+    case 1:
+      return null // null_value
+    case 2:
+      return f.i64 ? new DataView(f.i64.buffer, f.i64.byteOffset, 8).getFloat64(0, true) : 0
+    case 3:
+      return f.bytes ? new TextDecoder().decode(f.bytes) : ""
+    case 4:
+      return f.varint !== 0
+    case 5:
+      return f.bytes ? decodeStructBytes(f.bytes) : {}
+    case 6:
+      return f.bytes ? decodeListBytes(f.bytes) : []
+    default:
+      return null
   }
 }
 
@@ -262,7 +267,9 @@ export function encodeJsonAsValue(v: unknown): Uint8Array {
     writeLengthDelimited(out, 6, new Uint8Array(lv))
   } else if (typeof v === "object") {
     const st: number[] = []
-    for (const [key, val] of Object.entries(v as Record<string, unknown>).sort(([left], [right]) => left.localeCompare(right))) {
+    for (const [key, val] of Object.entries(v as Record<string, unknown>).sort(([left], [right]) =>
+      left.localeCompare(right),
+    )) {
       if (val === undefined) continue
       const entry: number[] = []
       writeString(entry, 1, key)

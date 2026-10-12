@@ -3,7 +3,7 @@ import { trace } from "./debug.js"
 import { CursorProtocolError, type CursorProviderError } from "./errors.js"
 import { sessionActivity, type SessionActivitySource } from "./activity.js"
 import type { HostSubagentCatalog, OpencodeToolDef, ToolAliasRegistry } from "./protocol/tools.js"
-import type { CursorConversationTokenDetails } from "./protocol/token-details.js"
+import type { CursorConversationTokenDetails } from "./protocol/tokenDetails.js"
 
 export type Frame = { flags: number; payload: Uint8Array }
 
@@ -107,7 +107,7 @@ export type PendingExec = {
   /**
    * True when this pending entry was synthesized from a Cursor display-only
    * tool_call_* frame (no ExecServerMessage). Continuation must not write an
-   * exec result back to Cursor — just clear pending and keep pumping.
+   * exec result back to Cursor - just clear pending and keep pumping.
    */
   bridged?: boolean
 }
@@ -152,7 +152,7 @@ export type CursorSession = {
    */
   sessionId: string
   /**
-   * Cursor conversation_id for this Run — used to store/echo
+   * Cursor conversation_id for this Run - used to store/echo
    * conversation_checkpoint_update (CLI parity).
    */
   conversationId: string
@@ -213,7 +213,7 @@ export type CursorSession = {
   nextBridgedExecId: number
   /** KV blob store: blob_id (hex) → data, for Cursor's out-of-band payload channel. */
   blobs: Map<string, Uint8Array>
-  /** McpToolDefinition list advertised this turn — echoed into the request_context reply. */
+  /** McpToolDefinition list advertised this turn - echoed into the request_context reply. */
   toolDescriptors: Array<Record<string, unknown>>
   /** Cursor-facing web alias → exact executable host tool for this Run. */
   toolAliases?: ToolAliasRegistry
@@ -291,7 +291,7 @@ export class SessionManager {
   private sessions = new Set<CursorSession>()
   // Most recently registered open session per OpenCode session id. A second
   // registration for the same id means the caller started a fresh Run instead
-  // of continuing the held-open one — the prior entry is stale and superseded.
+  // of continuing the held-open one - the prior entry is stale and superseded.
   private byOpenCodeSessionId = new Map<string, CursorSession>()
   private tombstones = new Map<string, Tombstone>()
   private readonly now: () => number
@@ -335,13 +335,13 @@ export class SessionManager {
         if (this.isPumping(prior)) {
           // A live pull() is mid-await on this stream (nextFrameWithSemanticDeadline
           // or the raw frame iterator). Forcing close() here would reject that await
-          // and propagate a real error to whatever still holds the ReadableStream —
+          // and propagate a real error to whatever still holds the ReadableStream  - 
           // exactly the kind of self-inflicted failure this cap is meant to prevent.
           // Let it finish or expire on its own (hard deadline / heartbeat failure).
           trace(
             `sessionManager.registerSession: openCodeSessionId=${session.openCodeSessionId} ` +
               `has a still-pumping prior session ${prior.sessionId} (pending=${prior.pending.size}) ` +
-              `— leaving it to finish or expire naturally instead of interrupting it`,
+              ` -  leaving it to finish or expire naturally instead of interrupting it`,
           )
         } else {
           trace(
@@ -367,7 +367,7 @@ export class SessionManager {
   /**
    * Force-close the oldest idle open session(s) once registration exceeds the
    * cap. Never closes a session with a live pull() mid-await (see the same
-   * guard in the supersede check above) — an unclosable backlog of genuinely
+   * guard in the supersede check above) - an unclosable backlog of genuinely
    * active sessions just means the cap can't be enforced until one finishes.
    */
   private enforceOpenSessionCap(justRegistered: CursorSession): void {
@@ -381,7 +381,7 @@ export class SessionManager {
         trace(
           `sessionManager.registerSession: open session cap exceeded ` +
             `(${this.sessions.size} > ${this.maxOpenSessions}) but no idle session is ` +
-            `available to close — all remaining sessions are actively pumping`,
+            `available to close - all remaining sessions are actively pumping`,
         )
         return
       }

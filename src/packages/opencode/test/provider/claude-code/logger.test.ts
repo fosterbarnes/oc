@@ -16,12 +16,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-import {
-  _resetLoggerForTests,
-  configureLogger,
-  getLoggerConfig,
-  log,
-} from "@/provider/claude-code/logger.js"
+import { _resetLoggerForTests, configureLogger, getLoggerConfig, log } from "@/provider/claude-code/logger.js"
 
 function captureStderr(): { lines: string[]; restore: () => void } {
   const lines: string[] = []

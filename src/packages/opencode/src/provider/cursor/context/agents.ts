@@ -37,10 +37,10 @@ function parseAgentMarkdown(
       for (const line of fm.split("\n")) {
         const m = line.match(/^(\w+):\s*(.*)$/)
         if (!m) continue
-        let val = m[2]!.trim()
-        if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
-          val = val.slice(1, -1)
-        }
+        const trimmed = m[2]!.trim()
+        const quoted =
+          (trimmed.startsWith('"') && trimmed.endsWith('"')) || (trimmed.startsWith("'") && trimmed.endsWith("'"))
+        const val = quoted ? trimmed.slice(1, -1) : trimmed
         if (m[1] === "name") name = val
         if (m[1] === "description") description = val
       }

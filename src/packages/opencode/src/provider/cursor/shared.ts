@@ -6,7 +6,6 @@ export const CURSOR_PROVIDER_ID = "cursor"
 export const CURSOR_COMPACTION_OPTION = "opencodeCompaction"
 /** Host-set on every turn after a compaction; value is the summary message id. */
 export const COMPACTION_BOUNDARY_OPTION = "opencodeCompactionBoundary"
-export const TOKEN_EXPIRY_THRESHOLD_S = 300
 
 export const RUN_PATH = "/agent.v1.AgentService/Run"
 export const AVAILABLE_MODELS_PATH = "/aiserver.v1.AiService/AvailableModels"

@@ -13,7 +13,7 @@ import { pluginTmpDir } from "./tmp.js"
 const MULTI_STEP_TASK_HINT = `## Continuing through multi-step tasks
 
 opencode requires the user to press "continue" after each turn ends. When a
-task has multiple steps, do them all in one turn — chain tool calls rather
+task has multiple steps, do them all in one turn - chain tool calls rather
 than pausing for user confirmation between subtasks. End the turn only
 when the task is done, you need clarification on intent, or you hit a real
 blocker. The user can interrupt or abort at any time; turn endings should
@@ -40,7 +40,7 @@ Subagent dispatch in this environment goes through exactly two tools: \`mcp__ope
  * Section of the tool environment note, emitted when the `question` proxy
  * survived the version gate. Live testing (2026-07-05, haiku) showed the model's reasoning
  * correctly identified `mcp__opencode_proxy__question` as the tool to use,
- * but then emitted a tool call for bare `question` — stripping the MCP
+ * but then emitted a tool call for bare `question` - stripping the MCP
  * prefix. opencode's AI SDK bridge has no bare `question` tool, so the
  * call rendered as `⚙ invalid`. Same near-miss pattern the task proxy
  * hit (TaskCreate vs mcp__opencode_proxy__task); the fix is the same:
@@ -52,7 +52,7 @@ export const QUESTION_PROXY_HINT = `### Asking the operator questions
 Structured questions in this environment go through exactly one tool: \`mcp__opencode_proxy__question\`.
 
 - When you need to ask the operator a question with options, call \`mcp__opencode_proxy__question\` with a \`questions\` array (each item has \`question\`, \`header\`, \`options\` of \`{label, description}\`, and optional \`multiple\`).
-- Do NOT call bare \`question\` — that is not a tool. Always use the full \`mcp__opencode_proxy__question\` name when invoking it.
+- Do NOT call bare \`question\` - that is not a tool. Always use the full \`mcp__opencode_proxy__question\` name when invoking it.
 - Claude Code's built-in \`AskUserQuestion\` is disabled in this environment; the proxy is the only way to ask structured questions.`
 
 /**

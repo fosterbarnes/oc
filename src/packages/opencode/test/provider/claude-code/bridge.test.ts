@@ -1,7 +1,7 @@
 // @ts-nocheck
 // WIP: ported from opencode-claude-code-plugin, which never typechecked its tests; type them as Phase 3 rewrites land.
 /**
- * Unit tests for src/mcp-bridge.ts.
+ * Unit tests for src/mcpBridge.ts.
  *
  * Runs offline against fake config trees written under a per-test temp dir.
  * Uses Node's built-in `node:test` so no extra dependencies are pulled in.
@@ -16,14 +16,10 @@ import * as fs from "node:fs"
 import * as path from "node:path"
 import * as os from "node:os"
 
-import { mergeOpencodeMcp, __test } from "@/provider/claude-code/mcp-bridge.js"
+import { mergeOpencodeMcp, __test } from "@/provider/claude-code/mcpBridge.js"
 import { defaultModels, toConfigModel } from "@/provider/claude-code/models.js"
 
-const {
-  deepMerge,
-  mergeMcp,
-  detectWorktree,
-} = __test
+const { deepMerge, mergeMcp, detectWorktree } = __test
 
 function mkTmp(prefix: string): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), prefix))
@@ -60,10 +56,7 @@ async function withIsolatedEnv<T>(fn: (xdgRoot: string) => Promise<T> | T): Prom
 }
 
 test("deepMerge replaces primitives, deep-merges objects, replaces arrays", () => {
-  const out = deepMerge(
-    { a: 1, b: { x: 1, y: 2 }, c: [1, 2] },
-    { a: 9, b: { y: 99, z: 3 }, c: [3] },
-  )
+  const out = deepMerge({ a: 1, b: { x: 1, y: 2 }, c: [1, 2] }, { a: 9, b: { y: 99, z: 3 }, c: [3] })
   assert.deepEqual(out, { a: 9, b: { x: 1, y: 99, z: 3 }, c: [3] })
 })
 

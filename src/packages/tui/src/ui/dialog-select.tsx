@@ -88,6 +88,7 @@ export interface DialogSelectOption<T = any> {
 export type DialogSelectRef<T> = {
   filter: string
   filtered: DialogSelectOption<T>[]
+  selected: DialogSelectOption<T> | undefined
   moveTo(value: T): void
 }
 
@@ -284,14 +285,17 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
       },
     ),
   )
+  let focusTimer: ReturnType<typeof setTimeout> | undefined
   onCleanup(() => {
     visibilityGeneration++
+    clearTimeout(focusTimer)
   })
 
   createEffect(
     on([() => store.filter, () => props.current], ([filter, current]) => {
       if (filter.length > 0) resetSelection = true
-      setTimeout(() => {
+      clearTimeout(focusTimer)
+      focusTimer = setTimeout(() => {
         if (filter.length > 0) {
           moveTo(0, true, false)
         } else if (current) {
@@ -515,6 +519,9 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
     },
     get filtered() {
       return filtered()
+    },
+    get selected() {
+      return selected()
     },
     moveTo(value) {
       const index = flat().findIndex((option) => isDeepEqual(option.value, value))

@@ -137,7 +137,9 @@ try {
         }
         $commandArguments = $check.Arguments
         if ($check.Output) {
-            & $check.Command @commandArguments | Set-Content -LiteralPath $check.Output -Encoding utf8NoBOM
+            $generated = & $check.Command @commandArguments
+            if ($LASTEXITCODE) { throw "$($check.Name) failed (exit $LASTEXITCODE)." }
+            $generated | Set-Content -LiteralPath $check.Output -Encoding utf8NoBOM
         } elseif ($check.RequireEmpty) {
             $unexpected = & $check.Command @commandArguments
             if ($LASTEXITCODE) { throw "$($check.Name) failed (exit $LASTEXITCODE)." }

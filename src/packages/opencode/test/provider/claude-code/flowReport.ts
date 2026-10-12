@@ -1,10 +1,11 @@
 import { Cause, Effect, Exit } from "effect"
-import { TURN_STATS_MARKER } from "../../../src/provider/claude-code/turn-stats"
-import type { openChat } from "./chat-fixture"
+import { TURN_STATS_MARKER } from "../../../src/provider/claude-code/turnStats"
+import type { openChat } from "./chatFixture"
 
 type Chat = Effect.Success<ReturnType<typeof openChat>>
 export type Entry = NonNullable<Awaited<ReturnType<Chat["sdk"]["session"]["messages"]>>["data"]>[number]
-const BLOCKED = /(?:^|\n)\s*(?:Error during compaction:\s*)?(?:Failed to authenticate\b[^\n]*|API Error: 40[13]\b[^\n]*|(?:[>▌*\s]|\*\*rate limit:\*\*)*Claude Code rejected this request:[^\n]*|You've hit your (?:session|usage|weekly) limit\b[^\n]*)/i
+const BLOCKED =
+  /(?:^|\n)\s*(?:Error during compaction:\s*)?(?:Failed to authenticate\b[^\n]*|API Error: 40[13]\b[^\n]*|(?:[>▌*\s]|\*\*rate limit:\*\*)*Claude Code rejected this request:[^\n]*|You've hit your (?:session|usage|weekly) limit\b[^\n]*)/i
 const EXPENSIVE_USD = 0.25
 
 export const refusalReason = (text: string) => text.match(BLOCKED)?.[0]
@@ -70,12 +71,21 @@ export function stepRunner(report: ReturnType<typeof flowReport>) {
               if (Exit.isSuccess(exit)) return yield* Effect.fail(new Error("step accounting failed"))
               return
             }
-            const all = [...new Map([...retained, ...collected.value].map((message) => [message.info.id, message])).values()]
+            const all = [
+              ...new Map([...retained, ...collected.value].map((message) => [message.info.id, message])).values(),
+            ]
             report.usage(turnUsage(all, ledger), (Date.now() - since) / 1000)
-            for (const notice of new Set(JSON.stringify(all).match(/Claude conversation \w+/g))) report.oddity(`notice: ${notice}`)
+            for (const notice of new Set(JSON.stringify(all).match(/Claude conversation \w+/g)))
+              report.oddity(`notice: ${notice}`)
             for (const message of all)
-              if (message.info.role === "assistant" && message.info.error && !(name.startsWith("3") && message.info.error.name === "MessageAbortedError"))
-                report.oddity(`error: ${message.info.error.name} ${JSON.stringify(message.info.error.data).slice(0, 200)}`)
+              if (
+                message.info.role === "assistant" &&
+                message.info.error &&
+                !(name.startsWith("3") && message.info.error.name === "MessageAbortedError")
+              )
+                report.oddity(
+                  `error: ${message.info.error.name} ${JSON.stringify(message.info.error.data).slice(0, 200)}`,
+                )
             if (Exit.isSuccess(exit)) {
               for (const message of all) yield* accept(message)
             }
@@ -111,32 +121,51 @@ export const childrenSince = (chat: Chat, since: number) =>
 export const texts = (messages: Entry[]) =>
   messages
     .filter((message) => message.info.role === "assistant")
-    .flatMap((message) => message.parts.flatMap((part) =>
-      part.type === "text" && !part.text.trim().startsWith(TURN_STATS_MARKER) ? [part.text] : [],
-    ))
+    .flatMap((message) =>
+      message.parts.flatMap((part) =>
+        part.type === "text" && !part.text.trim().startsWith(TURN_STATS_MARKER) ? [part.text] : [],
+      ),
+    )
     .join("\n")
 
 export const tools = (messages: Entry[]) =>
-  messages.flatMap((message) => message.parts.flatMap((part) => part.type === "tool" ? [part.tool] : []))
+  messages.flatMap((message) => message.parts.flatMap((part) => (part.type === "tool" ? [part.tool] : [])))
 
 // Each tool row as `name status [command or path] [-> short output or error]`: enough to tell a
 // skipped, failed, or misdirected tool call apart without dumping inputs or file contents.
 export const toolSummary = (messages: Entry[]) =>
   messages
-    .flatMap((message) => message.parts.flatMap((part) => {
-      if (part.type !== "tool") return []
-      const target = [part.state.input.command, part.state.input.file_path, part.state.input.path]
-        .find((value) => typeof value === "string")
-      const result = part.state.status === "error" ? part.state.error : part.state.status === "completed" ? part.state.output : ""
-      return [[part.tool, part.state.status, String(target ?? "").slice(0, 80), result.trim() && `-> ${result.trim().slice(0, 80)}`]
-        .filter(Boolean).join(" ")]
-    }))
+    .flatMap((message) =>
+      message.parts.flatMap((part) => {
+        if (part.type !== "tool") return []
+        const target = [part.state.input.command, part.state.input.file_path, part.state.input.path].find(
+          (value) => typeof value === "string",
+        )
+        const result =
+          part.state.status === "error" ? part.state.error : part.state.status === "completed" ? part.state.output : ""
+        return [
+          [
+            part.tool,
+            part.state.status,
+            String(target ?? "").slice(0, 80),
+            result.trim() && `-> ${result.trim().slice(0, 80)}`,
+          ]
+            .filter(Boolean)
+            .join(" "),
+        ]
+      }),
+    )
     .join("; ")
 
 export function cliCost(message: Entry) {
-  const footer = message.parts.findLast((part) => part.type === "text" && part.text.trim().startsWith(TURN_STATS_MARKER))
+  const footer = message.parts.findLast(
+    (part) => part.type === "text" && part.text.trim().startsWith(TURN_STATS_MARKER),
+  )
   if (footer?.type !== "text") return
-  const value = footer.text.trim().slice(TURN_STATS_MARKER.length).match(/^\s+\$(\d+(?:\.\d+)?)(?=\s|$)/)?.[1]
+  const value = footer.text
+    .trim()
+    .slice(TURN_STATS_MARKER.length)
+    .match(/^\s+\$(\d+(?:\.\d+)?)(?=\s|$)/)?.[1]
   if (value === undefined) return
   const cost = Number(value)
   return Number.isFinite(cost) && cost >= 0 ? cost : undefined
@@ -163,17 +192,19 @@ export function usage(messages: Entry[], costs?: ReadonlyMap<string, number | un
 }
 
 export function turnUsage(messages: Entry[], ledger: Map<string, number | undefined>) {
-  const all = [...new Map(messages.map((message) => [message.info.id, message])).values()]
-    .sort((a, b) => a.info.time.created - b.info.time.created)
+  const all = [...new Map(messages.map((message) => [message.info.id, message])).values()].sort(
+    (a, b) => a.info.time.created - b.info.time.created,
+  )
   const costs = new Map<string, number | undefined>()
   for (const message of all) {
     if (message.info.role !== "assistant") continue
     const total = cliCost(message)
     const previous = ledger.has(message.info.sessionID) ? ledger.get(message.info.sessionID) : 0
     // A missing observation or decreased counter cannot establish per-turn spend.
-    const delta = total !== undefined && previous !== undefined && total >= previous
-      ? Number((total - previous).toFixed(4))
-      : undefined
+    const delta =
+      total !== undefined && previous !== undefined && total >= previous
+        ? Number((total - previous).toFixed(4))
+        : undefined
     costs.set(message.info.id, delta)
     ledger.set(message.info.sessionID, total)
   }
@@ -191,35 +222,53 @@ export function flowReport(models: { modelID: string; switchModelID: string }) {
     oddity: (text: string) => oddities.push(`${report.current}: ${text}`),
     usage: (total: ReturnType<typeof usage> | undefined, seconds: number) => {
       usages.push({ step: report.current, seconds, total })
-      if (total && total.cliCost > EXPENSIVE_USD) report.oddity(`expensive: known CLI spend $${total.cliCost.toFixed(4)}`)
+      if (total && total.cliCost > EXPENSIVE_USD)
+        report.oddity(`expensive: known CLI spend $${total.cliCost.toFixed(4)}`)
     },
     block: (reason: string) => {
       checks.push({ step: report.current, check: "request accepted", ok: false, blocked: true, detail: reason })
       report.oddity(`run stopped: ${reason}; later steps not run`)
     },
-    render: () => [
-      "# claudeTestFlow real-model report", "",
-      `- Date: ${new Date().toISOString()}`,
-      `- Model: ${models.modelID} (step 7 switches to ${models.switchModelID})`,
-      `- Checks: ${checks.filter((row) => row.ok).length}/${checks.length} pass, ${checks.filter((row) => row.blocked).length} blocked; last step reached: ${report.current}`,
-      `- CLI cost total: ${costLabel({
-        cliCost: usages.reduce((sum, row) => sum + (row.total?.cliCost ?? 0), 0),
-        cliKnown: usages.reduce((sum, row) => sum + (row.total?.cliKnown ?? 0), 0),
-        cliMissing: usages.reduce((sum, row) => sum + (row.total?.cliMissing ?? 0), 0),
-      }, usages.some((row) => !row.total))}`, "",
-      "| Step | Check | Result | Detail |", "| --- | --- | --- | --- |",
-      ...checks.map((row) => `| ${row.step} | ${row.check} | ${row.ok ? "pass" : row.blocked ? "blocked" : "FAIL"} | ${cell(row.detail)} |`), "",
-      "Tokens and oc cost are each turn's last API call (what oc stores). CLI cost is estimated",
-      "spend from differences between rounded cumulative CLI footers, not subscription charges.",
-      "Missing footers (/compact, failed or interrupted turns) make spend unavailable or partial.", "",
-      "| Step | Input | Output | Cache read | Cache write | oc cost | CLI cost | Seconds |",
-      "| --- | --- | --- | --- | --- | --- | --- | --- |",
-      ...usages.map((row) => row.total
-        ? `| ${row.step} | ${row.total.input} | ${row.total.output} | ${row.total.cacheRead} | ${row.total.cacheWrite} | ${row.total.cost.toFixed(4)} | ${costLabel(row.total)} | ${row.seconds.toFixed(0)} |`
-        : `| ${row.step} | unavailable | unavailable | unavailable | unavailable | unavailable | unavailable | ${row.seconds.toFixed(0)} |`), "",
-      "## Oddities", "",
-      ...(oddities.length ? oddities.map((text) => `- ${cell(text, 600)}`) : ["- none"]), "",
-    ].join("\n"),
+    render: () =>
+      [
+        "# claudeTestFlow real-model report",
+        "",
+        `- Date: ${new Date().toISOString()}`,
+        `- Model: ${models.modelID} (step 7 switches to ${models.switchModelID})`,
+        `- Checks: ${checks.filter((row) => row.ok).length}/${checks.length} pass, ${checks.filter((row) => row.blocked).length} blocked; last step reached: ${report.current}`,
+        `- CLI cost total: ${costLabel(
+          {
+            cliCost: usages.reduce((sum, row) => sum + (row.total?.cliCost ?? 0), 0),
+            cliKnown: usages.reduce((sum, row) => sum + (row.total?.cliKnown ?? 0), 0),
+            cliMissing: usages.reduce((sum, row) => sum + (row.total?.cliMissing ?? 0), 0),
+          },
+          usages.some((row) => !row.total),
+        )}`,
+        "",
+        "| Step | Check | Result | Detail |",
+        "| --- | --- | --- | --- |",
+        ...checks.map(
+          (row) =>
+            `| ${row.step} | ${row.check} | ${row.ok ? "pass" : row.blocked ? "blocked" : "FAIL"} | ${cell(row.detail)} |`,
+        ),
+        "",
+        "Tokens and oc cost are each turn's last API call (what oc stores). CLI cost is estimated",
+        "spend from differences between rounded cumulative CLI footers, not subscription charges.",
+        "Missing footers (/compact, failed or interrupted turns) make spend unavailable or partial.",
+        "",
+        "| Step | Input | Output | Cache read | Cache write | oc cost | CLI cost | Seconds |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- |",
+        ...usages.map((row) =>
+          row.total
+            ? `| ${row.step} | ${row.total.input} | ${row.total.output} | ${row.total.cacheRead} | ${row.total.cacheWrite} | ${row.total.cost.toFixed(4)} | ${costLabel(row.total)} | ${row.seconds.toFixed(0)} |`
+            : `| ${row.step} | unavailable | unavailable | unavailable | unavailable | unavailable | unavailable | ${row.seconds.toFixed(0)} |`,
+        ),
+        "",
+        "## Oddities",
+        "",
+        ...(oddities.length ? oddities.map((text) => `- ${cell(text, 600)}`) : ["- none"]),
+        "",
+      ].join("\n"),
     write: (file: string) => Bun.write(file, report.render()),
   }
   return report

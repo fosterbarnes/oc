@@ -9,6 +9,30 @@ export type EventSource = {
   onReconnect?: (handler: () => void) => () => void
 }
 
+export interface ScheduledResumeEntry {
+  id: string
+  sessionID: string
+  directory: string
+  fireAt: number
+  reason: string
+  createdAt: number
+  attempts: number
+}
+
+export interface ScheduledResumeState {
+  enabled: boolean
+  prompt: string
+  entries: ScheduledResumeEntry[]
+}
+
+export interface ClaudeAccountOption {
+  id: string
+  label: string
+  current: boolean
+  pinned?: boolean
+  limitedUntil?: number
+}
+
 export const { use: useSDK, provider: SDKProvider } = createSimpleContext({
   name: "SDK",
   init: (props: {
@@ -196,12 +220,17 @@ export const { use: useSDK, provider: SDKProvider } = createSimpleContext({
       (
         sdk as unknown as {
           client: {
-            get: (options: { url: string }) => Promise<{ data?: { enabled?: boolean }; error?: unknown }>
+            get: (options: { url: string }) => Promise<{ data?: unknown; error?: unknown }>
+            post: (options: {
+              url: string
+              body: unknown
+              headers?: Record<string, string>
+            }) => Promise<{ data?: unknown; error?: unknown }>
             put: (options: {
               url: string
-              body: { enabled: boolean }
+              body: unknown
               headers?: Record<string, string>
-            }) => Promise<{ data?: { enabled?: boolean }; error?: unknown }>
+            }) => Promise<{ data?: unknown; error?: unknown }>
           }
         }
       ).client
@@ -224,7 +253,7 @@ export const { use: useSDK, provider: SDKProvider } = createSimpleContext({
         get: async () => {
           const result = await transport().get({ url: "/debug-logging" })
           if (result.error) throw result.error
-          return result.data?.enabled === true
+          return (result.data as { enabled?: boolean } | undefined)?.enabled === true
         },
         set: async (enabled: boolean) => {
           const result = await transport().put({
@@ -233,7 +262,51 @@ export const { use: useSDK, provider: SDKProvider } = createSimpleContext({
             headers: { "Content-Type": "application/json" },
           })
           if (result.error) throw result.error
-          return result.data?.enabled === true
+          return (result.data as { enabled?: boolean } | undefined)?.enabled === true
+        },
+      },
+      claudeAccount: {
+        state: async (sessionID?: string): Promise<ClaudeAccountOption[]> => {
+          const result = await transport().get({
+            url: `/session/claude/account${sessionID ? `?sessionID=${encodeURIComponent(sessionID)}` : ""}`,
+          })
+          if (result.error) throw result.error
+          return (result.data as { accounts: ClaudeAccountOption[] }).accounts
+        },
+        /** Without `sessionID` sets the global account; with it, pins that session (`id` undefined unpins). */
+        set: async (id: string | undefined, sessionID?: string): Promise<ClaudeAccountOption[]> => {
+          const result = await transport().put({
+            url: "/session/claude/account",
+            body: { id, sessionID },
+            headers: { "Content-Type": "application/json" },
+          })
+          if (result.error) throw result.error
+          return (result.data as { accounts: ClaudeAccountOption[] }).accounts
+        },
+      },
+      resume: {
+        state: async (): Promise<ScheduledResumeState> => {
+          const result = await transport().get({ url: "/session/resume/state" })
+          if (result.error) throw result.error
+          return result.data as unknown as ScheduledResumeState
+        },
+        set: async (enabled: boolean): Promise<ScheduledResumeState> => {
+          const result = await transport().put({
+            url: "/session/resume/state",
+            body: { enabled },
+            headers: { "Content-Type": "application/json" },
+          })
+          if (result.error) throw result.error
+          return result.data as unknown as ScheduledResumeState
+        },
+        cancel: async (id: string): Promise<boolean> => {
+          const result = await transport().post({
+            url: "/session/resume/cancel",
+            body: { id },
+            headers: { "Content-Type": "application/json" },
+          })
+          if (result.error) throw result.error
+          return result.data === true
         },
       },
     }

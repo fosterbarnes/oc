@@ -112,6 +112,169 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-12 (~17:54) - v0.2.162 variationsHedio - Post-review fixes for the fork-wide pass - Claude Opus 5.5, default reasoning; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; default reasoning; Implementation via subagents; completed
+- Version: 0.2.162 (no bump: same session as the v0.2.162 entry below)
+- Review: 4 read-only reviewers; findings in `~/.config/opencode/plans/forkReview/postReview.md`
+- Fixed `permission/index.ts` `disabled()`: turn ruleset also filtered, so `*: allow` never unhides `session_complete`/`session_failed`
+- Fixed `session/processor.ts:137` marker `command.ask`: gets only rules with permission exactly `marker`; default `*: allow` still prompts, explicit `marker: allow` skips
+- Fixed `provider/cursor/languageModel.ts`: continuation abort now closes the Run and stops the frame pump
+- Fixed `tui/src/app.tsx` file-loaded palette hotkeys: keymap conflict check matches interactive capture (`keymap.parseKeySequence`)
+- Changed `tui/.../sidebar.tsx:27` top/bottom cap: `max(8, floor(height/2))`, 24-row ceiling removed
+- Reverted rename side effects: `export.ts:168` label `session-directory`; `session-ui` `data-scope="apply-patch"` (upstream file)
+- Removed `showThinking` stub, `SCRIPT_OWN_PANE` env, `/claude-code-doctor` comment, root `.tmp_*.py` and `.diff-review.txt`
+- Fixed docs: FORK.md auto-resume toggle and sidebar size, `sidebar-tools` links, stale claims in the entry below, stale test usage comments
+- Removed oc.json `reasoningEffort` (user request): `createReasoningDefault`, `oc.reasoning_effort` palette entry and keybind, `oc.ts` key, schema command id, README rows; variant = session pick > model pick > model default
+- Fixed `tui/src/util/persistence.ts` `writeJsonAtomic`: writes to one path run in order (Windows EPERM when renames overlap); snapshot taken at call time
+- Fixed `test/cli/oc.test.ts`: dropped `defaultSubagent*` (never oc.json keys) and `serverStartOnWindowsUserStart` (would register a real sign-in entry; startup refuses under inline config); 11 pass
+- Fixed `config/oc.ts` regression from this session: `listOcProcesses` catch restored (null = no snapshot); `stopServer` sends the authenticated graceful shutdown without a snapshot and refuses only on a known identity mismatch (forced kill still needs identity); `shutdownAll` skips ledger removal when the second snapshot fails
+- Fixed stale tests in `test/config/oc.test.ts`: restart window is 120s (deliberate, covers 35s graceful stop); `executablePath` maps only `occ` -> `oc` (since entry at line ~326)
+- Verification: `config/oc.test.ts` + `cli/oc.test.ts` + `cli/launcherSafety.test.ts` 47 pass 0 fail; opencode typecheck exit 0
+- Kept PID fallback in `config/oc.ts` `isPidAlive`: win32-strict version broke revive waits that only have a bare PID; kills are already identity-gated
+- Verification: typecheck opencode + tui exit 0; `permissionSessionMarks.test.ts` 3 pass; `processor-effect.test.ts` 19 pass; `cursor.test.ts` 21 pass; `hotkeyValidate.test.ts` 17 pass; `openSidebar.test.ts` 74 pass 2 skip
+- ERROR: `test/cli/oc.test.ts:60` (config set serverStartOnWindowsUserStart exits 1) and `test/config/revive.test.ts:157` (TuiLedger.select empty) fail; not confirmed pre-existing
+- TODO: `buildNotes.txt` still v0.2.161; rewrite at push
+- Fixed `session/scheduledResume.ts` lock timeout: skips locked mutations; `takeDue` returns no claims and keeps queued resumes for next poll; counts/cap logic unchanged. Added held-lock regression; 18 pass, 0 fail.
+- Fixed lost bookkeeping on lock timeout: `retry`/`noteFired`/`noteUserIntervened` return whether the lock was taken; `fireEntry` writes them through `persist` (up to 10 tries, 1s apart, past the 30s stale-lock window). `scheduledResume.test.ts` 18 pass; opencode typecheck exit 0.
+- Fixed `provider/cursor/protocol/generateImage.ts` containment: root equality stays inside; exact `..`, parent traversal and absolute escapes stay outside; realpath handling kept. Target is a file path; root itself remains a directory, not a writable image file. Mapping tests 2 pass, 0 fail.
+- Fixed `provider/cursor/protocol/gitDiff.ts` target validation: returns checked realpath; callers convert to git pathspecs or read file contents. Added in-workspace junction/symlink regression; 22 pass, 0 fail.
+- Fixed `plugin/cursor.ts` session deletion: removes cached directory through new `sessionDirectory.ts` removal function (necessary supporting file outside handoff's named list); deletion preserves other sessions. Plugin tests 3 pass, 0 fail; provider tests included in combined 66 pass, 0 fail run.
+- Fixed `.scripts/installDebug.ps1`: timestamped backup, newest-three retention, restore on copy or validation failure. Parse PASS; installer never run. Fixed in review: uses `debugBackup-*` so its pruning cannot delete `install.ps1`'s full `backup-*` sets.
+- Verification (2026-10-12 ~18:15, GPT-6.1 Sol): five targeted files 66 pass, 0 fail; opencode `bun run typecheck` exit 0. bgShell unavailable; used built-in shell. Kept version 0.2.162 variationsHedio; Part 2 checks remain user-owned.
+- ERROR: separate scheduler run hit Windows EPERM at temp-file rename in existing stale-lock test (17 pass, 1 fail); immediate rerun without code changes 18 pass, 0 fail. Combined run also passed; no rename fix included.
+
+### User
+Permissions
+- Session complete/failed tools stay hidden unless allowed by name, even with a catch-all allow.
+- Marker commands still ask before running unless you add an explicit `marker` allow rule.
+
+Cursor and TUI
+- Stopping a Cursor reply mid-tool now stops it cleanly.
+- Palette hotkeys from your config file are rejected with a toast if they clash with an existing keybind.
+- Sidebar top/bottom sections can grow to half the terminal height.
+
+---
+
+## 2026-10-12 (~16:37) - v0.2.162 variationsHedio - Fork-wide review: bug fixes, unfinished features, dead code, style, camelCase renames - Claude Opus 5.5, default reasoning; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; default reasoning; spitS review then impS; 10 review + 10 impl subagents (Sonnet, Haiku, 2 Sol, Grok, Muse, Composer); completed
+- Version: 0.2.162 variationsHedio
+- Plan + raw reports: `C:\Users\user\.config\opencode\plans\forkReview\` (`plan.md`, per-area reports, `impB4.md`, `renameMap.txt`)
+- Fixed Claude provider: limit-text failover only on error results; no switch after abort; resume only after limit failure; pinned reset time; pending switch on exit without result; null version probe not cached, cross-spawn probe; session pins pruned; respawn keeps wake fields; default-account detection case/env aware
+- Fixed Cursor: relay h2 streams require control token (parent keeps token); stopCursorProxy awaits exit; per-pump abort; stream-start leak; git-diff realpath/homedir/ref rules; generate-image realpath; auth poll abort; `-1m` pricing; drain timeout fails. Unsupported execs reply typed errors and keep pumping; Windows background shell refused; `maxMode` option removed from thinking.ts
+- Fixed session: scheduled resume retries with backoff (busy/load/prompt failure), lockfile around store RMW, `cancel` keeps counts, `PUT session/resume/state` takes `prompt`; plan tools `ctx.ask`; `*: allow` no longer un-hides session marks; busy -> 409; tool flags merge into session permission; markers use merged ruleset; exclusive mark patch
+- Fixed launcher: no PID-only kills (CIM creation + exe identity, refuse when unproven); restart marked before stop, health fails while draining; startup lock kept while launcher alive; detached-launch quoting; revive keeps directory; worker logs faults; removed scratch/empty finally/occc TODO
+- Fixed TUI: script pins/favorites reactive; scrollbar default only when unset; Cursor reset date; left-button gating; dialog timer cleanup; Win32 clipboard image mime; single `accounts` entry uses pool probe
+- Finished sidebar top/bottom (height cap, backdrop close, WIP label gone) and palette hotkeys (alt mods, full conflict scan, hard modifier rule, prompt/dialog gating, invalid key toast, capture priority, serialized `persistTuiSetting`)
+- Reworked desktop updaters into one runner/parser (`OCERR:` line), shared `Get-MsixIdentity`, one `runVersionedCliUpdate`; host pins, signer checks, version match, CLI timeout, confirmed-version install
+- Scripts: Bun guard rejects all 1.4.0; install timestamped backup + restore (newest 3); `-SkipInstall` -> `-SkipBunInstall` on install.ps1; installDebug/.runDebug/revive/setReviveConsolePosition/test.ps1 fixes; SCRIPTS.md rows. Core: launchDetached quoting, debugConfig skip existing, log rotate ENOENT race
+- Removed legacy Claude `account` bash wrapper; ~21 dead symbols (list in session); `SCRIPT_OWN_PANE` env var from script runner (nothing read it)
+- Style: prettier (120) + em dash removal on ~290 fork-only files; renamed 174 fork-only kebab files to camelCase (dirs unchanged; map in plan folder); docs/scripts updated
+- FORK.md: auto-resume row, sign-in startup, meter averaging, installer backup, Cursor git_diff, palette hotkeys; level counts recounted
+- Kept (rejected findings): push.ps1 `-Force`/`Trim`, installer name-wide stop, marker `ask` default false, device-id MachineGuid parse
+- MISTAKE: style subagent replaced the `.` and em dash characters inside string literals and edited upstream `routes/session/index.tsx`; caught by `inline-tool-wrap` snapshot test, restored. Rule: glyph/dash cleanup touches comments only, never literals; never upstream files
+- Risk: claude-code `persistSessions`/`persistPool` last-writer-wins across oc + native opencode not fixed; per-hash skill plugin dir race open
+- Risk: old windows lack new identity stamps; launcher cleanup refuses them until closed
+- ERROR (pre-existing, not this session): `test/cli/run/footer.view.test.tsx` 2 fails + `runtime.boot.test.ts` keymap fallback (earlier keybind work); 4 claude-code tests expect proxy lists without `time` (time is in HEAD defaults); `spawn-env.test.ts` PATH vs Path; `oc.test.ts` `serverStartOnWindowsUserStart` fails and would write real HKCU Run if it passed
+- Verification: `bun run typecheck` 27/27; targeted tests pass (account-pool 17, cursor + scheduledResume + launcherSafety 156, tui updaters/hotkeys 48, inline-tool-wrap 17, core util 34, cursor-runtime node 9); `.ps1` parse checks clean. Provider unit run 649 pass / 6 fail (all classified above). No build, no install, no live checks
+
+### User
+Fixes across the fork
+- Claude accounts no longer switch just because a reply mentions a usage limit, and auto-resume after a limit reset no longer silently drops.
+- The Cursor helper now requires its private token for every request, and cancelling a Cursor reply stops it promptly.
+- oc never force-stops a process unless it can prove it is the same process it started.
+- Desktop and CLI harness updates show the real error message and refuse to install a different version than the one you confirmed.
+Finished features
+- Top/bottom sidebar positions are complete: no 12-row cap, and clicking outside the narrow overlay closes it.
+- Palette hotkeys validate keys, catch conflicts with built-in keys, and do not fire while typing.
+- The installer keeps a timestamped backup and restores it if install fails.
+Cleanup
+- Unused code and the old bash-only Claude account wrapper were removed; fork files were reformatted and renamed to camelCase. No UI change from the cleanup itself.
+
+---
+
+## 2026-10-12 (~01:45) - v0.2.161 forsenplsMoly - Manage third-party harness updates - GPT-6 Luna, reasoning unspecified; Agent
+
+### Agent
+- Meta: GPT-6 Luna; reasoning unspecified; Agent; completed
+- Version: v0.2.161 forsenplsMoly
+- Added Manage Third Party Harnesses palette submenu for Claude Code, Cursor and Codex CLIs, and Windows desktop updaters for Claude, Cursor and ChatGPT
+- Added CLI resolution/version reporting and desktop update checks with package identity/signature validation before in-place installation
+- Added `docs/wezterm.md`; README now documents terminal capabilities and WezTerm tab-color setup; updated `FORK.md` feature inventory
+- Cleared default keybindings for model, reasoning, agent, and home-directory preference commands
+- Verification: targeted opencode tests 43 passed; targeted tui tests 72 passed; `git diff --check` passed
+
+### User
+Third-party harness updates
+- Manage Third Party Harnesses groups updates for installed Claude Code, Cursor and Codex CLIs, plus Claude, Cursor and ChatGPT Desktop on Windows.
+- Desktop updates check the installed version and ask before closing and updating the application.
+
+Terminal
+- README documents terminal feature differences and recommends WezTerm; `docs/wezterm.md` explains colored agent tab setup.
+
+---
+
+## 2026-10-12 (~01:36) - v0.2.161 forsenplsMoly - Switch Claude account from the palette - Sonnet 5.5, default reasoning; Implementation
+
+### Agent
+- Meta: Sonnet 5.5; default reasoning; Implementation; completed
+- Version: v0.2.161 forsenplsMoly
+- Added `poolState` and `setCurrentAccount` in provider/claude-code/accounts.ts (manual pick clears that account's limit mark, persists the pool file)
+- Added `GET/PUT /session/claude-account` in httpapi groups/session.ts and handlers/session.ts (pool ids from `provider["claude-code"].options.accounts`); TUI reaches it through raw transport like `resume`, no client regenerate
+- Added `sdk.claudeAccount` in tui context/sdk.tsx and the `claude.account` palette command ("Switch Claude account", slash `/claude-account`) in tui app.tsx, shown only with 2+ pool accounts
+- Added test "a manual pick sticks..." in test/provider/claude-code/account-pool.test.ts
+- Verification: ran that test (pass); `tsc --noEmit` printed nothing for opencode and tui; TUI dialog and endpoint not exercised live
+
+### User
+Provider
+- New "Switch Claude account" palette command lists your pooled Claude accounts, marks the active one and shows limit reset times; picking one makes it the account for new turns.
+- Sessions restart their Claude context on the next turn after a switch.
+
+---
+
+
+## 2026-10-12 (~01:03) - v0.2.160 timewChatgpt - Label Claude usage accounts - GPT-6.1 Sol, default reasoning; Implementation
+
+### Agent
+- Meta: GPT-6.1 Sol; default reasoning; Implementation; completed
+- Version: 0.2.160 timewChatgpt
+- Changed `src/packages/tui/src/routes/session/sidebar-tools/usage.ts` `formatClaudeUsageRows`: each readable account gets paired hourly/weekly windows labeled Claude:, Claude2:, Claude3:, etc.; reused existing reset alignment/wrapping; spacing separates accounts and wrapped rows retain labels.
+- Changed `src/packages/tui/src/routes/session/sidebar-tools/sidebar-tools.tsx`: row label metadata gives numbered labels the existing freshness color.
+- Updated `src/packages/tui/test/cli/tui/usage-freshness.test.ts`: per-account values/resets, numbering, remaining mode, wrapping, spacing, idle dashes, unknown windows, and one-readable-account behavior.
+- Verification: `bun test test/cli/tui/usage-freshness.test.ts --only-failures` in tui: 31 pass, 0 fail. Live sidebar not run; build/install user-owned.
+
+### User
+Usage sidebar
+- Extra Claude accounts now show Claude2:, Claude3:, etc., with each account's hourly and weekly usage together.
+- Labels stay visible when a narrow sidebar wraps the usage windows.
+
+---
+
+## 2026-10-11 (~22:44) - v0.2.159 disrespectingWidely - Auto-resume after Claude usage reset - Muse Spark 1.3, default reasoning; Implementation
+
+### Agent
+- Meta: Muse Spark 1.3; default reasoning; Implementation; completed
+- Version: 0.2.159 disrespectingWidely
+- Added `src/packages/opencode/src/session/scheduled-resume.ts`: file-backed scheduler under Global.Path.data (`scheduled-resume.json`), enabled flag default false, one entry per session, startup overdue drain, five-fire cap, cancel; `fireEntry` claims before prompt, skips busy sessions and sessions with newer user messages, drops unreadable sessions.
+- Added turn-stream hook (`provider/claude-code/turn-stream.ts` `maybeScheduleResume`): schedules at earliest pool reset plus one minute when turn ends with all accounts limited; no-op for compaction, aborted, cancelled, or non-session turns. Added `earliestLimitedUntil` export in `provider/claude-code/accounts.ts`.
+- Added API `GET/PUT /session/resume/state` and `POST /session/resume/cancel` (groups/session.ts, handlers/session.ts); poll loop forks into app scope at handler setup. TUI uses raw transport (`tui/src/context/sdk.tsx` `resume` helper), no SDK regen needed.
+- Added TUI palette commands in `tui/src/app.tsx`: state-reflecting auto-resume toggle and "Scheduled resumes" list with local fire time; selecting an entry cancels it.
+- Fixed: Effect v4 beta has no `Effect.catchAll`; scheduler uses `Effect.catch` plus `Effect.catchDefect` on loop-survival paths.
+- Verification: `bun test test/session/scheduled-resume.test.ts` 11 pass; `bun run typecheck` clean in opencode and tui. Not run live.
+- TODO: live check needs a real all-accounts-limited turn with the toggle on; confirm the resume prompt posts after reset and the palette toggle reflects state.
+
+### User
+Auto-resume after usage reset
+- A new palette toggle enables automatic resume after Claude usage limits reset; it stays off until you turn it on.
+- When every Claude account hits its limit, the session is scheduled to continue on its own after the reset time.
+- "Scheduled resumes" in the palette lists pending auto-resumes with their times; picking one cancels it.
+- The resume is skipped if you already sent a message or the session is busy, and it stops after five automatic resumes in a row.
+
+---
+
 ## 2026-10-11 (~22:12) - v0.2.158 bangHahah - Clearer /done close-out wording - Claude Sonnet 5.5, low reasoning; Agent
 
 ### Agent

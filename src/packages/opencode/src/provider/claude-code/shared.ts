@@ -1,4 +1,4 @@
-// Host-set call options. oc writes them in session/llm/request.ts; the language model reads them in call-options.ts.
+// Host-set call options. oc writes them in session/llm/request.ts; the language model reads them in callOptions.ts.
 import type { SessionV1 } from "@opencode-ai/core/v1/session"
 
 export const CLAUDE_CODE_PROVIDER_ID = "claude-code"
@@ -29,7 +29,10 @@ export type HostToolExecutor = (
 // runs proxied calls in-stream with full oc tool context. One active turn per session, so overwrite is safe.
 export const hostToolExecutors = new Map<string, HostToolExecutor>()
 
-// Account providers expand to `claude-code-<account>`.
+// The `claude-code-*` arm matches nothing this plugin creates anymore (the
+// per-account providers are gone; the pool selects CLAUDE_CONFIG_DIR at spawn).
+// It stays so a stray suffixed id still routes to the Claude path instead of
+// falling through to generic handling.
 export function isClaudeCodeProvider(providerID: string) {
   return providerID === CLAUDE_CODE_PROVIDER_ID || providerID.startsWith(`${CLAUDE_CODE_PROVIDER_ID}-`)
 }

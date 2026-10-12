@@ -82,11 +82,7 @@ function base64url(bytes: Uint8Array): string {
 
 // ── Mode A: pass-through auth token ──
 
-export function useAuthToken(token: string): { accessToken: string } {
-  return { accessToken: token }
-}
-
-// ── Mode B: API key exchange + refresh ──
+// -- Mode B: API key exchange + refresh --
 
 export type TokenPair = {
   accessToken: string
@@ -166,11 +162,6 @@ export async function refreshAccessToken(refreshToken: string, baseUrl = API_BAS
 // on every turn when the caller only supplied `apiKey`.
 const _apiKeyTokenCache = new Map<string, TokenPair>()
 
-/** Clear the apiKey→JWT cache (tests). */
-export function clearBearerTokenCache(): void {
-  _apiKeyTokenCache.clear()
-}
-
 /**
  * Resolve a Bearer JWT for Cursor API calls. Prefer an already-exchanged
  * `accessToken`; otherwise exchange (and cache) from `apiKey`, refreshing
@@ -178,9 +169,9 @@ export function clearBearerTokenCache(): void {
  *
  * `apiKey` is only ever a raw exchangeable secret when it has Cursor's
  * `crsr_` prefix. Callers that generically forward whatever credential value
- * they hold — e.g. a host's package-agnostic "aisdk:" SDK loader, which
+ * they hold - e.g. a host's package-agnostic "aisdk:" SDK loader, which
  * doesn't distinguish our OAuth vs. API-key connection methods and may pass
- * an already-issued JWT through the `apiKey` field — hand us a token that's
+ * an already-issued JWT through the `apiKey` field - hand us a token that's
  * already good to use as-is; POSTing it to the exchange endpoint 401s.
  */
 export async function resolveBearerToken(input: {
@@ -258,11 +249,25 @@ export async function pollForTokens(
     if (signal?.aborted) throw new AuthTimeoutError("Poll cancelled")
 
     const delay = Math.min(1000 * Math.pow(1.2, i), 10000)
-    await new Promise((r) => setTimeout(r, delay))
+    await new Promise<void>((resolve, reject) => {
+      if (signal?.aborted) {
+        reject(new AuthTimeoutError("Poll cancelled"))
+        return
+      }
+      const onAbort = () => {
+        clearTimeout(timer)
+        reject(new AuthTimeoutError("Poll cancelled"))
+      }
+      signal?.addEventListener("abort", onAbort, { once: true })
+      const timer = setTimeout(() => {
+        signal?.removeEventListener("abort", onAbort)
+        resolve()
+      }, delay)
+    })
 
     try {
       const url = `${baseUrl}/auth/poll?uuid=${encodeURIComponent(uuid)}&verifier=${encodeURIComponent(verifier)}`
-      const res = await fetch(url)
+      const res = await fetch(url, signal ? { signal } : undefined)
 
       if (res.status === 404) {
         failures = 0
@@ -280,7 +285,7 @@ export async function pollForTokens(
       if (body.accessToken && body.refreshToken) {
         return { accessToken: body.accessToken, refreshToken: body.refreshToken }
       }
-      // 200 OK but missing tokens — same fail-fast policy as the other error
+      // 200 OK but missing tokens - same fail-fast policy as the other error
       // paths, otherwise a partial-body server response stalls the full
       // ~5-minute poll budget with no diagnostic.
       failures++
@@ -288,7 +293,9 @@ export async function pollForTokens(
         throw new AuthPollError("Poll returned 3 consecutive 200 responses without tokens")
       }
     } catch (err) {
+      if (err instanceof AuthTimeoutError) throw err
       if (err instanceof AuthPollError) throw err
+      if (signal?.aborted) throw new AuthTimeoutError("Poll cancelled")
       failures++
       if (failures >= 3) {
         throw new AuthPollError("Poll failed after 3 consecutive network errors", err)

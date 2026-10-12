@@ -67,6 +67,7 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
     const prepareShutdown = yield* Effect.cached(ServerShutdown.prepare())
 
     const health = Effect.fn("GlobalHttpApi.health")(function* () {
+      if (!ServerLifecycle.isHealthy()) return yield* Effect.die(new Error("Server is draining"))
       return { healthy: true as const, version: InstallationVersion }
     })
 
@@ -99,6 +100,7 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
       }
       // Explicit ordering: dispose first, then schedule process exit.
       // HTTP 200 is not a replacement barrier; callers must not assume new server is ready.
+      yield* Effect.promise(() => ServerLifecycle.beginShutdown(false))
       yield* prepareShutdown
       yield* Effect.sync(() => setTimeout(controller.shutdown, 0))
       return true
@@ -115,6 +117,7 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
       // Explicit bounded ordering: disposal completes before replacement is scheduled.
       // The HTTP response is returned before the detached replacement is observable;
       // callers must poll health + live PID rather than treating 200 as happens-before.
+      yield* Effect.promise(() => ServerLifecycle.beginShutdown(true))
       yield* prepareShutdown
       yield* Effect.sync(() => setTimeout(controller.restart, 0))
       return true

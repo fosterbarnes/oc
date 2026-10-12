@@ -18,9 +18,11 @@ const sessionWork = makeRuntime(SessionWork.Service, SessionWork.layer)
 
 Heap.start()
 
-const onUnhandledRejection = (_error: unknown) => {}
+const onUnhandledRejection = (error: unknown) =>
+  AppRuntime.runFork(Effect.logError("tui.worker unhandled rejection", error))
 
-const onUncaughtException = (_error: Error) => {}
+const onUncaughtException = (error: Error) =>
+  AppRuntime.runFork(Effect.logError("tui.worker uncaught exception", error))
 
 process.on("unhandledRejection", onUnhandledRejection)
 process.on("uncaughtException", onUncaughtException)

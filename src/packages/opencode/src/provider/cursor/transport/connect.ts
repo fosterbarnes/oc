@@ -1,8 +1,8 @@
 import { CURSOR_API_HOST, CONNECT_PROTOCOL_VERSION, SERVER_CONFIG_PATH } from "../shared.js"
 import { encodeFrame, streamFrames } from "../protocol/framing.js"
 import { createCursorChecksumHeader } from "../protocol/checksum.js"
-import { getDeviceIds } from "../protocol/device-id.js"
-import { resolveClientVersion } from "../protocol/client-version.js"
+import { getDeviceIds } from "../protocol/deviceId.js"
+import { resolveClientVersion } from "../protocol/clientVersion.js"
 import { trace } from "../debug.js"
 import {
   CursorLocalCancellationError,
@@ -148,7 +148,7 @@ export async function unaryAvailableModels(
 
 /**
  * Cursor Run stream hosts from GetServerConfig / agentBaseURL.
- * Any HTTPS subdomain of cursor.sh is accepted — hostnames vary
+ * Any HTTPS subdomain of cursor.sh is accepted - hostnames vary
  * (agentn.*, agent.*, agent-gcpp-*, api5 / api5lat, …) and may change.
  */
 export function isAllowedAgentHost(hostname: string): boolean {
@@ -177,7 +177,7 @@ export function normalizeAgentRunOrigin(raw: string | undefined): string | null 
 
 /**
  * Fetch the Cursor server config (a Connect unary RPC on the API host) and
- * return the `agentUrlConfig.agentnUrl` field — the region-specific Run stream
+ * return the `agentUrlConfig.agentnUrl` field - the region-specific Run stream
  * origin the server routes this account/team to (e.g. `agentn.us.api5.cursor.sh`).
  *
  * Region-routed accounts can be silently rejected by the wrong regional host, so
@@ -198,7 +198,7 @@ export async function fetchAgentUrl(
   const timeoutMs = unaryTimeoutMs("GetServerConfig", options.timeoutMs ?? 15_000)
   return withUnaryDeadline("GetServerConfig", timeoutMs, "CURSOR_AGENT_URL_TIMEOUT", async (signal) => {
     const clientVersion = await resolveClientVersion()
-    // Match Cursor CLI: GetServerConfig uses base headers only — session headers belong on Run.
+    // Match Cursor CLI: GetServerConfig uses base headers only - session headers belong on Run.
     const headers = buildBaseHeaders(token, clientVersion)
 
     trace(`GetServerConfig POST ${url}`)
@@ -335,7 +335,7 @@ function cursorRunGrpcError(
 }
 
 // Cache http2 sessions keyed by origin so a custom baseURL never reuses a
-// connection opened to the default agent host — and vice versa.
+// connection opened to the default agent host - and vice versa.
 const _http2Sessions = new Map<string, http2.ClientHttp2Session>()
 const _http2SessionCreatedAt = new WeakMap<http2.ClientHttp2Session, number>()
 const _http2SessionListenerCleanup = new WeakMap<http2.ClientHttp2Session, () => void>()
@@ -371,20 +371,6 @@ export function resolveAgentOrigin(baseURL: string): string {
 
 function dropSession(origin: string, session: http2.ClientHttp2Session): void {
   if (_http2Sessions.get(origin) === session) _http2Sessions.delete(origin)
-}
-
-/** Test cleanup for local HTTP/2 fixtures; production sessions stay process-cached. */
-export function closeCachedHttp2SessionsForTests(): void {
-  for (const session of _http2Sessions.values()) {
-    _http2SessionListenerCleanup.get(session)?.()
-    try {
-      session.destroy()
-    } catch {
-      /* already closed */
-    }
-  }
-  _http2Sessions.clear()
-  _http2Connecting.clear()
 }
 
 function timeoutMs(name: string, value: number | undefined, fallback: number): number {
@@ -468,11 +454,6 @@ function installSessionInvalidation(origin: string, session: http2.ClientHttp2Se
     }
   }
   _http2SessionListenerCleanup.set(session, cleanup)
-}
-
-/** Node-runtime regression hook; production callers use getSession(). */
-export function installSessionInvalidationForTests(origin: string, session: http2.ClientHttp2Session): void {
-  installSessionInvalidation(origin, session)
 }
 
 function invalidateSession(origin: string, session: http2.ClientHttp2Session): void {
@@ -658,7 +639,11 @@ export async function bidiRunStream(
     "user-agent": "connect-es/1.6.1",
   }
   const proxyOrigin = h2ProxyOrigin()
-  if (proxyOrigin) headers["x-cursor-h2-origin"] = origin
+  if (proxyOrigin) {
+    headers["x-cursor-h2-origin"] = origin
+    const control = process.env.CURSOR_H2_CONTROL_TOKEN?.trim()
+    if (control) headers["x-opencursor-control-token"] = control
+  }
 
   const stream = session.request(headers as unknown as http2.OutgoingHttpHeaders, {
     endStream: false,
@@ -792,7 +777,7 @@ export async function bidiRunStream(
     readIdleTimer = undefined
     if (locallyClosed || remotelyClosed || streamFailure) return
     streamFailure = new CursorTransportError(
-      `Cursor Run stream read-idle timeout after ${readIdleMs}ms — connection presumed dead`,
+      `Cursor Run stream read-idle timeout after ${readIdleMs}ms - connection presumed dead`,
       { transient: true, replaySafe: true, code: "CURSOR_READ_IDLE_TIMEOUT" },
     )
     writable = false
@@ -831,7 +816,7 @@ export async function bidiRunStream(
 
   // Capture the HTTP/2 response status/headers and any stream-level error.
   // Without this, a non-200 or RST_STREAM surfaces as a silent clean end
-  // (frames() just stops) — which looks exactly like "no response, no error".
+  // (frames() just stops) - which looks exactly like "no response, no error".
   stream.on("response", (h: Record<string, unknown>) => {
     responseHeaders = h
     responseStatus = h[":status"] !== undefined ? Number(h[":status"]) : 0
@@ -955,11 +940,6 @@ export async function bidiRunStream(
           )
         }
         const timer = setTimeout(() => {
-          if (h2ProxyOrigin()) {
-            backpressured = false
-            finish()
-            return
-          }
           streamFailure ??= new CursorTransportError(
             `Cursor Run stream backpressure did not drain after ${drainTimeoutMs}ms`,
             { transient: false, replaySafe: false, code: WRITE_DRAIN_TIMEOUT_CODE },
@@ -1061,10 +1041,6 @@ function mergeBuffers(buffers: Uint8Array[]): Uint8Array {
     offset += b.length
   }
   return merged
-}
-
-export function makeRequestId(): string {
-  return crypto.randomUUID()
 }
 
 function stripPseudo(h: Record<string, unknown>): Record<string, unknown> {

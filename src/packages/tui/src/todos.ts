@@ -17,7 +17,9 @@ export function createTodoCommand() {
     toast.show({
       message: overridden
         ? "Global todo default saved; project configuration overrides it"
-        : enabled ? "Todos enabled" : "Todos disabled",
+        : enabled
+          ? "Todos enabled"
+          : "Todos disabled",
       variant: overridden ? "warning" : "success",
     })
     setUpdate(undefined)
@@ -44,8 +46,11 @@ export function createTodoCommand() {
       const enabled = sync.data.config.todos !== true
       setUpdate({ enabled, epoch: sync.configReloadEpoch, saved: false })
       try {
-        const confirmed = await DialogConfirm.show(dialog, enabled ? "Enable todos?" : "Disable todos?",
-          "Save the global todo default and reload configuration? Active sessions in this server may stop.")
+        const confirmed = await DialogConfirm.show(
+          dialog,
+          enabled ? "Enable todos?" : "Disable todos?",
+          "Save the global todo default and reload configuration? Active sessions in this server may stop.",
+        )
         if (confirmed !== true) {
           setUpdate(undefined)
           return
@@ -54,7 +59,7 @@ export function createTodoCommand() {
         const global = await sdk.client.global.config.get({ throwOnError: true })
         // An unchanged patch emits no disposal event, notably with a project override.
         if ((global.data?.todos === true) === enabled) {
-          if (!await sync.bootstrap({ fatal: false })) throw new Error("Could not reload configuration")
+          if (!(await sync.bootstrap({ fatal: false }))) throw new Error("Could not reload configuration")
           finish(enabled)
           return
         }

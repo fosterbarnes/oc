@@ -1,9 +1,4 @@
-export type CursorErrorOrigin =
-  | "local-cancel"
-  | "transport"
-  | "server"
-  | "protocol"
-  | "auth"
+export type CursorErrorOrigin = "local-cancel" | "transport" | "server" | "protocol" | "auth"
 
 export type CursorErrorDiagnostics = {
   statusCode?: number
@@ -156,10 +151,7 @@ export function isTransientGrpcStatus(status: number | string): boolean {
 export function isAuthGrpcStatus(status: number | string): boolean {
   const normalized = String(status).toLowerCase().replaceAll("-", "_")
   return (
-    normalized === "7" ||
-    normalized === "16" ||
-    normalized === "permission_denied" ||
-    normalized === "unauthenticated"
+    normalized === "7" || normalized === "16" || normalized === "permission_denied" || normalized === "unauthenticated"
   )
 }
 
@@ -169,10 +161,10 @@ export function cursorHttpError(
   diagnostics: Omit<CursorErrorDiagnostics, "statusCode"> = {},
 ): CursorProviderError {
   if (statusCode === 401 || statusCode === 403) {
-    return new CursorAuthError(
-      `Cursor authentication failed (HTTP ${statusCode}); reauthenticate with Cursor`,
-      { ...diagnostics, statusCode },
-    )
+    return new CursorAuthError(`Cursor authentication failed (HTTP ${statusCode}); reauthenticate with Cursor`, {
+      ...diagnostics,
+      statusCode,
+    })
   }
   return new CursorServerError(`${operation} HTTP ${statusCode}`, {
     ...diagnostics,
@@ -188,10 +180,10 @@ export function cursorGrpcError(
   diagnostics: Omit<CursorErrorDiagnostics, "grpcStatus"> = {},
 ): CursorProviderError {
   if (isAuthGrpcStatus(grpcStatus)) {
-    return new CursorAuthError(
-      `Cursor authentication failed (gRPC ${grpcStatus}); reauthenticate with Cursor`,
-      { ...diagnostics, grpcStatus },
-    )
+    return new CursorAuthError(`Cursor authentication failed (gRPC ${grpcStatus}); reauthenticate with Cursor`, {
+      ...diagnostics,
+      grpcStatus,
+    })
   }
   return new CursorServerError(`${operation} gRPC status ${grpcStatus}`, {
     ...diagnostics,
@@ -257,18 +249,15 @@ export function retrySuppressedError(
   maxAttempts: number,
 ): CursorProviderError {
   const subject = cause.message.replace(/^Cursor Run stream /, "Cursor stream ")
-  return new CursorProviderError(
-    `${subject} ${reason}; automatic retry unsafe (attempt ${attempt}/${maxAttempts})`,
-    {
-      origin: cause.origin,
-      transient: false,
-      replaySafe: false,
-      statusCode: cause.statusCode,
-      grpcStatus: cause.grpcStatus,
-      rstCode: cause.rstCode,
-      code: cause.code,
-      retryAfterMs: cause.retryAfterMs,
-      cause,
-    },
-  )
+  return new CursorProviderError(`${subject} ${reason}; automatic retry unsafe (attempt ${attempt}/${maxAttempts})`, {
+    origin: cause.origin,
+    transient: false,
+    replaySafe: false,
+    statusCode: cause.statusCode,
+    grpcStatus: cause.grpcStatus,
+    rstCode: cause.rstCode,
+    code: cause.code,
+    retryAfterMs: cause.retryAfterMs,
+    cause,
+  })
 }

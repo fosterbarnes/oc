@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test"
 import fs from "fs/promises"
 import os from "os"
 import path from "path"
-import { MarkersFile } from "@opencode-ai/core/util/markers-file"
+import { MarkersFile } from "@opencode-ai/core/util/markersFile"
 import { Marker } from "../../src/marker/marker"
 
 const bun = process.execPath
@@ -98,7 +98,10 @@ describe("MarkersFile.setMarkersEnabled", () => {
     expect(await fs.readFile(file, "utf8")).toContain("ALPHA")
     await fs.writeFile(
       file,
-      (await fs.readFile(file, "utf8")).replace('"commands": {}', '"commands": { "a": { "run": ["x"], "mode": "inline" } }'),
+      (await fs.readFile(file, "utf8")).replace(
+        '"commands": {}',
+        '"commands": { "a": { "run": ["x"], "mode": "inline" } }',
+      ),
     )
     MarkersFile.setMarkersEnabled(true, file)
     expect(MarkersFile.markersEnabled(file)).toBe(true)
@@ -117,9 +120,9 @@ describe("Marker.run", () => {
     expect(await Marker.run("slow", inline("setTimeout(() => {}, 10000)", { timeout: 0.2 }), "ses_test")).toBe(
       "slow: timed out after 0.2s",
     )
-    expect(await Marker.run("missing", inline("", { run: [path.join(os.tmpdir(), "no-such.exe")] }), "ses_test")).toStartWith(
-      "missing: failed to start",
-    )
+    expect(
+      await Marker.run("missing", inline("", { run: [path.join(os.tmpdir(), "no-such.exe")] }), "ses_test"),
+    ).toStartWith("missing: failed to start")
   })
 
   test("window args run the argument list in a kept-open pwsh", () => {
