@@ -1,9 +1,9 @@
-v0.2.166 dogsFibber
+v0.2.168 wobblingLevincia
 
-pasting:
-Ctrl+V in oc can now read copied image files and raw image data from the Windows clipboard. In WezTerm, oc marks the active TUI so the terminal configuration can forward Ctrl+V to oc. Plain text uses the native clipboard reader, and copied image files keep their original path.
+readme:
+The README is now a short pitch: what oc is, standout features, requirements, install, and a short list of behavior changes from stock OpenCode. A new Docs section links into the wiki for everything else, and the feature links now open the matching wiki page. How it works, configuration, troubleshooting, FAQ, companion tools, and the developing notes now live only in the wiki. The "Why I made oc" writeup moved to its own wiki page.
 
-image attachments:
-Prompt images are saved to %LOCALAPPDATA%\oc\images, configurable through attachment.image.save_dir, and the agent receives the saved path alongside the image. Identical images reuse a saved file, and images already on disk use their original file. Models without image input support are directed to the path. The image folder is available to the agent without an external-directory permission prompt. The oc palette now includes Clear saved images with confirmation.
+wiki:
+The wiki home page opens with what oc is, a 4-step quick start, and an "I want to..." table. The sidebar is grouped by task, every page has a footer, and a new "Editing this wiki" page explains how to add pages. The wiki now covers /work and /done in full, Windows integration, and the list of behavior changes. The writeup's outdated bullets were corrected when it moved. No app or UI change.
 
-Under the hood: Image bytes are saved before normalization, writes are serialized, and save failures allow the prompt to continue. Non-base64 data URLs are skipped by the save step. The regenerated JavaScript SDK includes save_dir and existing resume and Claude-account route changes. Checks passed: three targeted session prompt tests, eight clipboard tests, and the agent-push pre-push checks. Earlier session verification also passed typechecks in opencode and tui. These changes have not been checked live in the TUI. The companion WezTerm keybinding change lives in its separate repository and is not part of this commit.
+Under the hood: AGENTS.md, FORK.md, and CONTRIBUTING.md now say the wiki is the source of truth for user-facing docs and the README is the pitch; code knowledge stays in FORK.md, AGENTS.md, and buildNotes.md. The wiki pages live in the separate oc.wiki repository, and this session's wiki edits are not pushed yet. Checks passed: the agent-push pre-push checks.

@@ -179,6 +179,7 @@ for (const variant of variants) {
     await $`mkdir -p dist/${name}/bin`
 
     const workerPath = "./src/cli/tui/worker.ts"
+    const spawnWorkerPath = "./src/config/spawnWorker.ts"
     const treeSitterWorkerPath = "opentui-tree-sitter-worker.js"
     const bunfsRoot = item.os === "win32" ? "B:/~BUN/root/" : "/$bunfs/root/"
 
@@ -208,6 +209,7 @@ for (const variant of variants) {
       entrypoints: [
         "./src/index.ts",
         workerPath,
+        spawnWorkerPath,
         treeSitterWorkerPath,
       ],
       define: {
@@ -217,6 +219,7 @@ for (const variant of variants) {
         OPENCODE_MODELS_DEV: generated.modelsData,
         OTUI_TREE_SITTER_WORKER_PATH: bunfsRoot + treeSitterWorkerPath,
         OPENCODE_WORKER_PATH: workerPath,
+        OPENCODE_SPAWN_WORKER_PATH: spawnWorkerPath,
         OPENCODE_CHANNEL: `'${Script.channel}'`,
         OPENCODE_FLAVOR: variant === "native" ? "'native'" : "'oc'",
         OPENCODE_LIBC: item.os === "linux" ? `'${item.abi ?? "glibc"}'` : "",

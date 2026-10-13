@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import { introCells, introCellsAt, introColors } from "../src/logo"
+import { INTRO_TICK_MS, introCells, introCellsAt, introColors, introPace, introTick } from "../src/logo"
 
 const width = introCells[0].length
 const scanRow = introCellsAt(width - 1).findIndex((row) => row.some((cell) => cell?.glyph === "■"))
@@ -31,4 +31,18 @@ test("scanner keeps bouncing after the reveal and leaves other cells untouched",
       if (rowIndex !== scanRow || !scanColumns.includes(column)) expect(cell).toBe(introCells[rowIndex][column])
     }),
   )
+})
+
+test("intro tick follows the clock, so late repaints skip ahead instead of slowing down", () => {
+  expect(introTick(1_000, 1_000)).toBe(0)
+  expect(introTick(1_000, 999)).toBe(0)
+  expect(introTick(1_000, 1_000 + INTRO_TICK_MS * 7 + 1)).toBe(7)
+  expect(introTick(1_000, 1_000 + INTRO_TICK_MS * 100)).toBe(100)
+})
+
+test("intro pace never skips a reveal column after a stall, then follows the clock", () => {
+  expect(introPace(0, 3, 1_000)).toEqual({ start: 1_000 - 4 * INTRO_TICK_MS, tick: 4 })
+  expect(introPace(0, 3, INTRO_TICK_MS * 4)).toEqual({ start: 0, tick: 4 })
+  expect(introPace(0, width - 1, 1_000)).toEqual({ start: 0, tick: introTick(0, 1_000) })
+  expect(introPace(0, undefined, 1_000)).toEqual({ start: 0, tick: introTick(0, 1_000) })
 })

@@ -12,7 +12,9 @@
 ## Project definition
 
 - `FORK.md` is the living definition of this fork. Statuses describe current state; they do not authorize work. `README.OG.md` tracks native OpenCode in this checkout (Now / Keep / Upstream). Keep fork-only work in `FORK.md`.
-- `README.md` is the public landing page. `countCode.ps1` (via `prePush.ps1`) requires its single `[number](scc.txt)` link and `code-count:start/end` markers.
+- `README.md` is the public pitch: hook, standout features, requirements, install, a short behavior-changes list, and links into the wiki. It is not the reference for how oc behaves.
+- The GitHub wiki (`fosterbarnes/oc.wiki`, local clone `..\oc.wiki`) is the source of truth for user-facing behavior, settings, keys, troubleshooting, and FAQ. When a change alters what users see or configure, update the wiki page, not the README. Code and agent knowledge stays in `FORK.md`, `AGENTS.md`, and `buildNotes.md`. Wiki layout rules: `Editing-This-Wiki.md` there. Pushing the wiki is the user's action.
+- `countCode.ps1` (via `prePush.ps1`) requires its single `[number](scc.txt)` link and `code-count:start/end` markers.
 
 ## Build notes
 

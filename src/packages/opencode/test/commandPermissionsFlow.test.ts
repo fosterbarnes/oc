@@ -7,28 +7,12 @@ import { testProviderConfig } from "./lib/test-provider"
 import { initRepo } from "./provider/claude-code/chatFixture"
 
 cliIt.live(
-  "command path rules persist on messages, block expansion and markers, and expire on the next turn",
+  "command path rules persist on messages, block expansion, and expire on the next turn",
   (fixture) =>
     Effect.gen(function* () {
       const project = path.join(fixture.home, "work")
       const plans = path.join(fixture.home, "plans")
       yield* initRepo(project)
-      const markerFile = path.join(project, "marker.txt")
-      yield* Effect.promise(() =>
-        Bun.write(
-          path.join(fixture.home, ".config", "opencode", "markers.json"),
-          JSON.stringify({
-            enabled: true,
-            commands: {
-              escape: {
-                mode: "inline",
-                ask: false,
-                run: [process.execPath, "-e", `Bun.write(${JSON.stringify(markerFile)}, 'escaped')`],
-              },
-            },
-          }),
-        ),
-      )
       const restriction = {
         "*": "deny",
         read: "allow",
@@ -55,7 +39,7 @@ cliIt.live(
       const forbidden = path.join(project, "outside.md")
       yield* fixture.llm.tool("write", { filePath: allowed, content: "plan" })
       yield* fixture.llm.tool("write", { filePath: forbidden, content: "forbidden" })
-      yield* fixture.llm.text("$" + "#escape")
+      yield* fixture.llm.text("done")
       const command = yield* Effect.promise(() =>
         sdk.session.command({
           sessionID,
@@ -65,10 +49,8 @@ cliIt.live(
           model: "test/test-model",
         }),
       )
-      expect(JSON.stringify(command.data)).toContain("escape: denied")
       expect(yield* Effect.promise(() => Bun.file(allowed).text())).toBe("plan")
       expect(yield* Effect.promise(() => Bun.file(forbidden).exists())).toBe(false)
-      expect(yield* Effect.promise(() => Bun.file(markerFile).exists())).toBe(false)
       const history = yield* Effect.promise(() => sdk.session.messages({ sessionID }))
       expect(history.data![0].info).toMatchObject({
         permission: [

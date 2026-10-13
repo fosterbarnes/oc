@@ -2,7 +2,8 @@
 
 oc is a personal fork of OpenCode that I've opened up. Issues and pull requests are welcome. I
 ask that pull requests be intentional, tested, and scoped to what oc is for: a Windows-first
-OpenCode with the features described in the [README](README.md).
+OpenCode with the features described in the [README](README.md) and the
+[wiki](https://github.com/fosterbarnes/oc/wiki).
 
 Good fits:
 

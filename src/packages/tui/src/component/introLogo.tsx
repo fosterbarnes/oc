@@ -1,7 +1,7 @@
 import { RGBA } from "@opentui/core"
 import { useTerminalDimensions } from "@opentui/solid"
 import { createMemo, createSignal, Index, onCleanup, Show } from "solid-js"
-import { INTRO_TICK_MS, introCells, introCellsAt } from "../logo"
+import { INTRO_PAINT_MS, INTRO_TICK_MS, introCells, introCellsAt, introPace } from "../logo"
 
 const width = introCells[0].length
 const height = introCells.length
@@ -13,10 +13,13 @@ const rgba = (hex: string | undefined) => {
   return cached
 }
 
-// The launcher passes its last painted tick so the reveal and scanner continue that frame. Without
-// it (stable, plain opencode) start fully revealed, as before the scanner existed.
-const handoff = Number(process.env.OC_INTRO_FRAME)
-const [tick, setTick] = createSignal(Number.isInteger(handoff) && handoff >= 0 ? handoff : width - 1)
+// The launcher passes its clock and last painted tick so the reveal and scanner continue that frame.
+// Without them (stable, plain opencode) start fully revealed, as before the scanner existed.
+const handoffStart = Number(process.env.OC_INTRO_START)
+const handoffTick = Number(process.env.OC_INTRO_FRAME)
+const handoff = Number.isInteger(handoffStart) && Number.isInteger(handoffTick) && handoffTick >= 0
+let start = handoff ? handoffStart : Date.now() - (width - 1) * INTRO_TICK_MS
+const [tick, setTick] = createSignal(handoff ? handoffTick : width - 1)
 const [done, setDone] = createSignal(false)
 export const hideIntroLogo = () => setDone(true)
 
@@ -25,7 +28,12 @@ export const hideIntroLogo = () => setDone(true)
 export function IntroLogo() {
   const dimensions = useTerminalDimensions()
   const cells = createMemo(() => introCellsAt(tick()))
-  const timer = setInterval(() => (done() ? clearInterval(timer) : setTick((value) => value + 1)), INTRO_TICK_MS)
+  const timer = setInterval(() => {
+    if (done()) return clearInterval(timer)
+    const next = introPace(start, tick())
+    start = next.start
+    setTick(next.tick)
+  }, INTRO_PAINT_MS)
   onCleanup(() => clearInterval(timer))
   return (
     <Show when={!done()}>

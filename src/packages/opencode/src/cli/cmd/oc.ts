@@ -7,7 +7,7 @@ import { cmd } from "./cmd"
 import { OcConfig } from "@/config/oc"
 import type { Revive } from "@/config/revive"
 import { TuiLedger } from "@/config/tuiLedger"
-import { startIntro } from "../intro"
+import { startIntro, type IntroHandoff } from "../intro"
 
 function runtimeArgs(args: string[]) {
   return process.execPath.toLowerCase().includes("bun") && process.argv[1] ? [process.argv[1], ...args] : args
@@ -40,7 +40,7 @@ export function resolveTargetDirectory(target: string | undefined, ocDir = os.ho
 async function attach(
   server: { url: string; secret: string },
   settings: OcConfig.Settings,
-  options: { session?: string; directory: string; introFrame?: number },
+  options: { session?: string; directory: string; intro?: IntroHandoff },
 ) {
   const args = ["attach", server.url, "--dir", options.directory]
   if (options.session) args.push("--session", options.session)
@@ -49,7 +49,7 @@ async function attach(
   await host(
     args,
     { OPENCODE_SERVER_PASSWORD: server.secret, OPENCODE_SERVER_USERNAME: "opencode" },
-    options.introFrame,
+    options.intro,
     async (handoff) =>
       attach(await OcConfig.startServer(), settings, { directory: handoff.directory, session: handoff.sessionID }),
   )
@@ -60,7 +60,7 @@ async function attach(
 async function host(
   args: string[],
   env: Record<string, string>,
-  introFrame: number | undefined,
+  intro: IntroHandoff | undefined,
   reopen: (handoff: { directory: string; sessionID?: string }) => Promise<void>,
 ) {
   const stopped = await runNative(args, {
@@ -68,7 +68,7 @@ async function host(
       ...env,
       OC_AUTO_RENAME: "1",
       OC_SUPERVISOR_PID: String(process.pid),
-      ...(introFrame === undefined ? {} : { OC_INTRO_FRAME: String(introFrame) }),
+      ...(intro ? { OC_INTRO_START: String(intro.start), OC_INTRO_FRAME: String(intro.tick) } : {}),
     },
   }).then(
     () => undefined,
@@ -248,8 +248,8 @@ async function launchProject(target: string | undefined, options: { session?: st
     const directory = resolveTargetDirectory(target, ocDir, homeDir)
     const server = await OcConfig.startServer()
     const session = options.session ?? (target ? await bootstrapSession(server, directory) : undefined)
-    // Leave the intro frame up; the TUI's first alternate-screen frame continues it.
-    await attach(server, settings, { directory, session, introFrame: stopIntro(false) })
+    // Leave the intro frame up; the TUI continues it from the same clock and frame.
+    await attach(server, settings, { directory, session, intro: stopIntro(false) })
   } finally {
     stopIntro()
   }
@@ -269,7 +269,7 @@ const PreviousCommand = cmd({
       const lookup = runNative(["session", "previous", "--depth", String(depth)], { capture: true })
       // Independent startup work: the session lookup is its own process, so overlap it with server startup.
       const [session, server] = await Promise.all([lookup, OcConfig.startServer()])
-      await attach(server, settings, { directory: os.homedir(), session, introFrame: stopIntro(false) })
+      await attach(server, settings, { directory: os.homedir(), session, intro: stopIntro(false) })
     } finally {
       stopIntro()
     }

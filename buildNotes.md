@@ -112,6 +112,182 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-13 (~00:28) - v0.2.168 wobblingLevincia - README becomes the pitch, wiki owns user docs - Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Opus 5.5; low effort; Implementation (imp from spitball plan `~/.config/opencode/plans/readmeWikiSplit.md`); completed; wiki not pushed
+- Version: 0.2.168 wobblingLevincia
+- Rule: README = pitch + links; `oc.wiki` = source of truth for user-facing behavior/settings/keys/troubleshooting/FAQ; code knowledge stays in FORK.md/AGENTS.md/buildNotes. Written into `AGENTS.md` (Project definition), `FORK.md` Related files, `oc.wiki/Editing-This-Wiki.md`; `CONTRIBUTING.md` links wiki.
+- README: removed How it works, Configuration, Troubleshooting, FAQ, Companion tools, Developing, key table, writeup `<details>` (545 -> ~163 lines). Added `## Docs` wiki link list; Why I made oc = one wiki link. Standout-feature `#anchor` links -> wiki URLs. Kept hook, features, QoL, Requirements, Terminal, Install, short Behavior changes, Progress (`scc.txt` link + code-count markers), License.
+- Wiki: added `Why-I-Made-oc.md` (writeup moved; fixed stale bullets per old TODO: `<folder> - <task>` naming, session_complete permission, TOS line -> FAQ link, ChatGPT = Codex via stock connection); sidebar **About** group + Home Help link. Filled gaps before cutting README: `Sessions.md` full `/work`/`/done` (env copy, work_done, conflict rounds, nested, resume), `Install.md` Windows integration, `Keybinds.md` Behavior changes section. Moved FAQ legal-review TODO comment to wiki `FAQ.md`.
+- Note: README said extra Claude accounts are macOS/Linux only; wiki `Claude-Code.md` documents Windows account pooling. README copy was stale; dropped with the section.
+- Verification: README has no `](#` links except `#terminal`; one `[n](scc.txt)` link, 2 code-count markers; wiki has no em dashes and every `[x](Page)` link resolves (except the `Page-Name` example). Rendering not checked.
+
+### User
+Docs
+- The README is now a short pitch with a Docs section that links into the wiki for every detail.
+- The "Why I made oc" writeup moved to its own wiki page, with outdated bullets corrected.
+- The wiki now covers `/work` and `/done` in full, Windows integration, and the list of behavior changes from stock OpenCode.
+
+---
+
+## 2026-10-13 (~00:20) - v0.2.168 wobblingLevincia - Wiki home and navigation redesign - Opus 5.5, low effort; Agent
+
+### Agent
+- Meta: Opus 5.5; low effort; Agent; docs-only, completed; wiki pushed `5735cc1` (user approved)
+- Version: 0.2.168 wobblingLevincia (no bump: wiki repo only)
+- Researched mpv, yt-dlp, gollum wikis, GitHub sidebar/footer docs, Diataxis. Applied: task-first Home, grouped sidebar mirroring Home, footer on every page, no H1 repeating the file-name title, one-line summary per page, alerts for warnings, one place per setting.
+- Changed `oc.wiki`: Home rewritten (pitch, NOTE alert, 4-step quick start, "I want to..." table, Help); `_Sidebar` regrouped (Get started, Daily use, Models, Reference, Help, Contributing); added `_Footer.md`, `Editing-This-Wiki.md` (layout + rules for adding pages).
+- Removed duplicated `provider.claude-code.options.*` rows from Configuration (lives on Claude-Code page); added file index table with anchors. FAQ questions -> `##` headings (linkable). Install TODO -> WARNING alert, uninstall -> CAUTION alert. Troubleshooting intro + "Error messages" heading.
+- Note: upstream link is `github.com/anomalyco/opencode` (matches README.OG/CONTRIBUTING).
+- Removed superseded drafts in `~/.config/opencode/plans/ocWiki/` (15 pages incl. `_Sidebar.md`; user approved). Kept `README.phase2.md` and `_research/`. `ocDocs.md` still points at the old drafts; the live wiki is now the source.
+- Verification: grep no `# ` H1s or em dashes; every `[x](Page)` link resolves to a file. Rendering not checked by agent.
+
+### User
+Wiki
+- The wiki home page now opens with what oc is, a 4-step quick start, and an "I want to..." table that points to the right page.
+- The sidebar is grouped by task, every page has a footer with links and a way to report wrong docs, and a new "Editing this wiki" page explains how to add pages.
+
+---
+
+## 2026-10-13 (~00:11) - v0.2.168 wobblingLevincia - Wiki bootstrap and draft refresh - Opus 5.5, low effort; Agent
+
+### Agent
+- Meta: Opus 5.5; low effort; Agent; docs-only, completed (wiki repo changes uncommitted, user pushes)
+- Version: 0.2.168 wobblingLevincia (no bump: docs-only, outside this repo)
+- Done: D7 bootstrap. User created wiki in browser; cloned `fosterbarnes/oc.wiki.git` to `C:\Users\user\Documents\GitHub\oc.wiki`. Copied 14 pages + `_Sidebar.md` from `~/.config/opencode/plans/ocWiki/` (not `README.phase2.md`, not `_research/`); overwrote placeholder `Home.md`; deleted user test page `poop.md` (user approved).
+- Refreshed vs FORK.md + source: Launching (single mode -> native `opencode.exe`, sign-in startup, revive failed-build + WezTerm multi-tab), FAQ (no ChatGPT, no `oc single`), Claude-Code (`account`/`configDir` -> `accounts` pool section, auto-resume, Third party harness heading), Configuration (removed `reasoningEffort`/`mode` oc.json rows; added `compaction.limit.*`, `attachment.image.save_dir`, `subagent_tabs.*`, `palette_keys`, `accounts`), Sidebar (position, Plugins, Usage menu/per-account, "Configure usage providers"), Sessions (Context limit section), Agents-and-Skills (Tools: time, images, bgRun), Install (WezTerm image paste), Home, `_Sidebar` (+Companion Tools).
+- Note: source wins over FORK.md: error text is "Session is running in another oc process" (FORK says window); Claude usage meter NOT in `DEFAULT_USAGE_PROVIDERS` (FORK says defaults on).
+- TODO: README phase 2 swap (`README.phase2.md`) and README "(future wiki goes here)" lines; FAQ ToS answer still `TODO(user)`; Companion-Tools links `TODO(user)`.
+- Verification: grep of wiki for em dash, single, configDir, `account`, ChatGPT Web, weekly: clean. No render check (needs push).
+
+### User
+Wiki
+- The GitHub wiki now has local pages for every planned topic, updated to match the current app; push `C:\Users\user\Documents\GitHub\oc.wiki` to publish them.
+- No app or UI change.
+
+---
+
+## 2026-10-13 (~00:02) - v0.2.168 wobblingLevincia - Remove command markers - Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Opus 5.5; low effort; Implementation via 2 Luna subagents (luna-high code/tests, luna-medium docs/files); completed
+- Version: 0.2.168 wobblingLevincia
+- Removed `opencode/src/marker/marker.ts`, `core/src/util/markersFile.ts`, `opencode/test/marker/marker.test.ts` (lockCheck finish item 3).
+- Removed from `session/processor.ts`: `runMarkers`, idle `Marker.flush` listener, text-end call. Renamed `markerPermission` -> `turnPermission` (still the doom_loop ruleset).
+- Removed marker system-prompt / Claude Code agent-prompt append in `session/prompt.ts`; `agent: base ? { ...agent, prompt: base } : agent`.
+- Removed `markers.json` forced edit-ask guard in `agent/agent.ts`; `oc.markers` palette entry + import in `tui/src/app.tsx`.
+- Removed marker tests in `processor-effect.test.ts`, `agent.test.ts`; stripped markers from `commandPermissionsFlow.test.ts` (title renamed).
+- Kept: permission config is an open string record, so stored `marker` rules still decode; `prompt.test.ts` legacy-rules test still uses `marker`.
+- Docs: README feature bullet, section, `markers.log` log mention removed. FORK.md row retired (medium 20, total 76), Plan-only row wording. Wiki drafts (Agents-and-Skills, Configuration, Home, Troubleshooting, README.phase2) stripped; `_research/` untouched. lockCheck item 3 struck.
+- Deleted user files `~/.config/opencode/markers.json` and `~/.local/share/opencode/log/markers.log` (user approved).
+- Verification: `bun test test/session/processor-effect.test.ts test/agent/agent.test.ts test/commandPermissionsFlow.test.ts`: 63 pass, 0 fail. `tsgo --noEmit` exit 0 in opencode, tui, core. Leftover-reference grep clean. No build/install/live check.
+- ERROR: subagent left mixed LF/CRLF in processor.ts, prompt.ts, commandPermissionsFlow.test.ts; normalized to CRLF, `git ls-files --eol` shows w/crlf.
+
+### User
+Command markers
+- The alpha command markers feature is gone: `$#name` lines in replies stay plain text, and the palette toggle is removed.
+- Agents no longer get a "Command markers" section in their prompt.
+- Your `markers.json` and `markers.log` were deleted.
+- README, FORK.md, and the wiki drafts no longer document it.
+
+---
+
+## 2026-10-12 (~23:45) - v0.2.167 yeshMargit - FORK.md re-review and 0.2 lock checklist - Opus 5.5, low effort; Agent
+
+### Agent
+- Meta: Opus 5.5; low effort; Agent; docs-only, completed
+- Version: 0.2.167 yeshMargit (no bump: docs-only)
+- Updated `FORK.md` against buildNotes since 2026-10-03: added rows Claude account pool, Update Claude Code, Work copies, Context limit, Sub-agents in terminal tabs, Plan-only command permissions, Time tool (~done~), Images in prompts; folded WezTerm tab revive, intro reveal, Usage menu, palette groups, bgRun toggle, live context/compact size, slash persona replace into existing rows; retired `oc single`, bash account wrapper, `/manageThirdPartyHarnesses`. Recount 16/39/21/1 = 77 (awk over tables)
+- Added `.opencode/plans/lockCheck.md` (gitignored): 6 finish, 10 defer, 56 verify steps grouped for one installed-build session
+- Decided (user): command markers to be removed (finish item, code untouched); octray frozen outside 0.3 scope; manual upstream porting moved from table to Caveats
+- TODO: wiki bootstrap D7 step 2 (Home page) still pending; `fosterbarnes/oc.wiki.git` not found as of this session
+- Verification: em dash grep 0 in both files; level counts recounted. No code or tests touched
+
+### User
+Project definition
+- `FORK.md` is up to date with the last week of features and now has 77 tracked features.
+- Command markers are slated for removal, the tray is frozen as-is, and upstream porting is now listed as a caveat instead of a feature.
+- A checklist in `.opencode/plans/lockCheck.md` lists what to check once in an installed build, what still needs code, and what moves past 0.2; no UI change.
+
+---
+
+## 2026-10-12 (~23:36) - v0.2.167 yeshMargit - Slow intro reveal so it visibly paints in - Opus 5.5, low effort; Debug + Build
+
+### Agent
+- Meta: Opus 5.5; low effort; Debug + Build; completed
+- Version: 0.2.167 yeshMargit (same session; no second bump)
+- ERROR: user report on installed 0.2.167: logo still "pops", no paint-in. Watched via computer use: first capture (new WezTerm window) already fully revealed.
+- Found: with launcher no longer blocked, reveal ran at design speed, 22 cols x 15 ms = ~0.33 s, too fast to read as painting in. The visible paint-in users knew came from the old ~0.43 s sync-spawn stalls stretching the reveal.
+- Changed `logo.ts`: `INTRO_TICK_MS` 15 -> 40 (~0.9 s reveal), `_SCANNER_TICKS` 3 -> 1 so later scanner passes step every 40 ms (was 45 ms). Single knob for reveal speed is `INTRO_TICK_MS`.
+- Note: a brand-new WezTerm window can still hide the start of the reveal while the window appears; running `occ` in an existing pane shows all of it.
+- Note: left WezTerm windows opened by computer-use runs (occ TUIs) open.
+- Verification: tui `bun test test/logo.test.ts` 5 pass. Screenshot cadence too slow to confirm frame timing; needs user live check after build.
+
+### User
+Startup animation
+- The oc logo now visibly paints in column by column over a bit under a second, then the scanner bounces at about the same speed as before.
+
+---
+
+## 2026-10-12 (~23:25) - v0.2.167 yeshMargit - Move process listing spawn off the main thread - Opus 5.5, low effort; Build
+
+### Agent
+- Meta: Opus 5.5; low effort; Build; completed
+- Version: 0.2.167 yeshMargit (same session; no second bump)
+- Added `src/config/spawnWorker.ts`: dependency-free Worker, one command per message via `Bun.spawnSync`, posts `{ exitCode, stdout, stderr }`.
+- Changed `TuiLedger.listProcessesAsync`: runs `_LIST_COMMAND` in one lazy shared worker (`new Worker(file, { ref: false })`, requests serialized on `_spawnQueue`). Fixes the first-pwsh-spawn ~0.42 s main-thread block noted in entry below; worker pays it once, later main-thread pwsh spawns are also fast (measured 4 ms).
+- Changed `script/build.ts`: `spawnWorkerPath` entrypoint + `OPENCODE_SPAWN_WORKER_PATH` define, same pattern as `OPENCODE_WORKER_PATH`. Dev falls back to `new URL("./spawnWorker.ts", import.meta.url)`.
+- Risk: compiled-exe worker path not verified (no build run). If launch fails with "Spawn worker failed", check the define/entrypoint resolve like the TUI worker.
+- Verification: scratch event-loop probe around real `OcConfig.startServer()` (resident reuse): before, 418 ms gap; after, no gap > 40 ms besides module import (before intro starts); process exits cleanly with worker alive. `tsgo --noEmit` clean in opencode.
+
+### User
+Startup animation
+- The short freeze right after the first column of the oc logo is gone; the reveal runs straight through while oc connects to its server.
+
+---
+
+## 2026-10-12 (~23:20) - v0.2.167 yeshMargit - Restore column-by-column intro reveal - Opus 5.5, low effort; Debug + Build
+
+### Agent
+- Meta: Opus 5.5; low effort; Debug + Build; completed
+- Version: 0.2.167 yeshMargit (same session as entry below; no second bump)
+- ERROR: user report after previous entry: logo "just appears"; pure clock ticks skipped the whole reveal (~22 ticks x 15 ms = ~0.33 s) during stalls.
+- Found: first pwsh spawn per Bun process blocks the calling thread ~410-425 ms inside the spawn call itself (Bun.spawn and child_process.spawn alike, any args, absolute path too; whoami/bash first spawn ~4 ms; later pwsh spawns ~4 ms). So `listProcessesAsync` still freezes the launcher once (~0.42 s, measured as event-loop gap in `startServer`). Spawn from a Worker or via `cmd.exe /d /c pwsh -EncodedCommand` does not block (measured); neither applied.
+- Added `logo.ts` `introPace(start, shown, now)`: clock tick, but while reveal unfinished advances at most one column per paint and re-anchors `start`. Scanner after reveal stays clock-based.
+- Changed handoff back to carry both: `OC_INTRO_START` (paced start) + `OC_INTRO_FRAME` (last painted tick); `intro.ts` stop returns `IntroHandoff { start, tick }`; `cmd/oc.ts` passes `intro`; `introLogo.tsx` continues with `introPace` from the handed frame.
+- Risk/TODO: one ~0.42 s freeze right after first column remains (first pwsh spawn), plus TUI `TuiLedger.register` sync listing before first TUI paint. Fix candidates: run process listing in a Worker (needs compiled worker entry in `script/build.ts`) or cmd.exe hop.
+- Verification: tui `bun test test/logo.test.ts` 5 pass (new `introPace` check); `tsgo --noEmit` clean in opencode and tui. No build/install, no live view.
+
+### User
+Startup animation
+- The oc logo paints in column by column again instead of popping in all at once; a pause no longer skips the reveal.
+- If oc pauses briefly while starting, the reveal picks up at the next column rather than jumping ahead.
+
+---
+
+## 2026-10-12 (~23:12) - v0.2.167 yeshMargit - Smooth startup intro animation - Opus 5.5, low effort; Debug + Build
+
+### Agent
+- Meta: Opus 5.5; low effort; Debug + Build; completed
+- Version: 0.2.167 yeshMargit
+- Found: launcher intro (`cli/intro.ts`) froze during `OcConfig.startServer` reuse path: `withResidentLock` + `observeResident`/`isPidAlive` each ran `TuiLedger.listProcesses` (`Bun.spawnSync` pwsh CIM), measured 424-454 ms per call, ~0.9 s blocked event loop per launch. Same path after /revive (revived terminal relaunches via `launchProject`).
+- Added `TuiLedger.listProcessesAsync` (shared `_LIST_COMMAND`); used in `withResidentLock` (self identity + lock-expiry retry) and `observeResident` (snapshot passed to `isPidAlive`). Identity checks unchanged. Sync `listProcesses` kept for other callers.
+- Changed intro to clock-based ticks: `logo.ts` `introTick(start, now)`, `INTRO_PAINT_MS = 16`; `INTRO_TICK_MS = 15` still sets speed. Late/skipped repaints now skip ahead instead of slowing.
+- Changed handoff env `OC_INTRO_FRAME` (last tick) -> `OC_INTRO_START` (epoch ms); `stopIntro` returns start; `cmd/oc.ts` `introFrame` -> `introStart`; `introLogo.tsx` derives tick from start (no env: start backdated so frame is fully revealed).
+- Changed launcher paint: one `write` per frame wrapped in synchronized output (`?2026h/l`) instead of one write per cell (tearing).
+- Risk/TODO: TUI child still blocks ~0.4 s before first paint in `cli/tui/layer.ts` `TuiLedger.register` (default `listProcesses()` sync). Animation now resumes at correct phase after the gap, but the frozen frame during child boot remains.
+- Note: computer-use screenshots ~1/s, could not observe frame-level stutter; /revive live test not run (WezTerm granted click-only).
+- Verification: `bun test test/logo.test.ts` (tui) 4 pass incl. new `introTick` check; `tsgo --noEmit` clean in opencode and tui. No build/install.
+
+### User
+Startup animation
+- The oc logo intro no longer freezes for about a second while oc connects to its server; it keeps moving at an even pace.
+- When the main screen takes over, the animation continues where it should be instead of resuming late.
+- Frames are drawn all at once, so the logo no longer flickers half-updated. This also applies to the relaunch after /revive.
+
+---
+
 ## 2026-10-12 (~23:20) - v0.2.166 dogsFibber - Pass over pasted-image save and Ctrl+V changes - Sonnet 5.5; Review
 
 ### Agent

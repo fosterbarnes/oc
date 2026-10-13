@@ -5,7 +5,6 @@ import { stringifyKeyStroke, type KeySequencePart } from "@opentui/keymap"
 import { Deferred, Effect } from "effect"
 import { Global } from "@opencode-ai/core/global"
 import { DebugConfig } from "@opencode-ai/core/debugConfig"
-import { MarkersFile } from "@opencode-ai/core/util/markersFile"
 import { Flag } from "@opencode-ai/core/flag/flag"
 import { InstallationDisplayVersion, InstallationVersion } from "@opencode-ai/core/installation/version"
 import { ClipboardProvider, useClipboard } from "./context/clipboard"
@@ -1953,49 +1952,6 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
             ))
           }
           show()
-        },
-      },
-      {
-        name: "oc.markers",
-        title: "Command markers (alpha)",
-        category: "oc",
-        group: "Tools (experimental)",
-        get desc() {
-          return MarkersFile.markersEnabled() ? "on" : "off"
-        },
-        slashName: "markers",
-        run: () => {
-          const current = MarkersFile.markersEnabled()
-          dialog.replace(() => (
-            <DialogSelect
-              title="Command markers (alpha)"
-              current={current ? "true" : "false"}
-              options={[
-                { value: "true", title: "on" },
-                { value: "false", title: "off" },
-              ]}
-              onSelect={async (option) => {
-                const on = option.value === "true"
-                if (on && !current) {
-                  const confirmed = await DialogConfirm.show(dialog, "Turn on command markers?", MarkersFile.MARKERS_WARNING)
-                  if (confirmed !== true) return
-                }
-                try {
-                  MarkersFile.setMarkersEnabled(on)
-                  toast.show({
-                    message: `Command markers ${on ? "on" : "off"} (${MarkersFile.markersFile()})`,
-                    variant: "success",
-                  })
-                } catch (error) {
-                  toast.show({
-                    message: `Failed to update ${MarkersFile.markersFile()}: ${error instanceof Error ? error.message : String(error)}`,
-                    variant: "error",
-                  })
-                }
-                dialog.clear()
-              }}
-            />
-          ))
         },
       },
       {

@@ -288,7 +288,9 @@ async function observeResident(url: string, secret: string, hostname: string, po
   const state = await readResidentState()
   const healthy = await serverHealthy(url, secret)
   const matches = state?.hostname === hostname && state?.port === port
-  const alive = state?.pid ? isPidAlive(state.pid, state) : false
+  // Async snapshot: the launcher intro animates while this runs.
+  const processes = state?.pid && state.created ? await TuiLedger.listProcessesAsync() : undefined
+  const alive = state?.pid ? isPidAlive(state.pid, state, processes && (() => processes)) : false
   const action = residentLaunchAction({
     healthy,
     hasState: state !== undefined,
@@ -934,7 +936,9 @@ async function withResidentLock<T>(action: () => Promise<T>) {
   const lock = `${serverStatePath()}.lock`
   await fs.mkdir(path.dirname(lock), { recursive: true })
   const identity =
-    process.platform === "win32" ? TuiLedger.listProcesses().find((item) => item.pid === process.pid) : undefined
+    process.platform === "win32"
+      ? (await TuiLedger.listProcessesAsync()).find((item) => item.pid === process.pid)
+      : undefined
   if (process.platform === "win32" && !identity?.created) throw new Error("Startup lock owner identity unavailable")
   let handle: fs.FileHandle | undefined
   for (let attempt = 0; attempt < 300; attempt++) {
@@ -957,7 +961,7 @@ async function withResidentLock<T>(action: () => Promise<T>) {
         const owner = JSON.parse(contents) as TuiLedger.Process
         const expired =
           process.platform === "win32"
-            ? startupLockExpired(owner, TuiLedger.listProcesses(), ageMs)
+            ? startupLockExpired(owner, await TuiLedger.listProcessesAsync(), ageMs)
             : !isPidAlive(owner.pid)
         if (expired && (await fs.readFile(lock, "utf8")) === contents) await fs.rm(lock, { force: true })
       } catch {}

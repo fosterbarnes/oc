@@ -29,7 +29,22 @@ export const introFrame = [
 
 // Scanner colors are blended over `interior` by scaling, so they assume it stays black.
 export const introColors = { open: "#a89bba", code: "#5f566d", border: "#3A2D5C", interior: "#000000" }
-export const INTRO_TICK_MS = 15
+// One reveal column (and one scanner step) per tick: ~0.9s reveal, slow enough to read as painting in.
+export const INTRO_TICK_MS = 40
+// Repaint cadence; ticks come from the clock, so late or skipped repaints never slow the intro.
+export const INTRO_PAINT_MS = 16
+
+// Tick for a start time (epoch ms).
+export const introTick = (start: number, now = Date.now()) => Math.max(0, Math.floor((now - start) / INTRO_TICK_MS))
+
+// Next tick after `shown`: the clock tick, except the reveal never skips a column. After a stall
+// (first pwsh spawn, TUI boot) it advances one column and moves `start` so the clock resumes there.
+// Launcher and TUI share start and shown tick (OC_INTRO_START, OC_INTRO_FRAME) across the handoff.
+export function introPace(start: number, shown: number | undefined, now = Date.now()) {
+  const tick = introTick(start, now)
+  if (shown === undefined || shown >= _REVEAL_END || tick <= shown + 1) return { start, tick }
+  return { start: now - (shown + 1) * INTRO_TICK_MS, tick: shown + 1 }
+}
 
 // Hex colors; no `bg` means the terminal background (the bottom border row).
 export type IntroCell = { glyph: string; fg: string; bg?: string }
@@ -64,8 +79,7 @@ export const introCells: IntroCell[][] = Array.from({ length: introBottom - intr
 // The intro at a given tick: the reveal shows one more column per tick (hidden cells are
 // undefined) and a Knight Rider scanner bounces in the row under the logo. Its first forward pass
 // rides the reveal edge and its end hold lasts while the reveal finishes the columns to its right;
-// later passes step every `_SCANNER_TICKS`. Launcher and TUI both draw this, so the handoff
-// (tick passed in OC_INTRO_FRAME) continues the same frame.
+// later passes step every `_SCANNER_TICKS`. Launcher and TUI both draw this from `introTick`.
 export function introCellsAt(tick: number) {
   const late = Math.max(0, tick - _REVEAL_END)
   const step = Math.max(0, tick - late - _SCAN_LEFT + Math.floor(late / _SCANNER_TICKS))
@@ -80,7 +94,7 @@ export function introCellsAt(tick: number) {
 }
 
 // Scanner geometry in `introCells` coordinates: the row under the logo, as wide as the logo.
-const _SCANNER_TICKS = 3
+const _SCANNER_TICKS = 1
 const _REVEAL_END = introRight - introLeft
 const _SCAN_LEFT = firstFilled(introLogo) - introLeft
 const _SCAN_WIDTH =

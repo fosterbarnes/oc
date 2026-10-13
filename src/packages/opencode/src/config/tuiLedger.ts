@@ -29,20 +29,60 @@ export function sameIdentity(identity: { pid?: number; executable?: string; crea
   )
 }
 
+const _LIST_COMMAND = [
+  "pwsh",
+  "-NoProfile",
+  "-NonInteractive",
+  "-Command",
+  "$ErrorActionPreference = 'Stop'; ConvertTo-Json -InputObject @(Get-CimInstance Win32_Process | Where-Object { $_.ProcessId -gt 0 -and $_.CreationDate } | ForEach-Object { @{ pid = [int]$_.ProcessId; parentPid = [int]$_.ParentProcessId; executable = [string]$_.ExecutablePath; startedAt = ([DateTimeOffset]$_.CreationDate).ToUnixTimeMilliseconds(); created = $_.CreationDate.ToFileTimeUtc().ToString() } }) -Compress",
+]
+
+// Blocks the event loop for the whole pwsh run (~0.4s); use listProcessesAsync while anything animates.
 export function listProcesses(): Process[] {
   if (process.platform !== "win32") return []
-  const result = Bun.spawnSync(
-    [
-      "pwsh",
-      "-NoProfile",
-      "-NonInteractive",
-      "-Command",
-      "$ErrorActionPreference = 'Stop'; ConvertTo-Json -InputObject @(Get-CimInstance Win32_Process | Where-Object { $_.ProcessId -gt 0 -and $_.CreationDate } | ForEach-Object { @{ pid = [int]$_.ProcessId; parentPid = [int]$_.ParentProcessId; executable = [string]$_.ExecutablePath; startedAt = ([DateTimeOffset]$_.CreationDate).ToUnixTimeMilliseconds(); created = $_.CreationDate.ToFileTimeUtc().ToString() } }) -Compress",
-    ],
-    { stdout: "pipe", stderr: "pipe", windowsHide: true },
-  )
+  const result = Bun.spawnSync(_LIST_COMMAND, { stdout: "pipe", stderr: "pipe", windowsHide: true })
   if (result.exitCode !== 0) throw new Error(`Failed to list processes: ${result.stderr.toString()}`)
   return parseProcesses(result.stdout.toString())
+}
+
+// Spawns in `spawnWorker` because even an async spawn blocks the main thread on the first pwsh
+// launch per process (~0.4s), freezing the launcher intro.
+export async function listProcessesAsync(): Promise<Process[]> {
+  if (process.platform !== "win32") return []
+  const run = _spawnQueue.then(() => spawnOffThread(_LIST_COMMAND))
+  _spawnQueue = run.then(
+    () => undefined,
+    () => undefined,
+  )
+  const result = await run
+  if (result.exitCode !== 0) throw new Error(`Failed to list processes: ${result.stderr}`)
+  return parseProcesses(result.stdout)
+}
+
+declare global {
+  const OPENCODE_SPAWN_WORKER_PATH: string
+}
+
+type SpawnResult = { exitCode: number; stdout: string; stderr: string }
+let _spawnWorker: Worker | undefined
+let _spawnQueue: Promise<unknown> = Promise.resolve()
+
+// One request at a time (callers queue on `_spawnQueue`); the unref'd worker never keeps oc alive.
+function spawnOffThread(command: string[]) {
+  const worker = (_spawnWorker ??= createSpawnWorker())
+  return new Promise<SpawnResult>((resolve, reject) => {
+    worker.onmessage = (event: MessageEvent<SpawnResult>) => resolve(event.data)
+    worker.onerror = (event) => reject(new Error(`Spawn worker failed: ${event.message}`))
+    worker.postMessage(command)
+  })
+}
+
+function createSpawnWorker() {
+  const file =
+    typeof OPENCODE_SPAWN_WORKER_PATH !== "undefined"
+      ? OPENCODE_SPAWN_WORKER_PATH
+      : new URL("./spawnWorker.ts", import.meta.url)
+  return new Worker(file, { ref: false })
 }
 
 // The shared TUI rewrites its ledger on navigation. Keep the CLI's CIM stamp separately.

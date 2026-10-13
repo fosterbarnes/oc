@@ -1,4 +1,7 @@
-import { INTRO_TICK_MS, introCells, introCellsAt } from "@opencode-ai/tui/logo"
+import { INTRO_PAINT_MS, introCells, introCellsAt, introPace } from "@opencode-ai/tui/logo"
+
+// Clock start and last painted tick, passed to the TUI as OC_INTRO_START / OC_INTRO_FRAME.
+export type IntroHandoff = { start: number; tick: number }
 
 function color(hex: string, plane = 38) {
   const red = Number.parseInt(hex.slice(1, 3), 16)
@@ -7,9 +10,9 @@ function color(hex: string, plane = 38) {
   return `\x1b[${plane};2;${red};${green};${blue}m`
 }
 
-// Returns stop(clear). stop returns the last painted tick so the TUI can continue the same frame.
+// Returns stop(clear). stop returns the intro clock so the TUI continues the same frame.
 export function startIntro(mode: "terminal" | "black" = "terminal") {
-  if (!process.stdout.isTTY) return (_clear = true): number | undefined => undefined
+  if (!process.stdout.isTTY) return (_clear = true): IntroHandoff | undefined => undefined
 
   const output = process.stdout
   const frameWidth = introCells[0].length
@@ -36,21 +39,21 @@ export function startIntro(mode: "terminal" | "black" = "terminal") {
   const background = mode === "black" ? "\x1b[48;2;0;0;0m" : "\x1b[49m"
   const reset = `\x1b[0m${background}`
   const write = (value: string) => output.write(value)
-  // Writes only cells that differ from `previous` (everything when it is undefined).
+  // Cells that differ from `previous` (everything when it is undefined), as one escape string.
   const paint = (cells: ReturnType<typeof introCellsAt>, previous?: ReturnType<typeof introCellsAt>) =>
-    cells.forEach((row, rowIndex) =>
-      row.forEach((cell, column) => {
-        if (!cell) return
-        const old = previous?.[rowIndex][column]
-        if (old && old.glyph === cell.glyph && old.fg === cell.fg && old.bg === cell.bg) return
-        const bg = cell.bg ? color(cell.bg, 48) : background
-        write(
-          `\x1b[${placed.startRow + rowIndex + 1};${placed.center + column + 1}H${bg}${color(cell.fg)}${cell.glyph}${reset}`,
-        )
-      }),
-    )
+    cells
+      .flatMap((row, rowIndex) =>
+        row.map((cell, column) => {
+          if (!cell) return ""
+          const old = previous?.[rowIndex][column]
+          if (old && old.glyph === cell.glyph && old.fg === cell.fg && old.bg === cell.bg) return ""
+          const bg = cell.bg ? color(cell.bg, 48) : background
+          return `\x1b[${placed.startRow + rowIndex + 1};${placed.center + column + 1}H${bg}${color(cell.fg)}${cell.glyph}${reset}`
+        }),
+      )
+      .join("")
 
-  let tick = 0
+  let pace: { start: number; tick: number | undefined } = { start: Date.now(), tick: undefined }
   let shown: ReturnType<typeof introCellsAt> | undefined
   let stopped = false
   let timer: ReturnType<typeof setInterval> | undefined
@@ -58,26 +61,30 @@ export function startIntro(mode: "terminal" | "black" = "terminal") {
   write(`\x1b[?1049h${background}\x1b[2J\x1b[H\x1b[?25l`)
   const step = () => {
     if (stopped) return
-    const next = size()
-    if (next.columns !== current.columns || next.rows !== current.rows) {
-      // Clear the whole new area and repaint the current frame at the new center.
-      current = next
+    const measured = size()
+    // A resize clears the whole new area and repaints the current frame at the new center.
+    const resized = measured.columns !== current.columns || measured.rows !== current.rows
+    if (resized) {
+      current = measured
       placed = position()
-      write(`${background}\x1b[2J`)
       shown = undefined
     }
-    const cells = introCellsAt(tick++)
-    paint(cells, shown)
+    const next = introPace(pace.start, pace.tick)
+    pace = next
+    const cells = introCellsAt(next.tick)
+    const frame = `${resized ? `${background}\x1b[2J` : ""}${paint(cells, shown)}`
     shown = cells
+    // One write per frame inside synchronized output, so the terminal never shows half a frame.
+    if (frame) write(`\x1b[?2026h${frame}\x1b[?2026l`)
   }
   step()
-  timer = setInterval(step, INTRO_TICK_MS)
+  timer = setInterval(step, INTRO_PAINT_MS)
 
   // clear=false hands the alternate screen to the TUI with the frame still up; the TUI leaves it
   // on exit, so a later stop() only restores the cursor. Without a handoff, stop() leaves it here.
   let handedOff = false
   let done = false
-  return (clear = true): number | undefined => {
+  return (clear = true): IntroHandoff | undefined => {
     if (!stopped) {
       stopped = true
       if (timer) clearInterval(timer)
@@ -91,6 +98,6 @@ export function startIntro(mode: "terminal" | "black" = "terminal") {
       done = true
       write(`\x1b[0m\x1b[?25h${handedOff ? "" : "\x1b[?1049l"}`)
     }
-    return tick - 1
+    return { start: pace.start, tick: pace.tick ?? 0 }
   }
 }

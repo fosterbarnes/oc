@@ -6,7 +6,6 @@ import os from "os"
 import { createHash } from "node:crypto"
 import { SessionID, MessageID, PartID } from "./schema"
 import { isClaudeCodeProvider } from "@/provider/claude-code/shared"
-import { Marker } from "@/marker/marker"
 import { MessageV2 } from "./message-v2"
 import { SessionRevert } from "./revert"
 import { Session } from "./session"
@@ -1551,18 +1550,10 @@ const layer = Layer.effect(
             ]
             const format = lastUser.format ?? { type: "text" as const }
             if (format.type === "json_schema") system.push(STRUCTURED_OUTPUT_SYSTEM_PROMPT)
-            const markers = Marker.prompt(yield* Effect.promise(() => Marker.read()))
-            if (markers && !claudeCode) system.push(markers)
             // A matching `instructionsByModel` base stands in for the built-in provider prompt.
-            const agentPrompt = base ?? agent.prompt
             const result = yield* handle.process({
               user: lastUser,
-              agent:
-                markers && claudeCode
-                  ? { ...agent, prompt: [agentPrompt, markers].filter(Boolean).join("\n\n") }
-                  : base
-                    ? { ...agent, prompt: base }
-                    : agent,
+              agent: base ? { ...agent, prompt: base } : agent,
               permission: turnPermission,
               sessionID,
               parentSessionID: session.parentID,
