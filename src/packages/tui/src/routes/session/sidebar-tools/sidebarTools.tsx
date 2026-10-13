@@ -1803,7 +1803,7 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
       .then(({ openFileAtLocation }) =>
         openFileAtLocation({
           filePath,
-          cwd: projectContext.instance.path().worktree || projectContext.instance.path().directory,
+          cwd: projectRoot(),
           editor: tuiConfig.openEditedWith,
         }),
       )

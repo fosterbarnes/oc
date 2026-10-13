@@ -7,6 +7,9 @@ $srcRoot = "$repoRoot\src"
 $projectName = 'opencode'
 $buildScript = "$srcRoot\packages\opencode\script\build.ts"
 $distFolder = "$srcRoot\packages\opencode\dist"
+# Per-user install target for install.ps1, installDebug.ps1, and the revive scripts.
+$installDir = "$HOME\Apps\opencode"
+$occShortcut = Join-Path ([Environment]::GetFolderPath('Desktop')) 'occ.lnk'
 $versionFolder = "$srcRoot\.version"
 $version = "$versionFolder\version"
 $versionTag = "$versionFolder\versionTag"
@@ -23,6 +26,20 @@ function runNativeCommand {
     )
     & $FilePath @ArgumentList
     if ($LASTEXITCODE) { throw "$Name failed (exit $LASTEXITCODE)." }
+}
+
+# True when buildNotes.txt differs from HEAD or is not tracked yet. git diff --quiet exits 1 for
+# a difference; any other nonzero exit is a git failure, not a changed file.
+function testBuildNotesChanged {
+    $tracked = @(& git ls-files -- $buildNotes)
+    if ($LASTEXITCODE) { throw "git ls-files failed (exit $LASTEXITCODE)." }
+    if (-not $tracked) { return $true }
+    & git diff --quiet HEAD -- $buildNotes
+    switch ($LASTEXITCODE) {
+        0 { return $false }
+        1 { return $true }
+        default { throw "git diff failed (exit $LASTEXITCODE)." }
+    }
 }
 
 # Converts bare LF to CRLF in modified and untracked files. Binary and non-UTF-8 files are left alone.

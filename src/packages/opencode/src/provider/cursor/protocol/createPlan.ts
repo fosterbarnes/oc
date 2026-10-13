@@ -165,7 +165,7 @@ export const CREATE_PLAN_NOT_APPROVED_REASON =
  * the transition *out of* planning, so a CreatePlan raised outside plan mode is
  * written and acknowledged without one.
  */
-export function resolveCreatePlanBridge(options: {
+export function resolveCreatePlanBridge(_options: {
   allowTools: boolean
   canStage?: boolean
   planModeActive?: boolean
@@ -339,9 +339,6 @@ export function resolveHostPlanPath(workspaceRoot: string, name?: string, create
   const slug = name?.trim() ? slugifyPlanName(name) : randomPlanSlug(created)
   return path.join(hostPlansDir(workspaceRoot), `${created}-${slug}.md`)
 }
-
-/** @deprecated Prefer {@link resolveHostPlanPath}. */
-export const resolveOpencodePlanPath = resolveHostPlanPath
 
 /**
  * Render plain markdown for the plan file. No Cursor YAML frontmatter.

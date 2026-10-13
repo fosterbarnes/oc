@@ -8,6 +8,7 @@ import { Schema } from "effect"
 import { HttpApi, HttpApiEndpoint, HttpApiError, HttpApiGroup, OpenApi } from "effect/unstable/httpapi"
 import semver from "semver"
 import { described } from "./metadata"
+import { ApiNotFoundError } from "../errors"
 
 const GlobalHealth = Schema.Struct({
   healthy: Schema.Literal(true),
@@ -85,7 +86,85 @@ export const GlobalPaths = {
   upgrade: "/global/upgrade",
   shutdown: "/global/shutdown",
   restart: "/global/restart",
+  warmup: "/global/claude/warmup",
 } as const
+
+const WarmupTimeList = Schema.mutable(Schema.Array(Schema.String))
+
+const WarmupDailySchedule = Schema.Struct({
+  mode: Schema.Literal("daily"),
+  times: WarmupTimeList,
+})
+
+const WarmupWeekDays = Schema.Struct({
+  mon: WarmupTimeList,
+  tue: WarmupTimeList,
+  wed: WarmupTimeList,
+  thu: WarmupTimeList,
+  fri: WarmupTimeList,
+  sat: WarmupTimeList,
+  sun: WarmupTimeList,
+})
+
+const WarmupWeeklySchedule = Schema.Struct({
+  mode: Schema.Literal("weekly"),
+  days: WarmupWeekDays,
+})
+
+const WarmupSchedule = Schema.Union([WarmupDailySchedule, WarmupWeeklySchedule])
+
+const WarmupLastAttempt = Schema.Struct({
+  scheduledAt: Schema.Finite,
+  attemptedAt: Schema.Finite,
+  outcome: Schema.Literals(["sent", "rejected", "failed", "timeout", "missed"]),
+})
+
+const WarmupAccount = Schema.Struct({
+  accountID: Schema.String,
+  label: Schema.String,
+  enabled: Schema.Boolean,
+  schedule: WarmupSchedule,
+  nextAt: Schema.optional(Schema.Finite),
+  lastAttempt: Schema.optional(WarmupLastAttempt),
+})
+
+const WarmupState = Schema.Struct({
+  accounts: Schema.mutable(Schema.Array(WarmupAccount)),
+  timeZone: Schema.String,
+  utcOffset: Schema.String,
+  available: Schema.Boolean,
+  error: Schema.optional(Schema.String),
+})
+
+const WarmupSetInput = Schema.Struct({
+  accountID: Schema.String,
+  enabled: Schema.Boolean,
+  schedule: WarmupSchedule,
+})
+
+export class ApiWarmupScheduleError extends Schema.ErrorClass<ApiWarmupScheduleError>("WarmupScheduleError")(
+  {
+    name: Schema.Literal("WarmupScheduleError"),
+    data: Schema.Struct({
+      message: Schema.String,
+    }),
+  },
+  { httpApiStatus: 400 },
+) {}
+
+export class ApiWarmupStoreError extends Schema.ErrorClass<ApiWarmupStoreError>("WarmupStoreError")(
+  {
+    name: Schema.Literal("WarmupStoreError"),
+    data: Schema.Struct({
+      message: Schema.String,
+    }),
+  },
+  { httpApiStatus: 500 },
+) {}
+
+export type WarmupSetInputType = typeof WarmupSetInput.Type
+export type WarmupAccountType = typeof WarmupAccount.Type
+export type WarmupStateType = typeof WarmupState.Type
 
 export const GlobalApi = HttpApi.make("global").add(
   HttpApiGroup.make("global")
@@ -166,6 +245,27 @@ export const GlobalApi = HttpApi.make("global").add(
           identifier: "global.restart",
           summary: "Restart server",
           description: "Dispose OpenCode instances and restart a managed server.",
+        }),
+      ),
+      HttpApiEndpoint.get("claudeWarmup", GlobalPaths.warmup, {
+        success: described(WarmupState, "Claude warm-up schedules"),
+      }).annotateMerge(
+        OpenApi.annotations({
+          identifier: "global.claudeWarmup",
+          summary: "Get Claude warm-up schedules",
+          description:
+            "Connected Claude accounts with their warm-up schedules, next occurrence, latest attempt, and server time zone.",
+        }),
+      ),
+      HttpApiEndpoint.put("setClaudeWarmup", GlobalPaths.warmup, {
+        payload: WarmupSetInput,
+        success: described(WarmupAccount, "Updated warm-up account"),
+        error: [ApiWarmupScheduleError, ApiNotFoundError, ApiWarmupStoreError],
+      }).annotateMerge(
+        OpenApi.annotations({
+          identifier: "global.setClaudeWarmup",
+          summary: "Set Claude warm-up schedule",
+          description: "Save or pause one account's warm-up schedule. Saving an empty schedule disables it.",
         }),
       ),
     )

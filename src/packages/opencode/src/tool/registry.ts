@@ -10,10 +10,6 @@ import { SessionFailedTool } from "./sessionFailed"
 import { SessionTailTool } from "./sessionTail"
 import { RunAfterTurnTool } from "./runAfterTurn"
 import { TimeTool } from "./time"
-import { WorkDoneTool } from "./workDone"
-import { WorkHandoff } from "@/session/workHandoff"
-import { Git } from "@opencode-ai/core/git"
-import { AbsolutePath } from "@opencode-ai/core/schema"
 import { Session } from "@/session/session"
 import { QuestionTool } from "./question"
 import { ShellTool } from "./shell"
@@ -109,7 +105,6 @@ const layer = Layer.effect(
     const truncate = yield* Truncate.Service
     const flags = yield* RuntimeFlags.Service
     const mcp = yield* MCP.Service
-    const git = yield* Git.Service
 
     const invalid = yield* InvalidTool
     const task = yield* TaskTool
@@ -126,7 +121,6 @@ const layer = Layer.effect(
     const sessionTail = yield* SessionTailTool
     const runAfterTurn = yield* RunAfterTurnTool
     const time = yield* TimeTool
-    const workDone = yield* WorkDoneTool
     const webfetch = yield* WebFetchTool
     const websearch = yield* WebSearchTool
     const shell = yield* ShellTool
@@ -254,7 +248,6 @@ const layer = Layer.effect(
           sessionTail: Tool.init(sessionTail),
           runAfterTurn: Tool.init(runAfterTurn),
           time: Tool.init(time),
-          workDone: Tool.init(workDone),
           ...(codeModeTool ? { execute: Tool.init(codeModeTool) } : {}),
         })
 
@@ -275,7 +268,6 @@ const layer = Layer.effect(
             tool.sessionTail,
             tool.runAfterTurn,
             tool.time,
-            tool.workDone,
             tool.fetch,
             tool.todo,
             tool.search,
@@ -297,12 +289,7 @@ const layer = Layer.effect(
     const all: Interface["all"] = Effect.fn("ToolRegistry.all")(function* () {
       const s = yield* InstanceState.get(state)
       const cfg = yield* config.get()
-      const directory = yield* InstanceState.directory
-      const repository = yield* git.repo.discover(AbsolutePath.make(directory))
-      const parent = repository ? yield* git.worktree.parent(repository) : undefined
-      return [...s.builtin, ...s.custom].filter((tool) =>
-        (cfg.todos === true || tool.id !== TodoWriteTool.id) && (tool.id !== WorkDoneTool.id || parent !== undefined),
-      )
+      return [...s.builtin, ...s.custom].filter((tool) => cfg.todos === true || tool.id !== TodoWriteTool.id)
     })
 
     const ids: Interface["ids"] = Effect.fn("ToolRegistry.ids")(function* () {
@@ -496,8 +483,6 @@ export const node = LayerNode.make({
     MCP.node,
     Database.node,
     Ripgrep.node,
-    Git.node,
-    WorkHandoff.node,
   ],
 })
 

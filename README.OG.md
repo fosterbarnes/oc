@@ -1,20 +1,9 @@
-<p align="center">
-  <a href="https://opencode.ai">
-    <picture>
-      <source srcset="packages/console/app/src/asset/logo-ornate-dark.svg" media="(prefers-color-scheme: dark)">
-      <source srcset="packages/console/app/src/asset/logo-ornate-light.svg" media="(prefers-color-scheme: light)">
-      <img src="packages/console/app/src/asset/logo-ornate-light.svg" alt="OpenCode logo">
-    </picture>
-  </a>
-</p>
 <p align="center">The open source AI coding agent.</p>
 <p align="center">
   <a href="https://opencode.ai/discord"><img alt="Discord" src="https://img.shields.io/discord/1391832426048651334?style=flat-square&label=discord" /></a>
   <a href="https://www.npmjs.com/package/opencode-ai"><img alt="npm" src="https://img.shields.io/npm/v/opencode-ai?style=flat-square" /></a>
   <a href="https://github.com/anomalyco/opencode/actions/workflows/publish.yml"><img alt="Build status" src="https://img.shields.io/github/actions/workflow/status/anomalyco/opencode/publish.yml?style=flat-square&branch=dev" /></a>
 </p>
-
-[![OpenCode Terminal UI](packages/web/src/assets/lander/screenshot.png)](https://opencode.ai)
 
 This file is the native-OpenCode map for this checkout (Now / Keep / Upstream). It records which stock surfaces still live here, whether they should stay stock, and whether they match isolated upstream or are pinned / lagging / gone on purpose.
 
@@ -72,8 +61,9 @@ Add a row when a native surface lands, is overlaid, is pinned, or is deleted. Af
 | GitHub Action | native | native | same | `github/` |
 | ACP | native | native | same | Stock. |
 | Desktop / Electron | removed | removed | gone | `packages/desktop` gone. |
-| Web app / `opencode web` | removed | removed | gone | `packages/app` and `WebCommand` gone. `packages/web` docs source remains; it is not a shipped app. |
-| Docs site source | native | native | lag | `packages/web` still has leftover desktop / `opencode web` wording. |
+| Web app / `opencode web` | removed | removed | gone | `packages/app` and `WebCommand` gone. |
+| Docs site source | removed | removed | gone | `packages/web` (Astro docs site) removed in v0.3.0 prep. |
+| Hosted SaaS / deployment | removed | removed | gone | `packages/console`, `stats`, `enterprise`, `slack`, `function`, `containers`, `identity`, `storybook`, `sst.config.ts`, `infra/`, `sst-env.d.ts` shims. The share client still talks to the hosted service. |
 | Localized `README.*.md` | removed | removed | gone | Deleted in v0.1.5. Isolated upstream still has 21. |
 | Install / run | mixed | mixed | gone | This checkout: `bun dev` and `.scripts` (see `SCRIPTS.md`). Upstream curl/npm/brew installers are not this fork. |
 

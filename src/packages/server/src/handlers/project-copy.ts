@@ -29,11 +29,6 @@ export const ProjectCopyHandler = HttpApiBuilder.group(Api, "server.projectCopy"
           ),
         ),
       )
-      .handle("projectCopy.merge", (ctx) =>
-        ProjectCopy.Service.use((copies) =>
-          badRequest(copies.merge({ ...ctx.payload, projectID: ctx.params.projectID })),
-        ),
-      )
       .handle("projectCopy.refresh", (ctx) =>
         ProjectCopy.Service.use((copies) =>
           badRequest(copies.refresh({ projectID: ctx.params.projectID })).pipe(

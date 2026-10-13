@@ -784,6 +784,457 @@
         ]
       }
     },
+    "/global/claude/warmup": {
+      "get": {
+        "tags": ["global"],
+        "operationId": "global.claudeWarmup",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Claude warm-up schedules",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "accounts": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "accountID": {
+                            "type": "string"
+                          },
+                          "label": {
+                            "type": "string"
+                          },
+                          "enabled": {
+                            "type": "boolean"
+                          },
+                          "schedule": {
+                            "anyOf": [
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "mode": {
+                                    "type": "string",
+                                    "enum": ["daily"]
+                                  },
+                                  "times": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "string"
+                                    }
+                                  }
+                                },
+                                "required": ["mode", "times"],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "mode": {
+                                    "type": "string",
+                                    "enum": ["weekly"]
+                                  },
+                                  "days": {
+                                    "type": "object",
+                                    "properties": {
+                                      "mon": {
+                                        "type": "array",
+                                        "items": {
+                                          "type": "string"
+                                        }
+                                      },
+                                      "tue": {
+                                        "type": "array",
+                                        "items": {
+                                          "type": "string"
+                                        }
+                                      },
+                                      "wed": {
+                                        "type": "array",
+                                        "items": {
+                                          "type": "string"
+                                        }
+                                      },
+                                      "thu": {
+                                        "type": "array",
+                                        "items": {
+                                          "type": "string"
+                                        }
+                                      },
+                                      "fri": {
+                                        "type": "array",
+                                        "items": {
+                                          "type": "string"
+                                        }
+                                      },
+                                      "sat": {
+                                        "type": "array",
+                                        "items": {
+                                          "type": "string"
+                                        }
+                                      },
+                                      "sun": {
+                                        "type": "array",
+                                        "items": {
+                                          "type": "string"
+                                        }
+                                      }
+                                    },
+                                    "required": ["mon", "tue", "wed", "thu", "fri", "sat", "sun"],
+                                    "additionalProperties": false
+                                  }
+                                },
+                                "required": ["mode", "days"],
+                                "additionalProperties": false
+                              }
+                            ]
+                          },
+                          "nextAt": {
+                            "type": "number"
+                          },
+                          "lastAttempt": {
+                            "type": "object",
+                            "properties": {
+                              "scheduledAt": {
+                                "type": "number"
+                              },
+                              "attemptedAt": {
+                                "type": "number"
+                              },
+                              "outcome": {
+                                "type": "string",
+                                "enum": ["sent", "rejected", "failed", "timeout", "missed"]
+                              }
+                            },
+                            "required": ["scheduledAt", "attemptedAt", "outcome"],
+                            "additionalProperties": false
+                          }
+                        },
+                        "required": ["accountID", "label", "enabled", "schedule"],
+                        "additionalProperties": false
+                      }
+                    },
+                    "timeZone": {
+                      "type": "string"
+                    },
+                    "utcOffset": {
+                      "type": "string"
+                    },
+                    "available": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["accounts", "timeZone", "utcOffset", "available"],
+                  "additionalProperties": false,
+                  "description": "Claude warm-up schedules"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BadRequestError"
+                }
+              }
+            }
+          }
+        },
+        "description": "Connected Claude accounts with their warm-up schedules, next occurrence, latest attempt, and server time zone.",
+        "summary": "Get Claude warm-up schedules",
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.global.claudeWarmup({\n  ...\n})"
+          }
+        ]
+      },
+      "put": {
+        "tags": ["global"],
+        "operationId": "global.setClaudeWarmup",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Updated warm-up account",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "accountID": {
+                      "type": "string"
+                    },
+                    "label": {
+                      "type": "string"
+                    },
+                    "enabled": {
+                      "type": "boolean"
+                    },
+                    "schedule": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "mode": {
+                              "type": "string",
+                              "enum": ["daily"]
+                            },
+                            "times": {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              }
+                            }
+                          },
+                          "required": ["mode", "times"],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "mode": {
+                              "type": "string",
+                              "enum": ["weekly"]
+                            },
+                            "days": {
+                              "type": "object",
+                              "properties": {
+                                "mon": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string"
+                                  }
+                                },
+                                "tue": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string"
+                                  }
+                                },
+                                "wed": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string"
+                                  }
+                                },
+                                "thu": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string"
+                                  }
+                                },
+                                "fri": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string"
+                                  }
+                                },
+                                "sat": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string"
+                                  }
+                                },
+                                "sun": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string"
+                                  }
+                                }
+                              },
+                              "required": ["mon", "tue", "wed", "thu", "fri", "sat", "sun"],
+                              "additionalProperties": false
+                            }
+                          },
+                          "required": ["mode", "days"],
+                          "additionalProperties": false
+                        }
+                      ]
+                    },
+                    "nextAt": {
+                      "type": "number"
+                    },
+                    "lastAttempt": {
+                      "type": "object",
+                      "properties": {
+                        "scheduledAt": {
+                          "type": "number"
+                        },
+                        "attemptedAt": {
+                          "type": "number"
+                        },
+                        "outcome": {
+                          "type": "string",
+                          "enum": ["sent", "rejected", "failed", "timeout", "missed"]
+                        }
+                      },
+                      "required": ["scheduledAt", "attemptedAt", "outcome"],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": ["accountID", "label", "enabled", "schedule"],
+                  "additionalProperties": false,
+                  "description": "Updated warm-up account"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "WarmupScheduleError | InvalidRequestError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/WarmupScheduleError"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidRequestError"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NotFoundError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotFoundError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "WarmupStoreError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WarmupStoreError"
+                }
+              }
+            }
+          }
+        },
+        "description": "Save or pause one account's warm-up schedule. Saving an empty schedule disables it.",
+        "summary": "Set Claude warm-up schedule",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "accountID": {
+                    "type": "string"
+                  },
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "schedule": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "mode": {
+                            "type": "string",
+                            "enum": ["daily"]
+                          },
+                          "times": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          }
+                        },
+                        "required": ["mode", "times"],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "mode": {
+                            "type": "string",
+                            "enum": ["weekly"]
+                          },
+                          "days": {
+                            "type": "object",
+                            "properties": {
+                              "mon": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              },
+                              "tue": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              },
+                              "wed": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              },
+                              "thu": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              },
+                              "fri": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              },
+                              "sat": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              },
+                              "sun": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              }
+                            },
+                            "required": ["mon", "tue", "wed", "thu", "fri", "sat", "sun"],
+                            "additionalProperties": false
+                          }
+                        },
+                        "required": ["mode", "days"],
+                        "additionalProperties": false
+                      }
+                    ]
+                  }
+                },
+                "required": ["accountID", "enabled", "schedule"],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.global.setClaudeWarmup({\n  ...\n})"
+          }
+        ]
+      }
+    },
     "/event": {
       "get": {
         "tags": ["event"],
@@ -3123,6 +3574,64 @@
           {
             "lang": "js",
             "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.lsp.status({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/plugin": {
+      "get": {
+        "tags": ["instance"],
+        "operationId": "plugin.status",
+        "parameters": [
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Plugin load status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/PluginStatus"
+                  },
+                  "description": "Plugin load status"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BadRequestError"
+                }
+              }
+            }
+          }
+        },
+        "description": "Get load status for built-in and configured server plugins",
+        "summary": "Get plugin status",
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.plugin.status({\n  ...\n})"
           }
         ]
       }
@@ -7315,6 +7824,87 @@
         ]
       }
     },
+    "/session/{sessionID}/handoff": {
+      "post": {
+        "tags": ["session"],
+        "operationId": "session.handoff",
+        "parameters": [
+          {
+            "name": "sessionID",
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "pattern": "^ses"
+            },
+            "required": true
+          },
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Started session handoff",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "boolean",
+                  "description": "Started session handoff"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "BadRequest | InvalidRequestError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/effect_HttpApiError_BadRequest"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidRequestError"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NotFoundError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotFoundError"
+                }
+              }
+            }
+          }
+        },
+        "description": "Write a handoff summary in this session and continue in a linked new session.",
+        "summary": "Handoff session",
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.session.handoff({\n  ...\n})"
+          }
+        ]
+      }
+    },
     "/session/{sessionID}/summarize": {
       "post": {
         "tags": ["session"],
@@ -7451,11 +8041,22 @@
         ],
         "responses": {
           "200": {
-            "description": "Renamed session",
+            "description": "Renamed session and the provider/model that wrote the title",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Session8"
+                  "type": "object",
+                  "properties": {
+                    "session": {
+                      "$ref": "#/components/schemas/Session1"
+                    },
+                    "model": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["session"],
+                  "additionalProperties": false,
+                  "description": "Renamed session and the provider/model that wrote the title"
                 }
               }
             }
@@ -7750,6 +8351,12 @@
                   "variant": {
                     "type": "string"
                   },
+                  "additionalCommands": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
                   "parts": {
                     "type": "array",
                     "items": {
@@ -7972,7 +8579,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Session9"
+                  "$ref": "#/components/schemas/Session8"
                 }
               }
             }
@@ -8083,7 +8690,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Session10"
+                  "$ref": "#/components/schemas/Session9"
                 }
               }
             }
@@ -8449,6 +9056,675 @@
           {
             "lang": "js",
             "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.part.update({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/session/resume/state": {
+      "get": {
+        "tags": ["session"],
+        "operationId": "session.resume.state",
+        "parameters": [
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Scheduled auto-resume state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "enabled": {
+                      "type": "boolean"
+                    },
+                    "prompt": {
+                      "type": "string"
+                    },
+                    "entries": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "sessionID": {
+                            "type": "string",
+                            "pattern": "^ses"
+                          },
+                          "directory": {
+                            "type": "string"
+                          },
+                          "fireAt": {
+                            "anyOf": [
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "string",
+                                "enum": ["NaN"]
+                              },
+                              {
+                                "type": "string",
+                                "enum": ["Infinity"]
+                              },
+                              {
+                                "type": "string",
+                                "enum": ["-Infinity"]
+                              },
+                              {
+                                "type": "string",
+                                "enum": ["Infinity", "-Infinity", "NaN"]
+                              }
+                            ]
+                          },
+                          "reason": {
+                            "type": "string"
+                          },
+                          "createdAt": {
+                            "anyOf": [
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "string",
+                                "enum": ["NaN"]
+                              },
+                              {
+                                "type": "string",
+                                "enum": ["Infinity"]
+                              },
+                              {
+                                "type": "string",
+                                "enum": ["-Infinity"]
+                              },
+                              {
+                                "type": "string",
+                                "enum": ["Infinity", "-Infinity", "NaN"]
+                              }
+                            ]
+                          },
+                          "attempts": {
+                            "anyOf": [
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "string",
+                                "enum": ["NaN"]
+                              },
+                              {
+                                "type": "string",
+                                "enum": ["Infinity"]
+                              },
+                              {
+                                "type": "string",
+                                "enum": ["-Infinity"]
+                              },
+                              {
+                                "type": "string",
+                                "enum": ["Infinity", "-Infinity", "NaN"]
+                              }
+                            ]
+                          }
+                        },
+                        "required": ["id", "sessionID", "directory", "fireAt", "reason", "createdAt", "attempts"],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": ["enabled", "prompt", "entries"],
+                  "additionalProperties": false,
+                  "description": "Scheduled auto-resume state"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "BadRequest | InvalidRequestError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/effect_HttpApiError_BadRequest"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidRequestError"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "description": "Get the auto-resume toggle, prompt, and pending scheduled resume entries.",
+        "summary": "Get scheduled resumes",
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.session.resume.state({\n  ...\n})"
+          }
+        ]
+      },
+      "put": {
+        "tags": ["session"],
+        "operationId": "session.resume.set",
+        "parameters": [
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Updated scheduled auto-resume state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "enabled": {
+                      "type": "boolean"
+                    },
+                    "prompt": {
+                      "type": "string"
+                    },
+                    "entries": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "sessionID": {
+                            "type": "string",
+                            "pattern": "^ses"
+                          },
+                          "directory": {
+                            "type": "string"
+                          },
+                          "fireAt": {
+                            "anyOf": [
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "string",
+                                "enum": ["NaN"]
+                              },
+                              {
+                                "type": "string",
+                                "enum": ["Infinity"]
+                              },
+                              {
+                                "type": "string",
+                                "enum": ["-Infinity"]
+                              },
+                              {
+                                "type": "string",
+                                "enum": ["Infinity", "-Infinity", "NaN"]
+                              }
+                            ]
+                          },
+                          "reason": {
+                            "type": "string"
+                          },
+                          "createdAt": {
+                            "anyOf": [
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "string",
+                                "enum": ["NaN"]
+                              },
+                              {
+                                "type": "string",
+                                "enum": ["Infinity"]
+                              },
+                              {
+                                "type": "string",
+                                "enum": ["-Infinity"]
+                              },
+                              {
+                                "type": "string",
+                                "enum": ["Infinity", "-Infinity", "NaN"]
+                              }
+                            ]
+                          },
+                          "attempts": {
+                            "anyOf": [
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "string",
+                                "enum": ["NaN"]
+                              },
+                              {
+                                "type": "string",
+                                "enum": ["Infinity"]
+                              },
+                              {
+                                "type": "string",
+                                "enum": ["-Infinity"]
+                              },
+                              {
+                                "type": "string",
+                                "enum": ["Infinity", "-Infinity", "NaN"]
+                              }
+                            ]
+                          }
+                        },
+                        "required": ["id", "sessionID", "directory", "fireAt", "reason", "createdAt", "attempts"],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": ["enabled", "prompt", "entries"],
+                  "additionalProperties": false,
+                  "description": "Updated scheduled auto-resume state"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "BadRequest | InvalidRequestError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/effect_HttpApiError_BadRequest"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidRequestError"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "description": "Enable or disable automatic resume prompts after usage-limit resets.",
+        "summary": "Set auto-resume",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "prompt": {
+                    "type": "string"
+                  }
+                },
+                "required": ["enabled"],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.session.resume.set({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/session/resume/cancel": {
+      "post": {
+        "tags": ["session"],
+        "operationId": "session.resume.cancel",
+        "parameters": [
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Cancelled scheduled resume",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "boolean",
+                  "description": "Cancelled scheduled resume"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "BadRequest | InvalidRequestError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/effect_HttpApiError_BadRequest"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidRequestError"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "description": "Cancel a pending scheduled resume entry by id.",
+        "summary": "Cancel scheduled resume",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  }
+                },
+                "required": ["id"],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.session.resume.cancel({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/session/claude/account": {
+      "get": {
+        "tags": ["session"],
+        "operationId": "session.claudeAccount.state",
+        "parameters": [
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "sessionID",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Claude Code pool accounts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "accounts": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "label": {
+                            "type": "string"
+                          },
+                          "current": {
+                            "type": "boolean"
+                          },
+                          "pinned": {
+                            "type": "boolean"
+                          },
+                          "limitedUntil": {
+                            "anyOf": [
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "string",
+                                "enum": ["NaN"]
+                              },
+                              {
+                                "type": "string",
+                                "enum": ["Infinity"]
+                              },
+                              {
+                                "type": "string",
+                                "enum": ["-Infinity"]
+                              },
+                              {
+                                "type": "string",
+                                "enum": ["Infinity", "-Infinity", "NaN"]
+                              }
+                            ]
+                          }
+                        },
+                        "required": ["id", "label", "current"],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": ["accounts"],
+                  "additionalProperties": false,
+                  "description": "Claude Code pool accounts"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "BadRequest | InvalidRequestError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/effect_HttpApiError_BadRequest"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidRequestError"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "description": "List the Claude Code pool accounts, the active one, and any usage limits.",
+        "summary": "Get Claude accounts",
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.session.claudeAccount.state({\n  ...\n})"
+          }
+        ]
+      },
+      "put": {
+        "tags": ["session"],
+        "operationId": "session.claudeAccount.set",
+        "parameters": [
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Updated Claude Code pool accounts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "accounts": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "label": {
+                            "type": "string"
+                          },
+                          "current": {
+                            "type": "boolean"
+                          },
+                          "pinned": {
+                            "type": "boolean"
+                          },
+                          "limitedUntil": {
+                            "anyOf": [
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "string",
+                                "enum": ["NaN"]
+                              },
+                              {
+                                "type": "string",
+                                "enum": ["Infinity"]
+                              },
+                              {
+                                "type": "string",
+                                "enum": ["-Infinity"]
+                              },
+                              {
+                                "type": "string",
+                                "enum": ["Infinity", "-Infinity", "NaN"]
+                              }
+                            ]
+                          }
+                        },
+                        "required": ["id", "label", "current"],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": ["accounts"],
+                  "additionalProperties": false,
+                  "description": "Updated Claude Code pool accounts"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "BadRequest | InvalidRequestError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/effect_HttpApiError_BadRequest"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidRequestError"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "description": "Make a Claude Code pool account the active one for new turns, or pin/unpin it for one session when sessionID is given.",
+        "summary": "Set Claude account",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "sessionID": {
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.session.claudeAccount.set({\n  ...\n})"
           }
         ]
       }
@@ -9370,7 +10646,6 @@
                       "session.most_recent",
                       "oc.new_session",
                       "model.default",
-                      "oc.reasoning_effort",
                       "agent.session",
                       "agent.default_subagent",
                       "agent.default_subagent_model",
@@ -15897,6 +17172,9 @@
             "additionalProperties": {
               "type": "boolean"
             }
+          },
+          "permission": {
+            "$ref": "#/components/schemas/PermissionRuleset"
           }
         },
         "required": ["id", "sessionID", "role", "time", "agent", "model"],
@@ -19678,7 +20956,6 @@
                           "session.most_recent",
                           "oc.new_session",
                           "model.default",
-                          "oc.reasoning_effort",
                           "agent.session",
                           "agent.default_subagent",
                           "agent.default_subagent_model",
@@ -21053,6 +22330,9 @@
           "max_base64_bytes": {
             "type": "integer",
             "exclusiveMinimum": 0
+          },
+          "save_dir": {
+            "type": "string"
           }
         },
         "additionalProperties": false
@@ -21103,6 +22383,9 @@
                 },
                 "subtask": {
                   "type": "boolean"
+                },
+                "permission": {
+                  "$ref": "#/components/schemas/PermissionConfig"
                 }
               },
               "required": ["template"],
@@ -21184,6 +22467,9 @@
             "additionalProperties": false
           },
           "snapshot": {
+            "type": "boolean"
+          },
+          "todos": {
             "type": "boolean"
           },
           "plugin": {
@@ -21591,6 +22877,67 @@
           "name": {
             "type": "string",
             "enum": ["ServerLifecycleUnavailable"]
+          },
+          "data": {
+            "type": "object",
+            "properties": {
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": ["message"],
+            "additionalProperties": false
+          }
+        },
+        "required": ["name", "data"],
+        "additionalProperties": false
+      },
+      "WarmupScheduleError": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "enum": ["WarmupScheduleError"]
+          },
+          "data": {
+            "type": "object",
+            "properties": {
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": ["message"],
+            "additionalProperties": false
+          }
+        },
+        "required": ["name", "data"],
+        "additionalProperties": false
+      },
+      "NotFoundError": {
+        "type": "object",
+        "required": ["name", "data"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "enum": ["NotFoundError"]
+          },
+          "data": {
+            "type": "object",
+            "required": ["message"],
+            "properties": {
+              "message": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "WarmupStoreError": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "enum": ["WarmupStoreError"]
           },
           "data": {
             "type": "object",
@@ -22656,6 +24003,36 @@
         "required": ["id", "name", "root", "status"],
         "additionalProperties": false
       },
+      "PluginStatus": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "spec": {
+            "type": "string"
+          },
+          "target": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string",
+            "enum": ["file", "npm", "internal"]
+          },
+          "version": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": ["loaded", "failed", "no_entry"]
+          },
+          "error": {
+            "type": "string"
+          }
+        },
+        "required": ["name", "spec", "target", "source", "status"],
+        "additionalProperties": false
+      },
       "FormatterStatus": {
         "type": "object",
         "properties": {
@@ -23493,25 +24870,6 @@
         },
         "required": ["id", "slug", "projectID", "directory", "title", "version", "time"],
         "additionalProperties": false
-      },
-      "NotFoundError": {
-        "type": "object",
-        "required": ["name", "data"],
-        "properties": {
-          "name": {
-            "type": "string",
-            "enum": ["NotFoundError"]
-          },
-          "data": {
-            "type": "object",
-            "required": ["message"],
-            "properties": {
-              "message": {
-                "type": "string"
-              }
-            }
-          }
-        }
       },
       "Session3": {
         "type": "object",
@@ -24418,6 +25776,168 @@
         "required": ["id", "slug", "projectID", "directory", "title", "version", "time"],
         "additionalProperties": false
       },
+      "TextPartInput": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^prt"
+          },
+          "type": {
+            "type": "string",
+            "enum": ["text"]
+          },
+          "text": {
+            "type": "string"
+          },
+          "synthetic": {
+            "type": "boolean"
+          },
+          "ignored": {
+            "type": "boolean"
+          },
+          "time": {
+            "type": "object",
+            "properties": {
+              "start": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "end": {
+                "type": "integer",
+                "minimum": 0
+              }
+            },
+            "required": ["start"],
+            "additionalProperties": false
+          },
+          "metadata": {
+            "type": "object"
+          }
+        },
+        "required": ["type", "text"],
+        "additionalProperties": false
+      },
+      "FilePartInput": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^prt"
+          },
+          "type": {
+            "type": "string",
+            "enum": ["file"]
+          },
+          "mime": {
+            "type": "string"
+          },
+          "filename": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          },
+          "source": {
+            "$ref": "#/components/schemas/FilePartSource"
+          }
+        },
+        "required": ["type", "mime", "url"],
+        "additionalProperties": false
+      },
+      "AgentPartInput": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^prt"
+          },
+          "type": {
+            "type": "string",
+            "enum": ["agent"]
+          },
+          "name": {
+            "type": "string"
+          },
+          "source": {
+            "type": "object",
+            "properties": {
+              "value": {
+                "type": "string"
+              },
+              "start": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "end": {
+                "type": "integer",
+                "minimum": 0
+              }
+            },
+            "required": ["value", "start", "end"],
+            "additionalProperties": false
+          }
+        },
+        "required": ["type", "name"],
+        "additionalProperties": false
+      },
+      "SubtaskPartInput": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^prt"
+          },
+          "type": {
+            "type": "string",
+            "enum": ["subtask"]
+          },
+          "prompt": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "agent": {
+            "type": "string"
+          },
+          "model": {
+            "type": "object",
+            "properties": {
+              "providerID": {
+                "type": "string"
+              },
+              "modelID": {
+                "type": "string"
+              }
+            },
+            "required": ["providerID", "modelID"],
+            "additionalProperties": false
+          },
+          "command": {
+            "type": "string"
+          }
+        },
+        "required": ["type", "prompt", "description", "agent"],
+        "additionalProperties": false
+      },
+      "SessionBusyError": {
+        "type": "object",
+        "properties": {
+          "_tag": {
+            "type": "string",
+            "enum": ["SessionBusyError"]
+          },
+          "sessionID": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": ["_tag", "sessionID", "message"],
+        "additionalProperties": false
+      },
       "Session8": {
         "type": "object",
         "properties": {
@@ -24599,350 +26119,7 @@
         "required": ["id", "slug", "projectID", "directory", "title", "version", "time"],
         "additionalProperties": false
       },
-      "TextPartInput": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string",
-            "pattern": "^prt"
-          },
-          "type": {
-            "type": "string",
-            "enum": ["text"]
-          },
-          "text": {
-            "type": "string"
-          },
-          "synthetic": {
-            "type": "boolean"
-          },
-          "ignored": {
-            "type": "boolean"
-          },
-          "time": {
-            "type": "object",
-            "properties": {
-              "start": {
-                "type": "integer",
-                "minimum": 0
-              },
-              "end": {
-                "type": "integer",
-                "minimum": 0
-              }
-            },
-            "required": ["start"],
-            "additionalProperties": false
-          },
-          "metadata": {
-            "type": "object"
-          }
-        },
-        "required": ["type", "text"],
-        "additionalProperties": false
-      },
-      "FilePartInput": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string",
-            "pattern": "^prt"
-          },
-          "type": {
-            "type": "string",
-            "enum": ["file"]
-          },
-          "mime": {
-            "type": "string"
-          },
-          "filename": {
-            "type": "string"
-          },
-          "url": {
-            "type": "string"
-          },
-          "source": {
-            "$ref": "#/components/schemas/FilePartSource"
-          }
-        },
-        "required": ["type", "mime", "url"],
-        "additionalProperties": false
-      },
-      "AgentPartInput": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string",
-            "pattern": "^prt"
-          },
-          "type": {
-            "type": "string",
-            "enum": ["agent"]
-          },
-          "name": {
-            "type": "string"
-          },
-          "source": {
-            "type": "object",
-            "properties": {
-              "value": {
-                "type": "string"
-              },
-              "start": {
-                "type": "integer",
-                "minimum": 0
-              },
-              "end": {
-                "type": "integer",
-                "minimum": 0
-              }
-            },
-            "required": ["value", "start", "end"],
-            "additionalProperties": false
-          }
-        },
-        "required": ["type", "name"],
-        "additionalProperties": false
-      },
-      "SubtaskPartInput": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string",
-            "pattern": "^prt"
-          },
-          "type": {
-            "type": "string",
-            "enum": ["subtask"]
-          },
-          "prompt": {
-            "type": "string"
-          },
-          "description": {
-            "type": "string"
-          },
-          "agent": {
-            "type": "string"
-          },
-          "model": {
-            "type": "object",
-            "properties": {
-              "providerID": {
-                "type": "string"
-              },
-              "modelID": {
-                "type": "string"
-              }
-            },
-            "required": ["providerID", "modelID"],
-            "additionalProperties": false
-          },
-          "command": {
-            "type": "string"
-          }
-        },
-        "required": ["type", "prompt", "description", "agent"],
-        "additionalProperties": false
-      },
-      "SessionBusyError": {
-        "type": "object",
-        "properties": {
-          "_tag": {
-            "type": "string",
-            "enum": ["SessionBusyError"]
-          },
-          "sessionID": {
-            "type": "string"
-          },
-          "message": {
-            "type": "string"
-          }
-        },
-        "required": ["_tag", "sessionID", "message"],
-        "additionalProperties": false
-      },
       "Session9": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string",
-            "pattern": "^ses"
-          },
-          "slug": {
-            "type": "string"
-          },
-          "projectID": {
-            "type": "string"
-          },
-          "workspaceID": {
-            "type": "string",
-            "pattern": "^wrk"
-          },
-          "directory": {
-            "type": "string"
-          },
-          "path": {
-            "type": "string"
-          },
-          "parentID": {
-            "type": "string",
-            "pattern": "^ses"
-          },
-          "summary": {
-            "type": "object",
-            "properties": {
-              "additions": {
-                "type": "number"
-              },
-              "deletions": {
-                "type": "number"
-              },
-              "files": {
-                "type": "number"
-              },
-              "diffs": {
-                "type": "array",
-                "items": {
-                  "$ref": "#/components/schemas/SnapshotFileDiff"
-                }
-              }
-            },
-            "required": ["additions", "deletions", "files"],
-            "additionalProperties": false
-          },
-          "cost": {
-            "type": "number"
-          },
-          "tokens": {
-            "type": "object",
-            "properties": {
-              "input": {
-                "type": "number"
-              },
-              "output": {
-                "type": "number"
-              },
-              "reasoning": {
-                "type": "number"
-              },
-              "cache": {
-                "type": "object",
-                "properties": {
-                  "read": {
-                    "type": "number"
-                  },
-                  "write": {
-                    "type": "number"
-                  }
-                },
-                "required": ["read", "write"],
-                "additionalProperties": false
-              },
-              "visible": {
-                "type": "number"
-              }
-            },
-            "required": ["input", "output", "reasoning", "cache"],
-            "additionalProperties": false
-          },
-          "share": {
-            "type": "object",
-            "properties": {
-              "url": {
-                "type": "string"
-              }
-            },
-            "required": ["url"],
-            "additionalProperties": false
-          },
-          "title": {
-            "type": "string"
-          },
-          "agent": {
-            "type": "string"
-          },
-          "model": {
-            "type": "object",
-            "properties": {
-              "id": {
-                "type": "string"
-              },
-              "providerID": {
-                "type": "string"
-              },
-              "variant": {
-                "type": "string"
-              }
-            },
-            "required": ["id", "providerID"],
-            "additionalProperties": false
-          },
-          "version": {
-            "type": "string"
-          },
-          "metadata": {
-            "type": "object"
-          },
-          "time": {
-            "type": "object",
-            "properties": {
-              "created": {
-                "type": "integer",
-                "minimum": 0
-              },
-              "updated": {
-                "type": "integer",
-                "minimum": 0
-              },
-              "compacting": {
-                "type": "integer",
-                "minimum": 0
-              },
-              "archived": {
-                "type": "number"
-              }
-            },
-            "required": ["created", "updated"],
-            "additionalProperties": false
-          },
-          "sessionComplete": {
-            "type": "boolean"
-          },
-          "sessionFailed": {
-            "type": "boolean"
-          },
-          "sessionInProgress": {
-            "type": "boolean"
-          },
-          "permission": {
-            "$ref": "#/components/schemas/PermissionRuleset"
-          },
-          "revert": {
-            "type": "object",
-            "properties": {
-              "messageID": {
-                "type": "string",
-                "pattern": "^msg"
-              },
-              "partID": {
-                "type": "string",
-                "pattern": "^prt"
-              },
-              "snapshot": {
-                "type": "string"
-              },
-              "diff": {
-                "type": "string"
-              }
-            },
-            "required": ["messageID"],
-            "additionalProperties": false
-          }
-        },
-        "required": ["id", "slug", "projectID", "directory", "title", "version", "time"],
-        "additionalProperties": false
-      },
-      "Session10": {
         "type": "object",
         "properties": {
           "id": {
@@ -34598,7 +35775,6 @@
                   "session.most_recent",
                   "oc.new_session",
                   "model.default",
-                  "oc.reasoning_effort",
                   "agent.session",
                   "agent.default_subagent",
                   "agent.default_subagent_model",
@@ -38051,7 +39227,6 @@
                   "session.most_recent",
                   "oc.new_session",
                   "model.default",
-                  "oc.reasoning_effort",
                   "agent.session",
                   "agent.default_subagent",
                   "agent.default_subagent_model",

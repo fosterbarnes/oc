@@ -58,7 +58,13 @@ Protect these areas when porting upstream changes:
 - `AGENTS.md`, `SCRIPTS.md`, `buildNotes.md`, `README.md`, `FORK.md`, `README.OG.md`, and this guide
 - TUI maintenance display-version behavior in the core, build, plugin, and TUI
   adapter/sidebar paths
-- Custom declaration fixes in the app and enterprise packages
+
+Do not port changes into upstream areas this fork removed on purpose: the
+browser app (`packages/app`), desktop (`packages/desktop`), the hosted SaaS and
+deployment tree (`packages/console`, `stats`, `enterprise`, `slack`,
+`function`, `containers`, `identity`, `sst.config.ts`, `infra/`, and every
+`sst-env.d.ts`), the docs site (`packages/web`), and `packages/storybook`.
+Skip those paths in the diff; the share client in `packages/opencode` stays.
 
 These are examples, not an exhaustive allowlist. Compare the validated
 baseline, current parent, and refreshed upstream before deciding whether any

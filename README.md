@@ -11,7 +11,6 @@
 - One background server shared by every window, so launches after the first are fast (beta) ([how](https://github.com/fosterbarnes/oc/wiki/Launching#background-server))
 - One session list for every project ([how](https://github.com/fosterbarnes/oc/wiki/Sessions#session-list-and-marks))
 - Mark sessions complete, failed, or in progress, and pin them (beta) ([how](https://github.com/fosterbarnes/oc/wiki/Sessions#session-list-and-marks))
-- `/work` moves a session into a git copy of the project; `/done` merges the changes back ([how](https://github.com/fosterbarnes/oc/wiki/Sessions#work-and-done))
 - A sidebar with usage meters, sub-agents, a file tree, and changed files, all clickable ([how](https://github.com/fosterbarnes/oc/wiki/Sidebar))
 - Run your project's scripts from the sidebar in one click ([how](https://github.com/fosterbarnes/oc/wiki/Sidebar#script-runner))
 - `/commands` and skills reload as you edit them, no restart needed ([how](https://github.com/fosterbarnes/oc/wiki/Agents-and-Skills#commands-and-skills))
@@ -67,7 +66,6 @@ Some features need extra software:
 |---|---|
 | Claude Code models | Claude Code CLI (`claude`), installed and signed in |
 | Cursor models | Node.js on PATH and a Cursor account |
-| `/work` and `/done` | Git, and the project must be a git repository |
 | Sidebar file search | [Everything](https://www.voidtools.com/) running, with `es.exe` on PATH |
 | Scripts opening in a new tab or split | WezTerm (first) or Windows Terminal; see [Terminal](#terminal) |
 | `/revive` rebuilding oc | Bun (not 1.4.0) and a copy of oc's source |
@@ -118,7 +116,7 @@ Things that work differently from stock OpenCode:
 How everything works is in the [wiki](https://github.com/fosterbarnes/oc/wiki):
 
 - [Launching](https://github.com/fosterbarnes/oc/wiki/Launching): `oc`, `occ`, the background server, `opencode`, and `/revive`
-- [Sessions](https://github.com/fosterbarnes/oc/wiki/Sessions): the session list, marks, names, `/work` and `/done`
+- [Sessions](https://github.com/fosterbarnes/oc/wiki/Sessions): the session list, marks, and names
 - [Sidebar](https://github.com/fosterbarnes/oc/wiki/Sidebar): usage, files, scripts, and sub-agents
 - [Claude Code](https://github.com/fosterbarnes/oc/wiki/Claude-Code) and [Cursor](https://github.com/fosterbarnes/oc/wiki/Cursor): using your subscriptions
 - [Agents and Skills](https://github.com/fosterbarnes/oc/wiki/Agents-and-Skills): commands, skills, and per-command permissions
@@ -129,23 +127,22 @@ How everything works is in the [wiki](https://github.com/fosterbarnes/oc/wiki):
 
 ## Progress
 
-[527,895](scc.txt) lines of code and counting...
+[440,112](scc.txt) lines of code and counting...
 
 <!-- code-count:start -->
 
 | Language | Files | Lines | Blanks | Comments | Code |
 |---|---:|---:|---:|---:|---:|
-| Astro | 8 | 1,299 | 150 | 10 | 1,139 |
-| CSS | 163 | 40,551 | 5,296 | 574 | 34,681 |
+| CSS | 102 | 17,176 | 1,949 | 490 | 14,737 |
 | Go | 5 | 902 | 54 | 3 | 845 |
 | HTML | 1 | 1,161 | 79 | 0 | 1,082 |
-| JavaScript | 10 | 1,773 | 133 | 53 | 1,587 |
+| JavaScript | 8 | 1,420 | 127 | 50 | 1,243 |
 | Nix | 3 | 258 | 23 | 26 | 209 |
-| Powershell | 22 | 1,234 | 83 | 73 | 1,078 |
-| SQL | 95 | 592 | 0 | 17 | 575 |
+| Powershell | 23 | 1,293 | 88 | 80 | 1,125 |
+| SQL | 2 | 5 | 0 | 0 | 5 |
 | Shell | 1 | 120 | 17 | 17 | 86 |
-| TypeScript | 2,775 | 546,016 | 43,756 | 15,647 | 486,613 |
-| **Total** | **3,083** | **593,906** | **49,591** | **16,420** | **527,895** |
+| TypeScript | 2,382 | 475,182 | 39,279 | 15,123 | 420,780 |
+| **Total** | **2,527** | **497,517** | **41,616** | **15,789** | **440,112** |
 
 <!-- code-count:end -->
 

@@ -15,8 +15,6 @@ import { Database } from "../database/database"
 import { Location } from "../location"
 import { Event } from "@opencode-ai/schema/project-directories"
 import { ProjectCopy } from "@opencode-ai/schema/project-copy"
-import { AppProcess } from "../process"
-import { ChildProcess } from "effect/unstable/process"
 
 export const StrategyID = ProjectCopy.StrategyID
 export type StrategyID = typeof StrategyID.Type
@@ -26,12 +24,6 @@ export type CreateInput = typeof CreateInput.Type
 
 export const RemoveInput = ProjectCopy.RemoveInput
 export type RemoveInput = typeof RemoveInput.Type
-
-export const MergeInput = ProjectCopy.MergeInput
-export type MergeInput = typeof MergeInput.Type
-
-export const MergeResult = ProjectCopy.MergeResult
-export type MergeResult = typeof MergeResult.Type
 
 export const RefreshInput = Schema.Struct({
   projectID: Project.ID,
@@ -96,7 +88,6 @@ export interface Strategy {
   readonly create: (input: {
     sourceDirectory: AbsolutePath
     directory: AbsolutePath
-    state?: boolean
   }) => Effect.Effect<Copy, Git.WorktreeError | DirectoryUnavailableError>
   readonly remove: (input: {
     directory: AbsolutePath
@@ -111,8 +102,6 @@ export interface Interface {
   readonly register: (strategy: Strategy) => Effect.Effect<void, DuplicateStrategyError>
   readonly create: (input: CreateInput) => Effect.Effect<Copy, Error>
   readonly remove: (input: RemoveInput) => Effect.Effect<void, Error>
-  /** Merge a state copy into its recorded parent as unstaged changes. */
-  readonly merge: (input: MergeInput) => Effect.Effect<MergeResult, Error>
   readonly refresh: (input: RefreshInput) => Effect.Effect<RefreshResult, Error>
 }
 
@@ -141,7 +130,6 @@ const layer = Layer.effect(
   Effect.gen(function* () {
     const fs = yield* FSUtil.Service
     const git = yield* Git.Service
-    const proc = yield* AppProcess.Service
     const directories = yield* ProjectDirectories.Service
     const db = (yield* Database.Service).db
     const events = yield* EventV2.Service
@@ -199,30 +187,7 @@ const layer = Layer.effect(
       const result = yield* selected.create({
         directory: copyDirectory,
         sourceDirectory,
-        state: input.state,
       })
-      if (input.state && (yield* fs.existsSafe(path.join(result.directory, "package.json")))) {
-        // User may later replace installation with a node_modules junction, or no installation.
-        const start = Date.now()
-        yield* proc
-          .run(ChildProcess.make("bun", ["install"], { cwd: result.directory, extendEnv: true, stdin: "ignore" }))
-          .pipe(
-            Effect.flatMap(AppProcess.requireSuccess),
-            Effect.tap(() =>
-              Effect.logInfo("work copy dependencies installed", {
-                directory: result.directory,
-                ms: Date.now() - start,
-              }),
-            ),
-            Effect.catch((cause) =>
-              Effect.logWarning("work copy dependency installation failed", {
-                directory: result.directory,
-                ms: Date.now() - start,
-                cause,
-              }),
-            ),
-          )
-      }
       yield* changed(
         input.projectID,
         yield* directories.create({
@@ -247,15 +212,6 @@ const layer = Layer.effect(
         input.projectID,
         yield* directories.remove({ projectID: input.projectID, directory: copyDirectory }),
       )
-    })
-
-    const merge = Effect.fn("ProjectCopy.merge")(function* (input: MergeInput) {
-      // The copy's git config (written by `worktree.copy`) is the source of truth; `merge` fails clearly
-      // without it, so no project-directory record is required here.
-      const copyDirectory = yield* canonical(input.directory)
-      const copy = yield* git.repo.discover(copyDirectory)
-      if (!copy) return yield* new DirectoryUnavailableError({ directory: copyDirectory })
-      return yield* git.worktree.merge({ copy })
     })
 
     const refresh = Effect.fn("ProjectCopy.refresh")(function* (input: RefreshInput) {
@@ -319,7 +275,6 @@ const layer = Layer.effect(
       register,
       create,
       remove,
-      merge,
       refresh,
     })
   }),
@@ -329,7 +284,7 @@ export const locationLayer = layer
 export const node = makeLocationNode({
   service: Service,
   layer: layer,
-  deps: [FSUtil.node, Git.node, AppProcess.node, ProjectDirectories.node, EventV2.node, Database.node],
+  deps: [FSUtil.node, Git.node, ProjectDirectories.node, EventV2.node, Database.node],
 })
 
 export const refreshNode = makeLocationNode({

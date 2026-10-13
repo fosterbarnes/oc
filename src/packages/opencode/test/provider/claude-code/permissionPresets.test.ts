@@ -314,6 +314,7 @@ test("createClaudeCode applies the preset to the language model's config", () =>
   assert.equal(model.config.permissionPreset, "read-only")
   assert.equal(model.config.permissionMode, READ_ONLY_PERMISSION_MODE)
   assert.equal(model.config.skipPermissions, false)
-  assert.deepEqual(model.config.proxyTools, [])
+  // `time` is read-only, so the preset keeps it while dropping Task and run_after_turn.
+  assert.deepEqual(model.config.proxyTools, ["time"])
   assert.deepEqual(model.config.extraDisallowedTools, [...READ_ONLY_DISALLOWED_CLI_TOOLS])
 })

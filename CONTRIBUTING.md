@@ -9,7 +9,7 @@ Good fits:
 
 - Bug fixes, especially Windows-specific ones
 - Fixes to the Claude Code or Cursor providers
-- Improvements to existing oc features (sidebar, session list, launcher, `/work`, revive)
+- Improvements to existing oc features (sidebar, session list, launcher, revive)
 - Documentation fixes
 
 For a new feature, open an issue first and describe the problem and your idea. That avoids work

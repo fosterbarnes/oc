@@ -63,6 +63,7 @@ import { DialogConfirm } from "./ui/dialog-confirm"
 import { createTodoCommand } from "./todos"
 import { createClearSavedImagesCommand } from "./savedImages"
 import { createContextLimitCommands } from "./contextLimit"
+import { createClaudeWarmupCommands } from "./claudeWarmup"
 import { ToastProvider, useToast, type ToastContext } from "./ui/toast"
 import { isDefaultTitle } from "./util/session"
 import { KVProvider, useKV } from "./context/kv"
@@ -1396,6 +1397,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
   const todoCommand = createTodoCommand()
   const clearSavedImagesCommand = createClearSavedImagesCommand()
   const contextLimitCommands = createContextLimitCommands()
+  const claudeWarmup = createClaudeWarmupCommands()
   const currentWorktreeWorkspace = createMemo(() => {
     const workspaceID = project.workspace.current()
     if (!workspaceID) return
@@ -1411,6 +1413,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
         category: "System",
         hidden: true,
         run: () => {
+          void claudeWarmup.refresh()
           dialog.replace(() => <CommandPaletteDialog />)
         },
       },
@@ -1420,6 +1423,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
         category: "oc",
         hidden: true,
         run: () => {
+          void claudeWarmup.refresh()
           dialog.replace(() => <CommandPaletteDialog category="oc" />)
         },
       },
@@ -2370,6 +2374,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
           dialog.clear()
         },
       },
+      ...claudeWarmup.commands(),
       ...(((sync.data.config.provider?.["claude-code"]?.options?.accounts as unknown[] | undefined)?.length ?? 0) > 1
         ? [
             {

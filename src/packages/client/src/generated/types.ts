@@ -2635,30 +2635,9 @@ export type ProjectCopiesCreateInput = {
   readonly location?: {
     readonly location?: { readonly directory?: string | undefined; readonly workspace?: string | undefined } | undefined
   }["location"]
-  readonly strategy: {
-    readonly strategy: string
-    readonly directory: string
-    readonly name?: string
-    readonly state?: boolean
-  }["strategy"]
-  readonly directory: {
-    readonly strategy: string
-    readonly directory: string
-    readonly name?: string
-    readonly state?: boolean
-  }["directory"]
-  readonly name?: {
-    readonly strategy: string
-    readonly directory: string
-    readonly name?: string
-    readonly state?: boolean
-  }["name"]
-  readonly state?: {
-    readonly strategy: string
-    readonly directory: string
-    readonly name?: string
-    readonly state?: boolean
-  }["state"]
+  readonly strategy: { readonly strategy: string; readonly directory: string; readonly name?: string }["strategy"]
+  readonly directory: { readonly strategy: string; readonly directory: string; readonly name?: string }["directory"]
+  readonly name?: { readonly strategy: string; readonly directory: string; readonly name?: string }["name"]
 }
 
 export type ProjectCopiesCreateOutput = { readonly directory: string }
@@ -2673,16 +2652,6 @@ export type ProjectCopiesRemoveInput = {
 }
 
 export type ProjectCopiesRemoveOutput = void
-
-export type ProjectCopiesMergeInput = {
-  readonly projectID: { readonly projectID: string }["projectID"]
-  readonly location?: {
-    readonly location?: { readonly directory?: string | undefined; readonly workspace?: string | undefined } | undefined
-  }["location"]
-  readonly directory: { readonly directory: string }["directory"]
-}
-
-export type ProjectCopiesMergeOutput = { readonly directory: string; readonly conflicts: ReadonlyArray<string> }
 
 export type ProjectCopiesRefreshInput = {
   readonly projectID: { readonly projectID: string }["projectID"]

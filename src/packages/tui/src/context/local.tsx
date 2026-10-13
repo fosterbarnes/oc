@@ -124,6 +124,13 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
     const event = useEvent()
     const permission = usePermission()
 
+    // Background saves never block input; a failed write is reported, not left unhandled.
+    function persist(filePath: string, value: unknown) {
+      void writeJsonAtomic(filePath, value).catch((error: unknown) =>
+        toast.show({ message: `Failed to save ${path.basename(filePath)}: ${errorMessage(error)}`, variant: "error" }),
+      )
+    }
+
     function isModelValid(model: { providerID: string; modelID: string }) {
       const provider = sync.data.provider.find((item) => item.id === model.providerID)
       return !!provider?.models[model.modelID]
@@ -164,7 +171,7 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
           return
         }
         state.pending = false
-        void writeJsonAtomic(filePath, {
+        persist(filePath, {
           current: agentStore.current,
           session: agentStore.session,
         })
@@ -206,7 +213,10 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
       }
 
       async function persistSessionAgent(id: string, name: string) {
-        const result = await sdk.client.session.update({ sessionID: id, agent: name })
+        // A rejected request (server gone, network error) is reported like an error response.
+        const result = await sdk.client.session
+          .update({ sessionID: id, agent: name })
+          .catch((error: unknown) => ({ error }))
         if (result.error) {
           toast.show({ message: `Failed to persist session agent: ${errorMessage(result.error)}`, variant: "error" })
           return false
@@ -351,7 +361,7 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
           return
         }
         state.pending = false
-        void writeJsonAtomic(filePath, {
+        persist(filePath, {
           recent: modelStore.recent,
           favorite: modelStore.favorite,
           hidden: modelStore.hidden,
@@ -468,10 +478,12 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
       }
 
       async function persistSessionOverride(id: string, override: SessionModelOverride) {
-        const result = await sdk.client.v2.session.switchModel({
-          sessionID: id,
-          model: { id: override.modelID, providerID: override.providerID, variant: override.variant },
-        })
+        const result = await sdk.client.v2.session
+          .switchModel({
+            sessionID: id,
+            model: { id: override.modelID, providerID: override.providerID, variant: override.variant },
+          })
+          .catch((error: unknown) => ({ error }))
         if (result.error) {
           toast.show({ message: `Failed to persist session model: ${errorMessage(result.error)}`, variant: "error" })
           return false
@@ -739,7 +751,7 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
           return
         }
         state.pending = false
-        void writeJsonAtomic(filePath, {
+        persist(filePath, {
           pinned: sessionStore.pinned,
         })
       }

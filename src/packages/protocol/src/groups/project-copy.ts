@@ -19,7 +19,6 @@ export class ProjectCopyError extends Schema.ErrorClass<ProjectCopyError>("Proje
 
 const CreatePayload = Schema.Struct(Struct.omit(ProjectCopy.CreateInput.fields, ["projectID", "sourceDirectory"]))
 const RemovePayload = Schema.Struct(Struct.omit(ProjectCopy.RemoveInput.fields, ["projectID"]))
-const MergePayload = Schema.Struct(Struct.omit(ProjectCopy.MergeInput.fields, ["projectID"]))
 
 export const ProjectCopyGroup = HttpApiGroup.make("server.projectCopy")
   .add(
@@ -43,17 +42,6 @@ export const ProjectCopyGroup = HttpApiGroup.make("server.projectCopy")
     })
       .annotateMerge(locationQueryOpenApi)
       .annotateMerge(OpenApi.annotations({ identifier: "v2.projectCopy.remove" })),
-  )
-  .add(
-    HttpApiEndpoint.post("projectCopy.merge", `${root}/merge`, {
-      params: { projectID: Project.ID },
-      query: LocationQuery,
-      payload: MergePayload,
-      success: ProjectCopy.MergeResult,
-      error: ProjectCopyError,
-    })
-      .annotateMerge(locationQueryOpenApi)
-      .annotateMerge(OpenApi.annotations({ identifier: "v2.projectCopy.merge" })),
   )
   .add(
     HttpApiEndpoint.post("projectCopy.refresh", `${root}/refresh`, {

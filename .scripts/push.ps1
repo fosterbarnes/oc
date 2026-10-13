@@ -13,8 +13,7 @@ Set-Location -LiteralPath $repoRoot
 # unchanged, it is still the previous push's message.
 $subject = $Message.Trim()
 $body = ''
-& git diff --quiet HEAD -- $buildNotes 2>$null
-$notesChanged = $LASTEXITCODE -ne 0 -or -not (& git ls-files -- $buildNotes)
+$notesChanged = testBuildNotesChanged
 if (-not $subject -and $notesChanged -and (Test-Path -LiteralPath $buildNotes)) {
     $lines = @([IO.File]::ReadAllLines($buildNotes))
     if ($lines.Count -gt 0 -and $lines[0].Trim()) {

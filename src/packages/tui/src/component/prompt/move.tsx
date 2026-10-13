@@ -27,12 +27,8 @@ export function usePromptMove(input: { projectID: () => string | undefined; sess
   const [creatingDots, setCreatingDots] = createSignal(3)
   const [progress, setProgress] = createSignal<string>()
 
-  // `workFrom` (/work) places the copy next to that checkout as `<repo>.work-<name>`.
-  // The copy source is the session checkout (`workFrom`), not the TUI launch dir:
-  // `sdk.directory` is often home, which fails `ProjectCopy.source()` with SourceDirectoryNotFoundError.
-  // `/work` passes the session's project: the TUI's own project follows its launch dir and can differ.
-  async function create(context?: string, workFrom?: string, sessionProjectID?: string) {
-    const projectID = sessionProjectID ?? input.projectID()
+  async function create(context?: string) {
+    const projectID = input.projectID()
     if (!projectID) return
     setCreating(true)
     setProgress("Creating copy")
@@ -41,16 +37,13 @@ export function usePromptMove(input: { projectID: () => string | undefined; sess
         { projectID, context },
         { throwOnError: true },
       )
-      // Non-/work callers pass no `workFrom`, keeping the previous `sdk.directory` location.
-      const locationDirectory = workFrom ?? sdk.directory
       const result = await sdk.client.v2.projectCopy.create(
         {
           projectID,
-          location: { directory: locationDirectory },
+          location: { directory: sdk.directory },
           strategy: "git_worktree",
-          state: !!workFrom,
-          directory: workFrom ? path.dirname(workFrom) : path.join(paths.worktree, projectID.slice(0, 6)),
-          name: workFrom ? `${path.basename(workFrom)}.work-${generated.data.name}` : generated.data.name,
+          directory: path.join(paths.worktree, projectID.slice(0, 6)),
+          name: generated.data.name,
         },
         { throwOnError: true },
       )
@@ -146,13 +139,13 @@ export function usePromptMove(input: { projectID: () => string | undefined; sess
       .catch(() => undefined)
   }
 
-  async function moveExistingSession(sessionID: string, selection: MoveSessionSelection, workFrom?: string) {
+  async function moveExistingSession(sessionID: string, selection: MoveSessionSelection) {
     const session = sync.session.get(sessionID)
     const status = await sdk.client.vcs.status({ directory: session?.directory }).catch(() => undefined)
     const choice = status?.data?.length ? await DialogWorkspaceFileChanges.show(dialog, status.data) : "no"
     if (!choice) return
     dialog.clear()
-    const directory = selection.type === "new" ? await create(sessionContext(sessionID), workFrom) : selection.directory
+    const directory = selection.type === "new" ? await create(sessionContext(sessionID)) : selection.directory
     if (!directory) {
       setProgress(undefined)
       dialog.clear()
@@ -168,47 +161,6 @@ export function usePromptMove(input: { projectID: () => string | undefined; sess
     } finally {
       setProgress(undefined)
       setCreating(false)
-    }
-  }
-
-  async function work() {
-    if (progress()) return
-    const sessionID = input.sessionID()
-    const session = sessionID ? sync.session.get(sessionID) : undefined
-    if (!sessionID || !session?.directory) return
-    if (sync.data.session_status[sessionID] && sync.data.session_status[sessionID].type !== "idle") {
-      toast.show({ message: "Wait for the current turn to finish before /work", variant: "warning" })
-      return
-    }
-    try {
-      setProgress("Creating work copy")
-      const generated = await sdk.client.experimental.projectCopy.generateName({ projectID: session.projectID, directory: session.directory, context: sessionContext(sessionID) }, { throwOnError: true })
-      const result = await sdk.client.experimental.projectCopy.work({ sessionID, directory: session.directory, name: generated.data.name }, { throwOnError: true })
-      toast.show({ message: `Work copy ready: ${result.data.directory}`, variant: "success" })
-    } catch (error) {
-      toast.error(error)
-    } finally {
-      setProgress(undefined)
-      setCreating(false)
-    }
-  }
-
-  // The server owns waiting, conflict turns, movement, and retryable cleanup.
-  async function done() {
-    if (progress()) return
-    const sessionID = input.sessionID()
-    const session = sessionID ? sync.session.get(sessionID) : undefined
-    const projectID = session?.projectID
-    const copy = session?.directory
-    if (!projectID || !sessionID || !copy) return
-    setProgress("Merging work")
-    try {
-      await sdk.client.experimental.projectCopy.done({ sessionID, directory: copy }, { throwOnError: true })
-      toast.show({ message: "Closing out: work merges into the parent repo when this turn ends", variant: "info" })
-    } catch (error) {
-      toast.error(error)
-    } finally {
-      setProgress(undefined)
     }
   }
 
@@ -246,7 +198,6 @@ export function usePromptMove(input: { projectID: () => string | undefined; sess
   return {
     creating,
     creatingDots,
-    done,
     finishSubmit,
     getDirectory,
     open,
@@ -254,6 +205,5 @@ export function usePromptMove(input: { projectID: () => string | undefined; sess
     pendingNew,
     progress,
     startSubmit,
-    work,
   }
 }

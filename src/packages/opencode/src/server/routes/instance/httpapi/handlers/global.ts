@@ -1,19 +1,29 @@
 import { Config } from "@/config/config"
 import { GlobalBus, type GlobalEvent as GlobalBusEvent } from "@/bus/global"
 import { EffectBridge } from "@/effect/bridge"
+import { EffectPromise } from "@/effect/promise"
 import { EventV2 } from "@opencode-ai/core/event"
+import { AppNodeBuilder } from "@opencode-ai/core/effect/app-node-builder"
 import { Installation } from "@/installation"
+import { ClaudeWarmup } from "@/provider/claude-code/warmup"
 import { disposeAllInstancesAndEmitGlobalDisposed } from "@/server/global-lifecycle"
 import { InstallationVersion } from "@opencode-ai/core/installation/version"
 import { ServerLifecycle } from "@/server/lifecycle"
 import { ServerShutdown } from "@/server/shutdown"
-import { Effect, Queue } from "effect"
+import { Cause, Effect, Layer, Queue, Result } from "effect"
 import * as Stream from "effect/Stream"
 import { HttpServerResponse } from "effect/unstable/http"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import * as Sse from "effect/unstable/encoding/Sse"
 import { RootHttpApi } from "../api"
-import { GlobalUpgradeInput, ServerLifecycleUnavailable } from "../groups/global"
+import {
+  GlobalUpgradeInput,
+  ServerLifecycleUnavailable,
+  ApiWarmupScheduleError,
+  ApiWarmupStoreError,
+  type WarmupSetInputType,
+} from "../groups/global"
+import { notFound } from "../errors"
 
 function eventData(data: unknown): Sse.Event {
   return {
@@ -125,8 +135,7 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
       return true
     })
 
-    const upgrade = Effect.fn("GlobalHttpApi.upgrade")(function* (ctx: { payload: typeof GlobalUpgradeInput.Type }) {
-      const method = yield* installation.method()
+    const upgrade = Effect.fn("GlobalHttpApi.upgrade")(function* (ctx: { payload: typeof GlobalUpgradeInput.Type }) {      const method = yield* installation.method()
       if (method === "unknown") {
         return HttpServerResponse.jsonUnsafe(
           { success: false as const, error: "Unknown installation method" },
@@ -154,6 +163,84 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
       return HttpServerResponse.jsonUnsafe(result)
     })
 
+    const warmupPool = Effect.fnUntraced(function* () {
+      const global = yield* config.getGlobal()
+      const options = global.provider?.["claude-code"]?.options as
+        | { accounts?: unknown; cliPath?: unknown }
+        | undefined
+      return {
+        poolIds: ClaudeWarmup.poolIdsForConfig(options?.accounts),
+        cliPath:
+          typeof options?.cliPath === "string" && options.cliPath ? options.cliPath : (process.env.CLAUDE_CLI_PATH ?? "claude"),
+      }
+    })
+
+    const claudeWarmup = Effect.fn("GlobalHttpApi.claudeWarmup")(function* () {
+      const pool = yield* warmupPool()
+      const cli = yield* Effect.tryPromise(() => ClaudeWarmup.checkWarmupCli(pool.cliPath)).pipe(
+        Effect.orElseSucceed(() => ({ available: false as const, error: "Claude CLI check failed" })),
+      )
+      const store = ClaudeWarmup.readStore(ClaudeWarmup.storeFile())
+      if (store.status === "malformed") {
+        return ClaudeWarmup.stateView({
+          poolIds: pool.poolIds,
+          connectedIds: [],
+          store,
+          available: cli.available,
+          error: store.error,
+        })
+      }
+      // Without a supported CLI there is nothing to probe with; report the
+      // update requirement instead of spawning a binary that cannot serve it.
+      if (!cli.available) {
+        return ClaudeWarmup.stateView({
+          poolIds: pool.poolIds,
+          connectedIds: [],
+          store,
+          available: false,
+          error: cli.error,
+        })
+      }
+      const inventory = yield* Effect.tryPromise(() =>
+        ClaudeWarmup.listConnected({ cliPath: pool.cliPath, candidates: pool.poolIds }),
+      ).pipe(Effect.orElseSucceed(() => ({ at: Date.now(), connectedIds: [] as string[], error: "account probe failed" })))
+      return ClaudeWarmup.stateView({
+        poolIds: pool.poolIds,
+        connectedIds: inventory.connectedIds,
+        store,
+        available: true,
+        error: inventory.error,
+      })
+    })
+
+    const setClaudeWarmup = Effect.fn("GlobalHttpApi.setClaudeWarmup")(function* (ctx: {
+      payload: WarmupSetInputType
+    }) {
+      const pool = yield* warmupPool()
+      if (!pool.poolIds.includes(ctx.payload.accountID)) {
+        return yield* notFound(`Unknown Claude account ${ctx.payload.accountID}`)
+      }
+      const record = yield* EffectPromise.refineRejection(
+        () =>
+          ClaudeWarmup.setAccountSchedule({
+            file: ClaudeWarmup.storeFile(),
+            accountID: ctx.payload.accountID,
+            enabled: ctx.payload.enabled,
+            schedule: ctx.payload.schedule,
+          }),
+        (cause) => {
+          if (cause instanceof ClaudeWarmup.ScheduleValidationError) {
+            return new ApiWarmupScheduleError({ name: "WarmupScheduleError", data: { message: cause.message } })
+          }
+          if (cause instanceof ClaudeWarmup.WarmupStoreError) {
+            return new ApiWarmupStoreError({ name: "WarmupStoreError", data: { message: cause.message } })
+          }
+          return undefined
+        },
+      )
+      return ClaudeWarmup.accountView({ accountID: ctx.payload.accountID, record, now: Date.now() })
+    })
+
     return handlers
       .handle("health", health)
       .handleRaw("event", event)
@@ -163,5 +250,90 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
       .handle("shutdown", shutdown)
       .handle("restart", restart)
       .handle("upgrade", upgrade)
+      .handle("claudeWarmup", claudeWarmup)
+      .handle("setClaudeWarmup", setClaudeWarmup)
   }),
+)
+
+// Listener-owned scheduler. This layer is merged only into the real listener
+// layer (server.ts), never into handler construction, so building
+// webHandler/OpenAPI/Codegen layers or test layers schedules nothing. It runs
+// in the listener scope: scope close interrupts the loop, aborts in-flight
+// auth/sends, and stops only this loop's children. Config resolves to the
+// same service instance the HttpApi graph uses (identical node compilations
+// share one build under the listener memoMap), so the loop reads the normal
+// cached global config with the normal invalidation path: no second instance,
+// no per-tick reload. The first iteration only establishes the watermark and
+// overdue slots are never drained. With no enabled schedules the tick reads
+// one small file and probes nothing.
+export type WarmupLoopClock = {
+  /** Wall clock for watermarking and tick windows; defaults to `Date.now`. */
+  now: () => number
+}
+
+function tickAbortSignal(controller: AbortController, interrupt: AbortSignal): AbortSignal {
+  return AbortSignal.any([controller.signal, interrupt])
+}
+
+export const makeWarmupLoop = (pollMs: number, clock?: WarmupLoopClock) => Effect.gen(function* () {
+  const config = yield* Config.Service
+  const owned: ClaudeWarmup.ChildTracker = new Set()
+  const controller = new AbortController()
+  const nowMs = clock?.now ?? Date.now
+  yield* Effect.addFinalizer(() =>
+    Effect.sync(() => {
+      controller.abort()
+      ClaudeWarmup.killTracker(owned)
+    }),
+  )
+  let prev = nowMs()
+  yield* Effect.forkScoped(
+    Effect.forever(
+      Effect.sleep(pollMs).pipe(
+        Effect.andThen(
+          Effect.gen(function* () {
+            const now = nowMs()
+            const global = yield* config.getGlobal()
+            const options = global.provider?.["claude-code"]?.options as
+              | { accounts?: unknown; cliPath?: unknown }
+              | undefined
+            yield* Effect.tryPromise((interrupt) =>
+              ClaudeWarmup.tickOnce({
+                file: ClaudeWarmup.storeFile(),
+                prevMs: prev,
+                nowMs: now,
+                poolIds: ClaudeWarmup.poolIdsForConfig(options?.accounts),
+                cliPath:
+                  typeof options?.cliPath === "string" && options.cliPath
+                    ? options.cliPath
+                    : (process.env.CLAUDE_CLI_PATH ?? "claude"),
+                signal: tickAbortSignal(controller, interrupt),
+                tracker: owned,
+                clock: nowMs,
+                // Current membership reread at the send boundary, not the
+                // tick's snapshot: a removed account stops immediately.
+                getPoolIds: async () => {
+                  const fresh = await Effect.runPromise(config.getGlobal())
+                  return ClaudeWarmup.poolIdsForConfig(
+                    (fresh.provider?.["claude-code"]?.options as { accounts?: unknown } | undefined)?.accounts,
+                  )
+                },
+              }),
+            ).pipe(
+              Effect.catchCause((cause) =>
+                Result.isSuccess(Cause.findInterrupt(cause))
+                  ? Effect.failCause(cause)
+                  : Effect.logWarning("claude warm-up tick failed", { cause: String(cause) }),
+              ),
+            )
+            prev = now
+          }),
+        ),
+      ),
+    ),
+  )
+})
+
+export const warmupLoopLayer = Layer.effectDiscard(makeWarmupLoop(ClaudeWarmup.POLL_MS)).pipe(
+  Layer.provide(AppNodeBuilder.build(Config.node)),
 )

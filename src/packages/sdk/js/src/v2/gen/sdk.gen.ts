@@ -42,12 +42,8 @@ import type {
   ExperimentalConsoleSwitchOrgResponses,
   ExperimentalControlPlaneMoveSessionErrors,
   ExperimentalControlPlaneMoveSessionResponses,
-  ExperimentalProjectCopyDoneErrors,
-  ExperimentalProjectCopyDoneResponses,
   ExperimentalProjectCopyGenerateNameErrors,
   ExperimentalProjectCopyGenerateNameResponses,
-  ExperimentalProjectCopyWorkErrors,
-  ExperimentalProjectCopyWorkResponses,
   ExperimentalResourceListErrors,
   ExperimentalResourceListResponses,
   ExperimentalSessionBackgroundErrors,
@@ -84,6 +80,8 @@ import type {
   FindTextResponses,
   FormatterStatusErrors,
   FormatterStatusResponses,
+  GlobalClaudeWarmupErrors,
+  GlobalClaudeWarmupResponses,
   GlobalConfigGetErrors,
   GlobalConfigGetResponses,
   GlobalConfigUpdateErrors,
@@ -96,6 +94,8 @@ import type {
   GlobalHealthResponses,
   GlobalRestartErrors,
   GlobalRestartResponses,
+  GlobalSetClaudeWarmupErrors,
+  GlobalSetClaudeWarmupResponses,
   GlobalShutdownErrors,
   GlobalShutdownResponses,
   GlobalUpgradeErrors,
@@ -339,8 +339,6 @@ import type {
   V2PermissionSavedRemoveResponses,
   V2ProjectCopyCreateErrors,
   V2ProjectCopyCreateResponses,
-  V2ProjectCopyMergeErrors,
-  V2ProjectCopyMergeResponses,
   V2ProjectCopyRefreshErrors,
   V2ProjectCopyRefreshResponses,
   V2ProjectCopyRemoveErrors,
@@ -1028,81 +1026,6 @@ export class ProjectCopy extends HeyApiClient {
       },
     })
   }
-
-  /**
-   * Start isolated work
-   */
-  public work<ThrowOnError extends boolean = false>(
-    parameters: {
-      sessionID: string
-      directory?: string
-      workspace?: string
-      name?: string
-    },
-    options?: Options<never, ThrowOnError>,
-  ) {
-    const params = buildClientParams(
-      [parameters],
-      [
-        {
-          args: [
-            { in: "path", key: "sessionID" },
-            { in: "query", key: "directory" },
-            { in: "query", key: "workspace" },
-            { in: "body", key: "name" },
-          ],
-        },
-      ],
-    )
-    return (options?.client ?? this.client).post<
-      ExperimentalProjectCopyWorkResponses,
-      ExperimentalProjectCopyWorkErrors,
-      ThrowOnError
-    >({
-      url: "/experimental/session/{sessionID}/work",
-      ...options,
-      ...params,
-      headers: {
-        "Content-Type": "application/json",
-        ...options?.headers,
-        ...params.headers,
-      },
-    })
-  }
-
-  /**
-   * Queue work completion
-   */
-  public done<ThrowOnError extends boolean = false>(
-    parameters: {
-      sessionID: string
-      directory?: string
-      workspace?: string
-    },
-    options?: Options<never, ThrowOnError>,
-  ) {
-    const params = buildClientParams(
-      [parameters],
-      [
-        {
-          args: [
-            { in: "path", key: "sessionID" },
-            { in: "query", key: "directory" },
-            { in: "query", key: "workspace" },
-          ],
-        },
-      ],
-    )
-    return (options?.client ?? this.client).post<
-      ExperimentalProjectCopyDoneResponses,
-      ExperimentalProjectCopyDoneErrors,
-      ThrowOnError
-    >({
-      url: "/experimental/session/{sessionID}/done",
-      ...options,
-      ...params,
-    })
-  }
 }
 
 export class Adapter extends HeyApiClient {
@@ -1535,6 +1458,75 @@ export class Global extends HeyApiClient {
     return (options?.client ?? this.client).post<GlobalRestartResponses, GlobalRestartErrors, ThrowOnError>({
       url: "/global/restart",
       ...options,
+    })
+  }
+
+  /**
+   * Get Claude warm-up schedules
+   *
+   * Connected Claude accounts with their warm-up schedules, next occurrence, latest attempt, and server time zone.
+   */
+  public claudeWarmup<ThrowOnError extends boolean = false>(options?: Options<never, ThrowOnError>) {
+    return (options?.client ?? this.client).get<GlobalClaudeWarmupResponses, GlobalClaudeWarmupErrors, ThrowOnError>({
+      url: "/global/claude/warmup",
+      ...options,
+    })
+  }
+
+  /**
+   * Set Claude warm-up schedule
+   *
+   * Save or pause one account's warm-up schedule. Saving an empty schedule disables it.
+   */
+  public setClaudeWarmup<ThrowOnError extends boolean = false>(
+    parameters?: {
+      accountID?: string
+      enabled?: boolean
+      schedule?:
+        | {
+            mode: "daily"
+            times: Array<string>
+          }
+        | {
+            mode: "weekly"
+            days: {
+              mon: Array<string>
+              tue: Array<string>
+              wed: Array<string>
+              thu: Array<string>
+              fri: Array<string>
+              sat: Array<string>
+              sun: Array<string>
+            }
+          }
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "body", key: "accountID" },
+            { in: "body", key: "enabled" },
+            { in: "body", key: "schedule" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).put<
+      GlobalSetClaudeWarmupResponses,
+      GlobalSetClaudeWarmupErrors,
+      ThrowOnError
+    >({
+      url: "/global/claude/warmup",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
     })
   }
 
@@ -7298,7 +7290,6 @@ export class ProjectCopy2 extends HeyApiClient {
       strategy?: string
       directory?: string
       name?: string
-      state?: boolean
     },
     options?: Options<never, ThrowOnError>,
   ) {
@@ -7312,7 +7303,6 @@ export class ProjectCopy2 extends HeyApiClient {
             { in: "body", key: "strategy" },
             { in: "body", key: "directory" },
             { in: "body", key: "name" },
-            { in: "body", key: "state" },
           ],
         },
       ],
@@ -7329,41 +7319,6 @@ export class ProjectCopy2 extends HeyApiClient {
         },
       },
     )
-  }
-
-  public merge<ThrowOnError extends boolean = false>(
-    parameters: {
-      projectID: string
-      location?: {
-        directory?: string
-        workspace?: string
-      }
-      directory?: string
-    },
-    options?: Options<never, ThrowOnError>,
-  ) {
-    const params = buildClientParams(
-      [parameters],
-      [
-        {
-          args: [
-            { in: "path", key: "projectID" },
-            { in: "query", key: "location" },
-            { in: "body", key: "directory" },
-          ],
-        },
-      ],
-    )
-    return (options?.client ?? this.client).post<V2ProjectCopyMergeResponses, V2ProjectCopyMergeErrors, ThrowOnError>({
-      url: "/experimental/project/{projectID}/copy/merge",
-      ...options,
-      ...params,
-      headers: {
-        "Content-Type": "application/json",
-        ...options?.headers,
-        ...params.headers,
-      },
-    })
   }
 
   public refresh<ThrowOnError extends boolean = false>(

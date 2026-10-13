@@ -7,8 +7,7 @@ $ErrorActionPreference = 'Stop'
 Set-Location -LiteralPath $repoRoot
 $current = requireVersion
 $tagWord = requireVersionTag
-& git diff --quiet HEAD -- $buildNotes 2>$null
-$notesChanged = $LASTEXITCODE -ne 0
+$notesChanged = testBuildNotesChanged
 
 if ($Context) {
     Write-Host "branch: $(git branch --show-current)  version: $current $tagWord"

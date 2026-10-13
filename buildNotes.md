@@ -112,6 +112,101 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-13 (~04:40) - v0.2.172 brushesAddress - Claude warm-up schedule closeout - Claude Sonnet 5.5, reasoning unspecified; Implementation
+
+### Agent
+- Meta: Claude Sonnet 5.5; reasoning unspecified; Implementation; completed (closeout of the claudeWarmup plan session, built by GPT-6.1 Sol plus subagents)
+- Version: 0.2.172 (brushesAddress)
+- Added (prior session): `provider/claude-code/warmup.ts` scheduler/store/auth inventory, listener loop `makeWarmupLoop` in `handlers/global.ts`, `/global/claude/warmup` GET/PUT, TUI `claudeWarmup.tsx` palette dialogs, wiki draft in `Claude-Code.md`.
+- Fixed `test/server/httpapi-warmup-listener.test.ts`: the loops spun TestClock without letting real promises settle and used TestClock-bound timeouts. Now `advanceTo` steps with `setImmediate` and `waitFor` polls in real time; B-send waits for A's recorded outcome so the 60s gap guard does not skip the slot.
+- Fixed typecheck: `withStoreLock` async wrapper, `ChildTracker` kill signal type (`NodeJS.Signals`), `TestLLMServer["Service"]` in `warmupFakeModel.test.ts`, `show` as a const arrow in `claudeWarmup.tsx` (lost narrowing), `fetch` `preconnect` in `claudeWarmup.test.ts`.
+- Verification: `warmup.test.ts` + listener `43 pass`; `httpapi-global -t "warm-up"` `6 pass`; `warmupFakeModel.test.ts` `3 pass`; tui `claudeWarmup.test.ts` `15 pass`; warmup/listener files typecheck clean in opencode and tui. Pane check and isolated sender passed earlier in the session; not rerun. No real-model run.
+- Risk: other repo-wide typecheck errors were not reviewed.
+
+### User
+Claude warm-up schedule
+- A command palette entry lets you set daily or weekly times per Claude account to send a tiny "hi" so the usage window starts on schedule; accounts can be paused and resumed.
+- Warm-ups only run for signed-in subscription accounts and are skipped if the Claude CLI is missing or too old.
+
+---
+
+## 2026-10-13 (~03:27) - v0.2.171 recognizingScots - Remove /work and /done - Claude Haiku 5.5, reasoning unspecified; Implementation
+
+### Agent
+- Meta: Claude Haiku 5.5 (claude-haiku-5-5); reasoning unspecified; Implementation; completed; typecheck errors remain in in-progress warmup files
+- Version: 0.2.171 recognizingScots
+- Removed `/work` and `/done` across the stack, per `~/.config/opencode/plans/removeWorkDone.md`: runtime `WorkDoneTool` and `WorkHandoff` service, `work_done` MCP injection, registry/app-runtime/server wiring; `projectCopy.work`/`merge` API chain and regenerated client/SDK; TUI `session.work` commands, `move.tsx` work/done, sidebar work-root mapping and `ocWorkHandoff` metadata; docs. Parallel agents did most of the runtime, TUI, API, and doc edits.
+- Fixed `opencode/src/provider/claude-code/runtimeStatus.ts` `resolveSpawnCwdForSession`: dropped the work-copy pin refusal; pins resolve through `resolveSpawnCwdFrom` only. Removed `workCopyGit` lazy runtime and now-unused `path`/`lazy` imports; updated the pin doc comment.
+- Removed `Git.worktree.parent` (`core/src/git.ts` interface and `oc.work.<name>.parent` config read). Only caller was `runtimeStatus.ts`; grep found no tests.
+- Removed `openPane` `workCopy` option, its git commit setup, and the work/done pane test in `opencode/test/provider/claude-code/tuiPane.test.ts`. Rest of file untouched.
+- Final sweep (`rg -i` over `src`, root docs, `.scripts`; excluding buildNotes, dist, node_modules, exe): no hits for `workHandoff`, `work_done`, `workDone`, `projectCopy.work|merge`, `session.work`, `ocWorkHandoff`, `workSidebarSource`, `.work-`, `worktree.merge`, `refs/oc/work`, `worktree.parent`, `oc.work.`, `WorkDoneTool`, `WorkHandoff`. TUI command sources have no `work`/`done` slash entries.
+- Deliberate leftovers: `core/src/session/work.ts` `SessionWork` (run admission, used by prompt, run-state, shutdown, server, worker); lsp `workDoneProgress`; `worktree/` service; `ProjectCopy` create/remove and `dialog-move-session.tsx`; FORK.md "Work copies" removed row; `.opencode/plans/*` (user plan files, outside src); sidebar and command labels that say "done" for other meanings.
+- Stale data left on disk: existing sessions' `ocWorkHandoff` metadata and `<repo>.work-*` folders. Nothing reads them.
+- Verification:
+  - `core` `bun run typecheck`: exit 0.
+  - `opencode` `bun run typecheck`: exit 2. Errors only in in-progress warmup files: `src/provider/claude-code/warmup.ts` L326, L366, L607, L615, L791; `test/provider/claude-code/warmupFakeModel.test.ts` L126, L135, L208, L259; `test/provider/claude-code/tuiPane.test.ts` L375 (`BUN_TEST` env key, not in the removed block). Not fixed.
+  - `tui` `bun run typecheck`: exit 2. Errors in `src/claudeWarmup.tsx` L458, L461, L472-474 and `test/claudeWarmup.test.ts` L405. Not fixed.
+  - `opencode` `bun test test/provider/claude-code/fakeModel.test.ts`: 23 pass, 0 fail, exit 0. `OC_REAL_MODEL` unset.
+  - `tui` `bun test test/feature-plugins/openSidebar.test.ts`: 74 pass, 2 skip, 0 fail, exit 0.
+  - `tuiPane.test.ts` edit not run (opt-in `OC_TUI_PANE` pane test).
+  - Not built, installed, pushed, or checked in a live TUI.
+- Risk: user live check after reinstall: `/work` and `/done` absent from slash menu and command palette; "move session to new copy" still works.
+
+### User
+Removed /work and /done
+- `/work` and `/done` are gone from the slash menu and command palette, along with the copy-and-merge flow they started. "Move session to new copy" still works.
+- Claude sessions no longer get the `work_done` tool, and a session pinned to a folder no longer fails because that folder is a work copy.
+- Existing work copy folders on disk are not deleted. Remove them by hand if you no longer need them.
+
+---
+
+## 2026-10-13 (~01:06) - v0.2.170 feverWinged - Finish portable-script cleanup handoff - GPT-6.1 Sol, default reasoning; Implementation
+
+
+### Agent
+- Meta: GPT-6.1 Sol; default reasoning; Implementation; completed closeout; Composer 2.5 moved three planning docs
+- Version: 0.2.170 feverWinged
+- Recorded preceding chunk: `.scripts/scriptHelper.ps1` supplies `$HOME\Apps\opencode` and Windows-resolved Desktop `occ.lnk`; production/debug installers and both revive scripts use those shared paths. `AGENTS.md` names the per-user install folder.
+- Recorded removal of unused `installDir`/`exeName` from `.scripts/upstream-sync.state.json`; baseline, snapshot, and timestamp kept. Local grepbench artifacts are ignored, not committed.
+- Moved `publicReadiness.md`, `nativeSplitPlan.md`, and `v0.3.0.md` into `docs/dev/`; replaced personal path examples, rebased Markdown source links, labeled historical content, updated `FORK.md` reference. Kept historical entries/archives unchanged.
+- Bumped once with `.scripts/bumpVersion.ps1`; preserved separate sidebar work and its v0.2.169 history entry.
+- Corrected global `codePass030/plan.md`: completed chunk handoffs need notes/revision even when the broader release pass continues; recorded this chunk's completion.
+- Verification: five PowerShell scripts parse; helper install/Desktop path assertions pass; script/rule/revision scoped diff check passes; relocated-doc existence, old-path absence, personal-path/old-link-prefix search, and whitespace checks pass. No build, install, revive, broad suite, or runtime launch.
+- Note: combined docs diff check reports an existing trailing blank line in `FORK.md`; left unrelated whitespace unchanged. Revive scripts inherit helper's existing `Set-Location src`; live acceptance remains user-owned.
+- MISTAKE: preceding handoff deferred required notes/revision because unrelated sidebar work had a bump; close each completed chunk independently instead of relying on another session's bookkeeping.
+
+### User
+Release preparation
+- Install and manual revive scripts now resolve your own home and Desktop folders instead of a fixed user path.
+- Three older release-planning documents now live in `docs/dev/`, with portable examples and updated links; no UI change.
+- The completed script cleanup is recorded, and the revision is now 0.2.170 feverWinged.
+
+---
+
+## 2026-10-13 (~00:55) - v0.2.169 crewsVery - Sidebar roots follow work copies - GPT-6.1 Sol, default reasoning; Implementation
+
+### Agent
+- Meta: GPT-6.1 Sol; default reasoning; Implementation; completed source fix; installed acceptance pending
+- Version: 0.2.169 crewsVery
+- Chose lockCheck finish item 2 while Opus session `ses_ecc738a43ffeFv3V7pscwnpluu` planned broad release review; no delegation.
+- Fixed `tui/.../sidebar-tools/helpers.ts`: saved project JSON records `configDirectory`; loader rebases repository-contained project, active, custom, recent, and favorite roots before existence validation. External roots retain paths.
+- Added one-time loader migration preserving raw script settings and unknown keys; copied settings persist destination ownership, so reopening does not reinterpret an explicitly selected parent root. Nested copies and `/done` reverse mapping survive removed copy directories.
+- Kept old config support through validated `ocWorkHandoff.copy/parent`; maps subdirectory origins and rejects malformed metadata/outside-copy paths.
+- Fixed `sidebarTools.tsx`: both initial/reload paths supply handoff source, legacy KV roots relocate before filtering, initial tree uses restored active root; changed-file editor cwd follows session directory.
+- Added `tui/test/sidebarWorkRoots.test.ts`: real disk config copies, nested/reopen/return, file/script discovery, global old-config migration, external roots, explicit parent selection, Windows case/separator and cross-drive boundaries; checks temp removal.
+- Updated `FORK.md`, gitignored `.opencode/plans/lockCheck.md` finish item 2, and sibling wiki `Sidebar.md`; wiki changes uncommitted/unpushed.
+- Verification: `bun test test/sidebarWorkRoots.test.ts` in packages/tui: 3 pass, 0 fail after formatting; parent/wiki `git diff --check` passed. Changed TypeScript files formatted with installed Prettier and CRLF. No broad suites, typecheck, build, install, or installed TUI run. Background tools unavailable; targeted check took ~0.3s through bash.
+- Live check: in installed build, select an internal file root, `/work`, inspect file/script paths, create a nested copy, `/done` twice, confirm roots return and an external favorite stays external (V-22).
+- Reference: buildNotes cumulative summary item 89 and 2026-10-12 lock checklist entry recorded original sidebar-root risk; this closes its source work, not installed sign-off.
+
+### User
+Work copies
+- The sidebar's saved repo roots now follow `/work`, nested copies, and the return through `/done` instead of pointing at the old checkout.
+- External folders stay where you chose them, and reopening a copy keeps its saved roots.
+- Changed-file actions use the session's current folder.
+
+---
+
 ## 2026-10-13 (~00:28) - v0.2.168 wobblingLevincia - README becomes the pitch, wiki owns user docs - Opus 5.5, low effort; Implementation
 
 ### Agent

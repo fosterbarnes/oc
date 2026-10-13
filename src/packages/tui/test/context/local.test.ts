@@ -86,6 +86,97 @@ test("local model shares reasoning for display, outgoing selections and persiste
     }
     return calls.fetch(request)
   }) as typeof globalThis.fetch
+  const { app, local, route, sync, sdk } = await mountLocal(tmp.path, statePath, fetch, events)
+  try {
+    await wait(() => !!local() && local().model.ready && sync().status === "complete")
+    await local().model.variant.set("high")
+    await wait(() => !fs.readdirSync(statePath).some((name) => name.endsWith(".tmp")))
+    expect(local().model.variant.selected()).toBe("high")
+    expect(local().model.variant.current()).toBe("high")
+    await sdk().client.session.prompt({ sessionID: "new", model: local().model.current(),
+      variant: local().model.variant.current(), parts: [{ type: "text", text: "test" }] })
+    expect(prompts.at(-1)?.variant).toBe("high")
+    route().navigate({ type: "session", sessionID: "explicit" })
+    expect(local().model.variant.current()).toBe("low")
+    await local().model.select({ providerID: "test", modelID: "first" })
+    expect(updates.at(-1)?.variant).toBe("low")
+    await wait(() => !fs.readdirSync(statePath).some((name) => name.endsWith(".tmp")))
+    route().navigate({ type: "session", sessionID: "providerDefault" })
+    expect(local().model.variant.selected()).toBe("default")
+    expect(local().model.variant.current()).toBeUndefined()
+    await local().model.select({ providerID: "test", modelID: "first" })
+    expect(updates.at(-1)?.variant).toBeUndefined()
+    await wait(() => !fs.readdirSync(statePath).some((name) => name.endsWith(".tmp")))
+    for (const [modelID, variant] of [["second", undefined], ["third", "low"], ["unsupported", undefined]] as const) {
+      await local().model.select({ providerID: "test", modelID })
+      expect(local().model.variant.current()).toBe(variant)
+      expect(updates.at(-1)?.variant).toBe(variant)
+      await wait(() => JSON.parse(fs.readFileSync(path.join(statePath, "model.json"), "utf8"))
+        .session.providerDefault.modelID === modelID &&
+        !fs.readdirSync(statePath).some((name) => name.endsWith(".tmp")))
+    }
+    route().navigate({ type: "home" })
+    local().model.set({ providerID: "test", modelID: "first" })
+    await local().model.variant.set(undefined)
+    expect(local().model.variant.current()).toBeUndefined()
+    await wait(() => {
+      try { return JSON.parse(fs.readFileSync(path.join(statePath, "model.json"), "utf8"))
+        .variant["test/first"] === "default" } catch { return false }
+    })
+    const persisted = await Bun.file(path.join(statePath, "model.json")).json()
+    expect(persisted.variant).toEqual({ ...saved.variant, "test/first": "default" })
+    expect(persisted.session.explicit.variant).toBe("low")
+    expect(persisted.session.providerDefault.variant).toBeUndefined()
+  } finally {
+    app.renderer.destroy()
+    await wait(() => !fs.readdirSync(statePath).some((name) => name.endsWith(".tmp")))
+  }
+})
+
+test("a rejected session request keeps the previous model and agent", async () => {
+  await using tmp = await tmpdir()
+  const statePath = path.join(tmp.path, "state")
+  await Bun.write(path.join(statePath, "kv.json"), "{}")
+  const events = createEventSource()
+  const calls = createFetch((url) => {
+    if (url.pathname === "/agent") return json([{ name: "build", mode: "primary" }, { name: "plan", mode: "primary" }])
+    if (url.pathname === "/config/providers") return json({
+      providers: [{ id: "test", name: "Test", models: { first: { id: "first", name: "first" },
+        second: { id: "second", name: "second" } } }], default: { test: "first" },
+    })
+  }, events)
+  let rejected = 0
+  const fetch = (async (request: RequestInfo | URL) => {
+    if (request instanceof Request && (request.method === "POST" || request.method === "PATCH")) {
+      rejected++
+      throw new TypeError("fetch failed")
+    }
+    return calls.fetch(request)
+  }) as typeof globalThis.fetch
+  const { app, local, route, sync } = await mountLocal(tmp.path, statePath, fetch, events)
+  try {
+    await wait(() => !!local() && local().model.ready && sync().status === "complete")
+    route().navigate({ type: "session", sessionID: "offline" })
+    const model = local().model.current()
+    const agent = local().agent.current()?.name
+    await local().model.select({ providerID: "test", modelID: "second" })
+    await local().agent.set(agent === "build" ? "plan" : "build")
+    expect(rejected).toBe(2)
+    expect(local().model.current()).toEqual(model)
+    expect(local().agent.current()?.name).toBe(agent)
+    expect(local().model.hasSessionOverride("offline")).toBe(false)
+  } finally {
+    app.renderer.destroy()
+    await wait(() => !fs.readdirSync(statePath).some((name) => name.endsWith(".tmp")))
+  }
+})
+
+async function mountLocal(
+  home: string,
+  statePath: string,
+  fetch: typeof globalThis.fetch,
+  events: ReturnType<typeof createEventSource>,
+) {
   let local!: ReturnType<typeof useLocal>
   let route!: ReturnType<typeof useRoute>
   let sync!: ReturnType<typeof useSync>
@@ -99,7 +190,7 @@ test("local model shares reasoning for display, outgoing selections and persiste
     return null
   }
   const app = await testRender(() => createComponent(TestTuiContexts, {
-    directory, paths: { state: statePath, home: tmp.path, worktree: tmp.path },
+    directory, paths: { state: statePath, home, worktree: home },
     get children() { return createComponent(ArgsProvider, {
       get children() { return createComponent(TuiConfigProvider, { config: createTuiResolvedConfig(),
         get children() { return createComponent(KVProvider, {
@@ -126,51 +217,8 @@ test("local model shares reasoning for display, outgoing selections and persiste
       }) },
     }) },
   }), { width: 100, height: 30 })
-  try {
-    await wait(() => !!local && local.model.ready && sync.status === "complete")
-    await local.model.variant.set("high")
-    await wait(() => !fs.readdirSync(statePath).some((name) => name.endsWith(".tmp")))
-    expect(local.model.variant.selected()).toBe("high")
-    expect(local.model.variant.current()).toBe("high")
-    await sdk.client.session.prompt({ sessionID: "new", model: local.model.current(),
-      variant: local.model.variant.current(), parts: [{ type: "text", text: "test" }] })
-    expect(prompts.at(-1)?.variant).toBe("high")
-    route.navigate({ type: "session", sessionID: "explicit" })
-    expect(local.model.variant.current()).toBe("low")
-    await local.model.select({ providerID: "test", modelID: "first" })
-    expect(updates.at(-1)?.variant).toBe("low")
-    await wait(() => !fs.readdirSync(statePath).some((name) => name.endsWith(".tmp")))
-    route.navigate({ type: "session", sessionID: "providerDefault" })
-    expect(local.model.variant.selected()).toBe("default")
-    expect(local.model.variant.current()).toBeUndefined()
-    await local.model.select({ providerID: "test", modelID: "first" })
-    expect(updates.at(-1)?.variant).toBeUndefined()
-    await wait(() => !fs.readdirSync(statePath).some((name) => name.endsWith(".tmp")))
-    for (const [modelID, variant] of [["second", undefined], ["third", "low"], ["unsupported", undefined]] as const) {
-      await local.model.select({ providerID: "test", modelID })
-      expect(local.model.variant.current()).toBe(variant)
-      expect(updates.at(-1)?.variant).toBe(variant)
-      await wait(() => JSON.parse(fs.readFileSync(path.join(statePath, "model.json"), "utf8"))
-        .session.providerDefault.modelID === modelID &&
-        !fs.readdirSync(statePath).some((name) => name.endsWith(".tmp")))
-    }
-    route.navigate({ type: "home" })
-    local.model.set({ providerID: "test", modelID: "first" })
-    await local.model.variant.set(undefined)
-    expect(local.model.variant.current()).toBeUndefined()
-    await wait(() => {
-      try { return JSON.parse(fs.readFileSync(path.join(statePath, "model.json"), "utf8"))
-        .variant["test/first"] === "default" } catch { return false }
-    })
-    const persisted = await Bun.file(path.join(statePath, "model.json")).json()
-    expect(persisted.variant).toEqual({ ...saved.variant, "test/first": "default" })
-    expect(persisted.session.explicit.variant).toBe("low")
-    expect(persisted.session.providerDefault.variant).toBeUndefined()
-  } finally {
-    app.renderer.destroy()
-    await wait(() => !fs.readdirSync(statePath).some((name) => name.endsWith(".tmp")))
-  }
-})
+  return { app, local: () => local, route: () => route, sync: () => sync, sdk: () => sdk }
+}
 
 test("moves a favorite one place and leaves it unchanged at the edge", () => {
   const favorites = [

@@ -50,7 +50,6 @@ import { Cause, Effect, Exit, Latch, Layer, Option, Scope, Context, Schema, Sema
 import { InstanceState } from "@/effect/instance-state"
 import { TaskTool, type TaskPromptOps } from "@/tool/task"
 import { SessionRunState } from "./run-state"
-import { WorkHandoff } from "./workHandoff"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { Database } from "@opencode-ai/core/database/database"
@@ -182,7 +181,6 @@ const layer = Layer.effect(
     const scope = yield* Scope.Scope
     const instruction = yield* Instruction.Service
     const state = yield* SessionRunState.Service
-    const workHandoff = yield* WorkHandoff.Service
     const revert = yield* SessionRevert.Service
     const summary = yield* SessionSummary.Service
     const sys = yield* SystemPrompt.Service
@@ -1371,7 +1369,6 @@ const layer = Layer.effect(
               if (
                 action &&
                 action !== "off" &&
-                !(yield* workHandoff.isPending(sessionID)) &&
                 SessionHandoff.canAutoHandoff({ session, messages: msgs }) &&
                 overLimit({ cfg, tokens: lastFinished.tokens, model, outputTokenMax: flags.outputTokenMax })
               ) {
@@ -2024,7 +2021,6 @@ export const node = LayerNode.make({
     CrossSpawnSpawner.node,
     Instruction.node,
     SessionRunState.node,
-    WorkHandoff.node,
     SessionRevert.node,
     SessionSummary.node,
     SystemPrompt.node,

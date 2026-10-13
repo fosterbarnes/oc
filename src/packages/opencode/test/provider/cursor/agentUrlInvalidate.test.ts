@@ -73,6 +73,23 @@ describe("agentUrl: invalidateAgentUrl", () => {
     expect(fetchCalls).toBe(5)
   })
 
+  test("malformed GetServerConfig replies fail with a protocol error", async () => {
+    const bodies = ["null", "42", "[]", JSON.stringify({ agentUrlConfig: null }), JSON.stringify({ agentUrlConfig: { agentnUrl: 7 } })]
+    const serverConfig = globalThis.fetch
+    for (const [index, body] of bodies.entries()) {
+      globalThis.fetch = (async (input: RequestInfo | URL) => {
+        if (!String(input).includes("ServerConfig")) return serverConfig(input)
+        return new Response(body, { status: 200, headers: { "content-type": "application/json" } })
+      }) as typeof fetch
+      const error = await resolveAgentUrl(`malformed-${index}`, { apiBaseURL: "https://api.test.cursor.sh" }).catch(
+        (cause: unknown) => cause,
+      )
+      expect(error).toBeInstanceOf(Error)
+      expect((error as Error).name).toBe("CursorProtocolError")
+      expect((error as Error).message).toBe("GetServerConfig response missing agentUrlConfig.agentnUrl")
+    }
+  })
+
   test("invalidate on missing key is no-op and idempotent", async () => {
     invalidateAgentUrl("nope", { apiBaseURL: "https://api.test.cursor.sh" })
     invalidateAgentUrl("nope", { apiBaseURL: "https://api.test.cursor.sh" })

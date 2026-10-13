@@ -179,7 +179,7 @@ export async function executeCursorImageSave(
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error)
     trace(`image save: permission refused path=${JSON.stringify(contained.path)} reason=${reason}`)
-    throw new Error(`${IMAGE_PERMISSION_DENIED_PREFIX} ${reason}`)
+    throw new Error(`${IMAGE_PERMISSION_DENIED_PREFIX} ${reason}`, { cause: error })
   }
 
   // Cursor writes generated images into an `assets/` subdirectory that will not
@@ -197,6 +197,7 @@ export async function executeCursorImageSave(
     throw new Error(
       `Could not save the generated image to ${contained.path}: ${reason}. ` +
         `Check that ${directory} is a writable directory.`,
+      { cause: error },
     )
   }
   trace(`image save: wrote path=${JSON.stringify(contained.path)} ` + `bytes=${image.data.length} mime=${image.mime}`)

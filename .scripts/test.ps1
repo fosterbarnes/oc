@@ -28,9 +28,8 @@ $root = Split-Path -Path $PSScriptRoot -Parent
 $workspace = "$root/src"
 # Keep this list aligned with the package suites you want to run locally.
 $unit = @(
-    'cli', 'client', 'codemode', 'console/app', 'console/core', 'console/function',
-    'core', 'effect-drizzle-sqlite', 'function', 'http-recorder', 'httpapi-codegen',
-    'llm', 'opencode', 'protocol', 'schema', 'sdk/js', 'session-ui', 'stats/core', 'tui', 'ui'
+    'cli', 'client', 'codemode', 'core', 'effect-drizzle-sqlite', 'http-recorder', 'httpapi-codegen',
+    'llm', 'opencode', 'protocol', 'schema', 'sdk/js', 'session-ui', 'tui', 'ui'
 )
 $providers = @{
     'cursor-runtime' = 'test/main.test.mjs'

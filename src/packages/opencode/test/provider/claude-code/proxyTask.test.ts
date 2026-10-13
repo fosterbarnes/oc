@@ -828,8 +828,8 @@ async function exerciseTaskRecovery(mode: "late" | "late-queued" | "swallow" | "
   }
 }
 
-test("default provider proxies Task and run_after_turn through opencode", () => {
-  assert.deepEqual(modelProxyTools(), ["Task", "run_after_turn"])
+test("default provider proxies Task, run_after_turn, and time through opencode", () => {
+  assert.deepEqual(modelProxyTools(), ["Task", "run_after_turn", "time"])
 })
 
 test("explicit proxyTools overrides preserve custom selection and empty opt-out", () => {
@@ -837,13 +837,13 @@ test("explicit proxyTools overrides preserve custom selection and empty opt-out"
   assert.deepEqual(modelProxyTools({ proxyTools: [] }), [])
 })
 
-test("opencode provider registration defaults Task and run_after_turn without overriding proxyTools", async () => {
+test("opencode provider registration defaults the proxy tools without overriding proxyTools", async () => {
   const hooks = await claudeCodeServer({})
   assert.equal("tool" in hooks, false)
 
   const defaults: any = {}
   await hooks.config?.(defaults)
-  assert.deepEqual(defaults.provider["claude-code"].options.proxyTools, ["Task", "run_after_turn"])
+  assert.deepEqual(defaults.provider["claude-code"].options.proxyTools, ["Task", "run_after_turn", "time"])
 
   const explicit: any = {
     provider: {

@@ -14,7 +14,6 @@ export const CreateInput = Schema.Struct({
   sourceDirectory: AbsolutePath,
   directory: AbsolutePath,
   name: optional(Schema.String),
-  state: optional(Schema.Boolean),
 }).annotate({ identifier: "ProjectCopy.CreateInput" })
 export interface CreateInput extends Schema.Schema.Type<typeof CreateInput> {}
 
@@ -24,18 +23,6 @@ export const RemoveInput = Schema.Struct({
   force: Schema.Boolean,
 }).annotate({ identifier: "ProjectCopy.RemoveInput" })
 export interface RemoveInput extends Schema.Schema.Type<typeof RemoveInput> {}
-
-export const MergeInput = Schema.Struct({
-  projectID: ProjectID,
-  directory: AbsolutePath,
-}).annotate({ identifier: "ProjectCopy.MergeInput" })
-export interface MergeInput extends Schema.Schema.Type<typeof MergeInput> {}
-
-export const MergeResult = Schema.Struct({
-  directory: AbsolutePath,
-  conflicts: Schema.Array(Schema.String),
-}).annotate({ identifier: "ProjectCopy.MergeResult" })
-export interface MergeResult extends Schema.Schema.Type<typeof MergeResult> {}
 
 export const Copy = Schema.Struct({
   directory: AbsolutePath,

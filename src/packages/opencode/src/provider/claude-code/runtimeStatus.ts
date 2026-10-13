@@ -1,14 +1,5 @@
 import type { RuntimeMcpStatus } from "./mcpBridge.js"
 import { log } from "./logger.js"
-import path from "node:path"
-import { lazy } from "@/util/lazy"
-
-const workCopyGit = lazy(async () => {
-  const { Git } = await import("@opencode-ai/core/git")
-  const { AppNodeBuilder } = await import("@opencode-ai/core/effect/app-node-builder")
-  const { makeRuntime } = await import("@/effect/run-service")
-  return makeRuntime(Git.Service, AppNodeBuilder.build(Git.node))
-})
 
 /**
  * Captured opencode runtime context (SDK client + project directory) from
@@ -98,8 +89,7 @@ export function isUsableDirectory(d: unknown): d is string {
  * Resolve the cwd for a Claude CLI subprocess spawn. Priority:
  *
  * 1. Explicit `configured` value (`options.cwd` from `opencode.json`).
- *    Pins remain authoritative outside recorded work copies; the session-aware
- *    resolver refuses pins that would escape a work copy.
+ *    Pins remain authoritative.
  * 2. The opencode session's own `directory` (resolved per-call from the
  *    `x-session-affinity` id via the SDK). Authoritative for
  *    `opencode serve` / web-UI mode, where one long-lived server process
@@ -143,19 +133,6 @@ export async function resolveSpawnCwdForSession(
   sessionID: string | undefined,
 ): Promise<string> {
   const sessionDir = sessionID ? await fetchSessionDirectory(sessionID) : undefined
-  if (configured && sessionDir && path.resolve(configured) !== path.resolve(sessionDir)) {
-    const { AbsolutePath } = await import("@opencode-ai/core/schema")
-    const { Effect } = await import("effect")
-    const runtime = await workCopyGit()
-    const parent = await runtime.runPromise((git) =>
-      Effect.gen(function* () {
-        const repository = yield* git.repo.discover(AbsolutePath.make(sessionDir))
-        return repository ? yield* git.worktree.parent(repository) : undefined
-      }),
-    )
-    if (parent)
-      throw new Error("Claude Code's pinned cwd differs from this work copy; remove the cwd override before continuing")
-  }
   return resolveSpawnCwdFrom(configured, process.cwd(), opencodeProjectDirectory, sessionDir)
 }
 

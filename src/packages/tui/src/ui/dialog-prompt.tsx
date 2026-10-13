@@ -15,6 +15,7 @@ export type DialogPromptProps = {
   busyText?: string
   onConfirm?: (value: string) => void
   onCancel?: () => void
+  onContentChange?: (value: string) => void
 }
 
 export function DialogPrompt(props: DialogPromptProps) {
@@ -54,6 +55,7 @@ export function DialogPrompt(props: DialogPromptProps) {
       textarea.focus()
     }, 1)
     textarea.gotoLineEnd()
+    props.onContentChange?.(textarea.plainText)
   })
 
   createEffect(() => {
@@ -97,6 +99,7 @@ export function DialogPrompt(props: DialogPromptProps) {
           focusedTextColor={props.busy ? theme.textMuted : theme.text}
           cursorColor={props.busy ? theme.backgroundElement : theme.text}
           cursorStyle={tuiConfig.cursor}
+          onContentChange={() => props.onContentChange?.(textarea.plainText)}
         />
         <Show when={props.busy}>
           <Spinner color={theme.textMuted}>{props.busyText ?? "Working…"}</Spinner>

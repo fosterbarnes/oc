@@ -2113,6 +2113,27 @@ export type ServerLifecycleUnavailable = {
   }
 }
 
+export type WarmupScheduleError = {
+  name: "WarmupScheduleError"
+  data: {
+    message: string
+  }
+}
+
+export type NotFoundError = {
+  name: "NotFoundError"
+  data: {
+    message: string
+  }
+}
+
+export type WarmupStoreError = {
+  name: "WarmupStoreError"
+  data: {
+    message: string
+  }
+}
+
 export type Model = {
   id: string
   providerID: string
@@ -2538,13 +2559,6 @@ export type ProjectNotFoundError = {
   message: string
 }
 
-export type WorkHandoffError = {
-  name: "WorkHandoffError"
-  data: {
-    message: string
-  }
-}
-
 export type PtyNotFoundError = {
   _tag: "PtyNotFoundError"
   ptyID: string
@@ -2758,13 +2772,6 @@ export type Session2 = {
     partID?: string
     snapshot?: string
     diff?: string
-  }
-}
-
-export type NotFoundError = {
-  name: "NotFoundError"
-  data: {
-    message: string
   }
 }
 
@@ -6786,11 +6793,6 @@ export type ProjectCopyCopy = {
   directory: string
 }
 
-export type ProjectCopyMergeResult = {
-  directory: string
-  conflicts: Array<string>
-}
-
 export type EventModelsDevRefreshed = {
   id: string
   type: "models-dev.refreshed"
@@ -8183,6 +8185,144 @@ export type GlobalRestartResponses = {
 }
 
 export type GlobalRestartResponse = GlobalRestartResponses[keyof GlobalRestartResponses]
+
+export type GlobalClaudeWarmupData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/global/claude/warmup"
+}
+
+export type GlobalClaudeWarmupErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type GlobalClaudeWarmupError = GlobalClaudeWarmupErrors[keyof GlobalClaudeWarmupErrors]
+
+export type GlobalClaudeWarmupResponses = {
+  /**
+   * Claude warm-up schedules
+   */
+  200: {
+    accounts: Array<{
+      accountID: string
+      label: string
+      enabled: boolean
+      schedule:
+        | {
+            mode: "daily"
+            times: Array<string>
+          }
+        | {
+            mode: "weekly"
+            days: {
+              mon: Array<string>
+              tue: Array<string>
+              wed: Array<string>
+              thu: Array<string>
+              fri: Array<string>
+              sat: Array<string>
+              sun: Array<string>
+            }
+          }
+      nextAt?: number
+      lastAttempt?: {
+        scheduledAt: number
+        attemptedAt: number
+        outcome: "sent" | "rejected" | "failed" | "timeout" | "missed"
+      }
+    }>
+    timeZone: string
+    utcOffset: string
+    available: boolean
+    error?: string
+  }
+}
+
+export type GlobalClaudeWarmupResponse = GlobalClaudeWarmupResponses[keyof GlobalClaudeWarmupResponses]
+
+export type GlobalSetClaudeWarmupData = {
+  body?: {
+    accountID: string
+    enabled: boolean
+    schedule:
+      | {
+          mode: "daily"
+          times: Array<string>
+        }
+      | {
+          mode: "weekly"
+          days: {
+            mon: Array<string>
+            tue: Array<string>
+            wed: Array<string>
+            thu: Array<string>
+            fri: Array<string>
+            sat: Array<string>
+            sun: Array<string>
+          }
+        }
+  }
+  path?: never
+  query?: never
+  url: "/global/claude/warmup"
+}
+
+export type GlobalSetClaudeWarmupErrors = {
+  /**
+   * WarmupScheduleError | InvalidRequestError
+   */
+  400: WarmupScheduleError | InvalidRequestError
+  /**
+   * NotFoundError
+   */
+  404: NotFoundError
+  /**
+   * WarmupStoreError
+   */
+  500: WarmupStoreError
+}
+
+export type GlobalSetClaudeWarmupError = GlobalSetClaudeWarmupErrors[keyof GlobalSetClaudeWarmupErrors]
+
+export type GlobalSetClaudeWarmupResponses = {
+  /**
+   * Updated warm-up account
+   */
+  200: {
+    accountID: string
+    label: string
+    enabled: boolean
+    schedule:
+      | {
+          mode: "daily"
+          times: Array<string>
+        }
+      | {
+          mode: "weekly"
+          days: {
+            mon: Array<string>
+            tue: Array<string>
+            wed: Array<string>
+            thu: Array<string>
+            fri: Array<string>
+            sat: Array<string>
+            sun: Array<string>
+          }
+        }
+    nextAt?: number
+    lastAttempt?: {
+      scheduledAt: number
+      attemptedAt: number
+      outcome: "sent" | "rejected" | "failed" | "timeout" | "missed"
+    }
+  }
+}
+
+export type GlobalSetClaudeWarmupResponse = GlobalSetClaudeWarmupResponses[keyof GlobalSetClaudeWarmupResponses]
 
 export type EventSubscribeData = {
   body?: never
@@ -9716,76 +9856,6 @@ export type ExperimentalProjectCopyGenerateNameResponses = {
 
 export type ExperimentalProjectCopyGenerateNameResponse =
   ExperimentalProjectCopyGenerateNameResponses[keyof ExperimentalProjectCopyGenerateNameResponses]
-
-export type ExperimentalProjectCopyWorkData = {
-  body?: {
-    name: string
-  }
-  path: {
-    sessionID: string
-  }
-  query?: {
-    directory?: string
-    workspace?: string
-  }
-  url: "/experimental/session/{sessionID}/work"
-}
-
-export type ExperimentalProjectCopyWorkErrors = {
-  /**
-   * WorkHandoffError | InvalidRequestError
-   */
-  400: WorkHandoffError | InvalidRequestError
-}
-
-export type ExperimentalProjectCopyWorkError =
-  ExperimentalProjectCopyWorkErrors[keyof ExperimentalProjectCopyWorkErrors]
-
-export type ExperimentalProjectCopyWorkResponses = {
-  /**
-   * Success
-   */
-  200: {
-    directory: string
-  }
-}
-
-export type ExperimentalProjectCopyWorkResponse =
-  ExperimentalProjectCopyWorkResponses[keyof ExperimentalProjectCopyWorkResponses]
-
-export type ExperimentalProjectCopyDoneData = {
-  body?: never
-  path: {
-    sessionID: string
-  }
-  query?: {
-    directory?: string
-    workspace?: string
-  }
-  url: "/experimental/session/{sessionID}/done"
-}
-
-export type ExperimentalProjectCopyDoneErrors = {
-  /**
-   * WorkHandoffError | InvalidRequestError
-   */
-  400: WorkHandoffError | InvalidRequestError
-}
-
-export type ExperimentalProjectCopyDoneError =
-  ExperimentalProjectCopyDoneErrors[keyof ExperimentalProjectCopyDoneErrors]
-
-export type ExperimentalProjectCopyDoneResponses = {
-  /**
-   * Success
-   */
-  200: {
-    queued: boolean
-  }
-}
-
-export type ExperimentalProjectCopyDoneResponse =
-  ExperimentalProjectCopyDoneResponses[keyof ExperimentalProjectCopyDoneResponses]
 
 export type PtyShellsData = {
   body?: never
@@ -14468,7 +14538,6 @@ export type V2ProjectCopyCreateData = {
     strategy: string
     directory: string
     name?: string
-    state?: boolean
   }
   path: {
     projectID: string
@@ -14499,40 +14568,6 @@ export type V2ProjectCopyCreateResponses = {
 }
 
 export type V2ProjectCopyCreateResponse = V2ProjectCopyCreateResponses[keyof V2ProjectCopyCreateResponses]
-
-export type V2ProjectCopyMergeData = {
-  body?: {
-    directory: string
-  }
-  path: {
-    projectID: string
-  }
-  query?: {
-    location?: {
-      directory?: string
-      workspace?: string
-    }
-  }
-  url: "/experimental/project/{projectID}/copy/merge"
-}
-
-export type V2ProjectCopyMergeErrors = {
-  /**
-   * ProjectCopyError | InvalidRequestError
-   */
-  400: ProjectCopyError | InvalidRequestError
-}
-
-export type V2ProjectCopyMergeError = V2ProjectCopyMergeErrors[keyof V2ProjectCopyMergeErrors]
-
-export type V2ProjectCopyMergeResponses = {
-  /**
-   * ProjectCopy.MergeResult
-   */
-  200: ProjectCopyMergeResult
-}
-
-export type V2ProjectCopyMergeResponse = V2ProjectCopyMergeResponses[keyof V2ProjectCopyMergeResponses]
 
 export type V2ProjectCopyRefreshData = {
   body?: never

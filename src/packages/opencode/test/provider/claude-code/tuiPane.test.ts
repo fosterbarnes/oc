@@ -5,6 +5,7 @@
 // pointed at TestLLMServer, through the server's env and its config (see `openPane`).
 import { describe, expect } from "bun:test"
 import { Database } from "bun:sqlite"
+import { mkdir } from "node:fs/promises"
 import path from "node:path"
 import { Effect } from "effect"
 import { cliIt, hostEnv, isolatedEnv, type CliFixture } from "../../lib/cli-process"
@@ -17,31 +18,6 @@ const muxPath = Bun.which("wezterm-mux-server")
 const opencodeRoot = path.resolve(import.meta.dir, "../../..")
 
 describe.skipIf(!process.env.OC_TUI_PANE || !cliPath || !muxPath)("oc TUI in a WezTerm pane", () => {
-  cliIt.live(
-    "work handoff: slash work and done return the Claude session to its parent",
-    (fixture) =>
-      Effect.gen(function* () {
-        const pane = yield* openPane(fixture, { workCopy: true })
-        yield* fixture.llm.text("WORK-READY")
-        yield* pane.waitFor("Ask anything")
-        yield* pane.type("remember HANDOFF-77\r")
-        yield* pane.waitFor(
-          "WORK-READY",
-          (shown) => !shown.includes("Wait for the current turn") && !/. \d+\.\d+s/.test(shown),
-        )
-        yield* pane.type("/work")
-        yield* pane.type("\r")
-        yield* pane.waitFor("Work copy ready")
-        yield* pane.type("/done")
-        yield* pane.type("\r")
-        yield* pane.waitFor("Work merged as unstaged changes")
-        yield* fixture.llm.text("PARENT-READY")
-        yield* pane.type("where are you now?\r")
-        yield* pane.waitFor("PARENT-READY")
-        expectIsolated(yield* fixture.llm.inputs)
-      }),
-    180_000,
-  )
   cliIt.live(
     "oc automatic rename updates a Home-created Claude session title once",
     (fixture) =>
@@ -251,6 +227,61 @@ describe.skipIf(!process.env.OC_TUI_PANE || !cliPath || !muxPath)("oc TUI in a W
     180_000,
   )
   cliIt.live(
+    "claude warm-up palette opens the schedule dialog",
+    (fixture) =>
+      Effect.gen(function* () {
+        const pane = yield* openPane(fixture, { warmupAuth: true })
+        const store = path.join(fixture.home, ".local", "share", "opencode", "claude-code", "warmup.json")
+        yield* pane.waitFor("Ask anything")
+        yield* pane.type("\x0f")
+        yield* pane.waitFor("Commands")
+        yield* pane.type("Schedule Claude warm-up")
+        const listed = yield* pane.waitFor("Third party harness management")
+        expect(listed).toContain("Schedule Claude warm-up:")
+        yield* pane.type("\r")
+        yield* pane.waitFor("Times: (none)")
+        yield* pane.type("\x1b[B")
+        yield* pane.type("\r")
+        yield* pane.waitFor("Times")
+        yield* pane.type("07:00")
+        const first = yield* pane.waitFor("Est. reset 12:00")
+        expect(first).toContain("If this starts a new 5-hour window.")
+        yield* pane.paste(", 12:00, 22:00, 07:")
+        const dailyPreview = yield* pane.waitFor("Est. reset 17:00")
+        expect(dailyPreview).toContain("Est. reset 12:00")
+        expect(dailyPreview).toContain("Est. reset 03:00 next day")
+        expect(dailyPreview).toContain("If this starts a new 5-hour window.")
+        // The trailing incomplete "07:" adds no fourth row: exactly the
+        // three complete times preview. ("Send at 07:" is a prefix of the
+        // valid "Send at 07:00" row, so count rows instead.)
+        expect(dailyPreview.split("Send at")).toHaveLength(4)
+        yield* pane.type("\x1b")
+        expect(yield* Effect.promise(() => Bun.file(store).exists())).toBe(false)
+        yield* pane.type("\x0f")
+        yield* pane.waitFor("Search")
+        yield* pane.type("Schedule Claude warm-up\r")
+        yield* pane.waitFor("Every day")
+        yield* pane.type("\r")
+        const weekday = yield* pane.waitFor("By weekday")
+        expect(weekday).toContain("Sunday:")
+        yield* pane.type("\x1b[B")
+        yield* pane.type("\x1b[B")
+        yield* pane.type("\x1b[B")
+        yield* pane.type("\x1b[B")
+        yield* pane.type("\x1b[B")
+        yield* pane.type("\x1b[B")
+        yield* pane.type("\x1b[B")
+        yield* pane.type("\r")
+        yield* pane.type("22:00")
+        const sunday = yield* pane.waitFor("Est. reset Monday 03:00")
+        expect(sunday).toContain("If this starts a new 5-hour window.")
+        yield* pane.type("\x1b")
+        expect(yield* Effect.promise(() => Bun.file(store).exists())).toBe(false)
+        expect(yield* fixture.llm.inputs).toEqual([])
+      }),
+    180_000,
+  )
+  cliIt.live(
     "rewinding Claude shows the provider notice in the transcript",
     (fixture) =>
       Effect.gen(function* () {
@@ -282,18 +313,32 @@ describe.skipIf(!process.env.OC_TUI_PANE || !cliPath || !muxPath)("oc TUI in a W
 // before the root is removed.
 const openPane = Effect.fnUntraced(function* (
   fixture: CliFixture,
-  options: { autoRename?: boolean; workCopy?: boolean } = {},
+  options: { autoRename?: boolean; warmupAuth?: boolean } = {},
 ) {
   const root = yield* outsideProfile
   const project = path.join(root, "work")
   yield* initRepo(project)
-  if (options.workCopy)
+  if (options.warmupAuth)
     yield* Effect.promise(async () => {
-      await Bun.$`git config user.name Test`.cwd(project).quiet()
-      await Bun.$`git config user.email test@opencode.test`.cwd(project).quiet()
-      await Bun.write(path.join(project, "note.txt"), "BASE\n")
-      await Bun.$`git add note.txt`.cwd(project).quiet()
-      await Bun.$`git -c commit.gpgsign=false commit -m fixture`.cwd(project).quiet()
+      const dir = path.join(root, "claude")
+      await mkdir(dir, { recursive: true })
+      // Offline subscription fixture: the CLI checks token shape and scopes
+      // locally, so short dummy tokens read as signed out and the warm-up
+      // palette stays empty. These format-valid fakes make `auth status
+      // --json` truthfully report logged-in with no network and no PII, and
+      // the pane test never sends a model request with them.
+      await Bun.write(
+        path.join(dir, ".credentials.json"),
+        JSON.stringify({
+          claudeAiOauth: {
+            accessToken: `sk-ant-oat01-${"A".repeat(96)}`,
+            refreshToken: `sk-ant-ort01-${"B".repeat(96)}`,
+            expiresAt: Date.now() + 86_400_000,
+            scopes: ["user:profile", "user:inference"],
+            subscriptionType: "pro",
+          },
+        }),
+      )
     })
   const socket = path.join(root, "wezterm.sock")
   const configFile = path.join(root, "wezterm.lua")
@@ -335,7 +380,8 @@ const openPane = Effect.fnUntraced(function* (
     ...Object.fromEntries(Object.entries(hostEnv()).filter(([key]) => key !== "WEZTERM_PANE")),
     WEZTERM_UNIX_SOCKET: socket,
   }
-  const serverEnv = { ...cliEnv, ...paneEnv }
+  const serverEnv: Record<string, string | undefined> = { ...cliEnv, ...paneEnv }
+  if (options.warmupAuth) delete serverEnv.BUN_TEST
   const wez = (args: string[]) => Bun.$`wezterm cli --no-auto-start ${args}`.env(cliEnv).quiet().text()
 
   // `bun dev`'s shape: bun must start in packages/opencode to load its bunfig preload (Solid JSX).
@@ -419,6 +465,7 @@ const openPane = Effect.fnUntraced(function* (
       return count.count
     }),
     type: (text: string) => Effect.promise(() => wez(["send-text", "--pane-id", String(paneID), "--no-paste", text])),
+    paste: (text: string) => Effect.promise(() => wez(["send-text", "--pane-id", String(paneID), text])),
     // Polls the visible screen; on timeout the error carries the last screen.
     waitFor: (text: string, matches: (shown: string) => boolean = () => true) =>
       pollWithTimeout(

@@ -184,7 +184,7 @@ export function resolveProxyOpencodeToolDefs(options: {
   const items = options.items
   if (!items) {
     log.warn(
-      "proxyOpencodeTools is set but opencode's tool registry did not answer;" + " forwarding nothing this spawn",
+      "proxyOpencodeTools is set but opencode's tool registry did not answer; forwarding nothing this spawn",
       { requested: requested.map(String) },
     )
     return []

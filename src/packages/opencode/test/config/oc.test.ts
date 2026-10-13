@@ -334,6 +334,17 @@ describe("OC config", () => {
     expect(await OcConfig.read()).toEqual({ ...retired, sessionAgent: "build" })
   })
 
+  test("malformed oc.json names the file and keeps the parse error as the cause", async () => {
+    const directory = await fs.mkdtemp(path.join(os.tmpdir(), "opencode-oc-"))
+    temporaryDirectories.push(directory)
+    ;(Global.Path as { config: string }).config = directory
+    await Bun.write(path.join(directory, "oc.json"), "{ not json")
+    const error = await OcConfig.read().catch((cause: unknown) => cause)
+    expect(error).toBeInstanceOf(Error)
+    expect((error as Error).message).toStartWith(`Failed to read ${path.join(directory, "oc.json")}: `)
+    expect((error as Error).cause).toBeInstanceOf(SyntaxError)
+  })
+
   test("rejects nonboolean startup settings before registration or persistence", async () => {
     await expect(OcConfig.update("serverStartOnWindowsUserStart", "yes")).rejects.toThrow("must be true or false")
   })

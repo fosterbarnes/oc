@@ -1,5 +1,4 @@
 import { Effect } from "effect"
-import path from "path"
 import { AbsolutePath } from "../schema"
 import { Git } from "../git"
 import { DirectoryUnavailableError, StrategyID, type ListEntry, type Strategy } from "./copy"
@@ -13,13 +12,7 @@ export function makeGitWorktreeStrategy(input: {
     create: Effect.fn("ProjectCopy.GitWorktree.create")(function* (options) {
       const repository = yield* input.git.repo.discover(options.sourceDirectory)
       if (!repository) return yield* new DirectoryUnavailableError({ directory: options.sourceDirectory })
-      if (options.state)
-        yield* input.git.worktree.copy({
-          repository,
-          directory: options.directory,
-          name: path.basename(options.directory),
-        })
-      if (!options.state) yield* input.git.worktree.create({ repository, directory: options.directory })
+      yield* input.git.worktree.create({ repository, directory: options.directory })
       return { directory: yield* input.canonical(options.directory) }
     }),
     remove: Effect.fn("ProjectCopy.GitWorktree.remove")(function* (options) {

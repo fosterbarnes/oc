@@ -1,9 +1,12 @@
-v0.2.168 wobblingLevincia
+v0.2.172 brushesAddress
 
-readme:
-The README is now a short pitch: what oc is, standout features, requirements, install, and a short list of behavior changes from stock OpenCode. A new Docs section links into the wiki for everything else, and the feature links now open the matching wiki page. How it works, configuration, troubleshooting, FAQ, companion tools, and the developing notes now live only in the wiki. The "Why I made oc" writeup moved to its own wiki page.
+claude warm-up:
+A new command palette entry lets you set daily or weekly times for each signed-in Claude subscription account. At those times oc sends a tiny "hi" so the usage window starts on schedule. Accounts can be paused and resumed. Warm-ups are skipped if the Claude CLI is missing or too old.
 
-wiki:
-The wiki home page opens with what oc is, a 4-step quick start, and an "I want to..." table. The sidebar is grouped by task, every page has a footer, and a new "Editing this wiki" page explains how to add pages. The wiki now covers /work and /done in full, Windows integration, and the list of behavior changes. The writeup's outdated bullets were corrected when it moved. No app or UI change.
+work copies:
+/work and /done are removed, along with the copy-and-merge flow they started and the work_done tool Claude sessions used to get. "Move session to new copy" still works. A session pinned to a folder no longer fails because that folder is a work copy. Existing work copy folders on disk are not deleted; remove them by hand if you no longer need them. Before the removal, the sidebar's saved repo roots were made to follow work copies, nested copies, and the return through /done; external folders stay where you chose them.
 
-Under the hood: AGENTS.md, FORK.md, and CONTRIBUTING.md now say the wiki is the source of truth for user-facing docs and the README is the pitch; code knowledge stays in FORK.md, AGENTS.md, and buildNotes.md. The wiki pages live in the separate oc.wiki repository, and this session's wiki edits are not pushed yet. Checks passed: the agent-push pre-push checks.
+release prep:
+Install and manual revive scripts now resolve your own home and Desktop folders instead of a fixed user path. Three older release-planning documents moved into docs/dev/ with portable examples and updated links.
+
+Under the hood: the warm-up scheduler, store, listener loop, /global/claude/warmup routes, and TUI dialogs are new, with fake-model and listener tests. The listener test now steps its clock with real promise settling. The /work and /done removal also dropped Git.worktree.parent, the projectCopy work/merge API chain, and the regenerated client and SDK pieces. Checks passed: the warm-up unit and listener tests, the warm-up fake-model scenario, the TUI warm-up test, and the agent-push pre-push checks.

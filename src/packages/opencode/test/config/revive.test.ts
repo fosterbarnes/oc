@@ -150,11 +150,18 @@ test("reopening every terminal uses a normal-window Start-Process hop instead of
 test("occ-started TUI identity matches its resolved helper", () => {
   const occ = "C:\\Apps\\oc\\occ.exe"
   const helper = Global.resolveExecutablePath(occ)
-  const record = { pid: 10, instance: "opencode", executable: Global.resolveExecutablePath(occ), startedAt: 1000 }
+  const record = {
+    pid: 10,
+    instance: "opencode",
+    executable: Global.resolveExecutablePath(occ),
+    startedAt: 1000,
+    created: "133000000000000000",
+  }
+  const live = { pid: 10, parentPid: 1, executable: occ, startedAt: 1000, created: "133000000000000000" }
   expect(helper).toBe(executable)
-  expect(
-    TuiLedger.select([record], [{ pid: 10, parentPid: 1, executable: occ, startedAt: 1000 }], "opencode", helper, 100),
-  ).toEqual([10])
+  expect(TuiLedger.select([record], [live], "opencode", helper, 100)).toEqual([10])
+  expect(TuiLedger.select([record], [{ ...live, created: "133000000000000001" }], "opencode", helper, 100)).toEqual([])
+  expect(TuiLedger.select([{ ...record, created: undefined }], [live], "opencode", helper, 100)).toEqual([])
 })
 
 test("revive and restart contexts round-trip and reject bad input before shutdown", () => {

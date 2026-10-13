@@ -14,21 +14,6 @@ const HARD_MODIFIERS = new Set(["ctrl", "alt", "meta", "super"])
 
 const LEADER_PREFIX = "<leader>"
 
-// Bare keys that would break typing in the prompt.
-const BARE_DENIED = new Set([
-  "escape",
-  "esc",
-  "return",
-  "enter",
-  "tab",
-  "space",
-  "backspace",
-  "up",
-  "down",
-  "left",
-  "right",
-])
-
 const RESERVED: Record<string, string> = {
   "ctrl+c": "ctrl+c is reserved for interrupt",
   "ctrl+d": "ctrl+d is reserved for end-of-input",

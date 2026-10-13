@@ -342,8 +342,15 @@ export async function createProxyMcpServer(
 
       if (request.method === "tools/call") {
         const params = request.params ?? {}
-        const toolName = String(params.name ?? "")
-        const input = (params.arguments ?? {}) as Record<string, unknown>
+        const toolName = typeof params.name === "string" ? params.name : ""
+        const args = params.arguments ?? {}
+        // Arguments come from the CLI unchecked: anything but a JSON object is refused here,
+        // before a pending call exists, so the broker only ever sees object input.
+        if (typeof args !== "object" || Array.isArray(args)) {
+          writeToolCallResult(res, requestId, { kind: "error", message: "tools/call arguments must be an object" })
+          return
+        }
+        const input = args as Record<string, unknown>
 
         if (!tools.some((t) => t.name === toolName)) {
           // tools/call failures MUST be MCP results with isError, never

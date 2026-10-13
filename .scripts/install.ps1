@@ -48,7 +48,6 @@ if ($installOc -and !(Test-Path -LiteralPath $cursorRuntime -PathType Container)
     throw "Packaged Cursor runtime not found: $cursorRuntime. Run build.ps1 first."
 }
 
-$installDir = 'C:\Users\user\Apps\opencode'
 New-Item -ItemType Directory -Path $installDir -Force | Out-Null
 
 $ocDestination = Join-Path $installDir 'oc.exe'

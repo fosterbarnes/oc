@@ -18,7 +18,6 @@ if (!(Test-Path -LiteralPath $binary)) {
     throw "Built debug binary not found: $binary. Run buildDebug.ps1 first."
 }
 
-$installDir = 'C:\Users\user\Apps\opencode'
 $debugDestination = Join-Path $installDir 'ocdebug.exe'
 
 New-Item -ItemType Directory -Path $installDir -Force | Out-Null

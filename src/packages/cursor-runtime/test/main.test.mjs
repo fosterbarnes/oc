@@ -62,21 +62,6 @@ async function waitForHealth({ healthPort, token, timeout = 5000 }) {
   throw new Error(`health not ready on ${healthPort}`)
 }
 
-async function waitForShutdown({ healthPort, token, timeout = 2000 }) {
-  const deadline = Date.now() + timeout
-  while (Date.now() < deadline) {
-    try {
-      await fetch(`http://127.0.0.1:${healthPort}/health`, {
-        headers: { "x-opencursor-control-token": token },
-        signal: AbortSignal.timeout(500),
-      })
-    } catch {
-      return
-    }
-    await new Promise((r) => setTimeout(r, 100))
-  }
-}
-
 test("forwardData preserves ordered data and closes the destination", async () => {
   const source = new PassThrough()
   const destination = new PassThrough()
@@ -221,11 +206,14 @@ test("fixed-port conflict prevents second sidecar from binding", async () => {
     await waitForHealth({ healthPort, token: token1 })
     // second sidecar on same ports should fail to listen and exit
     const child2 = spawnSidecar({ healthPort, h2Port, token: token2 })
-    let exited = false
-    child2.on("exit", () => (exited = true))
-    // wait a bit for second to fail
-    await new Promise((r) => setTimeout(r, 1500))
-    // child2 should have exited with error, child1 still healthy with its own token
+    // The second sidecar must exit nonzero on its own; a hang fails the check.
+    const exit = once(child2, "exit")
+    const timer = setTimeout(() => child2.kill(), 5000)
+    const [code, signal] = await exit
+    clearTimeout(timer)
+    assert.equal(signal, null, "second sidecar hung on a port it could not bind")
+    assert.notEqual(code, 0)
+    // child1 still healthy with its own token
     const health1 = await fetch(`http://127.0.0.1:${healthPort}/health`, {
       headers: { "x-opencursor-control-token": token1 },
       signal: AbortSignal.timeout(1000),
@@ -237,9 +225,6 @@ test("fixed-port conflict prevents second sidecar from binding", async () => {
       signal: AbortSignal.timeout(1000),
     })
     assert.equal(health2.status, 401)
-    // child2 should have exited (or be killed)
-    if (!exited) child2.kill()
-    await new Promise((r) => setTimeout(r, 200))
   } finally {
     child1.kill()
     await new Promise((r) => setTimeout(r, 200))

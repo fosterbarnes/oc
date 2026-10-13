@@ -227,13 +227,21 @@ export async function fetchAgentUrl(
       throw await cursorHttpResponseError("GetServerConfig failed:", res)
     }
 
-    let body: Record<string, unknown>
+    let body: unknown
     try {
-      body = (await res.json()) as Record<string, unknown>
+      body = await res.json()
     } catch (cause) {
       throw new CursorProtocolError("GetServerConfig returned malformed JSON", { cause })
     }
-    const cfg = body.agentUrlConfig as { agentnUrl?: string; agentUrl?: string } | undefined
+    // The reply is untrusted: null, arrays, or non-string URL fields fall through to the
+    // missing/invalid URL protocol error instead of throwing a TypeError here.
+    const cfgValue = isRecord(body) ? body.agentUrlConfig : undefined
+    const cfg = isRecord(cfgValue)
+      ? {
+          agentnUrl: typeof cfgValue.agentnUrl === "string" ? cfgValue.agentnUrl : undefined,
+          agentUrl: typeof cfgValue.agentUrl === "string" ? cfgValue.agentUrl : undefined,
+        }
+      : undefined
     const raw = cfg?.agentnUrl || cfg?.agentUrl
     const normalized = normalizeAgentRunOrigin(raw)
     trace(
@@ -1057,4 +1065,8 @@ function stripPseudo(h: Record<string, unknown>): Record<string, unknown> {
     out[k] = v
   }
   return out
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
 }

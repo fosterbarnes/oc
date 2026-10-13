@@ -38,7 +38,6 @@ import { queuePendingProxyCall } from "./proxyBroker.js"
 import { log } from "./logger.js"
 import { createHash } from "node:crypto"
 import { hasCommandPermission } from "./callOptions.js"
-import { isReadOnlyPermissionMode } from "./permissionPresets.js"
 
 export function toolCatalogHash(
   config: ClaudeCodeConfig,
@@ -421,18 +420,6 @@ async function assembleProxyTools(input: Parameters<typeof planSpawn>[0]) {
 
   const gated = gateStaticDefs(input.proxyTools, live, taskEnabled, questionEnabled)
   const staticDefs = gated ? filterProxyByModelTools(gated, modelTools, dialect) : []
-  const workDone =
-    !isReadOnlyPermissionMode(config.permissionMode) && modelTools?.find((tool) => tool.name === "work_done")
-  const handoffDefs: ProxyToolDef[] =
-    workDone && !staticDefs.some((tool) => tool.name === "work_done")
-      ? [
-          {
-            name: "work_done",
-            description: workDone.description ?? "",
-            inputSchema: workDone.inputSchema as Record<string, unknown>,
-          },
-        ]
-      : []
 
   // Opencode tools that belong to no MCP server are invisible to the MCP
   // resolution, so an explicitly named one is resolved here. Last in `taken`,
@@ -449,7 +436,7 @@ async function assembleProxyTools(input: Parameters<typeof planSpawn>[0]) {
   }
 
   return {
-    combined: [...staticDefs, ...handoffDefs, ...mcpDefs, ...opencodeDefs],
+    combined: [...staticDefs, ...mcpDefs, ...opencodeDefs],
     // Disallow against the post-version-gate defs, before the model-tools
     // filter: an unsupported question proxy leaves its native fallback live,
     // and a permission-denied proxy keeps its native replacement off.

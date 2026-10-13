@@ -8,6 +8,7 @@ import { OpenApi } from "effect/unstable/httpapi"
 import { createServer } from "node:http"
 import { MDNS } from "./mdns"
 import { HttpApiApp } from "./routes/instance/httpapi/server"
+import { warmupLoopLayer } from "./routes/instance/httpapi/handlers/global"
 import { disposeMiddleware } from "./routes/instance/httpapi/lifecycle"
 import { WebSocketTracker } from "./routes/instance/httpapi/websocket-tracker"
 import { PublicApi } from "./routes/instance/httpapi/public"
@@ -105,6 +106,10 @@ function listenerLayer(opts: ListenOptions, port: number) {
   }).pipe(
     Layer.provideMerge(AppNodeBuilder.build(WebSocketTracker.node)),
     Layer.provideMerge(serverLayer({ port, hostname: opts.hostname })),
+    // Claude warm-up scheduler: scoped to this listener only. Handler
+    // construction (webHandler/OpenAPI/tests) never schedules; closing the
+    // listener scope interrupts the loop and stops its owned children.
+    Layer.provideMerge(warmupLoopLayer),
     // Install a fresh `ConfigProvider` per listener so `Config.string(...)`
     // reads reflect the current `process.env`. Effect's default
     // `ConfigProvider` snapshots `process.env` on first read and caches the

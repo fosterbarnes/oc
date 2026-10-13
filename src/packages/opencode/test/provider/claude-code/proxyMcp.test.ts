@@ -204,6 +204,23 @@ test("tools/call for an unknown tool returns an MCP result with isError", async 
   })
 })
 
+test("tools/call with non-object arguments returns isError without reaching the broker", async () => {
+  await withServer(async (srv) => {
+    let calls = 0
+    srv.calls.on("call", () => calls++)
+    for (const [id, args] of [["a", [1, 2]], ["b", "echo hi"], ["c", 5]] as const) {
+      const res = await authedPost(srv, { jsonrpc: "2.0", id, method: "tools/call", params: { name: "bash", arguments: args } })
+      assert.equal(res.json.id, id)
+      assert.equal(res.json.error, undefined)
+      assert.equal(res.json.result.isError, true)
+      assert.match(res.json.result.content[0].text, /arguments must be an object/)
+    }
+    const named = await authedPost(srv, { jsonrpc: "2.0", id: "d", method: "tools/call", params: { name: ["bash"] } })
+    assert.match(named.json.result.content[0].text, /Unknown proxy tool/)
+    assert.equal(calls, 0)
+  })
+})
+
 test("tools/call success preserves isError:false and the result text", async () => {
   await withServer(async (srv) => {
     srv.calls.on("call", (call: ProxyToolCall) => {

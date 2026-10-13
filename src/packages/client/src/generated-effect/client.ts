@@ -571,13 +571,12 @@ type Endpoint17_0Input = {
   readonly strategy: Endpoint17_0Request["payload"]["strategy"]
   readonly directory: Endpoint17_0Request["payload"]["directory"]
   readonly name?: Endpoint17_0Request["payload"]["name"]
-  readonly state?: Endpoint17_0Request["payload"]["state"]
 }
 const Endpoint17_0 = (raw: RawClient["server.projectCopy"]) => (input: Endpoint17_0Input) =>
   raw["projectCopy.create"]({
     params: { projectID: input["projectID"] },
     query: { location: input["location"] },
-    payload: { strategy: input["strategy"], directory: input["directory"], name: input["name"], state: input["state"] },
+    payload: { strategy: input["strategy"], directory: input["directory"], name: input["name"] },
   }).pipe(Effect.mapError(mapClientError))
 
 type Endpoint17_1Request = Parameters<RawClient["server.projectCopy"]["projectCopy.remove"]>[0]
@@ -594,25 +593,12 @@ const Endpoint17_1 = (raw: RawClient["server.projectCopy"]) => (input: Endpoint1
     payload: { directory: input["directory"], force: input["force"] },
   }).pipe(Effect.mapError(mapClientError))
 
-type Endpoint17_2Request = Parameters<RawClient["server.projectCopy"]["projectCopy.merge"]>[0]
+type Endpoint17_2Request = Parameters<RawClient["server.projectCopy"]["projectCopy.refresh"]>[0]
 type Endpoint17_2Input = {
   readonly projectID: Endpoint17_2Request["params"]["projectID"]
   readonly location?: Endpoint17_2Request["query"]["location"]
-  readonly directory: Endpoint17_2Request["payload"]["directory"]
 }
 const Endpoint17_2 = (raw: RawClient["server.projectCopy"]) => (input: Endpoint17_2Input) =>
-  raw["projectCopy.merge"]({
-    params: { projectID: input["projectID"] },
-    query: { location: input["location"] },
-    payload: { directory: input["directory"] },
-  }).pipe(Effect.mapError(mapClientError))
-
-type Endpoint17_3Request = Parameters<RawClient["server.projectCopy"]["projectCopy.refresh"]>[0]
-type Endpoint17_3Input = {
-  readonly projectID: Endpoint17_3Request["params"]["projectID"]
-  readonly location?: Endpoint17_3Request["query"]["location"]
-}
-const Endpoint17_3 = (raw: RawClient["server.projectCopy"]) => (input: Endpoint17_3Input) =>
   raw["projectCopy.refresh"]({
     params: { projectID: input["projectID"] },
     query: { location: input["location"] },
@@ -621,8 +607,7 @@ const Endpoint17_3 = (raw: RawClient["server.projectCopy"]) => (input: Endpoint1
 const adaptGroup17 = (raw: RawClient["server.projectCopy"]) => ({
   create: Endpoint17_0(raw),
   remove: Endpoint17_1(raw),
-  merge: Endpoint17_2(raw),
-  refresh: Endpoint17_3(raw),
+  refresh: Endpoint17_2(raw),
 })
 
 const adaptClient = (raw: RawClient) => ({
