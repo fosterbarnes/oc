@@ -112,6 +112,37 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-13 (~07:01) - v0.2.175 skaDutchman - oc-release /update, session list attention, local model discovery - Claude Opus 5.5, reasoning unspecified; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; reasoning unspecified; Implementation (imp), orchestrator plus 3 subagents (Haiku high, Haiku med, Sol low); completed
+- Version: 0.2.175
+- Plan: `C:\Users\user\.config\opencode\plans\upstreamParity\plan.md` D7 + D9.
+- Added `core/src/util/ocRelease.ts` (`lookup`, `asset`, `isNewer`; asset names match `.scripts/pushRelease.ps1`).
+- Added revive mode `update` + `release` (validated `X.Y.Z`) and `Revive.downloadRelease` (download + `tar -xf` into `Global.Path.cache/oc-update/<v>` before shutdown; ocdebug included when installed or debug flavor). `oc.ts revivePipeline` feeds it to the existing install/rollback path.
+- Added TUI `/update` (`oc.update` in `reviveCommands`: latest / skip / update) and one startup notice (`updateNotice`, honors `autoupdate: false` and `skipped_version`). Removed stock `installation.update-available` handler, `isVersionGreater`, `DialogAlert` import.
+- Removed release blocker: `checkUpgrade` (worker + `cli/cmd/tui.ts`), `cli/upgrade.ts`. `Installation.method` always `unknown`; `latest` default points at fosterbarnes/oc. `opencode upgrade` only reports.
+- Added session palette `Copy session ID` (`session.copy_id`).
+- Subagent: session list "Awaiting input" group + `?` marker (`dialog-session-list.tsx`); `Project.list` orders by latest session activity and hides projects whose worktree is gone while the drive root exists (no migration).
+- Subagent: prompt footer `resumes at HH:mm` from `sdk.resume.state()` (mount, 60 s, idle, session switch).
+- Subagent: `provider/localDiscovery.ts` lists models for configured `lmstudio`/`ollama`/`vllm` (1 s deadline, debug log on failure).
+- Skipped: interrupt confirmation (double-Esc already exists).
+- Kept: `core/src/util/launchDetached.ts` `settleMs` diff is another session's work; untouched.
+- Docs: FORK.md row "Update from oc releases" (counts 77), README line, wiki `Launching.md` "Updating oc" (wiki push is user's).
+- Verification: opencode localDiscovery + project + revive + help snapshot 72 pass; tui dialog-session-list + format 19 pass; core ocRelease 5 pass; `tsgo --noEmit` clean in core, opencode, tui. No build/install. `/update` not live-checked (no public release yet).
+
+### User
+Updates
+- oc checks its own GitHub releases at startup and offers `/update`, which installs the new version and reopens where you were; it never offers stock OpenCode anymore.
+Sessions
+- Sessions waiting on a question or permission appear at the top of the session list with a `?`.
+- The prompt footer shows when a usage-limit auto-resume will fire.
+- The session menu can copy the session ID.
+Models
+- Configured LM Studio, Ollama, and vLLM providers list their installed models automatically.
+
+---
+
 ## 2026-10-13 (~06:40) - v0.2.174 coastersWall - Upstream parity stages 0-4: SCOPE.md, repo cleanup, v1 fix ports - Claude Opus 5.5, reasoning unspecified; Implementation
 
 ### Agent

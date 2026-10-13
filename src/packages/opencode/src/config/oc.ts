@@ -763,7 +763,10 @@ async function revivePipeline(context: Revive.ReviveContext) {
   const bun = /^bun(?:\.exe)?$/i.test(path.basename(process.execPath))
   // An ocdebug revive reopens ocdebug, so it must also build it, whatever the saved choice says.
   const build = context.mode === "install" ? Revive.effectiveBuild(settings.revive?.build, Global.Path.debug) : undefined
-  if (build && bun) throw new Error("Install revive needs an installed oc executable, not Bun")
+  // An update installs a downloaded oc release through the same steps as a source build.
+  const release = context.mode === "update" ? context.release : undefined
+  const installs = !!build || !!release
+  if (installs && bun) throw new Error("Install revive needs an installed oc executable, not Bun")
   const executable = Revive.resolveLauncher(executablePath(), Global.Path.debug)
   const installDir = path.dirname(executablePath())
   const restart: Revive.RestartContext = {
@@ -776,14 +779,19 @@ async function revivePipeline(context: Revive.ReviveContext) {
       ? { shellPid: context.shellPid, shellIdentity: context.shellIdentity }
       : {}),
     ...(context.supervisorPid ? { waitPid: context.supervisorPid } : {}),
-    ...(build ? { installDir } : {}),
+    ...(installs ? { installDir } : {}),
     ...(context.native ? { native: true, directory: context.directory, sessionID: context.sessionID } : {}),
   }
   const steps = build ? Revive.buildSteps(build) : undefined
   // One install at a time per installation: the build output, file swap and server start are shared.
-  const { tabs, failure } = await withInstallLock(build ? installDir : undefined, async () => {
+  const { tabs, failure } = await withInstallLock(installs ? installDir : undefined, async () => {
     for (const command of steps?.commands ?? []) await log.step(command.join(" "), () => runVisible(command, steps?.cwd))
-    const sources = steps ? await log.step("Checking build output", () => Revive.installSources(steps.output)) : undefined
+    const output = release
+      ? await log.step(`Downloading oc v${release}`, () =>
+          Revive.downloadRelease(release, installDir, Global.Path.debug),
+        )
+      : steps?.output
+    const sources = output ? await log.step("Checking build output", () => Revive.installSources(output)) : undefined
     // Ctrl+C from here would leave oc stopped or half installed.
     const ignore = () => {}
     process.on("SIGINT", ignore)
@@ -892,18 +900,17 @@ export async function restartTerminal(
         env: command.env,
         windowStyle: "Normal",
         windowsVerbatimArguments: command.windowsVerbatimArguments,
+        settleMs: REPLACEMENT_SETTLE_MS,
       }),
     ),
 ) {
   const log = reviveLog()
   if (restart.waitPid && !(await waitForExit(restart.waitPid, 10_000)))
     await log.write(`Launcher ${restart.waitPid} still running after 10s; opening replacement anyway`)
-  // WezTerm: open the new window first, then close only this instance's panes in the old one, so other
-  // panes keep running and a failed launch leaves the old tabs in place. Other terminals close the
-  // verified launching shell first. A failed close still opens the new terminal; a second window beats none.
+  // The new terminal opens first; the old window closes only once its process started and survived
+  // the settle window, so a failed launch leaves the old window in place. WezTerm closes only this
+  // instance's panes; other terminals close the verified launching shell. A failed close leaves two windows.
   const wezterm = restart.terminal === "wezterm" && !!restart.paneID
-  if (!restart.native && !wezterm)
-    await log.step("Closing the old window", () => closeWindow(restart)).catch(() => undefined)
   // Pane ids are per mux and a fresh WezTerm process reuses low ids, so the old panes are recorded with
   // their window before the launch and closed only if the same pane is still in that same window.
   // No socket or a failed list: leave the old panes open rather than guess.
@@ -915,6 +922,8 @@ export async function restartTerminal(
   await log.step(`Opening ${restart.terminal} with ${restart.launcher}`, () => launch(command))
   if (old)
     await log.step("Closing this instance's old panes", () => closeOwnedPanes(old)).catch(() => undefined)
+  if (!restart.native && !wezterm)
+    await log.step("Closing the old window", () => closeWindow(restart)).catch(() => undefined)
   if (!restart.installDir) return
   // A newer revive may hold its own `.old-*` files for rollback; leave them to its restarter.
   const installDir = restart.installDir
@@ -926,6 +935,9 @@ export async function restartTerminal(
   )
   if (kept.length) await log.write(`Kept in-use leftovers: ${kept.join(", ")}`)
 }
+
+// Acknowledgement is "the terminal process started and did not fail within this window", not a usable TUI.
+const REPLACEMENT_SETTLE_MS = 1500
 
 // Held from build through server readiness; a second revive fails fast instead of waiting minutes.
 function withInstallLock<T>(installDir: string | undefined, action: () => Promise<T>) {

@@ -1,5 +1,10 @@
 import { describe, expect, test } from "bun:test"
-import { createDialogSessionListQuery, loadDialogSessionList } from "../../src/component/dialog-session-list"
+import {
+  awaitingInput,
+  createDialogSessionListQuery,
+  loadDialogSessionList,
+  orderAwaitingInputFirst,
+} from "../../src/component/dialog-session-list"
 
 describe("dialog session list", () => {
   test("requests root sessions for the default browse list", () => {
@@ -72,5 +77,21 @@ describe("dialog session list", () => {
         list: () => Promise.reject(new Error("offline")),
       }),
     ).toBeUndefined()
+  })
+
+  test("a session is awaiting input when it has a permission or question request", () => {
+    expect(awaitingInput("a", { permission: { a: [{}] }, question: {} })).toBe(true)
+    expect(awaitingInput("a", { permission: {}, question: { a: [{}] } })).toBe(true)
+    expect(awaitingInput("a", { permission: { a: [] }, question: { a: [] } })).toBe(false)
+    expect(awaitingInput("a", { permission: {}, question: {} })).toBe(false)
+  })
+
+  test("moves awaiting-input sessions to the front and keeps the order of each group", () => {
+    const pending = { permission: { c: [{}] }, question: { f: [{}] } }
+    expect(orderAwaitingInputFirst(["a", "b", "c", "d", "e", "f"], pending)).toEqual(["c", "f", "a", "b", "d", "e"])
+  })
+
+  test("leaves the order unchanged when nothing is awaiting input", () => {
+    expect(orderAwaitingInputFirst(["a", "b"], { permission: {}, question: {} })).toEqual(["a", "b"])
   })
 })

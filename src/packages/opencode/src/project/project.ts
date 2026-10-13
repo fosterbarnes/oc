@@ -1,5 +1,6 @@
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
-import { and, eq, sql } from "drizzle-orm"
+import { and, desc, eq, sql } from "drizzle-orm"
+import path from "path"
 import { Database } from "@opencode-ai/core/database/database"
 import { ProjectDirectoryTable, ProjectTable } from "@opencode-ai/core/project/sql"
 import { ProjectDirectories } from "@opencode-ai/core/project/directories"
@@ -333,8 +334,30 @@ const layer = Layer.effect(
       )
     })
 
+    // A worktree counts as missing only when its drive or root still exists. An unplugged
+    // drive or a permission error is unknown, so the project stays listed.
+    const missing = Effect.fnUntraced(
+      function* (worktree: string) {
+        if (yield* fs.exists(worktree)) return false
+        return yield* fs.exists(path.parse(worktree).root)
+      },
+      Effect.orElseSucceed(() => false),
+    )
+
+    // Most recent session activity first; projects without sessions use their own updated time.
     const list = Effect.fn("Project.list")(function* () {
-      return (yield* db.select().from(ProjectTable).all().pipe(Effect.orDie)).map(fromRow)
+      const rows = yield* db
+        .select()
+        .from(ProjectTable)
+        .orderBy(
+          desc(
+            sql`coalesce((select max(${SessionTable.time_updated}) from ${SessionTable} where ${SessionTable.project_id} = ${ProjectTable.id}), ${ProjectTable.time_updated})`,
+          ),
+        )
+        .all()
+        .pipe(Effect.orDie)
+      const shown = yield* Effect.filter(rows, (row) => missing(row.worktree).pipe(Effect.map((gone) => !gone)))
+      return shown.map(fromRow)
     })
 
     const get = Effect.fn("Project.get")(function* (id: ProjectV2.ID) {

@@ -6,6 +6,8 @@ type LaunchOptions = {
   cwd?: string
   env?: NodeJS.ProcessEnv
   windowsVerbatimArguments?: boolean
+  // Windows: the hop waits this long and fails if the target already exited with a nonzero code.
+  settleMs?: number
 }
 
 /**
@@ -41,7 +43,7 @@ export function detachedCommand(
       "-NoProfile",
       "-NonInteractive",
       "-Command",
-      "$parameters = @{ FilePath = $env:OC_LAUNCH_EXE; WindowStyle = $env:OC_LAUNCH_STYLE; ErrorAction = 'Stop' }; if ($env:OC_LAUNCH_ARGS) { $parameters.ArgumentList = $env:OC_LAUNCH_ARGS }; Remove-Item Env:OC_LAUNCH_EXE, Env:OC_LAUNCH_ARGS, Env:OC_LAUNCH_STYLE; Start-Process @parameters",
+      "$parameters = @{ FilePath = $env:OC_LAUNCH_EXE; WindowStyle = $env:OC_LAUNCH_STYLE; ErrorAction = 'Stop' }; if ($env:OC_LAUNCH_ARGS) { $parameters.ArgumentList = $env:OC_LAUNCH_ARGS }; $settle = [int]$env:OC_LAUNCH_SETTLE; Remove-Item Env:OC_LAUNCH_EXE, Env:OC_LAUNCH_ARGS, Env:OC_LAUNCH_STYLE, Env:OC_LAUNCH_SETTLE -ErrorAction Ignore; $target = Start-Process @parameters -PassThru; if ($settle -gt 0) { Start-Sleep -Milliseconds $settle; if ($target.HasExited -and $target.ExitCode) { exit 2 } }",
     ],
     // Not detached: a DETACHED_PROCESS pwsh has no console and its Start-Process silently runs nothing.
     // The hop exits right away; Start-Process is what puts the target outside the caller's job.
@@ -53,6 +55,7 @@ export function detachedCommand(
         OC_LAUNCH_EXE: file,
         OC_LAUNCH_ARGS: input.windowsVerbatimArguments ? args.join(" ") : windowsArguments(args),
         OC_LAUNCH_STYLE: input.windowStyle ?? "Hidden",
+        ...(input.settleMs ? { OC_LAUNCH_SETTLE: String(input.settleMs) } : {}),
       },
     },
   }

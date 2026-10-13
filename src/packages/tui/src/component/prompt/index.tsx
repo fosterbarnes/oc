@@ -41,7 +41,7 @@ import { useRenderer, useTerminalDimensions, type JSX } from "@opentui/solid"
 import type { AssistantMessage, FilePart, UserMessage } from "@opencode-ai/sdk/v2"
 import { Locale } from "../../util/locale"
 import { errorMessage } from "../../util/error"
-import { formatDuration } from "../../util/format"
+import { formatDuration, formatResumeAt } from "../../util/format"
 import { createColors, createFrames } from "../../ui/spinner"
 import { useDialog } from "../../ui/dialog"
 import { DialogProvider as DialogProviderConnect } from "../dialog-provider"
@@ -164,6 +164,24 @@ export function Prompt(props: PromptProps) {
   const promptRef = usePromptRef()
   const toast = useToast()
   const status = createMemo(() => sync.data.session_status?.[props.sessionID ?? ""] ?? { type: "idle" })
+  const [resumes, setResumes] = createSignal<{ sessionID: string; fireAt: number }[]>([])
+  const resumeAt = createMemo(() => resumes().find((entry) => entry.sessionID === props.sessionID)?.fireAt)
+  const refreshResumes = () => {
+    if (!props.sessionID) return
+    // A failed refresh keeps the last list; the next refresh retries.
+    sdk.resume
+      .state()
+      .then((state) => setResumes(state.entries))
+      .catch(() => {})
+  }
+  onMount(() => {
+    refreshResumes()
+    const timer = setInterval(refreshResumes, 60_000)
+    onCleanup(() => clearInterval(timer))
+  })
+  // A turn ending is when a usage-limit resume gets queued, so refresh then instead of waiting for the poll.
+  createEffect(on(() => status().type, (type) => type === "idle" && refreshResumes(), { defer: true }))
+  createEffect(on(() => props.sessionID, refreshResumes, { defer: true }))
   const history = usePromptHistory()
   const stash = usePromptStash()
   const keymap = useOpencodeKeymap()
@@ -1768,6 +1786,13 @@ export function Prompt(props: PromptProps) {
               <box paddingLeft={3}>
                 <text fg={theme.accent}>(new working copy)</text>
               </box>
+            </Match>
+            <Match when={resumeAt()}>
+              {(fireAt) => (
+                <box marginLeft={1}>
+                  <text fg={theme.accent}>{formatResumeAt(fireAt())}</text>
+                </box>
+              )}
             </Match>
             <Match when={true}>
               {props.hint ?? (

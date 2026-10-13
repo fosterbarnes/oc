@@ -195,12 +195,9 @@ Options:
 `;
 
 exports[`opencode CLI help-text snapshots every documented command emits stable help text: opencode upgrade --help 1`] = `
-"opencode upgrade [target]
+"opencode upgrade
 
-upgrade opencode to the latest or a specific version
-
-Positionals:
-  target  version to upgrade to, for ex '0.1.48' or 'v0.1.48'                               [string]
+check for a newer oc release
 
 Options:
   -h, --help          show help                                                            [boolean]
@@ -210,9 +207,7 @@ Options:
                                                 [string] [choices: "DEBUG", "INFO", "WARN", "ERROR"]
       --log-channels  debug log channels (comma-separated:
                       session,config,mcp,tool,provider,plugin,server,worktree,lsp,tui)      [string]
-      --pure          run without external plugins                                         [boolean]
-  -m, --method        installation method to use
-                          [string] [choices: "curl", "npm", "pnpm", "bun", "brew", "choco", "scoop"]"
+      --pure          run without external plugins                                         [boolean]"
 `;
 
 exports[`opencode CLI help-text snapshots every documented command emits stable help text: opencode uninstall --help 1`] = `

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { formatDuration } from "../../src/util/format"
+import { formatDuration, formatResumeAt } from "../../src/util/format"
 
 describe("util.format", () => {
   describe("formatDuration", () => {
@@ -54,6 +54,14 @@ describe("util.format", () => {
       expect(formatDuration(86400)).toBe("~1 day")
       expect(formatDuration(604799)).toBe("~6 days")
       expect(formatDuration(604800)).toBe("~1 week")
+    })
+  })
+
+  describe("formatResumeAt", () => {
+    test("formats the local clock time with zero-padded hours and minutes", () => {
+      expect(formatResumeAt(new Date(2026, 9, 13, 9, 5).getTime())).toBe("resumes at 09:05")
+      expect(formatResumeAt(new Date(2026, 9, 13, 0, 0).getTime())).toBe("resumes at 00:00")
+      expect(formatResumeAt(new Date(2026, 9, 13, 23, 59).getTime())).toBe("resumes at 23:59")
     })
   })
 })

@@ -1139,6 +1139,18 @@ export function Session() {
       },
     },
     {
+      title: "Copy session ID",
+      value: "session.copy_id",
+      category: "Session",
+      run: async () => {
+        await clipboard
+          .write?.(route.sessionID)
+          .then(() => toast.show({ message: `Copied ${route.sessionID}`, variant: "success" }))
+          .catch(() => toast.show({ message: "Failed to copy session ID", variant: "error" }))
+        dialog.clear()
+      },
+    },
+    {
       title: "Export session transcript",
       value: "session.export",
       category: "Session",

@@ -31,6 +31,9 @@ import { ModelV2 } from "@opencode-ai/core/model"
 import { ModelStatus } from "./model-status"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { ProviderError } from "./error"
+import { LocalDiscovery } from "./localDiscovery"
+import { HttpClient } from "effect/unstable/http"
+import { httpClient } from "@opencode-ai/core/effect/app-node-platform"
 
 const OPENAI_HEADER_TIMEOUT_DEFAULT = 300_000
 
@@ -1403,6 +1406,7 @@ const layer = Layer.effect(
     const plugin = yield* Plugin.Service
     const modelsDevSvc = yield* ModelsDev.Service
     const runtimeFlags = yield* RuntimeFlags.Service
+    const http = yield* HttpClient.HttpClient
 
     const state = yield* InstanceState.make<State>(() =>
       Effect.gen(function* () {
@@ -1660,6 +1664,34 @@ const layer = Layer.effect(
           if (provider.options) partial.options = provider.options
           mergeProvider(providerID, partial)
         }
+
+        yield* Effect.forEach(
+          ["lmstudio", "ollama", "vllm"] as const,
+          Effect.fnUntraced(function* (id) {
+            const providerID = ProviderV2.ID.make(id)
+            const configured = cfg.provider?.[id]
+            const provider = providers[providerID]
+            if (!configured || !provider || !isProviderAllowed(providerID)) return
+            const baseURL = provider.options.baseURL ?? configured.api ?? LocalDiscovery.defaults[id]
+            if (typeof baseURL !== "string") return
+            const discovered = yield* LocalDiscovery.discover(http, id, baseURL, {
+              apiKey: provider.options.apiKey ?? provider.key,
+              headers: provider.options.headers,
+            })
+            const parsed = fromModelsDevProvider({
+              id,
+              name: provider.name,
+              env: [],
+              api: baseURL,
+              npm: configured.npm,
+              models: Object.fromEntries(discovered.map((model) => [model.id, model])),
+            })
+            for (const [modelID, model] of Object.entries(parsed.models)) {
+              if (!provider.models[modelID]) provider.models[modelID] = model
+            }
+          }),
+          { concurrency: 3 },
+        )
 
         const gitlab = ProviderV2.ID.make("gitlab")
         if (discoveryLoaders[gitlab] && providers[gitlab] && isProviderAllowed(gitlab)) {
@@ -2085,7 +2117,7 @@ export function parseModel(model: string) {
 export const node = LayerNode.make({
   service: Service,
   layer: layer,
-  deps: [FSUtil.node, Config.node, Auth.node, Env.node, Plugin.node, ModelsDev.node, RuntimeFlags.node],
+  deps: [FSUtil.node, Config.node, Auth.node, Env.node, Plugin.node, ModelsDev.node, RuntimeFlags.node, httpClient],
 })
 
 export * as Provider from "./provider"

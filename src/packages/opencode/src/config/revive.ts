@@ -4,6 +4,7 @@ import fs from "node:fs"
 import fsp from "node:fs/promises"
 import path from "node:path"
 import { Global } from "@opencode-ai/core/global"
+import { OcRelease } from "@opencode-ai/core/util/ocRelease"
 import type { TerminalInfo } from "@opencode-ai/core/util/terminal"
 import { TuiLedger } from "./tuiLedger"
 
@@ -12,6 +13,7 @@ const TERMINALS: readonly string[] = ["wezterm", "windows-terminal", "generic"]
 const LAUNCHERS = ["oc", "occ"] as const
 const SHELLS = new Set(["pwsh.exe", "powershell.exe", "cmd.exe", "bash.exe", "sh.exe", "zsh.exe", "fish.exe", "nu.exe"])
 const LEFTOVER = /\.old-\d+$/
+const RELEASE = /^\d+\.\d+\.\d+$/
 // Cloned by the first /revive when the user chooses to build from source.
 export const SOURCE_REPO = "https://github.com/fosterbarnes/oc"
 
@@ -19,7 +21,9 @@ export type Launcher = (typeof LAUNCHERS)[number]
 
 /** Written by the TUI (handoff file or detached helper argument), read by the revive pipeline. */
 export type ReviveContext = {
-  mode: "install" | "no-install"
+  // "update" installs the oc GitHub release `release` instead of building from source.
+  mode: "install" | "no-install" | "update"
+  release?: string
   terminal: Terminal
   directory: string
   sessionID?: string
@@ -93,7 +97,8 @@ export function decodeContext(encoded: string) {
 export function parseContext(input: unknown): ReviveContext {
   const value = record(input)
   if (
-    (value.mode !== "install" && value.mode !== "no-install") ||
+    (value.mode !== "install" && value.mode !== "no-install" && value.mode !== "update") ||
+    (value.mode === "update") !== (typeof value.release === "string" && RELEASE.test(value.release)) ||
     !TERMINALS.includes(value.terminal as string) ||
     !text(value.directory) ||
     !optional(value.sessionID, text) ||
@@ -242,6 +247,42 @@ export function buildSteps(build: BuildConfig) {
         : []),
     ],
   }
+}
+
+/**
+ * Downloads and unpacks oc release `version` for this platform; returns the same output shape as
+ * buildSteps (oc folder, native executable, ocdebug when this install has it). Runs before shutdown,
+ * so a missing asset or failed download leaves the running oc untouched.
+ */
+export async function downloadRelease(version: string, installDir: string, debugFlavor: boolean) {
+  const release = await OcRelease.lookup(version)
+  const exe = process.platform === "win32" ? ".exe" : ""
+  const debug = debugFlavor || fs.existsSync(path.join(installDir, `ocdebug${exe}`))
+  const variants: OcRelease.Variant[] = ["oc", "native", ...(debug ? (["debug"] as const) : [])]
+  const stage = path.join(Global.Path.cache, "oc-update", version)
+  await fsp.rm(stage, { recursive: true, force: true })
+  const folders = await Promise.all(
+    variants.map(async (variant) => {
+      const asset = OcRelease.asset(release, variant)
+      if (!asset) throw new Error(`oc v${version} has no ${variant} download for ${process.platform}-${process.arch}`)
+      const folder = path.join(stage, variant)
+      const archive = path.join(stage, asset.name)
+      const response = await fetch(asset.url, { signal: AbortSignal.timeout(300_000) })
+      if (!response.ok) throw new Error(`Download failed: HTTP ${response.status} for ${asset.name}`)
+      await fsp.mkdir(folder, { recursive: true })
+      await Bun.write(archive, response)
+      // Windows 10+ ships bsdtar, which reads zip archives.
+      const unpack = Bun.spawnSync(["tar", "-xf", archive, "-C", folder], { stdout: "pipe", stderr: "pipe" })
+      if (unpack.exitCode !== 0) throw new Error(`Unpacking ${asset.name} failed: ${unpack.stderr.toString().trim()}`)
+      return folder
+    }),
+  )
+  // The native and debug builds ship only their executable; they share the oc build's support files.
+  return [
+    folders[0],
+    path.join(folders[1], `opencode${exe}`),
+    ...(debug ? [path.join(folders[2], `ocdebug${exe}`)] : []),
+  ]
 }
 
 export function isShell(name: string) {

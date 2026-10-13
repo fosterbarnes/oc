@@ -6,7 +6,12 @@ import { Deferred, Effect } from "effect"
 import { Global } from "@opencode-ai/core/global"
 import { DebugConfig } from "@opencode-ai/core/debugConfig"
 import { Flag } from "@opencode-ai/core/flag/flag"
-import { InstallationDisplayVersion, InstallationVersion } from "@opencode-ai/core/installation/version"
+import {
+  InstallationDisplayVersion,
+  InstallationLocal,
+  InstallationVersion,
+} from "@opencode-ai/core/installation/version"
+import { OcRelease } from "@opencode-ai/core/util/ocRelease"
 import { ClipboardProvider, useClipboard } from "./context/clipboard"
 import { ExitProvider, useExit } from "./context/exit"
 import { EpilogueProvider } from "./context/epilogue"
@@ -58,7 +63,6 @@ import { Session } from "./routes/session"
 import { PromptHistoryProvider } from "./component/prompt/history"
 import { FrecencyProvider } from "./component/prompt/frecency"
 import { PromptStashProvider } from "./component/prompt/stash"
-import { DialogAlert } from "./ui/dialog-alert"
 import { DialogConfirm } from "./ui/dialog-confirm"
 import { createTodoCommand } from "./todos"
 import { createClearSavedImagesCommand } from "./savedImages"
@@ -570,6 +574,7 @@ function reviveCommands(toast: ToastContext) {
   const local = useLocal()
   const exit = useExit()
   const dialog = useDialog()
+  const kv = useKV()
   // Saved before launch, while this server still runs. A no-reply message costs no tokens until
   // the next prompt; synthetic text then reaches the model, and the session view draws a divider.
   // Carries the current agent/model because the reopened prompt seeds them from the last user message.
@@ -626,7 +631,7 @@ function reviveCommands(toast: ToastContext) {
   }
   // Context shape: Revive.ReviveContext in packages/opencode/src/config/revive.ts.
   type Source = { source: "existing" | "download"; sourceDir: string } | { source: "none" }
-  const revive = async (mode: "install" | "no-install", source?: Source) => {
+  const revive = async (mode: "install" | "no-install" | "update", source?: Source | { release: string }) => {
     await mark()
     const sessionID = route.data.type === "session" ? route.data.sessionID : undefined
     const terminal = detectTerminal()
@@ -695,7 +700,58 @@ function reviveCommands(toast: ToastContext) {
         return revive("install", choice)
       },
     },
+    {
+      name: "oc.update",
+      title: "Check for oc updates",
+      category: "System",
+      slashName: "update",
+      run: async () => {
+        if (InstallationLocal) {
+          toast.show({ message: "Running from source: update with git and /revive", variant: "info" })
+          return
+        }
+        const release = await OcRelease.lookup().catch((error: unknown) => {
+          toast.error(error instanceof Error ? error : new Error(String(error)))
+        })
+        if (!release) return
+        if (!OcRelease.isNewer(release.version, InstallationDisplayVersion)) {
+          toast.show({ message: `oc v${InstallationDisplayVersion} is the latest release`, variant: "info" })
+          return
+        }
+        const choice = await new Promise<"update" | "skip" | undefined>((resolve) => dialog.replace(() => (
+          <DialogSelect
+            title={`oc v${release.version} is available (installed: v${InstallationDisplayVersion})`}
+            renderFilter={false}
+            options={[
+              { value: "update" as const, title: "Update and restart", description: "stops oc, installs, reopens" },
+              { value: "skip" as const, title: "Skip this version", description: "no startup notice for it" },
+            ]}
+            onSelect={(option) => resolve(option.value)}
+          />
+        ), () => resolve(undefined)))
+        dialog.clear()
+        if (choice === "skip") kv.set(SKIPPED_VERSION, release.version)
+        if (choice === "update") return revive("update", { release: release.version })
+      },
+    },
   ]
+}
+
+// Release version the user chose to skip; the startup notice stays quiet until a newer one ships.
+const SKIPPED_VERSION = "skipped_version"
+
+// One check per TUI start. Installing always goes through /update, never automatically.
+async function updateNotice(toast: ToastContext, skipped: string | undefined) {
+  if (InstallationLocal) return
+  const release = await OcRelease.lookup().catch(() => undefined)
+  if (!release || !OcRelease.isNewer(release.version, InstallationDisplayVersion)) return
+  if (skipped && !OcRelease.isNewer(release.version, skipped)) return
+  toast.show({
+    title: "Update available",
+    message: `oc v${release.version} is available. Run /update to install it.`,
+    variant: "info",
+    duration: 10000,
+  })
 }
 
 const appGlobalBindingCommands = [
@@ -805,23 +861,6 @@ function writeLedger(record: Ledger) {
     fs.mkdirSync(path.dirname(file), { recursive: true })
     fs.writeFileSync(file, JSON.stringify(record))
   } catch {}
-}
-
-function isVersionGreater(left: string, right: string) {
-  const parse = (value: string) => {
-    const [core, prerelease] = value.replace(/^v/, "").split("-", 2)
-    return { core: core.split(".").map((part) => Number.parseInt(part, 10) || 0), prerelease }
-  }
-  const a = parse(left)
-  const b = parse(right)
-  for (let index = 0; index < Math.max(a.core.length, b.core.length); index++) {
-    const difference = (a.core[index] ?? 0) - (b.core[index] ?? 0)
-    if (difference) return difference > 0
-  }
-  if (a.prerelease === b.prerelease) return false
-  if (!a.prerelease) return true
-  if (!b.prerelease) return false
-  return a.prerelease.localeCompare(b.prerelease, undefined, { numeric: true }) > 0
 }
 
 export const run = Effect.fn("Tui.run")(function* (input: TuiInput) {
@@ -2639,53 +2678,12 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
     })
   })
 
-  event.on("installation.update-available", async (evt) => {
-    console.log("installation.update-available", evt)
-    const version = evt.properties.version
-
-    const skipped = kv.get("skipped_version")
-    if (skipped && !isVersionGreater(version, skipped)) return
-
-    const choice = await DialogConfirm.show(
-      dialog,
-      `Update Available`,
-      `A new release v${version} is available. Would you like to update now?`,
-      "skip",
-    )
-
-    if (choice === false) {
-      kv.set("skipped_version", version)
-      return
-    }
-
-    if (choice !== true) return
-
-    toast.show({
-      variant: "info",
-      message: `Updating to v${version}...`,
-      duration: 30000,
-    })
-
-    const result = await sdk.client.global.upgrade({ target: version })
-
-    if (result.error || !result.data?.success) {
-      toast.show({
-        variant: "error",
-        title: "Update Failed",
-        message: "Update failed",
-        duration: 10000,
-      })
-      return
-    }
-
-    await DialogAlert.show(
-      dialog,
-      "Update Complete",
-      `Successfully updated to OpenCode v${result.data.version}. Please restart the application.`,
-    )
-
-    void exit()
-  })
+  createEffect(
+    on(ready, (value) => {
+      if (!value || sync.data.config.autoupdate === false) return
+      void updateNotice(toast, kv.get(SKIPPED_VERSION))
+    }),
+  )
 
   const plugin = createMemo(() => {
     if (!ready()) return

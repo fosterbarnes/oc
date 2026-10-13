@@ -29,6 +29,7 @@
 - Startup animation with no blank gap before the app appears
 - Faster startup for every command
 - `/revive` restarts or rebuilds oc in place
+- `/update` installs a new oc release and reopens where you were
 - `opencode` runs every oc feature in one window with no background server, like stock OpenCode (beta)
 
 ### Claude Code
@@ -129,7 +130,7 @@ How everything works is in the [wiki](https://github.com/fosterbarnes/oc/wiki):
 
 ## Progress
 
-[373,305](scc.txt) lines of code and counting...
+[373,911](scc.txt) lines of code and counting...
 
 <!-- code-count:start -->
 
@@ -142,8 +143,8 @@ How everything works is in the [wiki](https://github.com/fosterbarnes/oc/wiki):
 | Powershell | 23 | 1,293 | 88 | 80 | 1,125 |
 | SQL | 2 | 5 | 0 | 0 | 5 |
 | Shell | 1 | 120 | 17 | 17 | 86 |
-| TypeScript | 2,038 | 419,368 | 35,926 | 14,744 | 368,698 |
-| **Total** | **2,081** | **424,542** | **36,315** | **14,922** | **373,305** |
+| TypeScript | 2,041 | 420,035 | 35,955 | 14,776 | 369,304 |
+| **Total** | **2,084** | **425,209** | **36,344** | **14,954** | **373,911** |
 
 <!-- code-count:end -->
 

@@ -55,6 +55,19 @@ export function loadDialogSessionList<T>(input: {
   )
 }
 
+type PendingRequests = {
+  permission: Record<string, readonly unknown[] | undefined>
+  question: Record<string, readonly unknown[] | undefined>
+}
+
+export function awaitingInput(sessionID: string, pending: PendingRequests) {
+  return !!pending.permission[sessionID]?.length || !!pending.question[sessionID]?.length
+}
+
+export function orderAwaitingInputFirst(ids: string[], pending: PendingRequests) {
+  return [...ids.filter((id) => awaitingInput(id, pending)), ...ids.filter((id) => !awaitingInput(id, pending))]
+}
+
 export function DialogSessionList() {
   const dialog = useDialog()
   const route = useRoute()
@@ -302,11 +315,13 @@ export function DialogSessionList() {
       const isDeleting = toDelete() === x.id
       const status = sync.data.session_status?.[x.id]
       const isWorking = status?.type === "busy" || status?.type === "retry"
-      const gutter = isWorking
-        ? () => <Spinner />
-        : pinnedSet.has(x.id)
-          ? () => <text fg={theme.accent}>◆</text>
-          : undefined
+      const gutter = awaitingInput(x.id, sync.data)
+        ? () => <text fg={theme.warning}>?</text>
+        : isWorking
+          ? () => <Spinner />
+          : pinnedSet.has(x.id)
+            ? () => <text fg={theme.accent}>◆</text>
+            : undefined
       return {
         title: isDeleting ? `Press ${deleteHint()} again to confirm` : x.title,
         titleView:
@@ -326,11 +341,15 @@ export function DialogSessionList() {
       }
     }
 
-    const remaining = displayOrder
-      .filter((id) => !pinnedSet.has(id))
+    // Sessions awaiting input get their own group so the date groups below stay intact.
+    const remaining = orderAwaitingInputFirst(
+      displayOrder.filter((id) => !pinnedSet.has(id)),
+      sync.data,
+    )
       .map((id) => {
         const x = sessionMap.get(id)
         if (!x) return undefined
+        if (awaitingInput(id, sync.data)) return buildOption(id, "Awaiting input")
         const label = new Date(x.time.updated).toDateString()
         return buildOption(id, label === today ? "Today" : label)
       })

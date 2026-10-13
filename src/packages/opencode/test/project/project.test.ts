@@ -1,4 +1,5 @@
 import { describe, expect } from "bun:test"
+import { existsSync } from "fs"
 import { Project } from "@/project/project"
 import { $ } from "bun"
 import path from "path"
@@ -15,6 +16,7 @@ import { WorkspaceV2 } from "@opencode-ai/core/workspace"
 import { Cause, Effect, Exit, Layer, Stream } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import { ProjectV2 } from "@opencode-ai/core/project"
+import { AbsolutePath } from "@opencode-ai/core/schema"
 import { CrossSpawnSpawner } from "@opencode-ai/core/cross-spawn-spawner"
 import { testEffect } from "../lib/effect"
 import { RuntimeFlags } from "@/effect/runtime-flags"
@@ -657,6 +659,89 @@ describe("Project.list and Project.get", () => {
       expect(found).toBeUndefined()
     }),
   )
+})
+
+function insertSession(projectID: ProjectV2.ID, directory: string, updated: number) {
+  return Effect.gen(function* () {
+    const { db } = yield* Database.Service
+    const sessionID = crypto.randomUUID() as SessionID
+    yield* db
+      .insert(SessionTable)
+      .values({
+        id: sessionID,
+        project_id: projectID,
+        slug: sessionID,
+        directory,
+        title: "test",
+        version: "0.0.0-test",
+        time_created: updated,
+        time_updated: updated,
+      })
+      .run()
+      .pipe(Effect.orDie)
+  })
+}
+
+describe("Project.list order and missing directories", () => {
+  it.live("orders projects by most recent session activity", () =>
+    Effect.gen(function* () {
+      const project = yield* Project.Service
+      const older = yield* tmpdirScoped({ git: true })
+      const newer = yield* tmpdirScoped({ git: true })
+      const olderID = (yield* project.fromDirectory(older)).project.id
+      const newerID = (yield* project.fromDirectory(newer)).project.id
+      yield* insertSession(olderID, older, 1_000)
+      yield* insertSession(newerID, newer, Date.now() + 60_000)
+
+      const ids = (yield* project.list()).map((item) => item.id)
+      expect(ids.indexOf(newerID)).toBeGreaterThanOrEqual(0)
+      expect(ids.indexOf(newerID)).toBeLessThan(ids.indexOf(olderID))
+    }),
+  )
+
+  it.live("hides a project whose directory is gone but keeps its row", () =>
+    Effect.gen(function* () {
+      const { db } = yield* Database.Service
+      const project = yield* Project.Service
+      const gone = yield* tmpdirScoped({ git: true })
+      const present = yield* tmpdirScoped({ git: true })
+      const goneID = (yield* project.fromDirectory(gone)).project.id
+      const presentID = (yield* project.fromDirectory(present)).project.id
+      yield* Effect.promise(() => $`rm -rf ${gone}`.quiet())
+
+      const ids = (yield* project.list()).map((item) => item.id)
+      expect(ids).not.toContain(goneID)
+      expect(ids).toContain(presentID)
+      expect(
+        yield* db.select().from(ProjectTable).where(eq(ProjectTable.id, goneID)).get().pipe(Effect.orDie),
+      ).toBeDefined()
+    }),
+  )
+
+  describe.skipIf(process.platform !== "win32")("unmounted drives", () => {
+    it.live("keeps a project whose drive is not mounted", () =>
+      Effect.gen(function* () {
+        const { db } = yield* Database.Service
+        const project = yield* Project.Service
+        const letter = "QRSTUVWXYZ".split("").find((item) => !existsSync(`${item}:\\`))
+        if (!letter) throw new Error("no unused drive letter for the unmounted-drive test")
+        const id = ProjectV2.ID.make("unmounted-drive-project")
+        yield* db
+          .insert(ProjectTable)
+          .values({
+            id,
+            worktree: AbsolutePath.make(`${letter}:\\unmounted-project`),
+            sandboxes: [],
+            time_created: 1,
+            time_updated: 1,
+          })
+          .run()
+          .pipe(Effect.orDie)
+
+        expect((yield* project.list()).map((item) => item.id)).toContain(id)
+      }),
+    )
+  })
 })
 
 describe("Project.setInitialized", () => {

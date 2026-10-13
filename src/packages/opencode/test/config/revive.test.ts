@@ -3,7 +3,7 @@ import fs from "fs/promises"
 import path from "path"
 import os from "node:os"
 import { Revive } from "../../src/config/revive"
-import { detachedCommand, windowsArguments } from "@opencode-ai/core/util/launchDetached"
+import { detachedCommand, launchDetached, windowsArguments } from "@opencode-ai/core/util/launchDetached"
 import { Global } from "@opencode-ai/core/global"
 import { TuiLedger } from "../../src/config/tuiLedger"
 import { tmpdir } from "../fixture/fixture"
@@ -187,11 +187,17 @@ test("revive and restart contexts round-trip and reject bad input before shutdow
     tuiPid: 50,
   } as const
   expect(Revive.decodeContext(Revive.encode(full))).toEqual(full)
+  const update = { ...context, mode: "update", release: "0.3.1" } as const
+  expect(Revive.decodeContext(Revive.encode(update))).toEqual(update)
   for (const input of [
     null,
     [],
     {},
     { ...context, mode: "other" },
+    { ...context, mode: "update" },
+    { ...context, mode: "update", release: "latest" },
+    { ...context, mode: "update", release: "0.3.1; calc" },
+    { ...context, release: "0.3.1" },
     { ...context, terminal: "other" },
     { ...context, directory: "" },
     { ...context, directory: "bad\0path" },
@@ -286,6 +292,45 @@ test.skipIf(process.platform !== "win32")("native terminal restart preserves the
     shell.kill()
     await shell.exited
   }
+})
+
+test.skipIf(process.platform !== "win32")("terminal restart closes the old shell only after the launch succeeds", async () => {
+  const shell = Bun.spawn(["pwsh", "-NoProfile", "-NonInteractive", "-Command", "[Console]::ReadLine()"], {
+    stdin: "pipe",
+    stdout: "ignore",
+    stderr: "ignore",
+    windowsHide: true,
+  })
+  try {
+    const shellIdentity = TuiLedger.listProcesses().find((item) => item.pid === shell.pid)
+    if (!shellIdentity) throw new Error("test shell identity unavailable")
+    const input = { ...restart, shellPid: shell.pid, shellIdentity }
+    await expect(
+      OcConfig.restartTerminal(input, async () => {
+        throw new Error("launch rejected")
+      }),
+    ).rejects.toThrow("launch rejected")
+    expect(OcConfig.isPidAlive(shell.pid)).toBe(true)
+    await OcConfig.restartTerminal(input, async () => {
+      expect(OcConfig.isPidAlive(shell.pid)).toBe(true)
+    })
+    await shell.exited
+  } finally {
+    shell.kill()
+  }
+})
+
+test.skipIf(process.platform !== "win32")("the launch hop fails when the target exits with an error during the settle window", async () => {
+  const run = (code: number) =>
+    new Promise<number | null>((resolve) =>
+      launchDetached("pwsh", ["-NoProfile", "-NonInteractive", "-Command", `exit ${code}`], { settleMs: 1500 }).once(
+        "exit",
+        resolve,
+      ),
+    )
+  expect(await run(3)).toBe(2)
+  // A clean exit passes: wt.exe and `cmd /c start` are stubs that hand off and exit 0 right away.
+  expect(await run(0)).toBe(0)
 })
 
 const windowList = JSON.stringify([

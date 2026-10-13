@@ -14,6 +14,7 @@ import semver from "semver"
 import { InstallationChannel, InstallationVersion } from "@opencode-ai/core/installation/version"
 import { NpmConfig } from "@opencode-ai/core/npm-config"
 import { InstallationEvent } from "@opencode-ai/schema/installation-event"
+import { OcRelease } from "@opencode-ai/core/util/ocRelease"
 
 export type Method = "curl" | "npm" | "yarn" | "pnpm" | "bun" | "brew" | "scoop" | "choco" | "unknown"
 
@@ -171,40 +172,9 @@ const layer: Layer.Layer<Service, never, HttpClient.HttpClient | AppProcess.Serv
           latest: yield* result.latest(),
         }
       }),
-      method: Effect.fn("Installation.method")(function* () {
-        if (process.execPath.includes(path.join(".opencode", "bin"))) return "curl" as Method
-        if (process.execPath.includes(path.join(".local", "bin"))) return "curl" as Method
-        const exec = process.execPath.toLowerCase()
-
-        const checks: Array<{ name: Method; command: () => Effect.Effect<string> }> = [
-          { name: "npm", command: () => text(["npm", "list", "-g", "--depth=0"]) },
-          { name: "yarn", command: () => text(["yarn", "global", "list"]) },
-          { name: "pnpm", command: () => text(["pnpm", "list", "-g", "--depth=0"]) },
-          { name: "bun", command: () => text(["bun", "pm", "ls", "-g"]) },
-          { name: "brew", command: () => text(["brew", "list", "--formula", "opencode"]) },
-          { name: "scoop", command: () => text(["scoop", "list", "opencode"]) },
-          { name: "choco", command: () => text(["choco", "list", "--limit-output", "opencode"]) },
-        ]
-
-        checks.sort((a, b) => {
-          const aMatches = exec.includes(a.name)
-          const bMatches = exec.includes(b.name)
-          if (aMatches && !bMatches) return -1
-          if (!aMatches && bMatches) return 1
-          return 0
-        })
-
-        for (const check of checks) {
-          const output = yield* check.command()
-          const installedName =
-            check.name === "brew" || check.name === "choco" || check.name === "scoop" ? "opencode" : "opencode-ai"
-          if (output.includes(installedName)) {
-            return check.name
-          }
-        }
-
-        return "unknown" as Method
-      }),
+      // Custom fork: oc is never installed through upstream's channels. Detecting npm/brew/scoop here
+      // would find a stock OpenCode install and "upgrade" it to stock OpenCode. oc updates via /update.
+      method: () => Effect.succeed("unknown" as Method),
       latest: Effect.fn("Installation.latest")(function* (installMethod?: Method) {
         const detectedMethod = installMethod || (yield* result.method())
 
@@ -255,7 +225,7 @@ const layer: Layer.Layer<Service, never, HttpClient.HttpClient | AppProcess.Serv
         }
 
         const response = yield* httpOk.execute(
-          HttpClientRequest.get("https://api.github.com/repos/anomalyco/opencode/releases/latest").pipe(
+          HttpClientRequest.get(`https://api.github.com/repos/${OcRelease.REPO}/releases/latest`).pipe(
             HttpClientRequest.acceptJson,
           ),
         )

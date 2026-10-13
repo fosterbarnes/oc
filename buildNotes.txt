@@ -1,12 +1,12 @@
-v0.2.174 coastersWall
+v0.2.175 skaDutchman
 
-repository cleanup:
-SCOPE.md now records upstream features oc leaves out, plans for later, and retired features. The unused UI, session UI, and docs packages are removed, along with their publishing, translation, and stats scripts. TUI notification sounds now live in the TUI package. Developer documents moved into docs/dev, GitHub ownership and contribution metadata now identify this fork, and personal machine paths were replaced with portable examples and tool lookup.
+updates:
+oc checks its own GitHub releases at startup and offers /update to install a release and reopen the session through the existing revive pipeline. Update notices honor disabled automatic updates and skipped versions. Stock OpenCode upgrade checks are removed, and the upgrade CLI reports how to update oc.
 
-upstream fixes:
-C++ module files get syntax highlighting, Windows plugin names display correctly in /status, and remote configuration login failures explain how to sign in again. Copilot message conversion and streaming, MCP browser handling, npm module resolution under Node, file search, and PTY handling received selected upstream fixes. Provider requests now carry session and parent-session identity headers.
+sessions:
+Sessions waiting on a question or permission appear at the top of the session list with a question-mark marker. The prompt footer shows when usage-limit auto-resume will fire, and the session menu can copy the session ID. Projects sort by recent session activity and hide missing worktrees when their drive is available.
 
-launcher and revive:
-Resident server URLs support IPv6 loopback, occupied ports produce a useful error, and abandoned partial startup locks can recover. Standalone servers and old resident processes leave another server's state record alone. Revive serializes installs, restores the previous binaries if the replacement server fails to start, and includes debug output when reviving ocdebug. WezTerm revive reopens owned oc panes before closing their old panes, preserving unrelated shells and other instances.
+local models:
+Configured LM Studio, Ollama, and vLLM providers discover their installed models automatically with a bounded discovery request.
 
-Under the hood: removed workspace and test-runner references, retained historical notes in buildNotes.archive9.md, and updated fork and upstream-sync documentation. Checks passed: changed Copilot conversion/model and npm tests; launcher safety, serve-process, oc CLI/config, revive, and session LLM tests; TUI filetype and sidebar tests; and the agent-push pre-push checks. Real-model checks were not run. Remaining upstream parity work, the native upgrade release-source blocker, and lockfile workspace cleanup are recorded in buildNotes.md.
+Under the hood: added release lookup, asset selection, version validation, and release download support; updated fork documentation and CLI help snapshots; and added an optional Windows detached-launch settle interval that detects an immediate unsuccessful exit. Checks passed: core release tests; opencode local-discovery, project, revive, and CLI help tests; TUI session-list and format tests; git diff whitespace validation; and agent-push pre-push checks. No build, install, or real-model checks were run. The release update flow still needs a live check once a public release is available.

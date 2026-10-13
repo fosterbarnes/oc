@@ -1,3 +1,11 @@
+/** Local-time clock for a queued auto-resume, e.g. `resumes at 09:05`. */
+export function formatResumeAt(ms: number) {
+  const date = new Date(ms)
+  const hh = String(date.getHours()).padStart(2, "0")
+  const mm = String(date.getMinutes()).padStart(2, "0")
+  return `resumes at ${hh}:${mm}`
+}
+
 export function formatDuration(secs: number) {
   if (secs <= 0) return ""
   if (secs < 60) return `${secs}s`
