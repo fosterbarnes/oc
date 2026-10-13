@@ -5,6 +5,8 @@ export const CLAUDE_CODE_PROVIDER_ID = "claude-code"
 export const CLAUDE_CODE_SESSION_OPTION = "opencodeSessionID"
 export const CLAUDE_CODE_AGENT_OPTION = "opencodeAgent"
 export const CLAUDE_CODE_COMMAND_PERMISSION_OPTION = "opencodeCommandPermission"
+// Set when the turn's user message names its model explicitly; agent model overrides then keep it.
+export const CLAUDE_CODE_EXPLICIT_MODEL_OPTION = "opencodeExplicitModel"
 // The agent's own prompt (custom agent prompt, or the `instructionsByModel` base). The only oc
 // system text Claude Code gets; its own prompt, CLAUDE.md and AGENTS.md cover the rest.
 export const CLAUDE_CODE_AGENT_PROMPT_OPTION = "opencodeAgentPrompt"

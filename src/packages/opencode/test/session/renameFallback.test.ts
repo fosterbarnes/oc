@@ -129,6 +129,9 @@ function check(input: {
       })
       const result = yield* prompt.rename(session.id).pipe(Effect.exit)
       expect(lookups).toEqual(input.expected)
+      // Each resolved model streams once; a failed lookup never reaches the model.
+      const failedLookups = input.outcomes.slice(0, lookups.length).filter((outcome) => outcome === "lookup").length
+      expect(requests).toHaveLength(lookups.length - failedLookups)
       const success = input.outcomes.includes("success")
       expect(Exit.isSuccess(result)).toBe(success)
       if (Exit.isSuccess(result)) expect(result.value.model).toBe(input.expected.at(-1))

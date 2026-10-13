@@ -21,6 +21,9 @@ import { ChildProcess } from "effect/unstable/process"
 import { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
 import { ShellPrompt, type Parameters } from "./shell/prompt"
 import { BashArity } from "@/permission/arity"
+import { ShellJobs } from "@/background/shellJobs"
+import { notifySession, type TaskPromptOps } from "./task"
+import { renderNotice, renderStarted } from "./shellJobs"
 
 export { Parameters } from "./shell/prompt"
 
@@ -260,7 +263,11 @@ const parse = Effect.fn("ShellTool.parse")(function* (command: string, ps: boole
   return tree
 })
 
-const ask = Effect.fn("ShellTool.ask")(function* (ctx: Tool.Context, scan: Scan, input: { command: string }) {
+const ask = Effect.fn("ShellTool.ask")(function* (
+  ctx: Tool.Context,
+  scan: Scan,
+  input: { command: string; background?: boolean },
+) {
   if (scan.dirs.size > 0) {
     const directories = Array.from(scan.dirs)
     const globs = directories.map((dir) => {
@@ -275,6 +282,18 @@ const ask = Effect.fn("ShellTool.ask")(function* (ctx: Tool.Context, scan: Scan,
         command: input.command,
         directories,
         patterns: globs,
+      },
+    })
+  }
+
+  // `bgRun` is the switch `/bgRun` toggles; background runs also still need the normal `bash` approval below.
+  if (input.background) {
+    yield* ctx.ask({
+      permission: "bgRun",
+      patterns: Array.from(scan.patterns),
+      always: Array.from(scan.always),
+      metadata: {
+        command: input.command,
       },
     })
   }
@@ -344,6 +363,7 @@ export const ShellTool = Tool.define(
     const trunc = yield* Truncate.Service
     const plugin = yield* Plugin.Service
     const flags = yield* RuntimeFlags.Service
+    const jobs = yield* ShellJobs.Service
     const defaultTimeoutMs = flags.bashDefaultTimeoutMs ?? 2 * 60 * 1000
 
     const cygpath = Effect.fn("ShellTool.cygpath")(function* (shell: string, text: string) {
@@ -594,6 +614,54 @@ export const ShellTool = Tool.define(
       }
     })
 
+    // The call returns once the process runs. Live output and the exit notice go through promptOps, because
+    // this tool part is already completed by then and ctx.metadata no longer applies.
+    const background = Effect.fn("ShellTool.background")(function* (
+      input: { shell: string; command: string; cwd: string; env: NodeJS.ProcessEnv; timeout?: number },
+      ctx: Tool.Context,
+    ) {
+      const ops = ctx.extra?.promptOps
+      const info = yield* jobs.start({
+        sessionID: ctx.sessionID,
+        command: input.command,
+        spawn: cmd(input.shell, input.command, input.cwd, input.env),
+        cwd: input.cwd,
+        timeoutMs: input.timeout,
+        watch: ops
+          ? ({ info: job, output }) =>
+              ops.partMetadata({
+                sessionID: ctx.sessionID,
+                messageID: ctx.messageID,
+                callID: ctx.callID ?? "",
+                metadata: { output, background: { jobID: job.id, status: job.status } },
+              })
+          : undefined,
+        onExit: ops
+          ? (job) =>
+              Effect.promise(() => ShellJobs.outputOf(job)).pipe(
+                Effect.flatMap((output) =>
+                  notifySession(ops, {
+                    sessionID: ctx.sessionID,
+                    agent: ctx.agent,
+                    turnPermission: ctx.extra?.turnPermission,
+                    text: renderNotice(job, output),
+                  }),
+                ),
+              )
+          : undefined,
+      }).pipe(Effect.orDie)
+      return {
+        title: input.command,
+        metadata: {
+          output: "",
+          exit: null,
+          truncated: false,
+          background: { jobID: info.id, status: info.status },
+        },
+        output: renderStarted(info),
+      }
+    })
+
     return () =>
       Effect.gen(function* () {
         const cfg = yield* config.get()
@@ -627,6 +695,13 @@ export const ShellTool = Tool.define(
                   yield* ask(ctx, scan, params)
                 }),
               )
+
+              if (params.background) {
+                return yield* background(
+                  { shell, command: params.command, cwd, env: yield* shellEnv(ctx, cwd), timeout: params.timeout },
+                  ctx,
+                )
+              }
 
               return yield* run(
                 {

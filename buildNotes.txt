@@ -1,6 +1,19 @@
-v0.2.176 tolkienBurps
+v0.2.177 parlorYowza
 
-usage sidebar:
-Claude and Codex usage readings in the sidebar now update while a turn is still running instead of waiting for the turn to end. An open Usage menu refreshes with the new readings without reopening it.
+sessions:
+Alt+Enter on a session screen queues your prompt; queued prompts send in order after each turn, survive restarts paused until resumed, and can be edited or cancelled in the queue manager. A due auto-resume waits while queued prompts exist.
+`/btw <question>` asks a quick side question about the session without adding it to the conversation (API providers only for now).
+Background shell commands are built in: agents can run `bash` in the background, check jobs with `bgStatus`, stop them with `bgKill`, and the session is told when a job ends. The separate bgShell plugin is retired.
 
-Under the hood: added provider usage observations from live streams (Claude rate-limit events, Codex WebSocket quota) with a shared schema, core cache, and event-manifest and generated client/SDK updates; added TUI usageLive and usageRefresh; the fractional-usage pane check now opens the Usage dialog by clicking the sidebar block. Checks passed: opencode usage-observations, codexQuota, openai-ws, accountPool, cliEventsStream, fakeModel; TUI usageLive, usageRefresh, usageFreshness, openSidebar; schema event-manifest; the Claude fractional usage pane check. No build or install was run.
+configuration:
+`/reload` reloads config, agents, skills, providers, MCP and plugins without rebuilding oc.
+
+agents and tools:
+Sub-agent calls can pick a model (`provider/model#variant`) for one run, shown in the TUI task row.
+Slightly malformed tool arguments from models are repaired automatically instead of failing.
+Automatic session names use one code path; no visible change.
+
+web search:
+A web search that fails inside Claude Code now shows a "Web search failed" line with the reason under the search query.
+
+Under the hood: added persisted session_queue table with claim/pause locking and restart reconciliation, SessionWork process-wide idle gate for reload, input repair at tool resolve, one title path under SessionWork, safe process-tree kill (win32 no longer uses taskkill), and 120 s no-history generate path; regenerated legacy JS SDK. Checks passed: core session-work and processTree (10 pass) and migration --check; opencode 209 pass across 18 new and edited files plus 115 pass on backgroundShell, queue, and shell reruns; TUI 23 pass; typecheck clean in core, opencode, and tui; keybindDocs check; cliEventsStream 14 pass. Pane checks not run. No build or install.

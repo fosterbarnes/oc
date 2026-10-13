@@ -6,7 +6,7 @@ oc is a personal, Windows-first OpenCode: native `oc` launcher, extra model prov
 
 Use this file to agree on what oc *is*. Statuses describe current state. They do not authorize implementation work.
 
-Last reviewed: 2026-10-12 (v0.2.167). The 0.2 lock checklist (verify / finish / defer per row) lives in `.opencode/plans/lockCheck.md`.
+Last reviewed: 2026-10-13 (v0.2.176). The 0.2 lock checklist (verify / finish / defer per row) lives in `.opencode/plans/lockCheck.md`.
 
 ---
 
@@ -27,11 +27,11 @@ Counts below are for **active** rows only. Retired work is listed separately and
 | Level | Count |
 |---|---:|
 | ~done~ | 16 |
-| high | 40 |
-| medium | 20 |
+| high | 46 |
+| medium | 19 |
 | low | 1 |
 | CRITICAL | 0 |
-| **Total** | **77** |
+| **Total** | **82** |
 
 ---
 
@@ -39,7 +39,7 @@ Counts below are for **active** rows only. Retired work is listed separately and
 
 - Names describe what you can *use*, not where the code lives.
 - Related backend plumbing is folded into the user-facing feature it supports.
-- Companion pieces that live next to this repo (`octray`, Everything Search, SuperPlan agents, `bgShell`) are included when they are part of daily OC use.
+- Companion pieces that live next to this repo (`octray`, Everything Search, SuperPlan agents) are included when they are part of daily OC use.
 - Status is conservative: tests and source are not enough for **~done~** when a rebuild, login, or interactive check is still part of the feature.
 - `SCOPE.md` lists what oc leaves out. Hosted docs at opencode.ai describe upstream, not oc.
 
@@ -74,6 +74,7 @@ Get into a project quickly, keep a local server running, and control it from the
 |---|---|---|---|
 | Native `oc` launcher | ~done~ | `oc` is OpenCode itself, with settings in `~/.config/opencode/oc.json`. Launch, previous session (`occ`), diagnostics, and `oc config get/set` all work. The `occ` desktop shortcut runs `occ.exe` directly (no PowerShell profile), and `occ` looks up the last session while the server starts. | None realistic. |
 | Run after turn and revive | high | **Revive** restarts this oc instance and its terminal window. When `oc`/`occ` launched the TUI, the TUI closes and that window shows step-by-step progress; then the window closes and a fresh terminal process (WezTerm, Windows Terminal, or a new console) runs `oc` or `occ` (`revive.launcher`, default `occ` = the revived session). The first `/revive` asks where oc's source comes from: use an existing source folder, download `github.com/fosterbarnes/oc` once to a chosen folder (default in oc's data folder; the user's copy to edit, never pulled again), or just restart. The answer is saved as `revive.build` (`false` = restart only). With a build configured (`revive.build: { source, debug }`), `/revive` runs `bun install` and `packages/opencode/script/build.ts --single` in the source folder, adding `--with-debug` and installing `ocdebug.exe` only when `debug` is true (output streams live; a failed build waits for a key and reopens the old oc), and swaps the new binaries (`oc.exe`, native `opencode.exe`) into the install dir by renaming running files aside, relinking `occ.exe`, with rollback. `revive.path` still overrides `/revive-no-install`. TUIs not launched through `oc`/`occ` use a hidden helper with the same pipeline. Progress and errors go to `revive.log`. The revive mark (`[oc revived at ...]`) is written by the old build; the new build restamps its versions while it is still the newest message, so the agent sees the build that actually came back. Shutdown closes only terminals and processes recorded for this instance; `ocdebug` and unrelated windows stay open. In a multi-tab WezTerm window, `/revive` opens a new window with this instance's oc tabs in order (each back on its session), then closes only those panes in the old window; shells, ocdebug, native, and other instances keep running there. **`run_after_turn`** queues an exe or `.ps1` after the agent turn (`/agent-revive` uses it), including Claude Code sessions when `run_after_turn` is listed in `proxyTools`. Permission: built-in default allows; global config can deny except revive scripts. | Live check hard revive in WezTerm and Windows Terminal from `oc` and `occ`, including a failing build and a real install. Claude Code `/agent-revive-no-install`. WezTerm tab order is assumed from `wezterm cli list`; an owned pane in a split tab moves on its own. |
+| Reload project config | high | `/reload` (next to Revive) calls `POST /instance/reload` and reloads the project's config, agents, commands, skills, providers, MCP servers, and server plugins without rebuilding. Refused while session work runs in that project (other projects do not block it); while it runs, new session requests for that project get a busy (409) refusal instead of waiting; invalid config keeps the old state and shows the error. Does not reload plugin module code, process env, launcher settings, or TUI plugins (use `/revive`). | Live check pending. |
 | Update from oc releases | high | Each TUI start checks `fosterbarnes/oc` GitHub releases once and shows a notice when a newer oc exists (`autoupdate: false` turns it off; a skipped version stays quiet). `/update` confirms, then runs the `/revive` install pipeline with the downloaded release instead of a source build: download and unpack before anything stops, stop oc, swap `oc.exe`, `opencode.exe` (and `ocdebug.exe` when installed) with rollback, reopen the terminal. Upstream package-manager upgrades are disabled (`Installation.method` is always unknown); `opencode upgrade` only reports. | No public release exists yet to check against; live check after the first one: notice, skip, `/update` from `oc` and native `opencode`. |
 | Separate home vs OC directory | high | Bare `oc` and relative project names can use two different folders. Absolute paths stay absolute. | Latest palette settings may still need a rebuild/restart to show in the running app. |
 | New-session project picker | high | Tray/palette "New session" starts the intro, then the real OpenCode project picker, then attaches to the running server. | Confirm the installed `oc.exe` shows the intended picker. |
@@ -105,6 +106,8 @@ Move between projects, keep a session's model, and mark work without deleting it
 | Questions survive closing the window | high | Pending questions reload when you open the session again (including via `occ`). If the live request is gone, the UI rebuilds from the saved tool call and your answer continues the agent as a normal follow-up. | Live check after close via `occ` and the session list; repeat after server restart (restored-question path). |
 | Work copies (`/work`, `/done`) | removed | Removed before 0.3.0; to be redesigned from scratch. | None. |
 | Context limit: compact or hand off | high | Palette **Context limit** sets a token threshold globally or per provider, with action Compact, Handoff, or Off. Handoff starts a follow-up session with a summary and the original turn's permissions; **Hand off session** does it on demand. Saving the setting does not interrupt running agents. | Live Claude handoff proven; live Cursor handoff not recorded. |
+| `/btw` side questions | high | `/btw <question>` (or `/btw` alone for an input box) asks the current model one side question using the session's history; the answer shows in a dialog and is not added to the conversation or prompt history. Works while the session is busy; Esc cancels. Text only, 120 s limit. API providers only: Claude Code and Cursor show `/btw is not available on <provider> yet`. Endpoint `POST /session/:sessionID/generate`. | Live check pending. |
+| Queue prompts while busy | high | Alt+Enter in a session queues the prompt (Home keeps newline; plain Enter still steers the running turn). Queued prompts are stored in the database (`session_queue`) and send in order after each successful turn. Errors and a confirmed Esc interrupt pause the queue; after a server restart or `/revive` the queue is paused until Resume. The prompt footer shows the count and pause reason; the queue manager (keybind `session_queued_prompts`, unbound by default; Ctrl+D cancels an entry) edits, cancels, and resumes. A due auto-resume waits while the queue has entries. | Two-process edge cases; live check pending. |
 | Auto-resume after Claude usage reset | high | When every Claude account hits its usage limit, the session queues a resume that fires after the reset ("Usage limit reset. Continue where you left off."). Busy sessions and failed fires retry with backoff; it stops after 5 consecutive auto-resumes or when you send a message yourself. Off by default; turn on with `PUT session/resume/state` (optional `prompt`), inspect with `GET`, cancel an entry with `POST session/resume/cancel`. | Toggle in the Session commands ("Enable/Disable auto-resume after usage reset"); installed live check pending (limit event, wait for reset, session continues on its own). |
 
 ### Automatic oc session names
@@ -118,7 +121,7 @@ input do not trigger naming.
 The attempt is saved once per session. Reopening, later prompts, and naming failures
 do not repeat it; `/rename` remains available for another attempt. Explicit bootstrap
 titles and manual edits made before or during naming are preserved. Forks do not
-inherit the automatic naming request. Installed launcher acceptance remains a user check.
+inherit the automatic naming request. Stock OpenCode titles and oc names share one generator (`title()` in `session/prompt.ts`), and an automatic title never overwrites a manual rename made meanwhile. Installed launcher acceptance remains a user check.
 
 ---
 
@@ -129,7 +132,7 @@ One sidebar for usage, files, scripts, search, and status.
 | Feature | Level | What it does | What's left |
 |---|---|---|---|
 | Integrated workspace sidebar | high | Native sidebar: usage, files, git changes, scripts, context, MCP, LSP, todos, footer. Position is left, right, top, or bottom (`sidebar_position`). Top/bottom size to content, up to half the terminal height (minimum 8 rows), and scroll. Narrow left/right overlay closes on backdrop click. Model and reasoning rows follow the current session (same as the prompt footer). Usage refreshes per provider after you use it and when you return; stale or cached numbers are dimmed with age on hover. | Two sessions on different models and reasoning: switch and confirm rows match the footer. Live Claude usage refresh and dim when stale. |
-| Plugins in the sidebar | low | Collapsible "Plugins" section under MCP: every configured server and TUI plugin as one row with version, `server`/`tui` badges, and load errors; built-in plugins on one muted line. Opens itself when a plugin failed. Server data comes from `GET /plugin` (`plugin.status`). | Live check with the current `opencode.jsonc` and `tui.json` plugins; confirm `weztermZoom` and bgShell merge correctly. |
+| Plugins in the sidebar | low | Collapsible "Plugins" section under MCP: every configured server and TUI plugin as one row with version, `server`/`tui` badges, and load errors; built-in plugins on one muted line. Opens itself when a plugin failed. Server data comes from `GET /plugin` (`plugin.status`). | Live check with the current `opencode.jsonc` and `tui.json` plugins; confirm `weztermZoom` merges correctly. |
 | Click a path to open it | high | Tool paths, edited files, and changed-file rows open in an editor chosen by extension via `openEditedWith` (a string or a map with `default` and per-extension keys). | Live click on a `.md` and a `.ts` path. |
 | Sub-agents in the sidebar | high | Lists the current session's sub-agents with name, short title, and live status; click opens the child session. Shows running agents and recent finishes that drop off after a short time. Hidden when empty. | Live SuperPlan conductor or `task_batch`; rows update and click through. |
 | Sub-agents in their own terminal tabs | high | `subagent_tabs.click: "tab"` opens a clicked sub-agent in a new WezTerm or Windows Terminal tab; `subagent_tabs.auto_open` opens each new one automatically; `session_child_tabs` opens all running ones. Palette **Subagent tabs** (`/subagentTabs`) switches these live. Needs the resident server; native `opencode` windows stay inline. | Installed acceptance in WezTerm and Windows Terminal. The server password is visible in the tab's process arguments; tabs disconnect if the server exits. |
@@ -162,11 +165,13 @@ Drop in Markdown agents, share prompts, and run SuperPlan / SuperGo / Debug as a
 | Tab order and friendly names | medium | Custom agents can have a Tab cycle order and a readable label. | Installed-build check is incomplete. |
 | Shared prompt files | medium | An agent can pull another file with `{file:...}` (relative, home, or absolute). | Installed-runtime freshness is uncertain. |
 | Cheap vs hard delegated models | medium | Primary agent stays on the selected model. Routine child work can go cheaper; hard work can go to a high-reasoning agent. | A live delegated request is not recorded. |
+| Task model override | high | `task` accepts optional `model` (`provider/model` or `provider/model#variant`), validated before any permission prompt or child session, for that call only. Agent permissions and prompt are unchanged; no parent effort is inherited; `task_id` must name a same-agent direct child. On Claude, an explicit model beats an agent's `forceModel` and `defaultSubagentModel` for that turn. The task row shows `provider/model#variant`. | Live check pending. |
 | SuperPlan (plan + implement) | high | Paired planning and execution. Plans are sized (`size`/`phases` frontmatter) and split into phases with file allowlists and done-when checks. `plan_execute` offers this session, a new session, phase sessions (`plan_next_phase` hands off), or a conductor that sends each phase to a `general-*` sub-agent. Go stops only on red flags; `plan_closeout` archives finished plans. Planners are read/search/plan-file only. Execution uses the exact plan file that was written, not a reconstructed name. | Full user-feature workflow is still separate from the probes that passed. |
 | Archive finished plans | ~done~ | Successful temp plans move to `plans/archive/`; failed or partial plans stay. | None realistic. |
 | Default child agent | medium | `default_subagent` is used when a task does not name a child type. | Installed command and live request still need confirmation. |
 | SuperGo, Debug, and Luna routing | high | Config `agents/` and `prompts/` set: Go, Debug family, SuperPlan aliases. Daily Luna sessions and Luna agents use `openai/gpt-6-luna` (live-checked). Luna stays off Max / `xhigh` unless asked. | Config-level, not fork source. Fresh restart is required after prompt edits. |
 | Plan-only command permissions | high | A command can carry its own permission rules for that turn only (for example `/spit` may write Markdown plans in the plans folder and nothing else). Rules flow into subtasks, compaction, and tools, and do not carry into the next ordinary turn. Claude Code restricted turns use oc's proxy tools. | Subtask and compaction carryover traced in code, not exercised live. |
+| Tool input repair | high | Builtin, plugin, and MCP tool arguments get deterministic shape repair before validation and execution (`tool/inputRepair.ts`). Advertised schemas are unchanged. Extra keys are dropped only when the original schema closes the object. Permission checks run on repaired arguments. | Code-mode child calls are not covered. Live check pending. |
 | Time tool | ~done~ | `time` returns the local date, time, and time zone offset for very few tokens; the clock is kept out of the system prompt so caching holds. Claude Code sees it as a proxy tool when `time` is in `proxyTools`. | None realistic. |
 | Hide stock Plan agent | ~done~ | Built-in Plan is disabled in config (`disable`). Hidden is a different switch. | None realistic. |
 
@@ -187,7 +192,7 @@ Timestamps, copy, keys, diffs, plugins, and the terminal itself. WezTerm is the 
 | Images in prompts | high | In WezTerm, Ctrl+V attaches a copied image file (ShareX "Copy file", Explorer) or raw image data. Attached images are saved to `%LOCALAPPDATA%\oc\images` (`attachment.image.save_dir`), or the original file is used, and the agent gets the path; models without vision get the path instead of an error. Palette **Clear saved images** empties the folder. | Uncommitted (0.2.166). Live paste in WezTerm. Saved images stay until cleared; deleting or reverting a session leaves them. |
 | Diff hover colors | ~done~ | Neutral diff regions share one hover background; add/remove colors stay. | None realistic. |
 | Crow session lock | medium | Each Crow tab stays on one OpenCode session via `CROW_SESSION_HANDLE`. Targeted commands only run on that handle. Optional `CROW_SESSION_ROUTE_URL` reports session changes. | Live Crow integration is limited. |
-| Parallel bgShell jobs | medium | Independent work starts with concurrent `bgRun`; short commands stay as bash. Palette **bgRun tool** (`/bgRun`) hides `bgRun`, `bgStatus`, and `bgKill` from agents when off. | Sibling `bgShell` plugin, not this git checkout. Agent `opencode-pty` removed. TUI `/pty` is human-only. |
+| Built-in background shell | high | `bash` takes `background: true`: the job starts, returns a job id at once, logs stdout/stderr under `shellJobs/<session>/<job>` in oc's state folder, and the TUI shows its status and live tail. `bgStatus` lists jobs with tails; `bgKill` stops a job's process tree (identity-checked, never `taskkill /T`). When a job ends, a notice is added to the session and wakes it (busy or idle). Server exit kills jobs and keeps logs; session delete removes logs; a restart marks running jobs interrupted; logs older than 7 days are removed. `/bgRun` still toggles `bgRun`/`bgStatus`/`bgKill`; background runs now ask for approval by default (`/bgRun on` allows). Claude Code: opt in with `proxyOpencodeTools: ["bash", "bgStatus", "bgKill"]`. | Live check pending. |
 
 ---
 
@@ -243,7 +248,7 @@ in [SCOPE.md](./SCOPE.md).
 - This checkout does not share a Git merge base with upstream. "Custom" is judged from notes, `Custom fork:` markers, isolated packages (`cursor-runtime`), `.scripts`, and `~/.config/opencode` agents.
 - Several "high" rows are source-complete and waiting on a rebuild (`install` stops the running app).
 - Small wording, generated-client, and selector fixes are support for the features above, not their own product rows.
-- `octray`, Everything Search, and `bgShell` are sibling checkouts. They still shape daily OC use.
+- `octray` and Everything Search are sibling checkouts. They still shape daily OC use.
 
 ---
 

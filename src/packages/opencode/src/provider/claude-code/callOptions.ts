@@ -8,6 +8,7 @@ import {
   CLAUDE_CODE_AGENT_OPTION,
   CLAUDE_CODE_AGENT_PROMPT_OPTION,
   CLAUDE_CODE_COMMAND_PERMISSION_OPTION,
+  CLAUDE_CODE_EXPLICIT_MODEL_OPTION,
   CLAUDE_CODE_PROVIDER_ID,
   CLAUDE_CODE_SESSION_OPTION,
 } from "./shared.js"
@@ -16,6 +17,10 @@ type ProviderOptions = LanguageModelV3CallOptions["providerOptions"]
 
 export function hasCommandPermission(providerOptions: ProviderOptions, providerKey: string) {
   return hostOption(providerOptions, providerKey, CLAUDE_CODE_COMMAND_PERMISSION_OPTION) === "true"
+}
+
+export function hasExplicitModel(providerOptions: ProviderOptions, providerKey: string) {
+  return hostOption(providerOptions, providerKey, CLAUDE_CODE_EXPLICIT_MODEL_OPTION) === "true"
 }
 
 // oc nests call options under the provider key; account providers use their own key.

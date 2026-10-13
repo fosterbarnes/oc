@@ -102,6 +102,8 @@ import type {
   GlobalUpgradeResponses,
   InstanceDisposeErrors,
   InstanceDisposeResponses,
+  InstanceReloadErrors,
+  InstanceReloadResponses,
   LocationRef,
   LspStatusErrors,
   LspStatusResponses,
@@ -213,6 +215,8 @@ import type {
   SessionDiffResponses,
   SessionForkErrors,
   SessionForkResponses,
+  SessionGenerateErrors,
+  SessionGenerateResponses,
   SessionGetErrors,
   SessionGetResponses,
   SessionHandoffErrors,
@@ -229,6 +233,10 @@ import type {
   SessionPromptAsyncResponses,
   SessionPromptErrors,
   SessionPromptResponses,
+  SessionQueueGetErrors,
+  SessionQueueGetResponses,
+  SessionQueueUpdateErrors,
+  SessionQueueUpdateResponses,
   SessionRenameErrors,
   SessionRenameResponses,
   SessionResumeCancelErrors,
@@ -2108,6 +2116,36 @@ export class Instance extends HeyApiClient {
       ...params,
     })
   }
+
+  /**
+   * Reload instance
+   *
+   * Reload the current project's config, agents, commands, skills, providers, MCP servers, and server plugins. Refused with a conflict while session work is running.
+   */
+  public reload<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<InstanceReloadResponses, InstanceReloadErrors, ThrowOnError>({
+      url: "/instance/reload",
+      ...options,
+      ...params,
+    })
+  }
 }
 
 export class Path extends HeyApiClient {
@@ -3733,6 +3771,102 @@ export class Resume extends HeyApiClient {
   }
 }
 
+export class Queue extends HeyApiClient {
+  /**
+   * Get queued prompts
+   *
+   * List the prompts queued while the session was busy, oldest first, and why the queue is paused. Queued prompts are kept in the database and survive restarts; a restart pauses them until resumed.
+   */
+  public get<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "sessionID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<SessionQueueGetResponses, SessionQueueGetErrors, ThrowOnError>({
+      url: "/session/{sessionID}/queue",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Change queued prompts
+   *
+   * Add, edit, or cancel a queued prompt, or resume a paused queue. Only pending prompts can be edited or cancelled; a prompt being sent returns a conflict.
+   */
+  public update<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+      directory?: string
+      workspace?: string
+      body?:
+        | {
+            type: "add"
+            id?: string
+            agent?: string
+            model?: {
+              providerID: string
+              modelID: string
+            }
+            variant?: string
+            parts: Array<TextPartInput | FilePartInput | AgentPartInput>
+          }
+        | {
+            type: "edit"
+            id: string
+            text: string
+          }
+        | {
+            type: "cancel"
+            id: string
+          }
+        | {
+            type: "resume"
+          }
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "sessionID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { key: "body", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<SessionQueueUpdateResponses, SessionQueueUpdateErrors, ThrowOnError>({
+      url: "/session/{sessionID}/queue",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+}
+
 export class ClaudeAccount extends HeyApiClient {
   /**
    * Get Claude accounts
@@ -4675,6 +4809,54 @@ export class Session2 extends HeyApiClient {
   }
 
   /**
+   * Generate side answer
+   *
+   * Answer a side question from the session's context with one model call, without adding messages, marks, or resume state to the session.
+   */
+  public generate<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+      directory?: string
+      workspace?: string
+      prompt?: string
+      model?: {
+        providerID: string
+        modelID: string
+      }
+      agent?: string
+      variant?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "sessionID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "body", key: "prompt" },
+            { in: "body", key: "model" },
+            { in: "body", key: "agent" },
+            { in: "body", key: "variant" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<SessionGenerateResponses, SessionGenerateErrors, ThrowOnError>({
+      url: "/session/{sessionID}/generate",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
    * Send command
    *
    * Send a new command to a session for execution by the AI assistant.
@@ -4858,6 +5040,11 @@ export class Session2 extends HeyApiClient {
   private _resume?: Resume
   get resume(): Resume {
     return (this._resume ??= new Resume({ client: this.client }))
+  }
+
+  private _queue?: Queue
+  get queue(): Queue {
+    return (this._queue ??= new Queue({ client: this.client }))
   }
 
   private _claudeAccount?: ClaudeAccount

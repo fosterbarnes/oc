@@ -1470,6 +1470,23 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
       },
       ...reviveCommands(toast),
       {
+        name: "oc.reload",
+        title: "Reload oc config",
+        category: "System",
+        slashName: "reload",
+        run: async () => {
+          const result = await sdk.client.instance.reload({ workspace: project.workspace.current() })
+          if (result.error) {
+            const detail = cliErrorMessage(result.error) ??
+              ("message" in result.error ? result.error.message : JSON.stringify(result.error))
+            return toast.error(new Error(`Reload failed: ${detail}`))
+          }
+          const refreshed = await sync.bootstrap({ fatal: false })
+          if (!refreshed) return toast.error(new Error("Config reloaded, but the TUI failed to refresh its state"))
+          toast.show({ message: "Reloaded oc config", variant: "success" })
+        },
+      },
+      {
         name: "session.list",
         title: "Switch session",
         category: "Session",

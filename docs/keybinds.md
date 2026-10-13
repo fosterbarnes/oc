@@ -132,7 +132,6 @@ Bold marks keys where the oc layout differs from opencode. `-` means unbound.
 | Interrupt current session | `escape` | `escape` |
 | Background synchronous subagents | **`ctrl+shift+b`** | `ctrl+b` |
 | Compact the session | `ctrl+x c` | `ctrl+x c` |
-| Manage queued prompts | `ctrl+x q` | `ctrl+x q` |
 | Go to first child session | **`ctrl+b`, `ctrl+x down`** | `ctrl+x down` |
 | Go to next child session | `right` | `right` |
 | Go to previous child session | `left` | `left` |
@@ -153,6 +152,12 @@ Bold marks keys where the oc layout differs from opencode. `-` means unbound.
 | Action | oc | opencode |
 |---|---|---|
 | Delete stash entry | **-** | `ctrl+d` |
+
+### Queue
+
+| Action | oc | opencode |
+|---|---|---|
+| Cancel queued prompt | `ctrl+d` | `ctrl+d` |
 
 ### Model
 
@@ -203,6 +208,7 @@ Bold marks keys where the oc layout differs from opencode. `-` means unbound.
 | Action | oc | opencode |
 |---|---|---|
 | Send prompt and stay on Home | `ctrl+return` | `ctrl+return` |
+| Queue prompt while the session is busy | `alt+return` | `alt+return` |
 | Move to previous autocomplete item | `up`, `ctrl+p` | `up`, `ctrl+p` |
 | Move to next autocomplete item | `down`, `ctrl+n` | `down`, `ctrl+n` |
 | Hide autocomplete | `escape` | `escape` |

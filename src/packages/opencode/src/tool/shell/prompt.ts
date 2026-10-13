@@ -15,12 +15,26 @@ export type Limits = {
 export function parameterSchema() {
   return Schema.Struct({
     command: Schema.String.annotate({ description: "The command to execute" }),
-    timeout: Schema.optional(PositiveInt).annotate({ description: "Optional timeout in milliseconds" }),
+    timeout: Schema.optional(PositiveInt).annotate({
+      description:
+        "Optional timeout in milliseconds. A background command is stopped when it expires; omit for no limit.",
+    }),
     workdir: Schema.optional(Schema.String).annotate({
       description: `The working directory to run the command in. Defaults to the current directory. Use this instead of 'cd' commands.`,
     }),
+    background: Schema.optional(Schema.Boolean).annotate({
+      description:
+        "Start the command in the background and return once it is running. Output goes to log files: read them with bgStatus and stop the job with bgKill. You are notified when it exits.",
+    }),
   })
 }
+
+const BACKGROUND_GUIDANCE = [
+  "# Background commands",
+  "- Set `background: true` for long, watch, build, or test commands whose output you do not need now. The call returns once the process starts, with a job id and log paths.",
+  "- Read a job with `bgStatus` and stop it with `bgKill` when those tools are available. You are woken automatically when a background job exits.",
+  "- Do not sleep or poll for background completion.",
+].join("\n")
 
 export const Parameters = parameterSchema()
 export type Parameters = Schema.Schema.Type<typeof Parameters>
@@ -279,7 +293,7 @@ export function render(name: string, platform: NodeJS.Platform, limits: Limits, 
       shell: name,
       tmp: Global.Path.tmp,
       workdirSection: selected.workdirSection,
-      commandSection: selected.commandSection,
+      commandSection: selected.commandSection + "\n\n" + BACKGROUND_GUIDANCE,
       gitCommands: selected.gitCommands,
       toolName: ShellID.ToolID,
       gitCommandRestriction: selected.gitCommandRestriction,

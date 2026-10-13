@@ -25,6 +25,7 @@ import { pollWithTimeout, testEffect } from "../lib/effect"
 import { ProviderV2 } from "@opencode-ai/core/provider"
 import { ModelV2 } from "@opencode-ai/core/model"
 import { Permission } from "../../src/permission"
+import { Provider } from "../../src/provider/provider"
 import { SessionCompleteTool } from "../../src/tool/sessionComplete"
 import { SessionFailedTool } from "../../src/tool/sessionFailed"
 
@@ -37,6 +38,44 @@ const ref = {
   modelID: ModelV2.ID.make("test-model"),
 }
 
+// A `test` provider with one enabled variant, one disabled variant, and a model ID containing a slash.
+const modelConfig = {
+  provider: {
+    test: {
+      name: "Test",
+      id: "test",
+      env: [],
+      npm: "@ai-sdk/openai-compatible",
+      models: {
+        "test-model": {
+          id: "test-model",
+          name: "Test Model",
+          attachment: false,
+          reasoning: false,
+          temperature: false,
+          tool_call: true,
+          release_date: "2025-01-01",
+          limit: { context: 100_000, output: 10_000 },
+          cost: { input: 0, output: 0 },
+          variants: { high: {}, low: { disabled: true } },
+        },
+        "vendor/model": {
+          id: "vendor/model",
+          name: "Vendor Model",
+          attachment: false,
+          reasoning: false,
+          temperature: false,
+          tool_call: true,
+          release_date: "2025-01-01",
+          limit: { context: 100_000, output: 10_000 },
+          cost: { input: 0, output: 0 },
+        },
+      },
+      options: { apiKey: "test-key", baseURL: "http://127.0.0.1:9" },
+    },
+  },
+}
+
 const layer = (flags: Partial<RuntimeFlags.Info> = {}) =>
   LayerNode.compile(
     LayerNode.group([
@@ -46,6 +85,7 @@ const layer = (flags: Partial<RuntimeFlags.Info> = {}) =>
       Config.node,
       CrossSpawnSpawner.node,
       Permission.node,
+      Provider.node,
       Session.node,
       SessionProjector.node,
       SessionRunState.node,
@@ -100,8 +140,16 @@ const seed = Effect.fn("TaskToolTest.seed")(function* (title = "Pinned") {
   return { chat, assistant }
 })
 
+// Notice and live-output ops. reply() echoes the prompt's messageID, so a notice never reaches loop here.
+const unusedNoticeOps = {
+  loop: () => Effect.die("loop not stubbed"),
+  available: () => Effect.void,
+  cancellation: () => Effect.succeed(0),
+  partMetadata: () => Effect.void,
+}
+
 function stubOps(opts?: {
-  onPrompt?: (input: SessionPrompt.PromptInput) => void
+  onPrompt?: (input: SessionPrompt.TurnInput) => void
   text?: string
   error?: NonNullable<SessionV1.Assistant["error"]>
   toolError?: string
@@ -114,6 +162,7 @@ function stubOps(opts?: {
         opts?.onPrompt?.(input)
         return reply(input, opts?.text ?? "done", opts?.error, opts?.toolError)
       }),
+    ...unusedNoticeOps,
   }
 }
 
@@ -436,7 +485,7 @@ describe("tool.task", () => {
     () =>
       Effect.gen(function* () {
         const { chat, assistant } = yield* seed()
-        let seen: SessionPrompt.PromptInput | undefined
+        let seen: SessionPrompt.TurnInput | undefined
         const tool = yield* TaskTool
         const def = yield* tool.init()
 
@@ -461,6 +510,7 @@ describe("tool.task", () => {
           providerID: ProviderV2.ID.make("test"),
           modelID: ModelV2.ID.make("agent-model"),
         })
+        expect(seen?.explicitModel).toBe(false)
       }),
     { config: { default_subagent: "general", agent: { general: { model: "test/agent-model" } } } },
   )
@@ -566,7 +616,7 @@ describe("tool.task", () => {
     Effect.gen(function* () {
       const sessions = yield* Session.Service
       const { chat, assistant } = yield* seed()
-      const child = yield* sessions.create({ parentID: chat.id, title: "Existing child" })
+      const child = yield* sessions.create({ parentID: chat.id, title: "Existing child", agent: "general" })
       const tool = yield* TaskTool
       const def = yield* tool.init()
       let seen: SessionPrompt.PromptInput | undefined
@@ -599,6 +649,189 @@ describe("tool.task", () => {
       expect(seen?.sessionID).toBe(child.id)
       expect(seen?.variant).toBe("xhigh")
     }),
+  )
+
+  it.instance(
+    "an explicit model replaces the agent model and drops the parent effort",
+    () =>
+      Effect.gen(function* () {
+        const sessions = yield* Session.Service
+        const { chat, assistant } = yield* seed()
+        let seen: SessionPrompt.TurnInput | undefined
+        const metadata: Record<string, unknown>[] = []
+        const def = yield* (yield* TaskTool).init()
+
+        const result = yield* def.execute(
+          { description: "inspect bug", prompt: "look", subagent_type: "general", model: "test/vendor/model" },
+          {
+            sessionID: chat.id,
+            messageID: assistant.id,
+            agent: "build",
+            abort: new AbortController().signal,
+            extra: { promptOps: stubOps({ onPrompt: (input) => (seen = input) }) },
+            messages: [],
+            metadata: (input) => Effect.sync(() => metadata.push(input.metadata ?? {})),
+            ask: () => Effect.void,
+          },
+        )
+
+        expect(seen?.model).toEqual({ providerID: ProviderV2.ID.make("test"), modelID: ModelV2.ID.make("vendor/model") })
+        expect(seen?.variant).toBeUndefined()
+        expect(seen?.agent).toBe("general")
+        expect(seen?.explicitModel).toBe(true)
+        expect(result.metadata.model).toEqual({
+          providerID: ProviderV2.ID.make("test"),
+          modelID: ModelV2.ID.make("vendor/model"),
+        })
+        expect(result.metadata.variant).toBeUndefined()
+        expect(metadata[0]?.model).toEqual({ providerID: "test", modelID: "vendor/model" })
+        expect((yield* sessions.get(result.metadata.sessionId)).agent).toBe("general")
+      }),
+    { config: modelConfig },
+  )
+
+  it.instance(
+    "an explicit #variant is passed to the child turn",
+    () =>
+      Effect.gen(function* () {
+        const { chat, assistant } = yield* seed()
+        let seen: SessionPrompt.PromptInput | undefined
+        const def = yield* (yield* TaskTool).init()
+
+        const result = yield* def.execute(
+          { description: "inspect bug", prompt: "look", subagent_type: "general", model: "test/test-model#high" },
+          {
+            sessionID: chat.id,
+            messageID: assistant.id,
+            agent: "build",
+            abort: new AbortController().signal,
+            extra: { promptOps: stubOps({ onPrompt: (input) => (seen = input) }) },
+            messages: [],
+            metadata: () => Effect.void,
+            ask: () => Effect.void,
+          },
+        )
+
+        expect(seen?.model?.modelID).toBe(ModelV2.ID.make("test-model"))
+        expect(seen?.variant).toBe("high")
+        expect(result.metadata.variant).toBe("high")
+      }),
+    { config: modelConfig },
+  )
+
+  it.instance(
+    "invalid, disabled, or unknown models fail before any child session is created",
+    () =>
+      Effect.gen(function* () {
+        const sessions = yield* Session.Service
+        const { chat, assistant } = yield* seed()
+        const def = yield* (yield* TaskTool).init()
+        const promptOps = stubOps()
+
+        for (const model of [
+          "test/missing",
+          "test-model",
+          "test/",
+          "/test-model",
+          "test/test-model#",
+          "test/test-model#high#extra",
+          "test/test-model#turbo",
+          "test/test-model#low",
+        ]) {
+          const exit = yield* Effect.exit(
+            def.execute(
+              { description: "inspect bug", prompt: "look", subagent_type: "general", model },
+              {
+                sessionID: chat.id,
+                messageID: assistant.id,
+                agent: "build",
+                abort: new AbortController().signal,
+                extra: { promptOps },
+                messages: [],
+                metadata: () => Effect.void,
+                ask: () => Effect.void,
+              },
+            ),
+          )
+          expect(Exit.isFailure(exit), model).toBe(true)
+        }
+
+        expect(yield* sessions.children(chat.id)).toHaveLength(0)
+      }),
+    { config: modelConfig },
+  )
+
+  it.instance(
+    "a denied task with an explicit model creates no child and keeps the agent as the permission subject",
+    () =>
+      Effect.gen(function* () {
+        const sessions = yield* Session.Service
+        const { chat, assistant } = yield* seed()
+        const def = yield* (yield* TaskTool).init()
+        const asked: unknown[] = []
+        let prompted = false
+
+        const exit = yield* Effect.exit(
+          def.execute(
+            { description: "inspect bug", prompt: "look", subagent_type: "general", model: "test/vendor/model" },
+            {
+              sessionID: chat.id,
+              messageID: assistant.id,
+              agent: "build",
+              abort: new AbortController().signal,
+              extra: { promptOps: stubOps({ onPrompt: () => (prompted = true) }) },
+              messages: [],
+              metadata: () => Effect.void,
+              ask: (input) =>
+                Effect.gen(function* () {
+                  asked.push(input)
+                  return yield* Effect.die(new Error("denied"))
+                }),
+            },
+          ),
+        )
+
+        expect(Exit.isFailure(exit)).toBe(true)
+        expect(asked).toEqual([
+          expect.objectContaining({ permission: "task", patterns: ["general"] }),
+        ])
+        expect(prompted).toBe(false)
+        expect(yield* sessions.children(chat.id)).toHaveLength(0)
+      }),
+    { config: modelConfig },
+  )
+
+  it.instance(
+    "resume rejects a task_id that is not a same-agent child of this chat",
+    () =>
+      Effect.gen(function* () {
+        const sessions = yield* Session.Service
+        const { chat, assistant } = yield* seed()
+        const other = yield* seed("Other")
+        const foreign = yield* sessions.create({ parentID: other.chat.id, title: "Foreign", agent: "general" })
+        const wrongAgent = yield* sessions.create({ parentID: chat.id, title: "Explore", agent: "explore" })
+        const def = yield* (yield* TaskTool).init()
+
+        for (const task_id of [foreign.id, wrongAgent.id]) {
+          const exit = yield* Effect.exit(
+            def.execute(
+              { description: "inspect bug", prompt: "look", subagent_type: "general", task_id },
+              {
+                sessionID: chat.id,
+                messageID: assistant.id,
+                agent: "build",
+                abort: new AbortController().signal,
+                extra: { promptOps: stubOps() },
+                messages: [],
+                metadata: () => Effect.void,
+                ask: () => Effect.void,
+              },
+            ),
+          )
+          expect(Exit.isFailure(exit), task_id).toBe(true)
+        }
+      }),
+    { config: modelConfig },
   )
 
   it.instance("execute surfaces child errors with a resumable task_id", () =>
@@ -743,6 +976,7 @@ describe("tool.task", () => {
       const cancelled = defer<SessionID>()
       const abort = new AbortController()
       const promptOps: TaskPromptOps = {
+        ...unusedNoticeOps,
         cancel: (sessionID) =>
           Effect.sync(() => {
             cancelled.resolve(sessionID)
@@ -1011,6 +1245,7 @@ describe("tool.task", () => {
       const injected = yield* Deferred.make<SessionPrompt.PromptInput>()
       let runs = 0
       const promptOps: TaskPromptOps = {
+        ...unusedNoticeOps,
         cancel: () => Effect.void,
         resolvePromptParts: (template) => Effect.succeed([{ type: "text" as const, text: template }]),
         prompt: (input) => {

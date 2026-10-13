@@ -83,6 +83,7 @@ const V2_TOOLS: Record<string, HostTool | null> = {
         prompt: input.prompt,
         sessionID: input.task_id ?? input.sessionID,
         background: input.background,
+        model: input.model,
       }),
   },
   todowrite: null,

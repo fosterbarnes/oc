@@ -349,6 +349,8 @@ export const User = Schema.Struct({
     providerID: Provider.ID,
     modelID: Model.ID,
     variant: Schema.optional(Schema.String),
+    // The caller named this model (`task` with `model`), so agent model overrides must not replace it.
+    explicit: Schema.optional(Schema.Boolean),
   }),
   system: Schema.optional(Schema.String),
   tools: Schema.optional(Schema.Record(Schema.String, Schema.Boolean)),

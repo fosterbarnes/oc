@@ -4,6 +4,7 @@ import type { BoxRenderable, ScrollBoxRenderable } from "@opentui/core"
 import { testRender, type JSX } from "@opentui/solid"
 import {
   formatCompletedSubagentDetail,
+  formatSubagentModel,
   formatSubagentRetry,
   formatSubagentTitle,
   formatSubagentToolcalls,
@@ -285,6 +286,14 @@ describe("TUI inline tool wrapping", () => {
     expect(formatSubagentTitle("Explore", "Inspect renderer", true)).toBe(
       "Explore Task (background) — Inspect renderer",
     )
+  })
+
+  test("shows the effective task model with its variant only when one ran", () => {
+    expect(formatSubagentModel(undefined, "high")).toBeUndefined()
+    expect(formatSubagentModel({ providerID: "claude-code", modelID: "claude-haiku-5-5" })).toBe(
+      "claude-code/claude-haiku-5-5",
+    )
+    expect(formatSubagentModel({ providerID: "test", modelID: "vendor/model" }, "high")).toBe("test/vendor/model#high")
   })
 
   test("keeps retry status ahead of wrapping messages", () => {

@@ -34,6 +34,7 @@ function services(
     onPrompt?: (input: unknown) => void
     loadFailure?: boolean
     promptFailure?: boolean
+    queued?: { id: string; state: "pending" | "dispatching"; text: string; attachments: number }[]
   } = {},
 ) {
   const prompts: unknown[] = []
@@ -53,6 +54,9 @@ function services(
         return opts.promptFailure
           ? Effect.fail(new Error("prompt unavailable"))
           : Effect.succeed({ info: {}, parts: [] })
+      },
+      queue: {
+        snapshot: () => Effect.succeed({ entries: opts.queued ?? [] }),
       },
     },
     store: {
@@ -252,6 +256,21 @@ describe("scheduledResume fireEntry", () => {
     try {
       const store = ScheduledResume.createStore(tmp.file, () => 1000)
       const { svc, prompts } = services({ status: "busy" })
+      await Effect.runPromise(ScheduledResume.fireEntry(svc, store, entry()))
+      expect(prompts).toEqual([])
+      expect(store.getState().resumeCounts).toEqual({})
+      expect(store.getState().entries).toEqual([{ ...entry(), attempts: 1, fireAt: 61_000 }])
+    } finally {
+      tmp.cleanup()
+    }
+  })
+
+  test("queued prompts go first: the resume waits while the queue has entries", async () => {
+    const tmp = tmpFile()
+    try {
+      const store = ScheduledResume.createStore(tmp.file, () => 1000)
+      const queued = [{ id: "msg_queued", state: "pending" as const, text: "next", attachments: 0 }]
+      const { svc, prompts } = services({ queued })
       await Effect.runPromise(ScheduledResume.fireEntry(svc, store, entry()))
       expect(prompts).toEqual([])
       expect(store.getState().resumeCounts).toEqual({})

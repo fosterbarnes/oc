@@ -130,7 +130,7 @@ How everything works is in the [wiki](https://github.com/fosterbarnes/oc/wiki):
 
 ## Progress
 
-[375,864](scc.txt) lines of code and counting...
+[380,685](scc.txt) lines of code and counting...
 
 <!-- code-count:start -->
 
@@ -143,8 +143,8 @@ How everything works is in the [wiki](https://github.com/fosterbarnes/oc/wiki):
 | Powershell | 23 | 1,293 | 88 | 80 | 1,125 |
 | SQL | 2 | 5 | 0 | 0 | 5 |
 | Shell | 1 | 120 | 17 | 17 | 86 |
-| TypeScript | 2,052 | 422,192 | 36,074 | 14,861 | 371,257 |
-| **Total** | **2,095** | **427,366** | **36,463** | **15,039** | **375,864** |
+| TypeScript | 2,076 | 427,669 | 36,535 | 15,056 | 376,078 |
+| **Total** | **2,119** | **432,843** | **36,924** | **15,234** | **380,685** |
 
 <!-- code-count:end -->
 

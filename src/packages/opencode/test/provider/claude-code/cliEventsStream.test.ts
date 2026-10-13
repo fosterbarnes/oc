@@ -203,6 +203,42 @@ test("a CLI tool that succeeded is not flagged", async () => {
   assert.deepEqual(result.result.metadata, {})
 })
 
+const searchResult = (id: string, extra: Record<string, unknown>) => ({
+  type: "user",
+  session_id: "fake-session",
+  message: { role: "user", content: [{ type: "tool_result", tool_use_id: id, content: "search body", ...extra }] },
+})
+
+const textBody = (parts: any[]) =>
+  parts
+    .filter((part) => part.type === "text-delta")
+    .map((part) => part.delta)
+    .join("")
+
+test("a failed CLI web search is reported in the reply", async () => {
+  const parts = await streamParts([
+    init,
+    assistantToolUse("toolu_search", "WebSearch"),
+    blockStop(),
+    searchResult("toolu_search", { content: "Search unavailable", is_error: true }),
+    endTurn,
+    successResult,
+  ])
+  assert.match(textBody(parts), /Web search failed:\*\* Search unavailable/)
+})
+
+test("a successful CLI web search adds no failure note", async () => {
+  const parts = await streamParts([
+    init,
+    assistantToolUse("toolu_search", "WebSearch"),
+    blockStop(),
+    searchResult("toolu_search", {}),
+    endTurn,
+    successResult,
+  ])
+  assert.doesNotMatch(textBody(parts), /Web search failed/)
+})
+
 test("a failing result subtype ends the turn as an error, naming the subtype", async () => {
   const parts = await streamParts([
     init,

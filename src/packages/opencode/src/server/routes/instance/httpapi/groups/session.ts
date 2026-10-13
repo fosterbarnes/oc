@@ -5,6 +5,7 @@ import { SessionV1 } from "@opencode-ai/core/v1/session"
 import { Session } from "@/session/session"
 import { MessageV2 } from "@/session/message-v2"
 import { SessionPrompt } from "@/session/prompt"
+import { SessionQueue } from "@/session/queue"
 import { SessionRevert } from "@/session/revert"
 import { SessionStatus } from "@/session/status"
 import { SessionSummary } from "@/session/summary"
@@ -20,7 +21,16 @@ import {
   WorkspaceRoutingQuery,
   WorkspaceRoutingQueryFields,
 } from "../middleware/workspace-routing"
-import { ApiNotFoundError, PermissionNotFoundError, SessionBusyError } from "../errors"
+import {
+  ApiNotFoundError,
+  ConflictError,
+  InvalidRequestError,
+  ModelNotFoundError,
+  PermissionNotFoundError,
+  SessionBusyError,
+  TimeoutError,
+  UpstreamError,
+} from "../errors"
 import { described } from "./metadata"
 import { QueryBoolean } from "./query"
 import { ProviderV2 } from "@opencode-ai/core/provider"
@@ -72,6 +82,16 @@ export const SummarizePayload = Schema.Struct({
   auto: Schema.optional(Schema.Boolean),
 })
 export const PromptPayload = Schema.Struct(Struct.omit(SessionPrompt.PromptInput.fields, ["sessionID"]))
+export const GeneratePayload = Schema.Struct(Struct.omit(SessionPrompt.GenerateInput.fields, ["sessionID"]))
+// 422 for providers that cannot run a tool-less side question yet (Claude Code, Cursor).
+export class UnsupportedProviderError extends Schema.TaggedErrorClass<UnsupportedProviderError>()(
+  "UnsupportedProviderError",
+  {
+    providerID: Schema.String,
+    message: Schema.String,
+  },
+  { httpApiStatus: 422 },
+) {}
 export const CommandPayload = Schema.Struct(Struct.omit(SessionPrompt.CommandInput.fields, ["sessionID"]))
 export const ShellPayload = Schema.Struct(Struct.omit(SessionPrompt.ShellInput.fields, ["sessionID"]))
 export const RevertPayload = Schema.Struct(Struct.omit(SessionRevert.RevertInput.fields, ["sessionID"]))
@@ -99,6 +119,13 @@ export const ResumeEnabledPayload = Schema.Struct({
 export const ResumeCancelPayload = Schema.Struct({
   id: Schema.String,
 })
+// `add` takes the prompt snapshot; the id is optional and makes a repeated add a no-op.
+export const QueuePayload = Schema.Union([
+  Schema.Struct({ type: Schema.Literal("add"), id: Schema.optional(MessageID), ...SessionQueue.Payload.fields }),
+  Schema.Struct({ type: Schema.Literal("edit"), id: MessageID, text: Schema.String }),
+  Schema.Struct({ type: Schema.Literal("cancel"), id: MessageID }),
+  Schema.Struct({ type: Schema.Literal("resume") }),
+]).annotate({ discriminator: "type" })
 
 export const ClaudeAccount = Schema.Struct({
   id: Schema.String,
@@ -139,6 +166,7 @@ export const SessionPaths = {
   rename: `${root}/:sessionID/rename`,
   prompt: `${root}/:sessionID/message`,
   promptAsync: `${root}/:sessionID/prompt_async`,
+  generate: `${root}/:sessionID/generate`,
   command: `${root}/:sessionID/command`,
   shell: `${root}/:sessionID/shell`,
   revert: `${root}/:sessionID/revert`,
@@ -149,6 +177,7 @@ export const SessionPaths = {
   updatePart: `${root}/:sessionID/message/:messageID/part/:partID`,
   resumeState: `${root}/resume/state`,
   resumeCancel: `${root}/resume/cancel`,
+  queue: `${root}/:sessionID/queue`,
   // Two segments, like the resume routes: a one-segment path is swallowed by `get` (`/session/:sessionID`).
   claudeAccount: `${root}/claude/account`,
 } as const
@@ -416,6 +445,28 @@ export const SessionApi = HttpApi.make("session")
               "Create and send a new message to a session asynchronously, starting the session if needed and returning immediately.",
           }),
         ),
+        HttpApiEndpoint.post("generate", SessionPaths.generate, {
+          params: { sessionID: SessionID },
+          query: WorkspaceRoutingQuery,
+          payload: GeneratePayload,
+          success: described(SessionPrompt.GenerateResult, "Side answer; the session is not changed"),
+          error: [
+            HttpApiError.BadRequest,
+            ApiNotFoundError,
+            InvalidRequestError,
+            ModelNotFoundError,
+            UnsupportedProviderError,
+            UpstreamError,
+            TimeoutError,
+          ],
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "session.generate",
+            summary: "Generate side answer",
+            description:
+              "Answer a side question from the session's context with one model call, without adding messages, marks, or resume state to the session.",
+          }),
+        ),
         HttpApiEndpoint.post("command", SessionPaths.command, {
           params: { sessionID: SessionID },
           query: WorkspaceRoutingQuery,
@@ -551,6 +602,33 @@ export const SessionApi = HttpApi.make("session")
             identifier: "session.resume.cancel",
             summary: "Cancel scheduled resume",
             description: "Cancel a pending scheduled resume entry by id.",
+          }),
+        ),
+        HttpApiEndpoint.get("queue", SessionPaths.queue, {
+          params: { sessionID: SessionID },
+          query: WorkspaceRoutingQuery,
+          success: described(SessionQueue.Snapshot, "Queued prompts and pause state"),
+          error: [HttpApiError.BadRequest, ApiNotFoundError],
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "session.queue.get",
+            summary: "Get queued prompts",
+            description:
+              "List the prompts queued while the session was busy, oldest first, and why the queue is paused. Queued prompts are kept in the database and survive restarts; a restart pauses them until resumed.",
+          }),
+        ),
+        HttpApiEndpoint.post("queueUpdate", SessionPaths.queue, {
+          params: { sessionID: SessionID },
+          query: WorkspaceRoutingQuery,
+          payload: QueuePayload,
+          success: described(SessionQueue.Snapshot, "Queue after the change"),
+          error: [HttpApiError.BadRequest, InvalidRequestError, ApiNotFoundError, ConflictError],
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "session.queue.update",
+            summary: "Change queued prompts",
+            description:
+              "Add, edit, or cancel a queued prompt, or resume a paused queue. Only pending prompts can be edited or cancelled; a prompt being sent returns a conflict.",
           }),
         ),
         HttpApiEndpoint.get("claudeAccountState", SessionPaths.claudeAccount, {

@@ -389,7 +389,27 @@ describe("cross-spawn spawner", () => {
 
   describe("Windows-specific", () => {
     fx.effect(
-      "kills descendant processes via native taskkill and reports root PID",
+      "background-shell: kills a pwsh root and its nested pwsh child on kill",
+      Effect.gen(function* () {
+        if (process.platform !== "win32") return
+        const tmp = yield* Effect.acquireRelease(
+          Effect.promise(() => tmpdir()),
+          (value) => Effect.promise(() => value[Symbol.asyncDispose]()),
+        )
+        const marker = path.join(tmp.path, "pids")
+        // Write then move, so the test never reads the marker while it is still empty.
+        const script = `$c = Start-Process -FilePath pwsh -ArgumentList '-NoProfile','-Command','Start-Sleep 120' -PassThru; Set-Content -LiteralPath '${marker}.tmp' -Value "$PID,$($c.Id)"; Move-Item -LiteralPath '${marker}.tmp' -Destination '${marker}'; Start-Sleep 120`
+        const handle = yield* ChildProcess.make("pwsh", ["-NoProfile", "-NonInteractive", "-Command", script])
+        const [root, child] = (yield* Effect.promise(() => readWhenReady(marker))).split(",").map(Number)
+        expect(Number(handle.pid)).toBe(root)
+        yield* handle.kill()
+        expect(yield* Effect.promise(() => gone(root))).toBe(true)
+        expect(yield* Effect.promise(() => gone(child))).toBe(true)
+      }),
+    )
+
+    fx.effect(
+      "kills descendant processes via the verified process tree stop and reports root PID",
       Effect.gen(function* () {
         if (process.platform !== "win32") return
         const tmp = yield* Effect.acquireRelease(

@@ -1,4 +1,5 @@
 import * as Tool from "./tool"
+import { PermissionV1 } from "@opencode-ai/core/v1/permission"
 import DESCRIPTION from "./task.txt"
 import { ToolJsonSchema } from "./json-schema"
 import { SessionV1 } from "@opencode-ai/core/v1/session"
@@ -14,11 +15,24 @@ import { Effect, Exit, Schema, Scope } from "effect"
 import { EffectBridge } from "@/effect/bridge"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { Database } from "@opencode-ai/core/database/database"
+import { ProviderV2 } from "@opencode-ai/core/provider"
+import { ModelV2 } from "@opencode-ai/core/model"
+import { Provider } from "@/provider/provider"
 
 export interface TaskPromptOps {
   cancel(sessionID: SessionID): Effect.Effect<void>
   resolvePromptParts(template: string): Effect.Effect<SessionPrompt.PromptInput["parts"]>
   prompt(input: SessionPrompt.TurnInput): Effect.Effect<SessionV1.WithParts>
+  loop(sessionID: SessionID): Effect.Effect<SessionV1.WithParts>
+  available(sessionID: SessionID): Effect.Effect<void>
+  cancellation(sessionID: SessionID): Effect.Effect<number>
+  /** Replaces metadata on a completed tool part, for output that keeps changing after the call returned. */
+  partMetadata(input: {
+    sessionID: SessionID
+    messageID: MessageID
+    callID: string
+    metadata: Record<string, unknown>
+  }): Effect.Effect<void>
 }
 
 const id = "task"
@@ -51,6 +65,10 @@ const BaseParameterFields = {
       "This should only be set if you mean to resume a previous task (you can pass a prior task_id and the task will continue the same subagent session as before instead of creating a fresh one)",
   }),
   command: Schema.optional(Schema.String).annotate({ description: "The command that triggered this task" }),
+  model: Schema.optional(Schema.String).annotate({
+    description:
+      "Model for this call only, as provider/model or provider/model#variant. Replaces the agent's model for this call; the agent's permissions and prompt still apply. Omit unless the user asked for a specific model",
+  }),
 }
 
 const BaseParameters = Schema.Struct(BaseParameterFields)
@@ -62,6 +80,20 @@ export const Parameters = Schema.Struct({
       "Run the agent in the background. You will be notified when it completes. DO NOT sleep, poll, or proactively check on its progress",
   }),
 })
+
+// `provider/model` or `provider/model#variant`. Model IDs may contain slashes; the first slash ends the provider.
+function parseModelOverride(value: string) {
+  const [ref, variant, extra] = value.split("#")
+  const slash = ref.indexOf("/")
+  if (slash <= 0 || slash === ref.length - 1 || extra !== undefined || variant === "") return undefined
+  return {
+    model: {
+      providerID: ProviderV2.ID.make(ref.slice(0, slash)),
+      modelID: ModelV2.ID.make(ref.slice(slash + 1)),
+    },
+    variant,
+  }
+}
 
 function renderOutput(input: {
   sessionID: SessionID
@@ -80,6 +112,44 @@ function renderOutput(input: {
   ].join("\n")
 }
 
+/**
+ * Appends one synthetic notice to a session and wakes its loop. Only maintenance is waited on: a running
+ * turn takes the notice through runner coalescing. A cancel that lands while the notice waits drops it.
+ */
+export const notifySession = Effect.fn("TaskTool.notifySession")(function* (
+  ops: TaskPromptOps,
+  input: {
+    sessionID: SessionID
+    text: string
+    agent?: string
+    variant?: string
+    turnPermission?: PermissionV1.Ruleset
+  },
+) {
+  const epoch = yield* ops.cancellation(input.sessionID)
+  yield* ops.available(input.sessionID)
+  if ((yield* ops.cancellation(input.sessionID)) !== epoch) return
+
+  const messageID = MessageID.ascending()
+  const delivered = yield* Effect.exit(
+    ops.prompt({
+      messageID,
+      sessionID: input.sessionID,
+      agent: input.agent,
+      variant: input.variant,
+      turnPermission: input.turnPermission,
+      parts: [{ type: "text", synthetic: true, text: input.text }],
+    }),
+  )
+  if (Exit.isFailure(delivered)) {
+    yield* Effect.logWarning("session notice not delivered", { sessionID: input.sessionID })
+    return
+  }
+  // A running turn can finish before it reads the notice; the consumed notice is the one the loop answered.
+  if (delivered.value.info.role === "assistant" && delivered.value.info.parentID === messageID) return
+  yield* ops.loop(input.sessionID)
+})
+
 export const TaskTool = Tool.define(
   id,
   Effect.gen(function* () {
@@ -90,6 +160,7 @@ export const TaskTool = Tool.define(
     const scope = yield* Scope.Scope
     const flags = yield* RuntimeFlags.Service
     const database = yield* Database.Service
+    const provider = yield* Provider.Service
 
     const run = Effect.fn("TaskTool.execute")(function* (
       params: Schema.Schema.Type<typeof Parameters>,
@@ -131,6 +202,24 @@ export const TaskTool = Tool.define(
         return yield* Effect.fail(new Error(`Configured default_subagent "${subagentType}" is a primary agent`))
       }
 
+      const override = params.model === undefined ? undefined : parseModelOverride(params.model)
+      if (params.model !== undefined && !override) {
+        return yield* Effect.fail(
+          new Error(`Invalid model "${params.model}": use provider/model or provider/model#variant`),
+        )
+      }
+      if (override) {
+        const selected = yield* provider.getModel(override.model.providerID, override.model.modelID)
+        if (override.variant !== undefined && !Object.hasOwn(selected.variants ?? {}, override.variant)) {
+          const enabled = Object.keys(selected.variants ?? {})
+          return yield* Effect.fail(
+            new Error(
+              `Model "${params.model}" has no enabled variant "${override.variant}". Enabled: ${enabled.join(", ") || "none"}`,
+            ),
+          )
+        }
+      }
+
       if (!ctx.extra?.bypassAgentCheck) {
         yield* ctx.ask({
           permission: id,
@@ -146,6 +235,10 @@ export const TaskTool = Tool.define(
       const session = params.task_id
         ? yield* sessions.get(SessionID.make(params.task_id)).pipe(Effect.catchCause(() => Effect.succeed(undefined)))
         : undefined
+      // A resumed session keeps its permission snapshot, so only this chat's child for the same agent may be reused.
+      if (session && (session.parentID !== ctx.sessionID || session.agent !== next.name)) {
+        return yield* Effect.fail(new Error(`task_id ${session.id} is not a ${next.name} subagent of this chat`))
+      }
       const childPermission = deriveSubagentSessionPermission({
         parentSessionPermission: parent.permission ?? [],
         subagent: next,
@@ -188,14 +281,14 @@ export const TaskTool = Tool.define(
       if (msg.info.role !== "assistant") return yield* Effect.fail(new Error("Not an assistant message"))
       const variant = msg.info.variant
 
-      const model = next.model ?? {
-        modelID: msg.info.modelID,
-        providerID: msg.info.providerID,
-      }
+      // An explicit model takes no parent effort: its variant is only the one named in the call.
+      const model = override?.model ?? next.model ?? { modelID: msg.info.modelID, providerID: msg.info.providerID }
+      const turnVariant = override ? override.variant : next.model ? undefined : variant
       const metadata = {
         parentSessionId: ctx.sessionID,
         sessionId: nextSession.id,
         model,
+        variant: turnVariant,
         ...(runInBackground ? { background: true } : {}),
       }
 
@@ -209,18 +302,20 @@ export const TaskTool = Tool.define(
 
       const runTask = Effect.fn("TaskTool.runTask")(function* () {
         const parts = yield* ops.resolvePromptParts(params.prompt)
-        const result = yield* ops.prompt({
-          messageID: MessageID.ascending(),
-          sessionID: nextSession.id,
-          model: {
-            modelID: model.modelID,
-            providerID: model.providerID,
-          },
-          variant: next.model ? undefined : variant,
-          agent: next.name,
-          parts,
-          turnPermission: ctx.extra?.turnPermission,
-        })
+        const result = yield* ops
+          .prompt({
+            messageID: MessageID.ascending(),
+            sessionID: nextSession.id,
+            model: {
+              modelID: model.modelID,
+              providerID: model.providerID,
+            },
+            variant: turnVariant,
+            explicitModel: override !== undefined,
+            agent: next.name,
+            parts,
+            turnPermission: ctx.extra?.turnPermission,
+          })
         if (result.info.role === "assistant" && result.info.error) {
           const message =
             "message" in result.info.error.data && typeof result.info.error.data.message === "string"
@@ -240,28 +335,21 @@ export const TaskTool = Tool.define(
         text: string,
       ) {
         const currentParent = yield* sessions.get(ctx.sessionID)
-        yield* ops
-          .prompt({
-            sessionID: ctx.sessionID,
-            agent: currentParent.agent ?? ctx.agent,
-            variant,
-            parts: [
-              {
-                type: "text",
-                synthetic: true,
-                text: renderOutput({
-                  sessionID: nextSession.id,
-                  state,
-                  summary:
-                    state === "completed"
-                      ? `Background task completed: ${params.description}`
-                      : `Background task failed: ${params.description}`,
-                  text,
-                }),
-              },
-            ],
-          })
-          .pipe(Effect.ignore, Effect.forkIn(scope, { startImmediately: true }))
+        yield* notifySession(ops, {
+          sessionID: ctx.sessionID,
+          agent: currentParent.agent ?? ctx.agent,
+          variant,
+          turnPermission: ctx.extra?.turnPermission,
+          text: renderOutput({
+            sessionID: nextSession.id,
+            state,
+            summary:
+              state === "completed"
+                ? `Background task completed: ${params.description}`
+                : `Background task failed: ${params.description}`,
+            text,
+          }),
+        }).pipe(Effect.ignore, Effect.forkIn(scope, { startImmediately: true }))
       })
 
       const notify = Effect.fn("TaskTool.notifyBackgroundResult")(function* (jobID: string) {

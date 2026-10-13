@@ -16,6 +16,8 @@ export interface Interface {
   readonly assertAvailable: (sessionID: SessionID) => Effect.Effect<void, Session.BusyError>
   readonly cancellation: (sessionID: SessionID) => Effect.Effect<number>
   readonly assertNotBusy: (sessionID: SessionID) => Effect.Effect<void, Session.BusyError>
+  /** Waits out maintenance holding the session; a running turn is not waited on here (new turns coalesce). */
+  readonly available: (sessionID: SessionID) => Effect.Effect<void>
   readonly cancel: (sessionID: SessionID) => Effect.Effect<void>
   readonly ensureRunning: (
     sessionID: SessionID,
@@ -44,9 +46,16 @@ const layer = Layer.effect(
     const background = yield* BackgroundJob.Service
     const status = yield* SessionStatus.Service
     const workBoundary = yield* SessionWork.Service
-    const held = new Set<SessionID>()
+    // Maintenance gate per session; completes when maintenance releases the session.
+    const held = new Map<SessionID, Deferred.Deferred<void>>()
     const cancellations = new Map<SessionID, number>()
     const assertAvailable = (sessionID: SessionID) => held.has(sessionID) ? Effect.fail(busyError(sessionID)) : Effect.void
+    const available = (sessionID: SessionID): Effect.Effect<void> =>
+      Effect.suspend(() => {
+        const gate = held.get(sessionID)
+        if (!gate) return Effect.void
+        return Deferred.await(gate).pipe(Effect.andThen(available(sessionID)))
+      })
 
     const state = yield* InstanceState.make(
       Effect.fn("SessionRunState.state")(function* () {
@@ -104,12 +113,20 @@ const layer = Layer.effect(
       yield* existing.cancel
     })
 
+    // Usually nested inside an admitted prompt, which keeps maintenance out. A queue wake that lands during
+    // this project's reload fails its turn rather than run on the instance the reload replaces.
+    const admitted = (sessionID: SessionID, work: Effect.Effect<SessionV1.WithParts>) =>
+      InstanceState.context.pipe(
+        Effect.flatMap((ctx) => workBoundary.run(ctx.directory, owned(sessionID, work))),
+        Effect.orDie,
+      )
+
     const ensureRunning = Effect.fn("SessionRunState.ensureRunning")(function* (
       sessionID: SessionID,
       onInterrupt: Effect.Effect<SessionV1.WithParts>,
       work: Effect.Effect<SessionV1.WithParts>,
     ) {
-      return yield* (yield* runner(sessionID, onInterrupt)).ensureRunning(workBoundary.run(owned(sessionID, work)))
+      return yield* (yield* runner(sessionID, onInterrupt)).ensureRunning(admitted(sessionID, work))
     })
 
     const startShell = Effect.fn("SessionRunState.startShell")(function* (
@@ -119,7 +136,7 @@ const layer = Layer.effect(
       ready?: Latch.Latch,
     ) {
       return yield* (yield* runner(sessionID, onInterrupt))
-        .startShell(workBoundary.run(owned(sessionID, work)), ready)
+        .startShell(admitted(sessionID, work), ready)
         .pipe(Effect.catchTag("RunnerBusy", () => Effect.fail(busyError(sessionID))))
     })
 
@@ -142,12 +159,15 @@ const layer = Layer.effect(
     const maintenance: Interface["maintenance"] = (sessionID, effect) => Effect.gen(function* () {
       yield* assertNotBusy(sessionID)
       return yield* Effect.acquireUseRelease(
-        Effect.suspend(() => held.has(sessionID) ? Effect.fail(busyError(sessionID)) : Effect.sync(() => held.add(sessionID))),
+        Effect.suspend(() => {
+          if (held.has(sessionID)) return Effect.fail(busyError(sessionID))
+          return Deferred.make<void>().pipe(Effect.tap((gate) => Effect.sync(() => held.set(sessionID, gate))))
+        }),
         () => effect,
-        () => Effect.sync(() => { held.delete(sessionID) }),
+        (gate) => Effect.sync(() => held.delete(sessionID)).pipe(Effect.andThen(Deferred.succeed(gate, undefined)), Effect.asVoid),
       )
     })
-    return Service.of({ assertNotBusy, assertAvailable, completion, maintenance, cancel, ensureRunning, startShell,
+    return Service.of({ assertNotBusy, assertAvailable, available, completion, maintenance, cancel, ensureRunning, startShell,
       cancellation: (sessionID) => Effect.sync(() => cancellations.get(sessionID) ?? 0),
     })
   }),

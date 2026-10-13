@@ -21,6 +21,7 @@ import { testEffect } from "../lib/effect"
 import { Tool } from "@/tool/tool"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { InstanceStore } from "@/project/instance-store"
+import { ShellJobs } from "@/background/shellJobs"
 
 const shellLayer = Layer.mergeAll(
   LayerNode.compile(
@@ -32,6 +33,7 @@ const shellLayer = Layer.mergeAll(
       Config.node,
       Agent.node,
       RuntimeFlags.node,
+      ShellJobs.node,
     ]),
   ),
   testInstanceStoreLayer,

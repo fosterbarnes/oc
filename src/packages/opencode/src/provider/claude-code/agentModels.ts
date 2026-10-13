@@ -117,6 +117,9 @@ export function qualifyModelName(wanted: string, referenceModelId: string): stri
  *   2. The agent is a discovered subagent and `defaultSubagentModel` is set.
  *   3. Anything else: the id opencode asked for, untouched.
  *
+ * A turn that names its model explicitly (`task` with `model`) skips this
+ * entirely; turnContext.ts checks that before calling here.
+ *
  * An agent that pinned a full `provider/model` is out of scope entirely:
  * opencode already routed the call to that provider, and second-guessing it
  * here would silently undo a choice the user made explicitly.

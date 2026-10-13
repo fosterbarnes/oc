@@ -212,6 +212,8 @@ class ClaudeTurn {
   /** Calls opencode runs itself; the CLI's echo of their result must not be forwarded. */
   private readonly skipResultForIds = new Set<string>()
   private readonly proxyToolUseIds = new Set<string>()
+  /** CLI-run web searches awaiting their result, so a failure can be shown. */
+  private readonly webSearchIds = new Set<string>()
   /** Todo mirrors run in order (see `mirrorTodoWrite`); the turn's finish waits for them. */
   private todoMirror = Promise.resolve()
   private todoMirrorsPending = 0
@@ -936,6 +938,7 @@ class ClaudeTurn {
     }
     if (name === "ExitPlanMode") return this.out.note(formatPlanApproval(input))
     if (isWebSearchTool(name) && isWebSearchHandledByCli(this.config.webSearch)) {
+      this.webSearchIds.add(id)
       return this.out.note(
         `\n> **Web search:** ${typeof input.query === "string" ? input.query : JSON.stringify(input)}\n`,
       )
@@ -986,6 +989,12 @@ class ClaudeTurn {
         continue
       }
       const resultText = toolResultText(block.content)
+      if (this.webSearchIds.delete(id)) {
+        if (block.is_error === true) {
+          this.out.note(`\n> **Web search failed:** ${resultText.slice(0, 200) || "no reason given"}\n`)
+        }
+        continue
+      }
 
       const name = this.toolCallNames.get(id)
       if (!name) continue

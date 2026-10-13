@@ -259,7 +259,7 @@ export const takeDue = singleton.takeDue
 export interface FireServices {
   readonly session: Pick<Session.Interface, "get" | "messages">
   readonly status: Pick<SessionStatus.Interface, "get">
-  readonly prompt: Pick<SessionPrompt.Interface, "prompt">
+  readonly prompt: Pick<SessionPrompt.Interface, "prompt" | "queue">
   readonly store: Pick<InstanceStore.Interface, "load">
 }
 
@@ -302,6 +302,12 @@ export const fireEntry = Effect.fn("ScheduledResume.fireEntry")(function* (
       }
       const status = yield* services.status.get(entry.sessionID)
       if (status.type !== "idle") {
+        yield* persist(() => store.retry(entry))
+        return
+      }
+      // Queued prompts go first. A paused queue also waits here, so the resume never jumps ahead of it.
+      const queued = yield* services.prompt.queue.snapshot(entry.sessionID)
+      if (queued.entries.length > 0) {
         yield* persist(() => store.retry(entry))
         return
       }

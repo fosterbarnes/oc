@@ -6,6 +6,7 @@ import os from "os"
 import { createHash } from "node:crypto"
 import { SessionID, MessageID, PartID } from "./schema"
 import { isClaudeCodeProvider } from "@/provider/claude-code/shared"
+import { CURSOR_PROVIDER_ID } from "@/provider/cursor/shared"
 import { MessageV2 } from "./message-v2"
 import { SessionRevert } from "./revert"
 import { Session } from "./session"
@@ -50,6 +51,7 @@ import { Cause, Effect, Exit, Latch, Layer, Option, Scope, Context, Schema, Sema
 import { InstanceState } from "@/effect/instance-state"
 import { TaskTool, type TaskPromptOps } from "@/tool/task"
 import { SessionRunState } from "./run-state"
+import { SessionQueue } from "./queue"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { Database } from "@opencode-ai/core/database/database"
@@ -77,6 +79,11 @@ const RENAME_FALLBACKS = [
   { model: Provider.parseModel("opencode/mimo-v2.6-flash-free"), variant: undefined },
   { model: Provider.parseModel("openai/gpt-6-luna"), variant: "medium" },
 ]
+// Stock titles use the loop model as fallback; marked and manual titles use the last user's model.
+type TitleInput = { session: Session.Info; history: SessionV1.WithParts[] } & (
+  | { mode: "stock"; providerID: ProviderV2.ID; modelID: ModelV2.ID }
+  | { mode: "marked" | "manual" }
+)
 const MAX_MCP_RESOURCE_BLOB_BYTES = 10 * 1024 * 1024
 const SUPPORTED_MCP_RESOURCE_ATTACHMENT_MIMES = new Set([
   "application/pdf",
@@ -95,6 +102,14 @@ IMPORTANT:
 - This tool provides your final answer - no further actions are taken after calling it`
 
 const STRUCTURED_OUTPUT_SYSTEM_PROMPT = `IMPORTANT: The user has requested structured output. You MUST use the StructuredOutput tool to provide your final response. Do NOT respond with plain text - you MUST call the StructuredOutput tool with your answer formatted according to the schema.`
+
+const GENERATE_TIMEOUT = "120 seconds"
+const SIDE_QUESTION_INSTRUCTION = [
+  "The user is asking a quick side question about the conversation so far.",
+  "Answer directly and concisely in markdown from what you already know.",
+  "Do not call any tools and do not take any actions.",
+  "This answer is not added to the conversation.",
+].join(" ")
 
 function mcpResourceBase64Size(value: string) {
   const trimmed = value.replace(/\s/g, "")
@@ -147,11 +162,26 @@ const writeImage = Effect.fn("SessionPrompt.writeImage")(function* (
 export interface Interface {
   readonly cancel: (sessionID: SessionID) => Effect.Effect<void>
   readonly prompt: (input: PromptInput) => Effect.Effect<SessionV1.WithParts, Image.Error | Session.BusyError>
-  readonly loop: (input: LoopInput) => Effect.Effect<SessionV1.WithParts>
+  readonly loop: (input: LoopInput) => Effect.Effect<SessionV1.WithParts, Session.BusyError>
   readonly shell: (input: ShellInput) => Effect.Effect<SessionV1.WithParts, Session.BusyError>
   readonly command: (input: CommandInput) => Effect.Effect<SessionV1.WithParts, Image.Error | Session.BusyError>
   readonly resolvePromptParts: (template: string) => Effect.Effect<PromptInput["parts"]>
-  readonly rename: (sessionID: SessionID) => Effect.Effect<{ session: Session.Info; model?: string }>
+  readonly rename: (sessionID: SessionID) => Effect.Effect<{ session: Session.Info; model?: string }, Session.BusyError>
+  readonly generate: (input: GenerateInput) => Effect.Effect<GenerateResult, GenerateError | Session.BusyError>
+  readonly queue: {
+    readonly snapshot: (sessionID: SessionID) => Effect.Effect<SessionQueue.Snapshot>
+    readonly add: (input: SessionQueue.AddInput) => Effect.Effect<SessionQueue.Snapshot>
+    readonly edit: (input: {
+      sessionID: SessionID
+      id: MessageID
+      text: string
+    }) => Effect.Effect<SessionQueue.Snapshot, SessionQueue.NotFoundError | SessionQueue.BusyError>
+    readonly cancel: (input: {
+      sessionID: SessionID
+      id: MessageID
+    }) => Effect.Effect<SessionQueue.Snapshot, SessionQueue.NotFoundError | SessionQueue.BusyError>
+    readonly resume: (sessionID: SessionID) => Effect.Effect<SessionQueue.Snapshot>
+  }
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/SessionPrompt") {}
@@ -190,17 +220,48 @@ const layer = Layer.effect(
     const database = yield* Database.Service
     const question = yield* Question.Service
     const work = yield* SessionWork.Service
+    const queue = yield* SessionQueue.Service
     const { db } = database
+    // Session work is admitted per project directory; work that lands during that project's reload is refused.
+    const gated = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+      InstanceState.context.pipe(Effect.flatMap((ctx) => work.run(ctx.directory, effect)))
+    // The HTTP routes already answer a busy session with 409.
+    const gatedSession = <A, E, R>(sessionID: SessionID, effect: Effect.Effect<A, E, R>) =>
+      gated(effect).pipe(
+        Effect.catchIf(
+          (error): error is SessionWork.BusyError => error instanceof SessionWork.BusyError,
+          () => Effect.fail(new Session.BusyError({ sessionID })),
+        ),
+      )
     const ops = Effect.fn("SessionPrompt.ops")(function* () {
       return {
         cancel: (sessionID: SessionID) => cancel(sessionID),
         resolvePromptParts: (template: string) => resolvePromptParts(template),
-        prompt: (input: TurnInput) => work.run(prompt(input)).pipe(Effect.catch(Effect.die)),
+        prompt: (input: TurnInput) => gated(prompt(input)).pipe(Effect.catch(Effect.die)),
+        loop: (sessionID: SessionID) => loop({ sessionID }),
+        available: (sessionID: SessionID) => state.available(sessionID),
+        cancellation: (sessionID: SessionID) => state.cancellation(sessionID),
+        partMetadata: (input) => partMetadata(input),
       } satisfies TaskPromptOps
+    })
+
+    const partMetadata = Effect.fn("SessionPrompt.partMetadata")(function* (input: {
+      sessionID: SessionID
+      messageID: MessageID
+      callID: string
+      metadata: Record<string, unknown>
+    }) {
+      const message = yield* sessions.findMessage(input.sessionID, (item) => item.info.id === input.messageID).pipe(Effect.orDie)
+      if (Option.isNone(message)) return
+      const part = message.value.parts.find((item) => item.type === "tool" && item.callID === input.callID)
+      if (part?.type !== "tool" || part.state.status !== "completed") return
+      yield* sessions.updatePart({ ...part, state: { ...part.state, metadata: { ...part.state.metadata, ...input.metadata } } })
     })
 
     const cancel = Effect.fn("SessionPrompt.cancel")(function* (sessionID: SessionID) {
       yield* Effect.logInfo("cancel", { "session.id": sessionID })
+      // Pause first so the drain cannot start the next queued prompt in the gap before the run stops.
+      yield* queue.pause(sessionID, "interrupted")
       yield* question.cancel(sessionID)
       yield* state.cancel(sessionID)
     })
@@ -241,143 +302,189 @@ const layer = Layer.effect(
       return parts
     })
 
-    const title = Effect.fn("SessionPrompt.ensureTitle")(function* (input: {
-      session: Session.Info
-      history: SessionV1.WithParts[]
-      providerID: ProviderV2.ID
-      modelID: ModelV2.ID
-    }) {
-      if (input.session.parentID) return
-      if (!Session.isDefaultTitle(input.session.title)) return
+    // One title path for every generated title. Modes:
+    // - stock: first request of an unmarked session. Title agent and whole request, one attempt.
+    // - marked: first request of an oc auto-rename session. Rename agent, its variant, then RENAME_FALLBACKS.
+    // - manual: /rename. Same rename attempts as marked, written unconditionally.
+    // Automatic modes skip the write when the title changed while the model was running.
+    const title = Effect.fn("SessionPrompt.title")(function* (input: TitleInput) {
+      const automatic = input.mode !== "manual"
+      if (automatic && (yield* sessions.get(input.session.id)).title !== input.session.title) return
 
-      const idx = input.history.findIndex(isRealUserMessage)
-      if (idx === -1) return
-      if (input.history.filter(isRealUserMessage).length !== 1) return
-
-      const context = input.history.slice(0, idx + 1)
-      const firstUser = context[idx]
-      if (!firstUser || firstUser.info.role !== "user") return
-      const firstInfo = firstUser.info
-
-      const subtasks = firstUser.parts.filter((p): p is SessionV1.SubtaskPart => p.type === "subtask")
-      const onlySubtasks = subtasks.length > 0 && firstUser.parts.every((p) => p.type === "subtask")
-
-      const ag = yield* agents.get("title")
+      const last = input.history.findLast((m) => m.info.role === "user")
+      if (!last || last.info.role !== "user") return
+      const user = last.info
+      const ag = yield* agents.get(input.mode === "stock" ? "title" : "rename")
       if (!ag) return
-      const mdl = ag.model
-        ? yield* provider.getModel(ag.model.providerID, ag.model.modelID)
-        : ((yield* provider.getSmallModel(input.providerID)) ??
-          (yield* provider.getModel(input.providerID, input.modelID)))
-      const msgs = onlySubtasks
-        ? [{ role: "user" as const, content: subtasks.map((p) => withoutCommandHeader(p.prompt)).join("\n") }]
-        : yield* MessageV2.toModelMessagesEffect(
-            context.map((message) => ({
-              ...message,
-              parts: message.parts.map((part) =>
-                message.info.role === "user" && part.type === "text"
-                  ? { ...part, text: namingText(part) }
-                  : part,
-              ),
-            })),
-            mdl,
-          )
-      const text = yield* llm
-        .stream({
-          agent: ag,
-          user: firstInfo,
-          system: [],
-          small: true,
-          tools: {},
-          model: mdl,
-          sessionID: input.session.id,
-          retries: 2,
-          messages: [{ role: "user", content: "Generate a title for this conversation:\n" }, ...msgs],
-        })
-        .pipe(
-          Stream.filter(LLMEvent.is.textDelta),
-          Stream.map((e) => e.text),
-          Stream.mkString,
-          Effect.orDie,
-        )
-      const t = cleanTitle(text)
-      if (!t) return
-      yield* sessions
-        .setTitle({ sessionID: input.session.id, title: t })
-        .pipe(Effect.catchCause((cause) => Effect.logError("failed to generate title", { error: Cause.squash(cause) })))
-    })
-
-    // Re-titles a session from a digest of its history, for the /rename command.
-    const rename = Effect.fn("SessionPrompt.rename")(function* (
-      sessionID: SessionID,
-      automatic?: { title: string; history: SessionV1.WithParts[] },
-    ) {
-      const session = yield* sessions.get(sessionID)
-      if (automatic && session.title !== automatic.title) return { session }
-      const history = automatic?.history ?? (yield* sessions.messages({ sessionID }))
-      const lastUser = history.findLast((m) => m.info.role === "user")?.info
-      const ag = yield* agents.get("rename")
-      if (!lastUser || lastUser.role !== "user" || !ag) return { session }
-      const small = ag.model ? undefined : yield* provider.getSmallModel(lastUser.model.providerID)
-      const attempts = [
-        {
-          model: ag.model ?? (small ? { providerID: small.providerID, modelID: small.id } : lastUser.model),
-          variant: ag.variant,
-        },
-        ...RENAME_FALLBACKS,
-      ].filter(
+      const fallback = input.mode === "stock" ? { providerID: input.providerID, modelID: input.modelID } : user.model
+      const small = ag.model ? undefined : yield* provider.getSmallModel(fallback.providerID)
+      const primary = {
+        model: ag.model ?? (small ? { providerID: small.providerID, modelID: small.id } : fallback),
+        variant: ag.variant,
+      }
+      const attempts = [primary, ...(input.mode === "stock" ? [] : RENAME_FALLBACKS)].filter(
         (attempt, index, all) =>
           all.findIndex(
             (other) =>
               other.model.providerID === attempt.model.providerID && other.model.modelID === attempt.model.modelID,
           ) === index,
       )
-      const t = yield* Effect.firstSuccessOf(
-        attempts.map((attempt) =>
-          Effect.gen(function* () {
-            const mdl =
-              small && small.providerID === attempt.model.providerID && small.id === attempt.model.modelID
-                ? small
-                : yield* provider.getModel(attempt.model.providerID, attempt.model.modelID)
-            const text = yield* llm
-              .stream({
-                agent: { ...ag, model: { providerID: mdl.providerID, modelID: mdl.id }, variant: attempt.variant },
-                // Request preparation otherwise inherits the conversation's effort for unvaried agents.
-                user: { ...lastUser, model: { ...lastUser.model, variant: attempt.variant } },
-                system: [],
-                small: true,
-                tools: {},
-                model: mdl,
-                sessionID,
-                retries: 2,
-                messages: [
-                  {
-                    role: "user",
-                    content: `Generate a concise title for this conversation. Start it with the folder name "${path.basename(session.directory)}", followed by " - " and a short description, for example "oc - description".\n\n${renameDigest(history)}`,
-                  },
-                ],
-              })
-              .pipe(Stream.filter(LLMEvent.is.textDelta), Stream.map((e) => e.text), Stream.mkString)
-            const title = cleanTitle(text)
-            if (!title) return yield* Effect.fail(new Error("Rename model returned an empty title"))
-            return { title, model: `${mdl.providerID}/${mdl.id}` }
-          }).pipe(
-            // SDK initialization surfaces its known provider error as a defect.
-            Effect.catchDefect((error) =>
-              Provider.InitError.isInstance(error) ? Effect.fail(error) : Effect.die(error),
-            ),
-            Effect.tapError((error) =>
-              Effect.logWarning("rename model failed", { sessionID, model: attempt.model, error }),
-            ),
+      const generate = (attempt: (typeof attempts)[number]) =>
+        Effect.gen(function* () {
+          const mdl =
+            small && small.providerID === attempt.model.providerID && small.id === attempt.model.modelID
+              ? small
+              : yield* provider.getModel(attempt.model.providerID, attempt.model.modelID)
+          const request =
+            input.mode === "stock"
+              ? {
+                  agent: ag,
+                  user,
+                  messages: [
+                    { role: "user" as const, content: "Generate a title for this conversation:\n" },
+                    ...(yield* titleConversation(last, input.history, mdl)),
+                  ],
+                }
+              : {
+                  agent: { ...ag, model: { providerID: mdl.providerID, modelID: mdl.id }, variant: attempt.variant },
+                  // Request preparation otherwise inherits the conversation's effort for unvaried agents.
+                  user: { ...user, model: { ...user.model, variant: attempt.variant } },
+                  messages: [
+                    {
+                      role: "user" as const,
+                      content: `Generate a concise title for this conversation. Start it with the folder name "${path.basename(input.session.directory)}", followed by " - " and a short description, for example "oc - description".\n\n${renameDigest(input.history)}`,
+                    },
+                  ],
+                }
+          const text = yield* llm
+            .stream({
+              ...request,
+              system: [],
+              small: true,
+              tools: {},
+              model: mdl,
+              sessionID: input.session.id,
+              retries: 2,
+            })
+            .pipe(Stream.filter(LLMEvent.is.textDelta), Stream.map((e) => e.text), Stream.mkString)
+          const result = cleanTitle(text)
+          if (!result) return yield* Effect.fail(new Error("Title model returned an empty title"))
+          return { title: result, model: `${mdl.providerID}/${mdl.id}` }
+        }).pipe(
+          // SDK initialization surfaces its known provider error as a defect.
+          Effect.catchDefect((error) => (Provider.InitError.isInstance(error) ? Effect.fail(error) : Effect.die(error))),
+          Effect.tapError((error) =>
+            Effect.logWarning("title model failed", { sessionID: input.session.id, model: attempt.model, error }),
           ),
-        ),
-      )
-      if (automatic) {
-        const current = yield* sessions.get(sessionID)
-        if (current.title !== automatic.title) return { session: current }
-      }
-      yield* sessions.setTitle({ sessionID, title: t.title })
-      return { session: yield* sessions.get(sessionID), model: t.model }
+        )
+      const result = yield* Effect.firstSuccessOf(attempts.map(generate))
+      if (automatic && (yield* sessions.get(input.session.id)).title !== input.session.title) return
+      yield* sessions.setTitle({ sessionID: input.session.id, title: result.title })
+      return result
+    })
+
+    // Re-titles a session from a digest of its history, for the /rename command.
+    const rename = Effect.fn("SessionPrompt.rename")(function* (sessionID: SessionID) {
+      const session = yield* sessions.get(sessionID)
+      const history = yield* sessions.messages({ sessionID })
+      const named = yield* title({ mode: "manual", session, history })
+      return { session: yield* sessions.get(sessionID), model: named?.model }
     }, Effect.orDie)
+
+    // /btw side question: one tool-less model call over a snapshot of the history. Nothing is
+    // written back, so messages, marks, and resume state stay as they were.
+    const generate = Effect.fn("SessionPrompt.generate")(function* (input: GenerateInput) {
+      const session = yield* sessions.get(input.sessionID).pipe(Effect.orDie)
+      const agentName = input.agent ?? session.agent ?? (yield* agents.defaultInfo()).name
+      const agent = yield* agents.get(agentName)
+      if (!agent) {
+        return yield* new GenerateAgentNotFoundError({ agent: agentName, message: `Agent not found: "${agentName}".` })
+      }
+
+      const model = input.model ?? agent.model ?? (yield* currentModel(input.sessionID))
+      const unsupported = isClaudeCodeProvider(model.providerID)
+        ? "Claude Code"
+        : model.providerID === CURSOR_PROVIDER_ID
+          ? "Cursor"
+          : undefined
+      if (unsupported) {
+        return yield* new GenerateUnsupportedError({
+          providerID: model.providerID,
+          message: `/btw is not available on ${unsupported} yet`,
+        })
+      }
+      const resolved = yield* provider.getModel(model.providerID, model.modelID)
+
+      const history = yield* sessions.messages({ sessionID: input.sessionID }).pipe(Effect.orDie)
+      // filterCompacted takes newest-first and returns oldest-first.
+      const context = MessageV2.filterCompacted(revertedHistory(history, session.revert).toReversed())
+      const messages = yield* MessageV2.toModelMessagesEffect(
+        context.filter(
+          (msg) => msg.parts.length > 0 && (msg.info.role !== "assistant" || msg.info.time.completed !== undefined),
+        ),
+        resolved,
+      )
+
+      const modelKey = `${resolved.providerID}/${resolved.id}`
+      const [env, instructions, base] = yield* Effect.all([
+        sys.environment(resolved),
+        instruction.system(modelKey).pipe(Effect.orDie),
+        agent.prompt ? Effect.succeed(undefined) : instruction.base(modelKey).pipe(Effect.orDie),
+      ])
+      const user: SessionV1.User = {
+        id: MessageID.ascending(),
+        role: "user",
+        sessionID: input.sessionID,
+        time: { created: Date.now() },
+        agent: agent.name,
+        model: { providerID: resolved.providerID, modelID: resolved.id, variant: input.variant },
+      }
+
+      const events = yield* llm
+        .stream({
+          user,
+          sessionID: input.sessionID,
+          model: resolved,
+          agent: base ? { ...agent, prompt: base } : agent,
+          system: [...env, ...instructions, SIDE_QUESTION_INSTRUCTION],
+          messages: [...messages, { role: "user", content: input.prompt }],
+          tools: {},
+          toolChoice: "none",
+        })
+        .pipe(
+          Stream.runCollect,
+          Effect.catchDefect((error) => (Provider.InitError.isInstance(error) ? Effect.fail(error) : Effect.die(error))),
+          Effect.mapError(
+            (error) => new GenerateFailedError({ message: error instanceof Error ? error.message : String(error) }),
+          ),
+          Effect.timeoutOrElse({
+            duration: GENERATE_TIMEOUT,
+            orElse: () =>
+              Effect.fail(
+                new GenerateTimeoutError({ message: `The side question timed out after ${GENERATE_TIMEOUT}.` }),
+              ),
+          }),
+        )
+
+      const providerError = events.find(LLMEvent.is.providerError)
+      if (providerError) return yield* new GenerateFailedError({ message: providerError.message })
+      if (events.some(LLMEvent.is.toolCall)) {
+        return yield* new GenerateFailedError({ message: "The model tried to call a tool, which /btw cannot run." })
+      }
+      const finish = events.findLast(LLMEvent.is.finish)
+      if (finish && finish.reason !== "stop" && finish.reason !== "unknown") {
+        return yield* new GenerateFailedError({
+          message: `The model stopped before finishing its answer (${finish.reason}).`,
+        })
+      }
+      const text = events
+        .filter(LLMEvent.is.textDelta)
+        .map((event) => event.text)
+        .join("")
+        .trim()
+      if (!text) return yield* new GenerateFailedError({ message: "The model returned an empty answer." })
+      return { text, providerID: resolved.providerID, modelID: resolved.id }
+    })
 
     const startTitle = Effect.fn("SessionPrompt.startTitle")(function* (input: {
       sessionID: SessionID
@@ -387,30 +494,35 @@ const layer = Layer.effect(
     }) {
       const session = yield* sessions.get(input.sessionID).pipe(Effect.orDie)
       if (session.parentID) return
-      if (session.metadata?.ocAutoRename === undefined) {
-        yield* title({ ...input, session }).pipe(Effect.ignore, Effect.forkIn(scope))
-        return
-      }
-      const automatic = decodeAutoRename(session.metadata.ocAutoRename)
-      if (Option.isNone(automatic) || automatic.value.state !== "pending") return
       const users = input.history.filter(isRealUserMessage)
-      if (users.length === 0) return
+      const marker = session.metadata?.ocAutoRename
+      if (marker === undefined) {
+        if (users.length !== 1 || !Session.isDefaultTitle(session.title)) return
+      } else {
+        const automatic = decodeAutoRename(marker)
+        if (Option.isNone(automatic) || automatic.value.state !== "pending") return
+        if (users.length === 0) return
 
-      // Claim inside the owning loop, before forking, so reconnects cannot repeat naming.
-      yield* sessions.setMetadata({
-        sessionID: session.id,
-        metadata: { ...session.metadata, ocAutoRename: { ...automatic.value, state: "attempted" } },
-      })
-      if (users.length !== 1) return
-      if (automatic.value.title === undefined
-        ? !Session.isDefaultTitle(session.title)
-        : session.title !== automatic.value.title) return
+        // Claim inside the owning loop, before forking, so reconnects cannot repeat naming.
+        yield* sessions.setMetadata({
+          sessionID: session.id,
+          metadata: { ...session.metadata, ocAutoRename: { ...automatic.value, state: "attempted" } },
+        })
+        if (users.length !== 1) return
+        if (automatic.value.title === undefined
+          ? !Session.isDefaultTitle(session.title)
+          : session.title !== automatic.value.title) return
+      }
 
       const history = structuredClone(input.history.slice(0, input.history.indexOf(users[0]) + 1))
-      yield* work.run(rename(session.id, { title: session.title, history })).pipe(
+      const titled =
+        marker === undefined
+          ? title({ mode: "stock", session, history, providerID: input.providerID, modelID: input.modelID })
+          : title({ mode: "marked", session, history })
+      yield* gated(titled).pipe(
         Effect.catchCause((cause) => Cause.hasInterruptsOnly(cause)
           ? Effect.failCause(cause)
-          : Effect.logWarning("automatic rename failed", { sessionID: session.id, error: Cause.squash(cause) })),
+          : Effect.logWarning("automatic title failed", { sessionID: session.id, error: Cause.squash(cause) })),
         Effect.forkIn(scope),
       )
     })
@@ -829,6 +941,7 @@ const layer = Layer.effect(
           providerID: model.providerID,
           modelID: model.modelID,
           variant,
+          ...(input.explicitModel ? { explicit: true } : {}),
         },
         system: input.system,
         format: input.format,
@@ -1254,6 +1367,7 @@ const layer = Layer.effect(
       const session = yield* sessions.get(input.sessionID).pipe(Effect.orDie)
       yield* revert.cleanup(session)
       const message = yield* createUserMessage(input)
+      if (input.persisted) yield* input.persisted
       yield* sessions.touch(input.sessionID)
 
       const permissions: PermissionV1.Rule[] = []
@@ -1837,14 +1951,75 @@ const layer = Layer.effect(
       return result
     })
 
+    // Queued prompts. One drain per session holds `draining` from claim until its turn ends, so no second
+    // claim can slip in between a prompt being saved and its run starting. A drain keeps going while each
+    // turn ends successfully; a second caller returns because the active drain picks up the next entry.
+    const draining = new Set<SessionID>()
+    const dispatchHead: (sessionID: SessionID) => Effect.Effect<boolean> = Effect.fn("SessionPrompt.dispatchQueued")(function* (sessionID: SessionID) {
+      const idle = Effect.exit(state.assertNotBusy(sessionID)).pipe(Effect.map(Exit.isSuccess))
+      const queued = yield* queue.claim(sessionID, idle)
+      if (!queued) {
+        const snapshot = yield* queue.snapshot(sessionID)
+        const head = snapshot.entries[0]
+        if (snapshot.pause !== "none" || head?.state !== "pending") return false
+        // The turn ended between the failed claim and now: claim again instead of waiting for a run that is over.
+        if (yield* idle) return yield* dispatchHead(sessionID)
+        // Busy: wait out maintenance, then the run in progress, then drain again.
+        yield* Effect.gen(function* () {
+          yield* state.available(sessionID)
+          const completion = yield* state.completion(sessionID)
+          yield* completion.pipe(
+            Effect.flatMap((ok) => (ok ? drainQueue(sessionID) : queue.pause(sessionID, "error"))),
+          )
+        }).pipe(Effect.forkIn(scope))
+        return false
+      }
+      // Refused during this project's reload: the queue pauses like any failed turn and resumes on demand.
+      const exit = yield* gated(
+        prompt({ ...queued.payload, sessionID, messageID: queued.id, persisted: queue.complete(queued.id) }),
+      ).pipe(Effect.exit)
+      if (Exit.isSuccess(exit) && SessionRunState.successfulTurn(exit.value)) return true
+      yield* queue.settle(queued.id)
+      yield* queue.pause(sessionID, "error")
+      return false
+    })
+
+    const drainQueue: (sessionID: SessionID) => Effect.Effect<void> = Effect.fn("SessionPrompt.drainQueue")(
+      function* (sessionID: SessionID) {
+        if (draining.has(sessionID)) return
+        draining.add(sessionID)
+        const sent = yield* dispatchHead(sessionID).pipe(
+          Effect.ensuring(Effect.sync(() => draining.delete(sessionID))),
+        )
+        if (sent) yield* drainQueue(sessionID)
+      },
+    )
+
+    const kick = (sessionID: SessionID) =>
+      drainQueue(sessionID).pipe(
+        Effect.catchCause((cause) => Effect.logError("queue drain failed", { sessionID, cause })),
+        Effect.forkIn(scope),
+        Effect.asVoid,
+      )
+
+    const queueOps: Interface["queue"] = {
+      snapshot: queue.snapshot,
+      add: (input) => queue.add(input).pipe(Effect.tap(() => kick(input.sessionID))),
+      edit: queue.edit,
+      cancel: (input) => queue.cancel(input).pipe(Effect.tap(() => kick(input.sessionID))),
+      resume: (sessionID) => queue.resume(sessionID).pipe(Effect.tap(() => kick(sessionID))),
+    }
+
     return Service.of({
       cancel,
-      prompt: (input) => work.run(prompt(input)),
-      loop: (input) => work.run(loop(input)),
-      shell: (input) => work.run(shell(input)),
-      command: (input) => work.run(command(input)),
+      prompt: (input) => gatedSession(input.sessionID, prompt(input)),
+      loop: (input) => gatedSession(input.sessionID, loop(input)),
+      shell: (input) => gatedSession(input.sessionID, shell(input)),
+      command: (input) => gatedSession(input.sessionID, command(input)),
       resolvePromptParts,
-      rename: (sessionID) => work.run(rename(sessionID)),
+      rename: (sessionID) => gatedSession(sessionID, rename(sessionID)),
+      generate: (input) => gatedSession(input.sessionID, generate(input)),
+      queue: queueOps,
     })
   }),
 )
@@ -1852,6 +2027,40 @@ const layer = Layer.effect(
 function isRealUserMessage(message: SessionV1.WithParts) {
   return message.info.role === "user" && !message.parts.every((part) => "synthetic" in part && part.synthetic)
 }
+
+// Same boundary as SessionRevert.cleanup, applied to a copy: the reverted message and later ones
+// go, or only the parts before the reverted part remain.
+function revertedHistory(msgs: SessionV1.WithParts[], revert: Session.Info["revert"]) {
+  if (!revert) return msgs
+  const index = msgs.findIndex((msg) => msg.info.id === revert.messageID)
+  if (index < 0) return msgs
+  if (!revert.partID) return msgs.slice(0, index)
+  const target = msgs[index]
+  const partIndex = target.parts.findIndex((part) => part.id === revert.partID)
+  if (partIndex < 0) return msgs.slice(0, index + 1)
+  return [...msgs.slice(0, index), { ...target, parts: target.parts.slice(0, partIndex) }]
+}
+
+// Stock titles model the whole first request. A subtask-only request sends its prompts instead.
+const titleConversation = Effect.fnUntraced(function* (
+  first: SessionV1.WithParts,
+  context: SessionV1.WithParts[],
+  model: Provider.Model,
+) {
+  const subtasks = first.parts.filter((p): p is SessionV1.SubtaskPart => p.type === "subtask")
+  if (subtasks.length > 0 && first.parts.every((p) => p.type === "subtask")) {
+    return [{ role: "user" as const, content: subtasks.map((p) => withoutCommandHeader(p.prompt)).join("\n") }]
+  }
+  return yield* MessageV2.toModelMessagesEffect(
+    context.map((message) => ({
+      ...message,
+      parts: message.parts.map((part) =>
+        message.info.role === "user" && part.type === "text" ? { ...part, text: namingText(part) } : part,
+      ),
+    })),
+    model,
+  )
+})
 
 function cleanTitle(text: string) {
   const line = text
@@ -1919,7 +2128,13 @@ export const PromptInput = Schema.Struct({
 })
 export type PromptInput = Schema.Schema.Type<typeof PromptInput>
 // Internal only: command rules are saved on the user message, never the session.
-export type TurnInput = PromptInput & { turnPermission?: PermissionV1.Ruleset }
+// `persisted` runs once the user message is saved; queued prompts use it to drop their queue row.
+// `explicitModel` marks a turn whose caller named its model (`task` with `model`); saved as `model.explicit`.
+export type TurnInput = PromptInput & {
+  turnPermission?: PermissionV1.Ruleset
+  persisted?: Effect.Effect<void>
+  explicitModel?: boolean
+}
 
 export class LoopInput extends Schema.Class<LoopInput>("SessionPrompt.LoopInput")({
   sessionID: SessionID,
@@ -1962,6 +2177,43 @@ export const CommandInput = Schema.Struct({
   ),
 })
 export type CommandInput = Schema.Schema.Type<typeof CommandInput>
+
+export const GenerateInput = Schema.Struct({
+  sessionID: SessionID,
+  prompt: Schema.String.check(Schema.isPattern(/\S/)),
+  model: Schema.optional(ModelRef),
+  agent: Schema.optional(Schema.String),
+  variant: Schema.optional(Schema.String),
+})
+export type GenerateInput = Schema.Schema.Type<typeof GenerateInput>
+
+export const GenerateResult = Schema.Struct({
+  text: Schema.String,
+  providerID: ProviderV2.ID,
+  modelID: ModelV2.ID,
+})
+export type GenerateResult = Schema.Schema.Type<typeof GenerateResult>
+
+export class GenerateUnsupportedError extends Schema.TaggedErrorClass<GenerateUnsupportedError>()(
+  "GenerateUnsupportedError",
+  { providerID: ProviderV2.ID, message: Schema.String },
+) {}
+export class GenerateAgentNotFoundError extends Schema.TaggedErrorClass<GenerateAgentNotFoundError>()(
+  "GenerateAgentNotFoundError",
+  { agent: Schema.String, message: Schema.String },
+) {}
+export class GenerateFailedError extends Schema.TaggedErrorClass<GenerateFailedError>()("GenerateFailedError", {
+  message: Schema.String,
+}) {}
+export class GenerateTimeoutError extends Schema.TaggedErrorClass<GenerateTimeoutError>()("GenerateTimeoutError", {
+  message: Schema.String,
+}) {}
+export type GenerateError =
+  | GenerateUnsupportedError
+  | GenerateAgentNotFoundError
+  | GenerateFailedError
+  | GenerateTimeoutError
+  | Provider.ModelNotFoundError
 
 /** @internal Exported for testing */
 export function createStructuredOutputTool(input: {
@@ -2030,6 +2282,7 @@ export const node = LayerNode.make({
     Database.node,
     Question.node,
     SessionWork.node,
+    SessionQueue.node,
   ],
 })
 

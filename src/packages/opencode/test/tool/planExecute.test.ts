@@ -255,6 +255,7 @@ function runQuestionnaire(answers: string[], planPath = TEST_PLAN_PATH) {
             yield* Deferred.succeed(started, undefined)
             return { info: { id: MessageID.make("msg_go"), role: "assistant", sessionID: input.sessionID }, parts: [] }
           })) as unknown as SessionPrompt.Interface["prompt"],
+        queue: {} as SessionPrompt.Interface["queue"],
       }),
       Layer.mock(Question.Service, {
         ask: (input: { questions: ReadonlyArray<Question.Info> }) =>

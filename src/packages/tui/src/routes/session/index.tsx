@@ -2386,6 +2386,13 @@ function Shell(props: ToolProps) {
     return `# Running in ${wd}`
   })
 
+  // Set on background runs: the job id and its state, which changes after the call has returned.
+  const job = createMemo(() => {
+    const background = props.metadata.background as { jobID?: string; status?: string } | undefined
+    if (!background) return
+    return `background ${background.jobID} ${background.status}`
+  })
+
   return (
     <Switch>
       <Match when={stringValue(props.metadata.output) !== undefined}>
@@ -2393,6 +2400,9 @@ function Shell(props: ToolProps) {
           <box gap={1}>
             <Show when={isRunning()} fallback={<text fg={theme.text}>$ {stringValue(props.input.command)}</text>}>
               <Spinner color={theme.text}>{stringValue(props.input.command)}</Spinner>
+            </Show>
+            <Show when={job()}>
+              <text fg={theme.textMuted}>{job()}</text>
             </Show>
             <Show when={output()}>
               <text fg={theme.text}>{limited()}</text>
@@ -2623,13 +2633,16 @@ function Task(props: ToolProps) {
   const content = createMemo(() => {
     const description = stringValue(props.input.description)
     if (!description) return ""
-    let content = [
-      formatSubagentTitle(
-        Locale.titlecase(stringValue(props.input.subagent_type) ?? "General"),
-        description,
-        props.metadata.background === true,
-      ),
-    ]
+    const title = formatSubagentTitle(
+      Locale.titlecase(stringValue(props.input.subagent_type) ?? "General"),
+      description,
+      props.metadata.background === true,
+    )
+    const model = formatSubagentModel(
+      props.metadata.model as { providerID: string; modelID: string } | undefined,
+      stringValue(props.metadata.variant),
+    )
+    let content = [model ? `${title} · ${model}` : title]
 
     const retrying = retry()
     if (isRunning() && retrying) {
@@ -2677,6 +2690,12 @@ export function formatSubagentToolcalls(count: number) {
 
 export function formatSubagentTitle(agent: string, description: string, background: boolean) {
   return `${agent} Task${background ? " (background)" : ""} — ${description}`
+}
+
+// The model a task call actually ran on, as `provider/model#variant`; undefined before the call publishes it.
+export function formatSubagentModel(model: { providerID: string; modelID: string } | undefined, variant?: string) {
+  if (!model) return undefined
+  return `${model.providerID}/${model.modelID}${variant ? `#${variant}` : ""}`
 }
 
 export function formatSubagentRetry(attempt: number, message: string) {

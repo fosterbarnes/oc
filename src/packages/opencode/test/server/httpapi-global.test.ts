@@ -74,7 +74,7 @@ describe("global HttpApi", () => {
         })),
         (clear) => Effect.sync(clear),
       )
-      const active = yield* work.run(Deferred.succeed(started, undefined).pipe(
+      const active = yield* work.run("global", Deferred.succeed(started, undefined).pipe(
         Effect.andThen(Effect.never),
         Effect.ensuring(Deferred.succeed(cleaned, undefined)),
       )).pipe(Effect.forkChild)
@@ -85,7 +85,7 @@ describe("global HttpApi", () => {
       expect(yield* Deferred.isDone(cleaned)).toBeTrue()
       yield* Deferred.await(scheduled)
       yield* Fiber.await(active)
-      const rejected = yield* work.run(Effect.die("must not execute")).pipe(Effect.exit)
+      const rejected = yield* work.run("global", Effect.die("must not execute")).pipe(Effect.exit)
       expect(rejected._tag).toBe("Failure")
     }),
   )

@@ -77,3 +77,4 @@ loop; the OpenCode 2 execution engine itself is not brought back.
 | Cursor native plan-mode bridge | | OpenCode planning agents |
 | ocdebug PowerShell wrapper function | | Native `ocdebug.exe` |
 | OpenTUI raw-mode resume patch | | Stock OpenTUI resume |
+| bgShell plugin (`bgRun`, `bgStatus`, `bgKill` sibling plugin) | 0.2.177 | Built-in background shell: `bash` with `background: true`. Migration: `bgRun` becomes `bash` with `background: true`; `bgStatus` and `bgKill` keep their names. |

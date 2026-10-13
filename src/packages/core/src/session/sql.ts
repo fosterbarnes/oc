@@ -14,6 +14,8 @@ import { Timestamps } from "../database/schema.sql"
 import type { SystemContext } from "../system-context/index"
 import { AgentV2 } from "../agent"
 import type { Revert } from "@opencode-ai/schema/revert"
+import type { ModelV2 } from "../model"
+import type { ProviderV2 } from "../provider"
 
 type SessionMessageData = Omit<(typeof SessionMessage.Message)["Encoded"], "type" | "id">
 type V1MessageData = Omit<SessionV1.Info, "id" | "sessionID">
@@ -168,6 +170,28 @@ export const SessionInputTable = sqliteTable(
     uniqueIndex("session_input_session_admitted_seq_idx").on(table.session_id, table.admitted_seq),
     uniqueIndex("session_input_session_promoted_seq_idx").on(table.session_id, table.promoted_seq),
   ],
+)
+
+// Prompts queued while a session is busy. The id is the user message id the prompt is sent with.
+// `dispatching` marks the head row while its prompt is being persisted and started.
+export const SessionQueueTable = sqliteTable(
+  "session_queue",
+  {
+    id: text().$type<MessageID>().primaryKey(),
+    session_id: text()
+      .$type<SessionSchema.ID>()
+      .notNull()
+      .references(() => SessionTable.id, { onDelete: "cascade" }),
+    state: text().$type<"pending" | "dispatching">().notNull(),
+    payload: text({ mode: "json" }).notNull().$type<{
+      agent?: string
+      model?: { providerID: ProviderV2.ID; modelID: ModelV2.ID }
+      variant?: string
+      parts: readonly (SessionV1.TextPartInput | SessionV1.FilePartInput | SessionV1.AgentPartInput)[]
+    }>(),
+    ...Timestamps,
+  },
+  (table) => [index("session_queue_session_time_created_idx").on(table.session_id, table.time_created)],
 )
 
 export const SessionContextEpochTable = sqliteTable("session_context_epoch", {

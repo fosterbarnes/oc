@@ -13,6 +13,8 @@ import { TimeTool } from "./time"
 import { Session } from "@/session/session"
 import { QuestionTool } from "./question"
 import { ShellTool } from "./shell"
+import { BgKillTool, BgStatusTool } from "./shellJobs"
+import { ShellJobs } from "@/background/shellJobs"
 import { EditTool } from "./edit"
 import { GlobTool } from "./glob"
 import { GrepTool } from "./grep"
@@ -124,6 +126,8 @@ const layer = Layer.effect(
     const webfetch = yield* WebFetchTool
     const websearch = yield* WebSearchTool
     const shell = yield* ShellTool
+    const bgStatus = yield* BgStatusTool
+    const bgKill = yield* BgKillTool
     const globtool = yield* GlobTool
     const writetool = yield* WriteTool
     const edit = yield* EditTool
@@ -226,6 +230,8 @@ const layer = Layer.effect(
         const tool = yield* Effect.all({
           invalid: Tool.init(invalid),
           shell: Tool.init(shell),
+          bgStatus: Tool.init(bgStatus),
+          bgKill: Tool.init(bgKill),
           read: Tool.init(read),
           glob: Tool.init(globtool),
           grep: Tool.init(greptool),
@@ -257,6 +263,8 @@ const layer = Layer.effect(
             tool.invalid,
             ...(questionEnabled ? [tool.question] : []),
             tool.shell,
+            tool.bgStatus,
+            tool.bgKill,
             tool.read,
             tool.glob,
             tool.grep,
@@ -470,6 +478,7 @@ export const node = LayerNode.make({
     Skill.node,
     Session.node,
     BackgroundJob.node,
+    ShellJobs.node,
     Provider.node,
     LSP.node,
     Instruction.node,

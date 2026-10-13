@@ -112,6 +112,61 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-13 (~11:01) - v0.2.177 - Show failed Claude CLI web searches - Claude Sonnet 5.5, reasoning default; Implementation
+
+### Agent
+- Meta: Claude Sonnet 5.5; reasoning default; Implementation; completed
+- Version: 0.2.177
+- Added `webSearchIds` in `provider/claude-code/turnStream.ts`: `completeToolUse` records each CLI-run WebSearch id, `onUser` now reads its `tool_result` and notes `Web search failed: <reason>` when `is_error` is true; success stays silent
+- Added two tests in `test/provider/claude-code/cliEventsStream.test.ts` (failed search noted, successful search not noted)
+- Verification: `bun test test/provider/claude-code/cliEventsStream.test.ts` 14 pass, 0 fail
+- Risk: real CLI may report a failed WebSearch as plain text without `is_error`; unverified against a live failure
+
+### User
+Web search
+- A web search that fails inside Claude Code now shows a "Web search failed" line with the reason under the search query.
+
+---
+
+## 2026-10-13 (~09:57) - v0.2.177 parlorYowza - Stage 6 adoptions: queue, /btw, /reload, background shell, task model, tool repair, one title path - Claude Opus 5.5, reasoning default; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; reasoning default; Implementation (imp, orchestrator); completed. Designs by general-gpt-6.1-sol-medium (architect role), code by general-haiku-5.5-high workers in 3 waves, docs by general-haiku-5.5-medium.
+- Version: 0.2.177 parlorYowza
+- Plans: `~/.config/opencode/plans/upstreamParity/stage6/*.md` (7 files); queue plan has an appended "Persistence (user decision)" section.
+- Merged automatic naming into `SessionPrompt.title({ mode: stock|marked|manual })` (`session/prompt.ts`); `rename()` is a thin manual wrapper; automatic writes skip when the title changed meanwhile. Stock titles now run under `SessionWork.run`.
+- Added `tool/inputRepair.ts` (port of dev `437cdc03a9`), applied at the `SessionTools.resolve` boundary (validator + executor). Builtins repair against the advertised normalized schema (raw Effect doc blocked repairs). Code-mode child calls not covered.
+- Added optional `model` (`provider/model#variant`) on `tool/task.ts`; validated before permission/child; `task_id` must be a same-agent direct child. Claude: `proxyToolDefs.ts` schema, `agentModels.ts` `setExplicitModelSession` skips `forceModel`/`defaultSubagentModel`, `hostTools.ts` V2 `subagent` passes `model`. TUI task row shows the effective model.
+- Added `POST /instance/reload` + TUI `/reload` (`app.tsx`): `SessionWork` process-wide idle gate (`core/src/session/work.ts`), config preflight (`config.ts`, local JSON only), `InstanceStore.reload`; disposal bootstrap in `sync.tsx` is nonfatal.
+- Added `POST /session/:sessionID/generate` + `SessionPrompt.generate` and `/btw` dialog (`tui/src/component/dialogBtw.tsx`): no history writes, tools none, 120 s. Claude Code and Cursor return typed 422.
+- Added built-in background shell: `bash` `background`, `background/shellJobs.ts`, `tool/shellJobs.ts` (`bgStatus`/`bgKill`), completion notice via shared `notifySession` in `task.ts`, `run-state.ts` maintenance gate, safe tree kill `core/src/util/processTree.ts` (cross-spawn-spawner win32 no longer uses `taskkill`). Jobs use their own instance-scoped registry, not `BackgroundJob` (Esc would kill them). `bgRun` now asks by default.
+- Added persisted queue: `session_queue` table + migration `20261013132808_sessionQueue`, `session/queue.ts`, `GET/POST /session/:sessionID/queue`, `dialogQueue.tsx`, Alt+Enter `prompt.queue` in session; restart/revive loads queues paused; `dispatching` rows reconciled by message id at start; scheduled resume defers while queue has entries. `session_queued_prompts` default now none (collided with quit).
+- Regenerated legacy JS SDK (`sdk/js/src/v2/gen/*`); `packages/client` generate produced only EOL changes (restored).
+- Docs: FORK.md (5 new rows, bgShell row replaced, counts 82), SCOPE.md bgShell retired row, `docs/keybinds.md`, wiki `Sessions.md`, `Keybinds.md`, `Configuration.md`, `Agents-and-Skills.md`, `Companion-Tools.md`.
+- Verification: core 10 pass (session-work, processTree), `migration --check` exit 0; opencode 209 pass / 0 fail across 18 new+edited files; tui 23 pass / 0 fail; typecheck exit 0 in core, opencode, tui; `keybindDocs.ts --check` exit 0. Pane checks not run. No build/install.
+- ERROR: known pre-existing failures in `test/session/prompt.test.ts`: "prompt tools replace previous prompt tool rules" (code merges, test expects replace; code unchanged from HEAD) and "concurrent loop callers get same result" (ModelNotFound in context-limit check from `f69cf20`). Not caused by this session.
+- Risk: queue Esc in the gap between claim and run start may still start that prompt; two oc processes on one DB can double-send after Resume. Background jobs die on instance reload (`/reload`); job lifetime = instance lifetime.
+- TODO: `/btw` on Claude Code (needs isolated one-shot CLI call); `docs/keybinds.md` still lists alt+return under Insert newline (upstream def).
+- Pass cleanup (4 grok review agents, claims verified by reading): `shellJobs.ts` job ids now match `^bg_[A-Za-z0-9]+$` (model-supplied id could walk out of the job dir), `readTail` reads only the log end, corrupt `meta.json` is skipped; queue `pause` now takes the same lock as `claim`, and a failed claim that finds the session idle retries instead of stalling; 20 new/edited LF files converted to CRLF. Verification: opencode typecheck 0, backgroundShell/queue/shell tests 115 pass; core processTree `stops a live child tree` failed once under load and passed on rerun (6 pass), `tool.shell basic [bash]` timed out once (5 s) and passed on rerun.
+- Known, not changed (need a decision): `explicitModelSessions` is a module-level Set in the Claude provider, set from `tool/task.ts`; `SessionWork` gate is process-wide and requests that waited out a reload resume with the pre-reload instance; paused queue also holds back a due auto-resume; recovery trusts `processAlive(owner)` (PID reuse can leave a job `running`).
+- MISTAKE: Haiku workers reported failure on harmless last-tool errors; resuming with `task_id` recovered them. Brief workers to finish with a text report.
+
+### User
+Sessions
+- Alt+Enter on a session screen queues your prompt; queued prompts send in order after each turn, survive restarts (paused until you resume), and can be edited or cancelled in the queue manager.
+- `/btw <question>` asks a quick side question about the session without adding it to the conversation (API providers only for now).
+- Background shell commands are built in: agents can run `bash` in the background, check jobs with `bgStatus`, stop them with `bgKill`, and the session is told when a job ends. The separate bgShell plugin is retired.
+
+Configuration
+- `/reload` reloads config, agents, skills, providers, MCP and plugins without rebuilding oc.
+
+Agents and tools
+- Sub-agent calls can pick a model (`provider/model#variant`) for one run.
+- Slightly malformed tool arguments from models are repaired automatically instead of failing.
+- Automatic session names use one code path; no visible change.
+
+---
+
 ## 2026-10-13 (~08:19) - v0.2.176 tolkienBurps - Live usage sidebar updates mid-turn - Claude Sonnet 5.5, reasoning unspecified; Agent
 
 ### Agent

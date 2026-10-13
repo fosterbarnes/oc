@@ -254,6 +254,12 @@ export const TASK_INPUT_PROPERTIES = {
     type: "string",
     description: "The command that triggered this task",
   },
+  model: {
+    type: "string",
+    description:
+      "Model for this task only, as provider/model or provider/model#variant. Set only when the user asks for a" +
+      " specific model; omit it to use the agent's own model.",
+  },
   background: {
     type: "boolean",
     description: "Run the task in the background when supported by opencode",

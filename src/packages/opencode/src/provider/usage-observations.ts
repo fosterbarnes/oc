@@ -113,7 +113,7 @@ export function openaiAccountId(accountId: string | undefined): string {
 }
 
 function headerValue(headers: Headers | Record<string, string>, name: string): string | undefined {
-  if (typeof Headers !== "undefined" && headers instanceof Headers) return headers.get(name) ?? undefined
+  if (headers instanceof Headers) return headers.get(name) ?? undefined
   for (const [key, value] of Object.entries(headers)) {
     if (key.toLowerCase() === name && typeof value === "string" && value.length > 0) return value
   }
@@ -121,15 +121,13 @@ function headerValue(headers: Headers | Record<string, string>, name: string): s
 }
 
 function parsePercent(value: string | undefined): number | undefined {
-  if (value === undefined) return undefined
-  if (!value.trim()) return undefined
+  if (value === undefined || !value.trim()) return undefined
   const parsed = Number(value)
   return isValidPercent(parsed) ? parsed : undefined
 }
 
 function parsePositiveInt(value: string | undefined): number | undefined {
-  if (value === undefined) return undefined
-  if (!value.trim()) return undefined
+  if (value === undefined || !value.trim()) return undefined
   const parsed = Number(value)
   return Number.isInteger(parsed) && parsed > 0 ? parsed : undefined
 }
@@ -137,7 +135,7 @@ function parsePositiveInt(value: string | undefined): number | undefined {
 function parseNonNegativeNumber(value: string | undefined): number | undefined {
   if (value === undefined || !value.trim()) return undefined
   const parsed = Number(value)
-  return typeof parsed === "number" && Number.isFinite(parsed) && parsed >= 0 ? parsed : undefined
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : undefined
 }
 
 function codexScopeWindows(

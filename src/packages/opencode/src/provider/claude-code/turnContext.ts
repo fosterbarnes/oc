@@ -5,7 +5,12 @@
 import type { LanguageModelV3CallOptions } from "@ai-sdk/provider"
 import type { ClaudeCodeConfig, ReasoningEffort } from "./types.js"
 import { resolveAgentEffort, resolveAgentModel } from "./agentModels.js"
-import { resolveOpencodeAgent, resolveOpencodeAgentPrompt, resolveSessionAffinity } from "./callOptions.js"
+import {
+  hasExplicitModel,
+  resolveOpencodeAgent,
+  resolveOpencodeAgentPrompt,
+  resolveSessionAffinity,
+} from "./callOptions.js"
 import { resolveSpawnCwdForSession } from "./runtimeStatus.js"
 import { deleteActiveProcess, deleteClaudeSessionId, sessionKey } from "./sessionManager.js"
 import { requestScope, isNamingAgent } from "./title.js"
@@ -32,8 +37,11 @@ export async function resolveTurnContext(
   // confirmation.
   const continuesChat = scope === "tools" || (agent !== undefined && !isNamingAgent(agent))
   // An agent may run on a different model than the one opencode routed here
-  // (see agentModels.ts), so the spawn uses the effective model.
-  const effectiveModelId = resolveAgentModel(agent, modelId)
+  // (see agentModels.ts), so the spawn uses the effective model. A turn that
+  // names its model explicitly (`task` with `model`) keeps it.
+  const effectiveModelId = hasExplicitModel(options.providerOptions, config.provider)
+    ? modelId
+    : resolveAgentModel(agent, modelId)
   const reasoningEffort = compactionMode
     ? undefined
     : (resolveAgentEffort(agent, readReasoningEffort(options.providerOptions, config.provider)) as

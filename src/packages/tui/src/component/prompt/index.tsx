@@ -59,6 +59,8 @@ import { usePromptMove } from "./move"
 import { readLocalAttachment } from "./local-attachment"
 import { useLocation } from "../../context/location"
 import { usePromptRef } from "../../context/prompt"
+import { DialogBtw } from "../dialogBtw"
+import { DialogQueue, createQueueSnapshot, queuePauseLabel } from "../dialogQueue"
 
 registerOpencodeSpinner()
 
@@ -182,6 +184,14 @@ export function Prompt(props: PromptProps) {
   // A turn ending is when a usage-limit resume gets queued, so refresh then instead of waiting for the poll.
   createEffect(on(() => status().type, (type) => type === "idle" && refreshResumes(), { defer: true }))
   createEffect(on(() => props.sessionID, refreshResumes, { defer: true }))
+  const queue = createQueueSnapshot(() => props.sessionID)
+  createEffect(on(() => status().type, (type) => type === "idle" && queue.refresh(), { defer: true }))
+  const queueLabel = createMemo(() => {
+    const snapshot = queue.snapshot()
+    if (snapshot.entries.length === 0) return undefined
+    const paused = queuePauseLabel(snapshot)
+    return `${snapshot.entries.length} queued${paused ? ` · ${paused}` : ""}`
+  })
   const history = usePromptHistory()
   const stash = usePromptStash()
   const keymap = useOpencodeKeymap()
@@ -400,6 +410,26 @@ export function Prompt(props: PromptProps) {
           if (props.sessionID || route.data.type !== "home") return
           const handled = await submit(true)
           if (handled) dialog.clear()
+        },
+      },
+      {
+        title: "Queue prompt",
+        name: "prompt.queue",
+        category: "Prompt",
+        enabled: !!props.sessionID && !props.disabled,
+        run: () => {
+          void queuePrompt()
+        },
+      },
+      {
+        title: "Queued prompts",
+        name: "session.queued_prompts",
+        category: "Session",
+        enabled: !!props.sessionID,
+        run: () => {
+          const sessionID = props.sessionID
+          if (!sessionID) return
+          dialog.replace(() => <DialogQueue sessionID={sessionID} />)
         },
       },
       {
@@ -903,6 +933,15 @@ export function Prompt(props: PromptProps) {
     }
   })
 
+  // Targeted so Alt+Enter queues in a session, while Home keeps its newline binding.
+  useBindings(() => {
+    return {
+      target: inputTarget,
+      enabled: inputTarget() !== undefined && !props.disabled && !!props.sessionID,
+      bindings: tuiConfig.keybinds.get("prompt.queue"),
+    }
+  })
+
   useBindings(() => {
     return {
       target: inputTarget,
@@ -1025,6 +1064,103 @@ export function Prompt(props: PromptProps) {
     }
   })
 
+  // The draft as it is sent: pasted text expanded inline, attachments kept, and any editor selection first.
+  function outgoingParts() {
+    const inputText = expandTrackedPastedText(
+      store.prompt.input,
+      input.extmarks.getAllForTypeId(promptPartTypeId).flatMap((extmark) => {
+        const partIndex = store.extmarkToPartIndex.get(extmark.id)
+        const part = partIndex === undefined ? undefined : store.prompt.parts[partIndex]
+        if (part?.type !== "text") return []
+        return [{ start: extmark.start, end: extmark.end, text: part.text }]
+      }),
+    )
+
+    // Filter out text parts (pasted content) since they're now expanded inline
+    const nonTextParts = store.prompt.parts.filter((part) => part.type !== "text")
+
+    const editorSelection = editorContext()
+    const editorParts =
+      editorSelection && editor.labelState() === "pending"
+        ? [
+            {
+              type: "text" as const,
+              text: formatEditorContext(editorSelection),
+              synthetic: true,
+              metadata: {
+                kind: "editor_context",
+                source: editorSelection.source ?? "editor",
+                filePath: editorSelection.filePath,
+                ranges: editorSelection.ranges,
+              },
+            },
+          ]
+        : []
+    return { inputText, nonTextParts, editorParts }
+  }
+
+  // Alt+Enter in a session: the draft joins the session queue instead of steering the running turn.
+  let queueing = false
+  async function queuePrompt() {
+    if (queueing) return false
+    queueing = true
+    try {
+      return await queueInner()
+    } finally {
+      queueing = false
+    }
+  }
+
+  async function queueInner() {
+    if (!props.sessionID || props.disabled) return false
+    if (store.mode === "shell") {
+      toast.show({ message: "Shell commands cannot be queued", variant: "warning" })
+      return false
+    }
+    const trimmed = store.prompt.input.trim()
+    if (trimmed.startsWith("/")) {
+      toast.show({ message: "Slash commands cannot be queued", variant: "warning" })
+      return false
+    }
+    if (!trimmed && store.prompt.parts.length === 0) return false
+    const agent = local.agent.current()
+    const selectedModel = local.model.current()
+    if (!agent || !selectedModel) return false
+
+    const { inputText, nonTextParts, editorParts } = outgoingParts()
+    const queued = await sdk.client.session.queue
+      .update(
+        {
+          sessionID: props.sessionID,
+          body: {
+            type: "add",
+            agent: agent.name,
+            model: { providerID: selectedModel.providerID, modelID: selectedModel.modelID },
+            variant: local.model.variant.current(),
+            parts: [...editorParts, { type: "text", text: inputText }, ...nonTextParts],
+          },
+        },
+        { throwOnError: true },
+      )
+      .then(
+        () => true,
+        (error) => {
+          toast.show({ title: "Failed to queue prompt", message: errorMessage(error), variant: "error" })
+          return false
+        },
+      )
+    if (!queued) return false
+
+    if (editorParts.length > 0) editor.markSelectionSent()
+    history.append({ ...store.prompt, mode: store.mode })
+    input.extmarks.clear()
+    setStore("prompt", { input: "", parts: [] })
+    setStore("extmarkToPartIndex", new Map())
+    if (!input.isDestroyed) input.clear()
+    queue.refresh()
+    return true
+  }
+
   let submitting = false
   async function submit(stayHome = false) {
     // Prevent overlapping invocations (e.g. a double-pressed Enter, or the
@@ -1085,6 +1221,23 @@ export function Prompt(props: PromptProps) {
     }
 
     const variant = local.model.variant.current()
+    // /btw is answered in a dialog, so the draft stays in the prompt and nothing enters history.
+    const aside = store.mode === "normal" ? trimmed.match(/^\/btw(?:\s+([\s\S]*))?$/) : null
+    if (aside) {
+      if (!props.sessionID) {
+        toast.show({ message: "Open a session first", variant: "warning" })
+        return false
+      }
+      if (store.prompt.parts.length > 0) {
+        toast.show({ message: "/btw takes plain text only", variant: "warning" })
+        return false
+      }
+      const target = { sessionID: props.sessionID, model: selectedModel, agent: agent.name, variant }
+      const question = aside[1]?.trim()
+      dialog.replace(() => <DialogBtw target={target} question={question || undefined} />)
+      return false
+    }
+
     let sessionID = props.sessionID
     let finishMoveProgress = false
     if (sessionID == null) {
@@ -1124,38 +1277,10 @@ export function Prompt(props: PromptProps) {
       await local.agent.attachSession(sessionID)
     }
 
-    const inputText = expandTrackedPastedText(
-      store.prompt.input,
-      input.extmarks.getAllForTypeId(promptPartTypeId).flatMap((extmark) => {
-        const partIndex = store.extmarkToPartIndex.get(extmark.id)
-        const part = partIndex === undefined ? undefined : store.prompt.parts[partIndex]
-        if (part?.type !== "text") return []
-        return [{ start: extmark.start, end: extmark.end, text: part.text }]
-      }),
-    )
-
-    // Filter out text parts (pasted content) since they're now expanded inline
-    const nonTextParts = store.prompt.parts.filter((part) => part.type !== "text")
+    const { inputText, nonTextParts, editorParts } = outgoingParts()
 
     // Capture mode before it gets reset
     const currentMode = store.mode
-    const editorSelection = editorContext()
-    const editorParts =
-      editorSelection && editor.labelState() === "pending"
-        ? [
-            {
-              type: "text" as const,
-              text: formatEditorContext(editorSelection),
-              synthetic: true,
-              metadata: {
-                kind: "editor_context",
-                source: editorSelection.source ?? "editor",
-                filePath: editorSelection.filePath,
-                ranges: editorSelection.ranges,
-              },
-            },
-          ]
-        : []
 
     const commands = extractSlashCommands(inputText, sync.data.command)
 
@@ -1565,6 +1690,9 @@ export function Prompt(props: PromptProps) {
                 Object.assign(r, {
                   getClipboardText: (text: string) => expandPastedTextPlaceholders(text, store.prompt.parts),
                 })
+                // Each targeted keymap layer adds a "destroyed" listener here; the prompt has 11+ by design.
+                // The default limit of 10 prints a warning that corrupts the TUI.
+                r.setMaxListeners(32)
                 setInputTarget(r)
                 if (promptPartTypeId === 0) {
                   promptPartTypeId = input.extmarks.registerType("prompt-part")
@@ -1786,6 +1914,13 @@ export function Prompt(props: PromptProps) {
               <box paddingLeft={3}>
                 <text fg={theme.accent}>(new working copy)</text>
               </box>
+            </Match>
+            <Match when={queueLabel()}>
+              {(label) => (
+                <box marginLeft={1}>
+                  <text fg={theme.accent}>{label()}</text>
+                </box>
+              )}
             </Match>
             <Match when={resumeAt()}>
               {(fireAt) => (

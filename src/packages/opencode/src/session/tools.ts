@@ -6,13 +6,14 @@ import { MCP } from "@/mcp"
 import { McpCatalog } from "@/mcp/catalog"
 import { Permission } from "@/permission"
 import { Tool } from "@/tool/tool"
+import { ToolInputRepair } from "@/tool/inputRepair"
 import { ToolJsonSchema } from "@/tool/json-schema"
 import { ToolRegistry } from "@/tool/registry"
 import { Truncate } from "@/tool/truncate"
 
 import { Plugin } from "@/plugin"
 import type { TaskPromptOps } from "@/tool/task"
-import { type Tool as AITool, tool, jsonSchema, type ToolExecutionOptions, asSchema } from "ai"
+import { type Tool as AITool, tool, jsonSchema, type JSONSchema7, type ToolExecutionOptions, asSchema } from "ai"
 import { Effect } from "effect"
 import { MessageV2 } from "./message-v2"
 import { Session } from "./session"
@@ -29,6 +30,41 @@ const MCP_RESOURCE_TOOLS = {
   listTemplates: "list_mcp_resource_templates",
   read: "read_mcp_resource",
 } as const
+const MCP_RESOURCE_LIST_SCHEMA = {
+  type: "object",
+  properties: {
+    server: {
+      type: "string",
+      description: "Optional MCP server name. When omitted, lists resources from every connected server.",
+    },
+  },
+  additionalProperties: false,
+} satisfies JSONSchema7
+const MCP_RESOURCE_LIST_TEMPLATES_SCHEMA = {
+  type: "object",
+  properties: {
+    server: {
+      type: "string",
+      description: "Optional MCP server name. When omitted, lists resource templates from every connected server.",
+    },
+  },
+  additionalProperties: false,
+} satisfies JSONSchema7
+const MCP_RESOURCE_READ_SCHEMA = {
+  type: "object",
+  properties: {
+    server: {
+      type: "string",
+      description: "MCP server name exactly as returned by list_mcp_resources.",
+    },
+    uri: {
+      type: "string",
+      description: "Resource URI to read. Use the exact URI string returned by list_mcp_resources.",
+    },
+  },
+  required: ["server", "uri"],
+  additionalProperties: false,
+} satisfies JSONSchema7
 const MAX_MCP_RESOURCE_BLOB_BYTES = 10 * 1024 * 1024
 const SUPPORTED_MCP_RESOURCE_ATTACHMENT_MIMES = new Set([
   "application/pdf",
@@ -103,7 +139,7 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
     permission: input.session.permission,
   })) {
     const schema = ProviderTransform.schema(input.model, ToolJsonSchema.fromTool(item))
-    tools[item.id] = tool({
+    const built: AITool = tool({
       description: item.description,
       inputSchema: jsonSchema(schema),
       execute(args, options) {
@@ -142,6 +178,9 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
         )
       },
     })
+    // The outer code-mode executor takes only `{ code }`; the tools it calls are repaired in their own sandbox boundary.
+    tools[item.id] =
+      item.id === "execute" ? built : ToolInputRepair.withInputRepair(built, ToolJsonSchema.fromTool(item))
   }
 
   const hasMcpResourceServer = Object.values(yield* mcp.clients()).some(
@@ -151,18 +190,7 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
     tools[MCP_RESOURCE_TOOLS.list] = tool({
       description:
         "Lists resources provided by connected MCP servers. Resources provide context such as files, database schemas, or application-specific information.",
-      inputSchema: jsonSchema(
-        ProviderTransform.schema(input.model, {
-          type: "object",
-          properties: {
-            server: {
-              type: "string",
-              description: "Optional MCP server name. When omitted, lists resources from every connected server.",
-            },
-          },
-          additionalProperties: false,
-        }),
-      ),
+      inputSchema: jsonSchema(ProviderTransform.schema(input.model, MCP_RESOURCE_LIST_SCHEMA)),
       execute(args, opts) {
         return run.promise(
           Effect.gen(function* () {
@@ -233,19 +261,7 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
     tools[MCP_RESOURCE_TOOLS.listTemplates] = tool({
       description:
         "Lists resource templates provided by connected MCP servers. Resource templates are parameterized resources that can be read after filling in their URI template.",
-      inputSchema: jsonSchema(
-        ProviderTransform.schema(input.model, {
-          type: "object",
-          properties: {
-            server: {
-              type: "string",
-              description:
-                "Optional MCP server name. When omitted, lists resource templates from every connected server.",
-            },
-          },
-          additionalProperties: false,
-        }),
-      ),
+      inputSchema: jsonSchema(ProviderTransform.schema(input.model, MCP_RESOURCE_LIST_TEMPLATES_SCHEMA)),
       execute(args, opts) {
         return run.promise(
           Effect.gen(function* () {
@@ -316,23 +332,7 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
     tools[MCP_RESOURCE_TOOLS.read] = tool({
       description:
         "Read a specific resource from an MCP server using the server name and resource URI. The URI is an MCP identifier and does not need to be a file URL.",
-      inputSchema: jsonSchema(
-        ProviderTransform.schema(input.model, {
-          type: "object",
-          properties: {
-            server: {
-              type: "string",
-              description: "MCP server name exactly as returned by list_mcp_resources.",
-            },
-            uri: {
-              type: "string",
-              description: "Resource URI to read. Use the exact URI string returned by list_mcp_resources.",
-            },
-          },
-          required: ["server", "uri"],
-          additionalProperties: false,
-        }),
-      ),
+      inputSchema: jsonSchema(ProviderTransform.schema(input.model, MCP_RESOURCE_READ_SCHEMA)),
       execute(args, opts) {
         return run.promise(
           Effect.gen(function* () {
@@ -394,6 +394,19 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
         )
       },
     })
+
+    tools[MCP_RESOURCE_TOOLS.list] = ToolInputRepair.withInputRepair(
+      tools[MCP_RESOURCE_TOOLS.list],
+      MCP_RESOURCE_LIST_SCHEMA,
+    )
+    tools[MCP_RESOURCE_TOOLS.listTemplates] = ToolInputRepair.withInputRepair(
+      tools[MCP_RESOURCE_TOOLS.listTemplates],
+      MCP_RESOURCE_LIST_TEMPLATES_SCHEMA,
+    )
+    tools[MCP_RESOURCE_TOOLS.read] = ToolInputRepair.withInputRepair(
+      tools[MCP_RESOURCE_TOOLS.read],
+      MCP_RESOURCE_READ_SCHEMA,
+    )
   }
 
   if (flags.experimentalCodeMode) return tools
@@ -499,7 +512,7 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
           return output
         }),
       )
-    tools[key] = item
+    tools[key] = ToolInputRepair.withInputRepair(item, entry.def.inputSchema as JSONSchema7)
   }
 
   return tools

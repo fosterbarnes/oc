@@ -315,7 +315,7 @@ export const {
             void recoverFromRestart()
             break
           }
-          void bootstrap().then((ok) => {
+          void bootstrap({ fatal: false }).then((ok) => {
             if (ok && directory === "global") setConfigReloadEpoch((value) => value + 1)
           })
           break

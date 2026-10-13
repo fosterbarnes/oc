@@ -865,6 +865,7 @@ test("Task proxy schema matches current opencode TaskTool fields", () => {
     "background",
     "command",
     "description",
+    "model",
     "prompt",
     "subagent_type",
     "task_id",

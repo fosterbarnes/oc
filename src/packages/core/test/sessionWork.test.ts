@@ -15,6 +15,7 @@ describe("SessionWork", () => {
       const cleaned = yield* Deferred.make<void>()
       const active = yield* work
         .run(
+          "a",
           Deferred.succeed(started, undefined).pipe(
             Effect.andThen(Effect.never),
             Effect.ensuring(
@@ -30,7 +31,7 @@ describe("SessionWork", () => {
       const first = yield* work.close.pipe(Effect.forkChild)
       yield* Deferred.await(cleaning)
       const second = yield* work.close.pipe(Effect.forkChild)
-      const rejected = yield* work.run(Effect.die("must not start")).pipe(Effect.exit)
+      const rejected = yield* work.run("a", Effect.die("must not start")).pipe(Effect.exit)
       expect(Exit.isFailure(rejected) && Cause.hasInterruptsOnly(rejected.cause)).toBeTrue()
       expect(yield* Deferred.isDone(cleaned)).toBeFalse()
       yield* Deferred.succeed(finish, undefined)
@@ -49,6 +50,7 @@ describe("SessionWork", () => {
       const committed = yield* Deferred.make<void>()
       const admission = yield* work
         .run(
+          "a",
           Effect.uninterruptible(
             Deferred.succeed(started, undefined).pipe(
               Effect.andThen(Deferred.await(release)),

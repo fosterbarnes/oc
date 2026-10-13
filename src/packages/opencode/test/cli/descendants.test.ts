@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test"
-import { captureDescendants, selectDescendants, stopDescendants } from "../../src/cli/tui/descendants"
+import { ProcessTree } from "@opencode-ai/core/util/processTree"
+import { captureDescendants, stopDescendants } from "../../src/cli/tui/descendants"
 
 test("single shutdown selects only verified descendants, leaves helpers and their subtrees alone", () => {
   const item = (pid: number, parentPid: number, created: string, protectedProcess = false) => ({
@@ -19,8 +20,8 @@ test("single shutdown selects only verified descendants, leaves helpers and thei
     item(8, 99, "106"),
     item(99, 100, "90"),
   ]
-  expect(selectDescendants(processes, 1).map((entry) => entry.pid)).toEqual([3, 2])
-  expect(() => selectDescendants(processes, 10)).toThrow("identity unavailable")
+  expect(ProcessTree.selectDescendants(processes, 1).map((entry) => entry.pid)).toEqual([3, 2])
+  expect(() => ProcessTree.selectDescendants(processes, 10)).toThrow("identity unavailable")
 })
 
 test.skipIf(process.platform !== "win32")(

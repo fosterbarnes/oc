@@ -244,7 +244,7 @@ it.instance(
       expect(saved?.parts).toContainEqual(
         expect.objectContaining({
           type: "text",
-          text: "Inspect the cache",
+          text: expect.stringContaining("Inspect the cache"),
           metadata: { ocCommandArguments: "the cache" },
         }),
       )
@@ -344,6 +344,10 @@ it.instance(
         "native title was not generated",
       )
       expect((yield* fixture.llm.hits).filter(naming)).toHaveLength(0)
+      const titles = (yield* fixture.llm.hits).filter((hit) =>
+        JSON.stringify(hit.body.messages).includes("Generate a title for this conversation"),
+      )
+      expect(titles).toHaveLength(1)
     }),
   { git: true },
   30_000,

@@ -169,6 +169,7 @@ export interface Interface {
   readonly update: (config: Info) => Effect.Effect<void>
   readonly updateGlobal: (config: Info) => Effect.Effect<{ info: Info; changed: boolean }>
   readonly invalidate: () => Effect.Effect<void>
+  readonly preflight: (ctx: InstanceContext) => Effect.Effect<void>
   readonly directories: () => Effect.Effect<string[]>
   readonly commands: () => Effect.Effect<{
     commands: NonNullable<Info["command"]>
@@ -750,6 +751,38 @@ const layer = Layer.effect(
       yield* invalidateGlobal
     })
 
+    // Parses the local JSON config files a reload would load, failing with the loaders' ConfigJsonError or
+    // ConfigInvalidError before anything is disposed. Skips caching, writes, npm installs, and plugin/agent scans.
+    // Remote, account, and managed sources are not checked here.
+    const preflight = Effect.fn("Config.preflight")(function* (ctx: InstanceContext) {
+      const directories = yield* ConfigPaths.directories(ctx.directory, ctx.worktree).pipe(Effect.orDie)
+      const projectFiles = yield* ConfigPaths.files("opencode", ctx.directory, ctx.worktree).pipe(Effect.orDie)
+      const dirFiles = directories.flatMap((dir) =>
+        dir.endsWith(".opencode") || dir === Flag.OPENCODE_CONFIG_DIR
+          ? ["opencode.json", "opencode.jsonc"].map((file) => path.join(dir, file))
+          : [],
+      )
+      const files = [
+        ...["config.json", "opencode.json", "opencode.jsonc"].map((file) => path.join(Global.Path.config, file)),
+        ...(Flag.OPENCODE_CONFIG ? [Flag.OPENCODE_CONFIG] : []),
+        ...projectFiles,
+        ...dirFiles,
+      ]
+      yield* Effect.forEach(
+        files,
+        (filepath) =>
+          Effect.gen(function* () {
+            const text = yield* readConfigFile(filepath)
+            if (!text) return
+            const expanded = yield* Effect.promise(() =>
+              ConfigVariable.substitute({ text, type: "path", path: filepath }),
+            )
+            yield* decodeConfig(ConfigParse.jsonc(expanded, filepath), filepath)
+          }),
+        { discard: true },
+      )
+    }, Effect.provideService(FSUtil.Service, fs))
+
     const updateGlobal = Effect.fn("Config.updateGlobal")(function* (config: Info) {
       const file = globalConfigFile()
       const before = (yield* readConfigFile(file)) ?? "{}"
@@ -786,6 +819,7 @@ const layer = Layer.effect(
       update,
       updateGlobal,
       invalidate,
+      preflight,
       directories,
       waitForDependencies,
       commands,

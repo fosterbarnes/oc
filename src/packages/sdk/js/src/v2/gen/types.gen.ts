@@ -259,6 +259,7 @@ export type UserMessage = {
     providerID: string
     modelID: string
     variant?: string
+    explicit?: boolean
   }
   system?: string
   tools?: {
@@ -2420,6 +2421,12 @@ export type File = {
   status: "added" | "deleted" | "modified"
 }
 
+export type ConflictError = {
+  _tag: "ConflictError"
+  message: string
+  resource?: string
+}
+
 export type Path = {
   home: string
   state: string
@@ -3117,6 +3124,33 @@ export type SubtaskPartInput = {
     modelID: string
   }
   command?: string
+}
+
+export type ModelNotFoundError = {
+  _tag: "ModelNotFoundError"
+  providerID: string
+  modelID: string
+  suggestions: Array<string>
+  message: string
+}
+
+export type UnsupportedProviderError = {
+  _tag: "UnsupportedProviderError"
+  providerID: string
+  message: string
+}
+
+export type UpstreamError = {
+  _tag: "UpstreamError"
+  message: string
+  service?: string
+  status?: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+}
+
+export type TimeoutError = {
+  _tag: "TimeoutError"
+  message: string
+  operation?: string
 }
 
 export type SessionBusyError = {
@@ -9106,6 +9140,38 @@ export type InstanceDisposeResponses = {
 
 export type InstanceDisposeResponse = InstanceDisposeResponses[keyof InstanceDisposeResponses]
 
+export type InstanceReloadData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/instance/reload"
+}
+
+export type InstanceReloadErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * ConflictError
+   */
+  409: ConflictError
+}
+
+export type InstanceReloadError = InstanceReloadErrors[keyof InstanceReloadErrors]
+
+export type InstanceReloadResponses = {
+  /**
+   * Instance reloaded
+   */
+  200: boolean
+}
+
+export type InstanceReloadResponse = InstanceReloadResponses[keyof InstanceReloadResponses]
+
 export type PathGetData = {
   body?: never
   path?: never
@@ -11346,6 +11412,64 @@ export type SessionPromptAsyncResponses = {
 
 export type SessionPromptAsyncResponse = SessionPromptAsyncResponses[keyof SessionPromptAsyncResponses]
 
+export type SessionGenerateData = {
+  body?: {
+    prompt: string
+    model?: {
+      providerID: string
+      modelID: string
+    }
+    agent?: string
+    variant?: string
+  }
+  path: {
+    sessionID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/session/{sessionID}/generate"
+}
+
+export type SessionGenerateErrors = {
+  /**
+   * BadRequest | InvalidRequestError
+   */
+  400: EffectHttpApiErrorBadRequest | InvalidRequestError
+  /**
+   * NotFoundError | ModelNotFoundError
+   */
+  404: NotFoundError | ModelNotFoundError
+  /**
+   * UnsupportedProviderError
+   */
+  422: UnsupportedProviderError
+  /**
+   * UpstreamError
+   */
+  502: UpstreamError
+  /**
+   * TimeoutError
+   */
+  504: TimeoutError
+}
+
+export type SessionGenerateError = SessionGenerateErrors[keyof SessionGenerateErrors]
+
+export type SessionGenerateResponses = {
+  /**
+   * Side answer; the session is not changed
+   */
+  200: {
+    text: string
+    providerID: string
+    modelID: string
+  }
+}
+
+export type SessionGenerateResponse = SessionGenerateResponses[keyof SessionGenerateResponses]
+
 export type SessionCommandData = {
   body?: {
     messageID?: string
@@ -11748,6 +11872,117 @@ export type SessionResumeCancelResponses = {
 }
 
 export type SessionResumeCancelResponse = SessionResumeCancelResponses[keyof SessionResumeCancelResponses]
+
+export type SessionQueueGetData = {
+  body?: never
+  path: {
+    sessionID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/session/{sessionID}/queue"
+}
+
+export type SessionQueueGetErrors = {
+  /**
+   * BadRequest | InvalidRequestError
+   */
+  400: EffectHttpApiErrorBadRequest | InvalidRequestError
+  /**
+   * NotFoundError
+   */
+  404: NotFoundError
+}
+
+export type SessionQueueGetError = SessionQueueGetErrors[keyof SessionQueueGetErrors]
+
+export type SessionQueueGetResponses = {
+  /**
+   * Queued prompts and pause state
+   */
+  200: {
+    pause: "none" | "restart" | "error" | "interrupted"
+    entries: Array<{
+      id: string
+      state: "pending" | "dispatching"
+      text: string
+      attachments: number
+    }>
+  }
+}
+
+export type SessionQueueGetResponse = SessionQueueGetResponses[keyof SessionQueueGetResponses]
+
+export type SessionQueueUpdateData = {
+  body?:
+    | {
+        type: "add"
+        id?: string
+        agent?: string
+        model?: {
+          providerID: string
+          modelID: string
+        }
+        variant?: string
+        parts: Array<TextPartInput | FilePartInput | AgentPartInput>
+      }
+    | {
+        type: "edit"
+        id: string
+        text: string
+      }
+    | {
+        type: "cancel"
+        id: string
+      }
+    | {
+        type: "resume"
+      }
+  path: {
+    sessionID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/session/{sessionID}/queue"
+}
+
+export type SessionQueueUpdateErrors = {
+  /**
+   * BadRequest | InvalidRequestError
+   */
+  400: EffectHttpApiErrorBadRequest | InvalidRequestError
+  /**
+   * NotFoundError
+   */
+  404: NotFoundError
+  /**
+   * ConflictError
+   */
+  409: ConflictError
+}
+
+export type SessionQueueUpdateError = SessionQueueUpdateErrors[keyof SessionQueueUpdateErrors]
+
+export type SessionQueueUpdateResponses = {
+  /**
+   * Queue after the change
+   */
+  200: {
+    pause: "none" | "restart" | "error" | "interrupted"
+    entries: Array<{
+      id: string
+      state: "pending" | "dispatching"
+      text: string
+      attachments: number
+    }>
+  }
+}
+
+export type SessionQueueUpdateResponse = SessionQueueUpdateResponses[keyof SessionQueueUpdateResponses]
 
 export type SessionClaudeAccountStateData = {
   body?: never

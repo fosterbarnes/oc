@@ -1,5 +1,6 @@
 import type { OpencodeClient } from "@opencode-ai/sdk/v2"
 import { createEffect, createMemo, createSignal, on, onCleanup, onMount } from "solid-js"
+import { useKV } from "./context/kv"
 import { useSDK } from "./context/sdk"
 import { useSync } from "./context/sync"
 import { useDialog } from "./ui/dialog"
@@ -15,6 +16,8 @@ export type ClaudeWarmupState = NonNullable<Awaited<ReturnType<OpencodeClient["g
 export type ClaudeWarmupAccount = ClaudeWarmupState["accounts"][number]
 export type ClaudeWarmupSchedule = ClaudeWarmupAccount["schedule"]
 type ClaudeWarmupSet = NonNullable<Awaited<ReturnType<OpencodeClient["global"]["setClaudeWarmup"]>>["data"]>
+
+export type ClockFormat = "24h" | "12h"
 
 export type ClaudeWarmupDraft =
   | { mode: "daily"; times: string }
@@ -66,6 +69,22 @@ export function warmupCommands(accounts: ClaudeWarmupAccount[], run: (accountID:
 
 export function formatTimes(times: string[]) {
   return times.join(", ")
+}
+
+export function displayClock(time: string, format: ClockFormat = "24h") {
+  if (format === "24h") return time
+  const hours = Number(time.slice(0, 2))
+  return `${hours % 12 || 12}:${time.slice(3, 5)} ${hours < 12 ? "AM" : "PM"}`
+}
+
+export function displayTimes(input: string, format: ClockFormat = "24h") {
+  return input
+    .split(",")
+    .map((token) => {
+      const parsed = parseClock(token.trim())
+      return parsed ? displayClock(parsed, format) : token.trim()
+    })
+    .join(", ")
 }
 
 export function emptyWeeklyDays(): Record<Weekday, string[]> {
@@ -224,52 +243,60 @@ export function weekdayReset(day: Weekday, time: string) {
   return { day: WEEKDAYS[(index + 1) % WEEKDAYS.length], time: reset.time }
 }
 
-export function datedResetPreview(nextAt: number, timeZone: string) {
-  return formatZoned(nextAt + RESET_MS, timeZone)
+export function datedResetPreview(nextAt: number, timeZone: string, format: ClockFormat = "24h") {
+  return formatZoned(nextAt + RESET_MS, timeZone, format)
 }
 
-export function previewLines(input: string, weekday?: Weekday) {
+export function previewLines(input: string, weekday?: Weekday, format: ClockFormat = "24h") {
   return unique(completeTimes(input)).flatMap((time) => {
-    const line = previewLine(time, weekday)
+    const line = previewLine(time, weekday, format)
     if (!line) return []
     return [line]
   })
 }
 
-export function previewLine(time: string, weekday?: Weekday) {
+export function previewLine(time: string, weekday?: Weekday, format: ClockFormat = "24h") {
+  const send = displayClock(time, format)
   if (weekday) {
     const reset = weekdayReset(weekday, time)
     if (!reset) return
-    if (reset.day === weekday) return `Send at ${time}    Est. reset ${reset.time}`
-    return `${WEEKDAY_TITLE[weekday]} ${time}    Est. reset ${WEEKDAY_TITLE[reset.day]} ${reset.time}`
+    const resetAt = displayClock(reset.time, format)
+    if (reset.day === weekday) return `Send at ${send}    Est. reset ${resetAt}`
+    return `${WEEKDAY_TITLE[weekday]} ${send}    Est. reset ${WEEKDAY_TITLE[reset.day]} ${resetAt}`
   }
   const reset = clockReset(time)
   if (!reset) return
-  if (reset.nextDay) return `Send at ${time}    Est. reset ${reset.time} next day`
-  return `Send at ${time}    Est. reset ${reset.time}`
+  const resetAt = displayClock(reset.time, format)
+  if (reset.nextDay) return `Send at ${send}    Est. reset ${resetAt} next day`
+  return `Send at ${send}    Est. reset ${resetAt}`
 }
 
-export function promptPreviewText(input: string, weekday?: Weekday, error?: string) {
-  return [...(error ? [error] : []), ...previewLines(input, weekday), PREVIEW_QUALIFIER].join("\n")
+export function promptPreviewText(input: string, weekday?: Weekday, error?: string, format: ClockFormat = "24h") {
+  return [...(error ? [error] : []), ...previewLines(input, weekday, format), PREVIEW_QUALIFIER].join("\n")
 }
 
 export function zoneLabel(timeZone: string, utcOffset: string) {
   return [timeZone, utcOffset].filter((part) => part.length > 0).join(" ")
 }
 
-export function formatNextAt(nextAt: number | undefined, timeZone: string, utcOffset: string) {
+export function formatNextAt(
+  nextAt: number | undefined,
+  timeZone: string,
+  utcOffset: string,
+  format: ClockFormat = "24h",
+) {
   if (nextAt === undefined) return "None"
-  const when = formatZoned(nextAt, timeZone)
+  const when = formatZoned(nextAt, timeZone, format)
   const zone = zoneLabel(timeZone, utcOffset)
   if (!zone) return when
   return `${when} ${zone}`
 }
 
-export function formatLastAttempt(account: ClaudeWarmupAccount, timeZone: string) {
+export function formatLastAttempt(account: ClaudeWarmupAccount, timeZone: string, format: ClockFormat = "24h") {
   if (!account.lastAttempt) return "No attempts yet"
   const outcome = account.lastAttempt.outcome
   const label = outcome in OUTCOME_LABEL ? OUTCOME_LABEL[outcome] : outcome
-  return `${formatZoned(account.lastAttempt.attemptedAt, timeZone)} ${label}`
+  return `${formatZoned(account.lastAttempt.attemptedAt, timeZone, format)} ${label}`
 }
 
 export function readWarmupState(
@@ -348,6 +375,8 @@ export function accountOptions(input: {
   timeZone: string
   utcOffset: string
   error?: string
+  clock?: ClockFormat
+  onClock?: () => void
   onMode: (mode: ClaudeWarmupDraft["mode"]) => void
   onTimes: (day: Weekday | undefined) => void
   onSave: () => void
@@ -355,6 +384,7 @@ export function accountOptions(input: {
   onResume: () => void
 }): DialogSelectOption<string>[] {
   const paused = accountStateLabel(input.account) === "Paused"
+  const clock = input.clock ?? "24h"
   const rows: DialogSelectOption<string>[] = [
     {
       value: "state",
@@ -368,21 +398,38 @@ export function accountOptions(input: {
   if (input.error) {
     rows.push({ value: "error", title: input.error, inert: true })
   }
-  rows.push({
-    value: "mode",
-    title: input.draft.mode === "daily" ? "Every day" : "By weekday",
-    onSelect: () => input.onMode(input.draft.mode === "daily" ? "weekly" : "daily"),
-  })
+  rows.push(
+    {
+      value: "clock",
+      title: `Time format: ${clock === "12h" ? "12-hour" : "24-hour"}`,
+      onSelect: () => input.onClock?.(),
+    },
+    {
+      value: "mode",
+      title: input.draft.mode === "daily" ? "Every day" : "By weekday",
+      onSelect: () => input.onMode(input.draft.mode === "daily" ? "weekly" : "daily"),
+    },
+  )
   if (input.draft.mode === "daily") {
-    rows.push(timesOption("times", `Times: ${input.draft.times || "(none)"}`, input.draft.times, undefined, () => input.onTimes(undefined)))
+    rows.push(
+      timesOption(
+        "times",
+        `Times: ${displayTimes(input.draft.times, clock) || "(none)"}`,
+        input.draft.times,
+        undefined,
+        clock,
+        () => input.onTimes(undefined),
+      ),
+    )
   } else {
     for (const day of WEEKDAYS) {
       rows.push(
         timesOption(
           `day.${day}`,
-          `${WEEKDAY_TITLE[day]}: ${input.draft.days[day] || "(none)"}`,
+          `${WEEKDAY_TITLE[day]}: ${displayTimes(input.draft.days[day], clock) || "(none)"}`,
           input.draft.days[day],
           day,
+          clock,
           () => input.onTimes(day),
         ),
       )
@@ -391,16 +438,16 @@ export function accountOptions(input: {
   rows.push(
     {
       value: "next",
-      title: `Next: ${formatNextAt(input.account.nextAt, input.timeZone, input.utcOffset)}`,
+      title: `Next: ${formatNextAt(input.account.nextAt, input.timeZone, input.utcOffset, clock)}`,
       details:
         input.account.nextAt === undefined
           ? undefined
-          : [`Est. reset ${datedResetPreview(input.account.nextAt, input.timeZone)}`],
+          : [`Est. reset ${datedResetPreview(input.account.nextAt, input.timeZone, clock)}`],
       inert: true,
     },
     {
       value: "last",
-      title: formatLastAttempt(input.account, input.timeZone),
+      title: formatLastAttempt(input.account, input.timeZone, clock),
       inert: true,
     },
     {
@@ -424,6 +471,8 @@ export function createClaudeWarmupCommands() {
   const sync = useSync()
   const dialog = useDialog()
   const toast = useToast()
+  const kv = useKV()
+  const [clock, setClock] = kv.signal<ClockFormat>("claude_warmup_clock", "24h")
   const [state, setState] = createSignal(emptyWarmupState())
   const discovery = createWarmupDiscovery({
     previous: state,
@@ -466,6 +515,11 @@ export function createClaudeWarmupCommands() {
             timeZone: state().timeZone,
             utcOffset: state().utcOffset,
             error: state().error,
+            clock: clock(),
+            onClock: () => {
+              setClock(clock() === "12h" ? "24h" : "12h")
+              show()
+            },
             onMode: (mode) => {
               setDraft(applyModeChange(draft(), mode))
               show()
@@ -495,7 +549,7 @@ export function createClaudeWarmupCommands() {
           title={day ? WEEKDAY_TITLE[day] : "Times"}
           value={value}
           placeholder="HH:mm, HH:mm"
-          description={() => <text>{promptPreviewText(live(), day, promptError())}</text>}
+          description={() => <text>{promptPreviewText(live(), day, promptError(), clock())}</text>}
           onContentChange={(next) => {
             setPromptError()
             setLive(next)
@@ -548,12 +602,13 @@ function timesOption(
   title: string,
   input: string,
   weekday: Weekday | undefined,
+  format: ClockFormat,
   onSelect: () => void,
 ): DialogSelectOption<string> {
   return {
     value,
     title,
-    details: previewLines(input, weekday),
+    details: previewLines(input, weekday, format),
     onSelect,
   }
 }
@@ -571,18 +626,20 @@ function formatClock(hours: number, minutes: number) {
   return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`
 }
 
-function formatZoned(at: number, timeZone: string) {
+function formatZoned(at: number, timeZone: string, format: ClockFormat = "24h") {
+  const twelve = format === "12h"
   const parts = new Intl.DateTimeFormat("en-US", {
     timeZone: timeZone || undefined,
     weekday: "short",
     month: "short",
     day: "numeric",
-    hour: "2-digit",
+    hour: twelve ? "numeric" : "2-digit",
     minute: "2-digit",
-    hourCycle: "h23",
+    ...(twelve ? { hour12: true } : { hourCycle: "h23" as const }),
   }).formatToParts(new Date(at))
   const read = (type: Intl.DateTimeFormatPartTypes) => parts.find((part) => part.type === type)?.value ?? ""
-  return `${read("weekday")} ${read("month")} ${read("day")} ${read("hour")}:${read("minute")}`
+  const clock = `${read("hour")}:${read("minute")}${twelve ? ` ${read("dayPeriod")}` : ""}`
+  return `${read("weekday")} ${read("month")} ${read("day")} ${clock}`
 }
 
 function unique(times: string[]) {

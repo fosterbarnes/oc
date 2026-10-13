@@ -33,19 +33,30 @@ import {
   CommandPayload,
   DiffQuery,
   ForkPayload,
+  GeneratePayload,
   InitPayload,
   ListQuery,
   MessagesQuery,
   PermissionResponsePayload,
   PromptPayload,
+  QueuePayload,
   ResumeCancelPayload,
   ResumeEnabledPayload,
   RevertPayload,
   ShellPayload,
   SummarizePayload,
+  UnsupportedProviderError,
   UpdatePayload,
 } from "../groups/session"
-import { PermissionNotFoundError } from "../errors"
+import {
+  ConflictError,
+  InvalidRequestError,
+  ModelNotFoundError,
+  PermissionNotFoundError,
+  TimeoutError,
+  UpstreamError,
+  notFound,
+} from "../errors"
 import * as SessionError from "./session-errors"
 
 const tryParseJson = (text: string) =>
@@ -327,7 +338,7 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       })
       yield* promptSvc.loop({ sessionID: ctx.params.sessionID })
       return true
-    })
+    }, Effect.catchTag("SessionBusyError", busyResponse))
 
     const summarize = Effect.fn("SessionHttpApi.summarize")(function* (ctx: {
       params: { sessionID: SessionID }
@@ -349,12 +360,12 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       })
       yield* promptSvc.loop({ sessionID: ctx.params.sessionID })
       return true
-    })
+    }, Effect.catchTag("SessionBusyError", busyResponse))
 
     const rename = Effect.fn("SessionHttpApi.rename")(function* (ctx: { params: { sessionID: SessionID } }) {
       yield* requireSession(ctx.params.sessionID)
       return yield* promptSvc.rename(ctx.params.sessionID)
-    })
+    }, Effect.catchTag("SessionBusyError", busyResponse))
 
     const prompt = Effect.fn("SessionHttpApi.prompt")(function* (ctx: {
       params: { sessionID: SessionID }
@@ -408,6 +419,35 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
           Effect.mapError((error) => error instanceof Session.BusyError ? error : new HttpApiError.BadRequest({})),
         )
     }, Effect.catchTag("SessionBusyError", busyResponse))
+
+    // Domain errors become the typed wire errors declared on the endpoint.
+    const generate = Effect.fn("SessionHttpApi.generate")(function* (ctx: {
+      params: { sessionID: SessionID }
+      payload: typeof GeneratePayload.Type
+    }) {
+      yield* requireSession(ctx.params.sessionID)
+      return yield* promptSvc.generate({ ...ctx.payload, sessionID: ctx.params.sessionID }).pipe(
+        Effect.catchTags({
+          GenerateUnsupportedError: (error) =>
+            Effect.fail(new UnsupportedProviderError({ providerID: error.providerID, message: error.message })),
+          GenerateAgentNotFoundError: (error) =>
+            Effect.fail(new InvalidRequestError({ message: error.message, field: "agent" })),
+          GenerateFailedError: (error) => Effect.fail(new UpstreamError({ message: error.message, service: "model" })),
+          GenerateTimeoutError: (error) =>
+            Effect.fail(new TimeoutError({ message: error.message, operation: "session.generate" })),
+          ProviderModelNotFoundError: (error) =>
+            Effect.fail(
+              new ModelNotFoundError({
+                providerID: error.providerID,
+                modelID: error.modelID,
+                suggestions: error.suggestions ?? [],
+                message: error.message,
+              }),
+            ),
+          SessionBusyError: busyResponse,
+        }),
+      )
+    })
 
     const shell = Effect.fn("SessionHttpApi.shell")(function* (ctx: {
       params: { sessionID: SessionID }
@@ -498,6 +538,59 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       return ScheduledResume.cancel(ctx.payload.id)
     })
 
+    const queueSnapshot = Effect.fn("SessionHttpApi.queueSnapshot")(function* (ctx: { params: { sessionID: SessionID } }) {
+      yield* requireSession(ctx.params.sessionID)
+      return yield* promptSvc.queue.snapshot(ctx.params.sessionID)
+    })
+
+    const queueChange = Effect.fn("SessionHttpApi.queueChange")(function* (
+      sessionID: SessionID,
+      change: typeof QueuePayload.Type,
+    ) {
+      switch (change.type) {
+        case "add":
+          if (change.parts.length === 0 || change.parts.some((part) => part.type === "text" && part.synthetic)) {
+            return yield* new InvalidRequestError({
+              message: "A queued prompt needs at least one part, and synthetic text cannot be queued",
+              field: "parts",
+            })
+          }
+          return yield* promptSvc.queue.add({
+            sessionID,
+            id: change.id,
+            payload: { agent: change.agent, model: change.model, variant: change.variant, parts: change.parts },
+          })
+        case "edit":
+          if (!change.text.trim()) {
+            return yield* new InvalidRequestError({ message: "Queued text cannot be empty", field: "text" })
+          }
+          return yield* promptSvc.queue.edit({ sessionID, id: change.id, text: change.text })
+        case "cancel":
+          return yield* promptSvc.queue.cancel({ sessionID, id: change.id })
+        case "resume":
+          return yield* promptSvc.queue.resume(sessionID)
+      }
+    })
+
+    const queueUpdate = Effect.fn("SessionHttpApi.queueUpdate")(function* (ctx: {
+      params: { sessionID: SessionID }
+      payload: typeof QueuePayload.Type
+    }) {
+      yield* requireSession(ctx.params.sessionID)
+      return yield* queueChange(ctx.params.sessionID, ctx.payload).pipe(
+        Effect.catchTags({
+          SessionQueueNotFoundError: (error) => Effect.fail(notFound(`Queued prompt not found: ${error.id}`)),
+          SessionQueueBusyError: (error) =>
+            Effect.fail(
+              new ConflictError({
+                message: `Queued prompt is being sent: ${error.id}`,
+                resource: "session.queue",
+              }),
+            ),
+        }),
+      )
+    })
+
     const claudePool = Effect.fnUntraced(function* () {
       const accounts = (yield* configSvc.get()).provider?.["claude-code"]?.options?.accounts
       return poolAccountIds(Array.isArray(accounts) ? accounts.filter((dir) => typeof dir === "string") : undefined)
@@ -551,6 +644,7 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       .handle("prompt", prompt)
       .handle("promptAsync", promptAsync)
       .handle("command", command)
+      .handle("generate", generate)
       .handle("shell", shell)
       .handle("revert", revert)
       .handle("unrevert", unrevert)
@@ -561,6 +655,8 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       .handle("resumeState", resumeState)
       .handle("resumeSet", resumeSet)
       .handle("resumeCancel", resumeCancel)
+      .handle("queue", queueSnapshot)
+      .handle("queueUpdate", queueUpdate)
       .handle("claudeAccountState", claudeAccountState)
       .handle("claudeAccountSet", claudeAccountSet)
   }),
