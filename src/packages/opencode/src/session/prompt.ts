@@ -3,6 +3,7 @@ import { PermissionV1 } from "@opencode-ai/core/v1/permission"
 import path from "path"
 import { SessionV1 } from "@opencode-ai/core/v1/session"
 import os from "os"
+import { createHash } from "node:crypto"
 import { SessionID, MessageID, PartID } from "./schema"
 import { isClaudeCodeProvider } from "@/provider/claude-code/shared"
 import { Marker } from "@/marker/marker"
@@ -42,10 +43,11 @@ import { LLM } from "./llm"
 import { Shell } from "@opencode-ai/core/shell"
 import { ShellID } from "@/tool/shell/id"
 import { FSUtil } from "@opencode-ai/core/fs-util"
+import { imageDir } from "@opencode-ai/core/util/imageDir"
 import { Truncate } from "@/tool/truncate"
 import { Image } from "@/image/image"
 import { decodeDataUrl } from "@/util/data-url"
-import { Cause, Effect, Exit, Latch, Layer, Option, Scope, Context, Schema, Types } from "effect"
+import { Cause, Effect, Exit, Latch, Layer, Option, Scope, Context, Schema, Semaphore, Types } from "effect"
 import { InstanceState } from "@/effect/instance-state"
 import { TaskTool, type TaskPromptOps } from "@/tool/task"
 import { SessionRunState } from "./run-state"
@@ -114,6 +116,36 @@ function isOrphanedInterruptedTool(part: SessionV1.ToolPart) {
   return part.state.status === "error" && part.state.metadata?.interrupted === true
 }
 
+const IMAGE_EXTENSIONS: Record<string, string> = {
+  "image/jpeg": "jpg",
+  "image/png": "png",
+  "image/gif": "gif",
+  "image/webp": "webp",
+  "image/avif": "avif",
+  "image/svg+xml": "svg",
+}
+
+type PromptFilePart = Extract<PromptInput["parts"][number], { type: "file" }>
+
+// Writes pasted image bytes into the image folder and returns the file path. The hash in the name
+// makes identical bytes reuse the existing file instead of writing a second copy.
+const writeImage = Effect.fn("SessionPrompt.writeImage")(function* (
+  fsys: FSUtil.Interface,
+  dir: string,
+  bytes: Uint8Array,
+  mime: string,
+) {
+  const hash = createHash("sha256").update(bytes).digest("hex").slice(0, 8)
+  const suffix = `-${hash}.${IMAGE_EXTENSIONS[mime] ?? "png"}`
+  yield* fsys.ensureDir(dir)
+  const existing = (yield* fsys.readDirectoryEntries(dir)).find((entry) => entry.name.endsWith(suffix))
+  if (existing) return path.join(dir, existing.name)
+  const stamp = new Date().toISOString().replace(/[-:]/g, "").replace("T", "-").slice(0, 15)
+  const file = path.join(dir, `${stamp}${suffix}`)
+  yield* fsys.writeWithDirs(file, bytes)
+  return file
+})
+
 export interface Interface {
   readonly cancel: (sessionID: SessionID) => Effect.Effect<void>
   readonly prompt: (input: PromptInput) => Effect.Effect<SessionV1.WithParts, Image.Error | Session.BusyError>
@@ -146,6 +178,7 @@ const layer = Layer.effect(
     const registry = yield* ToolRegistry.Service
     const truncate = yield* Truncate.Service
     const image = yield* Image.Service
+    const imageSaveLock = Semaphore.makeUnsafe(1)
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
     const scope = yield* Scope.Scope
     const instruction = yield* Instruction.Service
@@ -831,6 +864,34 @@ const layer = Layer.effect(
         id: part.id ? PartID.make(part.id) : PartID.ascending(),
       })
 
+      // Synthetic line that tells the model where the image is on disk. Empty when no path is known.
+      const imagePathParts = (part: PromptFilePart, filepath: string | undefined): Draft<SessionV1.Part>[] => {
+        if (!filepath) return []
+        const label = part.source?.text?.value ?? part.filename ?? "Image"
+        return [
+          {
+            messageID: info.id,
+            sessionID: input.sessionID,
+            type: "text",
+            synthetic: true,
+            text: `${label} saved at ${filepath}`,
+          },
+        ]
+      }
+
+      // Path of a pasted image. A real file the client already points at is used in place; other
+      // bytes are saved first. Undefined when the save fails, so the prompt still goes through.
+      const savePastedImage = Effect.fnUntraced(function* (part: PromptFilePart) {
+        const sourcePath = part.source?.type === "file" ? part.source.path : undefined
+        if (sourcePath && path.isAbsolute(sourcePath) && (yield* fsys.isFile(sourcePath))) return sourcePath
+        if (!/^data:[^,]*;base64,/.test(part.url)) return undefined
+        const dir = imageDir((yield* config.get()).attachment?.image?.save_dir)
+        const bytes = Buffer.from(part.url.slice(part.url.indexOf(",") + 1), "base64")
+        return yield* imageSaveLock.withPermits(1)(writeImage(fsys, dir, bytes, part.mime)).pipe(
+          Effect.catch((error) => Effect.logWarning("failed to save image", { error, dir }).pipe(Effect.as(undefined))),
+        )
+      })
+
       const resolvePart: (part: PromptInput["parts"][number]) => Effect.Effect<Draft<SessionV1.Part>[]> = Effect.fn(
         "SessionPrompt.resolveUserPart",
       )(function* (part) {
@@ -938,6 +999,10 @@ const layer = Layer.effect(
                   },
                   { ...part, messageID: info.id, sessionID: input.sessionID },
                 ]
+              }
+              if (part.mime.startsWith("image/")) {
+                const filepath = yield* savePastedImage(part)
+                return [{ ...part, messageID: info.id, sessionID: input.sessionID }, ...imagePathParts(part, filepath)]
               }
               break
             case "file:": {
@@ -1101,6 +1166,7 @@ const layer = Layer.effect(
                   filename: part.filename!,
                   source: part.source,
                 },
+                ...imagePathParts(part, mime.startsWith("image/") ? filepath : undefined),
               ]
             }
           }

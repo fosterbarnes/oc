@@ -112,6 +112,70 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-12 (~23:20) - v0.2.166 dogsFibber - Pass over pasted-image save and Ctrl+V changes - Sonnet 5.5; Review
+
+### Agent
+- Meta: Sonnet 5.5; review; completed
+- Version: 0.2.166 dogsFibber (no second bump)
+- Fixed prompt.ts `savePastedImage`: non-base64 or comma-less `data:` image URLs were decoded as base64 and written to disk as garbage; now skipped (no path line, image part unchanged)
+- Kept `opencode/package.json`: CRLF-only diff, no content change
+- Kept SDK regen: only `save_dir` plus the already-noted drift (`oc.reasoning_effort` removed, resume/claude-account routes added)
+- Kept `hostClipboard` singleton undisposed: native service only polls while an operation is pending; process exit tears it down
+- Risk: relative `save_dir` resolves against each process cwd (server vs TUI) and can differ; use an absolute path or `~`
+- Risk: `oc_tui` user var stays set if oc dies without `destroyRenderer`; Ctrl+V then sends raw Ctrl+V to the shell until the pane restarts
+- Verification: opencode prompt test filter 3 pass; tui clipboard test 8 pass; `bun run typecheck` exit 0 in both packages
+
+### User
+- Image attachments in a prompt that are not valid base64 data are no longer written to the images folder.
+
+---
+
+## 2026-10-12 (~22:55) - v0.2.166 dogsFibber - Prompt images saved to disk with a path for the agent - Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Opus 5.5; low effort; Implementation (2 subagents: haiku-5.5-high server, haiku-5.5-medium TUI); completed
+- Version: 0.2.166 dogsFibber (same session as the Ctrl+V entry below; no second bump)
+- Plan: `C:/Users/user/.config/opencode/plans/oc/pastedImageSave.md`
+- Added config `attachment.image.save_dir` (core v1/config/attachment.ts, config/attachments.ts); `core/src/util/imageDir.ts` resolves it (default `%LOCALAPPDATA%\oc\images`, else `<data>/images`)
+- Added prompt.ts `savePastedImage`/`writeImage`/`imagePathParts`: `data:` images saved (original bytes, before `Image.normalize`) as `<UTC stamp>-<sha256 8>.<ext>`, hash-suffix dedupe, Semaphore-serialized; absolute existing `source.path` used in place; `file:` images use their path. Synthetic `<label> saved at <path>` text follows the image. Save failure logs and continues
+- Changed transform.ts `unsupportedParts` text: non-vision models are told to use the saved path
+- Added image folder to agent.ts `whitelistedDirs` (external_directory allow)
+- Changed tui clipboard.ts file-drop read to return `filepath`; prompt.paste passes it, so ShareX "Copy file" points at the original file
+- Added tui/src/savedImages.ts palette entry `oc.clear_saved_images` ("Clear saved images", oc category): confirm, deletes top-level image files only
+- Regenerated JS SDK (`packages/sdk/js/script/build.ts`); also picked up stale drift (removed `oc.reasoning_effort` command id, new route types already in source)
+- Verification: opencode `bun test test/session/prompt.test.ts -t "pasted|reuses one saved|points the agent at an image"` 3 pass; tui `test/clipboard.test.ts` 8 pass; `bun run typecheck` exit 0 in packages/tui and packages/opencode; not run live
+- Risk: saved images persist until the palette clear; session delete/revert leaves them. Dedupe scans the folder per save
+
+### User
+Images in prompts
+- Images you attach are saved to `%LOCALAPPDATA%\oc\images` (change with `attachment.image.save_dir` in config), and the agent is told the file path along with the image.
+- Images pasted from a copied file (ShareX "Copy file", Explorer) use the original file instead of a copy.
+- Models that cannot view images now get the file path instead of only an error.
+- The agent can read that folder without a permission prompt.
+- New oc palette entry "Clear saved images" deletes them after you confirm.
+
+---
+
+## 2026-10-12 (~22:42) - v0.2.166 dogsFibber - Ctrl+V pastes file and image clipboards in WezTerm - Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Opus 5.5; low effort; Implementation; completed
+- Version: 0.2.166 dogsFibber
+- Cause: WezTerm Ctrl+V = `PasteFrom 'Clipboard'`, which reads only CF_UNICODETEXT; file-drop (ShareX "Copy file") and bitmap-only clipboards sent nothing, so `prompt.paste` never ran. Upstream v1 (GetImage only) and v2 (OpenTUI native: PNG/DIB/text, no CF_HDROP) do not fix this
+- Added `oc_tui=1` WezTerm user var on TUI start (app.tsx, wezterm only); cleared in util/renderer.ts `destroyRenderer`
+- Changed wezFig/wezterm.lua Ctrl+V: `action_callback` sends raw Ctrl+V when `oc_tui == '1'`, else `PasteFrom`. Separate repo, left uncommitted
+- Changed clipboard.ts `read` on win32: OpenTUI `createHostClipboard` (image/png, text/plain) first; PowerShell file-drop read (~280-390 ms measured) only when native is empty. New `host` read option for tests
+- Verification: `bun test test/clipboard.test.ts` 8 pass (new: native content skips PowerShell); `bun run typecheck` in packages/tui exit 0; not run live
+- Risk: stale `oc_tui` after an oc crash sends raw Ctrl+V; PSReadLine still pastes. Right-click paste stays text-only
+
+### User
+Pasting
+- In WezTerm, Ctrl+V in oc now attaches an image when the clipboard holds a copied file (ShareX "Copy file to clipboard", Explorer copy) or raw image data.
+- Plain text paste in oc uses a faster native clipboard read.
+- Ctrl+V outside oc in WezTerm behaves as before.
+
+---
+
 ## 2026-10-12 (~22:17) - v0.2.165 - Sidebar follows Claude account switch - Sonnet 5.5, low effort; Implementation
 
 ### Agent

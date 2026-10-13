@@ -405,7 +405,8 @@ export function Prompt(props: PromptProps) {
           const content = await clipboard.read?.()
           if (content?.mime.startsWith("image/")) {
             await pasteAttachment({
-              filename: "clipboard",
+              filename: content.filepath ? path.basename(content.filepath) : "clipboard",
+              filepath: content.filepath,
               mime: content.mime,
               content: content.data,
             })

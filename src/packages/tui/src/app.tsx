@@ -62,6 +62,7 @@ import { PromptStashProvider } from "./component/prompt/stash"
 import { DialogAlert } from "./ui/dialog-alert"
 import { DialogConfirm } from "./ui/dialog-confirm"
 import { createTodoCommand } from "./todos"
+import { createClearSavedImagesCommand } from "./savedImages"
 import { createContextLimitCommands } from "./contextLimit"
 import { ToastProvider, useToast, type ToastContext } from "./ui/toast"
 import { isDefaultTitle } from "./util/session"
@@ -1252,6 +1253,8 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
   const [resumeEnabled, setResumeEnabled] = createSignal(false)
   const terminal = detectTerminal()
   const terminalTabState = { progress: 0, color: "" }
+  // Lets the WezTerm config forward Ctrl+V to oc, which reads file-drop and image clipboards itself.
+  if (terminal.kind === "wezterm") writeTerminalEscape(renderer, "\x1b]1337;SetUserVar=oc_tui=MQ==\x07")
   const [pasteSummaryEnabled, setPasteSummaryEnabled] = createSignal(
     kv.get("paste_summary_enabled", !sync.data.config.experimental?.disable_paste_summary),
   )
@@ -1392,6 +1395,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
 
   const connected = useConnected()
   const todoCommand = createTodoCommand()
+  const clearSavedImagesCommand = createClearSavedImagesCommand()
   const contextLimitCommands = createContextLimitCommands()
   const currentWorktreeWorkspace = createMemo(() => {
     const workspaceID = project.workspace.current()
@@ -1706,6 +1710,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
       },
       contextLimitCommands.contextLimit,
       todoCommand,
+      clearSavedImagesCommand,
       {
         name: "oc.home_dir",
         title: "Home folder",

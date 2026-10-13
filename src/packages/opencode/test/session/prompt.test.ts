@@ -6,10 +6,12 @@ import { AppNodeBuilder } from "@opencode-ai/core/effect/app-node-builder"
 import { SessionProjector } from "@opencode-ai/core/session/projector"
 import { eq } from "drizzle-orm"
 import { EventV2Bridge } from "@/event-v2-bridge"
-import { expect, test } from "bun:test"
+import { afterAll, expect, test } from "bun:test"
 import { Cause, Deferred, Duration, Effect, Exit, Fiber, Layer } from "effect"
+import { existsSync, rmSync } from "node:fs"
+import os from "os"
 import path from "path"
-import { fileURLToPath } from "url"
+import { fileURLToPath, pathToFileURL } from "url"
 import { NamedError } from "@opencode-ai/core/util/error"
 import { Agent as AgentSvc } from "../../src/agent/agent"
 import { BackgroundJob } from "@/background/job"
@@ -2265,6 +2267,121 @@ noLLMServer.instance(
       yield* sessions.remove(session.id)
     }),
   { git: true, config: cfg },
+)
+
+// Pasted images are saved to the image folder; image files on disk are referenced in place
+
+const pngBytes = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
+  "base64",
+)
+const imageRoot = path.join(os.tmpdir(), `opencode-test-images-${Math.random().toString(36).slice(2)}`)
+const pastedDir = path.join(imageRoot, "pasted")
+const dedupeDir = path.join(imageRoot, "dedupe")
+const fileDir = path.join(imageRoot, "file")
+afterAll(() => rmSync(imageRoot, { recursive: true, force: true }))
+
+const imageCfg = (saveDir: string) => ({ ...cfg, attachment: { image: { save_dir: saveDir } } })
+
+const pastedImage = (label: string) => ({
+  type: "file" as const,
+  mime: "image/png",
+  filename: "clipboard",
+  url: `data:image/png;base64,${pngBytes.toString("base64")}`,
+  source: { type: "file" as const, path: "clipboard", text: { start: 0, end: label.length, value: label } },
+})
+
+noLLMServer.instance(
+  "saves a pasted image's original bytes and tells the agent its path",
+  () =>
+    Effect.gen(function* () {
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const fsys = yield* FSUtil.Service
+      const session = yield* sessions.create({})
+
+      const msg = yield* prompt.prompt({
+        sessionID: session.id,
+        agent: "build",
+        noReply: true,
+        parts: [{ type: "text", text: "what is in [Image 1]?" }, pastedImage("[Image 1]")],
+      })
+
+      const entries = yield* fsys.readDirectoryEntries(pastedDir)
+      expect(entries.length).toBe(1)
+      expect(entries[0].name).toMatch(/^\d{8}-\d{6}-[0-9a-f]{8}\.png$/)
+      const saved = path.join(pastedDir, entries[0].name)
+      expect(Buffer.from(yield* fsys.readFile(saved)).equals(pngBytes)).toBe(true)
+      expect(msg.parts.some((part) => part.type === "text" && part.synthetic && part.text === `[Image 1] saved at ${saved}`)).toBe(true)
+
+      yield* sessions.remove(session.id)
+    }),
+  { config: imageCfg(pastedDir) },
+  30_000,
+)
+
+noLLMServer.instance(
+  "reuses one saved file for identical pasted images",
+  () =>
+    Effect.gen(function* () {
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const fsys = yield* FSUtil.Service
+      const session = yield* sessions.create({})
+
+      const msg = yield* prompt.prompt({
+        sessionID: session.id,
+        agent: "build",
+        noReply: true,
+        parts: [pastedImage("[Image 1]"), pastedImage("[Image 2]")],
+      })
+
+      const entries = yield* fsys.readDirectoryEntries(dedupeDir)
+      expect(entries.length).toBe(1)
+      const saved = path.join(dedupeDir, entries[0].name)
+      expect(msg.parts.some((part) => part.type === "text" && part.synthetic && part.text === `[Image 1] saved at ${saved}`)).toBe(true)
+      expect(msg.parts.some((part) => part.type === "text" && part.synthetic && part.text === `[Image 2] saved at ${saved}`)).toBe(true)
+
+      yield* sessions.remove(session.id)
+    }),
+  { config: imageCfg(dedupeDir) },
+  30_000,
+)
+
+noLLMServer.instance(
+  "points the agent at an image file on disk without copying it",
+  () =>
+    Effect.gen(function* () {
+      const { directory: dir } = yield* TestInstance
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const fsys = yield* FSUtil.Service
+      const session = yield* sessions.create({})
+
+      const file = path.join(dir, "shot.png")
+      yield* fsys.writeWithDirs(file, pngBytes)
+      const msg = yield* prompt.prompt({
+        sessionID: session.id,
+        agent: "build",
+        noReply: true,
+        parts: [
+          {
+            type: "file",
+            mime: "image/png",
+            filename: "shot.png",
+            url: pathToFileURL(file).href,
+            source: { type: "file", path: file, text: { start: 0, end: 9, value: "[Image 1]" } },
+          },
+        ],
+      })
+
+      expect(existsSync(fileDir)).toBe(false)
+      expect(msg.parts.some((part) => part.type === "text" && part.synthetic && part.text === `[Image 1] saved at ${file}`)).toBe(true)
+
+      yield* sessions.remove(session.id)
+    }),
+  { config: imageCfg(fileDir) },
+  30_000,
 )
 
 // Regression: empty assistant turn loop

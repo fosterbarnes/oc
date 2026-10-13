@@ -31,6 +31,7 @@ test("returns the image file dropped on the Windows clipboard as image data", as
   try {
     const result = await read({
       os: "win32",
+      host: async () => undefined,
       command: async (_command, args) => {
         script = args?.[3] ?? ""
         return Buffer.from(`path:${file}`)
@@ -40,7 +41,7 @@ test("returns the image file dropped on the Windows clipboard as image data", as
     expect(script.indexOf("GetFileDropList")).toBeLessThan(script.indexOf("GetImage"))
     expect(script).not.toContain("{;")
     expect(script).not.toContain("-and;")
-    expect(result).toEqual({ data: pngBytes.toString("base64"), mime: "image/png" })
+    expect(result).toEqual({ data: pngBytes.toString("base64"), mime: "image/png", filepath: file })
     expect(existsSync(file)).toBe(true)
   } finally {
     await rm(file, { force: true })
@@ -53,6 +54,7 @@ test("returns and removes the temporary image for image-only Windows clipboard d
   await writeFile(outputPath, pngBytes)
   const result = await read({
     os: "win32",
+    host: async () => undefined,
     command: async (_command, args) => {
       expect(args?.[0]).toBe("-NonInteractive")
       expect(args?.[3]).toContain("GetFileDropList")
@@ -69,9 +71,25 @@ test("returns and removes the temporary image for image-only Windows clipboard d
 test("keeps ordinary Windows clipboard text as the fallback", async () => {
   const result = await read({
     os: "win32",
+    host: async () => undefined,
     command: async () => Buffer.alloc(0),
     text: async () => "clipboard text",
   })
 
   expect(result).toEqual({ data: "clipboard text", mime: "text/plain" })
+})
+
+test("skips the PowerShell read when the native Windows clipboard has content", async () => {
+  let ran = false
+  const result = await read({
+    os: "win32",
+    host: async () => ({ data: "clipboard text", mime: "text/plain" }),
+    command: async () => {
+      ran = true
+      return Buffer.alloc(0)
+    },
+  })
+
+  expect(result).toEqual({ data: "clipboard text", mime: "text/plain" })
+  expect(ran).toBe(false)
 })

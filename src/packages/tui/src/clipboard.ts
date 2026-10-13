@@ -3,13 +3,16 @@ import { readFile, rm } from "node:fs/promises"
 import { platform, release, tmpdir } from "node:os"
 import path from "node:path"
 import { promisify } from "node:util"
+import type { HostClipboardService } from "@opentui/core"
 
 const exec = promisify(execFile)
 
 type Command = (command: string, args?: string[], input?: string) => Promise<Buffer>
+type ClipboardContent = { data: string; mime: string; filepath?: string }
 type ReadOptions = Readonly<{
   os?: NodeJS.Platform
   command?: Command
+  host?: () => Promise<ClipboardContent | undefined>
   text?: () => Promise<string | undefined>
 }>
 
@@ -34,7 +37,7 @@ function writeOsc52(text: string) {
   process.stdout.write(process.env.TMUX ? sequence + passthrough : process.env.STY ? passthrough : sequence)
 }
 
-export async function read(options: ReadOptions = {}) {
+export async function read(options: ReadOptions = {}): Promise<ClipboardContent | undefined> {
   const os = options.os ?? platform()
   const run = options.command ?? command
 
@@ -61,6 +64,12 @@ export async function read(options: ReadOptions = {}) {
     }
   }
 
+  // Native read first: it is near-instant, while the PowerShell file-drop read costs ~300 ms.
+  if (os === "win32") {
+    const content = await (options.host ?? readHost)()
+    if (content) return content
+  }
+
   if (os === "win32" || release().includes("WSL")) {
     const image = await runWindowsClipboard(run)
     if (image) return image
@@ -77,6 +86,21 @@ export async function read(options: ReadOptions = {}) {
 
   const text = await (options.text ?? readText)()
   if (text) return { data: text, mime: "text/plain" }
+}
+
+let hostClipboard: HostClipboardService | undefined
+
+// OpenTUI's native reader covers PNG/DIB images and text, but not file-drop lists (CF_HDROP).
+async function readHost() {
+  const { createHostClipboard, decodePasteBytes } = await import("@opentui/core")
+  const result = await (hostClipboard ??= createHostClipboard())
+    .read({ preferredTypes: ["image/png", "text/plain"], selection: "clipboard" })
+    .catch(() => undefined)
+  if (result?.status !== "read" || result.representation.bytes.length === 0) return
+  if (result.representation.mimeType === "image/png") {
+    return { data: Buffer.from(result.representation.bytes).toString("base64"), mime: "image/png" }
+  }
+  return { data: decodePasteBytes(result.representation.bytes), mime: "text/plain" }
 }
 
 async function readText() {
@@ -99,7 +123,12 @@ async function runWindowsClipboard(run: Command) {
     Buffer.alloc(0),
   )
   const result = output.toString().trim()
-  if (result.startsWith("path:")) return readImageFile(result.slice("path:".length))
+  if (result.startsWith("path:")) {
+    const filepath = result.slice("path:".length)
+    const image = await readImageFile(filepath)
+    if (image) return { ...image, filepath }
+    return
+  }
   if (result.startsWith("image:")) {
     const file = result.slice("image:".length)
     const image = await readImageFile(file)

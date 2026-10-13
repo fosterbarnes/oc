@@ -1,12 +1,9 @@
-v0.2.165 chatstersSpittle
+v0.2.166 dogsFibber
 
-command palette:
-oc commands are now grouped under headings in the palette: Defaults, Layout, Folders, Tools (experimental), and Server. The harness update commands are listed directly under a "Third party harness management" heading instead of a submenu, and the `/manageThirdPartyHarnesses` slash command is gone. Switch Claude account and Switch Claude account (this session) sit under that same heading. Settings rows show their current value next to the name, and several entries are renamed, for example "Hand off session", "Harnesses", and "Shut down". The todo command is now "Todos" and shows on or off.
+pasting:
+Ctrl+V in oc can now read copied image files and raw image data from the Windows clipboard. In WezTerm, oc marks the active TUI so the terminal configuration can forward Ctrl+V to oc. Plain text uses the native clipboard reader, and copied image files keep their original path.
 
-sidebar usage:
-Switching the Claude account now refreshes the sidebar usage right away instead of waiting for the next throttled refresh. The account in use is marked with a `«` in the sidebar, for example `Claude2 «`.
+image attachments:
+Prompt images are saved to %LOCALAPPDATA%\oc\images, configurable through attachment.image.save_dir, and the agent receives the saved path alongside the image. Identical images reuse a saved file, and images already on disk use their original file. Models without image input support are directed to the path. The image folder is available to the agent without an external-directory permission prompt. The oc palette now includes Clear saved images with confirmation.
 
-question prompt:
-Enter on the Confirm/Review page no longer stops working after you type a custom answer and then click to another tab.
-
-Under the hood: The palette gained a `group` field rendered by `paletteHeading`, and `createContextLimitCommands` now returns the context-limit and hand-off commands separately. `sdk.claudeAccount` gained an `onChange` listener that triggers `usageScheduler.request()`, which bypasses the 45s provider throttle. `selectTab` in the question prompt now clears the editing state, which had left every key binding disabled on the Confirm tab. Checks passed: the usage freshness test with 32 tests including the new account marker test, the todos test, and the agent-push pre-push checks. The question prompt fix and the sidebar refresh were not checked live in the TUI.
+Under the hood: Image bytes are saved before normalization, writes are serialized, and save failures allow the prompt to continue. Non-base64 data URLs are skipped by the save step. The regenerated JavaScript SDK includes save_dir and existing resume and Claude-account route changes. Checks passed: three targeted session prompt tests, eight clipboard tests, and the agent-push pre-push checks. Earlier session verification also passed typechecks in opencode and tui. These changes have not been checked live in the TUI. The companion WezTerm keybinding change lives in its separate repository and is not part of this commit.

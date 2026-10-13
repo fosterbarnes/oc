@@ -436,7 +436,7 @@ function unsupportedParts(msgs: ModelMessage[], model: Provider.Model): ModelMes
       const name = filename ? `"${filename}"` : modality
       return {
         type: "text" as const,
-        text: `ERROR: Cannot read ${name} (this model does not support ${modality} input). Inform the user.`,
+        text: `ERROR: This model cannot view ${name} (no ${modality} input). If the message gives a saved path for it, use that path with tools; otherwise inform the user.`,
       }
     })
 

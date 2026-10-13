@@ -16,6 +16,10 @@ export const Image = Schema.Struct({
   max_base64_bytes: Schema.optional(PositiveInt).annotate({
     description: "Maximum base64 payload bytes for an image attachment (default: 5242880)",
   }),
+  save_dir: Schema.optional(Schema.String).annotate({
+    description:
+      "Folder where prompt images are saved so the agent gets a file path (default: %LOCALAPPDATA%\\oc\\images, else <data dir>/images)",
+  }),
 }).annotate({ identifier: "ImageAttachmentConfig" })
 export type Image = Schema.Schema.Type<typeof Image>
 

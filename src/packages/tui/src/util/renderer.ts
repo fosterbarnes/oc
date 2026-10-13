@@ -12,8 +12,10 @@ export function destroyRenderer(renderer: Pick<CliRenderer, "isDestroyed" | "set
   if (renderer.isDestroyed) return
   if ("writeOut" in renderer) {
     writeTerminalEscape(renderer, "\x1b]9;4;0\x1b\\")
-    if (detectTerminal().kind === "wezterm")
+    if (detectTerminal().kind === "wezterm") {
       writeTerminalEscape(renderer, "\x1b]1337;SetUserVar=oc_agent_color=\x07")
+      writeTerminalEscape(renderer, "\x1b]1337;SetUserVar=oc_tui=\x07")
+    }
   }
   renderer.destroy()
 }

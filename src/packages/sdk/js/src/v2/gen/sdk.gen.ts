@@ -195,6 +195,10 @@ import type {
   SessionAbortResponses,
   SessionChildrenErrors,
   SessionChildrenResponses,
+  SessionClaudeAccountSetErrors,
+  SessionClaudeAccountSetResponses,
+  SessionClaudeAccountStateErrors,
+  SessionClaudeAccountStateResponses,
   SessionCommandErrors,
   SessionCommandResponses,
   SessionCreateErrors,
@@ -225,6 +229,12 @@ import type {
   SessionPromptResponses,
   SessionRenameErrors,
   SessionRenameResponses,
+  SessionResumeCancelErrors,
+  SessionResumeCancelResponses,
+  SessionResumeSetErrors,
+  SessionResumeSetResponses,
+  SessionResumeStateErrors,
+  SessionResumeStateResponses,
   SessionRevertErrors,
   SessionRevertResponses,
   SessionShareErrors,
@@ -3582,6 +3592,197 @@ export class Provider extends HeyApiClient {
   }
 }
 
+export class Resume extends HeyApiClient {
+  /**
+   * Get scheduled resumes
+   *
+   * Get the auto-resume toggle, prompt, and pending scheduled resume entries.
+   */
+  public state<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<SessionResumeStateResponses, SessionResumeStateErrors, ThrowOnError>({
+      url: "/session/resume/state",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Set auto-resume
+   *
+   * Enable or disable automatic resume prompts after usage-limit resets.
+   */
+  public set<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+      enabled?: boolean
+      prompt?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "body", key: "enabled" },
+            { in: "body", key: "prompt" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).put<SessionResumeSetResponses, SessionResumeSetErrors, ThrowOnError>({
+      url: "/session/resume/state",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Cancel scheduled resume
+   *
+   * Cancel a pending scheduled resume entry by id.
+   */
+  public cancel<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+      id?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "body", key: "id" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<SessionResumeCancelResponses, SessionResumeCancelErrors, ThrowOnError>(
+      {
+        url: "/session/resume/cancel",
+        ...options,
+        ...params,
+        headers: {
+          "Content-Type": "application/json",
+          ...options?.headers,
+          ...params.headers,
+        },
+      },
+    )
+  }
+}
+
+export class ClaudeAccount extends HeyApiClient {
+  /**
+   * Get Claude accounts
+   *
+   * List the Claude Code pool accounts, the active one, and any usage limits.
+   */
+  public state<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+      sessionID?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "query", key: "sessionID" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<
+      SessionClaudeAccountStateResponses,
+      SessionClaudeAccountStateErrors,
+      ThrowOnError
+    >({
+      url: "/session/claude/account",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Set Claude account
+   *
+   * Make a Claude Code pool account the active one for new turns, or pin/unpin it for one session when sessionID is given.
+   */
+  public set<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+      id?: string
+      sessionID?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "body", key: "id" },
+            { in: "body", key: "sessionID" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).put<
+      SessionClaudeAccountSetResponses,
+      SessionClaudeAccountSetErrors,
+      ThrowOnError
+    >({
+      url: "/session/claude/account",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+}
+
 export class Session2 extends HeyApiClient {
   /**
    * List sessions
@@ -4622,6 +4823,16 @@ export class Session2 extends HeyApiClient {
       ...params,
     })
   }
+
+  private _resume?: Resume
+  get resume(): Resume {
+    return (this._resume ??= new Resume({ client: this.client }))
+  }
+
+  private _claudeAccount?: ClaudeAccount
+  get claudeAccount(): ClaudeAccount {
+    return (this._claudeAccount ??= new ClaudeAccount({ client: this.client }))
+  }
 }
 
 export class Part extends HeyApiClient {
@@ -5209,7 +5420,6 @@ export class Tui extends HeyApiClient {
         | "session.most_recent"
         | "oc.new_session"
         | "model.default"
-        | "oc.reasoning_effort"
         | "agent.session"
         | "agent.default_subagent"
         | "agent.default_subagent_model"

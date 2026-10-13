@@ -1423,7 +1423,6 @@ export type GlobalEvent = {
             | "session.most_recent"
             | "oc.new_session"
             | "model.default"
-            | "oc.reasoning_effort"
             | "agent.session"
             | "agent.default_subagent"
             | "agent.default_subagent_model"
@@ -1928,6 +1927,7 @@ export type ImageAttachmentConfig = {
   max_width?: number
   max_height?: number
   max_base64_bytes?: number
+  save_dir?: string
 }
 
 export type AttachmentConfig = {
@@ -6366,7 +6366,6 @@ export type TuiCommandExecuteTargeted = {
       | "session.most_recent"
       | "oc.new_session"
       | "model.default"
-      | "oc.reasoning_effort"
       | "agent.session"
       | "agent.default_subagent"
       | "agent.default_subagent_model"
@@ -7535,7 +7534,6 @@ export type EventTuiCommandExecuteTargeted = {
       | "session.most_recent"
       | "oc.new_session"
       | "model.default"
-      | "oc.reasoning_effort"
       | "agent.session"
       | "agent.default_subagent"
       | "agent.default_subagent_model"
@@ -11482,6 +11480,196 @@ export type PartUpdateResponses = {
 
 export type PartUpdateResponse = PartUpdateResponses[keyof PartUpdateResponses]
 
+export type SessionResumeStateData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/session/resume/state"
+}
+
+export type SessionResumeStateErrors = {
+  /**
+   * BadRequest | InvalidRequestError
+   */
+  400: EffectHttpApiErrorBadRequest | InvalidRequestError
+}
+
+export type SessionResumeStateError = SessionResumeStateErrors[keyof SessionResumeStateErrors]
+
+export type SessionResumeStateResponses = {
+  /**
+   * Scheduled auto-resume state
+   */
+  200: {
+    enabled: boolean
+    prompt: string
+    entries: Array<{
+      id: string
+      sessionID: string
+      directory: string
+      fireAt: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+      reason: string
+      createdAt: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+      attempts: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+    }>
+  }
+}
+
+export type SessionResumeStateResponse = SessionResumeStateResponses[keyof SessionResumeStateResponses]
+
+export type SessionResumeSetData = {
+  body?: {
+    enabled: boolean
+    prompt?: string
+  }
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/session/resume/state"
+}
+
+export type SessionResumeSetErrors = {
+  /**
+   * BadRequest | InvalidRequestError
+   */
+  400: EffectHttpApiErrorBadRequest | InvalidRequestError
+}
+
+export type SessionResumeSetError = SessionResumeSetErrors[keyof SessionResumeSetErrors]
+
+export type SessionResumeSetResponses = {
+  /**
+   * Updated scheduled auto-resume state
+   */
+  200: {
+    enabled: boolean
+    prompt: string
+    entries: Array<{
+      id: string
+      sessionID: string
+      directory: string
+      fireAt: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+      reason: string
+      createdAt: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+      attempts: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+    }>
+  }
+}
+
+export type SessionResumeSetResponse = SessionResumeSetResponses[keyof SessionResumeSetResponses]
+
+export type SessionResumeCancelData = {
+  body?: {
+    id: string
+  }
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/session/resume/cancel"
+}
+
+export type SessionResumeCancelErrors = {
+  /**
+   * BadRequest | InvalidRequestError
+   */
+  400: EffectHttpApiErrorBadRequest | InvalidRequestError
+}
+
+export type SessionResumeCancelError = SessionResumeCancelErrors[keyof SessionResumeCancelErrors]
+
+export type SessionResumeCancelResponses = {
+  /**
+   * Cancelled scheduled resume
+   */
+  200: boolean
+}
+
+export type SessionResumeCancelResponse = SessionResumeCancelResponses[keyof SessionResumeCancelResponses]
+
+export type SessionClaudeAccountStateData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+    sessionID?: string
+  }
+  url: "/session/claude/account"
+}
+
+export type SessionClaudeAccountStateErrors = {
+  /**
+   * BadRequest | InvalidRequestError
+   */
+  400: EffectHttpApiErrorBadRequest | InvalidRequestError
+}
+
+export type SessionClaudeAccountStateError = SessionClaudeAccountStateErrors[keyof SessionClaudeAccountStateErrors]
+
+export type SessionClaudeAccountStateResponses = {
+  /**
+   * Claude Code pool accounts
+   */
+  200: {
+    accounts: Array<{
+      id: string
+      label: string
+      current: boolean
+      pinned?: boolean
+      limitedUntil?: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+    }>
+  }
+}
+
+export type SessionClaudeAccountStateResponse =
+  SessionClaudeAccountStateResponses[keyof SessionClaudeAccountStateResponses]
+
+export type SessionClaudeAccountSetData = {
+  body?: {
+    id?: string
+    sessionID?: string
+  }
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/session/claude/account"
+}
+
+export type SessionClaudeAccountSetErrors = {
+  /**
+   * BadRequest | InvalidRequestError
+   */
+  400: EffectHttpApiErrorBadRequest | InvalidRequestError
+}
+
+export type SessionClaudeAccountSetError = SessionClaudeAccountSetErrors[keyof SessionClaudeAccountSetErrors]
+
+export type SessionClaudeAccountSetResponses = {
+  /**
+   * Updated Claude Code pool accounts
+   */
+  200: {
+    accounts: Array<{
+      id: string
+      label: string
+      current: boolean
+      pinned?: boolean
+      limitedUntil?: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+    }>
+  }
+}
+
+export type SessionClaudeAccountSetResponse = SessionClaudeAccountSetResponses[keyof SessionClaudeAccountSetResponses]
+
 export type SyncStartData = {
   body?: never
   path?: never
@@ -11856,7 +12044,6 @@ export type TuiExecuteTargetedCommandData = {
       | "session.most_recent"
       | "oc.new_session"
       | "model.default"
-      | "oc.reasoning_effort"
       | "agent.session"
       | "agent.default_subagent"
       | "agent.default_subagent_model"
