@@ -127,13 +127,14 @@ test("todo palette persists confirmed changes and waits for configuration reload
     await wait(() => sync?.status === "complete")
     expect(command.name).toBe("oc.todos.toggle")
     expect(command.category).toBe("oc")
-    expect(command.title).toBe("Enable todos")
+    expect(command.group).toBe("Defaults")
+    expect(command.desc).toBe("off")
     expect(command.enabled).toBe(true)
 
     dialog.replace(() => <CommandPaletteDialog />)
-    await app.waitForFrame((frame) => frame.includes("Commands") && frame.includes("Enable todos"))
+    await app.waitForFrame((frame) => frame.includes("oc Defaults") && frame.includes("Todos off"))
     dialog.replace(() => <CommandPaletteDialog category="oc" />)
-    await app.waitForFrame((frame) => frame.includes("Commands") && frame.includes("Enable todos"))
+    await app.waitForFrame((frame) => !frame.includes("oc Defaults") && frame.includes("Defaults"))
     app.mockInput.pressEnter()
     await app.waitForFrame((frame) => frame.includes("Enable todos?"))
     app.mockInput.pressEscape()
@@ -155,17 +156,17 @@ test("todo palette persists confirmed changes and waits for configuration reload
     await enabled
     await wait(() => command.enabled)
     state.response = undefined
-    expect(command.title).toBe("Disable todos")
+    expect(command.desc).toBe("on")
     expect(toast.currentToast?.message).toBe("Todos enabled")
 
     const disabled = command.run()
     await confirm()
     await disabled
     expect(command.enabled).toBe(false)
-    expect(command.title).toBe("Disable todos")
+    expect(command.desc).toBe("on")
     await reload()
     await wait(() => command.enabled)
-    expect(command.title).toBe("Enable todos")
+    expect(command.desc).toBe("off")
     expect(writes).toEqual([true, false])
 
     state.fail = true
@@ -173,28 +174,28 @@ test("todo palette persists confirmed changes and waits for configuration reload
     await confirm()
     await failed
     expect(command.enabled).toBe(true)
-    expect(command.title).toBe("Enable todos")
+    expect(command.desc).toBe("off")
     expect(toast.currentToast?.variant).toBe("error")
     expect(writes).toEqual([true, false])
     state.fail = false
 
     state.project = true
     await sync.bootstrap()
-    expect(command.title).toBe("Disable todos")
+    expect(command.desc).toBe("on")
     const overridden = command.run()
     await confirm()
     await overridden // Global is already false; no disposal event will be emitted.
     expect(command.enabled).toBe(true)
-    expect(command.title).toBe("Disable todos")
+    expect(command.desc).toBe("on")
     expect(toast.currentToast?.message).toContain("project configuration overrides")
     expect(writes).toEqual([true, false])
 
     state.project = undefined
     await sync.bootstrap()
-    expect(command.title).toBe("Enable todos")
+    expect(command.desc).toBe("off")
     state.global = true
     await reload() // Another TUI's saved preference follows the same lifecycle.
-    expect(command.title).toBe("Disable todos")
+    expect(command.desc).toBe("on")
   } finally {
     app.renderer.destroy()
   }

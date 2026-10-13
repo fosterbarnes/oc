@@ -112,6 +112,61 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-12 (~22:17) - v0.2.165 - Sidebar follows Claude account switch - Sonnet 5.5, low effort; Implementation
+
+### Agent
+- Meta: Sonnet 5.5; low effort; Implementation; completed
+- Version: 0.2.165
+- Added `sdk.claudeAccount.onChange` in tui/src/context/sdk.tsx; `set` notifies listeners after success
+- Fixed sidebarTools.tsx: account switch now calls `usageScheduler.request()` (bypasses the 45s provider throttle)
+- Added active-account state in sidebarTools.tsx, read from `sdk.claudeAccount.state(sessionID)` in the claude-code refresh; passed to `formatClaudeUsageRows` as `active`
+- Added ` «` marker (replaces the label's colon, e.g. `Claude2 «`) on the active account's row in usage.ts `formatClaudeUsageRows`
+- Verification: `bun test test/cli/tui/usageFreshness.test.ts` 32 pass (new marker test); not run live in the TUI
+- TODO: stale-cache dimming not added; sidebar may still show last-known `-` if the live read fails
+
+### User
+Sidebar usage
+- Switching the Claude account now refreshes the sidebar usage right away.
+- The account in use is marked with `«` in the sidebar, for example `Claude2 «`.
+
+---
+
+## 2026-10-12 (~21:57) - v0.2.165 chatstersSpittle - oc palette submenus and renames - Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Opus 5.5; low effort; Implementation (/imp); completed
+- Version: 0.2.165 chatstersSpittle
+- Added palette `group` field in `tui/src/component/command-palette.tsx` (`paletteHeading`): grouped commands render under their own heading, "oc Defaults" in the full palette and "Defaults" in the oc-only palette. First pass used ▸ submenus; user rejected it, replaced with headings.
+- Moved oc commands into groups Defaults, Layout, Folders, Tools (experimental), Server in `app.tsx`; renamed per `.opencode/plans/paletteReorg.md`; `desc` getters show current values.
+- Changed `createContextLimitCommands` to return `{ contextLimit, handoff }`; Handoff now -> Hand off session (top level); scope picker drops "(default)" title and "tokens".
+- Changed todo command: title `Todos`, desc `on`/`off`, group Defaults (`todos.ts`).
+- Kept: Defaults Model/Agent show no value (readOcConfig lacks sessionModel/sessionAgent). Switch Claude account rows stay below the groups (registration order).
+- Verification: `bun test test/todos.test.tsx` 1 pass (updated for new title/group); `tsc --noEmit` in packages/tui exit 0.
+
+### User
+Command palette
+- oc commands are grouped under headings: Defaults, Folders, Layout, Server, and Tools (experimental).
+- The harness update commands are listed directly under a "Third party harness management" heading instead of a submenu, and the `/manageThirdPartyHarnesses` slash command is gone.
+- Switch Claude account and Switch Claude account (this session) now sit under that same heading.
+- Settings rows show their current value next to the name.
+- Several entries are renamed, for example "Hand off session", "Harnesses", "Shut down".
+
+---
+
+## 2026-10-12 (~18:37) - v0.2.164 clownedProcessing - Question prompt Enter dead on Confirm - Opus 5.5, low; Implementation
+
+### Agent
+- Meta: Opus 5.5; low; Implementation; completed
+- Version: 0.2.164
+- Fixed `selectTab` in `packages/tui/src/routes/session/question.tsx`: now clears `store.editing`. Cause: custom-answer edit left open, then mouse tab click to Confirm; edit bindings off on Confirm (`!confirm()`) and normal bindings off while editing, so Enter/Esc/arrows all dead until remount.
+- Verification: skipped (no component test). Live repro: 2-question prompt, type custom answer, click Confirm tab, press Enter.
+
+### User
+Question prompt
+- Enter on the Confirm/Review page no longer stops working after you type a custom answer and click to another tab.
+
+---
+
 ## 2026-10-12 (~18:31) - v0.2.163 sabotageCrowd - Preserve running agents when changing context limits - GPT-6.1 Sol, default reasoning; Implementation
 
 ### Agent

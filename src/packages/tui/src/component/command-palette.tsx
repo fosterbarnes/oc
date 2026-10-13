@@ -61,6 +61,8 @@ function isSuggestedPaletteCommand(entry: PaletteCommandEntry) {
   return false
 }
 
+// A command's `group` becomes its own heading under its category ("oc Defaults"),
+// or just the group name when the palette already shows one category.
 export function CommandPaletteDialog(props: { category?: string } = {}) {
   const config = useTuiConfig()
   const sync = useSync()
@@ -73,7 +75,9 @@ export function CommandPaletteDialog(props: { category?: string } = {}) {
     const reachable = keymap.getCommandEntries({
       ...query,
       visibility: "reachable",
-      filter: (command) => isVisiblePaletteCommand(command) && (!props.category || command.category === props.category),
+      filter: (command) =>
+        isVisiblePaletteCommand(command) &&
+        (!props.category || command.category === props.category),
     })
     const registeredBindings = keymap.getCommandBindings({
       visibility: "registered",
@@ -89,7 +93,7 @@ export function CommandPaletteDialog(props: { category?: string } = {}) {
     entries().map((entry) => ({
       title: typeof entry.command.title === "string" ? entry.command.title : entry.command.name,
       description: typeof entry.command.desc === "string" ? entry.command.desc : undefined,
-      category: typeof entry.command.category === "string" ? entry.command.category : undefined,
+      category: paletteHeading(entry.command, props.category),
       footer: formatKeyBindings(entry.bindings, config),
       value: entry.command.name,
       suggested: isSuggestedPaletteCommand(entry),
@@ -136,3 +140,9 @@ export function CommandPaletteDialog(props: { category?: string } = {}) {
   return <DialogSelect ref={(value) => (ref = value)} title="Commands" options={list()} />
 }
 
+
+function paletteHeading(command: PaletteCommandEntry["command"], shown: string | undefined) {
+  const category = typeof command.category === "string" ? command.category : undefined
+  if (typeof command.group !== "string") return category
+  return shown ? command.group : `${category} ${command.group}`
+}

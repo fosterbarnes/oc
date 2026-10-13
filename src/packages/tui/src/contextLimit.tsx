@@ -67,7 +67,7 @@ function formatTokens(tokens: number) {
 function describeLimit(limit: ReturnType<typeof effectiveLimit>) {
   if (!limit) return "not set"
   if (limit.action === "off") return "off"
-  return `${limit.action} at ${formatTokens(limit.tokens)} tokens${limit.defaulted ? " (default)" : ""}`
+  return `${limit.action} at ${formatTokens(limit.tokens)}${limit.defaulted ? " (default)" : ""}`
 }
 
 function globalLimit(config: LimitInput): Limit {
@@ -185,7 +185,7 @@ export function createContextLimitCommands() {
     const options: DialogSelectOption<string | undefined>[] = [
       {
         value: undefined,
-        title: "All providers (default)",
+        title: "All providers",
         description: describeLimit(effectiveLimit(config, undefined)),
       },
       ...scopeKeys(config, sync.data.provider_next.connected).map((scope) => ({
@@ -200,17 +200,21 @@ export function createContextLimitCommands() {
     ))
   }
 
-  return [
-    {
+  return {
+    contextLimit: {
       name: "oc.context_limit",
       title: "Context limit",
       category: "oc",
+      group: "Defaults",
       slashName: "contextLimit",
+      get desc() {
+        return describeLimit(effectiveLimit(sync.data.config, undefined))
+      },
       run: () => openScope(),
     },
-    {
+    handoff: {
       name: "oc.handoff_now",
-      title: "Handoff now",
+      title: "Hand off session",
       category: "oc",
       slashName: "handoffNow",
       get enabled() {
@@ -232,6 +236,6 @@ export function createContextLimitCommands() {
         })
       },
     },
-  ]
+  }
 }
 

@@ -150,6 +150,8 @@ export function QuestionPrompt(props: {
   }
 
   function selectTab(index: number) {
+    // Leaving a tab ends any custom-answer edit; a stale edit on Confirm disables every binding.
+    setStore("editing", false)
     setStore("tab", index)
     setStore("selected", 0)
   }

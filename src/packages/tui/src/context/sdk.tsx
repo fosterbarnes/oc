@@ -59,6 +59,7 @@ export const { use: useSDK, provider: SDKProvider } = createSimpleContext({
 
     const handlers = new Set<(event: GlobalEvent) => void>()
     const reconnectHandlers = new Set<() => void>()
+    const claudeAccountHandlers = new Set<() => void>()
     const emitter = {
       emit(_type: "event", event: GlobalEvent) {
         for (const handler of handlers) handler(event)
@@ -266,6 +267,13 @@ export const { use: useSDK, provider: SDKProvider } = createSimpleContext({
         },
       },
       claudeAccount: {
+        /** Runs after any successful account switch, so views of per-account data can refresh. */
+        onChange(handler: () => void) {
+          claudeAccountHandlers.add(handler)
+          return () => {
+            claudeAccountHandlers.delete(handler)
+          }
+        },
         state: async (sessionID?: string): Promise<ClaudeAccountOption[]> => {
           const result = await transport().get({
             url: `/session/claude/account${sessionID ? `?sessionID=${encodeURIComponent(sessionID)}` : ""}`,
@@ -281,6 +289,7 @@ export const { use: useSDK, provider: SDKProvider } = createSimpleContext({
             headers: { "Content-Type": "application/json" },
           })
           if (result.error) throw result.error
+          for (const handler of claudeAccountHandlers) handler()
           return (result.data as { accounts: ClaudeAccountOption[] }).accounts
         },
       },

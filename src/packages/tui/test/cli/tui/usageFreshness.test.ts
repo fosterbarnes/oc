@@ -118,6 +118,24 @@ test("Claude pool labels each account with its own hourly and weekly resets", ()
   }
 })
 
+test("Claude pool marks the active account's label with «", () => {
+  const rows = formatClaudeUsageRows(
+    {
+      ...claudeAccounts[0],
+      accounts: claudeAccounts.map((usage, index) => ({ name: `acct${index}`, usage })),
+    },
+    false,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    "acct1",
+  )
+  expect(rows.map((row) => row.label)).toEqual(["Claude:", "Claude2 «"])
+  expect(rows[1].usage.startsWith("Claude2 «")).toBe(true)
+  expect(rows[1].usage.search(/\d+(?:\.\d+)?%/)).toBe(rows[1].reset.indexOf("~") + 1)
+})
+
 test("one readable pooled account uses its own two windows without a slash", () => {
   const single = formatClaudeUsageRows(claudeAccounts[1], false)
   expect(single).toMatchObject([{ usage: "Claude:   96%h,    8%w", reset: "10/11/26 ~3:20AM, ~12:30PM 10/18/26" }])

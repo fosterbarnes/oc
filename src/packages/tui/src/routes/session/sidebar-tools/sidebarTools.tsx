@@ -6,6 +6,7 @@ import path from "node:path"
 import { useProject } from "../../../context/project"
 import { useSync } from "../../../context/sync"
 import { useEvent } from "../../../context/event"
+import { useSDK } from "../../../context/sdk"
 import { useKV } from "../../../context/kv"
 import { useTuiConfig } from "../../../config"
 import { HeaderButton } from "./headerButton"
@@ -227,6 +228,7 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
   const projectContext = useProject()
   const sync = useSync()
   const event = useEvent()
+  const sdk = useSDK()
   const kv = useKV()
   const { theme } = useTheme()
   const paths = useTuiPaths()
@@ -303,6 +305,8 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
   const [openRouterUsage, setOpenRouterUsage] = createSignal<UsageSnapshot<OpenRouterUsage>>({ ok: false })
   const [cursorUsage, setCursorUsage] = createSignal<UsageSnapshot<CursorUsage>>({ ok: false })
   const [claudeCodeUsage, setClaudeCodeUsage] = createSignal<UsageSnapshot<ClaudeCodeUsage>>({ ok: false })
+  // Pool account this session runs on (config dir name), marked with `*` in the Claude rows.
+  const [activeClaudeAccount, setActiveClaudeAccount] = createSignal<string>()
   // Sidebar usage shows used or remaining percent for every provider; toggled from the Usage menu.
   const [showRemaining, setShowRemaining] = createSignal(false)
   const [usageWidth, setUsageWidth] = createSignal(0)
@@ -473,10 +477,13 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
               const dirs = Array.isArray(accounts)
                 ? accounts.filter((dir): dir is string => typeof dir === "string")
                 : []
-              const next =
-                dirs.length >= 1 ? await probeClaudeCodePool(dirs, options) : await probeClaudeCodeUsage(options)
-              if (!usageAbort.signal.aborted)
-                setClaudeCodeUsage((previous) => updateClaudeSnapshot(previous, next, Date.now()))
+              const [next, pool] = await Promise.all([
+                dirs.length >= 1 ? probeClaudeCodePool(dirs, options) : probeClaudeCodeUsage(options),
+                dirs.length > 1 ? sdk.claudeAccount.state(sessionID).catch(() => undefined) : undefined,
+              ])
+              if (usageAbort.signal.aborted) return
+              setClaudeCodeUsage((previous) => updateClaudeSnapshot(previous, next, Date.now()))
+              setActiveClaudeAccount(pool?.find((account) => account.current)?.label.replace(/^\./, ""))
               return
             }
             const next = await probeCursorUsage({ ...options, cursorSessionToken })
@@ -698,6 +705,7 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
                 shared?.starts,
                 shared?.clocks,
                 shared?.days,
+                activeClaudeAccount(),
               )
             : [],
         cursor: rows(providers.includes("cursor") && cursorOk, {
@@ -1761,6 +1769,7 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
       void refreshUsage([provider])
     }),
   )
+  onCleanup(sdk.claudeAccount.onChange(() => usageScheduler.request()))
   onCleanup(
     event.on("session.status", (evt) => {
       if (!shouldRefreshUsageAfterIdle(evt.properties, props.sessionID)) return

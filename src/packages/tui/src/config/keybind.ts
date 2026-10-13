@@ -97,7 +97,7 @@ export const Definitions = {
   agent_default_subagent: keybind("none", "Default sub-agent mode"),
   agent_default_subagent_model: keybind("none", "Default sub-agent model"),
   oc_home_dir: keybind("none", "Home directory"),
-  oc_home_dir_sort: keybind("none", "Home directory sort order"),
+  oc_home_dir_sort: keybind("none", "Home sort order"),
   session_timeline: keybind("<leader>g", "Show session timeline"),
   session_fork: keybind("none", "Fork session from message"),
   session_rename: keybind("ctrl+r", "Rename session"),

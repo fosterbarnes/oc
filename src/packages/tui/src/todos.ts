@@ -34,9 +34,10 @@ export function createTodoCommand() {
   return {
     name: "oc.todos.toggle",
     category: "oc",
-    desc: "Save the global todo default; project configuration can override it",
-    get title() {
-      return sync.data.config.todos === true ? "Disable todos" : "Enable todos"
+    group: "Defaults",
+    title: "Todos",
+    get desc() {
+      return sync.data.config.todos === true ? "on" : "off"
     },
     get enabled() {
       return sync.status !== "loading" && !sync.restart.pending && !update()

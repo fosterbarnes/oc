@@ -1,6 +1,12 @@
-v0.2.163 sabotageCrowd
+v0.2.165 chatstersSpittle
 
-context limits:
-Changing context limits or automatic compaction settings no longer interrupts running Claude sessions and subagents. The context-limit menu refreshes its settings after saving.
+command palette:
+oc commands are now grouped under headings in the palette: Defaults, Layout, Folders, Tools (experimental), and Server. The harness update commands are listed directly under a "Third party harness management" heading instead of a submenu, and the `/manageThirdPartyHarnesses` slash command is gone. Switch Claude account and Switch Claude account (this session) sit under that same heading. Settings rows show their current value next to the name, and several entries are renamed, for example "Hand off session", "Harnesses", and "Shut down". The todo command is now "Todos" and shows on or off.
 
-Under the hood: Compaction-only updates refresh configuration caches without disposing project or provider state. Other configuration changes retain their full reload. The keybind documentation check now accepts Windows line endings without reporting unchanged tables as stale. Checks passed: the context-limit HTTP regression with 48 assertions covering two open projects, provider overrides, local precedence, JSONC comments and mixed-update disposal, the keybind documentation check, plus the agent-push pre-push checks. No real-model or live pane check was performed for this push.
+sidebar usage:
+Switching the Claude account now refreshes the sidebar usage right away instead of waiting for the next throttled refresh. The account in use is marked with a `«` in the sidebar, for example `Claude2 «`.
+
+question prompt:
+Enter on the Confirm/Review page no longer stops working after you type a custom answer and then click to another tab.
+
+Under the hood: The palette gained a `group` field rendered by `paletteHeading`, and `createContextLimitCommands` now returns the context-limit and hand-off commands separately. `sdk.claudeAccount` gained an `onChange` listener that triggers `usageScheduler.request()`, which bypasses the 45s provider throttle. `selectTab` in the question prompt now clears the editing state, which had left every key binding disabled on the Confirm tab. Checks passed: the usage freshness test with 32 tests including the new account marker test, the todos test, and the agent-push pre-push checks. The question prompt fix and the sidebar refresh were not checked live in the TUI.

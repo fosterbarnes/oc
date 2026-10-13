@@ -197,9 +197,13 @@ export function formatClaudeUsageRows(
   columns?: number[],
   clocks?: number[],
   days?: number[],
+  /** Pool account name (config dir basename, no leading dot) whose row gets a `«` after its name. */
+  active?: string,
 ) {
-  const accounts = usage.accounts?.flatMap((account) => (account.usage.ok ? [account.usage] : []))
-  const known = accounts?.length ? accounts : [usage]
+  const accounts = usage.accounts?.flatMap((account) =>
+    account.usage.ok ? [{ name: account.name, usage: account.usage }] : [],
+  )
+  const known = accounts?.length ? accounts : [{ name: undefined, usage }]
   const cell = (window: UsageWindow, suffix: string) => {
     const idle = suffix === "h" && window.usedPercent === 0 ? "-" : ""
     // Unknown percent -> null ("reset unavailable"); hourly 0% with no reset ->
@@ -207,8 +211,9 @@ export function formatClaudeUsageRows(
     const resetAt = window.resetAt ?? (window.usedPercent === null ? null : idle)
     return { usedPercent: window.usedPercent, resetAt, suffix }
   }
-  return known.flatMap((account, index) => {
-    const label = index === 0 ? "Claude:" : `Claude${index + 1}:`
+  return known.flatMap(({ name, usage: account }, index) => {
+    const base = index === 0 ? "Claude" : `Claude${index + 1}`
+    const label = active && name === active ? `${base} «` : `${base}:`
     return formatUsageRows({
       label,
       remaining,

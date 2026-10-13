@@ -1420,8 +1420,6 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
           dialog.replace(() => <CommandPaletteDialog category="oc" />)
         },
       },
-      todoCommand,
-      ...contextLimitCommands,
       ...reviveCommands(toast),
       {
         name: "session.list",
@@ -1541,7 +1539,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
       },
       {
         name: "oc.new_session",
-        title: "New oc session",
+        title: "New session",
         category: "oc",
         slashName: "newOcSession",
         run: () => {
@@ -1592,10 +1590,12 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
           ))
         },
       },
+      contextLimitCommands.handoff,
       {
         name: "model.default",
-        title: "Set default model",
+        title: "Model",
         category: "oc",
+        group: "Defaults",
         slashName: "sessionModel",
         run: () => {
           dialog.replace(() => (
@@ -1610,8 +1610,9 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
       },
       {
         name: "agent.session",
-        title: "Set default agent",
+        title: "Agent",
         category: "oc",
+        group: "Defaults",
         slashName: "sessionAgent",
         run: () => {
           dialog.replace(() => (
@@ -1625,8 +1626,12 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
       },
       {
         name: "agent.default_subagent_model",
-        title: "Set default sub-agent model",
+        title: "Subagent model",
         category: "oc",
+        group: "Defaults",
+        get desc() {
+          return sync.data.agent.find((item) => item.name === sync.data.config.default_subagent)?.model?.modelID
+        },
         slashName: "defaultSubagentModel",
         run: () => {
           const defaultSubagent = sync.data.config.default_subagent
@@ -1659,8 +1664,12 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
       },
       {
         name: "agent.default_subagent",
-        title: "Set default sub-agent agent",
+        title: "Subagent agent",
         category: "oc",
+        group: "Defaults",
+        get desc() {
+          return sync.data.config.default_subagent
+        },
         slashName: "defaultSubagent",
         run: () => {
           const options = sync.data.agent
@@ -1676,7 +1685,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
           }
           dialog.replace(() => (
             <DialogSelect
-              title="Set default sub-agent agent"
+              title="Subagent agent"
               current={sync.data.config.default_subagent}
               options={options}
               onSelect={async (option) => {
@@ -1695,10 +1704,13 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
           ))
         },
       },
+      contextLimitCommands.contextLimit,
+      todoCommand,
       {
         name: "oc.home_dir",
-        title: "Home directory",
+        title: "Home folder",
         category: "oc",
+        group: "Folders",
         slashName: "homeDir",
         run: () => {
           const current = readOcConfig().homeDir
@@ -1723,13 +1735,17 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
       },
       {
         name: "oc.home_dir_sort",
-        title: "Home directory sort order",
+        title: "Home sort order",
         category: "oc",
+        group: "Layout",
+        get desc() {
+          return readOcConfig().homeDirSort
+        },
         slashName: "homeDirSort",
         run: () => {
           dialog.replace(() => (
             <DialogSelect
-              title="Home directory sort order"
+              title="Home sort order"
               options={[
                 { value: "name", title: "name" },
                 { value: "modified", title: "modified" },
@@ -1744,8 +1760,9 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
       },
       {
         name: "oc.oc_dir",
-        title: "OC directory",
+        title: "oc folder",
         category: "oc",
+        group: "Folders",
         slashName: "ocDir",
         run: () => {
           const current = readOcConfig().ocDir
@@ -1770,8 +1787,12 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
       },
       {
         name: "oc.server_startup",
-        title: "Start server at Windows sign-in",
+        title: "Start at Windows sign-in",
         category: "oc",
+        group: "Server",
+        get desc() {
+          return readOcConfig().serverStartOnWindowsUserStart ? "on" : "off"
+        },
         slashName: "serverStartOnWindowsUserStart",
         run: () => {
           const current = readOcConfig().serverStartOnWindowsUserStart
@@ -1794,6 +1815,10 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
         name: "oc.sidebar_position",
         title: "Sidebar position",
         category: "oc",
+        group: "Layout",
+        get desc() {
+          return kv.get("sidebar_position", "right")
+        },
         slashName: "sidebarPosition",
         run: () => {
           dialog.replace(() => (
@@ -1818,6 +1843,10 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
         name: "oc.keybind_preset",
         title: "Keybind layout",
         category: "oc",
+        group: "Layout",
+        get desc() {
+          return tuiConfig.keybind_preset
+        },
         slashName: "keybindLayout",
         run: () => {
           dialog.replace(() => (
@@ -1846,8 +1875,12 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
       },
       {
         name: "oc.sidebar_button_style",
-        title: "Sidebar button style",
+        title: "Sidebar buttons",
         category: "oc",
+        group: "Layout",
+        get desc() {
+          return tuiConfig.sidebar_button_style === "minimal" ? "Minimal" : "Outline"
+        },
         slashName: "sidebarButtonStyle",
         run: () => {
           dialog.replace(() => (
@@ -1878,6 +1911,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
         name: "oc.subagent_tabs",
         title: "Subagent tabs",
         category: "oc",
+        group: "Layout",
         slashName: "subagentTabs",
         run: () => {
           // Each pick flips one setting, then reopens on the same row so both can change in one visit.
@@ -1920,6 +1954,10 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
         name: "oc.markers",
         title: "Command markers (alpha)",
         category: "oc",
+        group: "Tools (experimental)",
+        get desc() {
+          return MarkersFile.markersEnabled() ? "on" : "off"
+        },
         slashName: "markers",
         run: () => {
           const current = MarkersFile.markersEnabled()
@@ -1957,8 +1995,13 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
       },
       {
         name: "oc.bgrun",
-        title: "bgRun tool",
+        title: "bgRun",
         category: "oc",
+        group: "Tools (experimental)",
+        get desc() {
+          const permission = sync.data.config.permission
+          return typeof permission !== "object" || permission.bgRun !== "deny" ? "on" : "off"
+        },
         slashName: "bgRun",
         run: () => {
           // A "deny" permission removes the tool from the agent's tool list, not just its calls.
@@ -1990,49 +2033,42 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
           ))
         },
       },
-      {
-        name: "oc.manage_third_party_harnesses",
-        title: "Manage Third Party Harnesses",
-        category: "oc",
-        slashName: "manageThirdPartyHarnesses",
-        submenu: true,
-        run: () => {
-          const desktop = process.platform === "win32"
-          const updates = [
-            {
-              value: "claude_code",
-              title: "Update Claude Code",
-              run: () => {
-                const cliPath = sync.data.config.provider?.["claude-code"]?.options?.cliPath
-                updateClaudeCode(typeof cliPath === "string" ? cliPath : "claude", toast)
-              },
-            },
-            { value: "cursor_cli", title: "Update Cursor CLI", run: () => updateCursorCli(toast) },
-            { value: "codex_cli", title: "Update Codex CLI", run: () => updateCodexCli(toast) },
-            ...(desktop
-              ? [
-                  { value: "claude_desktop", title: "Update Claude Desktop", run: () => updateClaudeDesktop(toast, dialog) },
-                  { value: "cursor_desktop", title: "Update Cursor Desktop", run: () => updateCursorDesktop(toast, dialog) },
-                  { value: "chatgpt_desktop", title: "Update ChatGPT Desktop", run: () => updateChatgptDesktop(toast, dialog) },
-                ]
-              : []),
-          ]
-          dialog.replace(() => (
-            <DialogSelect
-              title="Manage Third Party Harnesses"
-              options={updates.map((item) => ({ value: item.value, title: item.title }))}
-              onSelect={(option) => {
-                dialog.clear()
-                updates.find((item) => item.value === option.value)?.run()
-              }}
-            />
-          ))
+      ...[
+        {
+          name: "oc.update_claude_code",
+          title: "Update Claude Code",
+          run: () => {
+            const cliPath = sync.data.config.provider?.["claude-code"]?.options?.cliPath
+            updateClaudeCode(typeof cliPath === "string" ? cliPath : "claude", toast)
+          },
         },
-      },
+        { name: "oc.update_cursor_cli", title: "Update Cursor CLI", run: () => updateCursorCli(toast) },
+        { name: "oc.update_codex_cli", title: "Update Codex CLI", run: () => updateCodexCli(toast) },
+        ...(process.platform === "win32"
+          ? [
+              {
+                name: "oc.update_claude_desktop",
+                title: "Update Claude Desktop",
+                run: () => updateClaudeDesktop(toast, dialog),
+              },
+              {
+                name: "oc.update_cursor_desktop",
+                title: "Update Cursor Desktop",
+                run: () => updateCursorDesktop(toast, dialog),
+              },
+              {
+                name: "oc.update_chatgpt_desktop",
+                title: "Update ChatGPT Desktop",
+                run: () => updateChatgptDesktop(toast, dialog),
+              },
+            ]
+          : []),
+      ].map((command) => ({ ...command, category: "oc", group: "Third party harness management" })),
       {
         name: "server.shutdown",
-        title: "Shut Down",
+        title: "Shut down",
         category: "oc",
+        group: "Server",
         hidden: Global.native,
         run: () => void controlServer("shutdown"),
       },
@@ -2040,6 +2076,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
         name: "server.restart",
         title: "Restart",
         category: "oc",
+        group: "Server",
         hidden: Global.native,
         run: () => void controlServer("restart"),
       },
@@ -2379,6 +2416,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
               title: "Switch Claude account",
               slashName: "claude-account",
               category: "oc",
+              group: "Third party harness management",
               run: async () => {
                 const accounts = await sdk.claudeAccount.state().catch((error) => {
                   toast.error(error)
@@ -2418,6 +2456,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
               title: "Switch Claude account (this session)",
               slashName: "claude-session-account",
               category: "oc",
+              group: "Third party harness management",
               run: async () => {
                 if (route.data.type !== "session") return
                 const sessionID = route.data.sessionID
