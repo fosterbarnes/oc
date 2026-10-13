@@ -3,7 +3,7 @@
 - After changing the public Protocol or Server `HttpApi`, run `bun run generate` from `packages/client`. Do not edit `src/generated` or `src/generated-effect` directly.
 - Keep runtime dependencies directed from Schema to Core and Protocol, then from Core and Protocol to Server. Client runtime code may depend on Schema and Protocol but never Core or Server; `sdk-next` composes Client, Core, and Server.
 - The default branch in this repo is `main`; use `main` or `origin/main` for diffs. `v1` is the branch of the `UPSTREAM\opencode` checkout (upstream `dev` is OpenCode 2).
-- `UPSTREAM\opencode` is the separate upstream-only checkout at `C:\Users\user\Documents\GitHub\oc\UPSTREAM\opencode`. Keep custom source changes in this parent checkout; upstream synchronization must not modify parent source files.
+- `UPSTREAM\opencode` (inside this repository, gitignored) is the separate upstream-only checkout. Keep custom source changes in this parent checkout; upstream synchronization must not modify parent source files.
 - Windows TUI segfaults on Bun 1.4.0 (`34cbb9a40`): `bun:ffi` FTL pointer args (oven-sh/bun#39829, #40302). `.scripts\build.ps1`, `buildDebug.ps1`, `.run.ps1`, and `.runDebug.ps1` call `requireBunForCompile` and will `bun upgrade --canary` when PATH bun is still 1.4.0. Do not ship `opencode.exe` compiled with 1.4.0. Stable 1.4.1 was not published as of 2026-08-31.
 - Stock OpenCode shares oc's default data dir, so it can migrate `~\.local\share\opencode\opencode.db` into a schema oc cannot read (stock 2.0.6 did on 2026-09-27: FOREIGN KEY failures, "Unexpected server error"). `DatabaseMigration.apply` now refuses unknown migration ids. If oc reports "Database was migrated by a different OpenCode build", find the other version's `database migration started` lines in `opencode.log`, restore a backup, and give that build its own `XDG_DATA_HOME`. Local sqlite3 is 3.22 (no `DROP COLUMN`).
 - Two binaries, one source: `oc.exe` (launcher, resident server, revive host; `occ.exe` hard link, `ocdebug.exe`) and native `opencode.exe` (upstream in-process TUI + worker). Write every feature once. Gate on `Global.native` (build constant `OPENCODE_FLAVOR`, `OC_FLAVOR` env in `bun dev`) only where a feature needs the resident server. Do not reintroduce `oc single` or other env-flag runtime modes.
@@ -11,7 +11,8 @@
 
 ## Project definition
 
-- `FORK.md` is the living definition of this fork. Statuses describe current state; they do not authorize work. `README.OG.md` tracks native OpenCode in this checkout (Now / Keep / Upstream). Keep fork-only work in `FORK.md`.
+- `FORK.md` is the living definition of this fork. Statuses describe current state; they do not authorize work. Keep fork-only work in `FORK.md`.
+- `SCOPE.md` records what oc leaves out: upstream surfaces it removed, items not planned, items planned for later, and retired oc features. Every upstream sync classifies each new upstream feature as port, later, or not planned, and records the last two there. A row leaves `SCOPE.md` only by explicit decision.
 - `README.md` is the public pitch: hook, standout features, requirements, install, a short behavior-changes list, and links into the wiki. It is not the reference for how oc behaves.
 - The GitHub wiki (`fosterbarnes/oc.wiki`, local clone `..\oc.wiki`) is the source of truth for user-facing behavior, settings, keys, troubleshooting, and FAQ. When a change alters what users see or configure, update the wiki page, not the README. Code and agent knowledge stays in `FORK.md`, `AGENTS.md`, and `buildNotes.md`. Wiki layout rules: `Editing-This-Wiki.md` there. Pushing the wiki is the user's action.
 - `countCode.ps1` (via `prePush.ps1`) requires its single `[number](scc.txt)` link and `code-count:start/end` markers.

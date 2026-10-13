@@ -106,7 +106,7 @@ The runner's targeted verification is `.scripts/tests/testRunner.tests.ps1`.
 ## Upstream checkout
 
 The actual upstream OpenCode source is kept in the separate checkout at
-`C:\Users\user\Documents\GitHub\oc\UPSTREAM\opencode`. This repository is the customized parent checkout.
+`UPSTREAM\opencode` inside this repository. This repository is the customized parent checkout.
 
 Run `.\.scripts\updateUpstream.ps1` to fetch the nested checkout's configured
 remote and fast-forward its current tracking branch. The script refuses dirty

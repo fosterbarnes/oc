@@ -1,4 +1,4 @@
-// claudeTestFlow.md (repo root) against the real Claude model: one chat through steps 0-8, the
+// docs/dev/claudeTestFlow.md against the real Claude model: one chat through steps 0-8, the
 // way the user runs it by hand. Opt-in only, it spends real tokens. Run from a plain PowerShell
 // (not inside a Claude session, whose CLAUDE_* variables would reach the child):
 //   $env:OC_REAL_MODEL = "1"; $env:CLAUDE_CODE_OAUTH_TOKEN = "<from `claude setup-token`>"

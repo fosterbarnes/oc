@@ -321,6 +321,6 @@ export const TuiThreadCommand = cmd({
         await stop()
       }
     }
-    process.exit(0)
+    process.exit()
   },
 })

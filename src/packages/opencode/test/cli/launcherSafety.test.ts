@@ -47,6 +47,69 @@ test("startup lock cannot expire under a live launcher, including beyond the old
   expect(OcConfig.startupLockExpired(undefined, [], 10_001)).toBe(false)
 })
 
+test("resident URLs bracket IPv6 loopback and keep IPv4 and localhost", () => {
+  expect(OcConfig.residentUrl("::1", 4096)).toBe("http://[::1]:4096")
+  expect(new URL(`${OcConfig.residentUrl("::1", 4096)}/global/health`).host).toBe("[::1]:4096")
+  expect(OcConfig.residentUrl("127.0.0.1", 4096)).toBe("http://127.0.0.1:4096")
+  expect(OcConfig.residentUrl("localhost", 4097)).toBe("http://localhost:4097")
+})
+
+test("an unreadable startup lock is recovered by age, never while recent or owned by a live process", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "ocStartupLock-"))
+  const lock = path.join(directory, "oc-server.json.lock")
+  const age = async (contents: string, seconds: number) => {
+    await fs.writeFile(lock, contents)
+    const time = new Date(Date.now() - seconds * 1000)
+    await fs.utimes(lock, time, time)
+  }
+  try {
+    for (const partial of ["", '{"pid":12', "null", '{"pid":"x"}']) {
+      await age(partial, 180)
+      expect(await OcConfig.withResidentLock(async () => "ran", { lock, attempts: 3 })).toBe("ran")
+      expect(await fs.stat(lock).catch(() => undefined)).toBeUndefined()
+    }
+    // A lock still being written is not stolen.
+    await age("", 5)
+    await expect(OcConfig.withResidentLock(async () => "ran", { lock, attempts: 3 })).rejects.toThrow("Timed out")
+    expect(await fs.readFile(lock, "utf8")).toBe("")
+    // An old lock whose owner is this live process stays, however old.
+    const owner = (await TuiLedger.listProcessesAsync()).find((item) => item.pid === process.pid) ?? { pid: process.pid }
+    await age(JSON.stringify(owner), 600)
+    await expect(OcConfig.withResidentLock(async () => "ran", { lock, attempts: 3 })).rejects.toThrow("Timed out")
+    expect(JSON.parse(await fs.readFile(lock, "utf8")).pid).toBe(process.pid)
+  } finally {
+    await fs.rm(directory, { recursive: true, force: true })
+  }
+}, 60_000)
+
+test("a second revive install fails fast with the busy message while the first holds the lock", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "ocInstallLock-"))
+  const lock = path.join(directory, ".revive.lock")
+  const busy = "Another revive is already installing oc"
+  let release = () => {}
+  const held = new Promise<void>((resolve) => (release = resolve))
+  try {
+    let entered = () => {}
+    const inside = new Promise<void>((resolve) => (entered = resolve))
+    const first = OcConfig.withResidentLock(
+      async () => {
+        entered()
+        await held
+        return "first"
+      },
+      { lock, attempts: 3, busy },
+    )
+    await inside
+    await expect(OcConfig.withResidentLock(async () => "second", { lock, attempts: 3, busy })).rejects.toThrow(busy)
+    release()
+    expect(await first).toBe("first")
+    expect(await OcConfig.withResidentLock(async () => "third", { lock, attempts: 3, busy })).toBe("third")
+  } finally {
+    release()
+    await fs.rm(directory, { recursive: true, force: true })
+  }
+}, 60_000)
+
 test("ledger parent ownership compares exact CIM times even within the same millisecond", () => {
   const record = { ...identity, instance: Global.Path.app }
   const parent = { ...identity, pid: identity.parentPid, parentPid: 1, created: "134100000000000002" }
@@ -142,7 +205,7 @@ test("resident state and CLI ledger preserve exact identities without querying o
       directory,
       restarting: new Date().toISOString(),
     })
-    await clearResidentStateForRestart(directory)
+    await clearResidentStateForRestart(directory, identity.pid)
     expect(await Bun.file(OcConfig.serverStatePath(directory)).json()).toMatchObject({ created: identity.created })
     await TuiLedger.register(directory, identity.pid, [identity])
     await fs.writeFile(

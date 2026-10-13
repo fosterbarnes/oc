@@ -1,12 +1,12 @@
-v0.2.172 brushesAddress
+v0.2.174 coastersWall
 
-claude warm-up:
-A new command palette entry lets you set daily or weekly times for each signed-in Claude subscription account. At those times oc sends a tiny "hi" so the usage window starts on schedule. Accounts can be paused and resumed. Warm-ups are skipped if the Claude CLI is missing or too old.
+repository cleanup:
+SCOPE.md now records upstream features oc leaves out, plans for later, and retired features. The unused UI, session UI, and docs packages are removed, along with their publishing, translation, and stats scripts. TUI notification sounds now live in the TUI package. Developer documents moved into docs/dev, GitHub ownership and contribution metadata now identify this fork, and personal machine paths were replaced with portable examples and tool lookup.
 
-work copies:
-/work and /done are removed, along with the copy-and-merge flow they started and the work_done tool Claude sessions used to get. "Move session to new copy" still works. A session pinned to a folder no longer fails because that folder is a work copy. Existing work copy folders on disk are not deleted; remove them by hand if you no longer need them. Before the removal, the sidebar's saved repo roots were made to follow work copies, nested copies, and the return through /done; external folders stay where you chose them.
+upstream fixes:
+C++ module files get syntax highlighting, Windows plugin names display correctly in /status, and remote configuration login failures explain how to sign in again. Copilot message conversion and streaming, MCP browser handling, npm module resolution under Node, file search, and PTY handling received selected upstream fixes. Provider requests now carry session and parent-session identity headers.
 
-release prep:
-Install and manual revive scripts now resolve your own home and Desktop folders instead of a fixed user path. Three older release-planning documents moved into docs/dev/ with portable examples and updated links.
+launcher and revive:
+Resident server URLs support IPv6 loopback, occupied ports produce a useful error, and abandoned partial startup locks can recover. Standalone servers and old resident processes leave another server's state record alone. Revive serializes installs, restores the previous binaries if the replacement server fails to start, and includes debug output when reviving ocdebug. WezTerm revive reopens owned oc panes before closing their old panes, preserving unrelated shells and other instances.
 
-Under the hood: the warm-up scheduler, store, listener loop, /global/claude/warmup routes, and TUI dialogs are new, with fake-model and listener tests. The listener test now steps its clock with real promise settling. The /work and /done removal also dropped Git.worktree.parent, the projectCopy work/merge API chain, and the regenerated client and SDK pieces. Checks passed: the warm-up unit and listener tests, the warm-up fake-model scenario, the TUI warm-up test, and the agent-push pre-push checks.
+Under the hood: removed workspace and test-runner references, retained historical notes in buildNotes.archive9.md, and updated fork and upstream-sync documentation. Checks passed: changed Copilot conversion/model and npm tests; launcher safety, serve-process, oc CLI/config, revive, and session LLM tests; TUI filetype and sidebar tests; and the agent-push pre-push checks. Real-model checks were not run. Remaining upstream parity work, the native upgrade release-source blocker, and lockfile workspace cleanup are recorded in buildNotes.md.

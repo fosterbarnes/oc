@@ -1,6 +1,6 @@
 # oc
 
-**This is the project definition for this OpenCode fork.** It tracks oc-only work. `README.OG.md` tracks native OpenCode in this checkout (what is still stock, what should stay stock, and same / pin / lag / gone vs isolated upstream).
+**This is the project definition for this OpenCode fork.** It tracks oc-only work. [SCOPE.md](./SCOPE.md) tracks what oc leaves out of upstream OpenCode.
 
 oc is a personal, Windows-first OpenCode: native `oc` launcher, extra model providers, a workspace sidebar, custom planning agents, and local build/install tooling. Stock OpenCode still supplies the core chat, tools, and terminal UI. Everything listed below is what this project added or changed, and how complete that work is today.
 
@@ -41,7 +41,7 @@ Counts below are for **active** rows only. Retired work is listed separately and
 - Related backend plumbing is folded into the user-facing feature it supports.
 - Companion pieces that live next to this repo (`octray`, Everything Search, SuperPlan agents, `bgShell`) are included when they are part of daily OC use.
 - Status is conservative: tests and source are not enough for **~done~** when a rebuild, login, or interactive check is still part of the feature.
-- `README.OG.md` tracks native OpenCode (Now / Keep / Upstream). Hosted docs at opencode.ai remain upstream.
+- `SCOPE.md` lists what oc leaves out. Hosted docs at opencode.ai describe upstream, not oc.
 
 ---
 
@@ -51,7 +51,7 @@ Use Claude Code or Cursor from OpenCode without treating them as ordinary API-on
 
 | Feature | Level | What it does | What's left |
 |---|---|---|---|
-| Claude Code as the agent | high | Claude chats run in the Claude Code CLI with its own prompt, native tools, transcript and `/compact`; oc streams it live. oc sends only the agent's own prompt. oc skills load natively through a generated `--plugin-dir` of links, and oc-only tools (subagents, questions, session tools, MCP servers) are deferred proxy tools Claude loads with ToolSearch. Claude's own task list fills oc's todo list at the end of each turn, and an oc agent's missing tools turn off the matching Claude built-ins. The context meter updates during a turn and shows the compacted size after `/compact`. Slash-command turns with their own permissions load oc's file tools up front, and a new slash command replaces the previous command's rules. Live-checked with `claudeTestFlow.md` (tools, memory, interrupt, compact, revert, restart, effort switch, cache). | No Claude-backed restricted agent exists yet to live-check the agent tool limits. The task-list folder layout is undocumented Claude Code behavior. |
+| Claude Code as the agent | high | Claude chats run in the Claude Code CLI with its own prompt, native tools, transcript and `/compact`; oc streams it live. oc sends only the agent's own prompt. oc skills load natively through a generated `--plugin-dir` of links, and oc-only tools (subagents, questions, session tools, MCP servers) are deferred proxy tools Claude loads with ToolSearch. Claude's own task list fills oc's todo list at the end of each turn, and an oc agent's missing tools turn off the matching Claude built-ins. The context meter updates during a turn and shows the compacted size after `/compact`. Slash-command turns with their own permissions load oc's file tools up front, and a new slash command replaces the previous command's rules. Live-checked with `docs/dev/claudeTestFlow.md` (tools, memory, interrupt, compact, revert, restart, effort switch, cache). | No Claude-backed restricted agent exists yet to live-check the agent tool limits. The task-list folder layout is undocumented Claude Code behavior. |
 | Claude account pool | high | Several Claude logins act as one account (`accounts`: a list of Claude config dirs). A chat stays on one login until the CLI rejects a request for usage, then continues the same turn on the next login with oc's catch-up and what the turn already did. The current login survives `/revive` and server restarts, and logins already at 100% are skipped. Palette **Switch Claude account** (and the per-session variant) picks one by hand; the sidebar shows a row per account, marks the active one with `«`, and refreshes on switch. | Covered by fake-CLI tests; no real usage-limit switch recorded. `persistSessions`/`persistPool` are last-writer-wins when `oc` and native `opencode` run at once. |
 | Schedule Claude warm-up | high | **Third party harness management** has one **Schedule Claude warm-up: <label>** entry per connected subscription login. Global account folders have stable identities; project-only overrides do not schedule greetings. Off initially. **Every day** or **By weekday** accepts up to four `HH:mm` times per day in the server's local time zone. Save enables nonempty schedules; Pause retains times; an empty schedule disables sending. Missed times are skipped. Listener-owned, locked claims prevent duplicate attempts across hosts; resident `oc` continues with every TUI closed, while native `opencode` needs its host alive. Tiny account-pinned Haiku greetings stay outside chats. Live **Est. reset** previews are conditional on starting a new five-hour window. Latest outcome says **Prompt sent**, never promises that a window moved. | Scheduler/store, API, isolated fake-model, and pane checks pass; wiki documented. Installed schedule/pause/sleep and real subscription reset alignment remain user-owned. |
 | Cursor as a native model | medium | Uses a Cursor account login (browser sign-in) and talks to Cursor's service directly as an OpenCode model (tools, reasoning). The Cursor app does not need to be open. A small local Node HTTP/2 relay (`cursor-runtime`) carries the connection because Bun's client fails Cursor's TLS handshake. The picker can show live multi-tier models (Grok 4.7 base, Fast, 500k, and Claude Opus 5.5 metadata) with matching context, wire params, and pricing. | Live auth/request proof is thin. Git diff parity is implemented; shell exec variants stay deferred. Compaction and "this is OpenCode, not Cursor IDE" guidance were added later and look solid in tests. |
@@ -73,7 +73,7 @@ Get into a project quickly, keep a local server running, and control it from the
 | Feature | Level | What it does | What's left |
 |---|---|---|---|
 | Native `oc` launcher | ~done~ | `oc` is OpenCode itself, with settings in `~/.config/opencode/oc.json`. Launch, previous session (`occ`), diagnostics, and `oc config get/set` all work. The `occ` desktop shortcut runs `occ.exe` directly (no PowerShell profile), and `occ` looks up the last session while the server starts. | None realistic. |
-| Run after turn and revive | high | **Revive** restarts this oc instance and its terminal window. When `oc`/`occ` launched the TUI, the TUI closes and that window shows step-by-step progress; then the window closes and a fresh terminal process (WezTerm, Windows Terminal, or a new console) runs `oc` or `occ` (`revive.launcher`, default `occ` = the revived session). The first `/revive` asks where oc's source comes from: use an existing source folder, download `github.com/fosterbarnes/oc` once to a chosen folder (default in oc's data folder; the user's copy to edit, never pulled again), or just restart. The answer is saved as `revive.build` (`false` = restart only). With a build configured (`revive.build: { source, debug }`), `/revive` runs `bun install` and `packages/opencode/script/build.ts --single` in the source folder, adding `--with-debug` and installing `ocdebug.exe` only when `debug` is true (output streams live; a failed build waits for a key and reopens the old oc), and swaps the new binaries (`oc.exe`, native `opencode.exe`) into the install dir by renaming running files aside, relinking `occ.exe`, with rollback. `revive.path` still overrides `/revive-no-install`. TUIs not launched through `oc`/`occ` use a hidden helper with the same pipeline. Progress and errors go to `revive.log`. The revive mark (`[oc revived at ...]`) is written by the old build; the new build restamps its versions while it is still the newest message, so the agent sees the build that actually came back. Shutdown closes only terminals and processes recorded for this instance; `ocdebug` and unrelated windows stay open. In a multi-tab WezTerm window, `/revive` reopens every tab in order: oc tabs return to their session (or Home), shell tabs return as shells in the same folder. **`run_after_turn`** queues an exe or `.ps1` after the agent turn (`/agent-revive` uses it), including Claude Code sessions when `run_after_turn` is listed in `proxyTools`. Permission: built-in default allows; global config can deny except revive scripts. | Live check hard revive in WezTerm and Windows Terminal from `oc` and `occ`, including a failing build and a real install. Claude Code `/agent-revive-no-install`. WezTerm tab order is assumed from `wezterm cli list`; split panes keep only their first pane. |
+| Run after turn and revive | high | **Revive** restarts this oc instance and its terminal window. When `oc`/`occ` launched the TUI, the TUI closes and that window shows step-by-step progress; then the window closes and a fresh terminal process (WezTerm, Windows Terminal, or a new console) runs `oc` or `occ` (`revive.launcher`, default `occ` = the revived session). The first `/revive` asks where oc's source comes from: use an existing source folder, download `github.com/fosterbarnes/oc` once to a chosen folder (default in oc's data folder; the user's copy to edit, never pulled again), or just restart. The answer is saved as `revive.build` (`false` = restart only). With a build configured (`revive.build: { source, debug }`), `/revive` runs `bun install` and `packages/opencode/script/build.ts --single` in the source folder, adding `--with-debug` and installing `ocdebug.exe` only when `debug` is true (output streams live; a failed build waits for a key and reopens the old oc), and swaps the new binaries (`oc.exe`, native `opencode.exe`) into the install dir by renaming running files aside, relinking `occ.exe`, with rollback. `revive.path` still overrides `/revive-no-install`. TUIs not launched through `oc`/`occ` use a hidden helper with the same pipeline. Progress and errors go to `revive.log`. The revive mark (`[oc revived at ...]`) is written by the old build; the new build restamps its versions while it is still the newest message, so the agent sees the build that actually came back. Shutdown closes only terminals and processes recorded for this instance; `ocdebug` and unrelated windows stay open. In a multi-tab WezTerm window, `/revive` opens a new window with this instance's oc tabs in order (each back on its session), then closes only those panes in the old window; shells, ocdebug, native, and other instances keep running there. **`run_after_turn`** queues an exe or `.ps1` after the agent turn (`/agent-revive` uses it), including Claude Code sessions when `run_after_turn` is listed in `proxyTools`. Permission: built-in default allows; global config can deny except revive scripts. | Live check hard revive in WezTerm and Windows Terminal from `oc` and `occ`, including a failing build and a real install. Claude Code `/agent-revive-no-install`. WezTerm tab order is assumed from `wezterm cli list`; an owned pane in a split tab moves on its own. |
 | Separate home vs OC directory | high | Bare `oc` and relative project names can use two different folders. Absolute paths stay absolute. | Latest palette settings may still need a rebuild/restart to show in the running app. |
 | New-session project picker | high | Tray/palette "New session" starts the intro, then the real OpenCode project picker, then attaches to the running server. | Confirm the installed `oc.exe` shows the intended picker. |
 | Startup loading animation | high | Column-by-column logo reveal with a scanner while the server and session come up; a startup pause resumes at the next column instead of skipping. `intro.background` in `oc.json` uses your terminal background (default) or paints black. Fills and re-centers when the window is snapped or resized. Runs on the alternate screen; the TUI shows the same logo until it is ready, so there is no blank gap at handoff and quitting restores the terminal. | Handoff confirmed live on 0.2.87. Reveal timing reworked in 0.2.167 (uncommitted): live look, plus `intro.background: "black"` and resize through `occ`. |
@@ -83,7 +83,7 @@ Get into a project quickly, keep a local server running, and control it from the
 | `oc --kill-server` / `--restart-server` / `--shutdown-all` | high | Simple flags for the tray and CLI to stop or bounce the resident server without a full TUI. `--shutdown-all` stops only this instance's TUIs and server (TUI ledger), not `ocdebug` or unrelated terminals; revive uses the same scoping. | Tray wiring exists; treat as nearly done once it is used from a cold start. |
 | Faster command startup | ~done~ | Only the command asked for is loaded. `--version` is much quicker. | None realistic. |
 | Windows tray (`octray`) | medium | Separate tray app: open OC, open the project picker, start the server if it is down, restart/shut down the server. | Frozen as-is for 0.2 (decided 2026-10-12); outside the 0.3 public scope. Logs, live status, and settings menu items are thin. Not inside this git checkout. |
-| No browser/desktop OpenCode app | ~done~ | This checkout no longer builds the website UI or Electron desktop app. CLI, TUI, and API remain. `README.OG.md` states that. | Intentional removal, not a missing product. The upstream docs site, hosted SaaS, and SST deployment source are also removed. |
+| No browser/desktop OpenCode app | ~done~ | This checkout no longer builds the website UI or Electron desktop app. CLI, TUI, and API remain. `SCOPE.md` records it. | Intentional removal, not a missing product. The upstream docs site, hosted SaaS, and SST deployment source are also removed. |
 
 ---
 
@@ -229,29 +229,10 @@ Stay close to upstream without losing custom work.
 
 ---
 
-## Retired or superseded (not in the counts)
+## Retired or superseded
 
-These used to be customizations. They are history, not a backlog.
-
-- ChatGPT Web and Claude Web browser providers (Agentify runtime), removed 2026-10-10
-- Single-window mode (`oc single`, `--single`, `--portable`, `mode`), replaced by the native `opencode` binary 2026-10-11
-- Bash-only Claude `account` wrapper (account pool replaced it)
-- `/manageThirdPartyHarnesses` submenu (palette heading replaced it)
-- Standalone `oc.config.json` / `OPENCODE_OC_CONFIG` wrapper
-- External intro-script setting
-- Initial model / agent / reasoning palette settings (native session setup replaced them)
-- Global `ignoreAgentModels` (per-session model memory replaced it)
-- Standalone openSidebar plugin (native sidebar replaced it)
-- Singular-only global `agent/` folder (canonical is `agents/`; projects may still discover both)
-- Earlier snake/wave startup animations (column sweep remains)
-- Windows `opencode-process-tree.exe` supervisor (removed; direct spawn remains)
-- Open Computer Use MCP (uninstalled)
-- Web UI and Electron desktop packages (removed from this checkout)
-- Intermediate clack "type to filter" project list (replaced by the real TUI picker)
-- Cursor native plan-mode bridge (acknowledged, not activated)
-- ocdebug PowerShell wrapper function (native `ocdebug.exe` replaced it)
-- OpenTUI raw-mode resume patch (removed; stock 0.4.5 resume remains)
-- Command markers (`$#name` preset commands), removed 2026-10-12 (agent shell and edit tools could still write `markers.json`)
+Retired oc features, removed upstream surfaces, and items not planned or planned for later live
+in [SCOPE.md](./SCOPE.md).
 
 ---
 
@@ -272,7 +253,7 @@ These used to be customizations. They are history, not a backlog.
 | `FORK.md` | **This file.** Living definition of OC. |
 | `README.md` | Public pitch, links into the wiki, and the line count `prePush.ps1` refreshes. |
 | `oc.wiki` (GitHub wiki) | Source of truth for user-facing behavior, settings, keys, troubleshooting, and FAQ. |
-| `README.OG.md` | Native OpenCode map: Now / Keep / Upstream. Not the OC product list. |
+| `SCOPE.md` | What oc leaves out: removed upstream surfaces, not planned, planned for later, retired oc features. |
 | `SCRIPTS.md` | How to build, install, and sync. |
 | `UPSTREAM-SYNC.md` | How upstream is applied without dropping custom work. |
 | `AGENTS.md` | Agent working rules for this checkout. |
@@ -288,5 +269,5 @@ This file is the source of truth for what OC is and how complete each piece is.
 - Keep retired work out of the counts.
 
 - File new capabilities under how they are *used*.
-- Keep OC-only work in this file. Native OpenCode belongs in the `README.OG.md` Tracking table (Now / Keep / Upstream).
+- Keep OC-only work in this file. Exclusions and retired work belong in `SCOPE.md`.
 - Session notes stay in `buildNotes.md`. This document stays the product contract.

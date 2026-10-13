@@ -31,23 +31,31 @@ export function shouldClearResidentState(restart: boolean) {
   return !restart
 }
 
-export async function clearResidentStateForRestart(directory = Global.Path.state) {
+// Only the process a record names may clear it: an old server must not drop its replacement's record.
+export async function clearResidentStateForRestart(directory = Global.Path.state, pid = process.pid) {
   try {
-    const state = JSON.parse(await fs.readFile(residentStatePath(directory), "utf8")) as { restarting?: string }
+    const state = JSON.parse(await fs.readFile(residentStatePath(directory), "utf8")) as {
+      pid?: number
+      restarting?: string
+    }
+    if (state.pid !== pid) return
     // A CLI restart marks state before asking this process to shut down.
     if (residentRestartFresh(state.restarting)) return
     await fs.rm(residentStatePath(directory), { force: true })
   } catch {}
 }
 
-export async function markResidentRestart(input: { hostname: string; port: number; directory?: string }) {
+// Stamps a restart on this process's own record; a record owned by another pid is left alone.
+export async function markResidentRestart(input: { hostname: string; port: number; directory?: string; pid?: number }) {
   const directory = input.directory ?? Global.Path.state
+  const pid = input.pid ?? process.pid
   let existing: { pid?: number; executable?: string; created?: string } = {}
   try {
     existing = JSON.parse(await fs.readFile(residentStatePath(directory), "utf8"))
   } catch {}
+  if (existing.pid && existing.pid !== pid) return
   await writeResidentState({
-    pid: existing.pid && existing.pid > 0 ? existing.pid : process.pid,
+    pid,
     hostname: input.hostname,
     port: input.port,
     executable: existing.executable,
@@ -57,19 +65,26 @@ export async function markResidentRestart(input: { hostname: string; port: numbe
   })
 }
 
-function stopAndExit(server: { hostname: string; port: number; stop: (close?: boolean) => Promise<void> }, restart: boolean) {
+export function stopAndExit(
+  server: { hostname: string; port: number; stop: (close?: boolean) => Promise<void> },
+  restart: boolean,
+  resident: boolean,
+  exit: (code: number) => void = process.exit,
+) {
   // Mark before the port closes. A launch during shutdown must see a fresh restart,
-  // not a dead pid with the port already down.
-  const prepare = restart ? markResidentRestart({ hostname: server.hostname, port: server.port }) : Promise.resolve()
-  void prepare
+  // not a dead pid with the port already down. A nonresident serve shares the state
+  // directory but never touches the resident record.
+  const prepare =
+    restart && resident ? markResidentRestart({ hostname: server.hostname, port: server.port }) : Promise.resolve()
+  return prepare
     .then(() => server.stop(true))
     .then(() => stopCursorProxy())
-    .then(() => (shouldClearResidentState(restart) ? clearResidentStateForRestart() : undefined))
+    .then(() => (resident && shouldClearResidentState(restart) ? clearResidentStateForRestart() : undefined))
     .then(() => (restart ? restartProcess() : undefined))
-    .then(() => process.exit(0))
+    .then(() => exit(0))
     .catch((error) => {
       console.error(error)
-      process.exit(1)
+      exit(1)
     })
 }
 
@@ -87,13 +102,15 @@ export const ServeCommand = effectCmd({
     }
     const opts = yield* resolveNetworkOptions(args)
     const server = yield* Effect.promise(() => Server.listen(opts))
+    const resident = process.env[RESIDENT_ENV] === "1"
     ServerLifecycle.setController({
-      markRestart: () => markResidentRestart({ hostname: server.hostname, port: server.port }),
-      shutdown: () => stopAndExit(server, false),
-      restart: () => stopAndExit(server, true),
+      markRestart: () =>
+        resident ? markResidentRestart({ hostname: server.hostname, port: server.port }) : Promise.resolve(),
+      shutdown: () => void stopAndExit(server, false, resident),
+      restart: () => void stopAndExit(server, true, resident),
     })
     console.log(`opencode server listening on http://${server.hostname}:${server.port}`)
-    if (process.env[RESIDENT_ENV] === "1") {
+    if (resident) {
       yield* Effect.promise(() =>
         writeResidentState({
           pid: process.pid,

@@ -83,6 +83,16 @@ test("the configured launcher picks the previous session (occ) or the home scree
       sessionID: context.sessionID,
     }).args,
   ).toEqual(["start", "--always-new-process", "--", nativeExe, context.directory, "--session", context.sessionID])
+  // One snapshotted tab: occ reopens that pane's session, oc still opens Home.
+  const one = [{ kind: "oc", directory: "C:\\Split", sessionID: "ses_split", paneID: "4" }] satisfies Revive.Tab[]
+  expect(Revive.reopenCommand({ ...restart, terminal: "wezterm", tabs: one }).args.slice(3, 6)).toEqual([
+    executable,
+    "oc",
+    "revive-tabs",
+  ])
+  expect(Revive.reopenCommand({ ...restart, terminal: "wezterm", launcher: "oc", tabs: one }).args.at(-1)).toBe(
+    "launch",
+  )
   expect(Revive.parseLauncher(undefined)).toBe("occ")
   expect(Revive.parseLauncher("oc")).toBe("oc")
   expect(() => Revive.parseLauncher("opencode")).toThrow()
@@ -280,7 +290,7 @@ test.skipIf(process.platform !== "win32")("native terminal restart preserves the
 
 const windowList = JSON.stringify([
   { window_id: 0, tab_id: 9, pane_id: 1, cwd: "file:///C:/Projects/crow" },
-  { window_id: 0, tab_id: 1, pane_id: 2, cwd: "file:///C:/Users/user/Projects%20A" },
+  { window_id: 0, tab_id: 1, pane_id: 2, cwd: "file:///C:/Users/example/Projects%20A" },
   { window_id: 0, tab_id: 2, pane_id: 3, cwd: "file:///C:/Work" },
   { window_id: 0, tab_id: 2, pane_id: 4, cwd: "file:///C:/Work" },
   { window_id: 0, tab_id: 3, pane_id: 5, cwd: "file:///C:/Projects/b" },
@@ -293,28 +303,29 @@ const ledgerRecords = [
   { paneID: "6", directory: "C:\\Window2" },
 ]
 
-test("windowTabs keeps one window in list order, one pane per tab, oc panes from the ledger", () => {
+test("windowTabs moves only owned oc panes of the trigger's window, in list order", () => {
+  // Pane 2 (shell) and pane 3 (first pane of a split, e.g. ocdebug) are not owned: they stay behind.
+  // Pane 4 is the owned second pane of that split tab, so it moves on its own.
   expect(Revive.windowTabs(windowList, ledgerRecords, "1")).toEqual([
-    { kind: "oc", directory: "C:\\Projects\\crow", sessionID: "ses_a" },
-    { kind: "shell", cwd: "C:\\Users\\user\\Projects A" },
-    { kind: "shell", cwd: "C:\\Work" },
-    { kind: "oc", directory: "C:\\Projects\\b" },
+    { kind: "oc", directory: "C:\\Projects\\crow", sessionID: "ses_a", paneID: "1" },
+    { kind: "oc", directory: "C:\\Split", sessionID: "ses_split", paneID: "4" },
+    { kind: "oc", directory: "C:\\Projects\\b", paneID: "5" },
   ])
-  expect(Revive.windowTabs(windowList, ledgerRecords, "6")).toEqual([{ kind: "oc", directory: "C:\\Window2" }])
+  expect(Revive.windowTabs(windowList, ledgerRecords, "6")).toEqual([
+    { kind: "oc", directory: "C:\\Window2", paneID: "6" },
+  ])
   expect(Revive.windowTabs(windowList, ledgerRecords, "99")).toEqual([])
-  expect(
-    Revive.windowTabs(
-      JSON.stringify([
-        { window_id: 0, tab_id: 0, pane_id: 1, cwd: "https://example.com" },
-        { window_id: 0, tab_id: 1, pane_id: 2 },
-      ]),
-      [],
-      "1",
-    ),
-  ).toEqual([
-    { kind: "shell", cwd: os.homedir() },
-    { kind: "shell", cwd: os.homedir() },
-  ])
+  expect(Revive.windowTabs(windowList, [], "1")).toEqual([])
+})
+
+test("ownedPanes closes only the trigger and moved panes that still exist", () => {
+  const tabs = Revive.windowTabs(windowList, ledgerRecords, "1")
+  expect(Revive.ownedPanes(windowList, { paneID: "1", tabs })).toEqual(["1", "4", "5"])
+  // A pane closed meanwhile (or a reused id from another window) is skipped, never guessed.
+  const later = JSON.stringify(JSON.parse(windowList).filter((pane: { pane_id: number }) => pane.pane_id !== 5))
+  expect(Revive.ownedPanes(later, { paneID: "1", tabs })).toEqual(["1", "4"])
+  expect(Revive.ownedPanes(windowList, { paneID: "1" })).toEqual(["1"])
+  expect(Revive.ownedPanes(windowList, { paneID: "1", tabs: [{ kind: "shell", cwd: "C:\\Work" }] })).toEqual(["1"])
 })
 
 test("restart tabs round-trip, and a bad tab rejects the restart context", () => {
@@ -338,7 +349,7 @@ test("restart tabs round-trip, and a bad tab rejects the restart context", () =>
   expect(() => Revive.decodeRestart(Revive.encode({ ...restart, tabs: "C:\\Work" }))).toThrow()
 })
 
-test("wezterm restores several tabs through revive-tabs; one tab and other terminals keep previous", () => {
+test("wezterm restores several tabs through revive-tabs; no snapshot and other terminals keep previous", () => {
   const tabs: Revive.Tab[] = [
     { kind: "oc", directory: context.directory, sessionID: context.sessionID },
     { kind: "shell", cwd: "C:\\Work" },
@@ -363,10 +374,10 @@ test("wezterm restores several tabs through revive-tabs; one tab and other termi
     "--",
     executable,
     "oc",
-    "previous",
-    "--depth",
-    "1",
+    "revive-tabs",
+    Revive.encode([tabs[0]]),
   ])
+  expect(Revive.reopenCommand({ ...restart, terminal: "wezterm", tabs: [] }).args).toContain("previous")
   expect(Revive.reopenCommand({ ...restart, terminal: "windows-terminal", tabs }).args).toContain("previous")
 })
 
@@ -383,6 +394,16 @@ test("revive.build is a source folder with an optional debug build", () => {
     { cwd: "C:\\src\\oc", command: ["pwsh"], output: ["bin"] },
   ])
     expect(() => Revive.parseBuild(input)).toThrow()
+})
+
+test("an ocdebug revive always builds ocdebug; other flavors keep the saved choice", () => {
+  const saved = { source: "C:\\src\\oc", debug: false }
+  expect(Revive.effectiveBuild(saved, true)).toEqual({ source: "C:\\src\\oc", debug: true })
+  expect(Revive.effectiveBuild(saved, false)).toEqual(saved)
+  expect(Revive.effectiveBuild({ ...saved, debug: true }, false)).toEqual({ ...saved, debug: true })
+  expect(Revive.effectiveBuild(false, true)).toBeUndefined()
+  const output = Revive.buildSteps(Revive.effectiveBuild(saved, true)!).output
+  expect(output.some((item) => item.endsWith("ocdebug.exe") || item.endsWith("ocdebug"))).toBe(true)
 })
 
 test("build steps run build.ts in the source folder and add ocdebug only for debug builds", () => {
@@ -458,9 +479,34 @@ test("a failed install restores the previous files", async () => {
 
   await expect(Revive.install(sources, app, 7)).rejects.toThrow()
 
-  expect((await fs.readdir(app)).sort()).toEqual(["opencode.exe", "runtime"])
   expect(await fs.readFile(path.join(app, "opencode.exe"), "utf8")).toBe("old")
   expect(await fs.readFile(path.join(app, "runtime"), "utf8")).toBe("old runtime")
+  expect(await Revive.removeLeftovers(app)).toEqual([])
+  expect((await fs.readdir(app)).sort()).toEqual(["opencode.exe", "runtime"])
+})
+
+test("a finished install rolls back files and aliases when the new server is not ready", async () => {
+  await using tmp = await tmpdir()
+  const build = path.join(tmp.path, "build")
+  const app = path.join(tmp.path, "app")
+  await fs.mkdir(path.join(build, "runtime"), { recursive: true })
+  await fs.mkdir(path.join(app, "runtime"), { recursive: true })
+  await fs.writeFile(path.join(build, "opencode.exe"), "new")
+  await fs.writeFile(path.join(build, "runtime", "a.js"), "new runtime")
+  await fs.writeFile(path.join(app, "opencode.exe"), "old")
+  await fs.writeFile(path.join(app, "runtime", "a.js"), "old runtime")
+  await fs.link(path.join(app, "opencode.exe"), path.join(app, "occ.exe"))
+
+  const rollback = await Revive.install(await Revive.installSources([build]), app, 7)
+  await rollback(new Error("not ready"))
+
+  expect(await fs.readFile(path.join(app, "opencode.exe"), "utf8")).toBe("old")
+  expect(await fs.readFile(path.join(app, "occ.exe"), "utf8")).toBe("old")
+  expect(await fs.readFile(path.join(app, "runtime", "a.js"), "utf8")).toBe("old runtime")
+  const main = await fs.stat(path.join(app, "opencode.exe"), { bigint: true })
+  expect((await fs.stat(path.join(app, "occ.exe"), { bigint: true })).ino).toBe(main.ino)
+  expect(await Revive.removeLeftovers(app)).toEqual([])
+  expect((await fs.readdir(app)).sort()).toEqual(["occ.exe", "opencode.exe", "runtime"])
 })
 
 test("build outputs must exist and must not provide the same name twice", async () => {

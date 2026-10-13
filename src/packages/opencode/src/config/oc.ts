@@ -2,6 +2,7 @@ import fs from "fs/promises"
 import os from "os"
 import path from "path"
 import { spawn } from "child_process"
+import net from "net"
 import { randomBytes } from "crypto"
 import { Global } from "@opencode-ai/core/global"
 import { DebugConfig } from "@opencode-ai/core/debugConfig"
@@ -303,6 +304,11 @@ async function observeResident(url: string, secret: string, hostname: string, po
   return { state, healthy, matches, alive, action }
 }
 
+// IPv6 hosts need brackets in a URL; `http://::1:4096` does not parse.
+export function residentUrl(hostname: string, port: number) {
+  return `http://${hostname.includes(":") ? `[${hostname}]` : hostname}:${port}`
+}
+
 async function startServerUnlocked(replacement = false) {
   const settings = await read()
   const hostname = settings.server?.hostname || "127.0.0.1"
@@ -311,7 +317,7 @@ async function startServerUnlocked(replacement = false) {
     throw new Error(`Resident OpenCode server must use a loopback hostname: ${hostname}`)
   }
   const secret = await serverSecret()
-  const url = `http://${hostname}:${port}`
+  const url = residentUrl(hostname, port)
   let ready = false
   let unownedAttempts = 0
   for (let attempt = 0; !replacement && attempt < residentReadyAttempts; attempt++) {
@@ -351,6 +357,15 @@ async function startServerUnlocked(replacement = false) {
     if (observed.state && observed.matches && observed.alive)
       throw new Error(`Resident OpenCode server alive but not responding (pid ${observed.state.pid}): ${url}`)
     if (observed.state && !observed.alive) await clearServerState()
+  }
+  // Health is false here, so a bound port belongs to something that is not our server. Name it
+  // instead of spawning a child that cannot bind and timing out on readiness.
+  if (!replacement && (await portInUse(hostname, port))) {
+    const pid = residentListenerPid(hostname, port)
+    throw new Error(
+      `Resident port ${hostname}:${port} is in use by another program${pid ? ` (pid ${pid})` : ""} that is not an ` +
+        `OpenCode server for this launcher. Free the port or set server.port in ${filePath()}.`,
+    )
   }
   const executable = executablePath()
   const command =
@@ -420,6 +435,29 @@ export function uniqueListenerPid(
     ),
   ]
   return pids.length === 1 ? pids[0] : undefined
+}
+
+// Connects instead of binding: a test bind can fail with EACCES on Windows, and a successful one
+// would hold the port the server is about to take. `localhost` may listen on either family.
+async function portInUse(hostname: string, port: number) {
+  const hosts = hostname === "localhost" ? ["127.0.0.1", "::1"] : [hostname]
+  const results = await Promise.all(
+    hosts.map(
+      (host) =>
+        new Promise<boolean>((resolve) => {
+          const socket = net.connect({ host, port })
+          const finish = (inUse: boolean) => {
+            socket.destroy()
+            resolve(inUse)
+          }
+          socket.setTimeout(1000)
+          socket.once("connect", () => finish(true))
+          socket.once("error", () => finish(false))
+          socket.once("timeout", () => finish(false))
+        }),
+    ),
+  )
+  return results.some(Boolean)
 }
 
 function residentListenerPid(hostname: string, port: number) {
@@ -566,8 +604,7 @@ async function requestShutdown(directory: string, state: ResidentState) {
   if (!state.hostname || !state.port) throw new Error("Resident server address unavailable")
   const secret = (await fs.readFile(path.join(directory, "oc-server.secret"), "utf8")).trim()
   if (!secret) throw new Error("Resident server secret unavailable")
-  const host = state.hostname === "::1" ? "[::1]" : state.hostname
-  const response = await fetch(`http://${host}:${state.port}/global/shutdown`, {
+  const response = await fetch(`${residentUrl(state.hostname, state.port)}/global/shutdown`, {
     method: "POST",
     headers: { authorization: `Basic ${Buffer.from(`opencode:${secret}`).toString("base64")}` },
     signal: AbortSignal.timeout(35_000),
@@ -621,7 +658,10 @@ export async function stopServer(
 }
 
 /** Closes this instance's oc terminals, then stops its resident server gracefully. */
-export async function shutdownAll(opts: { directory?: string; listProcesses?: () => TuiLedger.Process[] } = {}) {
+// `keepPanes`: WezTerm panes a revive moves to its new window; the restarter closes them after the launch.
+export async function shutdownAll(
+  opts: { directory?: string; listProcesses?: () => TuiLedger.Process[]; keepPanes?: string[] } = {},
+) {
   const directory = opts.directory ?? serverStateDirectory()
   const processes = listOcProcesses(opts.listProcesses)
   const records = processes === null ? [] : await TuiLedger.read(directory, processes)
@@ -629,7 +669,7 @@ export async function shutdownAll(opts: { directory?: string; listProcesses?: ()
     processes === null ? [] : TuiLedger.select(records, processes, Global.Path.app, executablePath(), process.pid)
   const owned = records.filter((record) => pids.includes(record.pid))
   for (const record of owned) {
-    if (!record.paneID) continue
+    if (!record.paneID || opts.keepPanes?.includes(record.paneID)) continue
     killPane(record.paneID)
   }
   // TUIs have nothing to save; killing them up front avoids the "Unable to connect" screen while servers stop.
@@ -721,7 +761,8 @@ async function revivePipeline(context: Revive.ReviveContext) {
   if (context.source === "none") await log.step("Saving revive without a source build", () => saveReviveBuild(false))
   const settings = await read()
   const bun = /^bun(?:\.exe)?$/i.test(path.basename(process.execPath))
-  const build = context.mode === "install" ? Revive.parseBuild(settings.revive?.build) : undefined
+  // An ocdebug revive reopens ocdebug, so it must also build it, whatever the saved choice says.
+  const build = context.mode === "install" ? Revive.effectiveBuild(settings.revive?.build, Global.Path.debug) : undefined
   if (build && bun) throw new Error("Install revive needs an installed oc executable, not Bun")
   const executable = Revive.resolveLauncher(executablePath(), Global.Path.debug)
   const installDir = path.dirname(executablePath())
@@ -739,29 +780,45 @@ async function revivePipeline(context: Revive.ReviveContext) {
     ...(context.native ? { native: true, directory: context.directory, sessionID: context.sessionID } : {}),
   }
   const steps = build ? Revive.buildSteps(build) : undefined
-  for (const command of steps?.commands ?? []) await log.step(command.join(" "), () => runVisible(command, steps?.cwd))
-  const sources = steps ? await log.step("Checking build output", () => Revive.installSources(steps.output)) : undefined
-  // Ctrl+C from here would leave oc stopped or half installed.
-  const ignore = () => {}
-  process.on("SIGINT", ignore)
-  const tabs =
-    context.paneID && restart.terminal === "wezterm" && !context.native
-      ? await windowTabsSnapshot(context.paneID, context)
-      : undefined
-  const failure = await (async () => {
-    // A native TUI/worker already shut down before handoff; installs rename running files aside.
-    if (!context.native) await log.step("Stopping oc", () => shutdownAll())
-    if (sources) await log.step(`Installing into ${installDir}`, () => Revive.install(sources, installDir))
-    if (!context.native) await log.step("Starting server", () => startServer())
-  })().then(
-    () => undefined,
-    (error: unknown) => ({ error }),
-  )
-  process.off("SIGINT", ignore)
+  // One install at a time per installation: the build output, file swap and server start are shared.
+  const { tabs, failure } = await withInstallLock(build ? installDir : undefined, async () => {
+    for (const command of steps?.commands ?? []) await log.step(command.join(" "), () => runVisible(command, steps?.cwd))
+    const sources = steps ? await log.step("Checking build output", () => Revive.installSources(steps.output)) : undefined
+    // Ctrl+C from here would leave oc stopped or half installed.
+    const ignore = () => {}
+    process.on("SIGINT", ignore)
+    const tabs =
+      context.paneID && restart.terminal === "wezterm" && !context.native
+        ? await windowTabsSnapshot(context.paneID, context)
+        : undefined
+    const keepPanes = tabs?.flatMap((tab) => (tab.kind === "oc" && tab.paneID ? [tab.paneID] : []))
+    const failure = await (async () => {
+      // A native TUI/worker already shut down before handoff; installs rename running files aside.
+      if (!context.native) await log.step("Stopping oc", () => shutdownAll({ keepPanes }))
+      const rollback = sources
+        ? await log.step(`Installing into ${installDir}`, () => Revive.install(sources, installDir))
+        : undefined
+      if (context.native) return
+      // The install stays undoable until the new server is ready; a failed start restores the old files.
+      await log.step("Starting server", () => startServer()).catch(async (error: unknown) => {
+        if (!rollback) throw error
+        // Restore even if the stop fails: rollback renames, which works on running files.
+        await log.step("Stopping the new server", () => shutdownAll({ keepPanes })).catch(() => undefined)
+        await log.step("Restoring the previous install", () => rollback(error))
+        throw error
+      })
+    })().then(
+      () => undefined,
+      (error: unknown) => ({ error }),
+    )
+    process.off("SIGINT", ignore)
+    if (failure && !context.supervisorPid && !context.native)
+      await log.step("Starting server again", () => startServer())
+    return { tabs, failure }
+  })
   // A hosting launcher shows the error and reattaches. A hidden helper has no window left, so it
   // still reopens the terminal on the old version before reporting.
   if (failure && (context.supervisorPid || context.native)) throw failure.error
-  if (failure && !context.native) await log.step("Starting server again", () => startServer())
   await log.step(`Handing off to the terminal restarter (log: ${log.file})`, () =>
     awaitLaunch(
       launchDetached(process.execPath, [
@@ -841,25 +898,76 @@ export async function restartTerminal(
   const log = reviveLog()
   if (restart.waitPid && !(await waitForExit(restart.waitPid, 10_000)))
     await log.write(`Launcher ${restart.waitPid} still running after 10s; opening replacement anyway`)
-  // A failed close still opens the new terminal; a second window beats none.
-  if (!restart.native) await log.step("Closing the old window", () => closeWindow(restart)).catch(() => undefined)
+  // WezTerm: open the new window first, then close only this instance's panes in the old one, so other
+  // panes keep running and a failed launch leaves the old tabs in place. Other terminals close the
+  // verified launching shell first. A failed close still opens the new terminal; a second window beats none.
+  const wezterm = restart.terminal === "wezterm" && !!restart.paneID
+  if (!restart.native && !wezterm)
+    await log.step("Closing the old window", () => closeWindow(restart)).catch(() => undefined)
+  // Pane ids are per mux and a fresh WezTerm process reuses low ids, so the old panes are recorded with
+  // their window before the launch and closed only if the same pane is still in that same window.
+  // No socket or a failed list: leave the old panes open rather than guess.
+  const old =
+    !restart.native && wezterm
+      ? await log.step("Recording the old panes", () => oldPanes(restart)).catch(() => undefined)
+      : undefined
   const command = Revive.reopenCommand(restart)
   await log.step(`Opening ${restart.terminal} with ${restart.launcher}`, () => launch(command))
+  if (old)
+    await log.step("Closing this instance's old panes", () => closeOwnedPanes(old)).catch(() => undefined)
   if (!restart.installDir) return
-  const kept = await Revive.removeLeftovers(restart.installDir)
+  // A newer revive may hold its own `.old-*` files for rollback; leave them to its restarter.
+  const installDir = restart.installDir
+  const kept = await withInstallLock(installDir, () => Revive.removeLeftovers(installDir)).catch(
+    async (error: unknown) => {
+      await log.write(`Skipped leftover cleanup: ${error instanceof Error ? error.message : String(error)}`)
+      return []
+    },
+  )
   if (kept.length) await log.write(`Kept in-use leftovers: ${kept.join(", ")}`)
 }
 
+// Held from build through server readiness; a second revive fails fast instead of waiting minutes.
+function withInstallLock<T>(installDir: string | undefined, action: () => Promise<T>) {
+  if (!installDir) return action()
+  return withResidentLock(action, {
+    lock: path.join(installDir, ".revive.lock"),
+    attempts: 20,
+    busy: "Another revive is already installing oc; try again when it finishes",
+  })
+}
+
+// The restarter inherits the old pane's mux socket; pinning it keeps list/kill off the new window's mux.
+function oldPanes(restart: Revive.RestartContext) {
+  const socket = process.env.WEZTERM_UNIX_SOCKET
+  if (!socket) return undefined
+  const list = weztermList(socket)
+  return { socket, panes: Revive.ownedPanes(list, restart).map((id) => ({ id, window: windowOf(list, id) })) }
+}
+
+function closeOwnedPanes(old: NonNullable<ReturnType<typeof oldPanes>>) {
+  const list = weztermList(old.socket)
+  for (const pane of old.panes.filter((pane) => windowOf(list, pane.id) === pane.window))
+    killPane(pane.id, old.socket)
+}
+
+function weztermList(socket: string) {
+  const list = Bun.spawnSync(["wezterm", "cli", "--no-auto-start", "list", "--format", "json"], {
+    stdout: "pipe",
+    stderr: "pipe",
+    env: { ...process.env, WEZTERM_UNIX_SOCKET: socket },
+  })
+  if (list.exitCode !== 0) throw new Error(`wezterm cli list failed: ${list.stderr.toString().trim()}`)
+  return list.stdout.toString()
+}
+
+function windowOf(listJson: string, paneID: string) {
+  return (JSON.parse(listJson) as Array<{ window_id: number; pane_id: number }>).find(
+    (pane) => String(pane.pane_id) === paneID,
+  )?.window_id
+}
+
 async function closeWindow(restart: Revive.RestartContext) {
-  if (restart.terminal === "wezterm" && restart.paneID) {
-    const list = Bun.spawnSync(["wezterm", "cli", "list", "--format", "json"], { stdout: "pipe", stderr: "pipe" })
-    if (list.exitCode !== 0) throw new Error(`wezterm cli list failed: ${list.stderr.toString().trim()}`)
-    const panes = JSON.parse(list.stdout.toString()) as Array<{ window_id: number; pane_id: number }>
-    const window = panes.find((pane) => String(pane.pane_id) === restart.paneID)?.window_id
-    for (const pane of panes.filter((pane) => window !== undefined && pane.window_id === window))
-      killPane(String(pane.pane_id))
-    return
-  }
   // The console or Windows Terminal tab closes once its shell and launcher are gone.
   if (restart.shellPid) {
     if (
@@ -872,8 +980,12 @@ async function closeWindow(restart: Revive.RestartContext) {
   }
 }
 
-function killPane(paneID: string) {
-  const result = Bun.spawnSync(["wezterm", "cli", "kill-pane", "--pane-id", paneID], { stdout: "pipe", stderr: "pipe" })
+function killPane(paneID: string, socket?: string) {
+  const result = Bun.spawnSync(["wezterm", "cli", "--no-auto-start", "kill-pane", "--pane-id", paneID], {
+    stdout: "pipe",
+    stderr: "pipe",
+    ...(socket ? { env: { ...process.env, WEZTERM_UNIX_SOCKET: socket } } : {}),
+  })
   if (result.exitCode !== 0)
     throw new Error(`wezterm cli kill-pane ${paneID} failed: ${result.stderr.toString().trim() || result.exitCode}`)
 }
@@ -934,8 +1046,11 @@ export function startupLockExpired(
   return !TuiLedger.sameIdentity(owner, live)
 }
 
-async function withResidentLock<T>(action: () => Promise<T>) {
-  const lock = `${serverStatePath()}.lock`
+export async function withResidentLock<T>(
+  action: () => Promise<T>,
+  options: { lock?: string; attempts?: number; busy?: string } = {},
+) {
+  const lock = options.lock ?? `${serverStatePath()}.lock`
   await fs.mkdir(path.dirname(lock), { recursive: true })
   const identity =
     process.platform === "win32"
@@ -943,7 +1058,7 @@ async function withResidentLock<T>(action: () => Promise<T>) {
       : undefined
   if (process.platform === "win32" && !identity?.created) throw new Error("Startup lock owner identity unavailable")
   let handle: fs.FileHandle | undefined
-  for (let attempt = 0; attempt < 300; attempt++) {
+  for (let attempt = 0; attempt < (options.attempts ?? 300); attempt++) {
     try {
       handle = await fs.open(lock, "wx")
       await handle.writeFile(JSON.stringify(identity ?? { pid: process.pid }))
@@ -960,9 +1075,12 @@ async function withResidentLock<T>(action: () => Promise<T>) {
         const stat = await fs.stat(lock)
         const ageMs = Date.now() - stat.mtimeMs
         const contents = await fs.readFile(lock, "utf8")
-        const owner = JSON.parse(contents) as TuiLedger.Process
-        const expired =
-          process.platform === "win32"
+        // A crash between create and write leaves an empty or partial lock. With no readable
+        // owner, the ownerless age policy decides instead of the lock blocking every launch.
+        const owner = parseLockOwner(contents)
+        const expired = !owner
+          ? startupLockExpired(undefined, [], ageMs)
+          : process.platform === "win32"
             ? startupLockExpired(owner, await TuiLedger.listProcessesAsync(), ageMs)
             : !isPidAlive(owner.pid)
         if (expired && (await fs.readFile(lock, "utf8")) === contents) await fs.rm(lock, { force: true })
@@ -970,13 +1088,22 @@ async function withResidentLock<T>(action: () => Promise<T>) {
       await Bun.sleep(100)
     }
   }
-  if (!handle) throw new Error("Timed out waiting for resident OpenCode server startup")
+  if (!handle) throw new Error(options.busy ?? "Timed out waiting for resident OpenCode server startup")
   try {
     return await action()
   } finally {
     await handle.close()
     await fs.rm(lock, { force: true })
   }
+}
+
+function parseLockOwner(contents: string) {
+  try {
+    const owner: unknown = JSON.parse(contents)
+    if (owner && typeof owner === "object" && Number.isInteger((owner as { pid?: unknown }).pid))
+      return owner as TuiLedger.Process
+  } catch {}
+  return undefined
 }
 
 // Shared by `session bootstrap` and the launcher's server-side bootstrap.

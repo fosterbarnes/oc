@@ -47,7 +47,7 @@ describe("OC launcher settings CLI", () => {
   cliIt.live("writes and reads every command-palette setting", ({ opencode }) =>
     Effect.gen(function* () {
       const settings = [
-        ["ocDir", "C:/Users/user"],
+        ["ocDir", "C:/Users/example"],
         ["homeDir", "C:/workspace"],
         ["homeDirSort", "modified"],
         ["sessionModel", "openai/gpt-5.6-luna"],
@@ -62,7 +62,7 @@ describe("OC launcher settings CLI", () => {
       const result = yield* opencode.spawn(["oc", "config", "get"])
       opencode.expectExit(result, 0, "oc config get")
       expect(JSON.parse(result.stdout)).toMatchObject({
-        ocDir: "C:/Users/user",
+        ocDir: "C:/Users/example",
         homeDir: "C:/workspace",
         homeDirSort: "modified",
         sessionModel: "openai/gpt-5.6-luna",

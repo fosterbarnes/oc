@@ -1036,11 +1036,11 @@ test("returns a neutral state for failed OpenRouter usage requests", async () =>
 
 test("formats displayed paths relative to the home directory", () => {
   assert.equal(
-    displayPath("C:\\Users\\user\\Documents\\GitHub\\openSidebar", "C:\\Users\\user"),
+    displayPath("C:\\Users\\example\\Documents\\GitHub\\openSidebar", "C:\\Users\\example"),
     "/~Documents/GitHub/openSidebar",
   )
-  assert.equal(displayPath("C:\\Users\\user", "C:\\Users\\user"), "/~")
-  assert.equal(displayPath("C:\\Work\\openSidebar", "C:\\Users\\user"), "C:/Work/openSidebar")
+  assert.equal(displayPath("C:\\Users\\example", "C:\\Users\\example"), "/~")
+  assert.equal(displayPath("C:\\Work\\openSidebar", "C:\\Users\\example"), "C:/Work/openSidebar")
 })
 
 test("loads user sidebar visibility with nested, legacy and partial project overrides", () => {

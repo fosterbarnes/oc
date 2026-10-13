@@ -345,6 +345,28 @@ describe("OC config", () => {
     expect((error as Error).cause).toBeInstanceOf(SyntaxError)
   })
 
+  test("a port held by an unrelated program fails with a clear error instead of spawning", async () => {
+    const directory = await fs.mkdtemp(path.join(os.tmpdir(), "opencode-oc-"))
+    temporaryDirectories.push(directory)
+    const originalState = Global.Path.state
+    ;(Global.Path as { config: string }).config = directory
+    ;(Global.Path as { state: string }).state = directory
+    // Answers every request with 404, so our authenticated health check is false.
+    const foreign = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => new Response("nope", { status: 404 }) })
+    try {
+      for (const hostname of ["127.0.0.1", "localhost"]) {
+        await Bun.write(path.join(directory, "oc.json"), JSON.stringify({ server: { hostname, port: foreign.port } }))
+        const error = await OcConfig.startServer().catch((cause: unknown) => cause)
+        expect((error as Error).message).toContain(`Resident port ${hostname}:${foreign.port} is in use by another program`)
+      }
+      expect(await fs.stat(OcConfig.serverStatePath(directory)).catch(() => undefined)).toBeUndefined()
+      expect((await fetch(`http://127.0.0.1:${foreign.port}/`)).status).toBe(404)
+    } finally {
+      foreign.stop(true)
+      ;(Global.Path as { state: string }).state = originalState
+    }
+  }, 60_000)
+
   test("rejects nonboolean startup settings before registration or persistence", async () => {
     await expect(OcConfig.update("serverStartOnWindowsUserStart", "yes")).rejects.toThrow("must be true or false")
   })
@@ -383,10 +405,10 @@ describe("OC config", () => {
     }
     await OcConfig.update("serverStartOnWindowsUserStart", "true", startup)
     expect(registration).toContain("-WindowStyle Hidden")
-    await OcConfig.update("ocDir", "C:/Users/user")
+    await OcConfig.update("ocDir", "C:/Users/example")
 
     expect(await OcConfig.read()).toEqual({
-      ocDir: "C:/Users/user",
+      ocDir: "C:/Users/example",
       homeDirSort: "modified",
       server: { hostname: "127.0.0.1", port: 4096, startOnWindowsUserStart: true },
     })

@@ -29,7 +29,7 @@ $workspace = "$root/src"
 # Keep this list aligned with the package suites you want to run locally.
 $unit = @(
     'cli', 'client', 'codemode', 'core', 'effect-drizzle-sqlite', 'http-recorder', 'httpapi-codegen',
-    'llm', 'opencode', 'protocol', 'schema', 'sdk/js', 'session-ui', 'tui', 'ui'
+    'llm', 'opencode', 'protocol', 'schema', 'sdk/js', 'tui'
 )
 $providers = @{
     'cursor-runtime' = 'test/main.test.mjs'

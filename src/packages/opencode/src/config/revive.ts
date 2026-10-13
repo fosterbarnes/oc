@@ -2,9 +2,7 @@ export * as Revive from "./revive"
 
 import fs from "node:fs"
 import fsp from "node:fs/promises"
-import os from "node:os"
 import path from "node:path"
-import { fileURLToPath } from "node:url"
 import { Global } from "@opencode-ai/core/global"
 import type { TerminalInfo } from "@opencode-ai/core/util/terminal"
 import { TuiLedger } from "./tuiLedger"
@@ -42,7 +40,9 @@ export type ReviveContext = {
 }
 
 /** One tab of the revived WezTerm window: an oc session, or a plain shell in its working directory. */
-export type Tab = { kind: "oc"; directory: string; sessionID?: string } | { kind: "shell"; cwd: string }
+// `paneID` is the old-window pane the tab moves out of. Shell tabs are no longer produced; they stay
+// decodable for contexts written by an older build.
+export type Tab = { kind: "oc"; directory: string; sessionID?: string; paneID?: string } | { kind: "shell"; cwd: string }
 
 /** Handed from the revive pipeline to the detached terminal restarter (worker 2). */
 export type RestartContext = {
@@ -145,35 +145,42 @@ export function decodeTabs(encoded: string) {
 }
 
 /**
- * Maps the panes of the window that holds `paneID` to restorable tabs. Rows keep `wezterm cli list` order,
- * which is tab order; a split tab contributes only its first pane. A pane with a ledger record is an oc tab.
+ * The oc panes this instance owns in the window that holds `paneID`, in `wezterm cli list` (tab) order.
+ * Revive moves only these to the new window and closes only these; shells, ocdebug, native, and other
+ * instances' panes are not in `records`, so they stay running in the old window.
  */
 export function windowTabs(
   listJson: string,
   records: Pick<TuiLedger.Record, "paneID" | "directory" | "sessionID">[],
   paneID: string,
 ): Tab[] {
-  const panes = JSON.parse(listJson) as Array<{ window_id: number; tab_id: number; pane_id: number; cwd: string }>
+  const panes = JSON.parse(listJson) as Array<{ window_id: number; pane_id: number }>
   const window = panes.find((pane) => String(pane.pane_id) === paneID)?.window_id
   if (window === undefined) return []
-  const tabs = panes
+  return panes
     .filter((pane) => pane.window_id === window)
-    .filter((pane, index, all) => all.findIndex((other) => other.tab_id === pane.tab_id) === index)
-  return tabs.map((pane): Tab => {
-    const record = records.find((item) => item.paneID === String(pane.pane_id) && item.directory !== undefined)
-    return record?.directory
-      ? { kind: "oc", directory: record.directory, ...(record.sessionID ? { sessionID: record.sessionID } : {}) }
-      : { kind: "shell", cwd: cwdPath(pane.cwd) }
-  })
+    .flatMap((pane): Tab[] => {
+      const record = records.find((item) => item.paneID === String(pane.pane_id) && item.directory !== undefined)
+      if (!record?.directory) return []
+      return [
+        {
+          kind: "oc",
+          directory: record.directory,
+          ...(record.sessionID ? { sessionID: record.sessionID } : {}),
+          paneID: String(pane.pane_id),
+        },
+      ]
+    })
 }
 
-// WezTerm reports the working directory as a file:// URL; a missing or unreadable one falls back to home.
-function cwdPath(url: string) {
-  try {
-    return fileURLToPath(url)
-  } catch {
-    return os.homedir()
-  }
+/** Old-window panes the restarter may close: owned tabs plus the trigger, only while they still exist. */
+export function ownedPanes(listJson: string, restart: Pick<RestartContext, "paneID" | "tabs">) {
+  const live = new Set((JSON.parse(listJson) as Array<{ pane_id: number }>).map((pane) => String(pane.pane_id)))
+  const owned = [
+    restart.paneID,
+    ...(restart.tabs ?? []).map((tab) => (tab.kind === "oc" ? tab.paneID : undefined)),
+  ]
+  return [...new Set(owned.filter((id): id is string => id !== undefined && live.has(id)))]
 }
 
 export function parseLauncher(input: unknown): Launcher {
@@ -195,6 +202,12 @@ export function parseBuild(input: unknown): BuildConfig | undefined {
   if (!optional(value.debug, (item) => typeof item === "boolean"))
     throw new Error("revive.build.debug must be true or false")
   return { source: value.source as string, debug: value.debug === true }
+}
+
+/** The saved build, plus the debug output whenever the running flavor is ocdebug (it reopens ocdebug). */
+export function effectiveBuild(input: unknown, debugFlavor: boolean): BuildConfig | undefined {
+  const build = parseBuild(input)
+  return build && { ...build, debug: build.debug || debugFlavor }
 }
 
 /** Commands run in the source's workspace and the outputs they produce, from packages/opencode/script/build.ts --single. */
@@ -255,8 +268,11 @@ export function nativeExecutable(executable: string) {
 
 /** Opens a fresh terminal running the configured launcher, so the next revive is hosted in place again. */
 export function reopenCommand(restart: RestartContext) {
-  // Several WezTerm tabs restart from tab 0, which spawns the rest into this window (`oc revive-tabs`).
-  const tabs = restart.terminal === "wezterm" && restart.tabs && restart.tabs.length > 1 ? restart.tabs : undefined
+  // A WezTerm snapshot restarts from tab 0, which spawns the rest into this window (`oc revive-tabs`).
+  // One snapshotted tab goes through it only for `occ`, which reopens that pane's own session rather than
+  // whatever `previous` finds; `oc` keeps opening Home.
+  const count = restart.terminal === "wezterm" ? (restart.tabs?.length ?? 0) : 0
+  const tabs = count > 1 || (count === 1 && restart.launcher === "occ") ? restart.tabs : undefined
   const entrypoint = restart.entrypoint ? [restart.entrypoint] : []
   const command = restart.native
     ? [
@@ -328,6 +344,7 @@ export async function installSources(output: readonly string[]) {
  * Installs sources into `directory`. Current files are renamed aside (Windows allows renaming a running
  * executable, not overwriting it). Hard-link aliases of replaced files (occ.exe -> oc.exe)
  * are relinked to the new file. Any failure removes what was placed and restores the old names.
+ * Returns that same rollback so the caller can undo a finished install until the new server is ready.
  */
 export async function install(sources: readonly InstallSource[], directory: string, stamp = Date.now()) {
   const aliases = await aliasNames(
@@ -348,6 +365,19 @@ export async function install(sources: readonly InstallSource[], directory: stri
     await retry(() => fsp.rename(target, to))
     moved.push({ from: target, to })
   }
+  // Restores every name even when one step fails, then reports what could not be restored. New files
+  // go aside under a later stamp instead of being deleted: a started new server may be running them.
+  const rollback = async (error: unknown) => {
+    const failed: string[] = []
+    for (const [index, target] of placed.toReversed().entries()) {
+      if (!(await fsp.lstat(target).then(() => true, () => false))) continue
+      await retry(() => fsp.rename(target, `${target}.old-${stamp + 1 + index}`)).catch(() => failed.push(target))
+    }
+    for (const item of moved.toReversed())
+      await retry(() => fsp.rename(item.to, item.from)).catch(() => failed.push(item.to))
+    if (failed.length)
+      throw new Error(`Install failed and rollback is incomplete; fix by hand: ${failed.join(", ")}`, { cause: error })
+  }
   try {
     for (const source of sources) {
       const target = path.join(directory, source.name)
@@ -362,16 +392,10 @@ export async function install(sources: readonly InstallSource[], directory: stri
       await fsp.link(path.join(directory, alias.target), target)
     }
   } catch (error) {
-    // Restore every name even when one step fails, then report what could not be restored.
-    const failed: string[] = []
-    for (const target of placed.toReversed())
-      await retry(() => fsp.rm(target, { recursive: true, force: true })).catch(() => failed.push(target))
-    for (const item of moved.toReversed())
-      await retry(() => fsp.rename(item.to, item.from)).catch(() => failed.push(item.to))
-    if (failed.length)
-      throw new Error(`Install failed and rollback is incomplete; fix by hand: ${failed.join(", ")}`, { cause: error })
+    await rollback(error)
     throw error
   }
+  return rollback
 }
 
 /** Best-effort removal of `.old-*` files left by installs; returns names still in use. */
@@ -454,7 +478,7 @@ function tabList(value: unknown): value is Tab[] {
 function tab(value: unknown) {
   if (typeof value !== "object" || value === null) return false
   const item = value as Record<string, unknown>
-  if (item.kind === "oc") return text(item.directory) && optional(item.sessionID, text)
+  if (item.kind === "oc") return text(item.directory) && optional(item.sessionID, text) && optional(item.paneID, text)
   return item.kind === "shell" && text(item.cwd)
 }
 

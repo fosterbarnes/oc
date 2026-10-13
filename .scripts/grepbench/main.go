@@ -29,6 +29,10 @@ func main() {
 	}
 
 	rg, _ := exec.LookPath("rg")
+	ugrep := findTool("ugrep", "GREPBENCH_UGREP")
+	ug := findTool("ug", "GREPBENCH_UG")
+	tgrep := findTool("tgrep", "GREPBENCH_TGREP")
+	indexer := findTool("ugrep-indexer", "GREPBENCH_UGREP_INDEXER")
 	engines := []Engine{}
 	if rg != "" {
 		engines = append(engines, Engine{Name: "rg-oc", Kind: "rg", Bin: rg})
@@ -41,15 +45,15 @@ func main() {
 			engines = append(engines, Engine{Name: name, Kind: kind, Bin: bin, Indexed: indexed, Serve: serve, NoConfig: noconfig})
 		}
 	}
-	addIf("ugrep", "ugrep", `C:\Users\user\Apps\ugrep.exe`, false, false, true)
-	addIf("ug-noconfig", "ug", `C:\Users\user\Apps\ug.exe`, false, false, true)
-	addIf("ug-config", "ug", `C:\Users\user\Apps\ug.exe`, false, false, false)
-	addIf("ugrep-index", "ugrep", `C:\Users\user\Apps\ugrep.exe`, true, false, true)
-	addIf("tgrep-noindex", "tgrep", `C:\Users\user\Apps\tgrep.exe`, false, false, true)
+	addIf("ugrep", "ugrep", ugrep, false, false, true)
+	addIf("ug-noconfig", "ug", ug, false, false, true)
+	addIf("ug-config", "ug", ug, false, false, false)
+	addIf("ugrep-index", "ugrep", ugrep, true, false, true)
+	addIf("tgrep-noindex", "tgrep", tgrep, false, false, true)
 	// Indexed tgrep/serve are opt-in: full-tree index hung the first session.
 	if os.Getenv("GREPBENCH_INDEX") == "1" {
-		addIf("tgrep-index", "tgrep", `C:\Users\user\Apps\tgrep.exe`, true, false, true)
-		addIf("tgrep-serve", "tgrep", `C:\Users\user\Apps\tgrep.exe`, true, true, true)
+		addIf("tgrep-index", "tgrep", tgrep, true, false, true)
+		addIf("tgrep-serve", "tgrep", tgrep, true, true, true)
 	}
 
 	rep := Report{Notes: []string{
@@ -89,7 +93,6 @@ func main() {
 		os.Exit(1)
 	}
 
-	indexer := `C:\Users\user\Apps\ugrep-indexer.exe`
 	ugIndexBuilt := false
 	if _, err := os.Stat(indexer); err == nil {
 		t0 := time.Now()
@@ -134,7 +137,7 @@ func main() {
 		t0 := time.Now()
 		fmt.Fprintln(os.Stderr, "tgrep index corpus A...")
 		ctxA, cancelA := context.WithTimeout(context.Background(), 60*time.Second)
-		cmd := exec.CommandContext(ctxA, `C:\Users\user\Apps\tgrep.exe`, "index", synth, "--index-path", tgrepIdx, "--hidden", "--no-max-filesize")
+		cmd := exec.CommandContext(ctxA, tgrep, "index", synth, "--index-path", tgrepIdx, "--hidden", "--no-max-filesize")
 		out, err := cmd.CombinedOutput()
 		cancelA()
 		row := IndexRow{Engine: "tgrep-index", Corpus: "A", BuildMS: float64(time.Since(t0).Microseconds()) / 1000, SizeB: dirSize(tgrepIdx)}
@@ -147,7 +150,7 @@ func main() {
 		t0 = time.Now()
 		fmt.Fprintln(os.Stderr, "tgrep index corpus B...")
 		ctxB, cancelB := context.WithTimeout(context.Background(), 120*time.Second)
-		cmd = exec.CommandContext(ctxB, `C:\Users\user\Apps\tgrep.exe`, "index", corpusB, "--index-path", tgrepRepoIdx, "--hidden", "--no-max-filesize")
+		cmd = exec.CommandContext(ctxB, tgrep, "index", corpusB, "--index-path", tgrepRepoIdx, "--hidden", "--no-max-filesize")
 		out, err = cmd.CombinedOutput()
 		cancelB()
 		row = IndexRow{Engine: "tgrep-index", Corpus: "B", BuildMS: float64(time.Since(t0).Microseconds()) / 1000, SizeB: dirSize(tgrepRepoIdx)}
@@ -311,6 +314,18 @@ func main() {
 			}
 		}
 	}
+}
+
+// findTool returns the binary named by envVar, else the first match on PATH, else name
+// (which then fails the os.Stat check in addIf and skips that engine).
+func findTool(name, envVar string) string {
+	if p := os.Getenv(envVar); p != "" {
+		return p
+	}
+	if p, err := exec.LookPath(name); err == nil {
+		return p
+	}
+	return name
 }
 
 func markdown(rep Report) string {

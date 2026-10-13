@@ -110,6 +110,8 @@ Things that work differently from stock OpenCode:
 - **oc sessions are named `<folder> - <task>`** after your first prompt, using `/rename`'s model.
 - **Sending a prompt marks the session in progress.** Agents can't mark it complete or failed
   unless you allow it ([how](https://github.com/fosterbarnes/oc/wiki/Sessions#session-list-and-marks)).
+- **No desktop app, web app, or opencode.ai services.** [SCOPE.md](SCOPE.md) lists everything oc
+  leaves out or plans for later.
 
 ## Docs
 
@@ -123,26 +125,25 @@ How everything works is in the [wiki](https://github.com/fosterbarnes/oc/wiki):
 - [Configuration](https://github.com/fosterbarnes/oc/wiki/Configuration): every setting oc adds
 - [Troubleshooting](https://github.com/fosterbarnes/oc/wiki/Troubleshooting) and [FAQ](https://github.com/fosterbarnes/oc/wiki/FAQ)
 - [Companion Tools](https://github.com/fosterbarnes/oc/wiki/Companion-Tools)
-- [Developing](https://github.com/fosterbarnes/oc/wiki/Developing): building from source. Repo docs: [FORK.md](FORK.md), [SCRIPTS.md](SCRIPTS.md), [UPSTREAM-SYNC.md](UPSTREAM-SYNC.md)
+- [Developing](https://github.com/fosterbarnes/oc/wiki/Developing): building from source. Repo docs: [FORK.md](FORK.md), [SCOPE.md](SCOPE.md), [SCRIPTS.md](SCRIPTS.md), [UPSTREAM-SYNC.md](UPSTREAM-SYNC.md)
 
 ## Progress
 
-[440,112](scc.txt) lines of code and counting...
+[373,305](scc.txt) lines of code and counting...
 
 <!-- code-count:start -->
 
 | Language | Files | Lines | Blanks | Comments | Code |
 |---|---:|---:|---:|---:|---:|
-| CSS | 102 | 17,176 | 1,949 | 490 | 14,737 |
-| Go | 5 | 902 | 54 | 3 | 845 |
+| Go | 5 | 917 | 55 | 5 | 857 |
 | HTML | 1 | 1,161 | 79 | 0 | 1,082 |
 | JavaScript | 8 | 1,420 | 127 | 50 | 1,243 |
 | Nix | 3 | 258 | 23 | 26 | 209 |
 | Powershell | 23 | 1,293 | 88 | 80 | 1,125 |
 | SQL | 2 | 5 | 0 | 0 | 5 |
 | Shell | 1 | 120 | 17 | 17 | 86 |
-| TypeScript | 2,382 | 475,182 | 39,279 | 15,123 | 420,780 |
-| **Total** | **2,527** | **497,517** | **41,616** | **15,789** | **440,112** |
+| TypeScript | 2,038 | 419,368 | 35,926 | 14,744 | 368,698 |
+| **Total** | **2,081** | **424,542** | **36,315** | **14,922** | **373,305** |
 
 <!-- code-count:end -->
 

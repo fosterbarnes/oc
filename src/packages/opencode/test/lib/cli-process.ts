@@ -132,6 +132,8 @@ export type ServeHandle = {
   readonly url: string
   readonly hostname: string
   readonly port: number
+  // The serve process itself (`bun run` executes the entry in-process).
+  readonly pid: number
   // Sends SIGTERM. The scope finalizer also calls this, so tests rarely need
   // to invoke it directly — useful for tests that assert exit behavior.
   readonly kill: () => void
@@ -387,6 +389,7 @@ export function withCliFixture<A, E>(
         url: match.url,
         hostname: match.hostname,
         port: match.port,
+        pid: proc.pid,
         kill: () => {
           proc.kill()
         },

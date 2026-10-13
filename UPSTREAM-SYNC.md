@@ -6,8 +6,8 @@ upstream fixes are cherry-picked into the customized parent by hand.
 
 ## Checkouts
 
-- Parent custom fork: `C:\Users\user\Documents\GitHub\oc`
-- Isolated upstream source: `C:\Users\user\Documents\GitHub\oc\UPSTREAM\opencode`
+- Parent custom fork: this repository
+- Isolated upstream source: `UPSTREAM\opencode` inside this repository (gitignored)
 - Upstream remote: `https://github.com/anomalyco/opencode`
 - Upstream branch: `v1`
 - Parent remote: `https://github.com/fosterbarnes/oc`
@@ -55,7 +55,7 @@ Protect these areas when porting upstream changes:
 
 - `.install.ps1` and `.scripts\*` local automation
 - `.version\version` and `.version\versionTag` maintenance versioning
-- `AGENTS.md`, `SCRIPTS.md`, `buildNotes.md`, `README.md`, `FORK.md`, `README.OG.md`, and this guide
+- `AGENTS.md`, `SCRIPTS.md`, `buildNotes.md`, `README.md`, `FORK.md`, `SCOPE.md`, and this guide
 - TUI maintenance display-version behavior in the core, build, plugin, and TUI
   adapter/sidebar paths
 
@@ -68,10 +68,13 @@ Skip those paths in the diff; the share client in `packages/opencode` stays.
 
 These are examples, not an exhaustive allowlist. Compare the validated
 baseline, current parent, and refreshed upstream before deciding whether any
-overlap is upstream drift or intentional fork behavior. After porting, walk the
-Tracking table in `README.OG.md`. Update **Upstream** and the
-compared-against SHA when native behavior moved. Do not replace that table
-with upstream's README.
+overlap is upstream drift or intentional fork behavior.
+
+Classify every new upstream feature in the diff (v1 and, for ideas, `origin/dev`
+OpenCode 2) as port, later, or not planned. Record later and not planned items in
+`SCOPE.md` with a one-line reason, so the same feature is not evaluated twice.
+OpenCode 2 code uses a different layout and session engine; borrowing from it
+means rewriting onto oc's v1 session loop, never reintroducing the V2 engine.
 
 ## Verification
 

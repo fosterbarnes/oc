@@ -9,6 +9,7 @@ import { describe, expect, test } from "bun:test"
 import { Effect } from "effect"
 import { HttpClient } from "effect/unstable/http"
 import fs from "node:fs/promises"
+import path from "node:path"
 import { cliIt } from "../../lib/cli-process"
 import { serveArguments, clearResidentStateForRestart, shouldClearResidentState, writeResidentState, markResidentRestart } from "../../../src/cli/cmd/serve"
 import { tmpdir } from "../../fixture/fixture"
@@ -61,6 +62,28 @@ describe("opencode serve (subprocess)", () => {
       }),
     60_000,
   )
+
+  // A standalone serve shares the resident's state directory; its shutdown must leave the
+  // resident record alone.
+  cliIt.live(
+    "nonresident serve shutdown keeps the resident record",
+    ({ opencode, home }) =>
+      Effect.gen(function* () {
+        const record = path.join(home, ".local/state/opencode/oc-server.json")
+        const server = yield* opencode.serve({
+          env: { OPENCODE_INSTANCE: "opencode", OPENCODE_DB: path.join(home, "oc.db"), OC_RESIDENT: "" },
+        })
+        // The record names this very process, so only the resident gate can keep it.
+        const resident = { pid: server.pid, hostname: "127.0.0.1", port: 4096, created: "133000000000000000" }
+        yield* Effect.promise(() => Bun.write(record, JSON.stringify(resident)))
+        const client = yield* HttpClient.HttpClient
+        const res = yield* client.post(`${server.url}/global/shutdown`)
+        expect(res.status).toBe(200)
+        expect(yield* Effect.promise(() => server.exited)).toBe(0)
+        expect(JSON.parse(yield* Effect.promise(() => fs.readFile(record, "utf8")))).toMatchObject(resident)
+      }),
+    60_000,
+  )
 })
 
 describe("opencode serve restart helpers (unit)", () => {
@@ -82,10 +105,13 @@ describe("opencode serve restart helpers (unit)", () => {
     await using tmp = await tmpdir()
     const file = `${tmp.path}/oc-server.json`
     await fs.writeFile(file, JSON.stringify({ pid: 999999, hostname: "127.0.0.1", port: 4096 }, null, 2), "utf8")
-    await clearResidentStateForRestart(tmp.path)
+    // Another process (an old server, a standalone serve) never clears this record.
+    await clearResidentStateForRestart(tmp.path, 999998)
+    expect(JSON.parse(await fs.readFile(file, "utf8")).pid).toBe(999999)
+    await clearResidentStateForRestart(tmp.path, 999999)
     await expect(fs.stat(file)).rejects.toBeDefined()
     // Second clear is safe (bounded, no throw)
-    await clearResidentStateForRestart(tmp.path)
+    await clearResidentStateForRestart(tmp.path, 999999)
     await expect(fs.stat(file)).rejects.toBeDefined()
   })
 
@@ -94,10 +120,14 @@ describe("opencode serve restart helpers (unit)", () => {
     expect(shouldClearResidentState(false)).toBe(true)
   })
 
-  test("markResidentRestart stamps a fresh restart without dropping the pid", async () => {
+  test("markResidentRestart stamps only the owner's record", async () => {
     await using tmp = await tmpdir()
     await writeResidentState({ pid: 42, hostname: "127.0.0.1", port: 4096, directory: tmp.path })
-    await markResidentRestart({ hostname: "127.0.0.1", port: 4096, directory: tmp.path })
+    await markResidentRestart({ hostname: "127.0.0.1", port: 5000, directory: tmp.path, pid: 43 })
+    const foreign = JSON.parse(await fs.readFile(`${tmp.path}/oc-server.json`, "utf8"))
+    expect(foreign).toMatchObject({ pid: 42, port: 4096 })
+    expect(foreign.restarting).toBeUndefined()
+    await markResidentRestart({ hostname: "127.0.0.1", port: 4096, directory: tmp.path, pid: 42 })
     const written = JSON.parse(await fs.readFile(`${tmp.path}/oc-server.json`, "utf8"))
     expect(written.pid).toBe(42)
     expect(Date.now() - Date.parse(written.restarting)).toBeLessThan(5_000)
