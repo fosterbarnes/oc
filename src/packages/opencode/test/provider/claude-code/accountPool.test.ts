@@ -28,6 +28,7 @@ import {
 import { _resetRateLimitReports } from "@/provider/claude-code/cliEvents.js"
 import { createClaudeCode } from "@/provider/claude-code/index.js"
 import { deleteActiveProcessAndWait, sessionKey } from "@/provider/claude-code/sessionManager.js"
+import { ClaudeUsageCache } from "@opencode-ai/core/claude-usage-cache"
 
 beforeEach(() => _resetAccountPool())
 afterEach(() => _resetAccountPool())
@@ -155,7 +156,7 @@ test("pool pointer round-trips through the persist file and ignores expired limi
   }
 })
 
-test("a 100% usage cache with a future reset skips that account; 99% and missing files do not", () => {
+test("a 100% usage cache with a future reset skips that account; 99.9% and missing files do not", () => {
   const root = mkdtempSync(path.join(tmpdir(), "oc-account-pool-cache-"))
   const cache = path.join(root, "cache")
   mkdirSync(cache)
@@ -167,6 +168,10 @@ test("a 100% usage cache with a future reset skips that account; 99% and missing
       five_hour: { utilization, resets_at: resetsAt },
       seven_day: { utilization: 9, resets_at: new Date(now + 86_400_000).toISOString() },
     })
+  // Pin the default identity: an inherited CLAUDE_CONFIG_DIR elsewhere would
+  // hash the default account to a different cache file.
+  const previousConfigDir = process.env.CLAUDE_CONFIG_DIR
+  delete process.env.CLAUDE_CONFIG_DIR
   try {
     writeFileSync(path.join(cache, "claude-usage.json"), usage(100, future))
     writeFileSync(path.join(cache, "claude-usage-claudeSecond.json"), usage(0, null))
@@ -174,7 +179,7 @@ test("a 100% usage cache with a future reset skips that account; 99% and missing
     expect(poolAccount([DEFAULT_ACCOUNT, second], now)).toBe(second)
 
     _resetAccountPool()
-    writeFileSync(path.join(cache, "claude-usage.json"), usage(99, future))
+    writeFileSync(path.join(cache, "claude-usage.json"), usage(99.9, future))
     _setUsageCacheDir(cache)
     expect(poolAccount([DEFAULT_ACCOUNT, second], now)).toBe(DEFAULT_ACCOUNT)
 
@@ -183,6 +188,49 @@ test("a 100% usage cache with a future reset skips that account; 99% and missing
     _setUsageCacheDir(cache)
     expect(poolAccount([DEFAULT_ACCOUNT, second], now)).toBe(DEFAULT_ACCOUNT)
   } finally {
+    if (previousConfigDir === undefined) delete process.env.CLAUDE_CONFIG_DIR
+    else process.env.CLAUDE_CONFIG_DIR = previousConfigDir
+    rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 })
+  }
+})
+
+test("nondefault accounts seed from the hashed cache; legacy basename files need _configDir proof", () => {
+  const root = mkdtempSync(path.join(tmpdir(), "oc-account-pool-hash-"))
+  const cache = path.join(root, "cache")
+  mkdirSync(cache)
+  const second = path.join(root, ".claudeSecond")
+  const resolvedSecond = path.resolve(second)
+  const hashed = path.join(cache, ClaudeUsageCache.cacheFileName(expandHome("~"), resolvedSecond))
+  expect(path.basename(hashed)).toMatch(/^claude-usage-[0-9a-f]{16}\.json$/)
+  const legacy = path.join(cache, "claude-usage-claudeSecond.json")
+  const now = Date.now()
+  const future = new Date(now + 60_000).toISOString()
+  const usage = (extra: Record<string, unknown>) =>
+    JSON.stringify({
+      five_hour: { utilization: 100, resets_at: future },
+      seven_day: { utilization: 9, resets_at: new Date(now + 86_400_000).toISOString() },
+      ...extra,
+    })
+  const previousConfigDir = process.env.CLAUDE_CONFIG_DIR
+  delete process.env.CLAUDE_CONFIG_DIR
+  try {
+    writeFileSync(hashed, usage({}))
+    _setUsageCacheDir(cache)
+    expect(earliestLimitedUntil([second], now)).toBeGreaterThan(now)
+
+    _resetAccountPool()
+    rmSync(hashed)
+    writeFileSync(legacy, usage({}))
+    _setUsageCacheDir(cache)
+    expect(earliestLimitedUntil([second], now)).toBeUndefined()
+
+    _resetAccountPool()
+    writeFileSync(legacy, usage({ _configDir: ClaudeUsageCache.configDirId(resolvedSecond) }))
+    _setUsageCacheDir(cache)
+    expect(earliestLimitedUntil([second], now)).toBeGreaterThan(now)
+  } finally {
+    if (previousConfigDir === undefined) delete process.env.CLAUDE_CONFIG_DIR
+    else process.env.CLAUDE_CONFIG_DIR = previousConfigDir
     rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 })
   }
 })

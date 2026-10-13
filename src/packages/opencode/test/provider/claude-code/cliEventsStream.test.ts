@@ -20,6 +20,8 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import { _resetRateLimitReports, _resetSystemInitReports } from "@/provider/claude-code/cliEvents.js"
+import { canonicalAccountId, DEFAULT_ACCOUNT } from "@/provider/claude-code/accounts.js"
+import { _resetUsageObservations, getUsageSnapshot } from "@/provider/usage-observations.js"
 import { createClaudeCode } from "@/provider/claude-code/index.js"
 import { deleteActiveProcessAndWait, sessionKey } from "@/provider/claude-code/sessionManager.js"
 
@@ -324,6 +326,35 @@ test("a rate-limit rejection is written into the transcript", async () => {
   assert.match(body, /▌ \*\*rate limit:\*\*/)
   assert.match(body, /out of usage in the 5-hour window/)
   assert.match(body, /wait for the window to reset/)
+})
+
+test("a rate-limit observation is recorded against the canonical account", async () => {
+  _resetUsageObservations()
+  try {
+    await streamParts([
+      init,
+      {
+        type: "rate_limit_event",
+        session_id: "fake-session",
+        rate_limit_info: {
+          status: "allowed",
+          rateLimitType: "five_hour",
+          utilization: 0.5,
+          resetsAt: 1800000000,
+        },
+      },
+      text("carrying on"),
+      endTurn,
+      successResult,
+    ])
+    const observations = getUsageSnapshot()
+    assert.equal(observations.length, 1)
+    assert.equal(observations[0]?.providerID, "claude-code")
+    assert.equal(observations[0]?.accountID, canonicalAccountId(DEFAULT_ACCOUNT))
+    assert.deepEqual(observations[0]?.windows, [{ id: "five_hour", usedPercent: 50, observedAt: observations[0]?.observedAt, resetMs: 1800000000000 }])
+  } finally {
+    _resetUsageObservations()
+  }
 })
 
 test("a CLI self-compaction is announced in the transcript", async () => {

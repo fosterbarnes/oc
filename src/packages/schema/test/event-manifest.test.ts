@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 import { FileSystem, Integration, Permission, Project, Reference, Session, Workspace } from "../src"
 import { EventManifest } from "../src/event-manifest"
 import { IdeEvent } from "../src/ide-event"
+import { ProviderUsage } from "../src/provider-usage"
 import { SessionEvent } from "../src/session-event"
 import { SessionTodo } from "../src/session-todo"
 import { SessionV1 } from "../src/session-v1"
@@ -9,8 +10,8 @@ import { WorkspaceEvent } from "../src/workspace-event"
 
 describe("public event manifest", () => {
   test("owns the complete public event surface", () => {
-    expect(EventManifest.ServerDefinitions.length).toBe(58)
-    expect(EventManifest.Definitions.length).toBe(89)
+    expect(EventManifest.ServerDefinitions.length).toBe(59)
+    expect(EventManifest.Definitions.length).toBe(90)
     expect(SessionV1.Event.Definitions).toEqual([
       SessionV1.Event.Created,
       SessionV1.Event.Updated,
@@ -23,11 +24,13 @@ describe("public event manifest", () => {
       SessionV1.Event.Diff,
       SessionV1.Event.Error,
     ])
-    expect(EventManifest.Latest.size).toBe(89)
+    expect(EventManifest.Latest.size).toBe(90)
     expect(EventManifest.Durable.size).toBe(35)
   })
 
   test("uses canonical definitions for current public events", () => {
+    expect(EventManifest.Latest.get("provider.usage.updated")).toBe(ProviderUsage.Event.Updated)
+    expect(EventManifest.Durable.has("provider.usage.updated.1")).toBe(false)
     expect(Session.Event).toBe(SessionEvent)
     expect(Session.Event.Definitions).toBe(SessionEvent.Definitions)
     expect(Workspace.Event).toBe(WorkspaceEvent)

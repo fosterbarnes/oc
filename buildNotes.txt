@@ -1,12 +1,6 @@
-v0.2.175 skaDutchman
+v0.2.176 tolkienBurps
 
-updates:
-oc checks its own GitHub releases at startup and offers /update to install a release and reopen the session through the existing revive pipeline. Update notices honor disabled automatic updates and skipped versions. Stock OpenCode upgrade checks are removed, and the upgrade CLI reports how to update oc.
+usage sidebar:
+Claude and Codex usage readings in the sidebar now update while a turn is still running instead of waiting for the turn to end. An open Usage menu refreshes with the new readings without reopening it.
 
-sessions:
-Sessions waiting on a question or permission appear at the top of the session list with a question-mark marker. The prompt footer shows when usage-limit auto-resume will fire, and the session menu can copy the session ID. Projects sort by recent session activity and hide missing worktrees when their drive is available.
-
-local models:
-Configured LM Studio, Ollama, and vLLM providers discover their installed models automatically with a bounded discovery request.
-
-Under the hood: added release lookup, asset selection, version validation, and release download support; updated fork documentation and CLI help snapshots; and added an optional Windows detached-launch settle interval that detects an immediate unsuccessful exit. Checks passed: core release tests; opencode local-discovery, project, revive, and CLI help tests; TUI session-list and format tests; git diff whitespace validation; and agent-push pre-push checks. No build, install, or real-model checks were run. The release update flow still needs a live check once a public release is available.
+Under the hood: added provider usage observations from live streams (Claude rate-limit events, Codex WebSocket quota) with a shared schema, core cache, and event-manifest and generated client/SDK updates; added TUI usageLive and usageRefresh; the fractional-usage pane check now opens the Usage dialog by clicking the sidebar block. Checks passed: opencode usage-observations, codexQuota, openai-ws, accountPool, cliEventsStream, fakeModel; TUI usageLive, usageRefresh, usageFreshness, openSidebar; schema event-manifest; the Claude fractional usage pane check. No build or install was run.

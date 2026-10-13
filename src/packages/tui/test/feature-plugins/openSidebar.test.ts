@@ -41,7 +41,6 @@ import {
 import {
   cursorSessionCookie,
   cursorDbPath,
-  createUsageRefreshScheduler,
   DEFAULT_USAGE_PROVIDERS,
   normalizeUsageProviders,
   orderUsageWindows,
@@ -52,7 +51,6 @@ import {
   probeOpenCodeGoUsage,
   probeOpenRouterUsage,
   resolveAuthPath,
-  shouldRefreshUsageAfterIdle,
   USAGE_PROVIDER_IDS,
 } from "../../src/routes/session/sidebar-tools/usage.ts"
 import {
@@ -110,53 +108,6 @@ test("orders usage windows from shortest to longest", () => {
   const short = { usedPercent: 12, resetAt: "short", resetMs: null, minutes: 24 * 60 }
   const long = { usedPercent: 34, resetAt: "long", resetMs: null, minutes: 30 * 24 * 60 }
   assert.deepEqual(orderUsageWindows([long, short]), [short, long])
-})
-
-test("refreshes usage promptly and coalesces work while keeping a fallback", async () => {
-  let refreshes = 0
-  let resolveRefresh: (() => void) | undefined
-  let fallback: (() => void) | undefined
-  let cancelled = 0
-  const scheduler = createUsageRefreshScheduler({
-    refresh: () => {
-      refreshes += 1
-      return new Promise<void>((resolve) => {
-        resolveRefresh = resolve
-      })
-    },
-    fallbackIntervalMs: 300,
-    schedule: (callback) => {
-      fallback = callback
-      return callback
-    },
-    cancel: () => {
-      cancelled += 1
-    },
-  })
-
-  scheduler.request()
-  assert.equal(refreshes, 1)
-  scheduler.request()
-  scheduler.request()
-  assert.equal(refreshes, 1)
-  resolveRefresh?.()
-  await new Promise<void>((resolve) => setTimeout(resolve, 0))
-  assert.equal(refreshes, 2)
-  resolveRefresh?.()
-  await new Promise<void>((resolve) => setTimeout(resolve, 0))
-  assert.equal(typeof fallback, "function")
-  fallback?.()
-  assert.equal(refreshes, 3)
-  scheduler.dispose()
-  assert.ok(cancelled >= 1)
-  fallback?.()
-  assert.equal(refreshes, 3)
-})
-
-test("refreshes usage only when the active session becomes idle", () => {
-  assert.equal(shouldRefreshUsageAfterIdle({ sessionID: "active", status: { type: "idle" } }, "active"), true)
-  assert.equal(shouldRefreshUsageAfterIdle({ sessionID: "other", status: { type: "idle" } }, "active"), false)
-  assert.equal(shouldRefreshUsageAfterIdle({ sessionID: "active", status: { type: "busy" } }, "active"), false)
 })
 
 test("discovers supported files in the active .scripts directory", () => {
@@ -222,9 +173,10 @@ test("resolves OpenCode auth paths and parses subscription windows", async () =>
     assert.match(requestUrl, /chatgpt\.com\/backend-api\/wham\/usage$/)
     assert.equal(requestMethod, "GET")
     if (result.ok) {
-      assert.equal(result.primary.usedPercent, 28)
+      assert.equal(result.primary.usedPercent, 27.5)
       assert.equal(result.primary.minutes, 300)
       assert.equal(result.secondary.usedPercent, 100)
+      assert.equal(result.primary.fetchedAt, result.secondary.fetchedAt)
     }
   } finally {
     rmSync(root, { recursive: true, force: true })
@@ -329,7 +281,8 @@ test("requires reauthentication for an unauthorized OpenAI usage request", async
       authPath,
       fetchImpl: async () => new Response("", { status: 401 }),
     })
-    assert.deepEqual(result, { ok: false, reason: "reauthenticate" })
+    assert.equal(result.ok, false)
+    if (!result.ok) assert.equal(result.reason, "reauthenticate")
   } finally {
     rmSync(root, { recursive: true, force: true })
   }
@@ -872,11 +825,18 @@ test("returns a neutral state for failed OpenAI usage requests", async () => {
   try {
     const authPath = path.join(root, "auth.json")
     writeFileSync(authPath, JSON.stringify({ openai: { access: "secret" } }))
+    const nowMs = 1_700_000_000_000
     const result = await probeOpenAIUsage({
       authPath,
-      fetchImpl: async () => new Response("", { status: 503 }),
+      nowMs,
+      fetchImpl: async () =>
+        new Response("", { status: 429, headers: { "Retry-After": "120" } }),
     })
-    assert.deepEqual(result, { ok: false })
+    assert.equal(result.ok, false)
+    if (!result.ok) {
+      assert.equal(result.metadata?.status, 429)
+      assert.equal(result.metadata?.retryAt, nowMs + 120_000)
+    }
   } finally {
     rmSync(root, { recursive: true, force: true })
   }
@@ -913,10 +873,10 @@ test("parses OpenCode Go weekly and monthly usage with reset dates", async () =>
         const date = new Date(timestamp)
         return `${date.getMonth() + 1}/${date.getDate()}/${String(date.getFullYear()).slice(2)} ~`
       }
-      assert.equal(result.weekly.usedPercent, 28)
+      assert.equal(result.weekly.usedPercent, 27.5)
       assert.equal(result.weekly.minutes, 7 * 24 * 60)
       assert.match(result.weekly.resetAt ?? "", new RegExp(localDatePrefix("2026-08-17T00:00:00.000Z")))
-      assert.equal(result.monthly?.usedPercent, 12)
+      assert.equal(result.monthly?.usedPercent, 12.4)
       assert.equal(result.monthly.minutes, 30 * 24 * 60)
       assert.match(result.monthly.resetAt ?? "", new RegExp(localDatePrefix("2026-09-01T12:00:00.000Z")))
     }
@@ -959,7 +919,8 @@ test("returns a neutral state for failed OpenCode Go usage requests", async () =
       authPath,
       fetchImpl: async () => new Response("", { status: 503 }),
     })
-    assert.deepEqual(result, { ok: false })
+    assert.equal(result.ok, false)
+    if (!result.ok) assert.equal(result.metadata?.status, 503)
   } finally {
     rmSync(root, { recursive: true, force: true })
   }
@@ -984,8 +945,8 @@ test("parses OpenRouter key usage against its credit limit", async () => {
     assert.equal(requestUrl, "https://openrouter.ai/api/v1/key")
     assert.equal(authorization, "Bearer secret")
     if (result.ok) {
-      assert.equal(result.usedPercent, 42)
-      assert.equal(result.remainingPercent, 58)
+      assert.ok(Math.abs(result.usedPercent - 42) < 1e-9)
+      assert.ok(Math.abs(result.remainingPercent - 58) < 1e-9)
       assert.equal(result.usedUsd, 2.1)
       assert.equal(result.limitUsd, 5)
     }
@@ -1017,7 +978,8 @@ test("returns a neutral state for failed OpenRouter usage requests", async () =>
       authPath,
       fetchImpl: async () => new Response("", { status: 503 }),
     })
-    assert.deepEqual(failed, { ok: false })
+    assert.equal(failed.ok, false)
+    if (!failed.ok) assert.equal(failed.metadata?.status, 503)
     const noLimit = await probeOpenRouterUsage({
       authPath,
       fetchImpl: async () =>
@@ -1252,12 +1214,23 @@ test("reads Claude Code usage with its OAuth login and falls back to the cached 
     const result = await probeClaudeCodeUsage(options)
     assert.equal(result.ok, true)
     if (result.ok) {
-      assert.equal(result.fiveHour.usedPercent, 8)
+      assert.equal(result.fiveHour.usedPercent, 8.4)
       assert.equal(result.weekly.usedPercent, 100)
+      assert.equal(result.fiveHour.fetchedAt, nowMs)
       assert.ok(result.fiveHour.resetAt)
       assert.equal(result.weekly.resetAt, null)
     }
     assert.equal((requests[0].headers as Record<string, string>).Authorization, "Bearer tok")
+    const rateLimited = await probeClaudeCodeUsage({
+      ...options,
+      fetchImpl: async () => new Response("", { status: 429, headers: { "Retry-After": "60" } }),
+    })
+    assert.equal(rateLimited.ok, true)
+    if (rateLimited.ok) {
+      assert.equal(rateLimited.source, "cache")
+      assert.equal(rateLimited.metadata?.status, 429)
+      assert.equal(rateLimited.metadata?.retryAt, nowMs + 60_000)
+    }
     writeFileSync(credentialsPath, JSON.stringify({ claudeAiOauth: { accessToken: "tok", expiresAt: nowMs } }))
     const cached = await probeClaudeCodeUsage(options)
     assert.equal(result.ok && result.source, "live")
@@ -1306,7 +1279,9 @@ test("a Claude pool with one live account reads as live even when another is cac
     login(".claudeSecond", nowMs)
     const body = { five_hour: { utilization: 1, resets_at: null }, seven_day: { utilization: 0, resets_at: null } }
     mkdirSync(path.join(root, ".cache", "opencode"), { recursive: true })
-    writeFileSync(path.join(root, ".cache", "opencode", "claude-usage-claudeSecond.json"), JSON.stringify(body))
+    writeFileSync(path.join(root, ".cache", "opencode", "claude-usage-claudeSecond.json"), JSON.stringify({
+      ...body, _configDir: path.join(root, ".claudeSecond").replace(/\\/g, "/"),
+    }))
     const result = await probeClaudeCodePool(["~/.claude", "~/.claudeSecond"], {
       homeDir: root,
       nowMs,
@@ -1318,6 +1293,11 @@ test("a Claude pool with one live account reads as live even when another is cac
       "live",
       "cache",
     ])
+    if (result.ok && result.accounts) {
+      assert.match(result.accounts[0].id ?? "", /claude$/i)
+      assert.match(result.accounts[1].id ?? "", /claudeSecond$/i)
+      assert.equal(result.accounts[0].usage.ok && result.accounts[0].usage.fiveHour.usedPercent, 1)
+    }
   } finally {
     rmSync(root, { recursive: true, force: true })
   }
@@ -1351,6 +1331,8 @@ test("saveUserUsageProviders persists the selection without overwriting other si
   }
 })
 
+const emptyAuthEnv = { OPENCODE_AUTH_CONTENT: "{}" }
+
 function fakeCursorJwt(sub: string): string {
   const encode = (value: object) => Buffer.from(JSON.stringify(value)).toString("base64url")
   return `${encode({ alg: "none", typ: "JWT" })}.${encode({ sub, aud: "https://cursor.com", type: "session" })}.signature`
@@ -1376,6 +1358,7 @@ test("parses Cursor monthly usage with a pasted session cookie", async () => {
   let requestUrl = ""
   let cookie = ""
   const result = await probeCursorUsage({
+    env: emptyAuthEnv,
     cursorDbPath: missingDb,
     cursorSessionToken: `auth0|user_test::${jwt}`,
     fetchImpl: async (url, init) => {
@@ -1388,15 +1371,17 @@ test("parses Cursor monthly usage with a pasted session cookie", async () => {
   assert.equal(requestUrl, "https://cursor.com/api/usage-summary")
   assert.equal(cookie, `WorkosCursorSessionToken=auth0%7Cuser_test%3A%3A${jwt}`)
   if (result.ok) {
-    assert.equal(result.monthly.usedPercent, 1)
+    assert.ok(Math.abs((result.monthly.usedPercent ?? 0) - 1.4) < 1e-9)
     assert.equal(result.monthly.apiUsedPercent, null)
     assert.match(result.monthly.resetAt ?? "", /9\/18\/26 ~/)
+    assert.equal(result.metadata?.accountSource, "cookie")
   }
 })
 
 test("uses Cursor autoPercentUsed when used over limit would disagree", async () => {
   const jwt = fakeCursorJwt("auth0|user_test")
   const result = await probeCursorUsage({
+    env: emptyAuthEnv,
     cursorDbPath: path.join(os.tmpdir(), "sidebar-cursor-missing-db", "state.vscdb"),
     cursorSessionToken: `auth0|user_test::${jwt}`,
     fetchImpl: async () =>
@@ -1415,7 +1400,7 @@ test("uses Cursor autoPercentUsed when used over limit would disagree", async ()
   })
   assert.equal(result.ok, true)
   if (result.ok) {
-    assert.equal(result.monthly.usedPercent, 1)
+    assert.ok(Math.abs((result.monthly.usedPercent ?? 0) - 1.0377777777777777) < 0.0001)
     assert.equal(result.monthly.apiUsedPercent, 0)
   }
 })
@@ -1424,6 +1409,7 @@ test("parses Cursor Other Models API percent independently", async () => {
   const jwt = fakeCursorJwt("auth0|user_test")
   const missingDb = path.join(os.tmpdir(), "sidebar-cursor-missing-db", "state.vscdb")
   const result = await probeCursorUsage({
+    env: emptyAuthEnv,
     cursorDbPath: missingDb,
     cursorSessionToken: `auth0|user_test::${jwt}`,
     fetchImpl: async () =>
@@ -1441,10 +1427,11 @@ test("parses Cursor Other Models API percent independently", async () => {
   })
   assert.equal(result.ok, true)
   if (result.ok) {
-    assert.equal(result.monthly.usedPercent, 13)
-    assert.equal(result.monthly.apiUsedPercent, 3)
+    assert.equal(result.monthly.usedPercent, 13.4)
+    assert.equal(result.monthly.apiUsedPercent, 3.333)
   }
   const omitted = await probeCursorUsage({
+    env: emptyAuthEnv,
     cursorDbPath: missingDb,
     cursorSessionToken: `auth0|user_test::${jwt}`,
     fetchImpl: async () =>
@@ -1489,6 +1476,7 @@ test("auto-reads the Cursor session token from state.vscdb", async (t) => {
     db.close()
     let cookie = ""
     const result = await probeCursorUsage({
+      env: emptyAuthEnv,
       cursorDbPath: dbPath,
       fetchImpl: async (url, init) => {
         cookie = String(new Headers(init?.headers).get("cookie"))
@@ -1497,12 +1485,13 @@ test("auto-reads the Cursor session token from state.vscdb", async (t) => {
     })
     assert.equal(result.ok, true)
     assert.equal(cookie, `WorkosCursorSessionToken=auth0%7Cuser_db%3A%3A${jwt}`)
+    assert.equal(result.metadata?.accountSource, "desktop")
   } finally {
     rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 })
   }
 })
 
-test("prefers the Cursor app database over a pasted session token", async (t) => {
+test("prefers a pasted Cursor session token over the desktop app database", async (t) => {
   if (process.platform === "win32") {
     t.skip("Bun keeps node:sqlite database handles open on Windows during cleanup")
     return
@@ -1525,6 +1514,7 @@ test("prefers the Cursor app database over a pasted session token", async (t) =>
     db.close()
     let cookie = ""
     const result = await probeCursorUsage({
+      env: emptyAuthEnv,
       cursorDbPath: dbPath,
       cursorSessionToken: `auth0|user_paste::${pasteJwt}`,
       fetchImpl: async (_url, init) => {
@@ -1533,7 +1523,82 @@ test("prefers the Cursor app database over a pasted session token", async (t) =>
       },
     })
     assert.equal(result.ok, true)
-    assert.equal(cookie, `WorkosCursorSessionToken=auth0%7Cuser_db%3A%3A${dbJwt}`)
+    assert.equal(cookie, `WorkosCursorSessionToken=auth0%7Cuser_paste%3A%3A${pasteJwt}`)
+    assert.equal(result.metadata?.accountSource, "cookie")
+  } finally {
+    rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 })
+  }
+})
+
+test("prefers OpenCode Cursor OAuth over desktop and pasted tokens", async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "sidebar-cursor-oc-auth-"))
+  try {
+    const authPath = path.join(root, "auth.json")
+    const jwt = fakeCursorJwt("auth0|user_oc")
+    writeFileSync(
+      authPath,
+      JSON.stringify({ cursor: { type: "oauth", access: jwt, refresh: "refresh", expires: Date.now() + 60_000 } }),
+    )
+    let cookie = ""
+    const result = await probeCursorUsage({
+      authPath,
+      cursorDbPath: path.join(root, "missing", "state.vscdb"),
+      cursorSessionToken: `auth0|user_paste::${fakeCursorJwt("auth0|user_paste")}`,
+      fetchImpl: async (_url, init) => {
+        cookie = String(new Headers(init?.headers).get("cookie"))
+        return cursorSummaryResponse()
+      },
+    })
+    assert.equal(result.ok, true)
+    assert.equal(cookie, `WorkosCursorSessionToken=auth0%7Cuser_oc%3A%3A${jwt}`)
+    assert.equal(result.ok && result.metadata?.accountSource, "opencode")
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test("does not fall back to desktop when configured OpenCode Cursor auth fails", async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "sidebar-cursor-oc-fail-"))
+  try {
+    const authPath = path.join(root, "auth.json")
+    const jwt = fakeCursorJwt("auth0|user_oc")
+    writeFileSync(
+      authPath,
+      JSON.stringify({ cursor: { type: "oauth", access: jwt, refresh: "refresh", expires: Date.now() + 60_000 } }),
+    )
+    let called = false
+    const result = await probeCursorUsage({
+      authPath,
+      cursorSessionToken: `auth0|user_paste::${fakeCursorJwt("auth0|user_paste")}`,
+      fetchImpl: async () => {
+        called = true
+        return new Response("", { status: 401 })
+      },
+    })
+    assert.equal(called, true)
+    assert.deepEqual(result, { ok: false, reason: "reauthenticate", metadata: { status: 401, accountSource: "opencode" } })
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test("treats crsr API keys in OpenCode auth as unavailable without desktop fallback", async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "sidebar-cursor-crsr-"))
+  try {
+    const authPath = path.join(root, "auth.json")
+    writeFileSync(authPath, JSON.stringify({ cursor: { type: "api", key: "crsr_secret" } }))
+    const dbPath = path.join(root, "state.vscdb")
+    let called = false
+    const result = await probeCursorUsage({
+      authPath,
+      cursorDbPath: dbPath,
+      fetchImpl: async () => {
+        called = true
+        return cursorSummaryResponse()
+      },
+    })
+    assert.equal(called, false)
+    assert.deepEqual(result, { ok: false, reason: "need-token", metadata: { accountSource: "opencode" } })
   } finally {
     rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 })
   }
@@ -1562,6 +1627,7 @@ test("requests a Cursor session token when none is available", async () => {
   const root = mkdtempSync(path.join(os.tmpdir(), "sidebar-cursor-missing-"))
   try {
     const result = await probeCursorUsage({
+      env: emptyAuthEnv,
       cursorDbPath: path.join(root, "missing", "state.vscdb"),
       fetchImpl: async () => {
         throw new Error("should not be called")
@@ -1576,23 +1642,31 @@ test("requests a Cursor session token when none is available", async () => {
 test("requires a fresh Cursor session token for unauthorized requests", async () => {
   const jwt = fakeCursorJwt("auth0|user_test")
   const result = await probeCursorUsage({
+    env: emptyAuthEnv,
     cursorDbPath: path.join(os.tmpdir(), "sidebar-cursor-missing-db", "state.vscdb"),
     cursorSessionToken: `auth0|user_test::${jwt}`,
     fetchImpl: async () => new Response("", { status: 401 }),
   })
-  assert.deepEqual(result, { ok: false, reason: "reauthenticate" })
+  assert.equal(result.ok, false)
+  if (!result.ok) {
+    assert.equal(result.reason, "reauthenticate")
+    assert.equal(result.metadata?.status, 401)
+  }
 })
 
 test("returns a neutral state for failed Cursor usage requests", async () => {
   const jwt = fakeCursorJwt("auth0|user_test")
   const missingDb = path.join(os.tmpdir(), "sidebar-cursor-missing-db", "state.vscdb")
   const failed = await probeCursorUsage({
+    env: emptyAuthEnv,
     cursorDbPath: missingDb,
     cursorSessionToken: `auth0|user_test::${jwt}`,
     fetchImpl: async () => new Response("", { status: 503 }),
   })
-  assert.deepEqual(failed, { ok: false })
+  assert.equal(failed.ok, false)
+  if (!failed.ok) assert.equal(failed.metadata?.status, 503)
   const malformed = await probeCursorUsage({
+    env: emptyAuthEnv,
     cursorDbPath: missingDb,
     cursorSessionToken: `auth0|user_test::${jwt}`,
     fetchImpl: async () =>
@@ -1604,6 +1678,7 @@ test("returns a neutral state for failed Cursor usage requests", async () => {
 test("never uses the Cursor billing cycle start as the reset", async () => {
   const jwt = fakeCursorJwt("auth0|user_test")
   const result = await probeCursorUsage({
+    env: emptyAuthEnv,
     cursorDbPath: path.join(os.tmpdir(), "sidebar-cursor-missing-db", "state.vscdb"),
     cursorSessionToken: `auth0|user_test::${jwt}`,
     fetchImpl: async () => cursorSummaryResponse({ billingCycleEnd: undefined }),
@@ -1614,6 +1689,7 @@ test("never uses the Cursor billing cycle start as the reset", async () => {
 test("shows an unlimited Cursor plan with its reset date", async () => {
   const jwt = fakeCursorJwt("auth0|user_test")
   const result = await probeCursorUsage({
+    env: emptyAuthEnv,
     cursorDbPath: path.join(os.tmpdir(), "sidebar-cursor-missing-db", "state.vscdb"),
     cursorSessionToken: `auth0|user_test::${jwt}`,
     fetchImpl: async () => cursorSummaryResponse({ isUnlimited: true }),

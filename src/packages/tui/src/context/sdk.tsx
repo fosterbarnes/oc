@@ -1,6 +1,7 @@
 import { createOpencodeClient } from "@opencode-ai/sdk/v2"
 import type { GlobalEvent } from "@opencode-ai/sdk/v2"
 import { Flag } from "@opencode-ai/core/flag/flag"
+import type { ProviderUsage } from "@opencode-ai/core/provider-usage"
 import { createSimpleContext } from "./helper"
 import { batch, onCleanup, onMount } from "solid-js"
 
@@ -264,6 +265,12 @@ export const { use: useSDK, provider: SDKProvider } = createSimpleContext({
           })
           if (result.error) throw result.error
           return (result.data as { enabled?: boolean } | undefined)?.enabled === true
+        },
+      },
+      providerUsage: {
+        state: async (): Promise<ProviderUsage.Info[]> => {
+          const result = await sdk.provider.usage.state(undefined, { throwOnError: true })
+          return result.data
         },
       },
       claudeAccount: {

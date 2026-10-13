@@ -10,9 +10,10 @@ import {
   usageColumns,
   probeClaudeCodeUsage,
   probeClaudeCodePool,
+  probeCursorUsage,
+  probeOpenAIUsage,
   projectClaudeUsage,
   updateClaudeSnapshot,
-  shouldRefreshUsageProvider,
   updateUsageSnapshot,
   usageProviderForModel,
   windowLabel,
@@ -431,13 +432,6 @@ test("finished-message provider mapping ignores unknown and inherited names", ()
   expect(usageProviderForModel("claude-code-work")).toBe("claude-code")
   expect(usageProviderForModel("anthropic")).toBeUndefined()
   expect(usageProviderForModel("toString")).toBeUndefined()
-})
-
-test("provider refresh throttle includes the 45 second boundary", () => {
-  expect(shouldRefreshUsageProvider(undefined, 0)).toBe(true)
-  expect(shouldRefreshUsageProvider(0, 44_999)).toBe(false)
-  expect(shouldRefreshUsageProvider(0, 45_000)).toBe(true)
-  expect(shouldRefreshUsageProvider(45_000, 45_001)).toBe(false)
 })
 
 test("failed probe preserves numbers and fetch time, and live success clears stale state", () => {
@@ -872,4 +866,61 @@ test("pool average of all-unknown windows stay unknown", async () => {
   } finally {
     await rm(directory, { recursive: true, force: true })
   }
+})
+
+test("fractional OAuth utilization stays percent and equal Claude basenames have separate caches", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "oc-usage-identity-"))
+  try {
+    const dirs = [path.join(directory, "first", "account"), path.join(directory, "second", "account")]
+    await Promise.all(dirs.map((dir, index) => Bun.write(path.join(dir, ".credentials.json"), JSON.stringify({
+      claudeAiOauth: { accessToken: String(index), expiresAt: 10_000 },
+    }))))
+    const first = await probeClaudeCodePool(dirs, {
+      homeDir: directory, nowMs: 100,
+      fetchImpl: async (_url, init) => Response.json({
+        five_hour: { utilization: new Headers(init?.headers).get("Authorization") === "Bearer 0" ? 0.5 : 0.25 },
+        seven_day: { utilization: 1 },
+      }),
+    })
+    expect(first.ok && first.accounts?.map((account) => account.usage.ok && account.usage.fiveHour.usedPercent))
+      .toEqual([0.5, 0.25])
+    const cached = await probeClaudeCodePool(dirs, {
+      homeDir: directory, nowMs: 200,
+      fetchImpl: async () => new Response("", { status: 429, headers: { "Retry-After": "60" } }),
+    })
+    expect(cached.ok && cached.accounts?.map((account) => account.usage.ok && account.usage.fiveHour.usedPercent))
+      .toEqual([0.5, 0.25])
+    expect(cached.metadata?.retryAt).toBe(60_200)
+    if (cached.ok && first.ok) {
+      expect(cached.accounts?.[0].id).not.toBe(cached.accounts?.[1].id)
+      expect(updateClaudeSnapshot(first, cached, 200).stale).toBe(true)
+    }
+  } finally {
+    await rm(directory, { recursive: true, force: true })
+  }
+})
+
+test("fractional Cursor percentages below one are not mistaken for fractions of a quota", async () => {
+  const jwt = [Buffer.from('{"alg":"none"}').toString("base64url"),
+    Buffer.from('{"sub":"usage-test"}').toString("base64url"), "signature"].join(".")
+  const result = await probeCursorUsage({
+    env: { OPENCODE_AUTH_CONTENT: "{}" }, cursorSessionToken: jwt, nowMs: 100,
+    fetchImpl: async () => Response.json({ billingCycleEnd: "2026-11-01T00:00:00Z", individualUsage: {
+      plan: { autoPercentUsed: 0.5, apiPercentUsed: 0.25 },
+    } }),
+  })
+  expect(result.ok && result.monthly.usedPercent).toBe(0.5)
+  expect(result.ok && result.monthly.apiUsedPercent).toBe(0.25)
+})
+
+test("usage Retry-After accepts dates and rejects malformed values without inventing a deadline", async () => {
+  const options = { env: { OPENCODE_AUTH_CONTENT: JSON.stringify({ openai: { access: "test" } }) }, nowMs: 100 }
+  const date = await probeOpenAIUsage({ ...options,
+    fetchImpl: async () => new Response("", { status: 429, headers: { "Retry-After": "Thu, 01 Jan 1970 00:01:00 GMT" } }),
+  })
+  expect(date.metadata?.retryAt).toBe(60_000)
+  const invalid = await probeOpenAIUsage({ ...options,
+    fetchImpl: async () => new Response("", { status: 429, headers: { "Retry-After": "unknown" } }),
+  })
+  expect(invalid.metadata).toEqual({ status: 429 })
 })

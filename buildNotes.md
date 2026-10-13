@@ -112,6 +112,24 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-13 (~08:19) - v0.2.176 tolkienBurps - Live usage sidebar updates mid-turn - Claude Sonnet 5.5, reasoning unspecified; Agent
+
+### Agent
+- Meta: Claude Sonnet 5.5; reasoning unspecified; Agent (picked up from Sol session ses_ecb0be099ffexITeS0F8XysXdt); completed
+- Version: 0.2.176 tolkienBurps
+- Added: provider usage observations from live streams (Claude rate-limit events, Codex WS quota) published via `schema/src/provider-usage.ts`, `core/src/provider-usage.ts`, `core/src/claude-usage-cache.ts`, `opencode/src/provider/usage-observations.ts`; event-manifest and generated client/SDK updated.
+- Added: TUI `usageLive.ts` and `usageRefresh.ts` so the sidebar Usage block and an open Usage dialog update during an unfinished turn instead of waiting for turn end.
+- Changed: `tuiPane.test.ts` fractional-usage pane check opens the Usage dialog by clicking the sidebar Usage block (command-palette search for "Show usage" returned "No results found"); added `quotaFixture.ts`.
+- Verification: pane check `OC_TUI_PANE=1 bun test test/provider/claude-code/tuiPane.test.ts -t 'Claude fractional usage'` passed (1 pass). Ran opencode usage-observations, codexQuota, openai-ws, accountPool, cliEventsStream, fakeModel (102 pass); tui usageLive, usageRefresh, usageFreshness, openSidebar (117 pass, 2 skip); schema event-manifest (2 pass). No build or install run.
+- ERROR: command-palette search did not find the sidebar usage command in the pane (earlier run); resolved by clicking the Usage block.
+
+### User
+Usage sidebar
+- Claude and Codex usage readings in the sidebar now update while a turn is still running.
+- An open Usage menu refreshes with the new readings without reopening it.
+
+---
+
 ## 2026-10-13 (~07:01) - v0.2.175 skaDutchman - oc-release /update, session list attention, local model discovery - Claude Opus 5.5, reasoning unspecified; Implementation
 
 ### Agent

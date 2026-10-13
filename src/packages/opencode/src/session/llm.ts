@@ -32,6 +32,8 @@ import { LLMAISDK } from "./llm/ai-sdk"
 import { LLMNativeRuntime } from "./llm/native-runtime"
 import { LLMRequestPrep } from "./llm/request"
 import { hostToolExecutors, isClaudeCodeProvider, type HostToolResult } from "@/provider/claude-code/shared"
+import { setUsagePublisher } from "@/provider/usage-observations"
+import { ProviderUsage } from "@opencode-ai/core/provider-usage"
 
 export const OUTPUT_TOKEN_MAX = ProviderTransform.OUTPUT_TOKEN_MAX
 
@@ -88,6 +90,12 @@ const live: Layer.Layer<
     const events = yield* EventV2Bridge.Service
     const llmClient = yield* LLMClient.Service
     const flags = yield* RuntimeFlags.Service
+    // Quota is account-wide. Bind publication to the service lifetime, not the last active turn.
+    const usageBridge = yield* EffectBridge.make()
+    const unsubscribeUsage = setUsagePublisher((observation) => {
+      usageBridge.fork(events.publish(ProviderUsage.Event.Updated, observation))
+    })
+    yield* Effect.addFinalizer(() => Effect.sync(unsubscribeUsage))
 
     const run = Effect.fn("LLM.run")(function* (input: StreamRequest) {
       yield* Effect.logInfo("stream", {
@@ -122,6 +130,9 @@ const live: Layer.Layer<
       // Wire up toolExecutor for DWS workflow models so that tool calls
       // from the workflow service are executed via opencode's tool system
       // and results sent back over the WebSocket.
+      // The callbacks below run outside Effect fibers (AI SDK stream handlers,
+      // provider child-process readers). The bridge recaptures this request's
+      // instance context for anything they publish.
       const bridge = yield* EffectBridge.make()
       // Claude Code runs oc tools inside its own stream (providerExecuted), so it needs the bound tools.
       // Tool-less calls (title, summary) share the session id and must not replace the turn's executor.

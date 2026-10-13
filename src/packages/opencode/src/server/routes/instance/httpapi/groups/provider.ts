@@ -8,6 +8,7 @@ import { InstanceContextMiddleware } from "../middleware/instance-context"
 import { WorkspaceRoutingMiddleware, WorkspaceRoutingQuery } from "../middleware/workspace-routing"
 import { described } from "./metadata"
 import { ProviderV2 } from "@opencode-ai/core/provider"
+import { ProviderUsage } from "@opencode-ai/core/provider-usage"
 
 const root = "/provider"
 
@@ -43,6 +44,17 @@ export const ProviderApi = HttpApi.make("provider")
             identifier: "provider.list",
             summary: "List providers",
             description: "Get a list of all available AI providers, including both available and connected ones.",
+          }),
+        ),
+        HttpApiEndpoint.get("usage", `${root}/usage`, {
+          query: WorkspaceRoutingQuery,
+          success: described(Schema.Array(ProviderUsage.Info), "Provider quota observations"),
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "provider.usage.state",
+            summary: "Get provider quota observations",
+            description:
+              "Get the last observed account-bound quota readings from live provider responses, for mount and reconnect rehydration.",
           }),
         ),
         HttpApiEndpoint.get("auth", `${root}/auth`, {

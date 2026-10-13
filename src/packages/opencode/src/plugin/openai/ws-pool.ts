@@ -1,6 +1,11 @@
 import WebSocket from "ws"
 import { ProviderError } from "@/provider/error"
 import { isRecord } from "@/util/record"
+import {
+  openaiAccountId,
+  parseCodexRateLimitsEvent,
+  reportUsageObservation,
+} from "../../provider/usage-observations"
 import { OpenAIWebSocket } from "./ws"
 
 export const TITLE_HEADER = "x-opencode-title"
@@ -102,6 +107,16 @@ export function createWebSocketFetch(options?: CreateWebSocketFetchOptions) {
         idleTimeout,
         signal: init?.signal ?? undefined,
         onFirstEvent: (error) => resolveFirstEvent(error ?? true),
+        onQuota: (event) => {
+          const windows = parseCodexRateLimitsEvent(event, Date.now())
+          if (windows.length === 0) return
+          reportUsageObservation({
+            providerID: "openai",
+            accountID: openaiAccountId(internalHeaders["chatgpt-account-id"]),
+            observedAt: Date.now(),
+            windows,
+          })
+        },
         onTerminal: (event) => {
           entry.busy = false
           entry.lastUsedAt = Date.now()

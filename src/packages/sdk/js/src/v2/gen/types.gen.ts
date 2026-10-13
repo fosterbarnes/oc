@@ -58,6 +58,7 @@ export type Event =
   | EventPermissionV2Asked
   | EventPermissionV2Replied
   | EventPluginAdded
+  | EventProviderUsageUpdated
   | EventProjectDirectoriesUpdated
   | EventFileWatcherUpdated
   | EventPtyCreated
@@ -1289,6 +1290,16 @@ export type GlobalEvent = {
         type: "plugin.added"
         properties: {
           id: string
+        }
+      }
+    | {
+        id: string
+        type: "provider.usage.updated"
+        properties: {
+          providerID: string
+          accountID: string
+          observedAt: number
+          windows: Array<ProviderUsageWindow>
         }
       }
     | {
@@ -3517,6 +3528,7 @@ export type V2Event =
   | PermissionV2Asked
   | PermissionV2Replied
   | PluginAdded
+  | ProviderUsageUpdated
   | ProjectDirectoriesUpdated
   | FileWatcherUpdated
   | PtyCreated
@@ -3738,6 +3750,14 @@ export type PermissionV2Source = {
 }
 
 export type PermissionV2Reply = "once" | "always" | "reject"
+
+export type ProviderUsageWindow = {
+  id: string
+  usedPercent: number
+  observedAt: number
+  resetMs?: number
+  minutes?: number
+}
 
 export type QuestionV2Option = {
   /**
@@ -4464,6 +4484,13 @@ export type ProjectDirectories = Array<{
 export type PtyTicketConnectToken = {
   ticket: string
   expires_in: number
+}
+
+export type ProviderUsageInfo = {
+  providerID: string
+  accountID: string
+  observedAt: number
+  windows: Array<ProviderUsageWindow>
 }
 
 export type WorkspaceEventConnectionStatus = {
@@ -6092,6 +6119,26 @@ export type PluginAdded = {
   }
 }
 
+export type ProviderUsageUpdated = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "provider.usage.updated"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    providerID: string
+    accountID: string
+    observedAt: number
+    windows: Array<ProviderUsageWindow>
+  }
+}
+
 export type ProjectDirectoriesUpdated = {
   id: string
   metadata?: {
@@ -7395,6 +7442,17 @@ export type EventPluginAdded = {
   type: "plugin.added"
   properties: {
     id: string
+  }
+}
+
+export type EventProviderUsageUpdated = {
+  id: string
+  type: "provider.usage.updated"
+  properties: {
+    providerID: string
+    accountID: string
+    observedAt: number
+    windows: Array<ProviderUsageWindow>
   }
 }
 
@@ -10329,6 +10387,34 @@ export type ProviderListResponses = {
 }
 
 export type ProviderListResponse = ProviderListResponses[keyof ProviderListResponses]
+
+export type ProviderUsageStateData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/provider/usage"
+}
+
+export type ProviderUsageStateErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type ProviderUsageStateError = ProviderUsageStateErrors[keyof ProviderUsageStateErrors]
+
+export type ProviderUsageStateResponses = {
+  /**
+   * Provider quota observations
+   */
+  200: Array<ProviderUsageInfo>
+}
+
+export type ProviderUsageStateResponse = ProviderUsageStateResponses[keyof ProviderUsageStateResponses]
 
 export type ProviderAuthData = {
   body?: never

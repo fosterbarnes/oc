@@ -1,3 +1,4 @@
+import { ClaudeUsageCache } from "@opencode-ai/core/claude-usage-cache"
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
@@ -18,14 +19,11 @@ export function usageProviderForModel(providerID: string): UsageProviderId | und
   return USAGE_PROVIDER_IDS.find((id) => id === providerID)
 }
 
-export function shouldRefreshUsageProvider(lastRequestedAt: number | undefined, nowMs: number): boolean {
-  return lastRequestedAt === undefined || nowMs - lastRequestedAt >= 45_000
-}
-
 export type UsageSnapshot<T> = T & {
   fetchedAt?: number
   source?: "live" | "cache"
   stale?: boolean
+  metadata?: UsageProbeMetadata
 }
 
 export function updateUsageSnapshot<T extends { ok: boolean }>(
@@ -33,9 +31,9 @@ export function updateUsageSnapshot<T extends { ok: boolean }>(
   next: UsageSnapshot<T>,
   nowMs: number,
 ): UsageSnapshot<T> {
-  if (!next.ok && previous.ok) return { ...previous, stale: true }
+  if (!next.ok && previous.ok) return { ...previous, stale: true, ...(next.metadata ? { metadata: next.metadata } : {}) }
   if (!next.ok) return next
-  return { ...next, fetchedAt: next.fetchedAt ?? nowMs, source: next.source ?? "live", stale: false }
+  return { ...next, fetchedAt: next.fetchedAt ?? nowMs, source: next.source ?? "live", stale: next.source === "cache" }
 }
 
 /** Explicit Claude merge for partial reads: unknown windows keep the in-memory snapshot's known values. */
@@ -44,14 +42,15 @@ export function updateClaudeSnapshot(
   next: UsageSnapshot<ClaudeCodeUsage>,
   nowMs: number,
 ): UsageSnapshot<ClaudeCodeUsage> {
-  if (!next.ok && previous.ok) return { ...previous, stale: true }
+  if (!next.ok && previous.ok) return { ...previous, stale: true, ...(next.metadata ? { metadata: next.metadata } : {}) }
   if (!next.ok) return next
-  if (!previous.ok) return { ...next, fetchedAt: next.fetchedAt ?? nowMs, source: next.source ?? "live", stale: false }
+  if (!previous.ok || previous.accountID !== next.accountID)
+    return { ...next, fetchedAt: next.fetchedAt ?? nowMs, source: next.source ?? "live", stale: next.source === "cache" }
   return {
     ...withClaudeFallback(next, previous, nowMs),
     fetchedAt: next.fetchedAt ?? nowMs,
     source: next.source ?? "live",
-    stale: false,
+    stale: next.source === "cache",
   }
 }
 
@@ -77,6 +76,14 @@ export function normalizeUsageProviders(value: unknown, fallback = DEFAULT_USAGE
     providers.push(item)
   }
   return providers
+}
+
+/** HTTP failure and account labeling metadata returned by usage probes for scheduling and UI. */
+export type UsageProbeMetadata = {
+  status?: number
+  /** Absolute epoch milliseconds; earliest time a retry may succeed (from Retry-After). */
+  retryAt?: number
+  accountSource?: "opencode" | "cookie" | "desktop"
 }
 
 export type UsageWindow = {
@@ -197,23 +204,25 @@ export function formatClaudeUsageRows(
   columns?: number[],
   clocks?: number[],
   days?: number[],
-  /** Pool account name (config dir basename, no leading dot) whose row gets a `«` after its name. */
+  /** Canonical account identity; old callers without account IDs can still supply the name. */
   active?: string,
+  nowMs?: number,
 ) {
   const accounts = usage.accounts?.flatMap((account) =>
-    account.usage.ok ? [{ name: account.name, usage: account.usage }] : [],
+    account.usage.ok ? [{ id: account.id, name: account.name, usage: account.usage }] : [],
   )
-  const known = accounts?.length ? accounts : [{ name: undefined, usage }]
-  const cell = (window: UsageWindow, suffix: string) => {
+  const known = accounts?.length ? accounts : [{ id: usage.accountID, name: undefined, usage }]
+  const cell = (window: UsageWindow, suffix: string, snapshot: ClaudeCodeUsage) => {
     const idle = suffix === "h" && window.usedPercent === 0 ? "-" : ""
     // Unknown percent -> null ("reset unavailable"); hourly 0% with no reset ->
     // shows `-` (no 5-hour window running yet); other known percents without a reset leave a blank slot.
     const resetAt = window.resetAt ?? (window.usedPercent === null ? null : idle)
-    return { usedPercent: window.usedPercent, resetAt, suffix }
+    return { usedPercent: window.usedPercent, resetAt,
+      suffix: suffix + (nowMs !== undefined && usageWindowStale(window, snapshot, nowMs) ? "*" : "") }
   }
-  return known.flatMap(({ name, usage: account }, index) => {
+  return known.flatMap(({ id, name, usage: account }, index) => {
     const base = index === 0 ? "Claude" : `Claude${index + 1}`
-    const label = active && name === active ? `${base} «` : `${base}:`
+    const label = active && (id ?? name) === active ? `${base} «` : `${base}:`
     return formatUsageRows({
       label,
       remaining,
@@ -221,9 +230,16 @@ export function formatClaudeUsageRows(
       columns,
       clocks,
       days,
-      windows: [cell(account.fiveHour, "h"), cell(account.weekly, "w")],
-    }).map((row, rowIndex) => ({ ...row, label, spaced: index > 0 && rowIndex === 0 }))
+      windows: [cell(account.fiveHour, "h", account), cell(account.weekly, "w", account)],
+    }).map((row, rowIndex) => ({ ...row, label, snapshot: account, spaced: index > 0 && rowIndex === 0 }))
   })
+}
+
+export function usageWindowStale(window: UsageWindow, snapshot: UsageSnapshot<{ ok: boolean }>, now: number) {
+  return window.expired === true || window.cached === true || snapshot.stale === true ||
+    (window.resetMs !== null && window.resetMs <= now) ||
+    (window.fetchedAt === undefined && snapshot.source === "cache") ||
+    now - (window.fetchedAt ?? snapshot.fetchedAt ?? 0) > 300_000
 }
 
 /** Sidebar suffix for a window of this length: `h`, `d`, `w`, `m`; empty when the length is unknown or unusual. */
@@ -286,20 +302,27 @@ export function orderUsageWindows(windows: [UsageWindow, UsageWindow]): [UsageWi
 export type OpenAIUsage =
   | {
       ok: true
+      accountID?: string
       primary: UsageWindow
       secondary: UsageWindow
+      fetchedAt?: number
+      metadata?: UsageProbeMetadata
     }
   | {
       ok: false
+      accountID?: string
       reason?: "reauthenticate"
+      metadata?: UsageProbeMetadata
     }
 
 class UsageRequestError extends Error {
   readonly status: number
+  readonly retryAt?: number
 
-  constructor(status: number) {
+  constructor(status: number, retryAt?: number) {
     super(`Usage request failed with status ${status}.`)
     this.status = status
+    this.retryAt = retryAt
   }
 }
 
@@ -308,9 +331,12 @@ export type OpenCodeGoUsage =
       ok: true
       weekly: UsageWindow
       monthly: UsageWindow | null
+      fetchedAt?: number
+      metadata?: UsageProbeMetadata
     }
   | {
       ok: false
+      metadata?: UsageProbeMetadata
     }
 
 export type OpenRouterUsage =
@@ -320,35 +346,44 @@ export type OpenRouterUsage =
       remainingPercent: number
       usedUsd: number
       limitUsd: number
+      fetchedAt?: number
+      metadata?: UsageProbeMetadata
     }
   | {
       ok: false
+      metadata?: UsageProbeMetadata
     }
 
 export type CursorUsage =
   | {
       ok: true
       monthly: UsageWindow & { apiUsedPercent: number | null }
+      fetchedAt?: number
+      metadata?: UsageProbeMetadata
     }
   | {
       ok: false
       reason?: "need-token" | "reauthenticate"
+      metadata?: UsageProbeMetadata
     }
 
 export type ClaudeCodeUsage =
   | {
       ok: true
+      accountID?: string
       fetchedAt: number
       source: "live" | "cache"
       fiveHour: UsageWindow
       weekly: UsageWindow
+      metadata?: UsageProbeMetadata
       /** Pooled accounts: each account's own usage, in pool order, including unreadable ones. */
-      accounts?: { name: string; usage: ClaudeCodeUsage }[]
+      accounts?: { name: string; id?: string; usage: ClaudeCodeUsage }[]
     }
   | {
       ok: false
       /** Why no usage could be read: no login in the config dir, or an expired login with no cached result. */
       reason?: "signed-out" | "expired"
+      metadata?: UsageProbeMetadata
     }
 
 type UsageOptions = {
@@ -363,77 +398,6 @@ type UsageOptions = {
   nowMs?: number
   timeoutMs?: number
   signal?: AbortSignal
-}
-
-export type UsageRefreshScheduler = {
-  request(): void
-  dispose(): void
-}
-
-export function shouldRefreshUsageAfterIdle(
-  event: { sessionID: string; status: { type: string } },
-  activeSessionID: string,
-): boolean {
-  return event.sessionID === activeSessionID && event.status.type === "idle"
-}
-
-export function createUsageRefreshScheduler(options: {
-  refresh: () => Promise<void>
-  fallbackIntervalMs: number
-  schedule?: (callback: () => void, delay: number) => unknown
-  cancel?: (handle: unknown) => void
-}): UsageRefreshScheduler {
-  const schedule = options.schedule ?? ((callback, delay) => setTimeout(callback, delay))
-  const cancel = options.cancel ?? ((handle) => clearTimeout(handle as ReturnType<typeof setTimeout>))
-  let running = false
-  let queued = false
-  let disposed = false
-  let timer: unknown
-
-  const scheduleFallback = () => {
-    if (disposed) return
-    if (timer !== undefined) cancel(timer)
-    timer = schedule(() => {
-      timer = undefined
-      request()
-    }, options.fallbackIntervalMs)
-  }
-
-  function request() {
-    if (disposed) return
-    if (running) {
-      queued = true
-      return
-    }
-    if (timer !== undefined) {
-      cancel(timer)
-      timer = undefined
-    }
-    running = true
-    void options
-      .refresh()
-      .catch(() => undefined)
-      .finally(() => {
-        running = false
-        scheduleFallback()
-        if (queued) {
-          queued = false
-          queueMicrotask(request)
-        }
-      })
-  }
-
-  return {
-    request,
-    dispose() {
-      disposed = true
-      queued = false
-      if (timer !== undefined) {
-        cancel(timer)
-        timer = undefined
-      }
-    },
-  }
 }
 
 export function resolveAuthPath({
@@ -452,7 +416,67 @@ export function resolveAuthPath({
   return path.join(env.XDG_DATA_HOME ?? path.join(homeDir, ".local", "share"), "opencode", "auth.json")
 }
 
-function compactResetDate(date: Date): string {
+function clampUsagePercent(value: number): number {
+  return Math.max(0, Math.min(100, value))
+}
+
+function usageFailureMetadata(error: unknown): UsageProbeMetadata | undefined {
+  if (!(error instanceof UsageRequestError)) return undefined
+  return {
+    status: error.status,
+    ...(error.retryAt === undefined ? {} : { retryAt: error.retryAt }),
+  }
+}
+
+function parseRetryAfter(header: string | null, receiptMs: number): number | undefined {
+  if (!header) return undefined
+  const trimmed = header.trim()
+  if (!trimmed) return undefined
+  const seconds = Number(trimmed)
+  if (Number.isFinite(seconds) && seconds >= 0) return receiptMs + seconds * 1000
+  const date = Date.parse(trimmed)
+  if (!Number.isNaN(date)) return date
+  return undefined
+}
+
+/** Canonical identity for a resolved Claude config directory (stable across platforms when resolved). */
+export function claudeConfigDirId(resolvedDir: string): string {
+  return ClaudeUsageCache.configDirId(resolvedDir)
+}
+
+function claudeUsageCacheWritePath(homeDir: string, resolvedDir: string): string {
+  return path.join(homeDir, ".cache", "opencode", ClaudeUsageCache.cacheFileName(homeDir, resolvedDir))
+}
+
+function claudeUsageCacheLegacyPath(homeDir: string, resolvedDir: string): string {
+  return path.join(
+    homeDir,
+    ".cache",
+    "opencode",
+    ClaudeUsageCache.cacheLegacyFileName(resolvedDir),
+  )
+}
+
+async function resolveClaudeUsageCacheReadPath(homeDir: string, resolvedDir: string, writePath: string): Promise<string> {
+  if (writePath !== claudeUsageCacheWritePath(homeDir, resolvedDir)) return writePath
+  try {
+    await stat(writePath)
+    return writePath
+  } catch {
+    /* primary cache missing */
+  }
+  const legacyPath = claudeUsageCacheLegacyPath(homeDir, resolvedDir)
+  if (legacyPath === writePath) return writePath
+  try {
+    const raw = await readFile(legacyPath, "utf8")
+    if (ClaudeUsageCache.legacyCacheProvesIdentity(JSON.parse(raw), resolvedDir)) return legacyPath
+  } catch {
+    /* no legacy or unreadable */
+  }
+  return writePath
+}
+
+export function compactResetDate(date: Date): string {
   const hours = date.getHours()
   const minutes = String(date.getMinutes()).padStart(2, "0")
   return `${date.getMonth() + 1}/${date.getDate()}/${String(date.getFullYear()).slice(2)} ~${hours % 12 || 12}:${minutes}${hours >= 12 ? "PM" : "AM"}`
@@ -464,43 +488,68 @@ function compactResetDate(date: Date): string {
 export async function probeClaudeCodeUsage(options: UsageOptions = {}): Promise<ClaudeCodeUsage> {
   const homeDir = options.homeDir ?? os.homedir()
   const nowMs = options.nowMs ?? Date.now()
-  const cachePath = options.claudeUsageCachePath ?? path.join(homeDir, ".cache", "opencode", "claude-usage.json")
-  const oauth = await readFile(
-    options.claudeCredentialsPath ?? path.join(homeDir, ".claude", ".credentials.json"),
-    "utf8",
+  const credentialsPath = options.claudeCredentialsPath ?? path.join(
+    options.env?.CLAUDE_CONFIG_DIR ?? (options.homeDir ? undefined : process.env.CLAUDE_CONFIG_DIR) ??
+      path.join(homeDir, ".claude"), ".credentials.json",
   )
+  const configDir = path.resolve(path.dirname(credentialsPath))
+  const cacheWritePath =
+    options.claudeUsageCachePath ?? claudeUsageCacheWritePath(homeDir, configDir)
+  const cacheReadPath = await resolveClaudeUsageCacheReadPath(homeDir, configDir, cacheWritePath)
+  const oauth = await readFile(credentialsPath, "utf8")
     .then(
       (raw) => (JSON.parse(raw) as { claudeAiOauth?: { accessToken?: unknown; expiresAt?: unknown } }).claudeAiOauth,
     )
     .catch(() => undefined)
   if (typeof oauth?.accessToken !== "string" || !oauth.accessToken) return { ok: false, reason: "signed-out" }
   const expired = typeof oauth.expiresAt === "number" && oauth.expiresAt <= nowMs
-  const liveRaw = expired
+  let liveFailure: UsageProbeMetadata | undefined
+  const liveFetched = expired
     ? undefined
     : await fetchUsageResponse(options, CLAUDE_USAGE_URL, {
         Authorization: `Bearer ${oauth.accessToken}`,
         "anthropic-beta": "oauth-2025-04-20",
         accept: "application/json",
-      }).catch(() => undefined)
-  const liveUsage = parseClaudeUsage(liveRaw, nowMs)
-  const cachedRaw = await readFile(cachePath, "utf8")
+      }).catch((error) => {
+        liveFailure = usageFailureMetadata(error)
+        return undefined
+      })
+  const liveUsage = parseClaudeUsage(liveFetched?.body, nowMs, liveFetched?.receiptMs)
+  const cachedRaw = await readFile(cacheReadPath, "utf8")
     .then((raw) => JSON.parse(raw) as unknown)
     .catch(() => undefined)
-  const prevStat = await stat(cachePath).catch(() => undefined)
+  const prevStat = await stat(cacheReadPath).catch(() => undefined)
   const prevMtime = prevStat?.mtimeMs ?? nowMs
-  const cachedUsage = parseClaudeUsage(cachedRaw, nowMs)
+  const cachedUsage = parseClaudeUsage(cachedRaw, nowMs, prevMtime)
   const cachedTimed = cachedUsage.ok
     ? attachClaudeTimes(cachedUsage, claudeCacheTimes(cachedRaw), prevMtime)
     : cachedUsage
   if (liveUsage.ok) {
     const merged = withClaudeFallback(liveUsage, cachedTimed.ok ? cachedTimed : undefined, nowMs)
-    await mkdir(path.dirname(cachePath), { recursive: true })
-      .then(() => writeFile(cachePath, JSON.stringify(mergeClaudeCache(liveRaw, cachedRaw, merged, nowMs))))
+    await mkdir(path.dirname(cacheWritePath), { recursive: true })
+      .then(() =>
+        writeFile(
+          cacheWritePath,
+          JSON.stringify(mergeClaudeCache(liveFetched?.body, cachedRaw, merged, nowMs, configDir)),
+        ),
+      )
       .catch(() => undefined)
-    return merged
+    return { ...merged, accountID: claudeConfigDirId(configDir) }
   }
-  if (!cachedTimed.ok) return expired ? { ok: false, reason: "expired" } : cachedTimed
-  return { ...cachedTimed, source: "cache", fetchedAt: prevMtime }
+  if (!cachedTimed.ok) {
+    return expired
+      ? { ok: false, reason: "expired", ...(liveFailure ? { metadata: liveFailure } : {}) }
+      : liveFailure
+        ? { ...cachedTimed, metadata: liveFailure }
+        : cachedTimed
+  }
+  return {
+    ...cachedTimed,
+    accountID: claudeConfigDirId(configDir),
+    source: "cache",
+    fetchedAt: prevMtime,
+    ...(liveFailure ? { metadata: liveFailure } : {}),
+  }
 }
 
 /**
@@ -513,46 +562,54 @@ export async function probeClaudeCodeUsage(options: UsageOptions = {}): Promise<
  */
 export async function probeClaudeCodePool(configDirs: string[], options: UsageOptions = {}): Promise<ClaudeCodeUsage> {
   const homeDir = options.homeDir ?? os.homedir()
-  const defaultDir = path.join(homeDir, ".claude")
   const dirs = configDirs.map((dir) => path.resolve(dir.replace(/^~(?=$|[\\/])/, homeDir)))
   const results = await Promise.all(
     dirs.map((dir) =>
       probeClaudeCodeUsage({
         ...options,
         claudeCredentialsPath: path.join(dir, ".credentials.json"),
-        // The default account keeps the cache it always had.
-        claudeUsageCachePath:
-          dir === defaultDir
-            ? undefined
-            : path.join(homeDir, ".cache", "opencode", `claude-usage-${path.basename(dir).replace(/^\./, "")}.json`),
+        claudeUsageCachePath: claudeUsageCacheWritePath(homeDir, dir),
       }),
     ),
   )
   const known = results.filter((result) => result.ok)
-  if (!known.length) return { ok: false }
+  const metadata = results.map((result) => result.metadata).find((item) => item?.status === 429) ??
+    results.find((result) => result.metadata)?.metadata
+  const retryAt = Math.max(0, ...results.map((result) => result.metadata?.retryAt ?? 0))
+  if (!known.length) return { ok: false, ...(metadata ? { metadata: { ...metadata, ...(retryAt ? { retryAt } : {}) } } : {}) }
   return {
     ok: true,
     // The pool reads as fresh while any account is live; an idle account's cached usage does not dim it.
     fetchedAt: Math.max(...known.map((result) => result.fetchedAt)),
     source: known.some((result) => result.source === "live") ? "live" : "cache",
+    ...(metadata ? { metadata: { ...metadata, ...(retryAt ? { retryAt } : {}) } } : {}),
     fiveHour: averageClaudeWindows(known.map((result) => result.fiveHour)),
     weekly: averageClaudeWindows(known.map((result) => result.weekly)),
-    accounts: dirs.map((dir, index) => ({ name: path.basename(dir).replace(/^\./, ""), usage: results[index] })),
+    accounts: dirs.map((dir, index) => ({
+      name: path.basename(dir).replace(/^\./, ""),
+      id: claudeConfigDirId(dir),
+      usage: results[index],
+    })),
   }
 }
 
-function parseClaudeUsage(value: unknown, nowMs: number): ClaudeCodeUsage {
+function parseClaudeUsage(value: unknown, nowMs: number, receiptMs?: number): ClaudeCodeUsage {
   const body = value as { five_hour?: unknown; seven_day?: unknown } | undefined
   if (!body || typeof body !== "object") return { ok: false }
-  const fiveHour = claudeWindow(body?.five_hour, nowMs)
-  const weekly = claudeWindow(body?.seven_day, nowMs)
+  const readMs = receiptMs ?? nowMs
+  const fiveHour = claudeWindow(body?.five_hour, nowMs, readMs)
+  const weekly = claudeWindow(body?.seven_day, nowMs, readMs)
   // Windows read independently: a valid weekly survives a missing hourly and vice versa.
   // A malformed window stays unknown (null), never zero, unless its known reset proves expiry.
   if (fiveHour.usedPercent === null && weekly.usedPercent === null) return { ok: false }
-  return { ok: true, fiveHour, weekly, fetchedAt: nowMs, source: "live" }
+  const fetchedAt = Math.max(
+    fiveHour.fetchedAt ?? readMs,
+    weekly.fetchedAt ?? readMs,
+  )
+  return { ok: true, fiveHour, weekly, fetchedAt, source: "live" }
 }
 
-function claudeWindow(value: unknown, nowMs: number): UsageWindow {
+function claudeWindow(value: unknown, nowMs: number, receiptMs: number): UsageWindow {
   const item = value as { utilization?: unknown; resets_at?: unknown } | null
   if (typeof item?.utilization !== "number" || !Number.isFinite(item.utilization))
     return { usedPercent: null, resetAt: null, resetMs: null, minutes: null }
@@ -560,13 +617,14 @@ function claudeWindow(value: unknown, nowMs: number): UsageWindow {
   const valid = date && !Number.isNaN(date.valueOf())
   // A cached window whose reset has passed is known to be back at zero.
   if (valid && date.valueOf() <= nowMs)
-    return { usedPercent: 0, resetAt: null, resetMs: null, minutes: null, expired: true, fetchedAt: nowMs }
+    return { usedPercent: 0, resetAt: null, resetMs: null, minutes: null, expired: true, fetchedAt: receiptMs }
   return {
-    usedPercent: Math.round(Math.max(0, Math.min(100, item.utilization))),
+    // OAuth usage utilization is already a percentage; only stream events use fractions.
+    usedPercent: clampUsagePercent(item.utilization),
     resetAt: valid ? compactResetDate(date) : null,
     resetMs: valid ? date.valueOf() : null,
     minutes: null,
-    fetchedAt: nowMs,
+    fetchedAt: receiptMs,
   }
 }
 
@@ -609,6 +667,7 @@ function mergeClaudeCache(
   cachedRaw: unknown,
   merged: Extract<ClaudeCodeUsage, { ok: true }>,
   nowMs: number,
+  configDir: string,
 ): unknown {
   if (!liveRaw || typeof liveRaw !== "object") return liveRaw
   const live = liveRaw as Record<string, unknown>
@@ -622,6 +681,7 @@ function mergeClaudeCache(
     five_hour: merged.fiveHour.fetchedAt ?? nowMs,
     seven_day: merged.weekly.fetchedAt ?? nowMs,
   }
+  out._configDir = claudeConfigDirId(configDir)
   return out
 }
 
@@ -643,14 +703,14 @@ export function withClaudeFallback(
   const fallbackOk = fallback?.ok ? fallback : undefined
   const byName = new Map(
     (fallbackOk?.accounts ?? []).flatMap((account) =>
-      account.usage.ok ? [[account.name, account.usage] as const] : [],
+      account.usage.ok ? [[account.id ?? account.name, account.usage] as const] : [],
     ),
   )
   const accounts = primary.accounts?.map((account) => {
-    const previous = byName.get(account.name)
+    const previous = byName.get(account.id ?? account.name)
     if (account.usage.ok && previous?.ok)
-      return { name: account.name, usage: withClaudeFallback(account.usage, previous, nowMs) }
-    if (!account.usage.ok && previous?.ok) return { name: account.name, usage: markClaudeCached(previous) }
+      return { ...account, usage: withClaudeFallback(account.usage, previous, nowMs) }
+    if (!account.usage.ok && previous?.ok) return { ...account, usage: markClaudeCached(previous) }
     return account
   })
   const merged: Extract<ClaudeCodeUsage, { ok: true }> = {
@@ -684,7 +744,9 @@ function averageClaudeWindows(windows: UsageWindow[]): UsageWindow {
     ? ({ fetchedAt: Math.max(...known.map((window) => window.fetchedAt as number)) } as const)
     : {}
   return {
-    usedPercent: Math.round(known.reduce((total, window) => total + (window.usedPercent as number), 0) / known.length),
+    usedPercent: clampUsagePercent(
+      known.reduce((total, window) => total + (window.usedPercent as number), 0) / known.length,
+    ),
     resetAt: next?.resetAt ?? null,
     resetMs: next?.resetMs ?? null,
     minutes: null,
@@ -699,7 +761,7 @@ export function projectClaudeUsage(snapshot: ClaudeCodeUsage, nowMs: number): Cl
   if (!snapshot.ok) return snapshot
   if (snapshot.accounts) {
     const accounts = snapshot.accounts.map((account) => ({
-      name: account.name,
+      ...account,
       usage: projectClaudeUsage(account.usage, nowMs),
     }))
     const known = accounts.map((account) => account.usage).filter((usage) => usage.ok)
@@ -736,7 +798,7 @@ function resetTimestamp(resetAt: unknown, resetAfterSeconds: unknown, nowMs: num
   return Number.isNaN(new Date(ms).valueOf()) ? null : ms
 }
 
-function windowFromUsage(value: unknown, nowMs: number): UsageWindow | null {
+function windowFromUsage(value: unknown, receiptMs: number): UsageWindow | null {
   if (!value || typeof value !== "object") return null
   const window = value as {
     used_percent?: unknown
@@ -745,22 +807,23 @@ function windowFromUsage(value: unknown, nowMs: number): UsageWindow | null {
     limit_window_seconds?: unknown
   }
   if (typeof window.used_percent !== "number" || !Number.isFinite(window.used_percent)) return null
-  const usedPercent = Math.round(Math.max(0, Math.min(100, window.used_percent)))
+  const usedPercent = clampUsagePercent(window.used_percent)
   const minutes = typeof window.limit_window_seconds === "number" ? Math.round(window.limit_window_seconds / 60) : null
-  const resetMs = resetTimestamp(window.reset_at, window.reset_after_seconds, nowMs)
+  const resetMs = resetTimestamp(window.reset_at, window.reset_after_seconds, receiptMs)
   return {
     usedPercent,
     resetAt: resetMs === null ? null : compactResetDate(new Date(resetMs)),
     resetMs,
     minutes,
+    fetchedAt: receiptMs,
   }
 }
 
-function parseUsageResponse(value: unknown, nowMs: number): OpenAIUsage {
+function parseUsageResponse(value: unknown, receiptMs: number): OpenAIUsage {
   if (!value || typeof value !== "object") return errorResult()
   const body = value as { rate_limit?: { primary_window?: unknown; secondary_window?: unknown } }
-  const primary = windowFromUsage(body.rate_limit?.primary_window, nowMs)
-  const secondary = windowFromUsage(body.rate_limit?.secondary_window, nowMs) ?? {
+  const primary = windowFromUsage(body.rate_limit?.primary_window, receiptMs)
+  const secondary = windowFromUsage(body.rate_limit?.secondary_window, receiptMs) ?? {
     usedPercent: null,
     resetAt: null,
     resetMs: null,
@@ -798,7 +861,7 @@ async function fetchUsageResponse(
   options: UsageOptions,
   url: string,
   headers: Record<string, string>,
-): Promise<unknown> {
+): Promise<{ body: unknown; receiptMs: number }> {
   const fetchImpl = options.fetchImpl ?? fetch
   const response = await fetchImpl(url, {
     method: "GET",
@@ -807,12 +870,14 @@ async function fetchUsageResponse(
       ? AbortSignal.any([options.signal, AbortSignal.timeout(options.timeoutMs ?? REQUEST_TIMEOUT_MS)])
       : AbortSignal.timeout(options.timeoutMs ?? REQUEST_TIMEOUT_MS),
   })
-  if (!response.ok) throw new UsageRequestError(response.status)
-  return response.json()
+  const receiptMs = options.nowMs ?? Date.now()
+  if (!response.ok) throw new UsageRequestError(response.status, parseRetryAfter(response.headers.get("Retry-After"), receiptMs))
+  return { body: await response.json(), receiptMs }
 }
 
 async function readAuthContent(options: UsageOptions): Promise<string> {
   if (options.env?.OPENCODE_AUTH_CONTENT) return options.env.OPENCODE_AUTH_CONTENT
+  if (!options.authPath && !options.env && process.env.OPENCODE_AUTH_CONTENT) return process.env.OPENCODE_AUTH_CONTENT
   const authPaths = options.authPath
     ? [options.authPath]
     : [
@@ -835,8 +900,9 @@ export async function probeOpenAIUsage(options: UsageOptions = {}): Promise<Open
   try {
     const raw = await readAuthContent(options)
     const openai = (JSON.parse(raw) as { openai?: { access?: unknown; accountId?: unknown; expires?: unknown } }).openai
+    const accountID = typeof openai?.accountId === "string" ? openai.accountId : undefined
     if (typeof openai?.expires === "number" && Number.isFinite(openai.expires) && openai.expires <= nowMs) {
-      return { ok: false, reason: "reauthenticate" }
+      return { ok: false, reason: "reauthenticate", ...(accountID ? { accountID } : {}) }
     }
     if (typeof openai?.access !== "string" || openai.access.trim() === "") return errorResult()
     credentials = {
@@ -848,16 +914,21 @@ export async function probeOpenAIUsage(options: UsageOptions = {}): Promise<Open
   }
 
   try {
-    return parseUsageResponse(await fetchUsageResponse(options, USAGE_URL, usageHeaders(credentials)), nowMs)
+    const fetched = await fetchUsageResponse(options, USAGE_URL, usageHeaders(credentials))
+    const parsed = parseUsageResponse(fetched.body, fetched.receiptMs)
+    return parsed.ok ? { ...parsed, accountID: credentials.accountId, fetchedAt: fetched.receiptMs } : parsed
   } catch (error) {
+    const metadata = usageFailureMetadata(error)
     if (error instanceof UsageRequestError && error.status === 401) {
-      return { ok: false, reason: "reauthenticate" }
+      return { ok: false, reason: "reauthenticate", ...(metadata ? { metadata } : {}),
+        ...(credentials.accountId ? { accountID: credentials.accountId } : {}) }
     }
-    return errorResult()
+    return { ok: false, ...(metadata ? { metadata } : {}),
+      ...(credentials.accountId ? { accountID: credentials.accountId } : {}) }
   }
 }
 
-function goWindow(value: unknown, minutes: number): UsageWindow | null {
+function goWindow(value: unknown, minutes: number, receiptMs: number): UsageWindow | null {
   if (!value || typeof value !== "object") return null
   const window = value as { percent?: unknown; resetsAt?: unknown }
   if (typeof window.percent !== "number" || !Number.isFinite(window.percent)) return null
@@ -865,24 +936,25 @@ function goWindow(value: unknown, minutes: number): UsageWindow | null {
   const reset = new Date(window.resetsAt)
   if (Number.isNaN(reset.valueOf())) return null
   return {
-    usedPercent: Math.round(Math.max(0, Math.min(100, window.percent))),
+    usedPercent: clampUsagePercent(window.percent),
     resetAt: compactResetDate(reset),
     resetMs: reset.valueOf(),
     minutes,
+    fetchedAt: receiptMs,
   }
 }
 
-function parseGoUsageResponse(value: unknown): OpenCodeGoUsage {
+function parseGoUsageResponse(value: unknown, receiptMs: number): OpenCodeGoUsage {
   if (!value || typeof value !== "object") return goErrorResult()
   const usage = (value as { usage?: unknown }).usage
   if (!usage || typeof usage !== "object") return goErrorResult()
   const windows = usage as { weekly?: unknown; monthly?: unknown }
-  const weekly = goWindow(windows.weekly, 7 * 24 * 60)
+  const weekly = goWindow(windows.weekly, 7 * 24 * 60, receiptMs)
   if (!weekly) return goErrorResult()
   return {
     ok: true,
     weekly,
-    monthly: goWindow(windows.monthly, 30 * 24 * 60),
+    monthly: goWindow(windows.monthly, 30 * 24 * 60, receiptMs),
   }
 }
 
@@ -898,11 +970,15 @@ export async function probeOpenCodeGoUsage(options: UsageOptions = {}): Promise<
   }
 
   try {
-    return parseGoUsageResponse(
-      await fetchUsageResponse(options, GO_USAGE_URL, { Authorization: `Bearer ${key}`, accept: "application/json" }),
-    )
-  } catch {
-    return goErrorResult()
+    const fetched = await fetchUsageResponse(options, GO_USAGE_URL, {
+      Authorization: `Bearer ${key}`,
+      accept: "application/json",
+    })
+    const parsed = parseGoUsageResponse(fetched.body, fetched.receiptMs)
+    return parsed.ok ? { ...parsed, fetchedAt: fetched.receiptMs } : parsed
+  } catch (error) {
+    const metadata = usageFailureMetadata(error)
+    return metadata ? { ok: false, metadata } : goErrorResult()
   }
 }
 
@@ -917,8 +993,8 @@ function parseOpenRouterResponse(value: unknown): OpenRouterUsage {
   const usedUsd = limit - remaining
   return {
     ok: true,
-    usedPercent: Math.round((usedUsd / limit) * 100),
-    remainingPercent: Math.round((remaining / limit) * 100),
+    usedPercent: clampUsagePercent((usedUsd / limit) * 100),
+    remainingPercent: clampUsagePercent((remaining / limit) * 100),
     usedUsd,
     limitUsd: limit,
   }
@@ -926,8 +1002,9 @@ function parseOpenRouterResponse(value: unknown): OpenRouterUsage {
 
 export async function probeOpenRouterUsage(options: UsageOptions = {}): Promise<OpenRouterUsage> {
   let key: string | undefined
-  if (typeof options.env?.OPENROUTER_API_KEY === "string" && options.env.OPENROUTER_API_KEY.trim() !== "") {
-    key = options.env.OPENROUTER_API_KEY.trim()
+  const env = options.env ?? (options.authPath ? {} : process.env)
+  if (typeof env.OPENROUTER_API_KEY === "string" && env.OPENROUTER_API_KEY.trim() !== "") {
+    key = env.OPENROUTER_API_KEY.trim()
   } else {
     try {
       const raw = await readAuthContent(options)
@@ -940,11 +1017,15 @@ export async function probeOpenRouterUsage(options: UsageOptions = {}): Promise<
   if (!key) return openRouterErrorResult()
 
   try {
-    return parseOpenRouterResponse(
-      await fetchUsageResponse(options, OPENROUTER_URL, { Authorization: `Bearer ${key}`, accept: "application/json" }),
-    )
-  } catch {
-    return openRouterErrorResult()
+    const fetched = await fetchUsageResponse(options, OPENROUTER_URL, {
+      Authorization: `Bearer ${key}`,
+      accept: "application/json",
+    })
+    const parsed = parseOpenRouterResponse(fetched.body)
+    return parsed.ok ? { ...parsed, fetchedAt: fetched.receiptMs } : parsed
+  } catch (error) {
+    const metadata = usageFailureMetadata(error)
+    return metadata ? { ok: false, metadata } : openRouterErrorResult()
   }
 }
 
@@ -1006,7 +1087,16 @@ export function cursorSessionCookie(value: string): string | undefined {
   return `${encodeURIComponent(sub)}%3A%3A${jwt}`
 }
 
-function parseCursorUsageResponse(value: unknown, nowMs: number): CursorUsage {
+function parseCursorPercent(value: unknown): number | null {
+  if (typeof value !== "number" || !Number.isFinite(value)) return null
+  return clampUsagePercent(value)
+}
+
+function parseCursorUsageResponse(
+  value: unknown,
+  receiptMs: number,
+  accountSource: UsageProbeMetadata["accountSource"],
+): CursorUsage {
   if (!value || typeof value !== "object") return { ok: false }
   const body = value as {
     billingCycleEnd?: unknown
@@ -1028,60 +1118,95 @@ function parseCursorUsageResponse(value: unknown, nowMs: number): CursorUsage {
     apiPercentUsed?: unknown
     totalPercentUsed?: unknown
   }
-  const clampPercent = (value: unknown): number | null =>
-    typeof value === "number" && Number.isFinite(value) ? Math.round(Math.max(0, Math.min(100, value))) : null
   const usedPercent =
     body.isUnlimited === true
       ? null
-      : (clampPercent(window.autoPercentUsed) ??
+      : (parseCursorPercent(window.autoPercentUsed) ??
         (typeof window.used === "number" &&
         Number.isFinite(window.used) &&
         typeof window.limit === "number" &&
         Number.isFinite(window.limit) &&
         window.limit > 0
-          ? Math.round(Math.max(0, Math.min(100, (window.used / window.limit) * 100)))
-          : typeof window.totalPercentUsed === "number" && Number.isFinite(window.totalPercentUsed)
-            ? Math.round(
-                Math.max(
-                  0,
-                  Math.min(100, window.totalPercentUsed <= 1 ? window.totalPercentUsed * 100 : window.totalPercentUsed),
-                ),
-              )
-            : null))
+          ? clampUsagePercent((window.used / window.limit) * 100)
+          : parseCursorPercent(typeof window.totalPercentUsed === "number" && window.totalPercentUsed <= 1
+            ? window.totalPercentUsed * 100 : window.totalPercentUsed)))
   if (usedPercent === null && body.isUnlimited !== true) return { ok: false }
   return {
     ok: true,
+    fetchedAt: receiptMs,
     monthly: {
       usedPercent,
-      apiUsedPercent: clampPercent(window.apiPercentUsed),
+      apiUsedPercent: parseCursorPercent(window.apiPercentUsed),
       resetAt: compactResetDate(resetAt),
       resetMs: resetAt.valueOf(),
       minutes: null,
+      fetchedAt: receiptMs,
     },
+    ...(accountSource ? { metadata: { accountSource } } : {}),
+  }
+}
+
+async function readCursorOpenCodeCredential(
+  options: UsageOptions,
+): Promise<{ token: string } | { unavailable: "need-token" | "reauthenticate" } | undefined> {
+  try {
+    const raw = await readAuthContent(options)
+    const cursor = (JSON.parse(raw) as { cursor?: Record<string, unknown> }).cursor
+    if (!cursor || typeof cursor !== "object") return undefined
+    if (
+      cursor.type === "oauth" &&
+      typeof cursor.access === "string" &&
+      cursor.access.trim() !== ""
+    ) {
+      return { token: cursor.access.trim() }
+    }
+    if (cursor.type === "api" && typeof cursor.key === "string" && cursor.key.trim() !== "") {
+      const key = cursor.key.trim()
+      if (key.startsWith("crsr_")) return { unavailable: "need-token" }
+      if (cursorSessionCookie(key)) return { token: key }
+      return { unavailable: "need-token" }
+    }
+    return { unavailable: "reauthenticate" }
+  } catch {
+    return undefined
   }
 }
 
 export async function probeCursorUsage(options: UsageOptions = {}): Promise<CursorUsage> {
-  let token = await readCursorAccessToken(
-    options.cursorDbPath ?? cursorDbPath({ env: options.env, homeDir: options.homeDir }),
-  )
-  if (!token) token = options.cursorSessionToken?.trim()
+  const openCode = await readCursorOpenCodeCredential(options)
+  if (openCode && "unavailable" in openCode)
+    return { ok: false, reason: openCode.unavailable, metadata: { accountSource: "opencode" } }
+
+  const openCodeToken = openCode?.token
+  const pastedToken = options.cursorSessionToken?.trim()
+  const desktopToken = openCodeToken || pastedToken
+    ? undefined
+    : await readCursorAccessToken(options.cursorDbPath ?? cursorDbPath({ env: options.env, homeDir: options.homeDir }))
+
+  const token = openCodeToken ?? pastedToken ?? desktopToken
+  const accountSource: UsageProbeMetadata["accountSource"] | undefined = openCodeToken
+    ? "opencode"
+    : pastedToken
+      ? "cookie"
+      : desktopToken
+        ? "desktop"
+        : undefined
+
   if (!token) return { ok: false, reason: "need-token" }
   const cookie = cursorSessionCookie(token)
   if (!cookie) return { ok: false, reason: "need-token" }
 
   try {
-    return parseCursorUsageResponse(
-      await fetchUsageResponse(options, CURSOR_USAGE_URL, {
-        Cookie: `WorkosCursorSessionToken=${cookie}`,
-        accept: "application/json",
-      }),
-      options.nowMs ?? Date.now(),
-    )
+    const fetched = await fetchUsageResponse(options, CURSOR_USAGE_URL, {
+      Cookie: `WorkosCursorSessionToken=${cookie}`,
+      accept: "application/json",
+    })
+    return parseCursorUsageResponse(fetched.body, fetched.receiptMs, accountSource)
   } catch (error) {
+    const metadata = usageFailureMetadata(error)
     if (error instanceof UsageRequestError && (error.status === 401 || error.status === 403)) {
-      return { ok: false, reason: "reauthenticate" }
+      return { ok: false, reason: "reauthenticate", metadata: { ...metadata, accountSource } }
     }
-    return { ok: false }
+    return { ok: false, metadata: { ...metadata, accountSource } }
   }
 }

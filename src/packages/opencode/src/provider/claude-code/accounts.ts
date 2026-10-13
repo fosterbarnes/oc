@@ -1,6 +1,7 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import path from "node:path"
 import { Global } from "@opencode-ai/core/global"
+import { ClaudeUsageCache } from "@opencode-ai/core/claude-usage-cache"
 import { log } from "./logger.js"
 
 export const BASE_PROVIDER_ID = "claude-code"
@@ -121,17 +122,38 @@ function persistPool(now = Date.now()): void {
   }
 }
 
-/** Cache paths match `tui/.../sidebar-tools/usage.ts` (`claude-usage.json` / `claude-usage-<name>.json`). */
-function usageCachePath(id: string): string | undefined {
+/**
+ * Seed file for an account: the hashed write path when present, else a
+ * basename legacy file whose `_configDir` proves it belongs to this account.
+ * Unproven legacy files never seed, so one account cannot inherit another's
+ * limits through a shared basename.
+ */
+function seedCachePath(id: string): string | undefined {
   if (!cacheDir) return undefined
-  if (id === DEFAULT_ACCOUNT) return path.join(cacheDir, "claude-usage.json")
-  return path.join(cacheDir, `claude-usage-${path.basename(id).replace(/^\./, "")}.json`)
+  const home = expandHome("~")
+  const resolved = id === DEFAULT_ACCOUNT ? path.resolve(expandHome(process.env.CLAUDE_CONFIG_DIR ?? "~/.claude")) : id
+  const writePath = path.join(cacheDir, ClaudeUsageCache.cacheFileName(home, resolved))
+  try {
+    readFileSync(writePath, "utf8")
+    return writePath
+  } catch {
+    // Fall through to the legacy basename file.
+  }
+  const legacyPath = path.join(cacheDir, ClaudeUsageCache.cacheLegacyFileName(resolved))
+  let raw: unknown
+  try {
+    raw = JSON.parse(readFileSync(legacyPath, "utf8"))
+  } catch {
+    return undefined
+  }
+  if (!ClaudeUsageCache.legacyCacheProvesIdentity(raw, resolved)) return undefined
+  return legacyPath
 }
 
 function windowResetMs(value: unknown, now: number): number | undefined {
   const item = value as { utilization?: unknown; resets_at?: unknown } | null
   if (typeof item?.utilization !== "number" || !Number.isFinite(item.utilization)) return undefined
-  const usedPercent = Math.round(Math.max(0, Math.min(100, item.utilization)))
+  const usedPercent = Math.max(0, Math.min(100, item.utilization))
   if (usedPercent < 100) return undefined
   const date = typeof item.resets_at === "string" ? new Date(item.resets_at) : undefined
   if (!date || Number.isNaN(date.valueOf()) || date.valueOf() <= now) return undefined
@@ -140,7 +162,7 @@ function windowResetMs(value: unknown, now: number): number | undefined {
 
 function seedFromCaches(ids: string[], now: number): void {
   for (const id of ids) {
-    const file = usageCachePath(id)
+    const file = seedCachePath(id)
     if (!file) continue
     let raw: unknown
     try {
@@ -243,6 +265,15 @@ export function markAccountLimited(id: string, resetsAtMs: number | undefined, n
 /** `CLAUDE_CONFIG_DIR` for a pool account; undefined keeps the inherited environment. */
 export function poolConfigDir(id: string): string | undefined {
   return id === DEFAULT_ACCOUNT ? undefined : id
+}
+
+/**
+ * Canonical quota identity: the full resolved config dir with normalized
+ * slashes. Matches TUI `claudeConfigDirId`. Never a display basename.
+ */
+export function canonicalAccountId(id: string): string {
+  if (id !== DEFAULT_ACCOUNT) return ClaudeUsageCache.configDirId(id)
+  return ClaudeUsageCache.configDirId(expandHome(process.env.CLAUDE_CONFIG_DIR ?? "~/.claude"))
 }
 
 /** Earliest future `limitedUntil` over the given pool ids (all known ids when omitted). */

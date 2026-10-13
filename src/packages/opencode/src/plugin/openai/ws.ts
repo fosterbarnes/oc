@@ -26,6 +26,8 @@ export interface StreamResponsesWebSocketOptions {
   onFirstEvent?: (error?: WrappedError) => void
   onComplete?: (event: Record<string, unknown>) => void
   onTerminal?: (event: Record<string, unknown>) => void
+  /** Informational quota frames (`codex.rate_limits`); the stream flow is unchanged. */
+  onQuota?: (event: Record<string, unknown>) => void
   onRetryableTerminal?: (event: Record<string, unknown>) => Promise<WebSocket | undefined>
   onConnectionInvalid?: (error: ProviderError.ResponseStreamError, closeCode?: number) => void
   onAbort?: (error: Error) => void
@@ -194,6 +196,12 @@ export function streamResponsesWebSocket(options: StreamResponsesWebSocketOption
         return undefined
       }
     })()
+
+    // Informational quota frames are not Responses events or the first model response.
+    if (event?.type === "codex.rate_limits") {
+      options.onQuota?.(event)
+      return
+    }
 
     if (event?.type === "error" && options.onRetryableTerminal) {
       cleanupSocket()

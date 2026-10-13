@@ -10,9 +10,27 @@ import { cliIt } from "../../lib/cli-process"
 import { pollWithTimeout } from "../../lib/effect"
 import { reply, TestLLMServer } from "../../lib/llm-server"
 import { chatConfig, claudeEnv, expectIsolated, initRepo, openChat, outsideProfile } from "./chatFixture"
+import { runQuotaStreamIntegration } from "./quotaFixture"
 import { flowReport, stepRunner } from "./flowReport"
 
 const cliPath = process.env.CLAUDE_CLI_PATH ?? Bun.which("claude")
+
+describe("Claude quota observations through oc", () => {
+  cliIt.live(
+    "provider.usage.updated and GET /provider/usage refresh during a long Claude turn",
+    (fixture) =>
+      Effect.gen(function* () {
+        const { chat, first, snapshot } = yield* runQuotaStreamIntegration(fixture)
+        expect(first.observedAt).toBeGreaterThan(0)
+        expect(first.accountID).toContain("claude")
+        expect(JSON.stringify(snapshot)).toContain("8.25")
+        expect(
+          JSON.stringify((yield* Effect.promise(() => chat.sdk.session.messages({ sessionID: chat.sessionID }))).data),
+        ).toContain("QUOTA-DONE")
+      }),
+    120_000,
+  )
+})
 
 describe.skipIf(!cliPath)("Claude Code CLI against TestLLMServer", () => {
   cliIt.live(

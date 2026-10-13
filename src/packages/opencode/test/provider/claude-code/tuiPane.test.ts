@@ -12,6 +12,12 @@ import { cliIt, hostEnv, isolatedEnv, type CliFixture } from "../../lib/cli-proc
 import { pollWithTimeout } from "../../lib/effect"
 import { reply } from "../../lib/llm-server"
 import { chatConfig, claudeEnv, expectIsolated, initRepo, outsideProfile } from "./chatFixture"
+import {
+  installQuotaFakeCli,
+  quotaChatConfig,
+  quotaReleasePath,
+  QUOTA_MENU_HOURLY_UPDATED,
+} from "./quotaFixture"
 
 const cliPath = process.env.CLAUDE_CLI_PATH ?? Bun.which("claude")
 const muxPath = Bun.which("wezterm-mux-server")
@@ -282,6 +288,29 @@ describe.skipIf(!process.env.OC_TUI_PANE || !cliPath || !muxPath)("oc TUI in a W
     180_000,
   )
   cliIt.live(
+    "Claude fractional usage updates in the sidebar and Usage menu during a long turn",
+    (fixture) =>
+      Effect.gen(function* () {
+        const pane = yield* openPane(fixture, { quotaUsage: true })
+        const releasePath = pane.releasePath!
+        yield* pane.waitFor("Ask anything")
+        yield* pane.type("check quota mid-turn\r")
+        const mid = yield* pane.waitFor("12.5%h")
+        expect(sidebarColumn(mid)).toContain("8.25%w")
+        yield* pane.click("Usage:")
+        yield* pane.waitFor("5-hour")
+        yield* Effect.promise(() => Bun.write(releasePath, "go"))
+        yield* pane.waitFor(QUOTA_MENU_HOURLY_UPDATED)
+        yield* pane.type("\x1b")
+        const sidebar = yield* pane.waitFor("18.5%h", (shown) => sidebarColumn(shown).includes("18.5%h"))
+        expect(sidebarColumn(sidebar)).toContain("18.5%h")
+        const transcript = yield* pane.waitFor("QUOTA-DONE")
+        expect(transcript).toContain("QUOTA-DONE")
+        expect((yield* fixture.llm.inputs).length).toBe(0)
+      }),
+    180_000,
+  )
+  cliIt.live(
     "rewinding Claude shows the provider notice in the transcript",
     (fixture) =>
       Effect.gen(function* () {
@@ -311,13 +340,30 @@ describe.skipIf(!process.env.OC_TUI_PANE || !cliPath || !muxPath)("oc TUI in a W
 // Starts the mux server with oc as its first pane, in a git-inited `work` folder under a root
 // outside the profile (see `outsideProfile`). Scoped: closing the pane and the server comes
 // before the root is removed.
+function sidebarColumn(shown: string) {
+  return shown
+    .split("\n")
+    .map((line) => line.slice(118))
+    .join("\n")
+}
+
 const openPane = Effect.fnUntraced(function* (
   fixture: CliFixture,
-  options: { autoRename?: boolean; warmupAuth?: boolean } = {},
+  options: { autoRename?: boolean; warmupAuth?: boolean; quotaUsage?: boolean; root?: string } = {},
 ) {
-  const root = yield* outsideProfile
+  const root = options.root ?? (yield* outsideProfile)
   const project = path.join(root, "work")
   yield* initRepo(project)
+  let quotaCliPath: string | undefined
+  if (options.quotaUsage) {
+    const installed = yield* Effect.promise(() => installQuotaFakeCli(root))
+    quotaCliPath = installed.cliPath
+    yield* Effect.promise(async () => {
+      const sidebar = path.join(fixture.home, ".config", "openSidebar", "config.json")
+      await mkdir(path.dirname(sidebar), { recursive: true })
+      await Bun.write(sidebar, JSON.stringify({ usageProviders: ["claude-code"] }))
+    })
+  }
   if (options.warmupAuth)
     yield* Effect.promise(async () => {
       const dir = path.join(root, "claude")
@@ -342,18 +388,28 @@ const openPane = Effect.fnUntraced(function* (
     })
   const socket = path.join(root, "wezterm.sock")
   const configFile = path.join(root, "wezterm.lua")
-  const config = {
-    ...chatConfig(fixture.llm.url),
-    model: "claude-code/claude-sonnet-4-5",
-    ...(options.autoRename && { agent: { rename: { model: "test/test-model" } } }),
-  }
+  const config = quotaCliPath
+    ? {
+        ...quotaChatConfig(fixture.llm.url, quotaCliPath),
+        model: "claude-code/claude-sonnet-4-5",
+      }
+    : {
+        ...chatConfig(fixture.llm.url),
+        model: "claude-code/claude-sonnet-4-5",
+        ...(options.autoRename && { agent: { rename: { model: "test/test-model" } } }),
+      }
   const db = path.join(fixture.home, "opencode.db")
   const paneEnv = {
     ...isolatedEnv(fixture.home, JSON.stringify(config)),
     ...claudeEnv(root, fixture.llm.url),
+    // Sidebar reads os.homedir and desktop app-data paths, not only Global.Path.home.
+    USERPROFILE: fixture.home,
+    APPDATA: path.join(fixture.home, "AppData", "Roaming"),
+    LOCALAPPDATA: path.join(fixture.home, "AppData", "Local"),
     // The test preload's in-memory database is per process; the pane is a separate process.
     OPENCODE_DB: db,
     OC_AUTO_RENAME: options.autoRename ? "1" : "",
+    ...(options.quotaUsage && { OC_TEST_USAGE_RELEASE: quotaReleasePath(root) }),
   }
   // On Windows WezTerm builds each pane's env from its own env overlaid with the registry's
   // (HKCU\Environment), so a user-level OPENCODE_DB there sent panes to the real database.
@@ -457,6 +513,7 @@ const openPane = Effect.fnUntraced(function* (
   )
   const screen = Effect.promise(() => wez(["get-text", "--pane-id", String(paneID)]))
   return {
+    releasePath: options.quotaUsage ? quotaReleasePath(root) : undefined,
     // Sessions the pane's oc stored in the fixture database.
     sessions: Effect.sync(() => {
       const database = new Database(db, { readonly: true })
@@ -466,6 +523,14 @@ const openPane = Effect.fnUntraced(function* (
     }),
     type: (text: string) => Effect.promise(() => wez(["send-text", "--pane-id", String(paneID), "--no-paste", text])),
     paste: (text: string) => Effect.promise(() => wez(["send-text", "--pane-id", String(paneID), text])),
+    click: (text: string) => screen.pipe(Effect.flatMap((shown) => {
+      const lines = shown.split(/\r?\n/)
+      const row = lines.findIndex((line) => line.includes(text))
+      if (row < 0) return Effect.fail(new Error(`Cannot click absent text: ${text}`))
+      const column = lines[row].indexOf(text) + 2
+      return Effect.promise(() => wez(["send-text", "--pane-id", String(paneID), "--no-paste",
+        `\x1b[<0;${column};${row + 1}M\x1b[<0;${column};${row + 1}m`]))
+    })),
     // Polls the visible screen; on timeout the error carries the last screen.
     waitFor: (text: string, matches: (shown: string) => boolean = () => true) =>
       pollWithTimeout(

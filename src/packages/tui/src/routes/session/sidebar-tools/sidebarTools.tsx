@@ -22,9 +22,17 @@ import { useToast } from "../../../ui/toast"
 import { usePluginRuntime } from "../../../plugin/runtime"
 import { useOpencodeKeymap } from "../../../keymap"
 import { InstallationDisplayVersion, InstallationVersion } from "@opencode-ai/core/installation/version"
+import type { ProviderUsage } from "@opencode-ai/core/provider-usage"
+import { createUsageRefresh } from "./usageRefresh"
+import {
+  applyClaudeObservation,
+  applyOpenAIObservation,
+  mergeClaudeProbe,
+  mergeOpenAIProbe,
+  usageReadingDetails,
+} from "./usageLive"
 import {
   BUILTIN_SHELLS,
-  clearCursorSessionToken,
   clipEnd,
   defaultScriptSettings,
   defaultSidebarSettings,
@@ -64,7 +72,7 @@ import {
 } from "./helpers.js"
 import {
   cursorSessionCookie,
-  createUsageRefreshScheduler,
+  claudeConfigDirId,
   fullResetDate,
   formatUsagePercent,
   formatUsageRows,
@@ -78,14 +86,12 @@ import {
   probeOpenCodeGoUsage,
   probeOpenRouterUsage,
   projectClaudeUsage,
-  shouldRefreshUsageAfterIdle,
-  shouldRefreshUsageProvider,
-  updateClaudeSnapshot,
   updateUsageSnapshot,
   usageProviderForModel,
   USAGE_PROVIDER_OPTIONS,
   windowLabel,
   windowName,
+  usageWindowStale,
   type CursorUsage,
   type ClaudeCodeUsage,
   type OpenAIUsage,
@@ -119,7 +125,6 @@ const SCRIPT_EXTENSION_SECTION = "__sidebar_script_extension_section__"
 
 let everythingSearchHintShown = false
 const WEZTERM_SIZE_SECTION = "__sidebar_wezterm_size_section__"
-const USAGE_REFRESH_INTERVAL_MS = 5 * 60 * 1000
 
 function directoryColor(depth: number, colors: string[]): string {
   return colors[Math.min(depth, colors.length - 1)]
@@ -321,11 +326,10 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
   const [pins, setPins] = createSignal<ReadonlySet<string>>(new Set(sidebarSettings.scriptPins))
   const [favorites, setFavorites] = createSignal<ReadonlySet<string>>(new Set(sidebarSettings.favoriteFileRoots))
   let cursorSessionToken = readCursorSessionToken(os.homedir())
-  const usageRunning = new Set<UsageProviderId>()
-  const usageRequestedAt: Partial<Record<UsageProviderId, number>> = {}
+  const usageObservations = new Map<string, ProviderUsage.Info>()
   const [usageNow, setUsageNow] = createSignal(Date.now())
   const usageAbort = new AbortController()
-  let usageScheduler: ReturnType<typeof createUsageRefreshScheduler>
+  let usageScheduler: ReturnType<typeof createUsageRefresh>
   let refreshCommands = () => {}
   let visibilityRunning = false
 
@@ -445,62 +449,108 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
     return provider?.models[selected.modelID]?.name || selected.modelID
   }
 
-  const refreshUsage = async (providers = usageProviders()) => {
-    await Promise.all(
-      providers
-        .filter((provider) => usageProviders().includes(provider))
-        .map(async (provider) => {
-          if (usageRunning.has(provider) || usageAbort.signal.aborted) return
-          usageRunning.add(provider)
-          usageRequestedAt[provider] = Date.now()
-          try {
-            const options = { signal: usageAbort.signal }
-            if (provider === "openai") {
-              const next = await probeOpenAIUsage(options)
-              if (!usageAbort.signal.aborted) setUsage((previous) => updateUsageSnapshot(previous, next, Date.now()))
-              return
-            }
-            if (provider === "opencode-go") {
-              const next = await probeOpenCodeGoUsage(options)
-              if (!usageAbort.signal.aborted) setGoUsage((previous) => updateUsageSnapshot(previous, next, Date.now()))
-              return
-            }
-            if (provider === "openrouter") {
-              const next = await probeOpenRouterUsage(options)
-              if (!usageAbort.signal.aborted)
-                setOpenRouterUsage((previous) => updateUsageSnapshot(previous, next, Date.now()))
-              return
-            }
-            if (provider === "claude-code") {
-              // Pooled accounts (the provider's `accounts` option) are probed together; each account gets its own row.
-              const accounts = sync.data.config.provider?.["claude-code"]?.options?.accounts
-              const dirs = Array.isArray(accounts)
-                ? accounts.filter((dir): dir is string => typeof dir === "string")
-                : []
-              const [next, pool] = await Promise.all([
-                dirs.length >= 1 ? probeClaudeCodePool(dirs, options) : probeClaudeCodeUsage(options),
-                dirs.length > 1 ? sdk.claudeAccount.state(sessionID).catch(() => undefined) : undefined,
-              ])
-              if (usageAbort.signal.aborted) return
-              setClaudeCodeUsage((previous) => updateClaudeSnapshot(previous, next, Date.now()))
-              setActiveClaudeAccount(pool?.find((account) => account.current)?.label.replace(/^\./, ""))
-              return
-            }
-            const next = await probeCursorUsage({ ...options, cursorSessionToken })
-            const retry = !next.ok && next.reason === "reauthenticate" && !!cursorSessionToken
-            if (retry) {
-              clearCursorSessionToken(os.homedir())
-              cursorSessionToken = undefined
-            }
-            const cursor = retry ? await probeCursorUsage(options) : next
-            if (!usageAbort.signal.aborted)
-              setCursorUsage((previous) => updateUsageSnapshot(previous, cursor, Date.now()))
-          } finally {
-            usageRunning.delete(provider)
-            setUsageNow(Date.now())
-          }
+  const claudeDirectories = () => {
+    const accounts = sync.data.config.provider?.["claude-code"]?.options?.accounts
+    const dirs = Array.isArray(accounts) ? accounts.filter((dir): dir is string => typeof dir === "string") : []
+    return (dirs.length ? dirs : [process.env.CLAUDE_CONFIG_DIR ?? path.join(os.homedir(), ".claude")])
+      .map((dir) => claudeConfigDirId(dir.replace(/^~(?=$|[\\/])/, os.homedir())))
+  }
+  const claudeSeed = (): UsageSnapshot<ClaudeCodeUsage> => {
+    const dirs = claudeDirectories()
+    const unknown = () => ({ usedPercent: null, resetAt: null, resetMs: null, minutes: null })
+    return {
+      ok: true,
+      accountID: dirs[0],
+      fetchedAt: 0,
+      source: "cache",
+      fiveHour: unknown(),
+      weekly: unknown(),
+      ...(dirs.length > 1 ? { accounts: dirs.map((id) => ({
+        id,
+        name: path.basename(id).replace(/^\./, ""),
+        usage: { ok: false as const },
+      })) } : {}),
+    }
+  }
+  const refreshActiveClaudeAccount = async () => {
+    const selectedSession = sessionID
+    const pool = await sdk.claudeAccount.state(selectedSession).catch(() => undefined)
+    if (usageAbort.signal.aborted || selectedSession !== sessionID) return
+    const current = pool?.find((account) => account.current)
+    setActiveClaudeAccount(current ? claudeConfigDirId(current.id === "default"
+      ? process.env.CLAUDE_CONFIG_DIR ?? path.join(os.homedir(), ".claude") : current.id) : undefined)
+  }
+  const observeUsage = (observation: ProviderUsage.Info, fromSnapshot = false) => {
+    const key = `${observation.providerID}:${observation.accountID}`
+    const previous = usageObservations.get(key)
+    if (previous && previous.observedAt > observation.observedAt) return
+    usageObservations.set(key, observation)
+    if (observation.providerID === "openai" && (!fromSnapshot || usage().accountID === observation.accountID))
+      setUsage((previous) => applyOpenAIObservation(previous, observation))
+    if (observation.providerID === "claude-code") {
+      setClaudeCodeUsage((previous) => applyClaudeObservation(previous.ok ? previous : claudeSeed(), observation))
+      void refreshActiveClaudeAccount()
+    }
+    setUsageNow(Date.now())
+  }
+  const readObservedUsage = async () => {
+    const observations = await sdk.providerUsage.state().catch(() => undefined)
+    if (usageAbort.signal.aborted || !observations) return
+    observations.forEach((observation) => observeUsage(observation, true))
+  }
+  const refreshUsage = async (provider: UsageProviderId) => {
+    if (usageAbort.signal.aborted) return { ok: true, metadata: undefined }
+    const startedAt = Date.now()
+    const options = { signal: usageAbort.signal }
+    if (provider === "openai") {
+      const next = await probeOpenAIUsage(options)
+      if (!usageAbort.signal.aborted) setUsage((previous) => {
+        const merged = mergeOpenAIProbe(previous, next, startedAt, Date.now())
+        const observation = next.accountID
+          ? usageObservations.get(`openai:${next.accountID}`) : undefined
+        return observation ? applyOpenAIObservation(merged, observation) : merged
+      })
+      return next
+    }
+    if (provider === "opencode-go") {
+      const next = await probeOpenCodeGoUsage(options)
+      if (!usageAbort.signal.aborted) setGoUsage((previous) => updateUsageSnapshot(previous, next, Date.now()))
+      return next
+    }
+    if (provider === "openrouter") {
+      const next = await probeOpenRouterUsage(options)
+      if (!usageAbort.signal.aborted) setOpenRouterUsage((previous) => updateUsageSnapshot(previous, next, Date.now()))
+      return next
+    }
+    if (provider === "claude-code") {
+      const dirs = claudeDirectories()
+      const selectedSession = sessionID
+      const [next, pool] = await Promise.all([
+        dirs.length > 1 ? probeClaudeCodePool(dirs, options) : probeClaudeCodeUsage({
+          ...options, claudeCredentialsPath: path.join(dirs[0], ".credentials.json"),
         }),
-    )
+        dirs.length > 1 ? sdk.claudeAccount.state(selectedSession).catch(() => undefined) : undefined,
+      ])
+      if (!usageAbort.signal.aborted && JSON.stringify(dirs) === JSON.stringify(claudeDirectories())) {
+        setClaudeCodeUsage((previous) => {
+          const merged = mergeClaudeProbe(previous, next, startedAt, Date.now())
+          return dirs.reduce((snapshot, dir) => {
+            const observation = usageObservations.get(`claude-code:${dir}`)
+            return observation ? applyClaudeObservation(snapshot.ok ? snapshot : claudeSeed(), observation) : snapshot
+          }, merged)
+        })
+        if (sessionID === selectedSession) {
+          const current = pool?.find((account) => account.current)
+          setActiveClaudeAccount(current ? claudeConfigDirId(current.id === "default"
+            ? process.env.CLAUDE_CONFIG_DIR ?? path.join(os.homedir(), ".claude") : current.id) : undefined)
+        }
+      }
+      return { ok: next.ok && next.source === "live" && !next.metadata?.status, metadata: next.metadata }
+    }
+    const next = await probeCursorUsage({ ...options, cursorSessionToken })
+    if (!usageAbort.signal.aborted)
+      setCursorUsage((previous) => updateUsageSnapshot(previous, next, Date.now()))
+    return next
   }
   const refreshOldUsage = () => {
     const snapshots = {
@@ -510,16 +560,46 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
       cursor: cursorUsage(),
       "claude-code": claudeCodeUsage(),
     }
-    void refreshUsage(usageProviders().filter((provider) => Date.now() - (snapshots[provider].fetchedAt ?? 0) > 60_000))
+    usageScheduler.request(usageProviders().filter((provider) => Date.now() - (snapshots[provider].fetchedAt ?? 0) > 60_000))
   }
-  // Dim by age only: a cached read carries its file's mtime, and another oc instance may have just refreshed it.
+  // Account rows use their own snapshot; cached siblings are marked per window.
   const usageColor = (snapshot: UsageSnapshot<{ ok: boolean }>) =>
-    snapshot.stale || usageNow() - (snapshot.fetchedAt ?? 0) > 600_000 ? theme.textMuted : theme.text
-  usageScheduler = createUsageRefreshScheduler({
-    refresh: refreshUsage,
-    fallbackIntervalMs: USAGE_REFRESH_INTERVAL_MS,
+    snapshot.stale || snapshot.source === "cache" || usageNow() - (snapshot.fetchedAt ?? 0) > 300_000
+      ? theme.textMuted : theme.text
+  usageScheduler = createUsageRefresh({
+    providers: usageProviders,
+    active: (provider) => Object.entries(sync.data.session_status).some(([id, status]) => {
+      if (status.type === "idle") return false
+      const model = sync.data.message[id]?.findLast((message) => message.role === "assistant")
+      return usageProviderForModel(model?.role === "assistant" ? model.providerID :
+        id === props.sessionID ? local.model.current()?.providerID ?? "" : "") === provider
+    }),
+    refresh: async (provider) => {
+      const result = await refreshUsage(provider)
+      return { ok: result.ok, retryAt: result.metadata?.retryAt }
+    },
   })
   usageScheduler.request()
+  void readObservedUsage()
+  onCleanup(sdk.onReconnect(() => {
+    void readObservedUsage()
+    usageScheduler.request()
+  }))
+  createEffect(() => {
+    usageProviders()
+    Object.values(sync.data.session_status).forEach((status) => status.type)
+    usageScheduler.reconcile()
+  })
+  createEffect(() => {
+    const dirs = claudeDirectories()
+    setClaudeCodeUsage((previous) => {
+      const ids = previous.ok ? previous.accounts?.map((account) => account.id) ?? [previous.accountID] : []
+      if (JSON.stringify(ids) === JSON.stringify(dirs)) return previous
+      return [...usageObservations.values()].reduce(applyClaudeObservation, claudeSeed())
+    })
+    if (usageProviders().includes("claude-code")) usageScheduler.request(["claude-code"])
+    void refreshActiveClaudeAccount()
+  })
 
   const syncSession = (nextSessionID: string) => {
     const nextSessionDirectory = projectRoot(nextSessionID)
@@ -541,6 +621,7 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
     setTree((prev) => reconcileTree(prev, readTree(root, expanded())))
     refreshCommands()
     refreshOldUsage()
+    void refreshActiveClaudeAccount()
   }
   const refresh = () => {
     const nextSessionID = currentSessionID()
@@ -659,7 +740,8 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
     const goOk = goSnapshot.ok ? goSnapshot : undefined
     const orSnapshot = openRouterUsage()
     const orOk = orSnapshot.ok ? orSnapshot : undefined
-    const orValue = orOk ? formatUsagePercent(orOk.usedPercent, showRemaining()) : "unavailable"
+    const orValue = orOk ? formatUsagePercent(orOk.usedPercent, showRemaining()) +
+      (orSnapshot.stale || usageNow() - (orSnapshot.fetchedAt ?? 0) > 300_000 ? "*" : "") : "unavailable"
     const cursorSnapshot = cursorUsage()
     const cursorOk = cursorSnapshot.ok ? cursorSnapshot.monthly : undefined
     const cursorNeedsToken =
@@ -668,10 +750,10 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
     // Expire known windows against the local minute clock; no new request, no timestamp refresh.
     const claudeProjected = claudeSnapshot.ok ? projectClaudeUsage(claudeSnapshot, usageNow()) : claudeSnapshot
     const claudeOk = claudeProjected.ok ? claudeProjected : undefined
-    const cell = (window: UsageWindow, suffix = windowLabel(window.minutes)) => ({
+    const cell = (window: UsageWindow, snapshot: UsageSnapshot<{ ok: boolean }>, suffix = windowLabel(window.minutes)) => ({
       usedPercent: window.usedPercent,
       resetAt: window.resetAt,
-      suffix,
+      suffix: suffix + (usageWindowStale(window, snapshot, usageNow()) ? "*" : ""),
     })
     const providers = usageProviders()
     // Laid out twice: the first pass finds each window slot's widest date start, flipped clock, and flipped
@@ -694,7 +776,7 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
       return {
         codex: rows(providers.includes("openai") && codexHasData, {
           label: "Codex :",
-          windows: [codex.weekly, codex.monthly].flatMap((window) => (window ? [cell(window)] : [])),
+          windows: [codex.weekly, codex.monthly].flatMap((window) => (window ? [cell(window, usage())] : [])),
         }),
         claude:
           providers.includes("claude-code") && claudeOk
@@ -705,21 +787,23 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
                 shared?.starts,
                 shared?.clocks,
                 shared?.days,
-                activeClaudeAccount(),
+                 activeClaudeAccount(),
+                 usageNow(),
               )
             : [],
         cursor: rows(providers.includes("cursor") && cursorOk, {
           label: "Cursor:",
           windows: cursorOk
             ? [
-                cell(cursorOk, "m"),
-                { usedPercent: cursorOk.apiUsedPercent, resetAt: "", suffix: " api", compact: true },
+                cell(cursorOk, cursorSnapshot, "m"),
+                { usedPercent: cursorOk.apiUsedPercent, resetAt: "", suffix: " api" +
+                  (usageWindowStale(cursorOk, cursorSnapshot, usageNow()) ? "*" : "") },
               ]
             : [],
         }),
         go: rows(providers.includes("opencode-go") && goOk, {
           label: "OpenCode Go:",
-          windows: goOk ? [goOk.weekly, goOk.monthly].flatMap((window) => (window ? [cell(window)] : [])) : [],
+          windows: goOk ? [goOk.weekly, goOk.monthly].flatMap((window) => (window ? [cell(window, goSnapshot)] : [])) : [],
         }),
       }
     }
@@ -727,7 +811,9 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
     const aligned = (
       label: string,
       snapshot: UsageSnapshot<{ ok: boolean }>,
-      rows: (ReturnType<typeof formatUsageRows>[number] & { label?: string; spaced?: boolean })[],
+      rows: (ReturnType<typeof formatUsageRows>[number] & {
+        label?: string; spaced?: boolean; snapshot?: UsageSnapshot<{ ok: boolean }>
+      })[],
     ) => (
       <For each={rows}>
         {(row) => {
@@ -735,7 +821,7 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
           return (
             <box flexDirection="column" marginTop={"spaced" in row && row.spaced && usageSpacing() ? 1 : 0}>
               <text fg={theme.textMuted} wrapMode="none">
-                <span style={{ fg: usageColor(snapshot) }}>{row.usage.startsWith(rowLabel) ? rowLabel : ""}</span>
+                <span style={{ fg: usageColor(row.snapshot ?? snapshot) }}>{row.usage.startsWith(rowLabel) ? rowLabel : ""}</span>
                 {row.usage.startsWith(rowLabel) ? row.usage.slice(rowLabel.length) : row.usage}
               </text>
               <text fg={theme.textMuted} wrapMode="none">
@@ -1528,13 +1614,14 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
   const openUsageSettings = () => setTimeout(selectUsageSettings, 100)
 
   const usageMenuOptions = () => {
-    const nowMs = Date.now()
+    const nowMs = usageNow()
     const reset = (resetMs: number | null) =>
       resetMs === null ? "Reset date unavailable" : fullResetDate(resetMs, nowMs)
     const row = (category: string, name: string, used: number | null, details: string[]) => ({
       category,
       inert: true,
-      title: used === null ? `${name}: Unavailable` : `${name}: ${used}% used, ${100 - used}% remaining`,
+      title: used === null ? `${name}: Unavailable` :
+        `${name}: ${formatUsagePercent(used)} used, ${formatUsagePercent(used, true)} remaining`,
       details,
     })
     const unavailable = (category: string) => ({ category, title: "Unavailable", inert: true })
@@ -1546,7 +1633,8 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
         const windows = [codex.weekly, codex.monthly].filter((window) => window !== undefined)
         if (!windows.length) return [unavailable(category)]
         return windows.map((window) =>
-          row(category, windowName(window.minutes) || "Usage", window.usedPercent, [reset(window.resetMs)]),
+          row(category, windowName(window.minutes) || "Usage", window.usedPercent,
+            [reset(window.resetMs), ...usageReadingDetails(window, usage(), nowMs)]),
         )
       }
       if (id === "opencode-go") {
@@ -1554,14 +1642,17 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
         if (!snapshot.ok) return [unavailable(category)]
         return [snapshot.weekly, snapshot.monthly]
           .filter((window) => window !== null)
-          .map((window) => row(category, windowName(window.minutes), window.usedPercent, [reset(window.resetMs)]))
+          .map((window) => row(category, windowName(window.minutes), window.usedPercent,
+            [reset(window.resetMs), ...usageReadingDetails(window, snapshot, nowMs)]))
       }
       if (id === "openrouter") {
         const snapshot = openRouterUsage()
         if (!snapshot.ok) return [unavailable(category)]
         return [
           row(category, "Credit", snapshot.usedPercent, [
-            `$${snapshot.usedUsd.toFixed(2)} of $${snapshot.limitUsd.toFixed(2)} used`,
+             `$${snapshot.usedUsd.toFixed(2)} of $${snapshot.limitUsd.toFixed(2)} used`,
+             ...usageReadingDetails({ usedPercent: snapshot.usedPercent, resetAt: null, resetMs: null, minutes: null },
+               snapshot, nowMs),
           ]),
         ]
       }
@@ -1575,25 +1666,31 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
           ]
         }
         const monthly = snapshot.monthly
+        const source = snapshot.metadata?.accountSource
+        const login = source === "desktop" ? ["Meter login: Cursor desktop app"] :
+          source === "cookie" ? ["Meter login: separately connected cookie"] : []
         return [
-          row(category, "Monthly", monthly.usedPercent, [reset(monthly.resetMs)]),
-          row(category, "API", monthly.apiUsedPercent, [reset(monthly.resetMs)]),
+          row(category, "Monthly", monthly.usedPercent,
+            [reset(monthly.resetMs), ...usageReadingDetails(monthly, snapshot, nowMs), ...login]),
+          row(category, "API", monthly.apiUsedPercent,
+            [reset(monthly.resetMs), ...usageReadingDetails(monthly, snapshot, nowMs), ...login]),
         ]
       }
-      const claudeDetail = (window: UsageWindow): string[] => {
+      const claudeDetail = (window: UsageWindow, snapshot: ClaudeCodeUsage): string[] => {
+        const details = usageReadingDetails(window, snapshot, nowMs)
         if (window.resetMs !== null) {
           const base = reset(window.resetMs)
-          return window.cached ? [base, "Last known reading"] : [base]
+          return [base, ...details]
         }
-        if (window.expired) return ["Reset passed, showing 0%"]
-        if (window.usedPercent !== null) return window.cached ? ["Last known reading"] : []
+        if (window.expired) return details
+        if (window.usedPercent !== null) return details
         return ["Reset date unavailable"]
       }
       const claudeRows = (usage: ClaudeCodeUsage, group: string) =>
         usage.ok
           ? [
-              row(group, "5-hour", usage.fiveHour.usedPercent, claudeDetail(usage.fiveHour)),
-              row(group, "Weekly", usage.weekly.usedPercent, claudeDetail(usage.weekly)),
+              row(group, "5-hour", usage.fiveHour.usedPercent, claudeDetail(usage.fiveHour, usage)),
+              row(group, "Weekly", usage.weekly.usedPercent, claudeDetail(usage.weekly, usage)),
             ]
           : usage.reason === "signed-out"
             ? [{ category: group, title: "Not signed in", inert: true }]
@@ -1642,7 +1739,8 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
     return rows.map((option) => ({ ...option, value: `${option.category}: ${option.title}` }))
   }
   const selectUsageMenu = () => {
-    dialog.replace(() => <DialogSelect title="Usage" options={usageMenuOptions()} />)
+    usageScheduler.request()
+    dialog.replace(() => <DialogSelect title="Usage" options={usageMenuOptions()} preserveSelection />)
   }
   const openUsageMenu = () => setTimeout(selectUsageMenu, 100)
 
@@ -1765,19 +1863,52 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
       const info = evt.properties.info
       if (info.role !== "assistant" || info.time.completed === undefined) return
       const provider = usageProviderForModel(info.providerID)
-      if (!provider || !shouldRefreshUsageProvider(usageRequestedAt[provider], Date.now())) return
-      void refreshUsage([provider])
+      if (provider) usageScheduler.request([provider])
     }),
   )
-  onCleanup(sdk.claudeAccount.onChange(() => usageScheduler.request()))
+  onCleanup(sdk.claudeAccount.onChange(() => {
+    void readObservedUsage()
+    void refreshActiveClaudeAccount()
+    usageScheduler.request(["claude-code"])
+  }))
+  onCleanup(event.on("provider.usage.updated", (evt) => observeUsage(evt.properties)))
   onCleanup(
     event.on("session.status", (evt) => {
-      if (!shouldRefreshUsageAfterIdle(evt.properties, props.sessionID)) return
-      usageScheduler.request()
+      queueMicrotask(() => {
+        usageScheduler.reconcile()
+        if (evt.properties.status.type !== "idle") return
+        const message = sync.data.message[evt.properties.sessionID]?.findLast((item) => item.role === "assistant")
+        const provider = message?.role === "assistant" ? usageProviderForModel(message.providerID) : undefined
+        if (provider) usageScheduler.request([provider])
+      })
     }),
   )
   void syncSidebarVisibility()
-  const usageAgeTimer = setInterval(() => setUsageNow(Date.now()), 60_000)
+  const refreshedResets = new Set<string>()
+  const usageAgeTimer = setInterval(() => {
+    const now = Date.now()
+    setUsageNow(now)
+    const codex = usage()
+    const go = goUsage()
+    const cursor = cursorUsage()
+    const claude = claudeCodeUsage()
+    const windows: [UsageProviderId, UsageWindow[]][] = [
+      ["openai", codex.ok ? [codex.primary, codex.secondary] : []],
+      ["opencode-go", go.ok ? [go.weekly, ...(go.monthly ? [go.monthly] : [])] : []],
+      ["cursor", cursor.ok ? [cursor.monthly] : []],
+      ["claude-code", claude.ok ? (claude.accounts?.flatMap((account) => account.usage.ok
+        ? [account.usage.fiveHour, account.usage.weekly] : []) ?? [claude.fiveHour, claude.weekly]) : []],
+    ]
+    for (const [provider, readings] of windows) {
+      for (const window of readings) {
+        if (window.resetMs === null || window.resetMs > now) continue
+        const key = `${provider}:${window.resetMs}`
+        if (refreshedResets.has(key)) continue
+        refreshedResets.add(key)
+        usageScheduler.request([provider])
+      }
+    }
+  }, 1_000)
   onCleanup(() => {
     clearInterval(usageAgeTimer)
     clearInterval(marqueeTimer)

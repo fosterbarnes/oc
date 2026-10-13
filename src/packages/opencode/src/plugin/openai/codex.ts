@@ -6,6 +6,11 @@ import { setTimeout as sleep } from "node:timers/promises"
 import { createServer } from "http"
 import { OpenAIWebSocketPool } from "./ws-pool"
 import { OauthCallbackPage } from "@opencode-ai/core/oauth/page"
+import {
+  openaiAccountId,
+  parseCodexQuotaHeaders,
+  reportUsageObservation,
+} from "../../provider/usage-observations"
 
 const CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"
 const ISSUER = "https://auth.openai.com"
@@ -431,8 +436,22 @@ export async function CodexAuthPlugin(input: PluginInput, options: CodexAuthPlug
               body: init?.body,
               headers,
             }
-            if (websocketFetch && parsed.pathname.endsWith("/responses")) return websocketFetch(url, requestInit)
-            return fetch(url, OpenAIWebSocketPool.withoutInternalHeaders(requestInit))
+            // Quota headers ride on the response; reading them never touches
+            // the body. Absent metadata records nothing.
+            const observeQuota = (response: Response) => {
+              const windows = parseCodexQuotaHeaders(response.headers, Date.now())
+              if (windows.length === 0) return response
+              reportUsageObservation({
+                providerID: "openai",
+                accountID: openaiAccountId(authWithAccount.accountId),
+                observedAt: Date.now(),
+                windows,
+              })
+              return response
+            }
+            if (websocketFetch && parsed.pathname.endsWith("/responses"))
+              return websocketFetch(url, requestInit).then(observeQuota)
+            return fetch(url, OpenAIWebSocketPool.withoutInternalHeaders(requestInit)).then(observeQuota)
           },
         }
       },

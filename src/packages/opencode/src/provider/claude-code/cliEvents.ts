@@ -99,6 +99,30 @@ export function parseRateLimitEvent(msg: ClaudeStreamMessage): RateLimitInfo | n
   }
 }
 
+export interface QuotaWindow {
+  id: string
+  usedPercent: number
+  resetMs?: number
+}
+
+/**
+ * Windows the CLI attributes a utilization fraction to. Only the two
+ * subscription windows map; status-only events and model-scoped windows
+ * (seven_day_opus, overage, ...) yield nothing rather than a fabricated
+ * general percentage. Fractions stay fractional: rounding is presentation.
+ */
+const QUOTA_WINDOW_IDS = new Set(["five_hour", "seven_day"])
+
+export function toQuotaWindows(info: RateLimitInfo | null): QuotaWindow[] {
+  if (!info || !info.rateLimitType || !QUOTA_WINDOW_IDS.has(info.rateLimitType)) return []
+  if (typeof info.utilization !== "number" || !Number.isFinite(info.utilization)) return []
+  if (info.utilization < 0 || info.utilization > 1) return []
+  const window: QuotaWindow = { id: info.rateLimitType, usedPercent: info.utilization * 100 }
+  const resetMs = resetsAtToMs(info.resetsAt)
+  if (resetMs !== undefined) window.resetMs = resetMs
+  return [window]
+}
+
 /** The CLI sends unix seconds; tolerate milliseconds rather than mean 1970. */
 export function resetsAtToMs(resetsAt: number | undefined): number | undefined {
   if (resetsAt === undefined || !Number.isFinite(resetsAt)) return undefined

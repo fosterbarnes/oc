@@ -7,6 +7,7 @@ import { APICallError } from "ai"
 import { ProviderError } from "../../src/provider/error"
 import { OpenAIWebSocket } from "../../src/plugin/openai/ws"
 import { OpenAIWebSocketPool, TITLE_HEADER } from "../../src/plugin/openai/ws-pool"
+import { _resetUsageObservations, getUsageSnapshot } from "../../src/provider/usage-observations"
 
 describe("plugin.openai.ws", () => {
   test("derives websocket URLs and sends auth plus protocol headers", async () => {
@@ -303,6 +304,41 @@ describe("plugin.openai.ws-pool", () => {
     expect(await second.text()).toContain("data: [DONE]")
     expect(connections).toBe(2)
     fetch.close()
+  })
+
+  test("forwards codex.rate_limits frames to the usage store without disturbing the stream", async () => {
+    _resetUsageObservations()
+    try {
+      await using server = await createWebSocketServer((socket) => {
+        socket.once("message", () => {
+          socket.send(
+            JSON.stringify({
+              type: "codex.rate_limits",
+              rate_limits: { primary: { used_percent: 25.5, window_minutes: 300, reset_at: 1_800_000_000 } },
+            }),
+          )
+          socket.send(JSON.stringify({ type: "response.done", response: { id: "resp_quota" } }))
+        })
+      })
+      const fetch = OpenAIWebSocketPool.createWebSocketFetch({
+        url: server.url,
+      })
+
+      const response = await fetch(server.url, streamRequest({ "chatgpt-account-id": "acc-1" }))
+      const text = await response.text()
+      expect(text).toContain("response.done")
+      expect(text).not.toContain("codex.rate_limits")
+      const observations = getUsageSnapshot()
+      expect(observations).toHaveLength(1)
+      expect(observations[0]?.providerID).toBe("openai")
+      expect(observations[0]?.accountID).toBe("acc-1")
+      expect(observations[0]?.windows[0]).toMatchObject({
+        id: "primary", usedPercent: 25.5, minutes: 300, resetMs: 1_800_000_000_000,
+      })
+      fetch.close()
+    } finally {
+      _resetUsageObservations()
+    }
   })
 
   test("prunes idle websocket connections after completed responses", async () => {

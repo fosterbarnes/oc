@@ -33,9 +33,12 @@ import {
   reportRateLimitEvent,
   resetsAtToMs,
   reportSystemInit,
+  toQuotaWindows,
   type AccountBlockKind,
 } from "./cliEvents.js"
 import {
+  BASE_PROVIDER_ID,
+  canonicalAccountId,
   earliestLimitedUntil,
   markAccountLimited,
   nextUsableAccount,
@@ -69,6 +72,7 @@ import {
   type ActiveProcess,
 } from "./sessionManager.js"
 import { appendExchangeText, currentExchangeHash } from "./sessionSync.js"
+import { reportUsageObservation } from "@/provider/usage-observations.js"
 import { ScheduledResume } from "@/session/scheduledResume.js"
 import { log } from "./logger.js"
 import { hostToolExecutors, type HostToolExecutor, type HostToolResult } from "./shared.js"
@@ -642,6 +646,16 @@ class ClaudeTurn {
     // same content_block_* / message_* shape.
     const msg: ClaudeStreamMessage =
       outer.type === "stream_event" && outer.event ? { ...outer.event, session_id: outer.session_id } : outer
+    // Keep the originating account's quota even while its rejected reply is suppressed for failover.
+    if (msg.type === "rate_limit_event") {
+      const windows = toQuotaWindows(parseRateLimitEvent(msg))
+      if (windows.length) reportUsageObservation({
+        providerID: BASE_PROVIDER_ID,
+        accountID: canonicalAccountId(this.account),
+        observedAt: Date.now(),
+        windows,
+      })
+    }
     // The limited account's own "you've hit your limit" reply is not shown.
     if (this.switchTo && msg.type !== "result") return
 
