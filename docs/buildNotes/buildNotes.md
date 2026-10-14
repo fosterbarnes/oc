@@ -112,6 +112,25 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-14 (~03:37) - v0.2.184 blamFan - Sticky tool block titles while scrolling - Claude Opus 5.5, default reasoning; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; default reasoning; Implementation; completed, uncommitted
+- Version: 0.2.184
+- Added sticky title row in `packages/tui/src/routes/session/index.tsx`: `BlockTool` registers its box + title getter in new context field `blocks` (Map, deleted on cleanup). `queuePin` (microtask-deferred, since scrollbar `change` and content `resize` can fire inside opentui layout) picks the block whose title row (`el.y + 1`) is above `scroll.viewport.y` and whose last content row (`el.y + el.height - 2`) is below it.
+- Added absolute one-row overlay as a sibling after `<scrollbox>` in the padded outer box (ref `scrollFrame`); left/width from the block, same border/panel/muted styling as the real title. Click scrolls to block top (`pin.el.y - scroll.viewport.y`). Wheel over it is forwarded via `scroll.processMouseEvent` (overlay is not a scrollbox descendant, so wheel would not bubble there).
+- Kept: Spinner titles show with `# ` stripped, same as `BlockTool`. Assistant text, user messages, untitled Bash not pinned.
+- Risk: absolute `left` assumes Yoga offsets from the parent's border edge (outer box has padding 2); if the pinned row shows 2 columns off, that assumption is wrong.
+- Updated `FORK.md` section 6 row; wiki `Sessions.md` "Long tool blocks" (wiki push is the user's).
+- Verification: `bun run typecheck` in `packages/tui` exit 0. Prettier: file already unformatted at HEAD; new lines match Prettier output. No live check run.
+
+### User
+Session view
+- When an edit, write, or patch block is taller than the screen, its title stays pinned at the top while you scroll through it, so you can always see which file the diff is for.
+- Clicking the pinned title jumps back to the top of that block.
+
+---
+
 ## 2026-10-14 (~03:06) - v0.2.183 placementsSwingset - Move build notes out of the repo root - Claude Opus 5.5, default reasoning; Implementation
 
 ### Agent

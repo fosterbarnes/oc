@@ -1,6 +1,6 @@
-v0.2.183 placementsSwingset
+v0.2.184 blamFan
 
-repository:
-Build notes, their archives and the next-commit message file moved out of the repo root into docs/buildNotes/. The push scripts, the plan-execute test and every doc link now point at the new folder.
+session view:
+When an edit, write, patch or other titled tool block is taller than the screen, its title now stays pinned on the top row while you scroll through it, so you always know which file a long diff belongs to. The pinned title goes away once the block's last line scrolls past. Clicking it jumps back to the top of the block, and the mouse wheel still scrolls while the pointer is over it.
 
-Under the hood: moved with git mv so file history follows. agentPush and push read docs/buildNotes/buildNotes.txt through scriptHelper. No version bump (already bumped once this session). The plan-execute test, the buildNotes change check and prePush passed.
+Under the hood: tool blocks register with the session view, which picks the pinned title after each scroll or size change. FORK.md and the build notes describe the feature. Also includes pending bun.lock and opencode package.json changes. TUI typecheck passed, and the pinned title was confirmed working in the installed TUI. prePush passed.

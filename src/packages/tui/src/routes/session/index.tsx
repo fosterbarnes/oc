@@ -178,6 +178,7 @@ const context = createContext<{
   tui: ReturnType<typeof useTuiConfig>
   openFile: (filePath: string) => void
   openTab: (sessionID: string) => void
+  blocks: Map<BoxRenderable, () => string | undefined>
 }>()
 
 function use() {
@@ -408,6 +409,7 @@ export function Session() {
 
   let seeded = false
   let scroll: ScrollBoxRenderable
+  let scrollFrame: BoxRenderable
   let prompt: PromptRef | undefined
   let toBottomTimer: ReturnType<typeof setTimeout> | undefined
   const bind = (r: PromptRef | undefined) => {
@@ -489,6 +491,31 @@ export function Session() {
     const child = scroll.getChildren().find((c) => c.id === targetID)
     if (child) scroll.scrollBy(child.y - scroll.y - 1)
     dialog.clear()
+  }
+
+  // Sticky block title: while a BlockTool's title line is scrolled above the viewport and the
+  // block still reaches the top row, its title is pinned over that row.
+  const blocks = new Map<BoxRenderable, () => string | undefined>()
+  const [pinned, setPinned] = createSignal<
+    { el: BoxRenderable; title: string; left: number; width: number } | undefined
+  >(
+    undefined,
+    {
+      equals: (a, b) => a?.el === b?.el && a?.title === b?.title && a?.left === b?.left && a?.width === b?.width,
+    },
+  )
+  let pinQueued = false
+  // Scroll and resize events can fire during opentui's layout pass, so update after it.
+  const queuePin = () => {
+    if (pinQueued) return
+    pinQueued = true
+    queueMicrotask(() => {
+      pinQueued = false
+      if (!scroll || scroll.isDestroyed) return setPinned(undefined)
+      const top = scroll.viewport.y
+      const hit = [...blocks].find(([el, title]) => title() && el.y + 1 < top && el.y + el.height - 2 > top)
+      setPinned(hit ? { el: hit[0], title: hit[1]()!, left: hit[0].x - scrollFrame.x, width: hit[0].width } : undefined)
+    })
   }
 
   function toBottom() {
@@ -1393,16 +1420,29 @@ export function Session() {
           tui: tuiConfig,
           openFile,
           openTab,
+          blocks,
         }}
       >
         <box flexDirection={sidebarHorizontal() ? "column" : "row"} flexGrow={1} minHeight={0}>
           <Show when={sidebarVisible() && sidebarLeading()}>
             <Sidebar sessionID={route.sessionID} horizontal={sidebarHorizontal()} />
           </Show>
-          <box flexGrow={1} minHeight={0} paddingBottom={1} paddingLeft={2} paddingRight={2} gap={1}>
+          <box
+            ref={(r: BoxRenderable) => (scrollFrame = r)}
+            flexGrow={1}
+            minHeight={0}
+            paddingBottom={1}
+            paddingLeft={2}
+            paddingRight={2}
+            gap={1}
+          >
             <Show when={session()}>
               <scrollbox
-                ref={(r) => (scroll = r)}
+                ref={(r) => {
+                  scroll = r
+                  r.verticalScrollBar.on("change", queuePin)
+                  r.content.on("resize", queuePin)
+                }}
                 viewportOptions={{
                   paddingRight: showScrollbar() ? 1 : 0,
                 }}
@@ -1519,6 +1559,35 @@ export function Session() {
                   )}
                 </For>
               </scrollbox>
+              <Show when={pinned()}>
+                {(pin) => (
+                  <box
+                    position="absolute"
+                    top={scroll.viewport.y - scrollFrame.y}
+                    left={pin().left}
+                    width={pin().width}
+                    height={1}
+                    border={["left"]}
+                    customBorderChars={SplitBorder.customBorderChars}
+                    borderColor={theme.background}
+                    paddingLeft={2}
+                    backgroundColor={theme.backgroundPanel}
+                    onMouseUp={(evt) => {
+                      if (evt.button !== MouseButton.LEFT) return
+                      scroll.scrollBy(pin().el.y - scroll.viewport.y)
+                    }}
+                    onMouseScroll={(evt) => {
+                      // The row sits outside the scrollbox, so hand wheel input to it
+                      evt.stopPropagation()
+                      scroll.processMouseEvent(evt)
+                    }}
+                  >
+                    <text selectable={false} paddingLeft={3} fg={theme.textMuted} wrapMode="none">
+                      {pin().title}
+                    </text>
+                  </box>
+                )}
+              </Show>
               <box flexShrink={0}>
                 <Show when={permissions().length > 0}>
                   <PermissionPrompt
@@ -2314,9 +2383,17 @@ function BlockTool(props: {
   const { theme } = useTheme()
   const [hover, setHover] = createSignal(false)
   const error = createMemo(() => (props.part?.state.status === "error" ? props.part.state.error : undefined))
+  // Registers for the session's sticky title row; absent outside a Session
+  const blocks = useContext(context)?.blocks
+  let box: BoxRenderable | undefined
+  onCleanup(() => box && blocks?.delete(box))
   return (
     <box
-      ref={(el: BoxRenderable) => alwaysSeparate.add(el)}
+      ref={(el: BoxRenderable) => {
+        alwaysSeparate.add(el)
+        box = el
+        blocks?.set(el, () => (props.spinner ? props.title?.replace(/^# /, "") : props.title))
+      }}
       border={["left"]}
       paddingTop={1}
       paddingBottom={1}
