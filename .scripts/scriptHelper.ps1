@@ -15,7 +15,7 @@ $version = "$versionFolder\version"
 $versionTag = "$versionFolder\versionTag"
 $yapWords = "$repoRoot\.res\yapBot.json"
 $readme = "$repoRoot\README.md"
-$buildNotes = "$repoRoot\buildNotes.txt"
+$buildNotes = "$repoRoot\docs\buildNotes\buildNotes.txt"
 $ghRepo = 'fosterbarnes/oc'
 
 function runNativeCommand {

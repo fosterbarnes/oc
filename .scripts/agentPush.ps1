@@ -15,7 +15,7 @@ if ($Context) {
     Write-Host '--- status'
     git status --short 2>$null
     Write-Host '--- new buildNotes.md lines'
-    git diff -U0 HEAD -- buildNotes.md 2>$null | Where-Object { $_ -match '^\+(?!\+\+)' } | ForEach-Object { $_.Substring(1) }
+    git diff -U0 HEAD -- docs/buildNotes/buildNotes.md 2>$null | Where-Object { $_ -match '^\+(?!\+\+)' } | ForEach-Object { $_.Substring(1) }
     Write-Host '--- last 10 subjects'
     git log -10 --format=%s
     Write-Host '--- last commit message (style sample)'

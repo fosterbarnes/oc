@@ -112,6 +112,48 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-14 (~03:06) - v0.2.183 placementsSwingset - Move build notes out of the repo root - Claude Opus 5.5, default reasoning; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; default reasoning; Implementation; completed, uncommitted
+- Version: 0.2.183 (already bumped once this session; no second bump)
+- Moved `buildNotes.md`, `buildNotes.archive1-9.md`, `buildNotes.txt` to `docs/buildNotes/` with `git mv` (history follows renames). User chose the folder and moving the txt.
+- Fixed paths: `.scripts/scriptHelper.ps1` `$buildNotes`; `.scripts/agentPush.ps1` `-Context` diff path; `src/packages/opencode/test/tool/planExecute.test.ts` `TEST_PLAN_PATH`; `AGENTS.md` (layout line, build notes section, buildNotes.txt heading); `UPSTREAM-SYNC.md`, `FORK.md`, `SCRIPTS.md`; `docs/dev/{v0.3.0,nativeSplitPlan,publicReadiness}.md` links.
+- Kept: global `build-notes` skills still say repo root; `AGENTS.md` now overrides that for oc.
+- Risk: right after the move, `testBuildNotesChanged` sees `docs/buildNotes/buildNotes.txt` as changed (new path vs HEAD), so a bare `push.ps1` would reuse the old message. Write a new message before the next push.
+- Verification: `bun test test/tool/planExecute.test.ts` 14 pass; `.scripts/tests/buildNotesChanged.tests.ps1` passed; `agentPush.ps1 -Context` ran and read the new path.
+
+### User
+Repository
+- Build notes, their archives and the next-commit message file now live in `docs/buildNotes/` instead of the repo root.
+- No app or UI change.
+
+---
+
+## 2026-10-14 (~02:57) - v0.2.183 placementsSwingset - Publish oc as a GitHub fork of opencode - Claude Opus 5.5, default reasoning; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; default reasoning; Implementation (/imp, then /pass + agent-push; plan `~/.config/opencode/plans/2026-10-14-public-fork.md`); completed
+- Version: 0.2.183
+- Moved: old private repo renamed `fosterbarnes/oc-ARCHIVE` (local `Documents\GitHub\oc-ARCHIVE`); `fosterbarnes/oc` is now a public fork of `anomalyco/opencode`, default branch `main`, Actions off on purpose.
+- Rewrote history with git filter-repo: root grafted onto upstream `5cd8e68fdd`; removed `*.lnk`, `desktop.ini`, `.scripts/{revive,reviveAndInstall,safeShutdown}.exe`, `.res/yapBot.json` from all history; the home-folder name in Windows user paths -> `user` (separators kept), plus two approved wording redactions (rules in `plans/ocPublic/redactions.txt`, private); 11 bodyless subjects renamed. Authors/dates unchanged. Old-to-new map: `plans/ocPublic/commit-map.txt` (private).
+- Added sync merge `e10f2bb` (`-s ours` of upstream `abce98e`, tree unchanged) so Git knows upstream through `abce98e` is handled.
+- Added commit `ec678eb`: untracked `.config/openSidebar.json`; `.gitignore` += `*.lnk`, `.scripts/*.exe`, `.res/yapBot.json`; `newVersionTag` (`.scripts/scriptHelper.ps1`) throws a clear "list is private" error when the word list is missing. Pushed `main` = `ec678eb` (agent, user's explicit request).
+- Kept: `.res/yapBot.json` and `.config/` exist locally only (gitignored); `UPSTREAM/opencode` reference checkout not recreated in the new clone.
+- Fixed `UPSTREAM-SYNC.md`: real merge base now exists; still hand-port; after a committed port, fetch the upstream SHA and record it with `git merge -s ours --no-ff <sha>`. Fixed `.scripts/upstream-sync.state.json` `snapshotSha` to the true parent `5cd8e68fdd` (old `5e75e5e9` was 219 commits older, wrong).
+- Verification: per-commit verifier 100/100 (only approved diffs); leak gates L1-L8 (gitleaks custom rules, 45 real local credential values, personal-info, banned files, binaries, header literals, identities, fresh-clone rerun) clean; full-history gitleaks 78 hits all upstream; push dry run listed only `main`. Wiki (`oc.wiki`, 5 commits) L1-L7 clean. Scripts/reports: `plans/ocPublic/`.
+- Moved wiki: user created a placeholder page; agent pushed (user's explicit go-ahead) `oc.wiki` history plus a `-s ours` merge of GitHub's 2 placeholder commits, fast-forward, no force. Local `oc.wiki` origin -> `fosterbarnes/oc.wiki.git`. TODO: its 9 uncommitted page edits from an earlier session are untouched.
+- Risk: anything pushed to the fork is reachable through the whole opencode fork network permanently; scan before every push. Release binaries can embed build paths: scan archives before `pushRelease.ps1`.
+
+### User
+Repository
+- oc is now public at github.com/fosterbarnes/oc as a fork of opencode, with the full commit history kept and personal paths and private files scrubbed.
+- The old private repository is kept as oc-ARCHIVE.
+- Generating a new version tag needs the private word list, which only exists on your machine; anyone else gets a clear error.
+- No app or UI change.
+
+---
+
 ## 2026-10-14 (~01:29) - v0.2.182 fromsoftFreeztyle - Fix push-blocking model assertion - GPT-6.1 Sol, reasoning default; Implementation
 
 ### Agent

@@ -1,7 +1,7 @@
 # Public readiness: another Windows machine
 
 > Historical planning: source paths and line numbers reflect the earlier layout. Current behavior
-> is documented in [FORK.md](../../FORK.md), the wiki, and [buildNotes.md](../../buildNotes.md).
+> is documented in [FORK.md](../../FORK.md), the wiki, and [buildNotes.md](../buildNotes/buildNotes.md).
 
 First-pass review: 2026-10-02.
 

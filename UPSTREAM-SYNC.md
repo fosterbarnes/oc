@@ -28,11 +28,11 @@ upstream fixes are cherry-picked into the customized parent by hand.
    SHA.
 5. Diff upstream from `baselineSha` in `.scripts\upstream-sync.state.json`,
    the last upstream SHA ported into this fork, to see what changed since.
-   `snapshotSha` in the same file is the fixed original snapshot and never
-   changes. Record what was ported in the `buildNotes.md` session entry.
-   This repository was uploaded as a snapshot and has no Git merge
-   base with upstream. Do not use `--allow-unrelated-histories` as the normal
-   synchronization method.
+   `snapshotSha` in the same file is the upstream commit the first oc commit
+   was built on (its Git parent) and never changes. Record what was ported in
+   the `docs/buildNotes/buildNotes.md` session entry. oc's history sits on top of upstream, so
+   Git has a real merge base, but the layout moved to `src/` and the fork has
+   drifted too far for a plain `git merge`. Keep porting by hand.
 6. Pick the upstream changes worth porting and cherry-pick them into the
    parent by hand, adapting paths to this layout (the Bun workspace lives in
    `src/`). Preserve parent-only files and custom behavior by default. Do not
@@ -45,7 +45,11 @@ upstream fixes are cherry-picked into the customized parent by hand.
    `0.0.9`) and roll a new tag into `.version/versionTag`. Do this before
    the Windows dist build so the TUI display version matches. Do not bump
    OpenCode's package version. After porting up to an upstream release, update
-   `baselineSha` by hand to that release's upstream SHA.
+   `baselineSha` by hand to that release's upstream SHA. Once the port is
+   committed, record it in Git with a tree-preserving merge so the merge base
+   advances:
+   `git fetch https://github.com/anomalyco/opencode <sha>`, then
+   `git merge -s ours --no-ff <sha> -m "Record upstream sync through <short sha>"`.
 9. Leave the parent changes uncommitted for review. Do not reset, stash, commit,
    or push unless the user explicitly requests it.
 
@@ -55,7 +59,7 @@ Protect these areas when porting upstream changes:
 
 - `.install.ps1` and `.scripts\*` local automation
 - `.version\version` and `.version\versionTag` maintenance versioning
-- `AGENTS.md`, `SCRIPTS.md`, `buildNotes.md`, `README.md`, `FORK.md`, `SCOPE.md`, and this guide
+- `AGENTS.md`, `SCRIPTS.md`, `docs/buildNotes/`, `README.md`, `FORK.md`, `SCOPE.md`, and this guide
 - TUI maintenance display-version behavior in the core, build, plugin, and TUI
   adapter/sidebar paths
 
@@ -82,6 +86,6 @@ Agents run only newly added tests, selecting those cases in existing files.
 Existing tests, type checks, and other automated checks run on GitHub when the
 user pushes. Do not run them locally or ask to run them unless explicitly requested.
 Recheck both checkout statuses, inspect the final diff, and confirm the isolated
-checkout remains clean. Insert a newest-first session entry in `buildNotes.md` after
+checkout remains clean. Insert a newest-first session entry in `docs/buildNotes/buildNotes.md` after
 permitted verification (immediately under `# Historical entries (newest first)`).
 Record the upstream SHA, method, checks, and remaining issues.

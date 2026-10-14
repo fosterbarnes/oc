@@ -1,0 +1,6 @@
+v0.2.183 placementsSwingset
+
+repository:
+Build notes, their archives and the next-commit message file moved out of the repo root into docs/buildNotes/. The push scripts, the plan-execute test and every doc link now point at the new folder.
+
+Under the hood: moved with git mv so file history follows. agentPush and push read docs/buildNotes/buildNotes.txt through scriptHelper. No version bump (already bumped once this session). The plan-execute test, the buildNotes change check and prePush passed.

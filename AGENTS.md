@@ -1,4 +1,4 @@
-- Layout: the Bun workspace (`packages`, `sdks`, `script`, `package.json`, `bun.lock`, `turbo.json`, `.version`, ...) lives in `src/`. Run `bun` from `src` or a package under it. Docs, `buildNotes*`, `AGENTS.md`, `.github`, `.husky`, `.opencode`, and `.scripts` stay at the repo root. Package paths in these notes (`packages/...`) are relative to `src/`.
+- Layout: the Bun workspace (`packages`, `sdks`, `script`, `package.json`, `bun.lock`, `turbo.json`, `.version`, ...) lives in `src/`. Run `bun` from `src` or a package under it. Docs (build notes in `docs/buildNotes/`), `AGENTS.md`, `.github`, `.husky`, `.opencode`, and `.scripts` stay at the repo root. Package paths in these notes (`packages/...`) are relative to `src/`.
 - To regenerate the legacy JavaScript SDK, run `./packages/sdk/js/script/build.ts`.
 - After changing the public Protocol or Server `HttpApi`, run `bun run generate` from `packages/client`. Do not edit `src/generated` or `src/generated-effect` directly.
 - Keep runtime dependencies directed from Schema to Core and Protocol, then from Core and Protocol to Server. Client runtime code may depend on Schema and Protocol but never Core or Server; `sdk-next` composes Client, Core, and Server.
@@ -14,15 +14,15 @@
 - `FORK.md` is the living definition of this fork. Statuses describe current state; they do not authorize work. Keep fork-only work in `FORK.md`.
 - `SCOPE.md` records what oc leaves out: upstream surfaces it removed, items not planned, items planned for later, and retired oc features. Every upstream sync classifies each new upstream feature as port, later, or not planned, and records the last two there. A row leaves `SCOPE.md` only by explicit decision.
 - `README.md` is the public pitch: hook, standout features, requirements, install, a short behavior-changes list, and links into the wiki. It is not the reference for how oc behaves.
-- The GitHub wiki (`fosterbarnes/oc.wiki`, local clone `..\oc.wiki`) is the source of truth for user-facing behavior, settings, keys, troubleshooting, and FAQ. When a change alters what users see or configure, update the wiki page, not the README. Code and agent knowledge stays in `FORK.md`, `AGENTS.md`, and `buildNotes.md`. Wiki layout rules: `Editing-This-Wiki.md` there. Pushing the wiki is the user's action.
+- The GitHub wiki (`fosterbarnes/oc.wiki`, local clone `..\oc.wiki`) is the source of truth for user-facing behavior, settings, keys, troubleshooting, and FAQ. When a change alters what users see or configure, update the wiki page, not the README. Code and agent knowledge stays in `FORK.md`, `AGENTS.md`, and `docs/buildNotes/buildNotes.md`. Wiki layout rules: `Editing-This-Wiki.md` there. Pushing the wiki is the user's action.
 - `countCode.ps1` (via `prePush.ps1`) requires its single `[number](scc.txt)` link and `code-count:start/end` markers.
 
 ## Build notes
 
-- Session history lives in root `buildNotes.md` (`# Historical entries (newest first)`, newest-first). For insert/rotate procedure use skills `base/build-notes` and `base/build-notes-archive`.
+- Session history lives in `docs/buildNotes/buildNotes.md` (`# Historical entries (newest first)`, newest-first), not the repo root. Archives (`buildNotes.archiveN.md`) and `buildNotes.txt` live in the same folder. For insert/rotate procedure use skills `base/build-notes` and `base/build-notes-archive`, with this folder in place of the repo root.
 - Do not create notes under `.md/`.
 
-## buildNotes.txt (repo root)
+## buildNotes.txt (`docs/buildNotes/`)
 
 - Holds the next commit message. `.scripts/push.ps1` reads it: line 1 = commit subject, one blank line, remaining lines = commit body. A positional message passed to `push.ps1` wins (subject only). The file is used only when it changed since the last commit; unchanged, it is the previous push's message, so `push.ps1` prompts instead. `push.ps1 -DryRun` prints the commands without changing anything.
 - Agents write it when preparing a push (the `agent-push` skill), replacing the previous push's message. UTF-8 without BOM.

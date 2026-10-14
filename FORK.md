@@ -263,7 +263,7 @@ in [SCOPE.md](./SCOPE.md).
 | `SCRIPTS.md` | How to build, install, and sync. |
 | `UPSTREAM-SYNC.md` | How upstream is applied without dropping custom work. |
 | `AGENTS.md` | Agent working rules for this checkout. |
-| `buildNotes.md` | Session history. Evidence, not product definition. |
+| `docs/buildNotes/buildNotes.md` | Session history. Evidence, not product definition. |
 
 ---
 
@@ -276,4 +276,4 @@ This file is the source of truth for what OC is and how complete each piece is.
 
 - File new capabilities under how they are *used*.
 - Keep OC-only work in this file. Exclusions and retired work belong in `SCOPE.md`.
-- Session notes stay in `buildNotes.md`. This document stays the product contract.
+- Session notes stay in `docs/buildNotes/buildNotes.md`. This document stays the product contract.
