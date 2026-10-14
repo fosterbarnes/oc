@@ -5,7 +5,8 @@ import { SessionV1 } from "@opencode-ai/core/v1/session"
 import os from "os"
 import { createHash } from "node:crypto"
 import { SessionID, MessageID, PartID } from "./schema"
-import { isClaudeCodeProvider } from "@/provider/claude-code/shared"
+import { claudeSteerSinks, isClaudeCodeProvider, STEERED_METADATA_KEY } from "@/provider/claude-code/shared"
+import { EffectBridge } from "@/effect/bridge"
 import { CURSOR_PROVIDER_ID } from "@/provider/cursor/shared"
 import { MessageV2 } from "./message-v2"
 import { SessionRevert } from "./revert"
@@ -127,6 +128,15 @@ function isOrphanedInterruptedTool(part: SessionV1.ToolPart) {
   // cleanup() marks abandoned tool_use blocks this way after retries/aborts.
   // They are not pending work and must not trigger an assistant-prefill request.
   return part.state.status === "error" && part.state.metadata?.interrupted === true
+}
+
+// Every user message after this reply was read by Claude while the reply ran (`steerClaudeTurn`), so it answers them.
+function readMidTurn(msgs: SessionV1.WithParts[], assistantID: string) {
+  const later = msgs.filter((msg) => msg.info.role === "user" && msg.info.id > assistantID)
+  return (
+    later.length > 0 &&
+    later.every((msg) => msg.parts.some((part) => part.type === "text" && part.metadata?.[STEERED_METADATA_KEY]))
+  )
 }
 
 const IMAGE_EXTENSIONS: Record<string, string> = {
@@ -262,8 +272,8 @@ const layer = Layer.effect(
       yield* Effect.logInfo("cancel", { "session.id": sessionID })
       // Pause first so the drain cannot start the next queued prompt in the gap before the run stops.
       yield* queue.pause(sessionID, "interrupted")
-      yield* question.cancel(sessionID)
       yield* state.cancel(sessionID)
+      yield* question.cancel(sessionID)
     })
 
     const resolvePromptParts = Effect.fn("SessionPrompt.resolvePromptParts")(function* (template: string) {
@@ -1384,7 +1394,54 @@ const layer = Layer.effect(
       if (!session.parentID && !session.sessionInProgress) {
         yield* sessions.setSessionInProgress({ sessionID: session.id, sessionInProgress: true })
       }
+      yield* steerClaudeTurn(message)
       return yield* loop({ sessionID: input.sessionID })
+    })
+
+    // A plain-text message sent while a Claude Code turn runs goes into that turn instead of waiting for
+    // it to end. Once Claude reads it, its parts are flagged, which the loop's exit rule counts as answered.
+    const steerClaudeTurn = Effect.fnUntraced(function* (message: SessionV1.WithParts) {
+      if (message.info.role !== "user" || !isClaudeCodeProvider(message.info.model.providerID)) return
+      const sink = claudeSteerSinks.get(message.info.sessionID)
+      const texts = message.parts.filter(
+        (part): part is SessionV1.TextPart => part.type === "text" && !part.synthetic && !part.ignored,
+      )
+      // Files, agent mentions and other parts wait for the next step, which knows how to send them.
+      if (!sink || texts.length === 0 || texts.length !== message.parts.length) return
+      const msgs = yield* sessions.messages({ sessionID: message.info.sessionID }).pipe(Effect.orDie)
+      const assistant = msgs.findLast((msg) => msg.info.role === "assistant" && !msg.info.time.completed)?.info
+      if (assistant?.role !== "assistant") return
+      const parent = msgs.find((msg) => msg.info.id === assistant.parentID)?.info
+      if (parent?.role !== "user") return
+      // The executor and CLI spawn options are bound to the original user for the whole stream.
+      // Settings-bearing turns need their own step, in both directions.
+      const waiting = [message.info, ...msgs.flatMap((msg) =>
+        msg.info.role === "user" && msg.info.id > assistant.parentID && msg.info.id < message.info.id
+          ? [msg.info] : [])]
+      if ([parent, ...waiting].some((user) => user.permission !== undefined || user.tools !== undefined ||
+        user.system !== undefined || user.format !== undefined)) return
+      if (waiting.some((user) => parent.model.providerID !== user.model.providerID ||
+        parent.model.modelID !== user.model.modelID || parent.agent !== user.agent ||
+        parent.model.variant !== user.model.variant || parent.model.explicit !== user.model.explicit)) return
+      if (claudeSteerSinks.get(message.info.sessionID) !== sink) return
+      const bridge = yield* EffectBridge.make()
+      const markRead = Effect.forEach(
+        texts,
+        (part) => sessions.updatePart({ ...part, metadata: {
+          ...part.metadata,
+          [STEERED_METADATA_KEY]: Date.now(),
+          steeredAssistantID: assistant.id,
+          steeredParentID: assistant.parentID,
+        } }),
+        { discard: true },
+      )
+      sink.steer({
+        messageID: message.info.id,
+        text: texts.map((part) => part.text).join("\n"),
+        modelID: message.info.model.modelID,
+        agent: message.info.agent,
+        delivered: () => bridge.promise(markRead),
+      })
     })
 
     const lastAssistant = Effect.fnUntraced(function* (sessionID: SessionID) {
@@ -1410,9 +1467,25 @@ const layer = Layer.effect(
             Effect.provideService(Database.Service, database),
           )
 
-          const { user: lastUser, assistant: lastAssistant, finished: lastFinished, tasks } = MessageV2.latest(msgs)
+          const latest = MessageV2.latest(msgs)
+          const { assistant: lastAssistant, finished: lastFinished, tasks } = latest
+          // Settings-incompatible Claude prompts must run separately under their own permissions.
+          // Only after a Claude step: with none yet, `find` would pick the session's first (synthetic) message.
+          const pendingUser = lastAssistant && isClaudeCodeProvider(lastAssistant.providerID)
+            ? msgs.find((msg) => msg.info.role === "user" && msg.info.id > lastAssistant.parentID &&
+              !msg.parts.some((part) => part.type === "text" && part.metadata?.[STEERED_METADATA_KEY]))
+            : undefined
+          const unanswered = msgs.findLast((msg) => msg.info.role === "user" &&
+            !msg.parts.some((part) => part.type === "text" && part.metadata?.[STEERED_METADATA_KEY]))?.info
+          const lastUser = pendingUser?.info.role === "user" ? pendingUser.info
+            : unanswered?.role === "user" ? unanswered : latest.user
 
           if (!lastUser) throw new Error("No user message found in stream. This should never happen.")
+          if (pendingUser) msgs = msgs.filter((msg) => msg.info.role !== "user" || msg.info.id <= lastUser.id)
+          if (pendingUser && lastAssistant && lastUser.id < lastAssistant.id) {
+            // Saved during the previous step, but not executed there: send it after that reply.
+            msgs = [...msgs.filter((msg) => msg.info.id !== lastUser.id), pendingUser]
+          }
 
           const lastAssistantMsg = msgs.findLast(
             (msg) => msg.info.role === "assistant" && msg.info.id === lastAssistant?.id,
@@ -1429,7 +1502,7 @@ const layer = Layer.effect(
             lastAssistant?.finish &&
             !["tool-calls", "unknown"].includes(lastAssistant.finish) &&
             !hasToolCalls &&
-            lastAssistant.parentID === lastUser.id
+            (lastAssistant.parentID === lastUser.id || readMidTurn(msgs, lastAssistant.id))
           ) {
             const lastUserMsg = msgs.findLast((message) => message.info.id === lastUser.id)
             if (lastUserMsg && SessionHandoff.isHandoffMessage(lastUserMsg)) {

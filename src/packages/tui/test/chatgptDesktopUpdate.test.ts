@@ -33,6 +33,7 @@ test("parses a missing install", () => {
   expect(parseChatgptDesktopCheckOutput("ChatGPT Desktop not installed\n")).toEqual({
     ok: false,
     message: "ChatGPT Desktop not installed",
+    notInstalled: true,
   })
 })
 

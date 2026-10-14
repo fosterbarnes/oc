@@ -136,6 +136,7 @@ function init() {
         desc: "Close dialog",
         group: "Dialog",
         cmd: () => {
+          require("node:fs").appendFileSync("C:/Users/Foster/AppData/Local/Temp/opencode/tuiDiag.txt", `${new Date().toISOString()} dialog escape\n`)
           if (renderer.getSelection()) {
             renderer.clearSelection()
           }
@@ -164,6 +165,7 @@ function init() {
 
   return {
     clear() {
+      require("node:fs").appendFileSync("C:/Users/Foster/AppData/Local/Temp/opencode/tuiDiag.txt", `${new Date().toISOString()} dialog.clear ${store.stack.length} ${new Error().stack?.split("\n").slice(2, 5).join(" | ")}\n`)
       for (const item of store.stack) {
         if (item.onClose) item.onClose()
       }
@@ -198,6 +200,7 @@ function init() {
           onClose,
         },
       ])
+      require("node:fs").appendFileSync("C:/Users/Foster/AppData/Local/Temp/opencode/tuiDiag.txt", `${new Date().toISOString()} dialog.replace done ${store.stack.length}\n`)
     },
     // Stacks over the current dialog so escape returns to it
     push(input: any) {

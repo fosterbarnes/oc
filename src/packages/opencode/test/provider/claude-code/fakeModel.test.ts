@@ -129,6 +129,8 @@ describe.skipIf(!cliPath)("Claude Code CLI against TestLLMServer", () => {
         const claudeInputs = (yield* fixture.llm.hits).filter((hit) => hit.url.pathname === "/v1/messages")
         expect(claudeInputs).toHaveLength(1)
         expect(JSON.stringify(claudeInputs[0].body.messages)).not.toContain("Generate a concise title")
+        // The launcher's synthetic first message must not stand in for the real prompt.
+        expect(JSON.stringify(claudeInputs[0].body.messages)).toContain("Fix the first task")
         const messages = (yield* Effect.promise(() => sdk.session.messages({ sessionID }, { throwOnError: true }))).data
         expect(messages.filter((message) => message.info.role === "user")).toHaveLength(2)
 

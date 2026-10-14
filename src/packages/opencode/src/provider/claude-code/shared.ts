@@ -31,6 +31,27 @@ export type HostToolExecutor = (
 // runs proxied calls in-stream with full oc tool context. One active turn per session, so overwrite is safe.
 export const hostToolExecutors = new Map<string, HostToolExecutor>()
 
+// A user message sent while a Claude turn runs. A failed receipt save ends the turn.
+export type ClaudeSteer = {
+  messageID: string
+  text: string
+  modelID: string
+  agent: string
+  delivered: () => Promise<void>
+}
+export type ClaudeSteerSink = {
+  // False when the turn cannot take it; the message then waits for oc's next step as usual.
+  steer: (steer: ClaudeSteer) => boolean
+  // Takes back an admitted, held steer only. Unknown or written IDs return false.
+  retract: (messageID: string, remove: () => Promise<void>) => Promise<boolean>
+}
+// oc session id -> its running Claude turn's intake for such messages. Set by turnStream.ts, used by
+// session/prompt.ts (steer) and the delete-message route (retract).
+export const claudeSteerSinks = new Map<string, ClaudeSteerSink>()
+
+// Text-part metadata key set once Claude read a steered message; oc's loop then counts it as answered.
+export const STEERED_METADATA_KEY = "steered"
+
 // The `claude-code-*` arm matches nothing this plugin creates anymore (the
 // per-account providers are gone; the pool selects CLAUDE_CONFIG_DIR at spawn).
 // It stays so a stray suffixed id still routes to the Claude path instead of

@@ -112,6 +112,148 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-14 (~18:11) - v0.2.186 - Fix Claude ignoring the first prompt in launcher sessions - Claude Opus 5.5, low reasoning; Debug
+
+### Agent
+- Meta: Claude Opus 5.5; low; Debug (spit -> imp); completed
+- Version: 0.2.186
+- Fixed `src/packages/opencode/src/session/prompt.ts` loop `pendingUser`: steering code picked the oldest unsteered user message when no assistant existed, i.e. the launcher's synthetic `Working directory initialized` message (`oc.ts`, `noReply`), then filtered out the real prompt. Claude got only system reminders + `(empty)`. Now `pendingUser` requires a prior Claude assistant step; first turn falls to `unanswered`.
+- Evidence: DB parts for ses_ec3971169ffeg8vf0a2khUXAFf (oc41) and ses_ec3a42cc2ffe0qt3h5pwoMtpoE (stickee1); stickee1 also had Sol answer the synthetic message, then a 0-token Claude step.
+- Added assertion in `test/provider/claude-code/fakeModel.test.ts` (synthetic-first-message rename test) that the Claude envelope contains the real prompt text.
+- Fixed `test/provider/claude-code/flowReport.ts` `turnUsage`: a lower cumulative CLI cost footer means a new CLI process (server restart, rewound/lost conversation), so the turn's spend is the new total instead of unknown. Fixes pre-existing fakeModel failures `flow report: reverted tokens...` (rewind reset counter) and `flow report: cost deltas ... restart` (restart reset counter). Updated `flowReport.test.ts` decreased-counter case to match.
+- Verification: `bun test` fakeModel.test.ts + flowReport.test.ts: 30 pass, 0 fail. steering.test.ts alone: 13 pass twice.
+- ERROR: steering.test.ts flakes (30 s polls time out) when run in the same `bun test` call as fakeModel.test.ts; passes alone. Not fixed.
+
+### User
+Claude Code chats
+- Claude now answers your first prompt in sessions opened with `oc <project>`, instead of replying that there was no request.
+
+---
+
+## 2026-10-14 (~17:27) - v0.2.186 - Fix desktop app updates failing in server-connected oc - Claude Opus 5.5, low reasoning; Debug
+
+### Agent
+- Meta: Claude Opus 5.5; low reasoning; Debug; completed
+- Version: 0.2.186
+- Fixed Claude/Cursor Desktop install failing with "Error in TypeData System.Security.AccessControl.ObjectSecurity: The member AuditToString is already present". Cause: TUI env carried a PowerShell 7 `PSModulePath` (`...\PowerShell\7\Modules`), so `powershell.exe` 5.1 tried to load 7's `Microsoft.PowerShell.Security` and `Get-AuthenticodeSignature` (all three install scripts) failed. Worked under `/revive-single` because that process env differed.
+- Added `windowsPowershellEnv` in `src/packages/tui/src/desktopUpdate.ts` (drops `PSModulePath` in any casing); `runPowershell` passes it. Added optional `env` param to `runCliCommand` (`cliUpdate.ts`).
+- Kept `clipboard.ts` `powershell.exe` calls unchanged: they use `Set-Clipboard`/Management only, not Security.
+- Verification: reproduced from bun with a pwsh 7 `PSModulePath` (Get-AuthenticodeSignature fails); new win32 test in `test/desktopUpdate.test.ts` runs it through `windowsPowershellEnv` and expects `Valid`. 4 updater test files: 48 pass, 0 fail. Live palette rerun by user pending.
+
+### User
+Command palette
+- Updating Claude Desktop, Cursor Desktop, or ChatGPT Desktop no longer fails with an "AuditToString is already present" error when oc runs connected to its background server.
+
+---
+
+## 2026-10-14 (~17:07) - v0.2.186 - Palette "Update all" for third-party harnesses - Claude Opus 5.5, low reasoning; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low reasoning; Implementation; completed
+- Version: 0.2.186
+- Added `oc.update_all_harnesses` ("Update all") first in the "Third party harness management" palette group (`src/packages/tui/src/app.tsx`). Order: Claude Code, Cursor CLI, Codex CLI, then (win32) Claude/Cursor/ChatGPT Desktop. Sequential; one failure does not stop the rest. Module flag blocks a second concurrent run.
+- Refactored the six updaters into result-returning cores (`runClaudeCodeUpdate`, `runVersionedHarnessUpdate`, `checkDesktopHarness`, `installDesktopHarness`) returning `HarnessUpdateResult` status `ok|notInstalled|busy|declined|failed`. Single-item palette entries keep the same toasts and confirm text via `showHarnessResult` and `updateDesktopHarness` with `DesktopHarness` table consts.
+- Desktop flow in Update all: all checks first, then one combined `DialogConfirm` listing only pending updates; decline marks them `declined`. Ends with one summary toast grouped by status (error variant 30 s if any failed).
+- Added `notInstalled: true` to `resolveCursorCli`/`resolveCodexCli` not-found results (`cliUpdate.ts`) and to `parseDesktopCheckOutput`/`runDesktopCheck` not-installed results (`desktopUpdate.ts`). Claude Code not-installed = `which(cliPath)` null.
+- Verification: `bun test` cliUpdate, desktopUpdate, cursorDesktopUpdate, chatgptDesktopUpdate: 46 pass, 0 fail (not-installed expectations updated). Typecheck and live palette run not done.
+
+### User
+Command palette
+- New "Update all" entry updates Claude Code, Cursor CLI, Codex CLI, and on Windows the Claude, Cursor, and ChatGPT desktop apps, one after another.
+- Tools that are not installed are skipped and listed as "Not installed" in the final summary instead of raising errors.
+- Desktop app updates ask for confirmation once, listing every app that has an update, instead of one prompt per app.
+
+---
+
+## 2026-10-14 (~05:05) - v0.2.186 hospitalFavorite - Finish Claude steering cancellation, permissions, and revert fixes - GPT-6.1 Sol, default reasoning; Implementation
+
+### Agent
+- Meta: GPT-6.1 Sol; default reasoning; Implementation; completed approved follow-up directly; no delegation
+- Version: v0.2.186 hospitalFavorite; preserved session's existing bump and concurrent ledger/dependency work
+- Fixed `turnStream.ts`: stop steering on abort/cancel/close/denial; retain authoritative written IDs across receipts and child replacements; correlate replay by UUID instead of text; stop with an error when receipt persistence fails. Busy retraction owns DB removal and delays result completion until deletion settles.
+- ERROR: cancellation timeline proved unread `CANCEL-STEER` started a model request after the explicit abort. Retirement still sent interrupt to a terminating CLI, and PATH `claude` was an npm `.cmd` wrapper: killing its PID left native Claude running. Fixed shared `cliExecutable.ts` to resolve only the exact stock native npm shim; custom wrappers remain unchanged. Added `deleteActiveProcessAndWait.forceKill`: kill before releasing proxy requests; retired turns receive no interrupt or buffered output.
+- Fixed `prompt.ts`: inspect original and incoming stored user settings, including command permission, tools, system, format, variant, and explicit model selection. Incompatible prompts run individually in order under their own settings; later prompts cannot overtake an incompatible one. Cancel the run before releasing its question.
+- Fixed busy message deletion in HTTP `handlers/session.ts`: require live held-message ownership, never assume unknown IDs are pending; idle history deletion uses existing maintenance gate. Written IDs remain non-retractable while receipts save.
+- Added delivered text metadata `steeredAssistantID` / `steeredParentID`; `revert.ts` maps a delivered steer to the original prompt and restores all shared-turn patches. Existing `resetStaleSession` handles empty-history rewind; no sessionSync change or migration needed.
+- Fixed TUI `dialog-message.tsx`: capture Edit draft before removal events erase parts; show `Revert whole turn` for delivered steers and restore original prompt only after successful revert. Updated FORK and local wiki `Sessions.md`; wiki push remains user-owned.
+- Added real oc/CLI fake-model regressions for held Edit/Delete, busy/idle delivered deletion, cancellation before/after visible content, pending-message preservation and exactly-once next dispatch, identical text receipts, SQL-trigger receipt-save failure, denial, both command-permission directions, and delivered-steer file/history revert with prior/empty history. Added owned headless pane regression for QUEUED/SENT, Edit/Delete, busy revert refusal, and whole-turn revert.
+- MISTAKE: initial checks synchronized on saved message parts before sink admission, and tried reading an unfinished streamed text block from DB. Replaced with published admission/stream signals; pane waits for idle footer before successful revert. Early receipt assertion used the wrong SDK error field; final check reads serialized error contract. Temporary diagnostic writes removed from tests.
+- Verification: final `bun test test/provider/claude-code/steering.test.ts test/provider/claude-code/cliExecutable.test.ts`: 15 pass, 0 fail, 129 Bun assertions. `OC_TUI_PANE=1 bun test test/provider/claude-code/tuiPane.test.ts --test-name-pattern 'steering actions'`: 1 pass, 0 fail, 6 assertions; 12 unrelated cases filtered out. Scoped diff checks passed. Restored touched source CRLF with user's explicit bounded normalization approval.
+- Kept checks scoped to edited/introduced files. Background dispatch denied by bgRun permission; user explicitly approved bounded foreground fake-model runs. No general typecheck, build/install, real tokens, commit, push, or buildNotes.txt edit. Installed acceptance, account failover, and compaction interactions were not exercised.
+
+### User
+Claude steering
+- Stopping a turn prevents unread messages from starting unattended Claude work; pending messages remain available for the next prompt.
+- Commands with their own permissions and other changed execution settings run separately instead of inheriting the running turn's settings.
+- Edit and Delete safely take back messages still held by an oc tool; messages already written to Claude are protected from deletion while busy.
+- Revert whole turn restores the shared reply's file changes and puts the original prompt back; a busy revert leaves the prompt alone.
+- Fake-model and headless terminal checks passed without spending model usage.
+
+---
+
+## 2026-10-14 (~04:07) - v0.2.186 hospitalFavorite - Review revive PID-reuse fix - GPT-6.1 Sol, default reasoning; Pass
+
+### Agent
+- Meta: GPT-6.1 Sol; default reasoning; Pass; completed; scoped to this session's revive changes
+- Version: v0.2.186 hospitalFavorite
+- Reviewed shared ledger reader, registration/removal, shutdown selection, edited tests, troubleshooting entry, and session-owned version/notes delta. No actionable correctness defects found.
+- Simplified final identity validation to reuse already-resolved `live` process instead of rescanning process snapshot; exact creation/executable checks unchanged.
+- Verification: same 9 scoped tests passed, 41 assertions; scoped `git diff --check` passed. No build/install/live revive run. Kept session's existing version bump.
+
+### User
+Revive
+- Reviewed the stale-process fix and removed one redundant process-list search.
+- All 9 targeted checks still pass; live revive verification remains pending installation.
+
+---
+
+## 2026-10-14 (~04:01) - v0.2.186 hospitalFavorite - Skip stale revive terminal records after PID reuse - GPT-6.1 Sol, default reasoning; Implementation
+
+### Agent
+- Meta: GPT-6.1 Sol; default reasoning; Implementation; completed
+- Version: v0.2.186 hospitalFavorite
+- ERROR: `/revive` completed builds but aborted in `TuiLedger.read`; old oc PID 12184 now belongs to Firefox with a different CIM creation stamp. Crashed TUI ledger pairs remain on disk and Windows reuses PIDs.
+- Fixed `config/tuiLedger.ts` shared reader: skip live foreign executables and records whose saved CIM creation stamp proves PID reuse. Retained missing/corrupt identity failures for possible live oc TUIs; no PID-only stops or deletion of stale files.
+- Added mixed valid/stale ledger regression covering same-executable PID reuse, Firefox replacement, safe selection, preserved files, and unavailable live creation stamp. Updated launcher ledger expectation for proven reuse.
+- Updated wiki `Troubleshooting.md` with stale-ledger cause and manual build/install bootstrap for older installed helpers; wiki push remains user-owned.
+- Verification: scoped Bun run across edited `test/config/tuiLedger.test.ts` and launcher ledger check: 9 pass, 0 fail, 41 assertions; scoped `git diff --check` passed. Background dispatch denied; bounded foreground tests completed in 1.42s. No build/install or live revive run.
+
+### User
+Revive
+- Revive skips old terminal records when Windows has reused their process IDs, instead of aborting after a successful build.
+- Process identity checks still protect unrelated programs from being stopped.
+- The installed older helper needs one manual build/install to pick up this fix.
+
+---
+
+## 2026-10-14 (~03:57) - v0.2.185 wantsManifesting - Claude mid-turn steering, unsend waiting messages - Claude Opus 5.5, default reasoning; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; default reasoning; Implementation (/imp of `~/.config/opencode/plans/2026-10-14-claude-steering.md`); completed; resumed after a usage-limit cutoff and account switch
+- Version: v0.2.185 wantsManifesting
+- Probe (real CLI vs TestLLMServer): stdin user msg written mid-turn is delivered at the next tool boundary, appended by the CLI to the tool_result as a `<system-reminder>` "The user sent a new message while you were working"; written after the last tool call it runs as the CLI's next turn with its own `result`. `--replay-user-messages` echoes it (`isReplay: true`) when consumed. Compaction summary replays also carry `isReplay`.
+- Added `claudeSteerSinks` / `ClaudeSteer` / `ClaudeSteerSink` / `STEERED_METADATA_KEY` in `provider/claude-code/shared.ts`.
+- Added `--replay-user-messages` to `cliArgs.ts`; `isReplay` on `ClaudeStreamMessage`.
+- `turnStream.ts`: tool-scope non-compaction turns register a sink; `onSteer` holds while `inStreamCalls > 0` (retractable), else writes; `flushSteers` before resolving a proxied call and in its `finally`; `onReplay` matches echo text, runs `delivered()`; `onResult` waits for acks; `completeResult` holds the step open (no finish, `noteTurnStarted`, result fallback armed) while written steers are unread. Steers dropped on account switch and start-watchdog respawn (loop resends them).
+- `session/prompt.ts`: `steerClaudeTurn` after `createUserMessage` (plain text only, same model id and agent); `delivered` sets text-part `metadata.steered` via `EffectBridge`; loop exit also when every user msg after the assistant is steered (`readMidTurn`).
+- `message-v2.ts` passes `providerMetadata["claude-code"].steered` on steered user text; `messageBuilder.ts` skips those parts so a later step never repeats them.
+- `handlers/session.ts` `deleteMessage`: keeps `assertAvailable`; skips `assertNotBusy` for a user msg with no assistant child, not steered, and retracted from (or unknown to) the Claude turn.
+- TUI `dialog-message.tsx`: `waiting` prop shows Edit/Delete (deleteMessage, Edit refills the prompt) instead of Revert; Revert now awaits and toasts its error instead of filling the prompt. `routes/session/index.tsx`: `isSteered`, badge `SENT`, passes `waiting`.
+- Docs: `FORK.md` row "Claude mid-turn steering"; wiki `Sessions.md` "Steering a running turn" (wiki push is the user's).
+- Verification: `bun run typecheck` in `packages/opencode` and `packages/tui` passed; `bun test test/provider/claude-code/steering.test.ts` 2 pass (tool-boundary steer: 2 model requests, steer in request 2, one assistant msg, part flagged; late steer: same step, SECOND-DONE). No pane check; no test for delete-while-held.
+- Risk: Esc with a written-but-unread steer leaves it in CLI stdin; the CLI may run it as an unattended turn while oc still sees it unanswered.
+- Risk: delete-while-busy can race a non-Claude loop that is just starting a step for that message.
+
+### User
+Chat
+- On Claude Code, a message you send while the agent works now reaches Claude after its current tool call instead of after the whole turn.
+- While a subagent batch or other oc tool runs, your message waits and is delivered the moment that tool returns.
+- A delivered message's badge changes from `QUEUED` to `SENT`, and it is never sent a second time.
+- Clicking a `QUEUED` message offers Edit and Delete, which work while the agent is busy until the model has the message.
+- Revert on a message the agent is still working on shows an error instead of silently putting a duplicate in your prompt.
+
+---
+
 ## 2026-10-14 (~03:37) - v0.2.184 blamFan - Sticky tool block titles while scrolling - Claude Opus 5.5, default reasoning; Implementation
 
 ### Agent

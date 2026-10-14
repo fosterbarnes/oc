@@ -20,7 +20,8 @@ import { testProviderConfig } from "../../lib/test-provider"
 // with the shell's CLAUDE_CODE_OAUTH_TOKEN instead of the fixture's fake.
 export const openChat = Effect.fnUntraced(function* (
   fixture: CliFixture,
-  options: { resume?: string; root?: string; real?: boolean; modelID?: string; turnStats?: boolean } = {},
+  options: { resume?: string; root?: string; real?: boolean; modelID?: string; turnStats?: boolean;
+    config?: Record<string, unknown> } = {},
 ) {
   const root = options.root ?? fixture.home
   const project = path.join(root, "work")
@@ -32,7 +33,7 @@ export const openChat = Effect.fnUntraced(function* (
       // The test preload's in-memory database would not survive a restart.
       OPENCODE_DB: path.join(fixture.home, "opencode.db"),
       OPENCODE_CONFIG_CONTENT: JSON.stringify(
-        chatConfig(fixture.llm.url, { turnStats: options.turnStats ?? options.real }),
+        { ...chatConfig(fixture.llm.url, { turnStats: options.turnStats ?? options.real }), ...options.config },
       ),
     },
   })

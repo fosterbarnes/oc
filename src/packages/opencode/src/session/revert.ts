@@ -38,6 +38,19 @@ const layer = Layer.effect(
     const revert = Effect.fn("SessionRevert.revert")(function* (input: RevertInput) {
       yield* state.assertNotBusy(input.sessionID)
       const all = yield* sessions.messages({ sessionID: input.sessionID }).pipe(Effect.orDie)
+      const target = all.find((msg) => msg.info.id === input.messageID)
+      const receipt = target?.info.role === "user"
+        ? target.parts.find((part) => part.type === "text" && part.metadata?.steered)
+        : undefined
+      const responding = target && receipt?.type === "text"
+        ? all.findLast((msg) => msg.info.role === "assistant" &&
+          (msg.info.id === receipt.metadata?.steeredAssistantID ||
+            (!receipt.metadata?.steeredAssistantID && msg.info.id < input.messageID &&
+              msg.info.time.completed !== undefined && msg.info.time.completed >= target.info.time.created)))
+        : undefined
+      // A delivered steer shares this assistant's patches, including ones stored before the steer.
+      const messageID = responding?.info.role === "assistant" ? responding.info.parentID : input.messageID
+      const targetPartID = responding ? undefined : input.partID
       let lastUser: SessionV1.User | undefined
       const session = yield* sessions.get(input.sessionID).pipe(Effect.orDie)
 
@@ -53,8 +66,8 @@ const layer = Layer.effect(
           }
 
           if (!rev) {
-            if ((msg.info.id === input.messageID && !input.partID) || part.id === input.partID) {
-              const partID = remaining.some((item) => ["text", "tool"].includes(item.type)) ? input.partID : undefined
+            if ((msg.info.id === messageID && !targetPartID) || part.id === targetPartID) {
+              const partID = remaining.some((item) => ["text", "tool"].includes(item.type)) ? targetPartID : undefined
               rev = {
                 messageID: !partID && lastUser ? lastUser.id : msg.info.id,
                 partID,

@@ -137,6 +137,7 @@ test("reports a missing Cursor CLI with the install URL", async () => {
   const resolved = await resolveCursorCli(testEnv(dir))
   expect(resolved).toEqual({
     error: `Cursor CLI not found. Install it from ${CURSOR_CLI_INSTALL_URL}`,
+    notInstalled: true,
   })
 })
 
@@ -262,6 +263,7 @@ test("reports a missing Codex CLI with the npm hint", async () => {
   const resolved = await resolveCodexCli(testEnv(dir))
   expect(resolved).toEqual({
     error: `Codex CLI not found. Install it with ${CODEX_CLI_INSTALL_HINT}`,
+    notInstalled: true,
   })
 })
 

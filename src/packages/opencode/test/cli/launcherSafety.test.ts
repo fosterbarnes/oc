@@ -220,9 +220,7 @@ test("resident state and CLI ledger preserve exact identities without querying o
     const records = await TuiLedger.read(directory, [identity])
     expect(records[0]?.created).toBe(identity.created)
     expect(TuiLedger.select(records, [identity], Global.Path.app, identity.executable, 999)).toEqual([identity.pid])
-    await expect(TuiLedger.read(directory, [{ ...identity, created: "2" }])).rejects.toThrow(
-      "identity unavailable or changed",
-    )
+    expect(await TuiLedger.read(directory, [{ ...identity, created: "2" }])).toEqual([])
     await TuiLedger.remove(directory, identity.pid)
     expect(await fs.readdir(path.join(directory, "oc-tuis"))).toEqual([])
   } finally {

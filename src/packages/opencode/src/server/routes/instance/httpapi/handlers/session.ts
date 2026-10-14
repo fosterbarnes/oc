@@ -5,12 +5,14 @@ import { EventV2Bridge } from "@/event-v2-bridge"
 import { Command } from "@/command"
 import { Config } from "@/config/config"
 import { pinSessionAccount, poolAccountIds, poolState, setCurrentAccount } from "@/provider/claude-code/accounts"
+import { claudeSteerSinks, STEERED_METADATA_KEY } from "@/provider/claude-code/shared"
 import { Permission } from "@/permission"
 import { SessionShare } from "@/share/session"
 import { Session } from "@/session/session"
 import { SessionCompaction } from "@/session/compaction"
 import { SessionHandoff } from "@/session/handoff"
 import { MessageV2 } from "@/session/message-v2"
+import { EffectBridge } from "@/effect/bridge"
 import { SessionPrompt } from "@/session/prompt"
 import { ScheduledResume } from "@/session/scheduledResume"
 import { SessionRevert } from "@/session/revert"
@@ -20,7 +22,7 @@ import { SessionSummary } from "@/session/summary"
 import { Todo } from "@/session/todo"
 import { MessageID, PartID, SessionID } from "@/session/schema"
 import { NamedError } from "@opencode-ai/core/util/error"
-import { Cause, Effect, Option, Schema, Scope } from "effect"
+import { Cause, Effect, Exit, Option, Schema, Scope } from "effect"
 import * as Stream from "effect/Stream"
 import { InstanceState } from "@/effect/instance-state"
 import { InstanceStore } from "@/project/instance-store"
@@ -492,9 +494,34 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       params: { sessionID: SessionID; messageID: MessageID }
     }) {
       yield* requireSession(ctx.params.sessionID)
-      yield* SessionError.mapBusy(runState.assertNotBusy(ctx.params.sessionID))
-      yield* session.removeMessage(ctx.params)
+      yield* SessionError.mapBusy(runState.assertAvailable(ctx.params.sessionID))
+      if (Exit.isSuccess(yield* Effect.exit(runState.assertNotBusy(ctx.params.sessionID)))) {
+        yield* SessionError.mapBusy(runState.maintenance(ctx.params.sessionID, session.removeMessage(ctx.params)))
+        return true
+      }
+      if (!(yield* unsendable(ctx.params))) return yield* SessionError.mapBusy(
+        Effect.fail(new Session.BusyError({ sessionID: ctx.params.sessionID })),
+      )
       return true
+    })
+
+    // A user message the running turn has not started on and Claude has not read can be deleted while
+    // busy: nothing answers it yet. A steer still held by the Claude turn is taken back here.
+    const unsendable = Effect.fn("SessionHttpApi.unsendable")(function* (params: {
+      sessionID: SessionID
+      messageID: MessageID
+    }) {
+      const msgs = yield* session.messages({ sessionID: params.sessionID }).pipe(Effect.orDie)
+      const message = msgs.find((msg) => msg.info.id === params.messageID)
+      if (message?.info.role !== "user") return false
+      if (msgs.some((msg) => msg.info.role === "assistant" && msg.info.parentID === params.messageID)) return false
+      if (message.parts.some((part) => part.type === "text" && part.metadata?.[STEERED_METADATA_KEY])) return false
+      // The snapshot may predate the CLI receipt. Only its live held-message owner can
+      // authorize busy deletion; unknown messages might already be entering another step.
+      const sink = claudeSteerSinks.get(params.sessionID)
+      if (!sink) return false
+      const bridge = yield* EffectBridge.make()
+      return yield* Effect.promise(() => sink.retract(params.messageID, () => bridge.promise(session.removeMessage(params).pipe(Effect.asVoid))))
     })
 
     const deletePart = Effect.fn("SessionHttpApi.deletePart")(function* (ctx: {

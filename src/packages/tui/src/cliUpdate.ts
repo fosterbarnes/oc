@@ -67,6 +67,7 @@ export function runCliCommand(
   executable: string,
   args: string[],
   timeoutMs = CLI_TIMEOUT_MS,
+  env?: NodeJS.ProcessEnv,
 ): Promise<CliCommandResult> {
   return new Promise((resolve) => {
     let settled = false
@@ -89,6 +90,7 @@ export function runCliCommand(
       child = spawn(spawnCommand(executable, shell), args, {
         stdio: ["ignore", "pipe", "pipe"],
         cwd: os.homedir(),
+        env,
         shell,
         windowsHide: true,
       })
@@ -165,12 +167,12 @@ async function identifyCursorAgent(executable: string) {
 
 export async function resolveCursorCli(
   env: NodeJS.ProcessEnv = process.env,
-): Promise<{ executable: string } | { error: string }> {
+): Promise<{ executable: string } | { error: string; notInstalled?: true }> {
   const cursorAgent = which("cursor-agent", env)
   if (cursorAgent) return { executable: cursorAgent }
   const agent = which("agent", env)
   if (!agent) {
-    return { error: `Cursor CLI not found. Install it from ${CURSOR_CLI_INSTALL_URL}` }
+    return { error: `Cursor CLI not found. Install it from ${CURSOR_CLI_INSTALL_URL}`, notInstalled: true }
   }
   if (launcherName(agent) === "agent") {
     const mismatch = await identifyCursorAgent(agent)
@@ -219,10 +221,10 @@ export async function runVersionedCliUpdate(label: string, executable: string) {
 // prefer the runnable .cmd sibling and fail closed when it is missing.
 export async function resolveCodexCli(
   env: NodeJS.ProcessEnv = process.env,
-): Promise<{ executable: string } | { error: string }> {
+): Promise<{ executable: string } | { error: string; notInstalled?: true }> {
   const found = which("codex", env)
   if (!found) {
-    return { error: `Codex CLI not found. Install it with ${CODEX_CLI_INSTALL_HINT}` }
+    return { error: `Codex CLI not found. Install it with ${CODEX_CLI_INSTALL_HINT}`, notInstalled: true }
   }
   if (found.toLowerCase().endsWith(".ps1")) {
     const sibling = path.join(path.dirname(found), "codex.cmd")

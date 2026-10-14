@@ -48,12 +48,28 @@ test("reads proven records and skips dead, foreign, and truncated dead records w
 test("fails loudly when a live record's identity cannot be proven", async () => {
   await using missing = await ledger({ "10.json": record })
   await expect(TuiLedger.read(missing.path, processes)).rejects.toThrow("identity unavailable or changed")
-  await using reused = await ledger({ "10.json": record, "10.identity.json": tui })
-  await expect(TuiLedger.read(reused.path, [{ ...tui, created: "134100000000000099" }])).rejects.toThrow(
-    "identity unavailable or changed",
-  )
   await using corrupt = await ledger({ "10.json": "{", "10.identity.json": tui })
   await expect(TuiLedger.read(corrupt.path, processes)).rejects.toThrow("identity unavailable or changed")
+})
+
+test("skips stale records after PID reuse without deleting them or selecting the replacement", async () => {
+  await using tmp = await ledger({ "10.json": record, "10.identity.json": tui })
+  for (const replacement of [
+    { ...tui, created: "134100000000000099" },
+    { ...tui, executable: "C:\\Program Files\\Mozilla Firefox ESR\\firefox.exe" },
+  ]) {
+    const live = [replacement, { ...tui, pid: 20 }]
+    await Bun.write(path.join(tmp.path, "oc-tuis", "20.json"), JSON.stringify({ ...record, pid: 20 }))
+    await Bun.write(path.join(tmp.path, "oc-tuis", "20.identity.json"), JSON.stringify(live[1]))
+    const records = await TuiLedger.read(tmp.path, live)
+    expect(records.map((item) => item.pid)).toEqual([20])
+    expect(TuiLedger.select(records, live, Global.Path.app, executable, 100)).toEqual([20])
+  }
+  expect(await Bun.file(path.join(tmp.path, "oc-tuis", "10.json")).json()).toEqual(record)
+  expect(await Bun.file(path.join(tmp.path, "oc-tuis", "10.identity.json")).json()).toEqual(tui)
+  await expect(TuiLedger.read(tmp.path, [{ ...tui, created: undefined }])).rejects.toThrow(
+    "identity unavailable or changed",
+  )
 })
 
 test("rejects records with a bad session, directory, or pane type", async () => {

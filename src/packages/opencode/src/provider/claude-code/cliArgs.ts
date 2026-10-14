@@ -58,6 +58,8 @@ export function buildCliArgs(opts: {
     "stream-json",
     "--include-partial-messages",
     "--verbose",
+    // Echoes each stdin user message when Claude reads it: the delivery receipt for a mid-turn steer.
+    "--replay-user-messages",
   ]
 
   if (model) {

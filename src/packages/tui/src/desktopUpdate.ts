@@ -5,12 +5,12 @@ const inflight = new Set<string>()
 export type DesktopCheckParse =
   | { ok: true; upToDate: true; version: string }
   | { ok: true; upToDate: false; oldVersion: string; newVersion: string }
-  | { ok: false; message: string }
+  | { ok: false; message: string; notInstalled?: true }
 
 export type DesktopCheckResult =
   | { ok: true; alreadyRunning: false; upToDate: true; version: string; message: string }
   | { ok: true; alreadyRunning: false; upToDate: false; oldVersion: string; newVersion: string; message: string }
-  | { ok: false; alreadyRunning: boolean; message: string }
+  | { ok: false; alreadyRunning: boolean; message: string; notInstalled?: true }
 
 export type DesktopInstallResult = {
   ok: boolean
@@ -70,8 +70,10 @@ export function parseDesktopCheckOutput(
     const match = line.match(upToDate)
     if (match) return { ok: true, upToDate: true, version: match[1] }
   }
+  const notInstalled = `${label} not installed`
   for (const line of lines) {
-    for (const message of [`${label} not installed`, ...extraMessages]) {
+    if (line.includes(notInstalled)) return { ok: false, message: notInstalled, notInstalled: true }
+    for (const message of extraMessages) {
       if (line.includes(message)) return { ok: false, message }
     }
   }
@@ -134,7 +136,10 @@ export async function runDesktopCheck(input: {
     }
     const parsed = parseDesktopCheckOutput(result.output, input.label, input.extraMessages)
     if (!parsed.ok) {
-      return { ok: false, alreadyRunning: false, message: `Failed to check ${input.label}: ${parsed.message}` }
+      const message = `Failed to check ${input.label}: ${parsed.message}`
+      return parsed.notInstalled
+        ? { ok: false, alreadyRunning: false, message, notInstalled: true }
+        : { ok: false, alreadyRunning: false, message }
     }
     if (parsed.upToDate) {
       return {
@@ -186,15 +191,20 @@ export async function runDesktopInstall(input: {
   }
 }
 
+// A PSModulePath inherited from PowerShell 7 makes Windows PowerShell 5.1 load 7's
+// Microsoft.PowerShell.Security, which fails ("AuditToString is already present") and breaks
+// Get-AuthenticodeSignature. Without the variable, 5.1 builds its own default path.
+export function windowsPowershellEnv(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  return Object.fromEntries(Object.entries(env).filter(([key]) => key.toLowerCase() !== "psmodulepath"))
+}
+
 function runPowershell(script: string) {
-  return runCliCommand("powershell.exe", [
-    "-NoProfile",
-    "-NonInteractive",
-    "-ExecutionPolicy",
-    "Bypass",
-    "-Command",
-    script,
-  ])
+  return runCliCommand(
+    "powershell.exe",
+    ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script],
+    undefined,
+    windowsPowershellEnv(),
+  )
 }
 
 export function expectedVersionAssignment(version?: string) {

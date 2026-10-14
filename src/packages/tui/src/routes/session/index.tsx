@@ -1540,6 +1540,11 @@ export function Session() {
                                 messageID={message.id}
                                 sessionID={route.sessionID}
                                 setPrompt={(promptInfo) => prompt?.set(promptInfo)}
+                                waiting={
+                                  pending() !== undefined &&
+                                  index() > pending()! &&
+                                  !isSteered(sync.data.part[message.id] ?? [])
+                                }
                               />
                             ))
                           }}
@@ -1672,6 +1677,11 @@ export function Session() {
   )
 }
 
+// Claude read this message while its turn ran (opencode provider/claude-code/shared.ts STEERED_METADATA_KEY).
+function isSteered(parts: Part[]) {
+  return parts.some((part) => part.type === "text" && !!part.metadata?.steered)
+}
+
 function UserMessage(props: {
   message: UserMessage
   parts: Part[]
@@ -1737,7 +1747,11 @@ function UserMessage(props: {
             onMouseOut={() => {
               setHover(false)
             }}
+            onMouseDown={(evt) => {
+              require("node:fs").appendFileSync("C:/Users/Foster/AppData/Local/Temp/opencode/tuiDiag.txt", `${new Date().toISOString()} down ${props.message.id} ${evt.button}\n`)
+            }}
             onMouseUp={(evt) => {
+              require("node:fs").appendFileSync("C:/Users/Foster/AppData/Local/Temp/opencode/tuiDiag.txt", `${new Date().toISOString()} up ${props.message.id} ${evt.button} drag=${evt.isDragging}\n`)
               if (evt.button !== MouseButton.LEFT) return
               props.onAction()
             }}
@@ -1778,7 +1792,9 @@ function UserMessage(props: {
               }
             >
               <text selectable={false} fg={theme.textMuted}>
-                <span style={{ bg: color(), fg: queuedFg(), bold: true }}> QUEUED </span>
+                <span style={{ bg: color(), fg: queuedFg(), bold: true }}>
+                  {isSteered(props.parts) ? " SENT " : " QUEUED "}
+                </span>
               </text>
             </Show>
             <text

@@ -604,13 +604,17 @@ export async function deleteActiveProcessAndWait(
   options: {
     exitTimeoutMs?: number
     forceExitTimeoutMs?: number
+    forceKill?: boolean
   } = {},
 ): Promise<boolean> {
-  const ap = detachActiveProcess(key)
+  const ap = activeProcesses.get(key)
+  // Queued stdin work must die before closing the proxy can release a tool boundary.
+  if (options.forceKill) ap?.proc.kill("SIGKILL")
+  detachActiveProcess(key)
   if (!ap || hasProcessExited(ap.proc)) return true
 
   const gracefulExit = waitForProcessExit(ap.proc, options.exitTimeoutMs ?? PROCESS_EXIT_TIMEOUT_MS)
-  ap.proc.kill()
+  if (!options.forceKill) ap.proc.kill()
   if (await gracefulExit) return true
 
   const forcedExit = waitForProcessExit(ap.proc, options.forceExitTimeoutMs ?? PROCESS_FORCE_EXIT_TIMEOUT_MS)

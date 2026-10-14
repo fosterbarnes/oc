@@ -105,7 +105,13 @@ import { cliErrorMessage, errorFormat } from "./util/error"
 import { spawn } from "node:child_process"
 import { launchDetached } from "@opencode-ai/core/util/launchDetached"
 import { resolveCodexCli, resolveCursorCli, runCliUpdate, runVersionedCliUpdate } from "./cliUpdate"
-import { checkClaudeDesktop, installClaudeDesktop } from "./desktopUpdate"
+import {
+  checkClaudeDesktop,
+  installClaudeDesktop,
+  type DesktopCheckResult,
+  type DesktopInstallResult,
+} from "./desktopUpdate"
+import { which } from "@opencode-ai/core/util/which"
 import { checkChatgptDesktop, installChatgptDesktop } from "./chatgptDesktopUpdate"
 import { checkCursorDesktop, installCursorDesktop } from "./cursorDesktopUpdate"
 import { validateHotkey } from "./hotkeyValidate"
@@ -373,180 +379,197 @@ function persistOcConfig(
   })
 }
 
+// Every harness updater resolves to one of these so "Update all" can run them in sequence and
+// summarize; the single-harness palette entries show the same result as one toast.
+type HarnessUpdateStatus = "ok" | "notInstalled" | "busy" | "declined" | "failed"
+type HarnessUpdateResult = { label: string; status: HarnessUpdateStatus; message: string }
+
+function harnessResult(label: string, status: HarnessUpdateStatus, message: string): HarnessUpdateResult {
+  return { label, status, message }
+}
+
+function showHarnessResult(toast: ToastContext, result: HarnessUpdateResult) {
+  if (result.status === "declined") return
+  if (result.status === "ok") return toast.show({ message: result.message, variant: "success" })
+  if (result.status === "busy") return toast.show({ message: result.message, variant: "info" })
+  toast.show({ message: result.message, variant: "error", duration: 15_000 })
+}
+
 // `claude update` updates whichever install `cliPath` resolves to. A chat's live `claude` process
 // keeps its old binary; the next process oc starts uses the update. The shell resolves npm's
 // `claude.cmd` shim on Windows.
+async function runClaudeCodeUpdate(cliPath: string): Promise<HarnessUpdateResult> {
+  const label = "Claude Code"
+  if (!which(cliPath)) return harnessResult(label, "notInstalled", `${label} not found: ${cliPath}`)
+  const result = await runCliUpdate(cliPath)
+  if (result.alreadyRunning) return harnessResult(label, "busy", `${label} update already running`)
+  if (result.error && result.code === null && !result.lastLine) {
+    return harnessResult(label, "failed", `Failed to update ${label}: ${result.error}`)
+  }
+  if (result.ok) return harnessResult(label, "ok", result.lastLine || `${label} is up to date`)
+  const detail = result.lastLine || result.error || `exit code ${result.code}`
+  return harnessResult(label, "failed", `Failed to update ${label}: ${detail}`)
+}
+
+async function runVersionedHarnessUpdate(
+  label: string,
+  resolve: () => Promise<{ executable: string } | { error: string; notInstalled?: true }>,
+): Promise<HarnessUpdateResult> {
+  const resolved = await resolve()
+  if ("error" in resolved) {
+    return harnessResult(label, resolved.notInstalled ? "notInstalled" : "failed", resolved.error)
+  }
+  const result = await runVersionedCliUpdate(label, resolved.executable)
+  if (result.alreadyRunning) return harnessResult(label, "busy", result.message)
+  return harnessResult(label, result.ok ? "ok" : "failed", result.message)
+}
+
 function updateClaudeCode(cliPath: string, toast: ToastContext) {
   toast.show({ message: "Updating Claude Code...", variant: "info", duration: 120_000 })
-  void runCliUpdate(cliPath).then((result) => {
-    if (result.alreadyRunning) {
-      toast.show({ message: "Claude Code update already running", variant: "info" })
-      return
-    }
-    if (result.error && result.code === null && !result.lastLine) {
-      toast.show({ message: `Failed to update Claude Code: ${result.error}`, variant: "error" })
-      return
-    }
-    toast.show(
-      result.ok
-        ? { message: result.lastLine || "Claude Code is up to date", variant: "success" }
-        : {
-            message: `Failed to update Claude Code: ${result.lastLine || result.error || `exit code ${result.code}`}`,
-            variant: "error",
-            duration: 15_000,
-          },
-    )
-  })
+  void runClaudeCodeUpdate(cliPath).then((result) => showHarnessResult(toast, result))
 }
 
 function updateCursorCli(toast: ToastContext) {
-  void (async () => {
-    const resolved = await resolveCursorCli()
-    if ("error" in resolved) {
-      toast.show({ message: resolved.error, variant: "error", duration: 15_000 })
-      return
-    }
-    toast.show({ message: "Updating Cursor CLI...", variant: "info", duration: 120_000 })
-    const result = await runVersionedCliUpdate("Cursor CLI", resolved.executable)
-    if (result.alreadyRunning) {
-      toast.show({ message: result.message, variant: "info" })
-      return
-    }
-    toast.show(
-      result.ok
-        ? { message: result.message, variant: "success" }
-        : { message: result.message, variant: "error", duration: 15_000 },
-    )
-  })()
+  toast.show({ message: "Updating Cursor CLI...", variant: "info", duration: 120_000 })
+  void runVersionedHarnessUpdate("Cursor CLI", resolveCursorCli).then((result) => showHarnessResult(toast, result))
 }
 
 function updateCodexCli(toast: ToastContext) {
+  toast.show({ message: "Updating Codex CLI...", variant: "info", duration: 120_000 })
+  void runVersionedHarnessUpdate("Codex CLI", resolveCodexCli).then((result) => showHarnessResult(toast, result))
+}
+
+type DesktopHarness = {
+  label: string
+  check: () => Promise<DesktopCheckResult>
+  install: (version: string) => Promise<DesktopInstallResult>
+  // Completes "Updating ..." in the confirm prompt.
+  closes: string
+}
+
+const CLAUDE_DESKTOP: DesktopHarness = {
+  label: "Claude Desktop",
+  check: checkClaudeDesktop,
+  install: installClaudeDesktop,
+  closes: "closes Claude Desktop and any Claude Code sessions started from it",
+}
+const CURSOR_DESKTOP: DesktopHarness = {
+  label: "Cursor Desktop",
+  check: checkCursorDesktop,
+  install: installCursorDesktop,
+  closes: "closes Cursor and any terminals or agents running inside it",
+}
+const CHATGPT_DESKTOP: DesktopHarness = {
+  label: "ChatGPT Desktop",
+  check: checkChatgptDesktop,
+  install: installChatgptDesktop,
+  closes: "closes ChatGPT/Codex Desktop and any sessions running inside it",
+}
+
+type PendingDesktopUpdate = { harness: DesktopHarness; oldVersion: string; newVersion: string }
+
+async function checkDesktopHarness(harness: DesktopHarness): Promise<HarnessUpdateResult | PendingDesktopUpdate> {
+  const checked = await harness.check()
+  if (checked.alreadyRunning) return harnessResult(harness.label, "busy", checked.message)
+  if (!checked.ok) {
+    return harnessResult(harness.label, checked.notInstalled ? "notInstalled" : "failed", checked.message)
+  }
+  if (checked.upToDate) return harnessResult(harness.label, "ok", checked.message)
+  return { harness, oldVersion: checked.oldVersion, newVersion: checked.newVersion }
+}
+
+async function installDesktopHarness(pending: PendingDesktopUpdate): Promise<HarnessUpdateResult> {
+  const result = await pending.harness.install(pending.newVersion)
+  if (result.alreadyRunning) return harnessResult(pending.harness.label, "busy", result.message)
+  return harnessResult(pending.harness.label, result.ok ? "ok" : "failed", result.message)
+}
+
+function updateDesktopHarness(harness: DesktopHarness, toast: ToastContext, dialog: DialogContext) {
   void (async () => {
-    const resolved = await resolveCodexCli()
-    if ("error" in resolved) {
-      toast.show({ message: resolved.error, variant: "error", duration: 15_000 })
-      return
-    }
-    toast.show({ message: "Updating Codex CLI...", variant: "info", duration: 120_000 })
-    const result = await runVersionedCliUpdate("Codex CLI", resolved.executable)
-    if (result.alreadyRunning) {
-      toast.show({ message: result.message, variant: "info" })
-      return
-    }
-    toast.show(
-      result.ok
-        ? { message: result.message, variant: "success" }
-        : { message: result.message, variant: "error", duration: 15_000 },
+    toast.show({ message: `Checking ${harness.label}...`, variant: "info" })
+    const checked = await checkDesktopHarness(harness)
+    if ("status" in checked) return showHarnessResult(toast, checked)
+    const confirmed = await DialogConfirm.show(
+      dialog,
+      `Update ${harness.label}`,
+      `Updating ${harness.closes}. Update ${checked.oldVersion} -> ${checked.newVersion}?`,
     )
+    if (confirmed !== true) return
+    toast.show({ message: `Updating ${harness.label}...`, variant: "info", duration: 120_000 })
+    showHarnessResult(toast, await installDesktopHarness(checked))
   })()
 }
 
-function updateClaudeDesktop(toast: ToastContext, dialog: DialogContext) {
-  void (async () => {
-    toast.show({ message: "Checking Claude Desktop...", variant: "info" })
-    const checked = await checkClaudeDesktop()
-    if (checked.alreadyRunning) {
-      toast.show({ message: checked.message, variant: "info" })
-      return
+// CLIs first since updating them interrupts nothing; desktop apps last because installing closes
+// them. Desktop checks all run before one combined confirm so the run never stalls on several
+// prompts.
+let updateAllRunning = false
+async function updateAllHarnesses(cliPath: string, toast: ToastContext, dialog: DialogContext) {
+  if (updateAllRunning) return toast.show({ message: "Update all already running", variant: "info" })
+  updateAllRunning = true
+  try {
+    const progress = (message: string) => toast.show({ message, variant: "info", duration: 600_000 })
+    const results: HarnessUpdateResult[] = []
+    const clis: [string, () => Promise<HarnessUpdateResult>][] = [
+      ["Claude Code", () => runClaudeCodeUpdate(cliPath)],
+      ["Cursor CLI", () => runVersionedHarnessUpdate("Cursor CLI", resolveCursorCli)],
+      ["Codex CLI", () => runVersionedHarnessUpdate("Codex CLI", resolveCodexCli)],
+    ]
+    for (const [label, run] of clis) {
+      progress(`Update all: updating ${label}...`)
+      results.push(await run())
     }
-    if (!checked.ok) {
-      toast.show({ message: checked.message, variant: "error", duration: 15_000 })
-      return
+    const desktops = process.platform === "win32" ? [CLAUDE_DESKTOP, CURSOR_DESKTOP, CHATGPT_DESKTOP] : []
+    const pending: PendingDesktopUpdate[] = []
+    for (const harness of desktops) {
+      progress(`Update all: checking ${harness.label}...`)
+      const checked = await checkDesktopHarness(harness)
+      if ("status" in checked) results.push(checked)
+      else pending.push(checked)
     }
-    if (checked.upToDate) {
-      toast.show({ message: checked.message, variant: "success" })
-      return
+    if (pending.length > 0) {
+      toast.show({ message: "Update all: waiting for desktop app confirmation", variant: "info", duration: 600_000 })
+      const list = pending.map((item) => `${item.harness.label} ${item.oldVersion} -> ${item.newVersion}`).join(", ")
+      const confirmed = await DialogConfirm.show(
+        dialog,
+        "Update desktop apps",
+        `Updating closes these apps and any sessions running inside them: ${list}. Continue?`,
+      )
+      for (const item of pending) {
+        if (confirmed !== true) {
+          results.push(harnessResult(item.harness.label, "declined", "skipped"))
+          continue
+        }
+        progress(`Update all: updating ${item.harness.label}...`)
+        results.push(await installDesktopHarness(item))
+      }
     }
-    const confirmed = await DialogConfirm.show(
-      dialog,
-      "Update Claude Desktop",
-      `Updating closes Claude Desktop and any Claude Code sessions started from it. Update ${checked.oldVersion} -> ${checked.newVersion}?`,
-    )
-    if (confirmed !== true) return
-    toast.show({ message: "Updating Claude Desktop...", variant: "info", duration: 120_000 })
-    const result = await installClaudeDesktop(checked.newVersion)
-    if (result.alreadyRunning) {
-      toast.show({ message: result.message, variant: "info" })
-      return
-    }
-    toast.show(
-      result.ok
-        ? { message: result.message, variant: "success" }
-        : { message: result.message, variant: "error", duration: 15_000 },
-    )
-  })()
+    showUpdateAllSummary(toast, results)
+  } finally {
+    updateAllRunning = false
+  }
 }
 
-function updateCursorDesktop(toast: ToastContext, dialog: DialogContext) {
-  void (async () => {
-    toast.show({ message: "Checking Cursor Desktop...", variant: "info" })
-    const checked = await checkCursorDesktop()
-    if (checked.alreadyRunning) {
-      toast.show({ message: checked.message, variant: "info" })
-      return
-    }
-    if (!checked.ok) {
-      toast.show({ message: checked.message, variant: "error", duration: 15_000 })
-      return
-    }
-    if (checked.upToDate) {
-      toast.show({ message: checked.message, variant: "success" })
-      return
-    }
-    const confirmed = await DialogConfirm.show(
-      dialog,
-      "Update Cursor Desktop",
-      `Updating closes Cursor and any terminals or agents running inside it. Update ${checked.oldVersion} -> ${checked.newVersion}?`,
-    )
-    if (confirmed !== true) return
-    toast.show({ message: "Updating Cursor Desktop...", variant: "info", duration: 120_000 })
-    const result = await installCursorDesktop(checked.newVersion)
-    if (result.alreadyRunning) {
-      toast.show({ message: result.message, variant: "info" })
-      return
-    }
-    toast.show(
-      result.ok
-        ? { message: result.message, variant: "success" }
-        : { message: result.message, variant: "error", duration: 15_000 },
-    )
-  })()
-}
-
-function updateChatgptDesktop(toast: ToastContext, dialog: DialogContext) {
-  void (async () => {
-    toast.show({ message: "Checking ChatGPT Desktop...", variant: "info" })
-    const checked = await checkChatgptDesktop()
-    if (checked.alreadyRunning) {
-      toast.show({ message: checked.message, variant: "info" })
-      return
-    }
-    if (!checked.ok) {
-      toast.show({ message: checked.message, variant: "error", duration: 15_000 })
-      return
-    }
-    if (checked.upToDate) {
-      toast.show({ message: checked.message, variant: "success" })
-      return
-    }
-    const confirmed = await DialogConfirm.show(
-      dialog,
-      "Update ChatGPT Desktop",
-      `Updating closes ChatGPT/Codex Desktop and any sessions running inside it. Update ${checked.oldVersion} -> ${checked.newVersion}?`,
-    )
-    if (confirmed !== true) return
-    toast.show({ message: "Updating ChatGPT Desktop...", variant: "info", duration: 120_000 })
-    const result = await installChatgptDesktop(checked.newVersion)
-    if (result.alreadyRunning) {
-      toast.show({ message: result.message, variant: "info" })
-      return
-    }
-    toast.show(
-      result.ok
-        ? { message: result.message, variant: "success" }
-        : { message: result.message, variant: "error", duration: 15_000 },
-    )
-  })()
+function showUpdateAllSummary(toast: ToastContext, results: HarnessUpdateResult[]) {
+  const groups: [HarnessUpdateStatus, string][] = [
+    ["ok", "Updated or current"],
+    ["notInstalled", "Not installed"],
+    ["declined", "Skipped"],
+    ["busy", "Already running"],
+    ["failed", "Failed"],
+  ]
+  const lines = groups.flatMap(([status, title]) => {
+    const matched = results.filter((result) => result.status === status)
+    if (matched.length === 0) return []
+    const names = matched.map((result) => (status === "failed" ? `${result.label} (${result.message})` : result.label))
+    return [`${title}: ${names.join(", ")}`]
+  })
+  const failed = results.some((result) => result.status === "failed")
+  toast.show({
+    message: lines.join("\n"),
+    variant: failed ? "error" : "success",
+    duration: failed ? 30_000 : 10_000,
+  })
 }
 
 // Saves settings in global tui.jsonc or tui.json (jsonc wins when loading), keeping comments.
@@ -1127,6 +1150,10 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
   const attention = createTuiAttention({ renderer, config: tuiConfig, kv })
   const clipboard = useClipboard()
   const copyOnSelect = () => kv.get(Selection.COPY_ON_SELECT_KEY, Selection.defaultCopyOnSelect()) as boolean
+  const claudeCliPath = () => {
+    const cliPath = sync.data.config.provider?.["claude-code"]?.options?.cliPath
+    return typeof cliPath === "string" ? cliPath : "claude"
+  }
   // Keeps the ledger on the session this tab shows, so a revive reopens this tab on it.
   createEffect(() => {
     const sessionID = route.data.type === "session" ? route.data.sessionID : undefined
@@ -2110,12 +2137,14 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
       },
       ...[
         {
+          name: "oc.update_all_harnesses",
+          title: "Update all",
+          run: () => void updateAllHarnesses(claudeCliPath(), toast, dialog),
+        },
+        {
           name: "oc.update_claude_code",
           title: "Update Claude Code",
-          run: () => {
-            const cliPath = sync.data.config.provider?.["claude-code"]?.options?.cliPath
-            updateClaudeCode(typeof cliPath === "string" ? cliPath : "claude", toast)
-          },
+          run: () => updateClaudeCode(claudeCliPath(), toast),
         },
         { name: "oc.update_cursor_cli", title: "Update Cursor CLI", run: () => updateCursorCli(toast) },
         { name: "oc.update_codex_cli", title: "Update Codex CLI", run: () => updateCodexCli(toast) },
@@ -2124,17 +2153,17 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
               {
                 name: "oc.update_claude_desktop",
                 title: "Update Claude Desktop",
-                run: () => updateClaudeDesktop(toast, dialog),
+                run: () => updateDesktopHarness(CLAUDE_DESKTOP, toast, dialog),
               },
               {
                 name: "oc.update_cursor_desktop",
                 title: "Update Cursor Desktop",
-                run: () => updateCursorDesktop(toast, dialog),
+                run: () => updateDesktopHarness(CURSOR_DESKTOP, toast, dialog),
               },
               {
                 name: "oc.update_chatgpt_desktop",
                 title: "Update ChatGPT Desktop",
-                run: () => updateChatgptDesktop(toast, dialog),
+                run: () => updateDesktopHarness(CHATGPT_DESKTOP, toast, dialog),
               },
             ]
           : []),

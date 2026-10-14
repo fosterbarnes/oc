@@ -25,6 +25,74 @@ const opencodeRoot = path.resolve(import.meta.dir, "../../..")
 
 describe.skipIf(!process.env.OC_TUI_PANE || !cliPath || !muxPath)("oc TUI in a WezTerm pane", () => {
   cliIt.live(
+    "steering actions preserve edited text and show QUEUED, SENT, and whole-turn revert",
+    (fixture) => Effect.gen(function* () {
+      const pane = yield* openPane(fixture, { steering: true })
+      const ready = path.join(pane.project, "steeringReady")
+      const release = path.join(pane.project, "steeringRelease")
+      const final = Promise.withResolvers<void>()
+      yield* Effect.addFinalizer(() => Effect.sync(() => final.resolve()))
+      const project = pane.project.replaceAll("\\", "/")
+      yield* fixture.llm.tool("mcp__opencode_proxy__bash", {
+        command: `& "${process.execPath}" -e "await Bun.write('${project}/steeringReady', 'ready'); await new Promise(resolve => { const watcher = require('fs').watch('${project}', (_, name) => { if (name === 'steeringRelease') { watcher.close(); resolve(); } }); });"`,
+        description: "Hold steering tool",
+      })
+      yield* fixture.llm.push(reply().wait(final.promise).text("STEERING-PANE-DONE").stop())
+      yield* pane.waitFor("Ask anything")
+      yield* pane.type("STEERING-PANE-START\r")
+      yield* pollWithTimeout(Effect.promise(() => Bun.file(ready).exists()).pipe(
+        Effect.map((exists) => exists ? true : undefined)), "proxy tool never became ready", "30 seconds")
+      yield* pane.type("PANE-EDIT-ME\r")
+      yield* pane.waitFor("QUEUED")
+      yield* pane.click("PANE-EDIT-ME")
+      yield* pane.waitFor("take back and put in the prompt")
+      yield* pane.type("\r")
+      yield* pane.waitFor("PANE-EDIT-ME", (shown) => !shown.includes("QUEUED") && shown.split("PANE-EDIT-ME").length === 2)
+      yield* pane.type("\x15")
+      yield* pane.type("PANE-DELETE-ME\r")
+      yield* pane.waitFor("QUEUED")
+      yield* pane.click("PANE-DELETE-ME")
+      yield* pane.waitFor("take back before it is sent")
+      yield* pane.type("\x1b[B\r")
+      yield* pane.waitFor("STEERING-PANE-START", (shown) => !shown.includes("PANE-DELETE-ME") && !shown.includes("QUEUED"))
+      yield* pane.type("PANE-DELIVERED\r")
+      yield* pane.waitFor("QUEUED")
+      yield* Effect.promise(() => Bun.write(release, "release"))
+      yield* fixture.llm.wait(2)
+      yield* pane.waitFor("SENT")
+      yield* pane.click("PANE-DELIVERED")
+      yield* pane.waitFor("Revert whole turn")
+      yield* pane.type("\r")
+      yield* pane.waitFor("Revert failed")
+      final.resolve()
+      const diag = (label: string) => pane.screen.pipe(Effect.flatMap((shown) => Effect.promise(() =>
+        require("node:fs/promises").appendFile("C:/Users/Foster/AppData/Local/Temp/opencode/paneDiag.txt",
+          `\n===== ${label} ${new Date().toISOString()}\n${shown}`))))
+      yield* diag("after first revert failed")
+      yield* pane.waitFor("STEERING-PANE-DONE", (shown) => !/esc\s+interrupt/.test(shown))
+      yield* diag("done seen")
+      yield* Effect.sleep("2 seconds")
+      yield* diag("done +2s")
+      yield* pane.click("PANE-DELIVERED")
+      yield* Effect.sleep("1 second")
+      yield* diag("clicked +1s")
+      yield* pane.waitFor("Revert whole turn")
+      yield* pane.type("\r")
+      for (const n of [1, 2, 3, 4, 5, 6]) {
+        yield* Effect.sleep("1 second")
+        yield* diag(`enter +${n}s`)
+      }
+      yield* pane.waitFor("2 message reverted")
+      const inputs = yield* fixture.llm.inputs
+      expect(inputs).toHaveLength(2)
+      expect(JSON.stringify(inputs[1].messages)).toContain("PANE-DELIVERED")
+      expect(JSON.stringify(inputs)).not.toContain("PANE-EDIT-ME")
+      expect(JSON.stringify(inputs)).not.toContain("PANE-DELETE-ME")
+      expectIsolated(inputs)
+    }),
+    180_000,
+  )
+  cliIt.live(
     "oc automatic rename updates a Home-created Claude session title once",
     (fixture) =>
       Effect.gen(function* () {
@@ -349,7 +417,7 @@ function sidebarColumn(shown: string) {
 
 const openPane = Effect.fnUntraced(function* (
   fixture: CliFixture,
-  options: { autoRename?: boolean; warmupAuth?: boolean; quotaUsage?: boolean; root?: string } = {},
+  options: { autoRename?: boolean; warmupAuth?: boolean; quotaUsage?: boolean; root?: string; steering?: boolean } = {},
 ) {
   const root = options.root ?? (yield* outsideProfile)
   const project = path.join(root, "work")
@@ -396,6 +464,10 @@ const openPane = Effect.fnUntraced(function* (
     : {
         ...chatConfig(fixture.llm.url),
         model: "claude-code/claude-sonnet-4-5",
+        ...(options.steering && { provider: {
+          ...chatConfig(fixture.llm.url).provider,
+          "claude-code": { options: { proxyTools: ["Task", "Question"], proxyOpencodeTools: ["bash"] } },
+        } }),
         ...(options.autoRename && { agent: { rename: { model: "test/test-model" } } }),
       }
   const db = path.join(fixture.home, "opencode.db")
@@ -513,6 +585,8 @@ const openPane = Effect.fnUntraced(function* (
   )
   const screen = Effect.promise(() => wez(["get-text", "--pane-id", String(paneID)]))
   return {
+    project,
+    screen,
     releasePath: options.quotaUsage ? quotaReleasePath(root) : undefined,
     // Sessions the pane's oc stored in the fixture database.
     sessions: Effect.sync(() => {

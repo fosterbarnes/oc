@@ -367,6 +367,7 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
   }
 
   function submit() {
+    require("node:fs").appendFileSync("C:/Users/Foster/AppData/Local/Temp/opencode/tuiDiag.txt", `${new Date().toISOString()} select submit ${props.title} locked=${props.locked} sel=${selected()?.title}\n`)
     if (props.locked) return
     setStore("input", "keyboard")
     const index = focusedAction()

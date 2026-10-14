@@ -1,5 +1,6 @@
 import type { LanguageModelV3 } from "@ai-sdk/provider"
 import { log } from "./logger.js"
+import { CLAUDE_CODE_PROVIDER_ID, STEERED_METADATA_KEY } from "./shared.js"
 
 /** Historical transcript marker. The account-failover feature that wrote it is gone. */
 const ACCOUNT_FAILOVER_TOOL_CALL_PREFIX = "account_failover_"
@@ -288,6 +289,8 @@ export function getClaudeUserMessage(
       } else if (Array.isArray(msg.content)) {
         for (const part of msg.content as any[]) {
           if (part.type === "text") {
+            // Read mid-turn already (turnStream.ts `onSteer`); sending it again would repeat it.
+            if (part.providerOptions?.[CLAUDE_CODE_PROVIDER_ID]?.[STEERED_METADATA_KEY]) continue
             if (part.text && part.text.trim()) {
               content.push({ type: "text", text: part.text })
             }

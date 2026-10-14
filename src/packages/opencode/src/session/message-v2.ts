@@ -34,6 +34,7 @@ import { errorMessage } from "@/util/error"
 import { isMedia } from "@/util/media"
 import type { SystemError } from "bun"
 import type { Provider } from "@/provider/provider"
+import { CLAUDE_CODE_PROVIDER_ID, STEERED_METADATA_KEY } from "@/provider/claude-code/shared"
 import { Effect, Schema } from "effect"
 
 /** Error shape thrown by Bun's fetch() when gzip/br decompression fails mid-stream */
@@ -218,6 +219,10 @@ export const toModelMessagesEffect = Effect.fnUntraced(function* (
           userMessage.parts.push({
             type: "text",
             text: part.text,
+            // Claude already read it mid-turn; the Claude Code provider leaves it out of the next envelope.
+            ...(part.metadata?.[STEERED_METADATA_KEY]
+              ? { providerMetadata: { [CLAUDE_CODE_PROVIDER_ID]: { [STEERED_METADATA_KEY]: true } } }
+              : {}),
           })
         // text/plain and directory files are converted into text parts, ignore them
         if (part.type === "file" && part.mime !== "text/plain" && part.mime !== "application/x-directory") {

@@ -34,6 +34,7 @@ test("parses a missing install", () => {
   expect(parseCursorDesktopCheckOutput("Cursor Desktop not installed\n")).toEqual({
     ok: false,
     message: "Cursor Desktop not installed",
+    notInstalled: true,
   })
 })
 

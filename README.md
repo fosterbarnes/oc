@@ -1,7 +1,10 @@
 # <img src="src/.res/icon256.png" width="180">
 
-<!-- TODO(user): write the hook yourself (1-2 sentences on what oc is). Current text kept until then. -->
 Custom fork of opencode that focuses on building on existing features simply and cleanly, and adding new QOL features.
+
+Not ready for widespread use until 0.3.0, especially on Linux and macOS. As of current date, testing and feature work is being done on Windows 10 LTSC IoT (i know lol). Linux and macOS feature parity is planned for v0.3.0.
+
+Current version: [v#.#.#](https://github.com/fosterbarnes/oc/commit/23f7c5e879e48672f705c5d594b5b71b31db8f98)
 
 ## Standout features
 
@@ -132,7 +135,7 @@ How everything works is in the [wiki](https://github.com/fosterbarnes/oc/wiki):
 
 ## Progress
 
-[382,460](scc.txt) lines of code and counting...
+[383,307](scc.txt) lines of code and counting...
 
 <!-- code-count:start -->
 
@@ -145,8 +148,8 @@ How everything works is in the [wiki](https://github.com/fosterbarnes/oc/wiki):
 | Powershell | 24 | 1,247 | 85 | 80 | 1,082 |
 | SQL | 2 | 5 | 0 | 0 | 5 |
 | Shell | 1 | 120 | 17 | 17 | 86 |
-| TypeScript | 2,084 | 429,658 | 36,646 | 15,116 | 377,896 |
-| **Total** | **2,128** | **434,786** | **37,032** | **15,294** | **382,460** |
+| TypeScript | 2,085 | 430,621 | 36,691 | 15,187 | 378,743 |
+| **Total** | **2,129** | **435,749** | **37,077** | **15,365** | **383,307** |
 
 <!-- code-count:end -->
 

@@ -200,11 +200,12 @@ export function turnUsage(messages: Entry[], ledger: Map<string, number | undefi
     if (message.info.role !== "assistant") continue
     const total = cliCost(message)
     const previous = ledger.has(message.info.sessionID) ? ledger.get(message.info.sessionID) : 0
-    // A missing observation or decreased counter cannot establish per-turn spend.
+    // A missing observation cannot establish per-turn spend. A lower counter means a new CLI process
+    // (server restart, rewound or lost conversation) whose counter started at zero for this turn.
     const delta =
-      total !== undefined && previous !== undefined && total >= previous
-        ? Number((total - previous).toFixed(4))
-        : undefined
+      total === undefined || previous === undefined
+        ? undefined
+        : Number((total >= previous ? total - previous : total).toFixed(4))
     costs.set(message.info.id, delta)
     ledger.set(message.info.sessionID, total)
   }

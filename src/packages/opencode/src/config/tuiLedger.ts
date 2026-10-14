@@ -150,8 +150,10 @@ export async function read(directory: string, processes: Process[]) {
           .catch(() => undefined)
         // The file name carries the pid, so a dead TUI's truncated record is skipped instead of failing reads.
         const pid = Number(file.slice(0, -".json".length))
+        const live = processes.find((item) => item.pid === pid)
         if (
-          !processes.some((item) => item.pid === pid) ||
+          !live ||
+          (live.executable !== "" && !sameExecutable(live.executable, Global.resolveExecutablePath())) ||
           (typeof record === "object" &&
             record !== null &&
             (("instance" in record && record.instance !== Global.Path.app) ||
@@ -163,6 +165,15 @@ export async function read(directory: string, processes: Process[]) {
         const identity = (await Bun.file(path.join(root, file.replace(".json", ".identity.json")))
           .json()
           .catch(() => undefined)) as Process | undefined
+        // Crashed TUIs leave records behind; a reused PID is stale, not an unverified live TUI.
+        if (
+          identity?.pid === pid &&
+          typeof identity.created === "string" &&
+          /^\d+$/.test(identity.created) &&
+          live.created &&
+          identity.created !== live.created
+        )
+          return undefined
         if (
           typeof record === "object" &&
           record !== null &&
@@ -183,7 +194,7 @@ export async function read(directory: string, processes: Process[]) {
           identity?.pid === record.pid &&
           typeof identity.executable === "string" &&
           sameExecutable(identity.executable, record.executable as string) &&
-          processes.some((item) => sameIdentity(identity, item))
+          sameIdentity(identity, live)
         )
           return { ...record, created: identity.created } as Record
         throw new Error(`TUI ledger identity unavailable or changed: ${file}`)

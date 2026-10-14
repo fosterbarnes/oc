@@ -465,6 +465,8 @@ export interface ClaudeStreamMessage {
   uuid?: string
   /** Set on a subagent's messages, which live on a side chain, not the main one. */
   parent_tool_use_id?: string | null
+  /** A `user` line echoing a stdin message as Claude reads it (`--replay-user-messages`). */
+  isReplay?: boolean
   total_cost_usd?: number
   duration_ms?: number
   duration_api_ms?: number

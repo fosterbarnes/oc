@@ -1,5 +1,12 @@
 import { expect, test } from "bun:test"
-import { compareDesktopVersions, parseDesktopCheckOutput, parseDesktopInstallOutput } from "../src/desktopUpdate"
+import path from "node:path"
+import { runCliCommand } from "../src/cliUpdate"
+import {
+  compareDesktopVersions,
+  parseDesktopCheckOutput,
+  parseDesktopInstallOutput,
+  windowsPowershellEnv,
+} from "../src/desktopUpdate"
 
 test("reports the script's OCERR message instead of the PowerShell error id", () => {
   const output = "OCERR: Update check failed: no redirect from https://claude.ai\n+ FullyQualifiedErrorId : boom\n"
@@ -17,6 +24,7 @@ test("parses a missing install from the OCERR line", () => {
   expect(parseDesktopCheckOutput("OCERR: Claude Desktop not installed\n")).toEqual({
     ok: false,
     message: "Claude Desktop not installed",
+    notInstalled: true,
   })
 })
 
@@ -57,6 +65,7 @@ test("parses a missing install", () => {
   expect(parseDesktopCheckOutput("Claude Desktop not installed\n")).toEqual({
     ok: false,
     message: "Claude Desktop not installed",
+    notInstalled: true,
   })
 })
 
@@ -94,3 +103,33 @@ test("parses ChatGPT and Cursor labels with the shared checker", () => {
     message: "Cursor Desktop system install not supported",
   })
 })
+
+test("drops an inherited PSModulePath in any casing for Windows PowerShell", () => {
+  expect(windowsPowershellEnv({ PSModulePath: "a", Path: "p" })).toEqual({ Path: "p" })
+  expect(windowsPowershellEnv({ PSMODULEPATH: "a" })).toEqual({})
+})
+
+// Under a PowerShell 7 parent, 5.1 failed to load Microsoft.PowerShell.Security, which the install
+// scripts need for Get-AuthenticodeSignature.
+test.skipIf(process.platform !== "win32")(
+  "Windows PowerShell loads its Security module under a PowerShell 7 PSModulePath",
+  async () => {
+    const pwsh7 = [
+      path.join(process.env.ProgramFiles ?? "C:\\Program Files", "PowerShell", "7", "Modules"),
+      path.join(process.env.SystemRoot ?? "C:\\Windows", "System32", "WindowsPowerShell", "v1.0", "Modules"),
+    ].join(";")
+    const result = await runCliCommand(
+      "powershell.exe",
+      [
+        "-NoProfile",
+        "-NonInteractive",
+        "-Command",
+        "(Get-AuthenticodeSignature -FilePath (Join-Path $env:SystemRoot 'notepad.exe')).Status",
+      ],
+      60_000,
+      windowsPowershellEnv({ ...process.env, PSModulePath: pwsh7 }),
+    )
+    expect(result.lastLine).toBe("Valid")
+  },
+  60_000,
+)

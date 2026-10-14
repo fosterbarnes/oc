@@ -60,9 +60,10 @@ test("report cost deltas recover honestly after missing or decreased counters", 
     cliCost: 0.1,
     cliKnown: 1,
   })
+  // A lower counter is a new CLI process, so its whole total is this turn's spend.
   expect(turnUsage([entry("e", formatTurnStatsBlock({ costUsd: 0.01 }) ?? "")], ledger)).toMatchObject({
-    cliCost: 0,
-    cliMissing: 1,
+    cliCost: 0.01,
+    cliKnown: 1,
   })
   expect(turnUsage([entry("f", formatTurnStatsBlock({ costUsd: 0.03 }) ?? "")], ledger)).toMatchObject({
     cliCost: 0.02,
