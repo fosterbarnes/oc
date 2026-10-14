@@ -15,6 +15,7 @@ import PROMPT_META from "./prompt/meta.txt"
 import PROMPT_CODEX from "./prompt/codex.txt"
 import PROMPT_TRINITY from "./prompt/trinity.txt"
 import type { Provider } from "@/provider/provider"
+import { Patch } from "@/patch"
 import type { Agent } from "@/agent/agent"
 import { Permission } from "@/permission"
 import { Skill } from "@/skill"
@@ -32,7 +33,8 @@ export function provider(model: Provider.Model) {
   }
   if (model.api.id.includes("gpt-4") || model.api.id.includes("o1") || model.api.id.includes("o3"))
     return [PROMPT_BEAST]
-  if (model.api.id.includes("gpt")) {
+  // The GPT prompts direct edits through `apply_patch`, so only models that have it get them.
+  if (Patch.usesApplyPatch(model.api.id)) {
     if (model.api.id.includes("gpt-6")) return [PROMPT_ASTRA]
     if (model.api.id.includes("codex")) {
       return [PROMPT_CODEX]

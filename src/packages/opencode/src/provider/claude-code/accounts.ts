@@ -206,6 +206,19 @@ export function sessionPin(sessionID: string | undefined, ids: string[], now = D
   return id && ids.includes(id) ? id : undefined
 }
 
+/**
+ * The account a usage-rejected turn moves to; undefined when none is usable. A pinned chat's pin
+ * moves with it and the global current account is untouched.
+ */
+export function failoverAccount(sessionID: string | undefined, ids: string[], now = Date.now()): string | undefined {
+  const pin = sessionPin(sessionID, ids, now)
+  if (!pin) return nextUsableAccount(ids, now)
+  const start = ids.indexOf(pin) + 1
+  const next = [...ids.slice(start), ...ids.slice(0, start)].find((id) => (limitedUntil.get(id) ?? 0) <= now)
+  if (next && next !== pin) pinSessionAccount(sessionID!, next, ids, now)
+  return next
+}
+
 /** Pin a session to a pool account, or clear its pin with `undefined`. The global current account is untouched. */
 export function pinSessionAccount(sessionID: string, id: string | undefined, ids: string[], now = Date.now()): boolean {
   if (id !== undefined && !ids.includes(id)) return false

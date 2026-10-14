@@ -31,19 +31,21 @@ const STOP = [
   "}",
   "foreach ($item in $items) {",
   "  if (-not $running[[int]$item.pid]) { continue }",
-  // Get-Process supplies a handle. Check CIM again after obtaining it, then stop through that handle.
+  // Get-Process supplies a handle. It reads the live process table, so no result means the process
+  // already exited (CIM lags behind exit and must not be used to second-guess it). A reused PID is
+  // caught by the CIM identity check after the handle is held; the stop then goes through that handle.
   "  $target = Get-Process -Id $item.pid -ErrorAction SilentlyContinue",
-  "  if (-not $target) {",
-  "    if (Get-CimInstance Win32_Process -Filter ('ProcessId=' + $item.pid)) { throw ('Process handle unavailable: ' + $item.pid) }",
-  "    continue",
-  "  }",
+  "  if (-not $target) { continue }",
   "  $null = $target.Handle",
+  "  if ($target.HasExited) { continue }",
   "  $live = Get-CimInstance Win32_Process -Filter ('ProcessId=' + $item.pid)",
   "  if (-not $live) { continue }",
   "  if ($live.CreationDate.ToFileTimeUtc().ToString() -ne $item.created -or $live.ExecutablePath -ne $item.executable) { throw ('Process identity changed before stop: ' + $item.pid) }",
   "  $target.Kill()",
   "  if (-not $target.WaitForExit(5000)) { throw ('Process did not exit: ' + $item.pid) }",
   "}",
+  // A skipped Get-Process leaves $? false, which pwsh -Command would report as exit code 1.
+  "exit 0",
 ].join("\n")
 
 /**

@@ -216,7 +216,9 @@ readline.createInterface({ input: process.stdin }).on("line", async (line) => {
   return filename
 }
 
-test("command-permission turns alwaysLoad proxy tools and name them in the prompt", async () => {
+// Proxy tools stay deferred on command turns too: flipping them to alwaysLoad
+// made Claude Code tell the model the proxy server had disconnected.
+test("command-permission turns keep only ToolSearch and leave proxy tools deferred", async () => {
   await using directory = await tmpdir()
   const session = randomUUID()
   const key = sessionKey(directory.path, `tools::${session}::context=["claude-code"]`)
@@ -249,13 +251,12 @@ test("command-permission turns alwaysLoad proxy tools and name them in the promp
       ).stream,
     )
     const args = getActiveProcess(key)?.cliArgs
-    expect(args).toEqual(expect.arrayContaining(["--tools", "", "--strict-mcp-config"]))
+    expect(args).toEqual(expect.arrayContaining(["--tools", "ToolSearch", "--strict-mcp-config"]))
     const mcp = JSON.parse(await readFile(args![args!.indexOf("--mcp-config") + 1], "utf8"))
-    expect(mcp.mcpServers.opencode_proxy.alwaysLoad).toBe(true)
+    expect(mcp.mcpServers.opencode_proxy.alwaysLoad).toBeUndefined()
     const prompt = await readFile(args![args!.indexOf("--append-system-prompt-file") + 1], "utf8")
     expect(prompt).toContain("built-in file, shell and web tools are off this turn")
     expect(prompt).toContain("read, edit, grep, bash")
-    expect(prompt).not.toContain("ToolSearch")
   } finally {
     hostToolExecutors.delete(session)
     await deleteActiveProcessAndWait(key)

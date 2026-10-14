@@ -9,6 +9,12 @@ export const PatchSchema = Schema.Struct({
 
 export type PatchParams = Schema.Schema.Type<typeof PatchSchema>
 
+// Models that get `apply_patch` in place of `edit`/`write`. The tool registry and the system
+// prompt choice both read this, so a model is never told to use a tool it was not given.
+export function usesApplyPatch(modelID: string) {
+  return modelID.includes("gpt-") && !modelID.includes("oss") && !modelID.includes("gpt-4")
+}
+
 // Core types matching the Rust implementation
 export interface ApplyPatchArgs {
   patch: string

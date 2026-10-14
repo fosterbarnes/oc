@@ -85,6 +85,15 @@ const it = testEffect(
 )
 
 describe("session.system", () => {
+  test("gives apply_patch prompts only to models that get apply_patch", () => {
+    for (const id of ["gpt-5", "gpt-5-codex"]) {
+      expect(SystemPrompt.provider({ api: { id } } as Provider.Model)[0]).toContain("apply_patch")
+    }
+    for (const id of ["gpt-oss-120b", "openai/gpt-oss-20b"]) {
+      expect(SystemPrompt.provider({ api: { id } } as Provider.Model)[0]).not.toContain("apply_patch")
+    }
+  })
+
   test("selects the Meta prompt for Muse Spark model IDs", () => {
     for (const id of ["meta/muse-spark-preview", "muse-spark-1.1", "muse-spark-1.2"]) {
       const prompt = SystemPrompt.provider({ api: { id } } as Provider.Model)[0]

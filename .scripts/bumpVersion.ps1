@@ -9,4 +9,3 @@ if ($RerollTag) {
 } else {
     incrementMaintenancePatch | Out-Null
 }
-closeOut 3

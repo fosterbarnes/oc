@@ -1,12 +1,9 @@
-v0.2.186 hospitalFavorite
+v0.2.190 trailDepressing
 
-Claude Code chats:
-When Claude is busy, a message you send now reaches it after its current tool call instead of waiting for the whole turn, and is never sent twice. Waiting messages can be edited or deleted until Claude has them, stopping a turn no longer lets unread messages start unattended work, and reverting a delivered message reverts the whole turn it joined. Claude now also answers your first prompt in sessions opened with oc <project>, instead of replying that there was no request.
+tools:
+GPT models are now told that adding a file with apply_patch over an existing one replaces it, so they stop second-guessing whole-file rewrites.
 
-Command palette:
-New "Update all" entry updates Claude Code, Cursor CLI, Codex CLI and, on Windows, the Claude, Cursor and ChatGPT desktop apps in one go, skipping tools that are not installed and asking once for the desktop apps. Desktop app updates no longer fail with an "AuditToString is already present" error when oc runs connected to its background server.
+system prompt:
+Open-weight GPT models (gpt-oss) are no longer told to use a patch tool they do not have. They get the standard prompt that matches their edit and write tools.
 
-Revive:
-Revive no longer aborts after a successful build when Windows has reused an old terminal's process ID.
-
-Under the hood: steering adds a stdin intake to the Claude turn stream, delivery receipts on message parts, and safe busy-time deletion. The loop's pending-message pick now needs a prior Claude step, which fixes the dropped first prompt. The test flow report counts a lower CLI cost counter as a new CLI process. Steering, fake-model, flow-report and updater tests passed, and prePush passed.
+Under the hood: added Patch.usesApplyPatch(modelID) in the patch module; the tool registry filter and the GPT system prompt branch both use it, so tools and prompt read the same model id. Added a system.test.ts case covering gpt-5/gpt-5-codex versus gpt-oss prompts. system.test.ts and tool/registry.test.ts passed (25 tests), tsc was clean for the touched files, and prePush passed. bun.lock and packages/opencode/package.json carry line-ending changes only.

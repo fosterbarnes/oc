@@ -883,21 +883,6 @@ test("security: the 401 path answers without reading the request body", async ()
   })
 })
 
-test("command-turn MCP config sets alwaysLoad; ordinary configs stay deferred", async () => {
-  const deferred = await createProxyMcpServer(TOOLS)
-  const loaded = await createProxyMcpServer(TOOLS, undefined, { alwaysLoad: true })
-  try {
-    assert.equal(
-      JSON.parse(fs.readFileSync(deferred.configPath(), "utf8")).mcpServers.opencode_proxy.alwaysLoad,
-      undefined,
-    )
-    assert.equal(JSON.parse(fs.readFileSync(loaded.configPath(), "utf8")).mcpServers.opencode_proxy.alwaysLoad, true)
-  } finally {
-    await deferred.close()
-    await loaded.close()
-  }
-})
-
 test("security: the generated MCP config carries the token, 0600, and never in the URL", async () => {
   await withServer(async (srv) => {
     const cfgPath = srv.configPath()

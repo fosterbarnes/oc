@@ -112,6 +112,105 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-14 (~19:50) - v0.2.190 trailDepressing - One apply_patch model check for tools and prompt - Claude Opus 5.5, default reasoning; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; default reasoning; Implementation; completed
+- Version: 0.2.190 (already bumped this session; no second bump)
+- Fixed: gpt-oss got edit/write (registry excluded `oss`) but `gpt.txt` ("Always use apply_patch") via `SystemPrompt.provider` matching any `gpt`.
+- Added `Patch.usesApplyPatch(modelID)` in `src/patch/index.ts`; `tool/registry.ts` tool filter and `session/system.ts` GPT prompt branch both use it. Non-patch GPT ids (gpt-oss, `gpt` without `gpt-`) now fall to the default prompt. Session path already passes `model.api.id` to the registry (`session/tools.ts`), so both sides read the same id.
+- Added `test/session/system.test.ts` case: gpt-5/gpt-5-codex prompts mention apply_patch, gpt-oss ids do not. gpt-6 (astra prompt) mentions no edit tool, so it is left out.
+- Verification: `system.test.ts` + `tool/registry.test.ts` 25 pass; tsc clean for touched files.
+
+### User
+Tools
+- Open-weight GPT models (gpt-oss) are no longer told to use a patch tool they do not have; they get the standard prompt that matches their edit and write tools.
+
+---
+
+## 2026-10-14 (~19:37) - v0.2.190 trailDepressing - apply_patch Add File documents overwrite - Claude Opus 5.5, default reasoning; Debug
+
+### Agent
+- Meta: Claude Opus 5.5; default reasoning; Debug; completed
+- Version: 0.2.190 (already bumped this session; no second bump)
+- ERROR: GPT-6.1 Sol (session ses_ec33b36ccffeDxZYTmkdlMuuX7) reasoned it "can't overwrite" existing files. GPT models get `apply_patch` only (no write/edit), and `tool/apply_patch.txt` described `Add File` as "create a new file" though the `add` case in `apply_patch.ts` writes over any existing file (also noted in `provider/cursor/protocol/applyPatch.ts`). Its Add File on `buildNotes.txt` succeeded; no tool error in the session.
+- Fixed `src/packages/opencode/src/tool/apply_patch.txt`: Add File now says it replaces an existing file and is the whole-file rewrite path.
+- Verification: none; prompt text only.
+
+### User
+Tools
+- GPT models are now told that adding a file over an existing one replaces it, so they stop second-guessing whole-file rewrites.
+
+---
+
+## 2026-10-14 (~19:32) - v0.2.190 trailDepressing - Keep proxy tools deferred on command turns - Claude Opus 5.5, default reasoning; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; default reasoning; Implementation; completed
+- Version: 0.2.190 trailDepressing
+- ERROR: Sonnet in a `/imp` turn refused to edit: "Edit unavailable". Transcript `f5af515a`: a normal-to-command turn switch flipped the proxy server from deferred to `alwaysLoad`, and Claude Code 2.1.300 logged that as "68 tools are no longer available (MCP server disconnected): mcp__opencode_proxy__*... Do not call them". The model trusted that notice over its tool list, which did contain `mcp__opencode_proxy__edit`.
+- Fixed `planSpawn` (`provider/claude-code/spawnPlanning.ts`): command turns pass `--tools ToolSearch` instead of `--tools ""`, so proxy tools stay deferred like on normal turns and no false "disconnected" delta fires. ToolSearch only loads schemas, so the permission gate holds.
+- Removed the `alwaysLoad` option from `createProxyMcpServer`/`ensureProxyServer` (`proxyMcp.ts`). It had no other caller.
+- Changed `buildToolEnvironmentNote` (`prompts.ts`): command turns get the ToolSearch hint plus the "built-ins are off; proxy replacements are ..." line.
+- Verified CLI behavior with a scratch probe (fake `/v1/messages` capture plus stdio MCP, 81 tools): `--tools ToolSearch` + `ENABLE_TOOL_SEARCH=true` sends `ToolSearch` + a deferred placeholder. With tool search off (non-first-party base URL), the CLI loads the MCP schemas in full, so neither mode needs `alwaysLoad`.
+- Updated tests: `fundamentalTools.test.ts` (command turn asserts `--tools ToolSearch`, no `alwaysLoad`), `subagentHint.test.ts` (command note carries the ToolSearch hint). Removed the `alwaysLoad` config test from `proxyMcp.test.ts`.
+- Verification: `bun test` on fundamentalTools, subagentHint, proxyMcp: 105 pass. `tsc --noEmit` reports no errors in the touched files. A live `/spit` then `/imp` run in oc was not done.
+
+### User
+Claude provider
+- Slash-command turns (like `/imp`) no longer make Claude think its file tools have disconnected, so it edits files normally after a command.
+
+---
+
+## 2026-10-14 (~19:20) - v0.2.189 taperStreamrise - Remove version bump countdown - GPT-6.1 Sol, default reasoning; Implementation
+
+### Agent
+- Meta: GPT-6.1 Sol; default reasoning; Implementation; completed
+- Version: 0.2.189 taperStreamrise
+- Removed `.scripts/bumpVersion.ps1` `closeOut 3`; version bumps return without countdown or forced process exit.
+- Fixed `AGENTS.md` revision and commit-message version paths to explicitly use `src/.version/`.
+- Verification: required `pwsh -NoProfile -File .scripts\bumpVersion.ps1` bump exited 0 in 0.62 seconds; output contained no closing countdown. Read back version/tag and reviewed scoped diff.
+
+### User
+Version scripts
+- Version bumps finish without the three-second closing countdown.
+- Agent instructions now give the correct version file paths under `src/.version/`.
+
+---
+
+## 2026-10-14 (~19:20) - v0.2.188 appreciationsVods - pinned Claude chats fail over on usage limits - Claude Opus 5.5, low; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low; Implementation (/spit then /imp); completed
+- Version: 0.2.188 appreciationsVods
+- Fixed: pinned chat (`ses_ec6b130eb...` pinned to `.claudeSecond`) hit 5h limit and ended on "rate limit" while `default` was usable. Cause: `queueAccountSwitch` in `provider/claude-code/turnStream.ts` skipped failover for any session pin.
+- Added `failoverAccount(sessionID, ids, now)` in `provider/claude-code/accounts.ts`: unpinned = `nextUsableAccount` (moves global); pinned = next usable after the pin in pool order, pin moved via `pinSessionAccount`, global `currentAccount` untouched.
+- Changed `maybeScheduleResume` to wait for earliest pool reset even when pinned (pinned chats now move). Removed unused `sessionPin`/`nextUsableAccount` imports in turnStream.
+- Kept: compaction mode still never switches.
+- Verification: `bun test test/provider/claude-code/accountPool.test.ts` 19 pass 0 fail (new test: pin moves, all-limited returns undefined, unpinned still moves global).
+
+### User
+Claude accounts
+- A chat pinned to a Claude account now switches to another account when the pinned one runs out of usage, and the pin moves to the new account.
+
+---
+
+## 2026-10-14 (~19:18) - v0.2.187 skyTouring - agent-push version tag pick - Claude Opus 5.5, low; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low; Implementation; completed
+- Version: 0.2.187 skyTouring
+- Changed `.scripts/scriptHelper.ps1`: split `newVersionTag` into `getVersionTags -Count` (distinct tags, no write) and `setVersionTag` (validates `^[a-z]+[A-Z][a-z]*$` case-sensitively, writes); `newVersionTag` wraps both.
+- Added `.scripts/agentPush.ps1` `-Tags` (prints 10) and `-SetTag <tag>` (writes, prints new line 1).
+- Updated `agent-push` SKILL.md (`~/.claude` and `~/.claudeSecond`, kept identical): new step 2 asks Keep current / 10 tags / Reroll via question tool; on change runs `-SetTag` and fixes the tag in this session's buildNotes.md heading and Version bullet.
+- Verification: `-Tags` printed 10 distinct tags; `-SetTag badTag1` threw, exit 1, versionTag untouched. Live question form not checked.
+
+### User
+agent-push
+- agent-push now shows 10 version tag ideas and lets you keep the current one, pick one, or reroll before it commits.
+
+---
+
 ## 2026-10-14 (~18:11) - v0.2.186 - Fix Claude ignoring the first prompt in launcher sessions - Claude Opus 5.5, low reasoning; Debug
 
 ### Agent

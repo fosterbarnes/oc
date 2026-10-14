@@ -361,8 +361,7 @@ test("tool environment note names the proxy prefix and how to load a deferred to
   assert.match(command, /built-in file, shell and web tools are off this turn/)
   assert.match(command, /mcp__opencode_proxy__\*/)
   assert.match(command, /read, edit, grep, bash/)
-  assert.match(command, /called by full name/)
-  assert.doesNotMatch(command, /ToolSearch/)
+  assert.match(command, /ToolSearch \(`select:mcp__opencode_proxy__<name>`\)/)
 })
 
 // The dispatch and question sections live inside the one note and appear

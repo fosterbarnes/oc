@@ -47,8 +47,9 @@ export interface ProxyMcpServer {
   calls: EventEmitter
   /**
    * Write `--mcp-config <path>`-compatible scratch file and return its path.
-   * Deferred by default: Claude loads each tool through ToolSearch when needed.
-   * `alwaysLoad: true` (command-permission spawns) includes every schema up front.
+   * Never `alwaysLoad`: the tools stay deferred behind ToolSearch on every
+   * turn. Flipping a spawn between deferred and loaded made Claude Code tell
+   * the model the server had disconnected and its tools must not be called.
    */
   configPath(): string
   /**
@@ -152,19 +153,11 @@ export async function createProxyMcpServer(
   options: {
     /** Keepalive cadence for streamed replies; a test seam, defaults to `PROXY_KEEPALIVE_MS`. */
     keepaliveMs?: number
-    /**
-     * When true, the generated MCP config sets `alwaysLoad` so Claude includes
-     * this server's tool schemas without ToolSearch. Command-permission turns
-     * only: `--tools ""` strips built-ins (and ToolSearch), and native tools
-     * must stay off so oc's permission rules cannot be bypassed.
-     */
-    alwaysLoad?: boolean
   } = {},
 ): Promise<ProxyMcpServer> {
   const calls = new EventEmitter()
   const pending = new Map<string, ProxyToolCall>()
   const keepaliveMs = options.keepaliveMs ?? PROXY_KEEPALIVE_MS
-  const alwaysLoad = options.alwaysLoad === true
 
   // Per-server bearer secret (256 bits). This endpoint executes Bash/Edit/
   // Write through opencode's executor, so an unauthenticated caller on
@@ -559,7 +552,6 @@ export async function createProxyMcpServer(
               // who did not read this 0600 file.
               headers: { Authorization: `Bearer ${authToken}` },
               timeout: resolveProxyClientCeilingMs(timeoutOverrides),
-              ...(alwaysLoad ? { alwaysLoad: true } : {}),
             },
           },
         },

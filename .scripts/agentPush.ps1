@@ -1,11 +1,18 @@
 #requires -Version 7.0
 # Non-interactive push for the agent-push skill: -Context prints what the agent needs to write
 # buildNotes.txt; the default mode validates it, runs prePush.ps1 and push.ps1 quietly, then reports.
-param([switch]$Context)
+# -Tags prints 10 candidate version tags; -SetTag writes the one the user picked.
+param([switch]$Context, [switch]$Tags, [string]$SetTag)
 $ErrorActionPreference = 'Stop'
 . "$PSScriptRoot\scriptHelper.ps1"
 Set-Location -LiteralPath $repoRoot
 $current = requireVersion
+if ($Tags) { getVersionTags 10; return }
+if ($SetTag) {
+    $set = setVersionTag $SetTag
+    Write-Host "line 1: v$current $set"
+    return
+}
 $tagWord = requireVersionTag
 $notesChanged = testBuildNotesChanged
 

@@ -15,6 +15,7 @@ import {
   DEFAULT_ACCOUNT,
   earliestLimitedUntil,
   expandHome,
+  failoverAccount,
   forgetSessionPin,
   markAccountLimited,
   nextUsableAccount,
@@ -118,6 +119,23 @@ test("a session pin beats the global account, survives a reload, and unpins clea
   } finally {
     rmSync(root, { recursive: true, force: true })
   }
+})
+
+test("failover moves a pinned chat's pin to the next usable account without touching the global pick", () => {
+  const ids = ["a", "b", "c"]
+  const now = Date.now()
+  pinSessionAccount("ses_1", "b", ids, now)
+  markAccountLimited("b", now + 60_000, now)
+  markAccountLimited("c", now + 60_000, now)
+  expect(failoverAccount("ses_1", ids, now)).toBe("a")
+  expect(sessionPin("ses_1", ids, now)).toBe("a")
+  markAccountLimited("a", now + 60_000, now)
+  expect(failoverAccount("ses_1", ids, now)).toBeUndefined()
+  expect(sessionPin("ses_1", ids, now)).toBe("a")
+  // An unpinned chat moves the global pick as before.
+  setCurrentAccount("c", ids, now)
+  expect(failoverAccount("ses_2", ids, now)).toBe("c")
+  expect(sessionPin("ses_2", ids, now)).toBeUndefined()
 })
 
 test("a rejection without a reset time sits the account out for an hour", () => {

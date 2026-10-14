@@ -266,10 +266,9 @@ export async function ensureProxyServer(
   config: ClaudeCodeConfig,
   tools: ProxyToolDef[],
   sessionKeyForCalls: string,
-  options: { alwaysLoad?: boolean } = {},
 ): Promise<ProxyMcpServer> {
   const timeoutOverrides = config.proxyToolTimeoutMs
-  const srv = await createProxyMcpServer(tools, timeoutOverrides, options)
+  const srv = await createProxyMcpServer(tools, timeoutOverrides)
   srv.calls.on("call", (call: ProxyToolCall) => {
     queuePendingProxyCall(sessionKeyForCalls, call, timeoutOverrides)
   })
@@ -333,7 +332,7 @@ export async function planSpawn(input: {
   const proxyServer =
     input.proxyServer ??
     (tools.combined.length > 0
-      ? await ensureProxyServer(config, tools.combined, turn.sessionKey, { alwaysLoad: commandPermission })
+      ? await ensureProxyServer(config, tools.combined, turn.sessionKey)
       : null)
   const mcp = effectiveMcpConfig(config, turn.cwd, proxyServer?.configPath(), input.runtimeStatus)
   const systemPromptFile = systemPrompt(
@@ -349,8 +348,9 @@ export async function planSpawn(input: {
       model: spawnModel.model,
       permissionMode: config.permissionMode,
       // Command turns execute exclusively through oc's permission-checked tools.
-      // `--tools ""` strips Claude built-ins; proxy schemas load via alwaysLoad.
-      tools: commandPermission ? [] : undefined,
+      // Only ToolSearch survives: it loads schemas but runs nothing, and it
+      // keeps the proxy tools deferred exactly as on ordinary turns.
+      tools: commandPermission ? ["ToolSearch"] : undefined,
       mcpConfig: commandPermission ? proxyServer?.configPath() : mcp.paths,
       strictMcpConfig: commandPermission || config.strictMcpConfig,
       disallowedTools: tools.disallowed.length > 0 ? tools.disallowed : undefined,

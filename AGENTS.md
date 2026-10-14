@@ -27,11 +27,11 @@
 - Holds the next commit message. `.scripts/push.ps1` reads it: line 1 = commit subject, one blank line, remaining lines = commit body. A positional message passed to `push.ps1` wins (subject only). The file is used only when it changed since the last commit; unchanged, it is the previous push's message, so `push.ps1` prompts instead. `push.ps1 -DryRun` prints the commands without changing anything.
 - Agents write it when preparing a push (the `agent-push` skill), replacing the previous push's message. UTF-8 without BOM.
 - `.scripts/agentPush.ps1` is the agent path: `-Context` prints status, new `buildNotes.md` lines, and recent messages; the default mode validates `buildNotes.txt` (line 1 `v<version> <versionTag>`, blank line, body), runs `prePush.ps1` and `push.ps1` in-process with output shown only on failure, then prints hash, message, and files.
-- Format follows the recent commits: line 1 `v<version> <versionTag>` from `.version/version` and `.version/versionTag`; then one block per area, each a lowercase label with a colon (`home prompt:`) followed by plain-English paragraphs about what the user sees; last paragraph starts with `Under the hood:` (internal fixes, tests, which checks passed). Cover every `buildNotes.md` entry since the last commit, merge related ones, leave out reverted work, and never claim a check that did not run.
+- Format follows the recent commits: line 1 `v<version> <versionTag>` from `src/.version/version` and `src/.version/versionTag`; then one block per area, each a lowercase label with a colon (`home prompt:`) followed by plain-English paragraphs about what the user sees; last paragraph starts with `Under the hood:` (internal fixes, tests, which checks passed). Cover every `buildNotes.md` entry since the last commit, merge related ones, leave out reverted work, and never claim a check that did not run.
 
 ## Revision
 
-`.version/version` holds one version `X.Y.Z`. The patch component is the revision. `.version/versionTag` holds the random camelCase two-word tag rolled on every bump.
+`src/.version/version` holds one version `X.Y.Z`. The patch component is the revision. `src/.version/versionTag` holds the random camelCase two-word tag rolled on every bump.
 
 - Bump the revision once per session at the tail end, in the same step as the `build-notes` entry, whenever the session changed code (source, scripts, config, tests), by running `pwsh -NoProfile -File .scripts\bumpVersion.ps1` once. Never edit `version` or `versionTag` by hand; `bumpVersion.ps1 -RerollTag` rerolls only the tag.
 - Skip only sessions with no code changes: read-only or docs/notes-only.

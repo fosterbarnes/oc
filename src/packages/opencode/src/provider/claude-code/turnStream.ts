@@ -41,12 +41,11 @@ import {
   BASE_PROVIDER_ID,
   canonicalAccountId,
   earliestLimitedUntil,
+  failoverAccount,
   markAccountLimited,
-  nextUsableAccount,
   poolAccountIds,
   poolAccountLabel,
   poolConfigDir,
-  sessionPin,
 } from "./accounts.js"
 import { extractTurnStats, formatTurnStatsBlock, turnStatsLogPayload } from "./turnStats.js"
 import {
@@ -469,8 +468,8 @@ class ClaudeTurn {
     markAccountLimited(this.account, resetsAtMs)
     if (this.turn.compactionMode) return false
     const ids = poolAccountIds(this.config.accounts)
-    // A pinned chat stays on its account: no failover, and the global current account is not touched.
-    const next = sessionPin(this.turn.affinity, ids) ? undefined : nextUsableAccount(ids)
+    // A pinned chat fails over too; its pin follows, and the global current account is not touched.
+    const next = failoverAccount(this.turn.affinity, ids)
     if (!next || next === this.account) {
       this.allLimited = true
       return false
@@ -1811,9 +1810,8 @@ class ClaudeTurn {
     const sessionID = this.turn.affinity
     if (!sessionID || sessionID === "default") return
     const ids = poolAccountIds(this.config.accounts)
-    // A pinned chat never moves, so it waits for its own account, not the earliest of the pool.
-    const pin = sessionPin(sessionID, ids)
-    const resetAt = earliestLimitedUntil(pin ? [pin] : ids)
+    // Pinned chats fail over too, so the earliest reset in the pool resumes any chat.
+    const resetAt = earliestLimitedUntil(ids)
     if (resetAt === undefined) return
     const entry = ScheduledResume.requestResume({
       sessionID,
