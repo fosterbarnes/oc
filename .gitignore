@@ -37,3 +37,6 @@ UPSTREAM/opencode/
 /.config
 .vscode
 desktop.ini
+*.lnk
+.scripts/*.exe
+.res/yapBot.json
