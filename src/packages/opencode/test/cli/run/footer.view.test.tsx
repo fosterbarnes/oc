@@ -958,11 +958,13 @@ test("direct footer shows editable prompts and additional queued work while runn
     permissions: [],
     questions: [],
   })
+  // oc leaves session_queued_prompts unbound by default; bind it so the queued hint renders.
+  const queuedConfig = createTuiResolvedConfig({ keybinds: { session_queued_prompts: "<leader>q" } })
   let offKeymap: (() => void) | undefined
   function Harness() {
     const renderer = useRenderer()
     const keymap = createDefaultOpenTuiKeymap(renderer)
-    offKeymap = registerOpencodeKeymap(keymap, renderer, tuiConfig)
+    offKeymap = registerOpencodeKeymap(keymap, renderer, queuedConfig)
 
     return (
       <OpencodeKeymapProvider keymap={keymap}>
@@ -986,7 +988,7 @@ test("direct footer shows editable prompts and additional queued work while runn
             { messageID: "m-queued", partID: "p-queued", prompt: { text: "follow up", parts: [] } },
           ]}
           theme={() => RUN_THEME_FALLBACK}
-          tuiConfig={tuiConfig}
+          tuiConfig={queuedConfig}
           backgroundSubagents={true}
           agent="opencode"
           onSubmit={() => true}
@@ -1039,9 +1041,9 @@ test("direct footer shows editable prompts and additional queued work while runn
     expect(spinner).toBeDefined()
     expect(frame).toContain("a-model-name-long-enough-to-force-responsive-truncation")
     expect(frame).toContain("3 queued")
-    expect(frame).toContain("ctrl+b background")
+    expect(frame).toContain("background")
     expect(frame).toContain("ctrl+x q 3 queued")
-    expect(frame).toContain("ctrl+x down subagents")
+    expect(frame).toContain("ctrl+b subagents")
     expect(frame).toContain("ctrl+p cmd")
     expect(frame).toContain("a-model-name-long-enough-to-force-responsive-truncation")
     expect(frame).toContain("subagents · ctrl+p cmd")
@@ -1080,8 +1082,8 @@ test("direct footer separates a lone context hint from model and command hint", 
     const frame = app.captureCharFrame()
 
     expect(frame).toContain("GPT-5")
-    expect(frame).toContain("xhigh · ctrl+x down subagents · ctrl+p cmd")
-    expect(frame).not.toContain("ctrl+b background")
+    expect(frame).toContain("xhigh · ctrl+b subagents · ctrl+p cmd")
+    expect(frame).not.toContain("background")
     expect(frame).not.toContain("queued")
   } finally {
     app.cleanup()
@@ -1109,7 +1111,7 @@ test("direct footer hides the subagent hint when only completed subagents remain
 
     expect(frame).toContain("GPT-5")
     expect(frame).toContain("xhigh · ctrl+p cmd")
-    expect(frame).not.toContain("ctrl+x down subagents")
+    expect(frame).not.toContain("subagents")
   } finally {
     app.cleanup()
   }

@@ -255,16 +255,21 @@ test("restart from home returns home after reconnect", async () => {
   }
 })
 
-test("failed restart cancels recovery so later disposal can still exit", async () => {
+// Disposal bootstrap is nonfatal (/reload), so a cancelled restart shows up as an ordinary resync, not an exit.
+test("failed restart cancels recovery so a later disposal takes the ordinary resync path", async () => {
   const setup = await createTestRenderer({ width: 80, height: 24, useThread: false })
   const core = await import("@opentui/core")
   mock.module("@opentui/core", () => ({ ...core, createCliRenderer: async () => setup.renderer }))
   const events = createEventSource()
   let failNextProviders = false
+  let failedProviderCalls = 0
   const calls = createFetch((url) => {
     if (url.pathname === "/global/restart") throw new Error("unavailable")
     if (url.pathname === "/config/providers") {
-      if (failNextProviders) throw new Error("disposed")
+      if (failNextProviders) {
+        failedProviderCalls++
+        throw new Error("disposed")
+      }
       return json({ providers: {}, default: {} })
     }
   })
@@ -307,8 +312,13 @@ test("failed restart cancels recovery so later disposal can still exit", async (
       payload: { id: "evt_disposed", type: "server.instance.disposed", properties: { directory } },
     })
     events.reconnect()
+    // A still-pending restart would retry the failing bootstrap every 50ms; the ordinary path tries once.
+    await Bun.sleep(300)
+    await setup.renderOnce()
+    expect(failedProviderCalls).toBe(1)
+    expect(setup.renderer.isDestroyed).toBe(false)
+    setup.renderer.destroy()
     await task
-    expect(setup.renderer.isDestroyed).toBe(true)
   } finally {
     if (!setup.renderer.isDestroyed) setup.renderer.destroy()
     mock.restore()

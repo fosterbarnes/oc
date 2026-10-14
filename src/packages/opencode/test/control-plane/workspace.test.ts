@@ -121,6 +121,8 @@ async function initGitRepo(dir: string) {
   await fs.mkdir(dir, { recursive: true })
   await $`git init`.cwd(dir).quiet()
   await $`git config core.fsmonitor false`.cwd(dir).quiet()
+  // A global core.autocrlf=true would make the warped patch land as CRLF.
+  await $`git config core.autocrlf false`.cwd(dir).quiet()
   await $`git config commit.gpgsign false`.cwd(dir).quiet()
   await $`git config user.email "test@opencode.test"`.cwd(dir).quiet()
   await $`git config user.name "Test"`.cwd(dir).quiet()

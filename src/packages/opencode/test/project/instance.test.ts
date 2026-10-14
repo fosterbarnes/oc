@@ -1,7 +1,7 @@
 import { describe, expect } from "bun:test"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { CrossSpawnSpawner } from "@opencode-ai/core/cross-spawn-spawner"
-import { Deferred, Effect, Fiber, Layer } from "effect"
+import { Context, Deferred, Effect, Exit, Fiber, Layer, Option, Scope } from "effect"
 import { InstanceRef } from "../../src/effect/instance-ref"
 import { registerDisposer } from "../../src/effect/instance-registry"
 import { InstanceBootstrap } from "../../src/project/bootstrap"
@@ -15,11 +15,10 @@ const noopBootstrap = Layer.succeed(
   InstanceBootstrap.Service.of({ run: Effect.suspend(() => bootstrapRun) }),
 )
 
-const it = testEffect(
-  LayerNode.compile(LayerNode.group([InstanceStore.node, CrossSpawnSpawner.node]), [
-    [InstanceStore.bootstrapNode, noopBootstrap],
-  ]),
-)
+const storeLayer = LayerNode.compile(LayerNode.group([InstanceStore.node, CrossSpawnSpawner.node]), [
+  [InstanceStore.bootstrapNode, noopBootstrap],
+])
+const it = testEffect(storeLayer)
 
 const setBootstrap = (run: Effect.Effect<void>) =>
   Effect.acquireRelease(
@@ -223,6 +222,22 @@ describe("InstanceStore", () => {
       yield* Effect.sync(release)
       yield* Effect.all([Fiber.join(first), Fiber.join(second)])
       expect(disposed).toEqual([dir])
+    }),
+  )
+
+  it.live("closing the store while a load is still booting does not hang", () =>
+    Effect.gen(function* () {
+      const dir = yield* tmpdirScoped({ git: true })
+      const booting = yield* Deferred.make<void>()
+      yield* setBootstrap(Deferred.succeed(booting, undefined).pipe(Effect.andThen(Effect.never)))
+      // A store of its own, so closing it runs the disposeAll finalizer against the in-flight boot.
+      const scope = yield* Scope.make()
+      const context = yield* Layer.buildWithScope(storeLayer, scope)
+      yield* Context.get(context, InstanceStore.Service).load({ directory: dir }).pipe(Effect.forkScoped)
+      yield* Deferred.await(booting)
+
+      const closed = yield* Scope.close(scope, Exit.void).pipe(Effect.timeoutOption("5 seconds"))
+      expect(Option.isSome(closed)).toBe(true)
     }),
   )
 

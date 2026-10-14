@@ -22,7 +22,7 @@ import { OpenApi } from "effect/unstable/httpapi"
 import { TestLLMServer } from "../../lib/llm-server"
 import path from "path"
 import { array, boolean, check, isRecord, message, object, stable } from "./assertions"
-import { controlledPtyInput, http, route } from "./dsl"
+import { controlledPtyCommand, controlledPtyInput, http, route } from "./dsl"
 import {
   cleanupExercisePaths,
   exerciseConfigDirectory,
@@ -479,7 +479,7 @@ const scenarios: Scenario[] = [
       (body, ctx) => {
         object(body)
         check(body.title === "HTTP API PTY", "PTY create should return requested title")
-        check(body.command === "/bin/sh", "PTY create should use controlled shell command")
+        check(body.command === controlledPtyCommand, "PTY create should use controlled shell command")
         check(body.cwd === ctx.directory, "PTY create should default cwd to scenario directory")
       },
       "status",
@@ -1393,8 +1393,9 @@ const scenarios: Scenario[] = [
     .at((ctx) => ({ path: route("/session/{sessionID}/rename", { sessionID: ctx.state.id }), headers: ctx.headers() }))
     .json(200, (body, ctx) => {
       object(body)
-      check(body.id === ctx.state.id, "rename should return the requested session")
-      check(body.title === ctx.state.title, "rename should preserve the title without user messages")
+      object(body.session)
+      check(body.session.id === ctx.state.id, "rename should return the requested session")
+      check(body.session.title === ctx.state.title, "rename should preserve the title without user messages")
     }),
   http.protected
     .post("/session/{sessionID}/abort", "session.abort.missing")
@@ -1747,6 +1748,67 @@ const scenarios: Scenario[] = [
     .probe({ path: "/global/upgrade", body: { target: 1 } })
     .at(() => ({ path: "/global/upgrade", body: { target: 1 } }))
     .status(400),
+  // oc routes. Writes that would touch Claude accounts, warm-up or resume stores, or start a model call
+  // are exercised through payload validation (400) or a missing session (404).
+  http.protected.get("/global/claude/warmup", "global.claudeWarmup").global().json(200, object, "status"),
+  http.protected
+    .put("/global/claude/warmup", "global.setClaudeWarmup")
+    .global()
+    .probe({ path: "/global/claude/warmup", body: { accountID: 1 } })
+    .at(() => ({ path: "/global/claude/warmup", body: { accountID: 1 } }))
+    .status(400),
+  http.protected.get("/plugin", "plugin.status").json(200, array, "status"),
+  http.protected.get("/provider/usage", "provider.usage.state").json(200, array, "status"),
+  http.protected
+    .post("/instance/reload", "instance.reload")
+    .mutating()
+    .json(200, (body) => {
+      check(body === true, "instance reload should return true when no session work is running")
+    }),
+  http.protected.get("/session/claude/account", "session.claudeAccount.state").json(200, object, "status"),
+  http.protected
+    .put("/session/claude/account", "session.claudeAccount.set")
+    .at((ctx) => ({ path: "/session/claude/account", headers: ctx.headers(), body: { id: 1 } }))
+    .status(400),
+  http.protected.get("/session/resume/state", "session.resume.state").json(200, object, "status"),
+  http.protected
+    .put("/session/resume/state", "session.resume.set")
+    .at((ctx) => ({ path: "/session/resume/state", headers: ctx.headers(), body: { enabled: "yes" } }))
+    .status(400),
+  http.protected
+    .post("/session/resume/cancel", "session.resume.cancel")
+    .at((ctx) => ({ path: "/session/resume/cancel", headers: ctx.headers(), body: {} }))
+    .status(400),
+  http.protected
+    .get("/session/{sessionID}/queue", "session.queue.get")
+    .seeded((ctx) => ctx.session({ title: "Queue session" }))
+    .at((ctx) => ({ path: route("/session/{sessionID}/queue", { sessionID: ctx.state.id }), headers: ctx.headers() }))
+    .json(200, object, "status"),
+  http.protected
+    .post("/session/{sessionID}/queue", "session.queue.update")
+    .seeded((ctx) => ctx.session({ title: "Queue update session" }))
+    .at((ctx) => ({
+      path: route("/session/{sessionID}/queue", { sessionID: ctx.state.id }),
+      headers: ctx.headers(),
+      body: { type: "unknown" },
+    }))
+    .status(400),
+  http.protected
+    .post("/session/{sessionID}/generate", "session.generate")
+    .seeded((ctx) => ctx.session({ title: "Generate session" }))
+    .at((ctx) => ({
+      path: route("/session/{sessionID}/generate", { sessionID: ctx.state.id }),
+      headers: ctx.headers(),
+      body: { prompt: " " },
+    }))
+    .status(400),
+  http.protected
+    .post("/session/{sessionID}/handoff", "session.handoff")
+    .at((ctx) => ({
+      path: route("/session/{sessionID}/handoff", { sessionID: "ses_httpapi_missing" }),
+      headers: ctx.headers(),
+    }))
+    .status(404),
 ]
 
 const llmScenarios = new Set([

@@ -45,10 +45,11 @@ test("claudeSpawnEnv strips API key/token when ignoreAnthropicApiKey is true", (
 })
 
 test("claudeSpawnEnv with ignore flag leaves other env vars intact", () => {
-  withEnv({ ANTHROPIC_API_KEY: "sk-test", PATH: process.env.PATH }, () => {
+  // Not PATH: Windows spreads it as `Path`, so `env.PATH` would read undefined.
+  withEnv({ ANTHROPIC_API_KEY: "sk-test", OC_SPAWN_ENV_KEPT: "kept" }, () => {
     const env = claudeSpawnEnv({ ignoreAnthropicApiKey: true })
     assert.equal("ANTHROPIC_API_KEY" in env, false)
-    assert.equal(env.PATH, process.env.PATH)
+    assert.equal(env.OC_SPAWN_ENV_KEPT, "kept")
     assert.equal(env.TERM, "xterm-256color")
   })
 })

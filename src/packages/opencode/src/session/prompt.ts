@@ -1476,16 +1476,19 @@ const layer = Layer.effect(
                 callID: orphan.callID,
               })
             }
-            if (lastFinished && lastFinished.summary !== true && !lastFinished.error) {
+            const cfg = yield* config.get()
+            const action = lastFinished ? limitAction(cfg, lastFinished.providerID) : undefined
+            // Resolve the model only when a limit applies, so a finished turn whose model left the config still exits.
+            if (
+              lastFinished &&
+              lastFinished.summary !== true &&
+              !lastFinished.error &&
+              action &&
+              action !== "off" &&
+              SessionHandoff.canAutoHandoff({ session, messages: msgs })
+            ) {
               const model = yield* getModel(lastFinished.providerID, lastFinished.modelID, sessionID)
-              const cfg = yield* config.get()
-              const action = limitAction(cfg, model.providerID)
-              if (
-                action &&
-                action !== "off" &&
-                SessionHandoff.canAutoHandoff({ session, messages: msgs }) &&
-                overLimit({ cfg, tokens: lastFinished.tokens, model, outputTokenMax: flags.outputTokenMax })
-              ) {
+              if (overLimit({ cfg, tokens: lastFinished.tokens, model, outputTokenMax: flags.outputTokenMax })) {
                 if (action === "handoff") {
                   yield* handoff.enqueue({
                     sessionID,

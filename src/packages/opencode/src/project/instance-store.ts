@@ -70,12 +70,18 @@ const layer: Layer.Layer<Service, never, Project.Service | InstanceBootstrap.Ser
         return true
       })
 
+    // Closing the store scope interrupts an in-flight boot; settle its deferred so waiters such as the
+    // disposeAll finalizer do not hang on a load that will never finish.
     const completeLoad = (directory: string, input: LoadInput, entry: Entry) =>
       Effect.gen(function* () {
         const exit = yield* Effect.exit(boot({ ...input, directory }))
         if (Exit.isFailure(exit)) yield* removeEntry(directory, entry)
         yield* Deferred.done(entry.deferred, exit).pipe(Effect.asVoid)
-      })
+      }).pipe(
+        Effect.onInterrupt(() =>
+          removeEntry(directory, entry).pipe(Effect.andThen(Deferred.interrupt(entry.deferred)), Effect.asVoid),
+        ),
+      )
 
     const emitDisposed = (input: { directory: string; project?: string }) =>
       Effect.sync(() =>

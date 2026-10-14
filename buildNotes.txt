@@ -1,12 +1,15 @@
-v0.2.178 dacMemore
+v0.2.179 snakeArrived
 
-reload and sessions:
-`/reload` in one project no longer waits on or blocks sessions in other projects; prompts sent to the project being reloaded are refused as busy instead of waiting.
+providers:
+Updated xAI, Together AI, Vercel gateway, and GitLab provider SDKs. Cloudflare AI Gateway models now respect configured provider timeouts, and OpenAI Responses forwards the ultrafast service tier.
 
-subagents:
-A task given an explicit model keeps that model even when the same subagent is resumed while it is still running.
+browser links:
+Docs, login, and OAuth links use one shared HTTP and HTTPS opener across the CLI, TUI, and provider plugins.
 
-background shell:
-A background job left by a crashed oc is marked interrupted even if Windows reused its PID, and killing such a job says so instead of "already running". Stopping a process tree never touches an unrelated process that reused the original PID.
+acp:
+Editors using ACP restore session options on reload and receive reasoning separately from replies.
 
-Under the hood: Stage 6 follow-ups verified and recorded (SessionWork keyed by instance directory, explicit model carried on the user message instead of module state, owner creation time checked for background jobs and process-tree roots); version bump and buildNotes entry; package.json and bun.lock line-ending normalization only. Checks passed: opencode task, taskModelOverride, proxyTask, agentModels (76 pass); core session-work, processTree, cross-spawn-spawner (43 pass); opencode reloadConfig, httpapi-global, shutdown, backgroundShell (38 pass); typecheck clean in core, opencode, and tui. No build or install.
+reliability:
+Server shutdown no longer hangs when a project is still loading. Truncated records from crashed TUIs no longer block cleanup, and finished sessions remain readable when their configured model has been removed.
+
+Under the hood: Advanced the upstream sync baseline to the v1 tip, refreshed SDK patches and dependencies, corrected stale Windows tests and test isolation, reset test server draining state on controller cleanup, and added coverage for 14 HTTP API routes. Checks passed: targeted core, opencode, and TUI tests; HTTP API coverage, auth, and Effect scenarios; required pre-push checks. Earlier session verification covered provider suites and core, opencode, and TUI typechecks.

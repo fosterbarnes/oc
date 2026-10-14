@@ -1040,7 +1040,9 @@ it.instance("subtask child inherits parent session external_directory allow", ()
   }),
 )
 
-noLLMServer.instance("prompt tools replace previous prompt tool rules", () =>
+// oc merges tool flags into session rules (see "legacy tool flags preserve existing session permission rules"),
+// so a later prompt's flag overrides an earlier one for the same tool instead of replacing the whole set.
+noLLMServer.instance("later prompt tool flags override earlier ones for the same tool", () =>
   Effect.gen(function* () {
     const prompt = yield* SessionPrompt.Service
     const sessions = yield* Session.Service
@@ -1050,7 +1052,7 @@ noLLMServer.instance("prompt tools replace previous prompt tool rules", () =>
       sessionID: session.id,
       agent: "build",
       noReply: true,
-      tools: { bash: false },
+      tools: { bash: false, read: false },
       parts: [{ type: "text", text: "first" }],
     })
     yield* prompt.prompt({
@@ -1061,9 +1063,9 @@ noLLMServer.instance("prompt tools replace previous prompt tool rules", () =>
       parts: [{ type: "text", text: "second" }],
     })
 
-    const reloaded = yield* sessions.get(session.id)
-    expect(reloaded.permission).toEqual([{ permission: "read", pattern: "*", action: "allow" }])
-    expect(Permission.evaluate("bash", "anything", reloaded.permission ?? []).action).toBe("ask")
+    const rules = (yield* sessions.get(session.id)).permission ?? []
+    expect(Permission.evaluate("read", "anything", rules).action).toBe("allow")
+    expect(Permission.evaluate("bash", "anything", rules).action).toBe("deny")
   }),
 )
 

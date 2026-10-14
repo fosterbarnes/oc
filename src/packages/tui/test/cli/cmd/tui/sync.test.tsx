@@ -298,14 +298,17 @@ describe("tui sync", () => {
     }
   })
 
-  test("ordinary disposal still fatally exits when bootstrap fails", async () => {
+  // /reload disposes instances on purpose, so a failed bootstrap after disposal must not close the TUI.
+  test("ordinary disposal keeps the TUI when bootstrap fails and resyncs on the next disposal", async () => {
     await using tmp = await tmpdir()
     await Bun.write(`${tmp.path}/kv.json`, "{}")
     let failNextProviders = false
+    let providerCalls = 0
     let exited = false
     const { app, emit } = await mount(
       (url) => {
         if (url.pathname === "/config/providers") {
+          providerCalls++
           if (failNextProviders) return json({ error: "disposed" }, { status: 500 })
           return undefined
         }
@@ -320,10 +323,14 @@ describe("tui sync", () => {
     )
 
     try {
+      const baseline = providerCalls
       failNextProviders = true
       emit(disposedEvent())
-      await wait(() => exited)
-      expect(exited).toBe(true)
+      await wait(() => providerCalls > baseline)
+      failNextProviders = false
+      emit(disposedEvent())
+      await wait(() => providerCalls > baseline + 1)
+      expect(exited).toBe(false)
     } finally {
       app.renderer.destroy()
     }

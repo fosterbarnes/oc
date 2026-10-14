@@ -112,6 +112,49 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-13 (~21:13) - v0.2.179 snakeArrived - Stage 4 leftovers: dependency bumps, three upstream ports, baselineSha to v1 tip - Claude Opus 5.5, reasoning default; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; reasoning default; Implementation; completed (resumed after rate limit and account switch)
+- Version: 0.2.179 snakeArrived
+- Updated deps: `@ai-sdk/xai` 3.0.139 (patch moved to `patches/@ai-sdk%2Fxai@3.0.139.patch`), `@ai-sdk/gateway` 3.0.191, `@ai-sdk/togetherai` 2.0.68, `@ai-sdk/provider` 3.0.16, `@ai-sdk/provider-utils` 4.0.51, `gitlab-ai-provider` 6.19.0; refreshed openai patch (ultrafast). `bun install` run.
+- Ported `35fc7a776c` (provider timeouts for Cloudflare AI Gateway models) into `provider/provider.ts`, kept oc's Cloudflare loader; `test/provider/header-timeout.test.ts`, new `test/provider/openai.test.ts`.
+- Ported `29f07e0c69`: added `core/src/open.ts` (`openUrl`, `open` 11.0.4 moved to core); `tui/app.tsx`, `ui/link.tsx`, `dialog-retry-action.tsx`, `cli/cmd/account.ts`, `mcp/browser.ts`, `mcp/oauth-provider.ts`, digitalocean/snowflake plugins use it.
+- Ported `95daf90670` (ACP session options + reasoning boundaries): `acp/config-option.ts`, `acp/event.ts`, `acp/service.ts`, `session/message-v2.ts` + tests.
+- Moved `.scripts/upstream-sync.state.json` `baselineSha` `5cd8e68fdd` -> `abce98e0eb` (upstream v1 tip).
+- Verification: core `open.test.ts` 2/2, 8 ported opencode test files 148/148, typecheck clean core/opencode/tui. `.scripts\test.ps1` unit/providers/httpapi/typecheck: providers and typecheck pass; other unit packages pass except opencode (18 fail) and tui (2 fail); httpapi 207/207 scenarios pass but exits 1 for 14 routes with no scenario. `generated` not run (dirty worktree).
+- ERROR: known `prompt.test.ts` failures (2) still present. New stale-test failures unrelated to Stage 4 files (no Stage 4 diff touches them): `event-manifest` (Latest 90, test expects 89), `config/tuiLedger.test.ts` (7), `control-plane/workspace.test.ts` sessionWarp, `tool/parameters.test.ts` snapshots (bash `background`, task `model` params), `cli/run/footer.view.test.tsx` (2, `ctrl+b subagents` vs expected), `claude-code/spawnEnv.test.ts` (PATH), `tui/app-lifecycle.test.tsx` (2, one 30s timeout). `httpapi-listen`/`httpapi-sdk` failed in full run, pass in isolation. httpapi missing scenarios: claude warmup/account, plugin, provider usage, resume state/cancel, session queue/generate/handoff, instance reload.
+- TODO: fix or update the stale tests above and add the 14 httpapi scenarios before the 0.3.0 release gate.
+- Update (same session, ~22:40): TODO above done; all suites green. Real fixes and stale-test updates below.
+- Fixed `project/instance-store.ts` `completeLoad`: closing the store scope mid-boot interrupted the boot fiber before `entry.deferred` settled, so the `disposeAll` finalizer awaited forever (server shutdown hang; httpapi auth mode hung after an aborted probe). Now `onInterrupt` removes entry + `Deferred.interrupt`. Regression test `test/project/instance.test.ts` "closing the store while a load is still booting does not hang" (fails without fix).
+- Fixed `server/lifecycle.ts` `setController` clearer also resets `draining`; `httpapi-global` shutdown test leaked draining into later files (`/global/health` 500 in `httpapi-listen`/`httpapi-sdk`). Production never calls the clearer.
+- Fixed `session/prompt.ts` loop exit: model lookup only when a context-limit action applies; a finished turn whose model left config threw `ModelNotFound` ("concurrent loop callers get same result").
+- Fixed `config/tuiLedger.ts` `read()`: pid from file name, so a dead TUI's truncated `<pid>.json` is skipped instead of throwing on every read (blocked launcher cleanup).
+- Changed stale tests to current oc behavior: `tuiLedger.test.ts` rewritten for identity files + CIM `created` (v0.2.162 design); `event-manifest` 90 (fork `provider.usage.updated`); `parameters` snapshot (bash `background`, task `model`); `footer.view` oc preset (`ctrl+b` subagents, `ctrl+shift+b` background, queued key bound in test since default none per v0.2.177); `prompt.test.ts` replace test -> "later prompt tool flags override earlier ones" (merge is deliberate v0.2.162); tui `sync.test.tsx` + `app-lifecycle.test.tsx` disposal bootstrap nonfatal (v0.2.177 /reload).
+- Fixed test isolation: `spawnEnv.test.ts` used `env.PATH` (Windows key `Path`); `workspace.test.ts` `initGitRepo` sets `core.autocrlf false` (global true made warp patch CRLF); `compaction.test.ts` abort bound 250ms -> 2s (10s backoff; flaked at 354ms under load).
+- Added httpapi scenarios for 14 oc routes (`test/server/httpapi-exercise/index.ts`); writes use 400/404 validation paths. Fixed existing scenarios: `session.rename` returns `{ session, model }`; pty uses `cmd.exe` on Windows (`controlledPtyCommand` in `dsl.ts`). Effect + auth modes had never run (coverage mode failed first).
+- Verification: `.scripts\test.ps1 -Package opencode,tui` opencode 4861 pass / 1 fail (compaction flake, then fixed: file 55/55); tui 535/535; `bun run test:httpapi` coverage/auth/effect 221/221 each; opencode typecheck clean. Earlier this session: other unit packages, providers, typecheck categories pass.
+- Note: known `prompt.test.ts` failures (entry 2026-10-13 ~11:25 and earlier) are resolved; do not list them as expected anymore.
+
+### User
+Providers
+- xAI, Together AI, Vercel gateway, and GitLab providers are on newer SDK versions.
+- Cloudflare AI Gateway models now respect the configured provider timeout.
+
+Browser links
+- Opening docs, login, and OAuth links now goes through one shared opener in every part of the app.
+
+ACP
+- Editors using ACP get their session options back on reload and see reasoning separated correctly from replies.
+
+Reliability
+- Shutting down or restarting the server while a project is still loading no longer hangs.
+- A leftover, half-written TUI record from a crashed window no longer blocks oc from stopping its TUIs.
+- Reopening a finished session whose model was removed from your config no longer errors.
+- The full test suite now passes on Windows, including the server route checks.
+
+---
+
 ## 2026-10-13 (~11:25) - v0.2.178 dacMemore - Stage 6 follow-ups: per-project /reload gate, explicit task model, safe PID handling - Claude Opus 5.5, reasoning default; Implementation
 
 ### Agent

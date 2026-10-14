@@ -148,16 +148,16 @@ export async function read(directory: string, processes: Process[]) {
         const record: unknown = await Bun.file(path.join(root, file))
           .json()
           .catch(() => undefined)
+        // The file name carries the pid, so a dead TUI's truncated record is skipped instead of failing reads.
+        const pid = Number(file.slice(0, -".json".length))
         if (
-          typeof record === "object" &&
-          record !== null &&
-          "pid" in record &&
-          typeof record.pid === "number" &&
-          (!processes.some((item) => item.pid === record.pid) ||
-            ("instance" in record && record.instance !== Global.Path.app) ||
-            ("executable" in record &&
-              typeof record.executable === "string" &&
-              !sameExecutable(record.executable, Global.resolveExecutablePath())))
+          !processes.some((item) => item.pid === pid) ||
+          (typeof record === "object" &&
+            record !== null &&
+            (("instance" in record && record.instance !== Global.Path.app) ||
+              ("executable" in record &&
+                typeof record.executable === "string" &&
+                !sameExecutable(record.executable, Global.resolveExecutablePath()))))
         )
           return undefined
         const identity = (await Bun.file(path.join(root, file.replace(".json", ".identity.json")))
