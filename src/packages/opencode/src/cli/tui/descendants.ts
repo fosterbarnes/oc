@@ -9,7 +9,7 @@ export async function captureDescendants(rootPid = process.pid) {
       "ConvertTo-Json -InputObject @(Get-CimInstance Win32_Process | ForEach-Object {",
       "  @{ pid = [int]$_.ProcessId; parentPid = [int]$_.ParentProcessId; created = $_.CreationDate.ToFileTimeUtc().ToString(); executable = $_.ExecutablePath;",
       // Keep every other oc/runtime helper and terminal subtree, even if launched from this TUI.
-      "     protected = ($_.ProcessId -eq $PID -or ($_.ProcessId -ne $rootPid -and ($_.Name -match '^(?:opencode.*|oc|occ|ocdebug|oc-debug|wezterm.*|WindowsTerminal|wt|conhost|OpenConsole)\\.exe$' -or $_.CommandLine -match '--revive(?:-terminal)?(?:\\s|=)'))) }",
+      "     protected = ($_.ProcessId -eq $PID -or ($_.ProcessId -ne $rootPid -and ($_.Name -match '^(?:opencode.*|oc|occ|wezterm.*|WindowsTerminal|wt|conhost|OpenConsole)\\.exe$' -or $_.CommandLine -match '--revive(?:-terminal)?(?:\\s|=)'))) }",
       "}) -Compress",
     ].join("\n"),
     "",

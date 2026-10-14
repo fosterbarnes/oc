@@ -82,9 +82,9 @@ describe("OC resident PID and state", () => {
     expect(isPidAlive(Number.NaN)).toBe(false)
   })
 
-  test("serverStatePath is under Global.Path.state and defaultServerPort respects debug", () => {
+  test("serverStatePath is under Global.Path.state and defaultServerPort is 4096", () => {
     expect(serverStatePath()).toBe(path.join(Global.Path.state, "oc-server.json"))
-    expect(defaultServerPort()).toBe(Global.Path.debug ? 4097 : 4096)
+    expect(defaultServerPort()).toBe(4096)
   })
 
   test("clearServerState removes stale state without signaling PID", async () => {

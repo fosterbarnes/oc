@@ -9402,6 +9402,97 @@ export type AppAgentsResponses = {
 
 export type AppAgentsResponse = AppAgentsResponses[keyof AppAgentsResponses]
 
+export type AppAgentSubListData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/agent/sub"
+}
+
+export type AppAgentSubListErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type AppAgentSubListError = AppAgentSubListErrors[keyof AppAgentSubListErrors]
+
+export type AppAgentSubListResponses = {
+  /**
+   * Success
+   */
+  200: Array<string>
+}
+
+export type AppAgentSubListResponse = AppAgentSubListResponses[keyof AppAgentSubListResponses]
+
+export type AppAgentSubAddData = {
+  body?: {
+    name: string
+    model: string
+    variant?: string
+    description?: string
+  }
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/agent/sub"
+}
+
+export type AppAgentSubAddErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type AppAgentSubAddError = AppAgentSubAddErrors[keyof AppAgentSubAddErrors]
+
+export type AppAgentSubAddResponses = {
+  /**
+   * Subagent added
+   */
+  200: boolean
+}
+
+export type AppAgentSubAddResponse = AppAgentSubAddResponses[keyof AppAgentSubAddResponses]
+
+export type AppAgentSubRemoveData = {
+  body?: never
+  path: {
+    name: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/agent/sub/{name}"
+}
+
+export type AppAgentSubRemoveErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type AppAgentSubRemoveError = AppAgentSubRemoveErrors[keyof AppAgentSubRemoveErrors]
+
+export type AppAgentSubRemoveResponses = {
+  /**
+   * Subagent removed
+   */
+  200: boolean
+}
+
+export type AppAgentSubRemoveResponse = AppAgentSubRemoveResponses[keyof AppAgentSubRemoveResponses]
+
 export type AppSkillsData = {
   body?: never
   path?: never

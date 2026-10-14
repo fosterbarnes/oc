@@ -131,6 +131,7 @@ export const Definitions = {
 
   stash_delete: keybind("ctrl+d", "Delete stash entry"),
   queue_cancel: keybind("ctrl+d", "Cancel queued prompt"),
+  subagent_delete: keybind("ctrl+d", "Delete subagent"),
   model_provider_list: keybind("ctrl+a", "Open provider list from model dialog"),
   model_favorite_toggle: keybind("ctrl+f", "Toggle model favorite status"),
   model_favorite_move_up: keybind("shift+up", "Move favorite model up"),
@@ -359,6 +360,7 @@ export const CommandMap = {
   session_quick_switch_9: "session.quick_switch.9",
   stash_delete: "stash.delete",
   queue_cancel: "queue.cancel",
+  subagent_delete: "subagent.delete",
   model_provider_list: "model.dialog.provider",
   model_favorite_toggle: "model.dialog.favorite",
   model_favorite_move_up: "model.dialog.favorite.move_up",

@@ -1,6 +1,10 @@
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { PermissionV1 } from "@opencode-ai/core/v1/permission"
 import { Config } from "@/config/config"
+import { ConfigAgent } from "@/config/agent"
+import { Fingerprint } from "@/util/fingerprint"
+import { EventV2Bridge } from "@/event-v2-bridge"
+import { TuiEvent } from "@/server/tui-event"
 import { serviceUse } from "@opencode-ai/core/effect/service-use"
 import { Provider } from "@/provider/provider"
 
@@ -82,7 +86,7 @@ export interface Interface {
   >
 }
 
-type State = Omit<Interface, "generate">
+type State = Omit<Interface, "generate"> & { fingerprint: string }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/Agent") {}
 
@@ -97,10 +101,29 @@ const layer = Layer.effect(
     const skill = yield* Skill.Service
     const provider = yield* Provider.Service
     const locations = yield* LocationServiceMap.Service
+    const events = yield* EventV2Bridge.Service
+
+    const readFingerprint = Effect.fnUntraced(function* () {
+      const dirs = yield* config.directories()
+      return yield* Effect.promise(() => ConfigAgent.fingerprint(dirs))
+    })
 
     const state = yield* InstanceState.make<State>(
       Effect.fn("Agent.state")(function* (ctx) {
+        // Fingerprint before loading so an edit during the load is picked up by the next read.
+        const fingerprint = yield* readFingerprint()
         const cfg = yield* config.get()
+        const loaded = yield* config.agents()
+        for (const diag of loaded.diagnostics) {
+          yield* events
+            .publish(TuiEvent.ToastShow, {
+              title: "Invalid agent file",
+              message: `${diag.path}\n${diag.message}`,
+              variant: "warning",
+              duration: 8000,
+            })
+            .pipe(Effect.ignore)
+        }
         const skillDirs = yield* skill.dirs()
         const referenceDirs = Object.keys(cfg.references ?? cfg.reference ?? {}).length
           ? yield* Effect.gen(function* () {
@@ -292,7 +315,7 @@ const layer = Layer.effect(
           },
         }
 
-        for (const [key, value] of Object.entries(cfg.agent ?? {})) {
+        for (const [key, value] of Object.entries(loaded.agents)) {
           if (value.disable) {
             delete agents[key]
             continue
@@ -379,22 +402,30 @@ const layer = Layer.effect(
           list,
           defaultInfo,
           defaultAgent,
+          fingerprint,
         } satisfies State
       }),
     )
 
+    // Agent markdown files are hot-reloaded: rebuild when any agent or mode file was added, changed, or removed.
+    const current = Fingerprint.reloading(state, readFingerprint())
+
     return Service.of({
       get: Effect.fn("Agent.get")(function* (agent: string) {
-        return yield* InstanceState.useEffect(state, (s) => s.get(agent))
+        const s = yield* current()
+        return yield* s.get(agent)
       }),
       list: Effect.fn("Agent.list")(function* () {
-        return yield* InstanceState.useEffect(state, (s) => s.list())
+        const s = yield* current()
+        return yield* s.list()
       }),
       defaultInfo: Effect.fn("Agent.defaultInfo")(function* () {
-        return yield* InstanceState.useEffect(state, (s) => s.defaultInfo())
+        const s = yield* current()
+        return yield* s.defaultInfo()
       }),
       defaultAgent: Effect.fn("Agent.defaultAgent")(function* () {
-        return yield* InstanceState.useEffect(state, (s) => s.defaultAgent())
+        const s = yield* current()
+        return yield* s.defaultAgent()
       }),
       generate: Effect.fn("Agent.generate")(function* (input: {
         description: string
@@ -410,7 +441,8 @@ const layer = Layer.effect(
 
         const system = [PROMPT_GENERATE]
         yield* plugin.trigger("experimental.chat.system.transform", { model: resolved }, { system })
-        const existing = yield* InstanceState.useEffect(state, (s) => s.list())
+        const s = yield* current()
+        const existing = yield* s.list()
 
         // TODO: clean this up so provider specific logic doesnt bleed over
         const authInfo = yield* auth.get(model.providerID).pipe(Effect.orDie)
@@ -478,7 +510,7 @@ const locationServiceMapNode = LayerNode.make({
 export const node = LayerNode.make({
   service: Service,
   layer: layer,
-  deps: [Config.node, Auth.node, Plugin.node, Skill.node, Provider.node, locationServiceMapNode],
+  deps: [Config.node, Auth.node, Plugin.node, Skill.node, Provider.node, EventV2Bridge.node, locationServiceMapNode],
 })
 
 export * as Agent from "./agent"

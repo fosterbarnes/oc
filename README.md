@@ -1,7 +1,7 @@
-# oc
+# <img src="src/.res/icon256.png" width="180">
 
 <!-- TODO(user): write the hook yourself (1-2 sentences on what oc is). Current text kept until then. -->
-'Snapshot' of OpenCode version 1.18.29. oc aims to add new features, and enhancements to existing ones. Its base functionality has elements of v2's codebase, while still remaining rooted fundamentally in v1 practices.
+Custom fork of opencode that focuses on building on existing features simply and cleanly, and adding new QOL features.
 
 ## Standout features
 
@@ -15,6 +15,8 @@
 - Run your project's scripts from the sidebar in one click ([how](https://github.com/fosterbarnes/oc/wiki/Sidebar#script-runner))
 - `/commands` and skills reload as you edit them, no restart needed ([how](https://github.com/fosterbarnes/oc/wiki/Agents-and-Skills#commands-and-skills))
 - Combine commands and skills in one prompt, like `/spit /think` ([how](https://github.com/fosterbarnes/oc/wiki/Agents-and-Skills#commands-and-skills))
+
+
 
 ## Quality of life
 
@@ -130,7 +132,7 @@ How everything works is in the [wiki](https://github.com/fosterbarnes/oc/wiki):
 
 ## Progress
 
-[381,525](scc.txt) lines of code and counting...
+[382,386](scc.txt) lines of code and counting...
 
 <!-- code-count:start -->
 
@@ -140,11 +142,11 @@ How everything works is in the [wiki](https://github.com/fosterbarnes/oc/wiki):
 | HTML | 1 | 1,161 | 79 | 0 | 1,082 |
 | JavaScript | 8 | 1,420 | 127 | 50 | 1,243 |
 | Nix | 3 | 258 | 23 | 26 | 209 |
-| Powershell | 23 | 1,293 | 88 | 80 | 1,125 |
+| Powershell | 24 | 1,243 | 85 | 79 | 1,079 |
 | SQL | 2 | 5 | 0 | 0 | 5 |
 | Shell | 1 | 120 | 17 | 17 | 86 |
-| TypeScript | 2,079 | 428,608 | 36,604 | 15,086 | 376,918 |
-| **Total** | **2,122** | **433,782** | **36,993** | **15,264** | **381,525** |
+| TypeScript | 2,084 | 429,581 | 36,645 | 15,111 | 377,825 |
+| **Total** | **2,128** | **434,705** | **37,031** | **15,288** | **382,386** |
 
 <!-- code-count:end -->
 

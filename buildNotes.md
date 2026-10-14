@@ -112,6 +112,177 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-14 (~01:29) - v0.2.182 fromsoftFreeztyle - Fix push-blocking model assertion - GPT-6.1 Sol, reasoning default; Implementation
+
+### Agent
+- Meta: GPT-6.1 Sol; reasoning default; Implementation; fixed push blocker
+- Version: 0.2.182 fromsoftFreeztyle
+- Fixed `opencode/test/agent/plugin-agent-regression.test.ts`: compare branded model ID as String, matching existing agent tests; retained exact-value assertion.
+- Regenerated `docs/keybinds.md` with TUI keybind docs generator after prePush detected stale documentation.
+- ERROR: first agent-push prePush typecheck rejected plain string expectation for branded ModelV2.ID; no commit or push occurred.
+- Verification: edited plugin-agent regression file passed, 3 tests and 23 assertions. Prior push attempt passed 111 targeted tests and PowerShell revive cleanup checks; required pre-push checks run again before commit.
+
+### User
+Push checks
+- Fixed the model-ID test assertion that blocked the commit; the regression tests pass.
+
+---
+
+---
+
+## 2026-10-14 (~01:25) - v0.2.181 garnishForgive - Finish ocdebug retirement and report tab launch failures - GPT-6.1 Sol, reasoning default; Pass
+
+### Agent
+- Meta: GPT-6.1 Sol; reasoning default; Pass; completed approved fixes directly
+- Version: 0.2.181 garnishForgive; retained this session's existing revision bump
+- Reviewed session-owned `/revive-single`, ocdebug removal, old debug-setting revive failure; excluded concurrent subagent-management work.
+- ERROR: `.scripts/install.ps1` still required/copied removed ocdebug artifact; build.ps1 still passed --with-debug; buildDebug.ps1's ignored --debug-only silently built normal variants. Removed debug build source requirement/copy/flag; retired buildDebug/installDebug/.runDebug with immediate errors. Kept legacy installed-file backup/process guards.
+- Fixed `OcConfig.openReviveTab`: await terminal CLI exit rather than detached-hop acknowledgement; generic cmd uses Normal window and settle check. Added --no-auto-start to WezTerm spawn. TUI single helper uses ordinary hidden child with bounded stderr capture and exit failure toast; restart helpers retain detached launch.
+- Updated AGENTS.md, SCRIPTS.md, SCOPE.md, FORK.md and local wiki Launching.md for retirement/native test builds. Wiki not pushed.
+- Added terminal-launch regression using real harmless Bun child exits and environment forwarding; added `.scripts/tests/reviveCleanup.tests.ps1` parsing changed scripts, checking removed artifact/flag references, executing only retired entrypoints.
+- Verification: `bun test test/config/revive.test.ts --test-name-pattern 'single revive'` 3 pass, 0 fail; PowerShell cleanup checks passed; scoped git diff --check passed. No build/install, broad typecheck, or live terminal flow. Background test dispatch denied; bounded foreground check completed in 1.82s.
+- Risk: native-only test build reuses installed support files and production DB; no isolated profile. Full terminal flow still needs user acceptance.
+- MISTAKE: prior assistant claimed config edit without a tool record in this visible continuation. Current oc.json verified to have source only, no debug key; user's revive marker reports v0.2.181. Claim only observed edits/checks.
+
+### User
+Revive cleanup
+- The normal installer no longer asks for the removed ocdebug build.
+- Old debug scripts stop immediately and explain which current command to use.
+- `/revive-single` reports rejected tab launches, and plain-console launches request a visible window.
+- Focused checks passed; build/install and the live new-tab check remain user-driven.
+
+---
+
+## 2026-10-14 (~01:06) - v0.2.181 garnishForgive - Repair subagent picker handoffs and file edits - GPT-6.1 Sol, reasoning default; Implementation
+
+### Agent
+- Meta: GPT-6.1 Sol; reasoning default; Implementation; completed directly after Cat Jam task cancelled
+- Version: 0.2.181 garnishForgive; retained session's existing revision bump
+- Fixed `tui/src/component/dialog-model.tsx` and `dialog-subagent-efforts.tsx`: clear outgoing dialog before invoking continuation; next picker/name prompt survives.
+- Fixed `opencode/src/agent/subagentFile.ts`: restrict edits to YAML frontmatter agents map, quote scalar values, remove complete entries across internal blank lines, preserve body/comments/EOL, compare parsed result against expected data before atomic replacement. Keep empty map editable after last removal. Reject unsupported mapping layouts before writing.
+- Added GET `/agent/sub` names from configured writable file; `dialog-subagents.tsx` enables Ctrl+D only for matching names. Regenerated legacy SDK and Client outputs through project generators.
+- Added renderer regressions for model/effort/name handoff, multiple selections including provider default, no-effort models, and deletion membership. Extended file tests and hot reload integration with quoted descriptions and names.
+- Updated local wiki `Agents-and-Skills.md`: add/delete flow, writable-file setting, hot reload placement, safe edit limitations; not pushed.
+- Verification: `bun test test/agent/subagentFile.test.ts test/agent/subagentFile.integration.test.ts` 9 pass; `bun test test/cli/tui/subagentDialog.test.tsx` 4 pass. SDK generation and `packages/client` generation succeeded. No build/install, broad typecheck, or installed-app run.
+- MISTAKE: first file-test run collided fixture `tmpdir` with existing OS import; corrected OS calls to `os.tmpdir`; rerun passed.
+
+### User
+Subagents
+- Selecting a model and efforts now keeps the next dialog open so you can name the new subagent.
+- Ctrl+D is available only for entries in the file this menu can edit.
+- Adds and deletes preserve agent-file comments and Markdown content, and refuse malformed or unsafe edits.
+
+---
+
+## 2026-10-14 (~01:01) - v0.2.181 - /revive-single test builds; ocdebug removed - Claude Opus 5.5, medium; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; medium; Implementation (imp, cat jam subagent drafted then reworked); completed
+- Version: 0.2.181
+- Added `/revive-single` (`oc.revive_single`, tui `app.tsx` `reviveCommands`; shared `launchHelper`; `readOcConfig().reviveBuild`). ReviveContext mode `single` + `hosted` flag (`revive.ts`).
+- Added `oc.ts` `reviveSingle`: unhosted helper opens `Revive.openTabCommand` (wezterm cli spawn / wt -w 0 new-tab / cmd start via shared `consoleStart`) running itself with `hosted: true`; hosted run builds `buildSteps(build, "native")` (`--native-only`), installs only opencode.exe under install lock, then runs opencode in place. Failure: log, wait Enter, exit 1. No shutdown/server/restarter/marker.
+- Removed ocdebug flavor: `Global.isDebugExecutable`, `resolveAppName`, `Path.debug` (app always `opencode`); `core/src/debugConfig.ts` + test; `withOcLaunchDefault`; port 4097; debug log level; `build.ts` `--with-debug`/`--debug-only`; OcRelease `debug` variant; `effectiveBuild`, `BuildConfig.debug`, `resolveLauncher`/`downloadRelease` debug params; startup OPENCODE_INSTANCE; descendants regex; app.tsx debug env. `parseBuild` still accepts and ignores an old `debug` key.
+- Changed FORK.md: section 7 now `/revive-single`; ocdebug mentions dropped.
+- Kept: `cli/cmd/mcp.ts` `opencode-debug` (upstream MCP client name). Old `opencode-debug` data folders stay on disk.
+- Verification: opencode `bun test` revive/oc/tuiLedger/commandLoader/startup/cli oc: 84 pass 0 fail; core global 4 pass, ocRelease 5 pass. Typecheck: only known `plugin-agent-regression.test.ts(114)` and `tui/src/component/dialog-model.tsx(182)` (unrelated worktree change). Live `/revive-single` not run.
+- Risk: single build shares the production DB; a schema migration in a test build hits the running server's DB.
+
+### User
+Revive
+- New `/revive-single` builds just native `opencode.exe` from your saved source and opens it in a new tab, leaving this window, other oc windows, and the server running.
+- A failed `/revive-single` build waits for Enter and leaves your installed `opencode.exe` unchanged.
+- `ocdebug` and its separate data folder, port 4097, and settings import are gone.
+
+---
+
+## 2026-10-14 (~00:49) - v0.2.181 garnishForgive - Server API for adding and removing subagent entries - GPT-6.1 Sol, high; Implementation
+
+### Agent
+- Meta: GPT-6.1 Sol, high; Implementation; completed.
+- Version: 0.2.181 garnishForgive
+- Added Config.subagentFile optional string in src/packages/opencode/src/config/config.ts; default ~/.config/opencode/agents/sub/general.md; schema patched via Struct fields (Effect Schema has no extend).
+- Added src/packages/opencode/src/agent/subagentFile.ts: add({name,model,variant?,description}) and remove(name), text-edit preserving comments/order, duplicate/not-found/missing-file validation, name regex validation, atomic temp+rename.
+- Added HTTP routes in src/packages/opencode/src/server/routes/instance/httpapi: InstancePaths.agentSub/agentSubRemove, POST /agent/sub, DELETE /agent/sub/:name; handlers resolve subagentFile from config.
+- Regenerated legacy JS SDK: openapi includes operation ids app.agent.sub.add and app.agent.sub.remove; client.app.agent.sub nested methods.
+- Added tests test/agent/subagentFile.test.ts and test/agent/subagentFile.integration.test.ts: 7 pass including hot reload verification.
+- Verification: bun test targeted files: 7 pass, 0 fail. Typecheck showed pre-existing plugin-agent-regression test modelID branded type error only.
+- MISTAKE: initially used ConfigV1.Info.extend which does not exist; switched to Schema.Struct spread.
+- Added TUI flow in src/packages/tui/src/component/dialog-subagents.tsx: "Add subagent" row -> DialogModel (updateCurrent=false) -> dialog-subagent-efforts.tsx multi-select (efforts + No effort) -> name prompt prefilled general-<short> -> app.agent.sub.add per effort; list reopens refreshed.
+- Added keybind subagent_delete (ctrl+d) in tui config/keybind.ts; DialogSelect action, disabled on native agents and Add row; DialogConfirm then app.agent.sub.remove.
+- Fixed TUI SDK calls: removed unknown casts, added throwOnError so failures toast as errors.
+- Verification: tui tsgo shows only debug-path errors (core/src/debugConfig.ts, app.tsx) from concurrent global.ts edits, none in subagent files.
+
+### User
+Subagent management
+- API and file editor can now add or remove subagent entries in ~/.config/opencode/agents/sub/general.md while preserving comments and order.
+- Agent list hot-reloads added and removed entries.
+
+---
+
+## 2026-10-14 (~00:28) - v0.2.180 editFormed - Preserve plugin agent overrides and fix subagent command parsing - GPT-6.1 Sol, reasoning default; Implementation
+
+### Agent
+- Meta: GPT-6.1 Sol; reasoning default; Implementation; completed; Cat Jam handled command-file edits, parent reviewed and tightened validation.
+- Version: 0.2.180 editFormed; kept this session's earlier revision bump, no second bump.
+- Fixed `Config.agents()` replacing plugin edits to existing agents even on first initialization. Replaced name-only tracking with independent pre-plugin agent snapshot; recursively reapplied changed fields, additions, and deletions over fresh markdown layers. Untouched nested fields still reload; arrays/scalars retain plugin replacement values.
+- Added regression scenario in `test/agent/plugin-agent-regression.test.ts` with actual config hook fixture: startup and live edits, prompt/model overrides, nested permission override, option/temperature/agent deletions, fresh untouched fields, markdown removal, and plugin-added agent survival.
+- Fixed user commands `~/.opencode/commands/addSub.md` and `rmSub.md`: exact full model/name match precedes last-colon effort split; colon-bearing model IDs stay intact. Explicit `as slug` now wins in addSub; missing model/empty effort validation clarified.
+- Updated FORK.md and wiki `Agents-and-Skills.md` to describe preserved plugin overrides.
+- Verification: `bun test test/agent/plugin-agent-regression.test.ts` final 3 pass, 0 fail, 23 assertions; scoped `git diff --check` passed. Command instructions reviewed, commands not invoked. No build or package typecheck run.
+- MISTAKE: first regression run lacked exported Config service in test node group; added `Config.node`, reran successfully. Dependencies used directly by tests must be exposed as roots.
+- Corrected earlier limitation: plugin edits were discarded at first Agent initialization, not only after reload.
+
+### User
+Subagents
+- Plugin changes to existing agents now survive startup and hot reload while your other agent-file edits still take effect.
+- `/addSub ... as name` uses the name you requested even when that model already has another entry.
+- `/addSub` and `/rmSub` distinguish model IDs containing colons from reasoning-effort suffixes.
+
+---
+
+## 2026-10-14 (~00:19) - v0.2.180 editFormed - /viewSub subagent popout, /rmSub, /addSub rename - Claude Opus 5.5, reasoning low; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; reasoning low; Implementation (imp from spit plan `~/.config/opencode/plans/rmSubViewSub.md`); completed; Cat Jam trial subagent did rmSub.md and the rename
+- Version: 0.2.180 editFormed
+- Added `tui/src/component/dialog-subagents.tsx`: `DialogSelect` over a fresh `sdk.client.app.agents({})` (not `sync.data.agent`, which is bootstrap-only), non-primary non-hidden agents, category = `provider/model` or `native`, title padded to max name, description = variant, footer = first sentence. Enter copies the name + toast. Load error shown via `emptyView` like `dialog-skill`.
+- Added palette entry `oc.view_subagents` ("Subagents", `slashName: "viewSub"`) in `app.tsx` before `agent.default_subagent_model`. Do not create a `viewSub.md` command (slash collision).
+- Added user config `~/.opencode/commands/rmSub.md` (model id / name / slug target, optional efforts, refuses `general` alias, warns on tier-table names, confirms, deletes YAML blocks keeping LF). Renamed `addsub.md` -> `addSub.md`; updated subagents SKILL.md and FORK.md mentions. Historical plans/buildNotes left as `/addsub`.
+- Updated `agents/sub/general.md` `general-cat-jam-free` description with trial result.
+- Verification: `bun run typecheck` in `src/packages/tui` exit 0. Line endings checked (new tsx converted to CRLF to match repo). `/viewSub` and `/rmSub` not run (need installed build / live session).
+
+### User
+Subagents
+- New `/viewSub` (palette: oc > Subagents) shows every subagent grouped by model with its effort and a short description; type to filter, Enter copies the name.
+- New `/rmSub` removes subagents by model, name, or slug, optionally only some efforts, after you confirm.
+- `/addsub` is now `/addSub`.
+
+---
+
+## 2026-10-14 (~00:10) - v0.2.180 editFormed - Agent markdown hot reload and /addsub command - Claude Opus 5.5, reasoning low; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; reasoning low; Implementation (imp from spit plan `~/.config/opencode/plans/addsubHotAgents.md`); completed
+- Version: 0.2.180 editFormed
+- Added agent hot reload: `Agent.state` carries a fingerprint (`ConfigAgent.fingerprint`, agent+mode md in `config.directories()`), reads go through `Fingerprint.reloading`, init builds from new `Config.agents()` and toasts diagnostics. Agent node now depends on `EventV2Bridge`.
+- Added `Config.agents()`: replays `agentLayers` (inline JSON `agent` records from `merge()`/managed prefs, config dirs rescanned with `ConfigAgent.scan`+`loadMode`) in startup order, applies JSON `mode` entries, overlays plugin-added agents (names not in `layerAgentNames`). `Config.get().agent` stays the startup snapshot (claude-code registry unchanged).
+- Added per-file last-good cache in `ConfigAgent.scan` (split into `scanFile`); a file with any diagnostic serves its previous agents. No parse memo: `{file:}` prompts must stay fresh on instance reload.
+- Kept lock order Agent -> Skill (`skill.dirs()`); Skill never calls Agent.
+- Risk: plugin config-hook edits to file-defined agents are lost after the first reload; brand-new config dirs, `{file:}` targets, and JSON `agent` blocks still need `/reload`. Claude Code proxy `task` description refreshes only on CLI respawn.
+- Added `TestConfig.make` `agents` stub; `test/agent/hotReload.test.ts`; plugin-agent survival case in `plugin-agent-regression.test.ts`.
+- Added user config: `~/.opencode/commands/addsub.md` (`/addsub provider/model[:e1,e2] [as slug] ["note"]`, validates via `opencode models --verbose`, confirms, edits `agents/sub/general.md`); subagents skill drops its hand-kept name list and points at the live list + `/addsub`.
+- Updated FORK.md (Agent file hot reload row) and wiki `Agents-and-Skills.md` (Agent files section; wiki push is the user's).
+- Verification: `bun test test/agent/hotReload.test.ts test/agent/plugin-agent-regression.test.ts test/agent/agent.test.ts test/config/config.test.ts` 163 pass 0 fail; `bun run typecheck` clean. `/addsub` itself not run (needs installed build).
+- ERROR: first plugin-survival test version failed because `.opencode` did not exist at startup, so the dir was never a config layer; test now creates it first (matches real `~/.config/opencode`).
+
+### User
+Agents
+- Adding, editing, or removing an agent file now takes effect on the next task call, without restarting oc.
+- A broken agent file keeps its last working version and shows a warning toast.
+- New `/addsub` command adds general subagents from one line, for example `/addsub openai/gpt-6.2-sol:low,medium`, after checking the model and efforts exist and asking you to confirm.
+
+---
+
 ## 2026-10-13 (~21:13) - v0.2.179 snakeArrived - Stage 4 leftovers: dependency bumps, three upstream ports, baselineSha to v1 tip - Claude Opus 5.5, reasoning default; Implementation
 
 ### Agent

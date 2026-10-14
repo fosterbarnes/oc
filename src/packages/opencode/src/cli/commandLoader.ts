@@ -93,25 +93,6 @@ export function withExecutableDefault(args: readonly string[], execPath = proces
   return ["oc", "previous", "--depth", "1", ...args]
 }
 
-export function withOcLaunchDefault(args: readonly string[], debug: boolean) {
-  if (!debug) return [...args]
-  const helpOrVersion =
-    args.includes("-h") ||
-    args.includes("--help") ||
-    args.includes("-v") ||
-    args.includes("--version") ||
-    args.includes("--register")
-  if (helpOrVersion) return [...args]
-  if (
-    ["--restart-server", "--kill-server", "--shutdown-server", "--shutdown-all"].some((flag) => args.includes(flag))
-  ) {
-    if (args[0] === "oc") return [...args]
-    return ["oc", ...args]
-  }
-  if (resolveCommandToLoad(args) !== "tui") return [...args]
-  return ["oc", "launch", ...args]
-}
-
 export function resolveCommandToLoad(args: readonly string[]): CommandToLoad {
   for (let index = 0; index < args.length; index++) {
     const arg = args[index]

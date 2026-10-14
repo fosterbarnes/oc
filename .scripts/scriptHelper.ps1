@@ -7,7 +7,7 @@ $srcRoot = "$repoRoot\src"
 $projectName = 'opencode'
 $buildScript = "$srcRoot\packages\opencode\script\build.ts"
 $distFolder = "$srcRoot\packages\opencode\dist"
-# Per-user install target for install.ps1, installDebug.ps1, and the revive scripts.
+# Per-user install target for install.ps1 and the revive scripts.
 $installDir = "$HOME\Apps\opencode"
 $occShortcut = Join-Path ([Environment]::GetFolderPath('Desktop')) 'occ.lnk'
 $versionFolder = "$srcRoot\.version"

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { resolveCommandToLoad, withExecutableDefault, withOcLaunchDefault } from "../../src/cli/commandLoader"
+import { resolveCommandToLoad, withExecutableDefault } from "../../src/cli/commandLoader"
 
 describe("CLI command loading", () => {
   test("loads TUI for the default path", () => {
@@ -16,16 +16,6 @@ describe("CLI command loading", () => {
   test("resolves command aliases", () => {
     expect(resolveCommandToLoad(["auth", "list"])).toBe("providers")
     expect(resolveCommandToLoad(["plug", "module"])).toBe("plugin")
-  })
-
-  test("debug ocdebug default is oc launch, not TUI", () => {
-    expect(withOcLaunchDefault([], true)).toEqual(["oc", "launch"])
-    expect(withOcLaunchDefault(["project"], true)).toEqual(["oc", "launch", "project"])
-    expect(withOcLaunchDefault(["C:\\proj"], true)).toEqual(["oc", "launch", "C:\\proj"])
-    expect(withOcLaunchDefault(["serve", "--port", "4097"], true)).toEqual(["serve", "--port", "4097"])
-    expect(withOcLaunchDefault(["--version"], true)).toEqual(["--version"])
-    expect(withOcLaunchDefault(["--register"], true)).toEqual(["--register"])
-    expect(withOcLaunchDefault([], false)).toEqual([])
   })
 
   test("executable default oc maps to oc launch", () => {
@@ -81,7 +71,5 @@ describe("CLI command loading", () => {
     expect(withExecutableDefault([], "/usr/local/bin/bun")).toEqual([])
     expect(withExecutableDefault(["C:\\proj"], "C:\\Program Files\\bun\\bun.exe")).toEqual(["C:\\proj"])
     expect(withExecutableDefault([], "C:\\Apps\\opencode\\opencode.exe")).toEqual([])
-    expect(withExecutableDefault([], "C:\\Apps\\opencode\\ocdebug.exe")).toEqual([])
-    expect(withExecutableDefault([], "C:\\Apps\\opencode\\opencode-debug.exe")).toEqual([])
   })
 })

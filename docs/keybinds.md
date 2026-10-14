@@ -159,6 +159,12 @@ Bold marks keys where the oc layout differs from opencode. `-` means unbound.
 |---|---|---|
 | Cancel queued prompt | `ctrl+d` | `ctrl+d` |
 
+### Subagent
+
+| Action | oc | opencode |
+|---|---|---|
+| Delete subagent | `ctrl+d` | `ctrl+d` |
+
 ### Model
 
 | Action | oc | opencode |

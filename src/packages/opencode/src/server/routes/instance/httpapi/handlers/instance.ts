@@ -1,4 +1,5 @@
 import { Agent } from "@/agent/agent"
+import { SubagentFile } from "@/agent/subagentFile"
 import { Command } from "@/command"
 import { Config } from "@/config/config"
 import * as InstanceState from "@/effect/instance-state"
@@ -114,6 +115,22 @@ export const instanceHandlers = HttpApiBuilder.group(InstanceHttpApi, "instance"
       return yield* agent.list()
     })
 
+    const addAgentSub = Effect.fn("InstanceHttpApi.agentSub")(function* (ctx: {
+      payload: { name: string; model: string; variant?: string; description?: string }
+    }) {
+      const cfg = yield* config.get()
+      const file = cfg.subagentFile ?? SubagentFile.defaultFile()
+      yield* Effect.promise(() => SubagentFile.add(ctx.payload, file))
+      return true
+    })
+
+    const removeAgentSub = Effect.fn("InstanceHttpApi.agentSubRemove")(function* (ctx: { params: { name: string } }) {
+      const cfg = yield* config.get()
+      const file = cfg.subagentFile ?? SubagentFile.defaultFile()
+      yield* Effect.promise(() => SubagentFile.remove(ctx.params.name, file))
+      return true
+    })
+
     const getSkill = Effect.fn("InstanceHttpApi.skill")(function* () {
       return yield* skill.all()
     })
@@ -137,6 +154,14 @@ export const instanceHandlers = HttpApiBuilder.group(InstanceHttpApi, "instance"
       .handle("vcsApply", applyVcs)
       .handle("command", getCommand)
       .handle("agent", getAgent)
+      .handle("agentSubList", () =>
+        Effect.gen(function* () {
+          const cfg = yield* config.get()
+          return yield* Effect.promise(() => SubagentFile.names(cfg.subagentFile ?? SubagentFile.defaultFile()))
+        }),
+      )
+      .handle("agentSub", addAgentSub)
+      .handle("agentSubRemove", removeAgentSub)
       .handle("skill", getSkill)
       .handle("lsp", getLsp)
       .handle("plugin", () => plugin.status())

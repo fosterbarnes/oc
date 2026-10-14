@@ -3,7 +3,7 @@ param(
     [Alias('b', 'nb')]
     [switch]$NoBuild,
     [switch]$SkipBunInstall,
-    # Install one flavor only. Default installs oc (+ occ link, ocdebug) and native opencode.
+    # Install one flavor only. Default installs oc (+ occ link) and native opencode.
     [switch]$Oc,
     [switch]$Native
 )
@@ -16,8 +16,8 @@ $installOc = -not $Native
 $installNative = -not $Oc
 $ocBinary = "$distFolder\opencode-windows-x64\bin\oc.exe"
 $nativeBinary = "$distFolder\opencode-native-windows-x64\bin\opencode.exe"
-$debugBinary = "$distFolder\opencode-debug-windows-x64\bin\ocdebug.exe"
 $cursorRuntime = "$distFolder\opencode-windows-x64\bin\cursor-runtime"
+# Keep legacy ocdebug processes in shutdown/backup handling, but never require or reinstall that flavor.
 $processNames = @('opencode', 'oc', 'occ', 'ocdebug')
 $running = @($processNames | ForEach-Object { Get-Process -Name $_ -ErrorAction SilentlyContinue })
 if ($running) {
@@ -39,7 +39,7 @@ if (-not $NoBuild) {
 }
 
 $required = @()
-if ($installOc) { $required += $ocBinary, $debugBinary }
+if ($installOc) { $required += $ocBinary }
 if ($installNative) { $required += $nativeBinary }
 foreach ($file in $required) {
     if (!(Test-Path -LiteralPath $file -PathType Leaf)) { throw "Built binary not found: $file. Run build.ps1 first." }
@@ -88,7 +88,6 @@ try {
         if (Test-Path -LiteralPath $occLink) { Remove-Item -LiteralPath $occLink -Force }
         if (Test-Path -LiteralPath $occLink -PathType Leaf) { throw "Could not remove $occLink before install." }
         replaceFile $ocBinary $ocDestination
-        replaceFile $debugBinary $debugDestination
         Copy-Item -LiteralPath $cursorRuntime -Destination $installDir -Recurse -Force
         New-Item -ItemType HardLink -Path $occLink -Target $ocDestination -Force | Out-Null
         # Verify link identity with fsutil (hard-link count, not byte equality)

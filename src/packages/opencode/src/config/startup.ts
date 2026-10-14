@@ -34,7 +34,6 @@ export function plan(input: ReturnType<typeof context>) {
   if (input.env.OPENCODE_CONFIG_CONTENT)
     throw new Error("Save inline OPENCODE_CONFIG_CONTENT to a file and use OPENCODE_CONFIG before enabling startup.")
   const env = {
-    OPENCODE_INSTANCE: input.app === "opencode-debug" ? "debug" : "production",
     XDG_CONFIG_HOME: path.dirname(input.config),
     XDG_STATE_HOME: path.dirname(input.state),
     XDG_DATA_HOME: path.dirname(input.data),

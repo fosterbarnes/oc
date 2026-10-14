@@ -22,8 +22,11 @@ export type Launcher = (typeof LAUNCHERS)[number]
 /** Written by the TUI (handoff file or detached helper argument), read by the revive pipeline. */
 export type ReviveContext = {
   // "update" installs the oc GitHub release `release` instead of building from source.
-  mode: "install" | "no-install" | "update"
+  // "single" builds and installs only native opencode, then runs it in a new tab; nothing else stops.
+  mode: "install" | "no-install" | "update" | "single"
   release?: string
+  // Single only: set once the pipeline runs inside its new tab (the first helper just opens it).
+  hosted?: boolean
   terminal: Terminal
   directory: string
   sessionID?: string
@@ -69,7 +72,7 @@ export type RestartContext = {
 }
 
 // `source` is the user's oc source folder (chosen or downloaded on the first /revive); revive never pulls it.
-export type BuildConfig = { source: string; debug: boolean }
+export type BuildConfig = { source: string }
 // The Bun workspace inside an oc source folder; build commands run there.
 export const WORKSPACE = "src"
 // Relative to WORKSPACE; also how the TUI recognizes an oc source folder.
@@ -97,7 +100,7 @@ export function decodeContext(encoded: string) {
 export function parseContext(input: unknown): ReviveContext {
   const value = record(input)
   if (
-    (value.mode !== "install" && value.mode !== "no-install" && value.mode !== "update") ||
+    (value.mode !== "install" && value.mode !== "no-install" && value.mode !== "update" && value.mode !== "single") ||
     (value.mode === "update") !== (typeof value.release === "string" && RELEASE.test(value.release)) ||
     !TERMINALS.includes(value.terminal as string) ||
     !text(value.directory) ||
@@ -106,6 +109,7 @@ export function parseContext(input: unknown): ReviveContext {
     !optional(value.supervisorPid, pid) ||
     !optional(value.shellPid, pid) ||
     !optional(value.native, flag) ||
+    !optional(value.hosted, flag) ||
     !optional(value.tuiPid, pid) ||
     !optional(value.shellIdentity, processIdentity) ||
     (value.shellIdentity !== undefined && (value.shellIdentity as TuiLedger.Process).pid !== value.shellPid) ||
@@ -151,7 +155,7 @@ export function decodeTabs(encoded: string) {
 
 /**
  * The oc panes this instance owns in the window that holds `paneID`, in `wezterm cli list` (tab) order.
- * Revive moves only these to the new window and closes only these; shells, ocdebug, native, and other
+ * Revive moves only these to the new window and closes only these; shells, native, and other
  * instances' panes are not in `records`, so they stay running in the old window.
  */
 export function windowTabs(
@@ -195,7 +199,7 @@ export function parseLauncher(input: unknown): Launcher {
 }
 
 /**
- * Validates `revive.build` from oc.json: the oc source folder and whether to also build `ocdebug`.
+ * Validates `revive.build` from oc.json: the oc source folder. A `debug` key left by older builds is ignored.
  * `false` (or unset) means /revive restarts without building.
  */
 export function parseBuild(input: unknown): BuildConfig | undefined {
@@ -204,61 +208,51 @@ export function parseBuild(input: unknown): BuildConfig | undefined {
     typeof input === "object" && input !== null && !Array.isArray(input) ? (input as Record<string, unknown>) : {}
   if (!text(value.source) || !path.isAbsolute(value.source as string))
     throw new Error("revive.build.source must be the absolute path of an oc source folder")
-  if (!optional(value.debug, (item) => typeof item === "boolean"))
-    throw new Error("revive.build.debug must be true or false")
-  return { source: value.source as string, debug: value.debug === true }
-}
-
-/** The saved build, plus the debug output whenever the running flavor is ocdebug (it reopens ocdebug). */
-export function effectiveBuild(input: unknown, debugFlavor: boolean): BuildConfig | undefined {
-  const build = parseBuild(input)
-  return build && { ...build, debug: build.debug || debugFlavor }
+  return { source: value.source as string }
 }
 
 /** Commands run in the source's workspace and the outputs they produce, from packages/opencode/script/build.ts --single. */
-export function buildSteps(build: BuildConfig) {
+export function buildSteps(build: BuildConfig, variant?: "native") {
   const platform = process.platform === "win32" ? "windows" : process.platform
   const cwd = path.join(build.source, WORKSPACE)
   const dist = path.join(cwd, "packages", "opencode", "dist")
+  const native = path.join(
+    dist,
+    `opencode-native-${platform}-${process.arch}`,
+    "bin",
+    process.platform === "win32" ? "opencode.exe" : "opencode",
+  )
+  if (variant === "native")
+    return {
+      cwd,
+      commands: [
+        ["bun", "install"],
+        ["bun", "run", BUILD_SCRIPT, "--single", "--native-only"],
+      ],
+      output: [native],
+    }
   return {
     cwd,
     commands: [
       ["bun", "install"],
-      ["bun", "run", BUILD_SCRIPT, "--single", ...(build.debug ? ["--with-debug"] : [])],
+      ["bun", "run", BUILD_SCRIPT, "--single"],
     ],
     // The native build ships only its executable; it shares the oc build's support files.
     output: [
       path.join(dist, `opencode-${platform}-${process.arch}`, "bin"),
-      path.join(
-        dist,
-        `opencode-native-${platform}-${process.arch}`,
-        "bin",
-        process.platform === "win32" ? "opencode.exe" : "opencode",
-      ),
-      ...(build.debug
-        ? [
-            path.join(
-              dist,
-              `opencode-debug-${platform}-${process.arch}`,
-              "bin",
-              process.platform === "win32" ? "ocdebug.exe" : "ocdebug",
-            ),
-          ]
-        : []),
+      native,
     ],
   }
 }
 
 /**
  * Downloads and unpacks oc release `version` for this platform; returns the same output shape as
- * buildSteps (oc folder, native executable, ocdebug when this install has it). Runs before shutdown,
+ * buildSteps (oc folder, native executable). Runs before shutdown,
  * so a missing asset or failed download leaves the running oc untouched.
  */
-export async function downloadRelease(version: string, installDir: string, debugFlavor: boolean) {
+export async function downloadRelease(version: string) {
   const release = await OcRelease.lookup(version)
-  const exe = process.platform === "win32" ? ".exe" : ""
-  const debug = debugFlavor || fs.existsSync(path.join(installDir, `ocdebug${exe}`))
-  const variants: OcRelease.Variant[] = ["oc", "native", ...(debug ? (["debug"] as const) : [])]
+  const variants: OcRelease.Variant[] = ["oc", "native"]
   const stage = path.join(Global.Path.cache, "oc-update", version)
   await fsp.rm(stage, { recursive: true, force: true })
   const folders = await Promise.all(
@@ -277,26 +271,20 @@ export async function downloadRelease(version: string, installDir: string, debug
       return folder
     }),
   )
-  // The native and debug builds ship only their executable; they share the oc build's support files.
-  return [
-    folders[0],
-    path.join(folders[1], `opencode${exe}`),
-    ...(debug ? [path.join(folders[2], `ocdebug${exe}`)] : []),
-  ]
+  // The native build ships only its executable; it shares the oc build's support files.
+  return [folders[0], path.join(folders[1], process.platform === "win32" ? "opencode.exe" : "opencode")]
 }
 
 export function isShell(name: string) {
   return SHELLS.has(name.toLowerCase())
 }
 
-export function resolveLauncher(executable: string, debug: boolean, exists: (file: string) => boolean = fs.existsSync) {
+export function resolveLauncher(executable: string, exists: (file: string) => boolean = fs.existsSync) {
   const mod = executable.includes("\\") ? path.win32 : path.posix
   if (/^bun(?:\.exe)?$/i.test(mod.basename(executable))) return executable
-  if (debug && Global.isDebugExecutable(executable)) return executable
-  const names = debug ? ["ocdebug.exe", "oc-debug.exe", "opencode-debug.exe"] : ["occ.exe", "oc.exe"]
+  const names = ["occ.exe", "oc.exe"]
   const sibling = names.map((name) => mod.join(mod.dirname(executable), name)).find(exists)
   if (sibling) return sibling
-  if (debug) throw new Error("No debug oc launcher exists beside this executable")
   return executable
 }
 
@@ -353,7 +341,31 @@ export function reopenCommand(restart: RestartContext) {
       windowsVerbatimArguments: false,
     }
   }
-  // Expand paths once through env vars, so percent signs and shell metacharacters stay literal.
+  return consoleStart(command, flavor)
+}
+
+/** Opens `command` in a new tab of the current WezTerm or Windows Terminal window, else a new console. */
+export function openTabCommand(command: string[], options: { terminal: Terminal; directory: string }) {
+  const flavor: Record<string, string> = { OC_FLAVOR: "oc" }
+  if (options.terminal === "wezterm")
+    return {
+      file: "wezterm",
+      args: ["cli", "--no-auto-start", "spawn", "--cwd", options.directory, "--", ...command],
+      env: flavor,
+      windowsVerbatimArguments: false,
+    }
+  if (options.terminal === "windows-terminal")
+    return {
+      file: "wt.exe",
+      args: ["-w", "0", "new-tab", "-d", options.directory, ...command.map((arg) => arg.replaceAll(";", "\\;"))],
+      env: flavor,
+      windowsVerbatimArguments: false,
+    }
+  return consoleStart(command, flavor)
+}
+
+// Expand paths once through env vars, so percent signs and shell metacharacters stay literal.
+function consoleStart(command: string[], flavor: Record<string, string>) {
   const env = { ...flavor, ...Object.fromEntries(command.map((arg, index) => [`OC_REVIVE_ARG_${index}`, arg])) }
   return {
     file: "cmd.exe",

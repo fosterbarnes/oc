@@ -70,7 +70,7 @@ test("rejects records with a bad session, directory, or pane type", async () => 
 test("selects matching instance TUIs and their own launcher hard link, never self or reused pids", () => {
   const live = [ocTui, ocLauncher]
   expect(TuiLedger.select([owned], live, "opencode", oc, 100)).toEqual([10, 11])
-  expect(TuiLedger.select([owned], live, "opencode-debug", oc, 100)).toEqual([])
+  expect(TuiLedger.select([owned], live, "other-app", oc, 100)).toEqual([])
   expect(TuiLedger.select([owned], live, "opencode", oc, 10)).toEqual([])
   expect(TuiLedger.select([owned], live, "opencode", oc, 11)).toEqual([10])
   expect(TuiLedger.select([{ ...owned, created: undefined }], live, "opencode", oc, 100)).toEqual([])
@@ -90,7 +90,7 @@ test("does not stop shells, foreign launchers, or a launcher started after its T
 
 test("treats occ as the oc hard link and keeps other binaries distinct", () => {
   expect(TuiLedger.sameExecutable("C:/APPS/oc/OCC.EXE", "C:\\Apps\\oc\\oc.exe")).toBe(true)
-  expect(TuiLedger.sameExecutable("C:\\Apps\\oc\\ocdebug.exe", "C:\\Apps\\oc\\oc.exe")).toBe(false)
+  expect(TuiLedger.sameExecutable("C:\\Apps\\oc\\opencode.exe", "C:\\Apps\\oc\\oc.exe")).toBe(false)
   expect(TuiLedger.sameExecutable("C:\\Other\\oc.exe", "C:\\Apps\\oc\\oc.exe")).toBe(false)
 })
 

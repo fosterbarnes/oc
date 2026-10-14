@@ -4,7 +4,6 @@ import { createDefaultOpenTuiKeymap } from "@opentui/keymap/opentui"
 import { stringifyKeyStroke, type KeySequencePart } from "@opentui/keymap"
 import { Deferred, Effect } from "effect"
 import { Global } from "@opencode-ai/core/global"
-import { DebugConfig } from "@opencode-ai/core/debugConfig"
 import { Flag } from "@opencode-ai/core/flag/flag"
 import {
   InstallationDisplayVersion,
@@ -54,6 +53,7 @@ import { DialogDebug } from "./component/dialog-debug"
 import { DialogThemeList } from "./component/dialog-theme-list"
 import { DialogHelp } from "./ui/dialog-help"
 import { DialogAgent } from "./component/dialog-agent"
+import { DialogSubagents } from "./component/dialog-subagents"
 import { DialogSessionList } from "./component/dialog-session-list"
 import { DialogWorkspaceList } from "./component/dialog-workspace-list"
 import { DialogConsoleOrg } from "./component/dialog-console-org"
@@ -140,6 +140,8 @@ function readOcConfig(): {
   // False until the first /revive saves the source choice (`revive.build` object or `false`).
   // Without it, /revive asks first (`chooseSource` in `reviveCommands`).
   reviveSourceChosen: boolean
+  // A saved source folder (`revive.build` object): /revive-single needs one.
+  reviveBuild: boolean
 } {
   const fallbackDir = os.homedir()
   const fallbackSort = "name"
@@ -167,7 +169,10 @@ function readOcConfig(): {
     const serverStartOnWindowsUserStart = merged.server?.startOnWindowsUserStart === true
     const revivePath = typeof merged.revive?.path === "string" ? merged.revive.path.trim() : ""
     const reviveSourceChosen = merged.revive?.build !== undefined
-    return { executable, ocDir, homeDir, homeDirSort, serverStartOnWindowsUserStart, revivePath, reviveSourceChosen }
+    const reviveBuild = typeof merged.revive?.build === "object" && merged.revive.build !== null
+    return {
+      executable, ocDir, homeDir, homeDirSort, serverStartOnWindowsUserStart, revivePath, reviveSourceChosen, reviveBuild,
+    }
   } catch {
     return {
       executable: "",
@@ -177,6 +182,7 @@ function readOcConfig(): {
       serverStartOnWindowsUserStart: false,
       revivePath: "",
       reviveSourceChosen: false,
+      reviveBuild: false,
     }
   }
 }
@@ -338,7 +344,7 @@ function persistOcConfig(
   const child = spawn(config.executable, args, {
     stdio: ["ignore", "ignore", "pipe"],
     cwd: os.homedir(),
-    env: Global.Path.debug ? { ...process.env, OPENCODE_INSTANCE: "debug" } : process.env,
+    env: process.env,
   })
   let error = ""
   return new Promise<boolean>((resolve) => {
@@ -660,19 +666,36 @@ function reviveCommands(toast: ToastContext) {
       await fs.promises.rm(path.join(path.dirname(file), `${process.pid}.stopped`), { force: true })
       await fs.promises.writeFile(file, JSON.stringify(context))
     }
-    // The revive pipeline lives in oc: a native window hands off to the oc executable beside it.
+    launchHelper(context).once("exit", (code) => {
+      if (code) toast.error(new Error(`Revive helper launch failed: exit code ${code}`))
+      if (!code && Global.native) exit()
+    })
+  }
+  // The revive pipeline lives in oc: a native window hands off to the oc executable beside it.
+  const launchHelper = (context: Record<string, unknown>, wait = false) => {
     const bun = /^bun(?:\.exe)?$/i.test(path.basename(process.execPath))
     const helper = Global.native && !bun
       ? path.join(path.dirname(process.execPath), `oc${path.extname(process.execPath)}`)
       : process.execPath
-    launchDetached(helper, [
+    const args = [
       ...(bun ? [process.argv[1]] : []),
       "oc", "--revive", Buffer.from(JSON.stringify(context)).toString("base64url"),
-    ], { env: { OC_FLAVOR: "oc" } }).once("error", (error) => toast.error(error))
-      .once("exit", (code) => {
-        if (code) toast.error(new Error(`Revive helper launch failed: exit code ${code}`))
-        if (!code && Global.native) exit()
+    ]
+    const child = wait
+      ? spawn(helper, args, {
+          windowsHide: true,
+          stdio: ["ignore", "ignore", "pipe"],
+          env: { ...process.env, OC_FLAVOR: "oc" },
+        })
+      : launchDetached(helper, args, { env: { OC_FLAVOR: "oc" } })
+    if (wait) {
+      let error = ""
+      child.stderr?.on("data", (chunk) => { error = (error + chunk.toString()).slice(-4000) })
+      child.once("exit", (code) => {
+        if (code) toast.error(new Error(error.trim() || `Revive helper launch failed: exit code ${code}`))
       })
+    }
+    return child.once("error", (error) => toast.error(error))
   }
   return [
     {
@@ -698,6 +721,26 @@ function reviveCommands(toast: ToastContext) {
         if (!choice) return
         dialog.clear()
         return revive("install", choice)
+      },
+    },
+    {
+      name: "oc.revive_single",
+      title: "Build native opencode and open it in a new tab",
+      category: "System",
+      slashName: "revive-single",
+      run: () => {
+        if (!readOcConfig().reviveBuild) {
+          toast.show({ message: "No oc source saved; run /revive once to choose one", variant: "error" })
+          return
+        }
+        const sessionID = route.data.type === "session" ? route.data.sessionID : undefined
+        // The helper opens the new tab; this window, the server, and other tabs keep running.
+        launchHelper({
+          mode: "single",
+          terminal: detectTerminal().kind,
+          directory: (sessionID ? sync.session.get(sessionID)?.directory : undefined) ?? sdk.directory ?? process.cwd(),
+          ...(sessionID ? { sessionID } : {}),
+        }, true)
       },
     },
     {
@@ -1690,6 +1733,15 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
         },
       },
       {
+        name: "oc.view_subagents",
+        title: "Subagents",
+        category: "oc",
+        slashName: "viewSub",
+        run: () => {
+          dialog.replace(() => <DialogSubagents />)
+        },
+      },
+      {
         name: "agent.default_subagent_model",
         title: "Subagent model",
         category: "oc",
@@ -2102,29 +2154,6 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
         group: "Server",
         hidden: Global.native,
         run: () => void controlServer("restart"),
-      },
-      {
-        name: "oc.import_production_config",
-        title: "Import production settings into debug",
-        category: "oc",
-        hidden: !Global.Path.debug,
-        slashName: "importProductionConfig",
-        run: async () => {
-          try {
-            const copied = await DebugConfig.syncFromProduction({ overwrite: true, serverPort: 4097 })
-            toast.show({
-              message: copied.length
-                ? `Imported production settings (${copied.join(", ")}). Restart ocdebug to apply them.`
-                : "No production settings were found to import",
-              variant: copied.length ? "success" : "warning",
-            })
-          } catch (error) {
-            toast.show({
-              message: `Failed to import production settings: ${error instanceof Error ? error.message : String(error)}`,
-              variant: "error",
-            })
-          }
-        },
       },
       {
         name: "mcp.list",

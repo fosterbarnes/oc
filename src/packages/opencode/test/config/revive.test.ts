@@ -20,21 +20,13 @@ const context = {
 const restart = { terminal: "generic", launcher: "occ", executable } as const
 
 test("prefers sibling occ, then oc, then the current production executable", () => {
-  expect(Revive.resolveLauncher(executable, false, (file) => file.endsWith("occ.exe"))).toBe("C:\\Apps\\oc\\occ.exe")
-  expect(Revive.resolveLauncher(executable, false, (file) => file.endsWith("oc.exe"))).toBe("C:\\Apps\\oc\\oc.exe")
-  expect(Revive.resolveLauncher(executable, false, () => false)).toBe(executable)
-})
-
-test("debug retains its own executable and never selects a production sibling", () => {
-  expect(Revive.resolveLauncher("C:\\Apps\\oc\\ocdebug.exe", true, () => true)).toBe("C:\\Apps\\oc\\ocdebug.exe")
-  expect(Revive.resolveLauncher(executable, true, (file) => file.endsWith("ocdebug.exe"))).toBe(
-    "C:\\Apps\\oc\\ocdebug.exe",
-  )
-  expect(() => Revive.resolveLauncher(executable, true, (file) => file.endsWith("occ.exe"))).toThrow()
+  expect(Revive.resolveLauncher(executable, (file) => file.endsWith("occ.exe"))).toBe("C:\\Apps\\oc\\occ.exe")
+  expect(Revive.resolveLauncher(executable, (file) => file.endsWith("oc.exe"))).toBe("C:\\Apps\\oc\\oc.exe")
+  expect(Revive.resolveLauncher(executable, () => false)).toBe(executable)
 })
 
 test("Bun development uses the current interpreter and its entrypoint", () => {
-  expect(Revive.resolveLauncher("C:\\Tools\\bun.exe", true, () => true)).toBe("C:\\Tools\\bun.exe")
+  expect(Revive.resolveLauncher("C:\\Tools\\bun.exe", () => true)).toBe("C:\\Tools\\bun.exe")
   const command = Revive.reopenCommand({
     ...restart,
     terminal: "wezterm",
@@ -349,7 +341,7 @@ const ledgerRecords = [
 ]
 
 test("windowTabs moves only owned oc panes of the trigger's window, in list order", () => {
-  // Pane 2 (shell) and pane 3 (first pane of a split, e.g. ocdebug) are not owned: they stay behind.
+  // Pane 2 (shell) and pane 3 (first pane of a split, e.g. native) are not owned: they stay behind.
   // Pane 4 is the owned second pane of that split tab, so it moves on its own.
   expect(Revive.windowTabs(windowList, ledgerRecords, "1")).toEqual([
     { kind: "oc", directory: "C:\\Projects\\crow", sessionID: "ses_a", paneID: "1" },
@@ -426,34 +418,23 @@ test("wezterm restores several tabs through revive-tabs; no snapshot and other t
   expect(Revive.reopenCommand({ ...restart, terminal: "windows-terminal", tabs }).args).toContain("previous")
 })
 
-test("revive.build is a source folder with an optional debug build", () => {
-  expect(Revive.parseBuild({ source: "C:\\src\\oc" })).toEqual({ source: "C:\\src\\oc", debug: false })
-  expect(Revive.parseBuild({ source: "C:\\src\\oc", debug: true })).toEqual({ source: "C:\\src\\oc", debug: true })
+test("revive.build is a source folder", () => {
+  expect(Revive.parseBuild({ source: "C:\\src\\oc" })).toEqual({ source: "C:\\src\\oc" })
+  expect(Revive.parseBuild({ source: "C:\\src\\oc", debug: true })).toEqual({ source: "C:\\src\\oc" })
   expect(Revive.parseBuild(undefined)).toBeUndefined()
   expect(Revive.parseBuild(false)).toBeUndefined()
   for (const input of [
     true,
     "C:\\src\\oc",
     { source: "relative" },
-    { source: "C:\\src\\oc", debug: "yes" },
     { cwd: "C:\\src\\oc", command: ["pwsh"], output: ["bin"] },
   ])
     expect(() => Revive.parseBuild(input)).toThrow()
 })
 
-test("an ocdebug revive always builds ocdebug; other flavors keep the saved choice", () => {
-  const saved = { source: "C:\\src\\oc", debug: false }
-  expect(Revive.effectiveBuild(saved, true)).toEqual({ source: "C:\\src\\oc", debug: true })
-  expect(Revive.effectiveBuild(saved, false)).toEqual(saved)
-  expect(Revive.effectiveBuild({ ...saved, debug: true }, false)).toEqual({ ...saved, debug: true })
-  expect(Revive.effectiveBuild(false, true)).toBeUndefined()
-  const output = Revive.buildSteps(Revive.effectiveBuild(saved, true)!).output
-  expect(output.some((item) => item.endsWith("ocdebug.exe") || item.endsWith("ocdebug"))).toBe(true)
-})
-
-test("build steps run build.ts in the source folder and add ocdebug only for debug builds", () => {
+test("build steps run build.ts in the source folder", () => {
   const dist = "C:\\src\\oc\\src\\packages\\opencode\\dist"
-  const release = Revive.buildSteps({ source: "C:\\src\\oc", debug: false })
+  const release = Revive.buildSteps({ source: "C:\\src\\oc" })
   expect(release.cwd).toBe("C:\\src\\oc\\src")
   expect(release.commands).toEqual([
     ["bun", "install"],
@@ -461,13 +442,46 @@ test("build steps run build.ts in the source folder and add ocdebug only for deb
   ])
   const native = `${dist}\\opencode-native-windows-${process.arch}\\bin\\opencode.exe`
   expect(release.output).toEqual([`${dist}\\opencode-windows-${process.arch}\\bin`, native])
-  const debug = Revive.buildSteps({ source: "C:\\src\\oc", debug: true })
-  expect(debug.commands[1]).toEqual(["bun", "run", "packages/opencode/script/build.ts", "--single", "--with-debug"])
-  expect(debug.output).toEqual([
-    `${dist}\\opencode-windows-${process.arch}\\bin`,
-    native,
-    `${dist}\\opencode-debug-windows-${process.arch}\\bin\\ocdebug.exe`,
+})
+
+test("single revive builds and installs only native opencode", () => {
+  const steps = Revive.buildSteps({ source: "C:\\src\\oc" }, "native")
+  expect(steps.commands[1]).toEqual(["bun", "run", "packages/opencode/script/build.ts", "--single", "--native-only"])
+  expect(steps.output).toEqual([
+    `C:\\src\\oc\\src\\packages\\opencode\\dist\\opencode-native-windows-${process.arch}\\bin\\opencode.exe`,
   ])
+  expect(Revive.parseContext({ ...context, mode: "single", hosted: true }).hosted).toBe(true)
+  expect(() => Revive.parseContext({ ...context, mode: "single", hosted: "yes" })).toThrow()
+})
+
+test("single revive opens a new tab in the current terminal, or a new console", () => {
+  const command = [executable, "oc", "--revive", "ctx"]
+  const options = { directory: context.directory }
+  expect(Revive.openTabCommand(command, { ...options, terminal: "wezterm" })).toMatchObject({
+    file: "wezterm",
+    args: ["cli", "--no-auto-start", "spawn", "--cwd", context.directory, "--", ...command],
+  })
+  expect(Revive.openTabCommand(command, { ...options, terminal: "windows-terminal" })).toMatchObject({
+    file: "wt.exe",
+    args: ["-w", "0", "new-tab", "-d", context.directory, ...command],
+  })
+  const generic = Revive.openTabCommand(command, { ...options, terminal: "generic" })
+  expect(generic.file).toBe("cmd.exe")
+  expect(generic.env).toMatchObject({ OC_REVIVE_ARG_0: executable, OC_REVIVE_ARG_3: "ctx" })
+})
+
+test("single revive waits for the terminal CLI and reports a rejected tab launch", async () => {
+  const command = {
+    file: process.execPath,
+    args: ["-e", "process.exit(process.env.OC_REVIVE_TEST_EXIT === '7' ? 7 : 0)"],
+    env: { OC_FLAVOR: "oc", OC_REVIVE_TEST_EXIT: "0" },
+    windowsVerbatimArguments: false,
+  }
+  await expect(OcConfig.openReviveTab(command, os.tmpdir())).resolves.toBeUndefined()
+  await expect(OcConfig.openReviveTab({
+    ...command,
+    env: { ...command.env, OC_REVIVE_TEST_EXIT: "7" },
+  }, os.tmpdir())).rejects.toThrow("exited with code 7")
 })
 
 test("only known shells are treated as killable window owners", () => {

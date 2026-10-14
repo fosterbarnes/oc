@@ -4,6 +4,7 @@ import { serviceUse } from "@opencode-ai/core/effect/service-use"
 import path from "path"
 import { pathToFileURL } from "url"
 import os from "os"
+import { isDeepStrictEqual } from "util"
 import { mergeDeep } from "remeda"
 import { Global } from "@opencode-ai/core/global"
 import fsNode from "fs/promises"
@@ -151,13 +152,21 @@ type Info = ConfigV1.Info & {
   // plugin_origins is derived state, not a persisted config field. It keeps each winning plugin spec together
   // with the file and scope it came from so later runtime code can make location-sensitive decisions.
   plugin_origins?: ConfigPlugin.Origin[]
+  // Optional override for the markdown file holding subagent entries (YAML-frontmatter agents: map).
+  subagentFile?: string
 }
+
+const InfoSchema = Schema.Struct({ ...ConfigV1.Info.fields, subagentFile: Schema.optional(Schema.String) })
 
 type State = {
   config: Info
   directories: string[]
   // Command sources in merge order: inline config records, or config dirs rescanned on every commands() call.
   commandLayers: (NonNullable<Info["command"]> | string)[]
+  // Agent sources in the same merge order: inline config records, or config dirs rescanned on every agents() call.
+  agentLayers: (NonNullable<Info["agent"]> | string)[]
+  // Independent pre-plugin snapshot, including nested fields that config hooks can mutate in place.
+  agentSnapshot: NonNullable<Info["agent"]>
   deps: Fiber.Fiber<void>[]
   consoleState: ConsoleState
 }
@@ -174,6 +183,10 @@ export interface Interface {
   readonly commands: () => Effect.Effect<{
     commands: NonNullable<Info["command"]>
     diagnostics: ConfigCommand.Diagnostic[]
+  }>
+  readonly agents: () => Effect.Effect<{
+    agents: NonNullable<Info["agent"]>
+    diagnostics: ConfigAgent.AgentDiagnostic[]
   }>
   readonly waitForDependencies: () => Effect.Effect<void>
 }
@@ -245,7 +258,7 @@ const layer = Layer.effect(
           action: diagnostic.message,
         }),
       )
-      return ConfigParse.schema(ConfigV1.Info, result.value, source)
+      return ConfigParse.schema(InfoSchema, result.value, source)
     })
 
     const fetchRemoteJson = Effect.fnUntraced(function* <S extends Schema.Top>(
@@ -384,6 +397,7 @@ const layer = Layer.effect(
         const consoleManagedProviders = new Set<string>()
         let activeOrgName: string | undefined
         const commandLayers: State["commandLayers"] = []
+        const agentLayers: State["agentLayers"] = []
 
         const pluginScopeForSource = Effect.fnUntraced(function* (source: string) {
           if (source.startsWith("http://") || source.startsWith("https://")) return "global"
@@ -416,6 +430,7 @@ const layer = Layer.effect(
         const merge = (source: string, next: Info, kind?: ConfigPlugin.Scope) => {
           result = mergeConfigConcatArrays(result, next)
           if (next.command) commandLayers.push(next.command)
+          if (next.agent) agentLayers.push(next.agent)
           return mergePluginOrigins(source, next.plugin, kind)
         }
 
@@ -539,6 +554,7 @@ const layer = Layer.effect(
           }
           result.agent = mergeDeep(result.agent ?? {}, scanned.agents)
           result.agent = mergeDeep(result.agent ?? {}, yield* Effect.promise(() => ConfigAgent.loadMode(dir)))
+          agentLayers.push(dir)
           // Auto-discovered plugins under `.opencode/plugin(s)` are already local files, so ConfigPlugin.load
           // returns normalized Specs and we only need to attach origin metadata here.
           const list = yield* Effect.promise(() => ConfigPlugin.load(dir))
@@ -610,6 +626,7 @@ const layer = Layer.effect(
           })
           result = mergeConfigConcatArrays(result, next)
           if (next.command) commandLayers.push(next.command)
+          if (next.agent) agentLayers.push(next.agent)
         }
 
         const legacyPluginSources = (result.plugin_origins ?? [])
@@ -682,6 +699,8 @@ const layer = Layer.effect(
           config: result,
           directories,
           commandLayers,
+          agentLayers,
+          agentSnapshot: structuredClone(result.agent ?? {}),
           deps,
           consoleState: {
             consoleManagedProviders: Array.from(consoleManagedProviders),
@@ -719,6 +738,29 @@ const layer = Layer.effect(
       )
       return {
         commands: loaded.reduce<NonNullable<Info["command"]>>((acc, layer) => mergeDeep(acc, layer.commands), {}),
+        diagnostics: loaded.flatMap((layer) => layer.diagnostics),
+      }
+    })
+
+    // Rebuilds agents with the startup merge order, rescanning agent dirs so markdown edits apply live.
+    // Reapply only plugin changes, so untouched fields still follow markdown edits and removals.
+    const agents = Effect.fn("Config.agents")(function* () {
+      const s = yield* InstanceState.get(state)
+      const loaded = yield* Effect.promise(() =>
+        Promise.all(
+          s.agentLayers.map(async (layer) => {
+            if (typeof layer !== "string") return { agents: layer, diagnostics: [] }
+            const scanned = await ConfigAgent.scan(layer)
+            return { agents: mergeDeep(scanned.agents, await ConfigAgent.loadMode(layer)), diagnostics: scanned.diagnostics }
+          }),
+        ),
+      )
+      const fromLayers = loaded.reduce<NonNullable<Info["agent"]>>((acc, layer) => mergeDeep(acc, layer.agents), {})
+      const modes = Object.fromEntries(
+        Object.entries(s.config.mode ?? {}).map(([name, mode]) => [name, { ...mode, mode: "primary" as const }]),
+      )
+      return {
+        agents: applyAgentOverrides(mergeDeep(fromLayers, modes), s.agentSnapshot, s.config.agent ?? {}),
         diagnostics: loaded.flatMap((layer) => layer.diagnostics),
       }
     })
@@ -792,7 +834,7 @@ const layer = Layer.effect(
       let changed: boolean
       if (!file.endsWith(".jsonc")) {
         const existing = ConfigParse.jsonc(before, file)
-        ConfigParse.schema(ConfigV1.Info, ConfigV2Compat.lower(normalizeLoadedConfig(existing), file).value, file)
+        ConfigParse.schema(InfoSchema, ConfigV2Compat.lower(normalizeLoadedConfig(existing), file).value, file)
         const merged = mergeDeep(isRecord(existing) ? existing : {}, patch)
         const serialized = JSON.stringify(merged, null, 2)
         next = yield* decodeConfig(merged, file)
@@ -823,6 +865,7 @@ const layer = Layer.effect(
       directories,
       waitForDependencies,
       commands,
+      agents,
     })
   }),
 )
@@ -834,3 +877,24 @@ export const node = LayerNode.make({
 })
 
 export * as Config from "./config"
+
+function applyAgentOverrides<T extends Record<string, unknown>>(
+  fresh: T,
+  before: Record<string, unknown>,
+  after: Record<string, unknown>,
+): T {
+  const result = { ...fresh }
+  for (const key of new Set([...Object.keys(before), ...Object.keys(after)])) {
+    if (Object.hasOwn(before, key) === Object.hasOwn(after, key) && isDeepStrictEqual(before[key], after[key])) continue
+    if (!Object.hasOwn(after, key)) {
+      delete result[key]
+      continue
+    }
+    Object.assign(result, {
+      [key]: isRecord(before[key]) && isRecord(after[key])
+        ? applyAgentOverrides(isRecord(result[key]) ? result[key] : {}, before[key], after[key])
+        : after[key],
+    })
+  }
+  return result
+}

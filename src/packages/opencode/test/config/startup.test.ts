@@ -7,14 +7,14 @@ import { tmpdir } from "../fixture/fixture"
 function context(state: string) {
   return {
     platform: "win32" as const,
-    executable: "C:\\Apps\\O'Brien $x\\ocdebug.exe",
+    executable: "C:\\Apps\\O'Brien $x\\oc.exe",
     powershell: "C:\\Program Files\\PowerShell\\7\\pwsh.exe",
     entrypoint: undefined,
-    app: "opencode-debug",
+    app: "opencode",
     state,
-    config: "C:\\custom config\\opencode-debug",
-    data: "C:\\custom data\\opencode-debug",
-    cache: "C:\\custom cache\\opencode-debug",
+    config: "C:\\custom config\\opencode",
+    data: "C:\\custom data\\opencode",
+    cache: "C:\\custom cache\\opencode",
     cwd: "C:\\Users\\O'Brien",
     env: {
       OPENCODE_CONFIG: "C:\\custom config\\chosen.jsonc",
@@ -26,18 +26,16 @@ function context(state: string) {
 }
 
 test("startup preserves exact debug/config context, quotes literals and excludes secrets", () => {
-  const input = context("C:\\state\\opencode-debug")
+  const input = context("C:\\state\\opencode")
   const next = Startup.plan(input)
-  expect(next.name).toStartWith("oc-opencode-debug-")
+  expect(next.name).toStartWith("oc-opencode-")
   expect(next.command.length).toBeLessThanOrEqual(260)
   expect(next.command).toContain('"C:\\Program Files\\PowerShell\\7\\pwsh.exe"')
-  expect(next.script).toContain("& 'C:\\Apps\\O''Brien $x\\ocdebug.exe' 'oc' 'server' 'start' | Out-Null")
-  expect(next.script).toContain("$env:OPENCODE_INSTANCE = 'debug'")
+  expect(next.script).toContain("& 'C:\\Apps\\O''Brien $x\\oc.exe' 'oc' 'server' 'start' | Out-Null")
   expect(next.script).toContain("$env:OPENCODE_CONFIG = 'C:\\custom config\\chosen.jsonc'")
   expect(next.script).toContain("$env:OPENCODE_DB = 'custom.db'")
   expect(next.script).not.toContain("SECRET")
-  expect(Startup.plan({ ...input, app: "opencode" }).name).not.toBe(next.name)
-  expect(Startup.plan({ ...input, config: "C:\\another\\opencode-debug" }).name).not.toBe(next.name)
+  expect(Startup.plan({ ...input, config: "C:\\another\\opencode" }).name).not.toBe(next.name)
   const bun = Startup.plan({ ...input, executable: "C:\\bun.exe", entrypoint: "C:\\repo space\\index.ts" })
   expect(bun.script).toContain("& 'C:\\bun.exe' 'C:\\repo space\\index.ts' 'oc' 'server' 'start'")
 })

@@ -53,6 +53,8 @@ export const InstancePaths = {
   vcsApply: "/vcs/apply",
   command: "/command",
   agent: "/agent",
+  agentSub: "/agent/sub",
+  agentSubRemove: "/agent/sub/:name",
   skill: "/skill",
   lsp: "/lsp",
   plugin: "/plugin",
@@ -170,6 +172,43 @@ export const InstanceApi = HttpApi.make("instance")
             identifier: "app.agents",
             summary: "List agents",
             description: "Get a list of all available AI agents in the OpenCode system.",
+          }),
+        ),
+        HttpApiEndpoint.get("agentSubList", InstancePaths.agentSub, {
+          query: WorkspaceRoutingQuery,
+          success: Schema.Array(Schema.String),
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "app.agent.sub.list",
+            summary: "List editable subagents",
+            description: "Names defined in the configured writable subagent file.",
+          }),
+        ),
+        HttpApiEndpoint.post("agentSub", InstancePaths.agentSub, {
+          query: WorkspaceRoutingQuery,
+          payload: Schema.Struct({
+            name: Schema.String,
+            model: Schema.String,
+            variant: Schema.optional(Schema.String),
+            description: Schema.optional(Schema.String),
+          }),
+          success: described(Schema.Boolean, "Subagent added"),
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "app.agent.sub.add",
+            summary: "Add subagent",
+            description: "Add an entry to the subagent file.",
+          }),
+        ),
+        HttpApiEndpoint.delete("agentSubRemove", InstancePaths.agentSubRemove, {
+          params: { name: Schema.String },
+          query: WorkspaceRoutingQuery,
+          success: described(Schema.Boolean, "Subagent removed"),
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "app.agent.sub.remove",
+            summary: "Remove subagent",
+            description: "Remove an entry from the subagent file.",
           }),
         ),
         HttpApiEndpoint.get("skill", InstancePaths.skill, {

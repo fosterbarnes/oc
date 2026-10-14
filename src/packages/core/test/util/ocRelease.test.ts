@@ -15,7 +15,6 @@ test("asset picks each variant for the running platform", () => {
   for (const [variant, prefix] of [
     ["oc", ""],
     ["native", "native-"],
-    ["debug", "debug-"],
   ] as const) {
     const expected = assets.find((item) => item.name === `opencode-v0.3.1-coastersWall-${prefix}${platform}.zip`)
     expect(OcRelease.asset(release, variant)).toEqual(expected)

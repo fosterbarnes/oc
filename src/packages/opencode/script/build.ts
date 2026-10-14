@@ -34,12 +34,9 @@ const baselineFlag = process.argv.includes("--baseline")
 const skipInstall = process.argv.includes("--skip-install")
 const sourcemapsFlag = process.argv.includes("--sourcemaps")
 const plugin = createSolidTransformPlugin()
-// Default builds oc + native; `--with-debug` adds ocdebug. An `--*-only` flag builds just that flavor
-// and keeps the rest of dist.
-const debugOnlyFlag = process.argv.includes("--debug-only")
+// `--*-only` builds just that flavor and keeps the rest of dist.
 const ocOnlyFlag = process.argv.includes("--oc-only")
 const nativeOnlyFlag = process.argv.includes("--native-only")
-const withDebugFlag = process.argv.includes("--with-debug")
 const treeSitterWorker = await Bun.file(fileURLToPath(import.meta.resolve("@opentui/core/parser.worker"))).text()
 
 const allTargets: {
@@ -105,7 +102,7 @@ const allTargets: {
   },
 ]
 
-const onlyFlag = debugOnlyFlag || ocOnlyFlag || nativeOnlyFlag
+const onlyFlag = ocOnlyFlag || nativeOnlyFlag
 const targets =
   singleFlag || onlyFlag
     ? allTargets.filter((item) => {
@@ -128,20 +125,15 @@ const targets =
       })
     : allTargets
 
-// production = oc.exe (launcher + resident server), native = opencode.exe, debug = ocdebug.exe (oc flavor).
-const variants = debugOnlyFlag
-  ? (["debug"] as const)
-  : ocOnlyFlag
-    ? withDebugFlag ? (["production", "debug"] as const) : (["production"] as const)
-    : nativeOnlyFlag
-      ? (["native"] as const)
-      : withDebugFlag
-        ? (["production", "native", "debug"] as const)
-        : (["production", "native"] as const)
+// production = oc.exe (launcher + resident server), native = opencode.exe.
+const variants = ocOnlyFlag
+  ? (["production"] as const)
+  : nativeOnlyFlag
+    ? (["native"] as const)
+    : (["production", "native"] as const)
 const variantInfo = {
   production: { suffix: "", binary: "oc" },
   native: { suffix: "-native", binary: "opencode" },
-  debug: { suffix: "-debug", binary: "ocdebug" },
 } as const
 
 if (!onlyFlag) await $`rm -rf dist`

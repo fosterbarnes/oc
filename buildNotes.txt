@@ -1,15 +1,12 @@
-v0.2.179 snakeArrived
+v0.2.182 fromsoftFreeztyle
 
-providers:
-Updated xAI, Together AI, Vercel gateway, and GitLab provider SDKs. Cloudflare AI Gateway models now respect configured provider timeouts, and OpenAI Responses forwards the ultrafast service tier.
+subagents:
+Added /viewSub to browse and copy subagent names, with model and effort pickers for adding entries and Ctrl+D for deleting entries from the configured writable agent file. Picker handoffs keep the next dialog open. File edits preserve comments, Markdown content, and line endings, and refuse unsupported or unsafe layouts.
 
-browser links:
-Docs, login, and OAuth links use one shared HTTP and HTTPS opener across the CLI, TUI, and provider plugins.
+agent reload:
+Agent Markdown additions, edits, and removals take effect on the next task call. Broken files retain their last working definitions and show a warning. Plugin overrides survive startup and hot reload while untouched fields continue to refresh. The companion /addSub and /rmSub commands distinguish colon-bearing model IDs from effort suffixes and respect explicit names.
 
-acp:
-Editors using ACP restore session options on reload and receive reasoning separately from replies.
+revive:
+Added /revive-single to build and open native opencode in a new terminal tab while the current oc windows and server keep running. Failed builds leave the installed executable unchanged and wait for Enter. Tab launch failures are reported, and plain-console launches request a visible window. Retired ocdebug, its separate runtime settings, and the old debug build, install, and run entrypoints. The normal installer no longer requires the removed debug artifact.
 
-reliability:
-Server shutdown no longer hangs when a project is still loading. Truncated records from crashed TUIs no longer block cleanup, and finished sessions remain readable when their configured model has been removed.
-
-Under the hood: Advanced the upstream sync baseline to the v1 tip, refreshed SDK patches and dependencies, corrected stale Windows tests and test isolation, reset test server draining state on controller cleanup, and added coverage for 14 HTTP API routes. Checks passed: targeted core, opencode, and TUI tests; HTTP API coverage, auth, and Effect scenarios; required pre-push checks. Earlier session verification covered provider suites and core, opencode, and TUI typechecks.
+Under the hood: Added safe subagent-file API operations and regenerated the legacy SDK and Client outputs. Added agent reload, plugin override, file editing, picker handoff, revive launch, and retired-script regression coverage. Corrected a branded model-ID assertion that blocked typechecking and regenerated keybind documentation. Updated fork, scope, script, and project documentation. Checks passed: targeted core, opencode, and TUI regression tests; PowerShell revive cleanup checks; required pre-push checks. Earlier session verification also covered SDK and Client generation and scoped diff checks.

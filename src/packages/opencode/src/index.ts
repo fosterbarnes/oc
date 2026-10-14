@@ -6,11 +6,10 @@ import { FormatError } from "./cli/error"
 import { EOL } from "os"
 import { errorMessage } from "./util/error"
 import { Heap } from "./cli/heap"
-import { isDebugExecutable, native, resolveAppName } from "@opencode-ai/core/global"
+import { native } from "@opencode-ai/core/global"
 import {
   resolveCommandToLoad,
   withExecutableDefault,
-  withOcLaunchDefault,
   type CommandToLoad,
 } from "./cli/commandLoader"
 
@@ -18,7 +17,7 @@ const rawArgs = hideBin(process.argv)
 // The native build runs the upstream in-process TUI; only oc builds rewrite to the resident launcher.
 const args = native
   ? rawArgs
-  : withOcLaunchDefault(withExecutableDefault(rawArgs, process.execPath), isDebugExecutable())
+  : withExecutableDefault(rawArgs, process.execPath)
 
 function needsAllCommands(args: readonly string[]) {
   return args.includes("-h") || args.includes("--help") || args.includes("completion")
@@ -64,8 +63,6 @@ const cli = yargs(args)
     type: "boolean",
   })
   .middleware(async (opts) => {
-    if (resolveAppName() === "opencode-debug" && !process.env.OPENCODE_LOG_LEVEL)
-      process.env.OPENCODE_LOG_LEVEL = "DEBUG"
     if (opts.printLogs) process.env.OPENCODE_PRINT_LOGS = "1"
     if (opts.logLevel) process.env.OPENCODE_LOG_LEVEL = opts.logLevel
     if (opts.logChannels) process.env.OPENCODE_LOG_CHANNELS = opts.logChannels

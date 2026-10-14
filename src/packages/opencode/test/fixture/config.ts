@@ -15,6 +15,7 @@ export function make(overrides: Partial<Config.Interface> = {}) {
     directories: () => Effect.succeed([]),
     waitForDependencies: () => Effect.void,
     commands: () => get().pipe(Effect.map((config) => ({ commands: config.command ?? {}, diagnostics: [] }))),
+    agents: () => get().pipe(Effect.map((config) => ({ agents: config.agent ?? {}, diagnostics: [] }))),
     ...overrides,
   })
 }

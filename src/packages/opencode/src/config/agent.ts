@@ -9,6 +9,7 @@ import { ConfigMarkdown as ConfigMarkdownCore } from "@opencode-ai/core/config/m
 import { ConfigAgentV1 } from "@opencode-ai/core/v1/config/agent"
 import { FrontmatterError, InvalidError } from "@opencode-ai/core/v1/config/error"
 import { Filesystem } from "@/util/filesystem"
+import { Fingerprint } from "@/util/fingerprint"
 import { configEntryNameFromPath } from "./entry-name"
 import * as ConfigMarkdown from "./markdown"
 import { ConfigParse } from "./parse"
@@ -159,6 +160,9 @@ function agentDiagnosticIssues(error: unknown): { path: string[]; message: strin
   return undefined
 }
 
+// Last fully valid agents per file, so a broken edit (e.g. mid-save YAML) keeps serving the previous version.
+const lastGood = new Map<string, Record<string, ConfigAgentV1.Info>>()
+
 export async function scan(dir: string): Promise<{
   agents: Record<string, ConfigAgentV1.Info>
   diagnostics: AgentDiagnostic[]
@@ -174,60 +178,62 @@ export async function scan(dir: string): Promise<{
   })
   items.sort()
   for (const item of items) {
-    let md: Awaited<ReturnType<typeof parseAgentMarkdown>>
-    try {
-      md = await parseAgentMarkdown(item)
-    } catch (error) {
-      diagnostics.push({
-        path: item,
-        message: agentDiagnosticMessage(error),
-        issues: agentDiagnosticIssues(error),
-      })
-      continue
-    }
-
-    const relative = path.relative(dir, item).replaceAll("\\", "/")
-    const underSub = relative.startsWith("agents/sub/") || relative.startsWith("agent/sub/")
-    let name = configEntryNameFromPath(relative, ["agent/", "agents/"])
-    if (name.startsWith("sub/")) name = name.slice("sub/".length)
-
-    let entries: Record<string, Record<string, unknown>>
-    try {
-      entries = await expandAgentFile(md.data, md.content, name, item)
-    } catch (error) {
-      diagnostics.push({
-        path: item,
-        message: agentDiagnosticMessage(error),
-        issues: agentDiagnosticIssues(error),
-      })
-      continue
-    }
-
-    if (underSub) {
-      const wrong = Object.entries(entries).filter(([, config]) => config.mode && config.mode !== "subagent")
-      if (wrong.length) {
-        diagnostics.push({
-          path: item,
-          message: `${item}: agents/sub is only for mode: subagent`,
-        })
-        continue
-      }
-      for (const config of Object.values(entries)) config.mode = "subagent"
-    }
-
-    for (const [agentName, config] of Object.entries(entries)) {
-      try {
-        agents[agentName] = ConfigParse.schema(ConfigAgentV1.Info, { ...config, name: agentName }, item)
-      } catch (error) {
-        diagnostics.push({
-          path: item,
-          message: agentDiagnosticMessage(error),
-          issues: agentDiagnosticIssues(error),
-        })
-      }
-    }
+    const result = await scanFile(dir, item)
+    diagnostics.push(...result.diagnostics)
+    if (!result.diagnostics.length) lastGood.set(item, result.agents)
+    Object.assign(agents, result.diagnostics.length ? (lastGood.get(item) ?? result.agents) : result.agents)
   }
   return { agents, diagnostics, files: items.length }
+}
+
+// Change signature for every agent and mode markdown file in the given config directories.
+export async function fingerprint(dirs: string[]) {
+  return Fingerprint.of(
+    await Fingerprint.scan(dirs.map((dir) => ({ dir, pattern: "{agent,agents,mode,modes}/**/*.md", dot: true }))),
+  )
+}
+
+async function scanFile(dir: string, item: string) {
+  const agents: Record<string, ConfigAgentV1.Info> = {}
+  const diagnostics: AgentDiagnostic[] = []
+  const fail = (error: unknown) => ({
+    agents,
+    diagnostics: [{ path: item, message: agentDiagnosticMessage(error), issues: agentDiagnosticIssues(error) }],
+  })
+
+  let md: Awaited<ReturnType<typeof parseAgentMarkdown>>
+  try {
+    md = await parseAgentMarkdown(item)
+  } catch (error) {
+    return fail(error)
+  }
+
+  const relative = path.relative(dir, item).replaceAll("\\", "/")
+  const underSub = relative.startsWith("agents/sub/") || relative.startsWith("agent/sub/")
+  let name = configEntryNameFromPath(relative, ["agent/", "agents/"])
+  if (name.startsWith("sub/")) name = name.slice("sub/".length)
+
+  let entries: Record<string, Record<string, unknown>>
+  try {
+    entries = await expandAgentFile(md.data, md.content, name, item)
+  } catch (error) {
+    return fail(error)
+  }
+
+  if (underSub) {
+    const wrong = Object.entries(entries).filter(([, config]) => config.mode && config.mode !== "subagent")
+    if (wrong.length) return { agents, diagnostics: [{ path: item, message: `${item}: agents/sub is only for mode: subagent` }] }
+    for (const config of Object.values(entries)) config.mode = "subagent"
+  }
+
+  for (const [agentName, config] of Object.entries(entries)) {
+    try {
+      agents[agentName] = ConfigParse.schema(ConfigAgentV1.Info, { ...config, name: agentName }, item)
+    } catch (error) {
+      diagnostics.push(...fail(error).diagnostics)
+    }
+  }
+  return { agents, diagnostics }
 }
 
 export async function load(dir: string) {

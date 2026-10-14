@@ -2,14 +2,14 @@ export * as OcRelease from "./ocRelease"
 
 // Custom fork: oc updates come from oc's own GitHub releases, never upstream OpenCode's channels.
 // `.scripts/pushRelease.ps1` publishes tag `v<version>` with assets
-// `opencode-v<version>-<versionTag>-<variant><platform>.zip` (variant "" = oc.exe, "native-", "debug-").
+// `opencode-v<version>-<versionTag>-<variant><platform>.zip` (variant "" = oc.exe, "native-").
 export const REPO = "fosterbarnes/oc"
 
-export type Variant = "oc" | "native" | "debug"
+export type Variant = "oc" | "native"
 export type Asset = { name: string; url: string }
 export type Release = { version: string; assets: Asset[] }
 
-const PREFIX: Record<Variant, string> = { oc: "", native: "native-", debug: "debug-" }
+const PREFIX: Record<Variant, string> = { oc: "", native: "native-" }
 
 /** Latest published release, or the exact `version` when given (an update installs what the user confirmed). */
 export async function lookup(version?: string, api = "https://api.github.com"): Promise<Release> {

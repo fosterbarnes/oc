@@ -21,15 +21,10 @@ describe("resolveExecutablePath", () => {
     expect(Global.resolveExecutablePath("/usr/local/bin/occ")).toBe("/usr/local/bin/oc")
   })
 
-  test("leaves oc, native opencode, ocdebug, and bun unchanged", () => {
+  test("leaves oc, native opencode, and bun unchanged", () => {
     expect(Global.resolveExecutablePath("C:\\Apps\\opencode\\oc.exe")).toBe("C:\\Apps\\opencode\\oc.exe")
     expect(Global.resolveExecutablePath("/opt/opencode/oc")).toBe("/opt/opencode/oc")
     expect(Global.resolveExecutablePath("C:\\Apps\\opencode\\opencode.exe")).toBe("C:\\Apps\\opencode\\opencode.exe")
-    expect(Global.resolveExecutablePath("C:\\Apps\\opencode\\ocdebug.exe")).toBe("C:\\Apps\\opencode\\ocdebug.exe")
-    expect(Global.resolveExecutablePath("C:\\Apps\\opencode\\oc-debug.exe")).toBe("C:\\Apps\\opencode\\oc-debug.exe")
-    expect(Global.resolveExecutablePath("C:\\Apps\\opencode\\opencode-debug.exe")).toBe(
-      "C:\\Apps\\opencode\\opencode-debug.exe",
-    )
     expect(Global.resolveExecutablePath("/usr/local/bin/bun")).toBe("/usr/local/bin/bun")
     expect(Global.resolveExecutablePath("C:\\Program Files\\bun\\bun.exe")).toBe("C:\\Program Files\\bun\\bun.exe")
   })

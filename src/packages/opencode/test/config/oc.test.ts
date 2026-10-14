@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test"
 import fs from "fs/promises"
 import os from "os"
 import path from "path"
-import { Global, resolveAppName } from "@opencode-ai/core/global"
+import { Global } from "@opencode-ai/core/global"
 import { OcConfig } from "@/config/oc"
 import { Startup } from "@/config/startup"
 import { tmpdir } from "../fixture/fixture"
@@ -283,16 +283,6 @@ describe("resident state write", () => {
   })
 })
 
-describe("debug instance identity", () => {
-  test("treats oc-debug executable and OPENCODE_INSTANCE as the debug app", () => {
-    expect(resolveAppName({ execPath: "C:\\Apps\\opencode\\opencode.exe" })).toBe("opencode")
-    expect(resolveAppName({ execPath: "C:\\Apps\\opencode\\ocdebug.exe" })).toBe("opencode-debug")
-    expect(resolveAppName({ execPath: "C:\\Apps\\opencode\\oc-debug.exe" })).toBe("opencode-debug")
-    expect(resolveAppName({ instance: "debug", execPath: "C:\\Apps\\opencode\\opencode.exe" })).toBe("opencode-debug")
-    expect(OcConfig.defaultServerPort()).toBe(Global.Path.debug ? 4097 : 4096)
-  })
-})
-
 describe("canonical child executable", () => {
   // The resident server runs as oc, never native opencode, so only the occ hard link is remapped.
   test("maps occ to sibling oc and keeps oc", () => {
@@ -302,9 +292,8 @@ describe("canonical child executable", () => {
     expect(OcConfig.executablePath("/usr/local/bin/occ")).toBe("/usr/local/bin/oc")
   })
 
-  test("leaves bun, opencode, and ocdebug unchanged", () => {
+  test("leaves bun and opencode unchanged", () => {
     expect(OcConfig.executablePath("C:\\Apps\\opencode\\opencode.exe")).toBe("C:\\Apps\\opencode\\opencode.exe")
-    expect(OcConfig.executablePath("C:\\Apps\\opencode\\ocdebug.exe")).toBe("C:\\Apps\\opencode\\ocdebug.exe")
     expect(OcConfig.executablePath("/usr/local/bin/bun")).toBe("/usr/local/bin/bun")
     expect(OcConfig.executablePath("C:\\Program Files\\bun\\bun.exe")).toBe("C:\\Program Files\\bun\\bun.exe")
   })

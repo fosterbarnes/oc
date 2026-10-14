@@ -6,6 +6,12 @@ import type {
   AgentPartInput,
   AppAgentsErrors,
   AppAgentsResponses,
+  AppAgentSubAddErrors,
+  AppAgentSubAddResponses,
+  AppAgentSubListErrors,
+  AppAgentSubListResponses,
+  AppAgentSubRemoveErrors,
+  AppAgentSubRemoveResponses,
   AppDebugLoggingGetErrors,
   AppDebugLoggingGetResponses,
   AppDebugLoggingSetErrors,
@@ -571,6 +577,120 @@ export class DebugLogging extends HeyApiClient {
   }
 }
 
+export class Sub extends HeyApiClient {
+  /**
+   * List editable subagents
+   *
+   * Names defined in the configured writable subagent file.
+   */
+  public list<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<AppAgentSubListResponses, AppAgentSubListErrors, ThrowOnError>({
+      url: "/agent/sub",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Add subagent
+   *
+   * Add an entry to the subagent file.
+   */
+  public add<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+      name?: string
+      model?: string
+      variant?: string
+      description?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "body", key: "name" },
+            { in: "body", key: "model" },
+            { in: "body", key: "variant" },
+            { in: "body", key: "description" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<AppAgentSubAddResponses, AppAgentSubAddErrors, ThrowOnError>({
+      url: "/agent/sub",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Remove subagent
+   *
+   * Remove an entry from the subagent file.
+   */
+  public remove<ThrowOnError extends boolean = false>(
+    parameters: {
+      name: string
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "name" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).delete<AppAgentSubRemoveResponses, AppAgentSubRemoveErrors, ThrowOnError>({
+      url: "/agent/sub/{name}",
+      ...options,
+      ...params,
+    })
+  }
+}
+
+export class Agent extends HeyApiClient {
+  private _sub?: Sub
+  get sub(): Sub {
+    return (this._sub ??= new Sub({ client: this.client }))
+  }
+}
+
 export class App extends HeyApiClient {
   /**
    * Write log
@@ -680,6 +800,11 @@ export class App extends HeyApiClient {
   private _debugLogging?: DebugLogging
   get debugLogging(): DebugLogging {
     return (this._debugLogging ??= new DebugLogging({ client: this.client }))
+  }
+
+  private _agent?: Agent
+  get agent(): Agent {
+    return (this._agent ??= new Agent({ client: this.client }))
   }
 }
 
@@ -5852,7 +5977,7 @@ export class Location extends HeyApiClient {
   }
 }
 
-export class Agent extends HeyApiClient {
+export class Agent2 extends HeyApiClient {
   /**
    * List agents
    *
@@ -7591,9 +7716,9 @@ export class V2 extends HeyApiClient {
     return (this._location ??= new Location({ client: this.client }))
   }
 
-  private _agent?: Agent
-  get agent(): Agent {
-    return (this._agent ??= new Agent({ client: this.client }))
+  private _agent?: Agent2
+  get agent(): Agent2 {
+    return (this._agent ??= new Agent2({ client: this.client }))
   }
 
   private _session?: Session3

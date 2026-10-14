@@ -17,11 +17,6 @@ declare global {
 export const native =
   typeof OPENCODE_FLAVOR === "string" ? OPENCODE_FLAVOR === "native" : process.env.OC_FLAVOR === "native"
 
-export function isDebugExecutable(execPath = process.execPath) {
-  const base = executableBasename(execPath)
-  return base === "ocdebug" || base === "oc-debug" || base === "opencode-debug"
-}
-
 function executableBasename(execPath: string) {
   const file = execPath.split(/[\\/]/).pop() ?? execPath
   const ext = path.extname(file)
@@ -35,16 +30,7 @@ export function resolveExecutablePath(execPath = process.execPath) {
   return mod.join(mod.dirname(execPath), `oc${mod.extname(execPath)}`)
 }
 
-export function resolveAppName(input: { instance?: string; execPath?: string } = {}) {
-  const env = (input.instance ?? process.env.OPENCODE_INSTANCE)?.trim().toLowerCase()
-  const execPath = input.execPath ?? process.execPath
-  if (env === "debug" || env === "opencode-debug" || env === "ocdebug" || isDebugExecutable(execPath)) {
-    return "opencode-debug"
-  }
-  return "opencode"
-}
-
-const app = resolveAppName()
+const app = "opencode"
 const data = path.join(xdgData!, app)
 const cache = path.join(xdgCache!, app)
 const config = path.join(xdgConfig!, app)
@@ -56,7 +42,6 @@ const paths = {
     return process.env.OPENCODE_TEST_HOME ?? os.homedir()
   },
   app,
-  debug: app === "opencode-debug",
   data,
   bin: path.join(cache, "bin"),
   log: path.join(data, "log"),

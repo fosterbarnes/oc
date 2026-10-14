@@ -5,7 +5,6 @@ import { spawn } from "child_process"
 import net from "net"
 import { randomBytes } from "crypto"
 import { Global } from "@opencode-ai/core/global"
-import { DebugConfig } from "@opencode-ai/core/debugConfig"
 import { TuiLedger } from "./tuiLedger"
 import { Revive } from "./revive"
 import { Startup } from "./startup"
@@ -34,15 +33,11 @@ export type Settings = Partial<Record<Key, Value>> & {
 }
 
 export function defaultServerPort() {
-  return Global.Path.debug ? 4097 : 4096
+  return 4096
 }
 
 function filePath() {
   return path.join(Global.Path.config, "oc.json")
-}
-
-async function seedDebugFromProduction() {
-  await DebugConfig.syncFromProduction({ overwrite: false, serverPort: defaultServerPort() })
 }
 
 async function readFile(file: string) {
@@ -56,7 +51,6 @@ async function readFile(file: string) {
 }
 
 export async function read() {
-  await seedDebugFromProduction()
   const file = filePath()
   try {
     return await readFile(file)
@@ -379,7 +373,6 @@ async function startServerUnlocked(replacement = false) {
       [RESIDENT_ENV]: "1",
       OPENCODE_SERVER_PASSWORD: secret,
       OPENCODE_SERVER_USERNAME: "opencode",
-      ...(Global.Path.debug ? { OPENCODE_LOG_LEVEL: process.env.OPENCODE_LOG_LEVEL || "DEBUG" } : {}),
     },
   })
   for (let attempt = 0; attempt < residentReadyAttempts; attempt++) {
@@ -740,6 +733,7 @@ export async function revive(context: Revive.ReviveContext) {
 
 async function revivePipeline(context: Revive.ReviveContext) {
   const log = reviveLog()
+  if (context.mode === "single") return reviveSingle(context)
   if (context.native && context.tuiPid) {
     const tuiPid = context.tuiPid
     await log.step("Waiting for native window shutdown", async () => {
@@ -757,17 +751,16 @@ async function revivePipeline(context: Revive.ReviveContext) {
   if (context.source === "download" && sourceDir)
     await log.step(`Downloading oc source to ${sourceDir}`, () => downloadSource(sourceDir))
   if (context.source === "existing" && sourceDir)
-    await log.step(`Using oc source at ${sourceDir}`, () => saveReviveBuild({ source: sourceDir, debug: false }))
+    await log.step(`Using oc source at ${sourceDir}`, () => saveReviveBuild({ source: sourceDir }))
   if (context.source === "none") await log.step("Saving revive without a source build", () => saveReviveBuild(false))
   const settings = await read()
   const bun = /^bun(?:\.exe)?$/i.test(path.basename(process.execPath))
-  // An ocdebug revive reopens ocdebug, so it must also build it, whatever the saved choice says.
-  const build = context.mode === "install" ? Revive.effectiveBuild(settings.revive?.build, Global.Path.debug) : undefined
+  const build = context.mode === "install" ? Revive.parseBuild(settings.revive?.build) : undefined
   // An update installs a downloaded oc release through the same steps as a source build.
   const release = context.mode === "update" ? context.release : undefined
   const installs = !!build || !!release
   if (installs && bun) throw new Error("Install revive needs an installed oc executable, not Bun")
-  const executable = Revive.resolveLauncher(executablePath(), Global.Path.debug)
+  const executable = Revive.resolveLauncher(executablePath())
   const installDir = path.dirname(executablePath())
   const restart: Revive.RestartContext = {
     terminal: reviveTerminal(context.terminal),
@@ -788,7 +781,7 @@ async function revivePipeline(context: Revive.ReviveContext) {
     for (const command of steps?.commands ?? []) await log.step(command.join(" "), () => runVisible(command, steps?.cwd))
     const output = release
       ? await log.step(`Downloading oc v${release}`, () =>
-          Revive.downloadRelease(release, installDir, Global.Path.debug),
+          Revive.downloadRelease(release),
         )
       : steps?.output
     const sources = output ? await log.step("Checking build output", () => Revive.installSources(output)) : undefined
@@ -840,6 +833,57 @@ async function revivePipeline(context: Revive.ReviveContext) {
   if (failure) throw failure.error
 }
 
+// /revive-single: the TUI's hidden helper opens a new tab running this pipeline again (`hosted`), which
+// builds and installs only native opencode, then becomes that opencode. The server and every other
+// window keep running; a failed build leaves the installed opencode as it was.
+async function reviveSingle(context: Revive.ReviveContext) {
+  const log = reviveLog()
+  if (/^bun(?:\.exe)?$/i.test(path.basename(process.execPath)))
+    throw new Error("Revive single needs an installed oc executable, not Bun")
+  if (!context.hosted) {
+    const command = Revive.openTabCommand(
+      [process.execPath, "oc", "--revive", Revive.encode({ ...context, hosted: true })],
+      { terminal: reviveTerminal(context.terminal), directory: context.directory },
+    )
+    await log.step(`Opening a ${command.file} tab for the single build`, () =>
+      openReviveTab(command, context.directory),
+    )
+    return
+  }
+  const installDir = path.dirname(executablePath())
+  const native = await (async () => {
+    const build = Revive.parseBuild((await read()).revive?.build)
+    if (!build) throw new Error("No oc source saved in revive.build; run /revive once first")
+    const steps = Revive.buildSteps(build, "native")
+    await withInstallLock(installDir, async () => {
+      for (const command of steps.commands) await log.step(command.join(" "), () => runVisible(command, steps.cwd))
+      const sources = await log.step("Checking build output", () => Revive.installSources(steps.output))
+      await log.step(`Installing into ${installDir}`, () => Revive.install(sources, installDir))
+    })
+    return Revive.nativeExecutable(executablePath())
+  })().catch(async (error: unknown) => {
+    await log.write(`Revive single failed: ${error instanceof Error ? error.message : String(error)}`)
+    console.log("Press Enter to close")
+    for await (const _ of console) break
+    process.exit(1)
+  })
+  const args = [native, context.directory, ...(context.sessionID ? ["--session", context.sessionID] : [])]
+  process.exit(await Bun.spawn(args, { stdio: ["inherit", "inherit", "inherit"] }).exited)
+}
+
+// Terminal CLIs report whether they opened the tab. Only cmd's new-console path needs a detached hop.
+export async function openReviveTab(command: ReturnType<typeof Revive.openTabCommand>, directory: string) {
+  if (command.file === "cmd.exe")
+    return awaitLaunch(launchDetached(command.file, command.args, {
+      cwd: directory,
+      env: command.env,
+      windowStyle: "Normal",
+      windowsVerbatimArguments: command.windowsVerbatimArguments,
+      settleMs: REPLACEMENT_SETTLE_MS,
+    }))
+  await runVisible([command.file, ...command.args], directory, command.env)
+}
+
 async function windowTabsSnapshot(paneID: string, self: Pick<Revive.ReviveContext, "directory" | "sessionID">) {
   try {
     const list = Bun.spawnSync(["wezterm", "cli", "list", "--format", "json"], { stdout: "pipe", stderr: "pipe" })
@@ -876,7 +920,7 @@ async function downloadSource(directory: string) {
   await runVisible(
     cloned ? ["git", "-C", directory, "pull", "--ff-only"] : ["git", "clone", Revive.SOURCE_REPO, directory],
   )
-  await saveReviveBuild({ source: directory, debug: false })
+  await saveReviveBuild({ source: directory })
 }
 
 async function saveReviveBuild(build: false | Revive.BuildConfig) {
@@ -885,8 +929,12 @@ async function saveReviveBuild(build: false | Revive.BuildConfig) {
 }
 
 // Output streams into the revive window (or the hidden helper's console).
-async function runVisible(command: string[], cwd?: string) {
-  const code = await Bun.spawn(command, { cwd, stdio: ["inherit", "inherit", "inherit"] }).exited
+async function runVisible(command: string[], cwd?: string, env?: NodeJS.ProcessEnv) {
+  const code = await Bun.spawn(command, {
+    cwd,
+    ...(env ? { env: { ...process.env, ...env } } : {}),
+    stdio: ["inherit", "inherit", "inherit"],
+  }).exited
   if (code !== 0) throw new Error(`${command[0]} exited with code ${code}`)
 }
 

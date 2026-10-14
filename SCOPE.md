@@ -76,5 +76,6 @@ loop; the OpenCode 2 execution engine itself is not brought back.
 | Intermediate clack "type to filter" project list | | Real TUI picker |
 | Cursor native plan-mode bridge | | OpenCode planning agents |
 | ocdebug PowerShell wrapper function | | Native `ocdebug.exe` |
+| Native `ocdebug.exe` flavor and isolated debug profile | 2026-10-14 | `/revive-single` native test builds sharing production data |
 | OpenTUI raw-mode resume patch | | Stock OpenTUI resume |
 | bgShell plugin (`bgRun`, `bgStatus`, `bgKill` sibling plugin) | 0.2.177 | Built-in background shell: `bash` with `background: true`. Migration: `bgRun` becomes `bash` with `background: true`; `bgStatus` and `bgKill` keep their names. |
