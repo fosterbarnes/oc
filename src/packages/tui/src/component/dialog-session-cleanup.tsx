@@ -34,6 +34,25 @@ export function cleanupTargets<T extends Pick<GlobalSession, "id" | "workspaceID
   )
 }
 
+// Completed root sessions across all folders, newest first.
+export async function listCompletedRoots(client: ReturnType<typeof useSDK>["client"]) {
+  const all: GlobalSession[] = []
+  let cursor: number | undefined
+  while (true) {
+    const result = await client.experimental.session.list({
+      roots: true,
+      status: "complete",
+      limit: _PAGE,
+      ...(cursor ? { cursor } : {}),
+    })
+    if (result.error) throw new Error(errorMessage(result.error))
+    const page = result.data ?? []
+    all.push(...page)
+    if (page.length < _PAGE) return all
+    cursor = page[page.length - 1].time.updated
+  }
+}
+
 // The folder picker reopens this dialog, so action and folder come in as props. `directory`:
 // omitted = current folder, null = all folders.
 export function DialogSessionCleanup(props: { action?: CleanupAction; directory?: string | null }) {
@@ -47,23 +66,7 @@ export function DialogSessionCleanup(props: { action?: CleanupAction; directory?
   const [action, setAction] = createSignal<CleanupAction>(props.action ?? "delete")
   const directory = () => (props.directory === null ? undefined : (props.directory ?? sdk.directory))
 
-  const [completed] = createResource(async () => {
-    const all: GlobalSession[] = []
-    let cursor: number | undefined
-    while (true) {
-      const result = await sdk.client.experimental.session.list({
-        roots: true,
-        status: "complete",
-        limit: _PAGE,
-        ...(cursor ? { cursor } : {}),
-      })
-      if (result.error) throw new Error(errorMessage(result.error))
-      const page = result.data ?? []
-      all.push(...page)
-      if (page.length < _PAGE) return all
-      cursor = page[page.length - 1].time.updated
-    }
-  })
+  const [completed] = createResource(() => listCompletedRoots(sdk.client))
 
   const eligible = createMemo(() =>
     cleanupTargets({

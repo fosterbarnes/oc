@@ -215,7 +215,7 @@ it.instance(
     Effect.gen(function* () {
       const fixture = yield* setup()
       const session = yield* fixture.sessions.create({
-        metadata: { keep: "value", ocAutoRename: { state: "pending" } },
+        metadata: { keep: "value", ocAutoRename: { state: "pending" }, ocAutoDelete: true },
       })
       const fork = yield* fixture.sessions.fork({ sessionID: session.id })
       expect(fork.metadata).toEqual({ keep: "value" })

@@ -737,7 +737,7 @@ const layer: Layer.Layer<
         workspaceID: original.workspaceID,
         title,
         metadata: original.metadata
-          ? structuredClone(Object.fromEntries(Object.entries(original.metadata).filter(([key]) => key !== "ocAutoRename")))
+          ? structuredClone(Object.fromEntries(Object.entries(original.metadata).filter(([key]) => key !== "ocAutoRename" && key !== "ocAutoDelete")))
           : undefined,
       })
       const msgs = yield* messages({ sessionID: input.sessionID })

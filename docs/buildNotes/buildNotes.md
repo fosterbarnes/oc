@@ -112,6 +112,27 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-15 (~09:04) - v0.2.202 usuallyFellow - agent-push auto-delete on leave - Claude Opus 5.5, low reasoning; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low reasoning; Implementation (/spit then /imp, no subagents); completed
+- Version: 0.2.202 usuallyFellow
+- Added `session_complete` param `autoDelete` (`tool/sessionComplete.ts`): reuses the HEAD==`@{u}` check; on pass sets session metadata `ocAutoDelete: true` (`AUTO_DELETE_KEY`); on fail output says why. Title hash logic unchanged (still title-gated); flag is independent of title.
+- Added `tui/src/agentPushAutoDelete.ts` (`createAgentPushAutoDelete`, wired in `app.tsx`): kv `agent_push_auto_delete` (default off), palette `/agentPushAutoDelete` (oc, Defaults, desc on/off). Deletes the previous route session on leave when flag + `sessionComplete`, not pinned/busy/current, not in another tab's `oc-tuis/*.json` ledger. One sweep of `listCompletedRoots` when sync complete + kv ready + setting on (covers closed windows and turning it on). Unreadable ledger throws -> nothing deleted, error toast.
+- Moved completed-roots paging from `DialogSessionCleanup` to exported `listCompletedRoots`.
+- Fixed forks: `Session.fork` drops `ocAutoDelete` like `ocAutoRename`.
+- Updated agent-push SKILL.md (`~/.claude`, `~/.claudeSecond`, identical): final `session_complete` passes `autoDelete: true`. Wiki `Sessions.md` documents the setting (push is user's).
+- Risk: stale ledger from a crashed TUI keeps its session from auto-delete (safe side). Startup sweep runs once per TUI process.
+- Verification: new `task.test.ts` "autoDelete flags the session only after a verified push" + existing completion tests, 12 pass; `autoRename.test.ts` fork test (now also asserts `ocAutoDelete` dropped) 1 pass; opencode and tui typecheck exit 0. TUI behavior not live-checked; no pane test added.
+
+### User
+agent-push
+- New `/agentPushAutoDelete` setting (off by default) deletes a session after a successful agent-push once you leave it.
+- Only sessions whose push actually reached the remote are deleted; pinned sessions, sessions open in another window, and sessions you prompted again are kept.
+- Sessions left by closing oc are cleaned up the next time oc starts with the setting on.
+
+---
+
 ## 2026-10-15 (~00:39) - v0.2.201 singlehandedlyTidal - Clean up completed sessions from the palette - Claude Opus 5.5, low reasoning; Implementation
 
 ### Agent

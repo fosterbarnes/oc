@@ -27,7 +27,7 @@ import { ProviderV2 } from "@opencode-ai/core/provider"
 import { ModelV2 } from "@opencode-ai/core/model"
 import { Permission } from "../../src/permission"
 import { Provider } from "../../src/provider/provider"
-import { agentPushTitle, SessionCompleteTool } from "../../src/tool/sessionComplete"
+import { agentPushTitle, AUTO_DELETE_KEY, SessionCompleteTool } from "../../src/tool/sessionComplete"
 import { SessionFailedTool } from "../../src/tool/sessionFailed"
 
 afterEach(async () => {
@@ -337,6 +337,45 @@ describe("tool.task", () => {
         git("remote", "add", "origin", "remote.git")
         git("push", "-q", "-u", "origin", "HEAD")
         expect(yield* complete).toBe(`${title}#${git("rev-parse", "--short=7", "HEAD")}`)
+      }),
+    { git: true },
+  )
+
+  it.instance(
+    "autoDelete flags the session only after a verified push",
+    () =>
+      Effect.gen(function* () {
+        const sessions = yield* Session.Service
+        const { chat, assistant } = yield* seed()
+        const def = yield* (yield* SessionCompleteTool).init()
+        const git = (...args: string[]) => {
+          const out = Bun.spawnSync(["git", ...args], { cwd: chat.directory })
+          if (out.exitCode !== 0) throw new Error(`git ${args.join(" ")}: ${out.stderr.toString()}`)
+        }
+        const complete = Effect.gen(function* () {
+          yield* sessions.setSessionComplete({ sessionID: chat.id, sessionComplete: false })
+          const result = yield* def.execute({ autoDelete: true }, {
+            sessionID: chat.id,
+            messageID: assistant.id,
+            agent: "build",
+            abort: new AbortController().signal,
+            messages: [],
+            metadata: () => Effect.void,
+            ask: () => Effect.void,
+          })
+          return { output: result.output, flag: (yield* sessions.get(chat.id)).metadata?.[AUTO_DELETE_KEY] }
+        })
+
+        // No upstream: not pushed, so no flag, and the agent is told why.
+        expect(yield* complete).toEqual({
+          output: "Marked the current session complete. Not marked for auto-delete: HEAD does not match its upstream.",
+          flag: undefined,
+        })
+        git("init", "--bare", "-q", "remote.git")
+        git("remote", "add", "origin", "remote.git")
+        git("push", "-q", "-u", "origin", "HEAD")
+        expect(yield* complete).toEqual({ output: "Marked the current session complete.", flag: true })
+        expect((yield* sessions.get(chat.id)).title).toBe(chat.title)
       }),
     { git: true },
   )

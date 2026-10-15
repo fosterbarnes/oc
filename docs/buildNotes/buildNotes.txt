@@ -1,8 +1,8 @@
-v0.2.201 singlehandedlyTidal
+v0.2.202 usuallyFellow
 
-sessions:
-The oc command palette now includes Clean up completed sessions. Choose delete or archive, then select the current folder, another folder, or all folders. Delete is the default and asks for confirmation before permanently removing sessions and their subagent sessions.
+agent-push:
+The new /agentPushAutoDelete setting is off by default. When enabled, sessions marked for auto-delete after a successful agent-push are deleted once you leave them. Completed pushed sessions left by closing oc are cleaned up when oc next starts with the setting enabled.
 
-The cleanup skips the open session, running or retrying sessions, pinned sessions, and sessions on disconnected workspaces. It reports how many sessions were processed and any failures.
+Auto-delete keeps the current session, pinned sessions, running sessions, and sessions open in another tab. Prompting a session again clears its completion state and keeps it. Forks do not inherit the auto-delete marker.
 
-Under the hood: Added the cleanup dialog, paginated completed-session loading, and a shared eligibility filter. The targeted cleanup test and prePush checks passed.
+Under the hood: Added the verified-push autoDelete parameter to session_complete, shared completed-session paging with the cleanup dialog, and added cross-tab ledger checks before deletion. The targeted completion and fork tests and prePush checks passed.
