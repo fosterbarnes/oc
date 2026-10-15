@@ -1,6 +1,6 @@
-v0.2.194 hoplessExposing
+v0.2.195 regenerateVomit
 
 Claude Code:
-An agent that denies websearch now also turns Claude Code's own web search off, on normal turns as well as command turns.
+After a revive, Claude answers your next prompt directly instead of first replying to the "oc revived" line. Revive and launcher notices remain available as context for the next prompt.
 
-Under the hood: oc now sends the agent's denied harness-only tools to the Claude Code provider, which adds them to the disallowed tools and the tool catalog key. The earlier command-turn web search fix was confirmed live. Targeted Claude Code provider tests and TypeScript checks passed, and prePush checks passed.
+Under the hood: user messages now retain the noReply flag, and Claude's pending-prompt selection skips those context-only messages. Regenerated the legacy SDK message type. The revive-notice regression and automatic-rename scenarios passed, the earlier TypeScript check passed, and prePush checks passed.

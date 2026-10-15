@@ -112,6 +112,25 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-14 (~21:58) - v0.2.195 regenerateVomit - Claude no longer answers the revive mark before your prompt - Claude Opus 5.5, low reasoning; Debug
+
+### Agent
+- Meta: Claude Opus 5.5; low; Debug; completed
+- Version: 0.2.195 regenerateVomit
+- ERROR: first prompt after `/revive` (session ses_ec2d2575bffefzJxzDmWSxx7gP) got a Claude step answering the revive mark ("brief revival notice"), then a second step for the real prompt. DB: assistant msg_13d42b0dd parentID = revive mark msg_13d42101d.
+- Root cause: `pendingUser` in `session/prompt.ts` loop (added fc7699a1e, v0.2.186 steering follow-up) picks the OLDEST user message after the last Claude step's parent. The TUI revive mark (`app.tsx` `mark()`, `noReply`) sits there, so it ran as its own turn and the real prompt was filtered out until the next loop step. Same class as the v0.2.186 launcher-message fix.
+- Added `noReply` (optional boolean) to `SessionV1.User` (`schema/src/v1/session.ts`); `createUserMessage` persists it when `input.noReply`. `pendingUser` and `unanswered` skip `noReply` messages; the mark still reaches Claude as context with the next prompt.
+- Regenerated legacy SDK (`sdk/js/src/v2/gen/types.gen.ts`: one line).
+- Risk: marks saved before this build have no flag; one already sitting after the last Claude reply can still be answered once.
+- Added fakeModel.test.ts "a revive mark between prompts is never answered on its own": prompt, noReply revive mark, prompt; expects 2 Claude requests, mark flagged, assistants parented to the two real prompts.
+- Verification: new test fails without the `pendingUser` skip (3 requests), passes with it; with the launcher-mark rename test: 2 pass. `bun run typecheck` in opencode clean. Not checked live (needs build).
+
+### User
+Claude Code chats
+- After a revive, Claude answers your next prompt directly instead of first replying to the "oc revived" line.
+
+---
+
 ## 2026-10-14 (~21:58) - v0.2.194 hoplessExposing - Agent rules denying websearch turn Claude's WebSearch off - Claude Opus 5.5, low reasoning; Implementation
 
 ### Agent

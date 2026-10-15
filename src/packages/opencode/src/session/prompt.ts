@@ -948,6 +948,7 @@ const layer = Layer.effect(
         tools: input.tools,
         permission: input.turnPermission?.map((rule) => ({ ...rule })),
         ...(input.toolHost ? { toolHost: { ...input.toolHost } } : {}),
+        ...(input.noReply ? { noReply: true } : {}),
         agent: ag.name,
         model: {
           providerID: model.providerID,
@@ -1473,11 +1474,13 @@ const layer = Layer.effect(
           const { assistant: lastAssistant, finished: lastFinished, tasks } = latest
           // Settings-incompatible Claude prompts must run separately under their own permissions.
           // Only after a Claude step: with none yet, `find` would pick the session's first (synthetic) message.
+          // No-reply marks (revive) are never answered on their own; the next prompt carries them.
           const pendingUser = lastAssistant && isClaudeCodeProvider(lastAssistant.providerID)
-            ? msgs.find((msg) => msg.info.role === "user" && msg.info.id > lastAssistant.parentID &&
+            ? msgs.find((msg) => msg.info.role === "user" && !msg.info.noReply &&
+              msg.info.id > lastAssistant.parentID &&
               !msg.parts.some((part) => part.type === "text" && part.metadata?.[STEERED_METADATA_KEY]))
             : undefined
-          const unanswered = msgs.findLast((msg) => msg.info.role === "user" &&
+          const unanswered = msgs.findLast((msg) => msg.info.role === "user" && !msg.info.noReply &&
             !msg.parts.some((part) => part.type === "text" && part.metadata?.[STEERED_METADATA_KEY]))?.info
           const lastUser = pendingUser?.info.role === "user" ? pendingUser.info
             : unanswered?.role === "user" ? unanswered : latest.user

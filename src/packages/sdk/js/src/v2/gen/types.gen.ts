@@ -269,6 +269,7 @@ export type UserMessage = {
   toolHost?: {
     [key: string]: "auto" | "oc" | "harness"
   }
+  noReply?: boolean
 }
 
 export type ProviderAuthError = {

@@ -358,6 +358,8 @@ export const User = Schema.Struct({
   permission: optional(PermissionV1.Ruleset),
   // Command-turn choice per oc tool id (or "*") of which implementation a third-party harness runs.
   toolHost: optional(Schema.Record(Schema.String, Schema.Literals(["auto", "oc", "harness"]))),
+  // Saved with `noReply` (revive and launcher marks): context for the next prompt, never a turn of its own.
+  noReply: optional(Schema.Boolean),
 }).annotate({ identifier: "UserMessage" })
 export type User = Types.DeepMutable<Schema.Schema.Type<typeof User>>
 

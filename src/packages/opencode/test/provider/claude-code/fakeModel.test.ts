@@ -157,6 +157,41 @@ describe.skipIf(!cliPath)("Claude Code CLI against TestLLMServer", () => {
     120_000,
   )
 
+  // A revive mark (no-reply, saved by the TUI before relaunch) sits after the last answered prompt.
+  // The next prompt must get the only Claude step, not a step answering the mark first.
+  cliIt.live(
+    "a revive mark between prompts is never answered on its own",
+    (fixture) =>
+      Effect.gen(function* () {
+        const llm = fixture.llm
+        const chat = yield* openChat(fixture)
+        yield* llm.text("FIRST-REPLY")
+        yield* chat.prompt("First task")
+        yield* Effect.promise(() =>
+          chat.sdk.session.prompt({
+            sessionID: chat.sessionID,
+            model: { providerID: "claude-code", modelID: "claude-sonnet-4-5" },
+            noReply: true,
+            parts: [{ type: "text", synthetic: true, text: "[oc revived at 9:51 PM]", metadata: { kind: "revive" } }],
+          }),
+        )
+        yield* llm.text("SECOND-REPLY")
+        yield* chat.prompt("Second task after revive")
+
+        const inputs = yield* llm.inputs
+        expect(inputs).toHaveLength(2)
+        expect(JSON.stringify(inputs[1].messages)).toContain("Second task after revive")
+        const messages = (yield* Effect.promise(() => chat.sdk.session.messages({ sessionID: chat.sessionID }))).data!
+        const users = messages.filter((message) => message.info.role === "user").map((message) => message.info)
+        expect(users.map((user) => user.role === "user" && user.noReply)).toEqual([undefined, true, undefined])
+        const answered = messages.filter((message) => message.info.role === "assistant")
+          .map((message) => message.info.role === "assistant" && message.info.parentID)
+        expect(answered).toEqual([users[0].id, users[2].id])
+        expectIsolated(inputs)
+      }),
+    120_000,
+  )
+
   test("streams scripted replies and round-trips a tool call", async () => {
     await using tmp = await tmpdir()
     const note = path.join(tmp.path, "work", "note.txt")
