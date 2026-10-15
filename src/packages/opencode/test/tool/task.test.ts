@@ -10,6 +10,7 @@ import { EventV2Bridge } from "@/event-v2-bridge"
 import { Config } from "@/config/config"
 import { CrossSpawnSpawner } from "@opencode-ai/core/cross-spawn-spawner"
 import { Ripgrep } from "@opencode-ai/core/ripgrep"
+import { Git } from "@/git"
 import { Session } from "@/session/session"
 import type { SessionPrompt } from "../../src/session/prompt"
 import { MessageID, PartID, SessionID } from "../../src/session/schema"
@@ -26,7 +27,7 @@ import { ProviderV2 } from "@opencode-ai/core/provider"
 import { ModelV2 } from "@opencode-ai/core/model"
 import { Permission } from "../../src/permission"
 import { Provider } from "../../src/provider/provider"
-import { SessionCompleteTool } from "../../src/tool/sessionComplete"
+import { agentPushTitle, SessionCompleteTool } from "../../src/tool/sessionComplete"
 import { SessionFailedTool } from "../../src/tool/sessionFailed"
 
 afterEach(async () => {
@@ -84,6 +85,7 @@ const layer = (flags: Partial<RuntimeFlags.Info> = {}) =>
       EventV2Bridge.node,
       Config.node,
       CrossSpawnSpawner.node,
+      Git.node,
       Permission.node,
       Provider.node,
       Session.node,
@@ -299,6 +301,44 @@ describe("tool.task", () => {
         expect(after.time.updated).toBe(before.time.updated)
       }),
     { config: { agent: { build: { permission: { session_complete: "allow" } } } } },
+  )
+
+  it.instance(
+    "completion appends the pushed commit to an agent-push title",
+    () =>
+      Effect.gen(function* () {
+        const sessions = yield* Session.Service
+        const { chat, assistant } = yield* seed()
+        const title = agentPushTitle(chat.directory)
+        const def = yield* (yield* SessionCompleteTool).init()
+        const git = (...args: string[]) => {
+          const out = Bun.spawnSync(["git", ...args], { cwd: chat.directory })
+          if (out.exitCode !== 0) throw new Error(`git ${args.join(" ")}: ${out.stderr.toString()}`)
+          return out.stdout.toString().trim()
+        }
+        const complete = Effect.gen(function* () {
+          yield* sessions.setTitle({ sessionID: chat.id, title })
+          yield* sessions.setSessionComplete({ sessionID: chat.id, sessionComplete: false })
+          yield* def.execute({}, {
+            sessionID: chat.id,
+            messageID: assistant.id,
+            agent: "build",
+            abort: new AbortController().signal,
+            messages: [],
+            metadata: () => Effect.void,
+            ask: () => Effect.void,
+          })
+          return (yield* sessions.get(chat.id)).title
+        })
+
+        // No upstream yet: the push did not land, so the bare title stays.
+        expect(yield* complete).toBe(title)
+        git("init", "--bare", "-q", "remote.git")
+        git("remote", "add", "origin", "remote.git")
+        git("push", "-q", "-u", "origin", "HEAD")
+        expect(yield* complete).toBe(`${title}#${git("rev-parse", "--short=7", "HEAD")}`)
+      }),
+    { git: true },
   )
 
   it.instance(

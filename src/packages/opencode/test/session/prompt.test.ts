@@ -2613,6 +2613,22 @@ it.instance("slash composition expands shared arguments and shell snippets witho
   }),
 )
 
+it.instance("agent-push mid-session replaces the title with its placeholder", () =>
+  Effect.gen(function* () {
+    const { llm } = yield* useServerConfig((url) => ({
+      ...providerCfg(url),
+      command: { "agent-push": { template: "Push" } },
+    }))
+    const { prompt, chat, sessions } = yield* boot()
+    yield* sessions.setTitle({ sessionID: chat.id, title: "work in progress" })
+    yield* llm.text("worked")
+    yield* prompt.prompt({ sessionID: chat.id, agent: "build", parts: [{ type: "text", text: "do work" }] })
+    yield* llm.text("pushed")
+    yield* prompt.command({ sessionID: chat.id, command: "agent-push", arguments: "" })
+    expect((yield* sessions.get(chat.id)).title).toBe(`${path.basename(chat.directory)} - agent-push:`)
+  }),
+)
+
 it.instance("command permission applies to its own turn only", () =>
   Effect.gen(function* () {
     const { llm } = yield* useServerConfig((url) => ({

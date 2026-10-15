@@ -11,6 +11,7 @@ import { SessionTailTool } from "./sessionTail"
 import { RunAfterTurnTool } from "./runAfterTurn"
 import { TimeTool } from "./time"
 import { Session } from "@/session/session"
+import { Git } from "@/git"
 import { QuestionTool } from "./question"
 import { ShellTool } from "./shell"
 import { BgKillTool, BgStatusTool } from "./shellJobs"
@@ -477,6 +478,7 @@ export const node = LayerNode.make({
     Agent.node,
     Skill.node,
     Session.node,
+    Git.node,
     BackgroundJob.node,
     ShellJobs.node,
     Provider.node,

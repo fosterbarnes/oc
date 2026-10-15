@@ -112,6 +112,30 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-14 (~22:43) - v0.2.198 garnishKickflipping - agent-push session title with pushed commit hash - Claude Opus 5.5, low reasoning; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low; Implementation (/spit then /imp); completed
+- Version: 0.2.198 garnishKickflipping
+- Fixed v0.2.197 agent-push title: it was hardcoded `oc - agent-push: commit here` and only applied when agent-push was the first message (`startTitle` skips once users > 1). Removed `_FIXED_TITLES`, its `title()` branch, and the `ocCommand` text-part metadata (no other reader).
+- Added `agentPushTitle(directory)` in `tool/sessionComplete.ts` (`<basename> - agent-push:`). `SessionPrompt.command` sets it before `prompt()` when any selected command name is `agent-push`, at any message count. Automatic naming skips non-default titles, so no conflict.
+- Added in `SessionCompleteTool`: after marking complete, if the title equals the placeholder, `git rev-parse HEAD @{u}` must match (full hashes), then title becomes `<placeholder>#<rev-parse --short=7 HEAD>`. No upstream, or HEAD not pushed: placeholder stays as the failure marker. `--short` accepts only one revision, hence two calls.
+- Added `Git.node` to `ToolRegistry.node` deps (and the `task.test.ts` layer group, which lists nodes explicitly).
+- Changed `.scripts/agentPush.ps1` push report to `git rev-parse --short=7 HEAD`. Set local `git config core.abbrev 7` in this repo (git picked 9 at ~220k objects; local `.git/config` only).
+- Updated wiki `Sessions.md` Names section (separate `oc.wiki` checkout, unpushed).
+- Risk: TUI Ctrl+Shift+Enter complete toggle does not go through the tool, so it adds no hash. The Claude Code proxy reaches `session_complete` through the live tool registry (`spawnPlanning.ts` LiveToolInfo); not exercised live.
+- Verification: new `task.test.ts` "completion appends the pushed commit" (no upstream keeps placeholder; after push to a bare origin gets hash) plus the existing completion tests, 5 pass; new `prompt.test.ts` "agent-push mid-session" plus command permission test, 2 pass; `autoRename`/`renameDigest` 15 pass; `registry`/`skill`/`commandPermissions` 25 pass; opencode typecheck exit 0. Live run not done.
+- ERROR: first draft used `git rev-parse --short=7 HEAD @{u}`, which fails ("Needed a single revision"); the new test caught it.
+
+### User
+session titles
+- Running agent-push renames the session to `<folder> - agent-push:` at any point in a session, not just as the first message.
+- When the push lands and the agent marks the session complete, the title gains the 7-character commit hash, like `oc - agent-push:#b5e4f26`.
+- A title without a hash means the push did not finish.
+- Short commit hashes in this repo and in the agent-push report are now 7 characters.
+
+---
+
 ## 2026-10-14 (~22:28) - v0.2.197 attemptingNation - Claude auto-resume becomes one harness palette entry - Claude Opus 5.5, low reasoning; Agent
 
 ### Agent

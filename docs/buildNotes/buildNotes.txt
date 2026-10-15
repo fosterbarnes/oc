@@ -1,9 +1,6 @@
-v0.2.197 attemptingNation
-
-Claude auto-resume:
-The command palette now has one Claude auto-resume entry under Third party harness management, showing whether it is on or off. Its dialog explains the setting, lets users toggle it, and lists scheduled resumes by fire time with retry counts. Selecting a scheduled resume cancels it; an empty list shows None.
+v0.2.198 garnishKickflipping
 
 session titles:
-Sessions started with the agent-push command use the fixed title "oc - agent-push: commit here" instead of a generated title.
+Running agent-push now renames the session to <folder> - agent-push: at any point in a conversation. After the push lands and the agent marks the session complete, the title gains the pushed commit's short hash. The placeholder remains when completion cannot confirm that HEAD matches its upstream.
 
-Under the hood: single-command text parts carry the command name so session naming can recognize agent-push. The unused scheduled-resume type import was removed, and the Claude Code wiki documentation was updated in its separate checkout. The TUI typecheck and prePush checks passed. No test files changed, so targeted tests were skipped; live UI verification was not run.
+Under the hood: Removed the first-message-only fixed title path and unused command-name metadata. Added Git to the tool registry dependencies and updated the push report to request 7-character commit hashes. Updated the Sessions wiki documentation in its separate checkout. The changed prompt and task tests passed, including mid-session renaming and completion against a local bare remote. The prePush checks passed. Live UI verification was not run.

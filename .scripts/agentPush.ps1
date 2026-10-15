@@ -51,6 +51,6 @@ foreach ($step in 'prePush', 'push') {
 }
 
 Set-Location -LiteralPath $repoRoot
-Write-Host "--- pushed $(git log -1 --format=%h) to origin/$(git branch --show-current)"
+Write-Host "--- pushed $(git rev-parse --short=7 HEAD) to origin/$(git branch --show-current)"
 git show -s --format=%B HEAD
 git show --name-status --format= HEAD
