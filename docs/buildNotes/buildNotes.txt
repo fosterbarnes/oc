@@ -1,6 +1,6 @@
-v0.2.198 garnishKickflipping
+v0.2.199 jojoDrangleic
 
-session titles:
-Running agent-push now renames the session to <folder> - agent-push: at any point in a conversation. After the push lands and the agent marks the session complete, the title gains the pushed commit's short hash. The placeholder remains when completion cannot confirm that HEAD matches its upstream.
+command palette:
+The Claude auto-resume dialog now shows on/off choices with the current setting marked. Selecting the current setting closes the dialog. Scheduled resumes appear only when present, under "Scheduled (select to cancel)", with their session titles and scheduled times.
 
-Under the hood: Removed the first-message-only fixed title path and unused command-name metadata. Added Git to the tool registry dependencies and updated the push report to request 7-character commit hashes. Updated the Sessions wiki documentation in its separate checkout. The changed prompt and task tests passed, including mid-session renaming and completion against a local bare remote. The prePush checks passed. Live UI verification was not run.
+Under the hood: Simplified the dialog options and removed the empty scheduled row and long description. The TUI typecheck and prePush checks passed. Live UI verification was not run.

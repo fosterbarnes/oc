@@ -112,6 +112,20 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-14 (~22:54) - v0.2.199 jojoDrangleic - Simpler Claude auto-resume dialog - Claude Opus 5.5, low reasoning; Agent
+
+### Agent
+- Meta: Claude Opus 5.5; low reasoning; Agent; completed
+- Version: 0.2.199 jojoDrangleic
+- Simplified `claude.autoResume` dialog in `tui/src/app.tsx`: plain `on`/`off` rows with `current` marking state (bgRun pattern); re-picking the current value closes. Scheduled entries appear only when present, under "Scheduled (select to cancel)". Removed the long truncating description, "Setting" category, and inert "None" row.
+- Verification: `bun run typecheck` in `packages/tui` passed. Not run live.
+
+### User
+Command palette
+- The Claude auto-resume dialog is now just on/off, like other settings, with any scheduled resumes listed below for cancelling.
+
+---
+
 ## 2026-10-14 (~22:43) - v0.2.198 garnishKickflipping - agent-push session title with pushed commit hash - Claude Opus 5.5, low reasoning; Implementation
 
 ### Agent

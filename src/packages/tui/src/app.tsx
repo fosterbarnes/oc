@@ -2551,29 +2551,27 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
             setResumeEnabled(state.enabled)
             const entries = [...state.entries].sort((a, b) => a.fireAt - b.fireAt)
             const update = (action: Promise<unknown>) => void action.then(show).catch(toast.error)
+            const setEnabled = (enabled: boolean) =>
+              enabled === state.enabled ? dialog.clear() : update(sdk.resume.set(enabled))
             dialog.replace(() => (
               <DialogSelect
                 title="Claude auto-resume"
+                current={state.enabled ? "on" : "off"}
                 options={[
                   {
-                    title: "Auto-resume",
-                    description:
-                      "when every Claude account hits its usage limit, send a continue prompt a minute after the reset (max 5 in a row per session)",
-                    footer: state.enabled ? "on" : "off",
-                    value: "toggle",
-                    category: "Setting",
-                    onSelect: () => update(sdk.resume.set(!state.enabled)),
+                    title: "on",
+                    description: "continue after a usage limit resets",
+                    value: "on",
+                    onSelect: () => setEnabled(true),
                   },
-                  ...(entries.length === 0
-                    ? [{ title: "None", value: "none", category: "Scheduled", inert: true }]
-                    : entries.map((entry) => ({
-                        title: sync.session.get(entry.sessionID)?.title ?? entry.sessionID,
-                        description: `fires ${new Date(entry.fireAt).toLocaleString()}${entry.attempts ? `, retry ${entry.attempts}` : ""}`,
-                        footer: "select to cancel",
-                        value: entry.id,
-                        category: "Scheduled",
-                        onSelect: () => update(sdk.resume.cancel(entry.id)),
-                      }))),
+                  { title: "off", value: "off", onSelect: () => setEnabled(false) },
+                  ...entries.map((entry) => ({
+                    title: sync.session.get(entry.sessionID)?.title ?? entry.sessionID,
+                    description: new Date(entry.fireAt).toLocaleString(),
+                    value: entry.id,
+                    category: "Scheduled (select to cancel)",
+                    onSelect: () => update(sdk.resume.cancel(entry.id)),
+                  })),
                 ]}
               />
             ))
