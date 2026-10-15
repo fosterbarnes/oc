@@ -250,6 +250,17 @@ test("question proxy hint names the exact MCP tool and defuses bare 'question'",
   // Must mention that AskUserQuestion is disabled.
   assert.match(QUESTION_PROXY_HINT, /AskUserQuestion/)
   assert.match(QUESTION_PROXY_HINT, /disabled/i)
+  // Open-ended questions go through the tool too, and deferral is not absence.
+  assert.match(QUESTION_PROXY_HINT, /options: \[\]/)
+  assert.match(QUESTION_PROXY_HINT, /ToolSearch/)
+  assert.doesNotMatch(QUESTION_PROXY_HINT, /question with options/)
+})
+
+test("static question def covers open-ended questions and claims no deadline", () => {
+  const question = DEFAULT_PROXY_TOOLS.find((t) => t.name === "question")!
+  assert.match(question.description, /open-ended/)
+  assert.match(question.description, /options: \[\]/)
+  assert.doesNotMatch(question.description, /30-minute|deadline/)
 })
 
 // --- task_batch: the concurrency path (from @broskees' 68ed142) ----------------

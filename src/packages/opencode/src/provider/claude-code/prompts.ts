@@ -16,7 +16,8 @@ opencode requires the user to press "continue" after each turn ends. When a
 task has multiple steps, do them all in one turn - chain tool calls rather
 than pausing for user confirmation between subtasks. End the turn only
 when the task is done, you need clarification on intent, or you hit a real
-blocker. The user can interrupt or abort at any time; turn endings should
+blocker. When a question tool is available, ask clarification through it
+instead: it waits for the answer without ending the turn. The user can interrupt or abort at any time; turn endings should
 mark meaningful checkpoints, not every completed substep.`
 
 /**
@@ -49,11 +50,12 @@ Subagent dispatch in this environment goes through exactly two tools: \`mcp__ope
  */
 export const QUESTION_PROXY_HINT = `### Asking the operator questions
 
-Structured questions in this environment go through exactly one tool: \`mcp__opencode_proxy__question\`.
+Every question that needs an answer from the operator goes through exactly one tool: \`mcp__opencode_proxy__question\`.
 
-- When you need to ask the operator a question with options, call \`mcp__opencode_proxy__question\` with a \`questions\` array (each item has \`question\`, \`header\`, \`options\` of \`{label, description}\`, and optional \`multiple\`).
+- When you need a decision, preference, or clarification, call \`mcp__opencode_proxy__question\` with a \`questions\` array (each item has \`question\`, \`header\`, \`options\` of \`{label, description}\`, and optional \`multiple\`). For an open-ended question, pass \`options: []\`; the form always lets the operator type an answer.
+- Load it with ToolSearch if it is deferred. A deferred tool is available; do not fall back to a plain-text question instead of loading it.
 - Do NOT call bare \`question\` - that is not a tool. Always use the full \`mcp__opencode_proxy__question\` name when invoking it.
-- Claude Code's built-in \`AskUserQuestion\` is disabled in this environment; the proxy is the only way to ask structured questions.`
+- Claude Code's built-in \`AskUserQuestion\` is disabled in this environment; the proxy is the only way to ask the operator questions.`
 
 /**
  * The oc-only environment note for one tool-enabled spawn. The skills and

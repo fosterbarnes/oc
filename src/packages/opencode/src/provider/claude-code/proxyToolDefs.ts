@@ -132,17 +132,16 @@ const AGENT_BLURB_LIMIT = 140
  * round-trip.
  */
 export const QUESTION_PROXY_NOTE =
-  "This routes structured questions through opencode's native `question`" +
-  " tool, which renders a TUI form with the options you provide and" +
-  " blocks until the operator answers. Claude Code's built-in" +
-  " AskUserQuestion is disabled in this environment; this proxy is the" +
-  " ONLY way to ask the operator for a decision or clarification." +
-  " Answers come back as arrays of selected labels (set `multiple: true`" +
-  " to allow more than one). If the operator dismisses the form the call" +
-  " returns an error - treat that as 'no answer' and stop, do not guess." +
-  " Question calls get a 30-minute proxy deadline by default (configurable" +
-  " via proxyToolTimeoutMs); for long-AFK scenarios prefer fewer," +
-  " high-signal questions."
+  "This routes questions through opencode's native `question` tool, which" +
+  " renders a TUI form (your options plus a typed-answer field; pass" +
+  " `options: []` for an open-ended question) and blocks until the" +
+  " operator answers. Claude Code's built-in AskUserQuestion is disabled" +
+  " in this environment; this proxy is the ONLY way to ask the operator" +
+  " for a decision, preference, or clarification - do not ask in plain" +
+  " text instead. Answers come back as arrays of selected labels or typed" +
+  " text (set `multiple: true` to allow more than one). If the operator" +
+  " dismisses the form the call returns an error - treat that as 'no" +
+  " answer' and stop, do not guess."
 
 /**
  * Pull *only* the agent-type list out of opencode's live `task` description.
@@ -311,12 +310,9 @@ export const DEFAULT_PROXY_TOOLS: ProxyToolDef[] = [
   {
     name: "question",
     description:
-      "Ask the operator structured questions with options and receive" +
-      " their answers back. Routed through opencode's native `question`" +
-      " tool so the prompt renders as a real TUI form (with options and a" +
-      " custom-answer field) instead of a plain text turn. Use this when" +
-      " you need a decision, clarification, or preference from the" +
-      " operator mid-task. " +
+      "Ask the operator questions and receive their answers back. Use this" +
+      " whenever you need a decision, clarification, or preference from" +
+      " the operator, including open-ended questions. " +
       QUESTION_PROXY_NOTE,
     inputSchema: {
       type: "object",

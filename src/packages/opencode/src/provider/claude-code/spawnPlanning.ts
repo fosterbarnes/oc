@@ -40,6 +40,7 @@ import { log } from "./logger.js"
 import { createHash } from "node:crypto"
 import { commandToolPlan, harnessToolsDenied } from "./callOptions.js"
 import { CLAUDE_NATIVE_TOOLS, type CommandToolPlan } from "./shared.js"
+import { toolNameForHost } from "./hostTools.js"
 
 export function toolCatalogHash(
   config: ClaudeCodeConfig,
@@ -384,7 +385,11 @@ async function assembleProxyTools(input: Parameters<typeof planSpawn>[0]) {
     // proxy where oc enforces the turn's rules. Directly configured MCP servers stay out.
     const split = splitCommandTools(commandPlan, modelTools, dialect)
     const forwarded = new Set(split.forwarded)
-    const staticDefs = filterProxyByModelTools(input.proxyTools ?? [], modelTools, dialect)
+    // The host already offers the live `question` description; no registry fetch needed.
+    const staticDefs = overlayQuestionProxyDescription(
+      filterProxyByModelTools(input.proxyTools ?? [], modelTools, dialect),
+      modelTools?.find((tool) => tool.name === toolNameForHost("question", dialect))?.description,
+    )
     const taken = new Set(staticDefs.map((tool) => tool.name))
     return {
       combined: [

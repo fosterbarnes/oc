@@ -116,6 +116,7 @@ import { which } from "@opencode-ai/core/util/which"
 import { checkChatgptDesktop, installChatgptDesktop } from "./chatgptDesktopUpdate"
 import { checkCursorDesktop, installCursorDesktop } from "./cursorDesktopUpdate"
 import { validateHotkey } from "./hotkeyValidate"
+import { bootstrapSession, listHomeDirs } from "./ocNewSession"
 import fs from "node:fs"
 import { applyEdits, modify } from "jsonc-parser"
 import { reviveText, reviveVersions } from "./util/revive"
@@ -192,34 +193,6 @@ function readOcConfig(): {
       reviveBuild: false,
     }
   }
-}
-function listOcHomeDirs(): Array<{ name: string; fullPath: string; mtimeMs: number }> {
-  // Keep sort/filter aligned with OcConfig.listHomeDirs.
-  const { homeDir, homeDirSort } = readOcConfig()
-  let entries: fs.Dirent[]
-  try {
-    entries = fs.readdirSync(homeDir, { withFileTypes: true })
-  } catch {
-    return []
-  }
-  const dirs = entries
-    .filter((entry) => entry.isDirectory())
-    .map((entry) => {
-      const fullPath = path.join(homeDir, entry.name)
-      let mtimeMs = 0
-      try {
-        mtimeMs = fs.statSync(fullPath).mtimeMs
-      } catch {
-        mtimeMs = 0
-      }
-      return { name: entry.name, fullPath, mtimeMs }
-    })
-  if (homeDirSort === "modified") {
-    dirs.sort((a, b) => b.mtimeMs - a.mtimeMs || a.name.localeCompare(b.name))
-  } else {
-    dirs.sort((a, b) => a.name.localeCompare(b.name))
-  }
-  return dirs
 }
 
 const CROW_SESSION_HANDLE_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
@@ -301,34 +274,6 @@ export function handleCrowTargetedCommandExecute(input: {
     return
   }
   input.dispatchCommand(input.properties.command)
-}
-
-function runOcCommand(
-  executable: string,
-  args: string[],
-  cwd: string,
-): Promise<{ code: number; stdout: string; stderr: string }> {
-  return new Promise((resolve, reject) => {
-    const child = spawn(executable, args, { cwd, stdio: ["ignore", "pipe", "pipe"] })
-    let stdout = ""
-    let stderr = ""
-    child.stdout?.on("data", (chunk) => (stdout += String(chunk)))
-    child.stderr?.on("data", (chunk) => (stderr += String(chunk)))
-    child.once("error", reject)
-    child.once("close", (code) => resolve({ code: code ?? 1, stdout, stderr }))
-  })
-}
-
-async function bootstrapOcSession(executable: string, directory: string, cwd: string): Promise<string> {
-  const result = await runOcCommand(executable, ["session", "bootstrap", directory], cwd)
-  if (result.code !== 0) throw new Error(result.stderr.trim() || `exit code ${result.code}`)
-  try {
-    const payload = JSON.parse(result.stdout) as { sessionID?: unknown }
-    if (typeof payload.sessionID !== "string" || !payload.sessionID) throw new Error("bootstrap returned no session ID")
-    return payload.sessionID
-  } catch (error) {
-    throw new Error(`invalid bootstrap response: ${error instanceof Error ? error.message : String(error)}`)
-  }
 }
 
 function persistOcConfig(
@@ -1679,9 +1624,9 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
         category: "oc",
         slashName: "newOcSession",
         run: () => {
-          const dirs = listOcHomeDirs()
+          const { homeDir, homeDirSort } = readOcConfig()
+          const dirs = listHomeDirs(homeDir, homeDirSort)
           if (dirs.length === 0) {
-            const { homeDir } = readOcConfig()
             toast.show({ message: `No folders found in ${homeDir}`, variant: "error" })
             return
           }
@@ -1704,14 +1649,9 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
                   toast.show({ message: `Directory not found: ${directory}`, variant: "error" })
                   return
                 }
-                const { executable } = readOcConfig()
-                if (!executable) {
-                  toast.show({ message: "OpenCode executable is not configured", variant: "error" })
-                  return
-                }
                 creating = true
                 try {
-                  const sessionID = await bootstrapOcSession(executable, directory, os.homedir())
+                  const sessionID = await bootstrapSession(sdk.client, directory)
                   dialog.clear()
                   route.navigate({ type: "session", sessionID })
                 } catch (error) {

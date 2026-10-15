@@ -112,6 +112,44 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-14 (~22:04) - v0.2.196 roNetwork - New session from Home opens faster - Claude Opus 5.5, low reasoning; Agent
+
+### Agent
+- Meta: Claude Opus 5.5; low reasoning; Agent; completed
+- Version: 0.2.196 (reused uncommitted bump per user; no new bump)
+- Moved: ported uncommitted ocCLONE change (plan `2026-10-14-new-session-speed-merge.md`); `git apply --3way` clean
+- Added `src/packages/core/src/util/ocSession.ts`: `writeSidebar`, `nextProjectTitle` moved verbatim; `opencode/src/config/oc.ts` re-exports them
+- Added `src/packages/tui/src/ocNewSession.ts`: `listHomeDirs` (no stat on name sort), `bootstrapSession` (SDK in-process: sidebar, global list limit 500, create + noReply prompt with explicit `directory`)
+- Removed from `tui/src/app.tsx`: `listOcHomeDirs`, `runOcCommand`, `bootstrapOcSession`, executable check on `oc.new_session` path
+- Added `src/packages/tui/test/ocNewSession.test.ts`
+- Verification: `bun test test/ocNewSession.test.ts` (tui) 2 pass; `bun test test/cli/sessionBootstrap.test.ts` (opencode) 2 pass; `bunx tsc --noEmit` (tui) no errors; leftover-name grep clean
+- Risk: remote `oc attach <url>` lists local folders (pre-existing)
+
+### User
+Sessions
+- Home -> Ctrl+N -> pick project now creates the session directly instead of launching a separate oc process, so the prompt opens faster.
+- New session no longer requires a configured oc executable.
+
+---
+
+## 2026-10-14 (~22:02) - v0.2.196 roNetwork - Question tool works the same on every Claude turn - Claude Opus 5.5, low reasoning; Agent
+
+### Agent
+- Meta: Claude Opus 5.5; low; Agent (merge handoff questionToolConsistency.merge.md); completed, not committed
+- Version: 0.2.196
+- Moved uncommitted question-tool changes from ocCLONE2 (base 8a42a5cd3) via patch: question.txt, prompts.ts (QUESTION_PROXY_HINT, MULTI_STEP_TASK_HINT), proxyToolDefs.ts (QUESTION_PROXY_NOTE, static question def), question.test.ts (open-ended options: []), subagentHint.test.ts
+- Fixed merge conflict by hand in spawnPlanning.ts: v0.2.194 replaced hasCommandPermission with commandToolPlan; kept that and applied overlayQuestionProxyDescription on command-turn staticDefs, added toolNameForHost import
+- Kept ocCLONE2 src/.version out; left user's src/bun.lock and package.json changes untouched
+- Verification: bun test question.test.ts subagentHint.test.ts proxyMcp.test.ts: 95 pass, 0 fail
+- TODO: command-turn question overlay has no automated test (no planSpawn command-turn fixture)
+
+### User
+Claude provider
+- Claude now uses oc's question form consistently, including for open-ended questions and on command turns like `/spit`.
+- Claude is told to keep working through routine multi-step tasks instead of stopping to ask.
+
+---
+
 ## 2026-10-14 (~21:58) - v0.2.195 regenerateVomit - Claude no longer answers the revive mark before your prompt - Claude Opus 5.5, low reasoning; Debug
 
 ### Agent

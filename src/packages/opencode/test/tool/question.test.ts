@@ -90,6 +90,22 @@ describe("tool.question", () => {
     }),
   )
 
+  it.instance("returns typed text for an open-ended question with no options", () =>
+    Effect.gen(function* () {
+      const question = yield* Question.Service
+      const toolInfo = yield* QuestionTool
+      const tool = yield* toolInfo.init()
+      const questions = [{ question: "What should the branch be called?", header: "Branch", options: [] }]
+
+      const fiber = yield* tool.execute({ questions }, ctx).pipe(Effect.forkScoped)
+      const item = yield* pending(question)
+      yield* question.reply({ requestID: item.id, answers: [["fix-scroll-state"]] })
+
+      const result = yield* Fiber.join(fiber)
+      expect(result.output).toContain(`"What should the branch be called?"="fix-scroll-state"`)
+    }),
+  )
+
   // intentionally removed the zod validation due to tool call errors, hoping prompting is gonna be good enough
   //   test("should throw an Error for header exceeding 30 characters", async () => {
   //     const tool = await QuestionTool.init()
