@@ -112,6 +112,48 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-15 (~00:39) - v0.2.201 singlehandedlyTidal - Clean up completed sessions from the palette - Claude Opus 5.5, low reasoning; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low reasoning; Implementation; completed
+- Version: 0.2.201 singlehandedlyTidal (from latest commit; no .version file found)
+- Added src/packages/tui/src/component/dialog-session-cleanup.tsx: DialogSessionCleanup (action archive/delete, scope per folder or all, run row) + pure cleanupTargets filter
+- Loads root complete sessions via experimental.session.list, pages by cursor = last time.updated; skips open, busy/retry, pinned, disconnected-workspace sessions
+- Archive = session.update time.archived; delete = session.delete behind DialogConfirm; sequential, counts failures, one toast
+- Added palette command `oc.session_cleanup` ("Clean up completed sessions", oc category) in app.tsx
+- Reworked dialog to settings style: rows `Action`/`Folder` with value in description, run row "Archive N sessions"; no search box (renderFilter=false); Folder opens a DialogSelect of folders (basename + count, "All folders"), which reopens the cleanup dialog via props {action, directory} (null = all)
+- Kept: renderFilter=false hides disabled rows (dialog-select.tsx:142), so run row is never disabled; run() returns on 0
+- Moved palette entry after `clearSavedImagesCommand`, before About (was first in oc section)
+- Changed default action to delete (user request); delete still confirms via DialogConfirm
+- MISTAKE: first placed it in `Session` category, which the oc palette (oc.settings_palette, oc-only filter) hides; use `oc` category per oc-palette-entry skill
+- Added test/component/dialog-session-cleanup.test.ts
+- Risk: no TUI view to unarchive; child-session cascade on delete assumed from server session.delete
+- Verification: new bun test passed (1/1); tsc --noEmit on tui package exit 0; live check not run
+
+### User
+Sessions
+- New command palette item "Clean up completed sessions" opens a small menu to archive or delete every session marked complete.
+- Choose archive or delete, and either one folder's sessions or all folders, then pick the Run row.
+- Deleting asks for confirmation first; the open session, running sessions, and pinned sessions are never touched.
+
+---
+
+## 2026-10-14 (~23:11) - v0.2.201 singlehandedlyTidal - README shows current version automatically - Claude Opus 5.5, low reasoning; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low reasoning; Implementation; completed
+- Version: 0.2.201 singlehandedlyTidal
+- Added `.scripts/readmeVersion.ps1`: rewrites README `Current version: [...](...)` line from `src/.version/version`, links `commits/main` (new commit hash unknown at pre-push). Throws unless exactly one match.
+- Added call in `.scripts/prePush.ps1` after `countCode.ps1`.
+- Kept existing README line as the anchor instead of adding markers (simpler than plan).
+- Verification: ran `readmeVersion.ps1`; README line 7 became `v0.2.200` (bumped to 0.2.201 after, refreshes on next prePush).
+
+### User
+README
+- The "Current version" line in the README now updates itself to the latest version on every push.
+
+---
+
 ## 2026-10-14 (~23:04) - v0.2.200 crishEssentially - Separate themes for oc and opencode - Claude Opus 5.5, low reasoning; Implementation
 
 ### Agent

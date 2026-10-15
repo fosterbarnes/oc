@@ -56,6 +56,7 @@ import { DialogHelp } from "./ui/dialog-help"
 import { DialogAgent } from "./component/dialog-agent"
 import { DialogSubagents } from "./component/dialog-subagents"
 import { DialogSessionList } from "./component/dialog-session-list"
+import { DialogSessionCleanup } from "./component/dialog-session-cleanup"
 import { DialogWorkspaceList } from "./component/dialog-workspace-list"
 import { DialogConsoleOrg } from "./component/dialog-console-org"
 import { ThemeProvider, useTheme } from "./context/theme"
@@ -1792,6 +1793,14 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
       contextLimitCommands.contextLimit,
       todoCommand,
       clearSavedImagesCommand,
+      {
+        name: "oc.session_cleanup",
+        title: "Clean up completed sessions",
+        category: "oc",
+        run: () => {
+          dialog.replace(() => <DialogSessionCleanup />)
+        },
+      },
       {
         name: "oc.about",
         title: "About",
