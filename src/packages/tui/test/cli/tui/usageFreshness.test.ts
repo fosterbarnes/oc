@@ -3,25 +3,25 @@ import { mkdtemp, rm, stat } from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 import {
+  probeClaudeCodeUsage,
+  probeClaudeCodePool,
+  projectClaudeUsage,
+  updateClaudeSnapshot,
+  type ClaudeCodeUsage,
+} from "../../../src/routes/session/sidebar-tools/usage/claude"
+import { probeCursorUsage } from "../../../src/routes/session/sidebar-tools/usage/cursor"
+import {
   fullResetDate,
   formatUsagePercent,
   formatUsageRows,
   formatClaudeUsageRows,
   usageColumns,
-  probeClaudeCodeUsage,
-  probeClaudeCodePool,
-  probeCursorUsage,
-  probeOpenAIUsage,
-  projectClaudeUsage,
-  updateClaudeSnapshot,
-  updateUsageSnapshot,
-  usageProviderForModel,
   windowLabel,
   windowName,
-  type OpenAIUsage,
-  type ClaudeCodeUsage,
-  type UsageSnapshot,
-} from "../../../src/routes/session/sidebar-tools/usage"
+} from "../../../src/routes/session/sidebar-tools/usage/format"
+import { probeOpenAIUsage, type OpenAIUsage } from "../../../src/routes/session/sidebar-tools/usage/probes"
+import { usageProviderForModel } from "../../../src/routes/session/sidebar-tools/usage/providers"
+import { updateUsageSnapshot, type UsageSnapshot } from "../../../src/routes/session/sidebar-tools/usage/snapshot"
 
 test("sidebar precision follows the displayed used or remaining value", () => {
   expect([0, 2, 9, 10, 96, 99, 100].map((value) => formatUsagePercent(value))).toEqual([

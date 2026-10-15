@@ -144,7 +144,7 @@ export function mapTool(
 
   // TodoWrite becomes oc's `todowrite` so Todo.Service (and the todo panel)
   // gets populated. The stream mirrors the turn's last list once, in-process
-  // and provider-executed (`flushTodo` in turnStream.ts), never as an oc tool turn.
+  // and provider-executed (`TodoMirror.flush` in todoMirror.ts), never as an oc tool turn.
   if (name === "TodoWrite") {
     const mappedInput = mapToolInput(name, input)
     return { name: "todowrite", input: mappedInput, executed: false }

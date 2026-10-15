@@ -6,7 +6,7 @@ import protobuf from "protobufjs"
 import { CONVERSATION_CACHE_DIR, CONVERSATION_CACHE_SCHEMA_VERSION, CONVERSATION_CACHE_TTL_MS } from "../shared.js"
 import { decodeMessageSparse, encodeMessage } from "./messages.js"
 import type { ConversationBlobSnapshot } from "./blobStore.js"
-import type { OpencodeToolDef } from "./tools.js"
+import type { OpencodeToolDef } from "./descriptors.js"
 import { trace } from "../debug.js"
 
 export type PersistedConversation = {

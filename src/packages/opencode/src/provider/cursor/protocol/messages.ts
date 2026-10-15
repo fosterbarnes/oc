@@ -1025,7 +1025,7 @@ export function createMessageTypes(): protobuf.Root {
 
   // `args` is a map<string, google.protobuf.Value> on the wire (repeated map
   // entries at field #2). We capture each entry as raw bytes and decode them in
-  // tools.ts via struct.decodeStructEntriesToJson.
+  // execParse.ts via struct.decodeStructEntriesToJson.
   addType(root, "McpArgs", [
     { id: 1, name: "name", type: "string" },
     { id: 2, name: "args", type: "bytes", repeated: true },
@@ -1074,7 +1074,7 @@ export function createMessageTypes(): protobuf.Root {
   // (tasks/plans/fix-cursor-mcp-resource-exec.md, Correction 2). Under Option
   // B, list_mcp_resources/read_mcp_resource execute through the ordinary
   // field-11 MCP path via the alias rules below, so any 17/18 that still
-  // reaches this provider gets the total fallback built in tools.ts.
+  // reaches this provider gets the total fallback built in descriptors.ts.
   addType(root, "SmartModeApproval", [
     { id: 1, name: "request_id", type: "string" },
     { id: 2, name: "reason", type: "string" },

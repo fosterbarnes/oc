@@ -1,5 +1,5 @@
 /**
- * Claude warm-up schedules (warmup.ts): validation, due selection, the
+ * Claude warm-up schedules (warmup/): validation, due selection, the
  * locked atomic store, the pinned sender environment, and the tick rules.
  * No real CLI is spawned here; the fake-model sibling covers the installed
  * binary against TestLLMServer.
@@ -15,36 +15,38 @@ import {
   poolState,
   setCurrentAccount,
 } from "@/provider/claude-code/accounts.js"
+import { accountView, isStillSendable, sendWarmup, stateView, tickOnce } from "@/provider/claude-code/warmup"
 import {
-  _resetInventoryForTests,
   _setCliRunner,
-  _setInventoryProbe,
-  accountView,
   buildWarmupArgs,
   buildWarmupEnv,
   checkWarmupCli,
-  claimDueOccurrences,
   cliSupportsWarmup,
-  isScheduleEmpty,
-  isStillSendable,
+  warmupCwd,
+  type ChildTracker,
+} from "@/provider/claude-code/warmup/cli"
+import { materializePoolIds } from "@/provider/claude-code/warmup/identity"
+import {
+  _resetInventoryForTests,
+  _setInventoryProbe,
   listConnected,
-  materializePoolIds,
+} from "@/provider/claude-code/warmup/inventory"
+import {
+  isScheduleEmpty,
   nextOccurrence,
   normalizeSchedule,
   occurrencesInWindow,
   occurrenceMs,
   parseTimeList,
+  type DueOccurrence,
+} from "@/provider/claude-code/warmup/schedule"
+import {
+  claimDueOccurrences,
   readStore,
   recordAttempt,
-  sendWarmup,
   setAccountSchedule,
-  stateView,
   storeKeyForAccount,
-  tickOnce,
-  warmupCwd,
-  type ChildTracker,
-  type DueOccurrence,
-} from "@/provider/claude-code/warmup.js"
+} from "@/provider/claude-code/warmup/store"
 
 let dir = ""
 let storeFile = ""

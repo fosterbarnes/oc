@@ -40,7 +40,8 @@ fixed folder for now and stops running oc processes.
 Where things are:
 
 - `src/packages/opencode`: CLI, server, sessions, providers (`src/provider/claude-code`,
-  `src/provider/cursor`), oc launcher (`src/config/oc.ts`, `src/cli/cmd/oc.ts`)
+  `src/provider/cursor`), oc launcher (`src/config/oc.ts`, `resident.ts`, `reviveHost.ts`,
+  `src/cli/cmd/oc.ts`)
 - `src/packages/tui`: the terminal UI, including the sidebar (`src/routes/session/sidebar-tools`)
 - `src/packages/core`: shared services, config schema, database
 - `src/packages/cursor-runtime`: the Node relay for Cursor

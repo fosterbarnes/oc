@@ -8,7 +8,6 @@ import { createHash } from "node:crypto"
 import { SessionID, MessageID, PartID } from "./schema"
 import { claudeSteerSinks, isClaudeCodeProvider, STEERED_METADATA_KEY } from "@/provider/claude-code/shared"
 import { EffectBridge } from "@/effect/bridge"
-import { CURSOR_PROVIDER_ID } from "@/provider/cursor/shared"
 import { MessageV2 } from "./message-v2"
 import { SessionRevert } from "./revert"
 import { Session } from "./session"
@@ -64,29 +63,16 @@ import { eq } from "drizzle-orm"
 import { SessionTable } from "@opencode-ai/core/session/sql"
 import { SessionReminders } from "./reminders"
 import { SessionTools } from "./tools"
-import { LLMEvent } from "@opencode-ai/llm"
 import { Question } from "@/question"
 import { SessionWork } from "@opencode-ai/core/session/work"
+import { makeTitles } from "./titleGen"
+import { makeSideQuestion, type GenerateError, type GenerateInput, type GenerateResult } from "./sideQuestion"
 
 // @ts-ignore
 globalThis.AI_SDK_LOG_WARNINGS = false
 
 const decodeMessageInfo = Schema.decodeUnknownExit(SessionV1.Info)
 const decodeMessagePart = Schema.decodeUnknownExit(SessionV1.Part)
-const decodeAutoRename = Schema.decodeUnknownOption(Schema.Struct({
-  state: Schema.Literals(["pending", "attempted"]),
-  title: Schema.optional(Schema.String),
-}))
-// Tried in order after the rename agent's own model fails or returns an empty title.
-const RENAME_FALLBACKS = [
-  { model: Provider.parseModel("opencode/mimo-v2.6-flash-free"), variant: undefined },
-  { model: Provider.parseModel("openai/gpt-6-luna"), variant: "medium" },
-]
-// Stock titles use the loop model as fallback; marked and manual titles use the last user's model.
-type TitleInput = { session: Session.Info; history: SessionV1.WithParts[] } & (
-  | { mode: "stock"; providerID: ProviderV2.ID; modelID: ModelV2.ID }
-  | { mode: "marked" | "manual" }
-)
 const MAX_MCP_RESOURCE_BLOB_BYTES = 10 * 1024 * 1024
 const SUPPORTED_MCP_RESOURCE_ATTACHMENT_MIMES = new Set([
   "application/pdf",
@@ -105,14 +91,6 @@ IMPORTANT:
 - This tool provides your final answer - no further actions are taken after calling it`
 
 const STRUCTURED_OUTPUT_SYSTEM_PROMPT = `IMPORTANT: The user has requested structured output. You MUST use the StructuredOutput tool to provide your final response. Do NOT respond with plain text - you MUST call the StructuredOutput tool with your answer formatted according to the schema.`
-
-const GENERATE_TIMEOUT = "120 seconds"
-const SIDE_QUESTION_INSTRUCTION = [
-  "The user is asking a quick side question about the conversation so far.",
-  "Answer directly and concisely in markdown from what you already know.",
-  "Do not call any tools and do not take any actions.",
-  "This answer is not added to the conversation.",
-].join(" ")
 
 function mcpResourceBase64Size(value: string) {
   const trimmed = value.replace(/\s/g, "")
@@ -233,6 +211,7 @@ const layer = Layer.effect(
     const question = yield* Question.Service
     const work = yield* SessionWork.Service
     const queue = yield* SessionQueue.Service
+    const titles = makeTitles({ sessions, agents, provider, llm, work, scope })
     const { db } = database
     // Session work is admitted per project directory; work that lands during that project's reload is refused.
     const gated = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
@@ -312,231 +291,6 @@ const layer = Layer.effect(
         { concurrency: "unbounded", discard: true },
       )
       return parts
-    })
-
-    // One title path for every generated title. Modes:
-    // - stock: first request of an unmarked session. Title agent and whole request, one attempt.
-    // - marked: first request of an oc auto-rename session. Rename agent, its variant, then RENAME_FALLBACKS.
-    // - manual: /rename. Same rename attempts as marked, written unconditionally.
-    // Automatic modes skip the write when the title changed while the model was running.
-    const title = Effect.fn("SessionPrompt.title")(function* (input: TitleInput) {
-      const automatic = input.mode !== "manual"
-      if (automatic && (yield* sessions.get(input.session.id)).title !== input.session.title) return
-
-      const last = input.history.findLast((m) => m.info.role === "user")
-      if (!last || last.info.role !== "user") return
-      const user = last.info
-      const ag = yield* agents.get(input.mode === "stock" ? "title" : "rename")
-      if (!ag) return
-      const fallback = input.mode === "stock" ? { providerID: input.providerID, modelID: input.modelID } : user.model
-      const small = ag.model ? undefined : yield* provider.getSmallModel(fallback.providerID)
-      const primary = {
-        model: ag.model ?? (small ? { providerID: small.providerID, modelID: small.id } : fallback),
-        variant: ag.variant,
-      }
-      const attempts = [primary, ...(input.mode === "stock" ? [] : RENAME_FALLBACKS)].filter(
-        (attempt, index, all) =>
-          all.findIndex(
-            (other) =>
-              other.model.providerID === attempt.model.providerID && other.model.modelID === attempt.model.modelID,
-          ) === index,
-      )
-      const generate = (attempt: (typeof attempts)[number]) =>
-        Effect.gen(function* () {
-          const mdl =
-            small && small.providerID === attempt.model.providerID && small.id === attempt.model.modelID
-              ? small
-              : yield* provider.getModel(attempt.model.providerID, attempt.model.modelID)
-          const request =
-            input.mode === "stock"
-              ? {
-                  agent: ag,
-                  user,
-                  messages: [
-                    { role: "user" as const, content: "Generate a title for this conversation:\n" },
-                    ...(yield* titleConversation(last, input.history, mdl)),
-                  ],
-                }
-              : {
-                  agent: { ...ag, model: { providerID: mdl.providerID, modelID: mdl.id }, variant: attempt.variant },
-                  // Request preparation otherwise inherits the conversation's effort for unvaried agents.
-                  user: { ...user, model: { ...user.model, variant: attempt.variant } },
-                  messages: [
-                    {
-                      role: "user" as const,
-                      content: `Generate a concise title for this conversation. Start it with the folder name "${path.basename(input.session.directory)}", followed by " - " and a short description, for example "oc - description".\n\n${renameDigest(input.history)}`,
-                    },
-                  ],
-                }
-          const text = yield* llm
-            .stream({
-              ...request,
-              system: [],
-              small: true,
-              tools: {},
-              model: mdl,
-              sessionID: input.session.id,
-              retries: 2,
-            })
-            .pipe(Stream.filter(LLMEvent.is.textDelta), Stream.map((e) => e.text), Stream.mkString)
-          const result = cleanTitle(text)
-          if (!result) return yield* Effect.fail(new Error("Title model returned an empty title"))
-          return { title: result, model: `${mdl.providerID}/${mdl.id}` }
-        }).pipe(
-          // SDK initialization surfaces its known provider error as a defect.
-          Effect.catchDefect((error) => (Provider.InitError.isInstance(error) ? Effect.fail(error) : Effect.die(error))),
-          Effect.tapError((error) =>
-            Effect.logWarning("title model failed", { sessionID: input.session.id, model: attempt.model, error }),
-          ),
-        )
-      const result = yield* Effect.firstSuccessOf(attempts.map(generate))
-      if (automatic && (yield* sessions.get(input.session.id)).title !== input.session.title) return
-      yield* sessions.setTitle({ sessionID: input.session.id, title: result.title })
-      return result
-    })
-
-    // Re-titles a session from a digest of its history, for the /rename command.
-    const rename = Effect.fn("SessionPrompt.rename")(function* (sessionID: SessionID) {
-      const session = yield* sessions.get(sessionID)
-      const history = yield* sessions.messages({ sessionID })
-      const named = yield* title({ mode: "manual", session, history })
-      return { session: yield* sessions.get(sessionID), model: named?.model }
-    }, Effect.orDie)
-
-    // /btw side question: one tool-less model call over a snapshot of the history. Nothing is
-    // written back, so messages, marks, and resume state stay as they were.
-    const generate = Effect.fn("SessionPrompt.generate")(function* (input: GenerateInput) {
-      const session = yield* sessions.get(input.sessionID).pipe(Effect.orDie)
-      const agentName = input.agent ?? session.agent ?? (yield* agents.defaultInfo()).name
-      const agent = yield* agents.get(agentName)
-      if (!agent) {
-        return yield* new GenerateAgentNotFoundError({ agent: agentName, message: `Agent not found: "${agentName}".` })
-      }
-
-      const model = input.model ?? agent.model ?? (yield* currentModel(input.sessionID))
-      const unsupported = isClaudeCodeProvider(model.providerID)
-        ? "Claude Code"
-        : model.providerID === CURSOR_PROVIDER_ID
-          ? "Cursor"
-          : undefined
-      if (unsupported) {
-        return yield* new GenerateUnsupportedError({
-          providerID: model.providerID,
-          message: `/btw is not available on ${unsupported} yet`,
-        })
-      }
-      const resolved = yield* provider.getModel(model.providerID, model.modelID)
-
-      const history = yield* sessions.messages({ sessionID: input.sessionID }).pipe(Effect.orDie)
-      // filterCompacted takes newest-first and returns oldest-first.
-      const context = MessageV2.filterCompacted(revertedHistory(history, session.revert).toReversed())
-      const messages = yield* MessageV2.toModelMessagesEffect(
-        context.filter(
-          (msg) => msg.parts.length > 0 && (msg.info.role !== "assistant" || msg.info.time.completed !== undefined),
-        ),
-        resolved,
-      )
-
-      const modelKey = `${resolved.providerID}/${resolved.id}`
-      const [env, instructions, base] = yield* Effect.all([
-        sys.environment(resolved),
-        instruction.system(modelKey).pipe(Effect.orDie),
-        agent.prompt ? Effect.succeed(undefined) : instruction.base(modelKey).pipe(Effect.orDie),
-      ])
-      const user: SessionV1.User = {
-        id: MessageID.ascending(),
-        role: "user",
-        sessionID: input.sessionID,
-        time: { created: Date.now() },
-        agent: agent.name,
-        model: { providerID: resolved.providerID, modelID: resolved.id, variant: input.variant },
-      }
-
-      const events = yield* llm
-        .stream({
-          user,
-          sessionID: input.sessionID,
-          model: resolved,
-          agent: base ? { ...agent, prompt: base } : agent,
-          system: [...env, ...instructions, SIDE_QUESTION_INSTRUCTION],
-          messages: [...messages, { role: "user", content: input.prompt }],
-          tools: {},
-          toolChoice: "none",
-        })
-        .pipe(
-          Stream.runCollect,
-          Effect.catchDefect((error) => (Provider.InitError.isInstance(error) ? Effect.fail(error) : Effect.die(error))),
-          Effect.mapError(
-            (error) => new GenerateFailedError({ message: error instanceof Error ? error.message : String(error) }),
-          ),
-          Effect.timeoutOrElse({
-            duration: GENERATE_TIMEOUT,
-            orElse: () =>
-              Effect.fail(
-                new GenerateTimeoutError({ message: `The side question timed out after ${GENERATE_TIMEOUT}.` }),
-              ),
-          }),
-        )
-
-      const providerError = events.find(LLMEvent.is.providerError)
-      if (providerError) return yield* new GenerateFailedError({ message: providerError.message })
-      if (events.some(LLMEvent.is.toolCall)) {
-        return yield* new GenerateFailedError({ message: "The model tried to call a tool, which /btw cannot run." })
-      }
-      const finish = events.findLast(LLMEvent.is.finish)
-      if (finish && finish.reason !== "stop" && finish.reason !== "unknown") {
-        return yield* new GenerateFailedError({
-          message: `The model stopped before finishing its answer (${finish.reason}).`,
-        })
-      }
-      const text = events
-        .filter(LLMEvent.is.textDelta)
-        .map((event) => event.text)
-        .join("")
-        .trim()
-      if (!text) return yield* new GenerateFailedError({ message: "The model returned an empty answer." })
-      return { text, providerID: resolved.providerID, modelID: resolved.id }
-    })
-
-    const startTitle = Effect.fn("SessionPrompt.startTitle")(function* (input: {
-      sessionID: SessionID
-      history: SessionV1.WithParts[]
-      providerID: ProviderV2.ID
-      modelID: ModelV2.ID
-    }) {
-      const session = yield* sessions.get(input.sessionID).pipe(Effect.orDie)
-      if (session.parentID) return
-      const users = input.history.filter(isRealUserMessage)
-      const marker = session.metadata?.ocAutoRename
-      if (marker === undefined) {
-        if (users.length !== 1 || !Session.isDefaultTitle(session.title)) return
-      } else {
-        const automatic = decodeAutoRename(marker)
-        if (Option.isNone(automatic) || automatic.value.state !== "pending") return
-        if (users.length === 0) return
-
-        // Claim inside the owning loop, before forking, so reconnects cannot repeat naming.
-        yield* sessions.setMetadata({
-          sessionID: session.id,
-          metadata: { ...session.metadata, ocAutoRename: { ...automatic.value, state: "attempted" } },
-        })
-        if (users.length !== 1) return
-        if (automatic.value.title === undefined
-          ? !Session.isDefaultTitle(session.title)
-          : session.title !== automatic.value.title) return
-      }
-
-      const history = structuredClone(input.history.slice(0, input.history.indexOf(users[0]) + 1))
-      const titled =
-        marker === undefined
-          ? title({ mode: "stock", session, history, providerID: input.providerID, modelID: input.modelID })
-          : title({ mode: "marked", session, history })
-      yield* gated(titled).pipe(
-        Effect.catchCause((cause) => Cause.hasInterruptsOnly(cause)
-          ? Effect.failCause(cause)
-          : Effect.logWarning("automatic title failed", { sessionID: session.id, error: Cause.squash(cause) })),
-        Effect.forkIn(scope),
-      )
     })
 
     const handleSubtask = Effect.fn("SessionPrompt.handleSubtask")(function* (input: {
@@ -919,6 +673,7 @@ const layer = Layer.effect(
       if (Option.isSome(match) && match.value.info.role === "user") return match.value.info.model
       return yield* provider.defaultModel().pipe(Effect.orDie)
     })
+    const generate = makeSideQuestion({ sessions, agents, provider, instruction, sys, llm, currentModel })
 
     const createUserMessage = Effect.fn("SessionPrompt.createUserMessage")(function* (input: TurnInput) {
       const agentName = input.agent
@@ -947,7 +702,8 @@ const layer = Layer.effect(
         sessionID: input.sessionID,
         time: { created: Date.now() },
         tools: input.tools,
-        permission: input.turnPermission?.map((rule) => ({ ...rule })),
+        // The schema allows a missing key, not `permission: undefined`.
+        ...(input.turnPermission ? { permission: input.turnPermission.map((rule) => ({ ...rule })) } : {}),
         ...(input.toolHost ? { toolHost: { ...input.toolHost } } : {}),
         ...(input.noReply ? { noReply: true } : {}),
         agent: ag.name,
@@ -1586,7 +1342,7 @@ const layer = Layer.effect(
 
           step++
           if (step === 1)
-            yield* startTitle({
+            yield* titles.startTitle({
               sessionID,
               modelID: lastUser.model.modelID,
               providerID: lastUser.model.providerID,
@@ -2109,87 +1865,12 @@ const layer = Layer.effect(
       shell: (input) => gatedSession(input.sessionID, shell(input)),
       command: (input) => gatedSession(input.sessionID, command(input)),
       resolvePromptParts,
-      rename: (sessionID) => gatedSession(sessionID, rename(sessionID)),
+      rename: (sessionID) => gatedSession(sessionID, titles.rename(sessionID)),
       generate: (input) => gatedSession(input.sessionID, generate(input)),
       queue: queueOps,
     })
   }),
 )
-
-function isRealUserMessage(message: SessionV1.WithParts) {
-  return message.info.role === "user" && !message.parts.every((part) => "synthetic" in part && part.synthetic)
-}
-
-// Same boundary as SessionRevert.cleanup, applied to a copy: the reverted message and later ones
-// go, or only the parts before the reverted part remain.
-function revertedHistory(msgs: SessionV1.WithParts[], revert: Session.Info["revert"]) {
-  if (!revert) return msgs
-  const index = msgs.findIndex((msg) => msg.info.id === revert.messageID)
-  if (index < 0) return msgs
-  if (!revert.partID) return msgs.slice(0, index)
-  const target = msgs[index]
-  const partIndex = target.parts.findIndex((part) => part.id === revert.partID)
-  if (partIndex < 0) return msgs.slice(0, index + 1)
-  return [...msgs.slice(0, index), { ...target, parts: target.parts.slice(0, partIndex) }]
-}
-
-// Stock titles model the whole first request. A subtask-only request sends its prompts instead.
-const titleConversation = Effect.fnUntraced(function* (
-  first: SessionV1.WithParts,
-  context: SessionV1.WithParts[],
-  model: Provider.Model,
-) {
-  const subtasks = first.parts.filter((p): p is SessionV1.SubtaskPart => p.type === "subtask")
-  if (subtasks.length > 0 && first.parts.every((p) => p.type === "subtask")) {
-    return [{ role: "user" as const, content: subtasks.map((p) => withoutCommandHeader(p.prompt)).join("\n") }]
-  }
-  return yield* MessageV2.toModelMessagesEffect(
-    context.map((message) => ({
-      ...message,
-      parts: message.parts.map((part) =>
-        message.info.role === "user" && part.type === "text" ? { ...part, text: namingText(part) } : part,
-      ),
-    })),
-    model,
-  )
-})
-
-function cleanTitle(text: string) {
-  const line = text
-    .replace(/<think>[\s\S]*?<\/think>\s*/g, "")
-    .split("\n")
-    .map((l) => l.trim())
-    .find((l) => l.length > 0)
-  if (!line) return
-  return line.length > 100 ? line.substring(0, 97) + "..." : line
-}
-
-// First user message plus the latest exchanges, text only, so the model sees where the session started and where it is now.
-export function renameDigest(history: SessionV1.WithParts[]) {
-  const lines = history.flatMap((m) => {
-    const text = m.parts
-      .filter((p): p is SessionV1.TextPart => p.type === "text" && !p.synthetic)
-      .map((p) => (m.info.role === "user" ? namingText(p) : p.text).trim())
-      .join("\n")
-      .slice(0, 1500)
-    return text ? [`${m.info.role}: ${text}`] : []
-  })
-  const first = lines.find((l) => l.startsWith("user: "))
-  const recent = lines.slice(-6)
-  return (first && !recent.includes(first) ? [first, "...", ...recent] : recent).join("\n\n")
-}
-
-function namingText(part: SessionV1.TextPart | SessionV1.TextPartInput) {
-  // Argument-free commands can themselves describe a concrete task, such as reviewing a diff.
-  const request = part.metadata?.ocCommandArguments
-  if (typeof request === "string" && request.trim()) return request
-  return withoutCommandHeader(part.text)
-}
-
-// Single-command runs prepend an active-command header; titles use the task text.
-function withoutCommandHeader(text: string) {
-  return text.replace(/^\[[^\n]* is active:[^\n]*\]\n\n/, "")
-}
 
 const ModelRef = Schema.Struct({
   providerID: ProviderV2.ID,
@@ -2270,43 +1951,6 @@ export const CommandInput = Schema.Struct({
   ),
 })
 export type CommandInput = Schema.Schema.Type<typeof CommandInput>
-
-export const GenerateInput = Schema.Struct({
-  sessionID: SessionID,
-  prompt: Schema.String.check(Schema.isPattern(/\S/)),
-  model: Schema.optional(ModelRef),
-  agent: Schema.optional(Schema.String),
-  variant: Schema.optional(Schema.String),
-})
-export type GenerateInput = Schema.Schema.Type<typeof GenerateInput>
-
-export const GenerateResult = Schema.Struct({
-  text: Schema.String,
-  providerID: ProviderV2.ID,
-  modelID: ModelV2.ID,
-})
-export type GenerateResult = Schema.Schema.Type<typeof GenerateResult>
-
-export class GenerateUnsupportedError extends Schema.TaggedErrorClass<GenerateUnsupportedError>()(
-  "GenerateUnsupportedError",
-  { providerID: ProviderV2.ID, message: Schema.String },
-) {}
-export class GenerateAgentNotFoundError extends Schema.TaggedErrorClass<GenerateAgentNotFoundError>()(
-  "GenerateAgentNotFoundError",
-  { agent: Schema.String, message: Schema.String },
-) {}
-export class GenerateFailedError extends Schema.TaggedErrorClass<GenerateFailedError>()("GenerateFailedError", {
-  message: Schema.String,
-}) {}
-export class GenerateTimeoutError extends Schema.TaggedErrorClass<GenerateTimeoutError>()("GenerateTimeoutError", {
-  message: Schema.String,
-}) {}
-export type GenerateError =
-  | GenerateUnsupportedError
-  | GenerateAgentNotFoundError
-  | GenerateFailedError
-  | GenerateTimeoutError
-  | Provider.ModelNotFoundError
 
 /** @internal Exported for testing */
 export function createStructuredOutputTool(input: {

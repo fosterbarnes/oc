@@ -27,6 +27,7 @@
  * (chunk-7076/dist/ui.js onSwitchModeReject).
  */
 
+import { asRecord } from "@/util/record"
 import { type CursorAskQuestionItem, type OpencodeQuestionInput, parseAnswerSegments } from "./askQuestion.js"
 import { decodeMessageSparse } from "./messages.js"
 
@@ -115,10 +116,6 @@ type ActiveCursorModeState = {
 }
 
 const activeCursorModeBySession = new Map<string, ActiveCursorModeState>()
-
-function asRecord(value: unknown): Record<string, unknown> | undefined {
-  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined
-}
 
 function str(value: unknown): string {
   return typeof value === "string" ? value : ""

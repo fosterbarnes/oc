@@ -306,3 +306,9 @@ export function flatUsageFromV3(usage: LanguageModelV3Usage): {
     cacheWriteInputTokens: cacheWrite,
   }
 }
+
+/** Rough char->token estimate for mid-turn usage before TurnEnded arrives. */
+export function estimateTokens(chars: number): number {
+  if (!Number.isFinite(chars) || chars <= 0) return 0
+  return Math.ceil(chars / 4)
+}

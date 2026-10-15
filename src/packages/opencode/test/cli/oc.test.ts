@@ -5,14 +5,8 @@ import os from "node:os"
 import path from "node:path"
 import { cliIt } from "../lib/cli-process"
 import { resolveTargetDirectory } from "../../src/cli/cmd/oc"
-import {
-  isPidAlive,
-  serverStatePath,
-  clearServerState,
-  defaultServerPort,
-  resolvePaletteLaunch,
-  PALETTE_NEW_SESSION_OC,
-} from "../../src/config/oc"
+import { defaultServerPort, resolvePaletteLaunch, PALETTE_NEW_SESSION_OC } from "../../src/config/oc"
+import { isPidAlive, serverStatePath, clearServerState } from "../../src/config/resident"
 import { Global } from "@opencode-ai/core/global"
 import { tmpdir } from "../fixture/fixture"
 

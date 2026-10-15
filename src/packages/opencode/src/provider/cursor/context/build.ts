@@ -1,11 +1,6 @@
 import path from "node:path"
-import {
-  extractHostSubagentCatalog,
-  toolsToDescriptors,
-  toolsToMcpDescriptors,
-  type HostSubagentDefinition,
-  type OpencodeToolDef,
-} from "../protocol/tools.js"
+import { toolsToDescriptors, toolsToMcpDescriptors, type OpencodeToolDef } from "../protocol/descriptors.js"
+import { extractHostSubagentCatalog, type HostSubagentDefinition } from "../protocol/subagents.js"
 import { collectRules, findGitWorktree, loadMergedConfig, type OpencodeJson } from "./rules.js"
 import { collectSkills } from "./skills.js"
 import { collectAgents } from "./agents.js"

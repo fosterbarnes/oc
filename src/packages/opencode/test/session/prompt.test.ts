@@ -7,7 +7,7 @@ import { SessionProjector } from "@opencode-ai/core/session/projector"
 import { eq } from "drizzle-orm"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { afterAll, expect, test } from "bun:test"
-import { Cause, Deferred, Duration, Effect, Exit, Fiber, Layer } from "effect"
+import { Cause, Deferred, Duration, Effect, Exit, Fiber, Layer, Logger } from "effect"
 import { existsSync, rmSync } from "node:fs"
 import os from "os"
 import path from "path"
@@ -556,6 +556,20 @@ it.instance("loop calls LLM and returns assistant message", () =>
     const parts = result.parts.filter((p) => p.type === "text")
     expect(parts.some((p) => p.type === "text" && p.text === "world")).toBe(true)
     expect(yield* llm.hits).toHaveLength(1)
+  }),
+)
+
+it.instance("prompt without turn permissions saves a user message that passes the schema check", () =>
+  Effect.gen(function* () {
+    yield* useServerConfig(providerCfg)
+    const prompt = yield* SessionPrompt.Service
+    const sessions = yield* Session.Service
+    const chat = yield* sessions.create({ title: "Pinned" })
+    const messages: unknown[] = []
+    yield* prompt
+      .prompt({ sessionID: chat.id, agent: "build", noReply: true, parts: [{ type: "text", text: "a" }] })
+      .pipe(Effect.provide(Logger.layer([Logger.make<unknown, void>((options) => void messages.push(options.message))])))
+    expect(JSON.stringify(messages)).not.toContain("invalid user message before save")
   }),
 )
 

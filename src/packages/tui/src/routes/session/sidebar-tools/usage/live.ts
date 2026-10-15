@@ -1,14 +1,8 @@
 import type { ProviderUsage } from "@opencode-ai/core/provider-usage"
-import {
-  updateClaudeSnapshot,
-  updateUsageSnapshot,
-  compactResetDate,
-  usageWindowStale,
-  type ClaudeCodeUsage,
-  type OpenAIUsage,
-  type UsageSnapshot,
-  type UsageWindow,
-} from "./usage"
+import { updateClaudeSnapshot, type ClaudeCodeUsage } from "./claude"
+import { compactResetDate } from "./format"
+import type { OpenAIUsage } from "./probes"
+import { updateUsageSnapshot, usageWindowStale, type UsageSnapshot, type UsageWindow } from "./snapshot"
 
 const unknownWindow = (): UsageWindow => ({ usedPercent: null, resetAt: null, resetMs: null, minutes: null })
 

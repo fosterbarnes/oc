@@ -1,4 +1,6 @@
-import { mapCursorArgsToOpencode, mapCursorSubagentTypeToOpenCode, mcpRealToolName } from "./tools.js"
+import { asRecord } from "@/util/record"
+import { deleteShellCommand, mapCursorArgsToOpencode, mcpRealToolName } from "./execParse.js"
+import { mapCursorSubagentTypeToOpenCode } from "./subagents.js"
 import { decodeStructEntriesToJson } from "./struct.js"
 import { mapSwitchModeTarget } from "./switchMode.js"
 
@@ -78,10 +80,6 @@ const TOOL_CALL_VARIANTS = Object.keys(VARIANT_TO_OPENCODE)
 // must use an exec/interaction request channel where Cursor can receive their
 // actual result.
 const DISPLAY_STATE_MIRROR_VARIANTS = new Set(["update_todos_tool_call", "create_plan_tool_call"])
-
-function asRecord(v: unknown): Record<string, unknown> | undefined {
-  return v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : undefined
-}
 
 function findToolVariant(toolCall: Record<string, unknown>): string | undefined {
   for (const key of TOOL_CALL_VARIANTS) {
@@ -299,16 +297,6 @@ export function parseDisplayToolCall(
     preferredToolName: preferred,
     args,
   }
-}
-
-function shellQuote(s: string): string {
-  return `'${s.replace(/'/g, `'\\''`)}'`
-}
-
-function deleteShellCommand(target: string): string {
-  if (process.platform === "win32")
-    return `Remove-Item -LiteralPath '${target.replaceAll("'", "''")}' -Force -ErrorAction Stop`
-  return `rm -f -- ${shellQuote(target)}`
 }
 
 /**

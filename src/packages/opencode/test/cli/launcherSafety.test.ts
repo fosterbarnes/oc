@@ -3,6 +3,7 @@ import fs from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 import { OcConfig } from "../../src/config/oc"
+import { Resident } from "../../src/config/resident"
 import { TuiLedger } from "../../src/config/tuiLedger"
 import { Revive } from "../../src/config/revive"
 import { ServerLifecycle } from "../../src/server/lifecycle"
@@ -27,31 +28,31 @@ test("CIM identity requires the exact creation stamp and executable, not an upti
 })
 
 test("resident liveness uses injected CIM identities and propagates unavailable proof", () => {
-  expect(OcConfig.isPidAlive(identity.pid, identity, () => [identity])).toBe(true)
-  expect(OcConfig.isPidAlive(identity.pid, identity, () => [{ ...identity, created: "2" }])).toBe(false)
-  expect(OcConfig.isPidAlive(identity.pid, identity, () => [])).toBe(false)
+  expect(Resident.isPidAlive(identity.pid, identity, () => [identity])).toBe(true)
+  expect(Resident.isPidAlive(identity.pid, identity, () => [{ ...identity, created: "2" }])).toBe(false)
+  expect(Resident.isPidAlive(identity.pid, identity, () => [])).toBe(false)
   expect(() =>
-    OcConfig.isPidAlive(identity.pid, identity, () => {
+    Resident.isPidAlive(identity.pid, identity, () => {
       throw new Error("CIM unavailable")
     }),
   ).toThrow("CIM unavailable")
 })
 
 test("startup lock cannot expire under a live launcher, including beyond the old ten-second cutoff", () => {
-  expect(OcConfig.startupLockExpired(identity, [identity], 10_001)).toBe(false)
-  expect(OcConfig.startupLockExpired(identity, [identity], 300_000)).toBe(false)
-  expect(OcConfig.startupLockExpired(identity, [{ ...identity, created: "2" }], 100)).toBe(true)
-  expect(OcConfig.startupLockExpired(identity, [], 100)).toBe(true)
-  expect(OcConfig.startupLockExpired({ pid: identity.pid }, [identity], 300_000)).toBe(false)
-  expect(OcConfig.startupLockExpired(identity, [{ ...identity, executable: "" }], 300_000)).toBe(false)
-  expect(OcConfig.startupLockExpired(undefined, [], 10_001)).toBe(false)
+  expect(Resident.startupLockExpired(identity, [identity], 10_001)).toBe(false)
+  expect(Resident.startupLockExpired(identity, [identity], 300_000)).toBe(false)
+  expect(Resident.startupLockExpired(identity, [{ ...identity, created: "2" }], 100)).toBe(true)
+  expect(Resident.startupLockExpired(identity, [], 100)).toBe(true)
+  expect(Resident.startupLockExpired({ pid: identity.pid }, [identity], 300_000)).toBe(false)
+  expect(Resident.startupLockExpired(identity, [{ ...identity, executable: "" }], 300_000)).toBe(false)
+  expect(Resident.startupLockExpired(undefined, [], 10_001)).toBe(false)
 })
 
 test("resident URLs bracket IPv6 loopback and keep IPv4 and localhost", () => {
-  expect(OcConfig.residentUrl("::1", 4096)).toBe("http://[::1]:4096")
-  expect(new URL(`${OcConfig.residentUrl("::1", 4096)}/global/health`).host).toBe("[::1]:4096")
-  expect(OcConfig.residentUrl("127.0.0.1", 4096)).toBe("http://127.0.0.1:4096")
-  expect(OcConfig.residentUrl("localhost", 4097)).toBe("http://localhost:4097")
+  expect(Resident.residentUrl("::1", 4096)).toBe("http://[::1]:4096")
+  expect(new URL(`${Resident.residentUrl("::1", 4096)}/global/health`).host).toBe("[::1]:4096")
+  expect(Resident.residentUrl("127.0.0.1", 4096)).toBe("http://127.0.0.1:4096")
+  expect(Resident.residentUrl("localhost", 4097)).toBe("http://localhost:4097")
 })
 
 test("an unreadable startup lock is recovered by age, never while recent or owned by a live process", async () => {
@@ -65,17 +66,17 @@ test("an unreadable startup lock is recovered by age, never while recent or owne
   try {
     for (const partial of ["", '{"pid":12', "null", '{"pid":"x"}']) {
       await age(partial, 180)
-      expect(await OcConfig.withResidentLock(async () => "ran", { lock, attempts: 3 })).toBe("ran")
+      expect(await Resident.withResidentLock(async () => "ran", { lock, attempts: 3 })).toBe("ran")
       expect(await fs.stat(lock).catch(() => undefined)).toBeUndefined()
     }
     // A lock still being written is not stolen.
     await age("", 5)
-    await expect(OcConfig.withResidentLock(async () => "ran", { lock, attempts: 3 })).rejects.toThrow("Timed out")
+    await expect(Resident.withResidentLock(async () => "ran", { lock, attempts: 3 })).rejects.toThrow("Timed out")
     expect(await fs.readFile(lock, "utf8")).toBe("")
     // An old lock whose owner is this live process stays, however old.
     const owner = (await TuiLedger.listProcessesAsync()).find((item) => item.pid === process.pid) ?? { pid: process.pid }
     await age(JSON.stringify(owner), 600)
-    await expect(OcConfig.withResidentLock(async () => "ran", { lock, attempts: 3 })).rejects.toThrow("Timed out")
+    await expect(Resident.withResidentLock(async () => "ran", { lock, attempts: 3 })).rejects.toThrow("Timed out")
     expect(JSON.parse(await fs.readFile(lock, "utf8")).pid).toBe(process.pid)
   } finally {
     await fs.rm(directory, { recursive: true, force: true })
@@ -91,7 +92,7 @@ test("a second revive install fails fast with the busy message while the first h
   try {
     let entered = () => {}
     const inside = new Promise<void>((resolve) => (entered = resolve))
-    const first = OcConfig.withResidentLock(
+    const first = Resident.withResidentLock(
       async () => {
         entered()
         await held
@@ -100,10 +101,10 @@ test("a second revive install fails fast with the busy message while the first h
       { lock, attempts: 3, busy },
     )
     await inside
-    await expect(OcConfig.withResidentLock(async () => "second", { lock, attempts: 3, busy })).rejects.toThrow(busy)
+    await expect(Resident.withResidentLock(async () => "second", { lock, attempts: 3, busy })).rejects.toThrow(busy)
     release()
     expect(await first).toBe("first")
-    expect(await OcConfig.withResidentLock(async () => "third", { lock, attempts: 3, busy })).toBe("third")
+    expect(await Resident.withResidentLock(async () => "third", { lock, attempts: 3, busy })).toBe("third")
   } finally {
     release()
     await fs.rm(directory, { recursive: true, force: true })
@@ -141,9 +142,9 @@ test("Start-Process argv quoting handles empty strings, embedded quotes and trai
 
 test("fresh restarting state wins over healthy reuse throughout the thirty-second drain", () => {
   const now = Date.parse("2026-10-12T00:00:00Z")
-  expect(OcConfig.residentRestartFresh(new Date(now - 35_000).toISOString(), now)).toBe(true)
+  expect(Resident.residentRestartFresh(new Date(now - 35_000).toISOString(), now)).toBe(true)
   expect(
-    OcConfig.residentLaunchAction({ healthy: true, hasState: true, matches: true, alive: true, restartingFresh: true }),
+    Resident.residentLaunchAction({ healthy: true, hasState: true, matches: true, alive: true, restartingFresh: true }),
   ).toBe("wait")
 })
 
@@ -170,9 +171,9 @@ test("HTTP restart disables health before awaiting its restart mark or starting 
 })
 
 test("adoption records the listener's CIM creation identity and rejects PID reuse", async () => {
-  const written: Array<Parameters<typeof OcConfig.writeResidentState>[0]> = []
+  const written: Array<Parameters<typeof Resident.writeResidentState>[0]> = []
   expect(
-    await OcConfig.adoptResidentServer("127.0.0.1", 4096, {
+    await Resident.adoptResidentServer("127.0.0.1", 4096, {
       findListenerPid: () => identity.pid,
       listProcesses: () => [identity],
       readState: async () => undefined,
@@ -183,7 +184,7 @@ test("adoption records the listener's CIM creation identity and rejects PID reus
   ).toEqual({ ok: true, pid: identity.pid })
   expect(written[0]).toMatchObject({ created: identity.created, executable: identity.executable })
   expect(
-    await OcConfig.adoptResidentServer("127.0.0.1", 4096, {
+    await Resident.adoptResidentServer("127.0.0.1", 4096, {
       listProcesses: () => [{ ...identity, created: "2" }],
       readState: async () => ({ ...identity, hostname: "127.0.0.1", port: 4096 }),
       writeState: async () => {
@@ -196,9 +197,9 @@ test("adoption records the listener's CIM creation identity and rejects PID reus
 test("resident state and CLI ledger preserve exact identities without querying or stopping processes", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "ocLauncherSafety-"))
   try {
-    await OcConfig.writeResidentState({ ...identity, hostname: "127.0.0.1", port: 4096, directory })
-    expect(await Bun.file(OcConfig.serverStatePath(directory)).json()).toMatchObject({ created: identity.created })
-    await OcConfig.writeResidentState({
+    await Resident.writeResidentState({ ...identity, hostname: "127.0.0.1", port: 4096, directory })
+    expect(await Bun.file(Resident.serverStatePath(directory)).json()).toMatchObject({ created: identity.created })
+    await Resident.writeResidentState({
       ...identity,
       hostname: "127.0.0.1",
       port: 4096,
@@ -206,7 +207,7 @@ test("resident state and CLI ledger preserve exact identities without querying o
       restarting: new Date().toISOString(),
     })
     await clearResidentStateForRestart(directory, identity.pid)
-    expect(await Bun.file(OcConfig.serverStatePath(directory)).json()).toMatchObject({ created: identity.created })
+    expect(await Bun.file(Resident.serverStatePath(directory)).json()).toMatchObject({ created: identity.created })
     await TuiLedger.register(directory, identity.pid, [identity])
     await fs.writeFile(
       path.join(directory, "oc-tuis", `${identity.pid}.json`),

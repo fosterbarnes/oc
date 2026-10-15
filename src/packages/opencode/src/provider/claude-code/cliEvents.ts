@@ -1,3 +1,4 @@
+import { isRecord } from "@/util/record"
 import { log } from "./logger.js"
 import { DEFAULT_ACCOUNT, poolAccountLabel } from "./accounts.js"
 import type { ClaudeStreamMessage } from "./types.js"
@@ -15,10 +16,6 @@ import type { ClaudeStreamMessage } from "./types.js"
  * see without turning on debug logging is either a WARN or a `▌` line written
  * into the transcript. Everything else is INFO or NOTICE for the file log.
  */
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value)
-}
 
 function str(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined

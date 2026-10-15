@@ -58,9 +58,12 @@ function View(props: { api: TuiPluginApi }) {
     return theme().textMuted
   }
 
+  // The root box always renders. OpenTUI's Slot re-runs this renderer whenever its first output
+  // changes, so a root that appears only after the async status fetch remounts View in a loop and
+  // leaks native text buffers until the TUI crashes.
   return (
-    <Show when={rows().length + builtin().length > 0}>
-      <box>
+    <box>
+      <Show when={rows().length + builtin().length > 0}>
         <box flexDirection="row" gap={1} onMouseDown={() => setOpen(!expanded())}>
           <SidebarToggle open={expanded()} fg={theme().text} />
           <text fg={theme().text} selectable={false}>
@@ -112,8 +115,8 @@ function View(props: { api: TuiPluginApi }) {
             </text>
           </Show>
         </Show>
-      </box>
-    </Show>
+      </Show>
+    </box>
   )
 }
 

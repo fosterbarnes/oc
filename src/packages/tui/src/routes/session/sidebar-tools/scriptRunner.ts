@@ -2,8 +2,9 @@ import { spawn } from "node:child_process"
 import { existsSync } from "node:fs"
 import path from "node:path"
 import { detectTerminal, type TerminalInfo } from "@opencode-ai/core/util/terminal"
-import { resolveScriptTerminal } from "./helpers.js"
-import type { Script, ScriptLauncher, ScriptTerminal, WezTermSplitSize } from "./helpers.js"
+import { resolveScriptTerminal } from "./settings.js"
+import type { ScriptLauncher, ScriptTerminal, WezTermSplitSize } from "./settings.js"
+import type { Script } from "./scripts.js"
 
 export type RunResult = { target: string; error?: string }
 export type ClipboardSpawn = (

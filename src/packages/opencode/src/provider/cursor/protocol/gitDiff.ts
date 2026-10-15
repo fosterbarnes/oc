@@ -4,7 +4,7 @@ import os from "node:os"
 import path from "node:path"
 import { promisify } from "node:util"
 import { encodeMessage } from "./messages.js"
-import { buildExecStreamClose } from "./tools.js"
+import { buildExecStreamClose } from "./execResult.js"
 
 const execFileAsync = promisify(execFile)
 

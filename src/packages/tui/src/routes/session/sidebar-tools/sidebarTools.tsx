@@ -15,99 +15,47 @@ import { useTheme } from "../../../context/theme"
 import { useTuiPaths } from "../../../context/runtime"
 import { useLocal } from "../../../context/local"
 import { usePromptRef } from "../../../context/prompt"
-import { DialogPrompt } from "../../../ui/dialog-prompt"
-import { DialogSelect, type DialogSelectOption, type DialogSelectProps } from "../../../ui/dialog-select"
 import { useDialog } from "../../../ui/dialog"
 import { useToast } from "../../../ui/toast"
 import { usePluginRuntime } from "../../../plugin/runtime"
 import { useOpencodeKeymap } from "../../../keymap"
 import { InstallationDisplayVersion, InstallationVersion } from "@opencode-ai/core/installation/version"
-import type { ProviderUsage } from "@opencode-ai/core/provider-usage"
-import { createUsageRefresh } from "./usageRefresh"
 import {
-  applyClaudeObservation,
-  applyOpenAIObservation,
-  mergeClaudeProbe,
-  mergeOpenAIProbe,
-  usageReadingDetails,
-} from "./usageLive"
-import {
-  BUILTIN_SHELLS,
-  clipEnd,
   defaultScriptSettings,
   defaultSidebarSettings,
-  dedupeRootPaths,
-  displayPath,
   ensureSessionScrollbarVisible,
   hasConfiguredScripts,
-  isDirectory,
   loadSidebarSettings,
-  normalizeExtension,
-  normalizeRootPath,
   normalizeScriptSettings,
-  parseLauncher,
-  readCursorSessionToken,
+  saveSidebarSettings,
+  saveUserScriptSettings,
+  sessionProjectDirectory,
+  sidebarConfigPaths,
+  type ScriptSettings,
+  type SidebarSettings,
+} from "./settings.js"
+import {
+  dedupeRootPaths,
+  displayPath,
+  isDirectory,
+  normalizeRootPath,
+  rootSections,
+  sameRootPath,
+} from "./roots.js"
+import {
+  clipEnd,
+  MAX_TREE_ITEMS,
   readScripts,
   readTree,
   reconcileScripts,
   reconcileTree,
-  rootSections,
-  runEverythingSearch,
-  sameRootPath,
-  saveSidebarSettings,
-  saveUserScriptSettings,
-  saveUserUsageProviders,
-  saveUserUsageSpacing,
-  saveUserUsageSubscriptions,
-  sessionProjectDirectory,
-  sidebarConfigPaths,
-  updateLanguage,
-  scriptTerminals,
-  resolveScriptTerminal,
-  writeCursorSessionToken,
   type Script,
-  type ScriptLanguage,
-  type ScriptSettings,
-  type SidebarSettings,
-  type WezTermSplitSize,
-} from "./helpers.js"
-import {
-  cursorSessionCookie,
-  claudeConfigDirId,
-  compactResetDate,
-  fullResetDate,
-  formatUsagePercent,
-  formatUsageRows,
-  formatClaudeUsageRows,
-  usageColumns,
-  orderUsageWindows,
-  parseUsageDate,
-  probeClaudeCodePool,
-  probeClaudeCodeUsage,
-  probeCursorUsage,
-  probeOpenAIUsage,
-  probeOpenCodeGoUsage,
-  probeOpenRouterUsage,
-  projectClaudeUsage,
-  updateUsageSnapshot,
-  usageCalendarDay,
-  usageCalendarEvents,
-  usageCalendarStrip,
-  usageProviderForModel,
-  USAGE_PROVIDER_OPTIONS,
-  windowLabel,
-  windowName,
-  usageWindowStale,
-  type CursorUsage,
-  type ClaudeCodeUsage,
-  type OpenAIUsage,
-  type OpenCodeGoUsage,
-  type OpenRouterUsage,
-  type UsageProviderId,
-  type UsageSubscription,
-  type UsageWindow,
-  type UsageSnapshot,
-} from "./usage.js"
+} from "./scripts.js"
+import { createRootPicker } from "./rootPicker"
+import { createScriptSettingsMenu } from "./scriptSettingsMenu"
+import { createSidebarUsage } from "./sidebarUsage"
+import type { UsageSubscription } from "./usage/calendar"
+import { usageProviderForModel, type UsageProviderId } from "./usage/providers"
 import {
   copyToClipboard,
   fileClipboardText,
@@ -118,20 +66,6 @@ import {
 
 const DIRECTORY_COLORS = ["#F7E9B5", "#F4E1A0", "#F1D98B", "#EED076", "#EBC861"]
 const DIRECTORY_INDICATOR_COLORS = ["#DCCF99", "#D5C184", "#CEB56F", "#C7A95A", "#C09D45"]
-const MAX_TREE_ITEMS = 80
-const ADD_ROOT = "__sidebar_add_custom_root__"
-const RESET_ROOT = "__sidebar_reset_project_root__"
-const FAVORITE_HELP = "__sidebar_favorite_help__"
-const FILE_ROOT_PREFIX = "file:"
-const ADD_SCRIPT_EXECUTABLE = "__sidebar_add_script_executable__"
-const ADD_SCRIPT_EXTENSION = "__sidebar_add_script_extension__"
-const RESET_SCRIPT_SETTINGS = "__sidebar_reset_script_settings__"
-const SCRIPT_SHELL_SECTION = "__sidebar_script_shell_section__"
-const SCRIPT_LANGUAGE_SECTION = "__sidebar_script_language_section__"
-const SCRIPT_EXTENSION_SECTION = "__sidebar_script_extension_section__"
-
-let everythingSearchHintShown = false
-const WEZTERM_SIZE_SECTION = "__sidebar_wezterm_size_section__"
 
 function directoryColor(depth: number, colors: string[]): string {
   return colors[Math.min(depth, colors.length - 1)]
@@ -312,32 +246,10 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
       setMarqueeOffset(Math.min(max, Math.max(0, tick - startPause)))
     }, 150)
   }
-  const [usage, setUsage] = createSignal<UsageSnapshot<OpenAIUsage>>({ ok: false })
-  const [goUsage, setGoUsage] = createSignal<UsageSnapshot<OpenCodeGoUsage>>({ ok: false })
-  const [openRouterUsage, setOpenRouterUsage] = createSignal<UsageSnapshot<OpenRouterUsage>>({ ok: false })
-  const [cursorUsage, setCursorUsage] = createSignal<UsageSnapshot<CursorUsage>>({ ok: false })
-  const [claudeCodeUsage, setClaudeCodeUsage] = createSignal<UsageSnapshot<ClaudeCodeUsage>>({ ok: false })
-  // Pool account this session runs on (config dir name), marked with `*` in the Claude rows.
-  const [activeClaudeAccount, setActiveClaudeAccount] = createSignal<string>()
-  // Sidebar usage shows used or remaining percent for every provider; toggled from the Usage menu.
-  const [showRemaining, setShowRemaining] = createSignal(false)
-  const [usageWidth, setUsageWidth] = createSignal(0)
-  let usageBox: BoxRenderable | undefined
-  const [usageProviders, setUsageProviders] = createSignal<UsageProviderId[]>([...sidebarSettings.usageProviders])
-  const [usageSpacing, setUsageSpacing] = createSignal(sidebarSettings.usageSpacing)
-  const [usageSubscriptions, setUsageSubscriptions] = createSignal([...sidebarSettings.usageSubscriptions])
-  // Same kv key as the sidebar section state in feature-plugins/sidebar/open.ts.
-  const usageOpen = () => kv.get("sidebar_open_usage", true)
-  const setUsageOpen = (next: boolean) => kv.set("sidebar_open_usage", next)
   const [expanded, setExpanded] = createSignal<Set<string>>(new Set(["."]))
   const [tree, setTree] = createSignal(readTree(root, expanded()))
   const [pins, setPins] = createSignal<ReadonlySet<string>>(new Set(sidebarSettings.scriptPins))
   const [favorites, setFavorites] = createSignal<ReadonlySet<string>>(new Set(sidebarSettings.favoriteFileRoots))
-  let cursorSessionToken = readCursorSessionToken(os.homedir())
-  const usageObservations = new Map<string, ProviderUsage.Info>()
-  const [usageNow, setUsageNow] = createSignal(Date.now())
-  const usageAbort = new AbortController()
-  let usageScheduler: ReturnType<typeof createUsageRefresh>
   let refreshCommands = () => {}
   let visibilityRunning = false
 
@@ -443,9 +355,6 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
     }
     root = rootState.activeRoot ? normalizeRootPath(rootState.activeRoot) : project
     setPins(new Set(sidebarSettings.scriptPins))
-    setUsageProviders([...sidebarSettings.usageProviders])
-    setUsageSpacing(sidebarSettings.usageSpacing)
-    setUsageSubscriptions([...sidebarSettings.usageSubscriptions])
     void syncSidebarVisibility()
   }
 
@@ -459,156 +368,13 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
     return provider?.models[selected.modelID]?.name || selected.modelID
   }
 
-  const claudeDirectories = () => {
-    const accounts = sync.data.config.provider?.["claude-code"]?.options?.accounts
-    const dirs = Array.isArray(accounts) ? accounts.filter((dir): dir is string => typeof dir === "string") : []
-    return (dirs.length ? dirs : [process.env.CLAUDE_CONFIG_DIR ?? path.join(os.homedir(), ".claude")])
-      .map((dir) => claudeConfigDirId(dir.replace(/^~(?=$|[\\/])/, os.homedir())))
-  }
-  const claudeSeed = (): UsageSnapshot<ClaudeCodeUsage> => {
-    const dirs = claudeDirectories()
-    const unknown = () => ({ usedPercent: null, resetAt: null, resetMs: null, minutes: null })
-    return {
-      ok: true,
-      accountID: dirs[0],
-      fetchedAt: 0,
-      source: "cache",
-      fiveHour: unknown(),
-      weekly: unknown(),
-      ...(dirs.length > 1 ? { accounts: dirs.map((id) => ({
-        id,
-        name: path.basename(id).replace(/^\./, ""),
-        usage: { ok: false as const },
-      })) } : {}),
-    }
-  }
-  const refreshActiveClaudeAccount = async () => {
-    const selectedSession = sessionID
-    const pool = await sdk.claudeAccount.state(selectedSession).catch(() => undefined)
-    if (usageAbort.signal.aborted || selectedSession !== sessionID) return
-    const current = pool?.find((account) => account.current)
-    setActiveClaudeAccount(current ? claudeConfigDirId(current.id === "default"
-      ? process.env.CLAUDE_CONFIG_DIR ?? path.join(os.homedir(), ".claude") : current.id) : undefined)
-  }
-  const observeUsage = (observation: ProviderUsage.Info, fromSnapshot = false) => {
-    const key = `${observation.providerID}:${observation.accountID}`
-    const previous = usageObservations.get(key)
-    if (previous && previous.observedAt > observation.observedAt) return
-    usageObservations.set(key, observation)
-    if (observation.providerID === "openai" && (!fromSnapshot || usage().accountID === observation.accountID))
-      setUsage((previous) => applyOpenAIObservation(previous, observation))
-    if (observation.providerID === "claude-code") {
-      setClaudeCodeUsage((previous) => applyClaudeObservation(previous.ok ? previous : claudeSeed(), observation))
-      void refreshActiveClaudeAccount()
-    }
-    setUsageNow(Date.now())
-  }
-  const readObservedUsage = async () => {
-    const observations = await sdk.providerUsage.state().catch(() => undefined)
-    if (usageAbort.signal.aborted || !observations) return
-    observations.forEach((observation) => observeUsage(observation, true))
-  }
-  const refreshUsage = async (provider: UsageProviderId) => {
-    if (usageAbort.signal.aborted) return { ok: true, metadata: undefined }
-    const startedAt = Date.now()
-    const options = { signal: usageAbort.signal }
-    if (provider === "openai") {
-      const next = await probeOpenAIUsage(options)
-      if (!usageAbort.signal.aborted) setUsage((previous) => {
-        const merged = mergeOpenAIProbe(previous, next, startedAt, Date.now())
-        const observation = next.accountID
-          ? usageObservations.get(`openai:${next.accountID}`) : undefined
-        return observation ? applyOpenAIObservation(merged, observation) : merged
-      })
-      return next
-    }
-    if (provider === "opencode-go") {
-      const next = await probeOpenCodeGoUsage(options)
-      if (!usageAbort.signal.aborted) setGoUsage((previous) => updateUsageSnapshot(previous, next, Date.now()))
-      return next
-    }
-    if (provider === "openrouter") {
-      const next = await probeOpenRouterUsage(options)
-      if (!usageAbort.signal.aborted) setOpenRouterUsage((previous) => updateUsageSnapshot(previous, next, Date.now()))
-      return next
-    }
-    if (provider === "claude-code") {
-      const dirs = claudeDirectories()
-      const selectedSession = sessionID
-      const [next, pool] = await Promise.all([
-        dirs.length > 1 ? probeClaudeCodePool(dirs, options) : probeClaudeCodeUsage({
-          ...options, claudeCredentialsPath: path.join(dirs[0], ".credentials.json"),
-        }),
-        dirs.length > 1 ? sdk.claudeAccount.state(selectedSession).catch(() => undefined) : undefined,
-      ])
-      if (!usageAbort.signal.aborted && JSON.stringify(dirs) === JSON.stringify(claudeDirectories())) {
-        setClaudeCodeUsage((previous) => {
-          const merged = mergeClaudeProbe(previous, next, startedAt, Date.now())
-          return dirs.reduce((snapshot, dir) => {
-            const observation = usageObservations.get(`claude-code:${dir}`)
-            return observation ? applyClaudeObservation(snapshot.ok ? snapshot : claudeSeed(), observation) : snapshot
-          }, merged)
-        })
-        if (sessionID === selectedSession) {
-          const current = pool?.find((account) => account.current)
-          setActiveClaudeAccount(current ? claudeConfigDirId(current.id === "default"
-            ? process.env.CLAUDE_CONFIG_DIR ?? path.join(os.homedir(), ".claude") : current.id) : undefined)
-        }
-      }
-      return { ok: next.ok && next.source === "live" && !next.metadata?.status, metadata: next.metadata }
-    }
-    const next = await probeCursorUsage({ ...options, cursorSessionToken })
-    if (!usageAbort.signal.aborted)
-      setCursorUsage((previous) => updateUsageSnapshot(previous, next, Date.now()))
-    return next
-  }
-  const refreshOldUsage = () => {
-    const snapshots = {
-      openai: usage(),
-      "opencode-go": goUsage(),
-      openrouter: openRouterUsage(),
-      cursor: cursorUsage(),
-      "claude-code": claudeCodeUsage(),
-    }
-    usageScheduler.request(usageProviders().filter((provider) => Date.now() - (snapshots[provider].fetchedAt ?? 0) > 60_000))
-  }
-  // Account rows use their own snapshot; cached siblings are marked per window.
-  const usageColor = (snapshot: UsageSnapshot<{ ok: boolean }>) =>
-    snapshot.stale || snapshot.source === "cache" || usageNow() - (snapshot.fetchedAt ?? 0) > 300_000
-      ? theme.textMuted : theme.text
-  usageScheduler = createUsageRefresh({
-    providers: usageProviders,
-    active: (provider) => Object.entries(sync.data.session_status).some(([id, status]) => {
-      if (status.type === "idle") return false
-      const model = sync.data.message[id]?.findLast((message) => message.role === "assistant")
-      return usageProviderForModel(model?.role === "assistant" ? model.providerID :
-        id === props.sessionID ? local.model.current()?.providerID ?? "" : "") === provider
-    }),
-    refresh: async (provider) => {
-      const result = await refreshUsage(provider)
-      return { ok: result.ok, retryAt: result.metadata?.retryAt }
-    },
-  })
-  usageScheduler.request()
-  void readObservedUsage()
-  onCleanup(sdk.onReconnect(() => {
-    void readObservedUsage()
-    usageScheduler.request()
-  }))
-  createEffect(() => {
-    usageProviders()
-    Object.values(sync.data.session_status).forEach((status) => status.type)
-    usageScheduler.reconcile()
-  })
-  createEffect(() => {
-    const dirs = claudeDirectories()
-    setClaudeCodeUsage((previous) => {
-      const ids = previous.ok ? previous.accounts?.map((account) => account.id) ?? [previous.accountID] : []
-      if (JSON.stringify(ids) === JSON.stringify(dirs)) return previous
-      return [...usageObservations.values()].reduce(applyClaudeObservation, claudeSeed())
-    })
-    if (usageProviders().includes("claude-code")) usageScheduler.request(["claude-code"])
-    void refreshActiveClaudeAccount()
+  const usage = createSidebarUsage({
+    sessionID: () => sessionID,
+    routeSessionID: () => props.sessionID,
+    settings: () => sidebarSettings,
+    hovered,
+    setHovered,
+    hoverColor,
   })
 
   const syncSession = (nextSessionID: string) => {
@@ -624,14 +390,15 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
     sessionID = nextSessionID
     project = nextConfigRoot
     loadProjectSettings()
+    usage.loadSettings(sidebarSettings)
     setScriptsOpen(true)
     setFilesOpen(true)
     setExpanded(new Set(["."]))
     setScripts((prev) => reconcileScripts(prev, readScripts(project, root, scriptSettings)))
     setTree((prev) => reconcileTree(prev, readTree(root, expanded())))
     refreshCommands()
-    refreshOldUsage()
-    void refreshActiveClaudeAccount()
+    usage.refreshOldUsage()
+    void usage.refreshActiveClaudeAccount()
   }
   const refresh = () => {
     const nextSessionID = currentSessionID()
@@ -708,279 +475,6 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
       toast.show({ variant: "error", message: `Could not start ${script.name}: ${result.error}` })
     }
   }
-  const codexWindows = (): { weekly?: UsageWindow; monthly?: UsageWindow; reauthenticate: boolean } => {
-    const snapshot = usage()
-    if (!snapshot.ok)
-      return { weekly: undefined, monthly: undefined, reauthenticate: snapshot.reason === "reauthenticate" }
-    const [shortest, longest] = orderUsageWindows([snapshot.primary, snapshot.secondary])
-    return { weekly: shortest, monthly: longest, reauthenticate: false }
-  }
-  const promptCursorToken = () =>
-    dialog.replace(() => (
-      <DialogPrompt
-        title="Connect Cursor usage"
-        description={() => (
-          <text>
-            1. Open cursor.com in a browser while logged in (or stay signed into the Cursor app). 2. If the app is
-            signed in, cancel and wait: the sidebar will retry from the app. 3. Otherwise: in the browser, open
-            DevTools, Application (or Storage), Cookies, cursor.com, copy the value of WorkosCursorSessionToken. 4.
-            Paste that value here (a long user::eyJ... string is fine).
-          </text>
-        )}
-        placeholder="user::eyJ..."
-        onConfirm={(value) => {
-          const trimmed = value.trim()
-          if (!cursorSessionCookie(trimmed)) {
-            toast.show({ variant: "error", message: "That does not look like a Cursor session cookie" })
-            return
-          }
-          writeCursorSessionToken(os.homedir(), trimmed)
-          cursorSessionToken = trimmed
-          toast.show({ variant: "success", message: "Cursor usage connected" })
-          dialog.clear()
-          usageScheduler.request()
-        }}
-        onCancel={() => dialog.clear()}
-      />
-    ))
-  const usageRows = () => {
-    const codex = codexWindows()
-    const codexHasData = Boolean(codex.weekly || codex.monthly)
-    const goSnapshot = goUsage()
-    const goOk = goSnapshot.ok ? goSnapshot : undefined
-    const orSnapshot = openRouterUsage()
-    const orOk = orSnapshot.ok ? orSnapshot : undefined
-    const orValue = orOk ? formatUsagePercent(orOk.usedPercent, showRemaining()) +
-      (orSnapshot.stale || usageNow() - (orSnapshot.fetchedAt ?? 0) > 300_000 ? "*" : "") : "unavailable"
-    const cursorSnapshot = cursorUsage()
-    const cursorOk = cursorSnapshot.ok ? cursorSnapshot.monthly : undefined
-    const cursorNeedsToken =
-      !cursorSnapshot.ok && (cursorSnapshot.reason === "need-token" || cursorSnapshot.reason === "reauthenticate")
-    const claudeSnapshot = claudeCodeUsage()
-    // Expire known windows against the local minute clock; no new request, no timestamp refresh.
-    const claudeProjected = claudeSnapshot.ok ? projectClaudeUsage(claudeSnapshot, usageNow()) : claudeSnapshot
-    const claudeOk = claudeProjected.ok ? claudeProjected : undefined
-    const cell = (window: UsageWindow, snapshot: UsageSnapshot<{ ok: boolean }>, suffix = windowLabel(window.minutes)) => ({
-      usedPercent: window.usedPercent,
-      resetAt: window.resetAt,
-      suffix: suffix + (usageWindowStale(window, snapshot, usageNow()) ? "*" : ""),
-    })
-    const providers = usageProviders()
-    // Laid out twice: the first pass finds each window slot's widest date start, flipped clock, and flipped
-    // day; the second shares them across providers so later-slot dates end in one column.
-    const layout = (shared?: ReturnType<typeof usageColumns>) => {
-      const rows = (
-        show: unknown,
-        options: Omit<Parameters<typeof formatUsageRows>[0], "remaining" | "width" | "columns" | "clocks" | "days">,
-      ) =>
-        show
-          ? formatUsageRows({
-              ...options,
-              remaining: showRemaining(),
-              width: usageWidth(),
-              columns: shared?.starts,
-              clocks: shared?.clocks,
-              days: shared?.days,
-            })
-          : []
-      return {
-        codex: rows(providers.includes("openai") && codexHasData, {
-          label: "Codex :",
-          windows: [codex.weekly, codex.monthly].flatMap((window) => (window ? [cell(window, usage())] : [])),
-        }),
-        claude:
-          providers.includes("claude-code") && claudeOk
-            ? formatClaudeUsageRows(
-                claudeOk,
-                showRemaining(),
-                usageWidth(),
-                shared?.starts,
-                shared?.clocks,
-                shared?.days,
-                 activeClaudeAccount(),
-                 usageNow(),
-              )
-            : [],
-        cursor: rows(providers.includes("cursor") && cursorOk, {
-          label: "Cursor:",
-          windows: cursorOk
-            ? [
-                cell(cursorOk, cursorSnapshot, "m"),
-                { usedPercent: cursorOk.apiUsedPercent, resetAt: "", suffix: " api" +
-                  (usageWindowStale(cursorOk, cursorSnapshot, usageNow()) ? "*" : "") },
-              ]
-            : [],
-        }),
-        go: rows(providers.includes("opencode-go") && goOk, {
-          label: "OpenCode Go:",
-          windows: goOk ? [goOk.weekly, goOk.monthly].flatMap((window) => (window ? [cell(window, goSnapshot)] : [])) : [],
-        }),
-      }
-    }
-    const rows = layout(usageColumns(Object.values(layout()).flat()))
-    const aligned = (
-      label: string,
-      snapshot: UsageSnapshot<{ ok: boolean }>,
-      rows: (ReturnType<typeof formatUsageRows>[number] & {
-        label?: string; spaced?: boolean; snapshot?: UsageSnapshot<{ ok: boolean }>
-      })[],
-    ) => (
-      <For each={rows}>
-        {(row) => {
-          const rowLabel = row.label ?? label
-          return (
-            <box flexDirection="column" marginTop={"spaced" in row && row.spaced && usageSpacing() ? 1 : 0}>
-              <text fg={theme.textMuted} wrapMode="none">
-                <span style={{ fg: usageColor(row.snapshot ?? snapshot) }}>{row.usage.startsWith(rowLabel) ? rowLabel : ""}</span>
-                {row.usage.startsWith(rowLabel) ? row.usage.slice(rowLabel.length) : row.usage}
-              </text>
-              <text fg={theme.textMuted} wrapMode="none">
-                {row.reset}
-              </text>
-            </box>
-          )
-        }}
-      </For>
-    )
-    return (
-      <box
-        flexDirection="column"
-        ref={(el) => (usageBox = el)}
-        onSizeChange={() => setUsageWidth(usageBox?.width ?? 0)}
-        onMouseOver={() => setHovered("usage")}
-        onMouseOut={() => setHovered()}
-        onMouseUp={(event) => {
-          if (event.button === 0) openUsageMenu()
-        }}
-      >
-        <box flexDirection="row" gap={1}>
-          {/* Stops propagation on mouseUp so the outer box does not open the usage menu. */}
-          <SidebarToggle
-            open={usageOpen()}
-            fg={hovered() === "usage" ? hoverColor : theme.text}
-            onMouseDown={(event) => {
-              event.stopPropagation()
-              if (event.button === 0) setUsageOpen(!usageOpen())
-            }}
-            onMouseUp={(event) => event.stopPropagation()}
-          />
-          <text fg={hovered() === "usage" ? hoverColor : theme.text}>Usage:</text>
-        </box>
-        <Show when={usageOpen()}>
-          {/* Each visible provider is one flex child, so gap spaces only providers that render. */}
-          <box flexDirection="column" gap={usageSpacing() ? 1 : 0}>
-            <Show when={usageProviders().length === 0}>
-              <box flexDirection="row" gap={1}>
-                <text fg={theme.textMuted}>No usage providers selected</text>
-              </box>
-            </Show>
-            <Show when={usageProviders().includes("openai")}>
-              <box flexDirection="column">
-                <Show
-                  when={codexHasData}
-                  fallback={
-                    <>
-                      <box flexDirection="row" gap={1}>
-                        <text fg={usageColor(usage())}>Codex :</text>
-                        <text fg={theme.textMuted}>{codex.reauthenticate ? "run /connect" : "unavailable"}</text>
-                      </box>
-                      <box flexDirection="row" gap={1}>
-                        <text fg={theme.textMuted}>
-                          {codex.reauthenticate ? "OpenAI auth required" : "unavailable"}
-                        </text>
-                      </box>
-                    </>
-                  }
-                >
-                  {aligned("Codex :", usage(), rows.codex)}
-                </Show>
-              </box>
-            </Show>
-            <Show when={usageProviders().includes("claude-code")}>
-              <box flexDirection="column">
-                <Show
-                  when={claudeOk}
-                  fallback={
-                    <>
-                      <box flexDirection="row" gap={1}>
-                        <text fg={usageColor(claudeSnapshot)}>Claude:</text>
-                        <text fg={theme.textMuted}>unavailable</text>
-                      </box>
-                      <box flexDirection="row" gap={1}>
-                        <text fg={theme.textMuted}>unavailable</text>
-                      </box>
-                    </>
-                  }
-                >
-                  {aligned("Claude:", claudeProjected, rows.claude)}
-                </Show>
-              </box>
-            </Show>
-            <Show when={usageProviders().includes("cursor")}>
-              <box flexDirection="column">
-                <Show
-                  when={cursorOk}
-                  fallback={
-                    <>
-                      <box flexDirection="row" gap={1}>
-                        <text fg={usageColor(cursorSnapshot)}>Cursor:</text>
-                        <text fg={theme.textMuted}>{cursorNeedsToken ? "sign in" : "unavailable"}</text>
-                      </box>
-                      <box flexDirection="row" gap={1}>
-                        <text fg={theme.textMuted}>
-                          {cursorOk?.resetAt || (cursorNeedsToken ? "Cursor auth required" : "unavailable")}
-                        </text>
-                      </box>
-                    </>
-                  }
-                >
-                  {aligned("Cursor:", cursorSnapshot, rows.cursor)}
-                </Show>
-                <Show when={!cursorSnapshot.ok && cursorSnapshot.reason === "reauthenticate"}>
-                  <box flexDirection="row" gap={1}>
-                    <text fg={theme.textMuted}>open Usage to paste a new cookie</text>
-                  </box>
-                </Show>
-              </box>
-            </Show>
-            <Show when={usageProviders().includes("opencode-go")}>
-              <box flexDirection="column">
-                <Show
-                  when={goOk}
-                  fallback={
-                    <>
-                      <box flexDirection="row" gap={1}>
-                        <text fg={usageColor(goSnapshot)}>OpenCode Go:</text>
-                        <text fg={theme.textMuted}>unavailable</text>
-                      </box>
-                      <box flexDirection="row" gap={1}>
-                        <text fg={theme.textMuted}>unavailable</text>
-                      </box>
-                    </>
-                  }
-                >
-                  {aligned("OpenCode Go:", goSnapshot, rows.go)}
-                </Show>
-              </box>
-            </Show>
-            <Show when={usageProviders().includes("openrouter")}>
-              <box flexDirection="column">
-                <box flexDirection="row" gap={1}>
-                  <text fg={usageColor(orSnapshot)}>OpenRouter:</text>
-                  <text fg={theme.textMuted}>{orValue}</text>
-                </box>
-                <Show when={orOk}>
-                  <box flexDirection="row" gap={1}>
-                    <text fg={theme.textMuted}>{`$${orOk?.usedUsd.toFixed(2)} / $${orOk?.limitUsd.toFixed(2)}`}</text>
-                  </box>
-                </Show>
-              </box>
-            </Show>
-          </box>
-        </Show>
-      </box>
-    )
-  }
   const toggleDirectory = (relativePath: string) => {
     const next = new Set<string>(expanded())
     if (next.has(relativePath)) next.delete(relativePath)
@@ -1028,267 +522,14 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
     const result = keymap.dispatchCommand("model.list")
     if (!result.ok) toast.show({ variant: "error", message: `Could not switch model: ${result.reason}` })
   }
-  const promptForRoot = () =>
-    dialog.replace(() => (
-      <DialogPrompt
-        title="Set file root"
-        description={() => <text>Enter an absolute or project-relative directory.</text>}
-        placeholder={project}
-        onConfirm={(value) => {
-          const candidate = path.normalize(path.resolve(project, value.trim()))
-          if (!value.trim() || !isDirectory(candidate)) {
-            toast.show({ variant: "error", message: `Directory not found: ${candidate}` })
-            return
-          }
-          setRoot(candidate)
-          dialog.clear()
-        }}
-        onCancel={() => dialog.clear()}
-      />
-    ))
-  let rootPickerSearchAbort: AbortController | undefined
-  let rootPickerDebounce: ReturnType<typeof setTimeout> | undefined
-  let rootPickerSearchGeneration = 0
-  let pickerInterceptor: (() => void) | undefined
-  let selectedRootPickerValue: string | undefined
-  const [rootPickerOptions, setRootPickerOptions] = createSignal<
-    Array<{
-      title: string
-      value: string
-      category?: string
-      footer?: string
-      disabled?: boolean
-      onSelect?: () => void
-    }>
-  >([])
-  let liveRootPickerOptions: Array<{
-    title: string
-    value: string
-    category?: string
-    footer?: string
-    disabled?: boolean
-    onSelect?: () => void
-  }> = []
-
-  const rootDirectoryOptions = (directories: readonly string[], category: string) => {
-    const options: Array<{ title: string; value: string; category: string; onSelect?: () => void }> = []
-    for (const directory of directories) {
-      options.push({
-        title: displayPath(directory, os.homedir()),
-        value: directory,
-        category,
-        onSelect: () => {
-          setRoot(directory)
-          dialog.clear()
-        },
-      })
-    }
-    return options
-  }
-
-  const buildRootPickerOptions = (groupActions = false) => {
-    const actionCategory = groupActions ? "Actions" : undefined
-    const sections = rootSections(sidebarSettings.recentFileRoots, [...favorites()])
-    const projectCanonical = normalizeRootPath(project)
-    const options: Array<{
-      title: string
-      value: string
-      category?: string
-      footer?: string
-      disabled?: boolean
-      onSelect?: () => void
-    }> = [
-      {
-        title: "Add custom dir...",
-        value: ADD_ROOT,
-        category: actionCategory,
-        onSelect: () => promptForRoot(),
-      },
-    ]
-    if (isDirectory(projectCanonical)) {
-      options.push({
-        title: displayPath(projectCanonical, os.homedir()),
-        value: projectCanonical,
-        category: "Project",
-        onSelect: () => {
-          setRoot(projectCanonical)
-          dialog.clear()
-        },
-      })
-    }
-    options.push(...rootDirectoryOptions(sections.favoriteRoots, "Favorite"))
-    options.push(...rootDirectoryOptions(sections.recentRoots, "Recent"))
-    options.push({
-      title: "Reset to project root",
-      value: RESET_ROOT,
-      category: actionCategory,
-      onSelect: () => {
-        setRoot(project)
-        dialog.clear()
-      },
-    })
-    options.push({
-      title: "Favorite",
-      value: FAVORITE_HELP,
-      category: "Help",
-      footer: "ctrl+f",
-      onSelect: () => {},
-    })
-    return options
-  }
-
-  const handleRootPickerSelect = (value: string) => {
-    if (value === ADD_ROOT) {
-      promptForRoot()
-      return
-    }
-    if (value === RESET_ROOT) {
-      setRoot(project)
-      dialog.clear()
-      return
-    }
-    if (value.startsWith(FILE_ROOT_PREFIX)) {
-      insertPath(sessionID, value.slice(FILE_ROOT_PREFIX.length))
-      dialog.clear()
-      return
-    }
-    setRoot(value)
-    dialog.clear()
-  }
-
-  const applyRootPickerOptions = (
-    searchOptions: Array<{
-      title: string
-      value: string
-      category?: string
-      footer?: string
-      disabled?: boolean
-      onSelect?: () => void
-    }> = [],
-  ) => {
-    const searching = searchOptions.length > 0
-    const next = searching ? [...searchOptions, ...buildRootPickerOptions(true)] : buildRootPickerOptions()
-    liveRootPickerOptions.splice(0, liveRootPickerOptions.length, ...next)
-    setRootPickerOptions(liveRootPickerOptions.slice())
-    return liveRootPickerOptions
-  }
-
-  const renderRootPicker = (
-    query = "",
-    searchOptions: Array<{
-      title: string
-      value: string
-      category?: string
-      footer?: string
-      disabled?: boolean
-      onSelect?: () => void
-    }> = [],
-  ) => {
-    const options = applyRootPickerOptions(searchOptions)
-    selectedRootPickerValue = options.find(
-      (option) => typeof option.value === "string" && isDirectory(option.value),
-    )?.value
-    pickerInterceptor?.()
-    const pickerID = ++rootPickerSearchGeneration
-    const interceptor = keymap.intercept("key", (context) => {
-      if (
-        context.event.ctrl &&
-        context.event.name.toLowerCase() === "f" &&
-        selectedRootPickerValue &&
-        isDirectory(selectedRootPickerValue)
-      ) {
-        context.consume({ preventDefault: true, stopPropagation: true })
-        toggleFavorite(selectedRootPickerValue)
-        renderRootPicker(query, searchOptions)
-      }
-    })
-    pickerInterceptor = interceptor
-    const dialogProps = {
-      title: `Project: ${project}`,
-      skipFilter: true,
-      get options() {
-        rootPickerOptions()
-        return liveRootPickerOptions
-      },
-      onFilter: (filterQuery: string) => {
-        if (rootPickerDebounce) clearTimeout(rootPickerDebounce)
-        rootPickerDebounce = setTimeout(() => {
-          void (async () => {
-            const generation = ++rootPickerSearchGeneration
-            const trimmed = filterQuery.trim()
-            if (!trimmed) {
-              applyRootPickerOptions([])
-              return
-            }
-            rootPickerSearchAbort?.abort()
-            rootPickerSearchAbort = new AbortController()
-            const searchRoots = dedupeRootPaths([project, ...sidebarSettings.recentFileRoots, ...favorites()])
-            const result = await runEverythingSearch({
-              query: trimmed,
-              roots: searchRoots,
-              signal: rootPickerSearchAbort.signal,
-            })
-            if (generation !== rootPickerSearchGeneration) return
-            if (result.ok === false) {
-              if (result.error === "aborted") return
-              if (!everythingSearchHintShown) {
-                everythingSearchHintShown = true
-                if (result.error === "missing-es") {
-                  toast.show({ variant: "info", message: "Install es.exe and add it to PATH for file search." })
-                } else if (result.error === "ipc-unavailable") {
-                  toast.show({
-                    variant: "info",
-                    message: "Everything search needs es.exe on PATH and the Everything app running.",
-                  })
-                }
-              }
-              applyRootPickerOptions([])
-              return
-            }
-            applyRootPickerOptions(
-              result.entries.map((entry) => ({
-                title: entry.directory
-                  ? `${displayPath(entry.path, os.homedir())}/`
-                  : displayPath(entry.path, os.homedir()),
-                value: entry.directory ? entry.path : `${FILE_ROOT_PREFIX}${entry.path}`,
-                onSelect: () =>
-                  handleRootPickerSelect(entry.directory ? entry.path : `${FILE_ROOT_PREFIX}${entry.path}`),
-              })),
-            )
-          })()
-        }, 150)
-      },
-      onMove: (option: (typeof options)[number]) => {
-        if (option.value === FAVORITE_HELP) {
-          queueMicrotask(() => renderRootPicker(query, searchOptions))
-          return
-        }
-        selectedRootPickerValue =
-          typeof option.value === "string" && isDirectory(option.value) ? option.value : undefined
-      },
-      onSelect: (option: (typeof options)[number]) => {
-        pickerInterceptor?.()
-        pickerInterceptor = undefined
-        if (typeof option.onSelect === "function") {
-          option.onSelect()
-          return
-        }
-        handleRootPickerSelect(String(option.value))
-      },
-    } as unknown as DialogSelectProps<string>
-    dialog.replace(
-      () => <DialogSelect {...dialogProps} />,
-      () => {
-        if (pickerID !== rootPickerSearchGeneration) return
-        pickerInterceptor?.()
-        pickerInterceptor = undefined
-        if (rootPickerDebounce) clearTimeout(rootPickerDebounce)
-        rootPickerSearchAbort?.abort()
-      },
-    )
-  }
-
-  const selectRoot = () => renderRootPicker()
+  const { promptForRoot, selectRoot } = createRootPicker({
+    project: () => project,
+    recentRoots: () => sidebarSettings.recentFileRoots,
+    favorites,
+    setRoot,
+    toggleFavorite,
+    insertPath: (filePath) => insertPath(sessionID, filePath),
+  })
   const openRootPicker = () => setTimeout(selectRoot, 100)
 
   const saveScriptSettings = (next: ScriptSettings, message = "Script settings updated") => {
@@ -1307,563 +548,13 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
     refreshCommands()
     toast.show({ variant: "success", message: "Global script settings reset" })
   }
-  const toggleLanguage = (languageID: string) => {
-    saveScriptSettings(
-      updateLanguage(scriptSettings, languageID, (language) => ({ ...language, enabled: !language.enabled })),
-    )
-  }
-  const toggleExtension = (languageID: string, extension: string) => {
-    saveScriptSettings(
-      updateLanguage(scriptSettings, languageID, (language) => ({
-        ...language,
-        extensions: language.extensions.includes(extension)
-          ? language.extensions.filter((item) => item !== extension)
-          : [...language.extensions, extension],
-      })),
-    )
-  }
-  const chooseLanguageForExtension = (extension: string) => {
-    const options = scriptSettings.languages.map((language) => ({
-      title: language.title,
-      value: language.id,
-      category: language.enabled ? "Enabled languages" : "Disabled languages",
-      footer: language.launcher.executable,
-      disabled: !language.enabled,
-    }))
-    dialog.replace(() => (
-      <DialogSelect
-        title={`Track ${extension} with`}
-        options={options}
-        current={options.find((option) => !option.disabled)?.value}
-        onSelect={(option) => {
-          saveScriptSettings(
-            updateLanguage(scriptSettings, option.value, (language) => ({
-              ...language,
-              extensions: language.extensions.includes(extension)
-                ? language.extensions
-                : [...language.extensions, extension],
-            })),
-            `Tracking ${extension} with ${option.title}`,
-          )
-          selectScriptSettings()
-        }}
-      />
-    ), undefined, { back: selectScriptSettings })
-  }
-  const promptCustomExtension = (languageID?: string) =>
-    dialog.replace(() => (
-      <DialogPrompt
-        title="Add script extension"
-        description={() => <text>Enter an extension such as .ps1 or .envrc.</text>}
-        placeholder=".custom"
-        onConfirm={(value) => {
-          const extension = normalizeExtension(value)
-          if (!extension) {
-            toast.show({ variant: "error", message: "Enter a valid file extension." })
-            return
-          }
-          if (languageID) {
-            saveScriptSettings(
-              updateLanguage(scriptSettings, languageID, (language) => ({
-                ...language,
-                extensions: language.extensions.includes(extension)
-                  ? language.extensions
-                  : [...language.extensions, extension],
-              })),
-              `Tracking ${extension}`,
-            )
-            selectScriptSettings()
-          } else {
-            chooseLanguageForExtension(extension)
-          }
-        }}
-      />
-    ), undefined, { back: selectScriptSettings })
-  const promptCustomExecutable = () =>
-    dialog.replace(() => (
-      <DialogPrompt
-        title="Add custom script executable"
-        description={() => <text>Enter an executable and optional arguments. The file path is appended.</text>}
-        placeholder="my-runner --flag"
-        onConfirm={(value) => {
-          const tokens = parseLauncher(value)
-          if (!tokens) {
-            toast.show({ variant: "error", message: "Enter an executable." })
-            return
-          }
-          const [executable, ...args] = tokens
-          const id = `custom-${Date.now()}`
-          const language: ScriptLanguage = {
-            id,
-            title: `Custom: ${executable}`,
-            enabled: true,
-            launcher: { executable, args },
-            extensions: [],
-          }
-          saveScriptSettings(
-            { ...scriptSettings, languages: [...scriptSettings.languages, language] },
-            `Added ${executable}`,
-          )
-          promptCustomExtension(id)
-        }}
-      />
-    ), undefined, { back: selectScriptSettings })
-  const splitSizeLabel = (size: WezTermSplitSize) => ("Percent" in size ? `${size.Percent}%` : `${size.Cells} cells`)
-  const promptWeztermSizeValue = (direction: "horizontal" | "vertical", mode: "Percent" | "Cells") =>
-    dialog.replace(() => (
-      <DialogPrompt
-        title={`${direction === "horizontal" ? "Horizontal" : "Vertical"} split ${mode}`}
-        description={() => (
-          <text>{mode === "Percent" ? "Enter a percentage from 1 to 99." : "Enter a positive cell count."}</text>
-        )}
-        placeholder={mode === "Percent" ? "30" : "20"}
-        onConfirm={(value) => {
-          const number = Number(value.trim())
-          const valid = Number.isInteger(number) && (mode === "Percent" ? number > 0 && number < 100 : number > 0)
-          if (!valid) {
-            toast.show({
-              variant: "error",
-              message:
-                mode === "Percent"
-                  ? "Enter a whole percentage from 1 to 99."
-                  : "Enter a positive whole number of cells.",
-            })
-            return
-          }
-          const size: WezTermSplitSize = mode === "Percent" ? { Percent: number } : { Cells: number }
-          saveScriptSettings(
-            {
-              ...scriptSettings,
-              wezterm: { ...scriptSettings.wezterm, [direction]: size },
-            },
-            `${direction === "horizontal" ? "Horizontal" : "Vertical"} split size set to ${splitSizeLabel(size)}`,
-          )
-          selectScriptSettings()
-        }}
-      />
-    ), undefined, { back: () => selectWeztermSizeMode(direction) })
-  const selectWeztermSizeMode = (direction: "horizontal" | "vertical") => {
-    const current = scriptSettings.wezterm[direction]
-    dialog.replace(() => (
-      <DialogSelect
-        title={`${direction === "horizontal" ? "Horizontal" : "Vertical"} split size`}
-        options={[
-          { title: "Percent", value: "Percent", footer: "Percent" in current ? `${current.Percent}%` : "" },
-          { title: "Cells", value: "Cells", footer: "Cells" in current ? `${current.Cells} cells` : "" },
-        ]}
-        current={"Percent" in current ? "Percent" : "Cells"}
-        onSelect={(option) => promptWeztermSizeValue(direction, option.value as "Percent" | "Cells")}
-      />
-    ), undefined, { back: selectScriptSettings })
-  }
-  const selectScriptSettings = () => {
-    const defaults = defaultScriptSettings()
-    const languageMap = new Map(scriptSettings.languages.map((language) => [language.id, language]))
-    const extensionOptions = defaults.languages
-      .flatMap((language) => {
-        const current = languageMap.get(language.id)
-        const extensions = [...new Set([...language.extensions, ...(current?.extensions ?? [])])]
-        return extensions.map((extension) => ({
-          title: extension,
-          value: `extension:${language.id}:${extension}`,
-          category: language.title,
-          footer: current?.extensions.includes(extension) ? "tracked" : "not tracked",
-        }))
-      })
-      .concat(
-        scriptSettings.languages
-          .filter((language) => !defaults.languages.some((item) => item.id === language.id))
-          .flatMap((language) =>
-            language.extensions.map((extension) => ({
-              title: extension,
-              value: `extension:${language.id}:${extension}`,
-              category: language.title,
-              footer: "tracked",
-            })),
-          ),
-      )
-    const splitDirection =
-      scriptSettings.terminal === "wezterm-horizontal"
-        ? "horizontal"
-        : scriptSettings.terminal === "wezterm-vertical"
-          ? "vertical"
-          : undefined
-    const placements = scriptTerminals()
-    const selectedTarget = resolveScriptTerminal(scriptSettings.terminal)
-    const splitSizeOptions =
-      splitDirection && placements.length > 0
-        ? [
-            { title: "Split size", value: WEZTERM_SIZE_SECTION, disabled: true },
-            {
-              title: `${splitDirection === "horizontal" ? "Horizontal" : "Vertical"} split size`,
-              value: `wezterm-size:${splitDirection}`,
-              category: "Split size",
-              footer: splitSizeLabel(scriptSettings.wezterm[splitDirection]),
-            },
-          ]
-        : []
-    const options = [
-      { title: "Shell", value: SCRIPT_SHELL_SECTION, disabled: true },
-      ...BUILTIN_SHELLS.map((shell) => ({
-        title: shell.title,
-        value: `shell:${shell.id}`,
-        category: "Shell",
-        footer: scriptSettings.shell.executable === shell.launcher.executable ? "selected" : shell.launcher.executable,
-      })),
-      ...(BUILTIN_SHELLS.some((shell) => shell.launcher.executable === scriptSettings.shell.executable)
-        ? []
-        : [
-            {
-              title: `Custom: ${scriptSettings.shell.executable}`,
-              value: "shell:custom",
-              category: "Shell",
-              footer: "selected",
-            },
-          ]),
-      ...(placements.length > 0 ? [{ title: "Terminal placement", value: "terminal-section", disabled: true }] : []),
-      ...placements.map((terminal) => ({
-        title: terminal.title,
-        value: `terminal:${terminal.id}`,
-        category: "Terminal placement",
-        footer: selectedTarget === terminal.id ? "selected" : "",
-      })),
-      {
-        title: "Native detached runner",
-        value: "terminal:native",
-        category: placements.length > 0 ? "Terminal placement" : undefined,
-        footer: selectedTarget === "native" ? "selected" : "",
-      },
-      ...splitSizeOptions,
-      { title: "Languages", value: SCRIPT_LANGUAGE_SECTION, disabled: true },
-      ...scriptSettings.languages.map((language) => ({
-        title: `${language.enabled ? "*" : " "} ${language.title}`,
-        value: `language:${language.id}`,
-        category: "Languages",
-        footer: language.extensions.join(", ") || "no extensions",
-      })),
-      { title: "Tracked extensions", value: SCRIPT_EXTENSION_SECTION, disabled: true },
-      ...extensionOptions,
-      { title: "Add custom executable...", value: ADD_SCRIPT_EXECUTABLE },
-      { title: "Add custom extension...", value: ADD_SCRIPT_EXTENSION },
-      { title: "Reset global script settings", value: RESET_SCRIPT_SETTINGS },
-    ]
-    const selectedTerminal = selectedTarget === "native" ? "terminal:native" : `terminal:${selectedTarget}`
-    const dialogProps = {
-      title: `Global script settings`,
-      skipFilter: true,
-      options,
-      current: selectedTerminal,
-      onSelect: (option: (typeof options)[number]) => {
-        if (option.value === ADD_SCRIPT_EXECUTABLE) promptCustomExecutable()
-        else if (option.value === ADD_SCRIPT_EXTENSION) promptCustomExtension()
-        else if (option.value === RESET_SCRIPT_SETTINGS) {
-          resetScriptSettings()
-          selectScriptSettings()
-        } else if (option.value.startsWith("terminal:")) {
-          const terminal = option.value.slice("terminal:".length) as ScriptSettings["terminal"]
-          saveScriptSettings(
-            { ...scriptSettings, terminal },
-            terminal === "native" ? "Using native detached runner" : `Using terminal placement: ${option.title}`,
-          )
-          selectScriptSettings()
-        } else if (option.value.startsWith("wezterm-size:")) {
-          selectWeztermSizeMode(option.value.slice("wezterm-size:".length) as "horizontal" | "vertical")
-        } else if (option.value.startsWith("shell:")) {
-          const shell = BUILTIN_SHELLS.find((item) => `shell:${item.id}` === option.value)
-          if (shell) {
-            saveScriptSettings(
-              { ...scriptSettings, shell: { ...shell.launcher, args: [...shell.launcher.args] } },
-              `Using ${shell.title}`,
-            )
-            selectScriptSettings()
-          }
-        } else if (option.value.startsWith("language:")) {
-          toggleLanguage(option.value.slice("language:".length))
-          selectScriptSettings()
-        } else if (option.value.startsWith("extension:")) {
-          const [, languageID, extension] = option.value.split(":")
-          toggleExtension(languageID, extension)
-          selectScriptSettings()
-        }
-      },
-    } as unknown as DialogSelectProps<string>
-    dialog.replace(() => <DialogSelect {...dialogProps} />)
-  }
+  const { selectScriptSettings } = createScriptSettingsMenu({
+    settings: () => scriptSettings,
+    save: saveScriptSettings,
+    reset: resetScriptSettings,
+  })
   const openScriptSettings = () => setTimeout(selectScriptSettings, 100)
 
-  const selectUsageSettings = () => {
-    const selected = new Set(usageProviders())
-    const dialogProps = {
-      title: "Usage providers",
-      options: USAGE_PROVIDER_OPTIONS.map((provider) => ({
-        title: provider.title,
-        value: provider.id,
-        footer: selected.has(provider.id) ? "visible" : "hidden",
-        gutter: selected.has(provider.id) ? () => <text fg={theme.success}>:white_check_mark:</text> : undefined,
-      })),
-      onSelect: (option: { value: UsageProviderId }) => {
-        const next = selected.has(option.value)
-          ? usageProviders().filter((id) => id !== option.value)
-          : [
-              ...USAGE_PROVIDER_OPTIONS.map((provider) => provider.id).filter(
-                (id) => selected.has(id) || id === option.value,
-              ),
-            ]
-        sidebarSettings.usageProviders = next
-        saveUserUsageProviders(os.homedir(), next)
-        setUsageProviders(next)
-        usageScheduler.request()
-        selectUsageSettings()
-      },
-    } as unknown as DialogSelectProps<UsageProviderId>
-    dialog.replace(() => <DialogSelect {...dialogProps} />)
-  }
-  const openUsageSettings = () => setTimeout(selectUsageSettings, 100)
-
-  const usageMenuOptions = () => {
-    const nowMs = usageNow()
-    const reset = (resetMs: number | null) =>
-      resetMs === null ? "Reset date unavailable" : fullResetDate(resetMs, nowMs)
-    const row = (category: string, name: string, used: number | null, details: string[]) => ({
-      category,
-      inert: true,
-      title: used === null ? `${name}: Unavailable` :
-        `${name}: ${formatUsagePercent(used)} used, ${formatUsagePercent(used, true)} remaining`,
-      details,
-    })
-    const unavailable = (category: string) => ({ category, title: "Unavailable", inert: true })
-    const signIn = (category: string, detail: string) => ({ category, title: "Sign in required", details: [detail] })
-    const providerRows = (id: UsageProviderId, category: string): Omit<DialogSelectOption<string>, "value">[] => {
-      if (id === "openai") {
-        const codex = codexWindows()
-        if (codex.reauthenticate) return [signIn(category, "Run /connect")]
-        const windows = [codex.weekly, codex.monthly].filter((window) => window !== undefined)
-        if (!windows.length) return [unavailable(category)]
-        return windows.map((window) =>
-          row(category, windowName(window.minutes) || "Usage", window.usedPercent,
-            [reset(window.resetMs), ...usageReadingDetails(window, usage(), nowMs)]),
-        )
-      }
-      if (id === "opencode-go") {
-        const snapshot = goUsage()
-        if (!snapshot.ok) return [unavailable(category)]
-        return [snapshot.weekly, snapshot.monthly]
-          .filter((window) => window !== null)
-          .map((window) => row(category, windowName(window.minutes), window.usedPercent,
-            [reset(window.resetMs), ...usageReadingDetails(window, snapshot, nowMs)]))
-      }
-      if (id === "openrouter") {
-        const snapshot = openRouterUsage()
-        if (!snapshot.ok) return [unavailable(category)]
-        return [
-          row(category, "Credit", snapshot.usedPercent, [
-             `$${snapshot.usedUsd.toFixed(2)} of $${snapshot.limitUsd.toFixed(2)} used`,
-             ...usageReadingDetails({ usedPercent: snapshot.usedPercent, resetAt: null, resetMs: null, minutes: null },
-               snapshot, nowMs),
-          ]),
-        ]
-      }
-      if (id === "cursor") {
-        const snapshot = cursorUsage()
-        if (!snapshot.ok) {
-          const needsToken = snapshot.reason === "need-token" || snapshot.reason === "reauthenticate"
-          if (!needsToken) return [unavailable(category)]
-          return [
-            { ...signIn(category, "Select to paste a Cursor session cookie"), onSelect: () => promptCursorToken() },
-          ]
-        }
-        const monthly = snapshot.monthly
-        const source = snapshot.metadata?.accountSource
-        const login = source === "desktop" ? ["Meter login: Cursor desktop app"] :
-          source === "cookie" ? ["Meter login: separately connected cookie"] : []
-        return [
-          row(category, "Monthly", monthly.usedPercent,
-            [reset(monthly.resetMs), ...usageReadingDetails(monthly, snapshot, nowMs), ...login]),
-          row(category, "API", monthly.apiUsedPercent,
-            [reset(monthly.resetMs), ...usageReadingDetails(monthly, snapshot, nowMs), ...login]),
-        ]
-      }
-      const claudeDetail = (window: UsageWindow, snapshot: ClaudeCodeUsage): string[] => {
-        const details = usageReadingDetails(window, snapshot, nowMs)
-        if (window.resetMs !== null) {
-          const base = reset(window.resetMs)
-          return [base, ...details]
-        }
-        if (window.expired) return details
-        if (window.usedPercent !== null) return details
-        return ["Reset date unavailable"]
-      }
-      const claudeRows = (usage: ClaudeCodeUsage, group: string) =>
-        usage.ok
-          ? [
-              row(group, "5-hour", usage.fiveHour.usedPercent, claudeDetail(usage.fiveHour, usage)),
-              row(group, "Weekly", usage.weekly.usedPercent, claudeDetail(usage.weekly, usage)),
-            ]
-          : usage.reason === "signed-out"
-            ? [{ category: group, title: "Not signed in", inert: true }]
-            : usage.reason === "expired"
-              ? [
-                  {
-                    category: group,
-                    title: "Login expired",
-                    details: ["Use this account in Claude Code once"],
-                    inert: true,
-                  },
-                ]
-              : [unavailable(group)]
-      const rawClaude = claudeCodeUsage()
-      const snapshot = rawClaude.ok ? projectClaudeUsage(rawClaude, nowMs) : rawClaude
-      // Pooled logins each get their own group so an unreadable account still shows up.
-      if (snapshot.ok && snapshot.accounts)
-        return snapshot.accounts.flatMap((account) => claudeRows(account.usage, `${category} (${account.name})`))
-      return claudeRows(snapshot, category)
-    }
-    const providers = usageProviders().flatMap((id) => USAGE_PROVIDER_OPTIONS.filter((item) => item.id === id))
-    // Actions lead so they are visible without scrolling past every provider's rows.
-    const rows = [
-      { category: "Calendar", title: "Usage calendar", onSelect: () => openUsageCalendar() },
-      {
-        category: "Settings",
-        title: showRemaining() ? "Toggle: % remaining" : "Toggle: % used",
-        onSelect: () => {
-          setShowRemaining((value) => !value)
-          selectUsageMenu()
-        },
-      },
-      {
-        category: "Settings",
-        title: usageSpacing() ? "Toggle: provider spacing on" : "Toggle: provider spacing off",
-        onSelect: () => {
-          const next = !usageSpacing()
-          sidebarSettings.usageSpacing = next
-          saveUserUsageSpacing(os.homedir(), next)
-          setUsageSpacing(next)
-          selectUsageMenu()
-        },
-      },
-      { category: "Settings", title: "Configure usage providers", onSelect: () => openUsageSettings() },
-      ...providers.flatMap((provider) => providerRows(provider.id, provider.title)),
-    ]
-    // Values must be unique per row: identical titles such as "Weekly: 0% used" appear under several providers.
-    return rows.map((option) => ({ ...option, value: `${option.category}: ${option.title}` }))
-  }
-  const selectUsageMenu = () => {
-    usageScheduler.request()
-    dialog.replace(() => <DialogSelect title="Usage" options={usageMenuOptions()} preserveSelection />)
-  }
-  const openUsageMenu = () => setTimeout(selectUsageMenu, 100)
-
-  const saveUsageSubscriptions = (next: UsageSubscription[]) => {
-    sidebarSettings.usageSubscriptions = next
-    saveUserUsageSubscriptions(os.homedir(), next)
-    setUsageSubscriptions(next)
-    selectUsageCalendar()
-  }
-  const promptSubscriptionLabel = () =>
-    dialog.replace(() => (
-      <DialogPrompt
-        title="Add subscription date"
-        description={() => <text>Name the subscription, such as Claude Max (work).</text>}
-        placeholder="Claude Max"
-        onConfirm={(value) => {
-          const label = value.trim()
-          if (!label) {
-            toast.show({ variant: "error", message: "Enter a subscription name." })
-            return
-          }
-          setTimeout(() => promptSubscriptionDate(label), 100)
-        }}
-      />
-    ), undefined, { back: selectUsageCalendar })
-  const promptSubscriptionDate = (label: string) =>
-    dialog.replace(() => (
-      <DialogPrompt
-        title={`${label}: date`}
-        description={() => (
-          <text>Enter a day of the month (1-31) for a monthly renewal, or an end date as YYYY-MM-DD.</text>
-        )}
-        placeholder="12 or 2026-11-12"
-        onConfirm={(value) => {
-          const text = value.trim()
-          const day = /^\d{1,2}$/.test(text) ? Number(text) : 0
-          if (day >= 1 && day <= 31) {
-            saveUsageSubscriptions([...usageSubscriptions(), { label, renewDay: day }])
-            return
-          }
-          if (parseUsageDate(text) !== undefined) {
-            saveUsageSubscriptions([...usageSubscriptions(), { label, endsOn: text }])
-            return
-          }
-          toast.show({ variant: "error", message: "Enter a day from 1 to 31, or a date as YYYY-MM-DD." })
-        }}
-      />
-    ), undefined, { back: promptSubscriptionLabel })
-
-  const usageCalendarItems = () => usageCalendarEvents({
-    providers: usageProviders(),
-    openai: usage(),
-    cursor: cursorUsage(),
-    go: goUsage(),
-    claude: claudeCodeUsage(),
-    subscriptions: usageSubscriptions(),
-  }, usageNow())
-  const usageCalendarOptions = () => {
-    const nowMs = usageNow()
-    const events = usageCalendarItems()
-    const percent = (used: number | null, stale: boolean) =>
-      used === null ? "" :
-        `, ${formatUsagePercent(used, showRemaining())} ${showRemaining() ? "remaining" : "used"}${stale ? "*" : ""}`
-    const agenda = events.map((event) => ({
-      category: usageCalendarDay(event.atMs, nowMs),
-      inert: true,
-      // Window resets lead with their clock; subscription dates are whole days.
-      title: event.allDay ? event.title :
-        `${compactResetDate(new Date(event.atMs)).split(" ")[1].padEnd(8)} ${event.title}${percent(event.usedPercent, event.stale)}`,
-      details: [event.allDay
-        ? new Date(event.atMs).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" })
-        : fullResetDate(event.atMs, nowMs)],
-    }))
-    const subscriptions = usageSubscriptions().map((subscription, index) => ({
-      category: "Subscription dates",
-      title: "renewDay" in subscription
-        ? `${subscription.label}: renews monthly on day ${subscription.renewDay}`
-        : `${subscription.label}: ends ${subscription.endsOn}`,
-      details: ["Select to remove"],
-      onSelect: () => saveUsageSubscriptions(usageSubscriptions().filter((_, item) => item !== index)),
-    }))
-    const rows = [
-      { category: "Subscription dates", title: "Add subscription date...", onSelect: () => promptSubscriptionLabel() },
-      ...subscriptions,
-      ...(agenda.length ? agenda : [{ category: "Today", title: "No upcoming resets or subscription dates", inert: true }]),
-    ]
-    // Index keeps values unique: two rows can share a day and a title.
-    return rows.map((option, index) => ({ ...option, value: `${index}: ${option.category}: ${option.title}` }))
-  }
-  // Options and strip are read inside the dialog's JSX so they update as fresh usage readings arrive.
-  const selectUsageCalendar = () => {
-    usageScheduler.request()
-    const strip = () => (
-      <box flexDirection="row" gap={1}>
-        <For each={usageCalendarStrip(usageCalendarItems(), usageNow())}>
-          {(day, index) => (
-            <box flexDirection="column" alignItems="center" width={6}>
-              <text fg={index() === 0 ? theme.primary : theme.textMuted} wrapMode="none">{day.label}</text>
-              <text fg={day.count ? theme.text : theme.textMuted} wrapMode="none">{day.count ? `${day.count}` : "-"}</text>
-            </box>
-          )}
-        </For>
-      </box>
-    )
-    dialog.replace(() => (
-      <DialogSelect
-        title="Usage calendar"
-        filterFooter={strip()}
-        options={usageCalendarOptions()}
-        preserveSelection
-      />
-    ), undefined, { back: selectUsageMenu })
-  }
-  const openUsageCalendar = () => setTimeout(selectUsageCalendar, 100)
 
   const sidebarCommands = createMemo(() => {
     const rootCommands = rootSections(sidebarSettings.recentFileRoots, [...favorites()])
@@ -1887,21 +578,21 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
         title: "Show usage",
         category: "Sidebar",
         namespace: "sidebar",
-        run: selectUsageMenu,
+        run: usage.selectUsageMenu,
       },
       {
         name: "sidebar.usage-calendar",
         title: "Show usage calendar",
         category: "Sidebar",
         namespace: "sidebar",
-        run: selectUsageCalendar,
+        run: usage.selectUsageCalendar,
       },
       {
         name: "sidebar.usage-settings",
         title: "Configure usage providers",
         category: "Sidebar",
         namespace: "sidebar",
-        run: selectUsageSettings,
+        run: usage.selectUsageSettings,
       },
       {
         name: "sidebar.file-root.set",
@@ -1981,7 +672,7 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
     event.on("tui.session.select", () =>
       queueMicrotask(() => {
         refresh()
-        refreshOldUsage()
+        usage.refreshOldUsage()
       }),
     ),
   )
@@ -1991,62 +682,11 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
       const info = evt.properties.info
       if (info.role !== "assistant" || info.time.completed === undefined) return
       const provider = usageProviderForModel(info.providerID)
-      if (provider) usageScheduler.request([provider])
-    }),
-  )
-  onCleanup(sdk.claudeAccount.onChange(() => {
-    void readObservedUsage()
-    void refreshActiveClaudeAccount()
-    usageScheduler.request(["claude-code"])
-  }))
-  onCleanup(event.on("provider.usage.updated", (evt) => observeUsage(evt.properties)))
-  onCleanup(
-    event.on("session.status", (evt) => {
-      queueMicrotask(() => {
-        usageScheduler.reconcile()
-        if (evt.properties.status.type !== "idle") return
-        const message = sync.data.message[evt.properties.sessionID]?.findLast((item) => item.role === "assistant")
-        const provider = message?.role === "assistant" ? usageProviderForModel(message.providerID) : undefined
-        if (provider) usageScheduler.request([provider])
-      })
+      if (provider) usage.request([provider])
     }),
   )
   void syncSidebarVisibility()
-  const refreshedResets = new Set<string>()
-  const usageAgeTimer = setInterval(() => {
-    const now = Date.now()
-    setUsageNow(now)
-    const codex = usage()
-    const go = goUsage()
-    const cursor = cursorUsage()
-    const claude = claudeCodeUsage()
-    const windows: [UsageProviderId, UsageWindow[]][] = [
-      ["openai", codex.ok ? [codex.primary, codex.secondary] : []],
-      ["opencode-go", go.ok ? [go.weekly, ...(go.monthly ? [go.monthly] : [])] : []],
-      ["cursor", cursor.ok ? [cursor.monthly] : []],
-      ["claude-code", claude.ok ? (claude.accounts?.flatMap((account) => account.usage.ok
-        ? [account.usage.fiveHour, account.usage.weekly] : []) ?? [claude.fiveHour, claude.weekly]) : []],
-    ]
-    for (const [provider, readings] of windows) {
-      for (const window of readings) {
-        if (window.resetMs === null || window.resetMs > now) continue
-        const key = `${provider}:${window.resetMs}`
-        if (refreshedResets.has(key)) continue
-        refreshedResets.add(key)
-        usageScheduler.request([provider])
-      }
-    }
-  }, 1_000)
-  onCleanup(() => {
-    clearInterval(usageAgeTimer)
-    clearInterval(marqueeTimer)
-    usageAbort.abort()
-    usageScheduler.dispose()
-    rootPickerSearchGeneration += 1
-    if (rootPickerDebounce) clearTimeout(rootPickerDebounce)
-    rootPickerSearchAbort?.abort()
-    pickerInterceptor?.()
-  })
+  onCleanup(() => clearInterval(marqueeTimer))
   createEffect(() => syncSession(props.sessionID))
   const visibleScripts = createMemo(() =>
     [...scripts()].sort((a, b) => {
@@ -2118,7 +758,7 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
         </box>
       </box>
       <box flexDirection="column" gap={0}>
-        {usageRows()}
+        {usage.view()}
       </box>
       {props.children}
       <box flexDirection="column" gap={1} paddingTop={1} paddingBottom={1}>

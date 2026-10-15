@@ -13,17 +13,16 @@ import { hostEnv } from "../../lib/cli-process"
 import { testEffect } from "../../lib/effect"
 import { reply, TestLLMServer } from "../../lib/llm-server"
 import { expectIsolated, outsideProfile } from "./chatFixture"
+import { SEND_TIMEOUT_MS, sendWarmup } from "@/provider/claude-code/warmup"
 import {
   _setCliRunner,
   buildWarmupArgs,
   defaultCliRunner,
   killOwnedChildren,
-  SEND_TIMEOUT_MS,
-  sendWarmup,
   WARMUP_PROMPT,
   WARMUP_SYSTEM_PROMPT,
   type CliRunOpts,
-} from "@/provider/claude-code/warmup.js"
+} from "@/provider/claude-code/warmup/cli"
 
 const cliPath = process.env.CLAUDE_CLI_PATH ?? Bun.which("claude")
 
@@ -56,6 +55,10 @@ const ALLOWED_REQUEST_KEYS = [
   "tools",
 ] as const
 
+// CLI-owned keys the warm-up cannot turn off. `safeguards` (Claude Code 2.1.300+) carries the
+// server-side dangerous-tool-use classifier context and is sent only when that beta is on.
+const OPTIONAL_REQUEST_KEYS = ["safeguards"] as const
+
 /** Redacted request shape for failure logs (no device/session identifiers). */
 export function normalizedWarmupRequest(body: Record<string, unknown>) {
   const messages = body.messages as { role: string; content: unknown }[]
@@ -77,7 +80,14 @@ export function normalizedWarmupRequest(body: Record<string, unknown>) {
 
 function assertMinimalWarmupRequest(body: Record<string, unknown>) {
   expect(String(body.model ?? "")).toContain("haiku")
-  expect(Object.keys(body).toSorted()).toEqual([...ALLOWED_REQUEST_KEYS].toSorted())
+  const optional: readonly string[] = OPTIONAL_REQUEST_KEYS
+  expect(Object.keys(body).filter((key) => !optional.includes(key)).toSorted()).toEqual(
+    [...ALLOWED_REQUEST_KEYS].toSorted(),
+  )
+  if ("safeguards" in body) {
+    const safeguards = body.safeguards as { type: unknown }[]
+    expect(safeguards.map((entry) => entry.type)).toEqual(["dangerous_tool_use"])
+  }
   expect(body.tools).toEqual([])
   expect(body.output_config).toEqual({ effort: "low" })
 
@@ -98,7 +108,9 @@ function assertMinimalWarmupRequest(body: Record<string, unknown>) {
   expect(systemTexts[1]).toBe("You are a Claude agent, built on Anthropic's Claude Agent SDK.")
   expect(systemTexts[2]).toBe(WARMUP_SYSTEM_PROMPT)
 
-  const instructionText = [...systemTexts, ...envTexts, WARMUP_PROMPT].join("\n")
+  const instructionText = [...systemTexts, ...envTexts, WARMUP_PROMPT, JSON.stringify(body.safeguards ?? [])].join(
+    "\n",
+  )
   expect(instructionText).not.toMatch(/WARMUP-LEAK|USER-RULE|PROJECT-RULE|Generate a title/)
 }
 

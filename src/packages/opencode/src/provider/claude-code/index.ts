@@ -1,5 +1,6 @@
 import type { LanguageModelV3 } from "@ai-sdk/provider"
 import type { Plugin } from "@opencode-ai/plugin"
+import { isRecord } from "@/util/record"
 import { ClaudeCodeLanguageModel } from "./claudeCodeLanguageModel.js"
 import { defaultModels, passthroughModel, toConfigModel } from "./models.js"
 import type {
@@ -266,10 +267,6 @@ export function configModelsForProvider(
   }
 
   return models
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
 }
 
 /**

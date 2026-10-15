@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test"
-import { createUsageRefresh } from "../../../src/routes/session/sidebar-tools/usageRefresh"
-import type { UsageProviderId } from "../../../src/routes/session/sidebar-tools/usage"
+import { createUsageRefresh } from "../../../src/routes/session/sidebar-tools/usage/refresh"
+import type { UsageProviderId } from "../../../src/routes/session/sidebar-tools/usage/providers"
 
 function clock() {
   let now = 0

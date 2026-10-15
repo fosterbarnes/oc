@@ -34,28 +34,38 @@ import { ClaudeUsageCache } from "@opencode-ai/core/claude-usage-cache"
 beforeEach(() => _resetAccountPool())
 afterEach(() => _resetAccountPool())
 
-test("pool ids: the default dir inherits the environment, no option means one default account", () => {
-  const home = process.env.USERPROFILE ?? process.env.HOME ?? ""
-  expect(poolAccountIds(undefined)).toEqual([DEFAULT_ACCOUNT])
-  expect(poolAccountIds(["~/.claude", "~/.claudeSecond", "~/.claudeSecond"])).toEqual([
-    DEFAULT_ACCOUNT,
-    path.resolve(home, ".claudeSecond"),
-  ])
-})
-
-test("pool ids: an explicit entry for the inherited config dir collapses to default", () => {
-  const custom = path.join("home", "me", ".claudeCustom")
+/** Runs `fn` with `CLAUDE_CONFIG_DIR` set (or unset), so results never depend on the caller's shell. */
+function withConfigDir(value: string | undefined, fn: () => void) {
   const previous = process.env.CLAUDE_CONFIG_DIR
-  process.env.CLAUDE_CONFIG_DIR = custom
+  if (value === undefined) delete process.env.CLAUDE_CONFIG_DIR
+  else process.env.CLAUDE_CONFIG_DIR = value
   try {
-    expect(poolAccountIds(["~/.claude", custom])).toEqual([DEFAULT_ACCOUNT])
+    fn()
   } finally {
     if (previous === undefined) delete process.env.CLAUDE_CONFIG_DIR
     else process.env.CLAUDE_CONFIG_DIR = previous
   }
-  // The default dir matches however it is cased on Windows, exactly elsewhere.
-  const cased = path.resolve(expandHome("~/.claude")).toUpperCase()
-  expect(poolAccountIds([cased])).toEqual(process.platform === "win32" ? [DEFAULT_ACCOUNT] : [cased])
+}
+
+test("pool ids: with no inherited config dir, ~/.claude is default and no option means one default account", () => {
+  withConfigDir(undefined, () => {
+    expect(poolAccountIds(undefined)).toEqual([DEFAULT_ACCOUNT])
+    expect(poolAccountIds(["~/.claude", "~/.claudeSecond", "~/.claudeSecond"])).toEqual([
+      DEFAULT_ACCOUNT,
+      path.resolve(expandHome("~/.claudeSecond")),
+    ])
+    // The default dir matches however it is cased on Windows, exactly elsewhere.
+    const cased = path.resolve(expandHome("~/.claude")).toUpperCase()
+    expect(poolAccountIds([cased])).toEqual(process.platform === "win32" ? [DEFAULT_ACCOUNT] : [cased])
+  })
+})
+
+test("pool ids: an inherited config dir is the default account and ~/.claude becomes its own", () => {
+  const custom = path.join("home", "me", ".claudeCustom")
+  withConfigDir(custom, () => {
+    expect(poolAccountIds(["~/.claude", custom])).toEqual([path.resolve(expandHome("~/.claude")), DEFAULT_ACCOUNT])
+    expect(poolAccountIds(undefined)).toEqual([DEFAULT_ACCOUNT])
+  })
 })
 
 test("selection is sticky, skips limited accounts until their reset, and stays put when all are limited", () => {

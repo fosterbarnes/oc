@@ -47,20 +47,18 @@ let loaded = false
 let seeded = false
 
 export function poolAccountIds(accounts: string[] | undefined): string[] {
-  const defaultDir = path.resolve(expandHome("~/.claude"))
-  const inherited = process.env.CLAUDE_CONFIG_DIR ? path.resolve(process.env.CLAUDE_CONFIG_DIR) : undefined
+  // The default account spawns with the inherited environment, so its dir is the
+  // inherited CLAUDE_CONFIG_DIR, else ~/.claude. With CLAUDE_CONFIG_DIR set
+  // elsewhere, ~/.claude is a separate account.
+  const defaultDir = path.resolve(expandHome(process.env.CLAUDE_CONFIG_DIR || "~/.claude"))
   // Windows paths compare case-insensitively; elsewhere exactly.
   const sameDir = (a: string, b: string) =>
     process.platform === "win32" ? a.toLowerCase() === b.toLowerCase() : a === b
   const ids = (accounts ?? []).map((dir) => {
     const resolved = path.resolve(expandHome(dir))
-    // The default account spawns with the inherited environment, so an
-    // explicit entry for the same dir (however cased, or via an inherited
-    // CLAUDE_CONFIG_DIR) is that account, not a second pool entry whose
-    // limit marks would never meet the default's.
-    if (sameDir(resolved, defaultDir)) return DEFAULT_ACCOUNT
-    if (inherited && sameDir(resolved, inherited)) return DEFAULT_ACCOUNT
-    return resolved
+    // An explicit entry for the default dir (however cased) is that account,
+    // not a second pool entry whose limit marks would never meet the default's.
+    return sameDir(resolved, defaultDir) ? DEFAULT_ACCOUNT : resolved
   })
   return ids.length ? [...new Set(ids)] : [DEFAULT_ACCOUNT]
 }

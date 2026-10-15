@@ -13,7 +13,9 @@ import { Auth } from "../../src/auth"
 import { Config } from "../../src/config/config"
 import { Installation } from "../../src/installation"
 import { MoveSession } from "@opencode-ai/core/control-plane/move-session"
-import { ClaudeWarmup } from "../../src/provider/claude-code/warmup"
+import { materializePoolIds } from "../../src/provider/claude-code/warmup/identity"
+import { _resetInventoryForTests, _setInventoryProbe } from "../../src/provider/claude-code/warmup/inventory"
+import { _setStoreFile, readStore, setAccountSchedule } from "../../src/provider/claude-code/warmup/store"
 import { ServerAuth } from "../../src/server/auth"
 import { RootHttpApi } from "../../src/server/routes/instance/httpapi/api"
 import { GlobalPaths } from "../../src/server/routes/instance/httpapi/groups/global"
@@ -218,7 +220,7 @@ describe("global HttpApi", () => {
       const file = yield* warmupTempFile()
       yield* warmupSeams(file, [warmupDefaultId()])
       yield* Effect.promise(() =>
-        ClaudeWarmup.setAccountSchedule({
+        setAccountSchedule({
           file,
           accountID: "extra",
           enabled: true,
@@ -244,7 +246,7 @@ describe("global HttpApi", () => {
       const state = yield* HttpClientRequest.get(GlobalPaths.warmup).pipe(HttpClient.execute)
       const body = (yield* state.json) as { accounts: Array<{ accountID: string; enabled: boolean }> }
       expect(body.accounts.find((account) => account.accountID === warmupDefaultId())?.enabled).toBe(true)
-      const stored = ClaudeWarmup.readStore(file)
+      const stored = readStore(file)
       expect(stored.status === "ok" && stored.state.accounts["extra"]?.schedule).toEqual({
         mode: "daily",
         times: ["06:00"],
@@ -287,7 +289,7 @@ describe("global HttpApi", () => {
 })
 
 function warmupDefaultId() {
-  return ClaudeWarmup.materializePoolIds(undefined)[0]!
+  return materializePoolIds(undefined)[0]!
 }
 
 function warmupTempFile() {
@@ -303,17 +305,17 @@ function warmupTempFile() {
 function warmupSeams(file: string | null, connected: string[]) {
   return Effect.acquireRelease(
     Effect.sync(() => {
-      ClaudeWarmup._setStoreFile(file)
-      ClaudeWarmup._setInventoryProbe(async (cliPath, id) => ({
+      _setStoreFile(file)
+      _setInventoryProbe(async (cliPath, id) => ({
         id,
         status: connected.includes(id) ? ("connected" as const) : ("signed-out" as const),
       }))
     }),
     () =>
       Effect.sync(() => {
-        ClaudeWarmup._setStoreFile(undefined)
-        ClaudeWarmup._setInventoryProbe(null)
-        ClaudeWarmup._resetInventoryForTests()
+        _setStoreFile(undefined)
+        _setInventoryProbe(null)
+        _resetInventoryForTests()
       }),
   )
 }

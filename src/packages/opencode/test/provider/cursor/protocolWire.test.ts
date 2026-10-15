@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { createMessageTypes, decodeMessage, encodeMessage } from "@/provider/cursor/protocol/messages.js"
-import { buildListMcpResourcesFallback, buildReadMcpResourceFallback } from "@/provider/cursor/protocol/tools.js"
+import { buildListMcpResourcesFallback, buildReadMcpResourceFallback } from "@/provider/cursor/protocol/descriptors.js"
 
 function hex(bytes: Uint8Array): string {
   return Array.from(bytes)

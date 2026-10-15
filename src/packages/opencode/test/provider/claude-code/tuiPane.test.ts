@@ -65,23 +65,12 @@ describe.skipIf(!process.env.OC_TUI_PANE || !cliPath || !muxPath)("oc TUI in a W
       yield* pane.type("\r")
       yield* pane.waitFor("Revert failed")
       final.resolve()
-      const diag = (label: string) => pane.screen.pipe(Effect.flatMap((shown) => Effect.promise(() =>
-        require("node:fs/promises").appendFile("C:/Users/Foster/AppData/Local/Temp/opencode/paneDiag.txt",
-          `\n===== ${label} ${new Date().toISOString()}\n${shown}`))))
-      yield* diag("after first revert failed")
       yield* pane.waitFor("STEERING-PANE-DONE", (shown) => !/esc\s+interrupt/.test(shown))
-      yield* diag("done seen")
       yield* Effect.sleep("2 seconds")
-      yield* diag("done +2s")
       yield* pane.click("PANE-DELIVERED")
       yield* Effect.sleep("1 second")
-      yield* diag("clicked +1s")
       yield* pane.waitFor("Revert whole turn")
       yield* pane.type("\r")
-      for (const n of [1, 2, 3, 4, 5, 6]) {
-        yield* Effect.sleep("1 second")
-        yield* diag(`enter +${n}s`)
-      }
       yield* pane.waitFor("2 message reverted")
       const inputs = yield* fixture.llm.inputs
       expect(inputs).toHaveLength(2)
@@ -250,7 +239,10 @@ describe.skipIf(!process.env.OC_TUI_PANE || !cliPath || !muxPath)("oc TUI in a W
         yield* pane.waitFor("Ask anything")
         yield* pane.type("/contextLimit")
         yield* pane.type("\r")
-        const shown = yield* pane.waitFor("Context limit action")
+        // The scope picker comes first; "All providers" is selected.
+        yield* pane.waitFor("Context limit scope", (shown) => shown.includes("All providers"))
+        yield* pane.type("\r")
+        const shown = yield* pane.waitFor("Context limit action", (shown) => shown.includes("Handoff"))
         expect(shown).toContain("Compact")
         expect(shown).toContain("Handoff")
         expect(shown).toContain("Off")
@@ -314,6 +306,8 @@ describe.skipIf(!process.env.OC_TUI_PANE || !cliPath || !muxPath)("oc TUI in a W
         expect(listed).toContain("Schedule Claude warm-up:")
         yield* pane.type("\r")
         yield* pane.waitFor("Times: (none)")
+        // Selection starts on "Time format", above the mode and Times rows.
+        yield* pane.type("\x1b[B")
         yield* pane.type("\x1b[B")
         yield* pane.type("\r")
         yield* pane.waitFor("Times")
@@ -335,16 +329,12 @@ describe.skipIf(!process.env.OC_TUI_PANE || !cliPath || !muxPath)("oc TUI in a W
         yield* pane.waitFor("Search")
         yield* pane.type("Schedule Claude warm-up\r")
         yield* pane.waitFor("Every day")
+        yield* pane.type("\x1b[B")
         yield* pane.type("\r")
         const weekday = yield* pane.waitFor("By weekday")
         expect(weekday).toContain("Sunday:")
-        yield* pane.type("\x1b[B")
-        yield* pane.type("\x1b[B")
-        yield* pane.type("\x1b[B")
-        yield* pane.type("\x1b[B")
-        yield* pane.type("\x1b[B")
-        yield* pane.type("\x1b[B")
-        yield* pane.type("\x1b[B")
+        // The redraw puts the selection back on "Time format": mode, then Monday..Sunday.
+        for (const _ of Array.from({ length: 8 })) yield* pane.type("\x1b[B")
         yield* pane.type("\r")
         yield* pane.type("22:00")
         const sunday = yield* pane.waitFor("Est. reset Monday 03:00")
@@ -375,6 +365,46 @@ describe.skipIf(!process.env.OC_TUI_PANE || !cliPath || !muxPath)("oc TUI in a W
         const transcript = yield* pane.waitFor("QUOTA-DONE")
         expect(transcript).toContain("QUOTA-DONE")
         expect((yield* fixture.llm.inputs).length).toBe(0)
+      }),
+    180_000,
+  )
+  cliIt.live(
+    "sidebar and oc palette entries open their menus",
+    (fixture) =>
+      Effect.gen(function* () {
+        const pane = yield* openPane(fixture)
+        yield* fixture.llm.text("MENUS-READY")
+        yield* pane.waitFor("Ask anything")
+        // Sidebar commands register with the session route's sidebar.
+        yield* pane.type("open the sidebar\r")
+        yield* pane.waitFor("MENUS-READY")
+        // Sidebar commands are keymap commands, not palette entries: open each menu from its header.
+        const closes = (shows: string) =>
+          Effect.gen(function* () {
+            yield* pane.type("\x1b")
+            yield* pane.waitFor("MENUS-READY", (screen) => !screen.includes(shows))
+          })
+        yield* pane.click("files [work]")
+        yield* pane.waitFor("Add custom dir...")
+        yield* closes("Add custom dir...")
+        yield* pane.click("scripts")
+        yield* pane.waitFor("Global script settings", (shown) => shown.includes("Languages"))
+        yield* closes("Global script settings")
+        yield* pane.click("Usage:")
+        yield* pane.waitFor("Usage calendar")
+        yield* pane.type("Usage calendar")
+        yield* pane.type("\r")
+        yield* pane.waitFor("Add subscription date...")
+        yield* closes("Add subscription date...")
+        // Esc in the calendar goes back to the Usage menu.
+        yield* closes("Usage calendar")
+        yield* pane.type("\x0f")
+        yield* pane.waitFor("Commands")
+        yield* pane.type("Home sort order")
+        const listed = yield* pane.waitFor("Layout")
+        expect(listed).toContain("Home sort order")
+        yield* pane.type("\x1b")
+        expectIsolated(yield* fixture.llm.inputs)
       }),
     180_000,
   )

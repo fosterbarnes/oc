@@ -19,6 +19,7 @@
 import { mkdirSync, writeFileSync } from "node:fs"
 import path from "node:path"
 import { pathToFileURL } from "node:url"
+import { asRecord } from "@/util/record"
 import { hostPlansDir } from "../context/paths.js"
 import { type CursorAskQuestionItem, type OpencodeQuestionInput, parseAnswerSegments } from "./askQuestion.js"
 import { decodeMessageSparse } from "./messages.js"
@@ -223,10 +224,6 @@ export function createPlanApproved(output: string, isError: boolean, question: s
   if (isError) return false
   const [segment] = parseAnswerSegments([createPlanApprovalItem(question)], output)
   return (segment ?? "").trim().toLowerCase() === CREATE_PLAN_APPROVAL_YES.toLowerCase()
-}
-
-function asRecord(value: unknown): Record<string, unknown> | undefined {
-  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined
 }
 
 function str(value: unknown): string {

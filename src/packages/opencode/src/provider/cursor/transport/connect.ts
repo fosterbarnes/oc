@@ -15,6 +15,7 @@ import {
 } from "../errors.js"
 import { withAbortDeadline } from "../deadline.js"
 import http2 from "node:http2"
+import { isRecord } from "@/util/record"
 
 const API_BASE = `https://${CURSOR_API_HOST}`
 const DEFAULT_UNARY_TIMEOUT_MS = 5_000
@@ -1065,8 +1066,4 @@ function stripPseudo(h: Record<string, unknown>): Record<string, unknown> {
     out[k] = v
   }
   return out
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value)
 }

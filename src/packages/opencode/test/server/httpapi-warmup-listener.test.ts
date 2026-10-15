@@ -17,15 +17,14 @@ import { Effect, Exit, Layer, Scope } from "effect"
 import * as TestClock from "effect/testing/TestClock"
 import { Config } from "@/config/config"
 import { makeWarmupLoop } from "@/server/routes/instance/httpapi/handlers/global"
+import { _setCliRunner } from "@/provider/claude-code/warmup/cli"
+import { _resetInventoryForTests, _setInventoryProbe } from "@/provider/claude-code/warmup/inventory"
 import {
-  _resetInventoryForTests,
-  _setCliRunner,
-  _setInventoryProbe,
   _setStoreFile,
   readStore,
   storeKeyForAccount,
   setAccountSchedule,
-} from "@/provider/claude-code/warmup.js"
+} from "@/provider/claude-code/warmup/store"
 import { testEffect } from "../lib/effect"
 
 const cliPath = process.env.CLAUDE_CLI_PATH ?? Bun.which("claude")

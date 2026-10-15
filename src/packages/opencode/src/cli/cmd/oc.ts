@@ -5,6 +5,8 @@ import fs from "fs/promises"
 import { spawn } from "child_process"
 import { cmd } from "./cmd"
 import { OcConfig } from "@/config/oc"
+import { Resident } from "@/config/resident"
+import { ReviveHost } from "@/config/reviveHost"
 import type { Revive } from "@/config/revive"
 import { TuiLedger } from "@/config/tuiLedger"
 import { startIntro, type IntroHandoff } from "../intro"
@@ -51,7 +53,7 @@ async function attach(
     { OPENCODE_SERVER_PASSWORD: server.secret, OPENCODE_SERVER_USERNAME: "opencode" },
     options.intro,
     async (handoff) =>
-      attach(await OcConfig.startServer(), settings, { directory: handoff.directory, session: handoff.sessionID }),
+      attach(await Resident.startServer(), settings, { directory: handoff.directory, session: handoff.sessionID }),
   )
 }
 
@@ -246,7 +248,7 @@ async function launchProject(target: string | undefined, options: { session?: st
     const homeDir = typeof settings.homeDir === "string" ? settings.homeDir : os.homedir()
     const ocDir = typeof settings.ocDir === "string" ? settings.ocDir : undefined
     const directory = resolveTargetDirectory(target, ocDir, homeDir)
-    const server = await OcConfig.startServer()
+    const server = await Resident.startServer()
     const session = options.session ?? (target ? await bootstrapSession(server, directory) : undefined)
     // Leave the intro frame up; the TUI continues it from the same clock and frame.
     await attach(server, settings, { directory, session, intro: stopIntro(false) })
@@ -268,7 +270,7 @@ const PreviousCommand = cmd({
     try {
       const lookup = runNative(["session", "previous", "--depth", String(depth)], { capture: true })
       // Independent startup work: the session lookup is its own process, so overlap it with server startup.
-      const [session, server] = await Promise.all([lookup, OcConfig.startServer()])
+      const [session, server] = await Promise.all([lookup, Resident.startServer()])
       await attach(server, settings, { directory: os.homedir(), session, intro: stopIntro(false) })
     } finally {
       stopIntro()
@@ -384,7 +386,7 @@ export const OcCommand = cmd({
         command: "server start",
         describe: "start or reuse the resident OpenCode server",
         handler: async () => {
-          console.log(JSON.stringify(await OcConfig.startServer()))
+          console.log(JSON.stringify(await Resident.startServer()))
         },
       })
       .command(LaunchCommand)
@@ -408,16 +410,16 @@ export const OcCommand = cmd({
   handler: async (args) => {
     if (args.revive !== undefined) {
       const { Revive } = await import("@/config/revive")
-      await OcConfig.revive(Revive.decodeContext(args.revive))
+      await ReviveHost.revive(Revive.decodeContext(args.revive))
       return
     }
     if (args["revive-terminal"] !== undefined) {
       const { Revive } = await import("@/config/revive")
-      await OcConfig.restartTerminal(Revive.decodeRestart(args["revive-terminal"]))
+      await ReviveHost.restartTerminal(Revive.decodeRestart(args["revive-terminal"]))
       return
     }
     if ((args as Record<string, unknown>)["shutdown-all"]) {
-      console.log(JSON.stringify(await OcConfig.shutdownAll()))
+      console.log(JSON.stringify(await Resident.shutdownAll()))
       return
     }
     const doRestart = Boolean((args as Record<string, unknown>)["restart-server"])
@@ -425,11 +427,11 @@ export const OcCommand = cmd({
       (args as Record<string, unknown>)["kill-server"] || (args as Record<string, unknown>)["shutdown-server"],
     )
     if (doRestart) {
-      console.log(JSON.stringify(await OcConfig.restartServer()))
+      console.log(JSON.stringify(await Resident.restartServer()))
       return
     }
     if (doKill) {
-      console.log(JSON.stringify(await OcConfig.stopServer()))
+      console.log(JSON.stringify(await Resident.stopServer()))
       return
     }
   },

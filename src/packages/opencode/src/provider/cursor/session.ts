@@ -2,7 +2,8 @@ import type { BidiStream, BidiTerminalEvent } from "./transport/connect.js"
 import { trace } from "./debug.js"
 import { CursorProtocolError, type CursorProviderError } from "./errors.js"
 import { sessionActivity, type SessionActivitySource } from "./activity.js"
-import type { HostSubagentCatalog, OpencodeToolDef, ToolAliasRegistry } from "./protocol/tools.js"
+import type { OpencodeToolDef, ToolAliasRegistry } from "./protocol/descriptors.js"
+import type { HostSubagentCatalog } from "./protocol/subagents.js"
 import type { CursorConversationTokenDetails } from "./protocol/tokenDetails.js"
 
 export type Frame = { flags: number; payload: Uint8Array }

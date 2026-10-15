@@ -10,14 +10,18 @@ the user explicitly asks for it.
 
 ## Where
 
-`src/packages/tui/src/app.tsx`, the `appCommands` memo (`const appCommands = createMemo(() => [`).
-Every item is mapped to `namespace: "palette"` and registered through `useBindings`, so adding an
-object to the array is all the wiring needed. The `oc.settings_palette` command opens the palette
-filtered to `category === "oc"`.
+Most oc entries live in `src/packages/tui/src/ocCommands.tsx` (`createOcCommands`), in three
+arrays App spreads into the `appCommands` memo in `src/app.tsx`: `newSession`, `defaults`, and
+`settings` (folders, layout, server, tools, third-party harness updates). Every item in
+`appCommands` is mapped to `namespace: "palette"` and registered through `useBindings`, so adding
+an object to the right array is all the wiring needed. The `oc.settings_palette` command opens the
+palette filtered to `category === "oc"`. Claude warm-up entries live in `src/claudeWarmup.tsx`;
+account switching and auto-resume live in `src/claudeCommands.tsx`. Both are spread into
+`appCommands` after the System entries.
 
-Insert the new object next to the other `category: "oc"` entries, near related commands. If the
-command needs its own state or several hooks, put a `createXCommand()` factory in its own module
-and spread it into the array like `todoCommand` (`src/todos.ts`). Otherwise keep it inline.
+Insert the new object in `ocCommands.tsx`, near related commands. If the command needs its own
+state or several hooks, put a `createXCommand()` factory in its own module and spread it into
+`appCommands` like `todoCommand` (`src/todos.ts`). Otherwise keep it inline.
 
 ## Shape
 

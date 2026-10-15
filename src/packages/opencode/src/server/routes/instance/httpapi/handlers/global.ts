@@ -5,7 +5,17 @@ import { EffectPromise } from "@/effect/promise"
 import { EventV2 } from "@opencode-ai/core/event"
 import { AppNodeBuilder } from "@opencode-ai/core/effect/app-node-builder"
 import { Installation } from "@/installation"
-import { ClaudeWarmup } from "@/provider/claude-code/warmup"
+import { accountView, POLL_MS, stateView, tickOnce } from "@/provider/claude-code/warmup"
+import { checkWarmupCli, killTracker, type ChildTracker } from "@/provider/claude-code/warmup/cli"
+import { poolIdsForConfig } from "@/provider/claude-code/warmup/identity"
+import { listConnected } from "@/provider/claude-code/warmup/inventory"
+import {
+  readStore,
+  ScheduleValidationError,
+  setAccountSchedule,
+  storeFile,
+  WarmupStoreError,
+} from "@/provider/claude-code/warmup/store"
 import { disposeAllInstancesAndEmitGlobalDisposed } from "@/server/global-lifecycle"
 import { InstallationVersion } from "@opencode-ai/core/installation/version"
 import { ServerLifecycle } from "@/server/lifecycle"
@@ -169,7 +179,7 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
         | { accounts?: unknown; cliPath?: unknown }
         | undefined
       return {
-        poolIds: ClaudeWarmup.poolIdsForConfig(options?.accounts),
+        poolIds: poolIdsForConfig(options?.accounts),
         cliPath:
           typeof options?.cliPath === "string" && options.cliPath ? options.cliPath : (process.env.CLAUDE_CLI_PATH ?? "claude"),
       }
@@ -177,12 +187,12 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
 
     const claudeWarmup = Effect.fn("GlobalHttpApi.claudeWarmup")(function* () {
       const pool = yield* warmupPool()
-      const cli = yield* Effect.tryPromise(() => ClaudeWarmup.checkWarmupCli(pool.cliPath)).pipe(
+      const cli = yield* Effect.tryPromise(() => checkWarmupCli(pool.cliPath)).pipe(
         Effect.orElseSucceed(() => ({ available: false as const, error: "Claude CLI check failed" })),
       )
-      const store = ClaudeWarmup.readStore(ClaudeWarmup.storeFile())
+      const store = readStore(storeFile())
       if (store.status === "malformed") {
-        return ClaudeWarmup.stateView({
+        return stateView({
           poolIds: pool.poolIds,
           connectedIds: [],
           store,
@@ -193,7 +203,7 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
       // Without a supported CLI there is nothing to probe with; report the
       // update requirement instead of spawning a binary that cannot serve it.
       if (!cli.available) {
-        return ClaudeWarmup.stateView({
+        return stateView({
           poolIds: pool.poolIds,
           connectedIds: [],
           store,
@@ -202,9 +212,9 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
         })
       }
       const inventory = yield* Effect.tryPromise(() =>
-        ClaudeWarmup.listConnected({ cliPath: pool.cliPath, candidates: pool.poolIds }),
+        listConnected({ cliPath: pool.cliPath, candidates: pool.poolIds }),
       ).pipe(Effect.orElseSucceed(() => ({ at: Date.now(), connectedIds: [] as string[], error: "account probe failed" })))
-      return ClaudeWarmup.stateView({
+      return stateView({
         poolIds: pool.poolIds,
         connectedIds: inventory.connectedIds,
         store,
@@ -222,23 +232,23 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
       }
       const record = yield* EffectPromise.refineRejection(
         () =>
-          ClaudeWarmup.setAccountSchedule({
-            file: ClaudeWarmup.storeFile(),
+          setAccountSchedule({
+            file: storeFile(),
             accountID: ctx.payload.accountID,
             enabled: ctx.payload.enabled,
             schedule: ctx.payload.schedule,
           }),
         (cause) => {
-          if (cause instanceof ClaudeWarmup.ScheduleValidationError) {
+          if (cause instanceof ScheduleValidationError) {
             return new ApiWarmupScheduleError({ name: "WarmupScheduleError", data: { message: cause.message } })
           }
-          if (cause instanceof ClaudeWarmup.WarmupStoreError) {
+          if (cause instanceof WarmupStoreError) {
             return new ApiWarmupStoreError({ name: "WarmupStoreError", data: { message: cause.message } })
           }
           return undefined
         },
       )
-      return ClaudeWarmup.accountView({ accountID: ctx.payload.accountID, record, now: Date.now() })
+      return accountView({ accountID: ctx.payload.accountID, record, now: Date.now() })
     })
 
     return handlers
@@ -277,13 +287,13 @@ function tickAbortSignal(controller: AbortController, interrupt: AbortSignal): A
 
 export const makeWarmupLoop = (pollMs: number, clock?: WarmupLoopClock) => Effect.gen(function* () {
   const config = yield* Config.Service
-  const owned: ClaudeWarmup.ChildTracker = new Set()
+  const owned: ChildTracker = new Set()
   const controller = new AbortController()
   const nowMs = clock?.now ?? Date.now
   yield* Effect.addFinalizer(() =>
     Effect.sync(() => {
       controller.abort()
-      ClaudeWarmup.killTracker(owned)
+      killTracker(owned)
     }),
   )
   let prev = nowMs()
@@ -298,11 +308,11 @@ export const makeWarmupLoop = (pollMs: number, clock?: WarmupLoopClock) => Effec
               | { accounts?: unknown; cliPath?: unknown }
               | undefined
             yield* Effect.tryPromise((interrupt) =>
-              ClaudeWarmup.tickOnce({
-                file: ClaudeWarmup.storeFile(),
+              tickOnce({
+                file: storeFile(),
                 prevMs: prev,
                 nowMs: now,
-                poolIds: ClaudeWarmup.poolIdsForConfig(options?.accounts),
+                poolIds: poolIdsForConfig(options?.accounts),
                 cliPath:
                   typeof options?.cliPath === "string" && options.cliPath
                     ? options.cliPath
@@ -314,7 +324,7 @@ export const makeWarmupLoop = (pollMs: number, clock?: WarmupLoopClock) => Effec
                 // tick's snapshot: a removed account stops immediately.
                 getPoolIds: async () => {
                   const fresh = await Effect.runPromise(config.getGlobal())
-                  return ClaudeWarmup.poolIdsForConfig(
+                  return poolIdsForConfig(
                     (fresh.provider?.["claude-code"]?.options as { accounts?: unknown } | undefined)?.accounts,
                   )
                 },
@@ -334,6 +344,6 @@ export const makeWarmupLoop = (pollMs: number, clock?: WarmupLoopClock) => Effec
   )
 })
 
-export const warmupLoopLayer = Layer.effectDiscard(makeWarmupLoop(ClaudeWarmup.POLL_MS)).pipe(
+export const warmupLoopLayer = Layer.effectDiscard(makeWarmupLoop(POLL_MS)).pipe(
   Layer.provide(AppNodeBuilder.build(Config.node)),
 )

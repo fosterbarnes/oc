@@ -3,7 +3,7 @@ import { getFrozenRequestContext, setFrozenRequestContext } from "../context/fro
 import { hasConversationBinding, isActiveConversationBinding, restoreConversationBinding } from "./conversationBind.js"
 import { compactConversationBlobs, restoreConversationBlobs } from "./blobStore.js"
 import { getCheckpoint, setCheckpoint } from "./checkpoint.js"
-import type { OpencodeToolDef } from "./tools.js"
+import type { OpencodeToolDef } from "./descriptors.js"
 import {
   deletePersistedConversation,
   loadPersistedConversation,

@@ -6,53 +6,59 @@ import path from "node:path"
 import { createBuiltinPlugins } from "../../src/feature-plugins/builtins.ts"
 import {
   defaultScriptSettings,
-  displayPath,
   ensureSessionScrollbarVisible,
-  everythingSearchArgs,
-  everythingSearchQuery,
   hasConfiguredScripts,
   loadSidebarSettings,
-  MAX_RECENT_ROOTS,
   normalizeExtension,
-  normalizeRootPath,
   normalizeSidebarSettings,
   normalizeScriptSettings,
   OPENCODE_SESSION_SCROLLBAR_KEY,
   parseLauncher,
   promptProjectDirectory,
-  readCursorSessionToken,
-  readScripts,
   resolveScriptTerminal,
   scriptTerminals,
-  readTree,
-  rootPathKey,
-  rootSections,
-  runEverythingSearch,
-  sameRootPath,
   saveSidebarSettings,
   saveUserScriptSettings,
   saveUserUsageProviders,
   sessionProjectDirectory,
   sidebarConfigPaths,
+} from "../../src/routes/session/sidebar-tools/settings.ts"
+import {
+  readCursorSessionToken,
   writeCursorSessionToken,
   clearCursorSessionToken,
   cursorSessionSecretPath,
-} from "../../src/routes/session/sidebar-tools/helpers.ts"
+} from "../../src/routes/session/sidebar-tools/cursorToken.ts"
+import {
+  displayPath,
+  everythingSearchArgs,
+  everythingSearchQuery,
+  MAX_RECENT_ROOTS,
+  normalizeRootPath,
+  rootPathKey,
+  rootSections,
+  runEverythingSearch,
+  sameRootPath,
+} from "../../src/routes/session/sidebar-tools/roots.ts"
+import { readScripts, readTree } from "../../src/routes/session/sidebar-tools/scripts.ts"
+import { probeClaudeCodePool, probeClaudeCodeUsage } from "../../src/routes/session/sidebar-tools/usage/claude.ts"
 import {
   cursorSessionCookie,
   cursorDbPath,
-  DEFAULT_USAGE_PROVIDERS,
-  normalizeUsageProviders,
-  orderUsageWindows,
-  probeClaudeCodePool,
-  probeClaudeCodeUsage,
   probeCursorUsage,
+} from "../../src/routes/session/sidebar-tools/usage/cursor.ts"
+import { resolveAuthPath } from "../../src/routes/session/sidebar-tools/usage/fetch.ts"
+import { orderUsageWindows } from "../../src/routes/session/sidebar-tools/usage/format.ts"
+import {
   probeOpenAIUsage,
   probeOpenCodeGoUsage,
   probeOpenRouterUsage,
-  resolveAuthPath,
+} from "../../src/routes/session/sidebar-tools/usage/probes.ts"
+import {
+  DEFAULT_USAGE_PROVIDERS,
+  normalizeUsageProviders,
   USAGE_PROVIDER_IDS,
-} from "../../src/routes/session/sidebar-tools/usage.ts"
+} from "../../src/routes/session/sidebar-tools/usage/providers.ts"
 import {
   commandArgs,
   copyToClipboard,

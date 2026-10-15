@@ -1,5 +1,5 @@
 import { encodeMessage, getMessageTypes } from "./messages.js"
-import { toolsToDescriptors, type OpencodeToolDef } from "./tools.js"
+import { toolsToDescriptors, type OpencodeToolDef } from "./descriptors.js"
 import type { CursorImageInput } from "../imageInput.js"
 
 export type SeedHistoryMessage = {

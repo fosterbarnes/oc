@@ -22,6 +22,7 @@
 
 import fs from "node:fs"
 import path from "node:path"
+import { asRecord } from "@/util/record"
 import { decodeMessageSparse } from "./messages.js"
 
 /** Host tool id that commits a staged image. Registered by the classic plugin. */
@@ -51,10 +52,6 @@ export function imageMimeForPath(filePath: string): string {
   const dot = path.basename(filePath).lastIndexOf(".")
   if (dot <= 0) return "image/png"
   return IMAGE_MIME_BY_EXTENSION[path.extname(filePath).toLowerCase()] ?? "image/png"
-}
-
-function asRecord(value: unknown): Record<string, unknown> | undefined {
-  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined
 }
 
 function str(value: unknown): string {

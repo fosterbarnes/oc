@@ -21,6 +21,7 @@
  * tool feedback, and Cursor's server-side prompting is tuned against them.
  */
 
+import { asRecord } from "@/util/record"
 import { decodeMessageSparse } from "./messages.js"
 
 /** Cursor's synthetic "type your own answer" option id (interaction-utils `BU`). */
@@ -73,10 +74,6 @@ export type DecodedAskQuestionQuery = {
 
 /** `AskQuestionResult` oneof, shaped for `encodeMessage`. */
 export type AskQuestionResultMessage = Record<string, unknown>
-
-function asRecord(value: unknown): Record<string, unknown> | undefined {
-  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined
-}
 
 function str(value: unknown): string {
   return typeof value === "string" ? value : ""

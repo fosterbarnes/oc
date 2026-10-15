@@ -4,7 +4,6 @@ import { SessionV1 } from "@opencode-ai/core/v1/session"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { Command } from "@/command"
 import { Config } from "@/config/config"
-import { pinSessionAccount, poolAccountIds, poolState, setCurrentAccount } from "@/provider/claude-code/accounts"
 import { claudeSteerSinks, STEERED_METADATA_KEY } from "@/provider/claude-code/shared"
 import { Permission } from "@/permission"
 import { SessionShare } from "@/share/session"
@@ -14,7 +13,6 @@ import { SessionHandoff } from "@/session/handoff"
 import { MessageV2 } from "@/session/message-v2"
 import { EffectBridge } from "@/effect/bridge"
 import { SessionPrompt } from "@/session/prompt"
-import { ScheduledResume } from "@/session/scheduledResume"
 import { SessionRevert } from "@/session/revert"
 import { SessionRunState } from "@/session/run-state"
 import { SessionStatus } from "@/session/status"
@@ -25,13 +23,10 @@ import { NamedError } from "@opencode-ai/core/util/error"
 import { Cause, Effect, Exit, Option, Schema, Scope } from "effect"
 import * as Stream from "effect/Stream"
 import { InstanceState } from "@/effect/instance-state"
-import { InstanceStore } from "@/project/instance-store"
 import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
 import { HttpApiBuilder, HttpApiError, HttpApiSchema } from "effect/unstable/httpapi"
 import { InstanceHttpApi } from "../api"
 import {
-  ClaudeAccountPayload,
-  ClaudeAccountQuery,
   CommandPayload,
   DiffQuery,
   ForkPayload,
@@ -41,9 +36,6 @@ import {
   MessagesQuery,
   PermissionResponsePayload,
   PromptPayload,
-  QueuePayload,
-  ResumeCancelPayload,
-  ResumeEnabledPayload,
   RevertPayload,
   ShellPayload,
   SummarizePayload,
@@ -51,15 +43,14 @@ import {
   UpdatePayload,
 } from "../groups/session"
 import {
-  ConflictError,
   InvalidRequestError,
   ModelNotFoundError,
   PermissionNotFoundError,
   TimeoutError,
   UpstreamError,
-  notFound,
 } from "../errors"
 import * as SessionError from "./session-errors"
+import { makeOcSessionHandlers } from "./sessionOc"
 
 const tryParseJson = (text: string) =>
   Effect.try({
@@ -548,105 +539,7 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       return yield* session.updatePart(payload)
     })
 
-    const resumeState = Effect.fn("SessionHttpApi.resumeState")(function* () {
-      return ScheduledResume.getState()
-    })
-
-    const resumeSet = Effect.fn("SessionHttpApi.resumeSet")(function* (ctx: {
-      payload: typeof ResumeEnabledPayload.Type
-    }) {
-      if (ctx.payload.prompt !== undefined) ScheduledResume.setPrompt(ctx.payload.prompt)
-      return ScheduledResume.setEnabled(ctx.payload.enabled)
-    })
-
-    const resumeCancel = Effect.fn("SessionHttpApi.resumeCancel")(function* (ctx: {
-      payload: typeof ResumeCancelPayload.Type
-    }) {
-      return ScheduledResume.cancel(ctx.payload.id)
-    })
-
-    const queueSnapshot = Effect.fn("SessionHttpApi.queueSnapshot")(function* (ctx: { params: { sessionID: SessionID } }) {
-      yield* requireSession(ctx.params.sessionID)
-      return yield* promptSvc.queue.snapshot(ctx.params.sessionID)
-    })
-
-    const queueChange = Effect.fn("SessionHttpApi.queueChange")(function* (
-      sessionID: SessionID,
-      change: typeof QueuePayload.Type,
-    ) {
-      switch (change.type) {
-        case "add":
-          if (change.parts.length === 0 || change.parts.some((part) => part.type === "text" && part.synthetic)) {
-            return yield* new InvalidRequestError({
-              message: "A queued prompt needs at least one part, and synthetic text cannot be queued",
-              field: "parts",
-            })
-          }
-          return yield* promptSvc.queue.add({
-            sessionID,
-            id: change.id,
-            payload: { agent: change.agent, model: change.model, variant: change.variant, parts: change.parts },
-          })
-        case "edit":
-          if (!change.text.trim()) {
-            return yield* new InvalidRequestError({ message: "Queued text cannot be empty", field: "text" })
-          }
-          return yield* promptSvc.queue.edit({ sessionID, id: change.id, text: change.text })
-        case "cancel":
-          return yield* promptSvc.queue.cancel({ sessionID, id: change.id })
-        case "resume":
-          return yield* promptSvc.queue.resume(sessionID)
-      }
-    })
-
-    const queueUpdate = Effect.fn("SessionHttpApi.queueUpdate")(function* (ctx: {
-      params: { sessionID: SessionID }
-      payload: typeof QueuePayload.Type
-    }) {
-      yield* requireSession(ctx.params.sessionID)
-      return yield* queueChange(ctx.params.sessionID, ctx.payload).pipe(
-        Effect.catchTags({
-          SessionQueueNotFoundError: (error) => Effect.fail(notFound(`Queued prompt not found: ${error.id}`)),
-          SessionQueueBusyError: (error) =>
-            Effect.fail(
-              new ConflictError({
-                message: `Queued prompt is being sent: ${error.id}`,
-                resource: "session.queue",
-              }),
-            ),
-        }),
-      )
-    })
-
-    const claudePool = Effect.fnUntraced(function* () {
-      const accounts = (yield* configSvc.get()).provider?.["claude-code"]?.options?.accounts
-      return poolAccountIds(Array.isArray(accounts) ? accounts.filter((dir) => typeof dir === "string") : undefined)
-    })
-
-    const claudeAccountState = Effect.fn("SessionHttpApi.claudeAccountState")(function* (ctx: {
-      query: typeof ClaudeAccountQuery.Type
-    }) {
-      return { accounts: poolState(yield* claudePool(), Date.now(), ctx.query.sessionID) }
-    })
-
-    const claudeAccountSet = Effect.fn("SessionHttpApi.claudeAccountSet")(function* (ctx: {
-      payload: typeof ClaudeAccountPayload.Type
-    }) {
-      const ids = yield* claudePool()
-      const { id, sessionID } = ctx.payload
-      const ok = sessionID
-        ? pinSessionAccount(sessionID, id, ids)
-        : id !== undefined && setCurrentAccount(id, ids)
-      if (!ok) return yield* new HttpApiError.BadRequest({})
-      return { accounts: poolState(ids, Date.now(), sessionID) }
-    })
-
-    // Usage-reset auto-resumes: drain overdue entries at startup, then poll.
-    // The loop forks into the app scope, like promptAsync above.
-    yield* ScheduledResume.pollLoop(
-      { session, status: statusSvc, prompt: promptSvc, store: yield* InstanceStore.Service },
-      ScheduledResume.store,
-    ).pipe(Effect.forkIn(scope))
+    const oc = yield* makeOcSessionHandlers({ session, promptSvc, statusSvc, configSvc, scope })
 
     return handlers
       .handle("list", list)
@@ -679,12 +572,12 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       .handle("deleteMessage", deleteMessage)
       .handle("deletePart", deletePart)
       .handle("updatePart", updatePart)
-      .handle("resumeState", resumeState)
-      .handle("resumeSet", resumeSet)
-      .handle("resumeCancel", resumeCancel)
-      .handle("queue", queueSnapshot)
-      .handle("queueUpdate", queueUpdate)
-      .handle("claudeAccountState", claudeAccountState)
-      .handle("claudeAccountSet", claudeAccountSet)
+      .handle("resumeState", oc.resumeState)
+      .handle("resumeSet", oc.resumeSet)
+      .handle("resumeCancel", oc.resumeCancel)
+      .handle("queue", oc.queueSnapshot)
+      .handle("queueUpdate", oc.queueUpdate)
+      .handle("claudeAccountState", oc.claudeAccountState)
+      .handle("claudeAccountSet", oc.claudeAccountSet)
   }),
 )

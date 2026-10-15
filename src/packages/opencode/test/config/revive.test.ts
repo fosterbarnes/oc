@@ -7,7 +7,8 @@ import { detachedCommand, launchDetached, windowsArguments } from "@opencode-ai/
 import { Global } from "@opencode-ai/core/global"
 import { TuiLedger } from "../../src/config/tuiLedger"
 import { tmpdir } from "../fixture/fixture"
-import { OcConfig } from "../../src/config/oc"
+import { Resident } from "../../src/config/resident"
+import { ReviveHost } from "../../src/config/reviveHost"
 
 const executable = "C:\\Apps\\oc\\oc.exe"
 const nativeExe = "C:\\Apps\\oc\\opencode.exe"
@@ -263,7 +264,7 @@ test.skipIf(process.platform !== "win32")("native terminal restart preserves the
   try {
     const launched: string[][] = []
     for (const terminal of ["wezterm", "windows-terminal", "generic"] as const) {
-      await OcConfig.restartTerminal(
+      await ReviveHost.restartTerminal(
         {
           ...restart,
           terminal,
@@ -276,7 +277,7 @@ test.skipIf(process.platform !== "win32")("native terminal restart preserves the
           launched.push(terminal === "generic" ? Object.values(command.env) : command.args)
         },
       )
-      expect(OcConfig.isPidAlive(shell.pid)).toBe(true)
+      expect(Resident.isPidAlive(shell.pid)).toBe(true)
     }
     expect(launched).toHaveLength(3)
     expect(launched.every((args) => args.includes(context.sessionID))).toBe(true)
@@ -298,13 +299,13 @@ test.skipIf(process.platform !== "win32")("terminal restart closes the old shell
     if (!shellIdentity) throw new Error("test shell identity unavailable")
     const input = { ...restart, shellPid: shell.pid, shellIdentity }
     await expect(
-      OcConfig.restartTerminal(input, async () => {
+      ReviveHost.restartTerminal(input, async () => {
         throw new Error("launch rejected")
       }),
     ).rejects.toThrow("launch rejected")
-    expect(OcConfig.isPidAlive(shell.pid)).toBe(true)
-    await OcConfig.restartTerminal(input, async () => {
-      expect(OcConfig.isPidAlive(shell.pid)).toBe(true)
+    expect(Resident.isPidAlive(shell.pid)).toBe(true)
+    await ReviveHost.restartTerminal(input, async () => {
+      expect(Resident.isPidAlive(shell.pid)).toBe(true)
     })
     await shell.exited
   } finally {
@@ -477,8 +478,8 @@ test("single revive waits for the terminal CLI and reports a rejected tab launch
     env: { OC_FLAVOR: "oc", OC_REVIVE_TEST_EXIT: "0" },
     windowsVerbatimArguments: false,
   }
-  await expect(OcConfig.openReviveTab(command, os.tmpdir())).resolves.toBeUndefined()
-  await expect(OcConfig.openReviveTab({
+  await expect(ReviveHost.openReviveTab(command, os.tmpdir())).resolves.toBeUndefined()
+  await expect(ReviveHost.openReviveTab({
     ...command,
     env: { ...command.env, OC_REVIVE_TEST_EXIT: "7" },
   }, os.tmpdir())).rejects.toThrow("exited with code 7")

@@ -1,16 +1,16 @@
 import { describe, expect, test } from "bun:test"
 import { createCursor } from "@/provider/cursor"
 import { resolveAgentOrigin } from "@/provider/cursor/transport/connect"
-import { mapCursorArgsToOpencode } from "@/provider/cursor/protocol/tools"
+import { mapCursorArgsToOpencode } from "@/provider/cursor/protocol/execParse"
 import { PLAN_ENTER_DISABLED_REASON, resolveSwitchModeBridge } from "@/provider/cursor/protocol/switchMode"
+import { pumpWithRecovery } from "@/provider/cursor/languageModel"
+import { buildOpenCodeInteractionGuidance } from "@/provider/cursor/prompt"
+import { connectFrameError } from "@/provider/cursor/retry"
 import {
-  buildOpenCodeInteractionGuidance,
-  connectFrameError,
   isCursorCompactionTurn,
-  pumpWithRecovery,
   resetTurnStateForTests,
   resolveTurnConversationReset,
-} from "@/provider/cursor/languageModel"
+} from "@/provider/cursor/turnState"
 import { CURSOR_COMPACTION_OPTION } from "@/provider/cursor/shared"
 import { applyCursorCompactionOption } from "@/session/llm/request"
 import { resolveCreatePlanBridge } from "@/provider/cursor/protocol/createPlan"

@@ -9,7 +9,6 @@
  */
 import type { ChildProcess } from "node:child_process"
 import type { EventEmitter } from "node:events"
-import { randomUUID } from "node:crypto"
 import type { LanguageModelV3CallOptions, LanguageModelV3StreamPart } from "@ai-sdk/provider"
 import { generateId } from "ai"
 import type { ClaudeCodeConfig, ClaudeStreamMessage } from "./types.js"
@@ -17,7 +16,9 @@ import type { TurnContext } from "./turnContext.js"
 import type { RuntimeMcpStatus } from "./mcpBridge.js"
 import type { CliVersion } from "./cliVersion.js"
 import { mapTool, isWebSearchTool, isWebSearchHandledByCli } from "./toolMapping.js"
-import { readClaudeTaskList } from "./taskList.js"
+import { StreamWriter } from "./streamWriter.js"
+import { isTodoMirror, TodoMirror } from "./todoMirror.js"
+import { Steering } from "./steering.js"
 import {
   accountBlockKind,
   describeResultFailure,
@@ -75,14 +76,7 @@ import { appendExchangeText, currentExchangeHash } from "./sessionSync.js"
 import { reportUsageObservation } from "@/provider/usage-observations.js"
 import { ScheduledResume } from "@/session/scheduledResume.js"
 import { log } from "./logger.js"
-import {
-  claudeSteerSinks,
-  hostToolExecutors,
-  type ClaudeSteer,
-  type ClaudeSteerSink,
-  type HostToolExecutor,
-  type HostToolResult,
-} from "./shared.js"
+import { claudeSteerSinks, hostToolExecutors, type HostToolExecutor, type HostToolResult } from "./shared.js"
 import { PROXY_TOOL_PREFIX, proxyToolResult, type ProxyToolResult } from "./proxyMcp.js"
 import {
   TASK_BATCH_TOOL_NAME,
@@ -168,7 +162,8 @@ class ClaudeTurn {
   private readonly turn: TurnContext
   private readonly sk: string
   private readonly options: LanguageModelV3CallOptions
-  private readonly todosEnabled: boolean
+  private readonly todos: TodoMirror
+  private readonly steering: Steering
 
   private activeProcess: ActiveProcess | undefined
   private proc!: ChildProcess
@@ -221,26 +216,6 @@ class ClaudeTurn {
   private readonly proxyToolUseIds = new Set<string>()
   /** CLI-run web searches awaiting their result, so a failure can be shown. */
   private readonly webSearchIds = new Set<string>()
-  /** Todo mirrors run in order (see `mirrorTodoWrite`); the turn's finish waits for them. */
-  private todoMirror = Promise.resolve()
-  private todoMirrorsPending = 0
-  /** Newest TodoWrite list this turn, mirrored at the turn's end (see `flushTodo`). */
-  private heldTodo: { id: string; input: unknown } | undefined
-  /** Claude used its task tools this turn, so its saved task list is mirrored at the end. */
-  private usedTaskTools = false
-  /** Steers held while oc runs a proxied tool; still retractable. Written just before its result. */
-  private heldSteers: ClaudeSteer[] = []
-  /** Messages the operator sent mid-turn, written to stdin and not yet echoed back as read. */
-  private readonly steers: (ClaudeSteer & { uuid: string; read: boolean })[] = []
-  // Keep ownership even after the receipt saves, and across a child replacement.
-  private readonly writtenSteers = new Set<string>()
-  private steeringRetired = false
-  private readonly steerSink: ClaudeSteerSink = {
-    steer: (steer) => this.onSteer(steer),
-    retract: (messageID, remove) => this.retractSteer(messageID, remove),
-  }
-  /** oc recording that Claude read a steer; the finish waits so oc's loop never sends it again. */
-  private readonly steerAcks = new Set<Promise<void>>()
 
   // Activity since the last auto-continue nudge, and for the whole turn.
   private window = emptyWindow()
@@ -273,7 +248,27 @@ class ClaudeTurn {
     this.options = input.options
     this.userMsg = input.userMsg
     this.account = input.account
-    this.todosEnabled = input.options.tools?.some((tool) => tool.name === "todowrite") === true
+    this.todos = new TodoMirror({
+      out,
+      turn: this.turn,
+      options: this.options,
+      account: () => this.account,
+      closed: () => this.closed,
+    })
+    this.steering = new Steering({
+      turn: this.turn,
+      closed: () => this.closed,
+      stopped: () => this.closed || this.cancelled || !!this.autoContinue.aborted || this.toolDenied,
+      switching: () => !!this.switchTo,
+      busy: () => this.inStreamCalls > 0,
+      activeProcess: () => this.activeProcess,
+      write: (line) => this.proc.stdin?.write(line),
+      receiptFailed: (error) => {
+        this.autoContinue.aborted = true
+        this.steering.retire("Claude read a message whose delivery receipt could not be saved")
+        if (!this.closed) this.failTurn(`Claude read your message, but saving its delivery receipt failed: ${String(error)}`)
+      },
+    })
     this.autoContinue = {
       enabled: autoContinueEnabledFor(this.turn.compactionMode, this.config.autoContinueIncompleteTurns),
       attempts: 0,
@@ -367,7 +362,7 @@ class ClaudeTurn {
     this.unsubscribeProxyCalls = onPendingProxyCall(this.sk, this.onProxyCall)
     this.proc.on("error", this.onProcError)
     // Only the chat's own tool turn takes steers; title and summary calls share its session id.
-    if (!this.turn.compactionMode && this.turn.scope === "tools") claudeSteerSinks.set(this.turn.affinity, this.steerSink)
+    if (!this.turn.compactionMode && this.turn.scope === "tools") claudeSteerSinks.set(this.turn.affinity, this.steering.sink)
 
     if (this.options.abortSignal) {
       this.abortHandler = this.onAbort
@@ -508,8 +503,7 @@ class ClaudeTurn {
     this.allLimited = false
     const progress = this.progressSummary()
     // Unread steers die with the retired child; oc's loop sends them after this turn.
-    this.steers.length = 0
-    this.heldSteers = []
+    this.steering.clear()
     this.clearStartWatchdog()
     // Detach first: the retired child's close is not this turn ending.
     this.lineEmitter.off("line", this.onLine)
@@ -657,7 +651,7 @@ class ClaudeTurn {
   // CLI output
 
   private readonly onLine = (line: string) => {
-    if (!line.trim() || this.closed || this.steeringRetired) return
+    if (!line.trim() || this.closed || this.steering.retired) return
     // Any line counts as activity, so mid-turn pauses between blocks survive.
     this.startResultFallback()
     try {
@@ -736,7 +730,7 @@ class ClaudeTurn {
         return this.reportLiveUsage(outer)
       case "user":
         // A compaction turn's summary also arrives as a replay; `onUser` handles that.
-        if (outer.isReplay && !this.turn.compactionMode) return this.onReplay(msg)
+        if (outer.isReplay && !this.turn.compactionMode) return this.steering.onReplay(msg)
         return this.onUser(msg)
       case "result":
         return this.onResult(msg)
@@ -834,7 +828,7 @@ class ClaudeTurn {
     this.toolBlocks.set(idx, entry)
     if (rendersAsText(block.name, this.config) || block.name.startsWith(PROXY_TOOL_PREFIX)) return
     const mapped = mapTool(block.name, undefined, this.mapToolOptions())
-    // A todo row is written once, at the turn's end (`flushTodo`).
+    // A todo row is written once, at the turn's end (`TodoMirror.flush`).
     if (mapped.skip || isTodoMirror(mapped.name)) return
     entry.started = true
     this.out.enqueue({
@@ -976,12 +970,12 @@ class ClaudeTurn {
       log.debug("ignoring proxy tool_use; broker handles it", { name, id })
       return
     }
-    if (this.todosEnabled && (name === "TaskCreate" || name === "TaskUpdate")) this.usedTaskTools = true
+    this.todos.noteTool(name)
     const mapped = mapTool(name, input, this.mapToolOptions())
     log.info("tool call complete", { name, mappedName: mapped.name, id, executed: mapped.executed })
     if (mapped.skip) return
     if (isTodoMirror(mapped.name)) {
-      if (this.todosEnabled) this.heldTodo = { id, input: mapped.input }
+      this.todos.hold(id, mapped.input)
       return
     }
     this.toolCallNames.set(id, mapped.name)
@@ -1055,153 +1049,8 @@ class ClaudeTurn {
     this.out.note(text)
   }
 
-  /**
-   * A message the operator sent while this turn runs. Written to stdin, the
-   * CLI hands it to Claude at the next tool boundary, or runs it as its next
-   * turn when it arrives after the last tool call (`completeResult` waits).
-   * While oc runs a proxied tool (a subagent batch can take many minutes) it
-   * is held instead, so it can still be deleted, and written just before
-   * that tool's result.
-   */
-  private onSteer(steer: ClaudeSteer) {
-    if (this.closed || this.cancelled || this.autoContinue.aborted || this.toolDenied || this.switchTo) return false
-    if (steer.modelID !== this.turn.modelId || steer.agent !== this.turn.agent) return false
-    this.heldSteers.push(steer)
-    log.info("accepted steered message", { messageID: steer.messageID, held: this.inStreamCalls > 0 })
-    if (this.inStreamCalls === 0) this.flushSteers()
-    return true
-  }
-
-  private async retractSteer(messageID: string, remove: () => Promise<void>) {
-    if (this.closed || this.cancelled || this.autoContinue.aborted || this.toolDenied) return false
-    if (this.writtenSteers.has(messageID)) return false
-    if (!this.heldSteers.some((steer) => steer.messageID === messageID)) return false
-    const held = this.heldSteers.find((steer) => steer.messageID === messageID)!
-    this.heldSteers = this.heldSteers.filter((steer) => steer.messageID !== messageID)
-    // The result cannot release oc's next step while its history still contains the removed steer.
-    const removal = remove().catch((error) => {
-      if (!this.closed) this.heldSteers.push(held)
-      throw error
-    })
-    this.steerAcks.add(removal)
-    try {
-      await removal
-    } finally {
-      this.steerAcks.delete(removal)
-    }
-    return true
-  }
-
-  private flushSteers() {
-    if (this.closed || this.cancelled || this.autoContinue.aborted || this.toolDenied || this.switchTo) return
-    for (const steer of this.heldSteers) {
-      const uuid = randomUUID()
-      this.writtenSteers.add(steer.messageID)
-      this.steers.push({ ...steer, uuid, read: false })
-      this.proc.stdin?.write(
-        JSON.stringify({ type: "user", uuid, message: { role: "user", content: [{ type: "text", text: steer.text }] } }) +
-          "\n",
-      )
-      log.info("steered user message into running turn", { sessionKey: this.sk, textLength: steer.text.length })
-    }
-    this.heldSteers = []
-  }
-
-  /** The CLI read a stdin message. Other echoes (this turn's own envelope, nudges) need nothing. */
-  private onReplay(msg: ClaudeStreamMessage) {
-    const steer = this.steers.find((steer) => steer.uuid === msg.uuid && !steer.read)
-    if (!steer) return
-    steer.read = true
-    log.info("claude consumed steered message", { messageID: steer.messageID, uuid: steer.uuid })
-    const ack = steer.delivered().catch((error) => {
-      this.autoContinue.aborted = true
-      this.retireSteering("Claude read a message whose delivery receipt could not be saved")
-      if (!this.closed) this.failTurn(`Claude read your message, but saving its delivery receipt failed: ${String(error)}`)
-    })
-    this.steerAcks.add(ack)
-    void ack.then(() => this.steerAcks.delete(ack))
-  }
-
-  /** Interrupt only stops the active CLI turn, not stdin messages queued behind it. */
-  private retireSteering(reason: string) {
-    if (this.steeringRetired || !this.activeProcess) return
-    this.steeringRetired = true
-    this.activeProcess.turnAbandoned = true
-    this.activeProcess.wakeTarget = undefined
-    // Retire synchronously before a proxy rejection can release the CLI's next turn.
-    void deleteActiveProcessAndWait(this.sk, { forceKill: true })
-    markClaudeSessionLost(this.sk, reason)
-  }
-
-  /**
-   * Mirror the turn's todo list into oc once, at the end: the newest TodoWrite
-   * list, or Claude Code's saved task list when it used TaskCreate/TaskUpdate
-   * (one item per call, so the saved list is the only whole one).
-   */
-  private flushTodo() {
-    if (!this.todosEnabled) return
-    const claudeSessionId = this.usedTaskTools ? getClaudeSessionId(this.sk) : undefined
-    const saved = claudeSessionId ? readClaudeTaskList(poolConfigDir(this.account), claudeSessionId) : undefined
-    const held = this.heldTodo ?? (saved ? { id: `todowrite_${generateId()}`, input: saved } : undefined)
-    this.heldTodo = undefined
-    this.usedTaskTools = false
-    if (held) this.mirrorTodoWrite(held.id, held.input)
-  }
-  /**
-   * Claude Code already ran its own todo tool and has its result; oc's
-   * `todowrite` only mirrors the list into the todo panel. It runs here,
-   * provider-executed, so oc's agent loop never sends the result back to
-   * Claude as a new turn. Mirrors run one at a time so a late one never
-   * overwrites a newer list, and a denial never ends the turn.
-   */
-  private mirrorTodoWrite(id: string, input: unknown) {
-    this.out.enqueue({ type: "tool-input-start", id, toolName: "todowrite", providerExecuted: true })
-    this.out.enqueue({
-      type: "tool-call",
-      toolCallId: id,
-      toolName: "todowrite",
-      input: JSON.stringify(input),
-      providerExecuted: true,
-    })
-    const execute = this.turn.compactionMode ? undefined : hostToolExecutors.get(this.turn.affinity)
-    this.todoMirrorsPending++
-    this.todoMirror = this.todoMirror
-      .then(async () => {
-        const outcome = execute
-          ? await execute("todowrite", input as Record<string, unknown>, id).then(
-              (result) => ({ result, isError: result.denied !== undefined }),
-              (error) => ({
-                result: {
-                  output: error instanceof Error ? error.message : String(error),
-                  title: "todowrite",
-                  metadata: {},
-                },
-                isError: true,
-              }),
-            )
-          : { result: { output: "", title: "todowrite", metadata: {} }, isError: false }
-        if (outcome.isError) log.warn("todo mirror failed", { id, output: outcome.result.output })
-        if (this.closed) return
-        this.out.enqueue({
-          type: "tool-result",
-          toolCallId: id,
-          toolName: "todowrite",
-          result: {
-            output: outcome.result.output,
-            title: outcome.result.title ?? "todowrite",
-            metadata: outcome.result.metadata ?? {},
-          },
-          ...(outcome.isError ? { isError: true } : {}),
-          providerExecuted: true,
-        })
-      })
-      .finally(() => {
-        this.todoMirrorsPending--
-      })
-  }
-
   private onResult(msg: ClaudeStreamMessage) {
-    if (this.steeringRetired) return this.finish()
+    if (this.steering.retired) return this.finish()
     this.clearResultFallback()
     this.resultIsError = msg.is_error === true
     this.beginTextAccountSwitch(msg)
@@ -1259,9 +1108,9 @@ class ClaudeTurn {
 
     this.turnCompleted = true
     this.out.endText()
-    this.flushTodo()
-    if (this.todoMirrorsPending === 0 && this.steerAcks.size === 0) return this.completeResult(msg)
-    void Promise.all([this.todoMirror, ...this.steerAcks]).then(
+    this.todos.flush()
+    if (this.todos.idle && this.steering.acks.size === 0) return this.completeResult(msg)
+    void Promise.all([this.todos.settled, ...this.steering.acks]).then(
       () => this.completeResult(msg),
       (error) => { if (!this.closed) this.failTurn(`Updating a pending message failed: ${String(error)}`) },
     )
@@ -1271,8 +1120,8 @@ class ClaudeTurn {
     if (this.closed) return
     // A steer written after Claude's last tool call is still in stdin: the CLI
     // runs it as its next turn, which this step keeps streaming until that `result`.
-    this.flushSteers()
-    if (!this.autoContinue.aborted && !this.toolDenied && this.steers.some((steer) => !steer.read)) {
+    this.steering.flush()
+    if (!this.autoContinue.aborted && !this.toolDenied && this.steering.hasUnread) {
       this.turnCompleted = false
       if (this.activeProcess) noteTurnStarted(this.activeProcess)
       this.startResultFallback()
@@ -1471,11 +1320,11 @@ class ClaudeTurn {
             )
           : await runOne(call.toolCallId, call.toolName, call.input)
       // Before the result, so Claude reads held steers at this tool boundary.
-      this.flushSteers()
+      this.steering.flush()
       resolvePendingProxyCallById(call.toolCallId, result)
     } finally {
       // A failed call is rejected by the caller after this.
-      this.flushSteers()
+      this.steering.flush()
       this.inStreamCalls--
       this.startResultFallback()
     }
@@ -1543,8 +1392,8 @@ class ClaudeTurn {
     if (!this.denialTimer) return
     clearTimeout(this.denialTimer)
     this.denialTimer = null
-    if (this.steers.some((steer) => !steer.read)) this.retireSteering("the denied turn had unread queued messages")
-    if (this.activeProcess && !this.steeringRetired) {
+    if (this.steering.hasUnread) this.steering.retire("the denied turn had unread queued messages")
+    if (this.activeProcess && !this.steering.retired) {
       void interruptTurn(this.activeProcess).then((idle) =>
         log.info("interrupt sent for denied tool call", { sk: this.sk, idle }),
       )
@@ -1628,18 +1477,18 @@ class ClaudeTurn {
     this.autoContinue.aborted = true
     log.info("aborting claude turn", {
       sessionKey: this.sk,
-      unreadSteers: this.steers.filter((steer) => !steer.read).map((steer) => steer.messageID),
+      unreadSteers: this.steering.unreadIds(),
     })
     if (this.closed) return
-    if (this.steers.some((steer) => !steer.read)) {
-      this.retireSteering("the interrupted turn had unread queued messages")
+    if (this.steering.hasUnread) {
+      this.steering.retire("the interrupted turn had unread queued messages")
     }
     // Claude already applied the held todo list; the panel should show it too.
-    this.flushTodo()
+    this.todos.flush()
     // Stop the CLI's turn, not just this end of the stream: otherwise it runs
     // the abandoned turn to completion, billing tokens and running tools, and
     // its late output lands in the next turn. The process stays alive.
-    if (this.activeProcess && !this.steeringRetired) {
+    if (this.activeProcess && !this.steering.retired) {
       void interruptTurn(this.activeProcess).then((idle) =>
         log.info("interrupt sent for aborted turn", { sk: this.sk, idle }),
       )
@@ -1665,7 +1514,7 @@ class ClaudeTurn {
     this.autoContinue.aborted = true
     this.closed = true
     this.cleanup()
-    if (this.activeProcess && !this.steeringRetired) void interruptTurn(this.activeProcess)
+    if (this.activeProcess && !this.steering.retired) void interruptTurn(this.activeProcess)
   }
 
   /** Mark the stream done, tear down, and close it. */
@@ -1679,9 +1528,9 @@ class ClaudeTurn {
   private cleanup() {
     if (this.cleanedUp) return
     this.cleanedUp = true
-    if (this.steers.some((steer) => !steer.read) &&
+    if (this.steering.hasUnread &&
       (this.autoContinue.aborted || this.toolDenied || !this.turnCompleted)) {
-      this.retireSteering("the stopped turn had unread queued messages")
+      this.steering.retire("the stopped turn had unread queued messages")
     }
     this.flushExchangeText()
     this.clearResultFallback()
@@ -1693,7 +1542,7 @@ class ClaudeTurn {
     this.lineEmitter.off("close", this.onClose)
     this.unsubscribeProxyCalls?.()
     this.unsubscribeProxyCalls = null
-    if (claudeSteerSinks.get(this.turn.affinity) === this.steerSink) claudeSteerSinks.delete(this.turn.affinity)
+    if (claudeSteerSinks.get(this.turn.affinity) === this.steering.sink) claudeSteerSinks.delete(this.turn.affinity)
     this.proc.off("error", this.onProcError)
     rejectAllPendingProxyCallsForSession(this.sk, new Error("Provider stream closed before proxy calls completed"))
   }
@@ -1776,7 +1625,7 @@ class ClaudeTurn {
     }
     this.attach(respawned)
     // Unread steers died with the old child; held ones still go out at the next tool boundary.
-    this.steers.length = 0
+    this.steering.forgetWritten()
     try {
       noteTurnStarted(respawned)
       this.proc.stdin?.write(this.userMsg + "\n")
@@ -1858,69 +1707,6 @@ class ClaudeTurn {
   }
 }
 
-/** Text and reasoning block bookkeeping over the stream controller. */
-class StreamWriter {
-  private textId: string | null = null
-  /** Every text and reasoning delta written, in order: what opencode will show. */
-  shown = ""
-
-  constructor(private readonly controller: ReadableStreamDefaultController<LanguageModelV3StreamPart>) {}
-
-  enqueue(part: { type: string } & Record<string, unknown>) {
-    if ((part.type === "text-delta" || part.type === "reasoning-delta") && typeof part.delta === "string") {
-      this.shown += part.delta
-    }
-    this.controller.enqueue(part as LanguageModelV3StreamPart)
-  }
-
-  get inText() {
-    return this.textId !== null
-  }
-
-  /** Continue the open text block, or open one. */
-  append(delta: string) {
-    this.enqueue({ type: "text-delta", id: this.textId ?? this.startText(), delta })
-  }
-
-  /** Write into a fresh text block and leave it open. */
-  block(delta: string) {
-    this.enqueue({ type: "text-delta", id: this.startText(), delta })
-  }
-
-  /** Write a self-contained text block. */
-  note(delta: string) {
-    this.block(delta)
-    this.endText()
-  }
-
-  endText() {
-    if (!this.textId) return
-    this.enqueue({ type: "text-end", id: this.textId })
-    this.textId = null
-  }
-
-  reasoning(text: string) {
-    const id = generateId()
-    this.enqueue({ type: "reasoning-start", id })
-    this.enqueue({ type: "reasoning-delta", id, delta: text })
-    this.enqueue({ type: "reasoning-end", id })
-  }
-
-  close() {
-    try {
-      this.controller.close()
-    } catch {}
-  }
-
-  private startText() {
-    this.endText()
-    const id = generateId()
-    this.textId = id
-    this.enqueue({ type: "text-start", id })
-    return id
-  }
-}
-
 function emptyWindow() {
   return { text: "", lastText: "", reasoning: false, tool: false, proxy: false }
 }
@@ -1955,11 +1741,6 @@ function isModelProgress(msg: ClaudeStreamMessage) {
     (msg.delta?.type === "text_delta" && !!msg.delta.text) ||
     (msg.delta?.type === "thinking_delta" && !!msg.delta.thinking)
   )
-}
-
-/** oc's `todowrite` as a mirror of Claude Code's own todo tools (TodoWrite, TaskCreate/TaskUpdate). */
-function isTodoMirror(name: string) {
-  return name === "todowrite"
 }
 
 /** Tools rendered as text rather than opencode tool rows. */

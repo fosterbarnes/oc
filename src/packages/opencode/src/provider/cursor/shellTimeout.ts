@@ -294,9 +294,14 @@ export function prepareCursorShellArgs(
   if (!policy.backgroundSpawn && policy.timeoutBehavior !== CURSOR_TIMEOUT_BACKGROUND) return
 
   if (process.platform === "win32") {
-    // Native Windows PowerShell/cmd wrapping is unsupported: running the
-    // command plain would silently execute a background request in the
-    // foreground (or drop the soft-timeout handoff), so fail closed.
+    // Native Windows PowerShell/cmd wrapping is unsupported. Cursor marks every
+    // timed shell call as soft-timeout, so run those in the foreground and kill
+    // at Cursor's window (reported as a timeout) instead of handing off. Real
+    // background requests (spawn, or a zero window) still fail closed.
+    if (!policy.backgroundSpawn && policy.timeoutMs > 0) {
+      args.timeout = policy.timeoutMs
+      return
+    }
     return (
       `Cursor ${policy.backgroundSpawn ? "background" : "soft-timeout (background-on-timeout)"} shell ` +
       `execution is not supported on Windows through OpenCode. Ask for a foreground command instead; ` +

@@ -1,4 +1,4 @@
-import type { UsageProviderId } from "./usage"
+import type { UsageProviderId } from "./providers"
 
 type RefreshState = {
   running: boolean

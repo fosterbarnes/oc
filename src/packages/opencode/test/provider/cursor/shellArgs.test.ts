@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { decodeMessage, encodeMessage } from "../../../src/provider/cursor/protocol/messages.js"
-import { buildExecClientMessages, parseExecServerMessage } from "../../../src/provider/cursor/protocol/tools.js"
+import { parseExecServerMessage } from "../../../src/provider/cursor/protocol/execParse.js"
+import { buildExecClientMessages } from "../../../src/provider/cursor/protocol/execResult.js"
 import { readAllFields } from "../../../src/provider/cursor/protocol/struct.js"
 import { prepareCursorShellArgs, registerCursorShellCall } from "../../../src/provider/cursor/shellTimeout.js"
 
@@ -97,5 +98,22 @@ describe("shell_args parsing and bash mapping", () => {
     } else {
       expect(refusal).toBeUndefined()
     }
+  })
+
+  // Cursor sends timeout_behavior BACKGROUND on ordinary timed shell calls.
+  test.if(process.platform === "win32")("Windows runs timed soft-timeout shells in the foreground", () => {
+    const soft = (id: string, timeout: number) => {
+      const parsed = parseExecServerMessage({
+        id: 1,
+        exec_id: id,
+        shell_stream_args: { command: "git diff --stat", working_directory: "C:\\work", timeout, timeout_behavior: 2 },
+      } as Record<string, unknown>)
+      registerCursorShellCall(`cursor_${id}`, parsed!.resultMetadata)
+      return parsed!.args
+    }
+    const timed = soft("soft30", 30_000)
+    expect(prepareCursorShellArgs("cursor_soft30", timed)).toBeUndefined()
+    expect(timed).toMatchObject({ command: "git diff --stat", timeout: 30_000 })
+    expect(prepareCursorShellArgs("cursor_soft0", soft("soft0", 0))).toMatch(/not supported on Windows/)
   })
 })

@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test"
 import type { SessionV1 } from "@opencode-ai/core/v1/session"
-import { renameDigest } from "../../src/session/prompt"
+import { renameDigest } from "../../src/session/titleGen"
 
 const msg = (role: "user" | "assistant", text: string, synthetic?: boolean, metadata?: Record<string, unknown>) =>
   ({ info: { role }, parts: [{ type: "text", text, synthetic, metadata }] }) as unknown as SessionV1.WithParts

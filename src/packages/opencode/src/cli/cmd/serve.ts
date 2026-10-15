@@ -7,7 +7,7 @@ import { stopCursorProxy } from "@/provider/cursor/runtime"
 import fs from "node:fs/promises"
 import path from "node:path"
 import { Global } from "@opencode-ai/core/global"
-import { RESIDENT_ENV, residentRestartFresh, spawnResident, writeResidentState } from "@/config/oc"
+import { RESIDENT_ENV, residentRestartFresh, spawnResident, writeResidentState } from "@/config/resident"
 
 export { writeResidentState }
 

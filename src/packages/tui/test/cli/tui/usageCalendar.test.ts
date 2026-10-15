@@ -6,9 +6,9 @@ import {
   usageCalendarDay,
   usageCalendarEvents,
   usageCalendarStrip,
-  type ClaudeCodeUsage,
-  type UsageWindow,
-} from "../../../src/routes/session/sidebar-tools/usage"
+} from "../../../src/routes/session/sidebar-tools/usage/calendar"
+import type { ClaudeCodeUsage } from "../../../src/routes/session/sidebar-tools/usage/claude"
+import type { UsageWindow } from "../../../src/routes/session/sidebar-tools/usage/snapshot"
 
 // Thursday, October 15, 2026, noon local time.
 const NOW = new Date(2026, 9, 15, 12, 0).valueOf()

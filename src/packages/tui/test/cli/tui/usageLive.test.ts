@@ -6,14 +6,11 @@ import {
   mergeClaudeProbe,
   mergeOpenAIProbe,
   usageReadingDetails,
-} from "../../../src/routes/session/sidebar-tools/usageLive"
-import {
-  formatClaudeUsageRows,
-  usageWindowStale,
-  type ClaudeCodeUsage,
-  type OpenAIUsage,
-  type UsageSnapshot,
-} from "../../../src/routes/session/sidebar-tools/usage"
+} from "../../../src/routes/session/sidebar-tools/usage/live"
+import type { ClaudeCodeUsage } from "../../../src/routes/session/sidebar-tools/usage/claude"
+import { formatClaudeUsageRows } from "../../../src/routes/session/sidebar-tools/usage/format"
+import type { OpenAIUsage } from "../../../src/routes/session/sidebar-tools/usage/probes"
+import { usageWindowStale, type UsageSnapshot } from "../../../src/routes/session/sidebar-tools/usage/snapshot"
 
 const unknown = () => ({ usedPercent: null, resetAt: null, resetMs: null, minutes: null })
 const claude = (accountID = "C:/accounts/main"): UsageSnapshot<ClaudeCodeUsage> => ({

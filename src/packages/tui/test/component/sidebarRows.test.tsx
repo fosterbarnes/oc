@@ -9,7 +9,7 @@ import {
   reconcileTree,
   type Script,
   type TreeEntry,
-} from "../../src/routes/session/sidebar-tools/helpers.js"
+} from "../../src/routes/session/sidebar-tools/scripts.js"
 
 function packageScript(name: string, terminal: Script["terminal"] = "native"): Script {
   return {

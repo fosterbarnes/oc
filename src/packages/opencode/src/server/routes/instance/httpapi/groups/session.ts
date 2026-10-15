@@ -5,6 +5,7 @@ import { SessionV1 } from "@opencode-ai/core/v1/session"
 import { Session } from "@/session/session"
 import { MessageV2 } from "@/session/message-v2"
 import { SessionPrompt } from "@/session/prompt"
+import { GenerateInput, GenerateResult } from "@/session/sideQuestion"
 import { SessionQueue } from "@/session/queue"
 import { SessionRevert } from "@/session/revert"
 import { SessionStatus } from "@/session/status"
@@ -82,7 +83,7 @@ export const SummarizePayload = Schema.Struct({
   auto: Schema.optional(Schema.Boolean),
 })
 export const PromptPayload = Schema.Struct(Struct.omit(SessionPrompt.PromptInput.fields, ["sessionID"]))
-export const GeneratePayload = Schema.Struct(Struct.omit(SessionPrompt.GenerateInput.fields, ["sessionID"]))
+export const GeneratePayload = Schema.Struct(Struct.omit(GenerateInput.fields, ["sessionID"]))
 // 422 for providers that cannot run a tool-less side question yet (Claude Code, Cursor).
 export class UnsupportedProviderError extends Schema.TaggedErrorClass<UnsupportedProviderError>()(
   "UnsupportedProviderError",
@@ -449,7 +450,7 @@ export const SessionApi = HttpApi.make("session")
           params: { sessionID: SessionID },
           query: WorkspaceRoutingQuery,
           payload: GeneratePayload,
-          success: described(SessionPrompt.GenerateResult, "Side answer; the session is not changed"),
+          success: described(GenerateResult, "Side answer; the session is not changed"),
           error: [
             HttpApiError.BadRequest,
             ApiNotFoundError,
