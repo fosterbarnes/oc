@@ -101,17 +101,17 @@ export function DialogQueue(props: { sessionID: string }) {
       toast.show({ message: "This prompt is already being sent", variant: "warning" })
       return
     }
+    const back = () => dialog.replace(() => <DialogQueue sessionID={props.sessionID} />)
     dialog.replace(() => (
       <DialogPrompt
         title="Edit queued prompt"
         value={entry.text}
-        onCancel={() => dialog.replace(() => <DialogQueue sessionID={props.sessionID} />)}
         onConfirm={(text) => {
           if (!text.trim()) return
-          void update({ type: "edit", id, text }).then(() => dialog.replace(() => <DialogQueue sessionID={props.sessionID} />))
+          void update({ type: "edit", id, text }).then(back)
         }}
       />
-    ))
+    ), undefined, { back })
   }
 
   return (

@@ -1338,7 +1338,7 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
           selectScriptSettings()
         }}
       />
-    ))
+    ), undefined, { back: selectScriptSettings })
   }
   const promptCustomExtension = (languageID?: string) =>
     dialog.replace(() => (
@@ -1367,9 +1367,8 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
             chooseLanguageForExtension(extension)
           }
         }}
-        onCancel={selectScriptSettings}
       />
-    ))
+    ), undefined, { back: selectScriptSettings })
   const promptCustomExecutable = () =>
     dialog.replace(() => (
       <DialogPrompt
@@ -1397,9 +1396,8 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
           )
           promptCustomExtension(id)
         }}
-        onCancel={selectScriptSettings}
       />
-    ))
+    ), undefined, { back: selectScriptSettings })
   const splitSizeLabel = (size: WezTermSplitSize) => ("Percent" in size ? `${size.Percent}%` : `${size.Cells} cells`)
   const promptWeztermSizeValue = (direction: "horizontal" | "vertical", mode: "Percent" | "Cells") =>
     dialog.replace(() => (
@@ -1432,9 +1430,8 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
           )
           selectScriptSettings()
         }}
-        onCancel={selectScriptSettings}
       />
-    ))
+    ), undefined, { back: () => selectWeztermSizeMode(direction) })
   const selectWeztermSizeMode = (direction: "horizontal" | "vertical") => {
     const current = scriptSettings.wezterm[direction]
     dialog.replace(() => (
@@ -1447,7 +1444,7 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
         current={"Percent" in current ? "Percent" : "Cells"}
         onSelect={(option) => promptWeztermSizeValue(direction, option.value as "Percent" | "Cells")}
       />
-    ))
+    ), undefined, { back: selectScriptSettings })
   }
   const selectScriptSettings = () => {
     const defaults = defaultScriptSettings()

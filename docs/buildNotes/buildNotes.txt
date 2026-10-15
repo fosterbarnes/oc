@@ -1,9 +1,12 @@
-v0.2.190 trailDepressing
+v0.2.192 scallywagWhatsoever
 
-tools:
-GPT models are now told that adding a file with apply_patch over an existing one replaces it, so they stop second-guessing whole-file rewrites.
+oc palette:
+The new About entry in the oc command palette and /about shows the oc version and tag, included OpenCode version, build, runtime, creator, license, and repository and wiki links. Press enter to copy the details.
 
-system prompt:
-Open-weight GPT models (gpt-oss) are no longer told to use a patch tool they do not have. They get the standard prompt that matches their edit and write tools.
+dialogs:
+Esc now returns to the parent menu from script settings sub-menus, hidden models, Connect provider, hotkey editing, session rename, subagent setup, and queued prompt editing. Clicking the esc header label does the same. Dialogs opened directly from the palette still close on Esc, and ctrl+c closes any dialog.
 
-Under the hood: added Patch.usesApplyPatch(modelID) in the patch module; the tool registry filter and the GPT system prompt branch both use it, so tools and prompt read the same model id. Added a system.test.ts case covering gpt-5/gpt-5-codex versus gpt-oss prompts. system.test.ts and tool/registry.test.ts passed (25 tests), tsc was clean for the touched files, and prePush passed. bun.lock and packages/opencode/package.json carry line-ending changes only.
+cleanup:
+Menu picks, message clicks, and reverts no longer write the temporary tuiDiag debug log.
+
+Under the hood: embedded the version tag in the build, added a shared dialog back callback and escape handler, and removed the unused dialog push path and submenu gutter. TUI TypeScript checks passed in the implementation sessions, live Esc-back was confirmed by the user, and prePush checks passed. No targeted test files changed.

@@ -17,7 +17,6 @@ export function DialogMessage(props: {
   /** Sent while busy and not yet answered or read by Claude: it can still be taken back. */
   waiting?: boolean
 }) {
-  require("node:fs").appendFileSync("C:/Users/Foster/AppData/Local/Temp/opencode/tuiDiag.txt", `${new Date().toISOString()} DialogMessage create ${props.messageID} waiting=${props.waiting}\n`)
   const sync = useSync()
   const sdk = useSDK()
   const toast = useToast()
@@ -81,14 +80,12 @@ export function DialogMessage(props: {
     description: "undo messages and file changes",
     onSelect: async (dialog: DialogContext) => {
       const msg = message()
-      require("node:fs").appendFileSync("C:/Users/Foster/AppData/Local/Temp/opencode/tuiDiag.txt", `${new Date().toISOString()} revert select ${props.messageID} found=${!!msg}\n`)
       if (!msg) return
       dialog.clear()
       const result = await sdk.client.session.revert({
         sessionID: props.sessionID,
         messageID: msg.id,
       })
-      require("node:fs").appendFileSync("C:/Users/Foster/AppData/Local/Temp/opencode/tuiDiag.txt", `${new Date().toISOString()} revert result ${JSON.stringify(result.error ?? "ok")}\n`)
       if (result.error) {
         toast.show({ message: `Revert failed: ${errorMessage(result.error)}`, variant: "error" })
         return

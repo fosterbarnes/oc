@@ -97,7 +97,6 @@ export function CommandPaletteDialog(props: { category?: string } = {}) {
       footer: formatKeyBindings(entry.bindings, config),
       value: entry.command.name,
       suggested: isSuggestedPaletteCommand(entry),
-      gutter: entry.command.submenu === true ? () => <text>▸</text> : undefined,
       onSelect: (dialog: DialogContext) => {
         dialog.clear()
         keymap.dispatchCommand(entry.command.name)
@@ -118,7 +117,9 @@ export function CommandPaletteDialog(props: { category?: string } = {}) {
           if (!selected) return
           const name = selected.value
           if (!name) return
-          dialog.replace(() => <DialogHotkey command={name} title={selected.title} />)
+          dialog.replace(() => <DialogHotkey command={name} title={selected.title} />, undefined, {
+            back: () => dialog.replace(() => <CommandPaletteDialog category={props.category} />),
+          })
         },
       },
     ],

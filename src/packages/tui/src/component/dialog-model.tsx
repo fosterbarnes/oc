@@ -127,7 +127,8 @@ export function DialogModel(props: {
             {
               value: HIDDEN_MENU,
               title: `Hidden (${hiddenCount})`,
-              onSelect: () => dialog.push(() => <DialogModel hiddenOnly current={props.current} />),
+              onSelect: () =>
+                dialog.replace(() => <DialogModel {...props} hiddenOnly />, undefined, { back: reopen }),
             },
           ]
         : []
@@ -173,6 +174,10 @@ export function DialogModel(props: {
     )
   }
 
+  function reopen() {
+    dialog.replace(() => <DialogModel {...props} />)
+  }
+
   function onSelect(providerID: string, modelID: string) {
     if (props.updateCurrent === false) {
       dialog.clear()
@@ -202,7 +207,7 @@ export function DialogModel(props: {
           command: "model.dialog.provider",
           title: connected() ? "Connect provider" : "View all providers",
           onTrigger() {
-            dialog.replace(() => <DialogProvider />)
+            dialog.replace(() => <DialogProvider />, undefined, { back: reopen })
           },
         },
         {

@@ -112,6 +112,62 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-14 (~20:50) - v0.2.192 scallywagWhatsoever - Remove leftover tuiDiag debug writes - Claude Opus 5.5, low reasoning; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low; Implementation; completed
+- Version: 0.2.192 scallywagWhatsoever
+- Removed `tuiDiag.txt` appendFileSync writes from `ui/dialog-select.tsx` (submit), `routes/session/dialog-message.tsx` (create, revert select/result), `routes/session/index.tsx` (message mouse down/up; dropped the now-empty `onMouseDown`). No source references remain.
+- Added `esc` row to `oc.wiki/Keybinds.md` for drill-in menus going back (wiki push is the user's).
+- Verification: `bun x tsc --noEmit -p .` in `packages/tui` clean. Live Esc-back confirmed by the user on the installed build.
+
+### User
+Cleanup
+- oc no longer writes a debug log to the temp folder on menu picks, message clicks, and reverts.
+- The Keybinds wiki page lists Esc going back in menus opened from another menu.
+
+---
+
+## 2026-10-14 (~20:40) - v0.2.192 scallywagWhatsoever - Esc goes back in drill-in dialogs - Claude Opus 5.5, low reasoning; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low; Implementation; completed
+- Version: 0.2.192 scallywagWhatsoever
+- Added `back` option to `dialog.replace(input, onClose, { back })` in `ui/dialog.tsx`; global escape runs `back` when set, else closes. ctrl+c still closes. Exposed `dialog.escape()` for header "esc" labels (select, prompt, confirm, alert, export-options, dialogHotkey).
+- Removed `dialog.push` (only user: hidden models, now `replace` + `back`) and the `submenu` gutter in `command-palette.tsx` (no command set it).
+- Kept vanilla rule (sst/opencode dev `DialogSelect.onCancel` "Back"): palette -> dialog still closes; only drill-ins go back. Did not wire Esc to component `onCancel` props: `DialogPrompt.show`/`DialogConfirm.show` use `onCancel` as a resolve, so Esc would leave the dialog open.
+- Wired `back`: script settings children (extension/executable prompts, language pick, WezTerm split size mode/value) in `sidebarTools.tsx`; hidden models and Connect provider in `dialog-model.tsx`; set hotkey -> palette (same category); session rename -> session list; subagent add model/efforts -> subagents; queued prompt edit -> queue. Removed dead `onCancel` props those prompts passed.
+- Removed `tuiDiag.txt` debug writes in `ui/dialog.tsx` only. TODO: same writes remain in `dialog-select.tsx:370`, `dialog-message.tsx`, `routes/session/index.tsx` (not touched; may be an active debug session).
+- Not done: plugin API dialogs (`feature-plugins/system/plugins.tsx` install -> list) because `api.ui.dialog.replace` is the public plugin surface.
+- Verification: `bun x tsc --noEmit -p .` in `packages/tui` clean (0 lines). No pane check run; no live run.
+
+### User
+Dialogs
+- Pressing Esc in a menu opened from another menu now returns to that menu instead of closing everything, matching vanilla OpenCode.
+- This covers script settings sub-menus, hidden models, Connect provider from the model list, set hotkey from the palette, session rename, adding a subagent, and editing a queued prompt.
+- Clicking the "esc" label in a dialog header does the same as pressing Esc.
+- Dialogs opened straight from the command palette still close on Esc, and ctrl+c still closes any dialog.
+
+---
+
+## 2026-10-14 (~20:31) - v0.2.191 simplicityPonny - About dialog in the oc palette - Claude Opus 5.5, default reasoning; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; default reasoning; Implementation (after /spit plan); completed
+- Version: 0.2.191 simplicityPonny
+- Added `InstallationVersionTag` (`core/src/installation/version.ts`), baked from `.version/versionTag` as `OPENCODE_VERSION_TAG` in `opencode/script/build.ts` (validated `^[A-Za-z]+$`). `cli/script/build.ts` untouched: it does not define display version either.
+- Added `tui/src/component/dialog-about.tsx`: oc version+tag, OpenCode version, build flavor+channel, Bun+OS, creator, repo/wiki `Link`s, license; `enter` copies. Layout mirrors `dialog-debug.tsx`.
+- Added `oc.about` (`/about`) in `tui/src/app.tsx`, top `oc` group after Clear saved images.
+- Added About mention to wiki `Troubleshooting.md` intro (wiki push is user's).
+- Verification: `bunx tsc --noEmit` in `packages/tui` clean (exit 0). No build or live run.
+
+### User
+oc palette
+- `ctrl+o` has a new **About** entry (also `/about`) showing the oc version and tag, the OpenCode version it includes, build, runtime, creator, and links to the repo and wiki.
+- Press `enter` in the About dialog to copy its details.
+
+---
+
 ## 2026-10-14 (~19:50) - v0.2.190 trailDepressing - One apply_patch model check for tools and prompt - Claude Opus 5.5, default reasoning; Implementation
 
 ### Agent

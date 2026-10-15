@@ -153,7 +153,7 @@ export function DialogSubagents() {
           efforts={variants}
           onConfirm={(selected) => void continueAdd(providerID, modelID, selected)}
         />
-      ))
+      ), undefined, { back: reopen })
       return
     }
     void continueAdd(providerID, modelID, [undefined])
@@ -170,7 +170,7 @@ export function DialogSubagents() {
         if (option.value === "__add__") {
           dialog.replace(() => (
             <DialogModel updateCurrent={false} onSelect={(providerID, modelID) => void startAdd(providerID, modelID)} />
-          ))
+          ), undefined, { back: reopen })
           return
         }
         void clipboard

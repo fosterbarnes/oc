@@ -1747,11 +1747,7 @@ function UserMessage(props: {
             onMouseOut={() => {
               setHover(false)
             }}
-            onMouseDown={(evt) => {
-              require("node:fs").appendFileSync("C:/Users/Foster/AppData/Local/Temp/opencode/tuiDiag.txt", `${new Date().toISOString()} down ${props.message.id} ${evt.button}\n`)
-            }}
             onMouseUp={(evt) => {
-              require("node:fs").appendFileSync("C:/Users/Foster/AppData/Local/Temp/opencode/tuiDiag.txt", `${new Date().toISOString()} up ${props.message.id} ${evt.button} drag=${evt.isDragging}\n`)
               if (evt.button !== MouseButton.LEFT) return
               props.onAction()
             }}

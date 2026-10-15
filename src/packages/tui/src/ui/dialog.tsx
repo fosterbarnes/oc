@@ -73,6 +73,8 @@ function init() {
     stack: [] as {
       element: JSX.Element
       onClose?: () => void
+      // Set on drill-in dialogs: escape reopens the parent instead of closing
+      back?: () => void
     }[],
     size: "medium" as "medium" | "large" | "xlarge",
   })
@@ -128,23 +130,30 @@ function init() {
     refocusEpoch++
   })
 
+  function close() {
+    const current = store.stack.at(-1)
+    current?.onClose?.()
+    setStore("stack", store.stack.slice(0, -1))
+    refocus()
+  }
+
+  function escape() {
+    if (renderer.getSelection()) {
+      renderer.clearSelection()
+    }
+    const back = store.stack.at(-1)?.back
+    if (back) return back()
+    close()
+  }
+
   useBindings(() => ({
     enabled: store.stack.length > 0 && !renderer.getSelection()?.getSelectedText(),
     bindings: [
       {
         key: "escape",
-        desc: "Close dialog",
+        desc: "Back or close dialog",
         group: "Dialog",
-        cmd: () => {
-          require("node:fs").appendFileSync("C:/Users/Foster/AppData/Local/Temp/opencode/tuiDiag.txt", `${new Date().toISOString()} dialog escape\n`)
-          if (renderer.getSelection()) {
-            renderer.clearSelection()
-          }
-          const current = store.stack.at(-1)
-          current?.onClose?.()
-          setStore("stack", store.stack.slice(0, -1))
-          refocus()
-        },
+        cmd: escape,
       },
       {
         key: "ctrl+c",
@@ -154,18 +163,16 @@ function init() {
           if (renderer.getSelection()) {
             renderer.clearSelection()
           }
-          const current = store.stack.at(-1)
-          current?.onClose?.()
-          setStore("stack", store.stack.slice(0, -1))
-          refocus()
+          close()
         },
       },
     ],
   }))
 
   return {
+    // What the header "esc" label runs: same as pressing escape
+    escape,
     clear() {
-      require("node:fs").appendFileSync("C:/Users/Foster/AppData/Local/Temp/opencode/tuiDiag.txt", `${new Date().toISOString()} dialog.clear ${store.stack.length} ${new Error().stack?.split("\n").slice(2, 5).join(" | ")}\n`)
       for (const item of store.stack) {
         if (item.onClose) item.onClose()
       }
@@ -175,7 +182,7 @@ function init() {
       })
       refocus()
     },
-    replace(input: any, onClose?: () => void) {
+    replace(input: any, onClose?: () => void, options?: { back?: () => void }) {
       refocusEpoch++
       if (refocusTimer) {
         clearTimeout(refocusTimer)
@@ -198,13 +205,9 @@ function init() {
         {
           element: input,
           onClose,
+          back: options?.back,
         },
       ])
-      require("node:fs").appendFileSync("C:/Users/Foster/AppData/Local/Temp/opencode/tuiDiag.txt", `${new Date().toISOString()} dialog.replace done ${store.stack.length}\n`)
-    },
-    // Stacks over the current dialog so escape returns to it
-    push(input: any) {
-      setStore("stack", [...store.stack, { element: input }])
     },
     get stack() {
       return store.stack

@@ -23,6 +23,8 @@ const maintenanceVersion = (await Bun.file(path.resolve(dir, "../../.version/ver
 if (!/^\d+\.\d+\.\d+$/.test(maintenanceVersion)) {
   throw new Error(`Invalid maintenance version: ${maintenanceVersion}`)
 }
+const versionTag = (await Bun.file(path.resolve(dir, "../../.version/versionTag")).text()).trim()
+if (!/^[A-Za-z]+$/.test(versionTag)) throw new Error(`Invalid version tag: ${versionTag}`)
 const displayVersion = Script.version.startsWith("0.0.0-")
   ? maintenanceVersion + Script.version.slice("0.0.0".length)
   : Script.version
@@ -208,6 +210,7 @@ for (const variant of variants) {
         FFF_LIBC: JSON.stringify(item.abi === "musl" ? "musl" : "gnu"),
         OPENCODE_VERSION: `'${runtimeVersion}'`,
         OPENCODE_DISPLAY_VERSION: `'${displayVersion}'`,
+        OPENCODE_VERSION_TAG: `'${versionTag}'`,
         OPENCODE_MODELS_DEV: generated.modelsData,
         OTUI_TREE_SITTER_WORKER_PATH: bunfsRoot + treeSitterWorkerPath,
         OPENCODE_WORKER_PATH: workerPath,

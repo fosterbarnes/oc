@@ -100,7 +100,7 @@ export function DialogHotkey(props: { command: string; title: string }) {
     const name = evt.name.toLowerCase()
     const modified = evt.ctrl || evt.meta || evt.option || evt.shift || evt.super || evt.hyper
     if (!modified && name === "escape") {
-      dialog.clear()
+      dialog.escape()
       return
     }
     if (!modified && name === "backspace") {
@@ -162,7 +162,7 @@ export function DialogHotkey(props: { command: string; title: string }) {
         <text attributes={TextAttributes.BOLD} fg={theme.text}>
           Set hotkey: {props.title}
         </text>
-        <text fg={theme.textMuted} onMouseUp={() => dialog.clear()}>
+        <text fg={theme.textMuted} onMouseUp={() => dialog.escape()}>
           esc
         </text>
       </box>

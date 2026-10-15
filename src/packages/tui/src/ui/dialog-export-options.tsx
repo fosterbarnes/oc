@@ -89,7 +89,7 @@ export function DialogExportOptions(props: DialogExportOptionsProps) {
         <text attributes={TextAttributes.BOLD} fg={theme.text}>
           Export Options
         </text>
-        <text fg={theme.textMuted} onMouseUp={() => dialog.clear()}>
+        <text fg={theme.textMuted} onMouseUp={() => dialog.escape()}>
           esc
         </text>
       </box>

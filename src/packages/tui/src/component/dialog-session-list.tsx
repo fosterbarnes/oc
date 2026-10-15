@@ -434,7 +434,9 @@ export function DialogSessionList() {
           title: "rename",
           hidden: () => !hasOptions(),
           onTrigger: async (option) => {
-            dialog.replace(() => <DialogSessionRename session={option.value} />)
+            dialog.replace(() => <DialogSessionRename session={option.value} />, undefined, {
+              back: () => dialog.replace(() => <DialogSessionList />),
+            })
           },
         },
         {
