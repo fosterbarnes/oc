@@ -31,18 +31,21 @@ import {
   filterProxyByModelTools,
   filterProxyOpencodeToolDefs,
   nativeToolsDeniedByHost,
+  splitCommandTools,
   type McpProxyToolResolution,
   type ModelToolEntry,
 } from "./proxyToolSelection.js"
 import { queuePendingProxyCall } from "./proxyBroker.js"
 import { log } from "./logger.js"
 import { createHash } from "node:crypto"
-import { hasCommandPermission } from "./callOptions.js"
+import { commandToolPlan, harnessToolsDenied } from "./callOptions.js"
+import { CLAUDE_NATIVE_TOOLS, type CommandToolPlan } from "./shared.js"
 
 export function toolCatalogHash(
   config: ClaudeCodeConfig,
   tools: readonly ModelToolEntry[] | undefined,
-  commandPermission = false,
+  commandPlan?: CommandToolPlan,
+  harnessDenied: string[] = [],
 ) {
   return createHash("sha256")
     .update(
@@ -64,7 +67,8 @@ export function toolCatalogHash(
           mcpConfig: config.mcpConfig,
           permissionMode: config.permissionMode,
           skipPermissions: config.skipPermissions,
-          commandPermission,
+          commandPlan,
+          harnessDenied,
         },
         (_: string, value: unknown) =>
           value !== null && typeof value === "object" && !Array.isArray(value)
@@ -295,7 +299,7 @@ export async function planSpawn(input: {
 }) {
   const config = input.config
   const turn = input.turn
-  const commandPermission = hasCommandPermission(input.options.providerOptions, config.provider)
+  const commandPermission = commandToolPlan(input.options.providerOptions, config.provider) !== undefined
   const spawnModel = parseModelId(turn.effectiveModelId)
   const systemPrompt = (toolEnvironment?: string) =>
     input.reusing
@@ -338,7 +342,7 @@ export async function planSpawn(input: {
   const systemPromptFile = systemPrompt(
     buildToolEnvironmentNote(
       tools.combined.map((t) => t.name),
-      commandPermission,
+      tools.replaced,
     ),
   )
   return {
@@ -347,10 +351,9 @@ export async function planSpawn(input: {
       skipPermissions: config.skipPermissions !== false,
       model: spawnModel.model,
       permissionMode: config.permissionMode,
-      // Command turns execute exclusively through oc's permission-checked tools.
-      // Only ToolSearch survives: it loads schemas but runs nothing, and it
-      // keeps the proxy tools deferred exactly as on ordinary turns.
-      tools: commandPermission ? ["ToolSearch"] : undefined,
+      // Closed command turns keep only ToolSearch (it loads schemas but runs
+      // nothing) plus the built-ins their plan hands to Claude.
+      tools: tools.cliTools,
       mcpConfig: commandPermission ? proxyServer?.configPath() : mcp.paths,
       strictMcpConfig: commandPermission || config.strictMcpConfig,
       disallowedTools: tools.disallowed.length > 0 ? tools.disallowed : undefined,
@@ -374,15 +377,23 @@ async function assembleProxyTools(input: Parameters<typeof planSpawn>[0]) {
   const config = input.config
   const modelTools = input.options.tools as readonly ModelToolEntry[] | undefined
   const dialect = config.hostApi === "v2" ? "v2" : "v1"
-  if (hasCommandPermission(input.options.providerOptions, config.provider)) {
-    // No CLI built-ins or directly configured MCP servers can bypass turn rules.
+  const commandPlan = commandToolPlan(input.options.providerOptions, config.provider)
+  const harnessDenied = harnessToolsDenied(input.options.providerOptions, config.provider)
+  if (commandPlan) {
+    // Each allowed oc tool runs as Claude's built-in when the plan says so, otherwise through the
+    // proxy where oc enforces the turn's rules. Directly configured MCP servers stay out.
+    const split = splitCommandTools(commandPlan, modelTools, dialect)
+    const forwarded = new Set(split.forwarded)
     const staticDefs = filterProxyByModelTools(input.proxyTools ?? [], modelTools, dialect)
     const taken = new Set(staticDefs.map((tool) => tool.name))
     return {
       combined: [
         ...staticDefs,
         ...(modelTools ?? []).flatMap((tool): ProxyToolDef[] =>
-          tool.name && !taken.has(tool.name) && (tool.type === undefined || tool.type === "function")
+          tool.name &&
+          forwarded.has(tool.name) &&
+          !taken.has(tool.name) &&
+          (tool.type === undefined || tool.type === "function")
             ? [
                 {
                   name: tool.name,
@@ -393,7 +404,24 @@ async function assembleProxyTools(input: Parameters<typeof planSpawn>[0]) {
             : [],
         ),
       ],
-      disallowed: config.extraDisallowedTools ?? [],
+      replaced: Object.keys(CLAUDE_NATIVE_TOOLS).filter((id) => forwarded.has(id)),
+      // A closed turn lists its built-ins in `--tools`, so nothing else needs turning off.
+      cliTools: commandPlan.closed
+        ? [
+            "ToolSearch",
+            ...split.kept.filter(
+              (name) =>
+                !harnessDenied.includes(name) && (name !== "WebSearch" || config.webSearch !== "disabled"),
+            ),
+          ]
+        : undefined,
+      disallowed: commandPlan.closed
+        ? (config.extraDisallowedTools ?? [])
+        : resolveDisallowedTools({
+            proxyTools: input.proxyTools,
+            extraDisallowedTools: [...split.off, ...harnessDenied, ...(config.extraDisallowedTools ?? [])],
+            disableWebSearch: config.webSearch === "disabled",
+          }),
     }
   }
 
@@ -437,12 +465,18 @@ async function assembleProxyTools(input: Parameters<typeof planSpawn>[0]) {
 
   return {
     combined: [...staticDefs, ...mcpDefs, ...opencodeDefs],
+    cliTools: undefined,
+    replaced: [],
     // Disallow against the post-version-gate defs, before the model-tools
     // filter: an unsupported question proxy leaves its native fallback live,
     // and a permission-denied proxy keeps its native replacement off.
     disallowed: resolveDisallowedTools({
       proxyTools: [...(gated ?? []), ...resolvedOpencodeDefs],
-      extraDisallowedTools: [...nativeToolsDeniedByHost(modelTools, dialect), ...(config.extraDisallowedTools ?? [])],
+      extraDisallowedTools: [
+        ...nativeToolsDeniedByHost(modelTools, dialect),
+        ...harnessDenied,
+        ...(config.extraDisallowedTools ?? []),
+      ],
       disableWebSearch: config.webSearch === "disabled",
     }),
   }

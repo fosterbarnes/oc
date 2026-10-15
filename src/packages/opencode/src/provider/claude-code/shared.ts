@@ -4,7 +4,41 @@ import type { SessionV1 } from "@opencode-ai/core/v1/session"
 export const CLAUDE_CODE_PROVIDER_ID = "claude-code"
 export const CLAUDE_CODE_SESSION_OPTION = "opencodeSessionID"
 export const CLAUDE_CODE_AGENT_OPTION = "opencodeAgent"
+// Set on command turns (turn rules or `toolHost`): a JSON `CommandToolPlan`.
 export const CLAUDE_CODE_COMMAND_PERMISSION_OPTION = "opencodeCommandPermission"
+
+/**
+ * Claude Code built-ins behind each oc tool. A command turn gives Claude the built-in instead of
+ * the oc proxy when the tool is in `CommandToolPlan.native`.
+ */
+export const CLAUDE_NATIVE_TOOLS: Record<string, string[]> = {
+  bash: ["Bash", "PowerShell"],
+  edit: ["Edit", "MultiEdit", "NotebookEdit"],
+  write: ["Write"],
+  read: ["Read"],
+  glob: ["Glob"],
+  grep: ["Grep"],
+  webfetch: ["WebFetch"],
+  todowrite: ["TodoWrite", "TaskCreate", "TaskUpdate", "TaskGet", "TaskList"],
+}
+
+/**
+ * Claude Code built-ins oc has no proxy for, keyed by the oc permission that governs them. oc may
+ * not offer the tool itself (websearch needs Exa or Parallel), so only the command's rules decide.
+ */
+export const CLAUDE_HARNESS_ONLY_TOOLS: Record<string, string[]> = {
+  websearch: ["WebSearch"],
+}
+
+/**
+ * How a command turn splits tools between Claude Code and oc. `native`: oc tool ids (keys of
+ * `CLAUDE_NATIVE_TOOLS` or `CLAUDE_HARNESS_ONLY_TOOLS`) Claude runs itself when the turn allows
+ * them; the rest go through the proxy. `closed`: other Claude built-ins stay off, because the
+ * command's rules deny unlisted tools or the command forces oc tools.
+ */
+export type CommandToolPlan = { native: string[]; closed: boolean }
+// Comma-separated `CLAUDE_HARNESS_ONLY_TOOLS` built-ins the agent or session permissions deny.
+export const CLAUDE_CODE_HARNESS_DENIED_OPTION = "opencodeHarnessDenied"
 // Set when the turn's user message names its model explicitly; agent model overrides then keep it.
 export const CLAUDE_CODE_EXPLICIT_MODEL_OPTION = "opencodeExplicitModel"
 // The agent's own prompt (custom agent prompt, or the `instructionsByModel` base). The only oc

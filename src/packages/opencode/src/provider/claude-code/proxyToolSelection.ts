@@ -5,6 +5,7 @@
 import { log } from "./logger.js"
 import { toolNameForHost, type HostToolDialect } from "./hostTools.js"
 import { TASK_BATCH_TOOL_NAME, type ProxyToolDef } from "./proxyToolDefs.js"
+import { CLAUDE_HARNESS_ONLY_TOOLS, CLAUDE_NATIVE_TOOLS, type CommandToolPlan } from "./shared.js"
 
 /** CLI-ready list of Claude tool names to disable, for each proxied tool. */
 export function disallowedToolFlags(tools: readonly Pick<ProxyToolDef, "name">[]): string[] {
@@ -72,24 +73,11 @@ export function filterProxyByModelTools(
 }
 
 /**
- * Claude Code built-ins behind each oc tool. Missing tools are permission-denied
- * or disabled capabilities. Websearch and skill have separate provider settings.
- */
-const NATIVE_TOOLS_BY_HOST_TOOL: Record<string, string[]> = {
-  bash: ["Bash", "PowerShell"],
-  edit: ["Edit", "MultiEdit", "NotebookEdit"],
-  write: ["Write"],
-  read: ["Read"],
-  glob: ["Glob"],
-  grep: ["Grep"],
-  webfetch: ["WebFetch"],
-  todowrite: ["TodoWrite", "TaskCreate", "TaskUpdate", "TaskGet", "TaskList"],
-}
-
-/**
  * Claude Code runs its built-ins itself, so oc's per-agent permissions reach
  * them only through `--disallowedTools`: an oc tool left out of the agent's
  * tool set (a read-only subagent, a denied tool) turns its built-ins off.
+ * Missing tools are permission-denied or disabled capabilities. Websearch and
+ * skill have separate provider settings.
  */
 export function nativeToolsDeniedByHost(
   modelTools: readonly ModelToolEntry[] | undefined,
@@ -97,10 +85,42 @@ export function nativeToolsDeniedByHost(
 ): string[] {
   const offered = modelToolNames(modelTools)
   if (!offered) return []
-  return Object.entries(NATIVE_TOOLS_BY_HOST_TOOL).flatMap(([id, natives]) => {
+  return Object.entries(CLAUDE_NATIVE_TOOLS).flatMap(([id, natives]) => {
     const name = toolNameForHost(id, dialect)
     return name === null || offered.has(name) ? [] : natives
   })
+}
+
+/**
+ * A command turn's split under its plan. Each oc tool the turn allows runs either as Claude's
+ * built-in (in `plan.native`) or through the proxy, never both. Returns the oc tool names to
+ * forward, the built-ins Claude keeps, and the built-ins to turn off.
+ */
+export function splitCommandTools(
+  plan: CommandToolPlan,
+  modelTools: readonly ModelToolEntry[] | undefined,
+  dialect: HostToolDialect = "v1",
+) {
+  const offered = modelToolNames(modelTools) ?? new Set<string>()
+  const native = new Set(
+    plan.native.filter((id) => {
+      const name = toolNameForHost(id, dialect)
+      return name !== null && offered.has(name) && CLAUDE_NATIVE_TOOLS[id] !== undefined
+    }),
+  )
+  // Claude's own Bash runs background jobs itself, so oc's job controls go with oc's shell.
+  const replaced = new Set(
+    [...native, ...(native.has("bash") ? ["bgStatus", "bgKill"] : [])].map((id) => toolNameForHost(id, dialect)),
+  )
+  const harnessOnly = new Set(plan.native.filter((id) => CLAUDE_HARNESS_ONLY_TOOLS[id] !== undefined))
+  return {
+    forwarded: [...offered].filter((name) => !replaced.has(name)),
+    kept: [...native, ...harnessOnly].flatMap((id) => CLAUDE_NATIVE_TOOLS[id] ?? CLAUDE_HARNESS_ONLY_TOOLS[id]),
+    off: [
+      ...Object.entries(CLAUDE_NATIVE_TOOLS).flatMap(([id, natives]) => (native.has(id) ? [] : natives)),
+      ...Object.entries(CLAUDE_HARNESS_ONLY_TOOLS).flatMap(([id, natives]) => (harnessOnly.has(id) ? [] : natives)),
+    ],
+  }
 }
 
 /** Filter explicitly forwarded registry tools against the host's resolved tool set. */

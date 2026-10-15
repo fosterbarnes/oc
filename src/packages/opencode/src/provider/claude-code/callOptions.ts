@@ -9,14 +9,36 @@ import {
   CLAUDE_CODE_AGENT_PROMPT_OPTION,
   CLAUDE_CODE_COMMAND_PERMISSION_OPTION,
   CLAUDE_CODE_EXPLICIT_MODEL_OPTION,
+  CLAUDE_CODE_HARNESS_DENIED_OPTION,
   CLAUDE_CODE_PROVIDER_ID,
   CLAUDE_CODE_SESSION_OPTION,
+  type CommandToolPlan,
 } from "./shared.js"
 
 type ProviderOptions = LanguageModelV3CallOptions["providerOptions"]
 
-export function hasCommandPermission(providerOptions: ProviderOptions, providerKey: string) {
-  return hostOption(providerOptions, providerKey, CLAUDE_CODE_COMMAND_PERMISSION_OPTION) === "true"
+/** The command turn's tool plan, or undefined on an ordinary turn. */
+export function commandToolPlan(providerOptions: ProviderOptions, providerKey: string): CommandToolPlan | undefined {
+  const raw = hostOption(providerOptions, providerKey, CLAUDE_CODE_COMMAND_PERMISSION_OPTION)
+  if (raw === undefined) return undefined
+  const plan: unknown = JSON.parse(raw)
+  if (!isPlan(plan)) throw new Error(`invalid ${CLAUDE_CODE_COMMAND_PERMISSION_OPTION}: ${raw}`)
+  return plan
+}
+
+function isPlan(value: unknown): value is CommandToolPlan {
+  if (typeof value !== "object" || value === null) return false
+  const plan = value as Record<string, unknown>
+  return (
+    Array.isArray(plan.native) &&
+    plan.native.every((id) => typeof id === "string") &&
+    typeof plan.closed === "boolean"
+  )
+}
+
+/** Claude built-ins with no oc proxy that the agent or session permissions deny. */
+export function harnessToolsDenied(providerOptions: ProviderOptions, providerKey: string): string[] {
+  return hostOption(providerOptions, providerKey, CLAUDE_CODE_HARNESS_DENIED_OPTION)?.split(",") ?? []
 }
 
 export function hasExplicitModel(providerOptions: ProviderOptions, providerKey: string) {

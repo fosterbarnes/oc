@@ -482,6 +482,7 @@ const layer = Layer.effect(
             format: original.format,
             tools: original.tools,
             permission: original.permission,
+            toolHost: original.toolHost,
             system: original.system,
           })
           for (const part of replay.parts) {
@@ -529,6 +530,7 @@ const layer = Layer.effect(
               agent: userMessage.agent,
               model: userMessage.model,
               permission: userMessage.permission,
+              toolHost: userMessage.toolHost,
             })
             const text =
               (input.overflow
@@ -579,6 +581,7 @@ const layer = Layer.effect(
         sessionID: input.sessionID,
         agent: input.agent,
         permission: previous?.info.role === "user" ? previous.info.permission : undefined,
+        toolHost: previous?.info.role === "user" ? previous.info.toolHost : undefined,
         time: { created: Date.now() },
       })
       yield* session.updatePart({

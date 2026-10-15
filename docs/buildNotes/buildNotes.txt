@@ -1,12 +1,6 @@
-v0.2.192 scallywagWhatsoever
+v0.2.194 hoplessExposing
 
-oc palette:
-The new About entry in the oc command palette and /about shows the oc version and tag, included OpenCode version, build, runtime, creator, license, and repository and wiki links. Press enter to copy the details.
+Claude Code:
+An agent that denies websearch now also turns Claude Code's own web search off, on normal turns as well as command turns.
 
-dialogs:
-Esc now returns to the parent menu from script settings sub-menus, hidden models, Connect provider, hotkey editing, session rename, subagent setup, and queued prompt editing. Clicking the esc header label does the same. Dialogs opened directly from the palette still close on Esc, and ctrl+c closes any dialog.
-
-cleanup:
-Menu picks, message clicks, and reverts no longer write the temporary tuiDiag debug log.
-
-Under the hood: embedded the version tag in the build, added a shared dialog back callback and escape handler, and removed the unused dialog push path and submenu gutter. TUI TypeScript checks passed in the implementation sessions, live Esc-back was confirmed by the user, and prePush checks passed. No targeted test files changed.
+Under the hood: oc now sends the agent's denied harness-only tools to the Claude Code provider, which adds them to the disallowed tools and the tool catalog key. The earlier command-turn web search fix was confirmed live. Targeted Claude Code provider tests and TypeScript checks passed, and prePush checks passed.

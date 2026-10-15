@@ -32,6 +32,10 @@ describe.skipIf(!cliPath)("Claude command-turn permission enforcement", () => {
                     edit: { "*": "deny", [`${plans.replaceAll("\\", "/")}/**/*.md`]: "allow" },
                   },
                 },
+                imp: {
+                  template: "Implement",
+                  permission: { read: "allow", edit: "allow", bash: "allow" },
+                },
               },
             }),
           },
@@ -61,8 +65,10 @@ describe.skipIf(!cliPath)("Claude command-turn permission enforcement", () => {
         const inputs = yield* fixture.llm.inputs
         expectIsolated(inputs)
         const names = (inputs[0].tools as { name: string }[]).map((tool) => tool.name)
+        // Edits are limited to plans, so only oc's edit tools can run them; plain reads stay Claude's own.
         expect(names).toContain("mcp__opencode_proxy__write")
-        expect(names).toContain("mcp__opencode_proxy__read")
+        expect(names).toContain("Read")
+        expect(names).not.toContain("mcp__opencode_proxy__read")
         for (const tool of [
           "Write",
           "Edit",
@@ -91,6 +97,18 @@ describe.skipIf(!cliPath)("Claude command-turn permission enforcement", () => {
         expectIsolated(nextInputs)
         expect((nextInputs.at(-2)!.tools as { name: string }[]).map((tool) => tool.name)).toContain("Write")
         expect((yield* Effect.promise(() => sdk.session.get({ sessionID }))).data!.permission ?? []).toEqual([])
+
+        // A command whose rules limit nothing keeps Claude's own tools.
+        yield* fixture.llm.text("imp done")
+        yield* Effect.promise(() =>
+          sdk.session.command({ sessionID, command: "imp", arguments: "", model: "claude-code/claude-sonnet-4-5" }),
+        )
+        const impInputs = yield* fixture.llm.inputs
+        expectIsolated(impInputs)
+        const impNames = (impInputs.at(-1)!.tools as { name: string }[]).map((tool) => tool.name)
+        for (const tool of ["Bash", "Read", "Edit", "Write"]) expect(impNames).toContain(tool)
+        for (const tool of ["bash", "read", "edit", "write", "bgStatus"])
+          expect(impNames).not.toContain(`mcp__opencode_proxy__${tool}`)
       }),
     120_000,
   )

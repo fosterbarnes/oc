@@ -1,6 +1,7 @@
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import path from "path"
-import { Effect, Layer, Context, Schema } from "effect"
+import { Effect, Layer, Context, Option, Schema } from "effect"
+import { ConfigCommandV1 } from "@opencode-ai/core/v1/config/command"
 import type { Agent } from "@/agent/agent"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { InstanceState } from "@/effect/instance-state"
@@ -40,7 +41,10 @@ export const Info = Schema.Struct({
   location: Schema.String,
   content: Schema.String,
 })
-export type Info = Schema.Schema.Type<typeof Info>
+// `toolHost` stays server-side (not in the public schema); a skill run as a slash command applies it to that turn.
+export type Info = Schema.Schema.Type<typeof Info> & { toolHost?: ConfigCommandV1.ToolHost }
+
+const decodeToolHost = Schema.decodeUnknownOption(ConfigCommandV1.ToolHost)
 
 const Issue = Schema.StructWithRest(
   Schema.Struct({
@@ -50,7 +54,7 @@ const Issue = Schema.StructWithRest(
   [Schema.Record(Schema.String, Schema.Unknown)],
 )
 
-function isSkillFrontmatter(data: unknown): data is { name: string; description?: string } {
+function isSkillFrontmatter(data: unknown): data is { name: string; description?: string; toolHost?: unknown } {
   return (
     isRecord(data) &&
     typeof data.name === "string" &&
@@ -114,7 +118,17 @@ async function load(match: string): Promise<{ info?: Info; problem?: string }> {
   if (!isSkillFrontmatter(md.data)) {
     return { info: previous, problem: previous ? `${match}: frontmatter needs a string name` : undefined }
   }
-  const info = { name: md.data.name, description: md.data.description, location: match, content: md.content }
+  const toolHost = md.data.toolHost === undefined ? undefined : decodeToolHost(md.data.toolHost)
+  if (toolHost && Option.isNone(toolHost)) {
+    return { info: previous, problem: `${match}: toolHost must map tool ids to auto, oc, or harness` }
+  }
+  const info = {
+    name: md.data.name,
+    description: md.data.description,
+    location: match,
+    content: md.content,
+    ...(toolHost ? { toolHost: toolHost.value } : {}),
+  }
   lastGood.set(match, info)
   return { info }
 }

@@ -266,6 +266,9 @@ export type UserMessage = {
     [key: string]: boolean
   }
   permission?: PermissionRuleset
+  toolHost?: {
+    [key: string]: "auto" | "oc" | "harness"
+  }
 }
 
 export type ProviderAuthError = {
@@ -1960,6 +1963,9 @@ export type Config = {
       variant?: string
       subtask?: boolean
       permission?: PermissionConfig
+      toolHost?: {
+        [key: string]: "auto" | "oc" | "harness"
+      }
     }
   }
   command_palette?: {

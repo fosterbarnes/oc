@@ -1,5 +1,6 @@
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { ConfigPermissionV1 } from "@opencode-ai/core/v1/config/permission"
+import { ConfigCommandV1 } from "@opencode-ai/core/v1/config/command"
 import path from "path"
 import { InstanceState } from "@/effect/instance-state"
 import { EffectBridge } from "@/effect/bridge"
@@ -38,10 +39,11 @@ export const Info = Schema.Struct({
   hints: Schema.Array(Schema.String),
 }).annotate({ identifier: "Command" })
 
-// `permission` stays server-side (not in the public schema); `command()` applies it to that turn only.
+// `permission` and `toolHost` stay server-side (not in the public schema); `command()` applies them to that turn only.
 export type Info = Omit<Schema.Schema.Type<typeof Info>, "template"> & {
   template: Promise<string> | string
   permission?: ConfigPermissionV1.Info
+  toolHost?: ConfigCommandV1.ToolHost
 }
 
 export function hints(template: string) {
@@ -131,6 +133,7 @@ const layer = Layer.effect(
           },
           subtask: command.subtask,
           permission: command.permission,
+          toolHost: command.toolHost,
           hints: hints(command.template),
         }
       }
@@ -180,6 +183,7 @@ const layer = Layer.effect(
               "Relative paths in this skill (e.g., scripts/, references/) are relative to this base directory.",
             ].join("\n")
           },
+          toolHost: item.toolHost,
           hints: [],
         }
       }

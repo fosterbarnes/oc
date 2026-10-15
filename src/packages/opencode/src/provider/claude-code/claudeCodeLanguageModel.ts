@@ -22,7 +22,7 @@ import { log } from "./logger.js"
 import { detectCliVersion } from "./cliVersion.js"
 import { setProxyDeadlineGuard } from "./proxyDeadline.js"
 import { findPendingProxyCall, getPendingProxyCalls } from "./proxyBroker.js"
-import { hasCommandPermission, hasNewUserContent } from "./callOptions.js"
+import { commandToolPlan, harnessToolsDenied, hasNewUserContent } from "./callOptions.js"
 import {
   createLiveToolInfoLoader,
   resolvedProxyTools,
@@ -217,7 +217,8 @@ export class ClaudeCodeLanguageModel implements LanguageModelV3 {
       catalogHash: toolCatalogHash(
         this.config,
         options.tools,
-        hasCommandPermission(options.providerOptions, this.config.provider),
+        commandToolPlan(options.providerOptions, this.config.provider),
+        harnessToolsDenied(options.providerOptions, this.config.provider),
       ),
       runtimeStatus,
       cliVersion,

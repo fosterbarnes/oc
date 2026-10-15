@@ -67,7 +67,9 @@ test("catalog identity ignores object key order but tracks capabilities and poli
   expect(toolCatalogHash(config, [])).not.toBe(hash)
   expect(toolCatalogHash(config, [{ ...tools[0], description: "changed" }])).not.toBe(hash)
   expect(toolCatalogHash({ ...config, extraDisallowedTools: ["Read"] }, tools)).not.toBe(hash)
-  expect(toolCatalogHash(config, tools, true)).not.toBe(hash)
+  const plan = { native: ["read"], closed: false }
+  expect(toolCatalogHash(config, tools, plan)).not.toBe(hash)
+  expect(toolCatalogHash(config, tools, { ...plan, closed: true })).not.toBe(toolCatalogHash(config, tools, plan))
 })
 
 test("image bytes reach the MCP client, and unsupported attachments fail explicitly", async () => {
@@ -218,7 +220,7 @@ readline.createInterface({ input: process.stdin }).on("line", async (line) => {
 
 // Proxy tools stay deferred on command turns too: flipping them to alwaysLoad
 // made Claude Code tell the model the proxy server had disconnected.
-test("command-permission turns keep only ToolSearch and leave proxy tools deferred", async () => {
+test("closed command turns keep ToolSearch plus planned built-ins and leave proxy tools deferred", async () => {
   await using directory = await tmpdir()
   const session = randomUUID()
   const key = sessionKey(directory.path, `tools::${session}::context=["claude-code"]`)
@@ -244,19 +246,19 @@ test("command-permission turns keep only ToolSearch and leave proxy tools deferr
             "claude-code": {
               opencodeSessionID: session,
               opencodeAgent: "build",
-              opencodeCommandPermission: "true",
+              // oc offers no websearch tool here (no Exa or Parallel); the command's rules still keep WebSearch.
+              opencodeCommandPermission: JSON.stringify({ native: ["read", "websearch"], closed: true }),
             },
           },
         })
       ).stream,
     )
     const args = getActiveProcess(key)?.cliArgs
-    expect(args).toEqual(expect.arrayContaining(["--tools", "ToolSearch", "--strict-mcp-config"]))
+    expect(args).toEqual(expect.arrayContaining(["--tools", "ToolSearch,Read,WebSearch", "--strict-mcp-config"]))
     const mcp = JSON.parse(await readFile(args![args!.indexOf("--mcp-config") + 1], "utf8"))
     expect(mcp.mcpServers.opencode_proxy.alwaysLoad).toBeUndefined()
     const prompt = await readFile(args![args!.indexOf("--append-system-prompt-file") + 1], "utf8")
-    expect(prompt).toContain("built-in file, shell and web tools are off this turn")
-    expect(prompt).toContain("read, edit, grep, bash")
+    expect(prompt).toContain("This command limits bash, edit, grep, so Claude Code's own versions are off this turn")
   } finally {
     hostToolExecutors.delete(session)
     await deleteActiveProcessAndWait(key)

@@ -65,7 +65,8 @@ Structured questions in this environment go through exactly one tool: \`mcp__ope
  * Command-permission turns also strip Claude's built-ins, so the note names
  * the proxy replacements.
  */
-export function buildToolEnvironmentNote(proxyTools: string[], commandTurn = false): string {
+/** `replaced`: proxied oc tools whose Claude Code built-ins are off this turn. */
+export function buildToolEnvironmentNote(proxyTools: string[], replaced: string[] = []): string {
   return [
     "## OpenCode tools",
     "",
@@ -77,9 +78,9 @@ export function buildToolEnvironmentNote(proxyTools: string[], commandTurn = fal
       ? [
           "",
           "OpenCode-only tools are MCP tools named `mcp__opencode_proxy__<name>`. Load one with ToolSearch (`select:mcp__opencode_proxy__<name>`) if it is deferred, and always call it by its full name.",
-          ...(commandTurn
+          ...(replaced.length > 0
             ? [
-                `Claude Code's built-in file, shell and web tools are off this turn; the \`mcp__opencode_proxy__*\` tools (${proxyTools.join(", ")}) are the replacements.`,
+                `This command limits ${replaced.join(", ")}, so Claude Code's own versions are off this turn; use \`mcp__opencode_proxy__<name>\` for those.`,
               ]
             : []),
         ]

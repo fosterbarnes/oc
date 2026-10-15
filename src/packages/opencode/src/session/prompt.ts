@@ -1,5 +1,6 @@
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { PermissionV1 } from "@opencode-ai/core/v1/permission"
+import { ConfigCommandV1 } from "@opencode-ai/core/v1/config/command"
 import path from "path"
 import { SessionV1 } from "@opencode-ai/core/v1/session"
 import os from "os"
@@ -946,6 +947,7 @@ const layer = Layer.effect(
         time: { created: Date.now() },
         tools: input.tools,
         permission: input.turnPermission?.map((rule) => ({ ...rule })),
+        ...(input.toolHost ? { toolHost: { ...input.toolHost } } : {}),
         agent: ag.name,
         model: {
           providerID: model.providerID,
@@ -1418,7 +1420,7 @@ const layer = Layer.effect(
       const waiting = [message.info, ...msgs.flatMap((msg) =>
         msg.info.role === "user" && msg.info.id > assistant.parentID && msg.info.id < message.info.id
           ? [msg.info] : [])]
-      if ([parent, ...waiting].some((user) => user.permission !== undefined || user.tools !== undefined ||
+      if ([parent, ...waiting].some((user) => user.permission !== undefined || user.toolHost !== undefined || user.tools !== undefined ||
         user.system !== undefined || user.format !== undefined)) return
       if (waiting.some((user) => parent.model.providerID !== user.model.providerID ||
         parent.model.modelID !== user.model.modelID || parent.agent !== user.agent ||
@@ -1859,6 +1861,10 @@ const layer = Layer.effect(
       const turnPermission = selected.some((definition) => definition.permission !== undefined)
         ? Permission.merge(...selected.map((definition) => Permission.fromConfig(definition.permission ?? {})))
         : undefined
+      // Later commands win per tool, like their rules.
+      const toolHost = selected.some((definition) => definition.toolHost !== undefined)
+        ? Object.assign({}, ...selected.map((definition) => definition.toolHost ?? {}))
+        : undefined
 
       const raw = input.arguments.match(argsRegex) ?? []
       const args = raw.map((arg) => arg.replace(quoteTrimRegex, ""))
@@ -2017,6 +2023,7 @@ const layer = Layer.effect(
         parts,
         variant: input.variant,
         turnPermission,
+        toolHost,
       })
       yield* events.publish(Command.Event.Executed, {
         name: input.command,
@@ -2208,6 +2215,7 @@ export type PromptInput = Schema.Schema.Type<typeof PromptInput>
 // `explicitModel` marks a turn whose caller named its model (`task` with `model`); saved as `model.explicit`.
 export type TurnInput = PromptInput & {
   turnPermission?: PermissionV1.Ruleset
+  toolHost?: ConfigCommandV1.ToolHost
   persisted?: Effect.Effect<void>
   explicitModel?: boolean
 }

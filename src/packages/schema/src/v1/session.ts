@@ -356,6 +356,8 @@ export const User = Schema.Struct({
   tools: Schema.optional(Schema.Record(Schema.String, Schema.Boolean)),
   // Command-turn rules, retained across replay without changing session permissions.
   permission: optional(PermissionV1.Ruleset),
+  // Command-turn choice per oc tool id (or "*") of which implementation a third-party harness runs.
+  toolHost: optional(Schema.Record(Schema.String, Schema.Literals(["auto", "oc", "harness"]))),
 }).annotate({ identifier: "UserMessage" })
 export type User = Types.DeepMutable<Schema.Schema.Type<typeof User>>
 

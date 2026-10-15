@@ -112,6 +112,64 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-14 (~21:58) - v0.2.194 hoplessExposing - Agent rules denying websearch turn Claude's WebSearch off - Claude Opus 5.5, low reasoning; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low; Implementation; completed
+- Verified live: user confirmed closed-command WebSearch fix (v0.2.194).
+- Fixed: agent/session `websearch: deny` never reached Claude's WebSearch; `nativeToolsDeniedByHost` reads only offered oc tools, and oc offers `websearch` only with Exa/Parallel.
+- Added `harnessToolsDenied` (`session/llm/request.ts`): `CLAUDE_HARNESS_ONLY_TOOLS` built-ins disabled by agent+session permission, sent as `opencodeHarnessDenied` (`CLAUDE_CODE_HARNESS_DENIED_OPTION`, `shared.ts`). Read by `harnessToolsDenied` (`callOptions.ts`); `spawnPlanning.ts` adds it to `--disallowedTools` on normal and open command turns, drops it from closed `--tools`; `toolCatalogHash` keys on it.
+- Verification: `commandToolPlan.test.ts` (new case), `fundamentalTools`, `commandPermissions`: 21 pass. `bun run typecheck` clean. Not checked live.
+
+### User
+Claude Code
+- An agent that denies `websearch` now also turns Claude Code's own web search off.
+
+---
+
+## 2026-10-14 (~21:37) - v0.2.194 hoplessExposing - Live toolHost check; WebSearch kept in closed command turns - Claude Opus 5.5, low reasoning; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low reasoning; Implementation; completed
+- Version: 0.2.194 hoplessExposing
+- Verified live (v0.2.193): `/imp` ran Claude's own Bash with `run_in_background`, no oc bash/bgStatus/bgKill; `/spit` refused oc `write` outside plans, Claude `Write` was off, oc question/skill/session_*/custom_websearch still loadable. "71 tools disconnected" notice on command turns is Claude Code's MCP reconnect report, not loss.
+- Fixed: closed command turns (`"*": deny`) dropped Claude's WebSearch even with `websearch: allow`. Root cause: `--tools` built only from `CLAUDE_NATIVE_TOOLS`, gated on oc offering the tool; oc offers `websearch` only with Exa/Parallel (`tool/registry.ts:336`).
+- Added `CLAUDE_HARNESS_ONLY_TOOLS` (`websearch: ["WebSearch"]`) in `provider/claude-code/shared.ts`. `commandToolPlan` (`session/llm/request.ts`) adds a harness-only id to `native` when the command's rules do not deny it and `toolHost` is not `oc`. `splitCommandTools` (`proxyToolSelection.ts`) keeps it without needing an offered oc tool and puts it in `off` otherwise, so a non-closed turn denying `websearch` now also turns WebSearch off. `spawnPlanning.ts` closed `cliTools` drop WebSearch when `config.webSearch === "disabled"`.
+- Docs: FORK.md row 175 status and WebSearch note; wiki `Agents-and-Skills.md` WebSearch sentence.
+- Verification: `commandToolPlan.test.ts` (new WebSearch case), `fundamentalTools.test.ts` (closed spawn `--tools ToolSearch,Read,WebSearch` with no oc websearch offered), `commandPermissions.test.ts`: 20 pass, 0 fail. `bun run typecheck` in opencode clean. WebSearch fix not checked live (needs build).
+
+### User
+Commands on Claude Code
+- `/spit` and other commands that block everything they don't list now keep Claude Code's own web search when they allow `websearch`.
+- A command that denies `websearch` now also turns Claude Code's web search off.
+- Checked live: `/imp` runs background jobs with Claude Code's own shell, and `/spit` still refuses writes outside the plans folder.
+
+---
+
+## 2026-10-14 (~21:29) - v0.2.193 eldritchWario - Command turns keep Claude Code's own tools; per-tool toolHost - Claude Opus 5.5, low reasoning; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low; Implementation; completed
+- Version: 0.2.193 eldritchWario
+- Plan: `C:/Users/Foster/.config/opencode/plans/2026-10-14-command-turns-native-tools.md` (option a, per tool).
+- Fixed: any command with rules spawned Claude with `--tools ToolSearch` and proxied every oc tool, so `/imp` lost native Bash/Read/Edit and background runs.
+- Added `toolHost` (`auto`/`oc`/`harness`, `*` default) to command config (`core/src/v1/config/command.ts` `ToolHost`), skill frontmatter (`skill/index.ts`, server-side only), `Command.Info`, and `UserMessage` (`schema/src/v1/session.ts`). `command()` merges it (later wins) next to `turnPermission`; compaction copies it like `permission`; Claude steering refuses to merge into such turns.
+- Added `commandToolPlan` (`session/llm/request.ts`): per `CLAUDE_NATIVE_TOOLS` id, auto = native unless the command's own rules limit it (non-`*` pattern or `ask`; `external_directory` counts for file tools). `closed` when rules deny unlisted tools or `"*": oc`. Sent as JSON in `opencodeCommandPermission` (was `"true"`).
+- Moved the native map to `provider/claude-code/shared.ts` (`CLAUDE_NATIVE_TOOLS`). Added `splitCommandTools` (`proxyToolSelection.ts`): forwarded proxy names, kept/off built-ins. bgStatus/bgKill follow bash. `spawnPlanning.ts`: closed → `--tools ToolSearch,<kept>`; open → normal built-ins plus `--disallowedTools` for proxied/denied natives. `callOptions.ts` `commandToolPlan` replaces `hasCommandPermission`; catalog hash keys on the plan.
+- Changed the tool note (`prompts.ts`): names only the limited tools.
+- Regenerated the legacy SDK (`sdk/js/src/v2/gen/types.gen.ts`: `toolHost` on UserMessage and command config). Restored line-ending-only rewrites of `bun.lock` and `packages/opencode/package.json` from that run.
+- Kept: normal oc models unchanged; Cursor already executes its native calls through oc tools, so no Cursor change. `harness` applies only to tools with a Claude built-in counterpart.
+- Docs: `FORK.md` plan-only command permissions row; wiki `Agents-and-Skills.md`, `Configuration.md` (push is the user's).
+- Verification: `tsgo --noEmit` clean in opencode, core, schema. `bun test` new `commandToolPlan.test.ts` plus edited `fundamentalTools`/`subagentHint`: 44 pass. Fake-model `claude-code/commandPermissions.test.ts` (spit-style: native Read, proxied Write/Edit, native Write bypass blocked; new imp-style: native Bash/Read/Edit/Write, no proxy bash/bgStatus): 1 pass. `commandPermissions`, `commandPermissionsFlow`, `test/skill`, `claude-code/backgroundShell`: 32 pass. No live run.
+- Risk: `harness` on a limited tool runs Claude's own tool, so oc can't enforce that limit. That is by design for an explicit opt-in.
+
+### User
+Commands on Claude Code
+- Slash commands like `/imp` now keep Claude Code's own tools (Bash, Read, Edit, background runs). Only tools a command limits, like `/spit`'s plans-only edits, switch to oc's versions.
+- A new `toolHost:` setting in a command or skill file picks per tool: `auto`, `oc` (always oc's tool), or `harness` (always Claude Code's own).
+
+---
+
 ## 2026-10-14 (~20:50) - v0.2.192 scallywagWhatsoever - Remove leftover tuiDiag debug writes - Claude Opus 5.5, low reasoning; Implementation
 
 ### Agent

@@ -20,9 +20,14 @@ import {
   CLAUDE_CODE_AGENT_PROMPT_OPTION,
   CLAUDE_CODE_COMMAND_PERMISSION_OPTION,
   CLAUDE_CODE_EXPLICIT_MODEL_OPTION,
+  CLAUDE_CODE_HARNESS_DENIED_OPTION,
   CLAUDE_CODE_SESSION_OPTION,
+  CLAUDE_HARNESS_ONLY_TOOLS,
+  CLAUDE_NATIVE_TOOLS,
   isClaudeCodeProvider,
+  type CommandToolPlan,
 } from "@/provider/claude-code/shared"
+import { Wildcard } from "@opencode-ai/core/util/wildcard"
 
 const USER_AGENT = `opencode/${InstallationVersion}`
 
@@ -122,7 +127,10 @@ export const prepare = Effect.fn("LLMRequestPrep.prepare")(function* (input: Pre
     options[CLAUDE_CODE_SESSION_OPTION] = input.sessionID
     options[CLAUDE_CODE_AGENT_OPTION] = input.agent.name
     if (input.agent.prompt) options[CLAUDE_CODE_AGENT_PROMPT_OPTION] = input.agent.prompt
-    if (input.user.permission !== undefined) options[CLAUDE_CODE_COMMAND_PERMISSION_OPTION] = "true"
+    const plan = commandToolPlan(input.user)
+    if (plan) options[CLAUDE_CODE_COMMAND_PERMISSION_OPTION] = JSON.stringify(plan)
+    const harnessDenied = harnessToolsDenied(input)
+    if (harnessDenied.length > 0) options[CLAUDE_CODE_HARNESS_DENIED_OPTION] = harnessDenied.join(",")
     if (input.user.model.explicit) options[CLAUDE_CODE_EXPLICIT_MODEL_OPTION] = "true"
   }
   if (
@@ -250,6 +258,56 @@ function resolveTools(input: Pick<PrepareInput, "tools" | "agent" | "permission"
     input.user.permission,
   )
   return Record.filter(input.tools, (_, k) => input.user.tools?.[k] !== false && !disabled.has(k))
+}
+
+/**
+ * Claude built-ins with no oc proxy that the agent or session permissions deny. oc may not offer
+ * these tools at all, so the offered tool list can't carry the denial the way it does for the rest.
+ */
+export function harnessToolsDenied(input: Pick<PrepareInput, "agent" | "permission" | "user">) {
+  const disabled = Permission.disabled(
+    Object.keys(CLAUDE_HARNESS_ONLY_TOOLS),
+    Permission.merge(input.agent.permission, input.permission ?? []),
+    input.user.permission,
+  )
+  return Object.entries(CLAUDE_HARNESS_ONLY_TOOLS).flatMap(([id, natives]) => (disabled.has(id) ? natives : []))
+}
+
+const FILE_TOOLS = new Set(["read", "glob", "grep", "edit", "write"])
+// A permission no rule names, so only a catch-all rule can match it.
+const UNLISTED_PERMISSION = "\u0000unlisted"
+
+/**
+ * Which tools a command turn hands to Claude Code's own built-ins. Per oc tool id (or "*"),
+ * `toolHost` picks "oc" (always the proxy), "harness" (always Claude's own), or "auto": Claude's
+ * own unless the command's rules limit the tool (a pattern or `ask`), which only oc can enforce.
+ * A denied tool stays off whatever the choice. Only the command's own rules count, so a command
+ * turn starts from the same Claude tools as an ordinary turn.
+ */
+export function commandToolPlan(user: SessionV1.User): CommandToolPlan | undefined {
+  if (user.permission === undefined && user.toolHost === undefined) return undefined
+  const rules = user.permission ?? []
+  const host = (tool: string) => user.toolHost?.[tool] ?? user.toolHost?.["*"] ?? "auto"
+  const limited = (tool: string) => {
+    const keys = [tool === "write" ? "edit" : tool, ...(FILE_TOOLS.has(tool) ? ["external_directory"] : [])]
+    return rules.some(
+      (rule) =>
+        keys.some((key) => Wildcard.match(key, rule.permission)) && (rule.pattern !== "*" || rule.action === "ask"),
+    )
+  }
+  // Harness-only tools have no oc version, so "oc" turns them off and the command's rules decide.
+  const harnessOnly = Object.keys(CLAUDE_HARNESS_ONLY_TOOLS).filter(
+    (tool) => host(tool) !== "oc" && !Permission.disabled([tool], rules).has(tool),
+  )
+  return {
+    native: [
+      ...Object.keys(CLAUDE_NATIVE_TOOLS).filter((tool) =>
+        host(tool) === "auto" ? !limited(tool) : host(tool) === "harness",
+      ),
+      ...harnessOnly,
+    ],
+    closed: host("*") === "oc" || Permission.disabled([UNLISTED_PERMISSION], rules).size > 0,
+  }
 }
 
 export function hasToolCalls(messages: ModelMessage[]): boolean {
