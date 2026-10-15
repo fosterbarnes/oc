@@ -3,7 +3,13 @@ import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 import { detectTerminal, type TerminalInfo } from "@opencode-ai/core/util/terminal"
-import { DEFAULT_USAGE_PROVIDERS, normalizeUsageProviders, type UsageProviderId } from "./usage.js"
+import {
+  DEFAULT_USAGE_PROVIDERS,
+  normalizeUsageProviders,
+  normalizeUsageSubscriptions,
+  type UsageProviderId,
+  type UsageSubscription,
+} from "./usage.js"
 
 const IGNORED_DIRECTORIES = new Set([".git", "node_modules", "dist", "build", "coverage"])
 const MAX_TREE_ITEMS = 80
@@ -51,6 +57,7 @@ export type SidebarSettings = {
   fileRoots: Record<string, { customRoots: string[]; activeRoot?: string }>
   usageProviders: UsageProviderId[]
   usageSpacing: boolean
+  usageSubscriptions: UsageSubscription[]
 }
 
 const DEFAULT_SCRIPT_SETTINGS: ScriptSettings = {
@@ -229,6 +236,7 @@ export function defaultSidebarSettings(): SidebarSettings {
     fileRoots: {},
     usageProviders: [...DEFAULT_USAGE_PROVIDERS],
     usageSpacing: false,
+    usageSubscriptions: [],
   }
 }
 
@@ -280,6 +288,7 @@ export function normalizeSidebarSettings(value: unknown, base = defaultSidebarSe
       fileRoots: structuredClone(base.fileRoots),
       usageProviders: [...base.usageProviders],
       usageSpacing: base.usageSpacing,
+      usageSubscriptions: [...base.usageSubscriptions],
     }
   const input = value as {
     projectDirectory?: unknown
@@ -294,6 +303,7 @@ export function normalizeSidebarSettings(value: unknown, base = defaultSidebarSe
     fileRoots?: unknown
     usageProviders?: unknown
     usageSpacing?: unknown
+    usageSubscriptions?: unknown
   }
   const visibility =
     input.visibility && typeof input.visibility === "object"
@@ -359,6 +369,10 @@ export function normalizeSidebarSettings(value: unknown, base = defaultSidebarSe
         ? normalizeUsageProviders(input.usageProviders, base.usageProviders)
         : [...base.usageProviders],
     usageSpacing: typeof input.usageSpacing === "boolean" ? input.usageSpacing : base.usageSpacing,
+    usageSubscriptions:
+      "usageSubscriptions" in input
+        ? normalizeUsageSubscriptions(input.usageSubscriptions)
+        : [...base.usageSubscriptions],
   }
 }
 
@@ -457,6 +471,13 @@ export function saveUserUsageSpacing(homeDirectory: string, usageSpacing: boolea
   const existing = readJsonFile(filePath)
   const base = existing && typeof existing === "object" ? (existing as Record<string, unknown>) : {}
   writeJsonObject(filePath, { ...base, usageSpacing })
+}
+
+export function saveUserUsageSubscriptions(homeDirectory: string, usageSubscriptions: UsageSubscription[]): void {
+  const filePath = path.join(homeDirectory, ".config", "openSidebar", "config.json")
+  const existing = readJsonFile(filePath)
+  const base = existing && typeof existing === "object" ? (existing as Record<string, unknown>) : {}
+  writeJsonObject(filePath, { ...base, usageSubscriptions: [...usageSubscriptions] })
 }
 
 function cursorSettingsPath(homeDirectory: string): string {

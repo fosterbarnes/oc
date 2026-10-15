@@ -58,6 +58,7 @@ import {
   saveUserScriptSettings,
   saveUserUsageProviders,
   saveUserUsageSpacing,
+  saveUserUsageSubscriptions,
   sessionProjectDirectory,
   sidebarConfigPaths,
   updateLanguage,
@@ -73,12 +74,14 @@ import {
 import {
   cursorSessionCookie,
   claudeConfigDirId,
+  compactResetDate,
   fullResetDate,
   formatUsagePercent,
   formatUsageRows,
   formatClaudeUsageRows,
   usageColumns,
   orderUsageWindows,
+  parseUsageDate,
   probeClaudeCodePool,
   probeClaudeCodeUsage,
   probeCursorUsage,
@@ -87,6 +90,9 @@ import {
   probeOpenRouterUsage,
   projectClaudeUsage,
   updateUsageSnapshot,
+  usageCalendarDay,
+  usageCalendarEvents,
+  usageCalendarStrip,
   usageProviderForModel,
   USAGE_PROVIDER_OPTIONS,
   windowLabel,
@@ -98,6 +104,7 @@ import {
   type OpenCodeGoUsage,
   type OpenRouterUsage,
   type UsageProviderId,
+  type UsageSubscription,
   type UsageWindow,
   type UsageSnapshot,
 } from "./usage.js"
@@ -318,6 +325,7 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
   let usageBox: BoxRenderable | undefined
   const [usageProviders, setUsageProviders] = createSignal<UsageProviderId[]>([...sidebarSettings.usageProviders])
   const [usageSpacing, setUsageSpacing] = createSignal(sidebarSettings.usageSpacing)
+  const [usageSubscriptions, setUsageSubscriptions] = createSignal([...sidebarSettings.usageSubscriptions])
   // Same kv key as the sidebar section state in feature-plugins/sidebar/open.ts.
   const usageOpen = () => kv.get("sidebar_open_usage", true)
   const setUsageOpen = (next: boolean) => kv.set("sidebar_open_usage", next)
@@ -339,6 +347,7 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
     delete (projectSettings as { scripts?: ScriptSettings }).scripts
     delete (projectSettings as { usageProviders?: UsageProviderId[] }).usageProviders
     delete (projectSettings as { usageSpacing?: boolean }).usageSpacing
+    delete (projectSettings as { usageSubscriptions?: UsageSubscription[] }).usageSubscriptions
     saveSidebarSettings(paths.project, projectSettings)
   }
 
@@ -436,6 +445,7 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
     setPins(new Set(sidebarSettings.scriptPins))
     setUsageProviders([...sidebarSettings.usageProviders])
     setUsageSpacing(sidebarSettings.usageSpacing)
+    setUsageSubscriptions([...sidebarSettings.usageSubscriptions])
     void syncSidebarVisibility()
   }
 
@@ -1709,8 +1719,9 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
       return claudeRows(snapshot, category)
     }
     const providers = usageProviders().flatMap((id) => USAGE_PROVIDER_OPTIONS.filter((item) => item.id === id))
+    // Actions lead so they are visible without scrolling past every provider's rows.
     const rows = [
-      ...providers.flatMap((provider) => providerRows(provider.id, provider.title)),
+      { category: "Calendar", title: "Usage calendar", onSelect: () => openUsageCalendar() },
       {
         category: "Settings",
         title: showRemaining() ? "Toggle: % remaining" : "Toggle: % used",
@@ -1731,6 +1742,7 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
         },
       },
       { category: "Settings", title: "Configure usage providers", onSelect: () => openUsageSettings() },
+      ...providers.flatMap((provider) => providerRows(provider.id, provider.title)),
     ]
     // Values must be unique per row: identical titles such as "Weekly: 0% used" appear under several providers.
     return rows.map((option) => ({ ...option, value: `${option.category}: ${option.title}` }))
@@ -1740,6 +1752,118 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
     dialog.replace(() => <DialogSelect title="Usage" options={usageMenuOptions()} preserveSelection />)
   }
   const openUsageMenu = () => setTimeout(selectUsageMenu, 100)
+
+  const saveUsageSubscriptions = (next: UsageSubscription[]) => {
+    sidebarSettings.usageSubscriptions = next
+    saveUserUsageSubscriptions(os.homedir(), next)
+    setUsageSubscriptions(next)
+    selectUsageCalendar()
+  }
+  const promptSubscriptionLabel = () =>
+    dialog.replace(() => (
+      <DialogPrompt
+        title="Add subscription date"
+        description={() => <text>Name the subscription, such as Claude Max (work).</text>}
+        placeholder="Claude Max"
+        onConfirm={(value) => {
+          const label = value.trim()
+          if (!label) {
+            toast.show({ variant: "error", message: "Enter a subscription name." })
+            return
+          }
+          setTimeout(() => promptSubscriptionDate(label), 100)
+        }}
+      />
+    ), undefined, { back: selectUsageCalendar })
+  const promptSubscriptionDate = (label: string) =>
+    dialog.replace(() => (
+      <DialogPrompt
+        title={`${label}: date`}
+        description={() => (
+          <text>Enter a day of the month (1-31) for a monthly renewal, or an end date as YYYY-MM-DD.</text>
+        )}
+        placeholder="12 or 2026-11-12"
+        onConfirm={(value) => {
+          const text = value.trim()
+          const day = /^\d{1,2}$/.test(text) ? Number(text) : 0
+          if (day >= 1 && day <= 31) {
+            saveUsageSubscriptions([...usageSubscriptions(), { label, renewDay: day }])
+            return
+          }
+          if (parseUsageDate(text) !== undefined) {
+            saveUsageSubscriptions([...usageSubscriptions(), { label, endsOn: text }])
+            return
+          }
+          toast.show({ variant: "error", message: "Enter a day from 1 to 31, or a date as YYYY-MM-DD." })
+        }}
+      />
+    ), undefined, { back: promptSubscriptionLabel })
+
+  const usageCalendarItems = () => usageCalendarEvents({
+    providers: usageProviders(),
+    openai: usage(),
+    cursor: cursorUsage(),
+    go: goUsage(),
+    claude: claudeCodeUsage(),
+    subscriptions: usageSubscriptions(),
+  }, usageNow())
+  const usageCalendarOptions = () => {
+    const nowMs = usageNow()
+    const events = usageCalendarItems()
+    const percent = (used: number | null, stale: boolean) =>
+      used === null ? "" :
+        `, ${formatUsagePercent(used, showRemaining())} ${showRemaining() ? "remaining" : "used"}${stale ? "*" : ""}`
+    const agenda = events.map((event) => ({
+      category: usageCalendarDay(event.atMs, nowMs),
+      inert: true,
+      // Window resets lead with their clock; subscription dates are whole days.
+      title: event.allDay ? event.title :
+        `${compactResetDate(new Date(event.atMs)).split(" ")[1].padEnd(8)} ${event.title}${percent(event.usedPercent, event.stale)}`,
+      details: [event.allDay
+        ? new Date(event.atMs).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" })
+        : fullResetDate(event.atMs, nowMs)],
+    }))
+    const subscriptions = usageSubscriptions().map((subscription, index) => ({
+      category: "Subscription dates",
+      title: "renewDay" in subscription
+        ? `${subscription.label}: renews monthly on day ${subscription.renewDay}`
+        : `${subscription.label}: ends ${subscription.endsOn}`,
+      details: ["Select to remove"],
+      onSelect: () => saveUsageSubscriptions(usageSubscriptions().filter((_, item) => item !== index)),
+    }))
+    const rows = [
+      { category: "Subscription dates", title: "Add subscription date...", onSelect: () => promptSubscriptionLabel() },
+      ...subscriptions,
+      ...(agenda.length ? agenda : [{ category: "Today", title: "No upcoming resets or subscription dates", inert: true }]),
+    ]
+    // Index keeps values unique: two rows can share a day and a title.
+    return rows.map((option, index) => ({ ...option, value: `${index}: ${option.category}: ${option.title}` }))
+  }
+  // Options and strip are read inside the dialog's JSX so they update as fresh usage readings arrive.
+  const selectUsageCalendar = () => {
+    usageScheduler.request()
+    const strip = () => (
+      <box flexDirection="row" gap={1}>
+        <For each={usageCalendarStrip(usageCalendarItems(), usageNow())}>
+          {(day, index) => (
+            <box flexDirection="column" alignItems="center" width={6}>
+              <text fg={index() === 0 ? theme.primary : theme.textMuted} wrapMode="none">{day.label}</text>
+              <text fg={day.count ? theme.text : theme.textMuted} wrapMode="none">{day.count ? `${day.count}` : "-"}</text>
+            </box>
+          )}
+        </For>
+      </box>
+    )
+    dialog.replace(() => (
+      <DialogSelect
+        title="Usage calendar"
+        filterFooter={strip()}
+        options={usageCalendarOptions()}
+        preserveSelection
+      />
+    ), undefined, { back: selectUsageMenu })
+  }
+  const openUsageCalendar = () => setTimeout(selectUsageCalendar, 100)
 
   const sidebarCommands = createMemo(() => {
     const rootCommands = rootSections(sidebarSettings.recentFileRoots, [...favorites()])
@@ -1764,6 +1888,13 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
         category: "Sidebar",
         namespace: "sidebar",
         run: selectUsageMenu,
+      },
+      {
+        name: "sidebar.usage-calendar",
+        title: "Show usage calendar",
+        category: "Sidebar",
+        namespace: "sidebar",
+        run: selectUsageCalendar,
       },
       {
         name: "sidebar.usage-settings",

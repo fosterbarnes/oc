@@ -1,8 +1,8 @@
-v0.2.202 usuallyFellow
+v0.2.203 sculpturesTagging
 
-agent-push:
-The new /agentPushAutoDelete setting is off by default. When enabled, sessions marked for auto-delete after a successful agent-push are deleted once you leave them. Completed pushed sessions left by closing oc are cleaned up when oc next starts with the setting enabled.
+sidebar usage:
+Added a Usage calendar showing upcoming provider and Claude-account resets grouped by day, with a seven-day event count strip. Named subscription dates can be added as monthly renewal days or end dates and removed by selecting them.
 
-Auto-delete keeps the current session, pinned sessions, running sessions, and sessions open in another tab. Prompting a session again clears its completion state and keeps it. Forks do not inherit the auto-delete marker.
+Calendar and settings actions now appear above provider readings in the Usage menu. Subscription-date actions appear above the calendar agenda. The calendar updates while open as fresh usage readings arrive and preserves the selected action.
 
-Under the hood: Added the verified-push autoDelete parameter to session_complete, shared completed-session paging with the cleanup dialog, and added cross-tab ledger checks before deletion. The targeted completion and fork tests and prePush checks passed.
+Under the hood: Added subscription normalization, local-date validation, short-month renewal clamping, reset-event projection, and user-level subscription persistence. Rotated build notes into archive10 and updated the cumulative summary. The six targeted usage-calendar tests and prePush checks passed.
