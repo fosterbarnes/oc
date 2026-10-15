@@ -133,6 +133,53 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-15 (~18:51) - v0.2.207 feversJarrito - Separate harness update commands - GPT-6.1 Sol; Implementation
+
+### Agent
+- Meta: GPT-6.1 Sol; /imp follow-up; Implementation; completed
+- Version: 0.2.207 feversJarrito
+- Changed updater array group in `tui/src/ocCommands.tsx` to `Third party harness updates`; existing `Third party harness management` retains Claude warm-up, account switching, and auto-resume.
+- Updated `../oc.wiki/Claude-Code.md` updater location. Kept this session's existing revision bump.
+- Verification: reviewed one-line source diff and traced `CommandPaletteDialog` group-to-heading mapping; `git diff --check` passed. No tests added for a heading-only change; live palette check remains user-driven after rebuild.
+
+### User
+oc Palette
+- Update all and individual harness update commands now have their own Third party harness updates heading, separate from the other harness settings.
+
+---
+
+## 2026-10-15 (~18:49) - v0.2.207 feversJarrito - Single-row auto-resume toggle - GPT-6.1 Sol; Implementation
+
+### Agent
+- Meta: GPT-6.1 Sol; /imp follow-up; Implementation; completed
+- Version: 0.2.207 feversJarrito
+- Replaced separate on/off rows in `tui/src/claudeCommands.tsx` with `Auto-resume: on/off`; selecting writes the opposite server state and refreshes the open dialog. Removed redundant setter and inline description.
+- Updated `../oc.wiki/Claude-Code.md`. Kept this session's existing revision bump.
+- Verification: `git diff --check` passed; traced existing `update` path through save, refresh, and error toast. No new tests for this small presentation change; live toggle check remains user-driven after rebuild.
+
+### User
+Claude auto-resume
+- On and off now share one row: select Auto-resume to switch it on or off while keeping the dialog open.
+
+---
+
+## 2026-10-15 (~18:46) - v0.2.207 feversJarrito - Claude auto-resume clock preference - GPT-6.1 Sol; Implementation
+
+### Agent
+- Meta: GPT-6.1 Sol; /imp; Implementation; completed
+- Version: 0.2.207 feversJarrito
+- Added `claudeCommands.tsx` Time format toggle using existing saved KV key `claude_resume_clock`, default `24h`; available while auto-resume is off. Reactive options update title and scheduled list without reopening the dialog.
+- Changed `util/format.ts` `formatResumeAt` to accept `24h` or `12h`; wired prompt footer to the same reactive preference. Kept local timezone and scheduler deadlines unchanged; warm-up clock remains independent.
+- Updated `../oc.wiki/Claude-Code.md` activation instructions; preserved existing uncommitted wiki edits.
+- Verification: `bun test test/util/format.test.ts` from `src/packages/tui`: 10 pass, 0 fail, 42 assertions, including midnight, noon, afternoon, and switching back. Reviewed diff. Build, typecheck, live dialog rendering, and restart persistence not run; user checks toggle/footer and restart after their build/install.
+
+### User
+Claude auto-resume
+- Open Claude auto-resume in the oc Palette and select Time format to switch between 12-hour and 24-hour clocks for the resume footer and scheduled list.
+- The choice is saved across restarts, defaults to 24-hour time, and can be changed while auto-resume is off.
+
+---
+
 ## 2026-10-15 (~18:31) - v0.2.206 bindNew - Pre-push review; warm-up test accepts the CLI's safeguards field; Claude pool default dir - Claude Opus 5.5, low reasoning; Implementation
 
 ### Agent

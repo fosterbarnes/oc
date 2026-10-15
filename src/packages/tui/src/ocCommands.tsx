@@ -548,7 +548,7 @@ export function createOcCommands(input: {
               },
             ]
           : []),
-      ].map((command) => ({ ...command, category: "oc", group: "Third party harness management" })),
+      ].map((command) => ({ ...command, category: "oc", group: "Third party harness updates" })),
       {
         name: "server.shutdown",
         title: "Shut down",

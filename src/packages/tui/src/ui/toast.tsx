@@ -32,7 +32,7 @@ export function Toast() {
           paddingTop={1}
           paddingBottom={1}
           backgroundColor={theme.backgroundToast}
-          borderColor={theme[current().variant]}
+          borderColor={current().variant === "info" ? theme.warning : theme[current().variant]}
           border={["left", "right"]}
           customBorderChars={SplitBorder.customBorderChars}
         >

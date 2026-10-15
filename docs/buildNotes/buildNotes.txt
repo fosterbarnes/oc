@@ -1,18 +1,9 @@
-v0.2.206 bindNew
+v0.2.207 feversJarrito
 
-chat window:
-Fixed the chat freezing on "esc interrupt" after a Claude turn. The sidebar's plugin list kept rebuilding itself in the background until the screen crashed, which also blocked "Revert whole turn" and other clicks.
+Claude auto-resume:
+The resume footer and scheduled list can use 12-hour or 24-hour time. The saved choice defaults to 24-hour time and remains available when auto-resume is off.
 
-cursor:
-On Windows, Cursor models now run shell commands on the first try instead of being refused twice. A command that runs past Cursor's time limit is stopped and reported as timed out.
+oc Palette:
+Auto-resume now switches on or off from one row and keeps the dialog open. Harness update commands now have a separate Third party harness updates heading.
 
-claude accounts:
-If CLAUDE_CONFIG_DIR is set when oc starts, that folder is the default account, and a ~/.claude entry in the accounts list now counts as its own account instead of silently merging into it. The Claude warm-up check accepts the extra safety field newer Claude CLI versions send; any other new field still fails it.
-
-logs:
-Sending a message no longer writes a harmless "invalid user message before save" error to the log.
-
-code structure:
-No intended behavior change: large fork files were split into smaller ones by topic, and oc's own session-title, auto-rename, session-mark and queue/resume code moved out of files shared with upstream OpenCode, making upstream merges easier. This covers the oc config (resident server, revive host, WezTerm), the TUI app palette entries, sidebar tools and usage, Claude warm-up and turn streaming, the Cursor protocol tools and reply reader, and the /btw side question.
-
-Under the hood: Cursor's reply pump is now a CursorPump class. Stale pane tests were updated, a new pane test opens the sidebar files, scripts and usage menus, and pane debug writes were removed. Typecheck, the targeted Claude, Cursor, prompt and TUI tests, and prePush checks passed.
+Under the hood: The resume time formatter handles midnight, noon, afternoon, and both clock formats. `bun test test/util/format.test.ts` passed with 10 tests and 42 assertions; `git diff --check` passed. The palette heading-only change was reviewed and traced through its group-to-heading mapping.

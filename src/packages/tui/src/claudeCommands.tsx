@@ -1,5 +1,6 @@
 import { createSignal, onMount } from "solid-js"
 import { useRoute } from "./context/route"
+import { useKV } from "./context/kv"
 import { useSDK } from "./context/sdk"
 import { useSync } from "./context/sync"
 import { useDialog } from "./ui/dialog"
@@ -13,6 +14,8 @@ export function createClaudeAccountCommands() {
   const route = useRoute()
   const dialog = useDialog()
   const toast = useToast()
+  const kv = useKV()
+  const [resumeClock, setResumeClock] = kv.signal<"24h" | "12h">("claude_resume_clock", "24h")
   const [resumeEnabled, setResumeEnabled] = createSignal(false)
 
   onMount(() => {
@@ -124,23 +127,26 @@ export function createClaudeAccountCommands() {
         setResumeEnabled(state.enabled)
         const entries = [...state.entries].sort((a, b) => a.fireAt - b.fireAt)
         const update = (action: Promise<unknown>) => void action.then(show).catch(toast.error)
-        const setEnabled = (enabled: boolean) =>
-          enabled === state.enabled ? dialog.clear() : update(sdk.resume.set(enabled))
         dialog.replace(() => (
           <DialogSelect
             title="Claude auto-resume"
-            current={state.enabled ? "on" : "off"}
+            current="enabled"
             options={[
               {
-                title: "on",
-                description: "continue after a usage limit resets",
-                value: "on",
-                onSelect: () => setEnabled(true),
+                title: `Auto-resume: ${state.enabled ? "on" : "off"}`,
+                value: "enabled",
+                onSelect: () => update(sdk.resume.set(!state.enabled)),
               },
-              { title: "off", value: "off", onSelect: () => setEnabled(false) },
+              {
+                title: `Time format: ${resumeClock() === "12h" ? "12-hour" : "24-hour"}`,
+                value: "clock",
+                onSelect: () => setResumeClock(resumeClock() === "12h" ? "24h" : "12h"),
+              },
               ...entries.map((entry) => ({
                 title: sync.session.get(entry.sessionID)?.title ?? entry.sessionID,
-                description: new Date(entry.fireAt).toLocaleString(),
+                description: new Date(entry.fireAt).toLocaleString(undefined, {
+                  hourCycle: resumeClock() === "12h" ? "h12" : "h23",
+                }),
                 value: entry.id,
                 category: "Scheduled (select to cancel)",
                 onSelect: () => update(sdk.resume.cancel(entry.id)),

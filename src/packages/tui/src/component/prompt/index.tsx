@@ -1925,7 +1925,7 @@ export function Prompt(props: PromptProps) {
             <Match when={resumeAt()}>
               {(fireAt) => (
                 <box marginLeft={1}>
-                  <text fg={theme.accent}>{formatResumeAt(fireAt())}</text>
+                  <text fg={theme.accent}>{formatResumeAt(fireAt(), kv.get("claude_resume_clock", "24h"))}</text>
                 </box>
               )}
             </Match>
