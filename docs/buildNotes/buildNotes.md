@@ -112,6 +112,23 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-14 (~22:28) - v0.2.197 attemptingNation - Claude auto-resume becomes one harness palette entry - Claude Opus 5.5, low reasoning; Agent
+
+### Agent
+- Meta: Claude Opus 5.5; low reasoning; Agent; completed
+- Version: 0.2.197 attemptingNation
+- Replaced palette commands `resume.toggle` and `resume.list` in `tui/src/app.tsx` with `claude.autoResume` (group "Third party harness management", desc on/off). Dialog: Setting row toggles via `sdk.resume.set`; Scheduled rows (sorted by `fireAt`, shows retry count) cancel via `sdk.resume.cancel`; inert "None" row when empty; dialog reloads state after each action. Dropped unused `ScheduledResumeEntry` import.
+- Updated wiki `oc.wiki/Claude-Code.md` "When usage runs out" for the new entry name.
+- Kept: unrelated worktree changes in `prompt.ts`, `package.json`, `bun.lock`.
+- Verification: `bun run typecheck` in `packages/tui` passed. Not run live.
+
+### User
+Command palette
+- The two auto-resume entries ("Enable auto-resume after usage reset", "Scheduled resumes") are now one "Claude auto-resume" entry under Third party harness management, showing on/off.
+- Opening it explains what auto-resume does, toggles it, and lists scheduled resumes with their fire time; selecting one cancels it, and an empty list shows "None" instead of a toast.
+
+---
+
 ## 2026-10-14 (~22:04) - v0.2.196 roNetwork - New session from Home opens faster - Claude Opus 5.5, low reasoning; Agent
 
 ### Agent

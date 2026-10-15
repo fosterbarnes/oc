@@ -325,6 +325,12 @@ const layer = Layer.effect(
       const last = input.history.findLast((m) => m.info.role === "user")
       if (!last || last.info.role !== "user") return
       const user = last.info
+      const command = last.parts.find((p) => p.type === "text" && p.metadata?.ocCommand)
+      const fixed = command?.type === "text" ? _FIXED_TITLES[String(command.metadata?.ocCommand)] : undefined
+      if (fixed) {
+        yield* sessions.setTitle({ sessionID: input.session.id, title: fixed })
+        return { title: fixed, model: undefined }
+      }
       const ag = yield* agents.get(input.mode === "stock" ? "title" : "rename")
       if (!ag) return
       const fallback = input.mode === "stock" ? { providerID: input.providerID, modelID: input.modelID } : user.model
@@ -1988,7 +1994,14 @@ const layer = Layer.effect(
         .filter((part) => part.type !== "file" || !inputFiles.has(fileURLToPath(part.url)))
         .map((part) =>
           part.type === "text"
-            ? { ...part, metadata: { ...part.metadata, ocCommandArguments: input.arguments } }
+            ? {
+                ...part,
+                metadata: {
+                  ...part.metadata,
+                  ocCommandArguments: input.arguments,
+                  ...(selected.length === 1 && { ocCommand: cmd.name }),
+                },
+              }
             : part,
         )
       const isSubtask = (agent.mode === "subagent" && cmd.subtask !== false) || cmd.subtask === true
@@ -2147,6 +2160,9 @@ const titleConversation = Effect.fnUntraced(function* (
     model,
   )
 })
+
+// Commands whose sessions get a fixed title instead of a generated one.
+const _FIXED_TITLES: Record<string, string> = { "agent-push": "oc - agent-push: commit here" }
 
 function cleanTitle(text: string) {
   const line = text

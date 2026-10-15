@@ -1,9 +1,9 @@
-v0.2.196 roNetwork
+v0.2.197 attemptingNation
 
-sessions:
-Creating a session from Home now uses the existing server connection instead of launching another oc process, so the prompt opens faster. New session no longer requires a configured oc executable, and name-sorted project folders skip unnecessary file metadata reads.
+Claude auto-resume:
+The command palette now has one Claude auto-resume entry under Third party harness management, showing whether it is on or off. Its dialog explains the setting, lets users toggle it, and lists scheduled resumes by fire time with retry counts. Selecting a scheduled resume cancels it; an empty list shows None.
 
-Claude provider:
-Claude now uses oc's question form consistently for decisions, preferences, and clarification, including open-ended questions and command turns. It is told to continue routine multi-step work instead of stopping to ask unnecessary questions.
+session titles:
+Sessions started with the agent-push command use the fixed title "oc - agent-push: commit here" instead of a generated title.
 
-Under the hood: shared sidebar settings and project-title helpers moved into Core, and command turns now receive the live question description. The changed question-tool, Claude prompt-hint, and new-session tests passed, along with the prePush checks.
+Under the hood: single-command text parts carry the command name so session naming can recognize agent-push. The unused scheduled-resume type import was removed, and the Claude Code wiki documentation was updated in its separate checkout. The TUI typecheck and prePush checks passed. No test files changed, so targeted tests were skipped; live UI verification was not run.

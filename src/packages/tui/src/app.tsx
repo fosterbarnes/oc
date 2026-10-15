@@ -38,7 +38,7 @@ import { PluginRouteMissing } from "./component/plugin-route-missing"
 import { ProjectProvider, useProject } from "./context/project"
 import { EditorContextProvider } from "./context/editor"
 import { useEvent } from "./context/event"
-import { SDKProvider, useSDK, type ScheduledResumeEntry } from "./context/sdk"
+import { SDKProvider, useSDK } from "./context/sdk"
 import { IntroLogo, hideIntroLogo } from "./component/introLogo"
 import { SyncProvider, useSync } from "./context/sync"
 import { DataProvider } from "./context/data"
@@ -2533,57 +2533,52 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
           ]
         : []),
       {
-        name: "resume.toggle",
-        title: resumeEnabled() ? "Disable auto-resume after usage reset" : "Enable auto-resume after usage reset",
-        category: "Session",
-        run: async () => {
-          try {
-            const state = await sdk.resume.set(!resumeEnabled())
-            setResumeEnabled(state.enabled)
-          } catch (error) {
-            toast.error(error)
-          }
-          dialog.clear()
+        name: "claude.autoResume",
+        title: "Claude auto-resume",
+        category: "oc",
+        group: "Third party harness management",
+        get desc() {
+          return resumeEnabled() ? "on" : "off"
         },
-      },
-      {
-        name: "resume.list",
-        title: "Scheduled resumes",
-        category: "Session",
         run: async () => {
-          let entries: ScheduledResumeEntry[] = []
-          try {
-            const state = await sdk.resume.state()
+          // Reopens after every change so the toggle and the scheduled list stay current.
+          const show = async () => {
+            const state = await sdk.resume.state().catch((error) => {
+              toast.error(error)
+              return undefined
+            })
+            if (!state) return
             setResumeEnabled(state.enabled)
-            entries = state.entries
-          } catch (error) {
-            toast.error(error)
-            return
+            const entries = [...state.entries].sort((a, b) => a.fireAt - b.fireAt)
+            const update = (action: Promise<unknown>) => void action.then(show).catch(toast.error)
+            dialog.replace(() => (
+              <DialogSelect
+                title="Claude auto-resume"
+                options={[
+                  {
+                    title: "Auto-resume",
+                    description:
+                      "when every Claude account hits its usage limit, send a continue prompt a minute after the reset (max 5 in a row per session)",
+                    footer: state.enabled ? "on" : "off",
+                    value: "toggle",
+                    category: "Setting",
+                    onSelect: () => update(sdk.resume.set(!state.enabled)),
+                  },
+                  ...(entries.length === 0
+                    ? [{ title: "None", value: "none", category: "Scheduled", inert: true }]
+                    : entries.map((entry) => ({
+                        title: sync.session.get(entry.sessionID)?.title ?? entry.sessionID,
+                        description: `fires ${new Date(entry.fireAt).toLocaleString()}${entry.attempts ? `, retry ${entry.attempts}` : ""}`,
+                        footer: "select to cancel",
+                        value: entry.id,
+                        category: "Scheduled",
+                        onSelect: () => update(sdk.resume.cancel(entry.id)),
+                      }))),
+                ]}
+              />
+            ))
           }
-          if (entries.length === 0) {
-            toast.show({ message: "No scheduled resumes", variant: "info" })
-            dialog.clear()
-            return
-          }
-          dialog.replace(() => (
-            <DialogSelect
-              title="Scheduled resumes"
-              options={entries.map((entry) => ({
-                title: sync.session.get(entry.sessionID)?.title ?? entry.sessionID,
-                description: new Date(entry.fireAt).toLocaleString(),
-                value: entry.id,
-                onSelect: () => {
-                  void sdk.resume
-                    .cancel(entry.id)
-                    .then((ok) => {
-                      if (ok) toast.show({ message: "Cancelled scheduled resume", variant: "info" })
-                    })
-                    .catch(toast.error)
-                  dialog.clear()
-                },
-              }))}
-            />
-          ))
+          await show()
         },
       },
     ].map((command) => ({
