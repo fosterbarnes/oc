@@ -1,0 +1,232 @@
+{
+  "$schema": "https://opencode.ai/theme.json",
+  "defs": {
+    "fosterRosewater": "#f2d5cf",
+    "fosterFlamingo": "#eebebe",
+    "fosterPink": "#9D7CD8",
+    "fosterMauve": "#ca9ee6",
+    "fosterRed": "#e78284",
+    "fosterMaroon": "#ea999c",
+    "fosterPeach": "#ef9f76",
+    "fosterYellow": "#F7E9B5",
+    "fosterGreen": "#7FD88F",
+    "fosterTeal": "#81c8be",
+    "fosterSky": "#99d1db",
+    "fosterSapphire": "#85c1dc",
+    "fosterBlue": "#8da4e2",
+    "fosterLavender": "#babbf1",
+    "fosterText": "#EFEFFA",
+    "fosterSubtext1": "#b5bfe2",
+    "fosterSubtext0": "#a5adce",
+    "fosterOverlay2": "#949cb8",
+    "fosterOverlay1": "#838ba7",
+    "fosterOverlay0": "#737994",
+    "fosterSurface2": "#626880",
+    "fosterSurface1": "#51576d",
+    "fosterSurface0": "#414559",
+    "fosterBase": "#2C2F3F",
+    "fosterMantle": "#292c3c",
+    "fosterCrust": "#232634"
+  },
+  "theme": {
+    "primary": {
+      "dark": "fosterBlue",
+      "light": "fosterBlue"
+    },
+    "secondary": {
+      "dark": "fosterMauve",
+      "light": "fosterMauve"
+    },
+    "accent": {
+      "dark": "fosterPink",
+      "light": "fosterPink"
+    },
+    "error": {
+      "dark": "fosterRed",
+      "light": "fosterRed"
+    },
+    "warning": {
+      "dark": "fosterYellow",
+      "light": "fosterYellow"
+    },
+    "success": {
+      "dark": "fosterGreen",
+      "light": "fosterGreen"
+    },
+    "info": {
+      "dark": "fosterTeal",
+      "light": "fosterTeal"
+    },
+    "text": {
+      "dark": "fosterText",
+      "light": "fosterText"
+    },
+    "textMuted": {
+      "dark": "fosterOverlay2",
+      "light": "fosterOverlay2"
+    },
+    "background": {
+      "dark": "#1A1D29",
+      "light": "#1A1D29"
+    },
+    "backgroundPanel": {
+      "dark": "#2C2C3C",
+      "light": "#2C2C3C"
+    },
+    "backgroundElement": {
+      "dark": "#343446",
+      "light": "#343446"
+    },
+    "backgroundToast": "#423B52",
+    "border": {
+      "dark": "fosterSurface0",
+      "light": "fosterSurface0"
+    },
+    "borderActive": {
+      "dark": "fosterSurface1",
+      "light": "fosterSurface1"
+    },
+    "borderSubtle": {
+      "dark": "fosterSurface2",
+      "light": "fosterSurface2"
+    },
+    "diffAdded": {
+      "dark": "fosterGreen",
+      "light": "fosterGreen"
+    },
+    "diffRemoved": {
+      "dark": "fosterRed",
+      "light": "fosterRed"
+    },
+    "diffContext": {
+      "dark": "fosterOverlay2",
+      "light": "fosterOverlay2"
+    },
+    "diffHunkHeader": {
+      "dark": "fosterPeach",
+      "light": "fosterPeach"
+    },
+    "diffHighlightAdded": {
+      "dark": "fosterGreen",
+      "light": "fosterGreen"
+    },
+    "diffHighlightRemoved": {
+      "dark": "fosterRed",
+      "light": "fosterRed"
+    },
+    "diffAddedBg": {
+      "dark": "#354437",
+      "light": "#354437"
+    },
+    "diffRemovedBg": {
+      "dark": "#462525",
+      "light": "#462525"
+    },
+    "diffContextBg": {
+      "dark": "fosterMantle",
+      "light": "fosterMantle"
+    },
+    "diffLineNumber": "textMuted",
+    "diffAddedLineNumberBg": {
+      "dark": "#223025",
+      "light": "#223025"
+    },
+    "diffRemovedLineNumberBg": {
+      "dark": "#2f242b",
+      "light": "#2f242b"
+    },
+    "markdownText": {
+      "dark": "fosterText",
+      "light": "fosterText"
+    },
+    "markdownHeading": {
+      "dark": "fosterMauve",
+      "light": "fosterMauve"
+    },
+    "markdownLink": {
+      "dark": "fosterBlue",
+      "light": "fosterBlue"
+    },
+    "markdownLinkText": {
+      "dark": "fosterSky",
+      "light": "fosterSky"
+    },
+    "markdownCode": {
+      "dark": "fosterGreen",
+      "light": "fosterGreen"
+    },
+    "markdownBlockQuote": {
+      "dark": "fosterYellow",
+      "light": "fosterYellow"
+    },
+    "markdownEmph": {
+      "dark": "fosterYellow",
+      "light": "fosterYellow"
+    },
+    "markdownStrong": {
+      "dark": "fosterPeach",
+      "light": "fosterPeach"
+    },
+    "markdownHorizontalRule": {
+      "dark": "fosterSubtext0",
+      "light": "fosterSubtext0"
+    },
+    "markdownListItem": {
+      "dark": "fosterBlue",
+      "light": "fosterBlue"
+    },
+    "markdownListEnumeration": {
+      "dark": "fosterSky",
+      "light": "fosterSky"
+    },
+    "markdownImage": {
+      "dark": "fosterBlue",
+      "light": "fosterBlue"
+    },
+    "markdownImageText": {
+      "dark": "fosterSky",
+      "light": "fosterSky"
+    },
+    "markdownCodeBlock": {
+      "dark": "fosterText",
+      "light": "fosterText"
+    },
+    "syntaxComment": {
+      "dark": "fosterOverlay2",
+      "light": "fosterOverlay2"
+    },
+    "syntaxKeyword": {
+      "dark": "fosterMauve",
+      "light": "fosterMauve"
+    },
+    "syntaxFunction": {
+      "dark": "fosterBlue",
+      "light": "fosterBlue"
+    },
+    "syntaxVariable": {
+      "dark": "fosterRed",
+      "light": "fosterRed"
+    },
+    "syntaxString": {
+      "dark": "fosterGreen",
+      "light": "fosterGreen"
+    },
+    "syntaxNumber": {
+      "dark": "fosterPeach",
+      "light": "fosterPeach"
+    },
+    "syntaxType": {
+      "dark": "fosterYellow",
+      "light": "fosterYellow"
+    },
+    "syntaxOperator": {
+      "dark": "fosterSky",
+      "light": "fosterSky"
+    },
+    "syntaxPunctuation": {
+      "dark": "fosterText",
+      "light": "fosterText"
+    },
+    "thinkingOpacity": 0.9
+  }
+}

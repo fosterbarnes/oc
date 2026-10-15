@@ -2262,6 +2262,15 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
         category: "System",
       },
       {
+        name: "theme.switch_native",
+        title: "Switch opencode theme",
+        hidden: Global.native,
+        run: () => {
+          dialog.replace(() => <DialogThemeList native />)
+        },
+        category: "System",
+      },
+      {
         name: "theme.switch_mode",
         title: mode() === "dark" ? "Switch to light mode" : "Switch to dark mode",
         run: () => {

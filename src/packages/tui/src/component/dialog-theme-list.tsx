@@ -3,7 +3,8 @@ import { useTheme } from "../context/theme"
 import { useDialog } from "../ui/dialog"
 import { onCleanup } from "solid-js"
 
-export function DialogThemeList() {
+// `native`: pick opencode.exe's theme from oc; saves on select without previewing here.
+export function DialogThemeList(props: { native?: boolean }) {
   const theme = useTheme()
   const options = Object.keys(theme.all())
     .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }))
@@ -14,22 +15,25 @@ export function DialogThemeList() {
   const dialog = useDialog()
   let confirmed = false
   let ref: DialogSelectRef<string>
-  const initial = theme.selected
+  const initial = props.native ? theme.native() : theme.selected
+  const preview = (value: string) => {
+    if (!props.native) theme.set(value)
+  }
 
   onCleanup(() => {
-    if (!confirmed) theme.set(initial)
+    if (!confirmed) preview(initial)
   })
 
   return (
     <DialogSelect
-      title="Themes"
+      title={props.native ? "opencode theme" : "Themes"}
       options={options}
       current={initial}
       onMove={(opt) => {
-        theme.set(opt.value)
+        preview(opt.value)
       }}
       onSelect={(opt) => {
-        theme.set(opt.value)
+        props.native ? theme.setNative(opt.value) : theme.set(opt.value)
         confirmed = true
         dialog.clear()
       }}
@@ -38,12 +42,12 @@ export function DialogThemeList() {
       }}
       onFilter={(query) => {
         if (query.length === 0) {
-          theme.set(initial)
+          preview(initial)
           return
         }
 
         const first = ref.filtered[0]
-        if (first) theme.set(first.value)
+        if (first) preview(first.value)
       }}
     />
   )

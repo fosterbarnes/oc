@@ -112,6 +112,27 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-14 (~23:04) - v0.2.200 crishEssentially - Separate themes for oc and opencode - Claude Opus 5.5, low reasoning; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low reasoning; Implementation (spit then imp); completed
+- Version: 0.2.200 crishEssentially
+- Added: bundled `drac` theme (`tui/src/theme/assets/drac.json`, copy of user's `~/.config/opencode/themes/drac.json` minus its `notes` block), registered in `DEFAULT_THEMES`. Config copy still overrides (custom > defaults).
+- Changed: `context/theme.tsx` saves under `THEME_KEY` (`theme` for oc, `theme_native` for `Global.native`) and defaults via `DEFAULT_THEME` (`drac` oc, `opencode` native); all fallbacks use it. Added `setNative`/`native()` for oc to set native's pick without previewing.
+- Added: palette `theme.switch_native` "Switch opencode theme" (hidden in native); `DialogThemeList` `native` prop skips preview and saves via `setNative`.
+- Fixed: `context/kv.tsx` `set` re-reads `kv.json` under the Flock lock and merges only the changed key, so oc.exe/opencode.exe no longer clobber each other's keys. Unreadable file falls back to the in-memory snapshot (old behavior). Undefined value still removes the key.
+- Docs: `FORK.md` native row; wiki `Launching.md` native section and `Configuration.md` `tui.json` `theme` row (wiki push is user's).
+- Verification: `bun test test/context/themeKv.test.tsx test/theme.test.ts` 11 pass; `tsc --noEmit` in `packages/tui` exit 0. Native-flavor default not unit-tested (module-level `Global.native`); oc-flavor test `skipIf(Global.native)`.
+
+### User
+Themes
+- oc now starts on your `drac` theme and opencode.exe starts on the stock `opencode` theme.
+- Picking a theme in one no longer changes the other.
+- oc's command palette has "Switch opencode theme" to set the theme opencode.exe uses.
+- Settings saved by oc and opencode.exe at the same time no longer overwrite each other.
+
+---
+
 ## 2026-10-14 (~22:54) - v0.2.199 jojoDrangleic - Simpler Claude auto-resume dialog - Claude Opus 5.5, low reasoning; Agent
 
 ### Agent

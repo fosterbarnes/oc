@@ -7,6 +7,7 @@ import catppuccinMacchiato from "./assets/catppuccin-macchiato.json" with { type
 import catppuccin from "./assets/catppuccin.json" with { type: "json" }
 import cobalt2 from "./assets/cobalt2.json" with { type: "json" }
 import cursor from "./assets/cursor.json" with { type: "json" }
+import drac from "./assets/drac.json" with { type: "json" }
 import dracula from "./assets/dracula.json" with { type: "json" }
 import everforest from "./assets/everforest.json" with { type: "json" }
 import flexoki from "./assets/flexoki.json" with { type: "json" }
@@ -137,6 +138,7 @@ export const DEFAULT_THEMES: Record<string, ThemeJson> = {
   ["catppuccin-macchiato"]: catppuccinMacchiato,
   cobalt2,
   cursor,
+  drac,
   dracula,
   everforest,
   flexoki,

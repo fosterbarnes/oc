@@ -1,6 +1,8 @@
-v0.2.199 jojoDrangleic
+v0.2.200 crishEssentially
 
-command palette:
-The Claude auto-resume dialog now shows on/off choices with the current setting marked. Selecting the current setting closes the dialog. Scheduled resumes appear only when present, under "Scheduled (select to cancel)", with their session titles and scheduled times.
+themes:
+oc now defaults to the bundled drac theme, while opencode.exe defaults to the stock opencode theme. Each keeps its own saved theme choice. The oc command palette includes "Switch opencode theme" to change opencode.exe's selection without previewing it in oc.
 
-Under the hood: Simplified the dialog options and removed the empty scheduled row and long description. The TUI typecheck and prePush checks passed. Live UI verification was not run.
+Settings saved by oc and opencode.exe now merge into the shared settings file under its lock, preserving keys written by the other process. Fork and wiki documentation describe the separate theme settings; the wiki push remains user-driven.
+
+Under the hood: Added theme persistence coverage for separate selections and shared-file key merging. The targeted theme persistence tests and prePush checks passed.

@@ -80,6 +80,11 @@ export {
 } from "../theme"
 
 const THEME_REFRESH_DELAYS = [250, 1000] as const
+// oc.exe and opencode.exe share kv.json but keep separate theme picks and defaults.
+const NATIVE_THEME_KEY = "theme_native"
+const NATIVE_DEFAULT_THEME = "opencode"
+const THEME_KEY = Global.native ? NATIVE_THEME_KEY : "theme"
+const DEFAULT_THEME = Global.native ? NATIVE_DEFAULT_THEME : "drac"
 
 type State = {
   themes: Record<string, ThemeJson>
@@ -93,7 +98,7 @@ const [store, setStore] = createStore<State>({
   themes: allThemes(),
   mode: "dark",
   lock: undefined,
-  active: "opencode",
+  active: DEFAULT_THEME,
   ready: false,
 })
 
@@ -118,8 +123,8 @@ export const { use: useTheme, provider: ThemeProvider } = createSimpleContext({
         if (!lock && pick(kv.get("theme_mode")) !== undefined) kv.set("theme_mode", undefined)
         draft.mode = mode
         draft.lock = lock
-        const active = config.theme ?? kv.get("theme", "opencode")
-        draft.active = typeof active === "string" ? active : "opencode"
+        const active = config.theme ?? kv.get(THEME_KEY, DEFAULT_THEME)
+        draft.active = typeof active === "string" ? active : DEFAULT_THEME
         draft.ready = false
       }),
     )
@@ -140,7 +145,7 @@ export const { use: useTheme, provider: ThemeProvider } = createSimpleContext({
             }, {}),
           )
         })
-        .catch(() => setStore("active", "opencode"))
+        .catch(() => setStore("active", DEFAULT_THEME))
     }
 
     onMount(() => {
@@ -159,7 +164,7 @@ export const { use: useTheme, provider: ThemeProvider } = createSimpleContext({
           if (!colors.palette[0]) {
             if (hasResolvedSystemTheme) return
             setSystemTheme(undefined)
-            if (store.active === "system") setStore("active", "opencode")
+            if (store.active === "system") setStore("active", DEFAULT_THEME)
             return
           }
           const next = store.lock ?? terminalMode(colors) ?? mode
@@ -174,7 +179,7 @@ export const { use: useTheme, provider: ThemeProvider } = createSimpleContext({
         .catch(() => {
           if (hasResolvedSystemTheme) return
           setSystemTheme(undefined)
-          if (store.active === "system") setStore("active", "opencode")
+          if (store.active === "system") setStore("active", DEFAULT_THEME)
         })
     }
 
@@ -257,13 +262,13 @@ export const { use: useTheme, provider: ThemeProvider } = createSimpleContext({
       const active = store.themes[store.active]
       if (active) return resolveTheme(active, store.mode)
 
-      const saved = kv.get("theme")
+      const saved = kv.get(THEME_KEY)
       if (typeof saved === "string") {
         const theme = store.themes[saved]
         if (theme) return resolveTheme(theme, store.mode)
       }
 
-      return resolveTheme(store.themes.opencode, store.mode)
+      return resolveTheme(store.themes[DEFAULT_THEME],store.mode)
     })
 
     createEffect(() => renderer.setBackgroundColor(values().background))
@@ -293,8 +298,18 @@ export const { use: useTheme, provider: ThemeProvider } = createSimpleContext({
       set(theme: string) {
         if (!hasTheme(theme)) return false
         setStore("active", theme)
-        kv.set("theme", theme)
+        kv.set(THEME_KEY, theme)
         return true
+      },
+      // oc's palette sets opencode.exe's theme without previewing it here.
+      setNative(theme: string) {
+        if (!hasTheme(theme)) return false
+        kv.set(NATIVE_THEME_KEY, theme)
+        return true
+      },
+      native: () => {
+        const saved = kv.get(NATIVE_THEME_KEY)
+        return typeof saved === "string" ? saved : NATIVE_DEFAULT_THEME
       },
       get ready() {
         return store.ready

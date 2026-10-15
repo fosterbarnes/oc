@@ -54,8 +54,15 @@ export const { use: useKV, provider: KVProvider } = createSimpleContext({
       set(key: string, value: any) {
         setStore(key, value)
         const snapshot = structuredClone(unwrap(store))
+        // oc.exe and opencode.exe share kv.json: merge this one key into the file under the lock
+        // so one binary's save does not drop keys the other wrote. Unreadable file: write ours.
         write = write
-          .then(() => Flock.withLock(lock, () => writeJsonAtomic(file, snapshot)))
+          .then(() =>
+            Flock.withLock(lock, async () => {
+              const disk = await readJson<Record<string, unknown>>(file).catch(() => snapshot)
+              await writeJsonAtomic(file, { ...disk, [key]: snapshot[key] })
+            }),
+          )
           .catch((error) => {
             console.error("Failed to write KV state", { error })
           })
