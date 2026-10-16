@@ -7,7 +7,7 @@
 - Windows TUI segfaults on Bun 1.4.0 (`34cbb9a40`): `bun:ffi` FTL pointer args (oven-sh/bun#39829, #40302). `.scripts\build.ps1` and `.scripts\.run.ps1` call `requireBunForCompile` and will `bun upgrade --canary` when PATH bun is still 1.4.0. Do not ship `opencode.exe` compiled with 1.4.0. Stable 1.4.1 was not published as of 2026-08-31.
 - Stock OpenCode shares oc's default data dir, so it can migrate `~\.local\share\opencode\opencode.db` into a schema oc cannot read (stock 2.0.6 did on 2026-09-27: FOREIGN KEY failures, "Unexpected server error"). `DatabaseMigration.apply` now refuses unknown migration ids. If oc reports "Database was migrated by a different OpenCode build", find the other version's `database migration started` lines in `opencode.log`, restore a backup, and give that build its own `XDG_DATA_HOME`. Local sqlite3 is 3.22 (no `DROP COLUMN`).
 - Two binaries, one source: `oc.exe` (launcher, resident server, revive host; `occ.exe` hard link) and native `opencode.exe` (upstream in-process TUI + worker). Write every feature once. Gate on `Global.native` (build constant `OPENCODE_FLAVOR`, `OC_FLAVOR` env in `bun dev`) only where a feature needs the resident server. Do not reintroduce `oc single` or other env-flag runtime modes. `ocdebug` is retired; `/revive-single` builds native beside the running oc, sharing production data.
-- Safe local builds: `.scripts\build.ps1` never touches the install folder (`$installDir` in `.scripts\scriptHelper.ps1`, `$HOME\Apps\opencode`); building remains user-driven. Agents must not run `.scripts\install.ps1` or `.install.ps1`, because those installers can stop the OpenCode host. After a requested build, tell the user to exit OpenCode and run the installer with `-NoBuild` from a fresh PowerShell. Exception: the user-approved revive offer in the global `principles.md` may queue `.scripts\reviveAndInstall.ps1` or `.scripts\revive.ps1` with `run_after_turn`. Former debug build/install/run scripts fail with retirement instructions.
+- Safe local builds: `.scripts\build.ps1` never touches the install folder (`$installDir` in `.scripts\scriptHelper.ps1`, `$HOME\Apps\opencode`); building remains user-driven. Agents must not run `.scripts\install.ps1` or `.install.ps1`, because those installers can stop the OpenCode host. After a requested build, tell the user to exit OpenCode and run the installer with `-NoBuild` from a fresh PowerShell. Former debug build/install/run scripts fail with retirement instructions.
 
 ## Project definition
 
@@ -69,7 +69,7 @@ Examples: `fix(tui): simplify thinking toggle styling`, `docs: update contributi
 - Prefer functional array methods (flatMap, filter, map) over for loops; use type guards on filter to maintain type inference downstream
 - In `src/config`, follow the existing self-export pattern at the top of the file (for example `export * as ConfigAgent from "./agent"`) when adding a new config module.
 - In Effect generators, bind services to named variables before calling methods. Do not use nested service yields such as `yield* (yield* Foo.Service).bar()`.
-- Building and installing oc/opencode is strictly user driven. Never attempt to build or install opencode for them, except the user-approved revive offer (see Safe local builds above).
+- Building and installing oc/opencode is strictly user driven. Never attempt to build or install opencode for them.
 
 Reduce total variable count by inlining when a value is only used once.
 

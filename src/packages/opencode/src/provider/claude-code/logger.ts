@@ -1,6 +1,8 @@
 import { appendFileSync, mkdirSync, renameSync, statSync } from "node:fs"
 import { homedir } from "node:os"
 import { dirname, join } from "node:path"
+// Circular (runtimeStatus imports `log`), safe: only used at call time.
+import { showToast } from "./runtimeStatus.js"
 
 export type LogLevel = "debug" | "info" | "notice" | "warn" | "error"
 export type LogMode = "silent" | "debug"
@@ -93,6 +95,7 @@ export function getLoggerConfig(): LoggerConfig {
 export function _resetLoggerForTests(): void {
   activeConfig = withEnvOverrides(DEFAULT_CONFIG)
   fileLoggingDisabled = false
+  lastToastAt.clear()
 }
 
 function resolvedLogFile(): string {
@@ -137,20 +140,33 @@ function shouldEmit(level: LogLevel): boolean {
   return LEVEL_RANK[level] >= LEVEL_RANK[activeConfig.level]
 }
 
-function shouldTui(level: LogLevel): boolean {
-  // warn/error are alwaysStderr: a developer who passes the level threshold
-  // should still see real problems in the TUI regardless of mode. Below-
-  // threshold entries are filtered earlier by shouldEmit().
-  if (level === "warn" || level === "error") return true
-  return activeConfig.mode === "debug"
+// The same message toasts at most once per window, so a warning raised on
+// every turn or every file part cannot flood the TUI.
+const _TOAST_REPEAT_MS = 60_000
+const lastToastAt = new Map<string, number>()
+
+/**
+ * warn/error must reach the operator even outside debug mode. In the TUI the
+ * server runs in a worker whose stderr is the terminal itself, so a raw line
+ * paints over the rendered frame: show a toast instead. stderr is only the
+ * fallback for when no opencode client exists (early init, tests).
+ */
+function surface(level: "warn" | "error", msg: string, line: string): void {
+  const now = Date.now()
+  const last = lastToastAt.get(msg)
+  if (last !== undefined && now - last < _TOAST_REPEAT_MS) return
+  if (!showToast(msg, level === "warn" ? "warning" : "error")) {
+    console.error(line)
+    return
+  }
+  lastToastAt.set(msg, now)
 }
 
 function emit(level: LogLevel, msg: string, data?: Record<string, unknown>): void {
   if (!shouldEmit(level)) return
   const line = fmt(level.toUpperCase(), msg, data)
-  if (shouldTui(level)) {
-    console.error(line)
-  }
+  if (activeConfig.mode === "debug") console.error(line)
+  else if (level === "warn" || level === "error") surface(level, msg, line)
   writeToFile(line)
 }
 

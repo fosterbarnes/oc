@@ -133,6 +133,56 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-16 (~01:48) - v0.2.219 exitGasoline - Agents no longer offer to revive - Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Opus 5.5; low effort; Implementation; completed
+- Version: 0.2.219
+- Removed: the v0.2.216 revive offer (commit `ff3100a`). Deleted the `oc revive offer` bullet from global `~/.config/opencode/principles.md`; reverted both `AGENTS.md` exceptions (Safe local builds, strictly-user-driven build rule). `run_after_turn` rule for `/agent-revive*` kept.
+- Verification: none needed (policy text only).
+
+### User
+Agent workflow
+- Agents no longer ask whether to build, install, and revive oc after changes; no UI change.
+
+---
+
+## 2026-10-16 (~01:45) - v0.2.219 exitGasoline - "view subagents" hint only shows while subagents run - Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Opus 5.5; low effort; Implementation (after spit); completed
+- Version: 0.2.219 exitGasoline
+- Fixed packages/tui/src/routes/session/index.tsx AssistantMessage: the `view subagents` hint now uses new `activeTask` memo instead of "any task part". It is true when a task part is pending/running, or its `metadata.sessionId` child has non-idle `session_status`, so background tasks whose tool part completes at once still count.
+- Kept the inner `· background` hint unchanged (it already required a running task).
+- Verification: `bun run typecheck` in packages/tui exit 0. Live check not run.
+
+### User
+TUI
+- The "view subagents" hint under a reply now appears only while that reply's subagents are still running, and disappears once they finish.
+
+---
+
+## 2026-10-16 (~01:41) - v0.2.219 exitGasoline - Claude Code plugin warnings become TUI toasts instead of raw stderr - Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Opus 5.5; low effort; Implementation (/imp after /spit); completed
+- Version: 0.2.219 exitGasoline
+- Fixed: claude-code `logger.ts` warn/error always went to `console.error`. TUI server runs in a Bun Worker (`cli/cmd/tui.ts:215`) whose stderr is the terminal, so lines painted over the OpenTUI frame (seen: `proxyBroker.ts` 5-min no-deadline heartbeat during a healthy `task_batch`).
+- Changed `logger.ts` `emit`: debug mode -> console as before; otherwise warn/error -> `surface()` -> TUI toast via `runtimeStatus.showToast`, same msg deduped for 60 s (`_TOAST_REPEAT_MS`, cleared by `_resetLoggerForTests`); falls back to `console.error` when no client can toast (early init, tests). Toast shows `msg` only; data stays in file log.
+- Moved `showToast` from `sessionSync.ts` to `runtimeStatus.ts`; now sync, returns false without a client. logger <-> runtimeStatus import cycle is call-time only.
+- Changed `sessionSync.ts` fresh-conversation fallback `log.warn` -> `log.notice` so it does not double-toast beside its own toast.
+- Kept heartbeat at WARN (user chose toasts over demoting it); updated its comment in `proxyBroker.ts`.
+- Added `logger.test.ts` case: silent mode + toast client -> warn/error toast once, nothing on stderr.
+- Verification: `bun test test/provider/claude-code/logger.test.ts` 13 pass; `sessionSync.test.ts` 4 pass; `bun run typecheck` exit 0. Live TUI check not run.
+- Risk: 70+ warn sites now toast; noisy ones (e.g. `messageBuilder.ts` per-file-part skips, `runtimeStatus` fetch failures) are only limited by the 60 s dedupe.
+
+### User
+Claude Code models
+- Warnings from the Claude Code provider now show as a toast in the corner instead of raw text printed over the chat screen.
+- The same warning shows at most once a minute, and the full details still go to the plugin log file when file logging is on.
+
+---
+
 ## 2026-10-16 (~01:09) - v0.2.218 microsoftLusat - Version bump moved into the build-notes skill; prePush gate removed - Opus 5.5, low effort; Implementation
 
 ### Agent

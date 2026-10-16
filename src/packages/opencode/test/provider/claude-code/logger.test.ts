@@ -17,6 +17,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import { _resetLoggerForTests, configureLogger, getLoggerConfig, log } from "@/provider/claude-code/logger.js"
+import { setOpencodeClient } from "@/provider/claude-code/runtimeStatus.js"
 
 function captureStderr(): { lines: string[]; restore: () => void } {
   const lines: string[] = []
@@ -162,6 +163,33 @@ test("file=false: debug/info/notice vanish entirely, warn/error still in TUI", (
   } finally {
     stderr.restore()
     tmp.cleanup()
+    _resetLoggerForTests()
+  }
+})
+
+// In the TUI, raw stderr paints over the rendered frame, so with a client
+// that can toast, warn/error become toasts and never touch stderr.
+test("mode=silent with a TUI client: warn/error toast once per window, not stderr", () => {
+  clearEnv()
+  _resetLoggerForTests()
+  const toasts: Array<{ message: string; variant: string }> = []
+  setOpencodeClient({ tui: { showToast: async (options) => void toasts.push(options.body) } })
+  const stderr = captureStderr()
+  try {
+    configureLogger({ file: false, level: "info", mode: "silent" })
+    log.warn("toast-warn", { detail: 1 })
+    log.warn("toast-warn", { detail: 2 })
+    log.error("toast-error")
+    log.info("toast-info")
+    assert.deepEqual(toasts, [
+      { message: "toast-warn", variant: "warning" },
+      { message: "toast-error", variant: "error" },
+    ])
+    assert.deepEqual(stderr.lines, [], "nothing may reach stderr")
+  } finally {
+    stderr.restore()
+    // Leave a client that cannot toast, so later tests fall back to stderr.
+    setOpencodeClient({})
     _resetLoggerForTests()
   }
 })

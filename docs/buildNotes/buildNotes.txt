@@ -1,6 +1,12 @@
-v0.2.218 microsoftLusat
+v0.2.219 exitGasoline
 
-push checks:
-Code-changing pushes now stop when the version has not been bumped and tell you to run bumpVersion.ps1. Both agent pushes and manual pre-push checks enforce this; documentation-only changes still go through.
+claude warnings:
+Claude Code provider warnings and errors now appear as TUI toasts instead of printing over the chat screen. Repeated messages appear at most once a minute, while full details remain in the plugin file log when enabled.
 
-Under the hood: Removed the version-bump gate from prePush.ps1 and kept the agent-only gate in agentPush.ps1. PowerShell parsing and version-gate checks passed. Pre-push checks passed.
+subagent hint:
+The view subagents hint now appears only while a reply's subagents are running, including background tasks, and disappears when they finish.
+
+agent workflow:
+Agents no longer offer to build, install, and revive oc after changes. Builds and installation remain user-driven.
+
+Under the hood: Moved toast delivery into runtimeStatus, added logger toast and deduplication coverage, and avoided a duplicate conversation-recovery toast. The targeted logger tests and pre-push checks passed.

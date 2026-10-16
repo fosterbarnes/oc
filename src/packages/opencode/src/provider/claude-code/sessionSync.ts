@@ -17,7 +17,7 @@
 import type { LanguageModelV3CallOptions } from "@ai-sdk/provider"
 import type { TurnContext } from "./turnContext.js"
 import { log } from "./logger.js"
-import { getOpencodeClient, rawOpencodeClient } from "./runtimeStatus.js"
+import { rawOpencodeClient, showToast } from "./runtimeStatus.js"
 import { getPendingProxyCalls } from "./proxyBroker.js"
 import {
   deleteActiveProcessAndWait,
@@ -107,7 +107,7 @@ async function rewindOnDrift(turn: TurnContext, prompt: Prompt, abortSignal?: Ab
     uuid: target.uuid,
     dropped: anchors.length - 1 - anchors.indexOf(target),
   })
-  void showToast("Claude conversation was out of sync with this chat and was rewound.", "info")
+  showToast("Claude conversation was out of sync with this chat and was rewound.", "info")
   return "> **Claude conversation rewound:** it did not match this chat's history, so Claude Code was rewound to the last exchange both share. Only your new message was sent.\n"
 }
 
@@ -120,8 +120,9 @@ async function confirmFreshConversation(turn: TurnContext, reason: string, abort
     throw new Error(`Claude conversation lost: ${reason}. Nothing was sent; send again to choose.`)
   }
   if (answer === undefined) {
-    log.warn("cannot ask before starting a fresh claude conversation", { sessionKey: turn.sessionKey, reason })
-    void showToast(`Claude conversation lost: ${reason}. Started a new one.`, "warning")
+    // notice, not warn: warn would raise a second toast next to this one.
+    log.notice("cannot ask before starting a fresh claude conversation", { sessionKey: turn.sessionKey, reason })
+    showToast(`Claude conversation lost: ${reason}. Started a new one.`, "warning")
   }
   return notice
 }
@@ -181,13 +182,4 @@ function promptExchangeHashes(prompt: Prompt): string[] {
 // Whitespace is dropped: opencode may trim part text it stores.
 function exchangeHash(position: number, text: string): string {
   return `${position}:${Bun.hash(text.replace(/\s+/g, "")).toString(36)}`
-}
-
-async function showToast(message: string, variant: "info" | "warning") {
-  const client = getOpencodeClient() as {
-    tui?: { showToast?: (options: { body: { message: string; variant: string } }) => Promise<unknown> }
-  } | null
-  await client?.tui?.showToast?.({ body: { message, variant } }).catch((error: unknown) => {
-    log.debug("toast failed", { error: String(error) })
-  })
 }

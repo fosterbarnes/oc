@@ -162,9 +162,9 @@ export function queuePendingProxyCall(
       : null
 
   // A call with no deadline has nothing that will ever report it, so it gets
-  // a heartbeat instead. WARN on purpose: only warn and error are always on
-  // stderr (see `src/logger.ts`), and a NOTICE nobody sees outside debug mode
-  // would defeat the point of the line existing at all.
+  // a heartbeat instead. WARN on purpose: only warn and error reach the
+  // operator outside debug mode (a TUI toast, see `logger.ts`), and a NOTICE
+  // nobody sees would defeat the point of the line existing at all.
   const stallTimer =
     deadlineMs === PROXY_NO_DEADLINE_MS && stallWarningMs > 0
       ? setInterval(() => {

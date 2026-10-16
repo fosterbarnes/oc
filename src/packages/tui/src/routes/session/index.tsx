@@ -1785,6 +1785,15 @@ function AssistantMessage(props: { message: AssistantMessage; parts: Part[]; las
 
   const childShortcut = useCommandShortcut("session.child.first")
   const backgroundShortcut = useCommandShortcut("session.background")
+  // Background tasks finish their tool part at once, so also check the child session's status.
+  const activeTask = createMemo(() =>
+    props.parts.some((x) => {
+      if (x.type !== "tool" || x.tool !== "task") return false
+      if (x.state.status === "pending" || x.state.status === "running") return true
+      const id = stringValue(x.state.metadata?.sessionId)
+      return !!id && (sync.data.session_status[id]?.type ?? "idle") !== "idle"
+    }),
+  )
 
   return (
     <>
@@ -1803,7 +1812,7 @@ function AssistantMessage(props: { message: AssistantMessage; parts: Part[]; las
           )
         }}
       </For>
-      <Show when={props.parts.some((x) => x.type === "tool" && x.tool === "task")}>
+      <Show when={activeTask()}>
         <box paddingTop={1} paddingLeft={3}>
           <text fg={theme.text}>
             {childShortcut()}

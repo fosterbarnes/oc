@@ -44,6 +44,24 @@ export function getOpencodeClient(): unknown {
   return opencodeClient
 }
 
+type ToastClient = {
+  tui?: { showToast?: (options: { body: { message: string; variant: string } }) => Promise<unknown> }
+}
+
+/**
+ * Show a toast in the opencode TUI. Returns false when no client can show one
+ * yet (before the plugin's `server` factory runs, or in tests), so callers
+ * can fall back to stderr.
+ */
+export function showToast(message: string, variant: "info" | "warning" | "error"): boolean {
+  const show = (opencodeClient as ToastClient | null)?.tui?.showToast
+  if (!show) return false
+  show({ body: { message, variant } }).catch((error: unknown) => {
+    log.debug("toast failed", { error: String(error) })
+  })
+  return true
+}
+
 type RawClient = {
   get: (options: { url: string; query?: Record<string, string> }) => Promise<{ data?: unknown; error?: unknown }>
   post: (options: { url: string; body: unknown; signal?: AbortSignal }) => Promise<{ data?: unknown; error?: unknown }>
