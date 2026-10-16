@@ -54,9 +54,10 @@ type ToastClient = {
  * can fall back to stderr.
  */
 export function showToast(message: string, variant: "info" | "warning" | "error"): boolean {
-  const show = (opencodeClient as ToastClient | null)?.tui?.showToast
-  if (!show) return false
-  show({ body: { message, variant } }).catch((error: unknown) => {
+  // Called as a method: the SDK's `showToast` reads `this._client`, and an unbound call throws.
+  const tui = (opencodeClient as ToastClient | null)?.tui
+  if (!tui?.showToast) return false
+  tui.showToast({ body: { message, variant } }).catch((error: unknown) => {
     log.debug("toast failed", { error: String(error) })
   })
   return true

@@ -133,6 +133,34 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-16 (~03:13) - v0.2.220 endUndisputed - Fix throwing Claude warnings, zombie turns after Esc, and stuck subagent calls; Claude preempt at tool boundary - Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Opus 5.5; low effort; Implementation (Claude Code desktop, `/spit` then `/imp`); plan Revision 2 steps 1-5 done; live check (step 6) pending
+- Version: 0.2.220 endUndisputed
+- ERROR (shipped in v0.2.219 `fb049a1`): `runtimeStatus.ts` `showToast` called the SDK's `tui.showToast` unbound; `sdk.gen.ts:1118` reads `this._client`, so every provider `log.warn`/`log.error` threw `undefined is not an object (evaluating 'this._client')` and skipped its file line (`logger.ts` `emit` surfaced before `writeToFile`).
+- ERROR consequences (ocCLONE `ses_ebcd527faffe2AZsMiSnkJQFn8`, oc `ses_ebc9ca0b9ffeOWpDeMLQp6LK78`): an aborted turn's interrupt `result` threw while handled (`onLine` logged it as `failed to parse line`), never finished, and its 5 s grace was reset to the long default by every later line, so it stayed attached to the reused CLI (duplicate `session init`/`tool result emitted` lines). The zombie's `onProxyCall` late-arrival `log.warn` threw inside `proxyBroker` `emit`, so the live turn never got the `task` call and `proxyMcp`'s catch threw again; the CLI's MCP request hung ~13 min with no tool part. Esc then rejected it ("Provider stream was aborted while proxy tool calls were pending"), which Claude reported as the user declining. Also caused all 14 `steering.test.ts` tests to time out and probably the post-compaction double-step loop (four unasked "What did we do so far?" answers).
+- Fixed `runtimeStatus.ts` `showToast`: calls `tui.showToast(...)` as a method.
+- Fixed `logger.ts` `emit`: writes the file line before console/toast surfacing.
+- Added `ActiveProcess.releaseTurn` (`sessionManager.ts`); `ClaudeTurn.start`/`attach` (`turnStream.ts`) release any previous turn still attached before subscribing, via new `release` (marks aborted, closes like the grace fallback); `cleanup` clears it when owned.
+- Fixed `startResultFallback`: an aborted turn's armed grace is not reset by later lines; `onAbort` clears the old timer before arming the 5 s grace.
+- Changed `logger.test.ts` toast test to use the real v1 `createOpencodeClient` with a recording `fetch` (the old mock had no `this`, so the bug passed). Confirmed the unbound call throws the logged error with the real SDK.
+- Included the preempt work from oc session `ses_ebc9ca0b9ffeOWpDeMLQp6LK78` (`prompt.ts` `steerClaudeTurn` calls `sink.preempt` for unmergeable messages; `Steering` preempt queue, retract, admit refuses while preempting; `turnStream.ts` `maybePreempt`/`endPreempted` after a top-level tool result, `toolCallNames` leak fix for non-executed tools; updated/added `steering.test.ts` cases; `FORK.md`; wiki `Sessions.md`, push is the user's). Plan: `~/.config/opencode/plans/2026-10-16-claude-steer-preempt.md` (Revision 2).
+- Fixed `steering.test.ts` `waitMessage`: also matches a command's stored text (`[/name is active ...]` header, blank line, template). The two preempt "never stored" failures were this helper, not production: the busy command was saved all along.
+- Kept preempt checks only after a tool result (no check when the message arrives). Tried and reverted a `Steering.preempt` -> host boundary hook: interrupting while Claude is only writing discards the reply in progress, while a native step finishes it; a reply without a tool call ends the turn by itself, so the post-result check already matches native.
+- Verification: `logger.test.ts` 13 pass; typecheck (`tsgo --noEmit`) clean (before the test-helper change); `steering.test.ts` alone 13 pass, 1 fail; both preempt tests pass.
+- ERROR (flaky, cause unknown): "failed receipt save stops the turn with an error instead of resending the steer" failed 2 of 6 runs (full file once, alone once out of 4), each time `result.data.info.error` undefined (`JSON.stringify(undefined)` into `toContain`); failing runs were slow (~99 s). No evidence ties it to this session's changes; not investigated.
+- TODO: background-task "no reply" race; recheck post-compaction loop after install; receipt-save flake if it recurs.
+- Risk: installed v0.2.219 keeps the bug until the user installs a fixed build.
+
+### User
+Claude Code sessions
+- Claude provider warnings no longer crash whatever triggered them; they show as toasts and are written to the plugin log again.
+- Pressing Esc on a Claude turn no longer leaves the old turn attached in the background, so the next turn's subagents start instead of hanging and then showing as "rejected".
+- A message Claude can't take into its running turn (a command, attachments, another model or agent) now ends that turn right after its current tool finishes, then runs next under its own settings, instead of waiting for the whole turn.
+
+---
+
 ## 2026-10-16 (~02:21) - v0.2.219 exitGasoline - Rewrote version commit messages and squashed reused versions - Opus 5.5, low effort; Implementation
 
 ### Agent

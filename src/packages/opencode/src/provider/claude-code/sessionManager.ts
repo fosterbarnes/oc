@@ -76,6 +76,12 @@ export interface ActiveProcess {
   turnAbandoned?: boolean
   turnIdleWaiters?: Array<() => void>
   /**
+   * Ends the turn whose listeners are attached to this child. A newer turn
+   * calls it first, so an aborted turn still in its grace period never sees
+   * the next turn's lines or proxy calls.
+   */
+  releaseTurn?: () => void
+  /**
    * Tail of what the child last wrote to stderr, capped at
    * `STDERR_RETAIN_BYTES` with the newest bytes kept. Often the only record
    * of why a child died when it closed without emitting a terminal `result`

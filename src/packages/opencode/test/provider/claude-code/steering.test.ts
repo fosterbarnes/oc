@@ -288,38 +288,88 @@ describe.skipIf(!cliPath)("Claude mid-turn steering", () => {
     }), 120_000)
 
   for (const restrictedFirst of [false, true])
-    cliIt.live(restrictedFirst ? "ordinary steer waits for restricted command settings to end"
-      : "permission-bearing command waits and keeps its own tool settings", (fixture) =>
+    cliIt.live(restrictedFirst ? "ordinary prompt ends a restricted command turn at its next tool boundary"
+      : "permission-bearing command ends the running turn at its next tool boundary", (fixture) =>
       Effect.gen(function* () {
-        const chat = yield* openChat(fixture, { config: { command: { restricted: {
-          template: "RESTRICTED-TURN", permission: { "*": "deny", read: "allow" },
-        } } } })
+        const config = chatConfig(fixture.llm.url)
+        const logDir = path.join(fixture.home, "preemptLog")
+        const chat = yield* openChat(fixture, { config: {
+          provider: { ...config.provider, "claude-code": { options: { ...config.provider["claude-code"].options,
+            logging: { file: true, dir: logDir } } } },
+          command: { restricted: { template: "RESTRICTED-TURN", permission: { "*": "deny", read: "allow" } } },
+        } })
+        const [first, second] = restrictedFirst ? ["RESTRICTED-TURN", "ORDINARY-TURN"] : ["ORDINARY-TURN", "RESTRICTED-TURN"]
         const release = Promise.withResolvers<void>()
         yield* Effect.addFinalizer(() => Effect.sync(() => release.resolve()))
-        yield* fixture.llm.push(reply().wait(release.promise).text("INITIAL-DONE").stop())
-        yield* fixture.llm.text("FOLLOWUP-DONE")
+        const sent = (body: Record<string, unknown>, text: string) => JSON.stringify(body.messages).includes(text)
+        yield* fixture.llm.pushMatch((hit) => sent(hit.body, second), reply().text("FOLLOWUP-DONE").stop())
+        // The continuation after the tool result must never answer: the turn ends at that boundary.
+        yield* fixture.llm.pushMatch((hit) => sent(hit.body, "tool_result"), reply().text("INITIAL-NEVER").hang())
+        yield* fixture.llm.pushMatch((hit) => sent(hit.body, first), reply().wait(release.promise)
+          .tool("Read", { file_path: path.join(chat.project, "preempt.txt") }))
         const command = Effect.promise(() => chat.sdk.session.command({ sessionID: chat.sessionID,
           command: "restricted", arguments: "", model: "claude-code/claude-sonnet-4-5" }))
         const initial = yield* (restrictedFirst ? command : chat.prompt("ORDINARY-TURN")).pipe(Effect.forkScoped)
         yield* fixture.llm.wait(1)
         const next = yield* (restrictedFirst ? chat.prompt("ORDINARY-TURN") : command).pipe(Effect.forkScoped)
-        yield* pollWithTimeout(messages(chat).pipe(Effect.map((all) => all.filter((msg) => msg.info.role === "user").length === 2
-          ? true : undefined)), "incompatible prompt was not saved", "30 seconds")
+        const queued = yield* waitMessage(chat, second)
+        yield* waitAccepted(logDir, queued.info.id, "accepted preempting message")
         release.resolve()
         yield* Fiber.join(initial)
         yield* Fiber.join(next)
+        const log = yield* Effect.promise(() => Bun.file(path.join(logDir, "plugin.log")).text())
+        expect(log).toContain("preempting claude turn for a queued message")
         const inputs = yield* fixture.llm.inputs
-        expect(inputs).toHaveLength(2)
-        const names = inputs.map((input) => (input.tools as { name: string }[]).map((tool) => tool.name))
+        const followups = inputs.filter((input) => sent(input, second))
+        expect(followups).toHaveLength(1)
+        expect(inputs.at(-1)).toBe(followups[0])
+        // Claude's transcript kept the tool result the turn ended on.
+        expect(JSON.stringify(followups[0].messages)).toContain("tool_result")
+        const names = [inputs[0], followups[0]].map((input) => (input.tools as { name: string }[]).map((tool) => tool.name))
         expect(names[restrictedFirst ? 0 : 1]).not.toContain("Write")
         expect(names[restrictedFirst ? 0 : 1]).not.toContain("mcp__opencode_proxy__write")
         expect(names[restrictedFirst ? 1 : 0]).toContain("Write")
         const all = yield* messages(chat)
         expect(all.filter((msg) => msg.info.role === "assistant")).toHaveLength(2)
+        expect(JSON.stringify(all)).not.toContain("INITIAL-NEVER")
+        expect(JSON.stringify(all)).toContain("FOLLOWUP-DONE")
         expect(all.some((msg) => msg.parts.some((part) => part.type === "text" && part.metadata?.steered))).toBe(false)
         expect((yield* Effect.promise(() => chat.sdk.session.get({ sessionID: chat.sessionID }))).data!.permission ?? []).toEqual([])
         expectIsolated(inputs)
       }), 120_000)
+
+  cliIt.live("deleting a message waiting to end the turn lets the turn finish", (fixture) =>
+    Effect.gen(function* () {
+      const config = chatConfig(fixture.llm.url)
+      const logDir = path.join(fixture.home, "preemptDeleteLog")
+      const chat = yield* openChat(fixture, { config: {
+        provider: { ...config.provider, "claude-code": { options: { ...config.provider["claude-code"].options,
+          logging: { file: true, dir: logDir } } } },
+        command: { restricted: { template: "RESTRICTED-TURN", permission: { "*": "deny", read: "allow" } } },
+      } })
+      yield* fixture.llm.tool("mcp__opencode_proxy__question", heldQuestion)
+      yield* fixture.llm.text("HELD-DONE")
+      const turn = yield* chat.prompt("ORDINARY-TURN").pipe(Effect.forkScoped)
+      const question = yield* waitQuestion(chat)
+      const command = yield* Effect.promise(() => chat.sdk.session.command({ sessionID: chat.sessionID,
+        command: "restricted", arguments: "", model: "claude-code/claude-sonnet-4-5" })).pipe(Effect.forkScoped)
+      const queued = yield* waitMessage(chat, "RESTRICTED-TURN")
+      yield* waitAccepted(logDir, queued.info.id, "accepted preempting message")
+      expect((yield* Effect.promise(() => chat.sdk.session.deleteMessage({ sessionID: chat.sessionID,
+        messageID: queued.info.id }))).error).toBeUndefined()
+      yield* Effect.promise(() => chat.sdk.question.reply({ requestID: question.id, answers: [["Continue"]] }))
+      yield* Fiber.join(turn)
+      yield* Fiber.join(command)
+      const log = yield* Effect.promise(() => Bun.file(path.join(logDir, "plugin.log")).text())
+      expect(log).not.toContain("preempting claude turn for a queued message")
+      const inputs = yield* fixture.llm.inputs
+      expect(inputs).toHaveLength(2)
+      expect(JSON.stringify(inputs)).not.toContain("RESTRICTED-TURN")
+      const all = yield* messages(chat)
+      expect(all.filter((msg) => msg.info.role === "assistant")).toHaveLength(1)
+      expect(JSON.stringify(all)).toContain("HELD-DONE")
+      expectIsolated(inputs)
+    }), 120_000)
 
   for (const prior of [false, true])
     cliIt.live(prior ? "delivered steer revert restores patches and rewinds to the prior exchange"
@@ -374,7 +424,9 @@ const messages = (chat: Effect.Success<ReturnType<typeof openChat>>) =>
 
 const waitMessage = (chat: Effect.Success<ReturnType<typeof openChat>>, text: string, count = 1) =>
   pollWithTimeout(messages(chat).pipe(Effect.map((all) => {
-    const found = all.filter((msg) => msg.parts.some((part) => part.type === "text" && part.text === text))
+    // A command's text starts with its `[/name is active ...]` header, then a blank line and the template.
+    const found = all.filter((msg) => msg.parts.some((part) => part.type === "text" &&
+      (part.text === text || part.text.endsWith(`\n\n${text}`))))
     return found.length >= count ? found.at(-1) : undefined
   })), `message ${text} was never stored`, "30 seconds")
 
@@ -383,7 +435,7 @@ const waitQuestion = (chat: Effect.Success<ReturnType<typeof openChat>>) =>
     "held question never appeared", "30 seconds")
 
 // Saving a prompt precedes intake. Wait for ownership before racing Edit/Delete or the tool result.
-const waitAccepted = (logDir: string, messageID: string) => pollWithTimeout(
+const waitAccepted = (logDir: string, messageID: string, event = "accepted steered message") => pollWithTimeout(
   Effect.promise(() => Bun.file(path.join(logDir, "plugin.log")).text()).pipe(Effect.map((text) =>
-    text.split("\n").some((line) => line.includes("accepted steered message") && line.includes(messageID))
-      ? true : undefined)), "steer was never admitted", "30 seconds")
+    text.split("\n").some((line) => line.includes(event) && line.includes(messageID))
+      ? true : undefined)), `${event} never logged`, "30 seconds")

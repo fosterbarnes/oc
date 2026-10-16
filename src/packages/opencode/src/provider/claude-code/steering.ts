@@ -32,11 +32,14 @@ export class Steering {
   private readonly written: (ClaudeSteer & { uuid: string; read: boolean })[] = []
   // Keep ownership even after the receipt saves, and across a child replacement.
   private readonly writtenIds = new Set<string>()
+  /** Messages this turn cannot take; it ends at its next tool boundary so oc's loop runs them. */
+  private preempts: string[] = []
   private _retired = false
   /** oc recording that Claude read a steer; the finish waits so oc's loop never sends it again. */
   readonly acks = new Set<Promise<void>>()
   readonly sink: ClaudeSteerSink = {
     steer: (steer) => this.admit(steer),
+    preempt: (messageID) => this.preempt(messageID),
     retract: (messageID, remove) => this.retract(messageID, remove),
   }
 
@@ -51,6 +54,10 @@ export class Steering {
     return this.written.some((steer) => !steer.read)
   }
 
+  get preempting() {
+    return this.preempts[0]
+  }
+
   unreadIds() {
     return this.written.filter((steer) => !steer.read).map((steer) => steer.messageID)
   }
@@ -60,7 +67,7 @@ export class Steering {
     this.written.length = 0
   }
 
-  /** The turn restarts on another account; oc's loop sends every unread steer after it. */
+  /** The turn restarts on another account; oc's loop sends every unread steer after it. Preempts stay. */
   clear() {
     this.written.length = 0
     this.held = []
@@ -77,21 +84,34 @@ export class Steering {
   private admit(steer: ClaudeSteer) {
     if (this.host.stopped() || this.host.switching()) return false
     if (steer.modelID !== this.host.turn.modelId || steer.agent !== this.host.turn.agent) return false
+    // Never overtake a message waiting to run as its own step.
+    if (this.preempts.length > 0) return false
     this.held.push(steer)
     log.info("accepted steered message", { messageID: steer.messageID, held: this.host.busy() })
     if (!this.host.busy()) this.flush()
     return true
   }
 
+  private preempt(messageID: string) {
+    if (this.host.stopped() || this.host.switching()) return false
+    this.preempts.push(messageID)
+    log.info("accepted preempting message", { messageID, busy: this.host.busy() })
+    return true
+  }
+
   private async retract(messageID: string, remove: () => Promise<void>) {
     if (this.host.stopped()) return false
     if (this.writtenIds.has(messageID)) return false
-    if (!this.held.some((steer) => steer.messageID === messageID)) return false
-    const held = this.held.find((steer) => steer.messageID === messageID)!
+    const held = this.held.find((steer) => steer.messageID === messageID)
+    if (!held && !this.preempts.includes(messageID)) return false
     this.held = this.held.filter((steer) => steer.messageID !== messageID)
+    this.preempts = this.preempts.filter((id) => id !== messageID)
     // The result cannot release oc's next step while its history still contains the removed steer.
     const removal = remove().catch((error) => {
-      if (!this.host.closed()) this.held.push(held)
+      if (!this.host.closed()) {
+        if (held) this.held.push(held)
+        else this.preempts.push(messageID)
+      }
       throw error
     })
     this.acks.add(removal)

@@ -18,6 +18,7 @@ import { join } from "node:path"
 
 import { _resetLoggerForTests, configureLogger, getLoggerConfig, log } from "@/provider/claude-code/logger.js"
 import { setOpencodeClient } from "@/provider/claude-code/runtimeStatus.js"
+import { createOpencodeClient } from "@opencode-ai/sdk"
 
 function captureStderr(): { lines: string[]; restore: () => void } {
   const lines: string[] = []
@@ -169,11 +170,20 @@ test("file=false: debug/info/notice vanish entirely, warn/error still in TUI", (
 
 // In the TUI, raw stderr paints over the rendered frame, so with a client
 // that can toast, warn/error become toasts and never touch stderr.
-test("mode=silent with a TUI client: warn/error toast once per window, not stderr", () => {
+// The real SDK client, as the plugin receives it: its `showToast` reads `this`.
+test("mode=silent with a TUI client: warn/error toast once per window, not stderr", async () => {
   clearEnv()
   _resetLoggerForTests()
-  const toasts: Array<{ message: string; variant: string }> = []
-  setOpencodeClient({ tui: { showToast: async (options) => void toasts.push(options.body) } })
+  const requests: Request[] = []
+  const sent = Promise.withResolvers<void>()
+  setOpencodeClient(createOpencodeClient({
+    baseUrl: "http://toast.invalid",
+    fetch: async (request) => {
+      requests.push(request)
+      if (requests.length === 2) sent.resolve()
+      return Response.json(true)
+    },
+  }))
   const stderr = captureStderr()
   try {
     configureLogger({ file: false, level: "info", mode: "silent" })
@@ -181,6 +191,9 @@ test("mode=silent with a TUI client: warn/error toast once per window, not stder
     log.warn("toast-warn", { detail: 2 })
     log.error("toast-error")
     log.info("toast-info")
+    await sent.promise
+    const toasts = await Promise.all(requests.map((request) => request.json()))
+    assert.ok(requests.every((request) => new URL(request.url).pathname === "/tui/show-toast"))
     assert.deepEqual(toasts, [
       { message: "toast-warn", variant: "warning" },
       { message: "toast-error", variant: "error" },

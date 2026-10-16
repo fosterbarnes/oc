@@ -202,6 +202,8 @@ class ClaudeTurn {
   /** Proxied tool calls this stream is running; the CLI is silent by design meanwhile. */
   private inStreamCalls = 0
   private toolDenied = false
+  /** Ended at a tool boundary for a queued message; the interrupted CLI tail is ignored. */
+  private preempted = false
 
   /** Set once a `stream_event` arrives: top-level `assistant` messages then duplicate the deltas. */
   private gotPartialEvents = false
@@ -357,6 +359,8 @@ class ClaudeTurn {
     const autonomousLines = this.replayUnattendedOutput(attachAutonomous)
 
     if (!this.turn.compactionMode) this.activeProcess.opencodeSessionID = this.turn.affinity
+    this.activeProcess.releaseTurn?.()
+    this.activeProcess.releaseTurn = this.release
     this.lineEmitter.on("line", this.onLine)
     this.lineEmitter.on("close", this.onClose)
     this.unsubscribeProxyCalls = onPendingProxyCall(this.sk, this.onProxyCall)
@@ -430,6 +434,7 @@ class ClaudeTurn {
     this.activeProcess = ap
     this.proc = ap.proc
     this.lineEmitter = ap.lineEmitter
+    ap.releaseTurn = this.release
     this.lineEmitter.on("line", this.onLine)
     this.lineEmitter.on("close", this.onClose)
     this.proc.on("error", this.onProcError)
@@ -651,7 +656,7 @@ class ClaudeTurn {
   // CLI output
 
   private readonly onLine = (line: string) => {
-    if (!line.trim() || this.closed || this.steering.retired) return
+    if (!line.trim() || this.closed || this.steering.retired || this.preempted) return
     // Any line counts as activity, so mid-turn pauses between blocks survive.
     this.startResultFallback()
     try {
@@ -999,6 +1004,14 @@ class ClaudeTurn {
   /** Tool results the CLI produced, or on a compaction turn the summary it replays. */
   private onUser(msg: ClaudeStreamMessage) {
     if (this.turn.compactionMode) return this.onCompactionReplay(msg)
+    this.readToolResults(msg)
+    // Claude recorded these results, so this is the tool boundary a queued message waits for.
+    if (!msg.parent_tool_use_id && msg.message?.content?.some((block) => block.type === "tool_result")) {
+      this.maybePreempt()
+    }
+  }
+
+  private readToolResults(msg: ClaudeStreamMessage) {
     for (const block of msg.message?.content ?? []) {
       if (block.type !== "tool_result" || !block.tool_use_id) continue
       const id = block.tool_use_id
@@ -1006,6 +1019,8 @@ class ClaudeTurn {
       // MCP call id differs from Claude's tool_use id, so the first such echo
       // after a denial stands in for the denied one and ends the turn.
       if (this.proxyToolUseIds.delete(id) || this.skipResultForIds.has(id)) {
+        // Settled either way; a call left here would hold off every later preempt.
+        this.toolCallNames.delete(id)
         if (this.denialTimer) return this.endDeniedTurn()
         continue
       }
@@ -1127,7 +1142,8 @@ class ClaudeTurn {
       this.startResultFallback()
       return
     }
-    if (!this.toolDenied && this.maybeAutoContinue(msg)) return
+    // A queued message runs next; no nudge may keep this turn going in front of it.
+    if (!this.toolDenied && !this.steering.preempting && this.maybeAutoContinue(msg)) return
     // finish() runs cleanup(), which rejects whatever is still pending.
     const pendingSiblings = getPendingProxyCalls(this.sk)
     if (pendingSiblings.length > 0) {
@@ -1185,6 +1201,53 @@ class ClaudeTurn {
     })
     this.finish()
     scheduleIdleProcessEviction(this.sk, resolveIdleProcessTimeoutMs(this.config.idleProcessTimeoutMs))
+  }
+
+  /**
+   * A queued message this turn cannot take (other settings, attachments, another model) ends it
+   * once no tool is running: the CLI turn is interrupted and oc's loop runs that message next
+   * under its own settings. Checked only after a tool result: a reply without a tool call ends
+   * the turn by itself, as a native step would. Unread steers go first; the next boundary checks
+   * again.
+   */
+  private maybePreempt() {
+    if (!this.steering.preempting || this.preempted || this.closed || this.toolDenied) return
+    if (this.inStreamCalls > 0 || this.toolCallNames.size > 0 || this.proxyToolUseIds.size > 0) return
+    if (this.steering.hasUnread) return
+    this.preempted = true
+    this.autoContinue.aborted = true
+    this.clearResultFallback()
+    log.info("preempting claude turn for a queued message", {
+      sessionKey: this.sk,
+      messageID: this.steering.preempting,
+    })
+    if (this.activeProcess) void interruptTurn(this.activeProcess)
+    this.out.endText()
+    this.todos.flush()
+    // Read receipts must be saved first, or oc's loop would send those steers again.
+    void Promise.all([this.todos.settled, ...this.steering.acks]).then(
+      () => this.endPreempted(),
+      (error) => { if (!this.closed) this.failTurn(`Updating a pending message failed: ${String(error)}`) },
+    )
+  }
+
+  private endPreempted() {
+    if (this.closed) return
+    for (const reasoning of this.reasoning.values()) {
+      if (reasoning.started) this.out.enqueue({ type: "reasoning-end", id: reasoning.id })
+    }
+    this.out.enqueue({
+      type: "finish",
+      finishReason: toFinishReason("stop"),
+      usage: toUsage(contextUsage(this.lastCall)),
+      providerMetadata: {
+        "claude-code": {
+          claudePromptTokens: claudePromptTokens(this.lastCall),
+          visibleThreadTokens: this.input.visibleTokens,
+        },
+      },
+    })
+    this.finish()
   }
 
   /**
@@ -1505,7 +1568,16 @@ class ClaudeTurn {
     }
     log.info("abort signal received mid-turn, starting grace period", { cwd: this.turn.cwd })
     this.rejectPendingProxyCalls("Provider stream was aborted while proxy tool calls were pending")
+    this.clearResultFallback()
     this.startResultFallback(ABORT_GRACE_MS)
+  }
+
+  /** A newer turn takes over the child: an aborted turn still in its grace period ends now. */
+  private readonly release = () => {
+    if (this.closed) return
+    this.autoContinue.aborted = true
+    this.clearResultFallback()
+    this.onClose()
   }
 
   /** Stop listening and interrupt the CLI's turn; the process stays for the next one. */
@@ -1542,6 +1614,7 @@ class ClaudeTurn {
     this.lineEmitter.off("close", this.onClose)
     this.unsubscribeProxyCalls?.()
     this.unsubscribeProxyCalls = null
+    if (this.activeProcess?.releaseTurn === this.release) this.activeProcess.releaseTurn = undefined
     if (claudeSteerSinks.get(this.turn.affinity) === this.steering.sink) claudeSteerSinks.delete(this.turn.affinity)
     this.proc.off("error", this.onProcError)
     rejectAllPendingProxyCallsForSession(this.sk, new Error("Provider stream closed before proxy calls completed"))
@@ -1561,6 +1634,8 @@ class ClaudeTurn {
    * this stream runs a proxied tool, since the CLI waits silently on it.
    */
   private startResultFallback(delayMs = this.resultFallbackMs) {
+    // An aborted turn's grace is final: later lines must not push it out to the long default.
+    if (this.autoContinue.aborted && this.resultFallbackTimer) return
     this.clearResultFallback()
     if ((!this.hasReceivedContent && !this.hasReceivedProgress) || this.closed) return
     if (this.inStreamCalls > 0 && !this.autoContinue.aborted) return

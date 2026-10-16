@@ -91,7 +91,10 @@ export type ClaudeSteer = {
 export type ClaudeSteerSink = {
   // False when the turn cannot take it; the message then waits for oc's next step as usual.
   steer: (steer: ClaudeSteer) => boolean
-  // Takes back an admitted, held steer only. Unknown or written IDs return false.
+  // A message the turn cannot take: the turn ends at its next tool boundary so oc's loop runs it
+  // next. False when the turn is already stopping; the message then waits as usual.
+  preempt: (messageID: string) => boolean
+  // Takes back an admitted, held steer or a pending preempt. Unknown or written IDs return false.
   retract: (messageID: string, remove: () => Promise<void>) => Promise<boolean>
 }
 // oc session id -> its running Claude turn's intake for such messages. Set by turnStream.ts, used by

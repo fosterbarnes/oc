@@ -165,9 +165,10 @@ function surface(level: "warn" | "error", msg: string, line: string): void {
 function emit(level: LogLevel, msg: string, data?: Record<string, unknown>): void {
   if (!shouldEmit(level)) return
   const line = fmt(level.toUpperCase(), msg, data)
+  // File first: the record must survive whatever surfacing does.
+  writeToFile(line)
   if (activeConfig.mode === "debug") console.error(line)
   else if (level === "warn" || level === "error") surface(level, msg, line)
-  writeToFile(line)
 }
 
 export const log = {

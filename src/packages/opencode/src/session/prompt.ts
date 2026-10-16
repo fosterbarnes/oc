@@ -1164,30 +1164,36 @@ const layer = Layer.effect(
 
     // A plain-text message sent while a Claude Code turn runs goes into that turn instead of waiting for
     // it to end. Once Claude reads it, its parts are flagged, which the loop's exit rule counts as answered.
+    // Any other message ends the turn at its next tool boundary and runs as the next step.
     const steerClaudeTurn = Effect.fnUntraced(function* (message: SessionV1.WithParts) {
-      if (message.info.role !== "user" || !isClaudeCodeProvider(message.info.model.providerID)) return
+      if (message.info.role !== "user") return
       const sink = claudeSteerSinks.get(message.info.sessionID)
-      const texts = message.parts.filter(
-        (part): part is SessionV1.TextPart => part.type === "text" && !part.synthetic && !part.ignored,
-      )
-      // Files, agent mentions and other parts wait for the next step, which knows how to send them.
-      if (!sink || texts.length === 0 || texts.length !== message.parts.length) return
+      if (!sink) return
       const msgs = yield* sessions.messages({ sessionID: message.info.sessionID }).pipe(Effect.orDie)
       const assistant = msgs.findLast((msg) => msg.info.role === "assistant" && !msg.info.time.completed)?.info
       if (assistant?.role !== "assistant") return
       const parent = msgs.find((msg) => msg.info.id === assistant.parentID)?.info
       if (parent?.role !== "user") return
-      // The executor and CLI spawn options are bound to the original user for the whole stream.
-      // Settings-bearing turns need their own step, in both directions.
+      if (claudeSteerSinks.get(message.info.sessionID) !== sink) return
+      const texts = message.parts.filter(
+        (part): part is SessionV1.TextPart => part.type === "text" && !part.synthetic && !part.ignored,
+      )
+      // The executor and CLI spawn options are bound to the original user for the whole stream, so
+      // settings-bearing turns need their own step, in both directions. Files, agent mentions and
+      // other parts also need the next step, which knows how to send them.
       const waiting = [message.info, ...msgs.flatMap((msg) =>
         msg.info.role === "user" && msg.info.id > assistant.parentID && msg.info.id < message.info.id
           ? [msg.info] : [])]
-      if ([parent, ...waiting].some((user) => user.permission !== undefined || user.toolHost !== undefined || user.tools !== undefined ||
-        user.system !== undefined || user.format !== undefined)) return
-      if (waiting.some((user) => parent.model.providerID !== user.model.providerID ||
-        parent.model.modelID !== user.model.modelID || parent.agent !== user.agent ||
-        parent.model.variant !== user.model.variant || parent.model.explicit !== user.model.explicit)) return
-      if (claudeSteerSinks.get(message.info.sessionID) !== sink) return
+      const separate = texts.length === 0 || texts.length !== message.parts.length ||
+        [parent, ...waiting].some((user) => user.permission !== undefined || user.toolHost !== undefined ||
+          user.tools !== undefined || user.system !== undefined || user.format !== undefined) ||
+        waiting.some((user) => parent.model.providerID !== user.model.providerID ||
+          parent.model.modelID !== user.model.modelID || parent.agent !== user.agent ||
+          parent.model.variant !== user.model.variant || parent.model.explicit !== user.model.explicit)
+      if (separate) {
+        sink.preempt(message.info.id)
+        return
+      }
       const bridge = yield* EffectBridge.make()
       const markRead = Effect.forEach(
         texts,
