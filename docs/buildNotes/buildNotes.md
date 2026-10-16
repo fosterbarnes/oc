@@ -133,6 +133,25 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-16 (~18:55) - v0.2.224 divingWittily - Agent-push auto-delete ignores closed tabs' leftover ledgers - Opus 5.5, medium effort; Debug
+
+### Agent
+- Meta: Opus 5.5; medium effort; Debug (user report: `oc - agent-push:#14b2f3f`, `ses_eb918c07cffeuBsVHu8bytb5VX`, kept after close and reopen); completed
+- Version: 0.2.224 divingWittily
+- Checked: server side worked. `session_complete` (`autoDelete: true`) replied "Marked the current session complete."; the DB row has `ocPushSession: true`, `ocAutoDelete: true`, `session_complete = 1`; `kv.json` has `agent_push_auto_delete: true`.
+- ERROR: `tui/src/agentPushAutoDelete.ts` `openInOtherTabs` trusted every ledger in `state/opencode/oc-tuis`. A TUI closed with its window never runs the `app.tsx` finalizer that removes `<pid>.json`; `38528.json` (dead TUI started 18:50:18 after the 6:49 revive) still named the push session, so `remove` skipped it as open in another tab, silently (no toast when nothing is deleted). 86 ledgers sat there, most from dead TUIs. Its filter also matched `<pid>.identity.json`.
+- Fixed `openInOtherTabs`: only `<pid>.json` files whose process is running count (`process.kill(pid, 0)`: ESRCH gone, EPERM running); a reused PID keeps the session (safe side). Takes the ledger dir as a parameter for tests. `TuiLedger.read` (opencode) already skips dead and reused PIDs, but `tui` cannot import `opencode`.
+- Added `tui/test/agentPushAutoDelete.test.ts`: temp ledger dir with an exited process's ledger, a live one (`process.ppid`), this process's own, and an identity file; only the live tab's session counts.
+- Read-only check against the real ledger dir: open sessions are the two live tabs; `ses_eb918c07cffeuBsVHu8bytb5VX` is not open, so the next start sweep deletes it.
+- Kept: stale ledger files are not deleted here (other readers handle them; cleanup would be a separate change).
+- Verification: tui typecheck exit 0; `agentPushAutoDelete.test.ts` 1 pass 0 fail.
+
+### User
+Sessions
+- Agent-push auto-delete no longer keeps a pushed session because an oc window that once showed it was closed instead of exited.
+
+---
+
 ## 2026-10-16 (~18:46) - v0.2.223 uncontrollableDrippler - Fix agent-push auto-delete skipping new sessions - Opus 5.5, medium effort; Debug
 
 ### Agent

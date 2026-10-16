@@ -1,6 +1,6 @@
-v0.2.223 uncontrollableDrippler
+v0.2.224 divingWittily
 
 sessions:
-Agent-push auto-delete now works for fresh sessions that begin with the hidden working-directory initialization message. That synthetic message no longer counts as earlier work when deciding whether a session started with /agent-push.
+Agent-push auto-delete no longer keeps a pushed session because a closed oc window left its tab ledger behind. Only ledgers belonging to running processes keep sessions open in other tabs.
 
-Under the hood: Reuse the title generator's real-user-message check when setting the push-session marker, and cover the synthetic initialization message in the regression test. The recorded verification passed: opencode typecheck, 2 targeted agent-push prompt tests, and 10 auto-rename tests. The agent-push workflow runs prePush checks before pushing.
+Under the hood: Ignore dead-process ledgers and identity files when checking other tabs, while retaining sessions for reused process IDs. The recorded verification passed: tui typecheck and 1 agentPushAutoDelete regression test. The agent-push workflow runs prePush checks before pushing.

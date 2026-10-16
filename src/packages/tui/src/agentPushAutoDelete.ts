@@ -104,15 +104,17 @@ export function createAgentPushAutoDelete() {
   }
 }
 
-// Sessions other oc tabs show, from their ledgers (`writeLedger` in app.tsx). An unreadable ledger
-// throws, so nothing is deleted while another tab's view is unknown.
-function openInOtherTabs() {
-  const dir = path.join(Global.Path.state, "oc-tuis")
+// Sessions other oc tabs show, from their ledgers (`writeLedger` in app.tsx). A tab closed with its
+// window never removes its ledger, so only ledgers of running processes count; a reused PID keeps the
+// session. A running tab's unreadable ledger throws, so nothing is deleted while its view is unknown.
+export function openInOtherTabs(dir = path.join(Global.Path.state, "oc-tuis")) {
   if (!fs.existsSync(dir)) return new Set<string>()
   return new Set(
     fs
       .readdirSync(dir)
-      .filter((name) => name.endsWith(".json") && name !== `${process.pid}.json`)
+      .filter(
+        (name) => /^\d+\.json$/.test(name) && name !== `${process.pid}.json` && running(parseInt(name)),
+      )
       .flatMap((name) => {
         const file = path.join(dir, name)
         if (!fs.existsSync(file)) return []
@@ -120,4 +122,14 @@ function openInOtherTabs() {
         return typeof sessionID === "string" ? [sessionID] : []
       }),
   )
+}
+
+// Signal 0 only tests existence: ESRCH means gone, EPERM means running under another account.
+function running(pid: number) {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "EPERM"
+  }
 }
