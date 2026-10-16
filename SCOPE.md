@@ -62,6 +62,7 @@ loop; the OpenCode 2 execution engine itself is not brought back.
 | ChatGPT Web and Claude Web browser providers (Agentify runtime) | 2026-10-10 | Claude Code and Cursor providers |
 | Single-window mode (`oc single`, `--single`, `--portable`, `mode`) | 2026-10-11 | Native `opencode` binary |
 | Work copies (`/work`, `/done`) | 2026-10-13 | To be redesigned (Planned for later) |
+| Manual session-handoff palette command | 2026-10-15 | Automatic Context limit handoffs remain available. |
 | Command markers (`$#name` preset commands) | 2026-10-12 | Agent shell and edit tools could still write `markers.json` |
 | Bash-only Claude `account` wrapper | | Claude account pool |
 | `/manageThirdPartyHarnesses` submenu | | Palette heading |

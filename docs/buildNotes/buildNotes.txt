@@ -1,8 +1,6 @@
-v0.2.214 haldwaqyBsod
+v0.2.215 aliceBroooo
 
-favorite categories:
-The model list aligns category headings and models with Favorites, and hides the extra Favorites heading when every favorite belongs to a category. Categories support theme colors and custom hex colors that persist through renaming.
+command palette:
+Removed Hand off session and its /handoffNow alias from the command palette. Automatic Context limit handoffs remain available.
 
-The category picker names the model being edited and shows category counts and color swatches. Searching for a new name offers a Create row that creates and assigns the category in one step. Rename, color, reorder, and press-again delete actions are available directly in the picker. Moving a favorite past a category edge with Shift+Up or Shift+Down moves it into the neighboring category.
-
-Under the hood: Category colors are validated and stored with model preferences. Shared dialog rendering accounts for hidden category headings, and favorite ordering handles cross-category moves, including empty groups. Updated keybind documentation and fork notes. Changed TUI context tests passed. Pre-push validation passed.
+Under the hood: Removed the manual handoff handler, toasts, and unused route hook. Updated fork and scope notes. Diff validation and pre-push checks passed. No targeted tests applied to the deletion-only UI wiring.

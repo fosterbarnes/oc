@@ -133,6 +133,22 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-15 (~23:05) - v0.2.215 aliceBroooo - Remove manual session-handoff command - GPT-6.1 Sol, default reasoning; Implementation
+
+### Agent
+- Meta: GPT-6.1 Sol; default reasoning; Implementation; completed
+- Version: 0.2.215 aliceBroooo
+- Removed `oc.handoff_now` palette registration, `/handoffNow`, TUI handler/toasts, and unused route hook from `tui/src/app.tsx` and `contextLimit.tsx`.
+- Kept automatic Context limit handoffs and session API; user clarified removal covers only the palette item and its TUI code.
+- Updated `FORK.md`, retired-command row in `SCOPE.md`, and `../oc.wiki/Sessions.md`; preserved pre-existing wiki edits.
+- Verification: `git diff --check` passed; TUI and wiki searches found no manual-command identifiers or label. Tests/build not run for deletion-only UI wiring.
+
+### User
+Command palette
+- Removed Hand off session and its slash alias; automatic Context limit handoffs remain available.
+
+---
+
 ## 2026-10-15 (~22:56) - v0.2.214 haldwaqyBsod - One-screen favorite category picker and cross-category moves - Opus 5.5, low effort; Implementation
 
 ### Agent

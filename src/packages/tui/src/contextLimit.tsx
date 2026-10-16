@@ -1,6 +1,5 @@
 import { useSDK } from "./context/sdk"
 import { useSync } from "./context/sync"
-import { useRoute } from "./context/route"
 import { useProject } from "./context/project"
 import { useDialog } from "./ui/dialog"
 import { DialogSelect, type DialogSelectOption } from "./ui/dialog-select"
@@ -104,7 +103,6 @@ function limitMessage(scope: string | undefined, limit: Limit) {
 export function createContextLimitCommands() {
   const sdk = useSDK()
   const sync = useSync()
-  const route = useRoute()
   const dialog = useDialog()
   const toast = useToast()
   const project = useProject()
@@ -211,30 +209,6 @@ export function createContextLimitCommands() {
         return describeLimit(effectiveLimit(sync.data.config, undefined))
       },
       run: () => openScope(),
-    },
-    handoff: {
-      name: "oc.handoff_now",
-      title: "Hand off session",
-      category: "oc",
-      slashName: "handoffNow",
-      get enabled() {
-        return route.data.type === "session"
-      },
-      run: () => {
-        if (route.data.type !== "session") {
-          toast.show({ message: "Open a session to hand off", variant: "error" })
-          return
-        }
-        const sessionID = route.data.sessionID
-        dialog.clear()
-        void sdk.client.session.handoff({ sessionID }).then((result) => {
-          toast.show(
-            result.error
-              ? { message: `Failed to start handoff: ${String(result.error)}`, variant: "error" }
-              : { message: "Handoff started", variant: "success" },
-          )
-        })
-      },
     },
   }
 }

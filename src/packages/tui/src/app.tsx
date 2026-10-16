@@ -960,7 +960,6 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
         },
       },
       ocCommands.newSession,
-      contextLimitCommands.handoff,
       ...ocCommands.defaults,
       contextLimitCommands.contextLimit,
       todoCommand,
