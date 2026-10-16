@@ -126,7 +126,7 @@ _Avoid_: Response envelope
 - Context source changes never wake idle sessions; the next naturally scheduled **Safe Provider-Turn Boundary** loads and compares current values lazily.
 - Once admitted, a **Mid-Conversation System Message** remains durable even if the following provider attempt fails and is replayed unchanged on retry.
 - **Mid-Conversation System Messages** remain durable Session-message history; normal user-facing transcript surfaces may hide them.
-- The date **Context Source** initially preserves host-local calendar-date behavior; a configured user timezone may replace that default later.
+- The date **Context Source** uses the host-local calendar date, which follows config `time.timezone` through the process `TZ` (`core/util/timeZone.ts`).
 - A **Context Epoch** begins with one immutable **Baseline System Context**.
 - A **Baseline System Context** is stored durably and reused verbatim across process restarts within its **Context Epoch**.
 - A **Baseline System Context** durably preserves the exact joined text used for the active provider-cache prefix.

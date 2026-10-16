@@ -34,6 +34,7 @@ import {
   type ClaudeWarmupAccount,
   type ClaudeWarmupState,
 } from "../src/claudeWarmup"
+import { Locale } from "../src/util/locale"
 
 const daily = {
   accountID: "default",
@@ -258,40 +259,39 @@ test("account summary uses Times title, details rows, and the qualifier", () => 
 })
 
 test("12-hour format changes display only", () => {
-  expect(displayClock("00:00", "12h")).toBe("12:00 AM")
-  expect(displayClock("12:00", "12h")).toBe("12:00 PM")
-  expect(displayClock("16:05", "12h")).toBe("4:05 PM")
   expect(displayClock("16:05")).toBe("16:05")
-  expect(displayTimes("08:00, 16:00", "12h")).toBe("8:00 AM, 4:00 PM")
-  expect(displayTimes("", "12h")).toBe("")
-  expect(previewLines("07:00, 22:00", undefined, "12h")).toEqual([
-    "Send at 7:00 AM    Est. reset 12:00 PM",
-    "Send at 10:00 PM    Est. reset 3:00 AM next day",
-  ])
-  expect(previewLine("22:00", "sun", "12h")).toBe("Sunday 10:00 PM    Est. reset Monday 3:00 AM")
-  expect(promptPreviewText("07:00", undefined, undefined, "12h")).toBe(
-    ["Send at 7:00 AM    Est. reset 12:00 PM", PREVIEW_QUALIFIER].join("\n"),
-  )
-  const spring = Date.parse("2026-03-08T01:00:00-05:00")
-  expect(datedResetPreview(spring, "America/New_York", "12h")).toBe("Sun Mar 8 7:00 AM")
-  expect(formatNextAt(spring, "America/New_York", "UTC-05:00", "12h")).toBe(
-    "Sun Mar 8 1:00 AM America/New_York UTC-05:00",
-  )
-  const options = accountOptions({
-    account: daily,
-    draft: { mode: "daily", times: "08:00, 16:00" },
-    zone: "",
-    timeZone: "UTC",
-    utcOffset: "",
-    clock: "12h",
-    onMode: () => undefined,
-    onTimes: () => undefined,
-    onSave: () => undefined,
-    onPause: () => undefined,
-    onResume: () => undefined,
-  })
-  expect(options.find((option) => option.value === "clock")?.title).toBe("Time format: 12-hour")
-  expect(options.find((option) => option.value === "times")?.title).toBe("Times: 8:00 AM, 4:00 PM")
+  Locale.setTimeSettings({ clock: "12h" })
+  try {
+    expect(displayClock("00:00")).toBe("12:00 AM")
+    expect(displayClock("12:00")).toBe("12:00 PM")
+    expect(displayClock("16:05")).toBe("4:05 PM")
+    expect(displayTimes("08:00, 16:00")).toBe("8:00 AM, 4:00 PM")
+    expect(displayTimes("")).toBe("")
+    expect(previewLines("07:00, 22:00")).toEqual([
+      "Send at 7:00 AM    Est. reset 12:00 PM",
+      "Send at 10:00 PM    Est. reset 3:00 AM next day",
+    ])
+    expect(previewLine("22:00", "sun")).toBe("Sunday 10:00 PM    Est. reset Monday 3:00 AM")
+    expect(promptPreviewText("07:00")).toBe(["Send at 7:00 AM    Est. reset 12:00 PM", PREVIEW_QUALIFIER].join("\n"))
+    const spring = Date.parse("2026-03-08T01:00:00-05:00")
+    expect(datedResetPreview(spring, "America/New_York")).toBe("Sun Mar 8 7:00 AM")
+    expect(formatNextAt(spring, "America/New_York", "UTC-05:00")).toBe("Sun Mar 8 1:00 AM America/New_York UTC-05:00")
+    const options = accountOptions({
+      account: daily,
+      draft: { mode: "daily", times: "08:00, 16:00" },
+      zone: "",
+      timeZone: "UTC",
+      utcOffset: "",
+      onMode: () => undefined,
+      onTimes: () => undefined,
+      onSave: () => undefined,
+      onPause: () => undefined,
+      onResume: () => undefined,
+    })
+    expect(options.find((option) => option.value === "times")?.title).toBe("Times: 8:00 AM, 4:00 PM")
+  } finally {
+    Locale.setTimeSettings(undefined)
+  }
 })
 
 test("dated DST preview adds five elapsed hours in the server zone", () => {

@@ -1,6 +1,7 @@
 import fs from "node:fs"
 import path from "node:path"
 import { Global } from "@opencode-ai/core/global"
+import { SYSTEM_TIME_ZONE } from "@opencode-ai/core/util/timeZone"
 import { DialogAbout } from "./component/dialog-about"
 import { DialogAgent } from "./component/dialog-agent"
 import { DialogModel } from "./component/dialog-model"
@@ -27,6 +28,7 @@ import { useDialog } from "./ui/dialog"
 import { DialogPrompt } from "./ui/dialog-prompt"
 import { DialogSelect } from "./ui/dialog-select"
 import { useToast } from "./ui/toast"
+import { Locale } from "./util/locale"
 
 // oc palette entries, in three runs that App spreads at their palette positions. Call inside App.
 export function createOcCommands(input: {
@@ -487,6 +489,79 @@ export function createOcCommands(input: {
         },
       },
       {
+        name: "oc.time",
+        title: "Time",
+        category: "oc",
+        group: "Layout",
+        get desc() {
+          return `${Locale.clock()} · ${Locale.zone()}`
+        },
+        slashName: "time",
+        run: () => {
+          // Saves to global config `time`, applies locally at once, then reopens on the same row.
+          const save = async (patch: { clock?: Locale.Clock; timezone?: string }, current: "clock" | "zone") => {
+            const result = await sdk.client.global.config.update({ config: { time: patch } })
+            if (result.error) {
+              toast.show({ message: `Failed to save time setting: ${String(result.error)}`, variant: "error" })
+              return
+            }
+            Locale.setTimeSettings({ clock: Locale.clock(), timezone: Locale.zone(), ...patch })
+            show(current)
+          }
+          const pickZone = () => {
+            const now = new Date()
+            dialog.replace(() => (
+              <DialogSelect
+                title="Time zone"
+                current={Locale.zone()}
+                options={[
+                  { value: "auto", title: "auto", description: SYSTEM_TIME_ZONE },
+                  ...Intl.supportedValuesOf("timeZone").map((zone) => ({
+                    value: zone,
+                    title: zone,
+                    description: utcOffset(zone, now),
+                  })),
+                ]}
+                onSelect={(option) => void save({ timezone: option.value }, "zone")}
+              />
+            ))
+          }
+          const show = (current?: "clock" | "zone") => {
+            dialog.replace(() => (
+              <DialogSelect
+                title="Time"
+                current={current}
+                options={[
+                  {
+                    value: "clock",
+                    title: `Clock: ${Locale.clock() === "12h" ? "12-hour" : "24-hour"}`,
+                    onSelect: () => void save({ clock: Locale.clock() === "12h" ? "24h" : "12h" }, "clock"),
+                  },
+                  {
+                    value: "zone",
+                    title: `Time zone: ${Locale.zone() === "auto" ? `auto (${SYSTEM_TIME_ZONE})` : Locale.zone()}`,
+                    onSelect: pickZone,
+                  },
+                  {
+                    value: "now",
+                    title: `Now: ${Locale.format(Date.now(), {
+                      weekday: "short",
+                      month: "short",
+                      day: "numeric",
+                      hour: "numeric",
+                      minute: "2-digit",
+                      timeZoneName: "shortOffset",
+                    })}`,
+                    inert: true,
+                  },
+                ]}
+              />
+            ))
+          }
+          show()
+        },
+      },
+      {
         name: "oc.bgrun",
         title: "bgRun",
         category: "oc",
@@ -577,4 +652,12 @@ export function createOcCommands(input: {
       },
     ],
   }
+}
+
+// `UTC-05:00` for a zone at the given moment; `longOffset` names UTC itself plain `GMT`.
+function utcOffset(zone: string, at: Date) {
+  const name = new Intl.DateTimeFormat("en-US", { timeZone: zone, timeZoneName: "longOffset" })
+    .formatToParts(at)
+    .find((part) => part.type === "timeZoneName")?.value
+  return name === "GMT" ? "UTC+00:00" : name?.replace("GMT", "UTC")
 }

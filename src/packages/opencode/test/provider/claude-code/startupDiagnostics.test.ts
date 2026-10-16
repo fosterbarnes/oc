@@ -8,6 +8,7 @@ import { test } from "node:test"
 import { claudeCodeProviders } from "@/provider/claude-code/index.js"
 import { resolveSpawnCwdFrom } from "@/provider/claude-code/runtimeStatus.js"
 import {
+  accountSettingsDrift,
   collectStartupDiagnostics,
   describeSpawnCwd,
   detectOpencodeVersion,
@@ -130,7 +131,37 @@ test("collectStartupDiagnostics carries the options a preset replaced", () => {
   assert.match(joined, /permissionMode: "acceptEdits" is dropped/)
   assert.match(joined, /skipPermissions: forced to false/)
   // No proxyTools of its own, so the default list is what got filtered.
-  assert.match(joined, /proxyTools: dropped Task, run_after_turn;/)
+  assert.match(joined, /proxyTools: dropped Task, run_after_turn, schedule;/)
+})
+
+test("accountSettingsDrift names unpinned keys and CLAUDE.md copies that differ", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "oc-drift-"))
+  try {
+    const [first, second] = ["a", "b"].map((name) => path.join(root, name))
+    for (const [dir, compact, memory] of [
+      [first, false, "# Rules\r\nbe brief"],
+      [second, true, "# Rules\nbe brief"],
+    ] as const) {
+      fs.mkdirSync(dir)
+      fs.writeFileSync(path.join(dir, "settings.json"), JSON.stringify({ autoCompactEnabled: compact, theme: dir }))
+      fs.writeFileSync(path.join(dir, "CLAUDE.md"), memory)
+    }
+    // Line endings alone are not drift; display keys like `theme` are ignored.
+    assert.deepEqual(accountSettingsDrift([first, second], undefined), [
+      `autoCompactEnabled: ${first}=false, ${second}=true`,
+    ])
+    assert.deepEqual(accountSettingsDrift([first, second], { autoCompactEnabled: true }), [])
+    fs.writeFileSync(path.join(second, "CLAUDE.md"), "# Other rules")
+    assert.deepEqual(accountSettingsDrift([first, second], { autoCompactEnabled: true }), [
+      "CLAUDE.md differs between accounts",
+    ])
+    // An `@` import of the shared file counts as the same file.
+    fs.writeFileSync(path.join(second, "CLAUDE.md"), "@~/.claude/CLAUDE.md\n")
+    assert.deepEqual(accountSettingsDrift([first, second], { autoCompactEnabled: true }), [])
+    assert.deepEqual(accountSettingsDrift([first], undefined), [])
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true })
+  }
 })
 
 test("collectStartupDiagnostics calls out an unrecognised preset", () => {

@@ -415,7 +415,7 @@ test("full reset dates spell out the date and the time left in local time", () =
   // Built from local components so the expected text does not depend on the machine's time zone.
   const reset = new Date(2026, 9, 11, 2, 58).valueOf()
   const at = (day: number, hour: number, minute: number) => new Date(2026, 9, day, hour, minute).valueOf()
-  const date = "Sunday, October 11, 2026 at 2:58 AM"
+  const date = "Sunday, October 11, 2026 at 02:58"
   expect(fullResetDate(reset, at(10, 2, 58))).toBe(`${date} (in 1 day)`)
   expect(fullResetDate(reset, at(10, 22, 58))).toBe(`${date} (in 4 hours)`)
   expect(fullResetDate(reset, reset - (24 + 3) * 60 * 60_000 - 5 * 60_000)).toBe(

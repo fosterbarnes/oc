@@ -133,6 +133,63 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-15 (~21:53) - v0.2.213 tarStained - Claude under oc: unsupported tools off, oc schedule tools, claudeSettings - Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Opus 5.5; low effort; Implementation (imp from /spit plan `~/.config/opencode/plans/claudeFeatureFixes.md`, audit `claudeFeatureAudit.md`); completed
+- Version: 0.2.213 tarStained
+- Added `CLAUDE_UNSUPPORTED_TOOLS` (`provider/claude-code/shared.ts`): EnterWorktree, ExitWorktree, CronCreate, CronDelete, CronList, ScheduleWakeup; `resolveDisallowedTools` always pushes them. Closed command turns already use `--tools` allowlist.
+- Note: fake-model check showed EnterWorktree moves CLI cwd to `<project>\.claude\worktrees\<name>` for all later turns (oc snapshots/undo/diff miss edits); CronCreate result says "Session-only ... dies when Claude exits".
+- Changed `disallowedToolFlags`: task/task_batch also disable `Workflow` (CLI-internal subagents past oc).
+- Added `tool/schedule.ts`: `schedule_prompt` (`at` local `YYYY-MM-DD HH:MM` or `time`-tool format, or `delaySeconds`; target current/fork/new; one-shot), `schedule_list`, `schedule_cancel`. Uses `SessionPrompt.queue` via lazy import (same cycle-avoiding pattern as planExecute); payload keeps last user message model/variant and `ctx.agent`. Default allow; prompt/cancel call `ctx.ask` with their tool id. Registered in `tool/registry.ts`.
+- Added proxy defs + `SCHEDULE_TOOL_NAMES` (`proxyToolDefs.ts`); `schedule` proxyTools entry expands to all three (`spawnPlanning.ts resolvedProxyTools`); `DEFAULT_PROXY_TOOL_NAMES` now includes `schedule`; read-only preset drops it (`READ_ONLY_DENIED_PROXY_TOOLS`).
+- Changed `buildToolEnvironmentNote`: background Bash/Monitor end with the CLI process; schedule line when the proxy is live.
+- Added provider option `claudeSettings` (`types.ts`, `index.ts`); `buildCliArgs` merges it with fastMode into one `--settings`; both spawn paths pass it. Takes effect on next spawn (not in respawn hash).
+- Added `accountSettingsDrift` (`startupDiagnostics.ts`): warns when pool accounts differ on autoCompactEnabled/autoMemoryEnabled/outputStyle/permissions.deny (unless pinned) or CLAUDE.md text (CRLF-normalized; a lone `@import` counts as shared).
+- Note: CLI 2.1.301 disables tool search for non-Anthropic `ANTHROPIC_BASE_URL`; `ENABLE_TOOL_SEARCH=true` turns it on. Deferred tools appear only in a reminder until ToolSearch loads them (then `defer_loading: true` in `tools`). `openChat` gained `env` option.
+- Changed user config `~/.config/opencode/opencode.jsonc`: proxyTools + `schedule`, `claudeSettings: { autoCompactEnabled: true }`. User still runs the second-account link script (plan file).
+- Docs: FORK.md rows Schedule tools + Claude settings for every account; SCOPE.md later row Repeating scheduled prompts; wiki `Claude-Code.md` (scheduling, tools turned off, option rows), `Sessions.md` agent schedules paragraph (wiki push is user's).
+- Risk: not checked whether `permissions.deny` via `--settings` merges or replaces account deny lists. Model-scheduled prompt firing not checked live.
+- Verification: `tsgo --noEmit` clean (opencode). Unit: cliArgs, fundamentalTools, proxyMcp, proxyTask, subagentHint, permissionPresets, startupDiagnostics, commandToolPlan, tool/schedule, tool/registry 205 pass; commandPermissions, session/tools, toolInputRepair, tool/skill, tool/task 61 pass; session/prompt 56 pass. Fake-model `fakeModel.test.ts` 27 pass incl. new scenarios (tool list + queued row; ToolSearch deferred load).
+
+### User
+Claude Code provider
+- Claude can no longer move itself into a git worktree that oc does not track, and Claude Code's own multi-agent Workflow tool is off while oc runs its subagents.
+- Claude Code's own cron and wakeup tools are off because they vanished on any restart; agents now schedule prompts with oc's own tools, which survive restarts.
+- A new `claudeSettings` option applies Claude Code settings to every pooled account, and oc warns at startup when the accounts' settings or CLAUDE.md differ.
+
+Sessions
+- Any agent can schedule a one-time prompt for later, list its schedules, or cancel one; the prompts show in the session queue like ones you schedule yourself.
+
+---
+
+## 2026-10-15 (~21:35) - v0.2.212 vitaminsCowards - Unified time settings (clock and time zone) - Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Opus 5.5; low effort; Implementation (imp from /spit plan `~/.config/opencode/plans/timeSettings.md`); completed
+- Version: 0.2.212 vitaminsCowards
+- Added config `time: { clock: "24h"|"12h", timezone: "auto"|IANA }` in `core/src/v1/config/config.ts`; regenerated `sdk/js/src/v2/gen/types.gen.ts` (+4 lines).
+- Added `core/src/util/timeZone.ts`: `applyTimeZone` sets/restores process `TZ` (unknown zone -> startup zone), `SYSTEM_TIME_ZONE` captured before override.
+- Note: Bun 1.4.1 measured: runtime `TZ` changes `Date` getters and `Intl.DateTimeFormat` defaults process-wide; deleting restores; `toLocale*String` stays on startup zone; a worker's `TZ` write is ignored but main-thread writes reach workers. So native build applies via TUI thread; resident server applies in `Config.loadGlobal` (opencode `config/config.ts`).
+- Added `Locale.setTimeSettings`/`clock`/`zone`/`format` (`tui/src/util/locale.ts`); `time`/`shortDateTime`/`datetime` use `Intl.DateTimeFormat` with `hourCycle`. `app.tsx` effect mirrors `sync.data.config.time`.
+- Removed KV `claude_resume_clock`, `claude_warmup_clock`, both Time format rows, `ClockFormat`, `formatResumeAt`, and clock params from warm-up helpers (`displayClock` etc. read `Locale.clock()`).
+- Changed to Locale: prompt resume footer, auto-resume list/account limits, schedule dialog (hour12 + Next), queue labels, revive text and marker, transcript Created/Updated, usage `compactResetDate` (24h `~HH:mm`), `fullResetDate`, calendar day/weekday labels (module-level `Intl` consts were stuck on startup zone).
+- Added palette **Time** (`oc.time`, `/time`, Layout) in `ocCommands.tsx`: clock toggle, zone picker (auto + `Intl.supportedValuesOf("timeZone")` with UTC offset, ~31 ms), inert Now preview; saves via `global.config.update`, applies locally, reopens.
+- Kept: server-side math unchanged (time tool, `system.ts` date, warm-up schedule, cursor env follow `TZ`); warm-up ticks recompute occurrences live, no recompute hook needed.
+- Risk: CLI `run`/`session` output uses Locale without config, so shows 24h OS-zone times. Project-level `time.timezone` affects TUI only; server reads global.
+- Docs: FORK.md row **Unified time settings** + scheduled prompts wording; `docs/dev/CONTEXT.md` date line; wiki `Configuration.md`, `Claude-Code.md`, `Sessions.md` (wiki push is user's).
+- Verification: tui tests locale/format/claudeWarmup/usageCalendar/usageFreshness/transcript 86 pass; `usageFreshness` reset-date expectation updated to 24h default. `tsgo --noEmit` clean in core, tui, opencode. Installed live check not run.
+- ERROR: first typecheck missed `Locale` import in `dialogSchedule.tsx`; fixed.
+
+### User
+Time settings
+- New **Time** entry in the oc palette (`/time`) sets 12-hour or 24-hour clock and the time zone (auto or any zone) for all of oc.
+- Every time oc shows now follows it: message times, timeline, queue, scheduled prompts, auto-resume, warm-up, revive marker, transcripts, and the usage sidebar.
+- The time zone also applies to the agent `time` tool, the date agents see, and Claude warm-up schedules.
+- The separate Time format toggles in Claude auto-resume and warm-up are gone; the default is 24-hour.
+
+---
+
 ## 2026-10-15 (~21:14) - v0.2.211 sureSmelter - Schedule keybind hint in prompt footer - Opus 5.5, low effort; Build
 
 ### Agent

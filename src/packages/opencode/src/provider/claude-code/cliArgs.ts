@@ -31,6 +31,8 @@ export function buildCliArgs(opts: {
   thinking?: "enabled" | "disabled"
   thinkingDisplay?: "summarized" | "omitted"
   fastMode?: boolean
+  /** The provider's `claudeSettings`, merged into the one `--settings` object. */
+  settings?: Record<string, unknown>
   cliVersion?: CliVersion | null
 }): string[] {
   const {
@@ -48,6 +50,7 @@ export function buildCliArgs(opts: {
     thinking,
     thinkingDisplay,
     fastMode,
+    settings,
     cliVersion,
   } = opts
   const args = [
@@ -164,9 +167,11 @@ export function buildCliArgs(opts: {
   // in the user's own settings.json is NOT enough for a `--print` run.
   // Built as one object so later flag-settings keys merge here instead of
   // adding a second `--settings` (the CLI takes the flag once).
-  if (fastMode && cliSupportsFastMode(cliVersion ?? null)) {
-    args.push("--settings", JSON.stringify({ fastMode: true }))
+  const flagSettings = {
+    ...settings,
+    ...(fastMode && cliSupportsFastMode(cliVersion ?? null) && { fastMode: true }),
   }
+  if (Object.keys(flagSettings).length > 0) args.push("--settings", JSON.stringify(flagSettings))
 
   // Same rule as plan mode below, with a harder edge: `--restricted` and
   // `--dangerously-skip-permissions` together are not a silent override but a

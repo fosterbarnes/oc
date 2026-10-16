@@ -284,7 +284,7 @@ test("task and task_batch point at each other and disable the native subagent to
   assert.match(batch.description, /one at a time/)
   assert.deepEqual(
     disallowedToolFlags([task, batch]),
-    ["Agent", "Task", "TaskOutput"],
+    ["Agent", "Task", "TaskOutput", "Workflow"],
     "the CLI's own subagent tools are disabled once, not twice",
   )
 })
@@ -317,7 +317,17 @@ test("proxy defs follow the tools opencode offered the agent", () => {
   assert.deepEqual(names, ["question"])
   assert.deepEqual(
     filterProxyByModelTools(defs, undefined).map((tool) => tool.name),
-    ["task", TASK_BATCH_TOOL_NAME, "question", "session_tail", "run_after_turn", "time"],
+    [
+      "task",
+      TASK_BATCH_TOOL_NAME,
+      "question",
+      "session_tail",
+      "run_after_turn",
+      "time",
+      "schedule_prompt",
+      "schedule_list",
+      "schedule_cancel",
+    ],
   )
   assert.deepEqual(
     filterProxyByModelTools(defs, []).map((tool) => tool.name),

@@ -828,8 +828,8 @@ async function exerciseTaskRecovery(mode: "late" | "late-queued" | "swallow" | "
   }
 }
 
-test("default provider proxies Task, run_after_turn, and time through opencode", () => {
-  assert.deepEqual(modelProxyTools(), ["Task", "run_after_turn", "time"])
+test("default provider proxies Task, run_after_turn, time, and schedule through opencode", () => {
+  assert.deepEqual(modelProxyTools(), ["Task", "run_after_turn", "time", "schedule"])
 })
 
 test("explicit proxyTools overrides preserve custom selection and empty opt-out", () => {
@@ -843,7 +843,7 @@ test("opencode provider registration defaults the proxy tools without overriding
 
   const defaults: any = {}
   await hooks.config?.(defaults)
-  assert.deepEqual(defaults.provider["claude-code"].options.proxyTools, ["Task", "run_after_turn", "time"])
+  assert.deepEqual(defaults.provider["claude-code"].options.proxyTools, ["Task", "run_after_turn", "time", "schedule"])
 
   const explicit: any = {
     provider: {
@@ -877,7 +877,7 @@ test("Task proxy schema matches current opencode TaskTool fields", () => {
 test("proxy MCP initializes, lists Task, and resolves it through the broker", async () => {
   const task = DEFAULT_PROXY_TOOLS.find((tool) => tool.name === "task")
   assert.ok(task)
-  assert.deepEqual(disallowedToolFlags([task]), ["Agent", "Task", "TaskOutput"])
+  assert.deepEqual(disallowedToolFlags([task]), ["Agent", "Task", "TaskOutput", "Workflow"])
 
   const brokerSession = `proxy-http-${Date.now()}`
   const server = await createProxyMcpServer([task])

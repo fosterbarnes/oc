@@ -5,7 +5,12 @@
 import { log } from "./logger.js"
 import { toolNameForHost, type HostToolDialect } from "./hostTools.js"
 import { TASK_BATCH_TOOL_NAME, type ProxyToolDef } from "./proxyToolDefs.js"
-import { CLAUDE_HARNESS_ONLY_TOOLS, CLAUDE_NATIVE_TOOLS, type CommandToolPlan } from "./shared.js"
+import {
+  CLAUDE_HARNESS_ONLY_TOOLS,
+  CLAUDE_NATIVE_TOOLS,
+  CLAUDE_UNSUPPORTED_TOOLS,
+  type CommandToolPlan,
+} from "./shared.js"
 
 /** CLI-ready list of Claude tool names to disable, for each proxied tool. */
 export function disallowedToolFlags(tools: readonly Pick<ProxyToolDef, "name">[]): string[] {
@@ -16,9 +21,10 @@ export function disallowedToolFlags(tools: readonly Pick<ProxyToolDef, "name">[]
   // `general`, custom subagents in opencode.json) execute the work
   // under opencode's permission/lifecycle, rather than Claude's
   // internal-only general-purpose / Explore / Plan options.
+  // `Workflow` goes with them: it runs Claude's own subagents in the background, past oc.
   const nameMap: Record<string, string[]> = {
-    task: ["Agent", "Task", "TaskOutput"],
-    task_batch: ["Agent", "Task", "TaskOutput"],
+    task: ["Agent", "Task", "TaskOutput", "Workflow"],
+    task_batch: ["Agent", "Task", "TaskOutput", "Workflow"],
     // `question` disables Claude Code's built-in `AskUserQuestion` so the
     // structured-questions path flows through opencode's native `question`
     // tool instead - same UI/permission/audit benefits as the other
@@ -48,6 +54,9 @@ const PROXY_DEF_OPENCODE_TOOL: Record<string, string> = {
   session_tail: "session_tail",
   run_after_turn: "run_after_turn",
   time: "time",
+  schedule_prompt: "schedule_prompt",
+  schedule_list: "schedule_list",
+  schedule_cancel: "schedule_cancel",
 }
 
 /**
@@ -165,6 +174,7 @@ export function resolveDisallowedTools(options: {
   }
 
   for (const name of disallowedToolFlags(options.proxyTools ?? [])) push(name)
+  for (const name of CLAUDE_UNSUPPORTED_TOOLS) push(name)
   for (const name of options.extraDisallowedTools ?? []) push(String(name))
   if (options.disableWebSearch) push("WebSearch")
   return out

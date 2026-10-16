@@ -1,4 +1,5 @@
 import { InstallationDisplayVersion, InstallationVersion } from "@opencode-ai/core/installation/version"
+import { Locale } from "./locale"
 
 // Same oc version as the sidebar footer; InstallationVersion is the incorporated upstream release.
 export function reviveVersions() {
@@ -6,6 +7,6 @@ export function reviveVersions() {
 }
 
 export function reviveText(at: number, versions: string) {
-  const time = new Date(at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })
+  const time = Locale.time(at)
   return `[oc revived at ${time} . ${versions}]`
 }

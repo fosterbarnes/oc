@@ -13,6 +13,10 @@ import { parseModelId } from "@/provider/claude-code/models.js"
 import { configureLogger, _resetLoggerForTests } from "@/provider/claude-code/logger.js"
 import { type ProxyToolDef } from "@/provider/claude-code/proxyToolDefs.js"
 import { disallowedToolFlags, resolveDisallowedTools } from "@/provider/claude-code/proxyToolSelection.js"
+import { CLAUDE_UNSUPPORTED_TOOLS } from "@/provider/claude-code/shared.js"
+
+const SUBAGENT = ["Agent", "Task", "TaskOutput", "Workflow"]
+const OFF = CLAUDE_UNSUPPORTED_TOOLS
 
 function withClaudeThinkingEnv<T>(
   env: {
@@ -297,8 +301,8 @@ function proxyDef(name: string): ProxyToolDef {
 }
 
 test("disallowedToolFlags maps each proxy tool to its Claude built-ins", () => {
-  assert.deepEqual(disallowedToolFlags([proxyDef("task")]), ["Agent", "Task", "TaskOutput"])
-  assert.deepEqual(disallowedToolFlags([proxyDef("task_batch")]), ["Agent", "Task", "TaskOutput"])
+  assert.deepEqual(disallowedToolFlags([proxyDef("task")]), SUBAGENT)
+  assert.deepEqual(disallowedToolFlags([proxyDef("task_batch")]), SUBAGENT)
 })
 
 test("disallowedToolFlags disables AskUserQuestion for the question proxy", () => {
@@ -310,12 +314,12 @@ test("disallowedToolFlags is case-insensitive on the proxy tool name", () => {
   // disallowedToolFlags must tolerate either casing since callers pass the
   // def name as-authored.
   assert.deepEqual(disallowedToolFlags([proxyDef("Question")]), ["AskUserQuestion"])
-  assert.deepEqual(disallowedToolFlags([proxyDef("TASK")]), ["Agent", "Task", "TaskOutput"])
+  assert.deepEqual(disallowedToolFlags([proxyDef("TASK")]), SUBAGENT)
 })
 
 test("disallowedToolFlags dedupes and preserves order across combined defs", () => {
   const out = disallowedToolFlags([proxyDef("task"), proxyDef("task_batch"), proxyDef("question")])
-  assert.deepEqual(out, ["Agent", "Task", "TaskOutput", "AskUserQuestion"])
+  assert.deepEqual(out, [...SUBAGENT, "AskUserQuestion"])
 })
 
 test("disallowedToolFlags ignores proxy tools with no Claude equivalent", () => {
@@ -333,7 +337,7 @@ test("resolveDisallowedTools merges proxy-implied and operator-named tools", () 
       proxyTools: [proxyDef("question")],
       extraDisallowedTools: ["NotebookEdit"],
     }),
-    ["AskUserQuestion", "NotebookEdit"],
+    ["AskUserQuestion", ...OFF, "NotebookEdit"],
   )
 })
 
@@ -343,7 +347,7 @@ test("resolveDisallowedTools works with no proxy tools at all", () => {
       proxyTools: null,
       extraDisallowedTools: ["NotebookEdit", "Skill"],
     }),
-    ["NotebookEdit", "Skill"],
+    [...OFF, "NotebookEdit", "Skill"],
   )
 })
 
@@ -351,9 +355,9 @@ test("resolveDisallowedTools does not repeat a tool the proxy already disabled",
   assert.deepEqual(
     resolveDisallowedTools({
       proxyTools: [proxyDef("question")],
-      extraDisallowedTools: ["AskUserQuestion", " ", "AskUserQuestion"],
+      extraDisallowedTools: ["AskUserQuestion", " ", "AskUserQuestion", "CronCreate"],
     }),
-    ["AskUserQuestion"],
+    ["AskUserQuestion", ...OFF],
   )
 })
 
@@ -364,12 +368,24 @@ test("resolveDisallowedTools still appends WebSearch when it is disabled", () =>
       extraDisallowedTools: ["NotebookEdit"],
       disableWebSearch: true,
     }),
-    ["AskUserQuestion", "NotebookEdit", "WebSearch"],
+    ["AskUserQuestion", ...OFF, "NotebookEdit", "WebSearch"],
   )
 })
 
-test("resolveDisallowedTools is empty when nothing asks for anything", () => {
-  assert.deepEqual(resolveDisallowedTools({}), [])
+test("resolveDisallowedTools always turns off the tools oc cannot host", () => {
+  assert.deepEqual(resolveDisallowedTools({}), OFF)
+  assert.ok(OFF.includes("EnterWorktree") && OFF.includes("ScheduleWakeup"))
+})
+
+test("claudeSettings and fast mode share one --settings flag", () => {
+  const build = (opts: object) => buildCliArgs({ sessionKey: "settings", skipPermissions: false, ...opts })
+  const settingsOf = (args: string[]) => JSON.parse(args[args.indexOf("--settings") + 1])
+  const settings = { autoCompactEnabled: true }
+  const fast = build({ settings, fastMode: true, cliVersion: { major: 2, minor: 1, patch: 301, raw: "2.1.301" } })
+  assert.equal(fast.filter((arg) => arg === "--settings").length, 1)
+  assert.deepEqual(settingsOf(fast), { autoCompactEnabled: true, fastMode: true })
+  assert.deepEqual(settingsOf(build({ settings })), settings)
+  assert.equal(build({}).includes("--settings"), false)
 })
 
 test("plan mode drops --dangerously-skip-permissions so it cannot permit edits", () => {

@@ -1,6 +1,12 @@
-v0.2.211 sureSmelter
+v0.2.213 tarStained
 
-scheduled prompts:
-Prompts can be scheduled for this session, a fork, or a new session using a segmented clock with seconds. Due prompts retain ordering and recover safely across process restarts; failed scheduled sends return to the paused queue. Queue and schedule actions are available from the prompt and command palette.
+time settings:
+The Time palette entry (/time) sets a shared 12-hour or 24-hour clock and time zone. Message timestamps, queues, scheduled prompts, auto-resume, warm-up schedules, revive markers, transcripts, and the usage sidebar follow these settings. The configured zone also applies to agent time tools and server schedules. Separate Claude clock toggles are removed; the default is 24-hour.
 
-Under the hood: `bun test test/session/queue.test.ts` and `bun test test/component/dialogSchedule.test.ts` passed. `git diff --check` passed.
+agent scheduling:
+Agents can schedule one-time prompts for the current session, a fork, or a new session, list pending schedules, and cancel them. Schedules use oc's persistent queue and survive restarts. Claude Code receives the schedule tools by default; the read-only preset excludes them.
+
+claude code:
+Claude's worktree, cron, and wakeup tools are disabled because oc cannot track their directory changes or preserve their schedules. Claude's Workflow tool is disabled alongside its native subagent tools when oc handles delegation. The claudeSettings provider option applies settings to every pooled account, and startup diagnostics warn when account settings or CLAUDE.md differ. Tool guidance explains the lifetime of background jobs and watches.
+
+Under the hood: Shared time-zone handling and locale formatting replace scattered clock settings. Scheduling reuses SessionPrompt.queue and retains agent and model selection. Claude settings share one --settings flag with fast mode. Updated configuration SDK types, fork scope, and developer notes. Changed Claude provider, fake-model, schedule-tool, time-format, warm-up, and usage-freshness tests passed. Pre-push validation passed.

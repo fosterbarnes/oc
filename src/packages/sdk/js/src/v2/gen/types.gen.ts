@@ -2012,6 +2012,10 @@ export type Config = {
   default_subagent?: string
   subagent_depth?: number
   username?: string
+  time?: {
+    clock?: "24h" | "12h"
+    timezone?: string
+  }
   mode?: {
     build?: AgentConfig
     plan?: AgentConfig

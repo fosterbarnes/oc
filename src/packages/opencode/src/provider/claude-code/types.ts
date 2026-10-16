@@ -47,6 +47,8 @@ export interface ClaudeCodeConfig {
   idleProcessTimeoutMs?: number
   /** Append a one-line cost / duration / cache footer to each finished turn. */
   turnStats?: boolean
+  /** Claude Code settings applied to every spawn through `--settings`. */
+  claudeSettings?: Record<string, unknown>
   logging?: LoggingConfig
 }
 
@@ -264,6 +266,13 @@ export interface ClaudeCodeProviderSettings {
   turnStats?: boolean
 
   /**
+   * Claude Code `settings.json` keys applied to every spawn through `--settings`, for example
+   * `{ "autoCompactEnabled": true }`. Each pool account reads its own config dir, so this is how
+   * every account gets the same behavior. Takes effect on the next spawn.
+   */
+  claudeSettings?: Record<string, unknown>
+
+  /**
    * Routing for Claude's built-in `WebSearch` tool.
    *
    * - `"claude"` (default): Claude CLI runs WebSearch internally via
@@ -367,7 +376,7 @@ export type EffectivePermissionMode = PermissionMode | typeof READ_ONLY_PERMISSI
  * Only oc-only tools are proxied: Claude Code's native file, shell and web
  * tools run in the CLI and render as oc tool rows.
  */
-export const DEFAULT_PROXY_TOOL_NAMES = ["Task", "run_after_turn", "time"]
+export const DEFAULT_PROXY_TOOL_NAMES = ["Task", "run_after_turn", "time", "schedule"]
 
 /**
  * Claude CLI stream-json message types.

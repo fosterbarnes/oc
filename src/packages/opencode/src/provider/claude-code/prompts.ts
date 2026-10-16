@@ -76,6 +76,12 @@ export function buildToolEnvironmentNote(proxyTools: string[], replaced: string[
     "",
     "- Skills: prefer OpenCode skills (`oc:<name>`) over the user's own Claude Code skills from `~/.claude/skills`; those are for the Claude Code desktop app and may do oc-like things in a way that bypasses OpenCode. Skills built into Claude Code are fine.",
     "- Never start an OpenCode subagent through a shell (`opencode run`, `opencode.exe`): it bypasses the TUI and the native subagent lifecycle.",
+    "- Background Bash jobs and `Monitor` watches live only as long as this Claude process: an OpenCode restart, account switch or `/reload` ends them.",
+    ...(proxyTools.includes("schedule_prompt")
+      ? [
+          "- To do something later, use `mcp__opencode_proxy__schedule_prompt`; OpenCode keeps it across restarts. Claude Code's own cron and wakeup tools are off.",
+        ]
+      : []),
     ...(proxyTools.length > 0
       ? [
           "",

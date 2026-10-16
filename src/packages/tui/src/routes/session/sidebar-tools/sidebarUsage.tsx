@@ -14,6 +14,7 @@ import { DialogPrompt } from "../../../ui/dialog-prompt"
 import { DialogSelect, type DialogSelectOption, type DialogSelectProps } from "../../../ui/dialog-select"
 import { useDialog } from "../../../ui/dialog"
 import { useToast } from "../../../ui/toast"
+import { Locale } from "../../../util/locale"
 import {
   saveUserUsageProviders,
   saveUserUsageSpacing,
@@ -770,7 +771,7 @@ export function createSidebarUsage(input: {
       title: event.allDay ? event.title :
         `${compactResetDate(new Date(event.atMs)).split(" ")[1].padEnd(8)} ${event.title}${percent(event.usedPercent, event.stale)}`,
       details: [event.allDay
-        ? new Date(event.atMs).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" })
+        ? Locale.format(event.atMs, { weekday: "long", month: "long", day: "numeric", year: "numeric" })
         : fullResetDate(event.atMs, nowMs)],
     }))
     const subscriptions = usageSubscriptions().map((subscription, index) => ({

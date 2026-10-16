@@ -22,6 +22,7 @@ import { InstanceState } from "@/effect/instance-state"
 import { Context, Duration, Effect, Exit, Fiber, Layer, Option, Schema, ScopedCache } from "effect"
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http"
 import { EffectFlock } from "@opencode-ai/core/util/effect-flock"
+import { applyTimeZone } from "@opencode-ai/core/util/timeZone"
 import { containsPath, type InstanceContext } from "../project/instance-context"
 import { ConfigV1 } from "@opencode-ai/core/v1/config/config"
 import { RemoteAuthError } from "@opencode-ai/core/v1/config/error"
@@ -352,6 +353,7 @@ const layer = Layer.effect(
         )
       }
 
+      applyTimeZone(result.time?.timezone)
       return result
     })
 

@@ -1659,7 +1659,7 @@ function UserMessage(props: {
   const revive = createMemo(() => {
     const part = props.parts.find((x) => x.type === "text" && x.synthetic && x.metadata?.kind === "revive")
     if (part?.type !== "text") return
-    const time = new Date(Number(part.metadata?.at)).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })
+    const time = Locale.time(Number(part.metadata?.at))
     return ` Revived . ${time} . ${part.metadata?.versions} `
   })
 

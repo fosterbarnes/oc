@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { formatDuration, formatResumeAt } from "../../src/util/format"
+import { formatDuration } from "../../src/util/format"
 
 describe("util.format", () => {
   describe("formatDuration", () => {
@@ -54,28 +54,6 @@ describe("util.format", () => {
       expect(formatDuration(86400)).toBe("~1 day")
       expect(formatDuration(604799)).toBe("~6 days")
       expect(formatDuration(604800)).toBe("~1 week")
-    })
-  })
-
-  describe("formatResumeAt", () => {
-    test("formats the local clock time with zero-padded hours and minutes", () => {
-      expect(formatResumeAt(new Date(2026, 9, 13, 9, 5).getTime())).toBe("resumes at 09:05")
-      expect(formatResumeAt(new Date(2026, 9, 13, 0, 0).getTime())).toBe("resumes at 00:00")
-      expect(formatResumeAt(new Date(2026, 9, 13, 23, 59).getTime())).toBe("resumes at 23:59")
-    })
-
-    test("formats 12-hour times with AM or PM, including midnight and noon", () => {
-      expect(formatResumeAt(new Date(2026, 9, 13, 0, 0).getTime(), "12h")).toBe("resumes at 12:00 AM")
-      expect(formatResumeAt(new Date(2026, 9, 13, 9, 5).getTime(), "12h")).toBe("resumes at 9:05 AM")
-      expect(formatResumeAt(new Date(2026, 9, 13, 12, 0).getTime(), "12h")).toBe("resumes at 12:00 PM")
-      expect(formatResumeAt(new Date(2026, 9, 13, 13, 1).getTime(), "12h")).toBe("resumes at 1:01 PM")
-      expect(formatResumeAt(new Date(2026, 9, 13, 23, 59).getTime(), "12h")).toBe("resumes at 11:59 PM")
-    })
-
-    test("switches back to zero-padded 24-hour time", () => {
-      const at = new Date(2026, 9, 13, 0, 5).getTime()
-      expect(formatResumeAt(at, "12h")).toBe("resumes at 12:05 AM")
-      expect(formatResumeAt(at, "24h")).toBe("resumes at 00:05")
     })
   })
 })

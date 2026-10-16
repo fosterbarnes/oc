@@ -1,11 +1,11 @@
 import { createSignal, onMount } from "solid-js"
 import { useRoute } from "./context/route"
-import { useKV } from "./context/kv"
 import { useSDK } from "./context/sdk"
 import { useSync } from "./context/sync"
 import { useDialog } from "./ui/dialog"
 import { DialogSelect } from "./ui/dialog-select"
 import { useToast } from "./ui/toast"
+import { Locale } from "./util/locale"
 
 // Claude account switching and auto-resume palette entries, spread after the warm-up entries.
 export function createClaudeAccountCommands() {
@@ -14,8 +14,6 @@ export function createClaudeAccountCommands() {
   const route = useRoute()
   const dialog = useDialog()
   const toast = useToast()
-  const kv = useKV()
-  const [resumeClock, setResumeClock] = kv.signal<"24h" | "12h">("claude_resume_clock", "24h")
   const [resumeEnabled, setResumeEnabled] = createSignal(false)
 
   onMount(() => {
@@ -26,7 +24,7 @@ export function createClaudeAccountCommands() {
   })
 
   const accountDescription = (account: { limitedUntil?: number }) =>
-    account.limitedUntil ? `limited until ${new Date(account.limitedUntil).toLocaleString()}` : undefined
+    account.limitedUntil ? `limited until ${Locale.datetime(account.limitedUntil)}` : undefined
 
   const switchAccount = {
     name: "claude.account",
@@ -137,16 +135,9 @@ export function createClaudeAccountCommands() {
                 value: "enabled",
                 onSelect: () => update(sdk.resume.set(!state.enabled)),
               },
-              {
-                title: `Time format: ${resumeClock() === "12h" ? "12-hour" : "24-hour"}`,
-                value: "clock",
-                onSelect: () => setResumeClock(resumeClock() === "12h" ? "24h" : "12h"),
-              },
               ...entries.map((entry) => ({
                 title: sync.session.get(entry.sessionID)?.title ?? entry.sessionID,
-                description: new Date(entry.fireAt).toLocaleString(undefined, {
-                  hourCycle: resumeClock() === "12h" ? "h12" : "h23",
-                }),
+                description: Locale.datetime(entry.fireAt),
                 value: entry.id,
                 category: "Scheduled (select to cancel)",
                 onSelect: () => update(sdk.resume.cancel(entry.id)),

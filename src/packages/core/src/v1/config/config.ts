@@ -109,6 +109,16 @@ export const Info = Schema.Struct({
   username: Schema.optional(Schema.String).annotate({
     description: "Custom username to display in conversations instead of system username",
   }),
+  time: Schema.optional(
+    Schema.Struct({
+      clock: Schema.optional(Schema.Literals(["24h", "12h"])).annotate({
+        description: "Clock format for every displayed time (default: 24h)",
+      }),
+      timezone: Schema.optional(Schema.String).annotate({
+        description: "IANA time zone such as America/Chicago, or auto for the system zone (default: auto)",
+      }),
+    }),
+  ).annotate({ description: "Clock format and time zone used by the TUI, agent tools, and schedulers" }),
   mode: Schema.optional(
     Schema.StructWithRest(
       Schema.Struct({ build: Schema.optional(ConfigAgentV1.Info), plan: Schema.optional(ConfigAgentV1.Info) }),

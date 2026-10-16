@@ -1,23 +1,49 @@
+import { createSignal } from "solid-js"
+import { applyTimeZone } from "@opencode-ai/core/util/timeZone"
+
+export type Clock = "24h" | "12h"
+
+const [_clock, _setClock] = createSignal<Clock>("24h")
+const [_zone, _setZone] = createSignal("auto")
+
 export function titlecase(str: string) {
   return str.replace(/\b\w/g, (c) => c.toUpperCase())
 }
 
+// App mirrors config `time` here. The zone is applied process-wide, so local `Date` getters follow it too.
+export function setTimeSettings(input: { clock?: Clock; timezone?: string } | undefined) {
+  applyTimeZone(input?.timezone)
+  _setZone(input?.timezone ?? "auto")
+  _setClock(input?.clock ?? "24h")
+}
+
+export function clock() {
+  return _clock()
+}
+
+export function zone() {
+  return _zone()
+}
+
+// Every displayed date or time goes through here. Reading the zone signal re-runs reactive callers after a
+// zone change; `toLocale*String` would keep the startup zone (see `applyTimeZone`).
+export function format(input: number, options: Intl.DateTimeFormatOptions) {
+  _zone()
+  return new Intl.DateTimeFormat(undefined, { ...options, hourCycle: _clock() === "12h" ? "h12" : "h23" }).format(
+    input,
+  )
+}
+
 export function time(input: number): string {
-  const date = new Date(input)
-  return date.toLocaleTimeString(undefined, { timeStyle: "short" })
+  return format(input, { timeStyle: "short" })
 }
 
 export function shortDateTime(input: number): string {
-  const date = new Date(input)
-  const localDate = date.toLocaleDateString(undefined, { year: "2-digit", month: "numeric", day: "numeric" })
-  return `${localDate} ${time(input)}`
+  return `${format(input, { year: "2-digit", month: "numeric", day: "numeric" })} ${time(input)}`
 }
 
 export function datetime(input: number): string {
-  const date = new Date(input)
-  const localTime = time(input)
-  const localDate = date.toLocaleDateString()
-  return `${localTime} · ${localDate}`
+  return `${time(input)} · ${format(input, { year: "numeric", month: "numeric", day: "numeric" })}`
 }
 
 export function todayTimeOrDateTime(input: number): string {

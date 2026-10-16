@@ -21,6 +21,7 @@ import {
   overlayQuestionProxyDescription,
   filterQuestionProxyByOpencodeSupport,
   DEFAULT_PROXY_TOOLS,
+  SCHEDULE_TOOL_NAMES,
   TASK_BATCH_TOOL_NAME,
   type ProxyToolDef,
 } from "./proxyToolDefs.js"
@@ -146,6 +147,10 @@ export function resolvedProxyTools(config: ClaudeCodeConfig): ProxyToolDef[] | n
     picked.push(def)
   }
   for (const n of names) {
+    if (String(n).toLowerCase() === "schedule") {
+      for (const name of SCHEDULE_TOOL_NAMES) pick(defsByName.get(name)!)
+      continue
+    }
     const def = defsByName.get(String(n).toLowerCase())
     if (!def) {
       unknown.push(String(n))
@@ -165,7 +170,7 @@ export function resolvedProxyTools(config: ClaudeCodeConfig): ProxyToolDef[] | n
   // and unmediated, and if *every* name is unknown the whole turn runs
   // with no proxy at all (issue #26).
   if (unknown.length > 0) {
-    const known = [...defsByName.keys()].join(", ")
+    const known = [...defsByName.keys(), "schedule"].join(", ")
     if (picked.length === 0) {
       log.warn("no proxyTools entry was recognised; nothing will be proxied this turn", { unknown, known })
     } else {
@@ -325,6 +330,7 @@ export async function planSpawn(input: {
         disallowedTools: ["*"],
         appendSystemPromptFile: systemPromptFile,
         fastMode: spawnModel.fast,
+        settings: config.claudeSettings,
         cliVersion: input.cliVersion,
       }),
       systemPromptFile,
@@ -362,6 +368,7 @@ export async function planSpawn(input: {
       pluginDir: skills ? ensureSkillPlugin(skills, undefined, poolSkillsDir(input.account)) : undefined,
       ...thinkingCliOptions(),
       fastMode: spawnModel.fast,
+      settings: config.claudeSettings,
       cliVersion: input.cliVersion,
     }),
     systemPromptFile,

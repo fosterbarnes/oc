@@ -396,4 +396,45 @@ export const DEFAULT_PROXY_TOOLS: ProxyToolDef[] = [
     description: "Returns the user's current local date, time, and UTC offset.",
     inputSchema: { type: "object", properties: {} },
   },
+  // The `schedule` proxyTools entry picks all three (spawnPlanning.ts `resolvedProxyTools`).
+  {
+    name: "schedule_prompt",
+    description:
+      "Schedule a prompt to be sent later, once. Give `at` or `delaySeconds`. oc keeps the schedule" +
+      " across restarts. To repeat, schedule the next run from inside the scheduled prompt.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        prompt: { type: "string", description: "The prompt to send when the time comes" },
+        at: {
+          type: "string",
+          description: "Local time to send it, `YYYY-MM-DD HH:MM` (the `time` tool's format also works)",
+        },
+        delaySeconds: { type: "number", description: "Send it this many seconds from now" },
+        target: {
+          type: "string",
+          enum: ["current", "fork", "new"],
+          description: "Where it runs: this session (default), a fork of it, or a new session",
+        },
+      },
+      required: ["prompt"],
+    },
+  },
+  {
+    name: "schedule_list",
+    description: "List this session's scheduled prompts that have not been sent yet.",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "schedule_cancel",
+    description: "Cancel one of this session's scheduled prompts by id.",
+    inputSchema: {
+      type: "object",
+      properties: { id: { type: "string", description: "Scheduled prompt id from schedule_prompt or schedule_list" } },
+      required: ["id"],
+    },
+  },
 ]
+
+/** Proxy defs the `schedule` proxyTools entry stands for. */
+export const SCHEDULE_TOOL_NAMES = ["schedule_prompt", "schedule_list", "schedule_cancel"]

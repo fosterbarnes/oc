@@ -53,6 +53,7 @@ loop; the OpenCode 2 execution engine itself is not brought back.
 | MCP Code Mode expansion | 0.3.0 | Tied to the OpenCode 2 agent runtime. |
 | Skill `disable-model-invocation` frontmatter | 0.3.0 | Claude Code already honors it; oc's own skill list does not yet. |
 | Replace the sidebar Plugins section with a load-failure toast | 0.3.0 | `/plugins` already lists plugins. |
+| Repeating scheduled prompts | 0.2.213 | A repeat interval on `session_queue` rows (schema change and migration). Until then a scheduled prompt re-arms itself. |
 
 ## Retired oc features
 

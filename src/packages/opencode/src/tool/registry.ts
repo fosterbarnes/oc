@@ -10,6 +10,7 @@ import { SessionFailedTool } from "./sessionFailed"
 import { SessionTailTool } from "./sessionTail"
 import { RunAfterTurnTool } from "./runAfterTurn"
 import { TimeTool } from "./time"
+import { ScheduleCancelTool, ScheduleListTool, SchedulePromptTool } from "./schedule"
 import { Session } from "@/session/session"
 import { Git } from "@/git"
 import { QuestionTool } from "./question"
@@ -125,6 +126,9 @@ const layer = Layer.effect(
     const sessionTail = yield* SessionTailTool
     const runAfterTurn = yield* RunAfterTurnTool
     const time = yield* TimeTool
+    const schedulePrompt = yield* SchedulePromptTool
+    const scheduleList = yield* ScheduleListTool
+    const scheduleCancel = yield* ScheduleCancelTool
     const webfetch = yield* WebFetchTool
     const websearch = yield* WebSearchTool
     const shell = yield* ShellTool
@@ -256,6 +260,9 @@ const layer = Layer.effect(
           sessionTail: Tool.init(sessionTail),
           runAfterTurn: Tool.init(runAfterTurn),
           time: Tool.init(time),
+          schedulePrompt: Tool.init(schedulePrompt),
+          scheduleList: Tool.init(scheduleList),
+          scheduleCancel: Tool.init(scheduleCancel),
           ...(codeModeTool ? { execute: Tool.init(codeModeTool) } : {}),
         })
 
@@ -278,6 +285,9 @@ const layer = Layer.effect(
             tool.sessionTail,
             tool.runAfterTurn,
             tool.time,
+            tool.schedulePrompt,
+            tool.scheduleList,
+            tool.scheduleCancel,
             tool.fetch,
             tool.todo,
             tool.search,

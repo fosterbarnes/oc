@@ -1,6 +1,7 @@
 import { projectClaudeUsage, type ClaudeCodeUsage } from "./claude"
 import type { CursorUsage } from "./cursor"
 import { orderUsageWindows, windowName } from "./format"
+import { Locale } from "../../../../util/locale"
 import type { OpenAIUsage, OpenCodeGoUsage } from "./probes"
 import type { UsageProviderId } from "./providers"
 import { usageWindowStale, type UsageSnapshot, type UsageWindow } from "./snapshot"
@@ -115,8 +116,6 @@ export function usageCalendarEvents(
     .sort((first, second) => first.atMs - second.atMs || first.title.localeCompare(second.title))
 }
 
-const CALENDAR_DAY_FORMAT = new Intl.DateTimeFormat("en-US", { weekday: "short", month: "short", day: "numeric" })
-const CALENDAR_WEEKDAY_FORMAT = new Intl.DateTimeFormat("en-US", { weekday: "short" })
 
 /** Agenda group for an event: `Ended`, `Today`, `Tomorrow`, or a short date such as `Fri, Oct 17`. */
 export function usageCalendarDay(atMs: number, nowMs: number): string {
@@ -128,7 +127,7 @@ export function usageCalendarDay(atMs: number, nowMs: number): string {
   if (days === 1) return "Tomorrow"
   const date = new Date(atMs)
   const year = date.getFullYear() === new Date(nowMs).getFullYear() ? "" : ` ${date.getFullYear()}`
-  return `${CALENDAR_DAY_FORMAT.format(date)}${year}`
+  return `${Locale.format(atMs, { weekday: "short", month: "short", day: "numeric" })}${year}`
 }
 
 /** Event count for today and the six days after it, for the strip above the agenda. */
@@ -139,7 +138,7 @@ export function usageCalendarStrip(events: UsageCalendarEvent[], nowMs: number) 
     date.setDate(date.getDate() + index)
     const start = date.valueOf()
     return {
-      label: `${CALENDAR_WEEKDAY_FORMAT.format(date)} ${date.getDate()}`,
+      label: `${Locale.format(date.valueOf(), { weekday: "short" })} ${date.getDate()}`,
       count: events.filter((event) => startOfDay(event.atMs) === start).length,
     }
   })

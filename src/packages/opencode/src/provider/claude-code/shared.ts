@@ -31,6 +31,21 @@ export const CLAUDE_HARNESS_ONLY_TOOLS: Record<string, string[]> = {
 }
 
 /**
+ * Claude Code built-ins oc never hosts. The worktree tools move the CLI's cwd out of the oc
+ * session's directory, so oc's snapshots, undo, diffs and path checks miss every edit. The
+ * scheduling tools keep their jobs in the CLI process only, so any respawn drops them; oc's
+ * `schedule_*` tools replace them.
+ */
+export const CLAUDE_UNSUPPORTED_TOOLS = [
+  "EnterWorktree",
+  "ExitWorktree",
+  "CronCreate",
+  "CronDelete",
+  "CronList",
+  "ScheduleWakeup",
+]
+
+/**
  * How a command turn splits tools between Claude Code and oc. `native`: oc tool ids (keys of
  * `CLAUDE_NATIVE_TOOLS` or `CLAUDE_HARNESS_ONLY_TOOLS`) Claude runs itself when the turn allows
  * them; the rest go through the proxy. `closed`: other Claude built-ins stay off, because the

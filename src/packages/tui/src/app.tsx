@@ -10,6 +10,7 @@ import { ClipboardProvider, useClipboard } from "./context/clipboard"
 import { ExitProvider, useExit } from "./context/exit"
 import { EpilogueProvider } from "./context/epilogue"
 import { Selection } from "./util/selection"
+import { Locale } from "./util/locale"
 import { createCliRenderer } from "@opentui/core"
 import { RouteProvider, useRoute } from "./context/route"
 import {
@@ -462,6 +463,8 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
     sync.restart.recoveryEpoch
     if (!sync.restart.pending) promptRef.requestFocus()
   })
+  // Config `time` drives every displayed time; on the native build this thread also sets the worker's zone.
+  createEffect(() => Locale.setTimeSettings(sync.data.config.time))
   onMount(() => {
     void sdk.debugLogging
       .get()

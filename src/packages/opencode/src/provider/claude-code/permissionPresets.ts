@@ -80,7 +80,8 @@ export const READ_ONLY_DISALLOWED_CLI_TOOLS = [
  * every permission request and an MCP tool prompts, which is documented as a
  * limitation rather than pretended away.
  */
-export const READ_ONLY_DENIED_PROXY_TOOLS = new Set(["task", "task_batch", "run_after_turn"])
+// `schedule` queues prompts that later run with the agent's full permissions.
+export const READ_ONLY_DENIED_PROXY_TOOLS = new Set(["task", "task_batch", "run_after_turn", "schedule"])
 
 /** The options a preset decides, resolved. */
 export interface ResolvedPermissionPreset {

@@ -21,7 +21,7 @@ import { testProviderConfig } from "../../lib/test-provider"
 export const openChat = Effect.fnUntraced(function* (
   fixture: CliFixture,
   options: { resume?: string; root?: string; real?: boolean; modelID?: string; turnStats?: boolean;
-    config?: Record<string, unknown> } = {},
+    config?: Record<string, unknown>; env?: Record<string, string> } = {},
 ) {
   const root = options.root ?? fixture.home
   const project = path.join(root, "work")
@@ -30,6 +30,7 @@ export const openChat = Effect.fnUntraced(function* (
   const server = yield* fixture.opencode.serve({
     env: {
       ...claudeEnv(root, options.real ? undefined : fixture.llm.url),
+      ...options.env,
       // The test preload's in-memory database would not survive a restart.
       OPENCODE_DB: path.join(fixture.home, "opencode.db"),
       OPENCODE_CONFIG_CONTENT: JSON.stringify(

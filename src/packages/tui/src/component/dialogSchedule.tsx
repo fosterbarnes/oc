@@ -7,6 +7,7 @@ import { useBindings, useCommandShortcut } from "../keymap"
 import { useDialog } from "../ui/dialog"
 import { DialogSelect } from "../ui/dialog-select"
 import { useToast } from "../ui/toast"
+import { Locale } from "../util/locale"
 import {
   createScheduleClock,
   editScheduleClock,
@@ -55,13 +56,12 @@ function DialogScheduleTime(props: {
   const [now, setNow] = createSignal(Date.now())
   const [clock, setClock] = createSignal(createScheduleClock(
     now(),
-    new Intl.DateTimeFormat(undefined, { hour: "numeric" }).resolvedOptions().hour12 ?? false,
+    Locale.clock() === "12h",
   ))
   const timer = setInterval(() => setNow(Date.now()), 1000)
   onCleanup(() => clearInterval(timer))
   const next = createMemo(() => nextScheduleOccurrence(clock(), now()))
   const labels = clock().hour12 ? ["hr", "min", "sec", "AM/PM"] : ["hr", "min", "sec"]
-  const format = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "medium" })
 
   function schedule() {
     const runAt = nextScheduleOccurrence(clock(), Date.now())
@@ -126,7 +126,7 @@ function DialogScheduleTime(props: {
         </For>
       </box>
       <text fg={next() === undefined ? theme.warning : theme.text}>
-        {next() === undefined ? "Enter a valid local clock time" : `Next: ${format.format(next())}`}
+        {next() === undefined ? "Enter a valid local clock time" : `Next: ${Locale.format(next()!, { dateStyle: "medium", timeStyle: "medium" })}`}
       </text>
       <box>
         <text fg={theme.textMuted}>←/→ section · ↑/↓ adjust · Shift: ±1</text>

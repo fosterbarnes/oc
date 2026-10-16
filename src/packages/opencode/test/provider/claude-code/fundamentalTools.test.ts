@@ -57,7 +57,7 @@ test("Claude Code's native tools are never proxied or turned off by the defaults
   for (const native of ["read", "glob", "grep", "bash", "write", "edit", "webfetch", "compress"]) {
     expect(names).not.toContain(native)
   }
-  expect(disallowedToolFlags(DEFAULT_PROXY_TOOLS)).toEqual(["Agent", "Task", "TaskOutput", "AskUserQuestion"])
+  expect(disallowedToolFlags(DEFAULT_PROXY_TOOLS)).toEqual(["Agent", "Task", "TaskOutput", "Workflow", "AskUserQuestion"])
 })
 test("catalog identity ignores object key order but tracks capabilities and policy", () => {
   const config = { provider: "claude-code", cliPath: "claude", proxyTools: ["Read"] }
@@ -308,7 +308,8 @@ test("oc-only proxies execute once, refresh between turns, and leave native tool
     expect(events.filter((event) => event.type === "tool-result")).toHaveLength(1)
     const process = getActiveProcess(key)
     expect(process).toBeDefined()
-    expect(process?.cliArgs).not.toContain("--disallowedTools")
+    const natives = ["Read", "Glob", "Grep", "Bash", "Edit", "Write", "WebFetch", "TodoWrite"]
+    expect(natives.filter((name) => process?.cliArgs?.includes(name))).toEqual([])
     expect(process?.proxyServer?.tools.map((tool) => tool.name)).toEqual(["session_tail"])
     const continued = {
       ...options,

@@ -1,5 +1,6 @@
 import type { ClaudeCodeUsage } from "./claude"
 import { usageWindowStale, type UsageWindow } from "./snapshot"
+import { Locale } from "../../../../util/locale"
 
 export function formatUsagePercent(used: number | null | undefined, remaining = false, compact = false): string {
   if (used === null || used === undefined || !Number.isFinite(used)) return "unavailable"
@@ -156,18 +157,16 @@ export function windowName(minutes: number | null | undefined): string {
   return `${Math.round(days)}-day`
 }
 
-const RESET_DATE_FORMAT = new Intl.DateTimeFormat("en-US", {
-  weekday: "long",
-  month: "long",
-  day: "numeric",
-  year: "numeric",
-  hour: "numeric",
-  minute: "2-digit",
-})
-
 /** Full reset date in local time with the time left, e.g. `Sunday, October 11, 2026 at 2:58 AM (in 1 day, 4 hours)`. */
 export function fullResetDate(ms: number, nowMs: number): string {
-  const date = RESET_DATE_FORMAT.format(new Date(ms))
+  const date = Locale.format(ms, {
+    weekday: "long",
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  })
   const remaining = ms - nowMs
   if (remaining <= 0) return `${date} (reset passed)`
   const totalMinutes = Math.floor(remaining / 60_000)
@@ -196,5 +195,9 @@ export function orderUsageWindows(windows: [UsageWindow, UsageWindow]): [UsageWi
 export function compactResetDate(date: Date): string {
   const hours = date.getHours()
   const minutes = String(date.getMinutes()).padStart(2, "0")
-  return `${date.getMonth() + 1}/${date.getDate()}/${String(date.getFullYear()).slice(2)} ~${hours % 12 || 12}:${minutes}${hours >= 12 ? "PM" : "AM"}`
+  const clock =
+    Locale.clock() === "12h"
+      ? `${hours % 12 || 12}:${minutes}${hours >= 12 ? "PM" : "AM"}`
+      : `${String(hours).padStart(2, "0")}:${minutes}`
+  return `${date.getMonth() + 1}/${date.getDate()}/${String(date.getFullYear()).slice(2)} ~${clock}`
 }

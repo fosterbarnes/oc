@@ -41,7 +41,7 @@ import { useRenderer, useTerminalDimensions, type JSX } from "@opentui/solid"
 import type { AssistantMessage, FilePart, UserMessage } from "@opencode-ai/sdk/v2"
 import { Locale } from "../../util/locale"
 import { errorMessage } from "../../util/error"
-import { formatDuration, formatResumeAt } from "../../util/format"
+import { formatDuration } from "../../util/format"
 import { createColors, createFrames } from "../../ui/spinner"
 import { useDialog } from "../../ui/dialog"
 import { DialogProvider as DialogProviderConnect } from "../dialog-provider"
@@ -1948,7 +1948,7 @@ export function Prompt(props: PromptProps) {
             <Match when={resumeAt()}>
               {(fireAt) => (
                 <box marginLeft={1}>
-                  <text fg={theme.accent}>{formatResumeAt(fireAt(), kv.get("claude_resume_clock", "24h"))}</text>
+                  <text fg={theme.accent}>{`resumes at ${Locale.time(fireAt())}`}</text>
                 </box>
               )}
             </Match>

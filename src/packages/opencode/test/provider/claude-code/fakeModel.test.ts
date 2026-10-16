@@ -1088,7 +1088,67 @@ describe.skipIf(!cliPath)("Claude Code CLI against TestLLMServer", () => {
       }),
     120_000,
   )
+
+  cliIt.live(
+    "oc turns off Claude tools it cannot host and schedules through its own queue",
+    (fixture) =>
+      Effect.gen(function* () {
+        yield* fixture.llm.tool("mcp__opencode_proxy__schedule_prompt", { prompt: "LATER-81", delaySeconds: 3600 })
+        yield* fixture.llm.text("SCHEDULED")
+        const chat = yield* openChat(fixture, { config: proxyToolsConfig(fixture.llm.url, ["Task", "schedule"]) })
+        yield* chat.prompt("Schedule it.")
+        const inputs = yield* fixture.llm.inputs
+        const tools = (inputs[0].tools as { name: string }[]).map((tool) => tool.name)
+        expect(tools).toContain("mcp__opencode_proxy__schedule_prompt")
+        const hosted = ["EnterWorktree", "ExitWorktree", "Workflow", "CronCreate", "CronDelete", "CronList", "ScheduleWakeup"]
+        expect(tools.filter((name) => hosted.includes(name))).toEqual([])
+        const queue = (yield* Effect.promise(() => chat.sdk.session.queue.get({ sessionID: chat.sessionID }))).data!
+        expect(queue.entries.map((entry) => entry.text)).toEqual(["LATER-81"])
+        expect(queue.entries[0].runAt! - Date.now()).toBeGreaterThan(3_500_000)
+        expect(JSON.stringify(yield* chat.parts)).toContain("SCHEDULED")
+        expectIsolated(inputs)
+      }),
+    120_000,
+  )
+
+  // The CLI turns tool search off for a non-Anthropic ANTHROPIC_BASE_URL unless ENABLE_TOOL_SEARCH
+  // is set, so every other scenario sends proxy tools with full schemas.
+  cliIt.live(
+    "deferred proxy tools load through ToolSearch when tool search is on",
+    (fixture) =>
+      Effect.gen(function* () {
+        yield* fixture.llm.tool("ToolSearch", { query: "select:mcp__opencode_proxy__time", max_results: 1 })
+        yield* fixture.llm.tool("mcp__opencode_proxy__time", {})
+        yield* fixture.llm.text("TIME-LOADED")
+        const chat = yield* openChat(fixture, {
+          config: proxyToolsConfig(fixture.llm.url, ["Task", "time"]),
+          env: { ENABLE_TOOL_SEARCH: "true" },
+        })
+        yield* chat.prompt("What time is it?")
+        const inputs = yield* fixture.llm.inputs
+        // Deferred tools are only named in a reminder until ToolSearch loads their schema.
+        const names = (input: Record<string, unknown>) =>
+          (input.tools as { name: string; defer_loading?: boolean }[]).map((tool) => tool.name)
+        expect(names(inputs[0])).toContain("ToolSearch")
+        expect(names(inputs[0])).not.toContain("mcp__opencode_proxy__time")
+        expect(JSON.stringify(inputs[0].messages)).toContain("mcp__opencode_proxy__time")
+        const loaded = (inputs.at(-1)!.tools as { name: string; defer_loading?: boolean }[]).find(
+          (tool) => tool.name === "mcp__opencode_proxy__time",
+        )
+        expect(loaded?.defer_loading).toBe(true)
+        expect(JSON.stringify(inputs.at(-1)!.messages)).toMatch(/\d{4}-\d{2}-\d{2} (Sun|Mon|Tue|Wed|Thu|Fri|Sat) \d{2}:\d{2}/)
+        expect(JSON.stringify(yield* chat.parts)).toContain("TIME-LOADED")
+        expectIsolated(inputs)
+      }),
+    120_000,
+  )
 })
+
+// `chatConfig` with its own Claude `proxyTools` list.
+function proxyToolsConfig(llmUrl: string, proxyTools: string[]) {
+  const config = chatConfig(llmUrl)
+  return { provider: { ...config.provider, "claude-code": { options: { proxyTools } } } }
+}
 
 async function runClaude(dir: string, llmUrl: string) {
   const proc = Bun.spawn(

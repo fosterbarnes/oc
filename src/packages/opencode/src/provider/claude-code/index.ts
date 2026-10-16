@@ -170,6 +170,7 @@ export function createClaudeCode(settings: ClaudeCodeProviderSettings = {}): Cla
       ignoreAnthropicApiKey: settings.ignoreAnthropicApiKey,
       idleProcessTimeoutMs: settings.idleProcessTimeoutMs,
       turnStats: settings.turnStats === true,
+      claudeSettings: settings.claudeSettings,
     })
   }
 

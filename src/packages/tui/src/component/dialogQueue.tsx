@@ -56,7 +56,7 @@ const TARGET_LABEL = { current: "", fork: " · fork", new: " · new session" } a
 
 function scheduleLabel(entry: QueueSnapshot["entries"][number]) {
   if (entry.runAt === undefined) return "Waiting"
-  return `At ${new Date(entry.runAt).toLocaleString(undefined, { dateStyle: "short", timeStyle: "medium" })}${TARGET_LABEL[entry.target]}`
+  return `At ${Locale.format(entry.runAt, { dateStyle: "short", timeStyle: "medium" })}${TARGET_LABEL[entry.target]}`
 }
 
 export function DialogQueue(props: { sessionID: string }) {

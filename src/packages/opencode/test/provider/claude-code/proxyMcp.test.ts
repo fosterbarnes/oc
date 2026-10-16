@@ -51,9 +51,9 @@ test("default proxy tools are oc-only and leave Claude Code's native tools on", 
   const defaults = resolvedProxyTools({ proxyTools: DEFAULT_PROXY_TOOL_NAMES })!
   assert.deepEqual(
     defaults.map((tool) => tool.name),
-    ["task", TASK_BATCH_TOOL_NAME, "run_after_turn", "time"],
+    ["task", TASK_BATCH_TOOL_NAME, "run_after_turn", "time", "schedule_prompt", "schedule_list", "schedule_cancel"],
   )
-  assert.deepEqual(disallowedToolFlags(defaults), ["Agent", "Task", "TaskOutput"])
+  assert.deepEqual(disallowedToolFlags(defaults), ["Agent", "Task", "TaskOutput", "Workflow"])
   assert.deepEqual(
     filterProxyByModelTools(defaults, [modelTool("task")]).map((tool) => tool.name),
     ["task", TASK_BATCH_TOOL_NAME],

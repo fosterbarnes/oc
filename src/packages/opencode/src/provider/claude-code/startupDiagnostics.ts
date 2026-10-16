@@ -1,8 +1,10 @@
 import { execFile } from "node:child_process"
-import { basename } from "node:path"
+import { readFileSync } from "node:fs"
+import path, { basename } from "node:path"
 import { promisify } from "node:util"
 
 import { InstallationVersion } from "@opencode-ai/core/installation/version"
+import { expandHome } from "./accounts.js"
 import { detectCliVersion } from "./cliVersion.js"
 import { log } from "./logger.js"
 import { mergeOpencodeMcp } from "./mcpBridge.js"
@@ -182,6 +184,47 @@ export function collectStartupDiagnostics(
   }
 }
 
+/** Account settings that change how Claude works under oc; display-only keys are left out. */
+const DRIFT_KEYS = ["autoCompactEnabled", "autoMemoryEnabled", "outputStyle", "permissions.deny"]
+
+/**
+ * What differs between the pool accounts' config dirs (each is a `CLAUDE_CONFIG_DIR`): the
+ * `DRIFT_KEYS` of `settings.json` that `claudeSettings` does not pin, and `CLAUDE.md` text. A
+ * `CLAUDE.md` that is only an `@` import is taken as shared. Unreadable files read as empty.
+ */
+export function accountSettingsDrift(accounts: readonly string[], pinned: unknown): string[] {
+  if (accounts.length < 2) return []
+  const dirs = accounts.map(expandHome)
+  const pinnedKeys = pinned && typeof pinned === "object" ? Object.keys(pinned) : []
+  const settings = dirs.map((dir) => readText(path.join(dir, "settings.json")))
+  const parsed = settings.map((text) => {
+    try {
+      return text ? (JSON.parse(text) as Record<string, unknown>) : {}
+    } catch {
+      return {}
+    }
+  })
+  const keyDrift = DRIFT_KEYS.filter((key) => !pinnedKeys.includes(key.split(".")[0])).flatMap((key) => {
+    const values = parsed.map((json) => JSON.stringify(key.split(".").reduce<unknown>(
+      (value, part) => (value && typeof value === "object" ? (value as Record<string, unknown>)[part] : undefined),
+      json,
+    )))
+    return new Set(values).size > 1 ? [`${key}: ${values.map((value, i) => `${accounts[i]}=${value ?? "unset"}`).join(", ")}`] : []
+  })
+  const memories = dirs
+    .map((dir) => readText(path.join(dir, "CLAUDE.md")).replace(/\r\n/g, "\n").trim())
+    .filter((text) => !/^@\S+$/.test(text))
+  return new Set(memories).size > 1 ? [...keyDrift, "CLAUDE.md differs between accounts"] : keyDrift
+}
+
+function readText(file: string) {
+  try {
+    return readFileSync(file, "utf8")
+  } catch {
+    return ""
+  }
+}
+
 let logged = false
 
 /**
@@ -207,6 +250,15 @@ export function logStartupDiagnostics(
         claudeCli: { path: claudeCliPath, version: cli?.raw ?? "not detected" },
       }
       log.notice("claude-code plugin ready", { ...diagnostics })
+      const drift = accountSettingsDrift(rest.accounts, firstOption(providers, "claudeSettings"))
+      if (drift.length > 0) {
+        log.warn(
+          "Claude pool accounts load different Claude Code settings, so Claude behaves differently after" +
+            " an account switch. Pin a key with the provider's `claudeSettings` option, or point the" +
+            " accounts at one CLAUDE.md (`@~/.claude/CLAUDE.md`).",
+          { drift },
+        )
+      }
     } catch (err) {
       log.debug("startup diagnostics failed", {
         error: err instanceof Error ? err.message : String(err),
