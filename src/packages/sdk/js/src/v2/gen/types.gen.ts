@@ -12007,6 +12007,8 @@ export type SessionQueueGetResponses = {
       state: "pending" | "dispatching"
       text: string
       attachments: number
+      runAt?: number
+      target: "current" | "fork" | "new"
     }>
   }
 }
@@ -12025,6 +12027,8 @@ export type SessionQueueUpdateData = {
         }
         variant?: string
         parts: Array<TextPartInput | FilePartInput | AgentPartInput>
+        runAt?: number
+        target?: "current" | "fork" | "new"
       }
     | {
         type: "edit"
@@ -12076,6 +12080,8 @@ export type SessionQueueUpdateResponses = {
       state: "pending" | "dispatching"
       text: string
       attachments: number
+      runAt?: number
+      target: "current" | "fork" | "new"
     }>
   }
 }

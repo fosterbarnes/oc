@@ -4,7 +4,7 @@ Custom fork of opencode that focuses on building on existing features simply and
 
 Not ready for widespread use until 0.3.0, especially on Linux and macOS. As of current date, testing and feature work is being done on Windows 10 LTSC IoT (i know lol). Linux and macOS feature parity is planned for v0.3.0.
 
-Current version: [v0.2.207](https://github.com/fosterbarnes/oc/commits/main)
+Current version: [v0.2.211](https://github.com/fosterbarnes/oc/commits/main)
 
 ## Standout features
 
@@ -135,7 +135,7 @@ How everything works is in the [wiki](https://github.com/fosterbarnes/oc/wiki):
 
 ## Progress
 
-[385,314](scc.txt) lines of code and counting...
+[386,635](scc.txt) lines of code and counting...
 
 <!-- code-count:start -->
 
@@ -148,8 +148,8 @@ How everything works is in the [wiki](https://github.com/fosterbarnes/oc/wiki):
 | Powershell | 25 | 1,283 | 88 | 84 | 1,111 |
 | SQL | 2 | 5 | 0 | 0 | 5 |
 | Shell | 1 | 120 | 17 | 17 | 86 |
-| TypeScript | 2,142 | 433,145 | 36,917 | 15,507 | 380,721 |
-| **Total** | **2,187** | **438,309** | **37,306** | **15,689** | **385,314** |
+| TypeScript | 2,147 | 434,555 | 36,977 | 15,536 | 382,042 |
+| **Total** | **2,192** | **439,719** | **37,366** | **15,718** | **386,635** |
 
 <!-- code-count:end -->
 

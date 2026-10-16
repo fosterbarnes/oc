@@ -15,6 +15,8 @@ import { ClaudeAccountPayload, ClaudeAccountQuery, QueuePayload, ResumeCancelPay
 import { ConflictError, InvalidRequestError, notFound } from "../errors"
 import * as SessionError from "./session-errors"
 
+const SCHEDULE_POLL_MS = 5_000
+
 export const makeOcSessionHandlers = Effect.fnUntraced(function* ({ session, promptSvc, statusSvc, configSvc, scope }: {
   session: Session.Interface
   promptSvc: SessionPrompt.Interface
@@ -61,10 +63,18 @@ export const makeOcSessionHandlers = Effect.fnUntraced(function* ({ session, pro
             field: "parts",
           })
         }
+        if (change.target && change.target !== "current" && change.runAt === undefined) {
+          return yield* new InvalidRequestError({
+            message: "Only a scheduled prompt can go to a fork or a new session",
+            field: "runAt",
+          })
+        }
         return yield* promptSvc.queue.add({
           sessionID,
           id: change.id,
           payload: { agent: change.agent, model: change.model, variant: change.variant, parts: change.parts },
+          runAt: change.runAt,
+          target: change.target,
         })
       case "edit":
         if (!change.text.trim()) {
@@ -122,10 +132,24 @@ export const makeOcSessionHandlers = Effect.fnUntraced(function* ({ session, pro
 
   // Usage-reset auto-resumes: drain overdue entries at startup, then poll.
   // The loop forks into the app scope, like promptAsync above.
+  const instances = yield* InstanceStore.Service
   yield* ScheduledResume.pollLoop(
-    { session, status: statusSvc, prompt: promptSvc, store: yield* InstanceStore.Service },
+    { session, status: statusSvc, prompt: promptSvc, store: instances },
     ScheduledResume.store,
   ).pipe(Effect.forkIn(scope))
+
+  // Scheduled prompts: send what is due now (overdue ones fire on startup), then poll.
+  const inSession = (sessionID: SessionID, effect: Effect.Effect<void>) =>
+    session.get(sessionID).pipe(
+      Effect.flatMap((info) => instances.provide({ directory: info.directory }, effect)),
+      Effect.orDie,
+    )
+  yield* promptSvc.queue.fireDue(inSession).pipe(
+    Effect.catchCause((cause) => Effect.logWarning("scheduled prompt poll failed", { cause: String(cause) })),
+    Effect.andThen(Effect.sleep(SCHEDULE_POLL_MS)),
+    Effect.forever,
+    Effect.forkIn(scope),
+  )
 
   return { resumeState, resumeSet, resumeCancel, queueSnapshot, queueUpdate, claudeAccountState, claudeAccountSet }
 })

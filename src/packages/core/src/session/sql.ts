@@ -172,8 +172,10 @@ export const SessionInputTable = sqliteTable(
   ],
 )
 
-// Prompts queued while a session is busy. The id is the user message id the prompt is sent with.
+// Queue ids remain stable; message ids are assigned just before sending, after any fork is copied.
+// Completed rows retain an empty receipt so repeated adds with the same queue id remain a no-op.
 // `dispatching` marks the head row while its prompt is being persisted and started.
+// A scheduled row has `run_at` (ms) and waits until then; `target` says which session it is sent to.
 export const SessionQueueTable = sqliteTable(
   "session_queue",
   {
@@ -182,13 +184,16 @@ export const SessionQueueTable = sqliteTable(
       .$type<SessionSchema.ID>()
       .notNull()
       .references(() => SessionTable.id, { onDelete: "cascade" }),
-    state: text().$type<"pending" | "dispatching">().notNull(),
+    state: text().$type<"pending" | "dispatching" | "completed">().notNull(),
+    message_id: text().$type<MessageID>(),
     payload: text({ mode: "json" }).notNull().$type<{
       agent?: string
       model?: { providerID: ProviderV2.ID; modelID: ModelV2.ID }
       variant?: string
       parts: readonly (SessionV1.TextPartInput | SessionV1.FilePartInput | SessionV1.AgentPartInput)[]
     }>(),
+    run_at: integer(),
+    target: text().$type<"current" | "fork" | "new">().notNull().default("current"),
     ...Timestamps,
   },
   (table) => [index("session_queue_session_time_created_idx").on(table.session_id, table.time_created)],

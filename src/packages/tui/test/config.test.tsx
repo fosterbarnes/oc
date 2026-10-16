@@ -35,12 +35,16 @@ test("switches sidebar button style live without mutating input", () => {
 })
 
 test("resolves subagent tab defaults and switches them live without mutating input", () => {
-  expect(resolve({}, { terminalSuspend: true }).subagent_tabs).toEqual({ click: "inline", auto_open: false })
+  expect(resolve({}, { terminalSuspend: true }).subagent_tabs).toEqual({
+    click: "inline",
+    auto_open: false,
+    return_to_parent: true,
+  })
   const input: TuiConfigInfo = decodeInfo({ subagent_tabs: { click: "tab" } })
   const config = resolve(input, { terminalSuspend: true })
-  expect(config.subagent_tabs).toEqual({ click: "tab", auto_open: false })
-  config.setSubagentTabs({ click: "inline", auto_open: true })
-  expect(config.subagent_tabs).toEqual({ click: "inline", auto_open: true })
+  expect(config.subagent_tabs).toEqual({ click: "tab", auto_open: false, return_to_parent: true })
+  config.setSubagentTabs({ click: "inline", auto_open: true, return_to_parent: false })
+  expect(config.subagent_tabs).toEqual({ click: "inline", auto_open: true, return_to_parent: false })
   expect(input.subagent_tabs).toEqual({ click: "tab" })
   expect(() => decodeInfo({ subagent_tabs: { click: "window" } })).toThrow()
 })

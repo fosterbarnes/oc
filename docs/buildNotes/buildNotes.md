@@ -133,6 +133,129 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-15 (~21:14) - v0.2.211 sureSmelter - Schedule keybind hint in prompt footer - Opus 5.5, low effort; Build
+
+### Agent
+- Meta: Opus 5.5; low effort; Build; completed
+- Version: 0.2.211 sureSmelter
+- Added `scheduleShortcut` (`useCommandShortcut("prompt.schedule")`) in `tui/src/component/prompt/index.tsx`; footer shows `<key> schedule` between agents and commands in normal mode, only with a session and a bound key.
+- Added `ocPaletteShortcut` (`oc.settings_palette`, default ctrl+o): footer shows `<key> oc commands` after commands when bound.
+- Verification: not run (typecheck/visual check left to user).
+
+### User
+Prompt footer
+- The bottom row now shows the schedule-prompt key (default alt+s) next to `tab agents` and `ctrl+p commands` when you are in a session.
+- The bottom row also shows `ctrl+o oc commands` after `ctrl+p commands`.
+
+---
+
+## 2026-10-15 (~20:44) - v0.2.210 chantStandards - Scheduling pass: message order and live claims - GPT-6.1 Sol; Pass
+
+### Agent
+- Meta: GPT-6.1 Sol; /pass; completed after approval for two backend fixes; no new subagents
+- Version: 0.2.210 chantStandards (same session; kept existing revision bump)
+- Reviewed session additions: scheduled queue/schema/API/polling, current/fork/new dispatch, Alt+S clock, queue labels, SDK and docs. User live-confirmed clock picker.
+- Fixed old queue ids becoming user-message ids: Claude pending-user comparisons assume chronological ids. `queue.prepare` persists fresh `message_id` immediately before send, after fork copying. `prompt.ts` uses fresh ids for all queued sends.
+- Added nullable `session_queue.message_id` via generated migration `20261016004221_sessionQueueReceipts`. Completed rows retain empty payload receipts, hidden from snapshots, so stable queue ids still deduplicate adds. Recovery checks actual message id; legacy rows fall back to original id.
+- Fixed startup reconciliation releasing another host's live dispatch: claim holds existing Flock heartbeat lease (15 s stale threshold), released on persistence/settlement or service close. Startup and due polling acquire that same lease before recovering; live owners remain untouched.
+- Fixed detached project-load failure leaving claimed entries stuck: `inSession` propagates failure to `fireDue`, which settles/releases and pauses the original queue.
+- Verification: `bun test test/session/queue.test.ts` 14 pass, 0 fail, 53 assertions. Added fresh-id order assertions, fork-copy ordering, second-service startup after live claim, post-owner-exit recovery/deduplication, and failed project-load recovery. Migration generation and scoped diff whitespace check passed. No build, typecheck, or extra TUI tests.
+- Updated `FORK.md`; existing wiki behavior remains accurate. Build/install and installed two-host recovery remain user-owned.
+
+### User
+Scheduled prompts
+- Scheduled prompts get fresh message ids when they send, preventing later chats from confusing Claude's message order.
+- Opening another oc process no longer releases a prompt that the first process is still sending.
+- If a scheduled fork cannot load its project, its prompt returns to the paused queue instead of staying stuck as Sending.
+
+---
+
+## 2026-10-15 (~20:33) - v0.2.210 chantStandards - Segmented scheduling clock - GPT-6.1 Sol; Implementation
+
+### Agent
+- Meta: GPT-6.1 Sol; /imp follow-up; Implementation; completed with `general-gpt-6.1-sol-medium` implementation subagent
+- Version: 0.2.210 chantStandards (same session; kept existing revision bump)
+- Replaced presets/relative input in `tui/src/component/dialogSchedule.tsx` with locale-aware segmented HH:MM:SS plus AM/PM. Modal keymap owns digits, section selection, arrow steps, and submit; paste accepts full clocks; preview refreshes each second.
+- Added `component/scheduleClock.ts`: immutable editing, digit auto-advance, clock carry/borrow, AM/PM, valid-range checks, next local occurrence with seconds; rejects nonexistent DST times.
+- Changed `dialogQueue.tsx` schedule labels to show date and seconds. Updated `FORK.md` and sibling wiki `Sessions.md`.
+- Verification: edited `test/component/dialogSchedule.test.ts` 9 pass, 0 fail, 63 assertions (subagent; parent combined run also passed all 9 logic tests). Scoped diff whitespace check passed. Build/typecheck/live TUI not run.
+- MISTAKE: added an unnecessary headless dialog test; blank/garbled frame capture failed twice. Removed that agent-created test at user's request. Keep clock verification focused on logic and user-owned live interaction.
+
+### User
+Scheduled prompts
+- After choosing the target, set the clock directly instead of selecting a preset or typing a delay.
+- Left/right selects hours, minutes, seconds, or AM/PM; up/down adjusts hours by 1 and minutes/seconds by 10, or 1 with Shift.
+- Type 044530 from hours to enter 04:45:30, then select AM/PM when using a 12-hour clock.
+- The picker shows the next matching date and time, and saved queue entries show seconds.
+
+---
+
+## 2026-10-15 (~19:50) - v0.2.210 chantStandards - Scheduled prompts - Opus 5.5, low; Implementation
+
+### Agent
+- Meta: Opus 5.5; low; Implementation (/spit then /imp); completed, no subagents
+- Version: 0.2.210 chantStandards
+- Added `session_queue.run_at` + `target` (`current|fork|new`) in `core/src/session/sql.ts`; migration `20261015233906_sessionQueueSchedule` via `bun run migration` (schema.json, schema.gen.ts, migration.gen.ts regenerated).
+- Changed `SessionQueue` (`opencode/src/session/queue.ts`): `nextRow` picks own-session rows by `coalesce(run_at, time_created)`; pauses hold only unscheduled rows; `mark` claims with conditional `UPDATE ... WHERE state='pending' RETURNING` (cross-process safe); added `ready`, `due(now)`; `settleRow` turns a failed scheduled row into a plain current-session row (paused) instead of retrying.
+- Changed `SessionPrompt` (`prompt.ts`): drain uses `queue.ready`; added `dispatchDetached` (fork/new session created at fire time, prompt reuses entry id) and `queue.fireDue(inSession)`, skipping busy sessions to avoid stacking completion waiters.
+- Added 5 s poll loop in `handlers/sessionOc.ts` beside the scheduled-resume loop; `inSession` loads the session's project via `InstanceStore.provide`. Runs in native too (webHandler builds the same handlers).
+- Changed `QueuePayload.add` with `runAt` (Int) / `target`; fork/new without `runAt` -> 400. `ScheduledResume.fireEntry` now waits only on unscheduled entries.
+- Regenerated legacy JS SDK; `packages/client` generate had no content change (LF-only rewrites reverted).
+- Added TUI `prompt_schedule` (`alt+s`) / palette **Schedule prompt**, `component/dialogSchedule.tsx` (target step, then presets or custom `HH:mm`/`+30m`/`+1h30m` via `parseScheduleTime`), `queuePrompt(schedule)`, schedule labels in `dialogQueue.tsx`.
+- Docs: `FORK.md` row, `docs/keybinds.md`, wiki `Sessions.md#scheduled-prompts`, `Keybinds.md` (wiki push is user's).
+- TODO: usage-reset preset (needs sidebar usage `resetAt` wiring); pane check for the dialog.
+- Risk: a detached entry whose origin session lookup fails after claim stays `dispatching` until restart (then settles to plain queued).
+- Verification: `bun run typecheck` in opencode and tui clean; `bun test test/session/queue.test.ts test/session/scheduledResume.test.ts` 29 pass (3 new: pass-through + due fire, restart-pause bypass, new-session once across two SessionQueue layers); tui `dialogSchedule.test.ts` + `queue.test.tsx` + `config.test.tsx` 23 pass. No pane or live check.
+- MISTAKE: `sed -i` in Git Bash stripped CRLF from `queue.ts` and `groups/session.ts`; restored. Use Edit for project files.
+
+### User
+Scheduled prompts
+- In a session, type a prompt and press Alt+S (or use Schedule prompt in the command palette) to send it later.
+- Pick this session, a fork of it, or a new session, then a time: in 15 minutes, 1 hour, 3 hours, tomorrow at 09:00, or a custom time like 14:30 or +2h.
+- Scheduled prompts show their time in the queued prompts list and don't hold up normal queued prompts; a paused queue doesn't hold them either.
+- If a scheduled prompt fails, it turns into a normal paused queued prompt you can edit, resume, or cancel.
+- Prompts due while oc was closed send when it starts again.
+
+---
+
+## 2026-10-15 (~19:20) - v0.2.209 seriouslyInbred - Return to parent when a subagent finishes - Opus 5.5 (grok-4.6-medium subagent), low; Implementation
+
+### Agent
+- Meta: Opus 5.5; low; Implementation via `general-grok-4.6-medium`; completed
+- Version: 0.2.209 seriouslyInbred
+- Added `subagent_tabs.return_to_parent` (default true) in `packages/tui/src/config/index.tsx`; persist key in `ocSettings.ts`.
+- Added edge effect in `routes/session/index.tsx`: on `sync.data.session_status[route.sessionID].type` non-idle -> idle for the same route, navigate to `parentID`. Skips: setting off, first status (hydration), sibling switch, open dialog, and `args.sessionID === route` (tab process launched via `attach --session <child>`).
+- Changed `/subagentTabs` dialog: title "Subagents", third row toggles the new setting; boolean rows negate generically.
+- Updated `test/config.test.tsx` expectations.
+- Verification: `bun test test/config.test.tsx` 18 pass 0 fail; `tsgo --noEmit` exit 0 (both run by subagent). Live TUI behavior unchecked.
+- TODO: wiki page and `FORK.md` entry not updated.
+
+### User
+Subagents
+- When a subagent you are watching finishes, oc now jumps back to the parent session on its own.
+- Opening an already-finished subagent, switching between subagents, or a subagent in its own terminal tab does not jump.
+- Turn it off with "Return to parent when done" in `/subagentTabs` (now titled "Subagents").
+
+---
+
+## 2026-10-15 (~19:15) - v0.2.208 smhBombas - Favorite model categories - GPT-6.1 Sol; Implementation
+
+### Agent
+- Meta: GPT-6.1 Sol; /imp; Implementation; completed
+- Version: 0.2.208 smhBombas
+- Added optional named subcategories inside Favorites in `tui/src/component/dialog-model.tsx`; Category footer action (`Ctrl+G`) assigns, creates, and opens management for rename, reorder, and deletion. Uncategorized favorites lead; empty categories remain in picker only.
+- Added `favoriteCategories` and optional favorite `category` persistence in `context/local.tsx`; old lists load uncategorized, invalid assignments clear, deleting categories preserves favorites, hiding/unfavoriting clears assignment. Model movement stays within category; cycling keeps underlying favorite-list order and passes model identity only.
+- Added nested heading rendering, indentation, row counting, and scroll targeting in `ui/dialog-select.tsx`; restored highlighted favorite after category drill-ins without changing selected model. Updated keybind definitions/docs, `FORK.md`, and sibling wiki Configuration/Keybinds pages.
+- Verification: parent reran `bun test test/context/local.test.ts` from `src/packages/tui`: 18 pass, 0 fail, 101 assertions. Covers legacy loading, saved assignments, rename/reorder/delete, cleanup, cycling, nested headings, picker creation/navigation, and search. Build, broader checks, installed mouse interaction, and restart acceptance not run; user-owned.
+
+### User
+Favorite model categories
+- In `/models`, highlight a favorite and choose Category in the footer or press Ctrl+G to assign or create a named category inside Favorites.
+- Manage categories from the same picker to rename, reorder, or delete them; deleting a category keeps its models favorited.
+- Categories and assignments are saved, and model move actions reorder within the current category.
+
+---
+
 ## 2026-10-15 (~18:51) - v0.2.207 feversJarrito - Separate harness update commands - GPT-6.1 Sol; Implementation
 
 ### Agent

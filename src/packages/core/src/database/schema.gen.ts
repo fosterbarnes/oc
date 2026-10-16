@@ -184,7 +184,10 @@ export default {
           \`id\` text PRIMARY KEY,
           \`session_id\` text NOT NULL,
           \`state\` text NOT NULL,
+          \`message_id\` text,
           \`payload\` text NOT NULL,
+          \`run_at\` integer,
+          \`target\` text DEFAULT 'current' NOT NULL,
           \`time_created\` integer NOT NULL,
           \`time_updated\` integer NOT NULL,
           CONSTRAINT \`fk_session_queue_session_id_session_id_fk\` FOREIGN KEY (\`session_id\`) REFERENCES \`session\`(\`id\`) ON DELETE CASCADE

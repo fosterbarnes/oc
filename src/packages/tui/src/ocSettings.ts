@@ -130,7 +130,7 @@ let persistTuiSettingQueue = Promise.resolve()
 export function persistTuiSetting(
   key:
     | ["keybind_preset" | "sidebar_button_style"]
-    | ["subagent_tabs", "click" | "auto_open"]
+    | ["subagent_tabs", "click" | "auto_open" | "return_to_parent"]
     | ["palette_keys"],
   value: string | boolean | Record<string, string> | undefined,
 ) {

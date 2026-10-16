@@ -61,6 +61,7 @@ import { useLocation } from "../../context/location"
 import { usePromptRef } from "../../context/prompt"
 import { DialogBtw } from "../dialogBtw"
 import { DialogQueue, createQueueSnapshot, queuePauseLabel } from "../dialogQueue"
+import { DialogSchedule, type Schedule } from "../dialogSchedule"
 
 registerOpencodeSpinner()
 
@@ -197,6 +198,8 @@ export function Prompt(props: PromptProps) {
   const keymap = useOpencodeKeymap()
   const agentShortcut = useCommandShortcut("agent.cycle")
   const paletteShortcut = useCommandShortcut("command.palette.show")
+  const scheduleShortcut = useCommandShortcut("prompt.schedule")
+  const ocPaletteShortcut = useCommandShortcut("oc.settings_palette")
   const renderer = useRenderer()
   const exit = useExit()
   const dimensions = useTerminalDimensions()
@@ -419,6 +422,19 @@ export function Prompt(props: PromptProps) {
         enabled: !!props.sessionID && !props.disabled,
         run: () => {
           void queuePrompt()
+        },
+      },
+      {
+        title: "Schedule prompt",
+        name: "prompt.schedule",
+        category: "Prompt",
+        enabled: !!props.sessionID && !props.disabled,
+        run: () => {
+          if (!store.prompt.input.trim() && store.prompt.parts.length === 0) {
+            toast.show({ message: "Type a prompt to schedule", variant: "warning" })
+            return
+          }
+          dialog.replace(() => <DialogSchedule onSchedule={(schedule) => void queuePrompt(schedule)} />)
         },
       },
       {
@@ -938,7 +954,7 @@ export function Prompt(props: PromptProps) {
     return {
       target: inputTarget,
       enabled: inputTarget() !== undefined && !props.disabled && !!props.sessionID,
-      bindings: tuiConfig.keybinds.get("prompt.queue"),
+      bindings: [...tuiConfig.keybinds.get("prompt.queue"), ...tuiConfig.keybinds.get("prompt.schedule")],
     }
   })
 
@@ -1100,18 +1116,19 @@ export function Prompt(props: PromptProps) {
   }
 
   // Alt+Enter in a session: the draft joins the session queue instead of steering the running turn.
+  // With a schedule it waits for its time instead, and may go to a fork or a new session.
   let queueing = false
-  async function queuePrompt() {
+  async function queuePrompt(schedule?: Schedule) {
     if (queueing) return false
     queueing = true
     try {
-      return await queueInner()
+      return await queueInner(schedule)
     } finally {
       queueing = false
     }
   }
 
-  async function queueInner() {
+  async function queueInner(schedule?: Schedule) {
     if (!props.sessionID || props.disabled) return false
     if (store.mode === "shell") {
       toast.show({ message: "Shell commands cannot be queued", variant: "warning" })
@@ -1138,6 +1155,7 @@ export function Prompt(props: PromptProps) {
             model: { providerID: selectedModel.providerID, modelID: selectedModel.modelID },
             variant: local.model.variant.current(),
             parts: [...editorParts, { type: "text", text: inputText }, ...nonTextParts],
+            ...schedule,
           },
         },
         { throwOnError: true },
@@ -1145,11 +1163,16 @@ export function Prompt(props: PromptProps) {
       .then(
         () => true,
         (error) => {
-          toast.show({ title: "Failed to queue prompt", message: errorMessage(error), variant: "error" })
+          toast.show({
+            title: schedule ? "Failed to schedule prompt" : "Failed to queue prompt",
+            message: errorMessage(error),
+            variant: "error",
+          })
           return false
         },
       )
     if (!queued) return false
+    if (schedule) toast.show({ message: `Scheduled for ${Locale.todayTimeOrDateTime(schedule.runAt)}`, variant: "success" })
 
     if (editorParts.length > 0) editor.markSelectionSent()
     history.append({ ...store.prompt, mode: store.mode })
@@ -1962,9 +1985,19 @@ export function Prompt(props: PromptProps) {
                       </text>
                     </Match>
                   </Switch>
+                  <Show when={props.sessionID && scheduleShortcut()}>
+                    <text fg={theme.text}>
+                      {scheduleShortcut()} <span style={{ fg: theme.textMuted }}>schedule</span>
+                    </text>
+                  </Show>
                   <text fg={theme.text}>
                     {paletteShortcut()} <span style={{ fg: theme.textMuted }}>commands</span>
                   </text>
+                  <Show when={ocPaletteShortcut()}>
+                    <text fg={theme.text}>
+                      {ocPaletteShortcut()} <span style={{ fg: theme.textMuted }}>oc commands</span>
+                    </text>
+                  </Show>
                 </Match>
                 <Match when={store.mode === "shell"}>
                   <text fg={theme.text}>

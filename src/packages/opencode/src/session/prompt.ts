@@ -171,6 +171,10 @@ export interface Interface {
       id: MessageID
     }) => Effect.Effect<SessionQueue.Snapshot, SessionQueue.NotFoundError | SessionQueue.BusyError>
     readonly resume: (sessionID: SessionID) => Effect.Effect<SessionQueue.Snapshot>
+    /** Sends scheduled prompts that are due. `inSession` runs an effect in that session's project. */
+    readonly fireDue: (
+      inSession: (sessionID: SessionID, effect: Effect.Effect<void>) => Effect.Effect<void>,
+    ) => Effect.Effect<void>
   }
 }
 
@@ -1803,13 +1807,12 @@ const layer = Layer.effect(
     // claim can slip in between a prompt being saved and its run starting. A drain keeps going while each
     // turn ends successfully; a second caller returns because the active drain picks up the next entry.
     const draining = new Set<SessionID>()
+    const isIdle = (sessionID: SessionID) => Effect.exit(state.assertNotBusy(sessionID)).pipe(Effect.map(Exit.isSuccess))
     const dispatchHead: (sessionID: SessionID) => Effect.Effect<boolean> = Effect.fn("SessionPrompt.dispatchQueued")(function* (sessionID: SessionID) {
-      const idle = Effect.exit(state.assertNotBusy(sessionID)).pipe(Effect.map(Exit.isSuccess))
+      const idle = isIdle(sessionID)
       const queued = yield* queue.claim(sessionID, idle)
       if (!queued) {
-        const snapshot = yield* queue.snapshot(sessionID)
-        const head = snapshot.entries[0]
-        if (snapshot.pause !== "none" || head?.state !== "pending") return false
+        if (!(yield* queue.ready(sessionID))) return false
         // The turn ended between the failed claim and now: claim again instead of waiting for a run that is over.
         if (yield* idle) return yield* dispatchHead(sessionID)
         // Busy: wait out maintenance, then the run in progress, then drain again.
@@ -1823,9 +1826,10 @@ const layer = Layer.effect(
         return false
       }
       // Refused during this project's reload: the queue pauses like any failed turn and resumes on demand.
-      const exit = yield* gated(
-        prompt({ ...queued.payload, sessionID, messageID: queued.id, persisted: queue.complete(queued.id) }),
-      ).pipe(Effect.exit)
+      const exit = yield* Effect.gen(function* () {
+        const messageID = yield* queue.prepare(queued.id)
+        return yield* gated(prompt({ ...queued.payload, sessionID, messageID, persisted: queue.complete(queued.id) }))
+      }).pipe(Effect.exit)
       if (Exit.isSuccess(exit) && SessionRunState.successfulTurn(exit.value)) return true
       yield* queue.settle(queued.id)
       yield* queue.pause(sessionID, "error")
@@ -1850,12 +1854,55 @@ const layer = Layer.effect(
         Effect.asVoid,
       )
 
+    // A due fork or new-session entry runs in its own session, beside the origin session's queue.
+    // If it fails before its prompt is saved, it goes back to the origin queue, paused.
+    const dispatchDetached = Effect.fn("SessionPrompt.dispatchDetached")(function* (entry: SessionQueue.Detached) {
+      const exit = yield* Effect.gen(function* () {
+        const target =
+          entry.target === "fork"
+            ? yield* sessions.fork({ sessionID: entry.sessionID })
+            : yield* sessions.create({ workspaceID: (yield* sessions.get(entry.sessionID)).workspaceID })
+        const messageID = yield* queue.prepare(entry.id)
+        yield* gated(prompt({ ...entry.payload, sessionID: target.id, messageID, persisted: queue.complete(entry.id) }))
+      }).pipe(Effect.exit)
+      if (Exit.isSuccess(exit)) return
+      yield* Effect.logWarning("scheduled prompt failed", { sessionID: entry.sessionID, cause: exit.cause })
+      yield* queue.settle(entry.id)
+      yield* queue.pause(entry.sessionID, "error")
+    })
+
     const queueOps: Interface["queue"] = {
       snapshot: queue.snapshot,
       add: (input) => queue.add(input).pipe(Effect.tap(() => kick(input.sessionID))),
       edit: queue.edit,
       cancel: (input) => queue.cancel(input).pipe(Effect.tap(() => kick(input.sessionID))),
       resume: (sessionID) => queue.resume(sessionID).pipe(Effect.tap(() => kick(sessionID))),
+      // Busy sessions are skipped: a later call finds the entry still due once the turn ends.
+      fireDue: (inSession) =>
+        Effect.gen(function* () {
+          const due = yield* queue.due(Date.now())
+          yield* Effect.forEach(
+            due.detached,
+            (entry) => inSession(entry.sessionID, dispatchDetached(entry)).pipe(
+              Effect.catchCause((cause) => Effect.gen(function* () {
+                yield* queue.settle(entry.id)
+                yield* queue.pause(entry.sessionID, "error")
+                yield* Effect.logWarning("scheduled prompt skipped", { sessionID: entry.sessionID, cause })
+              })),
+              Effect.forkIn(scope),
+            ),
+            { discard: true },
+          )
+          yield* Effect.forEach(
+            due.sessions,
+            (sessionID) =>
+              inSession(
+                sessionID,
+                isIdle(sessionID).pipe(Effect.flatMap((idle) => (idle ? kick(sessionID) : Effect.void))),
+              ).pipe(Effect.catchCause((cause) => Effect.logWarning("scheduled prompt skipped", { sessionID, cause }))),
+            { discard: true },
+          )
+        }),
     }
 
     return Service.of({

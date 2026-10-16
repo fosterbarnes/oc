@@ -1,5 +1,5 @@
-import { createMemo, createSignal } from "solid-js"
-import { useLocal } from "../context/local"
+import { createMemo, createSignal, onMount } from "solid-js"
+import { useLocal, moveModelFavorite } from "../context/local"
 import { map, pipe, flatMap, entries, filter, sortBy, take } from "remeda"
 import { DialogSelect } from "../ui/dialog-select"
 import { useDialog } from "../ui/dialog"
@@ -8,6 +8,8 @@ import { DialogVariant } from "./dialog-variant"
 import * as fuzzysort from "fuzzysort"
 import { useConnected } from "./use-connected"
 import { useSync } from "../context/sync"
+import { DialogPrompt } from "../ui/dialog-prompt"
+import { useToast } from "../ui/toast"
 
 // Value of the "Hidden" row, so model actions can ignore it
 const HIDDEN_MENU = { providerID: "", modelID: "" }
@@ -15,6 +17,7 @@ const HIDDEN_MENU = { providerID: "", modelID: "" }
 export function DialogModel(props: {
   providerID?: string
   current?: { providerID: string; modelID: string }
+  highlighted?: { providerID: string; modelID: string }
   updateCurrent?: boolean
   hiddenOnly?: boolean
   onSelect?: (providerID: string, modelID: string) => void
@@ -22,7 +25,9 @@ export function DialogModel(props: {
   const local = useLocal()
   const sync = useSync()
   const dialog = useDialog()
+  const toast = useToast()
   const [query, setQuery] = createSignal("")
+  const [highlighted, setHighlighted] = createSignal(props.highlighted ?? props.current ?? local.model.current())
 
   const connected = useConnected()
   const providers = createDialogProviderOptions()
@@ -52,6 +57,7 @@ export function DialogModel(props: {
             title: model.name ?? item.modelID,
             description: provider.name,
             category,
+            subcategory: category === "Favorites" ? item.category : undefined,
             disabled: provider.id === "opencode" && model.id.includes("-nano"),
             footer: model.cost?.input === 0 && provider.id === "opencode" ? "Free" : undefined,
             onSelect: () => {
@@ -62,7 +68,13 @@ export function DialogModel(props: {
       })
     }
 
-    const favoriteOptions = toOptions(favorites, "Favorites")
+    const favoriteOptions = toOptions(
+      [
+        ...favorites.filter((item) => !item.category),
+        ...local.model.favoriteCategories().flatMap((name) => favorites.filter((item) => item.category === name)),
+      ],
+      "Favorites",
+    )
     const recentOptions = toOptions(
       recents.filter(
         (item) => !favorites.some((fav) => fav.providerID === item.providerID && fav.modelID === item.modelID),
@@ -127,8 +139,7 @@ export function DialogModel(props: {
             {
               value: HIDDEN_MENU,
               title: `Hidden (${hiddenCount})`,
-              onSelect: () =>
-                dialog.replace(() => <DialogModel {...props} hiddenOnly />, undefined, { back: reopen }),
+              onSelect: () => dialog.replace(() => <DialogModel {...props} hiddenOnly />, undefined, { back: reopen }),
             },
           ]
         : []
@@ -169,13 +180,132 @@ export function DialogModel(props: {
   })
 
   function favoriteIndex(model: { providerID: string; modelID: string }) {
-    return local.model.favorite().findIndex(
-      (item) => item.providerID === model.providerID && item.modelID === model.modelID,
-    )
+    return local.model
+      .favorite()
+      .findIndex((item) => item.providerID === model.providerID && item.modelID === model.modelID)
   }
 
   function reopen() {
-    dialog.replace(() => <DialogModel {...props} />)
+    dialog.replace(() => <DialogModel {...props} highlighted={highlighted()} />)
+  }
+
+  function categoryPicker(model: { providerID: string; modelID: string }) {
+    const back = () => categoryPicker(model)
+    dialog.replace(
+      () => (
+        <DialogSelect<string | { action: string }>
+          title="Favorite category"
+          current={
+            local.model
+              .favorite()
+              .find((item) => item.providerID === model.providerID && item.modelID === model.modelID)?.category ?? ""
+          }
+          options={[
+            { title: "No category", value: "", onSelect: () => assign() },
+            ...local.model
+              .favoriteCategories()
+              .map((name) => ({ title: name, value: name, onSelect: () => assign(name) })),
+            {
+              title: "New category…",
+              value: { action: "new" },
+              onSelect: () => editCategory(undefined, (name) => assign(name), back),
+            },
+            { title: "Manage categories…", value: { action: "manage" }, onSelect: () => manageCategories(back) },
+          ]}
+        />
+      ),
+      undefined,
+      { back: reopen },
+    )
+    function assign(name?: string) {
+      local.model.assignFavoriteCategory(model, name)
+      reopen()
+    }
+  }
+
+  function editCategory(previous: string | undefined, done: (name: string) => void, back: () => void) {
+    dialog.replace(
+      () => (
+        <DialogPrompt
+          title={previous === undefined ? "New category" : "Rename category"}
+          value={previous}
+          placeholder="Category name"
+          onConfirm={(input) => {
+            const error = local.model.renameFavoriteCategory(previous, input)
+            if (error) return toast.show({ message: error, variant: "warning" })
+            done(input.trim())
+          }}
+        />
+      ),
+      undefined,
+      { back },
+    )
+  }
+
+  function manageCategories(back: () => void, current?: string) {
+    dialog.replace(
+      () => (
+        <DialogSelect
+          title="Manage categories"
+          current={current}
+          preserveSelection
+          options={local.model.favoriteCategories().map((name) => ({
+            title: name,
+            value: name,
+            onSelect: () => categoryActions(name, back),
+          }))}
+        />
+      ),
+      undefined,
+      { back },
+    )
+  }
+
+  function categoryActions(name: string, back: () => void) {
+    const manage = () => manageCategories(back, name)
+    dialog.replace(
+      () => (
+        <DialogSelect
+          title={name}
+          renderFilter={false}
+          options={[
+            {
+              title: "Rename…",
+              value: "rename",
+              onSelect: () => editCategory(name, (next) => manageCategories(back, next), manage),
+            },
+            {
+              title: "Move up",
+              value: "up",
+              disabled: local.model.favoriteCategories().indexOf(name) === 0,
+              onSelect: () => {
+                local.model.moveFavoriteCategory(name, -1)
+                manage()
+              },
+            },
+            {
+              title: "Move down",
+              value: "down",
+              disabled: local.model.favoriteCategories().indexOf(name) === local.model.favoriteCategories().length - 1,
+              onSelect: () => {
+                local.model.moveFavoriteCategory(name, 1)
+                manage()
+              },
+            },
+            {
+              title: "Delete category",
+              value: "delete",
+              onSelect: () => {
+                local.model.deleteFavoriteCategory(name)
+                manageCategories(back)
+              },
+            },
+          ]}
+        />
+      ),
+      undefined,
+      { back: manage },
+    )
   }
 
   function onSelect(providerID: string, modelID: string) {
@@ -202,6 +332,11 @@ export function DialogModel(props: {
   return (
     <DialogSelect<ReturnType<typeof options>[number]["value"]>
       options={options()}
+      ref={(ref) =>
+        onMount(() => {
+          if (props.highlighted) setTimeout(() => ref.moveTo(props.highlighted!), 0)
+        })
+      }
       actions={[
         {
           command: "model.dialog.provider",
@@ -220,6 +355,21 @@ export function DialogModel(props: {
           },
         },
         {
+          command: "model.dialog.favorite.category",
+          title: "Category…",
+          hidden: (option) =>
+            !connected() ||
+            props.hiddenOnly ||
+            !option ||
+            typeof option.value === "string" ||
+            favoriteIndex(option.value) < 0,
+          onTrigger: (option) => {
+            if (typeof option.value === "string") return
+            setHighlighted(option.value)
+            categoryPicker(option.value)
+          },
+        },
+        {
           command: "model.dialog.favorite.move_up",
           title: "Move favorite up",
           hidden: (option) => {
@@ -228,7 +378,7 @@ export function DialogModel(props: {
           },
           disabled: (option) => {
             if (!option || typeof option.value === "string") return true
-            return favoriteIndex(option.value) <= 0
+            return moveModelFavorite(local.model.favorite(), option.value, -1) === local.model.favorite()
           },
           onTrigger: (option) => {
             if (typeof option.value === "string") return
@@ -243,10 +393,8 @@ export function DialogModel(props: {
             return favoriteIndex(option.value) < 0
           },
           disabled: (option) => {
-            const favorites = local.model.favorite()
             if (!option || typeof option.value === "string") return true
-            const index = favoriteIndex(option.value)
-            return index < 0 || index >= favorites.length - 1
+            return moveModelFavorite(local.model.favorite(), option.value, 1) === local.model.favorite()
           },
           onTrigger: (option) => {
             if (typeof option.value === "string") return
@@ -264,6 +412,9 @@ export function DialogModel(props: {
         },
       ]}
       onFilter={setQuery}
+      onMove={(option) => {
+        if (typeof option.value !== "string" && option.value !== HIDDEN_MENU) setHighlighted(option.value)
+      }}
       preserveSelection={true}
       flat={true}
       skipFilter={true}

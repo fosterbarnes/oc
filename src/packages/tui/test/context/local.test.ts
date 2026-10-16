@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test"
 import {
   moveModelFavorite,
+  loadModelFavorites,
   parseModel,
   pruneSessionAgents,
   pruneSessionModelOverrides,
@@ -13,8 +14,12 @@ import {
   useLocal,
 } from "../../src/context/local"
 import path from "node:path"
-import { createComponent } from "solid-js"
-import { testRender } from "@opentui/solid"
+import { createComponent, onCleanup } from "solid-js"
+import { testRender, useRenderer } from "@opentui/solid"
+import { createDefaultOpenTuiKeymap } from "@opentui/keymap/opentui"
+import { OpencodeKeymapProvider, registerOpencodeKeymap } from "../../src/keymap"
+import { DialogProvider, useDialog } from "../../src/ui/dialog"
+import { DialogModel } from "../../src/component/dialog-model"
 import { tmpdir } from "../fixture/fixture"
 import { createFetch, createEventSource, directory, json } from "../fixture/tui-sdk"
 import { TestTuiContexts } from "../fixture/tui-environment"
@@ -181,18 +186,26 @@ async function mountLocal(
   let route!: ReturnType<typeof useRoute>
   let sync!: ReturnType<typeof useSync>
   let sdk!: ReturnType<typeof import("../../src/context/sdk").useSDK>
+  let dialog!: ReturnType<typeof useDialog>
   const { useSDK } = await import("../../src/context/sdk")
   function Probe() {
     local = useLocal()
     route = useRoute()
     sync = useSync()
     sdk = useSDK()
+    dialog = useDialog()
     return null
   }
-  const app = await testRender(() => createComponent(TestTuiContexts, {
+  const app = await testRender(() => {
+    const renderer = useRenderer()
+    const keymap = createDefaultOpenTuiKeymap(renderer)
+    const config = createTuiResolvedConfig()
+    onCleanup(registerOpencodeKeymap(keymap, renderer, config))
+    return createComponent(OpencodeKeymapProvider, { keymap,
+    get children() { return createComponent(TestTuiContexts, {
     directory, paths: { state: statePath, home, worktree: home },
     get children() { return createComponent(ArgsProvider, {
-      get children() { return createComponent(TuiConfigProvider, { config: createTuiResolvedConfig(),
+      get children() { return createComponent(TuiConfigProvider, { config,
         get children() { return createComponent(KVProvider, {
           get children() { return createComponent(SDKProvider, { url: "http://test", directory, fetch, events: events.source,
             get children() { return createComponent(PermissionProvider, {
@@ -203,7 +216,9 @@ async function mountLocal(
                     get children() { return createComponent(ThemeProvider, { mode: "dark",
                       get children() { return createComponent(ToastProvider, {
                         get children() { return createComponent(LocalProvider, {
-                          get children() { return createComponent(Probe, {}) },
+                          get children() { return createComponent(DialogProvider, {
+                            get children() { return createComponent(Probe, {}) },
+                          }) },
                         }) },
                       }) },
                     }) },
@@ -216,9 +231,242 @@ async function mountLocal(
         }) },
       }) },
     }) },
-  }), { width: 100, height: 30 })
-  return { app, local: () => local, route: () => route, sync: () => sync, sdk: () => sdk }
+  }) },
+  }) }, { kittyKeyboard: true, width: 100, height: 50 })
+  await wait(() => !!local && local.model.ready && sync.status === "complete")
+  return { app, local: () => local, route: () => route, sync: () => sync, sdk: () => sdk, dialog: () => dialog }
 }
+
+test("favorite categories load old favorites and discard unknown or malformed category metadata", () => {
+  const model = { providerID: "test", modelID: "first" }
+  expect(loadModelFavorites({ favorite: [model] })).toEqual({ favorite: [model], favoriteCategories: [] })
+  expect(
+    loadModelFavorites({
+      favoriteCategories: ["Code", "Code", "", null, "bad\nname", "Research"],
+      favorite: [
+        { ...model, category: "Code" },
+        { providerID: "test", modelID: "second", category: "missing" },
+        null,
+        {},
+      ],
+    }),
+  ).toEqual({
+    favoriteCategories: ["Code", "Research"],
+    favorite: [
+      { ...model, category: "Code" },
+      { providerID: "test", modelID: "second" },
+    ],
+  })
+})
+
+test("favorite categories persist assignments, rename and reorder, preserving models and cycling", async () => {
+  await using tmp = await tmpdir()
+  const statePath = path.join(tmp.path, "state")
+  const file = path.join(statePath, "model.json")
+  const favorites = ["first", "second", "third", "fourth"].map((modelID) => ({ providerID: "test", modelID }))
+  await Bun.write(file, JSON.stringify({ favorite: favorites }))
+  await Bun.write(path.join(statePath, "kv.json"), "{}")
+  const events = createEventSource()
+  const calls = createFetch((url) => {
+    if (url.pathname === "/agent") return json([{ name: "build", mode: "primary" }])
+    if (url.pathname === "/config/providers")
+      return json({
+        providers: [
+          {
+            id: "test",
+            name: "Test",
+            models: Object.fromEntries(
+              favorites.map((item) => [item.modelID, { id: item.modelID, name: item.modelID }]),
+            ),
+          },
+        ],
+        default: { test: "first" },
+      })
+  }, events)
+  const mounted = await mountLocal(tmp.path, statePath, calls.fetch, events)
+  const model = mounted.local().model
+  try {
+    await wait(() => model.ready && mounted.sync().status === "complete")
+    expect(model.favorite()).toEqual(favorites)
+    expect(model.favoriteCategories()).toEqual([])
+    model.renameFavoriteCategory(undefined, "Code")
+    model.renameFavoriteCategory(undefined, "Research")
+    expect(model.renameFavoriteCategory(undefined, "  Code  ")).toBe("Category already exists")
+    expect(model.renameFavoriteCategory(undefined, "\n")).toBeDefined()
+    model.assignFavoriteCategory(favorites[0]!, "Code")
+    model.assignFavoriteCategory(favorites[2]!, "Code")
+    model.assignFavoriteCategory(favorites[1]!, "Research")
+    model.assignFavoriteCategory(favorites[3]!, "missing")
+    expect(model.favorite()[3]!.category).toBeUndefined()
+    model.moveFavorite(favorites[2]!, -1)
+    expect(model.favorite().map((item) => item.modelID)).toEqual(["third", "second", "first", "fourth"])
+    model.moveFavorite(favorites[2]!, -1)
+    expect(model.favorite()[0]!.modelID).toBe("third")
+    model.moveFavoriteCategory("Research", -1)
+    model.moveFavoriteCategory("Research", -1)
+    expect(model.favoriteCategories()).toEqual(["Research", "Code"])
+    model.renameFavoriteCategory("Code", "Coding")
+    expect(model.favorite().filter((item) => item.category === "Coding").length).toBe(2)
+    await wait(() => JSON.parse(fs.readFileSync(file, "utf8")).favoriteCategories?.includes("Coding"))
+    const saved = await Bun.file(file).json()
+    expect(loadModelFavorites(saved)).toEqual({
+      favorite: [...model.favorite()],
+      favoriteCategories: ["Research", "Coding"],
+    })
+    const current = model.current()?.modelID
+    await model.cycleFavorite(1)
+    expect(model.current()?.modelID).toBe("fourth")
+    await model.cycleFavorite(-1)
+    expect(model.current()?.modelID).toBe(current)
+    expect(model.current()).toEqual({ providerID: "test", modelID: "first" })
+    model.deleteFavoriteCategory("Coding")
+    expect(model.favorite().map((item) => item.modelID)).toEqual(["third", "second", "first", "fourth"])
+    expect(model.favorite().filter((item) => item.category === "Coding")).toEqual([])
+    model.assignFavoriteCategory(favorites[1]!)
+    expect(model.favorite().find((item) => item.modelID === "second")?.category).toBeUndefined()
+    model.assignFavoriteCategory(favorites[1]!, "Research")
+    model.toggleFavorite(favorites[0]!)
+    expect(model.favorite().find((item) => item.modelID === "second")?.category).toBe("Research")
+    model.toggleFavorite(favorites[1]!)
+    model.toggleFavorite(favorites[1]!)
+    expect(model.favorite()[0]!.category).toBeUndefined()
+    model.assignFavoriteCategory(favorites[1]!, "Research")
+    model.toggleHidden(favorites[1]!)
+    model.toggleHidden(favorites[1]!)
+    model.toggleFavorite(favorites[1]!)
+    expect(model.favorite()[0]!.category).toBeUndefined()
+    model.deleteFavoriteCategory("Research")
+    await wait(() => JSON.parse(fs.readFileSync(file, "utf8")).favoriteCategories?.length === 0)
+    expect((await Bun.file(file).json()).favorite).toEqual(model.favorite())
+  } finally {
+    mounted.app.renderer.destroy()
+    await wait(() => {
+      const saved = JSON.parse(fs.readFileSync(file, "utf8"))
+      return (
+        JSON.stringify(saved.favorite) === JSON.stringify(model.favorite()) &&
+        JSON.stringify(saved.favoriteCategories) === JSON.stringify(model.favoriteCategories())
+      )
+    })
+    await wait(() => !fs.readdirSync(statePath).some((name) => name.endsWith(".tmp")))
+  }
+})
+
+test("model menu nests category headings and creates, assigns and manages them without selecting a model", async () => {
+  await using tmp = await tmpdir()
+  const statePath = path.join(tmp.path, "state")
+  const file = path.join(statePath, "model.json")
+  const favorites = ["first", "second", "third"].map((modelID) => ({ providerID: "test", modelID }))
+  await Bun.write(file, JSON.stringify({ favorite: favorites }))
+  await Bun.write(path.join(statePath, "kv.json"), "{}")
+  const events = createEventSource()
+  const calls = createFetch((url) => {
+    if (url.pathname === "/agent") return json([{ name: "build", mode: "primary" }])
+    if (url.pathname === "/config/providers")
+      return json({
+        providers: [
+          {
+            id: "test",
+            name: "Test",
+            models: Object.fromEntries(
+              [...favorites, { modelID: "recent" }, { modelID: "other" }].map((item) => [
+                item.modelID,
+                { id: item.modelID, name: item.modelID },
+              ]),
+            ),
+          },
+        ],
+        default: { test: "first" },
+      })
+  }, events)
+  const mounted = await mountLocal(tmp.path, statePath, calls.fetch, events)
+  const model = mounted.local().model
+  const app = mounted.app
+  async function key(run: () => void) {
+    run()
+    await app.flush()
+    await app.waitForVisualIdle()
+  }
+  function frame() {
+    return app.captureCharFrame()
+  }
+  try {
+    await wait(() => model.ready && mounted.sync().status === "complete")
+    model.set({ providerID: "test", modelID: "recent" }, { recent: true })
+    model.set(favorites[0]!)
+    mounted.dialog().replace(() => createComponent(DialogModel, {}))
+    await app.waitForVisualIdle()
+    expect(frame()).toContain("Category…")
+    await key(() => app.mockInput.pressArrow("down"))
+    await key(() => app.mockInput.pressKey("g", { ctrl: true }))
+    expect(frame()).toContain("No category")
+    expect(frame()).toContain("Manage categories…")
+    await key(() => app.mockInput.pressArrow("down"))
+    await key(() => app.mockInput.pressEnter())
+    expect(frame()).toContain("New category")
+    await app.mockInput.typeText("Code")
+    await key(() => app.mockInput.pressEnter())
+    expect(model.favorite()[1]!.category).toBe("Code")
+    expect(model.current()?.modelID).toBe("first")
+    expect(frame()).toContain("Select model")
+    const lines = frame().split("\n")
+    const at = (text: string) => lines.findIndex((line) => line.trim() === text)
+    expect(at("Favorites")).toBeLessThan(at("Code"))
+    expect(at("Code")).toBeLessThan(at("Recent"))
+    expect(lines[at("Code")]!.indexOf("Code")).toBeGreaterThan(lines[at("Favorites")]!.indexOf("Favorites"))
+    expect(lines.findIndex((line) => line.includes("first Test"))).toBeLessThan(at("Code"))
+    expect(lines.findIndex((line) => line.includes("third Test"))).toBeLessThan(at("Code"))
+    expect(lines.find((line) => line.includes("second Test"))!.indexOf("second")).toBeGreaterThan(
+      lines[at("Code")]!.indexOf("Code"),
+    )
+    // Reopening keeps the highlighted favorite even after it moves below uncategorized rows.
+    await key(() => app.mockInput.pressKey("g", { ctrl: true }))
+    expect(frame()).toContain("Favorite category")
+    await key(() => app.mockInput.pressArrow("down"))
+    await key(() => app.mockInput.pressArrow("down"))
+    await key(() => app.mockInput.pressEnter())
+    expect(frame()).toContain("Manage categories")
+    await key(() => app.mockInput.pressEnter())
+    expect(frame()).toContain("Delete category")
+    await key(() => app.mockInput.pressEnter())
+    expect(frame()).toContain("Rename category")
+    await key(() => app.mockInput.pressEscape())
+    expect(frame()).toContain("Manage categories")
+    await key(() => app.mockInput.pressEscape())
+    expect(frame()).toContain("Favorite category")
+    await key(() => app.mockInput.pressEscape())
+    expect(frame()).toContain("Select model")
+    expect(model.current()?.modelID).toBe("first")
+    model.renameFavoriteCategory(undefined, "Research")
+    model.renameFavoriteCategory(undefined, "Empty")
+    model.assignFavoriteCategory(favorites[2]!, "Research")
+    await app.waitForVisualIdle()
+    const multiple = frame().split("\n")
+    const headings = ["Favorites", "Code", "Research", "Recent", "Test"].map((text) =>
+      multiple.findIndex((line) => line.trim() === text),
+    )
+    expect(headings.every((row, index) => row >= 0 && (index === 0 || row > headings[index - 1]!))).toBe(true)
+    expect(frame()).not.toContain("Empty")
+    model.moveFavoriteCategory("Research", -1)
+    await app.waitForVisualIdle()
+    expect(frame().indexOf("Research")).toBeLessThan(frame().indexOf("Code"))
+    await app.mockInput.typeText("second")
+    await app.flush()
+    await app.waitForVisualIdle()
+    expect(frame()).toContain("second")
+    expect(frame()).not.toContain("Research")
+    expect(model.current()?.modelID).toBe("first")
+  } finally {
+    app.renderer.destroy()
+    await wait(() => {
+      const saved = JSON.parse(fs.readFileSync(file, "utf8"))
+      return (
+        JSON.stringify(saved.favorite) === JSON.stringify(model.favorite()) &&
+        JSON.stringify(saved.favoriteCategories) === JSON.stringify(model.favoriteCategories())
+      )
+    })
+    await wait(() => !fs.readdirSync(statePath).some((name) => name.endsWith(".tmp")))
+  }
+})
 
 test("moves a favorite one place and leaves it unchanged at the edge", () => {
   const favorites = [

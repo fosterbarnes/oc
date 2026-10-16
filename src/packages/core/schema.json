@@ -1,9 +1,9 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "id": "fc817221-324c-4987-afa2-36fe1b77179e",
+  "id": "6a295fc0-1345-4087-8c8d-6e6c99aa3a13",
   "prevIds": [
-    "ef64a91a-3fa3-4efd-ada5-3edc44ca1ee8"
+    "46c7f1c0-07a8-4a37-a5e9-120e85c0377f"
   ],
   "ddl": [
     {
@@ -1108,11 +1108,41 @@
     },
     {
       "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "message_id",
+      "entityType": "columns",
+      "table": "session_queue"
+    },
+    {
+      "type": "text",
       "notNull": true,
       "autoincrement": false,
       "default": null,
       "generated": null,
       "name": "payload",
+      "entityType": "columns",
+      "table": "session_queue"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "run_at",
+      "entityType": "columns",
+      "table": "session_queue"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "'current'",
+      "generated": null,
+      "name": "target",
       "entityType": "columns",
       "table": "session_queue"
     },

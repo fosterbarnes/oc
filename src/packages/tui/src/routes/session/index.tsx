@@ -73,6 +73,7 @@ import { formatTranscript } from "../../util/transcript"
 import { sessionEpilogue } from "../../util/presentation"
 import { setPreLayoutSiblingMargin } from "../../util/layout"
 import { useTuiConfig } from "../../config"
+import { useArgs } from "../../context/args"
 import { useClipboard } from "../../context/clipboard"
 import { nextThinkingMode, reasoningSummary, useThinkingMode, type ThinkingMode } from "../../context/thinking"
 import { getScrollAcceleration } from "../../util/scroll"
@@ -203,6 +204,7 @@ export function Session() {
   const project = useProject()
   const paths = useTuiPaths()
   const tuiConfig = useTuiConfig()
+  const args = useArgs()
   const kv = useKV()
   const { theme } = useTheme()
   const promptRef = usePromptRef()
@@ -597,6 +599,22 @@ export function Session() {
     for (const id of fresh) tabbed.add(id)
     untrack(() => openTabs(fresh))
   })
+
+  createEffect(
+    on(
+      () => [route.sessionID, sync.data.session_status[route.sessionID]?.type] as const,
+      (next, prev) => {
+        if (!tuiConfig.subagent_tabs.return_to_parent) return
+        if (!prev || prev[0] !== next[0]) return
+        if (!prev[1] || prev[1] === "idle" || next[1] !== "idle") return
+        // Tab processes start with attach --session <child>; stay on that launch target.
+        if (args.sessionID === next[0]) return
+        const parentID = session()?.parentID
+        if (!parentID || dialog.stack.length > 0) return
+        navigate({ type: "session", sessionID: parentID })
+      },
+    ),
+  )
 
   const ocSessionCommands = createOcSessionCommands(session)
   const sessionCommandList = createMemo(() => [

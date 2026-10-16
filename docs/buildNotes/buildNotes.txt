@@ -1,9 +1,6 @@
-v0.2.207 feversJarrito
+v0.2.211 sureSmelter
 
-Claude auto-resume:
-The resume footer and scheduled list can use 12-hour or 24-hour time. The saved choice defaults to 24-hour time and remains available when auto-resume is off.
+scheduled prompts:
+Prompts can be scheduled for this session, a fork, or a new session using a segmented clock with seconds. Due prompts retain ordering and recover safely across process restarts; failed scheduled sends return to the paused queue. Queue and schedule actions are available from the prompt and command palette.
 
-oc Palette:
-Auto-resume now switches on or off from one row and keeps the dialog open. Harness update commands now have a separate Third party harness updates heading.
-
-Under the hood: The resume time formatter handles midnight, noon, afternoon, and both clock formats. `bun test test/util/format.test.ts` passed with 10 tests and 42 assertions; `git diff --check` passed. The palette heading-only change was reviewed and traced through its group-to-heading mapping.
+Under the hood: `bun test test/session/queue.test.ts` and `bun test test/component/dialogSchedule.test.ts` passed. `git diff --check` passed.

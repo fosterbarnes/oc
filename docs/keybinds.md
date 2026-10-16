@@ -171,6 +171,7 @@ Bold marks keys where the oc layout differs from opencode. `-` means unbound.
 |---|---|---|
 | Open provider list from model dialog | `ctrl+a` | `ctrl+a` |
 | Toggle model favorite status | `ctrl+f` | `ctrl+f` |
+| Choose a favorite model category | `ctrl+g` | `ctrl+g` |
 | Move favorite model up | `shift+up` | `shift+up` |
 | Move favorite model down | `shift+down` | `shift+down` |
 | Toggle model hidden status | `ctrl+h` | `ctrl+h` |
@@ -215,6 +216,7 @@ Bold marks keys where the oc layout differs from opencode. `-` means unbound.
 |---|---|---|
 | Send prompt and stay on Home | `ctrl+return` | `ctrl+return` |
 | Queue prompt while the session is busy | `alt+return` | `alt+return` |
+| Schedule prompt | `alt+s` | `alt+s` |
 | Move to previous autocomplete item | `up`, `ctrl+p` | `up`, `ctrl+p` |
 | Move to next autocomplete item | `down`, `ctrl+n` | `down`, `ctrl+n` |
 | Hide autocomplete | `escape` | `escape` |

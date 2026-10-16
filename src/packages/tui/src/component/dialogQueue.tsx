@@ -52,6 +52,13 @@ export function queuePauseLabel(snapshot: QueueSnapshot) {
   return snapshot.pause === "none" ? undefined : PAUSE_LABEL[snapshot.pause]
 }
 
+const TARGET_LABEL = { current: "", fork: " · fork", new: " · new session" } as const
+
+function scheduleLabel(entry: QueueSnapshot["entries"][number]) {
+  if (entry.runAt === undefined) return "Waiting"
+  return `At ${new Date(entry.runAt).toLocaleString(undefined, { dateStyle: "short", timeStyle: "medium" })}${TARGET_LABEL[entry.target]}`
+}
+
 export function DialogQueue(props: { sessionID: string }) {
   const dialog = useDialog()
   const sdk = useSDK()
@@ -86,7 +93,7 @@ export function DialogQueue(props: { sessionID: string }) {
           : Locale.truncate(entry.text.split("\n")[0]?.trim() || "(attachments only)", 60),
         value: entry.id,
         bg: confirming ? theme.error : undefined,
-        description: entry.state === "dispatching" ? "Sending" : "Waiting",
+        description: entry.state === "dispatching" ? "Sending" : scheduleLabel(entry),
         footer: entry.attachments > 0 ? `${entry.attachments} attachment${entry.attachments === 1 ? "" : "s"}` : undefined,
       }
     })

@@ -121,8 +121,15 @@ export const ResumeCancelPayload = Schema.Struct({
   id: Schema.String,
 })
 // `add` takes the prompt snapshot; the id is optional and makes a repeated add a no-op.
+// `runAt` (ms) schedules it; `target` other than "current" needs `runAt`.
 export const QueuePayload = Schema.Union([
-  Schema.Struct({ type: Schema.Literal("add"), id: Schema.optional(MessageID), ...SessionQueue.Payload.fields }),
+  Schema.Struct({
+    type: Schema.Literal("add"),
+    id: Schema.optional(MessageID),
+    ...SessionQueue.Payload.fields,
+    runAt: Schema.optional(Schema.Int),
+    target: Schema.optional(SessionQueue.Target),
+  }),
   Schema.Struct({ type: Schema.Literal("edit"), id: MessageID, text: Schema.String }),
   Schema.Struct({ type: Schema.Literal("cancel"), id: MessageID }),
   Schema.Struct({ type: Schema.Literal("resume") }),

@@ -67,6 +67,9 @@ export const SubagentTabs = Schema.Struct({
   auto_open: Schema.optional(Schema.Boolean).annotate({
     description: "Open each new subagent of the viewed session in its own terminal tab (default: false)",
   }),
+  return_to_parent: Schema.optional(Schema.Boolean).annotate({
+    description: "Leave a viewed subagent for its parent when it finishes (default: true)",
+  }),
 }).annotate({
   description: "Open subagents in WezTerm or Windows Terminal tabs; needs the resident oc server",
 })
@@ -106,7 +109,7 @@ export type Info = Schema.Schema.Type<typeof Info>
 
 export type KeybindPreset = (typeof TuiKeybindPreset.Names)[number]
 export type SidebarButtonStyle = NonNullable<Info["sidebar_button_style"]>
-export type SubagentTabsSettings = { click: "inline" | "tab"; auto_open: boolean }
+export type SubagentTabsSettings = { click: "inline" | "tab"; auto_open: boolean; return_to_parent: boolean }
 
 export type Resolved = Omit<Info, "attention" | "keybind_preset" | "sidebar_button_style" | "subagent_tabs" | "palette_keys" | "keybinds" | "leader_timeout" | "mouse" | "cursor"> & {
   keybind_preset: KeybindPreset
@@ -152,6 +155,7 @@ export function resolve(input: Info, options: ResolveOptions): Resolved {
   const [subagentTabs, setSubagentTabs] = createSignal<SubagentTabsSettings>({
     click: input.subagent_tabs?.click ?? "inline",
     auto_open: input.subagent_tabs?.auto_open ?? false,
+    return_to_parent: input.subagent_tabs?.return_to_parent ?? true,
   })
   const [paletteKeys, setPaletteKeys] = createSignal<Record<string, string>>(input.palette_keys ?? {})
 

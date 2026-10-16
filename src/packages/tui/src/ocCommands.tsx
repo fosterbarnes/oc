@@ -441,11 +441,11 @@ export function createOcCommands(input: {
         slashName: "subagentTabs",
         run: () => {
           // Each pick flips one setting, then reopens on the same row so both can change in one visit.
-          const show = (current?: "click" | "auto_open") => {
+          const show = (current?: "click" | "auto_open" | "return_to_parent") => {
             const settings = tuiConfig.subagent_tabs
             dialog.replace(() => (
               <DialogSelect
-                title="Subagent tabs"
+                title="Subagents"
                 current={current}
                 options={[
                   {
@@ -458,9 +458,19 @@ export function createOcCommands(input: {
                     title: `Auto-open new subagents: ${settings.auto_open ? "On" : "Off"}`,
                     description: "Open each new subagent of the viewed session in its own tab",
                   },
+                  {
+                    value: "return_to_parent" as const,
+                    title: `Return to parent when done: ${settings.return_to_parent ? "On" : "Off"}`,
+                    description: "Leave a viewed subagent for its parent when it finishes",
+                  },
                 ]}
                 onSelect={(option) => {
-                  const value = option.value === "click" ? (settings.click === "tab" ? "inline" : "tab") : !settings.auto_open
+                  const value =
+                    option.value === "click"
+                      ? settings.click === "tab"
+                        ? "inline"
+                        : "tab"
+                      : !settings[option.value]
                   tuiConfig.setSubagentTabs({ ...settings, [option.value]: value })
                   try {
                     persistTuiSetting(["subagent_tabs", option.value], value)

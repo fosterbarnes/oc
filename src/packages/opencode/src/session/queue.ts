@@ -4,7 +4,8 @@ import { MessageTable, SessionQueueTable } from "@opencode-ai/core/session/sql"
 import { SessionV1 } from "@opencode-ai/core/v1/session"
 import { ModelV2 } from "@opencode-ai/core/model"
 import { ProviderV2 } from "@opencode-ai/core/provider"
-import { asc, eq, sql } from "drizzle-orm"
+import { Flock } from "@opencode-ai/core/util/flock"
+import { and, asc, eq, lte, ne, sql } from "drizzle-orm"
 import { Context, Effect, Layer, Schema, Semaphore } from "effect"
 import { MessageID, SessionID } from "./schema"
 
@@ -25,11 +26,18 @@ export const Payload = Schema.Struct({
 })
 export type Payload = Schema.Schema.Type<typeof Payload>
 
+// Where a scheduled prompt goes: this session, a fork of it, or a new session. Fork and new sessions
+// are created when the prompt fires.
+export const Target = Schema.Literals(["current", "fork", "new"])
+export type Target = Schema.Schema.Type<typeof Target>
+
 export const Entry = Schema.Struct({
   id: MessageID,
   state: Schema.Literals(["pending", "dispatching"]),
   text: Schema.String,
   attachments: Schema.Int,
+  runAt: Schema.optional(Schema.Int),
+  target: Target,
 })
 export type Entry = Schema.Schema.Type<typeof Entry>
 
@@ -52,11 +60,20 @@ export interface AddInput {
   sessionID: SessionID
   id?: MessageID
   payload: Payload
+  /** Send no earlier than this (ms). Without it the prompt waits only for the session to be idle. */
+  runAt?: number
+  target?: Target
 }
 
 export interface Queued {
   id: MessageID
   payload: Payload
+}
+
+/** A claimed fork or new-session entry; `sessionID` is the session it was scheduled from. */
+export interface Detached extends Queued {
+  sessionID: SessionID
+  target: "fork" | "new"
 }
 
 export interface Interface {
@@ -66,11 +83,17 @@ export interface Interface {
   readonly cancel: (input: { sessionID: SessionID; id: MessageID }) => Effect.Effect<Snapshot, NotFoundError | BusyError>
   readonly resume: (sessionID: SessionID) => Effect.Effect<Snapshot>
   readonly pause: (sessionID: SessionID, reason: PauseReason) => Effect.Effect<void>
-  /** Marks the head pending entry `dispatching` when the session is paused-free and `idle` holds. */
+  /** Marks the next sendable entry `dispatching` when `idle` holds. */
   readonly claim: (sessionID: SessionID, idle: Effect.Effect<boolean>) => Effect.Effect<Queued | undefined>
-  /** Removes an entry whose user message was persisted. */
+  /** Whether `claim` would find an entry, ignoring idle. */
+  readonly ready: (sessionID: SessionID) => Effect.Effect<boolean>
+  /** Claims every due fork/new entry and lists sessions with a due entry for the session itself. */
+  readonly due: (now: number) => Effect.Effect<{ detached: Detached[]; sessions: SessionID[] }>
+  /** Assigns a fresh user-message id after the target session (including any fork) exists. */
+  readonly prepare: (id: MessageID) => Effect.Effect<MessageID>
+  /** Hides a persisted entry, retaining an empty receipt for duplicate-add protection. */
   readonly complete: (id: MessageID) => Effect.Effect<void>
-  /** Resolves a `dispatching` entry after its send failed: removed if the message exists, else pending again. */
+  /** Settles a failed send: completed if its message exists, otherwise pending again. */
   readonly settle: (id: MessageID) => Effect.Effect<void>
 }
 
@@ -81,6 +104,18 @@ export const layer = Layer.effect(
   Effect.gen(function* () {
     const { db } = yield* Database.Service
     const lock = Semaphore.makeUnsafe(1)
+    const leases = new Map<MessageID, Flock.Lease>()
+    const release = (id: MessageID) => Effect.promise(async () => {
+      const lease = leases.get(id)
+      if (!lease) return
+      leases.delete(id)
+      await lease.release()
+    })
+    yield* Effect.addFinalizer(() => Effect.forEach([...leases.keys()], release, { discard: true }))
+    const acquire = (id: MessageID) => Effect.tryPromise({
+      try: (signal) => Flock.acquire(`session-queue:${id}`, { timeoutMs: 0, staleMs: 15_000, signal }),
+      catch: (cause) => cause,
+    }).pipe(Effect.catch((cause) => cause instanceof Flock.ContentionError ? Effect.succeed(undefined) : Effect.die(cause)))
     // Explicit pause state per session, kept in memory. "running" clears a restart pause.
     const flags = new Map<SessionID, PauseReason | "running">()
 
@@ -88,7 +123,7 @@ export const layer = Layer.effect(
       db
         .select()
         .from(SessionQueueTable)
-        .where(eq(SessionQueueTable.session_id, sessionID))
+        .where(and(eq(SessionQueueTable.session_id, sessionID), ne(SessionQueueTable.state, "completed")))
         .orderBy(asc(SessionQueueTable.time_created), sql`rowid`)
         .all()
         .pipe(Effect.orDie)
@@ -104,52 +139,107 @@ export const layer = Layer.effect(
         .get()
         .pipe(Effect.orDie, Effect.map((row) => row !== undefined))
 
+    // Pauses hold only unscheduled entries: a scheduled entry was asked for at its time, so it fires then.
     const pausedFor = (sessionID: SessionID, waiting: boolean): PauseReason | undefined => {
       const flag = flags.get(sessionID)
       if (flag === undefined) return waiting ? "restart" : undefined
       return flag === "running" ? undefined : flag
     }
 
+    const hasUnscheduled = (rows: (typeof SessionQueueTable.$inferSelect)[]) => rows.some((row) => row.run_at === null)
+
+    // The next entry this session sends: unscheduled ones unless paused, scheduled ones once due,
+    // earliest first. One at a time, so nothing is picked while another is being sent.
+    const nextRow = (sessionID: SessionID, rows: (typeof SessionQueueTable.$inferSelect)[], now: number) => {
+      const own = rows.filter((row) => row.target === "current")
+      if (own.some((row) => row.state === "dispatching")) return undefined
+      const paused = pausedFor(sessionID, hasUnscheduled(own)) !== undefined
+      return own
+        .filter((row) => (row.run_at === null ? !paused : row.run_at <= now))
+        .toSorted((a, b) => (a.run_at ?? a.time_created) - (b.run_at ?? b.time_created))[0]
+    }
+
+    // Hold a heartbeat lease until persistence/settlement. Recovery cannot release a live owner's claim.
+    const mark = (id: MessageID) =>
+      Effect.uninterruptible(Effect.gen(function* () {
+        const lease = yield* acquire(id)
+        if (!lease) return false
+        leases.set(id, lease)
+        const row = yield* db
+          .update(SessionQueueTable)
+          .set({ state: "dispatching" })
+          .where(and(eq(SessionQueueTable.id, id), eq(SessionQueueTable.state, "pending")))
+          .returning({ id: SessionQueueTable.id })
+          .get()
+          .pipe(Effect.orDie, Effect.onError(() => release(id)))
+        if (row) return true
+        yield* release(id)
+        return false
+      }))
+
     const toEntry = (row: typeof SessionQueueTable.$inferSelect): Entry => ({
       id: row.id,
-      state: row.state,
+      state: row.state === "dispatching" ? "dispatching" : "pending",
       text: row.payload.parts
         .flatMap((part) => (part.type === "text" ? [part.text] : []))
         .join("\n"),
       attachments: row.payload.parts.filter((part) => part.type !== "text").length,
+      ...(row.run_at !== null && { runAt: row.run_at }),
+      target: row.target,
     })
 
     const snapshotOf = (sessionID: SessionID) =>
       readRows(sessionID).pipe(
         Effect.map((rows): Snapshot => ({
-          pause: pausedFor(sessionID, rows.length > 0) ?? "none",
+          pause: pausedFor(sessionID, hasUnscheduled(rows)) ?? "none",
           entries: rows.map(toEntry),
         })),
       )
 
-    // A `dispatching` row whose message exists was sent before the crash or failure, so it is dropped.
-    // Otherwise the prompt never persisted and the entry waits again. Nothing is sent here.
+    const receipt = (id: MessageID) => db
+      .update(SessionQueueTable)
+      .set({ state: "completed", payload: { parts: [] } })
+      .where(eq(SessionQueueTable.id, id))
+      .run()
+      .pipe(Effect.orDie, Effect.asVoid)
+
+    // A row whose message exists was sent before the crash or failure; keep only its receipt.
+    // Otherwise the prompt never persisted and the entry waits again as an ordinary queued prompt for
+    // its own session, so a failed scheduled send is held by the pause instead of retrying every poll.
+    // Nothing is sent here.
     const settleRow = (id: MessageID) =>
       Effect.gen(function* () {
-        if (yield* isSent(id)) {
-          yield* db.delete(SessionQueueTable).where(eq(SessionQueueTable.id, id)).run().pipe(Effect.orDie)
+        const row = yield* findRow(id)
+        if (!row || row.state !== "dispatching") return
+        if (yield* isSent(row.message_id ?? id)) {
+          yield* receipt(id)
           return
         }
         yield* db
           .update(SessionQueueTable)
-          .set({ state: "pending" })
+          .set({ state: "pending", message_id: null, run_at: null, target: "current" })
           .where(eq(SessionQueueTable.id, id))
           .run()
           .pipe(Effect.orDie)
       })
 
-    const stranded = yield* db
-      .select({ id: SessionQueueTable.id })
-      .from(SessionQueueTable)
-      .where(eq(SessionQueueTable.state, "dispatching"))
-      .all()
-      .pipe(Effect.orDie)
-    yield* Effect.forEach(stranded, (row) => settleRow(row.id), { discard: true })
+    const recover = Effect.gen(function* () {
+      const stranded = yield* db
+        .select({ id: SessionQueueTable.id, sessionID: SessionQueueTable.session_id })
+        .from(SessionQueueTable)
+        .where(eq(SessionQueueTable.state, "dispatching"))
+        .all()
+        .pipe(Effect.orDie)
+      yield* Effect.forEach(stranded.filter((row) => !leases.has(row.id)), (row) => Effect.acquireUseRelease(
+        acquire(row.id),
+        (lease) => lease ? Effect.gen(function* () {
+          yield* settleRow(row.id)
+          if ((yield* findRow(row.id))?.state === "pending") flags.set(row.sessionID, "restart")
+        }) : Effect.void,
+        (lease) => lease ? Effect.promise(() => lease.release()) : Effect.void,
+      ), { discard: true })
+    })
+    yield* recover
 
     const ownRow = (input: { sessionID: SessionID; id: MessageID }) =>
       Effect.gen(function* () {
@@ -163,12 +253,20 @@ export const layer = Layer.effect(
       lock.withPermit(
         Effect.gen(function* () {
           const id = input.id ?? MessageID.ascending()
+          if ((yield* findRow(id))?.state === "completed") return yield* snapshotOf(input.sessionID)
           if (yield* isSent(id)) return yield* snapshotOf(input.sessionID)
-          // An empty queue is not paused: sending the first entry clears any earlier pause.
-          if ((yield* readRows(input.sessionID)).length === 0) flags.set(input.sessionID, "running")
+          // With nothing unscheduled waiting the queue is not paused: a new entry clears any earlier pause.
+          if (!hasUnscheduled(yield* readRows(input.sessionID))) flags.set(input.sessionID, "running")
           yield* db
             .insert(SessionQueueTable)
-            .values({ id, session_id: input.sessionID, state: "pending", payload: input.payload })
+            .values({
+              id,
+              session_id: input.sessionID,
+              state: "pending",
+              payload: input.payload,
+              run_at: input.runAt ?? null,
+              target: input.target ?? "current",
+            })
             .onConflictDoNothing()
             .run()
             .pipe(Effect.orDie)
@@ -212,21 +310,52 @@ export const layer = Layer.effect(
     const claim: Interface["claim"] = (sessionID, idle) =>
       lock.withPermit(
         Effect.gen(function* () {
-          const [head] = yield* readRows(sessionID)
-          if (!head || head.state !== "pending") return undefined
-          if (pausedFor(sessionID, true)) return undefined
+          const row = nextRow(sessionID, yield* readRows(sessionID), Date.now())
+          if (!row) return undefined
           if (!(yield* idle)) return undefined
-          yield* db
-            .update(SessionQueueTable)
-            .set({ state: "dispatching" })
-            .where(eq(SessionQueueTable.id, head.id))
-            .run()
-            .pipe(Effect.orDie)
-          return { id: head.id, payload: head.payload }
+          if (!(yield* mark(row.id))) return undefined
+          return { id: row.id, payload: row.payload }
         }),
       )
 
-    const settle: Interface["settle"] = (id) => lock.withPermit(settleRow(id))
+    const ready: Interface["ready"] = (sessionID) =>
+      lock.withPermit(readRows(sessionID).pipe(Effect.map((rows) => nextRow(sessionID, rows, Date.now()) !== undefined)))
+
+    const due: Interface["due"] = (now) =>
+      lock.withPermit(
+        Effect.gen(function* () {
+          yield* recover
+          const rows = yield* db
+            .select()
+            .from(SessionQueueTable)
+            .where(and(eq(SessionQueueTable.state, "pending"), lte(SessionQueueTable.run_at, now)))
+            .all()
+            .pipe(Effect.orDie)
+          const detached = yield* Effect.forEach(
+            rows.filter((row): row is typeof row & { target: Detached["target"] } => row.target !== "current"),
+            (row) => mark(row.id).pipe(Effect.map((claimed) => (claimed ? [row] : []))),
+          )
+          return {
+            detached: detached
+              .flat()
+              .map((row) => ({ id: row.id, payload: row.payload, sessionID: row.session_id, target: row.target })),
+            sessions: [...new Set(rows.filter((row) => row.target === "current").map((row) => row.session_id))],
+          }
+        }),
+      )
+
+    const settle: Interface["settle"] = (id) => lock.withPermit(settleRow(id).pipe(Effect.ensuring(release(id))))
+    const prepare: Interface["prepare"] = (id) => lock.withPermit(Effect.gen(function* () {
+      const row = yield* findRow(id)
+      if (!row || row.state !== "dispatching" || !leases.has(id)) {
+        return yield* Effect.die(new Error(`Queue claim is not owned: ${id}`))
+      }
+      if (row.message_id) return row.message_id
+      const messageID = MessageID.ascending()
+      yield* db.update(SessionQueueTable).set({ message_id: messageID }).where(eq(SessionQueueTable.id, id))
+        .run().pipe(Effect.orDie)
+      return messageID
+    }))
 
     return Service.of({
       snapshot: snapshotOf,
@@ -244,7 +373,10 @@ export const layer = Layer.effect(
           }),
         ),
       claim,
-      complete: (id) => db.delete(SessionQueueTable).where(eq(SessionQueueTable.id, id)).run().pipe(Effect.orDie, Effect.asVoid),
+      ready,
+      due,
+      prepare,
+      complete: (id) => lock.withPermit(receipt(id).pipe(Effect.ensuring(release(id)))),
       settle,
     })
   }),

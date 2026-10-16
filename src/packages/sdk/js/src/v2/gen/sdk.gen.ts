@@ -3950,6 +3950,8 @@ export class Queue extends HeyApiClient {
             }
             variant?: string
             parts: Array<TextPartInput | FilePartInput | AgentPartInput>
+            runAt?: number
+            target?: "current" | "fork" | "new"
           }
         | {
             type: "edit"

@@ -306,8 +306,9 @@ export const fireEntry = Effect.fn("ScheduledResume.fireEntry")(function* (
         return
       }
       // Queued prompts go first. A paused queue also waits here, so the resume never jumps ahead of it.
+      // Scheduled prompts keep their own time and do not hold the resume.
       const queued = yield* services.prompt.queue.snapshot(entry.sessionID)
-      if (queued.entries.length > 0) {
+      if (queued.entries.some((queuedEntry) => queuedEntry.runAt === undefined)) {
         yield* persist(() => store.retry(entry))
         return
       }

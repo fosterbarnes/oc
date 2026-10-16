@@ -75,6 +75,7 @@ export interface DialogSelectOption<T = any> {
   titleWidth?: number
   truncateTitle?: boolean | "left"
   category?: string
+  subcategory?: string
   categoryView?: JSX.Element
   disabled?: boolean
   /** Shown but never selected, hovered, or clicked (read-only info rows). */
@@ -109,7 +110,7 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
   })
   const [focusedAction, setFocusedAction] = createSignal<number>()
   const actionFocused = createMemo(() => focusedAction() !== undefined)
-  let selection: { value: T; category?: string } | undefined
+  let selection: { value: T; category?: string; subcategory?: string } | undefined
   let resetSelection = false
   let visibilityGeneration = 0
 
@@ -194,7 +195,19 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
       if (!category) return acc
       return acc + (i > 0 ? 2 : 1)
     }, 0)
-    return grouped().flatMap(([_, options]) => options).reduce((acc, option) => acc + 1 + (option.details?.length ?? 0), headers)
+    return grouped().reduce(
+      (total, [_, options]) =>
+        total +
+        options.reduce(
+          (acc, option, index) =>
+            acc +
+            1 +
+            (option.details?.length ?? 0) +
+            (!flatten() && option.subcategory && option.subcategory !== options[index - 1]?.subcategory ? 1 : 0),
+          0,
+        ),
+      headers,
+    )
   })
 
   const dimensions = useTerminalDimensions()
@@ -262,7 +275,10 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
         const index = flat().findIndex((option) => isDeepEqual(option.value, previous.value))
         if (index >= 0) {
           const option = flat()[index]
-          const moved = index !== store.selected || option.category !== previous.category
+          const moved =
+            index !== store.selected ||
+            option.category !== previous.category ||
+            option.subcategory !== previous.subcategory
           setStore("selected", index)
           selection = option
           if (!moved) return
@@ -335,16 +351,16 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
     let remaining = store.selected
     let index = 0
     // Locate the row by position because a unique renderable ID cannot currently be ensured.
-    for (const [category, options] of grouped()) {
+    outer: for (const [category, options] of grouped()) {
       if (category) index++
-      // Inert rows render but are not in flat(), so skip them when mapping the flat index to a row.
-      const selectable = options.flatMap((option, row) => (option.inert ? [] : [row]))
-      if (remaining < selectable.length) {
-        index += selectable[remaining]
-        break
+      for (const [row, option] of options.entries()) {
+        if (!flatten() && option.subcategory && option.subcategory !== options[row - 1]?.subcategory) index++
+        if (!option.inert) {
+          if (remaining === 0) break outer
+          remaining--
+        }
+        index++
       }
-      index += options.length
-      remaining -= selectable.length
     }
     const target = scroll.getChildren()[index]
     if (!target) return
@@ -675,78 +691,93 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
                     </box>
                   </Show>
                   <For each={options}>
-                    {(option) => {
+                    {(option, row) => {
                       const active = createMemo(() => !props.locked && isDeepEqual(option.value, selected()?.value))
                       const current = createMemo(() => isDeepEqual(option.value, props.current))
                       return (
-                        <box
-                          flexDirection="column"
-                          position="relative"
-                          onMouseMove={() => {
-                            if (props.locked) return
-                            setStore("input", "mouse")
-                            setFocusedAction(undefined)
-                          }}
-                          onMouseUp={() => {
-                            if (props.locked || option.inert) return
-                            option.onSelect?.(dialog)
-                            props.onSelect?.(option)
-                          }}
-                          onMouseOver={() => {
-                            if (props.locked) return
-                            if (store.input !== "mouse") return
-                            const index = flat().findIndex((x) => isDeepEqual(x.value, option.value))
-                            if (index === -1) return
-                            moveTo(index)
-                          }}
-                          onMouseDown={() => {
-                            if (props.locked) return
-                            const index = flat().findIndex((x) => isDeepEqual(x.value, option.value))
-                            if (index === -1) return
-                            moveTo(index)
-                          }}
-                        >
-                          <box
-                            flexDirection="row"
-                            paddingLeft={current() || option.gutter ? 1 : 3}
-                            paddingRight={3}
-                            gap={1}
-                            backgroundColor={
-                              active()
-                                ? actionFocused()
-                                  ? theme.backgroundElement
-                                  : (option.bg ?? theme.primary)
-                                : RGBA.fromInts(0, 0, 0, 0)
+                        <>
+                          <Show
+                            when={
+                              !flatten() && option.subcategory && option.subcategory !== options[row() - 1]?.subcategory
                             }
                           >
-                            <Show when={!current() && option.margin}>
-                              <box position="absolute" left={1} flexShrink={0}>
-                                {option.margin}
-                              </box>
-                            </Show>
-                            <Option
-                              title={option.title}
-                              titleView={option.titleView}
-                              footer={flatten() ? (option.category ?? option.footer) : option.footer}
-                              titleWidth={option.titleWidth}
-                              truncateTitle={option.truncateTitle}
-                              description={option.description !== category ? option.description : undefined}
-                              active={active()}
-                              current={current()}
-                              muted={actionFocused()}
-                              gutter={option.gutter}
-                            />
+                            <box paddingLeft={5}>
+                              <text fg={theme.accent} attributes={TextAttributes.BOLD}>
+                                {option.subcategory}
+                              </text>
+                            </box>
+                          </Show>
+                          <box
+                            flexDirection="column"
+                            position="relative"
+                            onMouseMove={() => {
+                              if (props.locked) return
+                              setStore("input", "mouse")
+                              setFocusedAction(undefined)
+                            }}
+                            onMouseUp={() => {
+                              if (props.locked || option.inert) return
+                              option.onSelect?.(dialog)
+                              props.onSelect?.(option)
+                            }}
+                            onMouseOver={() => {
+                              if (props.locked) return
+                              if (store.input !== "mouse") return
+                              const index = flat().findIndex((x) => isDeepEqual(x.value, option.value))
+                              if (index === -1) return
+                              moveTo(index)
+                            }}
+                            onMouseDown={() => {
+                              if (props.locked) return
+                              const index = flat().findIndex((x) => isDeepEqual(x.value, option.value))
+                              if (index === -1) return
+                              moveTo(index)
+                            }}
+                          >
+                            <box
+                              flexDirection="row"
+                              paddingLeft={
+                                (current() || option.gutter ? 1 : 3) + (!flatten() && option.subcategory ? 4 : 0)
+                              }
+                              paddingRight={3}
+                              gap={1}
+                              backgroundColor={
+                                active()
+                                  ? actionFocused()
+                                    ? theme.backgroundElement
+                                    : (option.bg ?? theme.primary)
+                                  : RGBA.fromInts(0, 0, 0, 0)
+                              }
+                            >
+                              <Show when={!current() && option.margin}>
+                                <box position="absolute" left={1} flexShrink={0}>
+                                  {option.margin}
+                                </box>
+                              </Show>
+                              <Option
+                                title={option.title}
+                                titleView={option.titleView}
+                                footer={flatten() ? (option.category ?? option.footer) : option.footer}
+                                titleWidth={option.titleWidth}
+                                truncateTitle={option.truncateTitle}
+                                description={option.description !== category ? option.description : undefined}
+                                active={active()}
+                                current={current()}
+                                muted={actionFocused()}
+                                gutter={option.gutter}
+                              />
+                            </box>
+                            <For each={option.details}>
+                              {(detail) => (
+                                <box paddingLeft={3} paddingRight={3}>
+                                  <text fg={theme.textMuted} wrapMode="none">
+                                    {Locale.truncateMiddle(detail, Math.max(1, Math.min(76, dimensions().width - 12)))}
+                                  </text>
+                                </box>
+                              )}
+                            </For>
                           </box>
-                          <For each={option.details}>
-                            {(detail) => (
-                              <box paddingLeft={3} paddingRight={3}>
-                                <text fg={theme.textMuted} wrapMode="none">
-                                  {Locale.truncateMiddle(detail, Math.max(1, Math.min(76, dimensions().width - 12)))}
-                                </text>
-                              </box>
-                            )}
-                          </For>
-                        </box>
+                        </>
                       )
                     }}
                   </For>
