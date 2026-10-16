@@ -174,7 +174,8 @@ export function makeTitles({ sessions, agents, provider, llm, work, scope }: {
   return { rename, startTitle }
 }
 
-function isRealUserMessage(message: SessionV1.WithParts) {
+// New sessions start with a synthetic "Working directory initialized" message; it is not a request.
+export function isRealUserMessage(message: SessionV1.WithParts) {
   return message.info.role === "user" && !message.parts.every((part) => "synthetic" in part && part.synthetic)
 }
 

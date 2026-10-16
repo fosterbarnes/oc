@@ -66,7 +66,7 @@ import { SessionReminders } from "./reminders"
 import { SessionTools } from "./tools"
 import { Question } from "@/question"
 import { SessionWork } from "@opencode-ai/core/session/work"
-import { makeTitles } from "./titleGen"
+import { isRealUserMessage, makeTitles } from "./titleGen"
 import { makeSideQuestion, type GenerateError, type GenerateInput, type GenerateResult } from "./sideQuestion"
 
 // @ts-ignore
@@ -1820,8 +1820,9 @@ const layer = Layer.effect(
         const session = yield* sessions.get(input.sessionID).pipe(Effect.orDie)
         yield* sessions.setTitle({ sessionID: input.sessionID, title: agentPushTitle(session.directory) })
         // Opened by /agent-push: only such a session may auto-delete after its push (`sessionComplete.ts`).
-        const earlier = yield* sessions.messages({ sessionID: input.sessionID, limit: 1 }).pipe(Effect.orDie)
-        if (earlier.length === 0) {
+        // The synthetic message a new session starts with does not count.
+        const earlier = yield* sessions.messages({ sessionID: input.sessionID }).pipe(Effect.orDie)
+        if (!earlier.some((message) => message.info.role === "assistant" || isRealUserMessage(message))) {
           yield* sessions.setMetadata({
             sessionID: input.sessionID,
             metadata: { ...session.metadata, [PUSH_SESSION_KEY]: true },

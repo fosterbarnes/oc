@@ -133,6 +133,23 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-16 (~18:46) - v0.2.223 uncontrollableDrippler - Fix agent-push auto-delete skipping new sessions - Opus 5.5, medium effort; Debug
+
+### Agent
+- Meta: Opus 5.5; medium effort; Debug (user report: `oc - agent-push:#44bc1e2`, `ses_eb91f30f6ffeTiEjw8dwGTo4bG`, not deleted); completed
+- Version: 0.2.223 uncontrollableDrippler
+- ERROR (shipped in v0.2.222 `44bc1e2`): a fresh session never got `ocPushSession`. New sessions start with a synthetic `noReply` "Working directory initialized" message (`tui/src/ocNewSession.ts`, `cli/cmd/oc.ts`, `cli/cmd/session.ts`), and the check in `SessionPrompt.command` treated any earlier message as prior work (`messages` with `limit: 1`). The push session's `session_complete` (`autoDelete: true`) answered "Not marked for auto-delete: the session did not start with /agent-push.", and the TUI's `isAutoDeletable` also requires the marker.
+- Fixed `session/prompt.ts`: the marker is set when no earlier message is an assistant reply or a real user message. Exported `isRealUserMessage` from `session/titleGen.ts` (auto-rename's existing rule: a user message whose parts are all `synthetic` is not a request) and reused it.
+- MISTAKE: the v0.2.222 test created a bare session with no messages, a shape real callers never send. Prevention: build test sessions the way `ocNewSession.ts` does; the first-message test now sends the synthetic init message first.
+- Kept: `ses_eb91f30f6ffeTiEjw8dwGTo4bG` has no marker and no flag, so it stays until deleted by hand.
+- Verification: opencode typecheck exit 0. `prompt.test.ts` -t "agent-push": 2 pass 0 fail. `autoRename.test.ts` (titleGen export): 10 pass 0 fail.
+
+### User
+Sessions
+- Agent-push auto-delete works again for new sessions started with `/agent-push`; the hidden "working directory" message a new session begins with no longer counts as earlier work.
+
+---
+
 ## 2026-10-16 (~18:40) - v0.2.222 bblAdvantages - agent-push auto-delete only for sessions opened by agent-push - Opus 5.5, medium effort; Implementation
 
 ### Agent

@@ -1,6 +1,6 @@
-v0.2.222 bblAdvantages
+v0.2.223 uncontrollableDrippler
 
 sessions:
-Agent-push auto-delete now only removes sessions that started with /agent-push. Running it at the end of other work keeps that session and its history. Sessions marked under the previous rule are also kept unless they started with /agent-push.
+Agent-push auto-delete now works for fresh sessions that begin with the hidden working-directory initialization message. That synthetic message no longer counts as earlier work when deciding whether a session started with /agent-push.
 
-Under the hood: Record the first-message agent-push marker before saving the command message, and require it both when marking a session for auto-delete and when the TUI deletes it. Opencode and tui typechecks passed; the targeted agent-push prompt tests and auto-delete/title tests each passed 2 tests. The agent-push workflow runs prePush checks before pushing.
+Under the hood: Reuse the title generator's real-user-message check when setting the push-session marker, and cover the synthetic initialization message in the regression test. The recorded verification passed: opencode typecheck, 2 targeted agent-push prompt tests, and 10 auto-rename tests. The agent-push workflow runs prePush checks before pushing.

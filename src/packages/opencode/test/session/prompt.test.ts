@@ -2887,6 +2887,13 @@ it.instance("agent-push as the first message marks the session as a push session
       command: { "agent-push": { template: "Push" } },
     }))
     const { prompt, chat, sessions } = yield* boot()
+    // Every new oc session starts with this synthetic message (`tui/src/ocNewSession.ts`).
+    yield* prompt.prompt({
+      sessionID: chat.id,
+      agent: "build",
+      noReply: true,
+      parts: [{ type: "text", text: `Working directory initialized: ${chat.directory}`, synthetic: true }],
+    })
     yield* llm.text("pushed")
     yield* prompt.command({ sessionID: chat.id, command: "agent-push", arguments: "" })
     expect((yield* sessions.get(chat.id)).metadata?.[PUSH_SESSION_KEY]).toBe(true)
