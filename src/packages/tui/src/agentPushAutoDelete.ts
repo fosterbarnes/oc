@@ -16,9 +16,16 @@ const _KV_KEY = "agent_push_auto_delete"
 // Set by session_complete with autoDelete after a verified push (`AUTO_DELETE_KEY` in
 // opencode/src/tool/sessionComplete.ts). A later prompt clears sessionComplete, which keeps the session.
 const _FLAG = "ocAutoDelete"
+// Set only when /agent-push opened the session (`PUSH_SESSION_KEY`), so a push run mid-work never deletes,
+// including sessions flagged before that rule existed.
+const _PUSH_SESSION = "ocPushSession"
 
 export function isAutoDeletable(session?: { metadata?: Record<string, unknown>; sessionComplete?: boolean }) {
-  return session?.metadata?.[_FLAG] === true && session.sessionComplete === true
+  return (
+    session?.metadata?.[_FLAG] === true &&
+    session.metadata[_PUSH_SESSION] === true &&
+    session.sessionComplete === true
+  )
 }
 
 // When on, deletes a flagged session once this tab leaves it. Sessions left by closing oc are swept

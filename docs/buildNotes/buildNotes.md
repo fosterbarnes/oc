@@ -133,6 +133,24 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-16 (~18:40) - v0.2.222 bblAdvantages - agent-push auto-delete only for sessions opened by agent-push - Opus 5.5, medium effort; Implementation
+
+### Agent
+- Meta: Opus 5.5; medium effort; Implementation (user request after the v0.2.221 push); completed
+- Version: 0.2.222 bblAdvantages
+- Added `PUSH_SESSION_KEY` (`ocPushSession`) in `tool/sessionComplete.ts`. `SessionPrompt.command` (`session/prompt.ts`) sets it in session metadata when `agent-push` runs and the session has no messages yet (`sessions.messages` with `limit: 1`). Commands leave no structured marker on the user message, so the check runs before the command's message is saved.
+- Changed `session_complete`: `autoDelete: true` sets `ocAutoDelete` only when `ocPushSession` is set; otherwise the reply says "Not marked for auto-delete: the session did not start with /agent-push." Title hash and the upstream check are unchanged.
+- Changed `tui/src/agentPushAutoDelete.ts` `isAutoDeletable`: also requires `ocPushSession`, so sessions flagged under the old rule (mid-session pushes) are never deleted.
+- Kept: forks still drop `ocAutoDelete` and `ocAutoRename` and keep `ocPushSession` (a fork's first message is the same `/agent-push`).
+- Docs: `..\oc.wiki\Sessions.md` auto-delete paragraph names the first-message rule (wiki push is the user's).
+- Verification: typecheck exit 0 for opencode and tui. `task.test.ts` -t "autoDelete|agent-push title": 2 pass 0 fail (autoDelete test now seeds the marker and adds the unmarked case). `prompt.test.ts` -t "agent-push": 2 pass 0 fail (mid-session leaves no marker; first-message command sets it).
+
+### User
+Sessions
+- Agent-push auto-delete now only removes sessions that started with `/agent-push`; running it at the end of other work keeps that session and its history.
+
+---
+
 ## 2026-10-16 (~18:20) - v0.2.221 skiingAragorns - Merge perf review Waves 0-1 from ocCLONE; denied turns stop the loop again - Opus 5.5, medium effort; Implementation
 
 ### Agent

@@ -51,7 +51,7 @@ import { decodeDataUrl } from "@/util/data-url"
 import { Cause, Effect, Exit, Latch, Layer, Option, Scope, Context, Schema, Semaphore, Types } from "effect"
 import { InstanceState } from "@/effect/instance-state"
 import { TaskTool, type TaskPromptOps } from "@/tool/task"
-import { agentPushTitle } from "@/tool/sessionComplete"
+import { agentPushTitle, PUSH_SESSION_KEY } from "@/tool/sessionComplete"
 import { SessionRunState } from "./run-state"
 import { SessionQueue } from "./queue"
 import { ScheduledDelivery } from "./scheduledDelivery"
@@ -1819,6 +1819,14 @@ const layer = Layer.effect(
       if (names.includes("agent-push")) {
         const session = yield* sessions.get(input.sessionID).pipe(Effect.orDie)
         yield* sessions.setTitle({ sessionID: input.sessionID, title: agentPushTitle(session.directory) })
+        // Opened by /agent-push: only such a session may auto-delete after its push (`sessionComplete.ts`).
+        const earlier = yield* sessions.messages({ sessionID: input.sessionID, limit: 1 }).pipe(Effect.orDie)
+        if (earlier.length === 0) {
+          yield* sessions.setMetadata({
+            sessionID: input.sessionID,
+            metadata: { ...session.metadata, [PUSH_SESSION_KEY]: true },
+          })
+        }
       }
 
       const result = yield* prompt({

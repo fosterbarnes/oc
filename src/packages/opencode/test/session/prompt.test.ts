@@ -53,6 +53,7 @@ import { SystemPrompt } from "../../src/session/system"
 import { Shell } from "@opencode-ai/core/shell"
 import { Snapshot } from "../../src/snapshot"
 import { ToolRegistry } from "@/tool/registry"
+import { PUSH_SESSION_KEY } from "@/tool/sessionComplete"
 import { Truncate } from "@/tool/truncate"
 import { CrossSpawnSpawner } from "@opencode-ai/core/cross-spawn-spawner"
 import { Ripgrep } from "@opencode-ai/core/ripgrep"
@@ -2872,7 +2873,23 @@ it.instance("agent-push mid-session replaces the title with its placeholder", ()
     yield* prompt.prompt({ sessionID: chat.id, agent: "build", parts: [{ type: "text", text: "do work" }] })
     yield* llm.text("pushed")
     yield* prompt.command({ sessionID: chat.id, command: "agent-push", arguments: "" })
-    expect((yield* sessions.get(chat.id)).title).toBe(`${path.basename(chat.directory)} - agent-push:`)
+    const after = yield* sessions.get(chat.id)
+    expect(after.title).toBe(`${path.basename(chat.directory)} - agent-push:`)
+    // Not the first message, so this session can never auto-delete.
+    expect(after.metadata?.[PUSH_SESSION_KEY]).toBeUndefined()
+  }),
+)
+
+it.instance("agent-push as the first message marks the session as a push session", () =>
+  Effect.gen(function* () {
+    const { llm } = yield* useServerConfig((url) => ({
+      ...providerCfg(url),
+      command: { "agent-push": { template: "Push" } },
+    }))
+    const { prompt, chat, sessions } = yield* boot()
+    yield* llm.text("pushed")
+    yield* prompt.command({ sessionID: chat.id, command: "agent-push", arguments: "" })
+    expect((yield* sessions.get(chat.id)).metadata?.[PUSH_SESSION_KEY]).toBe(true)
   }),
 )
 
