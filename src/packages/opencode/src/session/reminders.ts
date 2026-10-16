@@ -50,6 +50,8 @@ export const apply = Effect.fn("SessionReminders.apply")(function* (input: {
 
   const assistantMessage = input.messages.findLast((msg) => msg.info.role === "assistant")
   if (input.agent.name !== "plan" && assistantMessage?.info.agent === "plan") {
+    if (userMessage.parts.some((part) => part.type === "text" && part.synthetic && part.text.startsWith(BUILD_SWITCH)))
+      return input.messages
     const ctx = yield* InstanceState.context
     const plan = Session.plan(input.session, ctx)
     const exists = yield* fsys.existsSafe(plan)
@@ -68,6 +70,8 @@ export const apply = Effect.fn("SessionReminders.apply")(function* (input: {
   }
 
   if (input.agent.name !== "plan" || assistantMessage?.info.agent === "plan") return input.messages
+  if (userMessage.parts.some((part) => part.type === "text" && part.synthetic && part.metadata?.planReminder))
+    return input.messages
 
   const ctx = yield* InstanceState.context
   const plan = Session.plan(input.session, ctx)
@@ -84,6 +88,7 @@ export const apply = Effect.fn("SessionReminders.apply")(function* (input: {
         : `No plan file exists yet. You should create your plan at ${plan} using the write tool.`,
     ),
     synthetic: true,
+    metadata: { planReminder: true },
   })
   userMessage.parts.push(part)
   return input.messages

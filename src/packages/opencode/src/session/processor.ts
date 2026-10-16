@@ -118,6 +118,13 @@ const layer = Layer.effect(
       let turnPermission: PermissionV1.Ruleset = []
       const partReady: Record<string, Deferred.Deferred<void>> = {}
       const readyFor = (toolCallID: string) => (partReady[toolCallID] ??= Deferred.makeUnsafe<void>())
+      const attemptParts = new Set<PartID>()
+      let toolStarted = false
+      let liveUsage: Usage | undefined
+      const createPart = <T extends SessionV1.Part>(part: T) => {
+        attemptParts.add(part.id)
+        return session.updatePart(part)
+      }
 
       const parse = (e: unknown) =>
         MessageV2.fromError(e, {
@@ -153,6 +160,7 @@ const layer = Layer.effect(
         const match = yield* readToolCall(toolCallID)
         if (!match) return undefined
         const part = yield* session.updatePart(update(match.part))
+        if (part.state.status === "running") toolStarted = true
         ctx.toolcalls[toolCallID] = {
           ...match.call,
           partID: part.id,
@@ -238,7 +246,7 @@ const layer = Layer.effect(
           }
           return { call: ctx.toolcalls[input.id], part }
         }
-        const part = yield* session.updatePart({
+        const part = yield* createPart({
           id: PartID.ascending(),
           messageID: ctx.assistantMessage.id,
           sessionID: ctx.assistantMessage.sessionID,
@@ -294,7 +302,7 @@ const layer = Layer.effect(
               time: { start: Date.now() },
               metadata: value.providerMetadata,
             }
-            yield* session.updatePart(ctx.reasoningMap[value.id])
+            yield* createPart(ctx.reasoningMap[value.id])
             return
 
           case "reasoning-delta":
@@ -326,15 +334,18 @@ const layer = Layer.effect(
             return
 
           case "tool-input-delta":
+            if (ctx.toolcalls[value.id]) return
             yield* ensureToolCall(value)
             return
 
           case "tool-input-end": {
+            if (ctx.toolcalls[value.id]) return
             yield* ensureToolCall(value)
             return
           }
 
           case "tool-call": {
+            toolStarted = true
             if (ctx.assistantMessage.summary) {
               throw new Error(`Tool call not allowed while generating summary: ${value.name}`)
             }
@@ -431,7 +442,7 @@ const layer = Layer.effect(
 
           case "step-start":
             if (!ctx.snapshot) ctx.snapshot = yield* snapshot.track()
-            yield* session.updatePart({
+            yield* createPart({
               id: PartID.ascending(),
               messageID: ctx.assistantMessage.id,
               sessionID: ctx.sessionID,
@@ -459,13 +470,14 @@ const layer = Layer.effect(
             }
             const usage = Session.getUsage({
               model: ctx.model,
-              usage: value.usage ?? new Usage({}),
+              usage: value.usage ?? liveUsage ?? new Usage({}),
               metadata: value.providerMetadata,
             })
             ctx.assistantMessage.finish = value.reason
             ctx.assistantMessage.cost += usage.cost
             ctx.assistantMessage.tokens = usage.tokens
-            yield* session.updatePart({
+            liveUsage = undefined
+            yield* createPart({
               id: PartID.ascending(),
               reason: value.reason,
               snapshot: completedSnapshot,
@@ -479,7 +491,7 @@ const layer = Layer.effect(
             if (ctx.snapshot) {
               const patch = yield* snapshot.patch(ctx.snapshot)
               if (patch.files.length) {
-                yield* session.updatePart({
+                yield* createPart({
                   id: PartID.ascending(),
                   messageID: ctx.assistantMessage.id,
                   sessionID: ctx.sessionID,
@@ -507,8 +519,12 @@ const layer = Layer.effect(
 
           // Live context only; cost is added once by step-finish.
           case "usage":
+            liveUsage = value.usage
             ctx.assistantMessage.tokens = Session.getUsage({ model: ctx.model, usage: value.usage }).tokens
-            yield* session.updateMessage(ctx.assistantMessage)
+            yield* events.publish(
+              { ...SessionV1.Event.MessageUpdated, durable: undefined },
+              { sessionID: ctx.sessionID, info: structuredClone(ctx.assistantMessage) },
+            )
             return
 
           case "text-start":
@@ -521,7 +537,7 @@ const layer = Layer.effect(
               time: { start: Date.now() },
               metadata: value.providerMetadata,
             }
-            yield* session.updatePart(ctx.currentText)
+            yield* createPart(ctx.currentText)
             return
 
           case "text-delta":
@@ -660,14 +676,50 @@ const layer = Layer.effect(
           messageID: input.assistantMessage.id,
         })
         ctx.needsCompaction = false
+        attemptParts.clear()
+        toolStarted = false
+        liveUsage = undefined
         ctx.shouldBreak = (yield* config.get()).experimental?.continue_loop_on_deny !== true
+        const before = structuredClone(ctx.assistantMessage)
+        const beforeSnapshot = ctx.snapshot
+        // SDK tools can start before their queued tool-call event reaches this consumer.
+        const tools = Object.fromEntries(
+          Object.entries(streamInput.tools).map(([name, tool]) => {
+            const execute = tool.execute
+            if (!execute) return [name, tool]
+            return [name, {
+              ...tool,
+              execute: (...args: Parameters<typeof execute>) => {
+                toolStarted = true
+                return execute(...args)
+              },
+            }]
+          }),
+        )
 
         return yield* Effect.gen(function* () {
           yield* Effect.gen(function* () {
+            if (attemptParts.size) {
+              for (const partID of attemptParts) {
+                yield* session.removePart({ sessionID: ctx.sessionID, messageID: ctx.assistantMessage.id, partID })
+              }
+              attemptParts.clear()
+              for (const id of Object.keys(ctx.toolcalls)) {
+                yield* settleToolCall(id)
+                delete partReady[id]
+              }
+              Object.assign(ctx.assistantMessage, structuredClone(before))
+              ctx.assistantMessage.finish = before.finish
+              ctx.snapshot = beforeSnapshot
+              ctx.blocked = false
+              ctx.needsCompaction = false
+            }
+            toolStarted = false
+            liveUsage = undefined
             ctx.currentText = undefined
             ctx.reasoningMap = {}
             yield* status.set(ctx.sessionID, { type: "busy" })
-            const stream = llm.stream(streamInput)
+            const stream = llm.stream({ ...streamInput, tools })
 
             yield* stream.pipe(
               Stream.tap((event) => handleEvent(event)),
@@ -687,8 +739,9 @@ const layer = Layer.effect(
               (cause) => !Cause.hasInterruptsOnly(cause),
               (cause) => Effect.fail(Cause.squash(cause)),
             ),
-            Effect.retry(
-              SessionRetry.policy({
+            Effect.retry({
+              while: () => !toolStarted,
+              schedule: SessionRetry.policy({
                 provider: input.model.providerID,
                 parse,
                 set: (info) => {
@@ -701,7 +754,7 @@ const layer = Layer.effect(
                   })
                 },
               }),
-            ),
+            }),
             Effect.catch(halt),
             Effect.ensuring(cleanup()),
           )
@@ -718,7 +771,10 @@ const layer = Layer.effect(
         },
         updateToolCall,
         completeToolCall,
-        toolPartReady: (toolCallID) => Deferred.await(readyFor(toolCallID)),
+        toolPartReady: (toolCallID) =>
+          Deferred.await(readyFor(toolCallID)).pipe(
+            Effect.tap(() => Effect.sync(() => { toolStarted = true })),
+          ),
         process,
       } satisfies Handle
     })

@@ -9,6 +9,7 @@
  */
 import type { ChildProcess } from "node:child_process"
 import type { EventEmitter } from "node:events"
+import { unlink } from "node:fs/promises"
 import type { LanguageModelV3CallOptions, LanguageModelV3StreamPart } from "@ai-sdk/provider"
 import { generateId } from "ai"
 import type { ClaudeCodeConfig, ClaudeStreamMessage } from "./types.js"
@@ -62,6 +63,7 @@ import {
   deleteActiveProcessAndWait,
   respawnActiveProcess,
   resolveIdleProcessTimeoutMs,
+  singleFlightSpawn,
   scheduleIdleProcessEviction,
   noteTurnStarted,
   isTurnInFlight,
@@ -309,23 +311,12 @@ class ClaudeTurn {
       )
     }
 
-    const plan = await planSpawn({
-      config: this.config,
-      turn: this.turn,
-      options: this.options,
-      account: this.account,
-      reusing: !!this.activeProcess,
-      proxyServer: this.activeProcess?.proxyServer ?? null,
-      proxyTools: this.input.proxyTools,
-      runtimeStatus: this.input.runtimeStatus,
-      cliVersion: this.input.cliVersion,
-      loadLiveToolInfo: this.input.loadLiveToolInfo,
-    })
-    this.cliArgs = plan.cliArgs
-
-    if (this.activeProcess) log.debug("reusing active process", { sk: this.sk })
-    if (!this.activeProcess) {
-      this.activeProcess = this.spawn(plan)
+    if (this.activeProcess) {
+      log.debug("reusing active process", { sk: this.sk })
+      this.cliArgs = (await this.planSpawnFor(this.activeProcess)).cliArgs
+    } else {
+      this.activeProcess = await singleFlightSpawn(this.sk, () => this.spawnFresh())
+      this.cliArgs = this.activeProcess.cliArgs ?? []
     }
     this.proc = this.activeProcess.proc
     this.lineEmitter = this.activeProcess.lineEmitter
@@ -406,6 +397,38 @@ class ClaudeTurn {
     // A reused child that goes silent after the envelope write (seen after a
     // long proxy-blocked tool call) is respawned instead of hanging the turn.
     this.armStartWatchdog()
+  }
+
+  private planSpawnFor(reused: ActiveProcess | undefined) {
+    return planSpawn({
+      config: this.config,
+      turn: this.turn,
+      options: this.options,
+      account: this.account,
+      reusing: !!reused,
+      proxyServer: reused?.proxyServer ?? null,
+      proxyTools: this.input.proxyTools,
+      runtimeStatus: this.input.runtimeStatus,
+      cliVersion: this.input.cliVersion,
+      loadLiveToolInfo: this.input.loadLiveToolInfo,
+    })
+  }
+
+  /**
+   * Plan and spawn this key's child. Setups that race here share the result
+   * (`singleFlightSpawn`). The plan is awaited, so a child another path started
+   * meanwhile is reused instead, and this plan's proxy server and prompt file go.
+   */
+  private async spawnFresh(): Promise<ActiveProcess> {
+    const plan = await this.planSpawnFor(undefined)
+    const live = getActiveProcess(this.sk)
+    if (live) {
+      if (plan.proxyServer && plan.proxyServer !== live.proxyServer) void plan.proxyServer.close()
+      if (plan.systemPromptFile && plan.systemPromptFile !== live.systemPromptFile)
+        void unlink(plan.systemPromptFile).catch(() => {})
+      return live
+    }
+    return this.spawn(plan)
   }
 
   private spawn(plan: Awaited<ReturnType<typeof planSpawn>>) {
@@ -659,12 +682,26 @@ class ClaudeTurn {
     if (!line.trim() || this.closed || this.steering.retired || this.preempted) return
     // Any line counts as activity, so mid-turn pauses between blocks survive.
     this.startResultFallback()
+    const outer = parseLine(line)
+    if (!outer) return this.onUnparsedLine(line)
     try {
-      const outer = JSON.parse(line) as ClaudeStreamMessage
       this.handleMessage(outer)
     } catch (e) {
-      log.debug("failed to parse line", { error: e instanceof Error ? e.message : String(e) })
+      log.debug("failed to handle line", { error: e instanceof Error ? e.message : String(e) })
     }
+  }
+
+  /**
+   * Stdout that is not JSON. Junk is ignored. A result line cut short would
+   * otherwise wait out the 60 s fallback, so the turn ends now. The child is
+   * dropped too: its state after that line is unknown, and a reused child would
+   * first wait out an interrupt that nothing answers.
+   */
+  private onUnparsedLine(line: string) {
+    log.warn("failed to parse line", { bytes: line.length })
+    if (!line.includes('"type":"result"')) return
+    this.failTurn("Claude Code's result could not be read, so this turn did not finish.")
+    deleteActiveProcess(this.sk)
   }
 
   private handleMessage(outer: ClaudeStreamMessage) {
@@ -890,7 +927,29 @@ class ClaudeTurn {
     // this index re-emit a tool call opencode already completed, which then
     // reports "Tool execution aborted".
     this.toolBlocks.delete(idx)
-    this.completeToolUse(tool.id, tool.name, parseToolInput(tool.inputJson), false)
+    const input = parseToolInput(tool.inputJson)
+    if (input) return this.completeToolUse(tool.id, tool.name, input, false)
+    this.failUnreadableToolUse(tool)
+  }
+
+  /**
+   * A tool input that is not JSON cannot be mapped. The call goes out with its
+   * raw text, which the AI SDK rejects as invalid tool input (a tool error),
+   * instead of running with empty arguments. The CLI's own result is skipped.
+   */
+  private failUnreadableToolUse(tool: { id: string; name: string; inputJson: string }) {
+    if (rendersAsText(tool.name, this.config) || tool.name.startsWith(PROXY_TOOL_PREFIX)) return
+    const mapped = mapTool(tool.name, undefined, this.mapToolOptions())
+    if (mapped.skip || isTodoMirror(mapped.name)) return
+    this.skipResultForIds.add(tool.id)
+    this.out.enqueue({
+      type: "tool-call",
+      toolCallId: tool.id,
+      toolName: mapped.name,
+      input: tool.inputJson,
+      providerExecuted: mapped.executed,
+      dynamic: mapped.executed,
+    })
   }
 
   /**
@@ -1021,7 +1080,7 @@ class ClaudeTurn {
       if (this.proxyToolUseIds.delete(id) || this.skipResultForIds.has(id)) {
         // Settled either way; a call left here would hold off every later preempt.
         this.toolCallNames.delete(id)
-        if (this.denialTimer) return this.endDeniedTurn()
+        if (this.denialTimer) return void this.endDeniedTurn()
         continue
       }
       const resultText = toolResultText(block.content)
@@ -1183,7 +1242,7 @@ class ClaudeTurn {
 
     this.out.enqueue({
       type: "finish",
-      finishReason: this.resultFailure ? { unified: "error", raw: this.resultFailure } : toFinishReason("stop"),
+      finishReason: this.finishReason(),
       // oc's context meter skips replies with no output tokens, so report the compacted size.
       usage:
         this.turn.compactionMode && !this.lastCall && this.compactedTokens
@@ -1448,28 +1507,40 @@ class ClaudeTurn {
 
   /**
    * A denial ends the turn: interrupt the CLI so Claude cannot retry or work
-   * around it, and close the stream so the processor records the turn as
-   * blocked. Once per turn.
+   * around it, wait for it to stop (bounded by the interrupt timeout), then
+   * close the stream as an error so the processor records the turn as blocked.
+   * A `result` that lands meanwhile finishes the stream first, as an error too.
+   * Once per turn.
    */
-  private endDeniedTurn() {
+  private async endDeniedTurn() {
     if (!this.denialTimer) return
     clearTimeout(this.denialTimer)
     this.denialTimer = null
     if (this.steering.hasUnread) this.steering.retire("the denied turn had unread queued messages")
+    if (this.closed) return
     if (this.activeProcess && !this.steering.retired) {
-      void interruptTurn(this.activeProcess).then((idle) =>
-        log.info("interrupt sent for denied tool call", { sk: this.sk, idle }),
-      )
+      const idle = await interruptTurn(this.activeProcess)
+      log.info("interrupt sent for denied tool call", { sk: this.sk, idle })
     }
     if (this.closed) return
     this.out.endText()
     this.out.enqueue({
       type: "finish",
-      finishReason: toFinishReason("stop"),
+      finishReason: this.finishReason(),
       usage: toUsage(contextUsage(this.lastCall)),
       providerMetadata: { "claude-code": this.resultMeta },
     })
     this.finish()
+  }
+
+  /**
+   * A failed, aborted, or denied turn ends as an error, so the processor never
+   * reads it as a completed answer.
+   */
+  private finishReason() {
+    if (this.resultFailure) return { unified: "error" as const, raw: this.resultFailure }
+    if (this.autoContinue.aborted || this.toolDenied) return toFinishReason("error")
+    return toFinishReason("stop")
   }
 
   // ---------------------------------------------------------------------------
@@ -1504,7 +1575,7 @@ class ClaudeTurn {
       }
       this.out.enqueue({
         type: "finish",
-        finishReason: toFinishReason(crashed ? "error" : "stop"),
+        finishReason: crashed ? toFinishReason("error") : this.finishReason(),
         usage: toUsage(),
         providerMetadata: { "claude-code": this.resultMeta },
       })
@@ -1551,11 +1622,7 @@ class ClaudeTurn {
     // Stop the CLI's turn, not just this end of the stream: otherwise it runs
     // the abandoned turn to completion, billing tokens and running tools, and
     // its late output lands in the next turn. The process stays alive.
-    if (this.activeProcess && !this.steering.retired) {
-      void interruptTurn(this.activeProcess).then((idle) =>
-        log.info("interrupt sent for aborted turn", { sk: this.sk, idle }),
-      )
-    }
+    const interrupt = this.activeProcess && !this.steering.retired ? interruptTurn(this.activeProcess) : undefined
     // opencode stops its tool runs with the turn, so proxy calls handed to it
     // will never get a result. Release them so the CLI's parked requests return.
     if (!this.hasReceivedContent) {
@@ -1568,8 +1635,16 @@ class ClaudeTurn {
     }
     log.info("abort signal received mid-turn, starting grace period", { cwd: this.turn.cwd })
     this.rejectPendingProxyCalls("Provider stream was aborted while proxy tool calls were pending")
-    this.clearResultFallback()
-    this.startResultFallback(ABORT_GRACE_MS)
+    if (!interrupt) {
+      // The aborted-grace guard in startResultFallback keeps an armed timer, so drop it first.
+      this.clearResultFallback()
+      return this.startResultFallback(ABORT_GRACE_MS)
+    }
+    // Finish once the CLI has stopped (or the interrupt timed out), so a late `result` cannot end the stream as a success.
+    void interrupt.then((idle) => {
+      log.info("interrupt sent for aborted turn", { sk: this.sk, idle })
+      this.onClose()
+    })
   }
 
   /** A newer turn takes over the child: an aborted turn still in its grace period ends now. */
@@ -1687,13 +1762,22 @@ class ClaudeTurn {
       sessionKey: this.sk,
       startWatchdogMs: this.startWatchdogMs,
     })
-    const respawned = respawnActiveProcess(
+    void this.respawnSilentProcess()
+  }
+
+  private async respawnSilentProcess() {
+    // The old child's exit must not close this turn, so detach before it is awaited.
+    this.lineEmitter.off("line", this.onLine)
+    this.lineEmitter.off("close", this.onClose)
+    this.proc.off("error", this.onProcError)
+    const respawned = await respawnActiveProcess(
       this.sk,
       this.config.cliPath,
       this.cliArgs,
       this.turn.cwd,
       this.config.ignoreAnthropicApiKey,
     )
+    if (this.closed) return
     if (!respawned) {
       log.error("no active process to respawn (start watchdog); ending turn", { sessionKey: this.sk })
       return this.failTurn("No active claude process to respawn after start watchdog timeout.")
@@ -1799,11 +1883,11 @@ function parseLine(line: string) {
   }
 }
 
-function parseToolInput(json: string): Record<string, unknown> {
+function parseToolInput(json: string): Record<string, unknown> | undefined {
   try {
     return JSON.parse(json || "{}")
   } catch {
-    return {}
+    return undefined
   }
 }
 

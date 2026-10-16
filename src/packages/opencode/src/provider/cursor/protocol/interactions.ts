@@ -212,8 +212,16 @@ export function handleInteractionQuery(
   options: HandleInteractionQueryOptions = {},
 ): HandledInteraction {
   const info = inspectInteractionQueryWire(agentServerPayload)
-  if (info.id === undefined || info.variantField === undefined || !info.variantName) {
-    throw new UnsupportedInteractionQueryError(info)
+  // Without an id no reply can be correlated; anything else unknown is rejected below.
+  if (info.id === undefined) throw new UnsupportedInteractionQueryError(info)
+  if (info.variantField === undefined || !info.variantName) {
+    return {
+      id: info.id,
+      variantField: info.variantField ?? 0,
+      variantName: info.variantName ?? "unsupported",
+      outcome: "rejected",
+      reply: encodeMessage("AgentClientMessage", { interaction_response: { id: info.id } }),
+    }
   }
   if (typeof query.id === "number" && query.id !== info.id) {
     throw new Error(`Cursor interaction query id mismatch: decoded=${query.id} wire=${info.id}`)
@@ -273,7 +281,13 @@ export function handleInteractionQuery(
       outcome = "rejected"
       break
     default:
-      throw new UnsupportedInteractionQueryError(info)
+      return {
+        id: info.id,
+        variantField: info.variantField,
+        variantName: info.variantName,
+        outcome: "rejected",
+        reply: encodeMessage("AgentClientMessage", { interaction_response: { id: info.id } }),
+      }
   }
 
   return {

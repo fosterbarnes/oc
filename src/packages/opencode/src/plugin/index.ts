@@ -323,11 +323,25 @@ const layer = Layer.effect(
           )
         }
 
+        const eventHookFailed = (error: unknown) =>
+          bridge.fork(
+            Effect.logError("plugin event hook failed", { error: errorMessage(error) }).pipe(
+              Effect.annotateLogs({ channel: "plugin" }),
+            ),
+          )
+        // Listeners run inside `publish`, so event hooks are not awaited: a slow plugin must not stall
+        // every event. Failures are logged and later hooks still run.
         const unsubscribe = yield* events.listen((event) => {
           if (event.location?.directory !== ctx.directory) return Effect.void
           return Effect.sync(() => {
+            const input = { event: { id: event.id, type: event.type, properties: event.data } as any }
             for (const hook of hooks) {
-              void hook["event"]?.({ event: { id: event.id, type: event.type, properties: event.data } as any })
+              if (!hook.event) continue
+              try {
+                Promise.resolve(hook.event(input)).catch(eventHookFailed)
+              } catch (error) {
+                eventHookFailed(error)
+              }
             }
           })
         })

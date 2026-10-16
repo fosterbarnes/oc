@@ -5,19 +5,30 @@ import { Config } from "@/config/config"
 import { InstanceStore } from "@/project/instance-store"
 import { pinSessionAccount, poolAccountIds, poolState, setCurrentAccount } from "@/provider/claude-code/accounts"
 import { SessionPrompt } from "@/session/prompt"
+import { ScheduledDelivery } from "@/session/scheduledDelivery"
 import { ScheduledResume } from "@/session/scheduledResume"
 import { SessionID } from "@/session/schema"
 import { Session } from "@/session/session"
 import { SessionStatus } from "@/session/status"
 import { Effect, Scope } from "effect"
 import { HttpApiError } from "effect/unstable/httpapi"
-import { ClaudeAccountPayload, ClaudeAccountQuery, QueuePayload, ResumeCancelPayload, ResumeEnabledPayload } from "../groups/session"
+import {
+  ClaudeAccountPayload,
+  ClaudeAccountQuery,
+  QueuePayload,
+  ResumeCancelPayload,
+  ResumeEnabledPayload,
+} from "../groups/session"
 import { ConflictError, InvalidRequestError, notFound } from "../errors"
 import * as SessionError from "./session-errors"
 
-const SCHEDULE_POLL_MS = 5_000
-
-export const makeOcSessionHandlers = Effect.fnUntraced(function* ({ session, promptSvc, statusSvc, configSvc, scope }: {
+export const makeOcSessionHandlers = Effect.fnUntraced(function* ({
+  session,
+  promptSvc,
+  statusSvc,
+  configSvc,
+  scope,
+}: {
   session: Session.Interface
   promptSvc: SessionPrompt.Interface
   statusSvc: SessionStatus.Interface
@@ -30,23 +41,33 @@ export const makeOcSessionHandlers = Effect.fnUntraced(function* ({ session, pro
   })
 
   const resumeState = Effect.fn("SessionHttpApi.resumeState")(function* () {
-    return ScheduledResume.getState()
+    return yield* Effect.try({ try: ScheduledResume.getState, catch: () => new HttpApiError.BadRequest({}) })
   })
 
   const resumeSet = Effect.fn("SessionHttpApi.resumeSet")(function* (ctx: {
     payload: typeof ResumeEnabledPayload.Type
   }) {
-    if (ctx.payload.prompt !== undefined) ScheduledResume.setPrompt(ctx.payload.prompt)
-    return ScheduledResume.setEnabled(ctx.payload.enabled)
+    return yield* Effect.try({
+      try: () => {
+        if (ctx.payload.prompt !== undefined) ScheduledResume.setPrompt(ctx.payload.prompt)
+        return ScheduledResume.setEnabled(ctx.payload.enabled)
+      },
+      catch: () => new HttpApiError.BadRequest({}),
+    })
   })
 
   const resumeCancel = Effect.fn("SessionHttpApi.resumeCancel")(function* (ctx: {
     payload: typeof ResumeCancelPayload.Type
   }) {
-    return ScheduledResume.cancel(ctx.payload.id)
+    return yield* Effect.try({
+      try: () => ScheduledResume.cancel(ctx.payload.id),
+      catch: () => new HttpApiError.BadRequest({}),
+    })
   })
 
-  const queueSnapshot = Effect.fn("SessionHttpApi.queueSnapshot")(function* (ctx: { params: { sessionID: SessionID } }) {
+  const queueSnapshot = Effect.fn("SessionHttpApi.queueSnapshot")(function* (ctx: {
+    params: { sessionID: SessionID }
+  }) {
     yield* requireSession(ctx.params.sessionID)
     return yield* promptSvc.queue.snapshot(ctx.params.sessionID)
   })
@@ -123,33 +144,30 @@ export const makeOcSessionHandlers = Effect.fnUntraced(function* ({ session, pro
   }) {
     const ids = yield* claudePool()
     const { id, sessionID } = ctx.payload
-    const ok = sessionID
-      ? pinSessionAccount(sessionID, id, ids)
-      : id !== undefined && setCurrentAccount(id, ids)
+    const ok = sessionID ? pinSessionAccount(sessionID, id, ids) : id !== undefined && setCurrentAccount(id, ids)
     if (!ok) return yield* new HttpApiError.BadRequest({})
     return { accounts: poolState(ids, Date.now(), sessionID) }
   })
 
-  // Usage-reset auto-resumes: drain overdue entries at startup, then poll.
-  // The loop forks into the app scope, like promptAsync above.
+  // Both sleepers wake on local writes. Cross-process changes reconcile at most once a minute.
   const instances = yield* InstanceStore.Service
   yield* ScheduledResume.pollLoop(
     { session, status: statusSvc, prompt: promptSvc, store: instances },
     ScheduledResume.store,
-  ).pipe(Effect.forkIn(scope))
+  ).pipe(Effect.forkScoped, Effect.provideService(Scope.Scope, scope))
 
-  // Scheduled prompts: send what is due now (overdue ones fire on startup), then poll.
   const inSession = (sessionID: SessionID, effect: Effect.Effect<void>) =>
     session.get(sessionID).pipe(
       Effect.flatMap((info) => instances.provide({ directory: info.directory }, effect)),
       Effect.orDie,
     )
-  yield* promptSvc.queue.fireDue(inSession).pipe(
-    Effect.catchCause((cause) => Effect.logWarning("scheduled prompt poll failed", { cause: String(cause) })),
-    Effect.andThen(Effect.sleep(SCHEDULE_POLL_MS)),
-    Effect.forever,
-    Effect.forkIn(scope),
-  )
+  yield* Effect.gen(function* () {
+    const version = ScheduledDelivery.queueWake.version()
+    yield* promptSvc.queue
+      .fireDue(inSession)
+      .pipe(Effect.catchCause((cause) => Effect.logWarning("scheduled prompt drain failed", { cause: String(cause) })))
+    yield* ScheduledDelivery.queueWake.wait(version, yield* promptSvc.queue.deadline())
+  }).pipe(Effect.forever, Effect.forkScoped, Effect.provideService(Scope.Scope, scope))
 
   return { resumeState, resumeSet, resumeCancel, queueSnapshot, queueUpdate, claudeAccountState, claudeAccountSet }
 })

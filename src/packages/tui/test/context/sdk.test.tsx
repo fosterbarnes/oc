@@ -186,3 +186,57 @@ test("does not flush stale batched events after SDK destroy", async () => {
     if (!app.renderer.isDestroyed) app.renderer.destroy()
   }
 })
+
+test("a throwing handler does not stop later handlers or later events", async () => {
+  const received: unknown[] = []
+  let captured: ((event: unknown) => void) | undefined
+  const events = {
+    subscribe: async (handler: (event: unknown) => void) => {
+      captured = handler
+      return () => {
+        captured = undefined
+      }
+    },
+  } as unknown as import("../../src/context/sdk").EventSource
+  const base = createFetch()
+  const app = await testRender(() => (
+    <TestTuiContexts>
+      <SDKProvider
+        url="http://test"
+        directory={directory}
+        fetch={Object.assign(async (input: RequestInfo | URL, init?: RequestInit) => base.fetch(input, init), {
+          preconnect: () => {},
+        })}
+        events={events}
+      >
+        {(() => {
+          function Probe() {
+            const sdk = useSDK()
+            onMount(() => {
+              sdk.event.on("event", () => {
+                throw new Error("handler failed")
+              })
+              sdk.event.on("event", (event) => received.push(event))
+            })
+            return <box />
+          }
+          return <Probe />
+        })()}
+      </SDKProvider>
+    </TestTuiContexts>
+  ))
+  try {
+    await Bun.sleep(20)
+    const evt = {
+      directory,
+      project: "proj_test",
+      payload: { id: "evt_throw", type: "server.connected", properties: {} },
+    } as unknown as import("@opencode-ai/sdk/v2").GlobalEvent
+    captured?.(evt)
+    captured?.(evt)
+    await Bun.sleep(40)
+    expect(received.length).toBe(2)
+  } finally {
+    if (!app.renderer.isDestroyed) app.renderer.destroy()
+  }
+})

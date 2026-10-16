@@ -1,9 +1,18 @@
-v0.2.220 endUndisputed
+v0.2.221 skiingAragorns
 
 claude sessions:
-Claude provider warnings show as toasts and reach the plugin log without crashing the operation that triggered them. Pressing Esc releases the old turn before the next turn attaches, preventing stale listeners from hanging subagent calls.
+Claude turns no longer start two CLI processes at once. Stopping a turn with Esc or denying a tool ends it cleanly after Claude actually stops, and a cut-off result line fails the turn instead of hanging. A message sent while a turn ends in a denied permission or an error now waits for you instead of running on its own.
 
-queued messages:
-Commands, attachments, and messages with different model or agent settings end the running Claude turn after its current tools finish, then run under their own settings. Deleting a queued message lets the current turn continue.
+scheduled prompts:
+Scheduled prompts and usage-reset resumes fire at their time without polling, survive a crash without sending twice, and a cancelled one never fires.
 
-Under the hood: Preserved the SDK toast method binding, wrote log records before surfacing warnings, bounded aborted-turn grace periods, and added turn-listener ownership and tool-boundary preemption. Updated real-SDK toast coverage and fake-model steering scenarios. The push-time test run was cancelled at the user's request; pre-push checks were not run.
+tui:
+The TUI keeps handling events when one handler throws, and deleted sessions no longer leave data behind in memory. Switching sessions quickly no longer lets a slow earlier load take over the screen, and a failed permission reply shows a toast and keeps the prompt.
+
+cursor:
+Cursor runs no longer abort on an unknown interaction request, and approving a plan starts execution in the right project.
+
+plugins and shell:
+A plugin whose event hook fails or hangs no longer blocks other plugins. A retry after a provider error no longer leaves the failed attempt's partial text behind, and long shell output writes much less to the database.
+
+Under the hood: Merged performance review Waves 0-1 from the ocCLONE working copy: the opt-in probe kit (OC_PERF_PROBE=1) now lives in the repo, scheduled delivery uses durable claims with idempotent receipts, the event core isolates listeners, and the process tree stop tolerates an exiting console host. Resolved the turn-ending conflict between preempt and wait-for-interrupt in the Claude turn stream, and limited the pre-exit recheck for unanswered prompts to clean loop exits. Typecheck passed for opencode, tui, and core; Claude provider, steering, queue, and scheduling tests passed. One known stale queue-contention test in the prompt tests still fails (it contends on a lock the queue no longer uses) and is tracked for the next wave.

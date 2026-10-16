@@ -76,6 +76,22 @@ describe("ProcessTree.killTree", () => {
     expect(await ProcessTree.processIdentity(child.pid).then((live) => live?.created)).not.toBe(child.created)
   })
 
+  // Stopping the shell's child ends pwsh, so its console host is mid-exit when its turn comes. CIM can then
+  // read it back without its path; that used to fail the stop in about one run of three.
+  windows("stops a shell tree whose console host exits during the stop", async () => {
+    for (const _ of Array.from({ length: 6 })) {
+      const from = Date.now()
+      const shell = Bun.spawn(
+        ["pwsh", "-NoProfile", "-NonInteractive", "-Command", `& "${process.execPath}" -e "await Bun.sleep(60000)"`],
+        { stdout: "ignore", stderr: "ignore", windowsHide: true },
+      )
+      const root = { pid: shell.pid, from, to: Date.now() }
+      await waitForTree(shell.pid, 3)
+      await ProcessTree.killTree(root, () => shell.exitCode === null)
+      await expect(shell.exited).resolves.toBeNumber()
+    }
+  }, 90_000)
+
   windows("refuses a live root created outside its spawn window (reused PID)", async () => {
     const proc = sleeper()
     await expect(ProcessTree.killTree({ pid: proc.pid, from: 0, to: 0 }, () => true)).rejects.toThrow(

@@ -370,13 +370,23 @@ describe("EventV2", () => {
     }),
   )
 
-  it.effect("keeps live-only listener defects fail-fast", () =>
+  it.effect("isolates live-only listener defects before typed and all publishes", () =>
     Effect.gen(function* () {
       const events = yield* EventV2.Service
-      const defect = new Error("listener defect")
-      yield* events.listen(() => Effect.die(defect))
+      const typed = yield* events.subscribe(Message).pipe(Stream.take(1), Stream.runCollect, Effect.forkScoped)
+      const all = yield* events.all().pipe(Stream.take(1), Stream.runCollect, Effect.forkScoped)
+      yield* Effect.yieldNow
+      const listeners = new Array<string>()
+      yield* events.listen(() => {
+        throw new Error("listener defect")
+      })
+      yield* events.listen(() => Effect.sync(() => listeners.push("later")))
 
-      expect(yield* events.publish(Message, { text: "hello" }).pipe(Effect.catchDefect(Effect.succeed))).toBe(defect)
+      const event = yield* events.publish(Message, { text: "live" })
+
+      expect(listeners).toEqual(["later"])
+      expect(Array.from(yield* Fiber.join(typed))).toEqual([event])
+      expect(Array.from(yield* Fiber.join(all))).toEqual([event])
     }),
   )
 

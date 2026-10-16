@@ -3,6 +3,11 @@ import type { Hooks, PluginInput } from "@opencode-ai/plugin"
 import { CursorPlugin } from "../../src/plugin/cursor"
 import { CURSOR_COMPACTION_OPTION, CURSOR_PROVIDER_ID } from "../../src/provider/cursor/shared"
 import { clearSessionDirectories, getSessionDirectory } from "../../src/provider/cursor/sessionDirectory"
+import {
+  flushPlanExecutionKickoff,
+  queuePlanExecutionKickoff,
+  resetPlanExecutionKickoffForTests,
+} from "../../src/provider/cursor/planExecutionKickoff"
 
 type ChatParams = NonNullable<Hooks["chat.params"]>
 
@@ -27,7 +32,7 @@ describe("CursorPlugin compaction chat.params", () => {
   let hook: ChatParams
 
   beforeAll(async () => {
-    hook = (await CursorPlugin({} as PluginInput))["chat.params"]!
+    hook = (await CursorPlugin({ directory: "/project", client: {} } as PluginInput))["chat.params"]!
   })
 
   test("sets opencodeCompaction for cursor compaction and not for title or build", async () => {
@@ -53,7 +58,7 @@ describe("CursorPlugin compaction chat.params", () => {
 
 describe("CursorPlugin session directory", () => {
   test("session events record directories and remove only the deleted session", async () => {
-    const plugin = await CursorPlugin({} as PluginInput)
+    const plugin = await CursorPlugin({ directory: "/project", client: {} } as PluginInput)
     const hook = plugin.event!
     type EventArg = Parameters<NonNullable<Hooks["event"]>>[0]
     const created = {
@@ -76,5 +81,33 @@ describe("CursorPlugin session directory", () => {
     expect(getSessionDirectory("ses_dir_2")).toBe("/proj/c")
     clearSessionDirectories()
     expect(getSessionDirectory("ses_dir_1")).toBeUndefined()
+  })
+})
+
+describe("CursorPlugin plan kickoff ownership", () => {
+  test("routes delayed approvals by directory through the current plugin instance", async () => {
+    resetPlanExecutionKickoffForTests()
+    const calls: string[] = []
+    const makeInput = (directory: string) =>
+      ({
+        directory,
+        client: { session: { promptAsync: async () => void calls.push(directory) } },
+      }) as unknown as PluginInput
+    const projectA = await CursorPlugin(makeInput("/project-a"))
+    const projectB = await CursorPlugin(makeInput("/project-b"))
+    expect(queuePlanExecutionKickoff({ sessionID: "a", instanceDirectory: "/project-a", planPath: "a.md" })).toBe(
+      true,
+    )
+    expect(queuePlanExecutionKickoff({ sessionID: "b", instanceDirectory: "/project-b", planPath: "b.md" })).toBe(
+      true,
+    )
+    await flushPlanExecutionKickoff("b", { terminal: true })
+    await projectB.dispose?.()
+    await projectA.dispose?.()
+    const rebootedA = await CursorPlugin(makeInput("/project-a"))
+    await flushPlanExecutionKickoff("a", { terminal: true })
+    expect(calls).toEqual(["/project-b", "/project-a"])
+    await rebootedA.dispose?.()
+    resetPlanExecutionKickoffForTests()
   })
 })

@@ -42,7 +42,7 @@ import { sessionActivity } from "../provider/cursor/activity.js"
 import { markSessionDirectory, removeSessionDirectory } from "../provider/cursor/sessionDirectory.js"
 import { createOpenCodeWebSearchTool, openCodeWebSearchTool } from "../provider/cursor/webSearchTool.js"
 import { createCursorImageSaveTool, cursorImageSaveTool } from "../provider/cursor/imageSaveTool.js"
-import { createPlanExecutionKickoffText, setPlanExecutionKickoff } from "../provider/cursor/planExecutionKickoff.js"
+import { createPlanExecutionKickoffText, registerPlanExecutionKickoff } from "../provider/cursor/planExecutionKickoff.js"
 import { CURSOR_PROVIDER_NPM } from "../provider/cursor.js"
 
 export async function loadClassicTools(
@@ -93,7 +93,7 @@ export async function CursorPlugin(input: PluginInput): Promise<Hooks> {
 
   // After CreatePlan Yes, queue OpenCode's plan_exit-shaped synthetic turn so
   // implementation starts. Failures stay in the kickoff module (trace only).
-  setPlanExecutionKickoff(async ({ sessionID, planPath }) => {
+  const unregisterPlanExecutionKickoff = registerPlanExecutionKickoff(input.directory, async ({ sessionID, planPath }) => {
     await input.client.session.promptAsync({
       path: { id: sessionID },
       body: {
@@ -245,6 +245,9 @@ export async function CursorPlugin(input: PluginInput): Promise<Hooks> {
   }
 
   return {
+    async dispose() {
+      unregisterPlanExecutionKickoff()
+    },
     tool: {
       // `websearch` is a reserved OpenCode id and is filtered for third-party
       // providers after plugin tools are merged. Use the collision-safe id

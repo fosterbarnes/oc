@@ -1,4 +1,4 @@
-import { Effect, Stream } from "effect"
+import { Clock, Effect, Fiber, Queue, Stream } from "effect"
 import os from "os"
 import { createWriteStream } from "node:fs"
 import * as Tool from "./tool"
@@ -466,6 +466,17 @@ export const ShellTool = Tool.define(
       let cut = false
       let expired = false
       let aborted = false
+      let published = ""
+      let publishedAt = -Infinity
+      const pendingMetadata = yield* Queue.sliding<void>(1)
+      const flushMetadata = Effect.fnUntraced(function* () {
+        if (last === published) return
+        const output = last
+        yield* ctx.metadata({ metadata: { output } })
+        published = output
+        publishedAt = yield* Clock.currentTimeMillis
+      })
+      const updateMetadata = Queue.offer(pendingMetadata, undefined).pipe(Effect.asVoid)
 
       const closeSink = Effect.fnUntraced(function* () {
         const stream = sink
@@ -500,10 +511,19 @@ export const ShellTool = Tool.define(
 
       const code: number | null = yield* Effect.scoped(
         Effect.gen(function* () {
+          yield* Effect.addFinalizer(flushMetadata)
           yield* Effect.addFinalizer(closeSink)
           const handle = yield* spawner.spawn(cmd(input.shell, input.command, input.cwd, input.env))
 
           yield* Effect.forkScoped(
+            Effect.gen(function* () {
+              yield* Queue.take(pendingMetadata)
+              const now = yield* Clock.currentTimeMillis
+              yield* Effect.sleep(`${Math.max(0, publishedAt + 250 - now)} millis`)
+              yield* flushMetadata()
+            }).pipe(Effect.forever),
+          )
+          const pump = yield* Effect.forkScoped(
             Stream.runForEach(Stream.decodeText(handle.all), (chunk) => {
               const size = Buffer.byteLength(chunk, "utf-8")
               list.push({ text: chunk, size })
@@ -531,22 +551,12 @@ export const ShellTool = Tool.define(
                         full = ""
                       }),
                     ),
-                    Effect.andThen(
-                      ctx.metadata({
-                        metadata: {
-                          output: last,
-                        },
-                      }),
-                    ),
+                    Effect.andThen(updateMetadata),
                   )
                 }
               }
 
-              return ctx.metadata({
-                metadata: {
-                  output: last,
-                },
-              })
+              return updateMetadata
             }),
           )
 
@@ -574,6 +584,7 @@ export const ShellTool = Tool.define(
             yield* handle.kill({ forceKillAfter: "3 seconds" }).pipe(Effect.orDie)
           }
 
+          yield* Fiber.join(pump)
           return exit.kind === "exit" ? exit.code : null
         }),
       ).pipe(Effect.orDie)

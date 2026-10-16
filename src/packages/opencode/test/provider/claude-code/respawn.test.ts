@@ -160,7 +160,7 @@ test("respawnActiveProcess preserves an in-flight turn on the replacement", asyn
   const old = spawnClaudeProcess(process.execPath, args, process.cwd(), sk)
   noteTurnStarted(old)
   try {
-    const replacement = respawnActiveProcess(sk, process.execPath, args, process.cwd())
+    const replacement = await respawnActiveProcess(sk, process.execPath, args, process.cwd())
     assert.ok(replacement)
     assert.notEqual(replacement, old)
     assert.equal(isTurnInFlight(replacement), true)
@@ -176,7 +176,7 @@ test("respawnActiveProcess leaves an idle replacement idle", async () => {
   const args = ["-e", "setInterval(() => {}, 1000)"]
   spawnClaudeProcess(process.execPath, args, process.cwd(), sk)
   try {
-    const replacement = respawnActiveProcess(sk, process.execPath, args, process.cwd())
+    const replacement = await respawnActiveProcess(sk, process.execPath, args, process.cwd())
     assert.ok(replacement)
     assert.equal(isTurnInFlight(replacement), false)
   } finally {
@@ -185,11 +185,26 @@ test("respawnActiveProcess leaves an idle replacement idle", async () => {
   }
 })
 
-test("respawnActiveProcess: returns undefined when no active process exists for the key", () => {
+// The replacement resumes the same transcript, which the old child may still hold open.
+test("respawnActiveProcess resolves only after the old child has exited", async () => {
+  const sk = `sk-old-exit-${Date.now()}`
+  const args = ["-e", "setInterval(() => {}, 1000)"]
+  const old = spawnClaudeProcess(process.execPath, args, process.cwd(), sk)
+  try {
+    const replacement = await respawnActiveProcess(sk, process.execPath, args, process.cwd())
+    assert.ok(replacement)
+    assert.ok(old.proc.exitCode !== null || old.proc.signalCode !== null, "the old child was still running")
+  } finally {
+    await deleteActiveProcessAndWait(sk)
+    deleteClaudeSessionId(sk)
+  }
+})
+
+test("respawnActiveProcess: returns undefined when no active process exists for the key", async () => {
   const sk = `sk-empty-${Date.now()}`
   // No setActiveProcess(spawnClaudeProcess(...)) was done for this key, so
   // there is nothing to respawn; the watchdog treats this as "give up".
-  assert.equal(respawnActiveProcess(sk, "/usr/bin/env", ["--print"], process.cwd()), undefined)
+  assert.equal(await respawnActiveProcess(sk, "/usr/bin/env", ["--print"], process.cwd()), undefined)
 })
 
 test(
@@ -219,7 +234,7 @@ test(
       const originalExit = once(original.proc, "close", { signal: AbortSignal.timeout(5_000) })
       // A reattached doStream turn has no freshly built args. Respawn must use
       // the original process's args, not launch Node (or Claude) with just resume.
-      const replacement = respawnActiveProcess(sk, process.execPath, [], tmpdir())
+      const replacement = await respawnActiveProcess(sk, process.execPath, [], tmpdir())
       assert.ok(replacement)
       assert.notEqual(replacement.proc.pid, original.proc.pid)
       assert.deepEqual(await once(replacement.lineEmitter, "line", { signal: AbortSignal.timeout(5_000) }), ["ready"])
@@ -336,7 +351,8 @@ test("a child that dies without a result ends the turn as an error", async () =>
 })
 
 // An abort is not a crash: the operator asked for it, and the CLI may well
-// exit before the interrupt's own `result` line lands.
+// exit before the interrupt's own `result` line lands. It still ends as an
+// error finish, so the processor never reads it as a completed answer.
 test("an aborted turn is not reported as a crash", async () => {
   const parts = await streamCrashingTurn({ exitDelayMs: 300, abort: true })
 
@@ -346,5 +362,5 @@ test("an aborted turn is not reported as a crash", async () => {
     "an abort must not surface as a child crash",
   )
   const finish = parts.find((part) => part.type === "finish") as any
-  if (finish) assert.notEqual(finish.finishReason.unified, "error")
+  assert.equal(finish?.finishReason.unified, "error")
 })

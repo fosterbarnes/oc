@@ -133,6 +133,47 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-16 (~18:20) - v0.2.221 skiingAragorns - Merge perf review Waves 0-1 from ocCLONE; denied turns stop the loop again - Opus 5.5, medium effort; Implementation
+
+### Agent
+- Meta: Opus 5.5; medium effort; Implementation (oc, `/spit` then `/imp`); merge done, Wave 2 next in oc
+- Version: 0.2.221 skiingAragorns
+- Plan: `C:\Users\Foster\.config\opencode\plans\perfReview\mergeHome.md`. `fixes.md` and `handoff.md` now point at `GitHub\oc`; ocCLONE is retired (user archives or deletes it).
+- Merged: ocCLONE's uncommitted Waves 0-1 work (base `a05c53b`, same tree as `e8e9138`) applied onto v0.2.220 with `git apply --3way` from a clone diff (39 files; excluded version files, buildNotes, and EOL-only `src/bun.lock`/`package.json`), plus the clone's 28 new files copied (no overwrites). The clone's own entry (v0.2.220 elbowWall, never in oc) is carried below.
+- Conflicts: only `provider/claude-code/turnStream.ts`. Kept main's `readToolResults` split with `toolCallNames.delete` plus the clone's `return void this.endDeniedTurn()`; `onAbort` keeps the clone's "interrupt, then `onClose`" and main's `clearResultFallback()` before the grace in the no-interrupt branch (the aborted-grace guard keeps an armed timer). Auto-merged and reviewed: `start` (single-flight spawn, then `releaseTurn`), `attach` (`releaseTurn`; respawn goes through it), `onLine` (`preempted` guard + `onUnparsedLine`), `onResult` (preempt auto-continue guard + `finishReason()`). Preempted turns still finish `stop` via `endPreempted`; aborted and denied turns finish `error`.
+- Fixed (user-approved, also failed in ocCLONE): F8's `pendingBeforeExit` ran before every loop exit, so a denied or failed turn ran a message held during it (steering "denying a held proxy call never delivers its held steer": 2 assistants, expected 1). `session/prompt.ts`: the processor `"stop"` break and a failed compaction break without the recheck; the clean-finish and handoff exits keep it.
+- From ocCLONE (v0.2.220 elbowWall, Opus 5.5, medium effort; perfReview handoff Waves 0-1):
+- Wave 0: Moved the probe kit from `%TEMP%\ocPerfProbe` to `src/packages/opencode/test/perf/` (gate `OC_PERF_PROBE=1`, Windows; `run.ps1 <M1-M6|P1-P9|cleanup>`, runs in `C:\ocTestTmp\ocPerfRuns`). Added the gate line under Testing in `AGENTS.md`.
+- 1A TUI events: `tui/src/context/sdk.tsx` isolates each handler; `sync.tsx` deletes session maps and parts on delete and `message.removed`, resyncs after reconnect, and drops stale hydration results; `event.ts` `subscribe` auto-cleans under an owner.
+- 1B TUI races: `routes/session/index.tsx` cancels a stale session load; `permission.tsx` keys the prompt by request id and awaits replies (toast on failure).
+- 1C-1 `session/prompt.ts`: slash `!` shell runs in the instance dir with a failure marker (F4), bounded queue re-claim (F5), history reload before loop exit (F8), subtask agent validated first (S3-15), handoff failures published (S3-16); `reminders.ts` dedupes per user message (S3-17).
+- 1C-2 J7: new `session/scheduledDelivery.ts`. Queue and resume entries keep durable claims (pid, creation time, owner token, time) until delivery; the delivery id is stored in session metadata (last 50) in the same SQLite transaction that admits the prompt; cap receipts are idempotent; claims older than 10 min or with a dead owner recover. Both schedulers sleep to the next deadline and wake on local writes, reconciling every 60 s for other processes (`sessionOc.ts`). S7-25: corrupt resume state is kept, lock timeouts error. No schema change. Claim identity is async `ProcessTree.processIdentity`, read outside the semaphore and the resume file lock.
+- 1D: `processor.ts` removes a failed attempt's parts unless a tool ran (F1), skips SQLite on tool-input deltas (F2), publishes live usage non-durably (S3-13); `retry.ts` caps waits at 10 min (S3-14); `tool/shell.ts` coalesces metadata at 250 ms (J1, 40-chunk burst 41 -> 4 writes).
+- 1E Claude provider: single-flight spawn, closing children skipped, truncated result line fails fast, denied and aborted turns await the interrupt and finish as error, shim unwrapped by path, S4-12, S4-14 (`sessionManager.ts`, `turnStream.ts`, `cliExecutable.ts`).
+- 1F Cursor: `stream_close` after custom exec frames (H6); unknown interaction variants get a correlated rejection and the Run continues (S5-09; a payload with no interaction query still fails the Run); MCP arg decode failure returns a failed `mcp_result` (S5-10); plan kickoff registered per directory (J3).
+- 1G: `core/src/event.ts` `notify` isolates every listener; instance SSE filters before enqueue (`handlers/global.ts` and `server/src/handlers/event.ts` stay unfiltered by design); `plugin/index.ts` event hooks stay fire-and-forget with sync throws and rejections logged (`hookIsolation.test.ts` adds a never-settling hook).
+- Fixed `core/src/util/processTree.ts` STOP: a console host that reads back from CIM without its path while exiting is skipped if it exits within 1 s; otherwise it still throws (was intermittent "identity changed before stop" in the shell timeout test).
+- Replaced upstream core test "keeps live-only listener defects fail-fast" with the isolation contract.
+- Verification (this merge, in oc): typecheck exit 0 for opencode, tui, core (after the merge; opencode again after the F8 fix). Claude provider `deniedTurn`, `turnStreamFailures`, `singleFlightSpawn`, `respawn`, `sessionManager`, `cliExecutable`, `logger`: 63 pass 0 fail. `steering.test.ts` alone: 12 pass 2 fail before the F8 fix (known receipt-save flake + the denial test), 14 pass 0 fail after. `prompt.test.ts`: 63 pass 1 fail (stale F5 test below). `queue`, `scheduledResume`, `scheduledDelivery`: 50 pass 0 fail. Not rerun here: Cursor, core event, plugin hook, shell, tui tests (no main-side changes since `e8e9138`; green in ocCLONE per its entry).
+- Known failure (carried from ocCLONE, fails there too): `prompt.test.ts` "queue contention bounds reclaims and drains once after the lock releases" (expected 3 claims, got 1). J7 replaced the queue's `Flock` (`session-queue:<id>`) with durable DB claims, so the `Flock` the test holds blocks nothing. TODO (user deferred to Wave 2 start): rewrite against a claim held by another live owner, or drop it with F5's now-unreachable bounded re-claim and 1 s retry in `dispatchHead`.
+- MISTAKE: first diagnosed the F5 failure as owner-identity latency and added a warm-up to the test; the rerun disproved it and the edit was reverted. Prevention: read the mechanism the test contends on before changing timing.
+- TODO: Wave 1 residual races from `fixes.md` (1A `refreshPrompts` after delete, 1C F8 admission vs runner teardown, 1E setup during a respawn's exit wait).
+- Risk: `turnStream.ts` combines two turn-ending redesigns (preempt/release and wait-for-interrupt); covered by the Claude test set above, live use pending.
+
+### User
+Performance and reliability
+- The performance probe kit now lives in the repo and runs only when `OC_PERF_PROBE=1` is set.
+- The TUI no longer drops later events when one event handler throws, and deleted sessions no longer leave data behind in memory.
+- Switching sessions quickly no longer lets a slow earlier load take over the screen, and a failed permission reply now shows a toast and keeps the prompt.
+- Scheduled prompts and usage-reset resumes fire at their time without polling, survive a crash without sending twice, and a cancelled one never fires.
+- A retry after a provider error no longer leaves the failed attempt's partial text behind, and long shell output writes much less to the database.
+- Claude turns no longer spawn two CLI processes at once, a stopped or denied turn ends cleanly, and a cut-off result line fails the turn instead of hanging.
+- Cursor runs no longer abort on an unknown interaction request, and plan approval starts execution in the right project.
+- A plugin whose event hook fails or hangs no longer blocks other plugins or slows the app.
+- A message you send while a turn ends in a denied permission or an error waits for you instead of running on its own.
+
+---
+
 ## 2026-10-16 (~03:13) - v0.2.220 endUndisputed - Fix throwing Claude warnings, zombie turns after Esc, and stuck subagent calls; Claude preempt at tool boundary - Opus 5.5, low effort; Implementation
 
 ### Agent

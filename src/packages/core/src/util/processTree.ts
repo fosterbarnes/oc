@@ -40,7 +40,12 @@ const STOP = [
   "  if ($target.HasExited) { continue }",
   "  $live = Get-CimInstance Win32_Process -Filter ('ProcessId=' + $item.pid)",
   "  if (-not $live) { continue }",
-  "  if ($live.CreationDate.ToFileTimeUtc().ToString() -ne $item.created -or $live.ExecutablePath -ne $item.executable) { throw ('Process identity changed before stop: ' + $item.pid) }",
+  // A process already exiting (a console host whose shell just ended) can read back from CIM without its
+  // path. A mismatch never stops anything: a process that exits on its own is skipped, one that stays throws.
+  "  if ($live.CreationDate.ToFileTimeUtc().ToString() -ne $item.created -or $live.ExecutablePath -ne $item.executable) {",
+  "    if ($target.WaitForExit(1000)) { continue }",
+  "    throw ('Process identity changed before stop: ' + $item.pid)",
+  "  }",
   "  $target.Kill()",
   "  if (-not $target.WaitForExit(5000)) { throw ('Process did not exit: ' + $item.pid) }",
   "}",

@@ -63,7 +63,14 @@ export const { use: useSDK, provider: SDKProvider } = createSimpleContext({
     const claudeAccountHandlers = new Set<() => void>()
     const emitter = {
       emit(_type: "event", event: GlobalEvent) {
-        for (const handler of handlers) handler(event)
+        // One throwing handler must not drop the rest of the batch: log it and keep dispatching.
+        for (const handler of handlers) {
+          try {
+            handler(event)
+          } catch (error) {
+            console.error("TUI event handler failed", error)
+          }
+        }
       },
       on(_type: "event", handler: (event: GlobalEvent) => void) {
         handlers.add(handler)

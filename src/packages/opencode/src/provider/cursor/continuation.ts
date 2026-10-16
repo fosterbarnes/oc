@@ -1,8 +1,8 @@
 import path from "node:path"
 import { trace } from "./debug.js"
-import { encodeMessage } from "./protocol/messages.js"
+import { decodeMessage, encodeMessage } from "./protocol/messages.js"
 import { buildCompleteEditReadMessages } from "./protocol/editRemap.js"
-import { buildExecClientMessages } from "./protocol/execResult.js"
+import { buildExecClientMessages, buildExecStreamClose } from "./protocol/execResult.js"
 import {
   buildAskQuestionInteractionReply,
   buildAsyncAskQuestionCompletion,
@@ -30,6 +30,7 @@ import {
 import { CURSOR_IMAGE_SAVE_TOOL } from "./protocol/generateImage.js"
 import { IMAGE_PERMISSION_DENIED_PREFIX } from "./imageSave.js"
 import { workspaceRootFromRequestContext } from "./context/env.js"
+import { getSessionDirectory } from "./sessionDirectory.js"
 import { sessionManager, type CursorSession, type PendingExec } from "./session.js"
 import { CursorProtocolError } from "./errors.js"
 import { consumeCursorShellResult } from "./shellTimeout.js"
@@ -128,7 +129,8 @@ function buildCreatePlanContinuationFrame(
 
   // The question-emulated path can report execution approval only when a host
   // kickoff exists. Otherwise keep planning mode active and return an error.
-  if (metadata.createPlanBridgeKind === "approve" && !hasPlanExecutionKickoff()) {
+  const instanceDirectory = getSessionDirectory(sessionKey) ?? ""
+  if (metadata.createPlanBridgeKind === "approve" && !hasPlanExecutionKickoff(instanceDirectory)) {
     return buildCreatePlanInteractionReply(interactionId, {
       error: { error: "The plan was approved, but this host cannot start its execution turn." },
       plan_uri: planUri,
@@ -151,6 +153,7 @@ function buildCreatePlanContinuationFrame(
     if (
       !queuePlanExecutionKickoff({
         sessionID: sessionKey,
+        instanceDirectory,
         planPath: formatPlanKickoffPath(absolute, workspaceRoot),
         cursorSessionID,
       })
@@ -357,6 +360,13 @@ export function deliverContinuationResults(
             workspaceRoot,
           })
         }
+        const last = frames.at(-1)
+        const closed = last
+          ? (decodeMessage("AgentClientMessage", last) as {
+              exec_client_control_message?: { stream_close?: { id?: number } }
+            }).exec_client_control_message?.stream_close?.id === r.execId
+          : false
+        if (!closed) frames.push(buildExecStreamClose(r.execId))
       } catch (error) {
         trace(`continuation: result encode FAILED execId=${r.execId} err=${(error as Error).message}`)
         sessionManager.close(session, "result-write-failed")

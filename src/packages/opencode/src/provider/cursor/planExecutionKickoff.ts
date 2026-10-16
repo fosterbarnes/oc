@@ -16,6 +16,7 @@ import { trace } from "./debug.js"
 
 export type PlanExecutionKickoffInput = {
   sessionID: string
+  instanceDirectory: string
   /** Filesystem path (or relative display path) of the approved plan. */
   planPath: string
   /** Concrete Cursor Run that owns the approval. Guards recovery/supersession. */
@@ -61,7 +62,7 @@ export function planPathFromUri(planUri: string): string {
   return raw
 }
 
-let kickoff: PlanExecutionKickoffFn | undefined
+const kickoffs = new Map<string, PlanExecutionKickoffFn>()
 export type PlanExecutionKickoffState = PlanExecutionKickoffInput & {
   status: "pending" | "failed"
   attempts: number
@@ -70,28 +71,34 @@ export type PlanExecutionKickoffState = PlanExecutionKickoffInput & {
 const pending = new Map<string, PlanExecutionKickoffState>()
 const warnings = new Map<string, string>()
 
-/** Install (or clear) the host kickoff. */
-export function setPlanExecutionKickoff(fn: PlanExecutionKickoffFn | undefined): void {
-  kickoff = fn
+/** Register the host kickoff for one instance and return its identity-checked disposer. */
+export function registerPlanExecutionKickoff(directory: string, fn: PlanExecutionKickoffFn): () => void {
+  const key = path.resolve(directory)
+  kickoffs.set(key, fn)
+  return () => {
+    if (kickoffs.get(key) === fn) kickoffs.delete(key)
+  }
 }
 
-export function hasPlanExecutionKickoff(): boolean {
-  return kickoff !== undefined
+export function hasPlanExecutionKickoff(directory: string): boolean {
+  return kickoffs.has(path.resolve(directory))
 }
 
 /** Record the approved plan; execution is flushed after the stream settles. */
 export function queuePlanExecutionKickoff(input: PlanExecutionKickoffInput): boolean {
   const sessionID = input.sessionID.trim()
   const planPath = input.planPath.trim()
-  if (!sessionID || !planPath || !kickoff) {
+  const instanceDirectory = input.instanceDirectory.trim()
+  if (!sessionID || !planPath || !instanceDirectory || !hasPlanExecutionKickoff(instanceDirectory)) {
     trace(
       `planExecutionKickoff: not queued sessionID=${JSON.stringify(sessionID)} ` +
-        `planPath=${JSON.stringify(planPath)} handler=${Boolean(kickoff)}`,
+        `planPath=${JSON.stringify(planPath)} handler=${hasPlanExecutionKickoff(instanceDirectory)}`,
     )
     return false
   }
   pending.set(sessionID, {
     sessionID,
+    instanceDirectory,
     planPath,
     ...(input.cursorSessionID ? { cursorSessionID: input.cursorSessionID } : {}),
     status: "pending",
@@ -136,7 +143,7 @@ export async function flushPlanExecutionKickoff(
     )
     return false
   }
-  const run = kickoff
+  const run = kickoffs.get(path.resolve(state.instanceDirectory))
   if (!run) {
     const message = "The plan was approved, but this host cannot start its execution turn."
     state.status = "failed"
@@ -148,6 +155,7 @@ export async function flushPlanExecutionKickoff(
   try {
     await run({
       sessionID: state.sessionID,
+      instanceDirectory: state.instanceDirectory,
       planPath: state.planPath,
       ...(state.cursorSessionID ? { cursorSessionID: state.cursorSessionID } : {}),
     })
@@ -188,7 +196,7 @@ export function planExecutionKickoffState(sessionID: string | undefined): PlanEx
 
 /** Test helper: clear the registered kickoff and pending approvals. */
 export function resetPlanExecutionKickoffForTests(): void {
-  kickoff = undefined
+  kickoffs.clear()
   pending.clear()
   warnings.clear()
 }

@@ -54,6 +54,7 @@ import { TaskTool, type TaskPromptOps } from "@/tool/task"
 import { agentPushTitle } from "@/tool/sessionComplete"
 import { SessionRunState } from "./run-state"
 import { SessionQueue } from "./queue"
+import { ScheduledDelivery } from "./scheduledDelivery"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { Database } from "@opencode-ai/core/database/database"
@@ -151,7 +152,7 @@ const writeImage = Effect.fn("SessionPrompt.writeImage")(function* (
 
 export interface Interface {
   readonly cancel: (sessionID: SessionID) => Effect.Effect<void>
-  readonly prompt: (input: PromptInput) => Effect.Effect<SessionV1.WithParts, Image.Error | Session.BusyError>
+  readonly prompt: (input: TurnInput) => Effect.Effect<SessionV1.WithParts, Image.Error | Session.BusyError>
   readonly loop: (input: LoopInput) => Effect.Effect<SessionV1.WithParts, Session.BusyError>
   readonly shell: (input: ShellInput) => Effect.Effect<SessionV1.WithParts, Session.BusyError>
   readonly command: (input: CommandInput) => Effect.Effect<SessionV1.WithParts, Image.Error | Session.BusyError>
@@ -159,6 +160,7 @@ export interface Interface {
   readonly rename: (sessionID: SessionID) => Effect.Effect<{ session: Session.Info; model?: string }, Session.BusyError>
   readonly generate: (input: GenerateInput) => Effect.Effect<GenerateResult, GenerateError | Session.BusyError>
   readonly queue: {
+    readonly deadline: SessionQueue.Interface["deadline"]
     readonly snapshot: (sessionID: SessionID) => Effect.Effect<SessionQueue.Snapshot>
     readonly add: (input: SessionQueue.AddInput) => Effect.Effect<SessionQueue.Snapshot>
     readonly edit: (input: {
@@ -306,6 +308,14 @@ const layer = Layer.effect(
       msgs: SessionV1.WithParts[]
     }) {
       const { task, model, lastUser, sessionID, session, msgs } = input
+      const taskAgent = yield* agents.get(task.agent)
+      if (!taskAgent) {
+        const available = (yield* agents.list()).filter((a) => !a.hidden).map((a) => a.name)
+        const hint = available.length ? ` Available agents: ${available.join(", ")}` : ""
+        const error = new NamedError.Unknown({ message: `Agent not found: "${task.agent}".${hint}` })
+        yield* events.publish(Session.Event.Error, { sessionID, error: error.toObject() })
+        throw error
+      }
       const ctx = yield* InstanceState.context
       const promptOps = yield* ops()
       const { task: taskTool } = yield* registry.named()
@@ -354,15 +364,6 @@ const layer = Layer.effect(
         { tool: TaskTool.id, sessionID, callID: part.id },
         { args: taskArgs },
       )
-
-      const taskAgent = yield* agents.get(task.agent)
-      if (!taskAgent) {
-        const available = (yield* agents.list()).filter((a) => !a.hidden).map((a) => a.name)
-        const hint = available.length ? ` Available agents: ${available.join(", ")}` : ""
-        const error = new NamedError.Unknown({ message: `Agent not found: "${task.agent}".${hint}` })
-        yield* events.publish(Session.Event.Error, { sessionID, error: error.toObject() })
-        throw error
-      }
 
       let error: Error | undefined
       const taskAbort = new AbortController()
@@ -1128,7 +1129,11 @@ const layer = Layer.effect(
         })
       }
 
-      yield* sessions.updateMessage(info)
+      if (input.delivery) {
+        const admitted = yield* ScheduledDelivery.admit(database, events, input.delivery, info, parts)
+        if (!admitted) return { info, parts, skipped: true }
+      }
+      if (!input.delivery) yield* sessions.updateMessage(info)
       for (const part of parts) yield* sessions.updatePart(part)
 
       return { info, parts }
@@ -1141,6 +1146,7 @@ const layer = Layer.effect(
       const session = yield* sessions.get(input.sessionID).pipe(Effect.orDie)
       yield* revert.cleanup(session)
       const message = yield* createUserMessage(input)
+      if ("skipped" in message) return message
       if (input.persisted) yield* input.persisted
       yield* sessions.touch(input.sessionID)
 
@@ -1228,8 +1234,20 @@ const layer = Layer.effect(
         let structured: unknown
         let step = 0
         const session = yield* sessions.get(sessionID).pipe(Effect.orDie)
+        const pendingBeforeExit = (lastUserID: MessageID) => MessageV2.filterCompactedEffect(sessionID).pipe(
+          Effect.provideService(Database.Service, database),
+          Effect.map((messages) => {
+            const answered = new Set(messages.flatMap((message) =>
+              message.info.role === "assistant" ? [message.info.parentID] : []))
+            return messages.slice(messages.findIndex((message) => message.info.id === lastUserID) + 1)
+              .some((message) => message.info.role === "user" && !message.info.noReply &&
+                !answered.has(message.info.id) &&
+                !message.parts.some((part) => part.type === "text" && part.metadata?.[STEERED_METADATA_KEY]))
+          }),
+        )
 
         while (true) {
+          structured = undefined
           yield* status.set(sessionID, { type: "busy" })
           yield* Effect.logInfo("loop", { "session.id": sessionID, step })
 
@@ -1298,16 +1316,21 @@ const layer = Layer.effect(
                       original?.info.role === "user" ? (original.info.permission ?? session.permission) : session.permission,
                   })
                   if (child) {
-                    yield* loop({ sessionID: child.id }).pipe(
-                      Effect.catchCause((cause) =>
-                        Effect.logError("Handoff kickoff failed", { sessionID: child.id, cause }),
-                      ),
-                      Effect.forkDetach,
-                    )
+                    yield* Effect.gen(function* () {
+                      const exit = yield* loop({ sessionID: child.id }).pipe(Effect.exit)
+                      const error = Exit.isFailure(exit)
+                        ? MessageV2.fromError(Cause.squash(exit.cause), { providerID: lastUser.model.providerID })
+                        : exit.value.info.role === "assistant" ? exit.value.info.error : undefined
+                      if (!error) return
+                      yield* sessions.setSessionFailed({ sessionID: child.id, sessionFailed: true })
+                      yield* events.publish(Session.Event.Error, { sessionID: child.id, error })
+                      yield* Effect.logError("Handoff kickoff failed", { sessionID: child.id, error })
+                    }).pipe(Effect.forkDetach)
                   }
                 }
               }
               yield* Effect.logInfo("exiting loop after handoff", { "session.id": sessionID })
+              if (yield* pendingBeforeExit(lastUser.id)) continue
               break
             }
             const orphan = lastAssistantMsg?.parts.find(
@@ -1347,6 +1370,7 @@ const layer = Layer.effect(
               }
             }
             yield* Effect.logInfo("exiting loop", { "session.id": sessionID })
+            if (yield* pendingBeforeExit(lastUser.id)) continue
             break
           }
 
@@ -1377,6 +1401,7 @@ const layer = Layer.effect(
               auto: task.auto,
               overflow: task.overflow,
             })
+            // A failed compaction stops the loop; only clean exits recheck for prompts saved meanwhile.
             if (result === "stop") break
             continue
           }
@@ -1573,6 +1598,7 @@ const layer = Layer.effect(
             Effect.ensuring(instruction.clear(handle.message.id)),
             Effect.onInterrupt(() => finalizeInterruptedAssistant),
           )
+          // Blocked, failed, and structured-output turns end the run; messages sent during them wait.
           if (outcome === "break") break
           continue
         }
@@ -1671,6 +1697,7 @@ const layer = Layer.effect(
 
           const shellMatches = ConfigMarkdown.shell(template)
           if (shellMatches.length > 0) {
+            const ctx = yield* InstanceState.context
             const cfg = yield* config.get()
             const sh = Shell.preferred(cfg.shell)
             const results = yield* Effect.forEach(
@@ -1690,7 +1717,8 @@ const layer = Layer.effect(
                     }).pipe(Effect.orDie)
                   }
                   const handle = yield* spawner.spawn(
-                    ChildProcess.make(sh, Shell.args(sh, cmd, process.cwd()), {
+                    ChildProcess.make(sh, Shell.args(sh, cmd, ctx.directory), {
+                      cwd: ctx.directory,
                       stdin: "ignore",
                       stdout: "pipe",
                       stderr: "ignore",
@@ -1698,11 +1726,14 @@ const layer = Layer.effect(
                     }),
                   )
                   const text = yield* Stream.mkString(Stream.decodeText(handle.stdout))
-                  yield* handle.exitCode
+                  const code = yield* handle.exitCode
+                  if (code !== 0) return yield* Effect.fail(new Error(`Shell command exited with code ${code}`))
                   return text
                 }).pipe(
                   Effect.scoped,
-                  Effect.catch(() => Effect.succeed("")),
+                  Effect.catch((error) => Effect.logError("command substitution failed", {
+                    sessionID: input.sessionID, command: cmd, error,
+                  }).pipe(Effect.as(`<failed: ${cmd}>`))),
                 ),
               { concurrency: "unbounded" },
             )
@@ -1816,11 +1847,19 @@ const layer = Layer.effect(
     const isIdle = (sessionID: SessionID) => Effect.exit(state.assertNotBusy(sessionID)).pipe(Effect.map(Exit.isSuccess))
     const dispatchHead: (sessionID: SessionID) => Effect.Effect<boolean> = Effect.fn("SessionPrompt.dispatchQueued")(function* (sessionID: SessionID) {
       const idle = isIdle(sessionID)
-      const queued = yield* queue.claim(sessionID, idle)
+      let queued = yield* queue.claim(sessionID, idle)
+      for (let attempt = 1; !queued && attempt < 3; attempt++) {
+        if (!(yield* queue.ready(sessionID)) || !(yield* idle)) break
+        yield* Effect.sleep(25)
+        queued = yield* queue.claim(sessionID, idle)
+      }
       if (!queued) {
         if (!(yield* queue.ready(sessionID))) return false
-        // The turn ended between the failed claim and now: claim again instead of waiting for a run that is over.
-        if (yield* idle) return yield* dispatchHead(sessionID)
+        // Idle, yet the queue lock is held elsewhere (another oc process or a stale lock): retry slowly.
+        if (yield* idle) {
+          yield* Effect.sleep("1 second").pipe(Effect.andThen(drainQueue(sessionID)), Effect.forkIn(scope))
+          return false
+        }
         // Busy: wait out maintenance, then the run in progress, then drain again.
         yield* Effect.gen(function* () {
           yield* state.available(sessionID)
@@ -1834,10 +1873,11 @@ const layer = Layer.effect(
       // Refused during this project's reload: the queue pauses like any failed turn and resumes on demand.
       const exit = yield* Effect.gen(function* () {
         const messageID = yield* queue.prepare(queued.id)
-        return yield* gated(prompt({ ...queued.payload, sessionID, messageID, persisted: queue.complete(queued.id) }))
+        return yield* gated(prompt({ ...queued.payload, sessionID, messageID,
+          delivery: queue.delivery(queued.id, queued.claim), persisted: queue.complete(queued.id) }))
       }).pipe(Effect.exit)
       if (Exit.isSuccess(exit) && SessionRunState.successfulTurn(exit.value)) return true
-      yield* queue.settle(queued.id)
+      yield* queue.settle(queued.id, queued.claim)
       yield* queue.pause(sessionID, "error")
       return false
     })
@@ -1869,15 +1909,17 @@ const layer = Layer.effect(
             ? yield* sessions.fork({ sessionID: entry.sessionID })
             : yield* sessions.create({ workspaceID: (yield* sessions.get(entry.sessionID)).workspaceID })
         const messageID = yield* queue.prepare(entry.id)
-        yield* gated(prompt({ ...entry.payload, sessionID: target.id, messageID, persisted: queue.complete(entry.id) }))
+        yield* gated(prompt({ ...entry.payload, sessionID: target.id, messageID,
+          delivery: queue.delivery(entry.id, entry.claim), persisted: queue.complete(entry.id) }))
       }).pipe(Effect.exit)
       if (Exit.isSuccess(exit)) return
       yield* Effect.logWarning("scheduled prompt failed", { sessionID: entry.sessionID, cause: exit.cause })
-      yield* queue.settle(entry.id)
+      yield* queue.settle(entry.id, entry.claim)
       yield* queue.pause(entry.sessionID, "error")
     })
 
     const queueOps: Interface["queue"] = {
+      deadline: queue.deadline,
       snapshot: queue.snapshot,
       add: (input) => queue.add(input).pipe(Effect.tap(() => kick(input.sessionID))),
       edit: queue.edit,
@@ -1891,7 +1933,7 @@ const layer = Layer.effect(
             due.detached,
             (entry) => inSession(entry.sessionID, dispatchDetached(entry)).pipe(
               Effect.catchCause((cause) => Effect.gen(function* () {
-                yield* queue.settle(entry.id)
+                 yield* queue.settle(entry.id, entry.claim)
                 yield* queue.pause(entry.sessionID, "error")
                 yield* Effect.logWarning("scheduled prompt skipped", { sessionID: entry.sessionID, cause })
               })),
@@ -1904,7 +1946,7 @@ const layer = Layer.effect(
             (sessionID) =>
               inSession(
                 sessionID,
-                isIdle(sessionID).pipe(Effect.flatMap((idle) => (idle ? kick(sessionID) : Effect.void))),
+                kick(sessionID),
               ).pipe(Effect.catchCause((cause) => Effect.logWarning("scheduled prompt skipped", { sessionID, cause }))),
             { discard: true },
           )
@@ -1961,6 +2003,7 @@ export type TurnInput = PromptInput & {
   toolHost?: ConfigCommandV1.ToolHost
   persisted?: Effect.Effect<void>
   explicitModel?: boolean
+  delivery?: ScheduledDelivery.Input
 }
 
 export class LoopInput extends Schema.Class<LoopInput>("SessionPrompt.LoopInput")({

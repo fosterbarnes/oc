@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto"
-import { mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs"
+import { copyFileSync, constants, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs"
 import path from "node:path"
 import { Global } from "@opencode-ai/core/global"
 import { SessionV1 } from "@opencode-ai/core/v1/session"
@@ -9,13 +9,14 @@ import { InstanceStore } from "@/project/instance-store"
 import type { Session } from "./session"
 import type { SessionPrompt } from "./prompt"
 import type { SessionStatus } from "./status"
-import type { SessionID } from "./schema"
+import { MessageID, type SessionID } from "./schema"
+import { ScheduledDelivery } from "./scheduledDelivery"
 
 export const DEFAULT_PROMPT = "Usage limit reset. Continue where you left off."
 /** Consecutive auto-resumes after which scheduling stops until the user intervenes. */
 export const MAX_AUTO_RESUMES = 5
 export const RESUME_REASON = "usage-reset"
-const POLL_MS = 15_000
+const wakes = new Map<string | null, ReturnType<typeof ScheduledDelivery.makeWake>>()
 
 export interface Entry {
   id: string
@@ -25,6 +26,8 @@ export interface Entry {
   reason: string
   createdAt: number
   attempts: number
+  claim?: ScheduledDelivery.Claim
+  messageID?: MessageID
 }
 
 export interface State {
@@ -32,6 +35,7 @@ export interface State {
   prompt: string
   entries: Entry[]
   resumeCounts: Record<string, number>
+  delivered: Record<string, string[]>
 }
 
 export interface RequestInput {
@@ -42,7 +46,7 @@ export interface RequestInput {
 }
 
 function defaultState(): State {
-  return { enabled: false, prompt: DEFAULT_PROMPT, entries: [], resumeCounts: {} }
+  return { enabled: false, prompt: DEFAULT_PROMPT, entries: [], resumeCounts: {}, delivered: {} }
 }
 
 function isEntry(value: unknown): value is Entry {
@@ -59,19 +63,35 @@ function isEntry(value: unknown): value is Entry {
     Number.isFinite(e.createdAt) &&
     typeof e.attempts === "number" &&
     Number.isSafeInteger(e.attempts) &&
-    e.attempts >= 0
+    e.attempts >= 0 &&
+    (e.claim === undefined || ScheduledDelivery.claim(e.claim) !== undefined) &&
+    (e.messageID === undefined || (typeof e.messageID === "string" && e.messageID.startsWith("msg")))
   )
 }
 
 function sanitize(raw: unknown): State {
   const base = defaultState()
-  if (!raw || typeof raw !== "object") return base
+  if (!raw || typeof raw !== "object") throw new Error("Invalid scheduled resume state")
   const r = raw as Record<string, unknown>
-  const entries = Array.isArray(r.entries) ? r.entries.filter(isEntry) : []
+  if (
+    typeof r.enabled !== "boolean" ||
+    typeof r.prompt !== "string" ||
+    !Array.isArray(r.entries) ||
+    !r.entries.every(isEntry) ||
+    !r.resumeCounts ||
+    typeof r.resumeCounts !== "object"
+  ) {
+    throw new Error("Invalid scheduled resume state")
+  }
+  const entries = r.entries
+  if (r.delivered !== undefined && (!r.delivered || typeof r.delivered !== "object" || Array.isArray(r.delivered))) {
+    throw new Error("Invalid scheduled resume receipts")
+  }
   const resumeCounts: Record<string, number> = {}
   if (r.resumeCounts && typeof r.resumeCounts === "object") {
     for (const [k, v] of Object.entries(r.resumeCounts as Record<string, unknown>)) {
-      if (typeof v === "number" && Number.isFinite(v) && v > 0) resumeCounts[k] = Math.floor(v)
+      if (typeof v !== "number" || !Number.isSafeInteger(v) || v < 0) throw new Error("Invalid scheduled resume count")
+      if (v > 0) resumeCounts[k] = v
     }
   }
   return {
@@ -79,6 +99,14 @@ function sanitize(raw: unknown): State {
     prompt: typeof r.prompt === "string" && r.prompt ? r.prompt : base.prompt,
     entries,
     resumeCounts,
+    delivered: Object.fromEntries(
+      Object.entries(r.delivered ?? {}).map(([key, value]) => {
+        if (!Array.isArray(value) || !value.every((id) => typeof id === "string")) {
+          throw new Error("Invalid scheduled resume receipts")
+        }
+        return [key, value.slice(-50)]
+      }),
+    ),
   }
 }
 
@@ -90,19 +118,37 @@ export interface Store {
   readonly cancel: (id: string) => boolean
   /** Bookkeeping writes return false when the lock was not acquired; `persist` retries them. */
   readonly retry: (entry: Entry) => boolean
-  /** Remove and return entries due at `now`, persisting the remainder first (fire-once claim). */
-  readonly takeDue: (now?: number) => Entry[]
-  readonly noteFired: (sessionID: string) => boolean
+  /** Persist an owned claim before returning due entries. */
+  readonly takeDue: (now?: number) => Promise<Entry[]>
+  readonly noteFired: (sessionID: string, deliveryID: string) => boolean
   readonly noteUserIntervened: (sessionID: string) => boolean
+  readonly owns: (entry: Entry) => boolean
+  readonly wake: ReturnType<typeof ScheduledDelivery.makeWake>
 }
 
 export function createStore(file: string | null, clock: () => number = Date.now): Store {
+  const wake = wakes.get(file) ?? ScheduledDelivery.makeWake()
+  wakes.set(file, wake)
+  const owner = Effect.runSync(Effect.cached(Effect.promise(ScheduledDelivery.owner)))
+  let identity: Awaited<ReturnType<typeof ScheduledDelivery.owner>> | undefined
   const read = (): State => {
     if (!file) return defaultState()
     try {
       return sanitize(JSON.parse(readFileSync(file, "utf8")))
-    } catch {
-      return defaultState()
+    } catch (cause) {
+      if ((cause as NodeJS.ErrnoException).code === "ENOENT") return defaultState()
+      if (
+        !(cause instanceof SyntaxError) &&
+        !(cause instanceof Error && cause.message.startsWith("Invalid scheduled resume"))
+      )
+        throw cause
+      const backup = `${file}.corrupt`
+      try {
+        copyFileSync(file, backup, constants.COPYFILE_EXCL)
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error
+      }
+      throw new Error(`Corrupt scheduled resume state preserved at ${backup}`, { cause })
     }
   }
   // Two instances (oc + native opencode share the data dir) can claim the
@@ -147,6 +193,7 @@ export function createStore(file: string | null, clock: () => number = Date.now)
     const tmp = `${file}.${process.pid}.tmp`
     writeFileSync(tmp, JSON.stringify(state), "utf8")
     renameSync(tmp, file)
+    wake.notify()
   }
 
   const getState = () => read()
@@ -157,7 +204,10 @@ export function createStore(file: string | null, clock: () => number = Date.now)
       state.enabled = enabled
       write(state)
       return state
-    }) ?? read()
+    }) ??
+    (() => {
+      throw new Error("Scheduled resume lock timeout")
+    })()
 
   const setPrompt = (prompt: string): State =>
     withLock(() => {
@@ -165,7 +215,10 @@ export function createStore(file: string | null, clock: () => number = Date.now)
       if (prompt) state.prompt = prompt
       write(state)
       return state
-    }) ?? read()
+    }) ??
+    (() => {
+      throw new Error("Scheduled resume lock timeout")
+    })()
 
   const requestResume = (input: RequestInput, now: number = clock()): Entry | null =>
     withLock(() => {
@@ -198,35 +251,74 @@ export function createStore(file: string | null, clock: () => number = Date.now)
       return true
     }) ?? false
 
-  const takeDue = (now: number = clock()): Entry[] =>
-    withLock(() => {
-      const state = read()
-      const due = state.entries.filter((e) => e.fireAt <= now)
-      if (!due.length) return []
-      state.entries = state.entries.filter((e) => e.fireAt > now)
-      write(state)
-      return due
-    }) ?? []
+  const takeDue = async (now: number = clock()): Promise<Entry[]> => {
+    const observed = read().entries
+    const resolved = await Effect.runPromise(owner)
+    identity = resolved
+    const expired = await Promise.all(
+      observed.map(async (entry) => {
+        const claim = entry.claim
+        if (!claim || entry.fireAt > now || !(await ScheduledDelivery.expired(claim, now))) return
+        return { id: entry.id, claim }
+      }),
+    )
+    return (
+      withLock(() => {
+        const state = read()
+        // A liveness result cannot evict a claim replaced while the OS query was in flight.
+        const due = state.entries.filter(
+          (entry) =>
+            entry.fireAt <= now &&
+            (!entry.claim ||
+              now - entry.claim.at >= ScheduledDelivery.CLAIM_MS ||
+              expired.some(
+                (checked) =>
+                  checked?.id === entry.id &&
+                  checked.claim?.owner === entry.claim?.owner &&
+                  checked.claim?.at === entry.claim?.at,
+              )),
+        )
+        if (!due.length) return []
+        for (const entry of due) {
+          entry.claim = { ...resolved, at: now }
+          entry.messageID ??= MessageID.ascending()
+        }
+        write(state)
+        return due
+      }) ?? []
+    )
+  }
 
   const retry = (entry: Entry): boolean =>
     withLock(() => {
       const state = read()
       if ((state.resumeCounts[entry.sessionID] ?? 0) >= MAX_AUTO_RESUMES) return true
       // Keep a newer schedule if the provider requested one while this entry was firing.
-      if (state.entries.some((pending) => pending.sessionID === entry.sessionID)) return true
-      state.entries.push({
-        ...entry,
-        attempts: entry.attempts + 1,
-        fireAt: clock() + Math.min(60_000 * 2 ** Math.min(entry.attempts, 6), 3_600_000),
-      })
+      const current = state.entries.find((pending) => pending.id === entry.id)
+      if (!current || current.claim?.owner !== identity?.owner || current.claim?.at !== entry.claim?.at) return true
+      const { claim, ...pending } = current
+      state.entries = state.entries.map((item) =>
+        item.id !== entry.id
+          ? item
+          : {
+              ...pending,
+              attempts: entry.attempts + 1,
+              fireAt: clock() + Math.min(60_000 * 2 ** Math.min(entry.attempts, 6), 3_600_000),
+            },
+      )
       write(state)
       return true
     }) ?? false
 
-  const noteFired = (sessionID: string): boolean =>
+  const noteFired = (sessionID: string, deliveryID: string): boolean =>
     withLock(() => {
       const state = read()
-      state.resumeCounts[sessionID] = (state.resumeCounts[sessionID] ?? 0) + 1
+      const ids = state.delivered[sessionID] ?? []
+      if (!ids.includes(deliveryID)) {
+        state.resumeCounts[sessionID] = (state.resumeCounts[sessionID] ?? 0) + 1
+        state.delivered[sessionID] = [...ids, deliveryID].slice(-50)
+      }
+      state.entries = state.entries.filter((entry) => entry.id !== deliveryID)
       write(state)
       return true
     }) ?? false
@@ -240,7 +332,22 @@ export function createStore(file: string | null, clock: () => number = Date.now)
       return true
     }) ?? false
 
-  return { getState, setEnabled, setPrompt, requestResume, cancel, retry, takeDue, noteFired, noteUserIntervened }
+  return {
+    getState,
+    setEnabled,
+    setPrompt,
+    requestResume,
+    cancel,
+    retry,
+    takeDue,
+    noteFired,
+    noteUserIntervened,
+    wake,
+    owns: (entry) =>
+      read().entries.some(
+        (item) => item.id === entry.id && item.claim?.owner === identity?.owner && item.claim?.at === entry.claim?.at,
+      ),
+  }
 }
 
 const DEFAULT_FILE = process.env.BUN_TEST != null ? null : path.join(Global.Path.data, "scheduledResume.json")
@@ -267,13 +374,21 @@ export interface FireServices {
 // bookkeeping keeps trying past that instead of silently losing a retry or a cap count.
 const persist = (write: () => boolean) =>
   Effect.gen(function* () {
-    for (let attempt = 0; attempt < 10 && !write(); attempt++) yield* Effect.sleep("1 second")
+    for (let attempt = 0; attempt < 10; attempt++) {
+      if (write()) return
+      yield* Effect.sleep("1 second")
+    }
+    yield* Effect.die(new Error("Scheduled resume receipt lock timeout"))
   })
 
 const drop = (store: Store, entry: Entry, reason: string) =>
-  reason === "user-message" || reason === "session-gone"
-    ? persist(() => store.noteUserIntervened(entry.sessionID))
-    : Effect.void
+  Effect.sync(() => store.cancel(entry.id)).pipe(
+    Effect.andThen(
+      reason === "user-message" || reason === "session-gone"
+        ? persist(() => store.noteUserIntervened(entry.sessionID))
+        : Effect.void,
+    ),
+  )
 
 /** Fire one claimed entry; retry transient failures without resetting the successful-resume cap. */
 export const fireEntry = Effect.fn("ScheduledResume.fireEntry")(function* (
@@ -282,6 +397,7 @@ export const fireEntry = Effect.fn("ScheduledResume.fireEntry")(function* (
   entry: Entry,
 ) {
   const fire = Effect.gen(function* () {
+    if (!store.owns(entry)) return
     const info = yield* services.session
       .get(entry.sessionID)
       .pipe(Effect.catchTag("NotFoundError", () => drop(store, entry, "session-gone").pipe(Effect.as(undefined))))
@@ -289,6 +405,16 @@ export const fireEntry = Effect.fn("ScheduledResume.fireEntry")(function* (
     const ctx = yield* services.store.load({ directory: entry.directory || info.directory })
     yield* Effect.gen(function* () {
       const messages = yield* services.session.messages({ sessionID: entry.sessionID })
+      if (
+        messages.some(
+          (message) =>
+            message.info.id === entry.messageID ||
+            message.parts.some((part) => part.type === "text" && part.metadata?.scheduledResumeID === entry.id),
+        )
+      ) {
+        yield* persist(() => store.noteFired(entry.sessionID, entry.id))
+        return
+      }
       const lastUser = messages
         .filter(
           (message) =>
@@ -312,14 +438,18 @@ export const fireEntry = Effect.fn("ScheduledResume.fireEntry")(function* (
         yield* persist(() => store.retry(entry))
         return
       }
+      if (!store.owns(entry)) return
       yield* services.prompt.prompt({
         sessionID: entry.sessionID,
+        messageID: entry.messageID,
+        delivery: { id: entry.id, check: Effect.sync(() => store.owns(entry)) },
+        persisted: persist(() => store.noteFired(entry.sessionID, entry.id)),
         ...(lastUser ? { model: lastUser.model, agent: lastUser.agent } : {}),
         parts: [
           { type: "text", text: store.getState().prompt, synthetic: true, metadata: { scheduledResumeID: entry.id } },
         ],
       })
-      yield* persist(() => store.noteFired(entry.sessionID))
+      if (store.owns(entry)) yield* persist(() => store.noteFired(entry.sessionID, entry.id))
     }).pipe(Effect.provideService(InstanceRef, ctx))
   })
   yield* fire.pipe(
@@ -332,16 +462,32 @@ export const fireEntry = Effect.fn("ScheduledResume.fireEntry")(function* (
   )
 })
 
-/** Drain due entries now, then every POLL_MS. Overdue entries fire once on startup. */
+/** Local writes re-arm deadlines; a slow reconciliation discovers other processes' writes. */
 export const pollLoop = (services: FireServices, store: Store) =>
   Effect.gen(function* () {
-    const drain = Effect.sync(() => store.takeDue()).pipe(
-      Effect.flatMap((due) => Effect.forEach(due, (entry) => fireEntry(services, store, entry), { discard: true })),
+    const drain = Effect.promise(() => store.takeDue()).pipe(
+      Effect.flatMap((due) =>
+        Effect.forEach(due, (entry) => fireEntry(services, store, entry).pipe(Effect.forkScoped), { discard: true }),
+      ),
       Effect.catch((cause) => Effect.logWarning("scheduled resume drain failed", { cause: String(cause) })),
       Effect.catchDefect((cause) => Effect.logWarning("scheduled resume drain defect", { cause: String(cause) })),
     )
-    yield* drain
-    yield* Effect.forever(Effect.sleep(POLL_MS).pipe(Effect.andThen(drain)))
+    yield* Effect.forever(
+      Effect.gen(function* () {
+        const version = store.wake.version()
+        yield* drain
+        const now = Date.now()
+        const deadline = Effect.sync(() =>
+          Math.min(
+            now + ScheduledDelivery.RECONCILE_MS,
+            ...store
+              .getState()
+              .entries.map((entry) => (entry.claim ? entry.claim.at + ScheduledDelivery.CLAIM_MS : entry.fireAt)),
+          ),
+        ).pipe(Effect.catchDefect(() => Effect.succeed(now + ScheduledDelivery.RECONCILE_MS)))
+        yield* store.wake.wait(version, yield* deadline)
+      }),
+    )
   })
 
 export * as ScheduledResume from "./scheduledResume"

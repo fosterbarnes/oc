@@ -4,6 +4,9 @@ import {
   shouldContinueProgressOnlyTurn,
 } from "@/provider/cursor/protocol/progressContinuation.js"
 import { resolveVariantMaxMode } from "@/provider/cursor/models.js"
+import { decodeMessage } from "@/provider/cursor/protocol/messages.js"
+import { handleInteractionQuery } from "@/provider/cursor/protocol/interactions.js"
+import { parseExecServerMessage } from "@/provider/cursor/protocol/execParse.js"
 
 describe("Cursor protocol helpers", () => {
   test("keeps an explicit non-max variant ahead of a max-mode hint", () => {
@@ -43,5 +46,27 @@ describe("Cursor protocol helpers", () => {
     expect(shouldContinueProgressOnlyTurn({ ...base, continuationAttempts: 0 })).toBe(true)
     expect(shouldContinueProgressOnlyTurn({ ...base, continuationAttempts: 1 })).toBe(false)
     expect(shouldContinueProgressOnlyTurn({ ...base, pendingExecs: 1 })).toBe(false)
+  })
+
+  test("rejects an unknown interaction without throwing or failing the Run", () => {
+    const handled = handleInteractionQuery({}, Uint8Array.of(0x3a, 0x05, 0x08, 0x09, 0xa2, 0x01, 0x00))
+    expect(handled.outcome).toBe("rejected")
+    expect(handled.id).toBe(9)
+    expect(decodeMessage<Record<string, unknown>>("AgentClientMessage", handled.reply!).interaction_response).toEqual({
+      id: 9,
+    })
+  })
+
+  test("failed MCP argument decode is rejected before host tool execution", () => {
+    const parsed = parseExecServerMessage({
+      id: 3,
+      exec_id: "4",
+      mcp_args: { tool_name: "opencode-read", args: ["%%%"] },
+    })
+    expect(parsed).toMatchObject({
+      resultField: "mcp_result",
+      toolName: "opencode-read",
+      localError: "Cursor MCP request arguments could not be decoded.",
+    })
   })
 })

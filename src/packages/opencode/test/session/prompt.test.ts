@@ -6,8 +6,9 @@ import { AppNodeBuilder } from "@opencode-ai/core/effect/app-node-builder"
 import { SessionProjector } from "@opencode-ai/core/session/projector"
 import { eq } from "drizzle-orm"
 import { EventV2Bridge } from "@/event-v2-bridge"
-import { afterAll, expect, test } from "bun:test"
+import { afterAll, expect, spyOn, test } from "bun:test"
 import { Cause, Deferred, Duration, Effect, Exit, Fiber, Layer, Logger } from "effect"
+import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import { existsSync, rmSync } from "node:fs"
 import os from "os"
 import path from "path"
@@ -40,6 +41,10 @@ import { SessionProcessor } from "../../src/session/processor"
 import { SessionPrompt } from "../../src/session/prompt"
 import { SessionRevert } from "../../src/session/revert"
 import { SessionRunState } from "../../src/session/run-state"
+import { SessionQueue } from "../../src/session/queue"
+import { SessionHandoff } from "../../src/session/handoff"
+import { SessionReminders } from "../../src/session/reminders"
+import { Flock } from "@opencode-ai/core/util/flock"
 import { MessageID, PartID, SessionID } from "../../src/session/schema"
 import { SessionStatus } from "../../src/session/status"
 import { SessionV2 } from "@opencode-ai/core/session"
@@ -191,6 +196,8 @@ const promptRoot = LayerNode.group([
   BackgroundJob.node,
   SessionStatus.node,
   SessionRunState.node,
+  SessionQueue.node,
+  SessionHandoff.node,
   Database.node,
   EventV2Bridge.node,
   Question.node,
@@ -448,6 +455,232 @@ const boot = Effect.fn("test.boot")(function* (input?: { title?: string }) {
 })
 
 // Loop semantics
+
+it.instance("command substitutions use the instance directory and show nonzero and spawn failures", () =>
+  Effect.gen(function* () {
+    const { dir, llm } = yield* useServerConfig((url) => ({
+      ...providerCfg(url),
+      shell: process.platform === "win32" ? "pwsh" : "/bin/sh",
+      command: { probe: { template: "Here: !`pwd`\nFailure: !`exit 7`" } },
+    }))
+    const { prompt, chat, sessions } = yield* boot()
+    const logs: unknown[] = []
+    yield* llm.text("done")
+    yield* prompt.command({ sessionID: chat.id, command: "probe", arguments: "" }).pipe(
+      Effect.provide(Logger.layer([Logger.make<unknown, void>((options) => void logs.push(options.message))])),
+    )
+    const messages = yield* sessions.messages({ sessionID: chat.id })
+    const text = messages[0].parts.find((part) => part.type === "text")
+    expect(text?.text).toContain(dir)
+    expect(text?.text).toContain("<failed: exit 7>")
+    expect(JSON.stringify(logs)).toContain(chat.id)
+    expect(JSON.stringify(logs)).toContain("exit 7")
+    const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+    const original = spawner.spawn
+    const spawn = spyOn(spawner, "spawn").mockImplementation(() =>
+      original(ChildProcess.make("oc-missing-substitution-shell", [])),
+    )
+    yield* Effect.addFinalizer(() => Effect.sync(() => spawn.mockRestore()))
+    const next = yield* sessions.create({ title: "Spawn failure" })
+    yield* llm.text("done")
+    yield* prompt.command({ sessionID: next.id, command: "probe", arguments: "" })
+    const saved = yield* sessions.messages({ sessionID: next.id })
+    expect(saved[0].parts.find((part) => part.type === "text")?.text).toContain("<failed: pwd>")
+  }),
+  20_000,
+)
+
+it.instance("unknown subtask agent creates no running tool or assistant", () =>
+  Effect.gen(function* () {
+    yield* useServerConfig(providerCfg)
+    const { prompt, chat, sessions } = yield* boot()
+    const msg = yield* user(chat.id, "delegate")
+    yield* sessions.updatePart({
+      id: PartID.ascending(), messageID: msg.id, sessionID: chat.id, type: "subtask",
+      agent: "missing-subtask-agent", prompt: "work", description: "missing agent",
+    })
+    const exit = yield* prompt.loop({ sessionID: chat.id }).pipe(Effect.exit)
+    expect(Exit.isFailure(exit)).toBe(true)
+    if (Exit.isFailure(exit)) {
+      const error = Cause.squash(exit.cause)
+      expect(NamedError.Unknown.isInstance(error)).toBe(true)
+      if (NamedError.Unknown.isInstance(error)) expect(error.data.message).toContain("missing-subtask-agent")
+    }
+    const messages = yield* sessions.messages({ sessionID: chat.id })
+    expect(messages.filter((message) => message.info.role === "assistant")).toHaveLength(0)
+    expect(messages.flatMap((message) => message.parts).filter((part) =>
+      part.type === "tool" && part.state.status === "running")).toHaveLength(0)
+  }),
+)
+
+for (const failure of ["kickoff", "model"] as const) {
+  it.instance(`handoff child ${failure} failure is marked failed and published`, () =>
+    Effect.gen(function* () {
+      const { llm } = yield* useServerConfig(providerCfg)
+      const { prompt, chat, sessions, run } = yield* boot()
+      const handoff = yield* SessionHandoff.Service
+      const events = yield* EventV2Bridge.Service
+      const errors: string[] = []
+      const off = yield* events.listen((event) => {
+        if (event.type === Session.Event.Error.type) errors.push(JSON.stringify(event.data))
+        return Effect.void
+      })
+      yield* Effect.addFinalizer(() => off)
+      if (failure === "kickoff") {
+        const original = run.ensureRunning
+        const start = spyOn(run, "ensureRunning").mockImplementation((id, interrupted, work) =>
+          id === chat.id ? original(id, interrupted, work) : Effect.die(new Error("child kickoff failed")),
+        )
+        yield* Effect.addFinalizer(() => Effect.sync(() => start.mockRestore()))
+      }
+      yield* user(chat.id, "original work")
+      yield* handoff.enqueue({ sessionID: chat.id, agent: "build", model: ref })
+      yield* llm.text("handoff summary")
+      if (failure === "model") yield* llm.error(400, { error: { message: "child model failed" } })
+      yield* prompt.loop({ sessionID: chat.id })
+      const child = yield* pollWithTimeout(sessions.children(chat.id).pipe(Effect.map((children) =>
+        children.find((child) => child.sessionFailed),
+      )), "handoff child was not marked failed", "10 seconds")
+      yield* pollWithTimeout(Effect.sync(() => errors.find((error) => error.includes(child.id))),
+        "child error was not published")
+      expect(child.sessionFailed).toBe(true)
+      expect(child.sessionInProgress).toBe(false)
+      expect(errors.some((error) => error.includes(child.id) && error.includes(`child ${failure} failed`))).toBe(true)
+    }),
+    20_000,
+  )
+}
+
+it.instance("queue contention bounds reclaims and drains once after the lock releases", () =>
+  Effect.gen(function* () {
+    const { llm } = yield* useServerConfig(providerCfg)
+    const { prompt, chat, sessions } = yield* boot()
+    const queue = yield* SessionQueue.Service
+    const id = MessageID.ascending()
+    const attempted = yield* Deferred.make<void>()
+    const times: number[] = []
+    const original = queue.claim
+    const claim = spyOn(queue, "claim").mockImplementation((sessionID, idle) => Effect.gen(function* () {
+      times.push(Date.now())
+      yield* Deferred.succeed(attempted, undefined)
+      return yield* original(sessionID, idle)
+    }))
+    yield* Effect.addFinalizer(() => Effect.sync(() => claim.mockRestore()))
+    yield* llm.text("drained")
+    yield* Effect.gen(function* () {
+      yield* Effect.acquireRelease(
+        Effect.promise(() => Flock.acquire(`session-queue:${id}`, { timeoutMs: 0, staleMs: 15_000 })),
+        (lease) => Effect.promise(() => lease.release()),
+      )
+      yield* prompt.queue.add({ sessionID: chat.id, id, payload: {
+        agent: "build", model: ref, parts: [{ type: "text", text: "queued" }],
+      } })
+      yield* awaitWithTimeout(Deferred.await(attempted), "queue never tried to claim")
+      // Hold the actual cross-process lease past the bounded retry window.
+      yield* Effect.sleep(200)
+      // Three quick claims, then one retry a second later: nothing more while the lock is held.
+      expect(times.length).toBe(3)
+      expect(times[1] - times[0]).toBeGreaterThanOrEqual(20)
+      expect(times[2] - times[1]).toBeGreaterThanOrEqual(20)
+    }).pipe(Effect.scoped)
+    yield* pollWithTimeout(sessions.messages({ sessionID: chat.id }).pipe(Effect.map((messages) =>
+      messages.find((message) => message.info.role === "assistant" && message.info.finish === "stop"),
+    )), "queue did not drain after contention", "10 seconds")
+    expect(yield* llm.calls).toBe(1)
+    expect((yield* queue.snapshot(chat.id)).entries).toHaveLength(0)
+  }),
+  20_000,
+)
+
+noLLMServer.instance("plan reminders persist once per user across repeated history loads", () =>
+  Effect.gen(function* () {
+    const { chat, sessions } = yield* boot()
+    const agents = yield* AgentSvc.Service
+    const plan = yield* agents.get("plan")
+    const build = yield* agents.get("build")
+    if (!plan || !build) throw new Error("missing test agents")
+    const first = yield* user(chat.id, "plan this")
+    for (let step = 0; step < 3; step++) {
+      const messages = yield* sessions.messages({ sessionID: chat.id })
+      yield* SessionReminders.apply({ messages, agent: plan, session: chat }).pipe(
+        Effect.provide(RuntimeFlags.layer({ experimentalPlanMode: true })),
+      )
+    }
+    const second = yield* user(chat.id, "another plan")
+    for (let step = 0; step < 2; step++) {
+      const messages = yield* sessions.messages({ sessionID: chat.id })
+      yield* SessionReminders.apply({ messages, agent: plan, session: chat }).pipe(
+        Effect.provide(RuntimeFlags.layer({ experimentalPlanMode: true })),
+      )
+    }
+    const messages = yield* sessions.messages({ sessionID: chat.id })
+    for (const id of [first.id, second.id]) {
+      expect(messages.find((message) => message.info.id === id)?.parts.filter((part) =>
+        part.type === "text" && part.synthetic)).toHaveLength(1)
+    }
+    const seeded = yield* seed(chat.id, { finish: "stop" })
+    yield* sessions.updateMessage({ ...seeded.assistant, agent: "plan" })
+    const switched = yield* user(chat.id, "build now")
+    for (let step = 0; step < 3; step++) {
+      yield* SessionReminders.apply({
+        messages: yield* sessions.messages({ sessionID: chat.id }), agent: build, session: chat,
+      }).pipe(Effect.provide(RuntimeFlags.layer({ experimentalPlanMode: true })))
+    }
+    const stored = yield* MessageV2.get({ sessionID: chat.id, messageID: switched.id })
+    expect(stored.parts.filter((part) => part.type === "text" && part.synthetic)).toHaveLength(1)
+  }),
+  { config: cfg },
+)
+
+for (const noReply of [false, true]) {
+  it.instance(`finishing loop ${noReply ? "ignores noReply" : "answers a prompt"} saved after its last history load exactly once`, () =>
+    Effect.gen(function* () {
+      const { llm } = yield* useServerConfig(providerCfg)
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const chat = yield* sessions.create({ title: "Finishing race" })
+      const loaded = yield* Deferred.make<void>()
+      const release = yield* Deferred.make<void>()
+      const original = MessageV2.filterCompactedEffect
+      let intercepted = false
+      const read = spyOn(MessageV2, "filterCompactedEffect").mockImplementation((sessionID) =>
+        original(sessionID).pipe(Effect.tap((messages) => {
+          if (sessionID !== chat.id || intercepted || !messages.some((message) =>
+            message.info.role === "assistant" && message.info.finish === "stop")) return Effect.void
+          intercepted = true
+          return Deferred.succeed(loaded, undefined).pipe(Effect.andThen(Deferred.await(release)))
+        })),
+      )
+      yield* Effect.addFinalizer(() => Effect.sync(() => read.mockRestore()))
+      yield* llm.text("first reply")
+      if (!noReply) yield* llm.text("second reply")
+      const firstID = MessageID.ascending()
+      const first = yield* prompt.prompt({
+        sessionID: chat.id, messageID: firstID, agent: "build", model: ref,
+        parts: [{ type: "text", text: "first prompt" }],
+      }).pipe(Effect.forkChild)
+      yield* awaitWithTimeout(Deferred.await(loaded), "loop did not reach its final history load", "10 seconds")
+      const secondID = MessageID.ascending()
+      const second = yield* prompt.prompt({
+        sessionID: chat.id, messageID: secondID, agent: "build", model: ref, noReply,
+        parts: [{ type: "text", text: "second prompt" }],
+      }).pipe(Effect.forkChild)
+      yield* pollWithTimeout(sessions.messages({ sessionID: chat.id }).pipe(Effect.map((messages) =>
+        messages.some((message) => message.info.id === secondID && message.parts.length > 0) ? true : undefined,
+      )), "second prompt was not saved")
+      yield* Deferred.succeed(release, undefined)
+      yield* Fiber.join(first)
+      yield* Fiber.join(second)
+      const messages = yield* sessions.messages({ sessionID: chat.id })
+      const assistants = messages.flatMap((message) => message.info.role === "assistant" ? [message.info] : [])
+      expect(assistants.map((message) => message.parentID)).toEqual(noReply ? [firstID] : [firstID, secondID])
+      expect(yield* llm.calls).toBe(noReply ? 1 : 2)
+      yield* prompt.loop({ sessionID: chat.id })
+      expect(yield* llm.calls).toBe(noReply ? 1 : 2)
+    }),
+    20_000,
+  )
+}
 
 noLLMServer.instance(
   "loop exits immediately when last assistant has stop finish",

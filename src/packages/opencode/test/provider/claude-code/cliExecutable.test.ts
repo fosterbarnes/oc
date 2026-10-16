@@ -17,7 +17,7 @@ test("Windows runs CommonJS CLI scripts through Node", () => {
   assert.deepEqual(command.args, ["--version"])
 })
 
-test("Windows owns the native process behind the stock npm shim and preserves custom wrappers", async () => {
+test("Windows owns the native process behind any .cmd shim that sits beside it, and keeps a bare .cmd on the shell", async () => {
   if (process.platform !== "win32") return
   await using tmp = await tmpdir()
   const native = path.join(tmp.path, "node_modules", "@anthropic-ai", "claude-code", "bin", "claude.exe")
@@ -29,5 +29,9 @@ test("Windows owns the native process behind the stock npm shim and preserves cu
     '"%dp0%\\node_modules\\@anthropic-ai\\claude-code\\bin\\claude.exe"   %*', ""].join("\r\n"))
   assert.deepEqual(cliCommand(shim, ["--print"]), { command: native, args: ["--print"], shell: false })
   await Bun.write(shim, '@echo off\r\necho custom setup\r\n"%dp0%\\node_modules\\@anthropic-ai\\claude-code\\bin\\claude.exe" %*\r\n')
-  assert.deepEqual(cliCommand(shim, ["--print"]), { command: shim, args: ["--print"], shell: true })
+  assert.deepEqual(cliCommand(shim, ["--print"]), { command: native, args: ["--print"], shell: false })
+  const bare = path.join(tmp.path, "elsewhere", "claude.cmd")
+  await mkdir(path.dirname(bare), { recursive: true })
+  await Bun.write(bare, "@echo off\r\n")
+  assert.deepEqual(cliCommand(bare, ["--print"]), { command: bare, args: ["--print"], shell: true })
 })

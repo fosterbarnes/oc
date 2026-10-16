@@ -17,6 +17,9 @@ import {
   evictIfNeeded,
   getActiveProcess,
   getClaudeSessionId,
+  hasActiveProcess,
+  markClaudeSessionLost,
+  takeClaudeSessionLoss,
   isIdleProcessEvictionScheduled,
   killAllActiveProcesses,
   MAX_ACTIVE_PROCESSES,
@@ -685,5 +688,48 @@ test("the claude session cap never takes a key that still has a process", () => 
     for (const key of keys) deleteClaudeSessionId(key)
     deleteActiveProcess(busyKey)
     deleteClaudeSessionId(busyKey)
+  }
+})
+
+// A child whose stdout closed is never handed to a turn, and LRU sheds it
+// before an idle process, even when it was the one mid-turn.
+test("a closing process is never handed to a turn and is the first LRU victim", () => {
+  const killed: string[] = []
+  const { keys, processes } = fillActiveProcesses(`lru-closing-${Date.now()}`, killed)
+  try {
+    noteTurnStarted(processes[0]!)
+    processes[1]!.closing = true
+    noteTurnStarted(processes[1]!)
+    assert.equal(getActiveProcess(keys[1]!), undefined)
+    assert.equal(hasActiveProcess(keys[1]!), false)
+    evictIfNeeded()
+    assert.deepEqual(killed, [keys[1]])
+    assert.equal(getActiveProcess(keys[0]!), processes[0])
+  } finally {
+    for (const key of keys) deleteActiveProcess(key)
+  }
+})
+
+// A child that never started emits no `exit`, so its entry must not outlive the failed spawn.
+test("a child that fails to start leaves no entry in the process map", async () => {
+  const key = `spawn-error-${Date.now()}`
+  const ap = spawnClaudeProcess("no-such-claude-binary-for-oc-tests", [], process.cwd(), key)
+  try {
+    await new Promise((resolve) => ap.proc.once("error", resolve))
+    assert.equal(getActiveProcess(key), undefined)
+    assert.equal(hasActiveProcess(key), false)
+  } finally {
+    deleteActiveProcess(key)
+  }
+})
+
+test("the lost-conversation notes are capped, and the oldest one is dropped", () => {
+  const keys = Array.from({ length: MAX_CLAUDE_SESSION_ENTRIES + 2 }, (_, i) => `lost-cap-${Date.now()}-${i}`)
+  try {
+    for (const key of keys) markClaudeSessionLost(key, "lost")
+    assert.equal(takeClaudeSessionLoss(keys[0]), undefined)
+    assert.equal(takeClaudeSessionLoss(keys.at(-1)), "lost")
+  } finally {
+    for (const key of keys) takeClaudeSessionLoss(key)
   }
 })

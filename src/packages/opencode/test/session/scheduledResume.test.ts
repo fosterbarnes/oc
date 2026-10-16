@@ -1,8 +1,9 @@
 import { describe, expect, test } from "bun:test"
+import { randomUUID } from "node:crypto"
 import { existsSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { Effect } from "effect"
+import { Deferred, Effect } from "effect"
 import { ScheduledResume } from "../../src/session/scheduledResume"
 import type { SessionID } from "../../src/session/schema"
 import { NotFoundError } from "../../src/storage/storage"
@@ -82,6 +83,15 @@ function entry(over: Partial<ScheduledResume.Entry> = {}): ScheduledResume.Entry
   }
 }
 
+async function claimed(store: ScheduledResume.Store) {
+  store.setEnabled(true)
+  store.requestResume(
+    { sessionID: "ses_abc", directory: "/tmp/proj", fireAt: 1000, reason: ScheduledResume.RESUME_REASON },
+    500,
+  )
+  return (await store.takeDue(1000))[0]!
+}
+
 describe("scheduledResume store", () => {
   test("starts disabled and requestResume returns null until enabled", () => {
     const tmp = tmpFile()
@@ -125,33 +135,33 @@ describe("scheduledResume store", () => {
     }
   })
 
-  test("corrupt file starts empty without throwing", () => {
+  test("corrupt file reports an error and preserves a copy", () => {
     const tmp = tmpFile()
     try {
       writeFileSync(tmp.file, "{not json")
       const store = ScheduledResume.createStore(tmp.file)
-      expect(store.getState().entries).toEqual([])
-      expect(store.getState().enabled).toBe(false)
+      expect(() => store.getState()).toThrow("Corrupt scheduled resume state")
+      expect(existsSync(`${tmp.file}.corrupt`)).toBe(true)
     } finally {
       tmp.cleanup()
     }
   })
 
-  test("takeDue claims overdue entries once", () => {
+  test("takeDue claims overdue entries once", async () => {
     const tmp = tmpFile()
     try {
       const store = ScheduledResume.createStore(tmp.file)
       store.setEnabled(true)
       store.requestResume({ sessionID: "due", directory: "/d", fireAt: 100, reason: "r" }, 10)
       store.requestResume({ sessionID: "later", directory: "/d", fireAt: 900, reason: "r" }, 10)
-      expect(store.takeDue(500).map((e) => e.sessionID)).toEqual(["due" as SessionID])
-      expect(store.takeDue(500)).toEqual([])
-      // Claimed entries persist as removed: a fresh store sees only the later one.
+      expect((await store.takeDue(500)).map((e) => e.sessionID)).toEqual(["due" as SessionID])
+      expect(await store.takeDue(500)).toEqual([])
+      // A fresh owner sees the claim but cannot take it until recovery is allowed.
       expect(
         ScheduledResume.createStore(tmp.file)
           .getState()
           .entries.map((e) => e.sessionID),
-      ).toEqual(["later" as SessionID])
+      ).toEqual(["due", "later"] as SessionID[])
     } finally {
       tmp.cleanup()
     }
@@ -163,14 +173,14 @@ describe("scheduledResume store", () => {
       const store = ScheduledResume.createStore(tmp.file)
       store.setEnabled(true)
       const created = store.requestResume({ sessionID: "s", directory: "/d", fireAt: 100, reason: "r" }, 10)!
-      store.noteFired("s")
+      store.noteFired("s", "previous")
       expect(store.cancel(created.id)).toBe(true)
       expect(store.cancel(created.id)).toBe(false)
       expect(store.getState().entries).toEqual([])
       expect(store.getState().resumeCounts.s).toBe(1)
-      for (let i = 0; i < 4; i++) store.noteFired("s")
+      for (let i = 0; i < 4; i++) store.noteFired("s", randomUUID())
       expect(store.requestResume({ sessionID: "s", directory: "/d", fireAt: 100, reason: "r" })).toBeNull()
-      for (let i = 0; i < 5; i++) store.noteFired("s2")
+      for (let i = 0; i < 5; i++) store.noteFired("s2", randomUUID())
       expect(store.requestResume({ sessionID: "s2", directory: "/d", fireAt: 100, reason: "r" })).toBeNull()
       store.noteUserIntervened("s2")
       expect(store.requestResume({ sessionID: "s2", directory: "/d", fireAt: 100, reason: "r" })).not.toBeNull()
@@ -188,7 +198,7 @@ describe("scheduledResume store", () => {
         expect(
           store.requestResume({ sessionID: "s", directory: "/d", fireAt: 100 + i, reason: "r" }, 10),
         ).not.toBeNull()
-        store.noteFired("s")
+        store.noteFired("s", randomUUID())
       }
       expect(store.requestResume({ sessionID: "s", directory: "/d", fireAt: 200, reason: "r" }, 10)).toBeNull()
     } finally {
@@ -208,7 +218,7 @@ describe("scheduledResume store", () => {
     }
   })
 
-  test("mutations leave no lockfile and break through a stale one", () => {
+  test("mutations leave no lockfile and break through a stale one", async () => {
     const tmp = tmpFile()
     try {
       const store = ScheduledResume.createStore(tmp.file)
@@ -219,7 +229,7 @@ describe("scheduledResume store", () => {
       writeFileSync(`${tmp.file}.lock`, "9999")
       const ancient = new Date(Date.now() - 60_000)
       utimesSync(`${tmp.file}.lock`, ancient, ancient)
-      expect(store.takeDue(500).map((e) => e.sessionID)).toEqual(["s" as SessionID])
+      expect((await store.takeDue(500)).map((e) => e.sessionID)).toEqual(["s" as SessionID])
       expect(existsSync(`${tmp.file}.lock`)).toBe(false)
     } finally {
       tmp.cleanup()
@@ -228,6 +238,27 @@ describe("scheduledResume store", () => {
 })
 
 describe("scheduledResume fireEntry", () => {
+  test("inserting an earlier entry wakes the deadline sleeper", async () => {
+    const tmp = tmpFile()
+    try {
+      const store = ScheduledResume.createStore(tmp.file)
+      store.setEnabled(true)
+      store.requestResume({ sessionID: "ses_later", directory: "/d", fireAt: Date.now() + 60_000, reason: "test" })
+      await Effect.runPromise(
+        Effect.gen(function* () {
+          const sent = yield* Deferred.make<void>()
+          const { svc, prompts } = services({ onPrompt: () => Effect.runSync(Deferred.succeed(sent, undefined)) })
+          yield* ScheduledResume.pollLoop(svc, store).pipe(Effect.forkScoped({ startImmediately: true }))
+          store.requestResume({ sessionID: "ses_earlier", directory: "/d", fireAt: Date.now() + 50, reason: "test" })
+          yield* Deferred.await(sent).pipe(Effect.timeout("2 seconds"))
+          expect(prompts).toHaveLength(1)
+        }).pipe(Effect.scoped),
+      )
+    } finally {
+      tmp.cleanup()
+    }
+  })
+
   test("a held lock leaves the resume queued without sending a second prompt", async () => {
     const tmp = tmpFile()
     try {
@@ -237,14 +268,14 @@ describe("scheduledResume fireEntry", () => {
       const other = ScheduledResume.createStore(tmp.file)
       const { svc, prompts } = services()
       writeFileSync(`${tmp.file}.lock`, String(process.pid))
-      for (const due of other.takeDue(500)) await Effect.runPromise(ScheduledResume.fireEntry(svc, other, due))
+      for (const due of await other.takeDue(500)) await Effect.runPromise(ScheduledResume.fireEntry(svc, other, due))
       expect(prompts).toEqual([])
       expect(other.getState().entries).toEqual([pending])
       expect(existsSync(`${tmp.file}.lock`)).toBe(true)
       rmSync(`${tmp.file}.lock`)
-      for (const due of store.takeDue(500)) await Effect.runPromise(ScheduledResume.fireEntry(svc, store, due))
+      for (const due of await store.takeDue(500)) await Effect.runPromise(ScheduledResume.fireEntry(svc, store, due))
       expect(prompts).toHaveLength(1)
-      expect(other.takeDue(500)).toEqual([])
+      expect(await other.takeDue(500)).toEqual([])
       expect(other.getState().resumeCounts).toEqual({ ses_abc: 1 })
     } finally {
       tmp.cleanup()
@@ -255,11 +286,13 @@ describe("scheduledResume fireEntry", () => {
     const tmp = tmpFile()
     try {
       const store = ScheduledResume.createStore(tmp.file, () => 1000)
+      const due = await claimed(store)
       const { svc, prompts } = services({ status: "busy" })
-      await Effect.runPromise(ScheduledResume.fireEntry(svc, store, entry()))
+      await Effect.runPromise(ScheduledResume.fireEntry(svc, store, due))
       expect(prompts).toEqual([])
       expect(store.getState().resumeCounts).toEqual({})
-      expect(store.getState().entries).toEqual([{ ...entry(), attempts: 1, fireAt: 61_000 }])
+      expect(store.getState().entries[0]).toMatchObject({ id: due.id, attempts: 1, fireAt: 61_000 })
+      expect(store.getState().entries[0]?.claim).toBeUndefined()
     } finally {
       tmp.cleanup()
     }
@@ -269,12 +302,13 @@ describe("scheduledResume fireEntry", () => {
     const tmp = tmpFile()
     try {
       const store = ScheduledResume.createStore(tmp.file, () => 1000)
+      const due = await claimed(store)
       const queued = [{ id: "msg_queued", state: "pending" as const, text: "next", attachments: 0 }]
       const { svc, prompts } = services({ queued })
-      await Effect.runPromise(ScheduledResume.fireEntry(svc, store, entry()))
+      await Effect.runPromise(ScheduledResume.fireEntry(svc, store, due))
       expect(prompts).toEqual([])
       expect(store.getState().resumeCounts).toEqual({})
-      expect(store.getState().entries).toEqual([{ ...entry(), attempts: 1, fireAt: 61_000 }])
+      expect(store.getState().entries[0]).toMatchObject({ id: due.id, attempts: 1, fireAt: 61_000 })
     } finally {
       tmp.cleanup()
     }
@@ -284,9 +318,10 @@ describe("scheduledResume fireEntry", () => {
     const tmp = tmpFile()
     try {
       const store = ScheduledResume.createStore(tmp.file)
-      store.noteFired("ses_abc")
+      store.noteFired("ses_abc", "previous")
+      const due = await claimed(store)
       const { svc, prompts } = services({ messages: [userMessage(600)] })
-      await Effect.runPromise(ScheduledResume.fireEntry(svc, store, entry()))
+      await Effect.runPromise(ScheduledResume.fireEntry(svc, store, due))
       expect(prompts).toEqual([])
       expect(store.getState().resumeCounts).toEqual({})
     } finally {
@@ -298,8 +333,9 @@ describe("scheduledResume fireEntry", () => {
     const tmp = tmpFile()
     try {
       const store = ScheduledResume.createStore(tmp.file)
+      const due = await claimed(store)
       const { svc, prompts } = services({ messages: [userMessage(400)] })
-      await Effect.runPromise(ScheduledResume.fireEntry(svc, store, entry()))
+      await Effect.runPromise(ScheduledResume.fireEntry(svc, store, due))
       expect(prompts).toHaveLength(1)
       const input = prompts[0] as { sessionID: string; agent: string; model: unknown; parts: { text: string }[] }
       expect(input.sessionID).toBe("ses_abc")
@@ -315,8 +351,9 @@ describe("scheduledResume fireEntry", () => {
     const tmp = tmpFile()
     try {
       const store = ScheduledResume.createStore(tmp.file)
+      const due = await claimed(store)
       const { svc, prompts } = services({ sessionExists: false })
-      await Effect.runPromise(ScheduledResume.fireEntry(svc, store, entry()))
+      await Effect.runPromise(ScheduledResume.fireEntry(svc, store, due))
       expect(prompts).toEqual([])
       expect(store.getState().entries).toEqual([])
     } finally {
@@ -329,17 +366,19 @@ describe("scheduledResume fireEntry", () => {
       const tmp = tmpFile()
       try {
         const store = ScheduledResume.createStore(tmp.file, () => 1000)
+        const due = await claimed(store)
         const { svc } = services({ [failure]: true })
-        await Effect.runPromise(ScheduledResume.fireEntry(svc, store, entry()))
+        await Effect.runPromise(ScheduledResume.fireEntry(svc, store, due))
         const retry = ScheduledResume.createStore(tmp.file).getState().entries[0]!
-        expect(retry).toEqual({ ...entry(), attempts: 1, fireAt: 61_000 })
-        expect(store.takeDue(60_000)).toEqual([])
-        expect(store.takeDue(61_000)).toEqual([retry])
-        await Effect.runPromise(ScheduledResume.fireEntry(svc, store, retry))
-        expect(store.getState().entries[0]).toEqual({ ...entry(), attempts: 2, fireAt: 121_000 })
+        expect(retry).toMatchObject({ id: due.id, attempts: 1, fireAt: 61_000 })
+        expect(await store.takeDue(60_000)).toEqual([])
+        const second = (await store.takeDue(61_000))[0]!
+        expect(second.id).toBe(retry.id)
+        await Effect.runPromise(ScheduledResume.fireEntry(svc, store, second))
+        expect(store.getState().entries[0]).toMatchObject({ id: due.id, attempts: 2, fireAt: 121_000 })
         expect(store.getState().resumeCounts).toEqual({})
-        const claimed = store.takeDue(121_000)[0]!
-        await Effect.runPromise(ScheduledResume.fireEntry(services().svc, store, claimed))
+        const finalClaim = (await store.takeDue(121_000))[0]!
+        await Effect.runPromise(ScheduledResume.fireEntry(services().svc, store, finalClaim))
         expect(store.getState().resumeCounts).toEqual({ ses_abc: 1 })
       } finally {
         tmp.cleanup()
@@ -355,10 +394,10 @@ describe("scheduledResume fireEntry", () => {
       const newer = store.requestResume({ sessionID: "ses_abc", directory: "/d", fireAt: 2000, reason: "new" })
       store.retry(entry())
       expect(store.getState().entries).toEqual([newer!])
-      store.takeDue(2000)
-      for (let i = 0; i < ScheduledResume.MAX_AUTO_RESUMES; i++) store.noteFired("ses_abc")
+      await store.takeDue(2000)
+      for (let i = 0; i < ScheduledResume.MAX_AUTO_RESUMES; i++) store.noteFired("ses_abc", randomUUID())
       store.retry(entry())
-      expect(store.getState().entries).toEqual([])
+      expect(store.getState().entries).toHaveLength(1)
     } finally {
       tmp.cleanup()
     }
@@ -368,13 +407,15 @@ describe("scheduledResume fireEntry", () => {
     const tmp = tmpFile()
     try {
       const store = ScheduledResume.createStore(tmp.file)
-      const saved = userMessage(600, "e1")
+      const due = await claimed(store)
+      const saved = userMessage(600, due.id)
       const resumed = services({ messages: [userMessage(400), saved] })
-      await Effect.runPromise(ScheduledResume.fireEntry(resumed.svc, store, entry({ attempts: 1 })))
-      expect(resumed.prompts).toHaveLength(1)
+      await Effect.runPromise(ScheduledResume.fireEntry(resumed.svc, store, due))
+      expect(resumed.prompts).toHaveLength(0)
       expect(store.getState().resumeCounts).toEqual({ ses_abc: 1 })
       const intervened = services({ status: "busy", messages: [saved, userMessage(700)] })
-      await Effect.runPromise(ScheduledResume.fireEntry(intervened.svc, store, entry({ attempts: 2 })))
+      const next = await claimed(store)
+      await Effect.runPromise(ScheduledResume.fireEntry(intervened.svc, store, next))
       expect(intervened.prompts).toEqual([])
       expect(store.getState().entries).toEqual([])
       expect(store.getState().resumeCounts).toEqual({})

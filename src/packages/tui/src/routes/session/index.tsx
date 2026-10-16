@@ -355,9 +355,15 @@ export function Session() {
 
   createEffect(() => {
     const sessionID = route.sessionID
+    // A load superseded by another session or by unmount must not change workspace, editor, or route.
+    const load = { cancelled: false }
+    onCleanup(() => {
+      load.cancelled = true
+    })
     void (async () => {
       const previousWorkspace = untrack(() => project.workspace.current())
       const result = await sdk.client.session.get({ sessionID }, { throwOnError: true })
+      if (load.cancelled) return
       if (!result.data) {
         toast.show({
           message: `Session not found: ${sessionID}`,
@@ -378,12 +384,13 @@ export function Session() {
         try {
           await sync.bootstrap({ fatal: false })
         } catch {}
+        if (load.cancelled) return
       }
       editor.reconnect(result.data.directory)
       await sync.session.sync(sessionID)
-      if (route.sessionID === sessionID && scroll) scroll.scrollBy(100_000)
+      if (!load.cancelled && scroll) scroll.scrollBy(100_000)
     })().catch((error) => {
-      if (route.sessionID !== sessionID) return
+      if (load.cancelled) return
       toast.show({
         message: errorMessage(error),
         variant: "error",

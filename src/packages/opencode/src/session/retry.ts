@@ -27,7 +27,7 @@ export const RETRY_INITIAL_DELAY = 2000
 export const RETRY_BACKOFF_FACTOR = 2
 export const RETRY_JITTER_FACTOR = 0.25
 export const RETRY_MAX_DELAY_NO_HEADERS = 30_000 // 30 seconds
-export const RETRY_MAX_DELAY = 2_147_483_647 // max 32-bit signed integer for setTimeout
+export const RETRY_MAX_DELAY = 10 * 60_000
 export const RETRY_MAX_RETRIES = 5
 
 const RETRYABLE_MESSAGE_PATTERNS = [
@@ -41,39 +41,37 @@ const RETRYABLE_MESSAGE_PATTERNS = [
 ]
 
 function cap(ms: number) {
-  return Math.min(ms, RETRY_MAX_DELAY)
+  return Math.max(0, Math.min(ms, RETRY_MAX_DELAY))
 }
 
-export function delay(attempt: number, error?: SessionV1.APIError, random = Math.random()) {
-  if (error) {
-    const headers = error.data.responseHeaders
-    if (headers) {
-      const retryAfterMs = headers["retry-after-ms"]
-      if (retryAfterMs) {
-        const parsedMs = Number.parseFloat(retryAfterMs)
-        if (!Number.isNaN(parsedMs)) {
-          return cap(parsedMs)
-        }
-      }
-
-      const retryAfter = headers["retry-after"]
-      if (retryAfter) {
-        const parsedSeconds = Number.parseFloat(retryAfter)
-        if (!Number.isNaN(parsedSeconds)) {
-          // convert seconds to milliseconds
-          return cap(Math.ceil(parsedSeconds * 1000))
-        }
-        // Try parsing as HTTP date format
-        const parsed = Date.parse(retryAfter) - Date.now()
-        if (!Number.isNaN(parsed) && parsed > 0) {
-          return cap(Math.ceil(parsed))
-        }
-      }
-
-      return cap(exponential(attempt, random))
+function headerDelay(error?: SessionV1.APIError) {
+  const headers = error?.data.responseHeaders
+  if (!headers) return
+  const retryAfterMs = headers["retry-after-ms"]
+  if (retryAfterMs) {
+    const parsedMs = Number.parseFloat(retryAfterMs)
+    if (Number.isFinite(parsedMs)) {
+      return parsedMs
     }
   }
 
+  const retryAfter = headers["retry-after"]
+  if (retryAfter) {
+    const parsedSeconds = Number.parseFloat(retryAfter)
+    if (Number.isFinite(parsedSeconds)) {
+      return Math.ceil(parsedSeconds * 1000)
+    }
+    const parsed = Date.parse(retryAfter) - Date.now()
+    if (!Number.isNaN(parsed) && parsed > 0) {
+      return Math.ceil(parsed)
+    }
+  }
+}
+
+export function delay(attempt: number, error?: SessionV1.APIError, random = Math.random()) {
+  const hint = headerDelay(error)
+  if (hint !== undefined) return cap(hint)
+  if (error?.data.responseHeaders) return cap(exponential(attempt, random))
   return cap(Math.min(exponential(attempt, random), RETRY_MAX_DELAY_NO_HEADERS))
 }
 
@@ -193,13 +191,21 @@ export function policy(opts: {
       if (meta.attempt > RETRY_MAX_RETRIES) return Cause.done(meta.attempt)
       return Effect.gen(function* () {
         const wait = delay(meta.attempt, SessionV1.APIError.isInstance(error) ? error : undefined)
+        const hint = headerDelay(SessionV1.APIError.isInstance(error) ? error : undefined)
         const now = yield* Clock.currentTimeMillis
         yield* opts.set({
           attempt: meta.attempt,
           message: retry.message,
-          action: retry.action,
-          next: now + wait,
+          action: retry.action ?? (hint !== undefined && hint > RETRY_MAX_DELAY ? {
+            reason: "account_rate_limit",
+            provider: opts.provider,
+            title: "Usage limit reached",
+            message: retry.message,
+            label: "retry later",
+          } : undefined),
+          next: now + (hint !== undefined && hint > RETRY_MAX_DELAY ? hint : wait),
         })
+        if (hint !== undefined && hint > RETRY_MAX_DELAY) return yield* Cause.done(meta.attempt)
         return [meta.attempt, Duration.millis(wait)] as [number, Duration.Duration]
       })
     }),

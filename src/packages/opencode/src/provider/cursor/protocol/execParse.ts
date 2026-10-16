@@ -201,7 +201,18 @@ export function parseExecServerMessage(msg: Record<string, unknown>): ParsedExec
     // tool name (Cursor's model may have shortened "opencode-read" → "read") and
     // decode the argument map back into JSON for opencode to execute.
     const m = (msg.mcp_args as Record<string, unknown>) ?? {}
-    const mapped = mapCursorArgsToOpencode(mcpRealToolName(m), decodeMcpArgs(m.args), "mcp_args")
+    const decoded = decodeMcpArgs(m.args)
+    if ("error" in decoded) {
+      return {
+        id,
+        execId,
+        toolName: mcpRealToolName(m),
+        args: {},
+        resultField,
+        localError: decoded.error,
+      }
+    }
+    const mapped = mapCursorArgsToOpencode(mcpRealToolName(m), decoded.args, "mcp_args")
     return {
       id,
       execId,
@@ -535,13 +546,13 @@ export function mcpRealToolName(mcpArgs: Record<string, unknown>, defaultServer 
   return name || "mcp"
 }
 
-function decodeMcpArgs(raw: unknown): Record<string, unknown> {
-  if (!Array.isArray(raw)) return {}
-  const entries = raw.map((a) => (typeof a === "string" ? b64ToBytes(a) : (a as Uint8Array)))
+function decodeMcpArgs(raw: unknown): { args: Record<string, unknown> } | { error: string } {
+  if (!Array.isArray(raw)) return { error: "Cursor MCP request arguments are malformed." }
   try {
-    return decodeStructEntriesToJson(entries)
+    const entries = raw.map((a) => (typeof a === "string" ? b64ToBytes(a) : (a as Uint8Array)))
+    return { args: decodeStructEntriesToJson(entries) }
   } catch {
-    return {}
+    return { error: "Cursor MCP request arguments could not be decoded." }
   }
 }
 

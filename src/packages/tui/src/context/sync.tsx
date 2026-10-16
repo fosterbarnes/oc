@@ -300,6 +300,41 @@ export const {
         .then((x) => (x.data ?? []).toSorted((a, b) => a.id.localeCompare(b.id)))
     }
 
+    // Removes every per-session key so a deleted session leaves nothing behind. Hydrations for it
+    // stop because their trackers are dropped, so their late results are discarded.
+    function forgetSession(sessionID: string) {
+      const messageIDs = (store.message[sessionID] ?? []).map((message) => message.id)
+      fullSyncedSessions.delete(sessionID)
+      syncingSessions.delete(sessionID)
+      hydratingSessions.delete(sessionID)
+      promptRevisions.delete(sessionID)
+      statusRevisions.delete(sessionID)
+      for (const [requestID, request] of questionRequests) {
+        if (request.sessionID === sessionID) questionRequests.delete(requestID)
+      }
+      setPromptReady(
+        produce((draft) => {
+          delete draft[sessionID]
+        }),
+      )
+      setDismissedQuestions(
+        produce((draft) => {
+          delete draft[sessionID]
+        }),
+      )
+      setStore(
+        produce((draft) => {
+          for (const messageID of messageIDs) delete draft.part[messageID]
+          delete draft.message[sessionID]
+          delete draft.todo[sessionID]
+          delete draft.session_diff[sessionID]
+          delete draft.session_status[sessionID]
+          delete draft.permission[sessionID]
+          delete draft.question[sessionID]
+        }),
+      )
+    }
+
     event.subscribe((event, { directory, workspace }) => {
       if (
         event.type === "question.asked" || event.type === "question.replied" || event.type === "question.rejected" ||
@@ -410,6 +445,7 @@ export const {
           break
 
         case "session.deleted": {
+          forgetSession(event.properties.info.id)
           const result = search(store.session, event.properties.info.id, (s) => s.id)
           if (result.found) {
             setStore(
@@ -505,7 +541,7 @@ export const {
         }
         case "message.removed": {
           touchMessage(event.properties.sessionID, event.properties.messageID)
-          const messages = store.message[event.properties.sessionID]
+          const messages = store.message[event.properties.sessionID] ?? []
           const index = messages.findIndex((message) => message.id === event.properties.messageID)
           if (index !== -1) {
             setStore(
@@ -516,6 +552,12 @@ export const {
               }),
             )
           }
+          setStore(
+            "part",
+            produce((draft) => {
+              delete draft[event.properties.messageID]
+            }),
+          )
           break
         }
         case "message.part.updated": {
@@ -555,16 +597,23 @@ export const {
         }
 
         case "message.part.delta": {
-          const parts = store.part[event.properties.messageID]
-          if (!parts) break
-          const result = search(parts, event.properties.partID, (part) => part.id)
-          if (!result.found) break
+          const parts = store.part[event.properties.messageID] ?? []
+          const match = search(parts, event.properties.partID, (part) => part.id)
+          if (!match.found) {
+            // A loaded session missing this part has lost an event, so reload it instead of dropping the delta.
+            const sessionID = event.properties.sessionID
+            if (fullSyncedSessions.has(sessionID)) {
+              fullSyncedSessions.delete(sessionID)
+              void result.session.sync(sessionID).catch((error) => console.error("Failed to resync session", error))
+            }
+            break
+          }
           touchPart(event.properties.sessionID, event.properties.partID)
           setStore(
             "part",
             event.properties.messageID,
             produce((draft) => {
-              const part = draft[result.index]
+              const part = draft[match.index]
               const field = event.properties.field as keyof typeof part
               const existing = part[field] as string | undefined
               ;(part[field] as string) = (existing ?? "") + event.properties.delta
@@ -575,7 +624,7 @@ export const {
 
         case "message.part.removed": {
           touchPart(event.properties.sessionID, event.properties.partID)
-          const parts = store.part[event.properties.messageID]
+          const parts = store.part[event.properties.messageID] ?? []
           const result = search(parts, event.properties.partID, (part) => part.id)
           if (result.found) {
             setStore(
@@ -812,10 +861,14 @@ export const {
     })
     onCleanup(
       sdk.onReconnect(() => {
+        // Events were missed while disconnected, so every session needs a fresh load. Clearing the
+        // trackers makes hydrations started before this point discard their results.
+        fullSyncedSessions.clear()
+        syncingSessions.clear()
+        hydratingSessions.clear()
         if (restartPending) restartReconnected = true
         void recoverFromRestart()
         if (!restartPending && route.data.type === "session") {
-          fullSyncedSessions.delete(route.data.sessionID)
           setPromptReady(route.data.sessionID, false)
           void result.session.sync(route.data.sessionID).catch((error) =>
             console.error("Failed to refresh session prompts", error),
@@ -925,6 +978,8 @@ export const {
           }
           const tracker = { messages: new Set<string>(), parts: new Set<string>() }
           hydratingSessions.set(sessionID, tracker)
+          // False once a reconnect or a delete dropped this tracker; the result is then stale.
+          const current = () => hydratingSessions.get(sessionID) === tracker
           const task = (async () => {
             const [session, messages, todo, diff] = await Promise.all([
               sdk.client.session.get({ sessionID }, { throwOnError: true }),
@@ -932,7 +987,9 @@ export const {
               sdk.client.session.todo({ sessionID }),
               sdk.client.session.diff({ sessionID }),
             ])
+            if (!current()) return
             await refreshPrompts(session.data!, sessionID)
+            if (!current()) return
             setStore(
               produce((draft) => {
                 const match = search(draft.session, sessionID, (s) => s.id)
@@ -988,8 +1045,9 @@ export const {
             )
             fullSyncedSessions.add(sessionID)
           })().finally(() => {
-            syncingSessions.delete(sessionID)
-            hydratingSessions.delete(sessionID)
+            // A newer hydration may own these entries now, so only remove our own.
+            if (syncingSessions.get(sessionID) === task) syncingSessions.delete(sessionID)
+            if (current()) hydratingSessions.delete(sessionID)
           })
           syncingSessions.set(sessionID, task)
           return task

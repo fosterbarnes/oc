@@ -4,7 +4,7 @@ import { Cause, Effect, Exit, Layer } from "effect"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { Database } from "@opencode-ai/core/database/database"
 import { SessionProjector } from "@opencode-ai/core/session/projector"
-import { MessageTable, SessionQueueTable } from "@opencode-ai/core/session/sql"
+import { MessageTable, SessionQueueTable, SessionTable } from "@opencode-ai/core/session/sql"
 import { ModelV2 } from "@opencode-ai/core/model"
 import { ProviderV2 } from "@opencode-ai/core/provider"
 import { eq } from "drizzle-orm"
@@ -14,6 +14,7 @@ import { Session } from "@/session/session"
 import { SessionCompaction } from "@/session/compaction"
 import { SessionPrompt } from "@/session/prompt"
 import { SessionQueue } from "@/session/queue"
+import { ScheduledDelivery } from "@/session/scheduledDelivery"
 import { SessionRevert } from "@/session/revert"
 import { SessionRunState } from "@/session/run-state"
 import { MessageID, SessionID } from "@/session/schema"
@@ -63,6 +64,7 @@ const setup = Effect.fnUntraced(function* () {
     queue: yield* SessionQueue.Service,
     database: yield* Database.Service,
     state: yield* SessionRunState.Service,
+    events: yield* EventV2Bridge.Service,
   }
 })
 type Fixture = Effect.Success<ReturnType<typeof setup>>
@@ -115,7 +117,7 @@ it.instance("sends queued prompts one at a time, in the order they were added", 
   }),
 )
 
-it.instance("edit and cancel refuse a prompt that is being sent, and allow it once released", () =>
+it.instance("editing refuses a claimed prompt and cancellation removes it", () =>
   Effect.gen(function* () {
     const fixture = yield* setup()
     const session = yield* fixture.sessions.create({ title: "claimed" })
@@ -131,20 +133,17 @@ it.instance("edit and cancel refuse a prompt that is being sent, and allow it on
 
         const edit = yield* Effect.exit(fixture.prompt.queue.edit({ sessionID: session.id, id, text: "changed" }))
         expect(Exit.isFailure(edit) && Cause.squash(edit.cause)).toBeInstanceOf(SessionQueue.BusyError)
-        const cancel = yield* Effect.exit(fixture.prompt.queue.cancel({ sessionID: session.id, id }))
-        expect(Exit.isFailure(cancel) && Cause.squash(cancel.cause)).toBeInstanceOf(SessionQueue.BusyError)
+        expect((yield* fixture.prompt.queue.cancel({ sessionID: session.id, id })).entries).toEqual([])
 
         const missing = yield* Effect.exit(
           fixture.prompt.queue.cancel({ sessionID: session.id, id: MessageID.ascending() }),
         )
         expect(Exit.isFailure(missing) && Cause.squash(missing.cause)).toBeInstanceOf(SessionQueue.NotFoundError)
 
-        // Release the claim while still held; the drain sends the entry after maintenance ends.
         yield* fixture.queue.settle(id)
       }),
     )
-    yield* drained(fixture, session.id, 1)
-    expect(yield* userTexts(fixture, session.id)).toEqual(["held"])
+    expect(yield* userTexts(fixture, session.id)).toEqual([])
   }),
 )
 
@@ -264,7 +263,10 @@ it.instance("on start, a dispatching prompt is completed when its message was sa
       .where(eq(SessionQueueTable.session_id, session.id))
       .all()
       .pipe(Effect.orDie)
-    expect(rows.map((row) => [row.id, row.state])).toEqual([[saved, "completed"], [unsaved, "pending"]])
+    expect(rows.map((row) => [row.id, row.state])).toEqual([
+      [saved, "completed"],
+      [unsaved, "pending"],
+    ])
     const snapshot = yield* fixture.queue.snapshot(session.id)
     expect(snapshot.pause).toBe("restart")
   }),
@@ -280,6 +282,160 @@ const makeDue = (fixture: Fixture, id: MessageID) =>
     .where(eq(SessionQueueTable.id, id))
     .run()
     .pipe(Effect.orDie)
+
+it.instance("delivery admission and receipt survive crashes without admitting twice", () =>
+  Effect.gen(function* () {
+    const fixture = yield* setup()
+    const session = yield* fixture.sessions.create({ title: "delivery boundaries" })
+    for (const boundary of ["after claim", "after admission", "before receipt"]) {
+      const added = yield* fixture.queue.add({
+        sessionID: session.id,
+        payload: { model: ref, parts: [text(boundary)] },
+        runAt: Date.now() - 1000,
+      })
+      const id = added.entries[0]!.id
+      expect((yield* fixture.queue.claim(session.id, Effect.succeed(true)))?.id).toBe(id)
+      const messageID = yield* fixture.queue.prepare(id)
+      const input = {
+        sessionID: session.id,
+        model: ref,
+        messageID,
+        noReply: true,
+        parts: [text(boundary)],
+        delivery: fixture.queue.delivery(id),
+      }
+      if (boundary === "before receipt") {
+        const exit = yield* Effect.exit(
+          fixture.prompt.prompt({ ...input, persisted: Effect.die(new Error("injected crash before receipt")) }),
+        )
+        expect(Exit.isFailure(exit)).toBe(true)
+      }
+      if (boundary === "after admission") yield* fixture.prompt.prompt(input)
+      // Expire the persisted owner, as after a restart following a hard crash.
+      const row = yield* fixture.database.db
+        .select()
+        .from(SessionQueueTable)
+        .where(eq(SessionQueueTable.id, id))
+        .get()
+        .pipe(Effect.orDie)
+      const payload = {
+        ...row!.payload,
+        deliveryClaim: { ...ScheduledDelivery.claim(Reflect.get(row!.payload, "deliveryClaim"))!, at: 0 },
+      }
+      yield* fixture.database.db
+        .update(SessionQueueTable)
+        .set({ payload })
+        .where(eq(SessionQueueTable.id, id))
+        .run()
+        .pipe(Effect.orDie)
+      yield* fixture.queue.due(Date.now())
+      if (boundary === "after claim") {
+        expect((yield* fixture.queue.snapshot(session.id)).entries[0]?.runAt).toBeDefined()
+        expect((yield* fixture.queue.claim(session.id, Effect.succeed(true)))?.id).toBe(id)
+        expect(yield* fixture.queue.prepare(id)).toBe(messageID)
+      }
+      const replay = boundary === "after claim" ? { ...input, delivery: fixture.queue.delivery(id) } : input
+      yield* fixture.prompt.prompt(replay)
+      yield* fixture.queue.complete(id)
+      yield* fixture.prompt.prompt(replay)
+    }
+    expect(
+      (yield* fixture.sessions.messages({ sessionID: session.id })).filter((item) => item.info.role === "user"),
+    ).toHaveLength(3)
+    expect(yield* userTexts(fixture, session.id)).toEqual(["after claim", "after admission", "before receipt"])
+    expect(yield* fixture.llm.calls).toBe(0)
+  }),
+)
+
+it.instance("delivery cancellation is checked at admission and concurrent owners admit once", () =>
+  Effect.gen(function* () {
+    const fixture = yield* setup()
+    const session = yield* fixture.sessions.create({ title: "delivery ownership" })
+    const info = {
+      id: MessageID.ascending(),
+      role: "user" as const,
+      sessionID: session.id,
+      agent: "build",
+      model: ref,
+      time: { created: Date.now() },
+    }
+    expect(
+      yield* ScheduledDelivery.admit(
+        fixture.database,
+        fixture.events,
+        { id: "cancelled", check: Effect.succeed(false) },
+        info,
+        [],
+      ),
+    ).toBe(false)
+    expect(yield* fixture.sessions.messages({ sessionID: session.id })).toEqual([])
+    const admit = ScheduledDelivery.admit(
+      fixture.database,
+      fixture.events,
+      { id: "two owners", check: Effect.succeed(true) },
+      info,
+      [],
+    )
+    expect((yield* Effect.all([admit, admit], { concurrency: "unbounded" })).sort()).toEqual([false, true])
+  }),
+)
+
+it.instance("delivery admission retains the last 50 ids per session", () =>
+  Effect.gen(function* () {
+    const fixture = yield* setup()
+    const session = yield* fixture.sessions.create({ title: "bounded receipts" })
+    for (let index = 0; index < 51; index++) {
+      const info = {
+        id: MessageID.ascending(),
+        role: "user" as const,
+        sessionID: session.id,
+        agent: "build",
+        model: ref,
+        time: { created: Date.now() },
+      }
+      yield* ScheduledDelivery.admit(
+        fixture.database,
+        fixture.events,
+        { id: String(index), check: Effect.succeed(true) },
+        info,
+        [],
+      )
+    }
+    const row = yield* fixture.database.db
+      .select()
+      .from(SessionTable)
+      .where(eq(SessionTable.id, session.id))
+      .get()
+      .pipe(Effect.orDie)
+    expect(row?.metadata?.scheduledDeliveries).toEqual(Array.from({ length: 50 }, (_, index) => String(index + 1)))
+  }),
+)
+
+it.instance("an earlier queued schedule re-arms the sleeping deadline", () =>
+  Effect.gen(function* () {
+    const fixture = yield* setup()
+    const session = yield* fixture.sessions.create({ title: "deadline wake" })
+    yield* fixture.llm.text("on time")
+    const later = yield* fixture.queue.add({
+      sessionID: session.id,
+      payload: { model: ref, parts: [text("later")] },
+      runAt: Date.now() + 60_000,
+    })
+    yield* Effect.gen(function* () {
+      const version = ScheduledDelivery.queueWake.version()
+      yield* fireDue(fixture)
+      yield* ScheduledDelivery.queueWake.wait(version, yield* fixture.queue.deadline())
+    }).pipe(Effect.forever, Effect.forkScoped({ startImmediately: true }))
+    yield* fixture.queue.add({
+      sessionID: session.id,
+      payload: { model: ref, parts: [text("earlier")] },
+      runAt: Date.now() + 50,
+    })
+    yield* fixture.llm.wait(1).pipe(Effect.timeout("2 seconds"))
+    expect(yield* userTexts(fixture, session.id)).toEqual(["earlier"])
+    yield* fixture.queue.cancel({ sessionID: session.id, id: later.entries[0]!.id })
+  }),
+)
 
 it.instance("a scheduled prompt lets queued prompts pass, then fires when due", () =>
   Effect.gen(function* () {
@@ -307,7 +463,9 @@ it.instance("a scheduled prompt lets queued prompts pass, then fires when due", 
     yield* fireDue(fixture)
     yield* drained(fixture, session.id, 2)
     expect(yield* userTexts(fixture, session.id)).toEqual(["now", "later"])
-    const users = (yield* fixture.sessions.messages({ sessionID: session.id })).filter((message) => message.info.role === "user")
+    const users = (yield* fixture.sessions.messages({ sessionID: session.id })).filter(
+      (message) => message.info.role === "user",
+    )
     expect(users[1]!.info.id > users[0]!.info.id).toBe(true)
     expect(users[1]!.info.id > id).toBe(true)
   }),
@@ -321,7 +479,12 @@ it.instance("a due scheduled prompt ignores a restart pause that holds queued pr
     yield* fixture.database.db
       .insert(SessionQueueTable)
       .values([
-        { id: MessageID.ascending(), session_id: session.id, state: "pending", payload: { model: ref, parts: [text("held")] } },
+        {
+          id: MessageID.ascending(),
+          session_id: session.id,
+          state: "pending",
+          payload: { model: ref, parts: [text("held")] },
+        },
         {
           id: MessageID.ascending(),
           session_id: session.id,
@@ -365,10 +528,7 @@ it.instance("a new-session prompt fires once, even with a second process on the 
       const other = yield* SessionQueue.Service
       yield* fireDue(fixture)
       expect((yield* other.due(Date.now())).detached).toEqual([])
-    }).pipe(
-      Effect.provide(Layer.fresh(SessionQueue.layer)),
-      Effect.provideService(Database.Service, fixture.database),
-    )
+    }).pipe(Effect.provide(Layer.fresh(SessionQueue.layer)), Effect.provideService(Database.Service, fixture.database))
 
     yield* drained(fixture, session.id, 1)
     expect(yield* userTexts(fixture, session.id)).toEqual([])
@@ -389,10 +549,15 @@ it.instance("a new-session prompt fires once, even with a second process on the 
       .pipe(Effect.orDie)
     expect(sent?.session_id).toBeDefined()
     expect(sent?.session_id).not.toBe(session.id)
-    expect((yield* fixture.prompt.queue.add({
-      sessionID: session.id, id, payload: { model: ref, parts: [text("duplicate")] },
-      runAt: Date.now() - 1000, target: "new",
-    })).entries).toEqual([])
+    expect(
+      (yield* fixture.prompt.queue.add({
+        sessionID: session.id,
+        id,
+        payload: { model: ref, parts: [text("duplicate")] },
+        runAt: Date.now() - 1000,
+        target: "new",
+      })).entries,
+    ).toEqual([])
     yield* fireDue(fixture)
     expect(yield* fixture.llm.calls).toBe(1)
   }),
@@ -406,19 +571,32 @@ it.instance("a scheduled fork assigns its prompt id after copying history", () =
     yield* fixture.llm.text("scheduled reply")
     yield* fixture.prompt.prompt({ sessionID: session.id, model: ref, parts: [text("original")] })
     const added = yield* fixture.queue.add({
-      sessionID: session.id, payload: { model: ref, parts: [text("scheduled fork")] },
-      runAt: Date.now() - 1000, target: "fork",
+      sessionID: session.id,
+      payload: { model: ref, parts: [text("scheduled fork")] },
+      runAt: Date.now() - 1000,
+      target: "fork",
     })
     const id = added.entries[0]!.id
     yield* fireDue(fixture)
     yield* drained(fixture, session.id, 2)
-    const receipt = yield* fixture.database.db.select().from(SessionQueueTable)
-      .where(eq(SessionQueueTable.id, id)).get().pipe(Effect.orDie)
-    const sent = yield* fixture.database.db.select().from(MessageTable)
-      .where(eq(MessageTable.id, receipt!.message_id!)).get().pipe(Effect.orDie)
+    const receipt = yield* fixture.database.db
+      .select()
+      .from(SessionQueueTable)
+      .where(eq(SessionQueueTable.id, id))
+      .get()
+      .pipe(Effect.orDie)
+    const sent = yield* fixture.database.db
+      .select()
+      .from(MessageTable)
+      .where(eq(MessageTable.id, receipt!.message_id!))
+      .get()
+      .pipe(Effect.orDie)
     const messages = yield* fixture.sessions.messages({ sessionID: sent!.session_id })
-    const copied = messages.filter((message) => message.info.id !== receipt!.message_id &&
-      !(message.info.role === "assistant" && message.info.parentID === receipt!.message_id))
+    const copied = messages.filter(
+      (message) =>
+        message.info.id !== receipt!.message_id &&
+        !(message.info.role === "assistant" && message.info.parentID === receipt!.message_id),
+    )
     expect(copied).toHaveLength(2)
     expect(copied.every((message) => message.info.id < receipt!.message_id!)).toBe(true)
     expect(yield* userTexts(fixture, sent!.session_id)).toEqual(["original", "scheduled fork"])
@@ -432,17 +610,29 @@ it.instance("starting another queue service leaves an already-live claim untouch
     const session = yield* fixture.sessions.create({ title: "live owner" })
     const at = Date.now() - 1000
     const added = yield* fixture.queue.add({
-      sessionID: session.id, payload: { model: ref, parts: [text("owned")] }, runAt: at, target: "new",
+      sessionID: session.id,
+      payload: { model: ref, parts: [text("owned")] },
+      runAt: at,
+      target: "new",
     })
     const id = added.entries[0]!.id
     expect((yield* fixture.queue.due(Date.now())).detached.map((entry) => entry.id)).toEqual([id])
     const messageID = yield* fixture.queue.prepare(id)
     yield* Effect.gen(function* () {
       const other = yield* SessionQueue.Service
-      expect((yield* other.snapshot(session.id)).entries[0]).toMatchObject({ id, state: "dispatching", runAt: at, target: "new" })
+      expect((yield* other.snapshot(session.id)).entries[0]).toMatchObject({
+        id,
+        state: "dispatching",
+        runAt: at,
+        target: "new",
+      })
       expect((yield* other.due(Date.now())).detached).toEqual([])
-      const row = yield* fixture.database.db.select().from(SessionQueueTable)
-        .where(eq(SessionQueueTable.id, id)).get().pipe(Effect.orDie)
+      const row = yield* fixture.database.db
+        .select()
+        .from(SessionQueueTable)
+        .where(eq(SessionQueueTable.id, id))
+        .get()
+        .pipe(Effect.orDie)
       expect(row?.message_id).toBe(messageID)
     }).pipe(Effect.provide(Layer.fresh(SessionQueue.layer)), Effect.provideService(Database.Service, fixture.database))
     yield* fixture.queue.settle(id)
@@ -454,7 +644,9 @@ it.instance("recovery uses the sent message id and keeps duplicate-add protectio
     const fixture = yield* setup()
     const session = yield* fixture.sessions.create({ title: "saved before exit" })
     const added = yield* fixture.queue.add({
-      sessionID: session.id, payload: { model: ref, parts: [text("persisted")] }, runAt: Date.now() - 1000,
+      sessionID: session.id,
+      payload: { model: ref, parts: [text("persisted")] },
+      runAt: Date.now() - 1000,
     })
     const id = added.entries[0]!.id
     yield* Effect.gen(function* () {
@@ -464,13 +656,20 @@ it.instance("recovery uses the sent message id and keeps duplicate-add protectio
       const messageID = yield* owner.prepare(id)
       expect(messageID).not.toBe(id)
       yield* fixture.sessions.updateMessage({
-        id: messageID, role: "user", sessionID: session.id, agent: "build", model: ref, time: { created: Date.now() },
+        id: messageID,
+        role: "user",
+        sessionID: session.id,
+        agent: "build",
+        model: ref,
+        time: { created: Date.now() },
       })
     }).pipe(Effect.provide(Layer.fresh(SessionQueue.layer)), Effect.provideService(Database.Service, fixture.database))
     // Polling also recovers claims whose owner ended after this service started.
     yield* fixture.queue.due(Date.now())
     expect((yield* fixture.queue.snapshot(session.id)).entries).toEqual([])
-    expect((yield* fixture.queue.add({ sessionID: session.id, id, payload: { parts: [text("retry")] } })).entries).toEqual([])
+    expect(
+      (yield* fixture.queue.add({ sessionID: session.id, id, payload: { parts: [text("retry")] } })).entries,
+    ).toEqual([])
     expect(yield* fixture.llm.calls).toBe(0)
   }),
 )
@@ -480,7 +679,10 @@ it.instance("a failed project load releases a detached claim into the paused que
     const fixture = yield* setup()
     const session = yield* fixture.sessions.create({ title: "unavailable project" })
     yield* fixture.queue.add({
-      sessionID: session.id, payload: { model: ref, parts: [text("recover me")] }, runAt: Date.now() - 1000, target: "fork",
+      sessionID: session.id,
+      payload: { model: ref, parts: [text("recover me")] },
+      runAt: Date.now() - 1000,
+      target: "fork",
     })
     yield* fixture.prompt.queue.fireDue(() => Effect.die(new Error("project unavailable")))
     const snapshot = yield* waitForPause(fixture, session.id, "error")

@@ -81,18 +81,47 @@ describe("session.retry.delay", () => {
     expect(SessionRetry.delay(1, error, 0)).toBe(2000)
   })
 
-  test("uses retry-after values even when exceeding 10 minutes with headers", () => {
+  test("caps header waits at ten minutes", () => {
     const error = apiError({ "retry-after": "50" })
     expect(SessionRetry.delay(1, error)).toBe(50000)
 
     const longError = apiError({ "retry-after-ms": "700000" })
-    expect(SessionRetry.delay(1, longError)).toBe(700000)
+    expect(SessionRetry.delay(1, longError)).toBe(600000)
+    expect(SessionRetry.delay(1, apiError({ "retry-after-ms": "600000" }))).toBe(600000)
+    expect(SessionRetry.delay(1, apiError({ "retry-after": "601" }))).toBe(600000)
+    expect(SessionRetry.delay(1, apiError({ "retry-after": new Date(Date.now() + 900000).toUTCString() }))).toBe(600000)
   })
 
-  test("caps oversized header delays to the runtime timer limit", () => {
+  test("caps oversized header delays", () => {
     const error = apiError({ "retry-after-ms": "999999999999" })
     expect(SessionRetry.delay(1, error)).toBe(SessionRetry.RETRY_MAX_DELAY)
+    expect(SessionRetry.delay(1, apiError({ "retry-after-ms": "-1" }))).toBe(0)
+    expect(SessionRetry.delay(1, apiError({ "retry-after-ms": "Infinity" }), 0)).toBe(2000)
   })
+
+  it.instance("long waits publish the usage-limit action and halt without sleeping", () =>
+    Effect.gen(function* () {
+      const updates: Array<{ next: number; action?: SessionRetry.Retryable["action"] }> = []
+      const error = apiError({ "retry-after": "900" })
+      let calls = 0
+      const exit = yield* Effect.suspend(() => {
+        calls++
+        return Effect.fail(error)
+      }).pipe(
+        Effect.retry(SessionRetry.policy({
+          provider: "test",
+          parse: () => error,
+          set: (info) => Effect.sync(() => { updates.push(info) }),
+        })),
+        Effect.exit,
+      )
+      expect(exit._tag).toBe("Failure")
+      expect(calls).toBe(1)
+      expect(updates).toHaveLength(1)
+      expect(updates[0].action?.reason).toBe("account_rate_limit")
+      expect(updates[0].next).toBeGreaterThan(Date.now() + 899000)
+    }),
+  )
 
   it.instance("policy updates retry status and increments attempts", () =>
     Effect.gen(function* () {

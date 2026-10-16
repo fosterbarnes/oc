@@ -2,7 +2,7 @@ import { SessionV1 } from "@opencode-ai/core/v1/session"
 import { Database } from "@opencode-ai/core/database/database"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { EventV2Bridge } from "@/event-v2-bridge"
-import { expect } from "bun:test"
+import { expect, spyOn } from "bun:test"
 import { tool } from "ai"
 import { Cause, Effect, Exit, Fiber, Layer, Stream } from "effect"
 import path from "path"
@@ -25,7 +25,7 @@ import { RuntimeFlags } from "@/effect/runtime-flags"
 import { ProviderV2 } from "@opencode-ai/core/provider"
 import { ModelV2 } from "@opencode-ai/core/model"
 import { SessionProjector } from "@opencode-ai/core/session/projector"
-import { LLMEvent } from "@opencode-ai/llm"
+import { LLMEvent, Usage } from "@opencode-ai/llm"
 import { Permission } from "@/permission"
 
 const summary = Layer.succeed(
@@ -227,6 +227,31 @@ const fragmentFailureLLM = Layer.succeed(
 )
 const fragmentFailureEnv = LayerNode.compile(root, [...replacements, [LLM.node, fragmentFailureLLM]])
 const itFragmentFailure = testEffect(fragmentFailureEnv)
+
+const usageLLM = Layer.succeed(LLM.Service, LLM.Service.of({
+  stream: () => Stream.make(
+    LLMEvent.stepStart({ index: 0 }),
+    LLMEvent.toolInputStart({ id: "large", name: "write" }),
+    ...Array.from({ length: 512 }, () => LLMEvent.toolInputDelta({ id: "large", name: "write", text: "x".repeat(100) })),
+    LLMEvent.toolInputEnd({ id: "large", name: "write" }),
+    LLMEvent.toolCall({ id: "large", name: "write", input: { content: "x".repeat(51200) } }),
+    LLMEvent.toolResult({ id: "large", name: "write", result: { type: "text", value: "done" } }),
+    { type: "usage", usage: new Usage({ inputTokens: 12, outputTokens: 1 }) },
+    { type: "usage", usage: new Usage({ inputTokens: 12, outputTokens: 2 }) },
+    { type: "usage", usage: new Usage({ inputTokens: 12, outputTokens: 3 }) },
+    LLMEvent.stepFinish({ index: 0, reason: "stop" }),
+    LLMEvent.finish({ reason: "stop" }),
+  ),
+}))
+const itUsage = testEffect(LayerNode.compile(root, [...replacements, [LLM.node, usageLLM]]))
+
+const earlyToolLLM = Layer.succeed(LLM.Service, LLM.Service.of({
+  stream: (input) => Stream.unwrap(Effect.promise(async () => {
+    await input.tools.lookup.execute?.({}, { toolCallId: "early", messages: [] })
+    return Stream.fail(new Error("503 Service unavailable"))
+  })),
+}))
+const itEarlyTool = testEffect(LayerNode.compile(root, [...replacements, [LLM.node, earlyToolLLM]]))
 
 const boot = Effect.fn("test.boot")(function* () {
   const processors = yield* SessionProcessor.Service
@@ -509,7 +534,8 @@ it.live("session.processor effect tests reset reasoning state across retries", (
 
         expect(value).toBe("continue")
         expect(yield* llm.calls).toBe(2)
-        expect(reasoning.some((part) => part.text === "two")).toBe(true)
+        expect(reasoning.map((part) => part.text)).toEqual(["two"])
+        expect(parts.filter((part) => part.type === "step-start")).toHaveLength(1)
         expect(reasoning.some((part) => part.text === "onetwo")).toBe(false)
       }),
     { config: (url) => providerCfg(url) },
@@ -612,7 +638,10 @@ it.live("session.processor effect tests retry OpenAI-compatible midstream server
       Effect.gen(function* () {
         const { processors, session, provider } = yield* boot()
 
-        yield* llm.push(raw({ chunks: [{ error: { type: "server_error", code: "server_error", message: "xxx" } }] }))
+        yield* llm.push(raw({ chunks: [
+          { id: "partial", object: "chat.completion.chunk", choices: [{ delta: { role: "assistant", content: "discard" } }] },
+          { error: { type: "rate_limit_error", code: "429", message: "Too many requests" } },
+        ] }))
         yield* llm.text("after")
 
         const chat = yield* session.create({})
@@ -647,6 +676,8 @@ it.live("session.processor effect tests retry OpenAI-compatible midstream server
         expect(value).toBe("continue")
         expect(yield* llm.calls).toBe(2)
         expect(parts.some((part) => part.type === "text" && part.text === "after")).toBe(true)
+        expect(parts.filter((part) => part.type === "text")).toHaveLength(1)
+        expect(parts.filter((part) => part.type === "step-start")).toHaveLength(1)
         expect(handle.message.error).toBeUndefined()
       }),
     { config: (url) => providerCfg(url) },
@@ -1117,6 +1148,112 @@ itProviderError.live("session.processor effect tests fail provider-executed erro
       }),
     { config: cfg },
   ),
+)
+
+itEarlyTool.live("session.processor guards execution even before a tool-call event is consumed", () =>
+  provideTmpdirInstance((dir) => Effect.gen(function* () {
+    const { processors, session, provider } = yield* boot()
+    const chat = yield* session.create({})
+    const parent = yield* user(chat.id, "early tool")
+    const msg = yield* assistant(chat.id, parent.id, path.resolve(dir))
+    const mdl = yield* provider.getModel(ref.providerID, ref.modelID)
+    const handle = yield* processors.create({ assistantMessage: msg, sessionID: chat.id, model: mdl })
+    let runs = 0
+    expect(yield* handle.process({
+      user: parent, sessionID: chat.id, model: mdl, agent: agent(), system: [],
+      messages: [{ role: "user", content: "early tool" }],
+      tools: { lookup: tool({
+        description: "Run before the call event", inputSchema: z.object({}),
+        execute: async () => { runs++; return "done" },
+      }) },
+    })).toBe("stop")
+    expect(runs).toBe(1)
+    expect(handle.message.error?.data).toMatchObject({ message: "503 Service unavailable" })
+  }), { config: cfg }),
+)
+
+itUsage.live("session.processor avoids per-chunk reads and publishes live usage without durable writes", () =>
+  provideTmpdirInstance((dir) => Effect.gen(function* () {
+    const database = yield* Database.Service
+    const { processors, session, provider } = yield* boot()
+    const events = yield* EventV2Bridge.Service
+    const chat = yield* session.create({})
+    const parent = yield* user(chat.id, "usage")
+    const msg = yield* assistant(chat.id, parent.id, path.resolve(dir))
+    const mdl = yield* provider.getModel(ref.providerID, ref.modelID)
+    const handle = yield* processors.create({ assistantMessage: msg, sessionID: chat.id, model: mdl })
+    const reads = spyOn(session, "getPart")
+    yield* Effect.addFinalizer(() => Effect.sync(() => reads.mockRestore()))
+    const updates: Array<{ durable: boolean; output: number; stored: number }> = []
+    const off = yield* events.listen((event) => Effect.gen(function* () {
+      if (event.type !== MessageV2.Event.Updated.type) return
+      const data = event.data as typeof MessageV2.Event.Updated.data.Type
+      if (data.info.id !== msg.id || data.info.role !== "assistant") return
+      const stored = yield* MessageV2.get({ sessionID: chat.id, messageID: msg.id }).pipe(
+        Effect.provideService(Database.Service, database), Effect.orDie,
+      )
+      updates.push({
+        durable: event.durable !== undefined,
+        output: data.info.tokens.output,
+        stored: stored.info.role === "assistant" ? stored.info.tokens.output : -1,
+      })
+    }))
+    yield* Effect.addFinalizer(() => off)
+    expect(yield* handle.process({
+      user: parent, sessionID: chat.id, model: mdl, agent: agent(), system: [],
+      messages: [{ role: "user", content: "usage" }], tools: {},
+    })).toBe("continue")
+    expect(reads.mock.calls).toHaveLength(4)
+    expect(updates.filter((event) => !event.durable)).toEqual([
+      { durable: false, output: 1, stored: 0 },
+      { durable: false, output: 2, stored: 0 },
+      { durable: false, output: 3, stored: 0 },
+    ])
+    expect(updates.filter((event) => event.durable).map((event) => event.output)).toEqual([3, 3])
+    console.log(`processor: 512 input chunks, ${reads.mock.calls.length} getPart reads`)
+  }), { config: cfg }),
+)
+
+it.live("session.processor never retries after a tool executes before a midstream 503", () =>
+  provideTmpdirServer(({ dir, llm }) => Effect.gen(function* () {
+    const { processors, session, provider } = yield* boot()
+    const executed = defer<void>()
+    let runs = 0
+    yield* llm.push(raw({
+      head: [
+        { id: "tool", object: "chat.completion.chunk", choices: [{ delta: { role: "assistant", tool_calls: [
+          { index: 0, id: "call_once", type: "function", function: { name: "lookup", arguments: "{}" } },
+        ] } }] },
+        { id: "tool", object: "chat.completion.chunk", choices: [{ delta: {}, finish_reason: "tool_calls" }] },
+      ],
+      wait: executed.promise,
+      tail: [{ error: { type: "server_error", code: "503", message: "Service unavailable" } }],
+    }))
+    yield* llm.text("must not retry")
+    const chat = yield* session.create({})
+    const parent = yield* user(chat.id, "tool failure")
+    const msg = yield* assistant(chat.id, parent.id, path.resolve(dir))
+    const mdl = yield* provider.getModel(ref.providerID, ref.modelID)
+    const handle = yield* processors.create({ assistantMessage: msg, sessionID: chat.id, model: mdl })
+    expect(yield* handle.process({
+      user: parent, sessionID: chat.id, model: mdl, agent: agent(), system: [],
+      messages: [{ role: "user", content: "tool failure" }],
+      tools: { lookup: tool({
+        description: "Run once", inputSchema: z.object({}),
+        execute: async () => {
+          runs++
+          executed.resolve()
+          return { title: "ran", output: "once", metadata: {} }
+        },
+      }) },
+    })).toBe("stop")
+    expect(runs).toBe(1)
+    expect(yield* llm.calls).toBe(1)
+    expect(handle.message.error?.data).toMatchObject({ message: expect.stringContaining("Service unavailable") })
+    const stored = yield* MessageV2.get({ sessionID: chat.id, messageID: msg.id })
+    expect(stored.info.role === "assistant" && stored.info.error).toEqual(handle.message.error)
+    expect(stored.parts.filter((part) => part.type === "tool")).toHaveLength(1)
+  }), { config: (url) => providerCfg(url) }),
 )
 
 itFragmentFailure.live("session.processor effect tests retain partial legacy parts without v2 events", () =>

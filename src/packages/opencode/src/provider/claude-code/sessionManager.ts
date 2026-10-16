@@ -95,6 +95,11 @@ export interface ActiveProcess {
    * background task finished) until an oc turn attaches to it.
    */
   autonomousTurn?: boolean
+  /**
+   * Set once the child's stdout closed, its stdin failed, or it was killed. Such a
+   * child cannot finish a turn, so no turn is handed it and LRU evicts it first.
+   */
+  closing?: boolean
 }
 
 export interface WakeTarget {
@@ -236,6 +241,8 @@ interface ClaudeSessionRecord {
 // Iteration order is insertion order, which we refresh on access to
 // make this a poor-man's LRU; see `touch()` below.
 const activeProcesses = new Map<string, ActiveProcess>()
+// Spawns still planning or starting for a key; see `singleFlightSpawn`.
+const spawnsInFlight = new Map<string, Promise<ActiveProcess>>()
 // Loaded from `SESSIONS_FILE` on first use so a restarted opencode resumes
 // the same Claude conversations instead of silently starting new ones.
 const claudeSessions = new Map<string, ClaudeSessionRecord>()
@@ -276,6 +283,7 @@ export function resolveIdleProcessTimeoutMs(configured: number | undefined): num
 export const MAX_ACTIVE_PROCESSES = 16
 const PROCESS_EXIT_TIMEOUT_MS = 1_500
 const PROCESS_FORCE_EXIT_TIMEOUT_MS = 500
+const STDOUT_DRAIN_GRACE_MS = 1_000
 /** Same wording the attached turn's close handler uses, so one log line
  * shape covers a child that died mid-turn and one that died between turns. */
 export const CHILD_EXITED_MESSAGE = "Claude CLI subprocess closed before pending tool calls were resolved"
@@ -300,7 +308,7 @@ export function evictIfNeeded(): void {
   while (activeProcesses.size >= MAX_ACTIVE_PROCESSES) {
     let victimKey: string | undefined
     for (const [key, ap] of activeProcesses) {
-      if (!isTurnInFlight(ap)) {
+      if (ap.closing || !isTurnInFlight(ap)) {
         victimKey = key
         break
       }
@@ -418,17 +426,28 @@ function cancelIdleProcessEviction(key: string): void {
   idleEvictionTimers.delete(key)
 }
 
+/**
+ * A child a turn may still use: not closing, killed, or exited, and with stdin
+ * open. A turn given a dying child writes into a closed stdin and then waits out
+ * the start watchdog.
+ */
+function isLiveProcess(ap: ActiveProcess): boolean {
+  if (ap.closing || ap.proc.killed) return false
+  if (typeof ap.proc.exitCode === "number" || typeof ap.proc.signalCode === "string") return false
+  return ap.proc.stdin?.writable !== false
+}
+
 /** Whether a live process owns `key`, without refreshing LRU order or idle timers. */
 export function hasActiveProcess(key: string): boolean {
-  return activeProcesses.has(key)
+  const ap = activeProcesses.get(key)
+  return ap !== undefined && isLiveProcess(ap)
 }
 
 export function getActiveProcess(key: string): ActiveProcess | undefined {
   const ap = activeProcesses.get(key)
-  if (ap) {
-    cancelIdleProcessEviction(key)
-    touch(key)
-  }
+  if (!ap || !isLiveProcess(ap)) return undefined
+  cancelIdleProcessEviction(key)
+  touch(key)
   return ap
 }
 
@@ -486,6 +505,7 @@ function detachActiveProcess(key: string): ActiveProcess | undefined {
   const ap = activeProcesses.get(key)
   if (!ap) return undefined
   activeProcesses.delete(key)
+  ap.closing = true
   if (ap.proxyServer) {
     void ap.proxyServer.close()
     // The server's close already answered every open HTTP request with an
@@ -605,27 +625,30 @@ function waitForProcessExit(proc: ChildProcess, timeoutMs: number): Promise<bool
   })
 }
 
-export async function deleteActiveProcessAndWait(
-  key: string,
-  options: {
-    exitTimeoutMs?: number
-    forceExitTimeoutMs?: number
-    forceKill?: boolean
-  } = {},
-): Promise<boolean> {
+type StopOptions = {
+  exitTimeoutMs?: number
+  forceExitTimeoutMs?: number
+  forceKill?: boolean
+}
+
+/** Kill a child and wait for it to exit: graceful first, then SIGKILL. False if it never exits. */
+async function stopChildProcess(proc: ChildProcess, options: StopOptions = {}): Promise<boolean> {
+  if (hasProcessExited(proc)) return true
+  const gracefulExit = waitForProcessExit(proc, options.exitTimeoutMs ?? PROCESS_EXIT_TIMEOUT_MS)
+  if (!options.forceKill) proc.kill()
+  if (await gracefulExit) return true
+
+  const forcedExit = waitForProcessExit(proc, options.forceExitTimeoutMs ?? PROCESS_FORCE_EXIT_TIMEOUT_MS)
+  proc.kill("SIGKILL")
+  return forcedExit
+}
+
+export async function deleteActiveProcessAndWait(key: string, options: StopOptions = {}): Promise<boolean> {
   const ap = activeProcesses.get(key)
   // Queued stdin work must die before closing the proxy can release a tool boundary.
   if (options.forceKill) ap?.proc.kill("SIGKILL")
   detachActiveProcess(key)
-  if (!ap || hasProcessExited(ap.proc)) return true
-
-  const gracefulExit = waitForProcessExit(ap.proc, options.exitTimeoutMs ?? PROCESS_EXIT_TIMEOUT_MS)
-  if (!options.forceKill) ap.proc.kill()
-  if (await gracefulExit) return true
-
-  const forcedExit = waitForProcessExit(ap.proc, options.forceExitTimeoutMs ?? PROCESS_FORCE_EXIT_TIMEOUT_MS)
-  ap.proc.kill("SIGKILL")
-  if (await forcedExit) return true
+  if (!ap || (await stopChildProcess(ap.proc, options))) return true
 
   log.warn("claude process did not exit; its conversation is lost", {
     sessionKey: key,
@@ -780,7 +803,10 @@ export function deleteClaudeSessionId(key: string): void {
  */
 export function markClaudeSessionLost(key: string, reason: string): void {
   deleteClaudeSessionId(key)
+  // Re-inserting moves the key to the back, so the cap drops the oldest loss.
+  lostSessions.delete(key)
   lostSessions.set(key, reason)
+  if (lostSessions.size > MAX_CLAUDE_SESSION_ENTRIES) lostSessions.delete(lostSessions.keys().next().value!)
 }
 
 /** Why the key's conversation was lost, once; undefined when it was not. */
@@ -825,6 +851,19 @@ export function takePendingRewind(key: string): string | undefined {
   const uuid = pendingRewinds.get(key)
   pendingRewinds.delete(key)
   return uuid
+}
+
+/**
+ * Run `start` for `key` unless one is already in flight, and share its result.
+ * Turn setups that race past the same check then get one child, not two; a
+ * failed start clears its entry so the next turn tries again.
+ */
+export function singleFlightSpawn(key: string, start: () => Promise<ActiveProcess>): Promise<ActiveProcess> {
+  const inFlight = spawnsInFlight.get(key)
+  if (inFlight) return inFlight
+  const spawning = start().finally(() => spawnsInFlight.delete(key))
+  spawnsInFlight.set(key, spawning)
+  return spawning
 }
 
 export function spawnClaudeProcess(
@@ -888,9 +927,14 @@ export function spawnClaudeProcess(
     lineEmitter.emit("line", line)
   })
   rl.on("close", () => {
+    // Readline closes on stdout end, which can come well before `exit`.
+    ap.closing = true
     settleTurn(ap)
     lineEmitter.emit("close")
   })
+  // A dead child still in the map would be overwritten untracked, so kill it first.
+  const stale = activeProcesses.get(sessionKey)
+  if (stale && !isLiveProcess(stale)) deleteActiveProcess(sessionKey)
   cancelIdleProcessEviction(sessionKey)
   activeProcesses.set(sessionKey, ap)
 
@@ -898,6 +942,8 @@ export function spawnClaudeProcess(
   // an error between stream turns (no per-stream listener attached then).
   proc.on("error", (err) => {
     log.error("claude process error", { sessionKey, error: err.message })
+    // A child that never started emits no `exit`, so release its entry here.
+    if (proc.pid === undefined && activeProcesses.get(sessionKey) === ap) detachActiveProcess(sessionKey)
   })
 
   // Same baseline for the child's stdin, which is a separate emitter. Every
@@ -914,11 +960,17 @@ export function spawnClaudeProcess(
       code: err.code,
       error: err.message,
     })
+    ap.closing = true
     settleTurn(ap)
   })
 
   proc.on("exit", (code, signal) => {
     log.info("claude process exited", { code, signal, sessionKey })
+    // Exit can come before the last stdout lines are read, so readline closes once they drain.
+    // The timer covers a grandchild that keeps the pipe open and stops stdout from ever ending.
+    const drainGrace = setTimeout(() => rl.close(), STDOUT_DRAIN_GRACE_MS)
+    drainGrace.unref()
+    rl.once("close", () => clearTimeout(drainGrace))
     void proxyServer?.close()
     if (systemPromptFile) {
       void unlink(systemPromptFile).catch(() => {})
@@ -1021,28 +1073,33 @@ export function appendResumeIfNeeded(sessionKey: string, cliArgs: string[]): str
  * idle timer and the next turn's quiesce all mistake the busy replacement
  * for an idle process.
  *
- * Returns the new `ActiveProcess`, or `undefined` if there was no active
- * process for the key (caller should treat that as "nothing to respawn").
+ * Resolves the new `ActiveProcess`, or `undefined` if there was no active
+ * process for the key (caller should treat that as "nothing to respawn") or
+ * the old child did not exit.
  */
-export function respawnActiveProcess(
+export async function respawnActiveProcess(
   sessionKey: string,
   cliPath: string,
   cliArgs: string[],
   cwd: string,
   ignoreAnthropicApiKey?: boolean,
-): ActiveProcess | undefined {
+): Promise<ActiveProcess | undefined> {
   const old = activeProcesses.get(sessionKey)
   if (!old) return undefined
   const turnWasInFlight = isTurnInFlight(old)
   activeProcesses.delete(sessionKey)
+  old.closing = true
   // Silence the old exit handler so it doesn't close the proxy server,
   // unlink the system-prompt file, or touch claudeSessions on its way out
   // - those handles are reused by the new child. spawnClaudeProcess wires
   // a fresh exit handler for the respawned child.
   old.proc.removeAllListeners("exit")
-  try {
-    old.proc.kill()
-  } catch {}
+  // The replacement resumes the transcript the old child may still hold open.
+  if (!(await stopChildProcess(old.proc))) {
+    log.warn("claude process did not exit before respawn; its conversation is lost", { sessionKey })
+    markClaudeSessionLost(sessionKey, "the Claude process did not exit when asked to")
+    return undefined
+  }
   const replacement = spawnClaudeProcess(
     cliPath,
     appendResumeIfNeeded(sessionKey, old.cliArgs ?? cliArgs),
