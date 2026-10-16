@@ -291,6 +291,11 @@ Bold marks keys where the oc layout differs from opencode. `-` means unbound.
 | New project copy | `ctrl+m` | `ctrl+m` |
 | Delete project copy | `ctrl+d` | `ctrl+d` |
 | Refresh project copies | `ctrl+r` | `ctrl+r` |
+| Rename favorite category | `ctrl+r` | `ctrl+r` |
+| Set favorite category color | `ctrl+l` | `ctrl+l` |
+| Move favorite category up | `shift+up` | `shift+up` |
+| Move favorite category down | `shift+down` | `shift+down` |
+| Delete favorite category | `ctrl+d` | `ctrl+d` |
 | Install plugin from plugin dialog | `shift+i` | `shift+i` |
 
 ### Permission

@@ -14,6 +14,7 @@ import {
   useLocal,
 } from "../../src/context/local"
 import path from "node:path"
+import { RGBA } from "@opentui/core"
 import { createComponent, onCleanup } from "solid-js"
 import { testRender, useRenderer } from "@opentui/solid"
 import { createDefaultOpenTuiKeymap } from "@opentui/keymap/opentui"
@@ -239,10 +240,15 @@ async function mountLocal(
 
 test("favorite categories load old favorites and discard unknown or malformed category metadata", () => {
   const model = { providerID: "test", modelID: "first" }
-  expect(loadModelFavorites({ favorite: [model] })).toEqual({ favorite: [model], favoriteCategories: [] })
+  expect(loadModelFavorites({ favorite: [model] })).toEqual({
+    favorite: [model],
+    favoriteCategories: [],
+    favoriteCategoryColors: {},
+  })
   expect(
     loadModelFavorites({
       favoriteCategories: ["Code", "Code", "", null, "bad\nname", "Research"],
+      favoriteCategoryColors: { Code: "accent", Research: "#zzzzzz", missing: "info" },
       favorite: [
         { ...model, category: "Code" },
         { providerID: "test", modelID: "second", category: "missing" },
@@ -252,6 +258,7 @@ test("favorite categories load old favorites and discard unknown or malformed ca
     }),
   ).toEqual({
     favoriteCategories: ["Code", "Research"],
+    favoriteCategoryColors: { Code: "accent" },
     favorite: [
       { ...model, category: "Code" },
       { providerID: "test", modelID: "second" },
@@ -300,18 +307,30 @@ test("favorite categories persist assignments, rename and reorder, preserving mo
     expect(model.favorite()[3]!.category).toBeUndefined()
     model.moveFavorite(favorites[2]!, -1)
     expect(model.favorite().map((item) => item.modelID)).toEqual(["third", "second", "first", "fourth"])
+    // At the top of Code it joins the uncategorized group, then hops back to the top of Code.
     model.moveFavorite(favorites[2]!, -1)
-    expect(model.favorite()[0]!.modelID).toBe("third")
+    expect(model.favorite().map((item) => item.modelID)).toEqual(["second", "first", "fourth", "third"])
+    expect(model.favorite()[3]!.category).toBeUndefined()
+    model.moveFavorite(favorites[2]!, 1)
+    expect(model.favorite().map((item) => item.modelID)).toEqual(["second", "third", "first", "fourth"])
+    expect(model.favorite()[1]!.category).toBe("Code")
     model.moveFavoriteCategory("Research", -1)
     model.moveFavoriteCategory("Research", -1)
     expect(model.favoriteCategories()).toEqual(["Research", "Code"])
+    model.setFavoriteCategoryColor("Code", "#a78bfa")
+    model.setFavoriteCategoryColor("Research", "not a color")
+    model.setFavoriteCategoryColor("missing", "info")
+    expect(model.favoriteCategoryColors()).toEqual({ Code: "#a78bfa" })
+    expect(model.favoriteCategoryColor("Code")).toEqual(RGBA.fromHex("#a78bfa"))
     model.renameFavoriteCategory("Code", "Coding")
     expect(model.favorite().filter((item) => item.category === "Coding").length).toBe(2)
+    expect(model.favoriteCategoryColors()).toEqual({ Coding: "#a78bfa" })
     await wait(() => JSON.parse(fs.readFileSync(file, "utf8")).favoriteCategories?.includes("Coding"))
     const saved = await Bun.file(file).json()
     expect(loadModelFavorites(saved)).toEqual({
       favorite: [...model.favorite()],
       favoriteCategories: ["Research", "Coding"],
+      favoriteCategoryColors: { Coding: "#a78bfa" },
     })
     const current = model.current()?.modelID
     await model.cycleFavorite(1)
@@ -320,7 +339,8 @@ test("favorite categories persist assignments, rename and reorder, preserving mo
     expect(model.current()?.modelID).toBe(current)
     expect(model.current()).toEqual({ providerID: "test", modelID: "first" })
     model.deleteFavoriteCategory("Coding")
-    expect(model.favorite().map((item) => item.modelID)).toEqual(["third", "second", "first", "fourth"])
+    expect(model.favoriteCategoryColors()).toEqual({})
+    expect(model.favorite().map((item) => item.modelID)).toEqual(["second", "third", "first", "fourth"])
     expect(model.favorite().filter((item) => item.category === "Coding")).toEqual([])
     model.assignFavoriteCategory(favorites[1]!)
     expect(model.favorite().find((item) => item.modelID === "second")?.category).toBeUndefined()
@@ -398,12 +418,12 @@ test("model menu nests category headings and creates, assigns and manages them w
     expect(frame()).toContain("Category…")
     await key(() => app.mockInput.pressArrow("down"))
     await key(() => app.mockInput.pressKey("g", { ctrl: true }))
-    expect(frame()).toContain("No category")
-    expect(frame()).toContain("Manage categories…")
-    await key(() => app.mockInput.pressArrow("down"))
-    await key(() => app.mockInput.pressEnter())
-    expect(frame()).toContain("New category")
+    expect(frame()).toContain("Category for second")
+    expect(frame()).toContain("None")
     await app.mockInput.typeText("Code")
+    await app.flush()
+    await app.waitForVisualIdle()
+    expect(frame()).toContain('Create "Code"')
     await key(() => app.mockInput.pressEnter())
     expect(model.favorite()[1]!.category).toBe("Code")
     expect(model.current()?.modelID).toBe("first")
@@ -412,27 +432,32 @@ test("model menu nests category headings and creates, assigns and manages them w
     const at = (text: string) => lines.findIndex((line) => line.trim() === text)
     expect(at("Favorites")).toBeLessThan(at("Code"))
     expect(at("Code")).toBeLessThan(at("Recent"))
-    expect(lines[at("Code")]!.indexOf("Code")).toBeGreaterThan(lines[at("Favorites")]!.indexOf("Favorites"))
+    // Category headings and their models sit flush with the Favorites heading.
+    expect(lines[at("Code")]!.indexOf("Code")).toBe(lines[at("Favorites")]!.indexOf("Favorites"))
     expect(lines.findIndex((line) => line.includes("first Test"))).toBeLessThan(at("Code"))
     expect(lines.findIndex((line) => line.includes("third Test"))).toBeLessThan(at("Code"))
-    expect(lines.find((line) => line.includes("second Test"))!.indexOf("second")).toBeGreaterThan(
+    expect(lines.find((line) => line.includes("second Test"))!.indexOf("second")).toBe(
       lines[at("Code")]!.indexOf("Code"),
     )
     // Reopening keeps the highlighted favorite even after it moves below uncategorized rows.
+    // The picker opens on the assigned category; footer keys act on it without leaving the picker.
     await key(() => app.mockInput.pressKey("g", { ctrl: true }))
-    expect(frame()).toContain("Favorite category")
-    await key(() => app.mockInput.pressArrow("down"))
-    await key(() => app.mockInput.pressArrow("down"))
-    await key(() => app.mockInput.pressEnter())
-    expect(frame()).toContain("Manage categories")
-    await key(() => app.mockInput.pressEnter())
-    expect(frame()).toContain("Delete category")
-    await key(() => app.mockInput.pressEnter())
-    expect(frame()).toContain("Rename category")
+    expect(frame()).toContain("Category for second")
+    expect(frame()).toContain("1 model")
+    expect(frame()).toContain("rename")
+    await key(() => app.mockInput.pressKey("r", { ctrl: true }))
+    expect(frame()).toContain("Rename Code")
     await key(() => app.mockInput.pressEscape())
-    expect(frame()).toContain("Manage categories")
+    expect(frame()).toContain("Category for second")
+    await key(() => app.mockInput.pressKey("l", { ctrl: true }))
+    expect(frame()).toContain("Color for Code")
     await key(() => app.mockInput.pressEscape())
-    expect(frame()).toContain("Favorite category")
+    expect(frame()).toContain("Category for second")
+    await key(() => app.mockInput.pressKey("d", { ctrl: true }))
+    expect(frame()).toContain("again to delete Code")
+    await key(() => app.mockInput.pressArrow("up"))
+    expect(frame()).not.toContain("again to delete Code")
+    expect(model.favoriteCategories()).toEqual(["Code"])
     await key(() => app.mockInput.pressEscape())
     expect(frame()).toContain("Select model")
     expect(model.current()?.modelID).toBe("first")
@@ -449,6 +474,15 @@ test("model menu nests category headings and creates, assigns and manages them w
     model.moveFavoriteCategory("Research", -1)
     await app.waitForVisualIdle()
     expect(frame().indexOf("Research")).toBeLessThan(frame().indexOf("Code"))
+    // Favorites heading shows only while an uncategorized favorite exists.
+    const headingRow = () => frame().split("\n").findIndex((line) => line.trim() === "Favorites")
+    model.assignFavoriteCategory(favorites[0]!, "Code")
+    await app.waitForVisualIdle()
+    expect(headingRow()).toBe(-1)
+    expect(frame()).toContain("Research")
+    model.assignFavoriteCategory(favorites[0]!)
+    await app.waitForVisualIdle()
+    expect(headingRow()).toBeGreaterThanOrEqual(0)
     await app.mockInput.typeText("second")
     await app.flush()
     await app.waitForVisualIdle()
@@ -475,9 +509,32 @@ test("moves a favorite one place and leaves it unchanged at the edge", () => {
     { providerID: "provider", modelID: "third" },
   ]
 
-  expect(moveModelFavorite(favorites, favorites[1]!, -1)).toEqual([favorites[1], favorites[0], favorites[2]])
-  expect(moveModelFavorite(favorites, favorites[0]!, -1)).toBe(favorites)
-  expect(moveModelFavorite(favorites, favorites[2]!, 1)).toBe(favorites)
+  expect(moveModelFavorite(favorites, favorites[1]!, -1, [])).toEqual([favorites[1], favorites[0], favorites[2]])
+  expect(moveModelFavorite(favorites, favorites[0]!, -1, [])).toBe(favorites)
+  expect(moveModelFavorite(favorites, favorites[2]!, 1, [])).toBe(favorites)
+})
+
+test("moves a favorite across a category edge into the neighboring category", () => {
+  const free = { providerID: "p", modelID: "free" }
+  const a = { providerID: "p", modelID: "a", category: "A" }
+  const a2 = { providerID: "p", modelID: "a2", category: "A" }
+  const b = { providerID: "p", modelID: "b", category: "B" }
+  const favorites = [a, free, b, a2]
+  const ids = (list: { modelID: string; category?: string }[]) => list.map((item) => `${item.modelID}:${item.category ?? "-"}`)
+
+  // Down from the last uncategorized favorite lands first in A
+  expect(ids(moveModelFavorite(favorites, free, 1, ["A", "B", "Empty"]))).toEqual(["free:A", "a:A", "b:B", "a2:A"])
+  // Up from the first in B lands last in A
+  expect(ids(moveModelFavorite(favorites, b, -1, ["A", "B", "Empty"]))).toEqual(["a:A", "free:-", "a2:A", "b:A"])
+  // Up from the first in A joins the uncategorized group and drops the category key
+  const up = moveModelFavorite(favorites, a, -1, ["A", "B", "Empty"])
+  expect(ids(up)).toEqual(["free:-", "a:-", "b:B", "a2:A"])
+  expect("category" in up[1]!).toBe(false)
+  // Down from the last in B fills the empty category in place
+  expect(ids(moveModelFavorite(favorites, b, 1, ["A", "B", "Empty"]))).toEqual(["a:A", "free:-", "b:Empty", "a2:A"])
+  // The first group's top and the last group's bottom stay put
+  expect(moveModelFavorite(favorites, free, -1, ["A", "B"])).toBe(favorites)
+  expect(moveModelFavorite(favorites, b, 1, ["A", "B"])).toBe(favorites)
 })
 
 test("parses model IDs containing slashes", () => {

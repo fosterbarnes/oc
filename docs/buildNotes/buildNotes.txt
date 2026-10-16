@@ -1,12 +1,8 @@
-v0.2.213 tarStained
+v0.2.214 haldwaqyBsod
 
-time settings:
-The Time palette entry (/time) sets a shared 12-hour or 24-hour clock and time zone. Message timestamps, queues, scheduled prompts, auto-resume, warm-up schedules, revive markers, transcripts, and the usage sidebar follow these settings. The configured zone also applies to agent time tools and server schedules. Separate Claude clock toggles are removed; the default is 24-hour.
+favorite categories:
+The model list aligns category headings and models with Favorites, and hides the extra Favorites heading when every favorite belongs to a category. Categories support theme colors and custom hex colors that persist through renaming.
 
-agent scheduling:
-Agents can schedule one-time prompts for the current session, a fork, or a new session, list pending schedules, and cancel them. Schedules use oc's persistent queue and survive restarts. Claude Code receives the schedule tools by default; the read-only preset excludes them.
+The category picker names the model being edited and shows category counts and color swatches. Searching for a new name offers a Create row that creates and assigns the category in one step. Rename, color, reorder, and press-again delete actions are available directly in the picker. Moving a favorite past a category edge with Shift+Up or Shift+Down moves it into the neighboring category.
 
-claude code:
-Claude's worktree, cron, and wakeup tools are disabled because oc cannot track their directory changes or preserve their schedules. Claude's Workflow tool is disabled alongside its native subagent tools when oc handles delegation. The claudeSettings provider option applies settings to every pooled account, and startup diagnostics warn when account settings or CLAUDE.md differ. Tool guidance explains the lifetime of background jobs and watches.
-
-Under the hood: Shared time-zone handling and locale formatting replace scattered clock settings. Scheduling reuses SessionPrompt.queue and retains agent and model selection. Claude settings share one --settings flag with fast mode. Updated configuration SDK types, fork scope, and developer notes. Changed Claude provider, fake-model, schedule-tool, time-format, warm-up, and usage-freshness tests passed. Pre-push validation passed.
+Under the hood: Category colors are validated and stored with model preferences. Shared dialog rendering accounts for hidden category headings, and favorite ordering handles cross-category moves, including empty groups. Updated keybind documentation and fork notes. Changed TUI context tests passed. Pre-push validation passed.

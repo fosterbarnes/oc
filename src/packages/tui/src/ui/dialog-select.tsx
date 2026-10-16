@@ -76,6 +76,7 @@ export interface DialogSelectOption<T = any> {
   truncateTitle?: boolean | "left"
   category?: string
   subcategory?: string
+  subcategoryColor?: RGBA
   categoryView?: JSX.Element
   disabled?: boolean
   /** Shown but never selected, hovered, or clicked (read-only info rows). */
@@ -190,10 +191,15 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
     )
   })
 
+  // A category whose rows all sit in subcategories shows only the subcategory headings
+  function hasHeading(category: string, options: DialogSelectOption<T>[]) {
+    return !!category && !options.every((option) => option.subcategory)
+  }
+
   const rows = createMemo(() => {
-    const headers = grouped().reduce((acc, [category], i) => {
+    const headers = grouped().reduce((acc, [category, options], i) => {
       if (!category) return acc
-      return acc + (i > 0 ? 2 : 1)
+      return acc + (i > 0 ? 1 : 0) + (hasHeading(category, options) ? 1 : 0)
     }, 0)
     return grouped().reduce(
       (total, [_, options]) =>
@@ -352,7 +358,7 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
     let index = 0
     // Locate the row by position because a unique renderable ID cannot currently be ensured.
     outer: for (const [category, options] of grouped()) {
-      if (category) index++
+      if (hasHeading(category, options)) index++
       for (const [row, option] of options.entries()) {
         if (!flatten() && option.subcategory && option.subcategory !== options[row - 1]?.subcategory) index++
         if (!option.inert) {
@@ -676,7 +682,7 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
             <For each={grouped()}>
               {([category, options], index) => (
                 <>
-                  <Show when={category}>
+                  <Show when={hasHeading(category, options)}>
                     <box paddingTop={index() > 0 ? 1 : 0} paddingLeft={3}>
                       <Show
                         when={options[0]?.categoryView}
@@ -701,8 +707,11 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
                               !flatten() && option.subcategory && option.subcategory !== options[row() - 1]?.subcategory
                             }
                           >
-                            <box paddingLeft={5}>
-                              <text fg={theme.accent} attributes={TextAttributes.BOLD}>
+                            <box
+                              paddingTop={row() === 0 && index() > 0 && !hasHeading(category, options) ? 1 : 0}
+                              paddingLeft={3}
+                            >
+                              <text fg={option.subcategoryColor ?? theme.accent} attributes={TextAttributes.BOLD}>
                                 {option.subcategory}
                               </text>
                             </box>
@@ -736,9 +745,7 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
                           >
                             <box
                               flexDirection="row"
-                              paddingLeft={
-                                (current() || option.gutter ? 1 : 3) + (!flatten() && option.subcategory ? 4 : 0)
-                              }
+                              paddingLeft={current() || option.gutter ? 1 : 3}
                               paddingRight={3}
                               gap={1}
                               backgroundColor={

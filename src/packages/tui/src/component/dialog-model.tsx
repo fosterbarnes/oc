@@ -1,7 +1,15 @@
 import { createMemo, createSignal, onMount } from "solid-js"
-import { useLocal, moveModelFavorite } from "../context/local"
+import { RGBA } from "@opentui/core"
+import {
+  useLocal,
+  moveModelFavorite,
+  FAVORITE_CATEGORY_THEME_COLORS,
+  isFavoriteCategoryColor,
+} from "../context/local"
+import { useTheme } from "../context/theme"
+import { Locale } from "../util/locale"
 import { map, pipe, flatMap, entries, filter, sortBy, take } from "remeda"
-import { DialogSelect } from "../ui/dialog-select"
+import { DialogSelect, type DialogSelectOption } from "../ui/dialog-select"
 import { useDialog } from "../ui/dialog"
 import { createDialogProviderOptions, DialogProvider } from "./dialog-provider"
 import { DialogVariant } from "./dialog-variant"
@@ -10,6 +18,8 @@ import { useConnected } from "./use-connected"
 import { useSync } from "../context/sync"
 import { DialogPrompt } from "../ui/dialog-prompt"
 import { useToast } from "../ui/toast"
+import { useTuiConfig } from "../config"
+import { stringifyKeyStroke } from "@opentui/keymap"
 
 // Value of the "Hidden" row, so model actions can ignore it
 const HIDDEN_MENU = { providerID: "", modelID: "" }
@@ -25,7 +35,6 @@ export function DialogModel(props: {
   const local = useLocal()
   const sync = useSync()
   const dialog = useDialog()
-  const toast = useToast()
   const [query, setQuery] = createSignal("")
   const [highlighted, setHighlighted] = createSignal(props.highlighted ?? props.current ?? local.model.current())
 
@@ -58,6 +67,8 @@ export function DialogModel(props: {
             description: provider.name,
             category,
             subcategory: category === "Favorites" ? item.category : undefined,
+            subcategoryColor:
+              category === "Favorites" && item.category ? local.model.favoriteCategoryColor(item.category) : undefined,
             disabled: provider.id === "opencode" && model.id.includes("-nano"),
             footer: model.cost?.input === 0 && provider.id === "opencode" ? "Free" : undefined,
             onSelect: () => {
@@ -189,122 +200,18 @@ export function DialogModel(props: {
     dialog.replace(() => <DialogModel {...props} highlighted={highlighted()} />)
   }
 
-  function categoryPicker(model: { providerID: string; modelID: string }) {
-    const back = () => categoryPicker(model)
+  function categoryPicker(model: { providerID: string; modelID: string }, highlight?: string) {
     dialog.replace(
       () => (
-        <DialogSelect<string | { action: string }>
-          title="Favorite category"
-          current={
-            local.model
-              .favorite()
-              .find((item) => item.providerID === model.providerID && item.modelID === model.modelID)?.category ?? ""
-          }
-          options={[
-            { title: "No category", value: "", onSelect: () => assign() },
-            ...local.model
-              .favoriteCategories()
-              .map((name) => ({ title: name, value: name, onSelect: () => assign(name) })),
-            {
-              title: "New category…",
-              value: { action: "new" },
-              onSelect: () => editCategory(undefined, (name) => assign(name), back),
-            },
-            { title: "Manage categories…", value: { action: "manage" }, onSelect: () => manageCategories(back) },
-          ]}
+        <DialogFavoriteCategory
+          model={model}
+          highlight={highlight}
+          onDone={reopen}
+          onReopen={(name) => categoryPicker(model, name)}
         />
       ),
       undefined,
       { back: reopen },
-    )
-    function assign(name?: string) {
-      local.model.assignFavoriteCategory(model, name)
-      reopen()
-    }
-  }
-
-  function editCategory(previous: string | undefined, done: (name: string) => void, back: () => void) {
-    dialog.replace(
-      () => (
-        <DialogPrompt
-          title={previous === undefined ? "New category" : "Rename category"}
-          value={previous}
-          placeholder="Category name"
-          onConfirm={(input) => {
-            const error = local.model.renameFavoriteCategory(previous, input)
-            if (error) return toast.show({ message: error, variant: "warning" })
-            done(input.trim())
-          }}
-        />
-      ),
-      undefined,
-      { back },
-    )
-  }
-
-  function manageCategories(back: () => void, current?: string) {
-    dialog.replace(
-      () => (
-        <DialogSelect
-          title="Manage categories"
-          current={current}
-          preserveSelection
-          options={local.model.favoriteCategories().map((name) => ({
-            title: name,
-            value: name,
-            onSelect: () => categoryActions(name, back),
-          }))}
-        />
-      ),
-      undefined,
-      { back },
-    )
-  }
-
-  function categoryActions(name: string, back: () => void) {
-    const manage = () => manageCategories(back, name)
-    dialog.replace(
-      () => (
-        <DialogSelect
-          title={name}
-          renderFilter={false}
-          options={[
-            {
-              title: "Rename…",
-              value: "rename",
-              onSelect: () => editCategory(name, (next) => manageCategories(back, next), manage),
-            },
-            {
-              title: "Move up",
-              value: "up",
-              disabled: local.model.favoriteCategories().indexOf(name) === 0,
-              onSelect: () => {
-                local.model.moveFavoriteCategory(name, -1)
-                manage()
-              },
-            },
-            {
-              title: "Move down",
-              value: "down",
-              disabled: local.model.favoriteCategories().indexOf(name) === local.model.favoriteCategories().length - 1,
-              onSelect: () => {
-                local.model.moveFavoriteCategory(name, 1)
-                manage()
-              },
-            },
-            {
-              title: "Delete category",
-              value: "delete",
-              onSelect: () => {
-                local.model.deleteFavoriteCategory(name)
-                manageCategories(back)
-              },
-            },
-          ]}
-        />
-      ),
-      undefined,
-      { back: manage },
     )
   }
 
@@ -378,7 +285,8 @@ export function DialogModel(props: {
           },
           disabled: (option) => {
             if (!option || typeof option.value === "string") return true
-            return moveModelFavorite(local.model.favorite(), option.value, -1) === local.model.favorite()
+            const favorites = local.model.favorite()
+            return moveModelFavorite(favorites, option.value, -1, local.model.favoriteCategories()) === favorites
           },
           onTrigger: (option) => {
             if (typeof option.value === "string") return
@@ -394,7 +302,8 @@ export function DialogModel(props: {
           },
           disabled: (option) => {
             if (!option || typeof option.value === "string") return true
-            return moveModelFavorite(local.model.favorite(), option.value, 1) === local.model.favorite()
+            const favorites = local.model.favorite()
+            return moveModelFavorite(favorites, option.value, 1, local.model.favoriteCategories()) === favorites
           },
           onTrigger: (option) => {
             if (typeof option.value === "string") return
@@ -420,6 +329,222 @@ export function DialogModel(props: {
       skipFilter={true}
       title={title()}
       current={props.current ?? local.model.current()}
+    />
+  )
+}
+
+// Value of the row that creates a category from the search text
+type CreateCategory = { create: string }
+
+// One-screen category picker for a favorite: Enter assigns, footer keys edit the highlighted category
+function DialogFavoriteCategory(props: {
+  model: { providerID: string; modelID: string }
+  highlight?: string
+  onDone: () => void
+  onReopen: (highlight?: string) => void
+}) {
+  const local = useLocal()
+  const sync = useSync()
+  const dialog = useDialog()
+  const toast = useToast()
+  const tuiConfig = useTuiConfig()
+  const { theme } = useTheme()
+  const [query, setQuery] = createSignal("")
+  const [toDelete, setToDelete] = createSignal<string>()
+  // Static config lookup, as in the session list, so row titles never track the binding layer
+  const deleteHint = createMemo(() => {
+    const key = tuiConfig.keybinds.get("dialog.model_category.delete")[0]?.key
+    return !key ? "" : typeof key === "string" ? key : stringifyKeyStroke(key)
+  })
+  const modelName =
+    sync.data.provider.find((provider) => provider.id === props.model.providerID)?.models[props.model.modelID]?.name ??
+    props.model.modelID
+  const assigned = createMemo(
+    () =>
+      local.model
+        .favorite()
+        .find((item) => item.providerID === props.model.providerID && item.modelID === props.model.modelID)
+        ?.category ?? "",
+  )
+
+  function count(category?: string) {
+    const total = local.model.favorite().filter((item) => item.category === category).length
+    return `${total} ${total === 1 ? "model" : "models"}`
+  }
+
+  const options = createMemo<DialogSelectOption<string | CreateCategory>[]>(() => {
+    const needle = query().trim()
+    const categories = local.model.favoriteCategories()
+    const rows: DialogSelectOption<string | CreateCategory>[] = [
+      { title: "None", value: "", footer: count() },
+      ...categories.map((category) => {
+        const deleting = toDelete() === category
+        return {
+          title: deleting ? `Press ${deleteHint()} again to delete ${category}` : category,
+          bg: deleting ? theme.error : undefined,
+          value: category,
+          footer: (
+            <>
+              {count(category)}{" "}
+              <span style={{ fg: local.model.favoriteCategoryColor(category) ?? theme.accent }}>■■■</span>
+            </>
+          ),
+        }
+      }),
+    ]
+    if (!needle) return rows
+    const matches = fuzzysort.go(needle, rows, { key: "title" }).map((result) => result.obj)
+    if (categories.some((category) => category.toLowerCase() === needle.toLowerCase())) return matches
+    return [{ title: `Create "${needle}"`, value: { create: needle } }, ...matches]
+  })
+
+  function assign(category?: string) {
+    local.model.assignFavoriteCategory(props.model, category)
+    props.onDone()
+  }
+
+  function select(value: string | CreateCategory) {
+    if (typeof value === "string") return assign(value || undefined)
+    const error = local.model.renameFavoriteCategory(undefined, value.create)
+    if (error) return toast.show({ message: error, variant: "warning" })
+    assign(value.create)
+  }
+
+  function rename(category: string) {
+    dialog.replace(
+      () => (
+        <DialogPrompt
+          title={`Rename ${category}`}
+          value={category}
+          placeholder="Category name"
+          onConfirm={(input) => {
+            const error = local.model.renameFavoriteCategory(category, input)
+            if (error) return toast.show({ message: error, variant: "warning" })
+            props.onReopen(input.trim())
+          }}
+        />
+      ),
+      undefined,
+      { back: () => props.onReopen(category) },
+    )
+  }
+
+  function colorPicker(category: string) {
+    const back = () => props.onReopen(category)
+    const current = local.model.favoriteCategoryColors()[category] ?? ""
+    const choose = (color?: string) => {
+      local.model.setFavoriteCategoryColor(category, color)
+      back()
+    }
+    dialog.replace(
+      () => (
+        <DialogSelect
+          title={`Color for ${category}`}
+          renderFilter={false}
+          current={current.startsWith("#") ? "custom" : current}
+          options={[
+            { title: "Default", value: "", footer: <span style={{ fg: theme.accent }}>■■■</span>, onSelect: () => choose() },
+            ...FAVORITE_CATEGORY_THEME_COLORS.map((color) => ({
+              title: Locale.titlecase(color),
+              value: color,
+              footer: <span style={{ fg: theme[color as keyof typeof theme] as RGBA }}>■■■</span>,
+              onSelect: () => choose(color),
+            })),
+            {
+              title: "Custom hex…",
+              value: "custom",
+              footer: current.startsWith("#") ? <span style={{ fg: RGBA.fromHex(current) }}>{current}</span> : undefined,
+              onSelect: () =>
+                dialog.replace(
+                  () => (
+                    <DialogPrompt
+                      title={`Color for ${category}`}
+                      value={current.startsWith("#") ? current : undefined}
+                      placeholder="#rrggbb"
+                      onConfirm={(input) => {
+                        const color = input.trim()
+                        if (!isFavoriteCategoryColor(color) || !color.startsWith("#"))
+                          return toast.show({ message: "Enter a hex color like #a78bfa", variant: "warning" })
+                        choose(color)
+                      }}
+                    />
+                  ),
+                  undefined,
+                  { back: () => colorPicker(category) },
+                ),
+            },
+          ]}
+        />
+      ),
+      undefined,
+      { back },
+    )
+  }
+
+  function remove(category: string) {
+    if (toDelete() !== category) return setToDelete(category)
+    setToDelete(undefined)
+    local.model.deleteFavoriteCategory(category)
+  }
+
+  const isCategory = (option?: DialogSelectOption<string | CreateCategory>) =>
+    typeof option?.value === "string" && option.value !== ""
+  const atEdge = (option: DialogSelectOption<string | CreateCategory> | undefined, direction: -1 | 1) => {
+    const categories = local.model.favoriteCategories()
+    const next = categories.indexOf(option?.value as string) + direction
+    return next < 0 || next >= categories.length
+  }
+
+  return (
+    <DialogSelect<string | CreateCategory>
+      title={`Category for ${modelName}`}
+      placeholder="Search or create a category"
+      options={options()}
+      skipFilter
+      preserveSelection
+      current={assigned()}
+      onFilter={setQuery}
+      onMove={() => setToDelete(undefined)}
+      onSelect={(option) => select(option.value)}
+      ref={(ref) =>
+        onMount(() => {
+          if (props.highlight !== undefined) setTimeout(() => ref.moveTo(props.highlight!), 0)
+        })
+      }
+      actions={[
+        {
+          command: "dialog.model_category.rename",
+          title: "rename",
+          hidden: (option) => !isCategory(option),
+          onTrigger: (option) => rename(option.value as string),
+        },
+        {
+          command: "dialog.model_category.color",
+          title: "color",
+          hidden: (option) => !isCategory(option),
+          onTrigger: (option) => colorPicker(option.value as string),
+        },
+        {
+          command: "dialog.model_category.move_up",
+          title: "move up",
+          hidden: (option) => !isCategory(option) || query().trim() !== "",
+          disabled: (option) => atEdge(option, -1),
+          onTrigger: (option) => local.model.moveFavoriteCategory(option.value as string, -1),
+        },
+        {
+          command: "dialog.model_category.move_down",
+          title: "move down",
+          hidden: (option) => !isCategory(option) || query().trim() !== "",
+          disabled: (option) => atEdge(option, 1),
+          onTrigger: (option) => local.model.moveFavoriteCategory(option.value as string, 1),
+        },
+        {
+          command: "dialog.model_category.delete",
+          title: "delete",
+          hidden: (option) => !isCategory(option),
+          onTrigger: (option) => remove(option.value as string),
+        },
+      ]}
     />
   )
 }

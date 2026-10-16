@@ -52,6 +52,22 @@ export function recentModels(
 
 export type ModelFavorite = { providerID: string; modelID: string; category?: string }
 
+// Favorite category heading colors: a theme color name or a hex value
+export const FAVORITE_CATEGORY_THEME_COLORS: readonly string[] = [
+  "primary",
+  "secondary",
+  "accent",
+  "success",
+  "warning",
+  "error",
+  "info",
+]
+
+export function isFavoriteCategoryColor(value: unknown): value is string {
+  if (typeof value !== "string") return false
+  return FAVORITE_CATEGORY_THEME_COLORS.includes(value) || /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(value)
+}
+
 export function loadModelFavorites(value: Record<string, unknown>) {
   const categories = Array.isArray(value.favoriteCategories)
     ? [
@@ -76,20 +92,42 @@ export function loadModelFavorites(value: Record<string, unknown>) {
         ]
       })
     : []
-  return { favorite, favoriteCategories: categories }
+  const colors =
+    value.favoriteCategoryColors && typeof value.favoriteCategoryColors === "object"
+      ? Object.fromEntries(
+          Object.entries(value.favoriteCategoryColors).filter(
+            ([name, color]) => categories.includes(name) && isFavoriteCategoryColor(color),
+          ),
+        )
+      : {}
+  return { favorite, favoriteCategories: categories, favoriteCategoryColors: colors as Record<string, string> }
 }
 
+// Swaps with the next favorite in the same category. At a category edge the favorite joins the
+// neighboring category instead, nearest the edge it crossed. Group order matches the model list.
 export function moveModelFavorite<T extends ModelFavorite>(
   favorites: T[],
   model: { providerID: string; modelID: string },
   direction: -1 | 1,
+  categories: readonly string[],
 ) {
   const index = favorites.findIndex((item) => item.providerID === model.providerID && item.modelID === model.modelID)
   if (index < 0) return favorites
-  const siblings = favorites.flatMap((item, i) => (item.category === favorites[index]!.category ? [i] : []))
+  const item = favorites[index]!
+  const siblings = favorites.flatMap((other, i) => (other.category === item.category ? [i] : []))
   const next = siblings[siblings.indexOf(index) + direction]
-  if (next === undefined) return favorites
-  return favorites.with(index, favorites[next]!).with(next, favorites[index]!)
+  if (next !== undefined) return favorites.with(index, favorites[next]!).with(next, item)
+  const groups = [undefined, ...categories]
+  const group = groups.indexOf(item.category)
+  const target = group + direction
+  if (group < 0 || target < 0 || target >= groups.length) return favorites
+  const category = groups[target]
+  const { category: _, ...rest } = item
+  const moved = (category ? { ...rest, category } : rest) as T
+  const others = favorites.toSpliced(index, 1)
+  const members = others.flatMap((other, i) => (other.category === category ? [i] : []))
+  const at = members.length === 0 ? index : direction === 1 ? members[0]! : members.at(-1)! + 1
+  return others.toSpliced(at, 0, moved)
 }
 
 export function resolveCurrentModel<T>(selected: T | undefined, cli: T | undefined, agent: T | undefined, fallback: T | undefined) {
@@ -359,6 +397,7 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
         }[]
         favorite: ModelFavorite[]
         favoriteCategories: string[]
+        favoriteCategoryColors: Record<string, string | undefined>
         hidden: {
           providerID: string
           modelID: string
@@ -372,6 +411,7 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
         recent: [],
         favorite: [],
         favoriteCategories: [],
+        favoriteCategoryColors: {},
         hidden: [],
         variant: {},
         session: {},
@@ -393,6 +433,7 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
           recent: modelStore.recent,
           favorite: modelStore.favorite,
           favoriteCategories: modelStore.favoriteCategories,
+          favoriteCategoryColors: modelStore.favoriteCategoryColors,
           hidden: modelStore.hidden,
           variant: modelStore.variant,
           session: modelStore.session,
@@ -407,6 +448,7 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
           const favorites = loadModelFavorites(value)
           setModelStore("favorite", favorites.favorite)
           setModelStore("favoriteCategories", favorites.favoriteCategories)
+          setModelStore("favoriteCategoryColors", favorites.favoriteCategoryColors)
           if (Array.isArray(value.hidden)) setModelStore("hidden", value.hidden)
           if (typeof value.variant === "object" && value.variant !== null)
             setModelStore("variant", value.variant as Record<string, string | undefined>)
@@ -555,6 +597,22 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
         favoriteCategories() {
           return modelStore.favoriteCategories
         },
+        favoriteCategoryColors() {
+          return modelStore.favoriteCategoryColors
+        },
+        favoriteCategoryColor(name: string) {
+          const color = modelStore.favoriteCategoryColors[name]
+          if (!color) return undefined
+          if (color.startsWith("#")) return RGBA.fromHex(color)
+          return theme[color as keyof LocalTheme]
+        },
+        setFavoriteCategoryColor(name: string, color?: string) {
+          if (!modelStore.favoriteCategories.includes(name)) return
+          if (color !== undefined && !isFavoriteCategoryColor(color)) return
+          // Solid stores delete a key set to undefined
+          setModelStore("favoriteCategoryColors", name, color)
+          save()
+        },
         assignFavoriteCategory(model: { providerID: string; modelID: string }, category?: string) {
           if (category !== undefined && !modelStore.favoriteCategories.includes(category)) return
           setModelStore("favorite", (list) =>
@@ -575,10 +633,14 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
             setModelStore("favoriteCategories", (list) =>
               previous === undefined ? [...list, name] : list.map((item) => (item === previous ? name : item)),
             )
-            if (previous !== undefined)
-              setModelStore("favorite", (list) =>
-                list.map((item) => (item.category === previous ? { ...item, category: name } : item)),
-              )
+            if (previous === undefined || previous === name) return
+            setModelStore("favorite", (list) =>
+              list.map((item) => (item.category === previous ? { ...item, category: name } : item)),
+            )
+            const color = modelStore.favoriteCategoryColors[previous]
+            if (!color) return
+            setModelStore("favoriteCategoryColors", previous, undefined)
+            setModelStore("favoriteCategoryColors", name, color)
           })
           save()
         },
@@ -592,6 +654,7 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
         deleteFavoriteCategory(name: string) {
           batch(() => {
             setModelStore("favoriteCategories", (list) => list.filter((item) => item !== name))
+            setModelStore("favoriteCategoryColors", name, undefined)
             setModelStore("favorite", (list) =>
               list.map((item) =>
                 item.category === name ? { providerID: item.providerID, modelID: item.modelID } : item,
@@ -735,7 +798,7 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
           })
         },
         moveFavorite(model: { providerID: string; modelID: string }, direction: -1 | 1) {
-          const next = moveModelFavorite(modelStore.favorite, model, direction)
+          const next = moveModelFavorite(modelStore.favorite, model, direction, modelStore.favoriteCategories)
           if (next === modelStore.favorite) return
           setModelStore("favorite", next)
           save()

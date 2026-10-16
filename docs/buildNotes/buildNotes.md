@@ -133,6 +133,62 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-15 (~22:56) - v0.2.214 haldwaqyBsod - One-screen favorite category picker and cross-category moves - Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Opus 5.5; low; Implementation (/imp from plan `~/.config/opencode/plans/favoriteCategoryPicker.md`); completed
+- Version: 0.2.214 haldwaqyBsod (kept this session's bump)
+- Replaced `categoryPicker` + `editCategory` + `manageCategories` + `categoryActions` + `colorPicker` in `component/dialog-model.tsx` with `DialogFavoriteCategory`: title `Category for <model>`, rows None + categories with count and color swatch footer, Enter assigns, search with no exact (case-insensitive) match prepends `Create "<query>"`. Footer actions rename/color/move up/move down/delete (press-again confirm via `toDelete`, red `bg`, reset in `onMove`); move actions hidden while searching. Rename/color return to the picker on the edited row via `onReopen(highlight)` + `ref.moveTo`.
+- Added `dialog.model_category.rename|color|move_up|move_down|delete` in `config/keybind.ts` (`ctrl+r`, `ctrl+l`, `shift+up/down`, `ctrl+d`); `ctrl+k` skipped (input delete-to-line-end), `ctrl+n` skipped (`dialog.select.next`). Regenerated `docs/keybinds.md` via `script/keybindDocs.ts`.
+- Changed `moveModelFavorite(favorites, model, direction, categories)` in `context/local.tsx`: no sibling in direction -> joins adjacent group of `[undefined, ...categories]`, first when moving down, last when moving up, in place when target empty; category key dropped for uncategorized. No-op at first group top / last group bottom.
+- Updated `test/context/local.test.ts`: store move test now expects the hop, new pure hop test, menu test drives Create row, ctrl+r/ctrl+l/ctrl+d in the picker. Updated `FORK.md`, `../oc.wiki/Keybinds.md`, `../oc.wiki/Configuration.md`.
+- Verification: `bun test test/context/local.test.ts` 19 pass 0 fail; `tsgo --noEmit` exit 0 after a test-only type fix. Live check after rebuild unchecked.
+- ERROR: first `tsgo` run failed on `test/context/local.test.ts` (`category` missing on inferred union type); fixed by typing the helper parameter.
+
+### User
+Favorite model categories
+- The category picker (`ctrl+g`) now names the model you are editing and shows each category's model count and color.
+- Type a new name in the picker's search and press Enter on `Create "name"` to create the category and assign the model in one step.
+- Rename (`ctrl+r`), recolor (`ctrl+l`), reorder (`shift+up/down`), and delete (`ctrl+d` twice) the highlighted category right in the picker; the Manage categories screens are gone.
+- In `/models`, `shift+up/down` at the edge of a category now moves the favorite into the neighboring category.
+
+---
+
+## 2026-10-15 (~22:42) - v0.2.214 haldwaqyBsod - Hide Favorites heading when every favorite has a category - Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Opus 5.5; low; Implementation follow-up; completed
+- Version: 0.2.214 haldwaqyBsod (kept this session's bump)
+- Added `hasHeading(category, options)` in `ui/dialog-select.tsx`: category heading hidden when every row has a `subcategory`. Applied in render, `rows()` (gap row still counted for i>0), and `scrollToSelection` child index.
+- Changed first subcategory heading: paddingTop 1 when its category heading is hidden and the group is not first, so the section gap stays.
+- Updated `FORK.md` row and `../oc.wiki/Keybinds.md`.
+- Verification: `bun test test/context/local.test.ts` 18 pass 0 fail (new assertions: heading hides when all favorites categorized, returns when one is uncategorized); `tsgo --noEmit` exit 0. Live check after rebuild unchecked.
+
+### User
+Favorite model categories
+- When every favorite is in a category, `/models` no longer shows the extra Favorites heading; it returns as soon as one favorite has no category.
+
+---
+
+## 2026-10-15 (~22:36) - v0.2.214 haldwaqyBsod - Flush favorite category headings and category colors - Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Opus 5.5; low; Implementation; completed
+- Version: 0.2.214 haldwaqyBsod
+- Changed `ui/dialog-select.tsx`: subcategory heading paddingLeft 5 -> 3, rows lose the +4 subcategory indent; follows v0.2.208 favorite categories. Added `DialogSelectOption.subcategoryColor` (heading fg, default `theme.accent`).
+- Added `favoriteCategoryColors` (name -> theme color name or `#rgb`/`#rrggbb`) in `context/local.tsx`: `FAVORITE_CATEGORY_THEME_COLORS`, `isFavoriteCategoryColor`, load filter (known categories, valid values), persist in `model.json`, `favoriteCategoryColor(name)` resolves RGBA, `setFavoriteCategoryColor`; rename moves the color, delete drops it.
+- Note: Solid store setters shallow-merge objects; remove a record key by setting it to `undefined` (store type `Record<string, string | undefined>`).
+- Added `Color…` row in category actions (`component/dialog-model.tsx`) -> picker: Default, 7 theme colors with swatch footers, Custom hex prompt.
+- Updated `FORK.md` row and `../oc.wiki/Keybinds.md` favorite categories section.
+- Verification: `bun test test/context/local.test.ts` from `src/packages/tui` 18 pass 0 fail (updated flush-alignment and color persistence/rename/delete assertions); `tsgo --noEmit` exit 0. Live picker and colors unchecked.
+
+### User
+Favorite model categories
+- Category headings and their models in `/models` now line up with the Favorites heading instead of being indented.
+- Each category can have its own heading color: Manage categories, pick a category, then Color… to choose a theme color, a custom hex value, or Default.
+
+---
+
 ## 2026-10-15 (~21:53) - v0.2.213 tarStained - Claude under oc: unsupported tools off, oc schedule tools, claudeSettings - Opus 5.5, low effort; Implementation
 
 ### Agent
