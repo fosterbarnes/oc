@@ -1,17 +1,32 @@
 import { TextAttributes } from "@opentui/core"
-import { DialogSelect, type DialogSelectOption } from "../ui/dialog-select"
-import { createResource, createMemo, createSignal } from "solid-js"
+import { stringifyKeyStroke } from "@opentui/keymap"
+import type { Agent } from "@opencode-ai/sdk/v2"
+import { DialogSelect, type DialogSelectOption, type DialogSelectRef } from "../ui/dialog-select"
+import { createResource, createMemo, createSignal, createEffect } from "solid-js"
 import { useDialog } from "../ui/dialog"
 import { useSDK } from "../context/sdk"
 import { useTheme } from "../context/theme"
 import { useClipboard } from "../context/clipboard"
 import { useToast } from "../ui/toast"
 import { useSync } from "../context/sync"
+import { useTuiConfig } from "../config"
 import { errorMessage } from "../util/error"
 import { DialogModel } from "./dialog-model"
 import { DialogSubagentEfforts } from "./dialog-subagent-efforts"
-import { DialogConfirm } from "../ui/dialog-confirm"
 import { DialogPrompt } from "../ui/dialog-prompt"
+
+// Value of the "Add subagent" row, so row actions can ignore it
+const ADD = "__add__"
+// Order for efforts the model's own variant list does not include
+const EFFORT_ORDER = ["none", "minimal", "low", "medium", "high", "xhigh", "max"]
+
+// No effort first, then the model's variant order, then unknown efforts by EFFORT_ORDER (unlisted last)
+function effortRank(variant: string | undefined, variants: string[]) {
+  if (!variant) return -1
+  if (variants.includes(variant)) return variants.indexOf(variant)
+  const known = EFFORT_ORDER.indexOf(variant)
+  return variants.length + (known < 0 ? EFFORT_ORDER.length : known)
+}
 
 function shortModelName(modelID: string): string {
   let short = modelID
@@ -22,18 +37,24 @@ function shortModelName(modelID: string): string {
 
 // List of delegated agents grouped by model. Fetched fresh on open because
 // sync.data.agent is only loaded at bootstrap and misses agents added by /addSub later.
-export function DialogSubagents() {
+// highlight moves the cursor to that agent once the list loads (set after an add).
+export function DialogSubagents(props: { highlight?: string }) {
   const dialog = useDialog()
   const sdk = useSDK()
   const sync = useSync()
   const { theme } = useTheme()
   const clipboard = useClipboard()
   const toast = useToast()
+  const tuiConfig = useTuiConfig()
   dialog.setSize("large")
 
   const [loadError, setLoadError] = createSignal<unknown>()
+  const [toDelete, setToDelete] = createSignal<string>()
+  const [selectedValue, setSelectedValue] = createSignal(ADD)
+  const [ref, setRef] = createSignal<DialogSelectRef<string>>()
+  let pendingHighlight = props.highlight
 
-  const [agents] = createResource(() =>
+  const [agents, { refetch: refetchAgents }] = createResource(() =>
     sdk.client.app
       .agents({}, { throwOnError: true })
       .then((result) => result.data ?? [])
@@ -46,7 +67,7 @@ export function DialogSubagents() {
 
   const showError = createMemo(() => Boolean(loadError()))
 
-  const [editableNames] = createResource(() =>
+  const [editableNames, { refetch: refetchEditable }] = createResource(() =>
     sdk.client.app.agent.sub
       .list({}, { throwOnError: true })
       .then((result) => new Set(result.data ?? []))
@@ -56,74 +77,113 @@ export function DialogSubagents() {
       }),
   )
 
-  const titleWidth = createMemo(() =>
-    Math.max(0, ...(agents() ?? []).filter((a) => a.mode !== "primary" && !a.hidden).map((a) => a.name.length)),
-  )
+  // Static config lookup, as in the model category dialog, so row titles never track the binding layer
+  const deleteHint = createMemo(() => {
+    const key = tuiConfig.keybinds.get("subagent.delete")[0]?.key
+    return !key ? "" : typeof key === "string" ? key : stringifyKeyStroke(key)
+  })
+
+  function modelInfo(model: NonNullable<Agent["model"]>) {
+    const provider = sync.data.provider.find((item) => item.id === model.providerID)
+    const info = provider?.models[model.modelID]
+    return {
+      name: info?.name ?? model.modelID,
+      provider: provider?.name ?? model.providerID,
+      variants: info?.variants ? Object.keys(info.variants) : [],
+    }
+  }
 
   const options = createMemo<DialogSelectOption<string>[]>(() => {
     if (showError()) return []
-    const list = (agents() ?? []).filter((agent) => agent.mode !== "primary" && !agent.hidden)
-    return list
-      .map((agent) => ({
-        agent,
-        category: agent.native
-          ? "native"
-          : agent.model
-            ? `${agent.model.providerID}/${agent.model.modelID}`
-            : "default model",
-      }))
-      .sort((a, b) => a.category.localeCompare(b.category) || a.agent.name.localeCompare(b.agent.name))
-      .map(({ agent, category }) => ({
-        title: agent.name.padEnd(titleWidth()),
-        description: agent.variant ?? "-",
-        footer: agent.description
-          ?.replace(/\s+/g, " ")
-          .trim()
-          .split(/(?<=\.)\s/)[0],
+    const rows = (agents() ?? [])
+      .filter((agent) => agent.mode !== "primary" && !agent.hidden)
+      .map((agent) => {
+        const model = agent.model ? modelInfo(agent.model) : undefined
+        const group = agent.native ? "Native" : (model?.provider ?? "Default model")
+        const subgroup = agent.native ? "" : (model?.name ?? "")
+        return { agent, model, group, subgroup, order: effortRank(agent.variant, model?.variants ?? []) }
+      })
+      .sort(
+        (a, b) =>
+          Number(b.agent.native ?? false) - Number(a.agent.native ?? false) ||
+          a.group.localeCompare(b.group) ||
+          a.subgroup.localeCompare(b.subgroup) ||
+          a.order - b.order ||
+          a.agent.name.localeCompare(b.agent.name),
+      )
+    // Layout comes only from structured fields (provider, model, variant), never the free-text description
+    return rows.map(({ agent, model, group, subgroup }) => {
+      const deleting = toDelete() === agent.name
+      return {
+        title: deleting ? `Press ${deleteHint()} again to delete ${agent.name}` : agent.name,
+        bg: deleting ? theme.error : undefined,
         value: agent.name,
-        category,
-      }))
+        category: group,
+        subcategory: subgroup || undefined,
+        subcategoryColor: theme.textMuted,
+        footer: agent.native
+          ? model && [model.name, agent.variant].filter(Boolean).join(", ")
+          : agent.variant,
+      }
+    })
   })
 
   const allOptions = createMemo<DialogSelectOption<string>[]>(() => {
     if (showError()) return options()
-    const addRow: DialogSelectOption<string> = {
-      title: "Add subagent",
-      description: "Choose model",
-      value: "__add__",
-      category: "Actions",
-    }
-    return [addRow, ...options()]
+    return [{ title: "Add subagent…", value: ADD }, ...options()]
   })
 
-  function reopen() {
-    dialog.replace(() => <DialogSubagents />)
+  createEffect(() => {
+    if (!pendingHighlight || !agents()) return
+    const name = pendingHighlight
+    pendingHighlight = undefined
+    setTimeout(() => ref()?.moveTo(name), 0)
+  })
+
+  function reopen(highlight?: string) {
+    dialog.replace(() => <DialogSubagents highlight={highlight} />)
+  }
+
+  function startAdd() {
+    dialog.replace(
+      () => <DialogModel updateCurrent={false} onSelect={(providerID, modelID) => chooseEfforts(providerID, modelID)} />,
+      undefined,
+      { back: () => reopen() },
+    )
+  }
+
+  function chooseEfforts(providerID: string, modelID: string) {
+    const model = modelInfo({ providerID, modelID })
+    if (model.variants.length === 0) {
+      void continueAdd(providerID, modelID, [undefined])
+      return
+    }
+    dialog.replace(
+      () => (
+        <DialogSubagentEfforts
+          model={model.name}
+          efforts={model.variants}
+          onConfirm={(selected) => void continueAdd(providerID, modelID, selected)}
+        />
+      ),
+      undefined,
+      { back: () => reopen() },
+    )
   }
 
   async function continueAdd(providerID: string, modelID: string, selectedEfforts: Array<string | undefined>) {
-    const info = sync.data.provider.find((provider) => provider.id === providerID)?.models[modelID]
-    const displayName = info?.name ?? modelID
+    const displayName = modelInfo({ providerID, modelID }).name
     const short = shortModelName(modelID)
+    const effort = selectedEfforts.length === 1 ? selectedEfforts[0] : undefined
+    const defaultName = effort ? `general-${short}-${effort}` : `general-${short}`
 
-    let defaultName: string
-    if (selectedEfforts.length === 1) {
-      const effort = selectedEfforts[0]
-      defaultName = effort ? `general-${short}-${effort}` : `general-${short}`
-    } else {
-      defaultName = `general-${short}`
-    }
-
-    const nameInput = await DialogPrompt.show(dialog, "Name", { value: defaultName })
-    if (!nameInput) {
-      reopen()
-      return
-    }
-    const baseName = nameInput.trim()
+    const baseName = (await DialogPrompt.show(dialog, "Name", { value: defaultName }))?.trim()
     if (!baseName) {
       reopen()
       return
     }
 
+    const added: string[] = []
     for (const effort of selectedEfforts) {
       const entryName = selectedEfforts.length === 1 ? baseName : effort ? `${baseName}-${effort}` : baseName
       try {
@@ -136,41 +196,48 @@ export function DialogSubagents() {
           },
           { throwOnError: true },
         )
+        added.push(entryName)
         toast.show({ message: `Added ${entryName}`, variant: "success" })
       } catch (error) {
         toast.error(error)
       }
     }
-    reopen()
+    reopen(added[0])
   }
 
-  async function startAdd(providerID: string, modelID: string) {
-    const info = sync.data.provider.find((provider) => provider.id === providerID)?.models[modelID]
-    const variants = info?.variants ? Object.keys(info.variants) : []
-    if (variants.length > 0) {
-      dialog.replace(() => (
-        <DialogSubagentEfforts
-          efforts={variants}
-          onConfirm={(selected) => void continueAdd(providerID, modelID, selected)}
-        />
-      ), undefined, { back: reopen })
+  async function remove(name: string) {
+    if (toDelete() !== name) {
+      setToDelete(name)
       return
     }
-    void continueAdd(providerID, modelID, [undefined])
+    setToDelete(undefined)
+    try {
+      await sdk.client.app.agent.sub.remove({ name }, { throwOnError: true })
+      toast.show({ message: `Deleted ${name}`, variant: "success" })
+    } catch (error) {
+      toast.error(error)
+    }
+    void refetchAgents()
+    void refetchEditable()
   }
 
   return (
     <DialogSelect
+      ref={setRef}
       title="Subagents"
       placeholder="Search subagents…"
       options={allOptions()}
       renderFilter={!showError()}
       locked={showError()}
+      nested
+      preserveSelection
+      onMove={(option) => {
+        setToDelete(undefined)
+        setSelectedValue(option.value)
+      }}
       onSelect={(option) => {
-        if (option.value === "__add__") {
-          dialog.replace(() => (
-            <DialogModel updateCurrent={false} onSelect={(providerID, modelID) => void startAdd(providerID, modelID)} />
-          ), undefined, { back: reopen })
+        if (option.value === ADD) {
+          startAdd()
           return
         }
         void clipboard
@@ -190,31 +257,18 @@ export function DialogSubagents() {
       }
       actions={[
         {
+          command: "subagent.add",
+          title: "add",
+          onTrigger: startAdd,
+        },
+        {
           command: "subagent.delete",
           title: "delete",
-          disabled: (option) => {
-            if (!option) return true
-            if (option.value === "__add__") return true
-            return !editableNames()?.has(option.value)
-          },
-          onTrigger: async (option) => {
-            const name = option.value
-            if (name === "__add__") return
-            const ok = await DialogConfirm.show(dialog, "Delete subagent", `Delete ${name}?`)
-            if (!ok) {
-              reopen()
-              return
-            }
-            try {
-              await sdk.client.app.agent.sub.remove({ name }, { throwOnError: true })
-              toast.show({ message: `Deleted ${name}`, variant: "success" })
-            } catch (error) {
-              toast.error(error)
-            }
-            reopen()
-          },
+          hidden: (option) => !option || option.value === ADD || !editableNames()?.has(option.value),
+          onTrigger: (option) => void remove(option.value),
         },
       ]}
+      footerHints={selectedValue() === ADD ? [] : [{ title: "copy", label: "enter" }]}
     />
   )
 }

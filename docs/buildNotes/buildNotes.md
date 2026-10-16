@@ -133,6 +133,128 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-16 (~00:19) - v0.2.216 - Agents may offer a revive after oc changes - Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Opus 5.5; low effort; Implementation (/imp after /spit review of Sol's plan); completed
+- Version: 0.2.216
+- Added exception to `AGENTS.md` Safe local builds and the strictly-user-driven build rule: the user-approved revive offer in global `principles.md` may queue `.scripts\reviveAndInstall.ps1` or `.scripts\revive.ps1` via `run_after_turn`.
+- Kept: no code change. `run_after_turn` already spawns only on session idle (`runAfterTurn.ts:20-33`); `opencode.jsonc` allows `revive*.ps1` without a permission prompt, so the question answer is the only gate.
+- Dropped Sol's `oc.wiki/Launching.md` step: personal agent policy, not an oc feature.
+- Verification: none possible offline (policy text). Live check pending by user.
+
+### User
+Agent workflow
+- After finishing changes to oc that need a restart, an agent may ask once whether to build, install, and revive (or revive only); no UI change.
+
+---
+
+## 2026-10-15 (~23:47) - v0.2.216 oprahChugs - Remove subagent descriptions from the list - Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Opus 5.5; low effort; Implementation; completed
+- Version: 0.2.216 oprahChugs (same session; no second bump)
+- Removed description line from `dialog-subagents.tsx` at user request; rows are name + effort only.
+- Removed `activeDetails` from `ui/dialog-select.tsx` (added in previous entry, no other users); file now differs from HEAD only by `nested`.
+- Verification: `bun run typecheck` in `packages/tui` exit 0.
+
+### User
+Subagents dialog
+- The highlighted entry no longer shows a description line.
+
+---
+
+## 2026-10-15 (~23:44) - v0.2.216 oprahChugs - Fix Subagents list not scrolling with the cursor - Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Opus 5.5; low effort; Implementation; completed
+- Version: 0.2.216 oprahChugs (same session; no second bump)
+- Fixed: previous entry put `selectedValue()` in the `options` memo, so every move rebuilt all option objects; `<For>` recreated every row, and `scrollToSelection` measured unlaid-out children, leaving the list at the top.
+- Added `activeDetails` to `DialogSelectOption` (`ui/dialog-select.tsx`): rendered after `details` only while the row is active; counted in `rows()` via `flat()[store.selected]`.
+- Changed `dialog-subagents.tsx` to pass descriptions as `activeDetails`; `selectedValue` now only drives the copy footer hint. Also closes the post-delete gap (DialogSelect owns the highlight).
+- Verification: `bun run typecheck` in `packages/tui` exit 0. Live check left to user.
+
+### User
+Subagents dialog
+- The list scrolls with the cursor again, and the highlighted entry's description shows right away after a delete.
+
+---
+
+## 2026-10-15 (~23:28) - v0.2.216 oprahChugs - Subagents layout from structured fields only - Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Opus 5.5; low effort; Implementation; completed
+- Version: 0.2.216 oprahChugs (same session; no second bump)
+- Removed generated-description text matching from `dialog-subagents.tsx` (MISTAKE below). Layout now uses only `agent.model` (provider group, model subcategory) and `agent.variant` (right footer).
+- Changed descriptions to show as `details` on the highlighted row only (`selectedValue` from `onMove`), for all agents including native.
+- Added `effortRank`: no variant first, then model variant order, then unknown efforts by `EFFORT_ORDER`, unlisted last.
+- Kept: models missing from `sync.data.provider` fall back to raw `modelID` as subcategory and `providerID` as group.
+- Risk: after inline delete, `preserveSelection` moves the cursor without `onMove`, so the new row's description appears only after the next move.
+- MISTAKE: previous two entries guessed redundancy from description text (exact, then prefix match); broke on "low reasoning" style. Rule: never derive layout from free text when structured fields exist.
+- Verification: `bun run typecheck` in `packages/tui` exit 0. Live check left to user.
+
+### User
+Subagents dialog
+- Every entry is one line: name on the left, effort on the right, under provider and model headings.
+- The highlighted entry shows its description on a line below it.
+
+---
+
+## 2026-10-15 (~23:24) - v0.2.216 oprahChugs - Hide generated subagent descriptions, fix effort order - Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Opus 5.5; low effort; Implementation; completed
+- Version: 0.2.216 oprahChugs (same session; no second bump)
+- Fixed `dialog-subagents.tsx` generated-description check: exact match failed when live model name gained suffixes ("Claude Haiku 5.5 (0.1×)", "Muse Spark 1.3 Contributor"), so Claude/Meta rows showed "<model>, <effort>." detail lines. Now end-anchored suffix strip + `model.name.startsWith(base)`.
+- Fixed effort order for models with no provider variants (Grok sorted high/low/medium): falls back to `EFFORT_ORDER` (none..max).
+- Verification: `bun run typecheck` in `packages/tui` exit 0. Live check left to user.
+
+### User
+Subagents dialog
+- Effort entries no longer show a repeated "model, effort." line under each name, and every model lists its efforts low to high.
+
+---
+
+## 2026-10-15 (~23:20) - v0.2.216 oprahChugs - Subagents dialog grouped by provider - Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Opus 5.5; low effort; Implementation; completed
+- Version: 0.2.216 oprahChugs (same session as previous entry; no second bump)
+- Changed `dialog-subagents.tsx`: `category` = provider name, `subcategory` = model name (`subcategoryColor` textMuted); sort Native, provider, model, variant order, name. Removed per-row `categoryView`.
+- Added `nested` prop to `ui/dialog-select.tsx`: keeps category heading when every row has a subcategory (`hasHeading`) and adds a blank line before each later subcategory (padding + `rows()` height count). Default off, so model favorites keep old layout.
+- Updated `../oc.wiki/Agents-and-Skills.md` wording.
+- Risk: model name no longer fuzzy-searchable (DialogSelect searches title + category only).
+- Verification: `bun run typecheck` in `packages/tui` exit 0. Live check left to user.
+
+### User
+Subagents dialog
+- Entries are now grouped under provider headings, with a dimmer heading for each model and a blank line between models.
+
+---
+
+## 2026-10-15 (~23:16) - v0.2.216 oprahChugs - Cleaner Subagents dialog layout - Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Opus 5.5; low effort; Implementation; completed
+- Version: 0.2.216 oprahChugs
+- Changed `tui/src/component/dialog-subagents.tsx`: groups by model display name via `categoryView` (model accent + provider muted, on every row so headings survive filtering); Native group first; rows are bare names with effort as right footer, efforts in model variant order; native rows show model name; dropped padded `titleWidth` column and auto-generated descriptions (hand-written ones show as `details`).
+- Added `subagent.add` action (`subagent_add` ctrl+a in `config/keybind.ts`) plus plain "Add subagent…" row; removed "Actions" category.
+- Changed delete to inline double-press (row turns `theme.error`, as in workspace list); dropped `DialogConfirm` + reopen; refetches both resources so cursor stays put (`preserveSelection`). Delete now `hidden` on non-editable rows instead of greyed.
+- Added "copy enter" footer hint (hidden on Add row); after add, reopens and `moveTo`s first added agent via `highlight` prop.
+- Changed `dialog-subagent-efforts.tsx`: `model` prop for title "Efforts for <model>", no filter, `[✓]` rows, "Add N subagent(s)" label, chosen efforts returned in variant order.
+- Regenerated `docs/keybinds.md`; updated `../oc.wiki/Agents-and-Skills.md` Managing subagents.
+- Kept shared `DialogSelect` unchanged; long footers there still squeeze titles (`dialog-select.tsx:872`), avoided by not sending long footers.
+- Verification: `bun run typecheck` in `packages/tui` exit 0; `keybindDocs.ts --check` exit 0. Live TUI check left to user.
+
+### User
+Subagents dialog
+- Entries are grouped under readable model names with the provider beside them, and each entry shows only its effort on the right.
+- Ctrl+A starts adding a subagent, and the new entry is highlighted when the list comes back.
+- Ctrl+D now asks you to press it again on a red row instead of opening a confirm dialog, and only appears on entries you can delete.
+- The effort picker shows the model name, uses checkboxes, lists efforts low to high, and has no search box.
+
+---
+
 ## 2026-10-15 (~23:05) - v0.2.215 aliceBroooo - Remove manual session-handoff command - GPT-6.1 Sol, default reasoning; Implementation
 
 ### Agent

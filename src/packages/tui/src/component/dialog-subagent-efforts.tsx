@@ -3,6 +3,7 @@ import { useDialog } from "../ui/dialog"
 import { createMemo, createSignal } from "solid-js"
 
 export function DialogSubagentEfforts(props: {
+  model: string
   efforts: string[]
   onConfirm: (selected: Array<string | undefined>) => void
 }) {
@@ -20,29 +21,25 @@ export function DialogSubagentEfforts(props: {
 
   const count = createMemo(() => selected().size)
 
+  // "" stands for no effort (provider default); efforts keep the model's variant order
+  const keys = [...props.efforts, ""]
   const options = createMemo<DialogSelectOption<string>[]>(() => [
-    ...props.efforts.map((effort) => ({
-      title: `${selected().has(effort) ? "✓" : " "} ${effort}`,
+    ...keys.map((effort) => ({
+      title: `[${selected().has(effort) ? "✓" : " "}] ${effort || "No effort"}`,
       value: `effort:${effort}`,
       onSelect: () => toggle(effort),
     })),
     {
-      title: `${selected().has("") ? "✓" : " "} No effort`,
-      value: "effort:",
-      onSelect: () => toggle(""),
-    },
-    {
-      title: `Add ${count()}`,
+      title: `Add ${count()} ${count() === 1 ? "subagent" : "subagents"}`,
       value: "confirm",
       disabled: count() === 0,
       onSelect: () => {
-        if (count() === 0) return
-        const chosen = [...selected()].map((key) => (key === "" ? undefined : key))
+        const chosen = keys.filter((key) => selected().has(key)).map((key) => key || undefined)
         dialog.clear()
         props.onConfirm(chosen)
       },
     },
   ])
 
-  return <DialogSelect title="Select efforts" placeholder="Toggle efforts…" options={options()} />
+  return <DialogSelect title={`Efforts for ${props.model}`} renderFilter={false} options={options()} />
 }

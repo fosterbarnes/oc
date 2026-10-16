@@ -29,6 +29,8 @@ export interface DialogSelectProps<T> {
   emptyView?: JSX.Element
   options: DialogSelectOption<T>[]
   flat?: boolean
+  /** Keep category headings above subcategory headings, with a blank line between subcategories. */
+  nested?: boolean
   ref?: (ref: DialogSelectRef<T>) => void
   onMove?: (option: DialogSelectOption<T>) => void
   onFilter?: (query: string) => void
@@ -191,9 +193,9 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
     )
   })
 
-  // A category whose rows all sit in subcategories shows only the subcategory headings
+  // A category whose rows all sit in subcategories shows only the subcategory headings unless nested
   function hasHeading(category: string, options: DialogSelectOption<T>[]) {
-    return !!category && !options.every((option) => option.subcategory)
+    return !!category && (props.nested || !options.every((option) => option.subcategory))
   }
 
   const rows = createMemo(() => {
@@ -209,7 +211,11 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
             acc +
             1 +
             (option.details?.length ?? 0) +
-            (!flatten() && option.subcategory && option.subcategory !== options[index - 1]?.subcategory ? 1 : 0),
+            (!flatten() && option.subcategory && option.subcategory !== options[index - 1]?.subcategory
+              ? props.nested && index > 0
+                ? 2
+                : 1
+              : 0),
           0,
         ),
       headers,
@@ -708,7 +714,12 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
                             }
                           >
                             <box
-                              paddingTop={row() === 0 && index() > 0 && !hasHeading(category, options) ? 1 : 0}
+                              paddingTop={
+                                (row() === 0 && index() > 0 && !hasHeading(category, options)) ||
+                                (props.nested && row() > 0)
+                                  ? 1
+                                  : 0
+                              }
                               paddingLeft={3}
                             >
                               <text fg={option.subcategoryColor ?? theme.accent} attributes={TextAttributes.BOLD}>

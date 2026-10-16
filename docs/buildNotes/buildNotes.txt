@@ -1,6 +1,6 @@
-v0.2.215 aliceBroooo
+v0.2.216 oprahChugs
 
-command palette:
-Removed Hand off session and its /handoffNow alias from the command palette. Automatic Context limit handoffs remain available.
+agent workflow:
+Agents may offer to build, install, and revive oc after changes that need a restart. The project rules now allow the approved revive scripts to be queued after the turn when the user accepts the offer.
 
-Under the hood: Removed the manual handoff handler, toasts, and unused route hook. Updated fork and scope notes. Diff validation and pre-push checks passed. No targeted tests applied to the deletion-only UI wiring.
+Under the hood: Updated the safe-build and user-driven build rules and recorded the workflow in build notes. Pre-push checks passed. No targeted tests apply to these documentation-only changes; the live revive check remains pending.

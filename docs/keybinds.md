@@ -163,6 +163,7 @@ Bold marks keys where the oc layout differs from opencode. `-` means unbound.
 
 | Action | oc | opencode |
 |---|---|---|
+| Add subagent | `ctrl+a` | `ctrl+a` |
 | Delete subagent | `ctrl+d` | `ctrl+d` |
 
 ### Model
