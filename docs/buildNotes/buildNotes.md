@@ -133,6 +133,29 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-16 (~02:21) - v0.2.219 exitGasoline - Rewrote version commit messages and squashed reused versions - Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Opus 5.5; low effort; Implementation (spit -> imp); completed, force-pushed with user approval
+- Version: 0.2.219 exitGasoline (no bump: history and notes only)
+- Audited all 112 version commit messages (v0.1.1 `ff0e56d` .. v0.2.219) against own first-parent diffs. Result 81 accurate, 14 incomplete, 16 misleading, 1 wrong. Audit + evidence: `~/.config/opencode/plans/2026-10-16-version-commit-audit.md` (+ part1-3).
+- Changed: 27 messages replaced with user-approved text. Subjects, versions, tags unchanged. Common faults: external work (global config, skills, wiki) presented as in-repo; lockfile changes claimed but absent (`23f7c5e`, `8a42a5c`); feature claims repeated in notes-only commits (`50a1219`, `0317d3c`, `a1028d3`); `a05c53b` said both push paths gate while its diff removed the prePush gate.
+- Squashed same version + same tag groups into one commit each (tree of last member, author date of first, merged message): v0.2.153, v0.2.168 (3), v0.2.190, v0.2.194, v0.2.201, v0.2.216. Untagged repeats (v0.2.76/79/87/122/135) kept separate by user choice. No tag shared across numbers, so no retag.
+- Method: `git commit-tree` chain from `87abda1`; trees untouched; sync merge kept with second parent `abce98e`; identity forced to fosterbarnes noreply. Fork commits 126 -> 119.
+- Old -> new hashes cited in notes: `ff3100a`->`ac5e762` (v0.2.216 squash), `820ddab`->`4416f40`, `b5e4f26`->`bce4367`, `8a42a5c`->`153584a`, `fc7699a`->`79bf9ad`, `ec678eb`->`6528aa7`, `e10f2bb`->`0694604`, `910eca0`->`1f1a4a4`, `84801be`->`1f1a4a4` (squashed), `7ac3de4`->`0a75fbd`. Older entries keep old hashes (append-only).
+- Kept: local branch `backup/pre-rewrite` (= old `ff0d204`) and bundle `Documents\GitHub\ocPreRewrite-2026-10-16.bundle`.
+- Verification: `git diff ff0d204 <new tip>` empty; every kept commit tree equals original; 86 unchanged messages byte-identical; 33 new messages match approved files; single author/committer identity; no attribution trailers on first-parent commits; no duplicate version+tag subjects.
+- MISTAKE: first subagent dispatch sent a literal `@@SHARED@@` placeholder instead of the shared audit rules; batch 1 stalled and was rerun. Batches 2-3 were spot-checked against diffs before use. Rule: expand shared prompt text before dispatch.
+- Risk: other clones (e.g. ocCLONE2) must `git fetch` + `git reset --hard origin/main`. Session titles `agent-push:#<hash>` keep old hashes.
+
+### User
+Git history
+- Every version commit message was checked against what the commit actually changed, and 27 inaccurate or incomplete messages were corrected.
+- Versions that had been pushed more than once under the same number and tag are now a single commit each, so main went from 126 to 119 fork commits.
+- The code at every commit is unchanged; only messages and commit hashes changed, and the old history is kept in a local backup branch and bundle.
+
+---
+
 ## 2026-10-16 (~01:48) - v0.2.219 exitGasoline - Agents no longer offer to revive - Opus 5.5, low effort; Implementation
 
 ### Agent
