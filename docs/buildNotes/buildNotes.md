@@ -133,6 +133,23 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-16 (~01:00) - v0.2.217 sunTemptation - agentPush and prePush refuse code changes without a version bump - Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Opus 5.5; low effort; Implementation (after a read-only audit of the named version commits); completed
+- Version: 0.2.217 sunTemptation
+- Audit: 4 code-changing pushes reused the previous version: `7ac3de4` (v0.2.153), `8a42a5c` (v0.2.190), `b5e4f26` (v0.2.194), `820ddab` (v0.2.201). All were Claude sessions that skipped `bumpVersion.ps1`; the build-notes skill only says to read the version. The docs-only repeats `84801be`, `910eca0` (v0.2.168) and `ff3100a` (v0.2.216) are allowed.
+- Added `getUnbumpedCodeChanges` in `.scripts/scriptHelper.ps1`: when HEAD's `src/.version/version` equals the current version, it returns the changed and untracked paths outside `docs/`, `*.md`, `scc.txt`, `UPSTREAM`, and `src/.version/`. It uses `git -C $repoRoot`, so it works from any cwd.
+- Added gate in `.scripts/agentPush.ps1`: `-Context` prints an `ACTION:` line (bump, fix the buildNotes heading, rerun) and the default mode throws before prePush.
+- Added gate as the first step of `.scripts/prePush.ps1`, so manual pushes are checked too. Documented it in `SCRIPTS.md`.
+- Verification: ParseFile reported 0 errors on all 3 scripts. With the version temporarily set back to 0.2.216, the function (run from `src\packages`) listed the changed scripts and `prePush.ps1` exited 1 before typecheck. Restored to 0.2.217, the function returned nothing. Typecheck was not run.
+
+### User
+Pushes
+- A push now stops if the code changed but the version was not bumped, and says to run `bumpVersion.ps1`. This applies to agent pushes and to `prePush.ps1`; docs-only changes still go through.
+
+---
+
 ## 2026-10-16 (~00:19) - v0.2.216 - Agents may offer a revive after oc changes - Opus 5.5, low effort; Implementation
 
 ### Agent

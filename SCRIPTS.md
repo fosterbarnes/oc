@@ -9,7 +9,7 @@ Project automation lives in `.scripts/`. Scripts target PowerShell 7 and fail on
 | `.scripts/scriptHelper.ps1` | Shared repository paths, maintenance version validation, and native-command checks. |
 | `.scripts/build.ps1` | Build of the current-platform `oc` and native `opencode` executables (`-Oc`/`-Native` for one flavor). `-Release` builds release executables and archives through the existing Bun build script. `-SkipInstall` passes `--skip-install` to the Bun build script. It never touches the installed runtime. |
 | `.scripts/buildDebug.ps1` | Retired: fails with directions to `/revive-single` or `build.ps1`. |
-| `.scripts/prePush.ps1` | Runs Turbo typecheck and the TUI keybind docs `--check`, then refreshes the README code count and `scc.txt`. It does not commit or push. |
+| `.scripts/prePush.ps1` | Fails first if code changed while `src/.version/version` still matches HEAD (docs-only changes pass). Runs Turbo typecheck and the TUI keybind docs `--check`, then refreshes the README code count and `scc.txt`. It does not commit or push. |
 | `.scripts/test.ps1` | Runs local package tests, HttpApi gates, typechecking, or generated-file checks. Supports package, file, test-name, category, and all-check selection. |
 | `.scripts/countCode.ps1` | Uses `scc` on PATH to refresh the README code count and root `scc.txt` language report. Runnable independently. |
 | `.scripts/updateUpstream.ps1` | Fetches and fast-forwards the separate `UPSTREAM\opencode` checkout without modifying this customized parent checkout. |

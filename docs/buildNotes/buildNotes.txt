@@ -1,6 +1,6 @@
-v0.2.216 oprahChugs
+v0.2.217 sunTemptation
 
-agent workflow:
-Agents may offer to build, install, and revive oc after changes that need a restart. The project rules now allow the approved revive scripts to be queued after the turn when the user accepts the offer.
+push checks:
+Code-changing pushes now stop when the version has not been bumped and tell you to run bumpVersion.ps1. Both agent pushes and manual pre-push checks enforce this; documentation-only changes still go through.
 
-Under the hood: Updated the safe-build and user-driven build rules and recorded the workflow in build notes. Pre-push checks passed. No targeted tests apply to these documentation-only changes; the live revive check remains pending.
+Under the hood: Added a shared changed-file check that works from any working directory, wired it into agentPush and prePush, and documented the requirement in SCRIPTS.md. PowerShell parsing and version-gate checks passed, including rejection of an unchanged version and acceptance after the bump. Pre-push checks passed.

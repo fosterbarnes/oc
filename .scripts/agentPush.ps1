@@ -16,6 +16,10 @@ if ($SetTag) {
 $tagWord = requireVersionTag
 $notesChanged = testBuildNotesChanged
 
+$unbumped = getUnbumpedCodeChanges
+$bumpFix = "Code changed but the version is still $current. Run .scripts\bumpVersion.ps1, update this " +
+    "session's buildNotes.md heading and Version bullet, then rerun agentPush.ps1 -Context."
+
 if ($Context) {
     Write-Host "branch: $(git branch --show-current)  version: $current $tagWord"
     Write-Host "line 1: v$current $tagWord"
@@ -28,10 +32,12 @@ if ($Context) {
     Write-Host '--- last commit message (style sample)'
     git log -1 --format=%B
     if ($notesChanged) { Write-Host 'WARN: buildNotes.txt already changed since HEAD; overwrite it.' }
+    if ($unbumped) { Write-Host "ACTION: $bumpFix" }
     return
 }
 
 # Fail on a bad message before the slow checks run.
+if ($unbumped) { throw "$bumpFix Changed: $($unbumped -join ', ')" }
 if (-not $notesChanged) { throw 'buildNotes.txt is unchanged since the last commit; write the new message first.' }
 $lines = @([IO.File]::ReadAllLines($buildNotes))
 if ($lines[0].Trim() -ne "v$current $tagWord") { throw "buildNotes.txt line 1 must be v$current $tagWord." }

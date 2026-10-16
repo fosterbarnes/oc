@@ -163,6 +163,19 @@ function incrementMaintenancePatch {
     $next
 }
 
+# AGENTS.md Revision: a push with code changes needs bumpVersion.ps1. Docs and notes alone do not.
+# Returns the changed or untracked code paths when the version still matches HEAD, else nothing.
+function getUnbumpedCodeChanges {
+    $headVersion = (& git -C $repoRoot show HEAD:src/.version/version | Out-String).Trim()
+    if ($LASTEXITCODE) { throw "git show HEAD version failed (exit $LASTEXITCODE)." }
+    if ($headVersion -ne (requireVersion)) { return @() }
+    $changed = @(& git -C $repoRoot diff --name-only HEAD)
+    if ($LASTEXITCODE) { throw "git diff failed (exit $LASTEXITCODE)." }
+    $changed += @(& git -C $repoRoot ls-files -o --exclude-standard)
+    if ($LASTEXITCODE) { throw "git ls-files failed (exit $LASTEXITCODE)." }
+    @($changed | Where-Object { $_ -notmatch '(^docs/|\.md$|^scc\.txt$|^UPSTREAM|^src/\.version/)' })
+}
+
 function newVersionTag { setVersionTag (getVersionTags 1) }
 
 # Returns $Count distinct random camelCase two-word tags without writing anything.
