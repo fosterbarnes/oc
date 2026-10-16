@@ -133,6 +133,23 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-16 (~01:09) - v0.2.218 microsoftLusat - Version bump moved into the build-notes skill; prePush gate removed - Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Opus 5.5; low effort; Implementation (/imp after /spit); completed
+- Version: 0.2.218 microsoftLusat
+- Removed the `getUnbumpedCodeChanges` gate from `.scripts/prePush.ps1` and its `SCRIPTS.md` line. Both now match `ff3100a`; the user does not want prePush cleaning up after agents.
+- Kept the `agentPush.ps1` gate (`-Context` ACTION line, default-mode throw) and the `getUnbumpedCodeChanges` helper in `scriptHelper.ps1` as an agent-only safety net.
+- Fixed root cause outside the repo: the build-notes skill only said to read the version, so Claude never bumped. The skill now runs `bumpVersion.ps1` first and has a matching done check (see `C:\Users\Foster\buildNotes.md`).
+- Added the agentPush version gate to the `agentPush.ps1` descriptions in `AGENTS.md` and `SCRIPTS.md`.
+- Verification: `git diff ff3100a -- .scripts/prePush.ps1` is empty. This session reloaded the edited skill and bumped 0.2.217 -> 0.2.218 by following it.
+
+### User
+Pushes
+- `prePush.ps1` no longer checks for a version bump. Agents now bump the version themselves when they write build notes, and agent pushes still stop if they forget.
+
+---
+
 ## 2026-10-16 (~01:00) - v0.2.217 sunTemptation - agentPush and prePush refuse code changes without a version bump - Opus 5.5, low effort; Implementation
 
 ### Agent

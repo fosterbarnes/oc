@@ -1,6 +1,6 @@
-v0.2.217 sunTemptation
+v0.2.218 microsoftLusat
 
 push checks:
 Code-changing pushes now stop when the version has not been bumped and tell you to run bumpVersion.ps1. Both agent pushes and manual pre-push checks enforce this; documentation-only changes still go through.
 
-Under the hood: Added a shared changed-file check that works from any working directory, wired it into agentPush and prePush, and documented the requirement in SCRIPTS.md. PowerShell parsing and version-gate checks passed, including rejection of an unchanged version and acceptance after the bump. Pre-push checks passed.
+Under the hood: Removed the version-bump gate from prePush.ps1 and kept the agent-only gate in agentPush.ps1. PowerShell parsing and version-gate checks passed. Pre-push checks passed.
