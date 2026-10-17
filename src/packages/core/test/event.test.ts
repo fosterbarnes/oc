@@ -351,6 +351,37 @@ describe("EventV2", () => {
     }),
   )
 
+  it.effect("filters a bounded subscriber before events count toward its capacity", () =>
+    Effect.gen(function* () {
+      const events = yield* EventV2.Service
+      const consuming = yield* Deferred.make<void>()
+      const release = yield* Deferred.make<void>()
+      const received: unknown[] = []
+      const stream = yield* EventV2.allBounded(events, 1, (event) => event.type === Message.type)
+      const slow = yield* stream.pipe(
+        Stream.runForEach((event) =>
+          Effect.sync(() => received.push(event.data)).pipe(
+            Effect.andThen(Deferred.succeed(consuming, undefined)),
+            Effect.andThen(Deferred.await(release)),
+          ),
+        ),
+        Effect.forkScoped,
+      )
+
+      yield* events.publish(Message, { text: "one" })
+      yield* Deferred.await(consuming)
+      yield* events.publish(GlobalMessage, { text: "filtered" })
+      yield* events.publish(GlobalMessage, { text: "filtered" })
+      yield* events.publish(Message, { text: "two" })
+      yield* events.publish(Message, { text: "overflow" })
+      yield* Deferred.succeed(release, undefined)
+
+      const slowExit = yield* Fiber.await(slow)
+      expect(Exit.findErrorOption(slowExit).pipe(Option.getOrUndefined)).toBeInstanceOf(EventV2.SubscriberOverflowError)
+      expect(received).toEqual([{ text: "one" }, { text: "two" }])
+    }),
+  )
+
   it.effect("preserves observer interruption", () =>
     Effect.gen(function* () {
       const events = yield* EventV2.Service

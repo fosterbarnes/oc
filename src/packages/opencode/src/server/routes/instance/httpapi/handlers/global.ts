@@ -44,16 +44,34 @@ function eventData(data: unknown): Sse.Event {
   }
 }
 
-function eventResponse() {
-  return Effect.gen(function* () {
-    yield* Effect.logInfo("global event connected")
-    const events = Stream.callback<GlobalBusEvent>((queue) => {
-      const handler = (event: GlobalBusEvent) => Queue.offerUnsafe(queue, event)
+const subscriberCapacity = 2048
+
+/** Every GlobalBus event. A reader that falls `capacity` events behind fails with
+ *  SubscriberOverflowError, which ends its SSE response so the client reconnects and resyncs. */
+export function globalEventStream(capacity: number) {
+  return Stream.callback<GlobalBusEvent, EventV2.SubscriberOverflowError>(
+    (queue) => {
+      const handler = (event: GlobalBusEvent) => {
+        if (Queue.offerUnsafe(queue, event)) return
+        Queue.failCauseUnsafe(queue, Cause.fail(new EventV2.SubscriberOverflowError({ capacity })))
+      }
       return Effect.acquireRelease(
         Effect.sync(() => GlobalBus.on("event", handler)),
         () => Effect.sync(() => GlobalBus.off("event", handler)),
       )
-    })
+    },
+    { bufferSize: capacity, strategy: "dropping" },
+  )
+}
+
+function eventResponse() {
+  return Effect.gen(function* () {
+    yield* Effect.logInfo("global event connected")
+    const events = globalEventStream(subscriberCapacity).pipe(
+      Stream.tapError(() =>
+        Effect.logWarning("event reader fell behind; closing so it resyncs", { capacity: subscriberCapacity }),
+      ),
+    )
     const heartbeat = Stream.tick("10 seconds").pipe(
       Stream.drop(1),
       Stream.map(() => ({ payload: { id: EventV2.ID.create(), type: "server.heartbeat", properties: {} } })),

@@ -10,8 +10,10 @@ import {
   deleteClaudeSessionId,
   getClaudeSessionId,
   markClaudeSessionLost,
+  MAX_CLAUDE_SESSION_ENTRIES,
   sessionKey,
 } from "@/provider/claude-code/sessionManager.js"
+import { appendExchangeText, currentExchangeHash, forgetSessionExchanges } from "@/provider/claude-code/sessionSync.js"
 
 // Fake CLI: resumes the id it is given (a new one on fork), numbers its
 // assistant uuids per process, and logs every argv so tests can read spawns.
@@ -142,4 +144,32 @@ test("conversations are saved to the data dir", async () => {
   const saved = JSON.parse(readFileSync(path.join(Global.Path.data, "claude-code", "sessions.json"), "utf8"))
   expect(saved[chat.key].sessionId).toBe(getClaudeSessionId(chat.key))
   expect(saved[chat.key].anchors).toHaveLength(1)
+})
+
+// Same key shape the provider builds: `<cwd>::<scope>::<session>::context=[...]`.
+const exchangeKey = (session: string) => sessionKey("C:/project", `tools::${session}::context=["claude-code"]`)
+const emptyExchange = () => currentExchangeHash(exchangeKey("ses_exchange_never_used"))
+
+test("a deleted session's exchanges are forgotten and other sessions keep theirs", () => {
+  const deleted = exchangeKey("ses_exchange_deleted")
+  const kept = exchangeKey("ses_exchange_kept")
+  appendExchangeText(deleted, "reply")
+  appendExchangeText(kept, "reply")
+  const keptHash = currentExchangeHash(kept)
+  expect(currentExchangeHash(deleted)).not.toBe(emptyExchange())
+
+  forgetSessionExchanges("ses_exchange_deleted")
+
+  expect(currentExchangeHash(deleted)).toBe(emptyExchange())
+  expect(currentExchangeHash(kept)).toBe(keptHash)
+})
+
+test("exchanges are capped like the conversation records", () => {
+  const keys = Array.from({ length: MAX_CLAUDE_SESSION_ENTRIES + 1 }, (_, index) =>
+    exchangeKey(`ses_exchange_${index}`),
+  )
+  for (const key of keys) appendExchangeText(key, "reply")
+
+  expect(currentExchangeHash(keys[0])).toBe(emptyExchange())
+  expect(currentExchangeHash(keys.at(-1)!)).not.toBe(emptyExchange())
 })

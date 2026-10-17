@@ -24,6 +24,7 @@ import {
 import { configureLogger, log } from "./logger.js"
 import { isUnknownPreset, resolvePermissionPreset, type ResolvedPermissionPreset } from "./permissionPresets.js"
 import { deleteActiveProcessesForSession, ensureProcessExitCleanup } from "./sessionManager.js"
+import { forgetSessionExchanges } from "./sessionSync.js"
 import {
   getOpencodeProjectDirectory,
   isUsableDirectory,
@@ -463,6 +464,7 @@ export const claudeCodeServer: OpenCodePlugin = async (input) => {
     event: async ({ event }) => {
       const sessionID = extractDeletedSessionId(event)
       if (!sessionID) return
+      forgetSessionExchanges(sessionID)
       const released = deleteActiveProcessesForSession(sessionID)
       if (released.length > 0) {
         log.info("released claude state for deleted session", { sessionID, released })

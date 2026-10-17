@@ -293,6 +293,20 @@ export const {
     const touchPart = (sessionID: string, partID: string) => {
       hydratingSessions.get(sessionID)?.parts.add(partID)
     }
+    // The global stream carries every session on the server. Transcripts are kept only for session
+    // trees this TUI opened (root plus every subagent under it); other views load through `session.sync`.
+    const openTrees = new Set<string>()
+    function treeRoot(sessionID: string) {
+      let id = sessionID
+      // The cap only guards against a corrupt parent cycle.
+      for (let depth = 0; depth < 32; depth++) {
+        const parentID = result.session.get(id)?.parentID
+        if (!parentID) return id
+        id = parentID
+      }
+      return id
+    }
+    const inOpenTree = (sessionID: string) => openTrees.has(treeRoot(sessionID))
 
     function listSessions() {
       return sdk.client.experimental.session
@@ -304,6 +318,7 @@ export const {
     // stop because their trackers are dropped, so their late results are discarded.
     function forgetSession(sessionID: string) {
       const messageIDs = (store.message[sessionID] ?? []).map((message) => message.id)
+      openTrees.delete(sessionID)
       fullSyncedSessions.delete(sessionID)
       syncingSessions.delete(sessionID)
       hydratingSessions.delete(sessionID)
@@ -500,6 +515,7 @@ export const {
         }
 
         case "message.updated": {
+          if (!inOpenTree(event.properties.info.sessionID)) break
           touchMessage(event.properties.info.sessionID, event.properties.info.id)
           const messages = store.message[event.properties.info.sessionID]
           if (!messages) {
@@ -540,6 +556,7 @@ export const {
           break
         }
         case "message.removed": {
+          if (!inOpenTree(event.properties.sessionID)) break
           touchMessage(event.properties.sessionID, event.properties.messageID)
           const messages = store.message[event.properties.sessionID] ?? []
           const index = messages.findIndex((message) => message.id === event.properties.messageID)
@@ -562,7 +579,6 @@ export const {
         }
         case "message.part.updated": {
           const part = event.properties.part
-          touchPart(part.sessionID, part.id)
           if (part.type === "tool" && part.tool === "question" && part.state.status === "error") {
             promptRevisions.set(part.sessionID, (promptRevisions.get(part.sessionID) ?? 0) + 1)
             const requests = store.question[part.sessionID]
@@ -576,6 +592,8 @@ export const {
               )
             }
           }
+          if (!inOpenTree(part.sessionID)) break
+          touchPart(part.sessionID, part.id)
           const parts = store.part[part.messageID]
           if (!parts) {
             setStore("part", part.messageID, [part])
@@ -597,6 +615,7 @@ export const {
         }
 
         case "message.part.delta": {
+          if (!inOpenTree(event.properties.sessionID)) break
           const parts = store.part[event.properties.messageID] ?? []
           const match = search(parts, event.properties.partID, (part) => part.id)
           if (!match.found) {
@@ -623,6 +642,7 @@ export const {
         }
 
         case "message.part.removed": {
+          if (!inOpenTree(event.properties.sessionID)) break
           touchPart(event.properties.sessionID, event.properties.partID)
           const parts = store.part[event.properties.messageID] ?? []
           const result = search(parts, event.properties.partID, (part) => part.id)
@@ -976,6 +996,8 @@ export const {
             if (session) await refreshPrompts(session, sessionID)
             return
           }
+          // Open the tree before fetching so events during the fetch apply.
+          openTrees.add(treeRoot(sessionID))
           const tracker = { messages: new Set<string>(), parts: new Set<string>() }
           hydratingSessions.set(sessionID, tracker)
           // False once a reconnect or a delete dropped this tracker; the result is then stale.
@@ -1043,6 +1065,8 @@ export const {
                 draft.session_diff[sessionID] = diff.data ?? []
               }),
             )
+            // A session outside the listed range only knows its parent once its own info is stored.
+            openTrees.add(treeRoot(sessionID))
             fullSyncedSessions.add(sessionID)
           })().finally(() => {
             // A newer hydration may own these entries now, so only remove our own.

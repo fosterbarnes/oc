@@ -9,6 +9,9 @@ import { HttpApiBuilder } from "effect/unstable/httpapi"
 import * as Sse from "effect/unstable/encoding/Sse"
 import { EventApi } from "../groups/event"
 
+// A stalled reader is cut off after this many queued events; the client reconnects and resyncs.
+const subscriberCapacity = 2048
+
 function eventData(data: unknown): Sse.Event {
   return {
     _tag: "Event",
@@ -28,18 +31,17 @@ function eventResponse(events: EventV2.Interface) {
     const workspaceID = yield* InstanceState.workspaceID
     // Listener registration is eager, so events published after this point cannot
     // be lost while the HTTP body fiber is starting or emitting server.connected.
-    const queue = yield* Queue.unbounded<EventV2.Payload>()
-    const unsubscribe = yield* events.listen((event) => {
-      if (
-        event.location?.directory !== instance.directory ||
-        (event.location.workspaceID !== undefined && event.location.workspaceID !== workspaceID)
-      ) {
-        return Effect.void
-      }
-      return Effect.sync(() => Queue.offerUnsafe(queue, event))
-    })
-    yield* Effect.addFinalizer(() => unsubscribe)
-    const stream = Stream.fromQueue(queue).pipe(
+    const live = yield* EventV2.allBounded(
+      events,
+      subscriberCapacity,
+      (event) =>
+        event.location?.directory === instance.directory &&
+        (event.location.workspaceID === undefined || event.location.workspaceID === workspaceID),
+    )
+    const stream = live.pipe(
+      Stream.tapError(() =>
+        Effect.logWarning("event reader fell behind; closing so it resyncs", { capacity: subscriberCapacity }),
+      ),
       Stream.map((event) => ({ id: event.id, type: event.type, properties: event.data })),
     )
     const disposed = Stream.callback<{ id: string; type: string; properties: unknown }>((queue) => {

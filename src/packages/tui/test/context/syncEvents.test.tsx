@@ -55,6 +55,38 @@ function sessionRoutes(messages: FetchHandler) {
   }
 }
 
+// Serves a session list and empty transcripts for a tree of sessions.
+function treeRoutes(sessions: (typeof session & { parentID?: string })[]) {
+  return (url: URL) => {
+    if (url.pathname === "/experimental/session") return json(sessions)
+    const match = sessions.find((item) => url.pathname === `/session/${item.id}`)
+    if (match) return json(match)
+    const transcript = sessions.some((item) =>
+      ["message", "todo", "diff"].some((path) => url.pathname === `/session/${item.id}/${path}`),
+    )
+    return transcript ? json([]) : undefined
+  }
+}
+
+function childEvents(sessionID: string, messageID: string) {
+  return [
+    global({
+      id: `evt_message_${sessionID}`,
+      type: "message.updated",
+      properties: { sessionID, info: { ...assistant, id: messageID, sessionID } },
+    }),
+    global({
+      id: `evt_part_${sessionID}`,
+      type: "message.part.updated",
+      properties: {
+        sessionID,
+        time: 1,
+        part: { id: `prt_${sessionID}`, sessionID, messageID, type: "text", text: "child" },
+      },
+    }),
+  ]
+}
+
 function Throwing() {
   const sdk = useSDK()
   sdk.event.on("event", () => {
@@ -71,7 +103,7 @@ function Capture(props: { onSync: (sync: ReturnType<typeof useSync>) => void }) 
 test("a throwing handler ahead of sync does not drop a later delta", async () => {
   await using tmp = await tmpdir()
   await Bun.write(`${tmp.path}/kv.json`, "{}")
-  const calls = createFetch()
+  const calls = createFetch(sessionRoutes(() => json([])))
   const events = createEventSource()
   let sync: ReturnType<typeof useSync> | undefined
   const app = await testRender(() => (
@@ -99,6 +131,7 @@ test("a throwing handler ahead of sync does not drop a later delta", async () =>
 
   try {
     await wait(() => sync?.status === "complete")
+    await sync!.session.sync(sessionID)
     events.emit(global({ id: "evt_message", type: "message.updated", properties: { sessionID, info: assistant } }))
     events.emit(
       global({
@@ -155,9 +188,10 @@ test("removal events for an unknown session leave later events applied", async (
 test("message.removed deletes the message's parts", async () => {
   await using tmp = await tmpdir()
   await Bun.write(`${tmp.path}/kv.json`, "{}")
-  const { app, emit, sync } = await mount(undefined, tmp.path)
+  const { app, emit, sync } = await mount(sessionRoutes(() => json([])), tmp.path)
 
   try {
+    await sync.session.sync(sessionID)
     emit(global({ id: "evt_message", type: "message.updated", properties: { sessionID, info: assistant } }))
     emit(
       global({
@@ -183,9 +217,10 @@ test("message.removed deletes the message's parts", async () => {
 test("session.deleted removes the session's transcript, todos, diff, and status", async () => {
   await using tmp = await tmpdir()
   await Bun.write(`${tmp.path}/kv.json`, "{}")
-  const { app, emit, sync } = await mount(undefined, tmp.path)
+  const { app, emit, sync } = await mount(sessionRoutes(() => json([])), tmp.path)
 
   try {
+    await sync.session.sync(sessionID)
     emit(global({ id: "evt_session", type: "session.updated", properties: { sessionID, info: session } }))
     emit(global({ id: "evt_message", type: "message.updated", properties: { sessionID, info: assistant } }))
     emit(
@@ -313,6 +348,69 @@ test("a delta for a part missing from a loaded session reloads the session", asy
     await wait(() => messageCalls === 2)
 
     expect(messageCalls).toBe(2)
+  } finally {
+    app.renderer.destroy()
+  }
+})
+
+test("transcript events for a session outside every opened tree are not stored", async () => {
+  await using tmp = await tmpdir()
+  await Bun.write(`${tmp.path}/kv.json`, "{}")
+  const { app, emit, sync } = await mount(undefined, tmp.path)
+
+  try {
+    emit(global({ id: "evt_session", type: "session.updated", properties: { sessionID, info: session } }))
+    emit(global({ id: "evt_message", type: "message.updated", properties: { sessionID, info: assistant } }))
+    emit(
+      global({
+        id: "evt_part",
+        type: "message.part.updated",
+        properties: { sessionID, time: 1, part: { id: partID, sessionID, messageID, type: "text", text: "other" } },
+      }),
+    )
+    emit(global({ id: "evt_status", type: "session.status", properties: { sessionID, status: { type: "busy" } } }))
+    await wait(() => sync.data.session_status[sessionID]?.type === "busy")
+
+    expect(Object.keys(sync.data.message)).not.toContain(sessionID)
+    expect(Object.keys(sync.data.part)).not.toContain(messageID)
+  } finally {
+    app.renderer.destroy()
+  }
+})
+
+test("a subagent created under an opened session keeps its transcript live", async () => {
+  await using tmp = await tmpdir()
+  await Bun.write(`${tmp.path}/kv.json`, "{}")
+  const parent = { ...session, id: "ses_tree_parent" }
+  const child = { ...session, id: "ses_tree_child", parentID: parent.id }
+  const { app, emit, sync } = await mount(treeRoutes([parent]), tmp.path)
+
+  try {
+    await sync.session.sync(parent.id)
+    emit(global({ id: "evt_child", type: "session.updated", properties: { sessionID: child.id, info: child } }))
+    childEvents(child.id, "msg_tree_child").forEach(emit)
+    await wait(() => sync.data.part["msg_tree_child"]?.length === 1)
+
+    expect(sync.data.message[child.id]).toHaveLength(1)
+  } finally {
+    app.renderer.destroy()
+  }
+})
+
+test("a subagent opened on its own keeps its siblings' transcripts live", async () => {
+  await using tmp = await tmpdir()
+  await Bun.write(`${tmp.path}/kv.json`, "{}")
+  const parent = { ...session, id: "ses_tree_parent" }
+  const first = { ...session, id: "ses_tree_first", parentID: parent.id }
+  const second = { ...session, id: "ses_tree_second", parentID: parent.id }
+  const { app, emit, sync } = await mount(treeRoutes([parent, first, second]), tmp.path)
+
+  try {
+    await sync.session.sync(first.id)
+    childEvents(second.id, "msg_tree_second").forEach(emit)
+    await wait(() => sync.data.part["msg_tree_second"]?.length === 1)
+
+    expect(sync.data.message[second.id]).toHaveLength(1)
   } finally {
     app.renderer.destroy()
   }

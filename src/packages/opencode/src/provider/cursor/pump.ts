@@ -368,7 +368,7 @@ export class CursorPump {
       const bytes = normalizeCheckpointBytes(checkpointRaw)
       if (bytes && bytes.length > 0) {
         this.cacheDiagnostics.checkpointUpdates++
-        setCheckpoint(session.conversationId, bytes)
+        if (session.openCodeSessionId) setCheckpoint(session.conversationId, bytes)
         session.resumeCheckpoint = Uint8Array.from(bytes)
         const tokenDetails = decodeConversationTokenDetails(bytes)
         if (tokenDetails) {

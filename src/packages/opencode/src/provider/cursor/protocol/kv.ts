@@ -12,7 +12,7 @@ function hex(b: Uint8Array): string {
  * Handle a server `KvServerMessage` (AgentServerMessage #4). Cursor moves large
  * payloads out-of-band via this blob channel:
  *  - `set_blob_args{blob_id, blob_data}` → server stores a blob on the client.
- *    We persist it (per-session + durable per conversation_id) and ACK.
+ *    We keep it per Run (plus durable per conversation_id when bound) and ACK.
  *  - `get_blob_args{blob_id}` → server asks the client for a blob it stored.
  *    We return `get_blob_result{blob_data}` (empty if unknown hash).
  * The reply MUST be sent as `AgentClientMessage.kv_client_message` (field #3) on
@@ -43,10 +43,8 @@ export function handleKvServerMessage(
     const data = setArgs.blob_data ?? new Uint8Array(0)
     const key = hex(setArgs.blob_id)
     session.blobs.set(key, data)
-    // Survive across Run streams - required for checkpoint echo on turn 2+.
-    if (session.conversationId) {
-      setConversationBlob(session.conversationId, setArgs.blob_id, data)
-    }
+    // Bound conversations keep blobs across Run streams for checkpoint echo on turn 2+.
+    if (session.openCodeSessionId) setConversationBlob(session.conversationId, setArgs.blob_id, data)
     return {
       kind: "set",
       id,

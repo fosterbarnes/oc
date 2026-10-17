@@ -33,10 +33,32 @@ function global(payload: GlobalEvent["payload"]): GlobalEvent {
   return { directory: "/tmp/other", project: "proj_test", payload }
 }
 
+const parent = { ...session, id: "ses_hydration_parent", slug: "parent", projectID: "proj_test" }
+
+function parentRoutes(url: URL) {
+  if (url.pathname === `/session/${parent.id}`) return json(parent)
+  if (url.pathname.startsWith(`/session/${parent.id}/`)) return json([])
+  return undefined
+}
+
+// Live events reach the store only inside a session tree this TUI opened. Open the parent the way
+// its view does before a task card hydrates the subagent that is already streaming.
+async function openParentTree(ctx: Pick<Awaited<ReturnType<typeof mount>>, "emit" | "sync">) {
+  await ctx.sync.session.sync(parent.id)
+  const child = { ...session, slug: "race", projectID: "proj_test", parentID: parent.id }
+  ctx.emit(global({ id: "evt_child", type: "session.updated", properties: { sessionID, info: child } }))
+  await wait(() => ctx.sync.session.get(sessionID)?.parentID === parent.id)
+}
+
 test("live messages use creation time with an ID tie-break", async () => {
   await using tmp = await tmpdir()
   await Bun.write(`${tmp.path}/kv.json`, "{}")
-  const { app, emit, sync } = await mount(undefined, tmp.path)
+  const { app, emit, sync } = await mount((url) => {
+    if (url.pathname === `/session/${sessionID}`) return json(session)
+    if (["message", "todo", "diff"].some((path) => url.pathname === `/session/${sessionID}/${path}`)) return json([])
+    return undefined
+  }, tmp.path)
+  await sync.session.sync(sessionID)
   const messages = [
     { ...assistant, id: "msg_a", time: { created: 30, completed: 31 } },
     { ...assistant, id: "msg_z", time: { created: 10, completed: 11 } },
@@ -164,10 +186,11 @@ test("hydration does not clear text streamed before it starts", async () => {
       return messages
     }
     if (url.pathname === `/session/${sessionID}/todo` || url.pathname === `/session/${sessionID}/diff`) return json([])
-    return undefined
+    return parentRoutes(url)
   }, tmp.path)
 
   try {
+    await openParentTree({ emit, sync })
     emit(global({ id: "evt_message", type: "message.updated", properties: { sessionID, info: assistant } }))
     emit(
       global({
@@ -262,10 +285,11 @@ test("a message removed during hydration does not regain stale parts", async () 
       return messages
     }
     if (url.pathname === `/session/${sessionID}/todo` || url.pathname === `/session/${sessionID}/diff`) return json([])
-    return undefined
+    return parentRoutes(url)
   }, tmp.path)
 
   try {
+    await openParentTree({ emit, sync })
     emit(global({ id: "evt_message", type: "message.updated", properties: { sessionID, info: assistant } }))
     await wait(() => sync.data.message[sessionID]?.length === 1)
     const hydrate = sync.session.sync(sessionID)

@@ -21,9 +21,11 @@ import { rawOpencodeClient, showToast } from "./runtimeStatus.js"
 import { getPendingProxyCalls } from "./proxyBroker.js"
 import {
   deleteActiveProcessAndWait,
+  describeSessionKey,
   getClaudeSessionId,
   getSessionAnchors,
   markClaudeSessionLost,
+  MAX_CLAUDE_SESSION_ENTRIES,
   rewindClaudeSession,
   takeClaudeSessionLoss,
   takeSessionDirectoryMove,
@@ -34,17 +36,33 @@ type Prompt = LanguageModelV3CallOptions["prompt"]
 const NO_RECORD_REASON = "opencode has no Claude conversation on record for this chat"
 const START_FRESH = "Start fresh"
 
-/** Text this provider emitted for the exchange in progress, per session key. */
-const exchangeText = new Map<string, string>()
-/** How many finished exchanges opencode showed before the one in progress, per session key. */
-const exchangePosition = new Map<string, number>()
+/** Per session key: finished exchanges before the one in progress, and the text this provider
+ *  emitted for it. LRU like the conversation records; an exchange idle through 64 newer ones
+ *  only loses its rewind anchor hash. */
+const exchanges = new Map<string, { position: number; text: string }>()
+
+function rememberExchange(key: string, exchange: { position: number; text: string }) {
+  exchanges.delete(key)
+  exchanges.set(key, exchange)
+  if (exchanges.size > MAX_CLAUDE_SESSION_ENTRIES) exchanges.delete(exchanges.keys().next().value!)
+}
 
 export function appendExchangeText(key: string, text: string): void {
-  if (text) exchangeText.set(key, (exchangeText.get(key) ?? "") + text)
+  if (!text) return
+  const current = exchanges.get(key)
+  rememberExchange(key, { position: current?.position ?? 0, text: (current?.text ?? "") + text })
 }
 
 export function currentExchangeHash(key: string): string {
-  return exchangeHash(exchangePosition.get(key) ?? 0, exchangeText.get(key) ?? "")
+  const exchange = exchanges.get(key)
+  return exchangeHash(exchange?.position ?? 0, exchange?.text ?? "")
+}
+
+/** A deleted session never resumes, so its exchanges go with it. */
+export function forgetSessionExchanges(sessionID: string): void {
+  for (const key of [...exchanges.keys()]) {
+    if (describeSessionKey(key).session === sessionID) exchanges.delete(key)
+  }
 }
 
 /**
@@ -62,10 +80,7 @@ export async function syncClaudeSession(input: {
 }): Promise<string | undefined> {
   const key = input.turn.sessionKey
   const newExchange = input.prompt.at(-1)?.role === "user"
-  if (newExchange) {
-    exchangeText.delete(key)
-    exchangePosition.set(key, promptExchangeHashes(input.prompt).length)
-  }
+  if (newExchange) rememberExchange(key, { position: promptExchangeHashes(input.prompt).length, text: "" })
   const loss = takeClaudeSessionLoss(key)
   if (!getClaudeSessionId(key)) {
     if (takeSessionDirectoryMove(input.turn.affinity, input.turn.cwd)) {

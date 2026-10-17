@@ -1,6 +1,15 @@
-v0.2.224 divingWittily
+v0.2.225 fuggnSomebody
 
-sessions:
-Agent-push auto-delete no longer keeps a pushed session because a closed oc window left its tab ledger behind. Only ledgers belonging to running processes keep sessions open in other tabs.
+memory:
+The background server no longer keeps data from Cursor title and naming requests for as long as it runs. Only Cursor requests that belong to a chat keep their conversation state between turns.
 
-Under the hood: Ignore dead-process ledgers and identity files when checking other tabs, while retaining sessions for reused process IDs. The recorded verification passed: tui typecheck and 1 agentPushAutoDelete regression test. The agent-push workflow runs prePush checks before pushing.
+A frozen or stalled oc window can no longer make the background server hold every event from every project forever. Each event stream now holds at most 2048 waiting events; when one falls that far behind, the window reconnects once it reads again and catches up, and the server log notes it.
+
+Each oc window now keeps chat history only for the sessions it opened and their subagents, instead of every chat running on the server. Task cards, the Sub-agents sidebar, and subagents opened in their own tab still update live. Sessions you have not opened load when you open them.
+
+Claude Code keeps its per-chat sync data for at most 64 chats and drops a chat's data when the session is deleted.
+
+cursor:
+An interrupted Cursor title request no longer resets the Cursor conversation of the chat it was naming.
+
+Under the hood: Cursor checkpoints, blobs, and frozen request context are only stored process-wide for requests bound to a session, and retries of title requests stay on their own throwaway conversation. The instance and global SSE streams use a bounded queue that ends the stream on overflow, sharing a filter option added to the core bounded subscriber. The TUI stores transcript events only for session trees it has synced. Claude exchange tracking is one capped map, cleared on session delete. Typecheck passed in core, opencode, and tui. Passing tests: new Cursor state tests and the exec reply tests (3), core event tests (45), the new global event stream overflow test (1), the global HTTP API tests (12), the instance event HTTP API tests, the four TUI sync test files (40, with three hydration tests and three event tests updated to open their session first), and the Claude session sync and plugin hook tests (9). Build notes were rotated to buildNotes.archive11.md. No build, install, or live check has run yet.

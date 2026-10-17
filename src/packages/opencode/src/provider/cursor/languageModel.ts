@@ -23,13 +23,9 @@ import {
   planExecutionKickoffState,
   takePlanExecutionKickoffWarning,
 } from "./planExecutionKickoff.js"
-import { clearCheckpoint, getCheckpoint } from "./protocol/checkpoint.js"
+import { getCheckpoint } from "./protocol/checkpoint.js"
 import { decodeConversationTokenDetails } from "./protocol/tokenDetails.js"
-import {
-  clearConversationBlobs,
-  inspectConversationBlobGraph,
-  type ConversationBlobGraphStats,
-} from "./protocol/blobStore.js"
+import { inspectConversationBlobGraph, type ConversationBlobGraphStats } from "./protocol/blobStore.js"
 import {
   bindConversationId,
   isActiveConversationBinding,
@@ -434,20 +430,24 @@ async function startSession(
   // Compaction must not reuse the prior conversation; its first normal turn
   // must also rebase so the summary-agent checkpoint cannot replace the normal
   // system prompt and OpenCode's newly compacted history.
-  const lifecycle = !allowTools && !isCompaction && !recovery
+  // A retry of a title or other no-tool Run is still one: it must never reset or take over the
+  // chat's own conversation binding.
+  const lifecycle = !allowTools && !isCompaction
+  // Only a Run bound to an oc session has a next Run that echoes its checkpoint, blobs, and
+  // frozen context. Title and other no-tool Runs keep them per Run, so process-wide stores
+  // never key on a throwaway conversation id.
+  const durable = !!sessionKey && !lifecycle
   let bound = resuming
     ? { conversationId: resumeRecovery!.conversationId, reset: false, previousId: undefined }
     : bindConversationId(sessionKey, {
         reset: resetState.reset || recovery?.kind === "rebase",
         ephemeral: lifecycle,
       })
-  let conversationState = lifecycle
-    ? undefined
-    : resuming
-      ? resumeRecovery!.checkpoint
-      : bound.reset
-        ? undefined
-        : getCheckpoint(bound.conversationId)
+  let conversationState = resuming
+    ? resumeRecovery!.checkpoint
+    : lifecycle || bound.reset
+      ? undefined
+      : getCheckpoint(bound.conversationId)
   let checkpointGraph: ConversationBlobGraphStats = conversationState
     ? inspectConversationBlobGraph(bound.conversationId, conversationState)
     : { count: 0, bytes: 0, complete: true }
@@ -467,11 +467,7 @@ async function startSession(
     if (recovery?.kind === "resume") recovery = { kind: "rebase" }
     resumeRecovery = undefined
     resuming = false
-    if (!sessionKey) {
-      clearCheckpoint(previousConversationId)
-      clearConversationBlobs(previousConversationId)
-    }
-    bound = bindConversationId(sessionKey, { reset: true })
+    bound = bindConversationId(sessionKey, { reset: true, ephemeral: lifecycle })
     conversationState = undefined
     checkpointGraph = { count: 0, bytes: 0, complete: true }
   }
@@ -620,10 +616,11 @@ async function startSession(
   }
   // Freeze RequestContext per conversation_id (CLI parity). Rebuilding every
   // Run mutates volatile slices (git porcelain, layout) and breaks prompt cache.
-  const { context: requestContext, reused: requestContextReused } = await getOrBuildRequestContext(conversationId, {
-    workspaceRoot,
-    tools: cursorTools,
-  })
+  // An empty id builds without freezing (no-tool Runs).
+  const { context: requestContext, reused: requestContextReused } = await getOrBuildRequestContext(
+    durable ? conversationId : "",
+    { workspaceRoot, tools: cursorTools },
+  )
   const contextSubagents = Array.isArray(requestContext.custom_subagents)
     ? requestContext.custom_subagents
         .map((agent) =>
@@ -757,7 +754,7 @@ async function startSession(
       displayToolCalls: 0,
       execRequests: 0,
     },
-    openCodeSessionId: lifecycle ? undefined : sessionKey,
+    openCodeSessionId: durable ? sessionKey : undefined,
     postCompactionRebase: isCompaction || hasPostCompactionRebase(sessionKey),
     toolCatalog: snapshotToolCatalog(sessionKey),
     stream,
