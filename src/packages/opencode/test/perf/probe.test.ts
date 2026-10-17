@@ -13,6 +13,7 @@ import { testProviderConfig } from "../lib/test-provider"
 import { claudeEnv, expectIsolated, initRepo, outsideProfile } from "../provider/claude-code/chatFixture"
 import { runP8 } from "./p8Probe"
 import { runP9 } from "./p9Probe"
+import { code, deltas, mixed, prose, schedule as pace, short } from "./streamContent"
 
 const opencodeRoot = path.resolve(import.meta.dir, "../..")
 const selected = process.env.OC_PERF_METRIC ?? "all"
@@ -233,6 +234,9 @@ describe.skipIf(process.env.OC_PERF_PROBE !== "1" || process.platform !== "win32
           yield* Effect.promise(() => mkdir(home, { recursive: true }))
           const socket = `${runDir}/wezterm.sock`
           let paced = false
+          // P10: delay before each content or reasoning frame, consumed in order.
+          const schedule: number[] = []
+          const sendLog: string[] = []
           let delayToolChunks = 0
           let sentChunks = 0
           let firstChunk = 0
@@ -245,15 +249,19 @@ describe.skipIf(process.env.OC_PERF_PROBE !== "1" || process.platform !== "win32
             async fetch(req) {
               const url = new URL(req.url)
               if (req.method !== "GET") llmHits.push(Date.now())
+              // The fake model stops before the pane at teardown while oc may still call it: answer
+              // 502 instead of throwing inside the handler, which Bun reports as a test failure.
               const upstream = await fetch(`${fixture.llm.url.replace(/\/v1$/, "")}${url.pathname}`, {
                 method: req.method,
                 headers: req.headers,
                 body: await req.text(),
                 signal: req.signal,
-              })
-              if (!paced && !delayToolChunks)
+              }).catch(() => undefined)
+              if (!upstream) return new Response(null, { status: 502 })
+              if (!paced && !delayToolChunks && schedule.length === 0)
                 return new Response(upstream.body, { status: upstream.status, headers: upstream.headers })
-              const text = await upstream.text()
+              const text = await upstream.text().catch(() => undefined)
+              if (text === undefined) return new Response(null, { status: 502 })
               const frames = text.split("\n\n").filter(Boolean)
               return new Response(
                 new ReadableStream({
@@ -267,6 +275,20 @@ describe.skipIf(process.env.OC_PERF_PROBE !== "1" || process.platform !== "win32
                           sentChunks++
                         }
                         if (delayToolChunks && frame.includes("tool_calls")) await setTimeout(delayToolChunks)
+                        // OpenAI-compatible content frames, or Anthropic text/thinking deltas (Claude CLI).
+                        if (schedule.length && /"(content|reasoning_content)":|"(text|thinking)_delta"/.test(frame)) {
+                          const ms = schedule.shift()!
+                          if (ms) await setTimeout(ms)
+                          const parsed = JSON.parse(frame.slice(frame.indexOf("{")))
+                          const delta = parsed.choices?.[0]?.delta ?? parsed.delta
+                          sendLog.push(
+                            JSON.stringify({
+                              time: Date.now(),
+                              chars: (delta?.content ?? delta?.reasoning_content ?? delta?.text ?? delta?.thinking ?? "")
+                                .length,
+                            }),
+                          )
+                        }
                         controller.enqueue(new TextEncoder().encode(frame + "\n\n"))
                       }
                       controller.close()
@@ -280,10 +302,28 @@ describe.skipIf(process.env.OC_PERF_PROBE !== "1" || process.platform !== "win32
             },
           })
           yield* Effect.addFinalizer(() => Effect.sync(() => proxy.stop(true)))
+          // P10 with OC_PERF_P10_PROVIDER=claude streams through the real `claude` CLI (pointed at the
+          // pacing proxy) and oc's Claude provider, logging like the user's config (debug, file).
+          const claudeStream = selected === "P10" && process.env.OC_PERF_P10_PROVIDER === "claude"
+          const base = testProviderConfig(`http://127.0.0.1:${proxy.port}/v1`)
           const config = {
-            ...testProviderConfig(`http://127.0.0.1:${proxy.port}/v1`),
-            model: "test/test-model",
-            enabled_providers: ["test"],
+            ...base,
+            ...(claudeStream && {
+              provider: {
+                ...base.provider,
+                "claude-code": {
+                  options: {
+                    // OC_PERF_CLAUDE_NOPROXY=1 drops oc's proxy MCP server from the CLI.
+                    ...(process.env.OC_PERF_CLAUDE_NOPROXY === "1"
+                      ? { proxyTools: [], proxyOpencodeTools: [] }
+                      : { proxyTools: ["Task", "Question"] }),
+                    logging: { file: true, level: process.env.OC_PERF_CLAUDE_LOG ?? "debug" },
+                  },
+                },
+              },
+            }),
+            model: claudeStream ? "claude-code/claude-sonnet-5-5" : "test/test-model",
+            enabled_providers: claudeStream ? ["test", "claude-code"] : ["test"],
             snapshot: selected === "P7" ? streamVariant === "on" : false,
             permission: {
               "*": "allow",
@@ -296,10 +336,54 @@ describe.skipIf(process.env.OC_PERF_PROBE !== "1" || process.platform !== "win32
             },
           }
           const memoryProbe = selected === "P1" || selected === "P2"
-          const kitEntry = selected === "P4" || selected === "P6" || selected === "P7"
-          const paneEnv = {
+          const kitEntry =
+            selected === "P4" || selected === "P6" || selected === "P7" || selected === "P10" || selected === "P11"
+          // P11 runs a real model with the user's own config, auth, and accounts. Only the session
+          // database and TUI state (ledgers, kv; seeded from the user's kv.json) live in the run folder.
+          // model.json is left out: its saved choice overrides `--model`.
+          // P10 with OC_PERF_REAL_CONFIG=1 uses the same real environment, with the fake model added
+          // to the user's config so the stream stays free.
+          const realModel = selected === "P11" ? process.env.OC_PERF_P11_MODEL : undefined
+          if (selected === "P11" && !realModel) throw new Error("P11 needs OC_PERF_P11_MODEL")
+          const realEnv = !!realModel || (selected === "P10" && process.env.OC_PERF_REAL_CONFIG === "1")
+          if (realEnv)
+            yield* Effect.promise(async () => {
+              const from = path.join(process.env.USERPROFILE!, ".local", "state", "opencode")
+              await Bun.write(`${home}/state/opencode/kv.json`, Bun.file(path.join(from, "kv.json")))
+            })
+          // OC_PERF_SMOOTH=1 turns on the Beta `smooth_streaming` TUI setting for P10.
+          const smooth = selected === "P10" && process.env.OC_PERF_SMOOTH === "1"
+          if (smooth) yield* Effect.promise(() => Bun.write(`${runDir}/tui.json`, '{ "smooth_streaming": true }'))
+          // OC_PERF_THINKING=show expands reasoning blocks in isolated P10 runs; the default `hide`
+          // collapses them, so reasoning deltas paint nothing.
+          const thinking = selected === "P10" && !realEnv ? process.env.OC_PERF_THINKING : undefined
+          if (thinking)
+            yield* Effect.promise(() =>
+              Bun.write(`${home}/.local/state/opencode/kv.json`, JSON.stringify({ thinking_mode: thinking })),
+            )
+          const paneEnv = realEnv
+            ? {
+                OPENCODE_DB: `${home}/opencode.db`,
+                // Real models select through `--model` only: with OPENCODE_CONFIG_CONTENT set, the
+                // served provider list lost Cursor and most OpenCode models.
+                ...(!realModel && {
+                  OPENCODE_CONFIG_CONTENT: JSON.stringify({
+                    ...testProviderConfig(`http://127.0.0.1:${proxy.port}/v1`),
+                    model: "test/test-model",
+                  }),
+                }),
+                XDG_STATE_HOME: `${home}/state`,
+                OC_AUTO_RENAME: "0",
+                // Attach mode mirrors oc.exe (resident server + attach); otherwise native opencode.exe.
+                OC_FLAVOR: process.env.OC_PERF_P11_ATTACH === "1" ? "oc" : "native",
+                OPENCODE_DISABLE_CONFIG_INSTALL: "1",
+                OC_PERF_LOG_DIR: runDir,
+                OC_PERF_STREAM: "1",
+                ...(smooth && { OPENCODE_TUI_CONFIG: `${runDir}/tui.json` }),
+              }
+            : {
             ...isolatedEnv(home, JSON.stringify(config)),
-            ...claudeEnv(home, fixture.llm.url),
+            ...claudeEnv(home, claudeStream ? `http://127.0.0.1:${proxy.port}/v1` : fixture.llm.url),
             USERPROFILE: home,
             APPDATA: `${home}/AppData/Roaming`,
             LOCALAPPDATA: `${home}/AppData/Local`,
@@ -314,12 +398,27 @@ describe.skipIf(process.env.OC_PERF_PROBE !== "1" || process.platform !== "win32
             ...(memoryProbe && { OC_PERF_LOG_DIR: runDir, OC_PERF_INJECT_PRELOAD: "1" }),
             ...(selected === "P4" && { OC_PERF_LOG_DIR: runDir, OC_PERF_SPINNER: "1" }),
             ...(selected === "P6" && { OC_PERF_LOG_DIR: runDir, OC_PERF_EVENTS: "1" }),
+            ...(selected === "P10" && {
+              OC_PERF_LOG_DIR: runDir,
+              OC_PERF_STREAM: "1",
+              ...(smooth && { OPENCODE_TUI_CONFIG: `${runDir}/tui.json` }),
+            }),
             ...(selected === "P7" && { OC_PERF_LOG_DIR: runDir, OC_PERF_GIT: "1", OC_PERF_INJECT_PRELOAD: "1" }),
           }
           const cliEnv = {
             ...Object.fromEntries(
               Object.entries(hostEnv()).filter(
-                ([key]) => key !== "WEZTERM_PANE" && key !== "CLAUDE_CODE_OAUTH_TOKEN" && !key.startsWith("XDG_"),
+                ([key]) =>
+                  key !== "WEZTERM_PANE" &&
+                  key !== "CLAUDE_CODE_OAUTH_TOKEN" &&
+                  !key.startsWith("XDG_") &&
+                  // test/preload.ts sets these for the test process; stream probes run oc as users do.
+                  !(
+                    (selected === "P10" || selected === "P11") &&
+                    /^(OPENCODE_MODELS_PATH|OPENCODE_EXPERIMENTAL_EVENT_SYSTEM|OPENCODE_EXPERIMENTAL_WORKSPACES|OPENCODE_TEST_.*)$/.test(
+                      key,
+                    )
+                  ),
               ),
             ),
             ...paneEnv,
@@ -342,6 +441,48 @@ describe.skipIf(process.env.OC_PERF_PROBE !== "1" || process.platform !== "win32
               ].join("\n"),
             ),
           )
+          // P11 attach mode (OC_PERF_P11_ATTACH=1): a source `serve` with the same environment, warmed
+          // until it lists the model, and the pane TUI attached to it over HTTP and SSE.
+          const attachUrl = yield* Effect.gen(function* () {
+            if (!realModel || process.env.OC_PERF_P11_ATTACH !== "1") return undefined
+            const port = 41000 + Math.floor(Math.random() * 1000)
+            const server = Bun.spawn(["bun", "run", "--cwd", opencodeRoot, "src/index.ts", "serve", "--port", String(port)], {
+              env: Object.fromEntries(Object.entries(cliEnv).filter(([key]) => !key.startsWith("WEZTERM_"))),
+              cwd: project,
+              stdout: Bun.file(`${runDir}/serve.stdout.log`),
+              stderr: Bun.file(`${runDir}/serve.stderr.log`),
+              stdin: "ignore",
+            })
+            const created = yield* Effect.promise(async () => {
+              const parsed = JSON.parse(await ps(["-RootId", String(server.pid)]))
+              const rows: Row[] = Array.isArray(parsed) ? parsed : [parsed]
+              return rows.find((row) => row.pid === server.pid)!.created
+            })
+            yield* Effect.addFinalizer(() =>
+              Effect.promise(async () =>
+                Bun.write(
+                  `${runDir}/serve-cleanup.log`,
+                  await ps(["-RootId", String(server.pid), "-Created", created, "-Cleanup"]),
+                ),
+              ),
+            )
+            const [providerID, ...rest] = realModel.split("/")
+            const modelID = rest.join("/")
+            const url = `http://127.0.0.1:${port}`
+            yield* Effect.promise(async () => {
+              const deadline = Date.now() + 180000
+              while (Date.now() < deadline) {
+                const listed = await fetch(`${url}/config/providers?directory=${encodeURIComponent(project)}`)
+                  .then((res) => (res.ok ? res.json() : undefined))
+                  .catch(() => undefined)
+                const providers = (listed as { providers?: { id: string; models: Record<string, unknown> }[] })?.providers
+                if (providers?.some((item) => item.id === providerID && item.models[modelID])) return
+                await setTimeout(1000)
+              }
+              throw new Error(`serve never listed ${realModel}`)
+            })
+            return url
+          })
           const started = Date.now()
           const entry = memoryProbe
             ? path.join(import.meta.dir, "instrumentedEntry.ts")
@@ -357,11 +498,16 @@ describe.skipIf(process.env.OC_PERF_PROBE !== "1" || process.platform !== "win32
               project,
               "--",
               "bun",
+              // Main-thread CPU profile, written when the TUI exits (`quit` below).
+              ...(process.env.OC_PERF_CPU_PROF === "1"
+                ? ["--cpu-prof", "--cpu-prof-md", `--cpu-prof-dir=${runDir}/prof`]
+                : []),
               "run",
               "--cwd",
               opencodeRoot,
               entry,
-              project,
+              ...(attachUrl ? ["attach", attachUrl, "--dir", project] : [project]),
+              ...(realModel ? ["--model", realModel] : []),
             ],
             {
               env: cliEnv,
@@ -449,6 +595,20 @@ describe.skipIf(process.env.OC_PERF_PROBE !== "1" || process.platform !== "win32
           yield* Effect.promise(save)
           console.log(`READY ${runDir}`)
           const type = (text: string) => wez(["send-text", "--pane-id", pane, "--no-paste", text])
+          // Exits the TUI normally so `--cpu-prof` writes its profile.
+          const quit = async () => {
+            if (process.env.OC_PERF_CPU_PROF !== "1") return
+            await type("/exit")
+            await setTimeout(800)
+            await type("\r")
+            const deadline = Date.now() + 30000
+            while (Date.now() < deadline) {
+              const files = await readdir(`${runDir}/prof`).catch(() => [] as string[])
+              if (files.some((name) => name.endsWith(".md"))) return
+              await setTimeout(500)
+            }
+            throw new Error("CPU profile was not written")
+          }
           const slash = async (name: string) => {
             await type(`/${name}`)
             await wait(`${name} autocomplete`, (text) => text.includes(`/${name}:(oc)`))
@@ -692,8 +852,156 @@ describe.skipIf(process.env.OC_PERF_PROBE !== "1" || process.platform !== "win32
             yield* Effect.promise(save)
             return
           }
+          if (selected === "P11") {
+            // Real-model stream smoothness: same trace as P10, prompts typed into a real session.
+            // OC_PERF_P11_PROMPTS picks prompts (comma list).
+            const prompts: Record<string, string> = {
+              markdown:
+                "Without using any tools, write a detailed technical explainer of about 900 words on how a terminal user interface renders streaming text smoothly. Include three ## sections, a bulleted list of 6 items, a markdown table with 5 rows and 4 columns, one TypeScript code block of about 50 lines, and one short bash code block. Answer directly in markdown.",
+              tools:
+                "Use your tools to list the files in this folder and read README.md, then explain in about 300 words what this project would need to become a small CLI tool, with one short TypeScript example.",
+            }
+            yield* Effect.promise(() =>
+              Bun.write(
+                path.join(project, "README.md"),
+                "# work\n\nA scratch project for performance probes. It has no code yet.\n",
+              ),
+            )
+            const phases: Record<string, unknown>[] = []
+            results.P11 = { model: realModel, phases }
+            // Plugins, MCP, and the model catalog keep loading after Home first draws.
+            yield* Effect.promise(() => setTimeout(8000))
+            // The startup pick from `--model` can miss providers that load late, so pick it in the
+            // model dialog: OC_PERF_P11_PICK is the filter text, OC_PERF_P11_EXPECT the footer label.
+            const pick = process.env.OC_PERF_P11_PICK
+            const expected = process.env.OC_PERF_P11_EXPECT
+            // Never prompt a model other than the one asked for (a fallback may be a paid model).
+            if (expected && !pick)
+              yield* Effect.promise(() => wait("expected model", (text) => text.includes(expected), 15000))
+            if (pick && expected)
+              yield* Effect.promise(async () => {
+                await type("/models")
+                await setTimeout(800)
+                await type("\r")
+                await wait("model dialog", (text) => text.includes("Select model"))
+                await type(pick)
+                await setTimeout(1200)
+                await type("\r")
+                await wait("model picked", (text) => !text.includes("Select model") && text.includes(expected), 15000)
+              })
+            yield* Effect.promise(async () => Bun.write(`${runDir}/ready-screen.txt`, await screen()))
+            // `none` only checks the model footer (OC_PERF_P11_EXPECT) and sends nothing.
+            for (const name of (process.env.OC_PERF_P11_PROMPTS ?? "markdown").split(",").filter((name) => prompts[name])) {
+              const begin = Date.now()
+              yield* Effect.promise(() => type(`${prompts[name]}\r`))
+              yield* Effect.promise(() => wait(`P11 ${name} busy`, (text) => /esc\s+interrupt/.test(text), 60000))
+              let complete = false
+              let done = 0
+              const completion = wait(`P11 ${name} idle`, (text) => !/esc\s+interrupt/.test(text), 300000).then(
+                () => {
+                  done = Date.now()
+                  complete = true
+                },
+              )
+              yield* Effect.promise(() => sample(`P10-${name}`, 300000, () => complete))
+              yield* Effect.promise(() => completion)
+              yield* Effect.promise(async () => Bun.write(`${runDir}/${name}-screen.txt`, await screen()))
+              phases.push({ name, begin, done, wallSeconds: (done - begin) / 1000 })
+              results.P10 = phases
+              yield* Effect.promise(save)
+              yield* Effect.promise(() => setTimeout(3000))
+            }
+            yield* Effect.promise(quit)
+            yield* Effect.promise(save)
+            return
+          }
+          if (selected === "P10") {
+            // Stream smoothness: each phase streams a seeded reply on a seeded bursty schedule and
+            // streamPreload.ts logs the TUI timeline. OC_PERF_P10 picks phases (comma list).
+            const wanted = (process.env.OC_PERF_P10 ?? "prose,mixed,code,reasoning,long").split(",")
+            const phases: Record<string, unknown>[] = []
+            results.P10 = phases
+            const flushSends = () =>
+              sendLog.length ? Bun.write(`${runDir}/llm-sends.jsonl`, sendLog.join("\n") + "\n") : Promise.resolve(0)
+            const stream = async (name: string, text: string, seed: number, reasoning?: string) => {
+              const marker = `P10${name.toUpperCase()}DONE`
+              const body = `${text}\n\n${marker}`
+              const response = reply()
+              const reasonDeltas = reasoning ? deltas(reasoning, seed + 1) : []
+              const textDeltas = deltas(body, seed)
+              for (const delta of reasonDeltas) response.reason(delta)
+              for (const delta of textDeltas) response.text(delta)
+              await Effect.runPromise(fixture.llm.push(response.stop()))
+              schedule.push(...pace(reasonDeltas.length + textDeltas.length, seed + 2))
+              const begin = Date.now()
+              await type(`P10 ${name} reply\r`)
+              let complete = false
+              let done = 0
+              const completion = wait(
+                `P10 ${name}`,
+                (shown) => shown.includes(marker) && !/esc\s+interrupt/.test(shown),
+                180000,
+              ).then(() => {
+                done = Date.now()
+                complete = true
+              })
+              await sample(`P10-${name}`, 180000, () => complete)
+              await completion
+              phases.push({
+                name,
+                begin,
+                done,
+                wallSeconds: (done - begin) / 1000,
+                chars: body.length + (reasoning?.length ?? 0),
+                deltas: reasonDeltas.length + textDeltas.length,
+                scheduleLeft: schedule.length,
+              })
+              await flushSends()
+              await save()
+              await setTimeout(2000)
+            }
+            yield* Effect.promise(() => turn(0))
+            if (wanted.includes("prose")) yield* Effect.promise(() => stream("prose", prose(11), 101))
+            if (wanted.includes("mixed")) yield* Effect.promise(() => stream("mixed", mixed(12), 201))
+            if (wanted.includes("code")) yield* Effect.promise(() => stream("code", code(13), 301))
+            if (wanted.includes("reasoning"))
+              yield* Effect.promise(() => stream("reasoning", prose(14).slice(0, 2500), 401, prose(15).slice(0, 3500)))
+            if (wanted.includes("long")) {
+              const toolFile = `${runDir}/toolOutput.txt`
+              yield* Effect.promise(() =>
+                Bun.write(
+                  toolFile,
+                  Array.from({ length: 200 }, (_, i) => `${String(i).padStart(4, "0")} ${"sample output ".repeat(6)}`).join(
+                    "\n",
+                  ),
+                ),
+              )
+              const seeded = Date.now()
+              for (let n = 1; n <= 30; n++) {
+                if (n % 6 === 0) yield* fixture.llm.tool("read", { filePath: toolFile })
+                const marker = `P10SEED${n}DONE`
+                yield* fixture.llm.text(`${short(n)}\n\n${marker}`)
+                yield* Effect.promise(() => type(`Seed turn ${n}\r`))
+                yield* Effect.promise(() =>
+                  wait(`seed ${n}`, (text) => text.includes(marker) && !/esc\s+interrupt/.test(text)),
+                )
+              }
+              phases.push({ name: "seed", begin: seeded, done: Date.now() })
+              yield* Effect.promise(() => setTimeout(2000))
+              yield* Effect.promise(() => stream("long", mixed(16), 501))
+            }
+            yield* Effect.promise(quit)
+            if (realEnv) {
+              yield* Effect.promise(save)
+              return
+            }
+            expectIsolated(yield* fixture.llm.inputs)
+            results.isolationChecked = true
+            yield* Effect.promise(save)
+            return
+          }
           if (selected === "P4") {
-            const glyphs = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+            const glyphs =["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
             const spinnerRows = (text: string) =>
               text.split("\n").filter((line) => glyphs.some((g) => line.includes(g))).length
             const capture = async (label: string) => {

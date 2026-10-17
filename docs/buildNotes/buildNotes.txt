@@ -1,15 +1,19 @@
-v0.2.225 fuggnSomebody
+v0.2.227 axesShittn
 
-memory:
-The background server no longer keeps data from Cursor title and naming requests for as long as it runs. Only Cursor requests that belong to a chat keep their conversation state between turns.
+chat streaming:
+Code blocks now show their text the moment it streams in; the newest characters pick up color a moment later instead of the whole block lagging behind. The first code block in a language no longer stays blank while its highlighter loads, and finishing a reply no longer flashes its code blocks as plain text.
 
-A frozen or stalled oc window can no longer make the background server hold every event from every project forever. Each event stream now holds at most 2048 waiting events; when one falls that far behind, the window reconnects once it reads again and catches up, and the server log notes it.
+Thinking blocks now use the same renderer as replies.
 
-Each oc window now keeps chat history only for the sessions it opened and their subagents, instead of every chat running on the server. Task cards, the Sub-agents sidebar, and subagents opened in their own tab still update live. Sessions you have not opened load when you open them.
+Spinners now tick together, so running tools no longer add extra screen redraws (about 37-48 down to about 27 per second).
 
-Claude Code keeps its per-chat sync data for at most 64 chats and drops a chat's data when the session is deleted.
+beta:
+New setting Smooth streaming (ctrl+o, or smooth_streaming in tui.json), off by default: replies and reasoning appear at a steady pace about a tenth of a second behind arrival instead of in bursts.
 
-cursor:
-An interrupted Cursor title request no longer resets the Cursor conversation of the chat it was naming.
+startup:
+The TUI now asks the server only for provider names at startup instead of the full catalog of every model, so about 8 MB less data moves at launch. Startup no longer has a brief freeze (about a tenth of a second) when that catalog arrived, and the startup sync no longer waits about 0.4 s for it. The Connect provider dialog and the first-run provider list look and work the same.
 
-Under the hood: Cursor checkpoints, blobs, and frozen request context are only stored process-wide for requests bound to a session, and retries of title requests stay on their own throwaway conversation. The instance and global SSE streams use a bounded queue that ends the stream on overflow, sharing a filter option added to the core bounded subscriber. The TUI stores transcript events only for session trees it has synced. Claude exchange tracking is one capped map, cleared on session delete. Typecheck passed in core, opencode, and tui. Passing tests: new Cursor state tests and the exec reply tests (3), core event tests (45), the new global event stream overflow test (1), the global HTTP API tests (12), the instance event HTTP API tests, the four TUI sync test files (40, with three hydration tests and three event tests updated to open their session first), and the Claude session sync and plugin hook tests (9). Build notes were rotated to buildNotes.archive11.md. No build, install, or live check has run yet.
+claude code:
+Debug file logging (plugin.log) now writes in small batches instead of once per line; warnings and errors still land immediately.
+
+Under the hood: OpenTUI 0.5.14 is patched so streaming code blocks append new text to the shown buffer, and its incremental markdown parser no longer splits the last paragraph when streaming ends just before the final text. opentui-spinner 0.0.7 is patched to schedule ticks on shared interval boundaries. A new GET /provider/summary endpoint returns provider ids, names, and connected ids; the TUI bootstrap uses it, and the JS SDK was regenerated. New opt-in performance probes for stream smoothness (P10) and real-model sessions (P11); the P4 probe proxy now answers 502 instead of failing at teardown. Typecheck passed in tui and opencode. Passing tests: the new streaming code tests, thinking tests, and smooth text tests (16), Claude logger tests (17), provider HTTP API tests (6, 1 skipped), the HTTP API exercise coverage run (222), scrollback surface tests (16, 1 skipped on Windows), the P4 spinner probe, the TUI fixture users (70), and the inline tool wrap snapshot test. Known failures, not from these changes: two subagentDialog tests, and the HTTP API coverage check missing the /agent/sub routes. No build or live check has run yet.

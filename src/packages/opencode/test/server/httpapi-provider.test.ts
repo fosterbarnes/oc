@@ -379,6 +379,30 @@ describe("provider HttpApi", () => {
   )
 
   it.instance(
+    "serves the provider summary with the same providers as the full list",
+    Effect.gen(function* () {
+      const directory = (yield* TestInstance).directory
+      yield* setEnvScoped("OPENCODE_AUTH_CONTENT", JSON.stringify({ xai: { type: "api", key: "dummy" } }))
+      const headers = { "x-opencode-directory": directory }
+      const listResponse = yield* request("/provider", { headers })
+      const summaryResponse = yield* request("/provider/summary", { headers })
+
+      expect(listResponse.status).toBe(200)
+      expect(summaryResponse.status).toBe(200)
+
+      const list = (yield* listResponse.json) as { all: { id: string; name: string }[]; connected: string[] }
+      const summary = yield* summaryResponse.json
+      expect(list.all.length).toBeGreaterThan(0)
+      expect(list.connected).toContain("xai")
+      expect(summary).toEqual({
+        all: list.all.map((provider) => ({ id: provider.id, name: provider.name })),
+        connected: list.connected,
+      })
+    }),
+    projectOptions,
+  )
+
+  it.instance(
     "keeps provider.models hook input mutations out of provider state",
     Effect.gen(function* () {
       const directory = (yield* TestInstance).directory

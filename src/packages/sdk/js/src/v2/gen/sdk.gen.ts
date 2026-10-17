@@ -172,6 +172,8 @@ import type {
   ProviderOauthAuthorizeResponses,
   ProviderOauthCallbackErrors,
   ProviderOauthCallbackResponses,
+  ProviderSummaryErrors,
+  ProviderSummaryResponses,
   ProviderUsageStateErrors,
   ProviderUsageStateResponses,
   PtyConnectErrors,
@@ -3740,6 +3742,36 @@ export class Provider extends HeyApiClient {
     )
     return (options?.client ?? this.client).get<ProviderListResponses, ProviderListErrors, ThrowOnError>({
       url: "/provider",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * List provider names
+   *
+   * Get the providers from provider.list with only their id and name, plus the connected provider ids.
+   */
+  public summary<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<ProviderSummaryResponses, ProviderSummaryErrors, ThrowOnError>({
+      url: "/provider/summary",
       ...options,
       ...params,
     })

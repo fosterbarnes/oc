@@ -1,0 +1,127 @@
+diff --git a/node_modules/@opentui/core/.bun-tag-ecd62a3426aa9103 b/.bun-tag-ecd62a3426aa9103
+new file mode 100644
+index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
+diff --git a/chunk-bun-j2z63cdy.js b/chunk-bun-j2z63cdy.js
+index f54fc0d21751a43caeda1ad48a973c2e8e83aac0..40e07c8e069854699420ffd4c7a1c82790b4b6c0 100644
+--- a/chunk-bun-j2z63cdy.js
++++ b/chunk-bun-j2z63cdy.js
+@@ -3219,6 +3219,8 @@ class CodeRenderable2 extends TextBufferRenderable2 {
+   _initialStyledText;
+   _hadInitialContent = false;
+   _lastHighlights = [];
++  // oc patch: the source text the text buffer currently shows (plain or styled).
++  _shownContent = "";
+   _baseHighlight;
+   _onHighlight;
+   _onChunks;
+@@ -3250,6 +3252,7 @@ class CodeRenderable2 extends TextBufferRenderable2 {
+       } else {
+         this.textBuffer.setText(this._content);
+       }
++      this._shownContent = this._content;
+       this.updateTextInfo();
+       this._shouldRenderTextBuffer = this._drawUnstyledText || !this._filetype;
+     }
+@@ -3267,6 +3270,16 @@ class CodeRenderable2 extends TextBufferRenderable2 {
+       this._content = value;
+       this.invalidateHighlights();
+       if (this._streaming && this._filetype && !this._drawUnstyledText) {
++        // oc patch: a growing streaming code block shows its new tail as plain text right away;
++        // the next highlight restyles the whole block. Other changes still wait for it.
++        if (this._filetype !== "markdown" && value.startsWith(this._shownContent)) {
++          this.textBuffer.append(value.slice(this._shownContent.length));
++          this._shownContent = value;
++          this._shouldRenderTextBuffer = true;
++          this.setRenderedLineSources(undefined);
++          this.updateTextInfo();
++          return;
++        }
+         this.requestRender();
+         return;
+       }
+@@ -3275,6 +3288,7 @@ class CodeRenderable2 extends TextBufferRenderable2 {
+       } else {
+         this.textBuffer.setText(value);
+       }
++      this._shownContent = value;
+       this.setRenderedLineSources(undefined);
+       this.updateTextInfo();
+     }
+@@ -3284,6 +3298,7 @@ class CodeRenderable2 extends TextBufferRenderable2 {
+     this._initialStyledText = initialStyledText;
+     this.invalidateHighlights();
+     this.textBuffer.setStyledText(initialStyledText);
++    this._shownContent = content;
+     this.setRenderedLineSources(undefined);
+     this.updateTextInfo();
+   }
+@@ -3440,15 +3455,25 @@ class CodeRenderable2 extends TextBufferRenderable2 {
+     }
+     const isInitialContent = this._streaming && !this._hadInitialContent;
+     const shouldDrawUnstyledNow = this._streaming ? isInitialContent && this._drawUnstyledText : this._drawUnstyledText;
++    const isCode = this._filetype !== "markdown";
+     if (this._streaming && !isInitialContent) {
+       this._shouldRenderTextBuffer = true;
+     } else if (shouldDrawUnstyledNow) {
+-      if (this._initialStyledText) {
+-        this.textBuffer.setStyledText(this._initialStyledText);
+-      } else {
+-        this.textBuffer.setText(content);
++      // oc patch: a code block that already shows this content (styled when a stream just
++      // ended) keeps it until the new highlight lands instead of flashing plain text.
++      if (!(isCode && this._shouldRenderTextBuffer && this._shownContent === content)) {
++        if (this._initialStyledText) {
++          this.textBuffer.setStyledText(this._initialStyledText);
++        } else {
++          this.textBuffer.setText(content);
++        }
++        this._shownContent = content;
++        this.setRenderedLineSources(undefined);
+       }
+-      this.setRenderedLineSources(undefined);
++      this._shouldRenderTextBuffer = true;
++    } else if (isInitialContent && isCode && this._shownContent === content) {
++      // oc patch: the first text of a streaming code block is already in the buffer as plain
++      // text (constructor or append); show it now instead of hiding it until the grammar loads.
+       this._shouldRenderTextBuffer = true;
+     } else {
+       this._shouldRenderTextBuffer = false;
+@@ -3525,6 +3550,7 @@ class CodeRenderable2 extends TextBufferRenderable2 {
+         this.textBuffer.setText(content);
+         this.setRenderedLineSources(undefined);
+       }
++      this._shownContent = content;
+       this._shouldRenderTextBuffer = true;
+       this._isHighlighting = false;
+       this._highlightsDirty = false;
+@@ -3539,6 +3565,7 @@ class CodeRenderable2 extends TextBufferRenderable2 {
+       if (this.isDestroyed)
+         return;
+       this.textBuffer.setText(content);
++      this._shownContent = content;
+       this.setRenderedLineSources(undefined);
+       this._shouldRenderTextBuffer = true;
+       this._isHighlighting = false;
+@@ -3667,6 +3694,7 @@ class CodeRenderable2 extends TextBufferRenderable2 {
+         this.clearPendingHighlight();
+         if (hasContent) {
+           this.textBuffer.setText(this._content);
++          this._shownContent = this._content;
+           this.setRenderedLineSources(undefined);
+           this.updateTextInfo();
+         }
+diff --git a/index.bun.js b/index.bun.js
+index ebfaceb70fd2b8c7a952d76bb1d11b9cf04f8b31..1cfd6593a4cf1cba46438145c37bfdc01dccfbf5 100644
+--- a/index.bun.js
++++ b/index.bun.js
+@@ -11856,7 +11856,9 @@ function parseMarkdownIncremental(newContent, prevState, trailingUnstable = 2) {
+       break;
+     }
+   }
+-  reuseCount = Math.max(0, reuseCount - trailingUnstable);
++  // oc patch: appended text can still extend the last matching token (a paragraph cut mid-word
++  // when streaming stops before the final append), so re-lex it even when trailingUnstable is 0.
++  reuseCount = Math.max(0, reuseCount - Math.max(1, trailingUnstable));
+   offset = 0;
+   for (let i = 0;i < reuseCount; i++) {
+     offset += prevState.tokens[i].raw.length;

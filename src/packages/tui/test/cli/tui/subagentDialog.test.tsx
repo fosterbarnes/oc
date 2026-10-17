@@ -53,12 +53,7 @@ async function mount(root: string, variants: Record<string, object>) {
   const calls = createFetch((url) => {
     if (url.pathname === "/config/providers")
       return json({ providers: [{ id: "test", name: "Test", models: { sample: model } }], default: { test: "sample" } })
-    if (url.pathname === "/provider")
-      return json({
-        all: [{ id: "test", name: "Test", models: { sample: model } }],
-        connected: ["test"],
-        default: { test: "sample" },
-      })
+    if (url.pathname === "/provider/summary") return json({ all: [{ id: "test", name: "Test" }], connected: ["test"] })
     if (url.pathname === "/agent")
       return json([
         { name: "editable", mode: "subagent", native: false },

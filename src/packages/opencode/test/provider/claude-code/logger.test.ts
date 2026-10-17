@@ -8,15 +8,22 @@
  *   - boolean / level parsing edge cases
  *
  * File-write side effects are exercised by pointing `dir` at a temp dir and
- * inspecting the file after each test.
+ * inspecting the file after each test. `readLog()` flushes the write queue
+ * first; `readLog(false)` shows only what already reached the file.
  */
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs"
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-import { _resetLoggerForTests, configureLogger, getLoggerConfig, log } from "@/provider/claude-code/logger.js"
+import {
+  _resetLoggerForTests,
+  configureLogger,
+  flushLogger,
+  getLoggerConfig,
+  log,
+} from "@/provider/claude-code/logger.js"
 import { setOpencodeClient } from "@/provider/claude-code/runtimeStatus.js"
 import { createOpencodeClient } from "@opencode-ai/sdk"
 
@@ -34,11 +41,12 @@ function captureStderr(): { lines: string[]; restore: () => void } {
   }
 }
 
-function withTempDir(): { dir: string; cleanup: () => void; readLog: () => string } {
+function withTempDir(): { dir: string; cleanup: () => void; readLog: (flush?: boolean) => string } {
   const dir = mkdtempSync(join(tmpdir(), "opencode-cc-logtest-"))
   return {
     dir,
-    readLog() {
+    readLog(flush = true) {
+      if (flush) flushLogger()
       const f = join(dir, "plugin.log")
       return existsSync(f) ? readFileSync(f, "utf8") : ""
     },
@@ -75,6 +83,79 @@ test("level threshold: debug dropped at level=info", () => {
     const out = tmp.readLog()
     assert.ok(!out.includes("dropped-debug"))
     assert.ok(out.includes("kept-info"))
+  } finally {
+    tmp.cleanup()
+    _resetLoggerForTests()
+  }
+})
+
+test("debug lines queue and reach the file on the 100 ms flush", async () => {
+  clearEnv()
+  const tmp = withTempDir()
+  try {
+    configureLogger({ file: true, dir: tmp.dir, level: "debug", mode: "silent" })
+    log.debug("queued-1")
+    log.debug("queued-2")
+    assert.equal(tmp.readLog(false), "", "debug lines wait for the batch")
+    await new Promise((resolve) => setTimeout(resolve, 250))
+    const out = tmp.readLog(false)
+    assert.ok(out.indexOf("queued-1") !== -1 && out.indexOf("queued-1") < out.indexOf("queued-2"))
+  } finally {
+    tmp.cleanup()
+    _resetLoggerForTests()
+  }
+})
+
+test("warn flushes at once, with the queued lines before it in order", () => {
+  clearEnv()
+  const tmp = withTempDir()
+  const stderr = captureStderr()
+  try {
+    configureLogger({ file: true, dir: tmp.dir, level: "debug", mode: "silent" })
+    log.debug("before-warn")
+    log.warn("the-warn")
+    const out = tmp.readLog(false)
+    assert.ok(out.indexOf("before-warn") !== -1 && out.indexOf("before-warn") < out.indexOf("the-warn"))
+  } finally {
+    stderr.restore()
+    tmp.cleanup()
+    _resetLoggerForTests()
+  }
+})
+
+test("configureLogger flushes queued lines to the old file", () => {
+  clearEnv()
+  const first = withTempDir()
+  const second = withTempDir()
+  try {
+    configureLogger({ file: true, dir: first.dir, level: "debug", mode: "silent" })
+    log.debug("old-file-line")
+    configureLogger({ file: true, dir: second.dir, level: "debug", mode: "silent" })
+    log.debug("new-file-line")
+    assert.ok(first.readLog(false).includes("old-file-line"))
+    assert.ok(!second.readLog().includes("old-file-line"))
+    assert.ok(second.readLog().includes("new-file-line"))
+  } finally {
+    first.cleanup()
+    second.cleanup()
+    _resetLoggerForTests()
+  }
+})
+
+test("rotation: tracked size past 5 MB moves the file to plugin.log.1", () => {
+  clearEnv()
+  const tmp = withTempDir()
+  try {
+    // Just under the limit: the first flush reads the size and stays in this file.
+    writeFileSync(join(tmp.dir, "plugin.log"), "x".repeat(5 * 1024 * 1024 - 10))
+    configureLogger({ file: true, dir: tmp.dir, level: "debug", mode: "silent" })
+    log.debug("crosses-limit")
+    assert.ok(tmp.readLog().endsWith("crosses-limit\n"))
+    // The tracked size is now past the limit, so the next flush rotates first.
+    log.debug("after-rotate")
+    assert.ok(tmp.readLog().includes("after-rotate"))
+    assert.ok(!tmp.readLog().includes("crosses-limit"))
+    assert.ok(readFileSync(join(tmp.dir, "plugin.log.1"), "utf8").endsWith("crosses-limit\n"))
   } finally {
     tmp.cleanup()
     _resetLoggerForTests()

@@ -1173,6 +1173,14 @@ export const ListResult = Schema.Struct({
 })
 export type ListResult = Types.DeepMutable<Schema.Schema.Type<typeof ListResult>>
 
+// The same providers as ListResult with only what a provider picker shows. The full list carries
+// every models.dev model (several MB), which clients that only list names do not need.
+export const SummaryResult = Schema.Struct({
+  all: Schema.Array(Schema.Struct({ id: Schema.String, name: Schema.String })),
+  connected: Schema.Array(Schema.String),
+})
+export type SummaryResult = Types.DeepMutable<Schema.Schema.Type<typeof SummaryResult>>
+
 export const ConfigProvidersResult = Schema.Struct({
   providers: Schema.Array(Info),
   default: DefaultModelIDs,

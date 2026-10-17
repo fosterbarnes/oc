@@ -23,6 +23,9 @@ const LEVEL_RANK: Record<LogLevel, number> = {
 }
 
 const MAX_LOG_BYTES = 5 * 1024 * 1024 // 5 MB
+// Debug logging writes a line per stream delta, so lines queue and flush in batches.
+const _FLUSH_MS = 100
+const _FLUSH_CHARS = 64 * 1024
 const DEFAULT_DIR = join(homedir(), ".local", "share", "opencode-claude-code")
 
 const DEFAULT_CONFIG: LoggerConfig = {
@@ -70,6 +73,14 @@ function withEnvOverrides(base: LoggerConfig): LoggerConfig {
 
 let activeConfig: LoggerConfig = withEnvOverrides(DEFAULT_CONFIG)
 let fileLoggingDisabled = false
+let pending: string[] = []
+let pendingChars = 0
+let flushTimer: ReturnType<typeof setTimeout> | undefined
+let exitHooked = false
+// Log file whose directory exists and whose size `fileBytes` tracks, so a flush skips
+// `mkdirSync`/`statSync`.
+let preparedFile: string | null = null
+let fileBytes = 0
 
 /**
  * Configure the logger from plugin settings. Env vars override the supplied
@@ -82,17 +93,25 @@ let fileLoggingDisabled = false
  *   `OPENCODE_CLAUDE_CODE_LOG_LEVEL`  → `level` (debug | info | notice | warn | error)
  */
 export function configureLogger(input: Partial<LoggerConfig>): void {
+  // Queued lines belong to the old file.
+  flushLogger()
   const merged: LoggerConfig = { ...DEFAULT_CONFIG, ...input }
   activeConfig = withEnvOverrides(merged)
   fileLoggingDisabled = false
+  preparedFile = null
 }
 
 export function getLoggerConfig(): LoggerConfig {
   return { ...activeConfig }
 }
 
-/** Test-only helper. Resets to defaults+env so tests are deterministic. */
+/** Test-only helper. Resets to defaults+env so tests are deterministic; drops queued lines. */
 export function _resetLoggerForTests(): void {
+  clearTimeout(flushTimer)
+  flushTimer = undefined
+  pending = []
+  pendingChars = 0
+  preparedFile = null
   activeConfig = withEnvOverrides(DEFAULT_CONFIG)
   fileLoggingDisabled = false
   lastToastAt.clear()
@@ -102,29 +121,55 @@ function resolvedLogFile(): string {
   return join(activeConfig.dir ?? DEFAULT_DIR, "plugin.log")
 }
 
-function rotateIfNeeded(logFile: string): void {
-  try {
-    const stat = statSync(logFile)
-    if (stat.size > MAX_LOG_BYTES) {
-      renameSync(logFile, `${logFile}.1`)
-    }
-  } catch {
-    // file does not exist yet - nothing to rotate
-  }
-}
-
-function writeToFile(line: string): void {
-  if (!activeConfig.file) return
+/**
+ * Writes queued lines with one append. Runs 100 ms after the first queued line, at 64K
+ * chars, at once for warn/error, before `configureLogger` changes the file, and on exit.
+ * A hard kill loses at most the last 100 ms of debug lines.
+ */
+export function flushLogger(): void {
+  clearTimeout(flushTimer)
+  flushTimer = undefined
+  if (pending.length === 0) return
+  const text = pending.join("\n") + "\n"
+  pending = []
+  pendingChars = 0
   if (fileLoggingDisabled) return
   try {
     const logFile = resolvedLogFile()
-    mkdirSync(dirname(logFile), { recursive: true })
-    rotateIfNeeded(logFile)
-    appendFileSync(logFile, line + "\n", "utf8")
+    if (preparedFile !== logFile) {
+      mkdirSync(dirname(logFile), { recursive: true })
+      fileBytes = statSync(logFile, { throwIfNoEntry: false })?.size ?? 0
+      preparedFile = logFile
+    }
+    if (fileBytes > MAX_LOG_BYTES) rotate(logFile)
+    appendFileSync(logFile, text, "utf8")
+    fileBytes += Buffer.byteLength(text)
   } catch {
     // Disable on first failure to avoid spamming errors on a read-only FS.
     fileLoggingDisabled = true
   }
+}
+
+function rotate(logFile: string): void {
+  try {
+    renameSync(logFile, `${logFile}.1`)
+    fileBytes = 0
+  } catch {
+    // Another process may hold the file; keep appending and retry on the next flush.
+  }
+}
+
+function writeToFile(line: string, now: boolean): void {
+  if (!activeConfig.file) return
+  if (fileLoggingDisabled) return
+  pending.push(line)
+  pendingChars += line.length + 1
+  if (!exitHooked) {
+    exitHooked = true
+    process.on("exit", flushLogger)
+  }
+  if (now || pendingChars >= _FLUSH_CHARS) return flushLogger()
+  flushTimer ??= setTimeout(flushLogger, _FLUSH_MS).unref()
 }
 
 function fmt(level: string, msg: string, data?: Record<string, unknown>): string {
@@ -166,7 +211,7 @@ function emit(level: LogLevel, msg: string, data?: Record<string, unknown>): voi
   if (!shouldEmit(level)) return
   const line = fmt(level.toUpperCase(), msg, data)
   // File first: the record must survive whatever surfacing does.
-  writeToFile(line)
+  writeToFile(line, level === "warn" || level === "error")
   if (activeConfig.mode === "debug") console.error(line)
   else if (level === "warn" || level === "error") surface(level, msg, line)
 }

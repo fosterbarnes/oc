@@ -104,6 +104,9 @@ export const Info = Schema.Struct({
   diff_style: Schema.optional(DiffStyle),
   cursor: Schema.optional(Cursor),
   mouse: Schema.optional(Schema.Boolean).annotate({ description: "Enable or disable mouse capture (default: true)" }),
+  smooth_streaming: Schema.optional(Schema.Boolean).annotate({
+    description: "Beta: reveal streamed replies and reasoning at a steady pace instead of in bursts (default: false)",
+  }),
 })
 export type Info = Schema.Schema.Type<typeof Info>
 
@@ -111,13 +114,15 @@ export type KeybindPreset = (typeof TuiKeybindPreset.Names)[number]
 export type SidebarButtonStyle = NonNullable<Info["sidebar_button_style"]>
 export type SubagentTabsSettings = { click: "inline" | "tab"; auto_open: boolean; return_to_parent: boolean }
 
-export type Resolved = Omit<Info, "attention" | "keybind_preset" | "sidebar_button_style" | "subagent_tabs" | "palette_keys" | "keybinds" | "leader_timeout" | "mouse" | "cursor"> & {
+export type Resolved = Omit<Info, "attention" | "keybind_preset" | "sidebar_button_style" | "subagent_tabs" | "palette_keys" | "keybinds" | "leader_timeout" | "mouse" | "cursor" | "smooth_streaming"> & {
   keybind_preset: KeybindPreset
   sidebar_button_style: SidebarButtonStyle
   subagent_tabs: SubagentTabsSettings
   palette_keys: Record<string, string>
+  smooth_streaming: boolean
   setKeybindPreset: (preset: KeybindPreset) => void
   setSidebarButtonStyle: (style: SidebarButtonStyle) => void
+  setSmoothStreaming: (on: boolean) => void
   setSubagentTabs: (settings: SubagentTabsSettings) => void
   setPaletteKey: (command: string, key: string | undefined) => void
   attention: {
@@ -158,6 +163,7 @@ export function resolve(input: Info, options: ResolveOptions): Resolved {
     return_to_parent: input.subagent_tabs?.return_to_parent ?? true,
   })
   const [paletteKeys, setPaletteKeys] = createSignal<Record<string, string>>(input.palette_keys ?? {})
+  const [smoothStreaming, setSmoothStreaming] = createSignal(input.smooth_streaming ?? false)
 
   return {
     ...input,
@@ -176,6 +182,10 @@ export function resolve(input: Info, options: ResolveOptions): Resolved {
       return subagentTabs()
     },
     setSubagentTabs,
+    get smooth_streaming() {
+      return smoothStreaming()
+    },
+    setSmoothStreaming,
     get palette_keys() {
       return paletteKeys()
     },

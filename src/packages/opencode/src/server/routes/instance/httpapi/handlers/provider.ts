@@ -40,7 +40,9 @@ export const providerHandlers = HttpApiBuilder.group(InstanceHttpApi, "provider"
     const svc = yield* ProviderAuth.Service
     const authStore = yield* Auth.Service
 
-    const list = Effect.fn("ProviderHttpApi.list")(function* () {
+    // models.dev providers allowed by enabled/disabled_providers, with loaded providers layered on
+    // top (same key order as Object.assign). Shared by `list` and `summary`.
+    const selectProviders = Effect.fnUntraced(function* () {
       const config = yield* cfg.get()
       const all = yield* ModelsDev.Service.use((s) => s.get())
       const disabled = new Set(config.disabled_providers ?? [])
@@ -49,16 +51,31 @@ export const providerHandlers = HttpApiBuilder.group(InstanceHttpApi, "provider"
       for (const [key, value] of Object.entries(all)) {
         if ((enabled ? enabled.has(key) : true) && !disabled.has(key)) filtered[key] = value
       }
-      const connected = yield* provider.list()
+      const loaded = yield* provider.list()
       const credentials = yield* authStore.all().pipe(Effect.orDie)
+      const ids = [...new Set([...Object.keys(filtered), ...Object.keys(loaded)])]
+      return { filtered, loaded, connected: ids.filter((id) => id in loaded || credentials[id]) }
+    })
+
+    const list = Effect.fn("ProviderHttpApi.list")(function* () {
+      const selected = yield* selectProviders()
       const providers = Object.assign(
-        mapValues(filtered, (item) => Provider.fromModelsDevProvider(item)),
-        connected,
+        mapValues(selected.filtered, (item) => Provider.fromModelsDevProvider(item)),
+        selected.loaded,
       )
       return {
         all: Object.values(providers).map(Provider.toPublicInfo),
         default: Provider.defaultModelIDs(providers),
-        connected: Object.keys(providers).filter((id) => id in connected || credentials[id]),
+        connected: selected.connected,
+      }
+    })
+
+    const summary = Effect.fn("ProviderHttpApi.summary")(function* () {
+      const selected = yield* selectProviders()
+      const providers: Record<string, { id: string; name: string }> = { ...selected.filtered, ...selected.loaded }
+      return {
+        all: Object.values(providers).map((item) => ({ id: item.id, name: item.name })),
+        connected: selected.connected,
       }
     })
 
@@ -114,6 +131,7 @@ export const providerHandlers = HttpApiBuilder.group(InstanceHttpApi, "provider"
 
     return handlers
       .handle("list", list)
+      .handle("summary", summary)
       .handle("auth", auth)
       .handle("usage", usage)
       .handleRaw("authorize", authorizeRaw)

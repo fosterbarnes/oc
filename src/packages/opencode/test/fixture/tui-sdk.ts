@@ -67,8 +67,8 @@ export function createFetch(override?: FetchHandler) {
         return json({ home: "", state: "", config: "", worktree, directory })
       case "/project/current":
         return json({ id: "proj_test" })
-      case "/provider":
-        return json({ all: [], default: {}, connected: [] })
+      case "/provider/summary":
+        return json({ all: [], connected: [] })
       case "/session":
         return json([])
       case "/vcs":

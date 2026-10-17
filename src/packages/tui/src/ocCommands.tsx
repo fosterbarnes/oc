@@ -601,6 +601,40 @@ export function createOcCommands(input: {
           ))
         },
       },
+      {
+        name: "oc.smooth_streaming",
+        title: "Smooth streaming",
+        category: "oc",
+        group: "Beta",
+        get desc() {
+          return tuiConfig.smooth_streaming ? "on" : "off"
+        },
+        slashName: "smoothStreaming",
+        run: () => {
+          dialog.replace(() => (
+            <DialogSelect
+              title="Smooth streaming"
+              current={tuiConfig.smooth_streaming}
+              options={[
+                { value: true, title: "on", description: "Reveal replies and reasoning at a steady pace" },
+                { value: false, title: "off", description: "Show text as soon as it arrives" },
+              ]}
+              onSelect={(option) => {
+                dialog.clear()
+                tuiConfig.setSmoothStreaming(option.value)
+                try {
+                  persistTuiSetting(["smooth_streaming"], option.value)
+                } catch (cause) {
+                  const message = cause instanceof Error ? cause.message : String(cause)
+                  toast.show({ message: `Smooth streaming applied but not saved: ${message}`, variant: "error" })
+                  return
+                }
+                toast.show({ message: `Smooth streaming ${option.title}`, variant: "success" })
+              }}
+            />
+          ))
+        },
+      },
       ...[
         {
           name: "oc.update_all_harnesses",

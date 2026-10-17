@@ -15,7 +15,7 @@ import type {
   McpResource,
   FormatterStatus,
   SessionStatus,
-  ProviderListResponse,
+  ProviderSummaryResponse,
   ProviderAuthMethod,
   VcsInfo,
   SnapshotFileDiff,
@@ -130,7 +130,7 @@ export const {
       status: "loading" | "partial" | "complete"
       provider: Provider[]
       provider_default: Record<string, string>
-      provider_next: ProviderListResponse
+      provider_next: ProviderSummaryResponse
       console_state: ConsoleState
       capabilities: {
         experimentalBackgroundSubagents: boolean
@@ -173,7 +173,6 @@ export const {
     }>({
       provider_next: {
         all: [],
-        default: {},
         connected: [],
       },
       console_state: emptyConsoleState,
@@ -770,7 +769,8 @@ export const {
 
       // blocking - include session.list when continuing a session
       const providersPromise = sdk.client.config.providers({ workspace }, { throwOnError: true })
-      const providerListPromise = sdk.client.provider.list({ workspace }, { throwOnError: true })
+      // Picker ids and names only; provider.list carries the full models.dev catalog (several MB).
+      const providerListPromise = sdk.client.provider.summary({ workspace }, { throwOnError: true })
       const capabilitiesPromise = sdk.client.experimental.capabilities
         .get({ workspace }, { throwOnError: true })
         .then((x) => x.data)

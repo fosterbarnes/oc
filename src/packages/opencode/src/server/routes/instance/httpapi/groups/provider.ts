@@ -46,6 +46,17 @@ export const ProviderApi = HttpApi.make("provider")
             description: "Get a list of all available AI providers, including both available and connected ones.",
           }),
         ),
+        HttpApiEndpoint.get("summary", `${root}/summary`, {
+          query: WorkspaceRoutingQuery,
+          success: described(Provider.SummaryResult, "Provider ids and names"),
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "provider.summary",
+            summary: "List provider names",
+            description:
+              "Get the providers from provider.list with only their id and name, plus the connected provider ids.",
+          }),
+        ),
         HttpApiEndpoint.get("usage", `${root}/usage`, {
           query: WorkspaceRoutingQuery,
           success: described(Schema.Array(ProviderUsage.Info), "Provider quota observations"),

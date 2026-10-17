@@ -37,6 +37,13 @@ test files skip, so the package suite never runs them.
 | P7 | Disk and git per turn on a 2,000-file repo, snapshot on vs off (`gitPreload.ts`) |
 | P8 | `opencode serve` + SDK on the Claude provider: CLI children cold vs warm, after 90 s idle, survivors after graceful and hard stop. No TUI |
 | P9 | `opencode serve` + SDK: memory and MCP children (`mcpStub.ts`) across six projects, idle, deletes, instance dispose. No TUI |
+| P10 | Stream smoothness: seeded replies (prose, mixed, code, reasoning, long session) on a seeded bursty delta schedule; `streamPreload.ts` writes the TUI timeline to `stream-trace.jsonl`. Options: `OC_PERF_P10` phase list, `OC_PERF_REAL_CONFIG=1` (user config, fake model), `OC_PERF_P10_PROVIDER=claude` (real `claude` CLI; `OC_PERF_CLAUDE_LOG`, `OC_PERF_CLAUDE_NOPROXY=1`), `OC_PERF_CPU_PROF=1`, `OC_PERF_SMOOTH=1` (Beta `smooth_streaming` on), `OC_PERF_THINKING=show` (expanded reasoning; the default `hide` collapses it, so reasoning timing needs this) |
+| P11 | Real model in a real session (spends usage): user config and auth, throwaway DB and TUI state. `OC_PERF_P11_MODEL` (required), `OC_PERF_P11_EXPECT` (footer label; never prompts another model), `OC_PERF_P11_PICK` (model dialog filter), `OC_PERF_P11_PROMPTS` (`markdown,tools`), `OC_PERF_P11_ATTACH=1` (warm `serve` + `attach`) |
+
+P10's Claude variant shows a delta hold that only exists in this harness: each delta reaches oc
+when the next one is sent (cause unknown). Real Claude through oc paints each delta about 8 ms
+after it arrives, so use P11 for Claude timing. P10's Claude variant still serves for counting
+`plugin.log` writes and other server-side cost.
 
 ## Method
 

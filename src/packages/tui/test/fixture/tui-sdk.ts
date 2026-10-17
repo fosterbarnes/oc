@@ -109,7 +109,7 @@ export function createFetch(override?: FetchHandler, events?: ReturnType<typeof 
     if (url.pathname === "/project/current") return json({ id: "proj_test" })
     if (url.pathname === "/api/reference")
       return json({ location: { directory, project: { id: "proj_test", directory } }, data: [] })
-    if (url.pathname === "/provider") return json({ all: [], default: {}, connected: [] })
+    if (url.pathname === "/provider/summary") return json({ all: [], connected: [] })
     if (url.pathname === "/session" || url.pathname === "/experimental/session") return json([])
     if (url.pathname === "/vcs") return json({ branch: "main" })
     throw new Error(`unexpected request: ${url.pathname}`)

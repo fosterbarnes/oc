@@ -1,4 +1,4 @@
-param([ValidateSet('all','M1','M2','M3','M4','M5','M6','P1','P2','P3','P4','P6','P7','P8','P9','cleanup')][string]$Metric = 'all')
+param([ValidateSet('all','M1','M2','M3','M4','M5','M6','P1','P2','P3','P4','P6','P7','P8','P9','P10','P11','cleanup')][string]$Metric = 'all')
 # Runs one opt-in performance probe (see README.md). Prints the run directory; the full bun test
 # output goes to rerun-<metric>-<time>.log beside the runs.
 $ErrorActionPreference = 'Stop'

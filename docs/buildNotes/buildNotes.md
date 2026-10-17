@@ -150,6 +150,101 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-17 (~14:50) - v0.2.227 axesShittn - P4 probe teardown no longer fails; scrollback surface checked against the OpenTUI patch - Opus 5.5, default effort; Implementation
+
+### Agent
+- Meta: Opus 5.5; default effort; Implementation (follow-up to stream smoothness v0.2.226 and startup payload v0.2.227, both uncommitted); completed
+- Version: 0.2.227 axesShittn (no bump: version already changed since the last commit)
+- Fixed `test/perf/probe.test.ts` pacing proxy: upstream `fetch` and body read now `.catch` to a 502 response. Cause: TestLLMServer closes before the pane at teardown while the pane's oc still calls the model, and a throw inside the `Bun.serve` handler fails the bun test ("Unable to connect", ConnectionRefused). Bug predates v0.2.226.
+- Verification: `bun test test/cli/run/scrollback.surface.test.ts` against the patched OpenTUI (`@opentui%2Fcore@0.5.14.patch`): 16 pass, 1 skip (`skipIf(win32)`, file unchanged), 0 fail. P4 `run-1792262819672-P4`: 1 pass, 0 fail, cleanup verified, isolation checked; frames/s 26.2 / 26.7 / 26.9 (no tool / 1 / 4 tools), confirming the spinner phase-lock (was 26.0 / 37.5 / 48.5).
+- Note: probe.test.ts kept CRLF.
+
+### User
+Tests
+- The spinner performance probe no longer reports a false failure when it shuts down.
+- The terminal scrollback check still passes with the new instant code-block streaming.
+
+---
+
+## 2026-10-17 (~10:03) - v0.2.227 axesShittn - Lighter TUI startup: provider summary endpoint replaces the 8.3 MB provider list - Opus 5.5, default effort; Implementation
+
+### Agent
+- Meta: Opus 5.5; default effort; Implementation (option A of `~/.config/opencode/plans/streamSmoothness/startupPayload.md`, user-chosen); completed; user live check pending a build
+- Version: 0.2.227 axesShittn
+- Note: runs after the v0.2.226 stream-smoothness session (same uncommitted tree); no shared source files.
+- Found: native startup sent 12.8-13.6 MB over the worker RPC bridge. 8.3 MB was `GET /provider` (sync.tsx bootstrap, blocking): 234 models.dev providers, 9,044 models. TUI read only `all[].id/name` (Connect dialog, model-dialog onboarding) and `connected` (Connect gutter, `contextLimit.tsx`); `default` unused.
+- Found: cost on the TUI thread about 105 ms in one block: envelope `JSON.parse` in `rpc.ts` about 18-23 ms, SDK body parse about 15-17 ms, Solid `reconcile` about 65 ms (its `unwrap` walks every object; about 77 ms again on each re-bootstrap). Worker answered 0.38-0.42 s after `/config/providers` (`fromModelsDevProvider` + `toPublicInfo` per provider + encode), so the blocking bootstrap waited for it.
+- Added `Provider.SummaryResult` (`opencode/src/provider/provider.ts`): `{ all: { id, name }[], connected: string[] }`.
+- Added `GET /provider/summary` (`provider.summary`) in `httpapi/groups/provider.ts`; handler `summary` in `handlers/provider.ts`. Moved list's provider selection into `selectProviders` (enabled/disabled filter over ModelsDev, loaded providers on top, `connected` = loaded or has credentials, same key order as `Object.assign`); `list` output unchanged; `summary` skips `fromModelsDevProvider`/`toPublicInfo`.
+- Regenerated legacy JS SDK: `bun ./packages/sdk/js/script/build.ts --generate-only` (from `src`). Diff only adds `provider.summary` and its types; no dist build. `packages/client` contract has no legacy `/provider`, so it was not regenerated.
+- Changed `tui/src/context/sync.tsx`: bootstrap calls `sdk.client.provider.summary`; `provider_next` typed `ProviderSummaryResponse`, initial `{ all: [], connected: [] }` (dropped unused `default`). Dialogs and `contextLimit.tsx` unchanged.
+- Changed tests: new case in `opencode/test/server/httpapi-provider.test.ts` (summary equals list's id/name and `connected`, with an `xai` credential); `/provider` stubs -> `/provider/summary` in `tui/test/fixture/tui-sdk.ts`, `tui/test/cli/tui/subagentDialog.test.tsx`, `opencode/test/fixture/tui-sdk.ts`; scenario `provider.summary` in `opencode/test/server/httpapi-exercise/index.ts`.
+- Added FORK.md row "Lighter TUI startup payload" (section 2); high 49 -> 50, total 85 -> 86.
+- Proof (P11, `OC_PERF_P11_PROMPTS=none OC_PERF_CPU_PROF=1`, `cursor/composer-2.5-fast`, no model calls; runs in `C:\ocTestTmp\ocPerfRuns\startupPayload`): before `run-1792208422134-P11`, after `run-1792245727752-P11`. Bridge bytes 13.6 MB -> 5.3 MB; largest message 8.3 MB -> 1.25 MB (`/config`); summary reply 11.6 KB, 5 ms after `/config/providers` (was 377 ms); the 125 ms + 107 ms stalls after bootstrap are gone; bootstrap reconcile samples about 65 ms -> about 6 ms. The after-run machine was slower overall (`/config` +3.49 s vs +2.52 s), so absolute startup times are not compared.
+- Verification: `tsgo --noEmit` exit 0 in tui and opencode. `bun test test/server/httpapi-provider.test.ts` 6 pass, 1 skip (pre-existing). TUI fixture users (`subagentDialog`, `app-lifecycle`, `data`, `test/cli/cmd/tui`, `use-event`, `dialogSessionListStatusFilter`): 70 pass, 2 fail. `httpapi-exercise --mode coverage`: 222 pass, 0 fail; `provider.summary` covered.
+- ERROR: pre-existing `subagentDialog.test.tsx` failures "model and effort selections hand off to the name prompt" and "Ctrl+D only opens confirmation for names in the writable file"; same 2 fail with this session's TUI files restored to HEAD. Not fixed.
+- ERROR: pre-existing httpapi coverage misses `GET /agent/sub`, `POST /agent/sub`, `DELETE /agent/sub/{name}` (no scenarios since v0.2.180-181), so `test:httpapi` exits 1. Not fixed.
+- Note: prettier warnings in `sync.tsx` and `httpapi-exercise/index.ts` are on lines this session did not touch; left alone.
+- Not changed (plan "not recommended now"): `/config` 1.25 MB (1 MB is `command`: synced Claude skills stored three times under `skill:synced:<id>_<id>:` keys, source not traced), `/agent` 857 KB `permission`, `/command` 608 KB `template`, unused `data.tsx` V2 loads (`/api/skill` 429 KB), bridge double encoding.
+- TODO: leftover `models.json.<pid>.<time>.tmp` files in `~\.cache\opencode` (26 files, 117 MB): `ModelsDev.fetchAndWrite` (`core/src/models-dev.ts:202-215`) cleans up only on failure, not on interruption or a hard kill.
+- Note: palette `get desc` getters in `ocCommands.tsx` call `readOcConfig()` (sync read + `statSync`, `ocSettings.ts:13`) on each palette rebuild; one 310 ms profile gap there. Not investigated.
+- TODO: user live check after a build: Connect dialog shows every provider with checkmarks on connected ones; first-run model dialog shows "Popular providers"; after connecting a provider the model list opens.
+
+### User
+Startup
+- The TUI now asks the server only for provider names at startup instead of the full catalog of every model, so about 8 MB less data moves at launch.
+- Startup no longer has a brief freeze (about a tenth of a second) when that catalog arrived, and the startup sync no longer waits about 0.4 s for it.
+- The Connect provider dialog and the first-run provider list look and work the same.
+
+---
+
+## 2026-10-17 (~03:26) - v0.2.226 subscribeButterfree - Stream smoothness: instant streaming code, reasoning on markdown, batched Claude logging, spinner phase-lock, Beta smooth streaming - Opus 5.5, default effort; Implementation
+
+### Agent
+- Meta: Opus 5.5; default effort; Implementation (stage 3 of `~/.config/opencode/plans/streamSmoothness/stage2.plan.md` items 1-5, evidence `stage1.findings.md`); completed; user live checks pending a build
+- Version: 0.2.226 subscribeButterfree
+- Added `src/patches/@opentui%2Fcore@0.5.14.patch` (`bun patch`; `patchedDependencies` in `src/package.json` and `bun.lock`), bun files only (`chunk-bun-j2z63cdy.js`, `index.bun.js`). `CodeRenderable._shownContent` = source text the buffer shows, set everywhere the buffer is set from content. Streaming non-markdown `set content` appends the new tail with `textBuffer.append` when the value extends `_shownContent`; other changes still wait for the highlight. `ensureVisibleTextBeforeHighlight` shows a streaming code block's first text at once, and keeps a visible code buffer that already shows the content (no plain flash when streaming ends). Markdown-filetype blocks unchanged.
+- Fixed (same patch) `parseMarkdownIncremental`: reuse drops `max(1, trailingUnstable)` tokens. With `trailingUnstable` 0 the last paragraph token was reused when `streaming=false` landed before the final append, so the tail became its own block (`P10PROSEDO` / `NE`). Exposed by TextPart's new `streaming` flip: `part.time.end` and the last text arrive in one update and `streaming` is applied first.
+- Changed `tui/src/routes/session/index.tsx`: ReasoningPart renders `<markdown streaming={!isDone()} internalBlockMode="top-level">` (subtle syntax, header, collapse kept); TextPart has one trim memo and `streaming` from `part.time?.end`.
+- Changed `opencode/src/provider/claude-code/logger.ts`: lines queue; flush on a 100 ms unref'd timer, at 64K chars, at once for warn/error, before `configureLogger`, and on process `exit`. `mkdirSync` + `statSync` once per resolved file, size tracked for 5 MB rotation; a failed rename keeps appending; disable on first write failure kept. Exported `flushLogger()`. `_resetLoggerForTests` drops queued lines (plan said flush; dropping avoids recreating deleted test dirs).
+- Added `src/patches/opentui-spinner@0.0.7.patch`: due times `(Math.floor(now / interval) + 1) * interval` in `start`, `reschedule`, and both `tick` sites.
+- Added Beta `smooth_streaming` (tui.json, default false): schema, signal, `setSmoothStreaming` in `tui/src/config/index.tsx`; `persistTuiSetting` key; palette `oc.smooth_streaming` (`/smoothStreaming`, category `oc`, new group "Beta") in `ocCommands.tsx`; helper `tui/src/routes/session/smoothText.ts` (33 ms ticks reveal `max(1, ceil(backlog / 4))`; off or done = full text; text present at mount or when enabled shows at once; a shorter rewrite clamps). Used by TextPart content and ReasoningPart body.
+- Docs: wiki `..\oc.wiki\Configuration.md` row for `smooth_streaming` (unpushed; that clone has other uncommitted edits not from this session). FORK.md rows "Steady streaming paint" and "Smooth streaming (beta)", high 47 -> 49, total 83 -> 85, Beta added to the palette headings list.
+- Removed `TEMP(streamTrace)` block and its `appendFileSync` import from `sessionManager.ts` (file equals HEAD again) and `OC_PERF_STREAM_RAW` from `probe.test.ts`. `streamPreload.ts` reads `_shownContent.length` (dropped `__shownLen`).
+- Recorded stage-1 perf kit (uncommitted until now): P10 stream smoothness and P11 real model in `probe.test.ts`, `streamPreload.ts`, `streamContent.ts`, `probeEntry.ts`, `run.ps1`, README; test-env leak fix (P10/P11 panes strip the `test/preload.ts` env: temp `XDG_*`, fixture model list, `OPENCODE_EXPERIMENTAL_*`, `OPENCODE_TEST_*`). This session added P10 options `OC_PERF_SMOOTH=1` and `OC_PERF_THINKING=show` and a README note that the P10 Claude variant has a harness-only delta hold (use P11 for Claude timing).
+- Changed root `AGENTS.md`: removed the "state the expected cost first" clause from the real-model rule (user edit from stage 1).
+- Proof item 1 (P10 isolated, before `run-1792206025959-P10`, after `run-1792221012148-P10`): code lag p50/p95 chars mixed 10/123 -> 0/0, code 9/44 -> 0/0, long 9/26 -> 0/0; longest frozen code block mixed 508 ms -> 0; hidden code frames 3/1/1 -> 0; frame JS p95 <= 1.9 ms; sent -> painted unchanged (prose 11.9/18.9 -> 10.7/19.9 ms).
+- Note: the stage-1 "reasoning sent -> painted p95 35 ms" was an artifact: the probe's thinking mode defaults to `hide`, so reasoning deltas painted nothing and the metric caught the next unrelated frame (fewer frames now with the phase-lock: 38.2 ms after). Expanded reasoning (`OC_PERF_THINKING=show`), old `<code>` renderer swapped in temporarily `run-1792221262971-P10` vs new `run-1792221215273-P10`: 11.2/19.5 vs 11.6/20.5 ms, equal; reasoning highlight ms p95 2.7 -> 0.8, total 566 -> 233 ms.
+- Proof item 3 (P4, before = original spinner file swapped into the store temporarily `run-1792221672708-P4`, after `run-1792221472640-P4`): frames/s (a) status only 26.0 -> 26.5, (b) one tool 37.5 -> 26.7, (c) four tools 48.5 -> 27.2 (before (c) counted from `spinner-wakes.jsonl` over the case window); spinner glyphs render the same in the screens.
+- Proof item 2 (Claude P10 prose, before `run-1792206160546-P10`, after `run-1792221877868-P10`): 400 `plugin.log` lines in the prose window in both; before = 400 appends + 400 `mkdirSync` + 400 `statSync`; after about 72 appends for 428 lines (estimated from 100 ms timestamp clusters, not counted directly), one `mkdirSync` + `statSync`.
+- Proof item 4 (`run-1792221321790-P10`, `OC_PERF_SMOOTH=1`; from `md` content-set rows, since `analyze.py` times message arrival, not reveal): content-set gap p95 64-82 -> 35 ms; chars per set p95 35-39 -> 19-22; final text length exact in every phase; arrival -> content set p50 ~16 -> ~115 ms, p95 ~230-250 ms; frames/s 44-49 -> 51-55.
+- Verification: `tsgo --noEmit` exit 0 in tui and opencode (tests included). tui `test/component/streamingCode.test.tsx` (6, new), `test/cli/tui/thinking.test.ts` (5), `test/routes/smoothText.test.ts` (5, new): 16 pass. opencode `test/provider/claude-code/logger.test.ts`: 17 pass. 0 fail.
+- ERROR: first P10 after item 1 timed out ("Timeout: P10 prose"): the parser split above. Fixed in the patch, regression case in `streamingCode.test.tsx`.
+- ERROR: both P4 runs fail at teardown with "Unable to connect" from the shared LLM proxy in `probe.test.ts` (late request after the fake LLM closed); all three cases were measured first. That proxy is in HEAD; not fixed here. TODO: return 502 when the upstream fetch fails.
+- Not run: `opencode/test/cli/run/scrollback.surface.test.ts` (streams through CodeRenderable with `MockTreeSitterClient`, so the patch can change its output) and tui snapshot tests that render session parts.
+- Risk: both vendor patches need a refresh on OpenTUI or opentui-spinner upgrades (OpenTUI 0.6.6 has the same gating). `TextBuffer.append` keeps appended chunks until the next `setText`, bounded by the block's size.
+- Note: FORK.md's medium count had already drifted (25 active rows vs 19 listed); left as is.
+- TODO: user live checks: a long Claude reply with a code block (text flows, last chars color a moment later; reasoning as smooth as text); spinner looks the same and WezTerm CPU is lower while a tool runs; Beta > Smooth streaming off by default, steady when on, final text exact; `plugin.log` still fills, warnings appear at once.
+
+### User
+Chat streaming
+- Code blocks now show their text the moment it streams in; the newest characters pick up color a moment later instead of the whole block lagging behind.
+- The first code block in a language no longer stays blank while its highlighter loads.
+- Thinking blocks now use the same renderer as replies.
+- Finishing a reply no longer flashes its code blocks as plain text.
+- Spinners now tick together, so running tools no longer add extra screen redraws (about 37-48 down to about 27 per second).
+
+Beta
+- New setting **Smooth streaming** (`ctrl+o`, or `smooth_streaming` in tui.json), off by default: replies and reasoning appear at a steady pace about a tenth of a second behind arrival instead of in bursts.
+
+Claude Code
+- Debug file logging (`plugin.log`) now writes in small batches instead of once per line; warnings and errors still land immediately.
+
+Developer
+- New opt-in performance probes for stream smoothness (P10) and real-model sessions (P11).
+
+---
+
 ## 2026-10-16 (~22:16) - v0.2.225 fuggnSomebody - Fix memory leaks ML-1 to ML-4: Cursor no-tool Runs, bounded SSE queues, TUI open trees, Claude exchanges - Opus 5.5, default effort; Implementation
 
 ### Agent

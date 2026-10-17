@@ -2,4 +2,5 @@
 if (process.env.OC_PERF_SPINNER === "1") await import("./spinnerPreload")
 if (process.env.OC_PERF_EVENTS === "1") await import("./eventPreload")
 if (process.env.OC_PERF_GIT === "1") await import("./gitPreload")
+if (process.env.OC_PERF_STREAM === "1") await import("./streamPreload")
 await import("../../src/index")

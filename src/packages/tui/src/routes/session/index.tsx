@@ -72,6 +72,7 @@ import * as Model from "../../util/model"
 import { formatTranscript } from "../../util/transcript"
 import { sessionEpilogue } from "../../util/presentation"
 import { setPreLayoutSiblingMargin } from "../../util/layout"
+import { smoothText } from "./smoothText"
 import { useTuiConfig } from "../../config"
 import { useArgs } from "../../context/args"
 import { useClipboard } from "../../context/clipboard"
@@ -1923,6 +1924,7 @@ function ReasoningPart(props: { last: boolean; part: ReasoningPart; message: Ass
     return end === undefined ? 0 : Math.max(0, end - props.part.time.start)
   })
   const summary = createMemo(() => reasoningSummary(content()))
+  const body = smoothText(() => summary().body, isDone, () => ctx.tui.smooth_streaming)
   const syntax = createSyntaxStyleMemo(() => generateSubtleSyntax(theme))
 
   const toggle = () => {
@@ -1949,16 +1951,16 @@ function ReasoningPart(props: { last: boolean; part: ReasoningPart; message: Ass
             encrypted={opaque()}
           />
         </box>
-        <Show when={!opaque() && (!inMinimal() || expanded()) && summary().body}>
+        <Show when={!opaque() && (!inMinimal() || expanded()) && body()}>
           <box paddingLeft={inMinimal() ? 2 : 0} marginTop={1}>
-            <code
-              filetype="markdown"
-              drawUnstyledText={false}
-              streaming={true}
+            <markdown
               syntaxStyle={syntax()}
-              content={summary().body}
+              streaming={!isDone()}
+              internalBlockMode="top-level"
+              content={body()}
               conceal={ctx.conceal()}
               fg={theme.textMuted}
+              bg={theme.background}
             />
           </box>
         </Show>
@@ -2005,14 +2007,17 @@ function ReasoningHeader(props: {
 function TextPart(props: { last: boolean; part: TextPart; message: AssistantMessage }) {
   const ctx = use()
   const { theme, syntax } = useTheme()
+  const text = createMemo(() => props.part.text.trim())
+  const streaming = () => props.part.time?.end === undefined
+  const shown = smoothText(text, () => !streaming(), () => ctx.tui.smooth_streaming)
   return (
-    <Show when={props.part.text.trim()}>
+    <Show when={shown()}>
       <box ref={(el: BoxRenderable) => alwaysSeparate.add(el)} paddingLeft={3} marginTop={1} flexShrink={0}>
         <markdown
           syntaxStyle={syntax()}
-          streaming={true}
+          streaming={streaming()}
           internalBlockMode="top-level"
-          content={props.part.text.trim()}
+          content={shown()}
           tableOptions={{ style: "grid" }}
           conceal={ctx.conceal()}
           fg={theme.markdownText}

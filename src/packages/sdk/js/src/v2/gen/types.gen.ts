@@ -10556,6 +10556,40 @@ export type ProviderListResponses = {
 
 export type ProviderListResponse = ProviderListResponses[keyof ProviderListResponses]
 
+export type ProviderSummaryData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/provider/summary"
+}
+
+export type ProviderSummaryErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type ProviderSummaryError = ProviderSummaryErrors[keyof ProviderSummaryErrors]
+
+export type ProviderSummaryResponses = {
+  /**
+   * Provider ids and names
+   */
+  200: {
+    all: Array<{
+      id: string
+      name: string
+    }>
+    connected: Array<string>
+  }
+}
+
+export type ProviderSummaryResponse = ProviderSummaryResponses[keyof ProviderSummaryResponses]
+
 export type ProviderUsageStateData = {
   body?: never
   path?: never
