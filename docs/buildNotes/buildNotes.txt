@@ -1,14 +1,8 @@
-v0.2.233 manipulatedGlaze
+v0.2.235 boobagesZuko
 
-notifications:
-New Notices entry in the oc palette (/notices) lists every toast since oc started, newest first, with its time; enter opens one in full. Warning and error toasts end with "/notices to read again", so a message that vanished can be found.
+pasting:
+Pressing Enter right after pasting an image with Ctrl+V now sends the image together with your text. Before, the text went out alone and the image landed in the next prompt. The same applies to pasting a file path that becomes an attachment, and to Alt+Enter queueing.
 
-Any model's unanswered question now gets one "Question waiting" toast after 5 minutes, naming the session, when you are looking at a different session. With attention enabled in tui.json, a desktop notification and sound also fire when the terminal is not focused. This replaces the Claude-only "proxy call still waiting" toast, which looked like an error.
+Typing, pressing Ctrl+V and then Enter very quickly now sends the prompt with the image even when Ctrl is still held as Enter goes down. That key used to arrive as Ctrl+Enter and add a newline instead of sending. Ctrl+Enter still adds a newline normally; only within a moment of a Ctrl+V paste does it send.
 
-claude code:
-Internal Claude Code warnings no longer pop up as raw toasts; they are written to opencode.log with channel=claude-code like everything else. Claude Code still tells you in plain English when an agent names a model or reasoning effort it does not have, when proxyTools or proxyOpencodeTools lists an unknown name, or when an image link or unsupported attachment was not sent. The same toast shows at most once a minute. A tool that runs out of time shows as a tool error in the chat instead of a warning toast beforehand.
-
-subagents menu:
-Pressing Enter on general or explore in the Subagents menu opens the model picker, then asks for the reasoning level; "Auto" leaves it open so each run can pick. The menu shows the new model once the server reloads. Other subagent rows still copy their name on Enter. The palette "Subagent model" entry saves through the same path.
-
-Under the hood: the question reminder lives in the shared TUI notifications plugin (feature-plugins/system/notifications.ts), so it is provider-neutral. The Claude logger mirrors warn/error through a ManagedRuntime over Observability.layer with the shared memoMap; the proxy broker's stall and deadline lines are NOTICE records in plugin.log only. The toast history is kept in ToastContext (last 100 per TUI run). DialogSubagents refetches agents on sync.configReloadEpoch; persistAgentModel takes an optional variant, and an empty agent variant is removed from config. Plan: docs/dev/noticesPlan.md. Checks run: tui notifications tests (9 pass); 17 Claude Code provider test files including logger, broker and agentModels (282 pass); subagentDialog tests (new tests pass, 2 known failures listed in AGENTS.md); config tests for variant/shell/subagent (10 pass); tui and opencode typechecks clean. Not checked live in the TUI yet.
+Under the hood: prompt pastes run through trackPaste, and submit and queuePrompt wait for any paste still reading before they read the draft. For 300 ms after Ctrl+V, or until the paste lands if that is later, a targeted ctrl+return binding runs prompt.submit and the Home "send and stay" binding is paused. Cause found with a temporary raw-input log (since removed): Enter came in as \x1b[13;5u 87 ms after Ctrl+V. Checks run: promptPasteSubmit.test.ts (Enter and Ctrl+Enter during a slow image read, 2 pass; each case fails with its fix removed); tui typecheck clean. Not checked live in the TUI after the last fix.

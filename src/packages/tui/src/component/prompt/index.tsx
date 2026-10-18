@@ -145,6 +145,9 @@ function formatEditorContext(selection: EditorSelection) {
 
 let stashed: { prompt: PromptInfo; cursor: number } | undefined
 
+// How long after Ctrl+V a Ctrl+Enter still counts as a submit (see `pasteGrace`).
+const _PASTE_GRACE_MS = 300
+
 export function Prompt(props: PromptProps) {
   let input: TextareaRenderable
   let anchor: BoxRenderable
@@ -183,10 +186,22 @@ export function Prompt(props: PromptProps) {
     onCleanup(() => clearInterval(timer))
   })
   // A turn ending is when a usage-limit resume gets queued, so refresh then instead of waiting for the poll.
-  createEffect(on(() => status().type, (type) => type === "idle" && refreshResumes(), { defer: true }))
+  createEffect(
+    on(
+      () => status().type,
+      (type) => type === "idle" && refreshResumes(),
+      { defer: true },
+    ),
+  )
   createEffect(on(() => props.sessionID, refreshResumes, { defer: true }))
   const queue = createQueueSnapshot(() => props.sessionID)
-  createEffect(on(() => status().type, (type) => type === "idle" && queue.refresh(), { defer: true }))
+  createEffect(
+    on(
+      () => status().type,
+      (type) => type === "idle" && queue.refresh(),
+      { defer: true },
+    ),
+  )
   const queueLabel = createMemo(() => {
     const snapshot = queue.snapshot()
     if (snapshot.entries.length === 0) return undefined
@@ -463,22 +478,26 @@ export function Prompt(props: PromptProps) {
         name: "prompt.paste",
         category: "Prompt",
         hidden: true,
-        run: async (ctx: CommandContext<Renderable, KeyEvent>) => {
+        run: (ctx: CommandContext<Renderable, KeyEvent>) => {
           ctx.event.preventDefault()
           ctx.event.stopPropagation()
-          const content = await clipboard.read?.()
-          if (content?.mime.startsWith("image/")) {
-            await pasteAttachment({
-              filename: content.filepath ? path.basename(content.filepath) : "clipboard",
-              filepath: content.filepath,
-              mime: content.mime,
-              content: content.data,
-            })
-            return
-          }
-          if (content?.mime === "text/plain") {
-            await pasteInputText(content.data)
-          }
+          const run = trackPaste(async () => {
+            const content = await clipboard.read?.()
+            if (content?.mime.startsWith("image/")) {
+              await pasteAttachment({
+                filename: content.filepath ? path.basename(content.filepath) : "clipboard",
+                filepath: content.filepath,
+                mime: content.mime,
+                content: content.data,
+              })
+              return
+            }
+            if (content?.mime === "text/plain") {
+              await pasteInputText(content.data)
+            }
+          })
+          startPasteGrace()
+          return run
         },
       },
       {
@@ -940,12 +959,39 @@ export function Prompt(props: PromptProps) {
     }
   })
 
+  // A fast Ctrl+V then Enter often arrives as Ctrl+Enter because Ctrl is still held, and Ctrl+Enter
+  // inserts a newline. Until the paste lands and at least _PASTE_GRACE_MS has passed, it submits.
+  const [pasteGrace, setPasteGrace] = createSignal(false)
+  let pasteGraceID = 0
+  function startPasteGrace() {
+    const id = ++pasteGraceID
+    setPasteGrace(true)
+    const minimum = new Promise((resolve) => setTimeout(resolve, _PASTE_GRACE_MS))
+    void Promise.allSettled([minimum, pasting]).then(() => {
+      if (id === pasteGraceID) setPasteGrace(false)
+    })
+  }
+
   // Targeted so Ctrl+Enter on Home wins over the managed textarea's input.newline.
   useBindings(() => {
     return {
       target: inputTarget,
-      enabled: inputTarget() !== undefined && !props.disabled && !props.sessionID && route.data.type === "home",
+      enabled:
+        inputTarget() !== undefined &&
+        !props.disabled &&
+        !props.sessionID &&
+        route.data.type === "home" &&
+        !pasteGrace(),
       bindings: tuiConfig.keybinds.get("prompt.submit.background"),
+    }
+  })
+
+  // Ctrl+Enter right after Ctrl+V is a plain submit with Ctrl still held (see `startPasteGrace`).
+  useBindings(() => {
+    return {
+      target: inputTarget,
+      enabled: inputTarget() !== undefined && !props.disabled && pasteGrace(),
+      bindings: [{ key: "ctrl+return", desc: "Submit after paste", group: "Prompt", cmd: "prompt.submit" }],
     }
   })
 
@@ -1122,6 +1168,7 @@ export function Prompt(props: PromptProps) {
     if (queueing) return false
     queueing = true
     try {
+      await pasting
       return await queueInner(schedule)
     } finally {
       queueing = false
@@ -1172,7 +1219,8 @@ export function Prompt(props: PromptProps) {
         },
       )
     if (!queued) return false
-    if (schedule) toast.show({ message: `Scheduled for ${Locale.todayTimeOrDateTime(schedule.runAt)}`, variant: "success" })
+    if (schedule)
+      toast.show({ message: `Scheduled for ${Locale.todayTimeOrDateTime(schedule.runAt)}`, variant: "success" })
 
     if (editorParts.length > 0) editor.markSelectionSent()
     history.append({ ...store.prompt, mode: store.mode })
@@ -1182,6 +1230,15 @@ export function Prompt(props: PromptProps) {
     if (!input.isDestroyed) input.clear()
     queue.refresh()
     return true
+  }
+
+  // Clipboard and file reads make pastes async. A submit that starts while one is still reading
+  // waits for it; otherwise the draft goes out without the attachment, which lands in the next draft.
+  let pasting = Promise.resolve()
+  function trackPaste(task: () => Promise<void>) {
+    const run = task()
+    pasting = Promise.allSettled([pasting, run]).then(() => {})
+    return run
   }
 
   let submitting = false
@@ -1195,6 +1252,7 @@ export function Prompt(props: PromptProps) {
     if (submitting) return false
     submitting = true
     try {
+      await pasting
       return await submitInner(stayHome)
     } finally {
       submitting = false
@@ -1706,7 +1764,7 @@ export function Prompt(props: PromptProps) {
                 // default paste unless we suppress it first and handle insertion ourselves.
                 event.preventDefault()
 
-                await pasteInputText(normalizedText)
+                await trackPaste(() => pasteInputText(normalizedText))
               }}
               ref={(r: TextareaRenderable) => {
                 input = r

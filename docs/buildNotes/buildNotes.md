@@ -150,6 +150,46 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-18 (~19:39) - v0.2.235 boobagesZuko - Fast Ctrl+V then Enter sends instead of adding a newline - Opus 5.5, low effort; Debug
+
+### Agent
+- Meta: Opus 5.5; low effort; Debug; completed
+- Version: 0.2.235 boobagesZuko
+- Cause (live raw-stdin log): fast `test`, Ctrl+V, Enter sent Enter as `\x1b[13;5u` 87 ms after `\x16`: Ctrl still held -> Ctrl+Enter -> textarea `input.newline` in a session (on Home: `prompt.submit.background`). Not a drop; v0.2.234 `await pasting` was working. Mocked tests and the `pasteLiveScratch` WezTerm pane never hit it because they sent plain `\r`.
+- Added tui `component/prompt/index.tsx` `pasteGrace` signal + `startPasteGrace()` (called from `prompt.paste` after `trackPaste`): true until the paste settles and `_PASTE_GRACE_MS` (300) has passed; `pasteGraceID` keeps an older timer from clearing a newer grace. While true, a targeted `ctrl+return` -> `prompt.submit` binding wins over `input.newline`, and `prompt.submit.background` is disabled so Home does a normal submit.
+- Kept: only the Ctrl+V path (`prompt.paste`, also reached from Windows Terminal empty bracketed paste) starts grace; bracketed text paste does not. Key hardcoded `ctrl+return` (the rolled-over modifier), not read from config.
+- Changed `tui/test/cli/tui/promptPasteSubmit.test.ts` to `test.each` over Enter and Ctrl+Enter; `finishRead` moved to module scope because `src/clipboard.ts` caches the first host clipboard (`hostClipboard ??=`), so case 2 reused case 1's read closure.
+- Removed temp `pasteDebug` logging (raw input handler, `%TEMP%\ocPasteDebug.log`); log file deleted.
+- Verification: `bun test --timeout 30000 test/cli/tui/promptPasteSubmit.test.ts` 2 pass; with the grace binding disabled the Ctrl+Enter case fails, restored and passes; `bun run typecheck` in packages/tui exit 0. Not yet confirmed live after the fix.
+- Removed untracked scratch repros `tui/test/cli/tui/pasteProbeScratch.test.ts` and `opencode/test/provider/claude-code/pasteLiveScratch.test.ts` (pass cleanup).
+
+### User
+Pasting
+- Typing, pressing Ctrl+V and then Enter very quickly now sends the prompt with the image, even if Ctrl is still held when Enter is pressed.
+- Ctrl+Enter still inserts a newline normally; only within a moment of a Ctrl+V paste does it send instead.
+
+---
+
+## 2026-10-18 (~18:57) - v0.2.234 burpedChief - Enter right after an image paste waits for the image - Opus 5.5, medium effort; Implementation
+
+### Agent
+- Meta: Opus 5.5; medium effort; Implementation (imp of `C:/Users/Foster/.config/opencode/plans/oc/pasteSubmitRace.md`); completed
+- Version: 0.2.234 burpedChief
+- Cause: `prompt.paste` awaits `clipboard.read()` (native read, or PowerShell file-drop ~300 ms) before `pasteAttachment`; Enter -> textarea `onSubmit` -> 2x `setTimeout(0)` -> `submit()` read and cleared the store first, so `[Image 1]` landed in the emptied prompt. OpenTUI keymap calls `run` synchronously (`@opentui/keymap src/index.js:1902-1923`), so a paste is always registered before the following Enter.
+- Added tui `component/prompt/index.tsx` `pasting` + `trackPaste(task)`: `Promise.allSettled([pasting, run]).then(() => {})`, never rejects, covers back-to-back pastes. `prompt.paste` body and `onPaste` -> `pasteInputText` run through it.
+- Changed `submit()` and `queuePrompt()`: `await pasting` inside their in-flight guards, so a second Enter during the wait is dropped (one send). Covers Enter, `prompt.submit`, Ctrl+Enter background, Alt+Enter queue, schedule dialog, `ref.submit`.
+- Added `tui/test/cli/tui/promptPasteSubmit.test.ts` (win32 only): full `run` with real Prompt, `@opentui/core` mock overrides `createCliRenderer` and `createHostClipboard` (deferred read), so the real `clipboard.read` path runs. `Global.layerWith({ state: tmp })` keeps kv/prompt history out of the real state dir. Did not `mock.module` `src/clipboard`: it would leak into `test/clipboard.test.ts` in a full-suite run.
+- Kept: text typed between Ctrl+V and the paste landing goes before `[Image N]`. No timeout on the wait; native host read has its own `timed-out` status, PowerShell read unbounded (Risk if it ever hangs: fix with a child timeout in `clipboard.ts`).
+- TODO: `test/cli/tui/prompt-submit-race.test.ts` mirrors `submit` logic instead of testing it; candidate for removal.
+- Verification: `bun test --timeout 30000 test/cli/tui/promptPasteSubmit.test.ts` 1 pass; with the `await pasting` in `submit` removed it fails (`Expected length: 0, Received length: 1`), restored and passes; `bun run typecheck` in packages/tui exit 0. Not run live.
+
+### User
+Pasting
+- Pressing Enter right after pasting an image now sends the image together with your text, instead of sending the text alone and leaving the image in the next prompt.
+- The same applies to pasting a file path that becomes an attachment, and to Alt+Enter queueing.
+
+---
+
 ## 2026-10-18 (~18:45) - v0.2.233 manipulatedGlaze - Provider-neutral notices: shared question reminder, Claude internals log only - Opus 5.5, low effort; Implementation
 
 ### Agent
