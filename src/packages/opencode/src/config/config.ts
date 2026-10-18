@@ -233,8 +233,17 @@ function writable(info: Info) {
 function writableGlobal(info: Info) {
   const next = writable(info)
   // When a user changes config from a value back to default in the Desktop app, we don't want to leave a blank `"shell": "",` key
-  if ("shell" in next && next.shell === "") return { ...next, shell: undefined }
-  return next
+  const shell = "shell" in next && next.shell === "" ? { shell: undefined } : {}
+  // Same for an agent's reasoning effort: "" (TUI Subagents menu "Auto") removes the variant key
+  const agent = next.agent && {
+    agent: Object.fromEntries(
+      Object.entries(next.agent).map(([name, item]) => [
+        name,
+        item?.variant === "" ? { ...item, variant: undefined } : item,
+      ]),
+    ),
+  }
+  return { ...next, ...shell, ...agent }
 }
 
 const layer = Layer.effect(
@@ -753,7 +762,10 @@ const layer = Layer.effect(
           s.agentLayers.map(async (layer) => {
             if (typeof layer !== "string") return { agents: layer, diagnostics: [] }
             const scanned = await ConfigAgent.scan(layer)
-            return { agents: mergeDeep(scanned.agents, await ConfigAgent.loadMode(layer)), diagnostics: scanned.diagnostics }
+            return {
+              agents: mergeDeep(scanned.agents, await ConfigAgent.loadMode(layer)),
+              diagnostics: scanned.diagnostics,
+            }
           }),
         ),
       )
@@ -798,34 +810,37 @@ const layer = Layer.effect(
     // Parses the local JSON config files a reload would load, failing with the loaders' ConfigJsonError or
     // ConfigInvalidError before anything is disposed. Skips caching, writes, npm installs, and plugin/agent scans.
     // Remote, account, and managed sources are not checked here.
-    const preflight = Effect.fn("Config.preflight")(function* (ctx: InstanceContext) {
-      const directories = yield* ConfigPaths.directories(ctx.directory, ctx.worktree).pipe(Effect.orDie)
-      const projectFiles = yield* ConfigPaths.files("opencode", ctx.directory, ctx.worktree).pipe(Effect.orDie)
-      const dirFiles = directories.flatMap((dir) =>
-        dir.endsWith(".opencode") || dir === Flag.OPENCODE_CONFIG_DIR
-          ? ["opencode.json", "opencode.jsonc"].map((file) => path.join(dir, file))
-          : [],
-      )
-      const files = [
-        ...["config.json", "opencode.json", "opencode.jsonc"].map((file) => path.join(Global.Path.config, file)),
-        ...(Flag.OPENCODE_CONFIG ? [Flag.OPENCODE_CONFIG] : []),
-        ...projectFiles,
-        ...dirFiles,
-      ]
-      yield* Effect.forEach(
-        files,
-        (filepath) =>
-          Effect.gen(function* () {
-            const text = yield* readConfigFile(filepath)
-            if (!text) return
-            const expanded = yield* Effect.promise(() =>
-              ConfigVariable.substitute({ text, type: "path", path: filepath }),
-            )
-            yield* decodeConfig(ConfigParse.jsonc(expanded, filepath), filepath)
-          }),
-        { discard: true },
-      )
-    }, Effect.provideService(FSUtil.Service, fs))
+    const preflight = Effect.fn("Config.preflight")(
+      function* (ctx: InstanceContext) {
+        const directories = yield* ConfigPaths.directories(ctx.directory, ctx.worktree).pipe(Effect.orDie)
+        const projectFiles = yield* ConfigPaths.files("opencode", ctx.directory, ctx.worktree).pipe(Effect.orDie)
+        const dirFiles = directories.flatMap((dir) =>
+          dir.endsWith(".opencode") || dir === Flag.OPENCODE_CONFIG_DIR
+            ? ["opencode.json", "opencode.jsonc"].map((file) => path.join(dir, file))
+            : [],
+        )
+        const files = [
+          ...["config.json", "opencode.json", "opencode.jsonc"].map((file) => path.join(Global.Path.config, file)),
+          ...(Flag.OPENCODE_CONFIG ? [Flag.OPENCODE_CONFIG] : []),
+          ...projectFiles,
+          ...dirFiles,
+        ]
+        yield* Effect.forEach(
+          files,
+          (filepath) =>
+            Effect.gen(function* () {
+              const text = yield* readConfigFile(filepath)
+              if (!text) return
+              const expanded = yield* Effect.promise(() =>
+                ConfigVariable.substitute({ text, type: "path", path: filepath }),
+              )
+              yield* decodeConfig(ConfigParse.jsonc(expanded, filepath), filepath)
+            }),
+          { discard: true },
+        )
+      },
+      Effect.provideService(FSUtil.Service, fs),
+    )
 
     const updateGlobal = Effect.fn("Config.updateGlobal")(function* (config: Info) {
       const file = globalConfigFile()
@@ -893,9 +908,10 @@ function applyAgentOverrides<T extends Record<string, unknown>>(
       continue
     }
     Object.assign(result, {
-      [key]: isRecord(before[key]) && isRecord(after[key])
-        ? applyAgentOverrides(isRecord(result[key]) ? result[key] : {}, before[key], after[key])
-        : after[key],
+      [key]:
+        isRecord(before[key]) && isRecord(after[key])
+          ? applyAgentOverrides(isRecord(result[key]) ? result[key] : {}, before[key], after[key])
+          : after[key],
     })
   }
   return result

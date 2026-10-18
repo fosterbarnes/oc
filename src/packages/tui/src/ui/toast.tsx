@@ -11,6 +11,10 @@ export type ToastOptions = {
   duration: number
 }
 type ToastInput = Omit<ToastOptions, "duration"> & { duration?: number }
+export type ToastNotice = Omit<ToastOptions, "duration"> & { time: number }
+
+// Toasts vanish after a few seconds; the oc Notices palette entry lists these.
+const _NOTICE_LIMIT = 100
 
 export function Toast() {
   const toast = useToast()
@@ -44,6 +48,11 @@ export function Toast() {
           <text fg={theme.text} wrapMode="word" width="100%">
             {current().message}
           </text>
+          <Show when={current().variant === "warning" || current().variant === "error"}>
+            <text fg={theme.textMuted} marginTop={1}>
+              /notices to read again
+            </text>
+          </Show>
         </box>
       )}
     </Show>
@@ -53,6 +62,7 @@ export function Toast() {
 function init() {
   const [store, setStore] = createStore({
     currentToast: null as ToastOptions | null,
+    notices: [] as ToastNotice[],
   })
 
   let timeoutHandle: NodeJS.Timeout | null = null
@@ -61,6 +71,12 @@ function init() {
     show(options: ToastInput) {
       const toastOptions = { ...options, duration: options.duration ?? 5000 }
       setStore("currentToast", toastOptions)
+      setStore("notices", (notices) =>
+        [
+          { title: options.title, message: options.message, variant: options.variant, time: Date.now() },
+          ...notices,
+        ].slice(0, _NOTICE_LIMIT),
+      )
       if (timeoutHandle) clearTimeout(timeoutHandle)
       timeoutHandle = setTimeout(() => {
         setStore("currentToast", null)
@@ -79,6 +95,10 @@ function init() {
     },
     get currentToast(): ToastOptions | null {
       return store.currentToast
+    },
+    /** Every toast this TUI showed, newest first. */
+    get notices(): readonly ToastNotice[] {
+      return store.notices
     },
   }
   return toast

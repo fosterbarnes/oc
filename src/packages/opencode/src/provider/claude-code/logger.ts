@@ -1,8 +1,9 @@
 import { appendFileSync, mkdirSync, renameSync, statSync } from "node:fs"
 import { homedir } from "node:os"
 import { dirname, join } from "node:path"
-// Circular (runtimeStatus imports `log`), safe: only used at call time.
-import { showToast } from "./runtimeStatus.js"
+import { Effect, ManagedRuntime } from "effect"
+import { memoMap } from "@opencode-ai/core/effect/memo-map"
+import { Observability } from "@opencode-ai/core/observability"
 
 export type LogLevel = "debug" | "info" | "notice" | "warn" | "error"
 export type LogMode = "silent" | "debug"
@@ -114,7 +115,6 @@ export function _resetLoggerForTests(): void {
   preparedFile = null
   activeConfig = withEnvOverrides(DEFAULT_CONFIG)
   fileLoggingDisabled = false
-  lastToastAt.clear()
 }
 
 function resolvedLogFile(): string {
@@ -185,35 +185,29 @@ function shouldEmit(level: LogLevel): boolean {
   return LEVEL_RANK[level] >= LEVEL_RANK[activeConfig.level]
 }
 
-// The same message toasts at most once per window, so a warning raised on
-// every turn or every file part cannot flood the TUI.
-const _TOAST_REPEAT_MS = 60_000
-const lastToastAt = new Map<string, number>()
+// Lazily built; the shared memoMap reuses the app's logging layer instead of
+// building a second one.
+let mainLogRuntime: ManagedRuntime.ManagedRuntime<never, never> | undefined
 
 /**
- * warn/error must reach the operator even outside debug mode. In the TUI the
- * server runs in a worker whose stderr is the terminal itself, so a raw line
- * paints over the rendered frame: show a toast instead. stderr is only the
- * fallback for when no opencode client exists (early init, tests).
+ * warn/error always land in oc's main log (opencode.log, `channel=claude-code`),
+ * like every other subsystem. They are not toasted: a problem the user must act
+ * on gets its own plain-English `showToast` at the call site. Never stderr: in
+ * the TUI the server worker's stderr is the terminal and paints over the frame.
  */
-function surface(level: "warn" | "error", msg: string, line: string): void {
-  const now = Date.now()
-  const last = lastToastAt.get(msg)
-  if (last !== undefined && now - last < _TOAST_REPEAT_MS) return
-  if (!showToast(msg, level === "warn" ? "warning" : "error")) {
-    console.error(line)
-    return
-  }
-  lastToastAt.set(msg, now)
+function toMainLog(level: "warn" | "error", msg: string, data?: Record<string, unknown>): void {
+  mainLogRuntime ??= ManagedRuntime.make(Observability.layer, { memoMap })
+  const args = data ? [msg, data] : [msg]
+  const effect = level === "warn" ? Effect.logWarning(...args) : Effect.logError(...args)
+  mainLogRuntime.runFork(effect.pipe(Effect.annotateLogs({ channel: "claude-code" })))
 }
 
 function emit(level: LogLevel, msg: string, data?: Record<string, unknown>): void {
   if (!shouldEmit(level)) return
   const line = fmt(level.toUpperCase(), msg, data)
-  // File first: the record must survive whatever surfacing does.
   writeToFile(line, level === "warn" || level === "error")
+  if (level === "warn" || level === "error") toMainLog(level, msg, data)
   if (activeConfig.mode === "debug") console.error(line)
-  else if (level === "warn" || level === "error") surface(level, msg, line)
 }
 
 export const log = {

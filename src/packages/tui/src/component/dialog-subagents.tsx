@@ -11,6 +11,7 @@ import { useToast } from "../ui/toast"
 import { useSync } from "../context/sync"
 import { useTuiConfig } from "../config"
 import { errorMessage } from "../util/error"
+import { persistAgentModel } from "../ocSettings"
 import { DialogModel } from "./dialog-model"
 import { DialogSubagentEfforts } from "./dialog-subagent-efforts"
 import { DialogPrompt } from "../ui/dialog-prompt"
@@ -54,15 +55,19 @@ export function DialogSubagents(props: { highlight?: string }) {
   const [ref, setRef] = createSignal<DialogSelectRef<string>>()
   let pendingHighlight = props.highlight
 
-  const [agents, { refetch: refetchAgents }] = createResource(() =>
-    sdk.client.app
-      .agents({}, { throwOnError: true })
-      .then((result) => result.data ?? [])
-      // Catch so an errored resource never re-throws inside the memo and tears down the dialog.
-      .catch((error) => {
-        setLoadError(error)
-        return undefined
-      }),
+  // Keyed on configReloadEpoch: a global config write reloads agents server-side after the PATCH
+  // returns, so a refetch right after a model change would still read the old list.
+  const [agents, { refetch: refetchAgents }] = createResource(
+    () => sync.configReloadEpoch,
+    () =>
+      sdk.client.app
+        .agents({}, { throwOnError: true })
+        .then((result) => result.data ?? [])
+        // Catch so an errored resource never re-throws inside the memo and tears down the dialog.
+        .catch((error) => {
+          setLoadError(error)
+          return undefined
+        }),
   )
 
   const showError = createMemo(() => Boolean(loadError()))
@@ -82,6 +87,10 @@ export function DialogSubagents(props: { highlight?: string }) {
     const key = tuiConfig.keybinds.get("subagent.delete")[0]?.key
     return !key ? "" : typeof key === "string" ? key : stringifyKeyStroke(key)
   })
+
+  function findAgent(name: string) {
+    return agents()?.find((agent) => agent.name === name)
+  }
 
   function modelInfo(model: NonNullable<Agent["model"]>) {
     const provider = sync.data.provider.find((item) => item.id === model.providerID)
@@ -121,9 +130,7 @@ export function DialogSubagents(props: { highlight?: string }) {
         category: group,
         subcategory: subgroup || undefined,
         subcategoryColor: theme.textMuted,
-        footer: agent.native
-          ? model && [model.name, agent.variant].filter(Boolean).join(", ")
-          : agent.variant,
+        footer: agent.native ? model && [model.name, agent.variant].filter(Boolean).join(", ") : agent.variant,
       }
     })
   })
@@ -146,9 +153,52 @@ export function DialogSubagents(props: { highlight?: string }) {
 
   function startAdd() {
     dialog.replace(
-      () => <DialogModel updateCurrent={false} onSelect={(providerID, modelID) => chooseEfforts(providerID, modelID)} />,
+      () => (
+        <DialogModel updateCurrent={false} onSelect={(providerID, modelID) => chooseEfforts(providerID, modelID)} />
+      ),
       undefined,
       { back: () => reopen() },
+    )
+  }
+
+  // Native agents (general, explore) have no sub entry; Enter rebinds their model in the global config
+  function changeModel(agent: Agent) {
+    dialog.replace(
+      () => (
+        <DialogModel
+          current={agent.model}
+          updateCurrent={false}
+          onSelect={(providerID, modelID) => chooseEffort(agent, providerID, modelID)}
+        />
+      ),
+      undefined,
+      { back: () => reopen(agent.name) },
+    )
+  }
+
+  // "" = Auto: the agent has no fixed effort, so each task call may pass provider/model#effort
+  function chooseEffort(agent: Agent, providerID: string, modelID: string) {
+    async function save(variant: string) {
+      await persistAgentModel(sdk.client, agent.name, `${providerID}/${modelID}`, toast, variant)
+      reopen(agent.name)
+    }
+    const { variants } = modelInfo({ providerID, modelID })
+    if (variants.length === 0) {
+      void save("")
+      return
+    }
+    const sameModel = agent.model?.providerID === providerID && agent.model?.modelID === modelID
+    dialog.replace(
+      () => (
+        <DialogSelect
+          title="Reasoning"
+          current={sameModel ? (agent.variant ?? "") : ""}
+          options={[{ title: "Auto", value: "" }, ...variants.map((variant) => ({ title: variant, value: variant }))]}
+          onSelect={(option) => void save(option.value)}
+        />
+      ),
+      undefined,
+      { back: () => changeModel(agent) },
     )
   }
 
@@ -240,6 +290,11 @@ export function DialogSubagents(props: { highlight?: string }) {
           startAdd()
           return
         }
+        const agent = findAgent(option.value)
+        if (agent?.native) {
+          changeModel(agent)
+          return
+        }
         void clipboard
           .write?.(option.value)
           .then(() => toast.show({ message: `Copied ${option.value}`, variant: "info" }))
@@ -268,7 +323,11 @@ export function DialogSubagents(props: { highlight?: string }) {
           onTrigger: (option) => void remove(option.value),
         },
       ]}
-      footerHints={selectedValue() === ADD ? [] : [{ title: "copy", label: "enter" }]}
+      footerHints={
+        selectedValue() === ADD
+          ? []
+          : [{ title: findAgent(selectedValue())?.native ? "change model" : "copy", label: "enter" }]
+      }
     />
   )
 }

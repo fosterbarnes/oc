@@ -1,5 +1,6 @@
 import type { LanguageModelV3 } from "@ai-sdk/provider"
 import { log } from "./logger.js"
+import { showToast } from "./runtimeStatus.js"
 import { CLAUDE_CODE_PROVIDER_ID, STEERED_METADATA_KEY } from "./shared.js"
 
 /** Historical transcript marker. The account-failover feature that wrote it is gone. */
@@ -117,6 +118,7 @@ export function stripContextReminders(prompt: Prompt): {
 }
 
 const SUPPORTED_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/gif", "image/webp"])
+const _IMAGE_LINK_MESSAGE = "Claude Code cannot take image links. Attach the image file instead."
 
 function toImageBlock(part: any): any | null {
   const raw: unknown = part.image ?? part.data ?? part.url ?? part.source?.data
@@ -139,12 +141,14 @@ function toImageBlock(part: any): any | null {
       base64 = match[2]
     } else if (/^https?:\/\//i.test(raw)) {
       log.warn("remote URL images are not supported by Claude CLI, skipping")
+      showToast(_IMAGE_LINK_MESSAGE, "warning", "Image not sent")
       return null
     } else {
       base64 = raw
     }
   } else if (raw instanceof URL) {
     log.warn("remote URL images are not supported by Claude CLI, skipping")
+    showToast(_IMAGE_LINK_MESSAGE, "warning", "Image not sent")
     return null
   } else if (raw instanceof Uint8Array || Buffer.isBuffer(raw)) {
     base64 = Buffer.from(raw as Uint8Array).toString("base64")
@@ -157,6 +161,11 @@ function toImageBlock(part: any): any | null {
     log.warn("unsupported media type for Claude image block, skipping", {
       mediaType: resolvedMediaType,
     })
+    showToast(
+      `Claude Code only takes JPEG, PNG, GIF and WebP images; a ${resolvedMediaType || "file of unknown type"} attachment was left out.`,
+      "warning",
+      "Attachment not sent",
+    )
     return null
   }
 

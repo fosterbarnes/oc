@@ -45,19 +45,32 @@ export function getOpencodeClient(): unknown {
 }
 
 type ToastClient = {
-  tui?: { showToast?: (options: { body: { message: string; variant: string } }) => Promise<unknown> }
+  tui?: {
+    showToast?: (options: { body: { title?: string; message: string; variant: string } }) => Promise<unknown>
+  }
 }
 
+// The same toast shows at most once per window, so a call site hit on every
+// turn (a config mistake, a dropped attachment) cannot flood the TUI.
+const _TOAST_REPEAT_MS = 60_000
+const lastToastAt = new Map<string, number>()
+
 /**
- * Show a toast in the opencode TUI. Returns false when no client can show one
- * yet (before the plugin's `server` factory runs, or in tests), so callers
- * can fall back to stderr.
+ * Show a plain-English toast in the opencode TUI, for a problem the user must
+ * act on. Internal warnings belong in `log` instead. Returns false when no
+ * client can show one yet (before the plugin's `server` factory runs, or in
+ * tests) or the same toast showed within the repeat window.
  */
-export function showToast(message: string, variant: "info" | "warning" | "error"): boolean {
+export function showToast(message: string, variant: "info" | "warning" | "error", title?: string): boolean {
   // Called as a method: the SDK's `showToast` reads `this._client`, and an unbound call throws.
   const tui = (opencodeClient as ToastClient | null)?.tui
   if (!tui?.showToast) return false
-  tui.showToast({ body: { message, variant } }).catch((error: unknown) => {
+  const key = `${title}\n${message}`
+  const now = Date.now()
+  const last = lastToastAt.get(key)
+  if (last !== undefined && now - last < _TOAST_REPEAT_MS) return false
+  lastToastAt.set(key, now)
+  tui.showToast({ body: { title, message, variant } }).catch((error: unknown) => {
     log.debug("toast failed", { error: String(error) })
   })
   return true

@@ -50,17 +50,32 @@ async function mount(root: string, variants: Record<string, object>) {
       output: { text: true },
     },
   }
+  const configPatches: unknown[] = []
+  // Set by tests once the server has reloaded agents after a config write
+  const server = { reloaded: false }
   const calls = createFetch((url) => {
     if (url.pathname === "/config/providers")
       return json({ providers: [{ id: "test", name: "Test", models: { sample: model } }], default: { test: "sample" } })
     if (url.pathname === "/provider/summary") return json({ all: [{ id: "test", name: "Test" }], connected: ["test"] })
     if (url.pathname === "/agent")
       return json([
+        {
+          name: "general",
+          mode: "subagent",
+          native: true,
+          ...(server.reloaded && { model: { providerID: "test", modelID: "sample" } }),
+        },
         { name: "editable", mode: "subagent", native: false },
         { name: "foreign", mode: "subagent", native: false },
       ])
     if (url.pathname === "/agent/sub") return json(["editable"])
+    if (url.pathname === "/global/config") return json({})
   })
+  const fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (input instanceof Request && new URL(input.url).pathname === "/global/config")
+      configPatches.push(await input.clone().json())
+    return calls.fetch(input, init)
+  }) as typeof globalThis.fetch
   let dialog!: ReturnType<typeof useDialog>
   let sync!: ReturnType<typeof useSync>
   let local!: ReturnType<typeof useLocal>
@@ -81,7 +96,7 @@ async function mount(root: string, variants: Record<string, object>) {
           <OpencodeKeymapProvider keymap={keymap}>
             <TuiConfigProvider config={config}>
               <KVProvider>
-                <SDKProvider url="http://test" directory={directory} events={events.source} fetch={calls.fetch}>
+                <SDKProvider url="http://test" directory={directory} events={events.source} fetch={fetch}>
                   <PermissionProvider>
                     <ProjectProvider>
                       <ExitProvider
@@ -118,7 +133,7 @@ async function mount(root: string, variants: Record<string, object>) {
   dialog.replace(() => <DialogSubagents />)
   await wait(() => app.renderer.currentFocusedEditor instanceof InputRenderable)
   await app.waitForVisualIdle()
-  return { app, dialog }
+  return { app, dialog, configPatches, events, server }
 }
 
 test.each([false, true])(
@@ -171,6 +186,60 @@ test("model without efforts opens the name prompt directly", async () => {
     app.mockInput.pressEnter()
     await wait(() => app.renderer.currentFocusedEditor instanceof TextareaRenderable)
     expect(dialog.stack.length).toBe(1)
+  } finally {
+    app.renderer.destroy()
+  }
+})
+
+test("Enter on a native agent saves the picked model and shows it after the config reload", async () => {
+  await using tmp = await tmpdir()
+  const { app, configPatches, events, server } = await mount(tmp.path, {})
+  try {
+    const editor = app.renderer.currentFocusedEditor
+    if (!(editor instanceof InputRenderable)) throw new Error("expected picker")
+    editor.value = "general"
+    await app.waitForVisualIdle()
+    app.mockInput.pressEnter()
+    await app.waitForVisualIdle()
+    app.mockInput.pressEnter()
+    await wait(() => configPatches.length > 0)
+    // A model without efforts skips the Reasoning step and clears any old effort
+    expect(configPatches).toEqual([{ agent: { general: { model: "test/sample", variant: "" } } }])
+    await app.waitForVisualIdle()
+    expect(app.captureCharFrame()).not.toContain("Sample")
+    server.reloaded = true
+    events.emit({
+      directory: "global",
+      project: "proj_test",
+      payload: { id: "evt_disposed", type: "server.instance.disposed", properties: { directory: "global" } },
+    })
+    await wait(() => app.captureCharFrame().includes("Sample"))
+  } finally {
+    app.renderer.destroy()
+  }
+})
+
+test("a native agent model with efforts asks for reasoning before saving", async () => {
+  await using tmp = await tmpdir()
+  const { app, configPatches } = await mount(tmp.path, { high: {} })
+  try {
+    const editor = app.renderer.currentFocusedEditor
+    if (!(editor instanceof InputRenderable)) throw new Error("expected picker")
+    editor.value = "general"
+    await app.waitForVisualIdle()
+    app.mockInput.pressEnter()
+    await app.waitForVisualIdle()
+    app.mockInput.pressEnter()
+    await app.waitForVisualIdle()
+    expect(configPatches).toEqual([])
+    expect(app.captureCharFrame()).toContain("Reasoning")
+    const filter = app.renderer.currentFocusedEditor
+    if (!(filter instanceof InputRenderable)) throw new Error("expected reasoning picker")
+    filter.value = "high"
+    await app.waitForVisualIdle()
+    app.mockInput.pressEnter()
+    await wait(() => configPatches.length > 0)
+    expect(configPatches).toEqual([{ agent: { general: { model: "test/sample", variant: "high" } } }])
   } finally {
     app.renderer.destroy()
   }

@@ -9,7 +9,7 @@ import type { ClaudeCodeConfig } from "./types.js"
 import type { TurnContext } from "./turnContext.js"
 import { shouldStripContextReminders } from "./messageBuilder.js"
 import { mergeOpencodeMcp, type RuntimeMcpStatus } from "./mcpBridge.js"
-import { fetchOpencodeToolList, type OpencodeToolListItem } from "./runtimeStatus.js"
+import { fetchOpencodeToolList, showToast, type OpencodeToolListItem } from "./runtimeStatus.js"
 import { buildAppendedSystemPrompt, buildToolEnvironmentNote } from "./prompts.js"
 import { buildCliArgs, thinkingCliOptions } from "./cliArgs.js"
 import type { CliVersion } from "./cliVersion.js"
@@ -173,8 +173,18 @@ export function resolvedProxyTools(config: ClaudeCodeConfig): ProxyToolDef[] | n
     const known = [...defsByName.keys(), "schedule"].join(", ")
     if (picked.length === 0) {
       log.warn("no proxyTools entry was recognised; nothing will be proxied this turn", { unknown, known })
+      showToast(
+        `No Claude Code proxyTools entry is known (${unknown.join(", ")}), so oc's tools are not routed. Known: ${known}.`,
+        "warning",
+        "Config entry ignored",
+      )
     } else {
       log.warn("ignoring unknown proxyTools entries", { unknown, known })
+      showToast(
+        `Claude Code setting proxyTools has unknown entries: ${unknown.join(", ")}. They are ignored. Known: ${known}.`,
+        "warning",
+        "Config entry ignored",
+      )
     }
   }
   return picked.length > 0 ? picked : null
@@ -342,9 +352,7 @@ export async function planSpawn(input: {
   const [tools, skills] = await Promise.all([assembleProxyTools(input), fetchOpencodeSkills(turn.cwd)])
   const proxyServer =
     input.proxyServer ??
-    (tools.combined.length > 0
-      ? await ensureProxyServer(config, tools.combined, turn.sessionKey)
-      : null)
+    (tools.combined.length > 0 ? await ensureProxyServer(config, tools.combined, turn.sessionKey) : null)
   const mcp = effectiveMcpConfig(config, turn.cwd, proxyServer?.configPath(), input.runtimeStatus)
   const systemPromptFile = systemPrompt(
     buildToolEnvironmentNote(
@@ -422,8 +430,7 @@ async function assembleProxyTools(input: Parameters<typeof planSpawn>[0]) {
         ? [
             "ToolSearch",
             ...split.kept.filter(
-              (name) =>
-                !harnessDenied.includes(name) && (name !== "WebSearch" || config.webSearch !== "disabled"),
+              (name) => !harnessDenied.includes(name) && (name !== "WebSearch" || config.webSearch !== "disabled"),
             ),
           ]
         : undefined,

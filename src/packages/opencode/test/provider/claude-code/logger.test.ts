@@ -3,7 +3,7 @@
 /**
  * Unit tests for the logger module:
  *   - level threshold (debug < info < notice < warn < error)
- *   - mode policy (silent vs debug) for TUI routing
+ *   - mode policy (silent vs debug) for stderr, and the opencode.log mirror
  *   - env-var precedence over config
  *   - boolean / level parsing edge cases
  *
@@ -26,6 +26,7 @@ import {
 } from "@/provider/claude-code/logger.js"
 import { setOpencodeClient } from "@/provider/claude-code/runtimeStatus.js"
 import { createOpencodeClient } from "@opencode-ai/sdk"
+import { Global } from "@opencode-ai/core/global"
 
 function captureStderr(): { lines: string[]; restore: () => void } {
   const lines: string[] = []
@@ -162,10 +163,9 @@ test("rotation: tracked size past 5 MB moves the file to plugin.log.1", () => {
   }
 })
 
-test("level=error drops warn entirely (no file, no TUI)", () => {
+test("level=error drops warn entirely", () => {
   clearEnv()
   const tmp = withTempDir()
-  const stderr = captureStderr()
   try {
     configureLogger({ file: true, dir: tmp.dir, level: "error", mode: "silent" })
     log.warn("dropped-warn")
@@ -173,17 +173,14 @@ test("level=error drops warn entirely (no file, no TUI)", () => {
     const out = tmp.readLog()
     assert.ok(!out.includes("dropped-warn"), "warn should not reach file")
     assert.ok(out.includes("kept-error"), "error should reach file")
-    const tui = stderr.lines.join("\n")
-    assert.ok(!tui.includes("dropped-warn"), "warn should not reach TUI")
-    assert.ok(tui.includes("kept-error"), "error should reach TUI")
   } finally {
-    stderr.restore()
     tmp.cleanup()
     _resetLoggerForTests()
   }
 })
 
-test("mode=silent: only warn/error reach TUI", () => {
+// In the TUI the server worker's stderr is the terminal: a raw line paints over the frame.
+test("mode=silent: nothing reaches stderr", () => {
   clearEnv()
   const tmp = withTempDir()
   const stderr = captureStderr()
@@ -193,11 +190,7 @@ test("mode=silent: only warn/error reach TUI", () => {
     log.notice("silent-notice")
     log.warn("silent-warn")
     log.error("silent-error")
-    const tui = stderr.lines.join("\n")
-    assert.ok(!tui.includes("silent-info"))
-    assert.ok(!tui.includes("silent-notice"))
-    assert.ok(tui.includes("silent-warn"))
-    assert.ok(tui.includes("silent-error"))
+    assert.deepEqual(stderr.lines, [])
   } finally {
     stderr.restore()
     tmp.cleanup()
@@ -229,63 +222,70 @@ test("mode=debug: all emitted levels reach TUI", () => {
   }
 })
 
-test("file=false: debug/info/notice vanish entirely, warn/error still in TUI", () => {
+test("file=false: no plugin.log is written", () => {
   clearEnv()
   _resetLoggerForTests()
   const tmp = withTempDir()
-  const stderr = captureStderr()
   try {
     configureLogger({ file: false, dir: tmp.dir, level: "debug", mode: "silent" })
     log.info("no-file-info")
     log.warn("no-file-warn")
     assert.equal(tmp.readLog(), "", "no file should be written")
-    const tui = stderr.lines.join("\n")
-    assert.ok(!tui.includes("no-file-info"))
-    assert.ok(tui.includes("no-file-warn"))
   } finally {
-    stderr.restore()
     tmp.cleanup()
     _resetLoggerForTests()
   }
 })
 
-// In the TUI, raw stderr paints over the rendered frame, so with a client
-// that can toast, warn/error become toasts and never touch stderr.
+// Internal warnings are log records, never toasts, whatever the provider.
 // The real SDK client, as the plugin receives it: its `showToast` reads `this`.
-test("mode=silent with a TUI client: warn/error toast once per window, not stderr", async () => {
+test("mode=silent with a TUI client: warn/error never toast", async () => {
   clearEnv()
   _resetLoggerForTests()
   const requests: Request[] = []
-  const sent = Promise.withResolvers<void>()
-  setOpencodeClient(createOpencodeClient({
-    baseUrl: "http://toast.invalid",
-    fetch: async (request) => {
-      requests.push(request)
-      if (requests.length === 2) sent.resolve()
-      return Response.json(true)
-    },
-  }))
-  const stderr = captureStderr()
+  setOpencodeClient(
+    createOpencodeClient({
+      baseUrl: "http://toast.invalid",
+      fetch: async (request) => {
+        requests.push(request)
+        return Response.json(true)
+      },
+    }),
+  )
   try {
     configureLogger({ file: false, level: "info", mode: "silent" })
-    log.warn("toast-warn", { detail: 1 })
-    log.warn("toast-warn", { detail: 2 })
-    log.error("toast-error")
-    log.info("toast-info")
-    await sent.promise
-    const toasts = await Promise.all(requests.map((request) => request.json()))
-    assert.ok(requests.every((request) => new URL(request.url).pathname === "/tui/show-toast"))
-    assert.deepEqual(toasts, [
-      { message: "toast-warn", variant: "warning" },
-      { message: "toast-error", variant: "error" },
-    ])
-    assert.deepEqual(stderr.lines, [], "nothing may reach stderr")
+    log.warn("quiet-warn")
+    log.error("quiet-error")
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    assert.deepEqual(requests, [])
   } finally {
-    stderr.restore()
-    // Leave a client that cannot toast, so later tests fall back to stderr.
     setOpencodeClient({})
     _resetLoggerForTests()
   }
+})
+
+// The preload points XDG_DATA_HOME at a temp dir, so this is the test's own opencode.log.
+test("warn/error reach opencode.log on the claude-code channel; info does not", async () => {
+  clearEnv()
+  _resetLoggerForTests()
+  const file = join(Global.Path.log, "opencode.log")
+  const marker = `main-log-${Date.now()}`
+  configureLogger({ file: false, level: "info", mode: "silent" })
+  log.info(`${marker}-info`)
+  log.warn(`${marker}-warn`, { detail: 1 })
+  log.error(`${marker}-error`)
+  const read = () => (existsSync(file) ? readFileSync(file, "utf8") : "")
+  // The file sink writes in batches; wait for both lines rather than a fixed delay.
+  for (let waited = 0; waited < 5000 && !read().includes(`${marker}-error`); waited += 50) {
+    await new Promise((resolve) => setTimeout(resolve, 50))
+  }
+  const lines = read()
+    .split("\n")
+    .filter((line) => line.includes(marker))
+  assert.equal(lines.length, 2, lines.join("\n"))
+  assert.match(lines[0]!, /level=WARN .*channel=claude-code/)
+  assert.match(lines[1]!, /level=ERROR .*channel=claude-code/)
+  _resetLoggerForTests()
 })
 
 test("env var OPENCODE_CLAUDE_CODE_LOG_FILE overrides config", () => {

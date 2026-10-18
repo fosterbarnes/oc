@@ -37,6 +37,7 @@ import { readFile, readdir } from "node:fs/promises"
 import path from "node:path"
 import { log } from "./logger.js"
 import { defaultModels } from "./models.js"
+import { showToast } from "./runtimeStatus.js"
 
 /** Directory names opencode reads agent markdown from, current form first. */
 export const AGENT_DIR_NAMES = ["agents", "agent"]
@@ -154,6 +155,11 @@ export function resolveAgentModel(
       wanted: withoutAccountMarker(wanted),
       keeping: modelId,
     })
+    showToast(
+      `Agent "${agent}" asks for model "${withoutAccountMarker(wanted)}", which Claude Code does not have. Using ${modelId}.`,
+      "warning",
+      "Agent model not found",
+    )
     return modelId
   }
 
@@ -197,6 +203,11 @@ export function resolveAgentEffort(
       wanted: declared,
       keeping: inherited,
     })
+    showToast(
+      `Agent "${agent}" sets reasoning effort "${declared}", which is not one of ${REASONING_EFFORTS.join(", ")}. Using ${inherited ?? "the default"}.`,
+      "warning",
+      "Agent effort not valid",
+    )
     return inherited
   }
 

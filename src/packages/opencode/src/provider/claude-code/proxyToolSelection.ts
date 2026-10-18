@@ -3,6 +3,7 @@
  * and how opencode's MCP and registry tools become proxy defs.
  */
 import { log } from "./logger.js"
+import { showToast } from "./runtimeStatus.js"
 import { toolNameForHost, type HostToolDialect } from "./hostTools.js"
 import { TASK_BATCH_TOOL_NAME, type ProxyToolDef } from "./proxyToolDefs.js"
 import {
@@ -213,10 +214,9 @@ export function resolveProxyOpencodeToolDefs(options: {
 
   const items = options.items
   if (!items) {
-    log.warn(
-      "proxyOpencodeTools is set but opencode's tool registry did not answer; forwarding nothing this spawn",
-      { requested: requested.map(String) },
-    )
+    log.warn("proxyOpencodeTools is set but opencode's tool registry did not answer; forwarding nothing this spawn", {
+      requested: requested.map(String),
+    })
     return []
   }
 
@@ -264,11 +264,21 @@ export function resolveProxyOpencodeToolDefs(options: {
       unknown,
       known: [...byLowerId.values()].map((item) => item.id).join(", "),
     })
+    showToast(
+      `Claude Code setting proxyOpencodeTools lists tools oc does not have: ${unknown.join(", ")}. They are ignored.`,
+      "warning",
+      "Config entry ignored",
+    )
   }
   if (collided.length > 0) {
     log.warn("proxyOpencodeTools entry dropped: a proxy tool already holds that name," + " and it keeps it", {
       collided,
     })
+    showToast(
+      `Claude Code setting proxyOpencodeTools entries ${collided.join(", ")} were dropped: a built-in proxy tool already uses that name.`,
+      "warning",
+      "Config entry ignored",
+    )
   }
   return out
 }

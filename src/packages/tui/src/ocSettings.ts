@@ -3,6 +3,7 @@ import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 import { Global } from "@opencode-ai/core/global"
+import type { OpencodeClient } from "@opencode-ai/sdk/v2"
 import { applyEdits, modify } from "jsonc-parser"
 import type { ToastContext } from "./ui/toast"
 
@@ -60,7 +61,14 @@ export function readOcConfig(): {
     const reviveSourceChosen = merged.revive?.build !== undefined
     const reviveBuild = typeof merged.revive?.build === "object" && merged.revive.build !== null
     return {
-      executable, ocDir, homeDir, homeDirSort, serverStartOnWindowsUserStart, revivePath, reviveSourceChosen, reviveBuild,
+      executable,
+      ocDir,
+      homeDir,
+      homeDirSort,
+      serverStartOnWindowsUserStart,
+      revivePath,
+      reviveSourceChosen,
+      reviveBuild,
     }
   } catch {
     return {
@@ -77,13 +85,7 @@ export function readOcConfig(): {
 }
 
 export function persistOcConfig(
-  key:
-    | "ocDir"
-    | "homeDir"
-    | "homeDirSort"
-    | "sessionModel"
-    | "sessionAgent"
-    | "serverStartOnWindowsUserStart",
+  key: "ocDir" | "homeDir" | "homeDirSort" | "sessionModel" | "sessionAgent" | "serverStartOnWindowsUserStart",
   value: string,
   toast: ToastContext,
 ) {
@@ -125,6 +127,24 @@ export function persistOcConfig(
   })
 }
 
+// Saves agent.<name>.model in the global opencode config. model is "provider/model".
+// variant "" removes the agent's effort; undefined leaves it unchanged.
+export async function persistAgentModel(
+  client: OpencodeClient,
+  name: string,
+  model: string,
+  toast: ToastContext,
+  variant?: string,
+) {
+  const result = await client.global.config.update({ config: { agent: { [name]: { model, variant } } } })
+  if (result.error) {
+    toast.show({ message: `Failed to set ${name} model: ${String(result.error)}`, variant: "error" })
+    return false
+  }
+  toast.show({ message: `Saved ${name} model: ${model}${variant ? `, ${variant}` : ""}`, variant: "success" })
+  return true
+}
+
 // Saves settings in global tui.jsonc or tui.json (jsonc wins when loading), keeping comments.
 let persistTuiSettingQueue = Promise.resolve()
 export function persistTuiSetting(
@@ -137,8 +157,9 @@ export function persistTuiSetting(
   persistTuiSettingQueue = persistTuiSettingQueue
     .then(() => {
       const file =
-        ["tui.jsonc", "tui.json"].map((name) => path.join(Global.Path.config, name)).find((item) => fs.existsSync(item)) ??
-        path.join(Global.Path.config, "tui.json")
+        ["tui.jsonc", "tui.json"]
+          .map((name) => path.join(Global.Path.config, name))
+          .find((item) => fs.existsSync(item)) ?? path.join(Global.Path.config, "tui.json")
       const text = fs.existsSync(file) ? fs.readFileSync(file, "utf8") : "{}"
       const edits = modify(text, key, value, { formattingOptions: { tabSize: 2, insertSpaces: true } })
       fs.writeFileSync(file, applyEdits(text, edits))

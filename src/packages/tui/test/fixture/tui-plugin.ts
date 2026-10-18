@@ -8,6 +8,8 @@ type Opts = {
   attention?: Partial<TuiPluginApi["attention"]>
   event?: TuiPluginApi["event"]
   state?: { session?: Partial<TuiPluginApi["state"]["session"]> }
+  toast?: TuiPluginApi["ui"]["toast"]
+  route?: Partial<TuiPluginApi["route"]>
 }
 
 export function createTuiPluginApi(opts: Opts = {}) {
@@ -31,6 +33,7 @@ export function createTuiPluginApi(opts: Opts = {}) {
     state: { session: { get: () => undefined, ...opts.state?.session } },
     theme: { current: new Proxy({}, { get: () => color }) },
     tuiConfig: createTuiResolvedConfig(),
-    ui: { dialog },
+    ui: { dialog, toast: opts.toast ?? (() => {}) },
+    route: opts.route ?? { current: { name: "home" } },
   } as unknown as TuiPluginApi
 }

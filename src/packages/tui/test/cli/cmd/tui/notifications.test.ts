@@ -1,11 +1,13 @@
 import { describe, expect, test } from "bun:test"
-import Notifications from "../../../../src/feature-plugins/system/notifications"
+import Notifications, { _setQuestionReminderMs } from "../../../../src/feature-plugins/system/notifications"
 import type { Event, PermissionRequest, QuestionRequest, Session } from "@opencode-ai/sdk/v2"
-import type { TuiAttentionNotifyInput } from "@opencode-ai/plugin/tui"
+import type { TuiAttentionNotifyInput, TuiRouteCurrent, TuiToast } from "@opencode-ai/plugin/tui"
 import { createTuiPluginApi } from "../../../fixture/tui-plugin"
 
 async function setup() {
   const notifications: TuiAttentionNotifyInput[] = []
+  const toasts: TuiToast[] = []
+  const route: { current: TuiRouteCurrent } = { current: { name: "home" } }
   const handlers = new Map<Event["type"], ((event: Event) => void)[]>()
   const session = (id: string, title: string, parentID?: string): Session => ({
     id,
@@ -51,6 +53,8 @@ async function setup() {
           get: (sessionID: string) => sessions[sessionID],
         },
       },
+      toast: (input) => toasts.push(input),
+      route,
     }),
     undefined,
     {} as never,
@@ -58,6 +62,8 @@ async function setup() {
 
   return {
     notifications,
+    toasts,
+    route,
     emit(event: Event) {
       for (const handler of handlers.get(event.type) ?? []) handler(event)
     },
@@ -223,6 +229,69 @@ describe("internal notifications TUI plugin", () => {
         sound: { name: "error", when: "always" },
       },
     ])
+  })
+
+  describe("question reminder", () => {
+    const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+    const reminder: TuiAttentionNotifyInput = {
+      title: "Question waiting",
+      message: '"Demo session" has waited 5 min for your answer.',
+      notification: { when: "blurred" },
+      sound: { name: "question", when: "blurred" },
+    }
+
+    test("reminds once with the session title when the question is still open", async () => {
+      _setQuestionReminderMs(10)
+      try {
+        const harness = await setup()
+        harness.emit({ id: "event-1", type: "question.asked", properties: question("question-1") })
+        await pause(40)
+        expect(harness.toasts).toEqual([
+          { variant: "info", title: "Question waiting", message: '"Demo session" has waited 5 min for your answer.' },
+        ])
+        expect(harness.notifications).toEqual([questionNotification, reminder])
+      } finally {
+        _setQuestionReminderMs()
+      }
+    })
+
+    test("no reminder once the question is answered or dismissed", async () => {
+      _setQuestionReminderMs(10)
+      try {
+        const harness = await setup()
+        harness.emit({ id: "event-1", type: "question.asked", properties: question("question-1") })
+        harness.emit({ id: "event-2", type: "question.asked", properties: question("question-2") })
+        harness.emit({
+          id: "event-3",
+          type: "question.replied",
+          properties: { sessionID: "session", requestID: "question-1", answers: [] },
+        })
+        harness.emit({
+          id: "event-4",
+          type: "question.rejected",
+          properties: { sessionID: "session", requestID: "question-2" },
+        })
+        await pause(40)
+        expect(harness.toasts).toEqual([])
+        expect(harness.notifications).toEqual([questionNotification, questionNotification])
+      } finally {
+        _setQuestionReminderMs()
+      }
+    })
+
+    test("no toast while viewing that session; the away-only ping still goes out", async () => {
+      _setQuestionReminderMs(10)
+      try {
+        const harness = await setup()
+        harness.route.current = { name: "session", params: { sessionID: "session" } }
+        harness.emit({ id: "event-1", type: "question.asked", properties: question("question-1") })
+        await pause(40)
+        expect(harness.toasts).toEqual([])
+        expect(harness.notifications).toEqual([questionNotification, reminder])
+      } finally {
+        _setQuestionReminderMs()
+      }
+    })
   })
 
   test("special-cases aborts and model response timeouts", async () => {

@@ -162,15 +162,15 @@ export function queuePendingProxyCall(
       : null
 
   // A call with no deadline has nothing that will ever report it, so it gets
-  // a heartbeat instead. WARN on purpose: only warn and error reach the
-  // operator outside debug mode (a TUI toast, see `logger.ts`), and a NOTICE
-  // nobody sees would defeat the point of the line existing at all.
+  // a heartbeat instead: a log record for diagnosing a wedged bridge, not a
+  // user notice. Unanswered questions are reminded by the TUI for every
+  // provider (`feature-plugins/system/notifications.ts`).
   const stallTimer =
     deadlineMs === PROXY_NO_DEADLINE_MS && stallWarningMs > 0
       ? setInterval(() => {
           const current = pendingByCallId.get(call.id)
           if (!current) return
-          log.warn("proxy call still waiting, no deadline", {
+          log.notice("proxy call still waiting, no deadline", {
             sessionKey: current.sessionKey,
             toolCallId: current.toolCallId,
             toolName: current.toolName,
@@ -182,9 +182,9 @@ export function queuePendingProxyCall(
   // Never hold opencode's process open for a heartbeat.
   stallTimer?.unref?.()
 
-  // The other half: a call that DOES have a deadline says so before the
-  // deadline takes it, rather than only by dying. Same WARN reasoning, and
-  // one-shot, since the rejection is the next thing that will report.
+  // The other half: a call that DOES have a deadline is recorded before the
+  // deadline takes it, rather than only by dying. One-shot, since the rejection
+  // is the next thing that will report (as a tool error in the transcript).
   const warnAtMs = Math.floor(deadlineMs * PROXY_DEADLINE_WARNING_FRACTION)
   const deadlineWarnTimer =
     deadlineMs >= deadlineWarningMinMs && deadlineMs > 0 && warnAtMs > 0
@@ -192,7 +192,7 @@ export function queuePendingProxyCall(
           const current = pendingByCallId.get(call.id)
           if (!current) return
           const waitedMs = Date.now() - current.createdAt
-          log.warn("proxy call still waiting, deadline approaching", {
+          log.notice("proxy call still waiting, deadline approaching", {
             sessionKey: current.sessionKey,
             toolCallId: current.toolCallId,
             toolName: current.toolName,

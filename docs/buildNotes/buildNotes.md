@@ -150,6 +150,123 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-18 (~18:45) - v0.2.233 manipulatedGlaze - Provider-neutral notices: shared question reminder, Claude internals log only - Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Opus 5.5; low effort; Implementation (imp of `docs/dev/noticesPlan.md`); completed
+- Version: 0.2.233 manipulatedGlaze (same session as the ~18:10 Notices entry; not bumped twice)
+- Why: user saw the earlier Claude-only "still waiting" toast as provider-specific UX. Rule now: user-facing notices live in shared TUI attention; provider internals log.
+- Added question reminder to `tui/src/feature-plugins/system/notifications.ts`: `questions` is now `Map<id, timer>`; 5 min after `question.asked` (`QUESTION_REMINDER_MS`, seam `_setQuestionReminderMs`) `remindQuestion` toasts info "Question waiting" (`"<title>" has waited 5 min for your answer.`) unless `api.route.current` is that session, and calls `attention.notify` with notification+sound `when: "blurred"`. Cleared on replied/rejected. Once per question. Gap kept: questions pending before TUI start get no reminder.
+- Removed `toastProxyWait` from `proxyBroker.ts` (added in the ~18:10 entry); stall and deadline-approaching stay `log.notice` only.
+- Changed `logger.ts`: removed `surface()`/toast/stderr fallback; warn/error now mirror to opencode.log via `ManagedRuntime.make(Observability.layer, { memoMap })` + `Effect.logWarning/logError` annotated `channel: "claude-code"`. Silent mode never writes stderr. Shared memoMap reuses the app's built logging layer; no app-runtime import cycle.
+- Moved the 60 s per-toast repeat guard into `runtimeStatus.showToast` (key = title + message).
+- Audit of ~70 warn/error sites: added plain-English `showToast` only for user-actionable ones: `agentModels.ts` unknown model / effort override, `proxyToolSelection.ts` unknown or colliding `proxyOpencodeTools`, `spawnPlanning.ts` unknown `proxyTools` (none-recognised variant too), `messageBuilder.ts` image link and unsupported media type. Rest log only (turn-ending errors already surface as `session.error`; warm-up shows its outcome in its own UI; MCP availability shows in MCP status).
+- Tests: `notifications.test.ts` +3 (reminder fires with title; none after reply/reject; no toast while viewing); fixture `test/fixture/tui-plugin.ts` gained optional `toast` and `route`. `logger.test.ts` rewritten for no-stderr/no-toast plus a new opencode.log mirror test (reads the preload's temp `Global.Path.log`). `broker.test.ts` question-toast test removed.
+- Docs: wiki `Troubleshooting.md` toast meanings rewritten (wiki push is user's), `FORK.md` Notices row, plan status.
+- Verification: tui `bun test test/cli/cmd/tui/notifications.test.ts` 9 pass; opencode 17 claude-code test files (incl. logger, broker, agentModels, indexHooks, proxyMcp) 282 pass; `tsgo --noEmit` exit 0 in opencode and tui. Not run: live TUI check.
+- MISTAKE: the ~18:10 entry shipped a Claude-only "Question waiting" toast that duplicated the shared attention system. Prevention: before adding a user-facing notice inside a provider, check `feature-plugins/system/notifications.ts` and keep notices provider-neutral.
+
+### User
+Notifications
+- Any model's unanswered question now gets one "Question waiting" toast after 5 minutes, naming the session, if you are looking at a different session.
+- Claude Code no longer shows its internal warnings as toasts; they go to `opencode.log` like everything else.
+- Claude Code still tells you in plain English when an agent names a model or effort it does not have, when a proxy tool setting has an unknown name, or when an attached image or file was not sent.
+- The "Tool still running" and "Tool near time limit" toasts are gone; a tool that runs out of time shows as a tool error in the chat.
+
+---
+
+## 2026-10-18 (~18:18) - v0.2.233 painedKool - Reasoning "Not set" renamed to "Auto" - Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Opus 5.5; low effort; Implementation; completed
+- Version: v0.2.233 painedKool (not re-bumped; already changed since last commit)
+- Changed Reasoning row in `tui/src/component/dialog-subagents.tsx` `chooseEffort`: title "Not set" -> "Auto", dropped "chosen per run" footer; comments in same file and `opencode/src/config/config.ts` `writableGlobal` updated
+- Verification: label/comment change only; no test references the label. Not re-run
+
+### User
+Subagents menu
+- The reasoning option that lets each run choose is now called "Auto".
+
+---
+
+## 2026-10-18 (~18:14) - v0.2.233 painedKool - Subagents menu asks for reasoning after the native model pick - Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Opus 5.5; low effort; Implementation; completed
+- Version: v0.2.233 painedKool (already bumped since last commit by another session's entry; not re-bumped)
+- Added `chooseEffort` in `tui/src/component/dialog-subagents.tsx`: after `DialogModel` for a native agent, single-choice `DialogSelect` "Reasoning" with "Not set" (value "") + the model's variants; current = agent variant when model unchanged. Back returns to the model picker. Models without variants save straight away with variant ""
+- Changed `persistAgentModel` (`tui/src/ocSettings.ts`): optional `variant`; "" clears, undefined leaves unchanged (palette "Subagent model" still passes none)
+- Changed `writableGlobal` (`opencode/src/config/config.ts`): agent `variant: ""` -> undefined so `patchJsonc` removes the key (JSON payload cannot carry undefined; same pattern as `shell: ""`)
+- Not set = no fixed effort; caller can pass `provider/model#effort` per task call (`tool/task.ts:70`)
+- Added tests: `opencode/test/config/config.test.ts` "removes an agent variant when the update sends an empty one"; tui `subagentDialog.test.tsx` "a native agent model with efforts asks for reasoning before saving"; updated native test to expect `variant: ""`
+- Verification: tui `subagentDialog.test.tsx` 4 pass / 2 fail (known 2); `config.test.ts -t "variant|shell|subagent"` 10 pass (first run failed on my over-strict `toEqual`; fixed assertion); tui and opencode `bun run typecheck` exit 0. No live TUI run
+- Kept: other session's uncommitted claude-code/toast changes untouched
+
+### User
+Subagents menu
+- After picking a model for general or explore, you now choose its reasoning level; "Not set" leaves it open so each run can pick.
+
+---
+
+## 2026-10-18 (~18:10) - v0.2.233 manipulatedGlaze - Notices list and plain-English wait toasts - Opus 5.5, low effort; Build
+
+### Agent
+- Meta: Opus 5.5; low effort; Build; completed
+- Version: 0.2.233 manipulatedGlaze
+- Trigger: user saw raw toast "proxy call still waiting, no deadline" (question form unanswered 5 min) and read it as a failure. User picked: Notices list + clearer text; question stall as info toast.
+- Added `ToastContext.notices` (`tui/src/ui/toast.tsx`): every `toast.show` kept newest-first, cap 100, per TUI run. Warning/error toasts render a muted "/notices to read again" line.
+- Added oc palette **Notices** (`oc.notices`, `/notices`) in `ocCommands.tsx`: DialogSelect of snapshot, footer `Locale.todayTimeOrDateTime`, enter opens `DialogAlert` with `Locale.datetime` + full message. Empty list opens an alert, not a toast (a toast would itself become a notice).
+- Added optional `title` to plugin `showToast` (`runtimeStatus.ts`); `logger.ts` `surface()` titles every plugin warn/error toast "Claude Code".
+- Changed `proxyBroker.ts` stall and deadline-approaching lines from WARN to NOTICE (record only) plus `toastProxyWait`: looks up session title via raw client `GET /session/:id?directory=<cwd>` (session id = sessionKey part 2, only `ses_*`), fallback "a Claude Code session". Texts: "Question waiting" (info, question tool), "Tool still running" (warning), "Tool near time limit" (warning, mentions `proxyToolTimeoutMs`). Durations via `turnStats.formatDuration`. Did not import sessionManager (it imports proxyBroker).
+- Kept: other ~85 plugin warn/error call sites still toast their raw log message (now titled + in Notices). TODO if wanted: human toast text per call site.
+- Updated `broker.test.ts` (NOTICE asserts, new question-toast-names-session test), `logger.test.ts` (toast body has title), `FORK.md` row, wiki `Troubleshooting.md` (Notices + three toast meanings; wiki push is user's).
+- Verification: `bun test` broker + logger (46 pass); `tsgo --noEmit` in opencode and tui packages exit 0. Not run: live TUI check.
+
+### User
+Notifications
+- New **Notices** entry in the oc palette (`/notices`) lists every toast since oc started, with its time, and opens any one in full.
+- Warning and error toasts now say "/notices to read again", so a message that vanished can be found.
+- Claude Code warnings and errors now show the title "Claude Code" so you can tell where they came from.
+- The 5-minute "still waiting" toast is now plain English and names the session, for example "Question waiting: A question in "Fix toasts" has waited 5m 0s for your answer", and shows as info rather than a warning.
+- Long-running subagent and near-time-limit toasts are reworded the same way.
+
+---
+
+## 2026-10-18 (~17:54) - v0.2.232 aurousOriginaly - Subagents menu shows the new native model after saving - Opus 5.5, low effort; Debug
+
+### Agent
+- Meta: Opus 5.5; low effort; Debug; completed
+- Version: v0.2.232 aurousOriginaly (already bumped this session, not re-bumped)
+- Fixed: Subagents dialog kept the old model after Enter on general/explore. Cause: `GlobalHttpApi.configUpdate` (`opencode/src/server/routes/instance/httpapi/handlers/global.ts:122-123`) forks instance dispose after the PATCH returns, so the dialog's immediate `app.agents` refetch read the pre-reload list
+- Changed `DialogSubagents` agents resource to key on `sync.configReloadEpoch` (bumped by sync after a global `server.instance.disposed` bootstrap), so it refetches once the server reloads
+- Changed test: mock `/agent` reports the new model only after `server.reloaded`; test asserts old frame lacks "Sample", emits global `server.instance.disposed`, waits for "Sample"
+- Verification: `bun test test/cli/tui/subagentDialog.test.tsx` 3 pass / 2 fail (known 2). New test fails with the epoch key removed and passes with it. tui `bun run typecheck` exit 0. No live TUI run
+
+### User
+Subagents menu
+- After you pick a new model for general or explore, the menu now shows that model instead of the old one.
+
+---
+
+## 2026-10-18 (~17:50) - v0.2.232 aurousOriginaly - Enter on general/explore in Subagents picks their model - Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Opus 5.5; low effort; Implementation (/spit then /imp); completed
+- Version: v0.2.232 aurousOriginaly
+- Added `persistAgentModel(client, name, model, toast)` in `tui/src/ocSettings.ts`: PATCH `/global/config` `{ agent: { [name]: { model } } }` + toast
+- Changed `DialogSubagents` (`tui/src/component/dialog-subagents.tsx`): Enter on a `native` row (general, explore) opens `DialogModel` (`current` = agent model, `updateCurrent={false}`), saves via `persistAgentModel`, reopens highlighted on that row; back also reopens. Non-native rows keep copy-on-Enter. Footer hint `change model`/`copy` by row
+- Changed "Subagent model" palette entry (`tui/src/ocCommands.tsx`) to use `persistAgentModel` instead of its inline update
+- Kept: model only; existing `variant` on the agent is not cleared. Risk: a configured effort the new model lacks carries over (no general/explore overrides in opencode.jsonc today)
+- Added test in `tui/test/cli/tui/subagentDialog.test.tsx`: mocked `general` native agent, wrapped fetch captures `/global/config` PATCH bodies; asserts `{ agent: { general: { model: "test/sample" } } }`
+- Verification: `bun test test/cli/tui/subagentDialog.test.tsx` 3 pass / 2 fail; the 2 are the known failures (AGENTS.md Known failures), same 2 fail with changes stashed; new test passes. `bun run typecheck` in tui exit 0. No live TUI run
+
+### User
+Subagents menu
+- Pressing Enter on general or explore in the Subagents menu now opens the model picker, and the chosen model is saved for that agent.
+- Other subagent rows still copy their name on Enter.
+
+---
+
 ## 2026-10-18 (~14:56) - v0.2.231 wooooooooooooooooOutfit - launchDetached return type fixes prePush typecheck - Opus 5.5, default effort; Agent
 
 ### Agent

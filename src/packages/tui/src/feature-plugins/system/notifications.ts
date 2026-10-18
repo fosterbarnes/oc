@@ -4,6 +4,15 @@ import type { BuiltinTuiPlugin } from "../builtins"
 
 const id = "internal:notifications"
 
+// One reminder per question still unanswered after this long, for every provider.
+const QUESTION_REMINDER_MS = 5 * 60_000
+let questionReminderMs = QUESTION_REMINDER_MS
+
+/** Test seam. */
+export function _setQuestionReminderMs(ms = QUESTION_REMINDER_MS) {
+  questionReminderMs = ms
+}
+
 type SessionError = Extract<Event, { type: "session.error" }>["properties"]["error"]
 
 function notify(api: TuiPluginApi, sessionID: string | undefined, message: string, sound: TuiAttentionSoundName) {
@@ -14,6 +23,25 @@ function notify(api: TuiPluginApi, sessionID: string | undefined, message: strin
     message,
     notification: isSubagent ? false : { when: "blurred" },
     sound: { name: sound, when: "always" },
+  })
+}
+
+// The toast skips the session you are viewing (its form is on screen); the desktop
+// notification and sound only reach you away from the terminal.
+function remindQuestion(api: TuiPluginApi, sessionID: string) {
+  const title = api.state.session.get(sessionID)?.title
+  const waited = `${QUESTION_REMINDER_MS / 60_000} min`
+  const message = title
+    ? `"${title}" has waited ${waited} for your answer.`
+    : `A question has waited ${waited} for your answer.`
+  const route = api.route.current
+  const viewing = route.name === "session" && route.params?.sessionID === sessionID
+  if (!viewing) api.ui.toast({ variant: "info", title: "Question waiting", message })
+  void api.attention.notify({
+    title: "Question waiting",
+    message,
+    notification: { when: "blurred" },
+    sound: { name: "question", when: "blurred" },
   })
 }
 
@@ -29,21 +57,33 @@ function sessionErrorMessage(error: SessionError) {
 const tui: TuiPlugin = async (api) => {
   const active = new Set<string>()
   const errored = new Set<string>()
-  const questions = new Set<string>()
+  // Pending question id -> its reminder timer.
+  const questions = new Map<string, ReturnType<typeof setTimeout>>()
   const permissions = new Set<string>()
 
+  const settleQuestion = (requestID: string) => {
+    clearTimeout(questions.get(requestID))
+    questions.delete(requestID)
+  }
+
   api.event.on("question.asked", (event) => {
-    if (questions.has(event.properties.id)) return
-    questions.add(event.properties.id)
-    notify(api, event.properties.sessionID, "Question needs input", "question")
+    const request = event.properties
+    if (questions.has(request.id)) return
+    const timer = setTimeout(() => {
+      questions.delete(request.id)
+      remindQuestion(api, request.sessionID)
+    }, questionReminderMs)
+    timer.unref?.()
+    questions.set(request.id, timer)
+    notify(api, request.sessionID, "Question needs input", "question")
   })
 
   api.event.on("question.replied", (event) => {
-    questions.delete(event.properties.requestID)
+    settleQuestion(event.properties.requestID)
   })
 
   api.event.on("question.rejected", (event) => {
-    questions.delete(event.properties.requestID)
+    settleQuestion(event.properties.requestID)
   })
 
   api.event.on("permission.asked", (event) => {

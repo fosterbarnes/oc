@@ -1,24 +1,14 @@
-v0.2.231 wooooooooooooooooOutfit
+v0.2.233 manipulatedGlaze
 
-security:
-Arguments passed to a .ps1 through run_after_turn can no longer break out and run extra cmd commands, so an "always" approval for a script only ever runs that script. Arguments containing %, !, ^, quotes or a trailing backslash now reach the script exactly as written.
+notifications:
+New Notices entry in the oc palette (/notices) lists every toast since oc started, newest first, with its time; enter opens one in full. Warning and error toasts end with "/notices to read again", so a message that vanished can be found.
 
-cursor:
-Cursor models are now told the real shell (PowerShell on Windows) instead of /bin/bash, so they stop writing Git Bash paths like /c/... that created a stray C:\c\ folder. Reading the end of a file now returns the last lines instead of line 1, and case-insensitive searches really ignore case (both confirmed live on Composer and Grok). Native file searches and directory listings no longer list "No files found" or odd ../C:\ paths as results; paths are sent absolute with forward slashes. Cursor models are told to run shells in the foreground with a long timeout, because background shells do not work for them on Windows.
+Any model's unanswered question now gets one "Question waiting" toast after 5 minutes, naming the session, when you are looking at a different session. With attention enabled in tui.json, a desktop notification and sound also fire when the terminal is not focused. This replaces the Claude-only "proxy call still waiting" toast, which looked like an error.
 
-rename session:
-Pressing ctrl+c in the Rename Session dialog copies the session's current name and keeps the dialog open; the footer shows the key. It is configurable with keybinds["dialog.session_rename.copy"], or "none" to turn it off.
+claude code:
+Internal Claude Code warnings no longer pop up as raw toasts; they are written to opencode.log with channel=claude-code like everything else. Claude Code still tells you in plain English when an agent names a model or reasoning effort it does not have, when proxyTools or proxyOpencodeTools lists an unknown name, or when an image link or unsupported attachment was not sent. The same toast shows at most once a minute. A tool that runs out of time shows as a tool error in the chat instead of a warning toast beforehand.
 
-dialogs:
-In the oc keybind layout, ctrl+c no longer closes menus and dialogs; esc still does. Set keybinds["dialog.close"] to "ctrl+c" or switch to the opencode layout to get stock behavior back.
+subagents menu:
+Pressing Enter on general or explore in the Subagents menu opens the model picker, then asks for the reasoning level; "Auto" leaves it open so each run can pick. The menu shows the new model once the server reloads. Other subagent rows still copy their name on Enter. The palette "Subagent model" entry saves through the same path.
 
-slash commands:
-/thinking is gone from the slash menu (the thinking toggle stays in the command palette). Typing a command's full name, such as /think, now puts that exact command first and selects it even when longer names also match.
-
-formatting:
-Pushing now auto-formats changed code files under src with Prettier, in batches so very large pushes stay under the Windows command-line limit. The whole-repo format script no longer touches build output or generated JSON.
-
-testing:
-Running a single test file in the main package now uses the same 30-second limit as the package test script instead of failing slow tests at 5 seconds. AGENTS.md lists the known test failures so agents compare against them instead of re-proving them, and tells agents working-tree line endings do not matter.
-
-Under the hood: launchDetached builds a constant cmd line and passes arguments through a delayed-expansion env var; a live Windows test round-trips the hostile arguments. Cursor's RequestContext env.shell comes from the configured oc shell. execParse resolves negative read offsets and adds an inline (?i) for case-insensitive grep; execResult parses only real paths and the <entries> block. DialogPrompt gained an actions prop, and dialog close is a registered dialog.close keybind. detachedCommand now has one return type, which fixes the core and opencode typecheck errors its env union caused. Checks run: launchDetached tests (3 pass), Cursor env test (1 pass), Cursor toolMapping tests (4 pass), dialog-prompt tests (5 pass), autocomplete tests (2 pass), tui, core and opencode typechecks clean, prettier --check on format.ts and preload.ts, a batched read-only Prettier run over the changed files, and prePush. Known test failures are listed in AGENTS.md.
+Under the hood: the question reminder lives in the shared TUI notifications plugin (feature-plugins/system/notifications.ts), so it is provider-neutral. The Claude logger mirrors warn/error through a ManagedRuntime over Observability.layer with the shared memoMap; the proxy broker's stall and deadline lines are NOTICE records in plugin.log only. The toast history is kept in ToastContext (last 100 per TUI run). DialogSubagents refetches agents on sync.configReloadEpoch; persistAgentModel takes an optional variant, and an empty agent variant is removed from config. Plan: docs/dev/noticesPlan.md. Checks run: tui notifications tests (9 pass); 17 Claude Code provider test files including logger, broker and agentModels (282 pass); subagentDialog tests (new tests pass, 2 known failures listed in AGENTS.md); config tests for variant/shell/subagent (10 pass); tui and opencode typechecks clean. Not checked live in the TUI yet.

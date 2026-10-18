@@ -23,8 +23,9 @@ import {
   updateDesktopHarness,
 } from "./harnessUpdate"
 import { bootstrapSession, listHomeDirs } from "./ocNewSession"
-import { persistOcConfig, persistTuiSetting, readOcConfig, resolveOcDirectory } from "./ocSettings"
+import { persistAgentModel, persistOcConfig, persistTuiSetting, readOcConfig, resolveOcDirectory } from "./ocSettings"
 import { useDialog } from "./ui/dialog"
+import { DialogAlert } from "./ui/dialog-alert"
 import { DialogPrompt } from "./ui/dialog-prompt"
 import { DialogSelect } from "./ui/dialog-select"
 import { useToast } from "./ui/toast"
@@ -136,6 +137,35 @@ export function createOcCommands(input: {
         },
       },
       {
+        name: "oc.notices",
+        title: "Notices",
+        category: "oc",
+        slashName: "notices",
+        run: () => {
+          if (toast.notices.length === 0) return void DialogAlert.show(dialog, "Notices", "No notices since oc started")
+          // Snapshot: opening an entry must not shift indexes if a toast lands meanwhile.
+          const notices = [...toast.notices]
+          dialog.replace(() => (
+            <DialogSelect
+              title="Notices"
+              options={notices.map((notice, index) => ({
+                value: index,
+                title: notice.title ? `${notice.title}: ${notice.message}` : notice.message,
+                footer: Locale.todayTimeOrDateTime(notice.time),
+              }))}
+              onSelect={(option) => {
+                const notice = notices[option.value]!
+                void DialogAlert.show(
+                  dialog,
+                  notice.title ?? notice.variant,
+                  `${Locale.datetime(notice.time)}\n\n${notice.message}`,
+                )
+              }}
+            />
+          ))
+        },
+      },
+      {
         name: "agent.default_subagent_model",
         title: "Subagent model",
         category: "oc",
@@ -155,19 +185,8 @@ export function createOcCommands(input: {
             <DialogModel
               current={agent?.model}
               updateCurrent={false}
-              onSelect={async (providerID, modelID) => {
-                const model = `${providerID}/${modelID}`
-                const result = await sdk.client.global.config.update({
-                  config: { agent: { [defaultSubagent]: { model } } },
-                })
-                if (result.error) {
-                  toast.show({
-                    message: `Failed to set native default sub-agent model: ${String(result.error)}`,
-                    variant: "error",
-                  })
-                  return
-                }
-                toast.show({ message: `Saved default sub-agent model: ${model}`, variant: "success" })
+              onSelect={(providerID, modelID) => {
+                void persistAgentModel(sdk.client, defaultSubagent, `${providerID}/${modelID}`, toast)
               }}
             />
           ))
@@ -382,7 +401,11 @@ export function createOcCommands(input: {
               title="Keybind layout"
               current={tuiConfig.keybind_preset}
               options={[
-                { value: "oc" as const, title: "oc", description: "ctrl+m models, ctrl+s sessions, ctrl+c never quits" },
+                {
+                  value: "oc" as const,
+                  title: "oc",
+                  description: "ctrl+m models, ctrl+s sessions, ctrl+c never quits",
+                },
                 { value: "opencode" as const, title: "opencode", description: "Stock OpenCode keys" },
               ]}
               onSelect={(option) => {
@@ -468,11 +491,7 @@ export function createOcCommands(input: {
                 ]}
                 onSelect={(option) => {
                   const value =
-                    option.value === "click"
-                      ? settings.click === "tab"
-                        ? "inline"
-                        : "tab"
-                      : !settings[option.value]
+                    option.value === "click" ? (settings.click === "tab" ? "inline" : "tab") : !settings[option.value]
                   tuiConfig.setSubagentTabs({ ...settings, [option.value]: value })
                   try {
                     persistTuiSetting(["subagent_tabs", option.value], value)
