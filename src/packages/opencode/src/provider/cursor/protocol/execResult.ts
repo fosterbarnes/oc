@@ -70,7 +70,7 @@ export type ToolResultInput = {
 
 /**
  * Build one or more ExecClientMessage frames for a tool result.
- * Shell replies are a sequence of ShellStream oneofs under the same id  - 
+ * Shell replies are a sequence of ShellStream oneofs under the same id  -
  * Start → stdout/stderr → exit - then an ACM #5 stream_close so the server
  * knows the client finished streaming (CLI always sends this; without it
  * shell execs hang on heartbeats forever).
@@ -212,8 +212,12 @@ export function buildTypedExecResult(
       if (error) return { error: { error } }
       // Prefer files_with_matches: OpenCode glob/grep often returns path lists.
       // Content-mode GrepSuccess also works but needs GrepFileMatch nesting.
-      const files = extractPathLines(output)
-      const cwd = resultRoot ?? ""
+      // Key the results by the searched folder. Cursor shows each file relative to that key
+      // using POSIX path rules, so Windows paths go out with forward slashes; backslash paths
+      // render as `../C:\...` or `../src\a.ts`.
+      const searched = str(resultMetadata?.path)
+      const cwd = forwardSlashes(searched ? path.resolve(resultRoot ?? "", searched) : (resultRoot ?? ""))
+      const files = extractResultPaths(output).map(forwardSlashes)
       return {
         success: {
           pattern: "",
@@ -305,17 +309,19 @@ export function buildTypedExecResult(
     }
     case "ls_result": {
       if (error) return { error: { path: "", error } }
-      const rootPath = resultRoot ?? ""
-      const entries = extractPathLines(output)
+      // ls_args runs OpenCode's read on the directory; its entries list marks folders with "/".
+      const rootPath = extractPathTag(output) ?? resultRoot ?? ""
+      const entries = readDirectoryEntries(output)
+      const files = entries.filter((name) => !name.endsWith("/"))
       return {
         success: {
           directory_tree_root: {
             abs_path: rootPath,
-            children_dirs: [],
-            children_files: entries.map((name) => ({
-              name: name.includes("/") ? name.slice(name.lastIndexOf("/") + 1) : name,
-            })),
-            num_files: entries.length,
+            children_dirs: entries
+              .filter((name) => name.endsWith("/"))
+              .map((name) => ({ abs_path: path.join(rootPath, name.slice(0, -1)) })),
+            children_files: files.map((name) => ({ name })),
+            num_files: files.length,
           },
         },
       }
@@ -427,14 +433,29 @@ function extractPathTag(output: string): string | undefined {
   return m?.[1]
 }
 
-function extractPathLines(output: string): string[] {
-  const lines = output
-    .split("\n")
-    .map((l) => l.trim())
-    .filter(Boolean)
-  // Prefer absolute / relative path-looking lines; fall back to all non-empty.
-  const paths = lines.filter((l) => l.startsWith("/") || l.startsWith("./") || l.includes("/"))
-  return (paths.length > 0 ? paths : lines).slice(0, 2000)
+/**
+ * File paths from OpenCode glob output (one absolute path per line) or grep output (absolute
+ * `<path>:` headers). Match lines, counts, "No files found", and truncation notes drop out.
+ */
+function extractResultPaths(output: string): string[] {
+  return output
+    .split(/\r?\n/)
+    .map((line) => line.trim().replace(/:$/, ""))
+    .filter((line) => path.isAbsolute(line) || path.win32.isAbsolute(line))
+    .slice(0, 2000)
+}
+
+function forwardSlashes(file: string): string {
+  return file.replaceAll("\\", "/")
+}
+
+/** Entry names between `<entries>` tags of OpenCode's directory read, without its count note. */
+function readDirectoryEntries(output: string): string[] {
+  const body = /<entries>\n?([\s\S]*?)<\/entries>/.exec(output)?.[1] ?? ""
+  return body
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line && !/^\((Showing \d+ of \d+ entries\.|\d+ entries\))/.test(line))
 }
 
 function encodeShellStream(

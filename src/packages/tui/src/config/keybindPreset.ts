@@ -8,6 +8,8 @@ export const Names = ["oc", "opencode"] as const
 // their replacements so terminals that send ctrl+m as Enter, and opencode habits, still work.
 export const oc: TuiKeybind.KeybindOverrides = {
   app_exit: "<leader>q",
+  // ctrl+c never closes dialogs; Esc does.
+  "dialog.close": "none",
   model_list: "ctrl+m,<leader>m",
   session_list: "ctrl+s,<leader>l",
   session_child_first: "ctrl+b,<leader>down",

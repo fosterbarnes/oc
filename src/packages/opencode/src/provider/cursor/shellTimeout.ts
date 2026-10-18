@@ -56,6 +56,10 @@ export function setCursorShellPath(shell: string | undefined): void {
   configuredShell = shell?.trim() || undefined
 }
 
+export function configuredCursorShell(): string | undefined {
+  return configuredShell
+}
+
 function executableOnPath(name: string): boolean {
   for (const dir of (process.env.PATH ?? "").split(delimiter)) {
     if (dir && existsSync(join(dir, name))) return true
@@ -318,7 +322,7 @@ export function prepareCursorShellArgs(
 
   const shellKind = resolveCursorShellKind()
   // OpenCode 2.0 has no `shell.env` hook, so bash/zsh cannot be wrapped by
-  // sourcing an injector. Callers there opt into the wrapper-file command  - 
+  // sourcing an injector. Callers there opt into the wrapper-file command  -
   // the same mechanism sh/dash already use - which needs no env injection.
   const envInjectable = !options.preferWrapperCommand && (shellKind === "bash" || shellKind === "zsh")
   if (envInjectable) {

@@ -150,6 +150,266 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-18 (~14:56) - v0.2.231 wooooooooooooooooOutfit - launchDetached return type fixes prePush typecheck - Opus 5.5, default effort; Agent
+
+### Agent
+- Meta: Opus 5.5; default effort; Agent (agent-push, fix after prePush failed); completed
+- Version: 0.2.231 wooooooooooooooooOutfit (tag rerolled from herosComplimented via `agentPush.ps1 -SetTag`; no bump)
+- ERROR: prePush typecheck failed in core `test/util/launchDetached.test.ts:14` (`OC_LAUNCH_ARGV` missing on the inferred env union). Same cause as the 2 opencode errors the 02:03 entry reported (`launcherSafety.test.ts:139`, `revive.test.ts:150`): each branch of `detachedCommand` inferred its own env shape
+- Fixed `core/src/util/launchDetached.ts`: `detachedCommand` returns `DetachedCommand` (`options: SpawnOptions & { env: NodeJS.ProcessEnv }`). No runtime change
+- Verification: core and opencode `bun run typecheck` exit 0; core `bun test test/util/launchDetached.test.ts` 3 pass
+
+### User
+Push checks
+- Fixed a type error that blocked the pre-push typecheck; no behavior or UI change.
+
+---
+
+## 2026-10-18 (~14:47) - v0.2.231 wooooooooooooooooOutfit - Session pass: batched prePush Prettier, doc corrections - Opus 5.5, default effort; Pass
+
+### Agent
+- Meta: Opus 5.5; default effort; /pass over this chat's Prettier + noise-audit work; completed
+- Version: 0.2.231 wooooooooooooooooOutfit (already bumped this session; no second bump)
+- Fixed `.scripts/prePush.ps1` Prettier step: changed files now go to Prettier in batches of 200. One command line with every path would exceed the Windows 32,767-char limit on large pushes (v0.2.172 and v0.2.174 each changed 1,500-1,900 src files, 78-97 KB of paths) and fail prePush
+- Fixed `src/script/format.ts` comment: nested `.gitignore` files exist (`packages/opencode`, `plugin`, `sdk`, `sdks/vscode`, `github`, `artifacts`). Behavior unchanged: every git-ignored file on disk under `src` already reports `ignored: true` with format.ts's ignore paths
+- Changed AGENTS.md: opencode preload timeout bullet says a CLI `--timeout` has no effect there (probed: 3 s test passed under `--timeout 2000`; `script/profile-test-files.ts` `TEST_PROFILE_TIMEOUT` is now inert); known-failures header no longer claims the flaky steering entry was confirmed
+- Kept preload `setDefaultTimeout(30000)`: Bun gives the preload no view of CLI flags (`process.argv` lacks `--timeout`), and every repo script passes 30000 anyway
+- Verification: batch slicing covers a synthetic 1,900-path list exactly once (longest batch 7,199 chars); batched read-only `prettier --list-different` over the 23 real changed files ran 3 batches without error; `format.ts` and `preload.ts` pass `prettier --check`. Full prePush not run (typecheck)
+
+### User
+Push checks
+- The pre-push formatting step no longer breaks on very large pushes such as upstream syncs.
+- AGENTS.md now says a custom test timeout flag is ignored in the main package, and the known-failures note is worded accurately.
+
+---
+
+## 2026-10-18 (~14:34) - v0.2.231 wooooooooooooooooOutfit - Effect reference cache actually repaired - Opus 5.5, default effort; Debug
+
+### Agent
+- Meta: Opus 5.5; default effort; Debug; completed (follow-up to the noise audit below)
+- Version: 0.2.231 (user data only, no bump)
+- ERROR: after the stale `index.lock` was deleted, every hourly refresh still failed (11 warnings, 07:10-17:53Z): `checkout -B main origin/main` refused "untracked working tree files would be overwritten". The interrupted August checkout had left 2,163 staged deletions with the files still on disk; `repository-cache.ts` runs checkout before `resetHard`, so it never self-heals from that state
+- Fixed (user data): in `~\.local\share\opencode\repos\github.com\Effect-TS\effect-smol` ran `reset --hard HEAD`, `fetch origin`, `checkout -B main origin/main`, `reset --hard origin/main`; 0 dirty entries, 2,163 tracked files
+- Note: effect-smol is archived (origin/main `3a1128c` 2026-07-14 "Update readme with archive notice"; V4 moved to `Effect-TS/effect` main). Frozen at `effect` 4.0.0-beta.98, newer than oc's pinned 4.0.0-beta.83, so the `.opencode/opencode.jsonc` reference stays. Revisit when oc moves past beta.98
+- MISTAKE: previous entry claimed the next refresh would heal the cache without checking the refresh order. Rule: after a one-time repair, confirm the next real run succeeds (log or state) before reporting it fixed
+- Verification: cache `git status --short` empty; `git log -1` = origin/main. Next oc refresh not yet observed
+
+### User
+Agent noise
+- The Effect reference docs that agents read are now a clean, complete copy; the earlier fix only removed the first of two problems.
+
+---
+
+## 2026-10-18 (~03:12) - v0.2.231 wooooooooooooooooOutfit - Agent noise audit: test timeout, line endings, known failures - Opus 5.5, default effort; Implementation
+
+### Agent
+- Meta: Opus 5.5; default effort; Implementation; completed (same chat as the Prettier entry below)
+- Version: 0.2.231 wooooooooooooooooOutfit
+- Audit: `~\.local\share\opencode\plans\1792307014350-agent-noise-audit.md` (259 MISTAKE/ERROR lines across all build notes, opencode.log 10-15..10-18, git EOL state, Bun probes)
+- Added `setDefaultTimeout(30000)` to `packages/opencode/test/preload.ts`. Bun 1.4.1 ignores bunfig `[test] timeout` (probed); bare `bun test <file>` used 5 s (9 past entries). Preload value also overrides CLI `--timeout`; per-test timeouts still win
+- Added AGENTS.md General Principles bullet: working-tree EOL irrelevant (`* text=auto eol=crlf` stores LF; prePush `setCrlf` restores CRLF); do not check/convert EOL. Supersedes summary "Subagents leave LF/mixed EOL: check EOL"
+- Changed local git config `core.safecrlf=false` (this clone only): `git diff` LF->CRLF warnings 7 -> 0. LF writers remain (scriptHelper version/tag, `keybindDocs.ts`, bun.lock); harmless
+- Added AGENTS.md Testing bullets: opencode preload timeout; Known failures list (prompt.test.ts F5, subagentDialog 2, test:httpapi missing `/agent/sub` x3, steering flaky)
+- Removed from baseline: `warmupFakeModel` (3 pass), `probe.test.ts` teardown (fixed earlier), `accountPool.test.ts` CLAUDE_CONFIG_DIR note (19 pass with 15 inherited CLAUDE* vars; test pins it). Summary line "accountPool needs CLAUDE_CONFIG_DIR unset" is stale
+- Fixed (user data, not repo): deleted 0-byte `~\.local\share\opencode\repos\github.com\Effect-TS\effect-smol\.git\index.lock` dated 2026-08-20; every reference refresh failed (270 warnings/4 days), checkout stuck at 2026-07-14 with half-applied deletions. RepositoryCache refresh fetches + hard-resets on next boot
+- Removed (user data): 4 folders in `~\.claude\skills\.trash`; upstream skill loader scans `~/.claude/skills/**` with `dot: true`, so trashed skills loaded and re-logged `duplicate skill name` (2,511 of 3,634 WARN/ERROR lines)
+- Kept (not fixed, upstream code): `duplicate skill name` from `synced/` account copies; `failed to getPrompt` avalonia-docs `recreate-ui` (460): command list MCP `template` getter (`command/index.ts:146`) passes `$1` to an enum arg
+- Risk: version bumped although another session already bumped since HEAD; AGENTS.md "once per session" applied, earlier entry in this chat did not bump
+- Verification: 6 s probe test passes under bare `bun test` in packages/opencode (probe file removed, Test-Path false). Confirming runs: prompt.test.ts 64 pass/1 fail (F5); subagentDialog 2 pass/2 fail; test:httpapi pass=222 missing=3 exit 1; warmupFakeModel 3 pass; steering 14 pass; accountPool 19 pass. Worktree had another session's uncommitted PerfReview changes during these runs
+- ERROR: OpenCode Console API key expired: `title model failed` (opencode/mimo-v2.6-flash-free, 28 on 10-18) and `failed to load OpenCode provider config` 401. User action
+
+### User
+Testing
+- Running a single test file in the main package no longer fails slow tests at 5 seconds; it now uses the same 30-second limit as the package test script.
+- AGENTS.md now lists the tests that are known to fail, so agents compare against that list instead of re-proving old failures each session.
+
+Agent noise
+- Agents are told line endings in the working tree do not matter, and git no longer prints "LF will be replaced by CRLF" warnings in this clone.
+- Cleared a two-month-old stale git lock that kept the Effect reference docs from updating, and emptied Claude's skills trash folder that was flooding the log with duplicate-skill warnings.
+- Your OpenCode Console API key has expired, so session titles from that provider fail until you replace or remove it.
+
+---
+
+## 2026-10-18 (~02:54) - v0.2.230 powerwashFun - Prettier runs at push; format script honors root gitignore - Opus 5.5, default effort; Implementation
+
+### Agent
+- Meta: Opus 5.5; default effort; Implementation; completed except plan step 4 (blocked on dirty tree)
+- Version: 0.2.230 (already bumped since last commit by a concurrent session; no extra bump)
+- Plan: `~/.config/opencode/plans/prettierFormatting.md`. Root cause: fork removed upstream's generate/format workflow, so 205 tracked `src` files drifted; all 92 upstream-derived ones are clean at upstream `abce98e0eb` (drift is fork-made; formatting moves toward upstream).
+- Fixed `src/script/format.ts`: `--ignore-path ../.gitignore --ignore-path .prettierignore`, cwd pinned to `src`. Before, it rewrote ~320 ignored files (`.turbo/cache`, `dist`, `sdk/js`).
+- Added `packages/core/schema.json`, `packages/opencode/config.json` to `src/.prettierignore` (generator output via `JSON.stringify`; would flip-flop).
+- Added prePush step (`.scripts/prePush.ps1`, before `setCrlf`): Prettier `--write --ignore-unknown --log-level warn` on `git -C src ls-files -m -o --exclude-standard`, existing files only.
+- Added `AGENTS.md` General Principles bullet: no manual Prettier, no Prettier verification claims, no hand-reverting its output.
+- TODO: plan step 4 baseline (`bun script/format.ts` from `src`, ~203 files) on a clean tree as its own commit; optional `.git-blame-ignore-revs` after.
+- Verification: `prettier --check script/format.ts` clean; ignore-path list = 203 tracked files, none ignored/generated; prePush block run by hand with `--list-different` instead of `--write` (22 changed files listed, unknown types skipped, cwd restored, 9 would format). No files written by Prettier; full `prePush.ps1` not run.
+
+### User
+Formatting
+- Pushing now auto-formats changed code files under `src` with Prettier, so agents no longer argue about or revert formatting noise.
+- The whole-repo format script no longer touches build output; run it once on a clean tree to clear the existing drift.
+
+---
+
+## 2026-10-18 (~02:53) - v0.2.230 powerwashFun - Cursor fixes rechecked live; native Glob/Grep paths sent with forward slashes - Opus 5.5, default effort; Implementation
+
+### Agent
+- Meta: Opus 5.5; default effort; Implementation (follow-up to the 02:46 entry, after the user's 02:50 rebuild); completed; Glob path recheck pending a build
+- Version: 0.2.230 powerwashFun (no bump: version already changed since the last commit)
+- Verified live on Composer 2.5 and Grok 4.6 low (`ses_eb237b931ffel6qFuiSVSLy2ag`, `ses_eb237b92bffeRefo2kLCJ4xo2B`):
+  - negative-offset reads return lines 300 / 298-300;
+  - case-insensitive grep finds both files;
+  - no-match now reads `0 files found`.
+- Fixed `cursor/protocol/execResult.ts` `grep_result`: relative backslash paths still rendered as `../src\deep\b.ts`.
+  - Both that and the original `../C:\...` fit Cursor showing each file relative to the workspace key with POSIX path rules.
+  - Key and files now go out absolute with forward slashes (`forwardSlashes`); removed `pathUnder`.
+- Changed `opencode/test/provider/cursor/toolMapping.test.ts` grep_result case to forward-slash absolute paths.
+- Verification: `bun test test/provider/cursor/toolMapping.test.ts` 4 pass 0 fail; `tsgo --noEmit` no Cursor errors; CRLF kept.
+- TODO (user): rebuild; then rerun native Glob on both models and expect `src/a.ts`-style paths with no `../`.
+
+### User
+Cursor
+- Reading the end of a file and case-insensitive search now work for Cursor models (confirmed live on Composer and Grok).
+- Native file search results are now sent in a form Cursor shows as clean paths instead of `../src\...`; needs a rebuild to check.
+
+---
+
+## 2026-10-18 (~02:46) - v0.2.230 powerwashFun - Cursor tool fundamentals: negative read offset, case-insensitive grep, native Glob/Grep/ls results - Opus 5.5, default effort; Debug
+
+### Agent
+- Meta: Opus 5.5; default effort; Debug (live subagent tests on Composer 2.5 and Grok 4.6 low, then fixes); completed; live recheck pending a build
+- Version: 0.2.230 powerwashFun (no bump: version already changed since the last commit)
+- Tested read/edit/write/delete/grep/glob/shell/parallel/web/skill on both models against fixtures; verified via DB tool parts and disk bytes. Results table: `~/.config/opencode/plans/oc/cursorAfterClaudeChanges.plan.md` Phase 4.
+- Fixed `cursor/protocol/execParse.ts` read: negative Cursor offset (-1 = last line) was dropped (`offset > 0` only), so the read returned line 1. Now resolved with `fileLineCount` (trailing newline is not a line, same as oc read). Relative paths keep the old behavior.
+- Fixed `execParse.ts` grep: `case_insensitive` was dropped. Now an inline `(?i)` prefix (ripgrep).
+- Changed `execParse.ts` `parseExecServerMessage`: `grep_args` now sets `resultMetadata.path` to the searched path.
+- Fixed `cursor/protocol/execResult.ts` `grep_result`:
+  - Removed `extractPathLines`, which kept lines containing `/`. Windows paths have none, so every line went through, incl. "No files found" and `Line N:`.
+  - New `extractResultPaths` keeps only absolute paths and grep `<path>:` headers.
+  - `pathUnder` makes them relative to the searched folder, which is now the `workspace_results` key; absolute paths rendered as `../C:\...` in Grok.
+- Fixed `execResult.ts` `ls_result`: the same parser listed `<path>`/`</entries>` as files and dropped plain names. New `readDirectoryEntries` reads the `<entries>` block; `name/` entries go to `children_dirs`. Found by reading only (neither model exposed a native ls).
+- Added `opencode/test/provider/cursor/toolMapping.test.ts` (real oc output shapes). Fail-on-old-code check not done (user stopped it).
+- Changed user config `~/.config/opencode/cursorInOpencode.md` (user decision): Cursor shells run in the foreground with a long `timeout`; removed `bgStatus`/`bgKill` and the `background: true` mapping.
+  - Cause: Cursor native Shell has no background flag, and `background_shell_spawn_args` becomes a POSIX `nohup` wrapper that `shellTimeout.ts` refuses on Windows. Neither model reached oc background jobs.
+- Verification: `bun test test/provider/cursor/toolMapping.test.ts` 4 pass 0 fail; `tsgo --noEmit` in opencode has no Cursor errors (the 2 known `launchDetached` test errors remain, from other work). CRLF kept in all edited files.
+- ERROR (agent): the user-stopped revert check had already run its first half: `git show HEAD:...` overwrote `execParse.ts`/`execResult.ts` before the rejection. Restored from the backup it made first; diff, tests and EOL re-checked.
+- MISTAKE: a destructive "revert to verify" step on files in a shared tree. Rule: verify fail-on-old-code in a temp copy (for example a scratch worktree), never by overwriting the working files.
+- TODO (user): rebuild, then rerun the read-last-line, case-insensitive grep and native Glob tests on both models.
+
+### User
+Cursor
+- "Read the last lines of a file" now returns the end of the file instead of line 1.
+- Case-insensitive searches from Cursor models now really ignore case.
+- Native file searches and directory listings no longer show "No files found" or odd `../C:\` paths as results on Windows; paths are shown relative to the searched folder.
+- Cursor models are now told to run shell commands in the foreground with a long timeout, because background shells don't work for them on Windows.
+
+---
+
+## 2026-10-18 (~02:41) - v0.2.230 powerwashFun - Exact slash command match ranks first - Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Opus 5.5; low effort; Implementation; completed
+- Version: 0.2.230 (already bumped this uncommitted cycle)
+- Added `withExactSlashFirst` in `tui/src/component/prompt/autocomplete.tsx`: in "/" mode, option whose name (display minus `:(label)`) or alias equals `/<search>` goes first, pulled from all options so fuzzysort limit 10 can't drop it
+- Added test in `tui/test/component/autocomplete.test.ts`
+- Verification: `bun test test/component/autocomplete.test.ts` 2 pass; tui `tsgo --noEmit` exit 0
+
+### User
+Slash commands
+- Typing a slash command's full name, such as `/think`, now puts that exact command at the top of the list and selects it, even when longer names like `/thinking` also match.
+
+---
+
+## 2026-10-18 (~02:37) - v0.2.230 powerwashFun - Remove /thinking slash command - Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Opus 5.5; low effort; Implementation; completed
+- Version: 0.2.230 (already bumped this uncommitted cycle)
+- Removed `slash` (`thinking`, alias `toggle-thinking`) from `session.toggle.thinking` in `tui/src/routes/session/index.tsx`; palette entry and keybind kept
+- Verification: skipped (one-property removal); no other refs to `/thinking` or `toggle-thinking`
+
+### User
+Slash commands
+- `/thinking` no longer appears in the slash menu, so typing `/think` goes straight to your command; the expand/collapse thinking toggle is still in the command palette.
+
+---
+
+## 2026-10-18 (~02:20) - v0.2.230 powerwashFun - Rename dialog copies session name; ctrl+c no longer closes dialogs in oc layout - Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Opus 5.5; low effort; Implementation (/spit plan then /imp); completed
+- Version: 0.2.230 powerwashFun
+- Added keybinds `dialog.close` (default `ctrl+c`) and `dialog.session_rename.copy` (default `ctrl+c`) in `packages/tui/src/config/keybind.ts`.
+- Changed `ui/dialog.tsx` stack layer: hardcoded `ctrl+c` close binding replaced by registered `dialog.close` command bound from config; `escape` binding unchanged; selection guard unchanged.
+- Added `"dialog.close": "none"` to oc preset (`config/keybindPreset.ts`). User `keybinds` override still wins (`config/index.tsx` resolveKeybinds merge order).
+- Added `actions` prop to `DialogPrompt` (`ui/dialog-prompt.tsx`): commands + config bindings in the existing textarea-targeted priority-1 layer, footer hints via `ActionHint` (hidden when unbound). Mirrors `DialogSelect` actions.
+- `component/dialog-session-rename.tsx`: copy action writes saved `session.title` (not edited draft) to clipboard, toast "Copied session name", dialog stays open.
+- Regenerated `docs/keybinds.md` via `packages/tui/script/keybindDocs.ts`. Updated wiki `Keybinds.md`, `Configuration.md` (local clone, not pushed).
+- Test harness `test/cli/tui/dialog-prompt.test.tsx` now opens the prompt through `dialog.replace` (production path) so stack bindings apply; fixture `createTuiResolvedConfig` resolves to the oc preset by default.
+- Verification: `bun test test/cli/tui/dialog-prompt.test.tsx` from `packages/tui`: 5 pass, 0 fail (2 existing + 3 new: action beats ctrl+c close, oc keeps dialog open, `dialog.close` override restores close). Typecheck not run.
+
+### User
+Rename session
+- Pressing `ctrl+c` in the Rename Session dialog copies the session's current name and keeps the dialog open; the footer shows the key.
+- The key is configurable with `keybinds["dialog.session_rename.copy"]`, or `"none"` to turn it off.
+
+Dialogs
+- In the oc keybind layout, `ctrl+c` no longer closes menus and dialogs; `esc` still does.
+- To get stock behavior back, set `keybinds["dialog.close"]` to `"ctrl+c"` or switch Keybind layout to opencode.
+
+---
+
+## 2026-10-18 (~02:03) - v0.2.229 trePeice - Cursor review after Claude harness changes; Cursor now told the real shell (pwsh) - Opus 5.5, default effort; Debug
+
+### Agent
+- Meta: Opus 5.5; default effort; Debug (review, live Cursor subagent checks, one fix); completed
+- Version: 0.2.229 trePeice (no bump: version already changed since the last commit)
+- Reviewed Claude harness changes v0.2.190-229 for Cursor impact. Claude-only paths are gated by `isClaudeCodeProvider` (`session/llm/request.ts`, `llm.ts`, `prompt.ts`, `tools.ts`), and `provider/cursor` imports nothing from `claude-code`. No cross-impact regression found. Plan and evidence: `~/.config/opencode/plans/oc/cursorAfterClaudeChanges.plan.md` and `cursorAfterClaudeChanges.md`.
+- Note: the main DB has no real Cursor turns between 10-16 15:47 and this session (v0.2.220+). Live subagent checks on the installed build (rebuilt 10-18 01:38 from this tree) passed:
+  - Composer two-turn checkpoint reuse: turn 2 `in=119 cacheR=10394`, so the v0.2.225 durable path works.
+  - Composer tool breadth incl. `time`/`schedule_list`.
+  - Grok read/write/bash/time.
+- Fixed `provider/cursor/context/env.ts`: RequestContext `env.shell` was `process.env.SHELL || "/bin/bash"`. `SHELL` is unset on Windows, so Cursor models assumed Git Bash. Grok ran `mkdir -p "/c/ocTestTmp/..."` and pwsh created `C:\c\ocTestTmp`. Now `Shell.acceptable(configuredCursorShell())`, the same shell `tool/shell.ts:679` runs.
+- Added `configuredCursorShell()` in `shellTimeout.ts`, which returns the config-hook value already stored there.
+- Note: RequestContext base is frozen per Cursor conversation in memory; the new hint applies after rebuild/restart.
+- Added `opencode/test/provider/cursor/env.test.ts` (CRLF like neighbors).
+- Changed user config (outside repo, user approved):
+  - `~/.config/opencode/cursorInOpencode.md`: dropped the stale `cursor-opencode-provider@0.6.2` npm-patch note and the background-subagent env-var sentence (the flag is set at user level, and `task` hides `background` when it is off).
+  - `~/.opencode/skills/host-skills/SKILL.md`: removed the vendor link.
+  - Deleted `~/.opencode/vendor/cursor-opencode-provider` and the then-empty `vendor` folder (unused; npm id `cursor-opencode-provider` maps in-tree at `provider/provider.ts:155`).
+- Verification: `bun test test/provider/cursor/env.test.ts` 1 pass (3 runs). First run had an unnamed hook timeout, which did not recur (cold start). `tsgo --noEmit` in opencode: no errors in Cursor files.
+- ERROR: `tsgo --noEmit` reports 2 errors in `test/cli/launcherSafety.test.ts:139` (`OC_LAUNCH_ARGS`) and `test/config/revive.test.ts:150` (`OC_LAUNCH_STYLE`). They come from the uncommitted v0.2.229 `launchDetached` change (env type is now a union), not from this session. Not fixed.
+- TODO (user): live check in a new Cursor chat after the build: `bash` uses PowerShell syntax and no `C:\c\` folder appears. Delete the stray `C:\c\ocTestTmp\cursorLive2`. Remaining Cursor live checks (auto-title memory, mid-turn message, Esc, restart) are listed in the plan.
+
+### User
+Cursor
+- Cursor models are now told your real shell (PowerShell on Windows) instead of `/bin/bash`, so they stop writing Git Bash paths like `/c/...` that created a stray `C:\c\` folder.
+- A review found that the recent Claude Code changes did not affect how Cursor models work; live Composer and Grok checks passed.
+- The Cursor instructions file no longer mentions an old npm patch, and the unused vendor folder was removed.
+
+---
+
+## 2026-10-18 (~01:36) - v0.2.229 trePeice - .ps1 launches no longer let arguments run cmd commands - Opus 5.5, default effort; Implementation
+
+### Agent
+- Meta: Opus 5.5; default effort; Implementation; completed
+- Version: 0.2.229 trePeice
+- Fixed cmd injection in `core/src/util/launchDetached.ts` `.ps1` path: `windowsArguments` writes `"` as `\"`, which cmd does not honor, so arg `a" & cmd & "b` ran `cmd`, and `%VAR%` in args expanded. Exposure was `run_after_turn` (permission keys on `exe` only).
+- Changed `.ps1` line to constant `cmd /d /v:on /c start "<title>" pwsh -NoProfile -File !OC_LAUNCH_ARGV!`; env `OC_LAUNCH_ARGV = windowsArguments([file, ...args])`. Delayed expansion runs after cmd parses metacharacters and is not re-parsed. `-File` kept, so named params bind as before.
+- Changed `consoleTitle` (was inline in removed `startScript`): strips `" % ! ^` (was only `"`). Changes `HKCU\Console` key only for script names with those chars.
+- Kept: `OC_LAUNCH_ARGV` is inherited by the script (cmd cannot unset before `start`), same as `OC_REVIVE_ARG_*`.
+- Risk: `config/revive.ts` `consoleStart` uses `"%OC_REVIVE_ARG_n%"` with `/v:off`; phase-1 expansion is re-parsed, so a value with `"` would break out. Current values cannot contain `"`. Follow-up: same `/v:on` + `!VAR!` pattern, with a live check that `start` finds the program from expanded text.
+- Risk: `run_after_turn` with `.bat`/`.cmd` goes through `Start-Process`, which hands batch files to `cmd /c`, so args are re-parsed by cmd. Not fixed.
+- Rewrote `core/test/util/launchDetached.test.ts`: the old assertion enshrined the bug. Now asserts the constant command line, env value, and title stripping. Added a Windows-only live test: a temp `.ps1` writes `$args` as JSON; asserts exact round trip of `&`/`%`/`!`/trailing `\`/`-Flag` args and that the injection target file is absent.
+- Verification: `bun test test/util/launchDetached.test.ts` in `src/packages/core`: 3 pass, 0 fail. Scratch run of the old command line with the same payload created the injection file, so the live test catches the old bug.
+- MISTAKE: the first live-test payload quoted the redirect path, which the old quoting would not have run either, so it could not fail on the old code. Rule: confirm a regression test fails against the old code before trusting the pass.
+
+### User
+Security
+- Arguments passed to a `.ps1` through `run_after_turn` can no longer break out and run extra cmd commands, so an "always" approval for a script only ever runs that script.
+- Arguments containing `%`, `!`, `^`, quotes or a trailing backslash now reach the script exactly as written; no UI change.
+
+---
+
 ## 2026-10-18 (~01:22) - v0.2.228 swagGap - /update verifies each zip against GitHub's published SHA-256 - Opus 5.5, default effort; Implementation
 
 ### Agent

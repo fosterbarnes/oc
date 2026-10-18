@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import { orderSlashFavorites } from "../../src/component/prompt/autocomplete"
+import { orderSlashFavorites, withExactSlashFirst } from "../../src/component/prompt/autocomplete"
 
 test("slash favorites preserve alphabetical source order without duplicates or display-based identity", () => {
   const options = [
@@ -21,4 +21,14 @@ test("slash favorites preserve alphabetical source order without duplicates or d
   expect(orderSlashFavorites(options, new Set())).toEqual(options)
   expect(orderSlashFavorites([], favorites)).toEqual([])
   expect(orderSlashFavorites(options, new Set(options.map((option) => option.favoriteKey)))).toEqual(options)
+})
+
+test("slash exact name or alias match ranks first", () => {
+  const thinking = { display: "/thinking:(oc)  " }
+  const think = { display: "/think:(command)  " }
+  const compact = { display: "/compact:(oc)  ", aliases: ["/summarize"] }
+  expect(withExactSlashFirst([thinking, think], [compact, think, thinking], "think")).toEqual([think, thinking])
+  expect(withExactSlashFirst([thinking], [compact, think, thinking], "think")).toEqual([think, thinking])
+  expect(withExactSlashFirst([thinking], [compact, thinking], "summarize")).toEqual([compact, thinking])
+  expect(withExactSlashFirst([thinking, think], [think, thinking], "thin")).toEqual([thinking, think])
 })

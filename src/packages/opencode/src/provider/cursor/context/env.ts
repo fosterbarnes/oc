@@ -1,6 +1,8 @@
 import { homedir } from "node:os"
 import path from "node:path"
+import { Shell } from "@opencode-ai/core/shell"
 import { trace } from "../debug.js"
+import { configuredCursorShell } from "../shellTimeout.js"
 import { ensureOpencodeProjectDir } from "./paths.js"
 
 export function buildEnv(workspaceRoot: string): Record<string, unknown> {
@@ -28,7 +30,9 @@ export function buildEnv(workspaceRoot: string): Record<string, unknown> {
   const env = {
     os_version: osVersion,
     workspace_paths: [cwd],
-    shell: process.env.SHELL || "/bin/bash",
+    // The shell oc's `bash` tool really runs (tool/shell.ts), e.g. pwsh on Windows. `$SHELL`
+    // is usually unset there, and a `/bin/bash` hint makes models write POSIX paths.
+    shell: Shell.acceptable(configuredCursorShell()),
     sandbox_enabled: false,
     sandbox_supported: false,
     time_zone: timeZone,

@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs"
+import path from "node:path"
 import { decodeStructEntriesToJson, readAllFields } from "./struct.js"
 import { trace } from "../debug.js"
 import { cursorExecVariantByRequestName } from "./execVariants.js"
@@ -261,7 +263,9 @@ export function parseExecServerMessage(msg: Record<string, unknown>): ParsedExec
             ...(typeof mapped.args.offset === "number" ? { offset: mapped.args.offset } : {}),
             ...(typeof mapped.args.limit === "number" ? { limit: mapped.args.limit } : {}),
           }
-        : undefined
+        : execVariant === "grep_args" && typeof mapped.args.path === "string"
+          ? { path: mapped.args.path }
+          : undefined
   if (resultMetadata && resultMetadata.timeout_behavior !== 2 && typeof resultMetadata.timeout_ms === "number") {
     // Cursor's protobuf default (timeout=0) means 30 seconds for an ordinary
     // foreground shell. OpenCode instead treats zero literally, so pass the
@@ -355,6 +359,12 @@ export function mapCursorArgsToOpencode(
       // read treats limit=0 as "read zero lines" (empty content) - omit zeros.
       const offset = num(cleaned.offset)
       if (offset !== undefined && offset > 0) args.offset = offset
+      // A negative Cursor offset counts back from the end (-1 = last line); OpenCode's read has
+      // no tail mode, so resolve it to a 1-based line here.
+      if (offset !== undefined && offset < 0 && filePath && path.isAbsolute(filePath)) {
+        const total = fileLineCount(filePath)
+        if (total !== undefined) args.offset = Math.max(1, total + offset + 1)
+      }
       const limit = num(cleaned.limit)
       if (limit !== undefined && limit > 0) args.limit = limit
       return { toolName: "read", args }
@@ -421,7 +431,10 @@ export function mapCursorArgsToOpencode(
         if (path) args.path = path
         return { toolName: "glob", args }
       }
-      const args: Record<string, unknown> = { pattern }
+      // OpenCode's grep has no case flag; ripgrep honors an inline `(?i)`.
+      const args: Record<string, unknown> = {
+        pattern: cleaned.case_insensitive === true && !pattern.startsWith("(?i)") ? `(?i)${pattern}` : pattern,
+      }
       if (path) args.path = path
       if (include) args.include = include
       return { toolName: "grep", args }
@@ -438,7 +451,6 @@ export function mapCursorArgsToOpencode(
       return { toolName, args: cleaned }
   }
 }
-
 
 /** A non-empty protobuf `bytes` field, or undefined when absent/empty. */
 function bytesValue(v: unknown): Uint8Array | undefined {
@@ -503,6 +515,16 @@ function describeSubagentTask(prompt?: string, subagentType?: string): string {
   const words = prompt?.replace(/\s+/g, " ").trim().split(" ").filter(Boolean).slice(0, 5)
   if (words?.length) return words.join(" ")
   return `${subagentType || "Delegated"} task`
+}
+
+/** Line count as OpenCode's read reports it: a trailing newline does not start another line. */
+function fileLineCount(filePath: string): number | undefined {
+  try {
+    const text = readFileSync(filePath, "utf8")
+    return text.split("\n").length - (text.endsWith("\n") ? 1 : 0)
+  } catch {
+    return undefined
+  }
 }
 
 function shellQuote(s: string): string {

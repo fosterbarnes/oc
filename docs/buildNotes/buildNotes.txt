@@ -1,8 +1,24 @@
-v0.2.228 swagGap
+v0.2.231 wooooooooooooooooOutfit
 
-updates:
-/update now checks each downloaded zip against the SHA-256 hash GitHub publishes for the release asset. Missing hashes or mismatched downloads cancel the update before shutdown. Progress now reads "Downloading and verifying oc v<version>".
+security:
+Arguments passed to a .ps1 through run_after_turn can no longer break out and run extra cmd commands, so an "always" approval for a script only ever runs that script. Arguments containing %, !, ^, quotes or a trailing backslash now reach the script exactly as written.
 
-Release documentation explains how to compare hashes with Get-FileHash and recommends enabling GitHub release immutability.
+cursor:
+Cursor models are now told the real shell (PowerShell on Windows) instead of /bin/bash, so they stop writing Git Bash paths like /c/... that created a stray C:\c\ folder. Reading the end of a file now returns the last lines instead of line 1, and case-insensitive searches really ignore case (both confirmed live on Composer and Grok). Native file searches and directory listings no longer list "No files found" or odd ../C:\ paths as results; paths are sent absolute with forward slashes. Cursor models are told to run shells in the foreground with a long timeout, because background shells do not work for them on Windows.
 
-Under the hood: Release lookup keeps valid SHA-256 digests from GitHub's API, and downloads are hashed before writing or unpacking. The core release lookup tests passed (5 tests). The opencode typecheck exited 2 with no errors in touched files. The download path and live /update remain unverified pending a release.
+rename session:
+Pressing ctrl+c in the Rename Session dialog copies the session's current name and keeps the dialog open; the footer shows the key. It is configurable with keybinds["dialog.session_rename.copy"], or "none" to turn it off.
+
+dialogs:
+In the oc keybind layout, ctrl+c no longer closes menus and dialogs; esc still does. Set keybinds["dialog.close"] to "ctrl+c" or switch to the opencode layout to get stock behavior back.
+
+slash commands:
+/thinking is gone from the slash menu (the thinking toggle stays in the command palette). Typing a command's full name, such as /think, now puts that exact command first and selects it even when longer names also match.
+
+formatting:
+Pushing now auto-formats changed code files under src with Prettier, in batches so very large pushes stay under the Windows command-line limit. The whole-repo format script no longer touches build output or generated JSON.
+
+testing:
+Running a single test file in the main package now uses the same 30-second limit as the package test script instead of failing slow tests at 5 seconds. AGENTS.md lists the known test failures so agents compare against them instead of re-proving them, and tells agents working-tree line endings do not matter.
+
+Under the hood: launchDetached builds a constant cmd line and passes arguments through a delayed-expansion env var; a live Windows test round-trips the hostile arguments. Cursor's RequestContext env.shell comes from the configured oc shell. execParse resolves negative read offsets and adds an inline (?i) for case-insensitive grep; execResult parses only real paths and the <entries> block. DialogPrompt gained an actions prop, and dialog close is a registered dialog.close keybind. detachedCommand now has one return type, which fixes the core and opencode typecheck errors its env union caused. Checks run: launchDetached tests (3 pass), Cursor env test (1 pass), Cursor toolMapping tests (4 pass), dialog-prompt tests (5 pass), autocomplete tests (2 pass), tui, core and opencode typechecks clean, prettier --check on format.ts and preload.ts, a batched read-only Prettier run over the changed files, and prePush. Known test failures are listed in AGENTS.md.

@@ -7,6 +7,7 @@ import { useToast } from "./toast"
 import { useBindings, useOpencodeModeStack } from "../keymap"
 import { useClipboard } from "../context/clipboard"
 import { useKV } from "../context/kv"
+import { useTuiConfig } from "../config"
 import { Selection } from "../util/selection"
 
 export function Dialog(
@@ -81,6 +82,7 @@ function init() {
 
   const renderer = useRenderer()
   const modeStack = useOpencodeModeStack()
+  const tuiConfig = useTuiConfig()
 
   createEffect(() => {
     if (store.stack.length === 0) return
@@ -148,6 +150,19 @@ function init() {
 
   useBindings(() => ({
     enabled: store.stack.length > 0 && !renderer.getSelection()?.getSelectedText(),
+    commands: [
+      {
+        name: "dialog.close",
+        title: "Close dialog",
+        category: "Dialog",
+        run: () => {
+          if (renderer.getSelection()) {
+            renderer.clearSelection()
+          }
+          close()
+        },
+      },
+    ],
     bindings: [
       {
         key: "escape",
@@ -155,17 +170,7 @@ function init() {
         group: "Dialog",
         cmd: escape,
       },
-      {
-        key: "ctrl+c",
-        desc: "Close dialog",
-        group: "Dialog",
-        cmd: () => {
-          if (renderer.getSelection()) {
-            renderer.clearSelection()
-          }
-          close()
-        },
-      },
+      ...tuiConfig.keybinds.get("dialog.close"),
     ],
   }))
 

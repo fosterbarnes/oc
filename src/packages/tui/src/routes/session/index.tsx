@@ -82,7 +82,13 @@ import { collapseToolOutput } from "../../util/collapse-tool-output"
 import { usePluginRuntime } from "../../plugin/runtime"
 import { DialogRetryAction } from "../../component/dialog-retry-action"
 import { getRevertDiffFiles } from "../../util/revert-diff"
-import { OPENCODE_BASE_MODE, useBindings, useCommandShortcut, useOpencodeKeymap, useOpencodeModeStack } from "../../keymap"
+import {
+  OPENCODE_BASE_MODE,
+  useBindings,
+  useCommandShortcut,
+  useOpencodeKeymap,
+  useOpencodeModeStack,
+} from "../../keymap"
 import { usePathFormatter } from "../../context/path-format"
 import { reviveText, reviveVersions } from "../../util/revive"
 import { LocationProvider } from "../../context/location"
@@ -292,9 +298,7 @@ export function Session() {
   const wide = createMemo(() => dimensions().width > 120)
   const sidebarHorizontal = createMemo(() => sidebarPosition() === "top" || sidebarPosition() === "bottom")
   // Rendered before the messages; narrow left falls through to the overlay after them
-  const sidebarLeading = createMemo(
-    () => sidebarPosition() === "top" || (sidebarPosition() === "left" && wide()),
-  )
+  const sidebarLeading = createMemo(() => sidebarPosition() === "top" || (sidebarPosition() === "left" && wide()))
   const sidebarVisible = createMemo(() => {
     if (session()?.parentID) return false
     if (sidebarOpen()) return true
@@ -509,12 +513,9 @@ export function Session() {
   const blocks = new Map<BoxRenderable, () => string | undefined>()
   const [pinned, setPinned] = createSignal<
     { el: BoxRenderable; title: string; left: number; width: number } | undefined
-  >(
-    undefined,
-    {
-      equals: (a, b) => a?.el === b?.el && a?.title === b?.title && a?.left === b?.left && a?.width === b?.width,
-    },
-  )
+  >(undefined, {
+    equals: (a, b) => a?.el === b?.el && a?.title === b?.title && a?.left === b?.left && a?.width === b?.width,
+  })
   let pinQueued = false
   // Scroll and resize events can fire during opentui's layout pass, so update after it.
   const queuePin = () => {
@@ -597,11 +598,18 @@ export function Session() {
 
   const subagents = createMemo(() => sync.data.session.filter((x) => x.parentID === route.sessionID))
   // Only subagents created after entering this session, so opening an old session opens no tabs.
-  const autoOpenFrom = createMemo(on(() => route.sessionID, () => Date.now()))
+  const autoOpenFrom = createMemo(
+    on(
+      () => route.sessionID,
+      () => Date.now(),
+    ),
+  )
   createEffect(() => {
     if (!tuiConfig.subagent_tabs.auto_open) return
     const from = autoOpenFrom()
-    const fresh = subagents().filter((x) => x.time.created >= from && !tabbed.has(x.id)).map((x) => x.id)
+    const fresh = subagents()
+      .filter((x) => x.time.created >= from && !tabbed.has(x.id))
+      .map((x) => x.id)
     if (fresh.length === 0) return
     // Marked first so an unavailable terminal warns once per subagent, not on every list update.
     for (const id of fresh) tabbed.add(id)
@@ -876,10 +884,6 @@ export function Session() {
       })(),
       value: "session.toggle.thinking",
       category: "Session",
-      slash: {
-        name: "thinking",
-        aliases: ["toggle-thinking"],
-      },
       run: () => {
         thinking.set(nextThinkingMode(thinkingMode()))
         dialog.clear()
@@ -1442,7 +1446,10 @@ export function Session() {
                                 paddingLeft={2}
                                 backgroundColor={hover() ? theme.backgroundElement : theme.backgroundPanel}
                               >
-                                <text selectable={false} fg={theme.textMuted}>{`${revert()!.reverted.length} message reverted`}</text>
+                                <text
+                                  selectable={false}
+                                  fg={theme.textMuted}
+                                >{`${revert()!.reverted.length} message reverted`}</text>
                                 <text selectable={false} fg={theme.textMuted}>
                                   <span style={{ fg: theme.text }}>{redoShortcut()}</span> or /redo to restore
                                 </text>
@@ -1699,7 +1706,9 @@ function UserMessage(props: {
             backgroundColor={hover() ? theme.backgroundElement : theme.backgroundPanel}
             flexShrink={0}
           >
-            <text selectable={false} fg={theme.text}>{text()}</text>
+            <text selectable={false} fg={theme.text}>
+              {text()}
+            </text>
             <Show when={files().length}>
               <box flexDirection="row" paddingBottom={metadataVisible() ? 1 : 0} paddingTop={1} gap={1} flexWrap="wrap">
                 <For each={files()}>
@@ -1759,13 +1768,7 @@ function UserMessage(props: {
         />
       </Show>
       <Show when={revive()}>
-        <box
-          marginTop={1}
-          border={["top"]}
-          title={revive()}
-          titleAlignment="center"
-          borderColor={theme.borderActive}
-        />
+        <box marginTop={1} border={["top"]} title={revive()} titleAlignment="center" borderColor={theme.borderActive} />
       </Show>
     </>
   )
@@ -1924,7 +1927,11 @@ function ReasoningPart(props: { last: boolean; part: ReasoningPart; message: Ass
     return end === undefined ? 0 : Math.max(0, end - props.part.time.start)
   })
   const summary = createMemo(() => reasoningSummary(content()))
-  const body = smoothText(() => summary().body, isDone, () => ctx.tui.smooth_streaming)
+  const body = smoothText(
+    () => summary().body,
+    isDone,
+    () => ctx.tui.smooth_streaming,
+  )
   const syntax = createSyntaxStyleMemo(() => generateSubtleSyntax(theme))
 
   const toggle = () => {
@@ -2009,7 +2016,11 @@ function TextPart(props: { last: boolean; part: TextPart; message: AssistantMess
   const { theme, syntax } = useTheme()
   const text = createMemo(() => props.part.text.trim())
   const streaming = () => props.part.time?.end === undefined
-  const shown = smoothText(text, () => !streaming(), () => ctx.tui.smooth_streaming)
+  const shown = smoothText(
+    text,
+    () => !streaming(),
+    () => ctx.tui.smooth_streaming,
+  )
   return (
     <Show when={shown()}>
       <box ref={(el: BoxRenderable) => alwaysSeparate.add(el)} paddingLeft={3} marginTop={1} flexShrink={0}>
@@ -2284,11 +2295,7 @@ export function InlineToolRow(props: {
       <Switch>
         <Match when={props.spinner}>
           <box flexDirection="row">
-            <text
-              width={INLINE_TOOL_ICON_WIDTH}
-              fg={props.iconColor ?? props.color}
-              selectable={!props.onMouseUp}
-            >
+            <text width={INLINE_TOOL_ICON_WIDTH} fg={props.iconColor ?? props.color} selectable={!props.onMouseUp}>
               {props.icon}
             </text>
             <Spinner color={props.color} selectable={!props.onMouseUp}>

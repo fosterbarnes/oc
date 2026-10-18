@@ -1,7 +1,7 @@
 import { TextareaRenderable, TextAttributes } from "@opentui/core"
 import { useTheme } from "../context/theme"
 import { useDialog, type DialogContext } from "./dialog"
-import { Show, createEffect, createSignal, onMount, type JSX } from "solid-js"
+import { For, Show, createEffect, createSignal, onMount, type JSX } from "solid-js"
 import { Spinner } from "../component/spinner"
 import { useTuiConfig } from "../config"
 import { useBindings, useCommandShortcut } from "../keymap"
@@ -16,6 +16,19 @@ export type DialogPromptProps = {
   onConfirm?: (value: string) => void
   onCancel?: () => void
   onContentChange?: (value: string) => void
+  actions?: { command: string; title: string; onTrigger: () => void }[]
+}
+
+function ActionHint(props: { command: string; title: string }) {
+  const { theme } = useTheme()
+  const shortcut = useCommandShortcut(props.command)
+  return (
+    <Show when={shortcut()}>
+      <text fg={theme.text}>
+        {shortcut()} <span style={{ fg: theme.textMuted }}>{props.title}</span>
+      </text>
+    </Show>
+  )
 }
 
 export function DialogPrompt(props: DialogPromptProps) {
@@ -43,8 +56,17 @@ export function DialogPrompt(props: DialogPromptProps) {
         category: "Dialog",
         run: confirm,
       },
+      ...(props.actions ?? []).map((item) => ({
+        name: item.command,
+        title: item.title,
+        category: "Dialog",
+        run: item.onTrigger,
+      })),
     ],
-    bindings: tuiConfig.keybinds.gather("dialog.prompt", ["dialog.prompt.submit"]),
+    bindings: [
+      ...tuiConfig.keybinds.gather("dialog.prompt", ["dialog.prompt.submit"]),
+      ...(props.actions ?? []).flatMap((item) => tuiConfig.keybinds.get(item.command)),
+    ],
   }))
 
   onMount(() => {
@@ -112,6 +134,7 @@ export function DialogPrompt(props: DialogPromptProps) {
               {submitShortcut()} <span style={{ fg: theme.textMuted }}>submit</span>
             </text>
           </Show>
+          <For each={props.actions}>{(item) => <ActionHint command={item.command} title={item.title} />}</For>
         </Show>
       </box>
     </box>

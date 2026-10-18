@@ -2,4 +2,7 @@
 
 import { $ } from "bun"
 
-await $`bun run prettier --ignore-unknown --write .`
+// Prettier only reads ./.gitignore by default; the main .gitignore is at the repo root, so pass it explicitly.
+await $`bun run prettier --ignore-unknown --ignore-path ../.gitignore --ignore-path .prettierignore --write .`.cwd(
+  `${import.meta.dir}/..`,
+)

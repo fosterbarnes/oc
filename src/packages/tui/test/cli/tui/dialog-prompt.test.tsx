@@ -23,13 +23,14 @@ async function mountPrompt(input: {
   root: string
   keybinds: Partial<TuiKeybind.Keybinds>
   onConfirm: (value: string) => void
+  actions?: { command: string; title: string; onTrigger: () => void }[]
 }) {
   const state = path.join(input.root, "state")
   await mkdir(state, { recursive: true })
   await Bun.write(path.join(state, "kv.json"), "{}")
 
   const [
-    { DialogProvider },
+    { DialogProvider, useDialog },
     { DialogPrompt },
     { KVProvider },
     { ThemeProvider },
@@ -45,6 +46,17 @@ async function mountPrompt(input: {
     import("../../../src/ui/toast"),
     import("../../../src/keymap"),
   ])
+
+  let dialog: ReturnType<typeof useDialog> | undefined
+
+  // Opened through the dialog stack like production callers, so stack bindings (dialog.close) apply.
+  function Opener() {
+    dialog = useDialog()
+    dialog.replace(() => (
+      <DialogPrompt title="Rename Session" value="draft" actions={input.actions} onConfirm={input.onConfirm} />
+    ))
+    return null
+  }
 
   function Harness() {
     const renderer = useRenderer()
@@ -71,7 +83,7 @@ async function mountPrompt(input: {
               <ThemeProvider mode="dark">
                 <ToastProvider>
                   <DialogProvider>
-                    <DialogPrompt title="Rename Session" value="draft" onConfirm={input.onConfirm} />
+                    <Opener />
                   </DialogProvider>
                 </ToastProvider>
               </ThemeProvider>
@@ -85,6 +97,7 @@ async function mountPrompt(input: {
   const app = await testRender(() => <Harness />, { kittyKeyboard: true })
   return {
     app,
+    stackSize: () => dialog?.stack.length ?? 0,
     async cleanup() {
       app.renderer.destroy()
     },
@@ -141,6 +154,63 @@ test("dialog prompt submit can be rebound separately from input submit", async (
     prompt.app.mockInput.pressKey("y", { ctrl: true })
 
     expect(confirmed).toEqual(["draft"])
+  } finally {
+    await prompt.cleanup()
+  }
+})
+
+async function focusedTextarea(prompt: Awaited<ReturnType<typeof mountPrompt>>) {
+  await wait(() => prompt.app.renderer.currentFocusedEditor instanceof TextareaRenderable)
+  const textarea = prompt.app.renderer.currentFocusedEditor
+  if (!(textarea instanceof TextareaRenderable)) throw new Error("expected focused dialog textarea")
+  return textarea
+}
+
+test("dialog prompt action wins over ctrl+c dialog close", async () => {
+  await using tmp = await tmpdir()
+  let copies = 0
+  const prompt = await mountPrompt({
+    root: tmp.path,
+    keybinds: { "dialog.close": "ctrl+c", "dialog.session_rename.copy": "ctrl+c" },
+    onConfirm: () => {},
+    actions: [{ command: "dialog.session_rename.copy", title: "copy", onTrigger: () => copies++ }],
+  })
+
+  try {
+    const textarea = await focusedTextarea(prompt)
+    prompt.app.mockInput.pressKey("c", { ctrl: true })
+
+    expect(copies).toBe(1)
+    expect(prompt.stackSize()).toBe(1)
+    expect(textarea.plainText).toBe("draft")
+  } finally {
+    await prompt.cleanup()
+  }
+})
+
+test("oc layout keeps dialogs open on ctrl+c", async () => {
+  await using tmp = await tmpdir()
+  const prompt = await mountPrompt({ root: tmp.path, keybinds: {}, onConfirm: () => {} })
+
+  try {
+    await focusedTextarea(prompt)
+    prompt.app.mockInput.pressKey("c", { ctrl: true })
+
+    expect(prompt.stackSize()).toBe(1)
+  } finally {
+    await prompt.cleanup()
+  }
+})
+
+test("dialog.close override restores ctrl+c close", async () => {
+  await using tmp = await tmpdir()
+  const prompt = await mountPrompt({ root: tmp.path, keybinds: { "dialog.close": "ctrl+c" }, onConfirm: () => {} })
+
+  try {
+    await focusedTextarea(prompt)
+    prompt.app.mockInput.pressKey("c", { ctrl: true })
+
+    expect(prompt.stackSize()).toBe(0)
   } finally {
     await prompt.cleanup()
   }

@@ -231,6 +231,8 @@ export const Definitions = {
   "dialog.select.end": keybind("end", "Move to last dialog item"),
   "dialog.select.submit": keybind("return", "Submit selected dialog item"),
   "dialog.prompt.submit": keybind("return", "Submit dialog prompt"),
+  "dialog.close": keybind("ctrl+c", "Close dialog"),
+  "dialog.session_rename.copy": keybind("ctrl+c", "Copy session name"),
   "dialog.mcp.toggle": keybind("space", "Toggle MCP in MCP dialog"),
   "dialog.session.status.cycle": keybind("ctrl+s", "Cycle session picker status filter"),
   "dialog.move_session.new": keybind("ctrl+m", "New project copy"),

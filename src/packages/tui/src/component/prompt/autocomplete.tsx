@@ -140,8 +140,11 @@ export function Autocomplete(props: {
         const parentX = anchor.parent?.x ?? 0
         const parentY = anchor.parent?.y ?? 0
         if (
-          anchor.x !== lastPos.x || anchor.y !== lastPos.y || anchor.width !== lastPos.width ||
-          parentX !== lastPos.parentX || parentY !== lastPos.parentY
+          anchor.x !== lastPos.x ||
+          anchor.y !== lastPos.y ||
+          anchor.width !== lastPos.width ||
+          parentX !== lastPos.parentX ||
+          parentY !== lastPos.parentY
         ) {
           lastPos = { x: anchor.x, y: anchor.y, width: anchor.width, parentX, parentY }
           setPositionTick((t) => t + 1)
@@ -561,6 +564,7 @@ export function Autocomplete(props: {
       })
       .map((arr) => arr.obj)
 
+    if (store.visible === "/") return withExactSlashFirst(fuzziedNonFiles, nonFileOptions, searchValue)
     return [...fuzziedNonFiles, ...fileOptions].slice(0, 10)
   })
 
@@ -785,8 +789,9 @@ export function Autocomplete(props: {
   const inline = () => Boolean(props.inlineSlashMenu) && store.visible === "/"
   const menuBudget = () => Math.max(1, Math.floor(dimensions().height / 3))
   const footerHeight = () =>
-    store.visible === "/" && Boolean(favoriteShortcut()) && props.anchor().y > 1 &&
-    (!inline() || menuBudget() > 1) ? 1 : 0
+    store.visible === "/" && Boolean(favoriteShortcut()) && props.anchor().y > 1 && (!inline() || menuBudget() > 1)
+      ? 1
+      : 0
 
   const height = createMemo(() => {
     const count = options().length || 1
@@ -850,17 +855,11 @@ export function Autocomplete(props: {
               onMouseUp={() => select()}
             >
               <Show when={store.visible === "/"}>
-                <text
-                  fg={index === store.selected ? selectedForeground(theme) : theme.warning}
-                  flexShrink={0}
-                >
+                <text fg={index === store.selected ? selectedForeground(theme) : theme.warning} flexShrink={0}>
                   {favoriteKeys().has(option().favoriteKey ?? "") ? "\u2b29 " : "  "}
                 </text>
               </Show>
-              <text
-                fg={index === store.selected ? selectedForeground(theme) : kindColor(option().kind)}
-                flexShrink={0}
-              >
+              <text fg={index === store.selected ? selectedForeground(theme) : kindColor(option().kind)} flexShrink={0}>
                 {option().display}
               </text>
               <Show when={option().description}>
@@ -875,7 +874,8 @@ export function Autocomplete(props: {
       <Show when={footerHeight()}>
         <box backgroundColor={theme.backgroundMenu} paddingLeft={1} height={1}>
           <text fg={theme.textMuted} wrapMode="none">
-            {favoriteShortcut()} {favoriteKeys().has(options()[store.selected]?.favoriteKey ?? "") ? "unfavorite" : "favorite"}
+            {favoriteShortcut()}{" "}
+            {favoriteKeys().has(options()[store.selected]?.favoriteKey ?? "") ? "unfavorite" : "favorite"}
           </text>
         </box>
       </Show>
@@ -889,4 +889,14 @@ export function orderSlashFavorites(options: AutocompleteOption[], favorites: Re
     ...options.filter((option) => favorites.has(option.favoriteKey ?? "")),
     ...options.filter((option) => !favorites.has(option.favoriteKey ?? "")),
   ]
+}
+
+// Fuzzy ranking can put a longer name above the one typed in full (/thinking over /think).
+export function withExactSlashFirst(ranked: AutocompleteOption[], all: AutocompleteOption[], search: string) {
+  const typed = `/${search}`
+  const exact = all.find(
+    (option) => option.display.trimEnd().replace(/:\([^)]*\)$/, "") === typed || option.aliases?.includes(typed),
+  )
+  if (!exact) return ranked.slice(0, 10)
+  return [exact, ...ranked.filter((option) => option !== exact)].slice(0, 10)
 }

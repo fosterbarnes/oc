@@ -7,6 +7,21 @@ runNativeCommand bun @('turbo', 'typecheck') 'typecheck'
 runNativeCommand bun @('packages/tui/script/keybindDocs.ts', '--check') 'keybind docs check'
 & "$PSScriptRoot\countCode.ps1"
 & "$PSScriptRoot\readmeVersion.ps1"
+# Format changed files the way upstream's format workflow does, so src stays Prettier-clean.
+$changed = @(git -C $srcRoot ls-files -m -o --exclude-standard)
+if ($LASTEXITCODE) { throw "git ls-files failed (exit $LASTEXITCODE)." }
+$changed = @($changed | Where-Object { Test-Path -LiteralPath (Join-Path $srcRoot $_) -PathType Leaf })
+if ($changed) {
+    Push-Location -LiteralPath $srcRoot
+    try {
+        # Batches keep each command line under the Windows 32K limit; large syncs change ~1,900 files.
+        for ($i = 0; $i -lt $changed.Count; $i += 200) {
+            $batch = $changed[$i..([Math]::Min($i + 199, $changed.Count - 1))]
+            runNativeCommand bun (@('run', 'prettier', '--write', '--ignore-unknown', '--log-level', 'warn') + $batch) 'prettier'
+        }
+    }
+    finally { Pop-Location }
+}
 setCrlf
 Write-Host 'Pre-push checks passed. No commit or push was performed.'
 closeOut 3
