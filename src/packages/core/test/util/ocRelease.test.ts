@@ -41,7 +41,16 @@ beforeAll(() => {
     fetch: (request) => {
       const url = new URL(request.url)
       if (url.pathname.endsWith("/releases/latest"))
-        return Response.json({ tag_name: "v0.3.1", assets: [{ name: "a.zip", browser_download_url: "u" }, { x: 1 }] })
+        // `digest` exactly as GitHub's release API returns it.
+        return Response.json({
+          tag_name: "v0.3.1",
+          assets: [
+            { name: "a.zip", browser_download_url: "u", digest: `sha256:${"ab".repeat(32)}` },
+            { name: "b.zip", browser_download_url: "v", digest: "sha256:XYZ" },
+            { name: "c.zip", browser_download_url: "w" },
+            { x: 1 },
+          ],
+        })
       if (url.pathname.endsWith("/releases/tags/v9.9.9")) return new Response("{}", { status: 404 })
       return Response.json({ unexpected: true })
     },
@@ -49,10 +58,14 @@ beforeAll(() => {
 })
 afterAll(() => server.stop(true))
 
-test("lookup parses the release and drops malformed assets", async () => {
+test("lookup parses the release, keeps valid SHA-256 digests, and drops malformed assets", async () => {
   expect(await OcRelease.lookup(undefined, server.url.origin)).toEqual({
     version: "0.3.1",
-    assets: [{ name: "a.zip", url: "u" }],
+    assets: [
+      { name: "a.zip", url: "u", sha256: "ab".repeat(32) },
+      { name: "b.zip", url: "v" },
+      { name: "c.zip", url: "w" },
+    ],
   })
 })
 

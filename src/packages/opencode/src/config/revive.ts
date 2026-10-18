@@ -248,7 +248,7 @@ export function buildSteps(build: BuildConfig, variant?: "native") {
 /**
  * Downloads and unpacks oc release `version` for this platform; returns the same output shape as
  * buildSteps (oc folder, native executable). Runs before shutdown,
- * so a missing asset or failed download leaves the running oc untouched.
+ * so a missing asset, failed download, or digest mismatch leaves the running oc untouched.
  */
 export async function downloadRelease(version: string) {
   const release = await OcRelease.lookup(version)
@@ -259,12 +259,18 @@ export async function downloadRelease(version: string) {
     variants.map(async (variant) => {
       const asset = OcRelease.asset(release, variant)
       if (!asset) throw new Error(`oc v${version} has no ${variant} download for ${process.platform}-${process.arch}`)
+      if (!asset.sha256) throw new Error(`oc v${version} has no published SHA-256 for ${asset.name}`)
       const folder = path.join(stage, variant)
       const archive = path.join(stage, asset.name)
       const response = await fetch(asset.url, { signal: AbortSignal.timeout(300_000) })
       if (!response.ok) throw new Error(`Download failed: HTTP ${response.status} for ${asset.name}`)
+      // Nothing is written or unpacked until the bytes match GitHub's published digest.
+      const bytes = await response.bytes()
+      const sha256 = new Bun.CryptoHasher("sha256").update(bytes).digest("hex")
+      if (sha256 !== asset.sha256)
+        throw new Error(`${asset.name} SHA-256 mismatch: expected ${asset.sha256}, got ${sha256}`)
       await fsp.mkdir(folder, { recursive: true })
-      await Bun.write(archive, response)
+      await Bun.write(archive, bytes)
       // Windows 10+ ships bsdtar, which reads zip archives.
       const unpack = Bun.spawnSync(["tar", "-xf", archive, "-C", folder], { stdout: "pipe", stderr: "pipe" })
       if (unpack.exitCode !== 0) throw new Error(`Unpacking ${asset.name} failed: ${unpack.stderr.toString().trim()}`)

@@ -97,7 +97,7 @@ async function revivePipeline(context: Revive.ReviveContext) {
   const { tabs, failure } = await withInstallLock(installs ? installDir : undefined, async () => {
     for (const command of steps?.commands ?? []) await log.step(command.join(" "), () => runVisible(command, steps?.cwd))
     const output = release
-      ? await log.step(`Downloading oc v${release}`, () =>
+      ? await log.step(`Downloading and verifying oc v${release}`, () =>
           Revive.downloadRelease(release),
         )
       : steps?.output

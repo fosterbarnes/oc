@@ -150,6 +150,27 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-18 (~01:22) - v0.2.228 swagGap - /update verifies each zip against GitHub's published SHA-256 - Opus 5.5, default effort; Implementation
+
+### Agent
+- Meta: Opus 5.5; default effort; Implementation; completed
+- Version: 0.2.228 swagGap
+- Added `OcRelease.Asset.sha256` (`core/src/util/ocRelease.ts`): `parse` keeps the hex from the API's `digest` (`sha256:<64 hex>`); malformed or missing leaves it unset.
+- Changed `Revive.downloadRelease` (`opencode/src/config/revive.ts`): refuses an asset without `sha256`; reads the body to bytes, hashes with `Bun.CryptoHasher`, throws on mismatch before `Bun.write`/`tar`. Still runs before shutdown.
+- Changed `reviveHost.ts` step label to `Downloading and verifying oc v<release>`.
+- Kept trust root = GitHub account (user decision). Rejected signed-manifest/offline-key and Authenticode plans: Authenticode cannot cover `cursor-runtime/main.mjs` in the zip; offline key blocks forks. Plan: `~/.config/opencode/plans/oc/updateSignedManifest.md`.
+- Docs: `FORK.md` update row, `SCRIPTS.md` release section, wiki `Launching.md` (user pushes wiki).
+- TODO (user): enable repo "Release immutability"; on next release confirm `gh release create <tag> <files>` still works with it on (fallback: `--draft` then `gh release edit --draft=false`).
+- Verification: `bun test test/util/ocRelease.test.ts` (core) 5 pass 0 fail, lookup test now returns real-shape `digest` values. `tsc --noEmit` in `packages/opencode` exits 2, no errors in touched files. `downloadRelease` not exercised; live `/update` after next release.
+
+### User
+Updates
+- `/update` now checks each downloaded zip against the SHA-256 hash GitHub shows on the release page, and cancels the update if the hash is missing or different.
+- The progress line reads "Downloading and verifying oc v<version>".
+- You can check a release by hand by running `Get-FileHash <zip> -Algorithm SHA256` and comparing it with the release page.
+
+---
+
 ## 2026-10-17 (~14:50) - v0.2.227 axesShittn - P4 probe teardown no longer fails; scrollback surface checked against the OpenTUI patch - Opus 5.5, default effort; Implementation
 
 ### Agent

@@ -6,7 +6,8 @@ export * as OcRelease from "./ocRelease"
 export const REPO = "fosterbarnes/oc"
 
 export type Variant = "oc" | "native"
-export type Asset = { name: string; url: string }
+// `sha256` is the digest GitHub computes on upload and shows on the release page; /update requires it.
+export type Asset = { name: string; url: string; sha256?: string }
 export type Release = { version: string; assets: Asset[] }
 
 const PREFIX: Record<Variant, string> = { oc: "", native: "native-" }
@@ -49,11 +50,11 @@ function parse(input: unknown): Release {
     throw new Error("oc release lookup returned an unexpected response")
   return {
     version: value.tag_name.replace(/^v/, ""),
-    assets: value.assets.flatMap((item: { name?: unknown; browser_download_url?: unknown }) =>
-      typeof item?.name === "string" && typeof item.browser_download_url === "string"
-        ? [{ name: item.name, url: item.browser_download_url }]
-        : [],
-    ),
+    assets: value.assets.flatMap((item: { name?: unknown; browser_download_url?: unknown; digest?: unknown }) => {
+      if (typeof item?.name !== "string" || typeof item.browser_download_url !== "string") return []
+      const sha256 = typeof item.digest === "string" ? /^sha256:([0-9a-f]{64})$/.exec(item.digest)?.[1] : undefined
+      return [{ name: item.name, url: item.browser_download_url, ...(sha256 ? { sha256 } : {}) }]
+    }),
   }
 }
 
