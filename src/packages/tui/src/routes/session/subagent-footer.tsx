@@ -3,8 +3,9 @@ import { useRouteData } from "../../context/route"
 import { useSync } from "../../context/sync"
 import { useTheme } from "../../context/theme"
 import { SplitBorder } from "../../ui/border"
-import type { AssistantMessage } from "@opencode-ai/sdk/v2"
+import { contextUsage } from "../../util/contextUsage"
 import { Locale } from "../../util/locale"
+import { subagentLabel } from "../../util/session"
 import { useTerminalDimensions } from "@opentui/solid"
 import { useCommandShortcut, useOpencodeKeymap } from "../../keymap"
 
@@ -17,8 +18,7 @@ export function SubagentFooter() {
   const subagentInfo = createMemo(() => {
     const s = session()
     if (!s) return { label: "Subagent", index: 0, total: 0 }
-    const agentMatch = s.title.match(/@(\w+) subagent/)
-    const label = agentMatch ? Locale.titlecase(agentMatch[1]) : "Subagent"
+    const label = subagentLabel(s.title)
 
     if (!s.parentID) return { label, index: 0, total: 0 }
 
@@ -31,16 +31,8 @@ export function SubagentFooter() {
   })
 
   const usage = createMemo(() => {
-    const msg = messages()
-    const last = msg.findLast((item): item is AssistantMessage => item.role === "assistant" && item.tokens.output > 0)
-    if (!last) return
-
-    const tokens =
-      last.tokens.input + last.tokens.output + last.tokens.reasoning + last.tokens.cache.read + last.tokens.cache.write
-    if (tokens <= 0) return
-
-    const model = sync.data.provider.find((item) => item.id === last.providerID)?.models[last.modelID]
-    const pct = model?.limit.context ? `${Math.round((tokens / model.limit.context) * 100)}%` : undefined
+    const context = contextUsage(messages(), sync.data.provider)
+    if (!context) return
     const cost = session()?.cost ?? 0
 
     const money = new Intl.NumberFormat("en-US", {
@@ -49,7 +41,10 @@ export function SubagentFooter() {
     })
 
     return {
-      context: pct ? `${Locale.number(tokens)} (${pct})` : Locale.number(tokens),
+      context:
+        context.percent === undefined
+          ? Locale.number(context.tokens)
+          : `${Locale.number(context.tokens)} (${context.percent}%)`,
       cost: cost > 0 ? money.format(cost) : undefined,
     }
   })
@@ -81,9 +76,7 @@ export function SubagentFooter() {
               <b>{subagentInfo().label}</b>
             </text>
             <Show when={subagentInfo().total > 0}>
-              <text style={{ fg: theme.textMuted }}>
-                {`(${subagentInfo().index} of ${subagentInfo().total})`}
-              </text>
+              <text style={{ fg: theme.textMuted }}>{`(${subagentInfo().index} of ${subagentInfo().total})`}</text>
             </Show>
             <Show when={usage()}>
               {(item) => (

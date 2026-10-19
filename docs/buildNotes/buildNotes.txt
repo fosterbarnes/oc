@@ -1,8 +1,9 @@
-v0.2.236 bareShmeeba
+v0.2.238 controlJeremy
 
-subagents:
-A new "Session subagents" menu switches subagents on or off for the current chat only. Open it from the oc palette, with /sessionSub, or with the new Subagents button in the sidebar under oc Palette. Each subagent has a checkbox, and an "All subagents" row removes the task tool from that chat entirely. Agent files and config are not touched.
+subagent cards:
+While a subagent runs, its line in the chat becomes a small box showing its latest tool calls, thinking, and replies, newest at the bottom. The box header shows the agent, task, model, and how full its context is; click it to open the subagent. When the subagent finishes, the box shrinks back to the usual one-line summary. Subagent live rows in the oc palette (/subagentRows) cycles the box height between off, 3, 4, and 6 rows; it starts at 4. Claude Code's own built-in subagents get no box. Parallel subagents stack their boxes.
 
-Switched-off subagents drop out of the list the model sees and their calls are refused. Naming an agent yourself with @agent still runs it. The sidebar button shows how many subagents are off in the chat. A Claude Code chat keeps its old list until its Claude process restarts, but calls to switched-off subagents are still refused.
+prompt bar:
+The bar under the prompt now shows each subagent's context use, such as "Explore 45% . General 12%", next to the chat's own tokens and cost. Up to three subagents show, newest first, with +N for the rest. Show/Hide subagent usage in the oc palette (/subagentUsage) turns this on or off; it starts on. The ctrl+p "commands" hint now sits at the far right, after ctrl+o "oc commands".
 
-Under the hood: the switched-off names live in the session's metadata as disabledSubagents and become task deny rules on each turn (disabledSubagentRules), because session permission rules can only be added to, so a subagent could never be switched back on. The task tool's agent list now also respects session rules (it only checked the agent's own permissions before), and the Claude Code task description comes from the turn's own tool list. Toggling also drops names of agents deleted since they were switched off. Checks run: opencode and tui typecheck clean; tool registry tests 19 pass, including a new one for a switched-off subagent. No TUI dialog test, no Claude fake-model scenario, not checked live in the TUI.
+Under the hood: new subagentFeed helper builds the card rows from the child session's live messages and parts (no server change), and the card reuses the transcript's BlockTool inside the Task renderer. New contextUsage helper replaces the duplicated context math in the prompt bar and subagent footer, and subagentLabel moved into util/session.ts. Checks run: tui typecheck clean; subagentFeed tests 3 pass; contextUsage tests 4 pass. Not checked live in the TUI.

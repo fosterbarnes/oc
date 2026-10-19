@@ -150,6 +150,52 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-19 (~00:01) - v0.2.238 controlJeremy - Live subagent cards in the transcript - Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Opus 5.5; low effort; Implementation (from spitball plan `~/.config/opencode/plans/subagentCards.md`); completed
+- Version: 0.2.238 controlJeremy
+- Added `tui/src/util/subagentFeed.ts` `subagentFeed(messages, parts, max)` -> `FeedEntry[]` (tool `› Tool title` / reasoning / text, whitespace-collapsed 400-char tail, newest `max`, oldest first). Child parts and deltas were already live in sync (`inOpenTree`); no server change.
+- Changed `Task` (`tui/src/routes/session/index.tsx`): split `header` memo; while running with `cardRows() > 0` renders `BlockTool` (spinner title = header + context %, retry line, fixed-height `overflow="hidden"` `justifyContent="flex-end"` body via `Index`). Not running or rows 0 -> unchanged `InlineTool`. Click handler shared (`open`).
+- Deviation: card lives in `Task` instead of a separate `subagentCard.tsx`, since `BlockTool` is file-private there.
+- Added oc palette `oc.subagent_card_rows` "Subagent live rows: N|off" (`/subagentRows`, Layout) cycling kv `subagent_card_rows` 0/3/4/6, default 4.
+- Kept: Claude Code native Agent subagents get no card (output dropped in `turnStream.ts`). Parallel tasks stack vertically.
+- Risk: flex-end clipping relies on opentui scissor for `overflow="hidden"` (confirmed in core `pushScissorRect`), not seen live.
+- Docs: `FORK.md` row "Live subagent cards". Wiki page not updated.
+- Verification: `bun test test/cli/tui/subagentFeed.test.ts` 3 pass; tui `bun run typecheck` exit 0. No live TUI run.
+
+### User
+Subagents
+- While a subagent runs, its line in the chat becomes a small box showing its latest tool calls, thinking, and replies, with the newest at the bottom.
+- The box header shows the agent, task, model, and how full its context is; click it to open the subagent.
+- When the subagent finishes, the box shrinks back to the usual one-line summary.
+- **Subagent live rows** in the oc palette (`/subagentRows`) cycles the box height between off, 3, 4, and 6 rows; it starts at 4.
+
+---
+
+## 2026-10-18 (~23:46) - v0.2.237 likeeeNepean - Subagent context % in the prompt bar - Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Opus 5.5; low effort; Implementation (after /spit plan); completed
+- Version: 0.2.237 likeeeNepean
+- Added `tui/src/util/contextUsage.ts` `contextUsage(messages, providers)` -> `{ tokens, percent }`; replaced duplicated math in `component/prompt/index.tsx` `usage` and `routes/session/subagent-footer.tsx`.
+- Added `subagentLabel(title)` to `tui/src/util/session.ts` (regex `@(\w+) subagent`, moved from subagent footer). Risk: names like `general-haiku-5.5-medium` label as "General".
+- Added prompt `subagentUsage` memo: direct children (`parentID === sessionID`) with loaded messages, newest first, cap 3 + `+N`, rendered as a sibling `<text>` after main usage inside the `Match when={usage()}` branch. Only shows once the main thread has usage.
+- Added oc palette `oc.subagent_usage` (`/subagentUsage`, Layout group) toggling kv `subagent_usage_enabled` (default true).
+- Kept: unloaded children from earlier runs are skipped (no extra hydration). Claude Code built-in Task subagents are not oc sessions.
+- Docs: `FORK.md` row; wiki `Agents-and-Skills.md` "Subagent usage in the prompt bar" (wiki push is user's).
+- Moved prompt bar hint order: `oc commands` (ctrl+o) now before `commands` (ctrl+p), so ctrl+p sits rightmost.
+- Verification: tui `bun test test/cli/tui/contextUsage.test.ts` 4 pass; tui `bun run typecheck` exit 0. Live TUI check not run.
+
+### User
+Prompt bar
+- The bar under the prompt now shows each subagent's context use, such as `Explore 45% . General 12%`, next to the chat's own tokens and cost.
+- Up to three subagents show, newest first, with `+N` for the rest.
+- **Show/Hide subagent usage** in the oc palette (`/subagentUsage`) turns this on or off; it starts on.
+- The ctrl+p "commands" hint now sits at the far right, after ctrl+o "oc commands".
+
+---
+
 ## 2026-10-18 (~23:30) - v0.2.236 bareShmeeba - Switch subagents on or off per session - Opus 5.5, low effort; Implementation
 
 ### Agent

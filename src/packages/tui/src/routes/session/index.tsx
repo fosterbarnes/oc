@@ -5,6 +5,7 @@ import {
   createMemo,
   createSignal,
   For,
+  Index,
   Match,
   on,
   onCleanup,
@@ -94,6 +95,8 @@ import { reviveText, reviveVersions } from "../../util/revive"
 import { LocationProvider } from "../../context/location"
 import { openSessionTab, unavailable as tabUnavailable } from "../../util/sessionTab"
 import { detectTerminal } from "@opencode-ai/core/util/terminal"
+import { contextUsage } from "../../util/contextUsage"
+import { subagentFeed } from "../../util/subagentFeed"
 
 addDefaultParsers(parsers.parsers)
 
@@ -2639,6 +2642,7 @@ function Task(props: ToolProps) {
   const { navigate } = useRoute()
   const sync = useSync()
   const dialog = useDialog()
+  const kv = useKV()
 
   onMount(() => {
     const sessionID = stringValue(props.metadata.sessionId)
@@ -2681,7 +2685,7 @@ function Task(props: ToolProps) {
     return assistant - first
   })
 
-  const content = createMemo(() => {
+  const header = createMemo(() => {
     const description = stringValue(props.input.description)
     if (!description) return ""
     const title = formatSubagentTitle(
@@ -2693,7 +2697,20 @@ function Task(props: ToolProps) {
       props.metadata.model as { providerID: string; modelID: string } | undefined,
       stringValue(props.metadata.variant),
     )
-    let content = [model ? `${title} · ${model}` : title]
+    return model ? `${title} · ${model}` : title
+  })
+
+  // Live card rows while running; 0 keeps the single-line view.
+  const cardRows = createMemo(() => (isRunning() && header() ? kv.get("subagent_card_rows", 4) : 0))
+  const feed = createMemo(() => (cardRows() ? subagentFeed(messages(), sync.data.part, cardRows()) : []))
+  const cardTitle = createMemo(() => {
+    const percent = contextUsage(messages(), sync.data.provider)?.percent
+    return percent === undefined ? header() : `${header()} · ${percent}%`
+  })
+
+  const content = createMemo(() => {
+    if (!header()) return ""
+    let content = [header()]
 
     const retrying = retry()
     if (isRunning() && retrying) {
@@ -2713,25 +2730,56 @@ function Task(props: ToolProps) {
     return content.join("\n")
   })
 
+  const open = () => {
+    const id = sessionID()
+    if (id && ctx.tui.subagent_tabs.click === "tab") ctx.openTab(id)
+    else if (id) navigate({ type: "session", sessionID: id })
+    const status = retry()
+    if (status) void DialogAlert.show(dialog, "Retry Error", status.message)
+  }
+
   return (
-    <InlineTool
-      icon={props.part.state.status === "completed" ? "✓" : "│"}
-      separate={true}
-      color={retry() ? theme.error : undefined}
-      spinner={isRunning()}
-      complete={stringValue(props.input.description)}
-      pending="Delegating…"
-      part={props.part}
-      onClick={() => {
-        const id = sessionID()
-        if (id && ctx.tui.subagent_tabs.click === "tab") ctx.openTab(id)
-        else if (id) navigate({ type: "session", sessionID: id })
-        const status = retry()
-        if (status) void DialogAlert.show(dialog, "Retry Error", status.message)
-      }}
+    <Show
+      when={cardRows()}
+      fallback={
+        <InlineTool
+          icon={props.part.state.status === "completed" ? "✓" : "│"}
+          separate={true}
+          color={retry() ? theme.error : undefined}
+          spinner={isRunning()}
+          complete={stringValue(props.input.description)}
+          pending="Delegating…"
+          part={props.part}
+          onClick={open}
+        >
+          {content()}
+        </InlineTool>
+      }
     >
-      {content()}
-    </InlineTool>
+      <BlockTool title={cardTitle()} spinner={true} part={props.part} onClick={open}>
+        <Show when={retry()}>
+          {(status) => (
+            <text fg={theme.error} wrapMode="none">
+              {formatSubagentRetry(status().attempt, Locale.truncate(status().message, 80))}
+            </text>
+          )}
+        </Show>
+        {/* Fixed height with bottom alignment: newest lines stay visible, older ones clip off the top. */}
+        <box height={cardRows()} overflow="hidden" flexDirection="column" justifyContent="flex-end">
+          <Index each={feed()}>
+            {(entry) => (
+              <text
+                flexShrink={0}
+                wrapMode={entry().kind === "tool" ? "none" : "word"}
+                fg={entry().error ? theme.error : entry().kind === "text" ? theme.text : theme.textMuted}
+              >
+                {entry().text}
+              </text>
+            )}
+          </Index>
+        </box>
+      </BlockTool>
+    </Show>
   )
 }
 

@@ -40,6 +40,8 @@ import { type AutocompleteRef, Autocomplete } from "./autocomplete"
 import { useRenderer, useTerminalDimensions, type JSX } from "@opentui/solid"
 import type { AssistantMessage, FilePart, UserMessage } from "@opencode-ai/sdk/v2"
 import { Locale } from "../../util/locale"
+import { contextUsage } from "../../util/contextUsage"
+import { subagentLabel } from "../../util/session"
 import { errorMessage } from "../../util/error"
 import { formatDuration } from "../../util/format"
 import { createColors, createFrames } from "../../ui/spinner"
@@ -315,22 +317,32 @@ export function Prompt(props: PromptProps) {
 
   const usage = createMemo(() => {
     if (!props.sessionID) return
-    const session = sync.session.get(props.sessionID)
-    const msg = sync.data.message[props.sessionID] ?? []
-    const last = msg.findLast((item): item is AssistantMessage => item.role === "assistant" && item.tokens.output > 0)
-    if (!last) return
-
-    const tokens =
-      last.tokens.input + last.tokens.output + last.tokens.reasoning + last.tokens.cache.read + last.tokens.cache.write
-    if (tokens <= 0) return
-
-    const model = sync.data.provider.find((item) => item.id === last.providerID)?.models[last.modelID]
-    const pct = model?.limit.context ? `${Math.round((tokens / model.limit.context) * 100)}%` : undefined
-    const cost = session?.cost ?? 0
+    const context = contextUsage(sync.data.message[props.sessionID] ?? [], sync.data.provider)
+    if (!context) return
+    const cost = sync.session.get(props.sessionID)?.cost ?? 0
     return {
-      context: pct ? `${Locale.number(tokens)} (${pct})` : Locale.number(tokens),
+      context:
+        context.percent === undefined
+          ? Locale.number(context.tokens)
+          : `${Locale.number(context.tokens)} (${context.percent}%)`,
       cost: cost > 0 ? money.format(cost) : undefined,
     }
+  })
+
+  // Direct children with loaded messages, newest first; unloaded past children are skipped.
+  const subagentUsage = createMemo(() => {
+    const sessionID = props.sessionID
+    if (!sessionID || !kv.get("subagent_usage_enabled", true)) return
+    const entries = sync.data.session
+      .filter((item) => item.parentID === sessionID)
+      .toSorted((a, b) => b.time.created - a.time.created)
+      .flatMap((item) => {
+        const percent = contextUsage(sync.data.message[item.id] ?? [], sync.data.provider)?.percent
+        return percent === undefined ? [] : [`${subagentLabel(item.title)} ${percent}%`]
+      })
+    if (entries.length === 0) return
+    const shown = entries.slice(0, 3).join(" . ")
+    return entries.length > 3 ? `${shown} +${entries.length - 3}` : shown
   })
 
   const [store, setStore] = createStore<{
@@ -2032,9 +2044,18 @@ export function Prompt(props: PromptProps) {
                   <Switch>
                     <Match when={usage()}>
                       {(item) => (
-                        <text fg={theme.textMuted} wrapMode="none">
-                          {[item().context, item().cost].filter(Boolean).join(" . ")}
-                        </text>
+                        <box flexDirection="row" gap={2}>
+                          <text fg={theme.textMuted} wrapMode="none">
+                            {[item().context, item().cost].filter(Boolean).join(" . ")}
+                          </text>
+                          <Show when={subagentUsage()}>
+                            {(text) => (
+                              <text fg={theme.textMuted} wrapMode="none">
+                                {text()}
+                              </text>
+                            )}
+                          </Show>
+                        </box>
                       )}
                     </Match>
                     <Match when={true}>
@@ -2048,14 +2069,14 @@ export function Prompt(props: PromptProps) {
                       {scheduleShortcut()} <span style={{ fg: theme.textMuted }}>schedule</span>
                     </text>
                   </Show>
-                  <text fg={theme.text}>
-                    {paletteShortcut()} <span style={{ fg: theme.textMuted }}>commands</span>
-                  </text>
                   <Show when={ocPaletteShortcut()}>
                     <text fg={theme.text}>
                       {ocPaletteShortcut()} <span style={{ fg: theme.textMuted }}>oc commands</span>
                     </text>
                   </Show>
+                  <text fg={theme.text}>
+                    {paletteShortcut()} <span style={{ fg: theme.textMuted }}>commands</span>
+                  </text>
                 </Match>
                 <Match when={store.mode === "shell"}>
                   <text fg={theme.text}>

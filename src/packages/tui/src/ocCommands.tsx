@@ -473,6 +473,37 @@ export function createOcCommands(input: {
         },
       },
       {
+        name: "oc.subagent_usage",
+        get title() {
+          return kv.get("subagent_usage_enabled", true) ? "Hide subagent usage" : "Show subagent usage"
+        },
+        category: "oc",
+        group: "Layout",
+        desc: "Context % of each subagent in the prompt bar",
+        slashName: "subagentUsage",
+        run: () => {
+          kv.set("subagent_usage_enabled", !kv.get("subagent_usage_enabled", true))
+          dialog.clear()
+        },
+      },
+      {
+        name: "oc.subagent_card_rows",
+        get title() {
+          const rows = kv.get("subagent_card_rows", 4)
+          return `Subagent live rows: ${rows ? rows : "off"}`
+        },
+        category: "oc",
+        group: "Layout",
+        desc: "Rows of tool calls, thinking, and output shown for each running subagent",
+        slashName: "subagentRows",
+        run: () => {
+          const steps = [0, 3, 4, 6]
+          const index = steps.indexOf(kv.get("subagent_card_rows", 4))
+          kv.set("subagent_card_rows", steps[(index + 1) % steps.length])
+          dialog.clear()
+        },
+      },
+      {
         name: "oc.subagent_tabs",
         title: "Subagent tabs",
         category: "oc",
