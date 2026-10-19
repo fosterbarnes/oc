@@ -17,7 +17,8 @@ import { deleteActiveProcessAndWait, sessionKey, WAKE_PROMPT_TEXT } from "@/prov
 
 const SESSION = "ses_wake_test"
 
-function createFixture() {
+// `wakes: false` never starts a turn on its own and echoes every message it reads.
+function createFixture({ wakes = true } = {}) {
   const cwd = mkdtempSync(join(tmpdir(), "opencode-autonomous-turn-"))
   const cliPath = join(cwd, "fake-claude.cjs")
   writeFileSync(
@@ -38,7 +39,8 @@ const say = (text) => {
   process.stdout.write(JSON.stringify({ type: "result", subtype: "success", session_id: "fake-session" }) + "\\n")
 }
 let turn = 0
-readline.createInterface({ input: process.stdin }).on("line", () => {
+readline.createInterface({ input: process.stdin }).on("line", (line) => {
+  if (${!wakes}) return say("Read: " + JSON.stringify(JSON.parse(line).message.content))
   turn++
   if (turn > 1) return say("UNEXPECTED: oc wrote to the CLI")
   say("Started.")
@@ -98,6 +100,34 @@ test("a turn the CLI starts on its own wakes the oc session and streams live", {
     ])
     assert.match(text, /Woke\./)
     assert.doesNotMatch(text, /UNEXPECTED/)
+  } finally {
+    setOpencodeClient({})
+    await deleteActiveProcessAndWait(sessionKey(fixture.cwd, `tools::${SESSION}::context=["claude-code"]`))
+    rmSync(fixture.cwd, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 })
+  }
+})
+
+// A wake posted for a CLI turn this process never saw (an orphaned old server, 2026-10-19) gets an
+// empty reply that the next prompt leaves out, so the marker sits beside the user's next message.
+test("a stale wake does not swallow the user's next message", { timeout: 10_000 }, async () => {
+  const fixture = createFixture({ wakes: false })
+  setOpencodeClient({ _client: { get: async () => ({ data: [] }), post: async () => ({ data: undefined }) } })
+  try {
+    const model = createClaudeCode({ cliPath: fixture.cliPath, cwd: fixture.cwd, proxyTools: [] }).languageModel(
+      "claude-test-autonomous",
+    )
+    const first = [{ role: "user", content: [{ type: "text", text: "Start the task." }] }]
+    assert.match(await runTurn(model, first), /Read: .*Start the task\./)
+    const history = [
+      ...first,
+      { role: "assistant", content: [{ type: "text", text: "Read." }] },
+      { role: "user", content: [{ type: "text", text: WAKE_PROMPT_TEXT }] },
+    ]
+    assert.equal(await runTurn(model, history), "")
+
+    const text = await runTurn(model, [...history, { role: "user", content: [{ type: "text", text: "Next?" }] }])
+    assert.match(text, /Read: .*Next\?/)
+    assert.ok(!text.includes(WAKE_PROMPT_TEXT), "the wake marker reached the CLI")
   } finally {
     setOpencodeClient({})
     await deleteActiveProcessAndWait(sessionKey(fixture.cwd, `tools::${SESSION}::context=["claude-code"]`))

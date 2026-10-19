@@ -1,6 +1,8 @@
 import type { JSX } from "solid-js"
 import type { RGBA } from "@opentui/core"
-import { openUrl } from "@opencode-ai/core/open"
+import { useKV } from "../context/kv"
+import { openLink } from "../util/browser"
+import { useToast } from "./toast"
 
 export interface LinkProps {
   href: string
@@ -13,9 +15,11 @@ export interface LinkProps {
 
 /**
  * Link component that renders clickable hyperlinks.
- * Clicking anywhere on the link text opens the URL in the default browser.
+ * Clicking anywhere on the link text opens the URL in the browser picked in the oc palette.
  */
 export function Link(props: LinkProps) {
+  const kv = useKV()
+  const toast = useToast()
   const displayText = props.children ?? props.href
 
   return (
@@ -26,7 +30,7 @@ export function Link(props: LinkProps) {
       width={props.width}
       wrapMode={props.wrapMode}
       onMouseUp={() => {
-        openUrl(props.href).catch(() => {})
+        openLink(kv, props.href).catch(toast.error)
       }}
     >
       {displayText}

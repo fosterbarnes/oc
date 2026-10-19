@@ -71,7 +71,6 @@ import {
   takeUnattendedLines,
   describeChildCrash,
   isInitLine,
-  WAKE_PROMPT_TEXT,
   type ActiveProcess,
 } from "./sessionManager.js"
 import { appendExchangeText, currentExchangeHash } from "./sessionSync.js"
@@ -113,6 +112,8 @@ export interface TurnInput {
   turn: TurnContext
   options: LanguageModelV3CallOptions
   userMsg: string
+  /** The newest message is oc's wake prompt (`isWakeTurn`). */
+  wake: boolean
   /** Pool account (accounts.ts) this turn starts on. */
   account: string
   /** This turn's message for a fresh conversation on another account, given the work done so far. */
@@ -270,7 +271,8 @@ class ClaudeTurn {
       receiptFailed: (error) => {
         this.autoContinue.aborted = true
         this.steering.retire("Claude read a message whose delivery receipt could not be saved")
-        if (!this.closed) this.failTurn(`Claude read your message, but saving its delivery receipt failed: ${String(error)}`)
+        if (!this.closed)
+          this.failTurn(`Claude read your message, but saving its delivery receipt failed: ${String(error)}`)
       },
     })
     this.autoContinue = {
@@ -332,7 +334,7 @@ class ClaudeTurn {
     }
     // A wake prompt attaches to the turn the CLI started on its own; any
     // other turn takes over from it (interrupting it below if still running).
-    const attachAutonomous = this.activeProcess.autonomousTurn === true && this.userMsg.includes(WAKE_PROMPT_TEXT)
+    const attachAutonomous = this.activeProcess.autonomousTurn === true && this.input.wake
     this.activeProcess.autonomousTurn = false
 
     // The CLI serves one turn at a time. If the previous one is still running
@@ -357,7 +359,8 @@ class ClaudeTurn {
     this.unsubscribeProxyCalls = onPendingProxyCall(this.sk, this.onProxyCall)
     this.proc.on("error", this.onProcError)
     // Only the chat's own tool turn takes steers; title and summary calls share its session id.
-    if (!this.turn.compactionMode && this.turn.scope === "tools") claudeSteerSinks.set(this.turn.affinity, this.steering.sink)
+    if (!this.turn.compactionMode && this.turn.scope === "tools")
+      claudeSteerSinks.set(this.turn.affinity, this.steering.sink)
 
     if (this.options.abortSignal) {
       this.abortHandler = this.onAbort
@@ -712,12 +715,13 @@ class ClaudeTurn {
     // Keep the originating account's quota even while its rejected reply is suppressed for failover.
     if (msg.type === "rate_limit_event") {
       const windows = toQuotaWindows(parseRateLimitEvent(msg))
-      if (windows.length) reportUsageObservation({
-        providerID: BASE_PROVIDER_ID,
-        accountID: canonicalAccountId(this.account),
-        observedAt: Date.now(),
-        windows,
-      })
+      if (windows.length)
+        reportUsageObservation({
+          providerID: BASE_PROVIDER_ID,
+          accountID: canonicalAccountId(this.account),
+          observedAt: Date.now(),
+          windows,
+        })
     }
     // The limited account's own "you've hit your limit" reply is not shown.
     if (this.switchTo && msg.type !== "result") return
@@ -1186,7 +1190,9 @@ class ClaudeTurn {
     if (this.todos.idle && this.steering.acks.size === 0) return this.completeResult(msg)
     void Promise.all([this.todos.settled, ...this.steering.acks]).then(
       () => this.completeResult(msg),
-      (error) => { if (!this.closed) this.failTurn(`Updating a pending message failed: ${String(error)}`) },
+      (error) => {
+        if (!this.closed) this.failTurn(`Updating a pending message failed: ${String(error)}`)
+      },
     )
   }
 
@@ -1286,7 +1292,9 @@ class ClaudeTurn {
     // Read receipts must be saved first, or oc's loop would send those steers again.
     void Promise.all([this.todos.settled, ...this.steering.acks]).then(
       () => this.endPreempted(),
-      (error) => { if (!this.closed) this.failTurn(`Updating a pending message failed: ${String(error)}`) },
+      (error) => {
+        if (!this.closed) this.failTurn(`Updating a pending message failed: ${String(error)}`)
+      },
     )
   }
 
@@ -1675,8 +1683,7 @@ class ClaudeTurn {
   private cleanup() {
     if (this.cleanedUp) return
     this.cleanedUp = true
-    if (this.steering.hasUnread &&
-      (this.autoContinue.aborted || this.toolDenied || !this.turnCompleted)) {
+    if (this.steering.hasUnread && (this.autoContinue.aborted || this.toolDenied || !this.turnCompleted)) {
       this.steering.retire("the stopped turn had unread queued messages")
     }
     this.flushExchangeText()

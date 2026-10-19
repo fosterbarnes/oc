@@ -14,7 +14,7 @@
 - `FORK.md` is the living definition of this fork. Statuses describe current state; they do not authorize work. Keep fork-only work in `FORK.md`.
 - `SCOPE.md` records what oc leaves out: upstream surfaces it removed, items not planned, items planned for later, and retired oc features. Every upstream sync classifies each new upstream feature as port, later, or not planned, and records the last two there. A row leaves `SCOPE.md` only by explicit decision.
 - `README.md` is the public pitch: hook, standout features, requirements, install, a short behavior-changes list, and links into the wiki. It is not the reference for how oc behaves.
-- The GitHub wiki (`fosterbarnes/oc.wiki`, local clone `..\oc.wiki`) is the source of truth for user-facing behavior, settings, keys, troubleshooting, and FAQ. When a change alters what users see or configure, update the wiki page, not the README. Code and agent knowledge stays in `FORK.md`, `AGENTS.md`, and `docs/buildNotes/buildNotes.md`. Wiki layout rules: `Editing-This-Wiki.md` there. Pushing the wiki is the user's action.
+- The GitHub wiki (`fosterbarnes/oc.wiki`, local clone `..\oc.wiki`) is the source of truth for user-facing behavior, settings, keys, troubleshooting, and FAQ. When a change alters what users see or configure, update the wiki page, not the README. Code and agent knowledge stays in `FORK.md`, `AGENTS.md`, and `docs/buildNotes/buildNotes.md`. Wiki layout rules: `Editing-This-Wiki.md` there. Pushing the wiki is the user's action, except that `agent-push` pushes it too.
 - `countCode.ps1` (via `prePush.ps1`) requires its single `[number](scc.txt)` link and `code-count:start/end` markers.
 
 ## Build notes

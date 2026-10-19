@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
-import { expandTrackedPastedText, stripPromptPartIDs } from "../../src/prompt/part"
+import type { Part } from "@opencode-ai/sdk/v2"
+import { expandTrackedPastedText, promptFromParts, stripPromptPartIDs, typedSlashCommands } from "../../src/prompt/part"
 
 describe("prompt part", () => {
   test("strips persisted IDs from reused parts", () => {
@@ -18,6 +19,25 @@ describe("prompt part", () => {
       mime: "image/png",
       filename: "tiny.png",
       url: "data:image/png;base64,abc",
+    })
+  })
+
+  test("rebuilds a command message as the typed prompt", () => {
+    const ids = { sessionID: "ses_old", messageID: "msg_old" }
+    const parts = [
+      {
+        ...ids,
+        id: "prt_text",
+        type: "text",
+        text: "[/spit is active: ...]\n\nTemplate\n\nfix it",
+        metadata: { ocCommands: ["spit"], ocCommandArguments: "fix it" },
+      },
+      { ...ids, id: "prt_note", type: "text", text: "hidden", synthetic: true },
+      { ...ids, id: "prt_file", type: "file", mime: "text/plain", filename: "a.ts", url: "file:///a.ts" },
+    ] as Part[]
+    expect(promptFromParts(parts)).toEqual({
+      input: "/spit fix it",
+      parts: [{ type: "file", mime: "text/plain", filename: "a.ts", url: "file:///a.ts" }],
     })
   })
 
@@ -49,5 +69,22 @@ describe("prompt part", () => {
         },
       ]),
     ).toBe(`keep ${marker} then alpha\nbeta\ngamma tail`)
+  })
+
+  test("finds commands in typed text only and keeps pasted text verbatim", () => {
+    const marker = "[Pasted ~2 lines]"
+    const prefix = "/spit 你好 "
+    const commands = typedSlashCommands(
+      `${prefix}${marker} /think`,
+      [
+        {
+          start: Bun.stringWidth(prefix),
+          end: Bun.stringWidth(prefix + marker),
+          text: "notes: run /imp now $&\n",
+        },
+      ],
+      [{ name: "spit" }, { name: "think" }, { name: "imp" }],
+    )
+    expect(commands).toEqual({ names: ["spit", "think"], arguments: "你好 notes: run /imp now $&\n" })
   })
 })

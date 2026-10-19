@@ -24,12 +24,14 @@ import {
   updateDesktopHarness,
 } from "./harnessUpdate"
 import { bootstrapSession, listHomeDirs } from "./ocNewSession"
+import { PASTE_SUMMARY_KEY } from "./prompt/part"
 import { persistAgentModel, persistOcConfig, persistTuiSetting, readOcConfig, resolveOcDirectory } from "./ocSettings"
 import { useDialog } from "./ui/dialog"
 import { DialogAlert } from "./ui/dialog-alert"
 import { DialogPrompt } from "./ui/dialog-prompt"
 import { DialogSelect } from "./ui/dialog-select"
 import { useToast } from "./ui/toast"
+import { LINK_BROWSER_KEY, LINK_CLICK_KEY, scanBrowsers } from "./util/browser"
 import { Locale } from "./util/locale"
 
 // oc palette entries, in three runs that App spreads at their palette positions. Call inside App.
@@ -487,6 +489,21 @@ export function createOcCommands(input: {
         },
       },
       {
+        // Upstream name, so the `app_toggle_paste_summary` keybind still resolves.
+        name: "app.toggle.paste_summary",
+        get title() {
+          return kv.get(PASTE_SUMMARY_KEY, false) ? "Disable paste summary" : "Enable paste summary"
+        },
+        category: "oc",
+        group: "Layout",
+        desc: "Collapse long pastes in the prompt to a [Pasted ~N lines] placeholder",
+        slashName: "pasteSummary",
+        run: () => {
+          kv.set(PASTE_SUMMARY_KEY, !kv.get(PASTE_SUMMARY_KEY, false))
+          dialog.clear()
+        },
+      },
+      {
         name: "oc.subagent_card_rows",
         get title() {
           const rows = kv.get("subagent_card_rows", 4)
@@ -623,6 +640,47 @@ export function createOcCommands(input: {
             ))
           }
           show()
+        },
+      },
+      {
+        name: "oc.link_click",
+        get title() {
+          return kv.get(LINK_CLICK_KEY, true) ? "Disable click to open links" : "Enable click to open links"
+        },
+        category: "oc",
+        group: "Links",
+        desc: "Left click a link in chat to open it",
+        slashName: "linkClick",
+        run: () => {
+          kv.set(LINK_CLICK_KEY, !kv.get(LINK_CLICK_KEY, true))
+          dialog.clear()
+        },
+      },
+      {
+        name: "oc.link_browser",
+        title: "Link browser",
+        category: "oc",
+        group: "Links",
+        get desc() {
+          return kv.get(LINK_BROWSER_KEY) || "system default"
+        },
+        slashName: "linkBrowser",
+        run: async () => {
+          const browsers = await scanBrowsers()
+          dialog.replace(() => (
+            <DialogSelect
+              title="Open links with"
+              current={kv.get(LINK_BROWSER_KEY, "")}
+              options={[
+                { value: "", title: "System default" },
+                ...browsers.map((browser) => ({ value: browser.path, title: browser.name, description: browser.path })),
+              ]}
+              onSelect={(option) => {
+                kv.set(LINK_BROWSER_KEY, option.value)
+                dialog.clear()
+              }}
+            />
+          ))
         },
       },
       {

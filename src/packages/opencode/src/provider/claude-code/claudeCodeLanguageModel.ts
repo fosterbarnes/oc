@@ -8,15 +8,9 @@ import type {
 import { generateId } from "ai"
 import type { ClaudeCodeConfig } from "./types.js"
 import { translateStreamForHost } from "./hostTools.js"
-import { getClaudeUserMessage, visibleThreadTokens } from "./messageBuilder.js"
+import { getClaudeUserMessage, isWakeTurn, visibleThreadTokens } from "./messageBuilder.js"
 import { getRuntimeMcpStatus, fetchSessionRunState } from "./runtimeStatus.js"
-import {
-  getActiveProcess,
-  getClaudeSessionId,
-  describeSessionKey,
-  retireOtherAccount,
-  WAKE_PROMPT_TEXT,
-} from "./sessionManager.js"
+import { getActiveProcess, getClaudeSessionId, describeSessionKey, retireOtherAccount } from "./sessionManager.js"
 import { poolAccount, poolAccountIds, poolAccountLabel, sessionPin } from "./accounts.js"
 import { log } from "./logger.js"
 import { detectCliVersion } from "./cliVersion.js"
@@ -171,9 +165,10 @@ export class ClaudeCodeLanguageModel implements LanguageModelV3 {
           cliToolCallIds: new Set(previousPendingProxyCalls.map((c) => c.toolCallId)),
           stripContextReminders,
         })
+    const wake = !turn.compactionMode && isWakeTurn(options.prompt)
     // A wake prompt whose CLI turn was already taken over by a user message
-    // has nothing to attach to; sending it would hand Claude the marker text.
-    if (userMsg.includes(WAKE_PROMPT_TEXT) && !getActiveProcess(turn.sessionKey)?.autonomousTurn) {
+    // has nothing to attach to.
+    if (wake && !getActiveProcess(turn.sessionKey)?.autonomousTurn) {
       log.info("doStream short-circuit: stale wake prompt")
       return syntheticStream("stale-wake")
     }
@@ -205,6 +200,7 @@ export class ClaudeCodeLanguageModel implements LanguageModelV3 {
       turn,
       options,
       userMsg,
+      wake,
       account,
       // A fresh conversation on the next account: no CLI tool ids carry over.
       catchUpMessage: (progress) =>

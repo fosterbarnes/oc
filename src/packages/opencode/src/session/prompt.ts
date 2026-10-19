@@ -1813,11 +1813,7 @@ const layer = Layer.effect(
         selected.length === 1
           ? `[/${cmd.name} is active: its instructions replace any earlier slash command's persona, mode, and rules from this conversation.]\n\n${templates[0]}`
           : [
-              "Apply all listed slash commands together to the user request below.",
-              "They are complementary unless their instructions directly conflict.",
-              "For direct conflicts at the same instruction priority, later command instructions take precedence.",
-              "These commands replace any earlier slash command's persona, mode, and rules from this conversation.",
-              "Follow higher-priority instructions and permission restrictions. Writing a plan does not authorize implementing it.",
+              Command.COMPOSED_PREAMBLE,
               "",
               ...selected.map((definition, index) => `[/${definition.name}]\n${templates[index]}\n`),
               `[User request]\n${input.arguments}`,
@@ -1846,13 +1842,15 @@ const layer = Layer.effect(
 
       const templateParts = yield* resolvePromptParts(template)
       const inputFiles = new Set(
-        input.parts?.filter((part) => new URL(part.url).protocol === "file:").map((part) => fileURLToPath(part.url)),
+        input.parts?.flatMap((part) =>
+          part.type === "file" && new URL(part.url).protocol === "file:" ? [fileURLToPath(part.url)] : [],
+        ),
       )
       const uniqueTemplateParts = templateParts
         .filter((part) => part.type !== "file" || !inputFiles.has(fileURLToPath(part.url)))
         .map((part) =>
           part.type === "text"
-            ? { ...part, metadata: { ...part.metadata, ocCommandArguments: input.arguments } }
+            ? { ...part, metadata: { ...part.metadata, ocCommands: names, ocCommandArguments: input.arguments } }
             : part,
         )
       const isSubtask = (agent.mode === "subagent" && cmd.subtask !== false) || cmd.subtask === true
@@ -1906,12 +1904,15 @@ const layer = Layer.effect(
         turnPermission,
         toolHost,
       })
-      yield* events.publish(Command.Event.Executed, {
-        name: input.command,
-        sessionID: input.sessionID,
-        arguments: input.arguments,
-        messageID: result.info.id,
-      })
+      // One per composed command: listeners such as `/init` detection (`project.ts`) match by name.
+      yield* Effect.forEach(names, (name) =>
+        events.publish(Command.Event.Executed, {
+          name,
+          sessionID: input.sessionID,
+          arguments: input.arguments,
+          messageID: result.info.id,
+        }),
+      )
       return result
     })
 
@@ -2120,12 +2121,14 @@ export const CommandInput = Schema.Struct({
   command: Schema.String,
   variant: Schema.optional(Schema.String),
   additionalCommands: Schema.optional(Schema.Array(Schema.String)),
-  // Inlined (no identifier annotation) to keep the original SDK output - the
+  // Text parts carry synthetic context such as an editor selection. The file part is
+  // inlined (no identifier annotation) to keep the original SDK output - the
   // PromptInput call site below references FilePartInput by ref via the
   // Schema export in message-v2.ts.
   parts: Schema.optional(
     Schema.Array(
       Schema.Union([
+        SessionV1.TextPartInput,
         Schema.Struct({
           id: Schema.optional(PartID),
           type: Schema.Literal("file"),

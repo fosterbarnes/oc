@@ -11,7 +11,7 @@ import { ExitProvider, useExit } from "./context/exit"
 import { EpilogueProvider } from "./context/epilogue"
 import { Selection } from "./util/selection"
 import { Locale } from "./util/locale"
-import { createCliRenderer } from "@opentui/core"
+import { createCliRenderer, MouseButton, type MouseEvent } from "@opentui/core"
 import { RouteProvider, useRoute } from "./context/route"
 import {
   Switch,
@@ -70,7 +70,7 @@ import { isDefaultTitle } from "./util/session"
 import { KVProvider, useKV } from "./context/kv"
 import * as Model from "./util/model"
 import { ArgsProvider, useArgs, type Args } from "./context/args"
-import { openUrl } from "@opencode-ai/core/open"
+import { LINK_CLICK_KEY, openLink } from "./util/browser"
 import { PromptRefProvider, usePromptRef } from "./context/prompt"
 import { TuiConfigProvider, useTuiConfig, type TuiConfig } from "./config"
 import { TuiKeybind } from "./config/keybind"
@@ -292,112 +292,116 @@ export const run = Effect.fn("Tui.run")(function* (input: TuiInput) {
         await render(() => {
           return (
             <>
-            <IntroLogo />
-            <ExitProvider
-              exit={(reason) => {
-                if (renderer.isDestroyed) return
-                exit.reason = reason
-                destroyRenderer(renderer)
-              }}
-            >
-              <EpilogueProvider set={(value) => (exit.epilogue = value)}>
-                <ErrorBoundary fallback={(error, reset) => <ErrorComponent error={error} reset={reset} mode={mode} />}>
-                  <TuiPathsProvider
-                    value={{
-                      cwd: process.cwd(),
-                      home: global.home,
-                      state: global.state,
-                      worktree: global.data + "/worktree",
-                    }}
+              <IntroLogo />
+              <ExitProvider
+                exit={(reason) => {
+                  if (renderer.isDestroyed) return
+                  exit.reason = reason
+                  destroyRenderer(renderer)
+                }}
+              >
+                <EpilogueProvider set={(value) => (exit.epilogue = value)}>
+                  <ErrorBoundary
+                    fallback={(error, reset) => <ErrorComponent error={error} reset={reset} mode={mode} />}
                   >
-                    <TuiTerminalEnvironmentProvider
+                    <TuiPathsProvider
                       value={{
-                        platform: process.platform,
-                        multiplexer: process.env.TMUX ? "tmux" : process.env.STY ? "screen" : undefined,
-                        displayServer: process.env.WAYLAND_DISPLAY
-                          ? "wayland"
-                          : process.env.DISPLAY
-                            ? "x11"
-                            : undefined,
+                        cwd: process.cwd(),
+                        home: global.home,
+                        state: global.state,
+                        worktree: global.data + "/worktree",
                       }}
                     >
-                      <TuiStartupProvider
+                      <TuiTerminalEnvironmentProvider
                         value={{
-                          initialRoute: process.env.OPENCODE_ROUTE ? JSON.parse(process.env.OPENCODE_ROUTE) : undefined,
-                          skipInitialLoading: Boolean(process.env.OPENCODE_FAST_BOOT),
+                          platform: process.platform,
+                          multiplexer: process.env.TMUX ? "tmux" : process.env.STY ? "screen" : undefined,
+                          displayServer: process.env.WAYLAND_DISPLAY
+                            ? "wayland"
+                            : process.env.DISPLAY
+                              ? "x11"
+                              : undefined,
                         }}
                       >
-                        <ClipboardProvider>
-                          <OpencodeKeymapProvider keymap={keymap}>
-                            <ArgsProvider {...input.args}>
-                              <KVProvider>
-                                <ToastProvider>
-                                  <RouteProvider
-                                    onSessionChange={input.onSessionChange}
-                                    initialRoute={
-                                      input.args.continue
-                                        ? {
-                                            type: "session",
-                                            sessionID: "dummy",
-                                          }
-                                        : undefined
-                                    }
-                                  >
-                                    <TuiConfigProvider config={input.config}>
-                                      <PluginRuntimeProvider value={pluginRuntime}>
-                                        <SDKProvider
-                                          url={input.url}
-                                          directory={input.directory}
-                                          fetch={input.fetch}
-                                          headers={input.headers}
-                                          events={input.events}
-                                        >
-                                          <PermissionProvider>
-                                            <ProjectProvider>
-                                              <SyncProvider>
-                                                <DataProvider>
-                                                  <ThemeProvider mode={mode}>
-                                                    <LocalProvider>
-                                                      <PromptStashProvider>
-                                                        <DialogProvider>
-                                                          <FrecencyProvider>
-                                                            <PromptHistoryProvider>
-                                                              <PromptRefProvider>
-                                                                <EditorContextProvider>
-                                                                  <LocationProvider>
-                                                                    <App
-                                                                      onSnapshot={input.onSnapshot}
-                                                                      pluginHost={input.pluginHost}
-                                                                      ledger={ledger}
-                                                                    />
-                                                                  </LocationProvider>
-                                                                </EditorContextProvider>
-                                                              </PromptRefProvider>
-                                                            </PromptHistoryProvider>
-                                                          </FrecencyProvider>
-                                                        </DialogProvider>
-                                                      </PromptStashProvider>
-                                                    </LocalProvider>
-                                                  </ThemeProvider>
-                                                </DataProvider>
-                                              </SyncProvider>
-                                            </ProjectProvider>
-                                          </PermissionProvider>
-                                        </SDKProvider>
-                                      </PluginRuntimeProvider>
-                                    </TuiConfigProvider>
-                                  </RouteProvider>
-                                </ToastProvider>
-                              </KVProvider>
-                            </ArgsProvider>
-                          </OpencodeKeymapProvider>
-                        </ClipboardProvider>
-                      </TuiStartupProvider>
-                    </TuiTerminalEnvironmentProvider>
-                  </TuiPathsProvider>
-                </ErrorBoundary>
-              </EpilogueProvider>
-            </ExitProvider>
+                        <TuiStartupProvider
+                          value={{
+                            initialRoute: process.env.OPENCODE_ROUTE
+                              ? JSON.parse(process.env.OPENCODE_ROUTE)
+                              : undefined,
+                            skipInitialLoading: Boolean(process.env.OPENCODE_FAST_BOOT),
+                          }}
+                        >
+                          <ClipboardProvider>
+                            <OpencodeKeymapProvider keymap={keymap}>
+                              <ArgsProvider {...input.args}>
+                                <KVProvider>
+                                  <ToastProvider>
+                                    <RouteProvider
+                                      onSessionChange={input.onSessionChange}
+                                      initialRoute={
+                                        input.args.continue
+                                          ? {
+                                              type: "session",
+                                              sessionID: "dummy",
+                                            }
+                                          : undefined
+                                      }
+                                    >
+                                      <TuiConfigProvider config={input.config}>
+                                        <PluginRuntimeProvider value={pluginRuntime}>
+                                          <SDKProvider
+                                            url={input.url}
+                                            directory={input.directory}
+                                            fetch={input.fetch}
+                                            headers={input.headers}
+                                            events={input.events}
+                                          >
+                                            <PermissionProvider>
+                                              <ProjectProvider>
+                                                <SyncProvider>
+                                                  <DataProvider>
+                                                    <ThemeProvider mode={mode}>
+                                                      <LocalProvider>
+                                                        <PromptStashProvider>
+                                                          <DialogProvider>
+                                                            <FrecencyProvider>
+                                                              <PromptHistoryProvider>
+                                                                <PromptRefProvider>
+                                                                  <EditorContextProvider>
+                                                                    <LocationProvider>
+                                                                      <App
+                                                                        onSnapshot={input.onSnapshot}
+                                                                        pluginHost={input.pluginHost}
+                                                                        ledger={ledger}
+                                                                      />
+                                                                    </LocationProvider>
+                                                                  </EditorContextProvider>
+                                                                </PromptRefProvider>
+                                                              </PromptHistoryProvider>
+                                                            </FrecencyProvider>
+                                                          </DialogProvider>
+                                                        </PromptStashProvider>
+                                                      </LocalProvider>
+                                                    </ThemeProvider>
+                                                  </DataProvider>
+                                                </SyncProvider>
+                                              </ProjectProvider>
+                                            </PermissionProvider>
+                                          </SDKProvider>
+                                        </PluginRuntimeProvider>
+                                      </TuiConfigProvider>
+                                    </RouteProvider>
+                                  </ToastProvider>
+                                </KVProvider>
+                              </ArgsProvider>
+                            </OpencodeKeymapProvider>
+                          </ClipboardProvider>
+                        </TuiStartupProvider>
+                      </TuiTerminalEnvironmentProvider>
+                    </TuiPathsProvider>
+                  </ErrorBoundary>
+                </EpilogueProvider>
+              </ExitProvider>
             </>
           )
         }, renderer)
@@ -437,6 +441,23 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
   const attention = createTuiAttention({ renderer, config: tuiConfig, kv })
   const clipboard = useClipboard()
   const copyOnSelect = () => kv.get(Selection.COPY_ON_SELECT_KEY, Selection.defaultCopyOnSelect()) as boolean
+  // Markdown tags URLs with link ids in the render buffer; a plain left click on one opens it.
+  // opentui flags every mouseup on selectable text as dragging, so a click is a down and up on
+  // the same cell.
+  let linkDown: { x: number; y: number } | undefined
+  const openClickedLink = (evt: MouseEvent) => {
+    const down = linkDown
+    linkDown = undefined
+    if (evt.button !== MouseButton.LEFT || !kv.get(LINK_CLICK_KEY, true)) return false
+    if (down?.x !== evt.x || down.y !== evt.y) return false
+    const url = renderer.getLinkAt(evt.x, evt.y)
+    if (!url) return false
+    renderer.clearSelection()
+    openLink(kv, url).catch(toast.error)
+    evt.preventDefault()
+    evt.stopPropagation()
+    return true
+  }
   const claudeCliPath = () => {
     const cliPath = sync.data.config.provider?.["claude-code"]?.options?.cliPath
     return typeof cliPath === "string" ? cliPath : "claude"
@@ -471,25 +492,29 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
       .then((enabled) => kv.set("debug_logging", enabled))
       .catch(() => {})
     const leaderBinding = tuiConfig.keybinds.get("leader")[0]?.key
-    const leaderKey =
-      !leaderBinding ? "" : typeof leaderBinding === "string" ? leaderBinding.trim().toLowerCase() : ""
+    const leaderKey = !leaderBinding ? "" : typeof leaderBinding === "string" ? leaderBinding.trim().toLowerCase() : ""
     const kittyKeyboard = renderer.capabilities?.kitty_keyboard === true
     const entries = keymap.getCommandEntries({ visibility: "registered" })
-    const titles = new Map(entries.map((entry) => [
-      entry.command.name,
-      typeof entry.command.title === "string" ? entry.command.title : entry.command.name,
-    ]))
+    const titles = new Map(
+      entries.map((entry) => [
+        entry.command.name,
+        typeof entry.command.title === "string" ? entry.command.title : entry.command.name,
+      ]),
+    )
     const sequenceKey = (sequence: readonly KeySequencePart[]) => {
       const parts = sequence.map((part) => {
         if (part.tokenName === LEADER_TOKEN) return "<leader>"
         const stroke = stringifyKeyStroke(part.stroke).split("+")
         const name = stroke.pop() ?? ""
         const mods = new Set(stroke)
-        return [...new Set(
-          ["ctrl", "alt", "option", "meta", "shift", "super", "hyper"]
-            .filter((mod) => mods.has(mod))
-            .map((mod) => mod === "meta" || mod === "option" ? "alt" : mod),
-        ), name].join("+")
+        return [
+          ...new Set(
+            ["ctrl", "alt", "option", "meta", "shift", "super", "hyper"]
+              .filter((mod) => mods.has(mod))
+              .map((mod) => (mod === "meta" || mod === "option" ? "alt" : mod)),
+          ),
+          name,
+        ].join("+")
       })
       return parts[0] === "<leader>" ? "<leader>" + parts.slice(1).join(" ") : parts.join(" ")
     }
@@ -650,9 +675,6 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
   const terminalTabState = { progress: 0, color: "" }
   // Lets the WezTerm config forward Ctrl+V to oc, which reads file-drop and image clipboards itself.
   if (terminal.kind === "wezterm") writeTerminalEscape(renderer, "\x1b]1337;SetUserVar=oc_tui=MQ==\x07")
-  const [pasteSummaryEnabled, setPasteSummaryEnabled] = createSignal(
-    kv.get("paste_summary_enabled", !sync.data.config.experimental?.disable_paste_summary),
-  )
 
   // Update terminal window title based on current route and session
   createEffect(() => {
@@ -672,8 +694,14 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
       terminalTabState.progress = progress
     }
     const agent = local.agent.current()
-    const color = tabEnabled && route.data.type !== "plugin" && agent ? local.agent.color(agent.name).toInts() : undefined
-    const hex = color ? `#${color.slice(0, 3).map((channel) => channel.toString(16).padStart(2, "0")).join("")}` : ""
+    const color =
+      tabEnabled && route.data.type !== "plugin" && agent ? local.agent.color(agent.name).toInts() : undefined
+    const hex = color
+      ? `#${color
+          .slice(0, 3)
+          .map((channel) => channel.toString(16).padStart(2, "0"))
+          .join("")}`
+      : ""
     if (terminal.kind === "wezterm" && hex !== terminalTabState.color) {
       writeTerminalEscape(renderer, `\x1b]1337;SetUserVar=oc_agent_color=${Buffer.from(hex).toString("base64")}\x07`)
       terminalTabState.color = hex
@@ -834,7 +862,8 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
         run: async () => {
           const result = await sdk.client.instance.reload({ workspace: project.workspace.current() })
           if (result.error) {
-            const detail = cliErrorMessage(result.error) ??
+            const detail =
+              cliErrorMessage(result.error) ??
               ("message" in result.error ? result.error.message : JSON.stringify(result.error))
             return toast.error(new Error(`Reload failed: ${detail}`))
           }
@@ -1134,7 +1163,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
         name: "docs.open",
         title: "Open docs",
         run: () => {
-          openUrl("https://opencode.ai/docs").catch(() => {})
+          openLink(kv, "https://opencode.ai/docs").catch(toast.error)
           dialog.clear()
         },
         category: "System",
@@ -1259,19 +1288,6 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
         },
       },
       {
-        name: "app.toggle.paste_summary",
-        title: pasteSummaryEnabled() ? "Disable paste summary" : "Enable paste summary",
-        category: "System",
-        run: () => {
-          setPasteSummaryEnabled((prev) => {
-            const next = !prev
-            kv.set("paste_summary_enabled", next)
-            return next
-          })
-          dialog.clear()
-        },
-      },
-      {
         name: "permission.mode",
         title:
           local.permission.mode === "auto" ? "Disable auto-approve permissions" : "Enable auto-approve permissions",
@@ -1305,8 +1321,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
   useBindings(() => {
     const commands = new Set(keymap.getCommands().map((command) => command.name))
     const leaderBinding = tuiConfig.keybinds.get("leader")[0]?.key
-    const leaderKey =
-      !leaderBinding ? "" : typeof leaderBinding === "string" ? leaderBinding.trim().toLowerCase() : ""
+    const leaderKey = !leaderBinding ? "" : typeof leaderBinding === "string" ? leaderBinding.trim().toLowerCase() : ""
     const kittyKeyboard = renderer.capabilities?.kitty_keyboard === true
     return {
       mode: OPENCODE_BASE_MODE,
@@ -1422,10 +1437,14 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
       flexDirection="column"
       backgroundColor={theme.background}
       onMouseDown={(evt) => {
+        if (evt.button === MouseButton.LEFT) linkDown = { x: evt.x, y: evt.y }
         if (copyOnSelect()) return
         Selection.copyOnMouseDown(renderer, toast, evt, clipboard)
       }}
-      onMouseUp={copyOnSelect() ? (evt) => Selection.copyOnMouseUp(renderer, toast, evt, clipboard) : undefined}
+      onMouseUp={(evt) => {
+        if (openClickedLink(evt)) return
+        if (copyOnSelect()) Selection.copyOnMouseUp(renderer, toast, evt, clipboard)
+      }}
     >
       <Show when={Flag.OPENCODE_SHOW_TTFD}>
         <TimeToFirstDraw />
@@ -1452,4 +1471,3 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
     </box>
   )
 }
-

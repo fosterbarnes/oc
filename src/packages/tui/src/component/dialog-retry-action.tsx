@@ -1,9 +1,11 @@
 import { RGBA, TextAttributes } from "@opentui/core"
-import { openUrl } from "@opencode-ai/core/open"
 import { createSignal } from "solid-js"
+import { useKV } from "../context/kv"
 import { selectedForeground, useTheme } from "../context/theme"
+import { openLink } from "../util/browser"
 import { useDialog, type DialogContext } from "../ui/dialog"
 import { Link } from "../ui/link"
+import { useToast } from "../ui/toast"
 import { BgPulse } from "./bg-pulse"
 import { useBindings } from "../keymap"
 
@@ -20,8 +22,8 @@ export type DialogRetryActionProps = {
   onClose?: (dontShowAgain?: boolean) => void
 }
 
-function runAction(props: DialogRetryActionProps, dialog: ReturnType<typeof useDialog>) {
-  if (props.link) openUrl(props.link).catch(() => {})
+function runAction(props: DialogRetryActionProps, dialog: ReturnType<typeof useDialog>, open: (url: string) => void) {
+  if (props.link) open(props.link)
   props.onClose?.()
   dialog.clear()
 }
@@ -38,6 +40,9 @@ function panelOverlay(color: RGBA) {
 
 export function DialogRetryAction(props: DialogRetryActionProps) {
   const dialog = useDialog()
+  const kv = useKV()
+  const toast = useToast()
+  const open = (url: string) => void openLink(kv, url).catch(toast.error)
   const { theme } = useTheme()
   const fg = selectedForeground(theme)
   const showGoTreatment = () => props.link === GO_URL
@@ -69,7 +74,7 @@ export function DialogRetryAction(props: DialogRetryActionProps) {
         desc: "Confirm retry option",
         group: "Dialog",
         cmd: () => {
-          if (selected() === "action") runAction(props, dialog)
+          if (selected() === "action") runAction(props, dialog, open)
           else dismiss(props, dialog)
         },
       },
@@ -131,7 +136,7 @@ export function DialogRetryAction(props: DialogRetryActionProps) {
             paddingRight={2}
             backgroundColor={selected() === "action" ? theme.primary : RGBA.fromInts(0, 0, 0, 0)}
             onMouseOver={() => setSelected("action")}
-            onMouseUp={() => runAction(props, dialog)}
+            onMouseUp={() => runAction(props, dialog, open)}
           >
             <text
               fg={selected() === "action" ? fg : theme.text}

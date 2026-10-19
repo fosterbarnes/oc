@@ -27,6 +27,15 @@ export const Event = {
   Executed: LegacyEvent.CommandExecuted,
 }
 
+// Leads a turn that combines several slash commands (`SessionPrompt.command`); titles strip it (`titleGen.ts`).
+export const COMPOSED_PREAMBLE = [
+  "Apply all listed slash commands together to the user request below.",
+  "They are complementary unless their instructions directly conflict.",
+  "For direct conflicts at the same instruction priority, later command instructions take precedence.",
+  "These commands replace any earlier slash command's persona, mode, and rules from this conversation.",
+  "Follow higher-priority instructions and permission restrictions. Writing a plan does not authorize implementing it.",
+].join("\n")
+
 export const Info = Schema.Struct({
   name: Schema.String,
   description: Schema.optional(Schema.String),

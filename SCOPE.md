@@ -23,6 +23,7 @@ loop; the OpenCode 2 execution engine itself is not brought back.
 | Web UI component packages (`packages/ui`, `packages/session-ui`) | 0.3.0 | Only the web and desktop apps used them. The TUI keeps its notification sounds. |
 | Upstream release, publish, translation, and download-stats scripts | 0.3.0 | Built for upstream's npm packages and website. |
 | Localized `README.*.md` | v0.1.5 | oc docs are English only. |
+| `experimental.disable_paste_summary` config option | v0.2.241 | Paste summary is off by default and toggled with `/pasteSummary` (kv). The schema still accepts the key so existing configs load; the TUI ignores it. |
 
 ## Not planned
 

@@ -310,4 +310,19 @@ describe("SessionPrompt input schemas", () => {
     const input: unknown = expected
     expect(decode(input)).toEqual(expected)
   })
+
+  test("CommandInput accepts synthetic editor text beside file parts", () => {
+    const decode = decodeUnknown(SessionPrompt.CommandInput)
+    const expected = {
+      sessionID,
+      arguments: "request",
+      command: "spit",
+      parts: [
+        { type: "text" as const, text: "Selected lines", synthetic: true, metadata: { kind: "editor_context" } },
+        { type: "file" as const, mime: "text/plain", filename: "a.ts", url: "file:///a.ts" },
+      ],
+    }
+    const input: unknown = expected
+    expect(decode(input)).toEqual(expected)
+  })
 })

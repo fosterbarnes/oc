@@ -38,6 +38,8 @@ import { Plugin } from "../plugin"
 import { Provider } from "@/provider/provider"
 
 import { WebSearchTool } from "./websearch"
+import { JEV_TOOL_IDS, JevAskTool, JevCheckTool, JevClassifyTool, JevRankTool, JevScoreTool } from "./jev"
+import { apiKey } from "./jevClient"
 import { LspTool } from "./lsp"
 import * as Truncate from "./truncate"
 import { ApplyPatchTool } from "./apply_patch"
@@ -131,6 +133,11 @@ const layer = Layer.effect(
     const scheduleCancel = yield* ScheduleCancelTool
     const webfetch = yield* WebFetchTool
     const websearch = yield* WebSearchTool
+    const jevClassify = yield* JevClassifyTool
+    const jevCheck = yield* JevCheckTool
+    const jevScore = yield* JevScoreTool
+    const jevRank = yield* JevRankTool
+    const jevAsk = yield* JevAskTool
     const shell = yield* ShellTool
     const bgStatus = yield* BgStatusTool
     const bgKill = yield* BgKillTool
@@ -247,6 +254,11 @@ const layer = Layer.effect(
           fetch: Tool.init(webfetch),
           todo: Tool.init(todo),
           search: Tool.init(websearch),
+          jevClassify: Tool.init(jevClassify),
+          jevCheck: Tool.init(jevCheck),
+          jevScore: Tool.init(jevScore),
+          jevRank: Tool.init(jevRank),
+          jevAsk: Tool.init(jevAsk),
           skill: Tool.init(skilltool),
           patch: Tool.init(patchtool),
           question: Tool.init(question),
@@ -291,6 +303,11 @@ const layer = Layer.effect(
             tool.fetch,
             tool.todo,
             tool.search,
+            tool.jevClassify,
+            tool.jevCheck,
+            tool.jevScore,
+            tool.jevRank,
+            tool.jevAsk,
             tool.skill,
             tool.patch,
             ...(tool.execute ? [tool.execute] : []),
@@ -350,6 +367,9 @@ const layer = Layer.effect(
         if (tool.id === WebSearchTool.id) {
           return webSearchEnabled(input.providerID, { exa: flags.enableExa, parallel: flags.enableParallel })
         }
+
+        // Without a key every jev call would fail, so the tools stay hidden.
+        if (JEV_TOOL_IDS.has(tool.id)) return apiKey() !== undefined
 
         const usePatch = Patch.usesApplyPatch(input.modelID)
         if (tool.id === ApplyPatchTool.id) return usePatch

@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import { extractSlashCommands, slashTriggerIndex } from "../../src/prompt/slash"
+import { commandUse, extractSlashCommands, slashTriggerIndex, typedText } from "../../src/prompt/slash"
 import { promptOffsetWidth } from "../../src/prompt/display"
 
 test("slash composition locates the current trigger across Unicode, buffer replacement, and separators", () => {
@@ -25,4 +25,17 @@ test("slash composition extracts ordered unique names while preserving request t
     arguments: "hello  world /unknown /usr/bin https://example.com/spit",
   })
   expect(extractSlashCommands("ordinary text", available)).toEqual({ names: [], arguments: "ordinary text" })
+})
+
+test("command messages restore the typed commands instead of their templates", () => {
+  const sent = (metadata?: Record<string, unknown>) => ({ text: "[/spit is active: ...]\n\nTemplate", metadata })
+  expect(commandUse(sent({ ocCommands: ["spit", "imp"], ocCommandArguments: " fix it\n" }))).toEqual({
+    names: ["spit", "imp"],
+    request: "fix it",
+  })
+  expect(typedText(sent({ ocCommands: ["spit", "imp"], ocCommandArguments: "fix it" }))).toBe("/spit /imp fix it")
+  expect(typedText(sent({ ocCommands: ["pass"], ocCommandArguments: "" }))).toBe("/pass")
+  expect(typedText(sent())).toBe("[/spit is active: ...]\n\nTemplate")
+  expect(commandUse(sent({ ocCommands: [] }))).toBeUndefined()
+  expect(commandUse(sent({ ocCommands: "spit" }))).toBeUndefined()
 })

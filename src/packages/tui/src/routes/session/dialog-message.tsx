@@ -5,7 +5,7 @@ import { useSDK } from "../../context/sdk"
 import { useRoute } from "../../context/route"
 import { useClipboard } from "../../context/clipboard"
 import type { PromptInfo } from "../../component/prompt/history"
-import { stripPromptPartIDs as strip } from "../../prompt/part"
+import { promptFromParts } from "../../prompt/part"
 import { useToast } from "../../ui/toast"
 import type { DialogContext } from "../../ui/dialog"
 import { errorMessage } from "../../util/error"
@@ -24,17 +24,7 @@ export function DialogMessage(props: {
   const route = useRoute()
   const clipboard = useClipboard()
 
-  const promptInfo = (messageID: string) =>
-    (sync.data.part[messageID] ?? []).reduce(
-      (agg, part) => {
-        if (part.type === "text") {
-          if (!part.synthetic) agg.input += part.text
-        }
-        if (part.type === "file") agg.parts.push(strip(part))
-        return agg
-      },
-      { input: "", parts: [] as PromptInfo["parts"] },
-    )
+  const promptInfo = (messageID: string) => promptFromParts(sync.data.part[messageID] ?? [])
 
   // Deleting fails once the model may have read the message (the server re-checks).
   const unsend = async (edit: boolean) => {
@@ -75,7 +65,8 @@ export function DialogMessage(props: {
 
   const revertOption = {
     title: (sync.data.part[props.messageID] ?? []).some((part) => part.type === "text" && part.metadata?.steered)
-      ? "Revert whole turn" : "Revert",
+      ? "Revert whole turn"
+      : "Revert",
     value: "session.revert",
     description: "undo messages and file changes",
     onSelect: async (dialog: DialogContext) => {
@@ -129,18 +120,7 @@ export function DialogMessage(props: {
               messageID: props.messageID,
             })
             const msg = message()
-            const prompt = msg
-              ? sync.data.part[msg.id].reduce(
-                  (agg, part) => {
-                    if (part.type === "text") {
-                      if (!part.synthetic) agg.input += part.text
-                    }
-                    if (part.type === "file") agg.parts.push(part)
-                    return agg
-                  },
-                  { input: "", parts: [] as PromptInfo["parts"] },
-                )
-              : undefined
+            const prompt = msg ? promptInfo(msg.id) : undefined
             route.navigate({
               sessionID: result.data!.id,
               type: "session",

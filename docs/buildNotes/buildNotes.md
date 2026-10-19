@@ -150,6 +150,212 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-19 (~01:43) - v0.2.245 goatcheeseColosseum - A failed revive no longer leaves the old server running - Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Opus 5.5; low effort; Implementation (/spit /think -> /imp); completed (task 1 of 3)
+- Version: 0.2.245 goatcheeseColosseum
+- Plan: `~/.config/opencode/plans/2026-10-19-revive-orphan-openapi-jev.md`.
+- Root cause (revive.log 04:55Z, opencode.log run `45f693ac`): `shutdownAll` force-killed the TUIs, then `stopServer` threw `Resident server 24416 identity unavailable or changed` because the live server's executable did not equal the caller's `executablePath()`. TUIs were dead, the server and its Claude CLIs lived on, and the user carried on in another process (`c8311e53`), which led to the v0.2.243 stale wake.
+- Fixed `config/resident.ts`: split `stopServer` into `prepareStop` (reads state, `alive` by creation time, checks address and `oc-server.secret`) and `runStop` (authenticated `/global/shutdown`, wait, identity-gated `forceKill`, clear state). Removed the executable-vs-caller gate: the secret proves ownership and `isPidAlive` already rules out pid reuse. `shutdownAll` now runs `prepareStop` before any pane close or TUI kill. `requestShutdown` takes url and secret.
+- Checked hypothesis "Bun's `process.execPath` follows a renamed running exe": scratch copy of bun.exe renamed itself and `process.execPath` stayed the original path. `executablePath()` unchanged. Why the executables differed on 04:55 stays unproven; it no longer matters for stopping.
+- Added `test/config/oc.test.ts`: `fakeResident()` helper; "shutdownAll stops a live server whose executable differs from the caller's"; "shutdownAll fails before touching terminals when the server cannot be stopped" (empty secret + an unprovable TUI ledger record, so reaching the ledger read would change the error).
+- Not done: task 2 (`openapi.json` refresh) waits until the current work is pushed, because `.scripts/test.ps1 -Category generated` needs clean generated paths. Task 3 (Jev missing-key toast) skipped as recommended.
+- Kept: if the shutdown request itself hangs after TUIs were killed, TUIs stay dead as before; only validation moved ahead of the kills.
+- Verification: `bun test test/config/oc.test.ts` 29 pass; `bun run typecheck` (packages/opencode) exit 0. No live revive run.
+
+### User
+Revive
+- If a revive cannot stop the running oc server, it now fails before closing any oc window, so oc stays usable instead of leaving a hidden server running.
+- A revive no longer refuses to stop a server that was started from a different oc executable.
+
+---
+
+## 2026-10-19 (~01:33) - v0.2.244 fuddSamsung - Review cleanups since v0.2.238 - Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Opus 5.5; low effort; Implementation (/spit /think review -> /imp); completed
+- Version: 0.2.244 fuddSamsung
+- Plan: `~/.config/opencode/plans/2026-10-19-review-since-v0.2.238.md` (review of all uncommitted work v0.2.239-v0.2.243; no bugs found).
+- Added `Command.COMPOSED_PREAMBLE` (`opencode/src/command/index.ts`); `SessionPrompt.command` (`session/prompt.ts`) and `titleGen.ts` `withoutCommandHeader` (now a `startsWith` prefix strip, regex kept for the single-command header) and `renameDigest.test.ts` all use it. Before, the text lived in three places and the test could pass while titles broke.
+- Fixed silent link-open failures: `util/browser.ts` `openLink` rejects with `Link browser not found: <path>. Pick another in /linkBrowser.` when the picked exe is gone (`open` resolves before PowerShell fails). `app.tsx` (chat click, `docs.open`), `ui/link.tsx`, `dialog-retry-action.tsx` now `.catch(toast.error)`; `runAction` takes an `open` callback instead of kv.
+- Added SCOPE.md "Removed from upstream" row: `experimental.disable_paste_summary` (schema keeps it, TUI ignores it).
+- Docs: wiki `Sessions.md` new "Pasting" section and missing-browser note; `Agents-and-Skills.md` Combining bullet notes pastes never run commands and Alt+Enter refuses command drafts (wiki push is the user's).
+- Kept: `/linkBrowser` desc still shows the exe path (optional item, left for the user). Follow-ups not done: orphaned resident server after failed revive, stale `packages/sdk/openapi.json`, jev missing-key toast wording.
+- Verification: opencode `bun test test/session/renameDigest.test.ts` 6 pass; `bun test test/session/prompt.test.ts -t "slash composition"` 4 pass; `bun run typecheck` exit 0. tui `bun test test/cli/tui/browser.test.ts` 3 pass (new missing-browser case); `bun run typecheck` exit 0. No live click check.
+
+### User
+Links
+- If the browser picked in **Link browser** is no longer installed, clicking a link now shows an error instead of silently doing nothing.
+
+Docs
+- The wiki now explains paste summary and that pasted text never runs slash commands.
+
+---
+
+## 2026-10-19 (~01:24) - v0.2.243 mcgradyExcluded - Stale wake prompt no longer silences a Claude Code chat - Opus 5.5, low effort; Debug
+
+### Agent
+- Meta: Opus 5.5; low effort; Debug (inspect BUGGED SESSION, plan, temp debug, fix, cleanup); completed
+- Version: 0.2.243
+- ERROR: `ses_ead947310ffe1FAf89dHyMGtUi` returned empty replies forever after 05:08Z. Chain: 04:55Z revive failed (`Resident server 24416 identity unavailable or changed`, `config/resident.ts:559`) after `shutdownAll` killed the TUIs, so old server `45f693ac` and its Claude CLI lived on. 05:05Z that CLI finished a background job; `requestWakeTurn` posted the wake prompt into the shared DB (`HeldElsewhereError`, new server `c8311e53` owned the chat). `c8311e53` ran it as a stale wake (empty reply). `message-v2.ts:427` drops step-start-only replies, so the marker stayed in every later envelope and `userMsg.includes(WAKE_PROMPT_TEXT)` short-circuited every turn.
+- Fixed: `messageBuilder.ts` `isWakeTurn(prompt)` (newest message carries the marker) replaces the envelope substring check in `claudeCodeLanguageModel.ts` and `turnStream.ts` (new `TurnInput.wake`); `getClaudeUserMessage` drops wake marker parts. Also covers the marker quoted in a `<session_resume>` block, which used to trip the same check.
+- Kept: one empty reply per stale wake (by design). Not fixed: failed revive orphaning the resident server with live Claude CLIs (separate issue).
+- Added: `autonomousTurn.test.ts` "a stale wake does not swallow the user's next message"; fixture takes `{ wakes: false }`.
+- Verification: replayed the real session rows (read-only DB dump) through `MessageV2.toModelMessages` + provider with a fake CLI: before fix "so whats next?" short-circuited, after fix it reached the CLI with no marker; scratch replay and TEMP debug log removed. `bun test test/provider/claude-code/autonomousTurn.test.ts` 2 pass; `bun run typecheck` (packages/opencode) clean.
+
+### User
+Claude Code chats
+- A chat no longer gets stuck giving blank replies after a background-task wake-up arrives at the wrong moment; your next message goes through normally.
+
+---
+
+## 2026-10-19 (~01:14) - v0.2.242 slumberjackSweat - Native Jev tools replace the jev MCP server - Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Opus 5.5; low effort; Implementation (imp after spit); completed
+- Version: 0.2.242 slumberjackSweat
+- Added `tool/jevClient.ts`: in-process `POST /v1/systemone` client (Bearer `TYPESAFE_API_KEY`, `TYPESAFE_BASE_URL`, `TYPESAFE_DEFAULT_MODEL`), 30s timeout per attempt, 2 retries on 408/425/429/5xx/529 with `retry-after(-ms)` capped at 30s. Ported from jev-code `051b492` (MIT).
+- Added `tool/jev.ts`: `jev_classify`/`jev_check`/`jev_score`/`jev_rank`/`jev_ask`, with Effect Schema params ported from jev-code zod schemas, the same request shaping, id sanitising, truncation, 120k request budget, and decision policy. Shared `jev` permission. Output is compact JSON.
+- Added registry wiring in `tool/registry.ts`: five builtins, filtered in `tools()` by `JEV_TOOL_IDS`, so they are listed only while `apiKey()` is set (read per turn).
+- Claude Code: no provider code. The existing `proxyOpencodeTools` path takes schemas from `registry.tools` via `ToolJsonSchema.fromTool` (`handlers/experimental.ts:95`), so no hand-written proxy defs and no drift.
+- Config (`~/.config/opencode/opencode.jsonc`): removed `mcp.jev`; added the five ids to `claude-code.options.proxyOpencodeTools`. The `TYPESAFE_API_KEY` User env var is already set.
+- Deviation from plan: two flat files (`tool/jev.ts`, `tool/jevClient.ts`), not a `tool/jev/` folder. Dropped upstream `USAGE_GUIDANCE` and `JEV_CODE_TIMEOUT_MS`/`JEV_CODE_MAX_RETRIES`; folded the per-tool guidelines into the descriptions.
+- Docs: FORK.md row "Native Jev tools". Wiki `Agents-and-Skills.md` Tools bullet (wiki push is the user's).
+- Verification: new `test/tool/jev.test.ts` 7/7 pass (local `Bun.serve` stand-in: schema required fields, accept/reject, check/classify request shape and verdicts, a 429 retry, duplicate ids, missing key). `bun run typecheck` exit 0. No fake-model scenario: the provider is unchanged and forwarding uses an existing path. No live TypeSafe call.
+- Risk: if the key is missing, Claude spawns show the "proxyOpencodeTools lists tools oc does not have" toast for the jev ids.
+- Pass: live `mcp__opencode_proxy__jev_check` from this Claude session returned typed verdicts (`jev-1.13.0`, 331 input tokens). A one-option `jev_ask` came back as a clean error. Fixed the registry comment (process env is fixed at start, so a new key needs an oc restart). Typed the test's `any` request body. Re-ran jev tests 7/7 and typecheck exit 0.
+
+### User
+Tools
+- Jev's five tools (classify, check, score, rank, ask) are now built into oc, so no jev MCP server process starts for each oc window or project.
+- They appear only while `TYPESAFE_API_KEY` is set, and one `jev` permission covers all five.
+- Claude sessions get them through the Claude provider's `proxyOpencodeTools` list, which now names them in your config.
+- The `jev` MCP entry is removed from your global config.
+
+---
+
+## 2026-10-19 (~01:08) - v0.2.241 overworkedHacj - Paste summary off by default, oc palette toggle - Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Opus 5.5; low effort; Implementation (/imp after /spit); completed
+- Version: 0.2.241 overworkedHacj
+- Added `PASTE_SUMMARY_KEY` in `packages/tui/src/prompt/part.ts`; prompt paste handler (`component/prompt/index.tsx`) now reads `kv.get(PASTE_SUMMARY_KEY, false)`, so pastes insert as plain text by default. `experimental.disable_paste_summary` no longer read by TUI.
+- Moved palette toggle from System (`app.tsx`) into oc Layout group in `ocCommands.tsx` with `/pasteSummary`; removed `pasteSummaryEnabled` signal from `app.tsx`. Kept command name `app.toggle.paste_summary` so `app_toggle_paste_summary` keybind (`config/keybind.ts`) and `appBindingCommands` still resolve.
+- Added FORK.md row.
+- Verification: `bun run typecheck` in `packages/tui` exit 0. Live paste check not run.
+
+### User
+Prompt
+- Long pastes now go into the prompt as plain text instead of a `[Pasted ~N lines]` placeholder.
+- **Enable paste summary** in the oc palette (or `/pasteSummary`) turns the placeholder back on.
+
+---
+
+## 2026-10-19 (~01:03) - v0.2.240 terminatedUpon - Final pass on click-to-open links - Opus 5.5, low effort; Pass
+
+### Agent
+- Meta: Opus 5.5; low effort; Pass over the v0.2.239/v0.2.240 link work; completed
+- Version: 0.2.240 (already bumped since last commit; no new bump)
+- Reviewed `util/browser.ts`, `app.tsx` `openClickedLink` (down/up same-cell check from the v0.2.240 fix), `ui/link.tsx`, `dialog-retry-action.tsx`, `ocCommands.tsx` Links entries, `core/src/open.ts`, wiki `Sessions.md`, `FORK.md` row: no bugs found.
+- Fixed two over-length doc comments in `ui/link.tsx` and `util/browser.ts`.
+- MISTAKE: v0.2.239 guarded on `!evt.isDragging`, assuming a click is not a drag; opentui marks every mouseup on selectable text as dragging. Prevention: check opentui event flags in its source before relying on them.
+- Risk: a picked browser that is later uninstalled makes links silently not open (PowerShell `Start-Process` fails after `open` resolves); fix by picking again or **System default**.
+- Verification: `bun test test/cli/tui/browser.test.ts` 2 pass.
+
+### User
+Links
+- No behavior change; small code comment cleanup.
+
+---
+
+## 2026-10-19 (~01:01) - v0.2.240 terminatedUpon - Fix chat link clicks doing nothing - Opus 5.5, low effort; Debug
+
+### Agent
+- Meta: Opus 5.5; low effort; Debug; completed
+- Version: 0.2.240
+- Fixed `openClickedLink` in `packages/tui/src/app.tsx`: opentui `Selection` starts with `_isDragging = true`, so every mouseup on selectable text arrived with `evt.isDragging` and the guard dropped all chat link clicks. Now a click = left down and up on the same cell (`linkDown` set in root `onMouseDown`); clears the empty selection before opening.
+- Verification: `bun run typecheck` in `packages/tui` exited 0; live click not tested.
+- MISTAKE: trusted `evt.isDragging` without reading opentui's renderer mouse routing (mouseup branch). Rule: read opentui event flow before relying on event flags.
+
+### User
+Links
+- Left-clicking a link in a chat message now opens it; before, the click did nothing.
+
+---
+
+## 2026-10-19 (~00:48) - v0.2.240 terminatedUpon - Slash composition review fixes - Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Opus 5.5; low effort; Implementation (/spit review -> /imp); completed
+- Version: 0.2.240 terminatedUpon (already bumped since last commit; no new bump)
+- Plan/findings: `~/.config/opencode/plans/2026-10-19-slash-composition-review.md`. Kept by user decision: later-command-wins permissions, anywhere-in-text detection.
+- Fixed pasted text running commands: added `typedSlashCommands` (`packages/tui/src/prompt/part.ts`); tracked pastes become `n` markers during `extractSlashCommands`, then expand back via callback replace (no `$&` expansion). `outgoingParts` (`component/prompt/index.tsx`) now returns `commands`; submit uses it.
+- Fixed Alt+Enter queue guard: refuses `startsWith("/")` or any typed command (`queueInner`), matching submit.
+- Fixed editor selection dropped from command turns and leaking into the next prompt: `CommandInput.parts` (`opencode/src/session/prompt.ts`) accepts `SessionV1.TextPartInput`; TUI sends `editorParts` and calls `markSelectionSent()`. `inputFiles` narrows to file parts.
+- Changed `Command.Event.Executed`: published once per composed name, so `/x /init` marks the project initialized (`project.ts:415`).
+- Fixed argument-free combos titled from the wrapper: `withoutCommandHeader` (`titleGen.ts`) also strips the multi-command preamble.
+- Regenerated legacy SDK with `bun ./packages/sdk/js/script/build.ts --generate-only`: only `SessionCommandData.parts` / `session.command` changed.
+- Kept: duplicated request when a template uses `$ARGUMENTS` (test asserts it); subtask commands dropping attachments (not composition-specific).
+- Updated FORK.md keys/palette row.
+- Verification: tui `bun test test/prompt/part.test.ts test/prompt/slash.test.ts` 8 pass; opencode `bun test test/session/renameDigest.test.ts test/session/schema-decoding.test.ts` 32 pass, then schema-decoding 26 pass after fix; `bun test test/session/prompt.test.ts -t "slash composition"` 4 pass; `tsgo --noEmit` exit 0 in tui and opencode. No live TUI check.
+- MISTAKE: new decode test widened literal `type` to `string` (tsgo TS2769); fixed with `as const`.
+- ERROR: tracked `packages/sdk/openapi.json` is far behind the server (fresh `bun dev generate` diff ~1500 lines of unrelated routes). Restored to committed version; refresh it in its own change via `script/generate.ts`.
+
+### User
+Slash commands
+- Large pasted text no longer runs slash commands it happens to mention, and the pasted text stays exactly as pasted.
+- Alt+Enter now refuses any draft that would run a slash command, not just drafts that start with one.
+- A pending editor selection is now sent with a slash-command message instead of being held for your next message.
+- Sessions started with several commands and no request no longer get titles taken from the combined-command wording.
+
+---
+
+## 2026-10-19 (~00:35) - v0.2.240 terminatedUpon - Collapsed slash-command user messages - Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Opus 5.5; low effort; Implementation (/spit -> /think plan -> /imp); completed
+- Version: 0.2.240 terminatedUpon
+- Plan: `~/.config/opencode/plans/2026-10-19-collapsed-slash-command-messages.md`
+- Added `ocCommands: names` beside `ocCommandArguments` on command template text parts (`packages/opencode/src/session/prompt.ts` `SessionPrompt.command`). Old sessions lack it: TUI falls back to raw text; no header parsing.
+- Added `commandUse` / `typedText` (`packages/tui/src/prompt/slash.ts`) and `promptFromParts` (`packages/tui/src/prompt/part.ts`).
+- Changed `UserMessage` (`routes/session/index.tsx`): command messages show `/name` lines in `theme.textMuted` + request in `theme.text`; click on names toggles full stored text (muted), `stopPropagation` so Actions does not open.
+- Fixed revert/undo/edit/fork restoring expanded templates: 4 duplicate reducers (`dialog-message.tsx` x2, `index.tsx` Undo, `dialog-fork-from-timeline.tsx`) now use `promptFromParts` -> `/a /b request`. Fork and Undo now also strip part IDs, like the other two did.
+- Changed Timeline and Fork-from-timeline titles to `typedText`.
+- Kept Copy and transcript export on raw full text.
+- Verification: `bun test test/prompt/slash.test.ts test/prompt/part.test.ts` (tui) 7 pass; `bun test test/session/prompt.test.ts -t "slash composition"` (opencode) 3 pass; tui `tsgo --noEmit` exit 0. Rendering not live-checked.
+
+### User
+Slash commands
+- Messages sent with slash commands now show just the command names in gray and the request you typed, instead of the full injected prompt.
+- Clicking a command name expands the full command text, and clicking again collapses it.
+- Revert, undo, edit, and fork put the commands and request back in the prompt box, not the expanded text.
+- The Timeline and Fork dialogs list command messages by what you typed.
+
+---
+
+## 2026-10-19 (~00:26) - v0.2.239 tidbitRansomware - Click to open links and link browser picker - Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Opus 5.5; low effort; Implementation (/spit then /imp); completed
+- Version: 0.2.239
+- Added `tui/src/util/browser.ts`: `parseBrowsers` (reads `reg query <root> /s /ve` output, `<id>` default = name, `<id>\shell\open\command` = exe), `scanBrowsers` (HKCU, HKLM, HKLM WOW6432Node `Clients\StartMenuInternet`; dedupe by lowercased path, drop missing exes; empty off Windows), `openLink(kv, url)`, kv keys `link_click_enabled` (default true) and `link_browser` ("" = system default).
+- Changed `core/src/open.ts` `openUrl(input, app?)`: passes `{ app: { name } }` to `open` 11.0.4 (Windows `Start-Process <path> -ArgumentList url`).
+- Added `app.tsx` `openClickedLink` in the root `onMouseUp`: left button, not dragging, toggle on -> `renderer.getLinkAt(x, y)` -> `openLink`; runs before copy-on-select. opentui 0.5.14 `detectLinks2` tags markdown links with link ids regardless of the terminal hyperlinks capability, so lookup works in any terminal.
+- Changed `ui/link.tsx`, `dialog-retry-action.tsx` and `docs.open` to `openLink`, so the picked browser applies everywhere. The toggle covers chat links only; dialog links always open (user choice).
+- Added palette entries `oc.link_click` (`/linkClick`) and `oc.link_browser` (`/linkBrowser`, rescans on every open, "System default" resets) in group "Links".
+- Updated wiki `Sessions.md` "Links" section (wiki push is the user's).
+- Kept: URLs in code blocks and `<code>` tool output are not linkified by opentui, so not clickable.
+- Verification: `bun test test/cli/tui/browser.test.ts` 2 pass (fixture from real `reg query` output); `bun run typecheck` in `packages/tui` exit 0; live `scanBrowsers()` on this machine returned 6 browsers. Click behavior not run live.
+
+### User
+Links
+- Left clicking a link in a chat message now opens it in your browser; dragging over a link still selects text.
+- **Disable click to open links** in `ctrl+o` (`/linkClick`) turns this off; it is on by default.
+- **Link browser** in `ctrl+o` (`/linkBrowser`) lists your installed browsers and opens all links with the one you pick; **System default** resets it.
+
+---
+
 ## 2026-10-19 (~00:01) - v0.2.238 controlJeremy - Live subagent cards in the transcript - Opus 5.5, low effort; Implementation
 
 ### Agent

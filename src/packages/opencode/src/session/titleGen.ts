@@ -11,15 +11,18 @@ import * as Stream from "effect/Stream"
 import { InstanceState } from "@/effect/instance-state"
 import { Provider } from "@/provider/provider"
 import { Agent } from "../agent/agent"
+import { Command } from "../command"
 import { LLM } from "./llm"
 import { MessageV2 } from "./message-v2"
 import { SessionID } from "./schema"
 import { Session } from "./session"
 
-const decodeAutoRename = Schema.decodeUnknownOption(Schema.Struct({
-  state: Schema.Literals(["pending", "attempted"]),
-  title: Schema.optional(Schema.String),
-}))
+const decodeAutoRename = Schema.decodeUnknownOption(
+  Schema.Struct({
+    state: Schema.Literals(["pending", "attempted"]),
+    title: Schema.optional(Schema.String),
+  }),
+)
 // Tried in order after the rename agent's own model fails or returns an empty title.
 const RENAME_FALLBACKS = [
   { model: Provider.parseModel("opencode/mimo-v2.6-flash-free"), variant: undefined },
@@ -31,7 +34,14 @@ type TitleInput = { session: Session.Info; history: SessionV1.WithParts[] } & (
   | { mode: "marked" | "manual" }
 )
 
-export function makeTitles({ sessions, agents, provider, llm, work, scope }: {
+export function makeTitles({
+  sessions,
+  agents,
+  provider,
+  llm,
+  work,
+  scope,
+}: {
   sessions: Session.Interface
   agents: Agent.Interface
   provider: Provider.Interface
@@ -103,7 +113,11 @@ export function makeTitles({ sessions, agents, provider, llm, work, scope }: {
             sessionID: input.session.id,
             retries: 2,
           })
-          .pipe(Stream.filter(LLMEvent.is.textDelta), Stream.map((e) => e.text), Stream.mkString)
+          .pipe(
+            Stream.filter(LLMEvent.is.textDelta),
+            Stream.map((e) => e.text),
+            Stream.mkString,
+          )
         const result = cleanTitle(text)
         if (!result) return yield* Effect.fail(new Error("Title model returned an empty title"))
         return { title: result, model: `${mdl.providerID}/${mdl.id}` }
@@ -151,9 +165,12 @@ export function makeTitles({ sessions, agents, provider, llm, work, scope }: {
         metadata: { ...session.metadata, ocAutoRename: { ...automatic.value, state: "attempted" } },
       })
       if (users.length !== 1) return
-      if (automatic.value.title === undefined
-        ? !Session.isDefaultTitle(session.title)
-        : session.title !== automatic.value.title) return
+      if (
+        automatic.value.title === undefined
+          ? !Session.isDefaultTitle(session.title)
+          : session.title !== automatic.value.title
+      )
+        return
     }
 
     const history = structuredClone(input.history.slice(0, input.history.indexOf(users[0]) + 1))
@@ -164,9 +181,11 @@ export function makeTitles({ sessions, agents, provider, llm, work, scope }: {
     // Same project gate as SessionPrompt's `gated`.
     yield* InstanceState.context.pipe(
       Effect.flatMap((ctx) => work.run(ctx.directory, titled)),
-      Effect.catchCause((cause) => Cause.hasInterruptsOnly(cause)
-        ? Effect.failCause(cause)
-        : Effect.logWarning("automatic title failed", { sessionID: session.id, error: Cause.squash(cause) })),
+      Effect.catchCause((cause) =>
+        Cause.hasInterruptsOnly(cause)
+          ? Effect.failCause(cause)
+          : Effect.logWarning("automatic title failed", { sessionID: session.id, error: Cause.squash(cause) }),
+      ),
       Effect.forkIn(scope),
     )
   })
@@ -232,7 +251,10 @@ function namingText(part: SessionV1.TextPart | SessionV1.TextPartInput) {
   return withoutCommandHeader(part.text)
 }
 
-// Single-command runs prepend an active-command header; titles use the task text.
+// `SessionPrompt.command` prepends an active-command header (one command) or `Command.COMPOSED_PREAMBLE`
+// (several), each followed by a blank line; titles use the text after it.
 function withoutCommandHeader(text: string) {
+  const preamble = `${Command.COMPOSED_PREAMBLE}\n\n`
+  if (text.startsWith(preamble)) return text.slice(preamble.length)
   return text.replace(/^\[[^\n]* is active:[^\n]*\]\n\n/, "")
 }

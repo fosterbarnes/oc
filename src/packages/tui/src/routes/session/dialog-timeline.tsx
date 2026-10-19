@@ -6,6 +6,7 @@ import { Locale } from "../../util/locale"
 import { DialogMessage } from "./dialog-message"
 import { useDialog } from "../../ui/dialog"
 import type { PromptInfo } from "../../component/prompt/history"
+import { typedText } from "../../prompt/slash"
 
 export function DialogTimeline(props: {
   sessionID: string
@@ -29,7 +30,7 @@ export function DialogTimeline(props: {
       ) as TextPart
       if (!part) continue
       result.push({
-        title: part.text.replace(/\n/g, " "),
+        title: typedText(part).replace(/\n/g, " "),
         value: message.id,
         footer: Locale.time(message.time.created),
         onSelect: (dialog) => {

@@ -515,16 +515,54 @@ export async function waitForExit(pid: number, timeoutMs: number, identity?: Res
 }
 
 /** Asks the resident server to cancel its work and exit. The server bounds its own cleanup to 30 seconds. */
-async function requestShutdown(directory: string, state: ResidentState) {
-  if (!state.hostname || !state.port) throw new Error("Resident server address unavailable")
-  const secret = (await fs.readFile(path.join(directory, "oc-server.secret"), "utf8")).trim()
-  if (!secret) throw new Error("Resident server secret unavailable")
-  const response = await fetch(`${residentUrl(state.hostname, state.port)}/global/shutdown`, {
+async function requestShutdown(url: string, secret: string) {
+  const response = await fetch(`${url}/global/shutdown`, {
     method: "POST",
     headers: { authorization: `Basic ${Buffer.from(`opencode:${secret}`).toString("base64")}` },
     signal: AbortSignal.timeout(35_000),
   })
   if (!response.ok) throw new Error(`Resident shutdown failed: HTTP ${response.status}`)
+}
+
+/**
+ * Reads the resident state and checks that a stop can proceed, so callers can fail before killing anything.
+ * The shutdown request carries `oc-server.secret`, which only our server accepts, and `isPidAlive` matches
+ * the recorded creation time, so the server's executable need not match this process's.
+ */
+async function prepareStop(directory: string, processes: TuiLedger.Process[] | null) {
+  let state: ResidentState
+  try {
+    state = JSON.parse(await fs.readFile(serverStatePath(directory), "utf8"))
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error
+    return undefined
+  }
+  const pid = state.pid
+  const alive = pid !== undefined && (processes === null ? isPidAlive(pid) : isPidAlive(pid, state, () => processes))
+  if (!alive) return { state, pid, live: undefined }
+  if (!state.hostname || !state.port) throw new Error(`Resident server ${pid} address unavailable`)
+  const secret = (await fs.readFile(path.join(directory, "oc-server.secret"), "utf8")).trim()
+  if (!secret) throw new Error("Resident server secret unavailable")
+  const identity = processes?.find((item) => TuiLedger.sameIdentity(state, item))
+  return { state, pid, live: { pid, url: residentUrl(state.hostname, state.port), secret, identity } }
+}
+
+async function runStop(
+  directory: string,
+  prepared: NonNullable<Awaited<ReturnType<typeof prepareStop>>>,
+  keepState?: boolean,
+) {
+  const { state, live } = prepared
+  if (live) {
+    await requestShutdown(live.url, live.secret)
+    if (!(await waitForExit(live.pid, 35_000, state))) {
+      if (!live.identity) throw new Error(`Resident server ${live.pid} identity unavailable for forced stop`)
+      await forceKill([live.identity])
+      if (!(await waitForExit(live.pid, 5_000, state))) throw new Error(`Resident server ${live.pid} did not exit`)
+    }
+  }
+  if (!keepState) await clearServerState(directory)
+  return { stopped: live !== undefined, pid: prepared.pid }
 }
 
 export async function stopServer(
@@ -536,40 +574,15 @@ export async function stopServer(
     keepState?: boolean
   } = {},
 ) {
-  const killTuis = opts.killTuis ?? true
-  const file = serverStatePath(directory)
-  let state: ResidentState | undefined
-  try {
-    state = JSON.parse(await fs.readFile(file, "utf8"))
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error
-    return { stopped: false }
-  }
-  const pid = state?.pid
   const processes = opts.processes === undefined ? listOcProcesses(opts.listProcesses) : opts.processes
-  const alive =
-    pid !== undefined && (processes === null ? isPidAlive(pid) : isPidAlive(pid, state, () => processes))
-  if (alive) {
-    const identity = processes?.find((item) => TuiLedger.sameIdentity(state!, item))
-    if (
-      process.platform === "win32" &&
-      processes !== null &&
-      (!identity || !TuiLedger.sameExecutable(identity.executable, executablePath()))
-    )
-      throw new Error(`Resident server ${pid} identity unavailable or changed`)
-    await requestShutdown(directory, state!)
-    if (!(await waitForExit(pid, 35_000, state))) {
-      if (!identity) throw new Error(`Resident server ${pid} identity unavailable for forced stop`)
-      await forceKill([identity])
-      if (!(await waitForExit(pid, 5_000, state))) throw new Error(`Resident server ${pid} did not exit`)
-    }
-  }
-  if (!opts.keepState) await clearServerState(directory)
-  if (killTuis && processes !== null) {
+  const prepared = await prepareStop(directory, processes)
+  if (!prepared) return { stopped: false }
+  const stopped = await runStop(directory, prepared, opts.keepState)
+  if ((opts.killTuis ?? true) && processes !== null) {
     const pids = await ocProcessIds(processes, directory)
     await forceKill(processes.filter((item) => pids.includes(item.pid)))
   }
-  return { stopped: alive, pid }
+  return stopped
 }
 
 /** Closes this instance's oc terminals, then stops its resident server gracefully. */
@@ -579,6 +592,8 @@ export async function shutdownAll(
 ) {
   const directory = opts.directory ?? serverStateDirectory()
   const processes = listOcProcesses(opts.listProcesses)
+  // Before any kill: a stop that cannot proceed must leave the terminals and server both running.
+  const prepared = await prepareStop(directory, processes)
   const records = processes === null ? [] : await TuiLedger.read(directory, processes)
   const pids =
     processes === null ? [] : TuiLedger.select(records, processes, Global.Path.app, executablePath(), process.pid)
@@ -589,7 +604,7 @@ export async function shutdownAll(
   }
   // TUIs have nothing to save; killing them up front avoids the "Unable to connect" screen while servers stop.
   if (processes !== null) await forceKill(processes.filter((item) => pids.includes(item.pid)))
-  const stopped = await stopServer(directory, { killTuis: false, processes })
+  const stopped = prepared ? await runStop(directory, prepared) : { stopped: false }
   const live = processes === null ? null : listOcProcesses(opts.listProcesses)
   // Without a second snapshot nothing is proven dead, so ledger records stay and owned TUIs count as leftovers.
   if (processes === null || live === null)

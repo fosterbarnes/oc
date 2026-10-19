@@ -49,7 +49,8 @@ import { useDialog } from "../../ui/dialog"
 import { DialogAlert } from "../../ui/dialog-alert"
 import { TodoItem } from "../../component/todo-item"
 import { DialogMessage } from "./dialog-message"
-import type { PromptInfo } from "../../component/prompt/history"
+import { promptFromParts } from "../../prompt/part"
+import { commandUse } from "../../prompt/slash"
 import { DialogConfirm } from "../../ui/dialog-confirm"
 import { DialogTimeline } from "./dialog-timeline"
 import { DialogForkFromTimeline } from "./dialog-fork-from-timeline"
@@ -802,19 +803,7 @@ export function Session() {
           .then(() => {
             toBottom()
           })
-        const parts = sync.data.part[message.id]
-        prompt?.set(
-          parts.reduce(
-            (agg, part) => {
-              if (part.type === "text") {
-                if (!part.synthetic) agg.input += part.text
-              }
-              if (part.type === "file") agg.parts.push(part)
-              return agg
-            },
-            { input: "", parts: [] as PromptInfo["parts"] },
-          ),
-        )
+        prompt?.set(promptFromParts(sync.data.part[message.id] ?? []))
         dialog.clear()
       },
     },
@@ -1656,6 +1645,12 @@ function UserMessage(props: {
     return texts.join("\n\n")
   })
   const files = createMemo(() => props.parts.flatMap((x) => (x.type === "file" ? [x] : [])))
+  // Command messages show the typed commands and request; a click on the commands shows the templates.
+  const command = createMemo(() => {
+    const part = props.parts.find((x) => x.type === "text" && !x.synthetic)
+    return part?.type === "text" ? commandUse(part) : undefined
+  })
+  const [expanded, setExpanded] = createSignal(false)
   const { theme } = useTheme()
   const [hover, setHover] = createSignal(false)
   const queued = createMemo(() => props.pending !== undefined && props.index > props.pending)
@@ -1709,9 +1704,39 @@ function UserMessage(props: {
             backgroundColor={hover() ? theme.backgroundElement : theme.backgroundPanel}
             flexShrink={0}
           >
-            <text selectable={false} fg={theme.text}>
-              {text()}
-            </text>
+            <Show
+              when={command()}
+              fallback={
+                <text selectable={false} fg={theme.text}>
+                  {text()}
+                </text>
+              }
+            >
+              {(use) => (
+                <>
+                  <text
+                    selectable={false}
+                    fg={theme.textMuted}
+                    onMouseUp={(evt) => {
+                      if (evt.button !== MouseButton.LEFT) return
+                      evt.stopPropagation()
+                      setExpanded((prev) => !prev)
+                    }}
+                  >
+                    {use()
+                      .names.map((name) => `/${name}`)
+                      .join("\n")}
+                  </text>
+                  <Show when={expanded() || use().request}>
+                    <box paddingTop={1}>
+                      <text selectable={false} fg={expanded() ? theme.textMuted : theme.text}>
+                        {expanded() ? text() : use().request}
+                      </text>
+                    </box>
+                  </Show>
+                </>
+              )}
+            </Show>
             <Show when={files().length}>
               <box flexDirection="row" paddingBottom={metadataVisible() ? 1 : 0} paddingTop={1} gap={1} flexWrap="wrap">
                 <For each={files()}>

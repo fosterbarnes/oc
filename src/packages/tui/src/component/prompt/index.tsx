@@ -32,8 +32,12 @@ import { promptOffsetWidth } from "../../prompt/display"
 import { createStore, produce, unwrap } from "solid-js/store"
 import { usePromptHistory, type PromptInfo } from "../../prompt/history"
 import { computePromptTraits } from "../../prompt/traits"
-import { extractSlashCommands } from "../../prompt/slash"
-import { expandPastedTextPlaceholders, expandTrackedPastedText } from "../../prompt/part"
+import {
+  expandPastedTextPlaceholders,
+  expandTrackedPastedText,
+  PASTE_SUMMARY_KEY,
+  typedSlashCommands,
+} from "../../prompt/part"
 import { usePromptStash } from "../../prompt/stash"
 import { DialogStash } from "../dialog-stash"
 import { type AutocompleteRef, Autocomplete } from "./autocomplete"
@@ -1140,15 +1144,13 @@ export function Prompt(props: PromptProps) {
 
   // The draft as it is sent: pasted text expanded inline, attachments kept, and any editor selection first.
   function outgoingParts() {
-    const inputText = expandTrackedPastedText(
-      store.prompt.input,
-      input.extmarks.getAllForTypeId(promptPartTypeId).flatMap((extmark) => {
-        const partIndex = store.extmarkToPartIndex.get(extmark.id)
-        const part = partIndex === undefined ? undefined : store.prompt.parts[partIndex]
-        if (part?.type !== "text") return []
-        return [{ start: extmark.start, end: extmark.end, text: part.text }]
-      }),
-    )
+    const pastes = input.extmarks.getAllForTypeId(promptPartTypeId).flatMap((extmark) => {
+      const partIndex = store.extmarkToPartIndex.get(extmark.id)
+      const part = partIndex === undefined ? undefined : store.prompt.parts[partIndex]
+      if (part?.type !== "text") return []
+      return [{ start: extmark.start, end: extmark.end, text: part.text }]
+    })
+    const inputText = expandTrackedPastedText(store.prompt.input, pastes)
 
     // Filter out text parts (pasted content) since they're now expanded inline
     const nonTextParts = store.prompt.parts.filter((part) => part.type !== "text")
@@ -1170,7 +1172,8 @@ export function Prompt(props: PromptProps) {
             },
           ]
         : []
-    return { inputText, nonTextParts, editorParts }
+    const commands = typedSlashCommands(store.prompt.input, pastes, sync.data.command)
+    return { inputText, nonTextParts, editorParts, commands }
   }
 
   // Alt+Enter in a session: the draft joins the session queue instead of steering the running turn.
@@ -1194,7 +1197,9 @@ export function Prompt(props: PromptProps) {
       return false
     }
     const trimmed = store.prompt.input.trim()
-    if (trimmed.startsWith("/")) {
+    const { inputText, nonTextParts, editorParts, commands } = outgoingParts()
+    // Submit runs a command found anywhere in the typed text, so queueing must refuse the same drafts.
+    if (trimmed.startsWith("/") || commands.names.length) {
       toast.show({ message: "Slash commands cannot be queued", variant: "warning" })
       return false
     }
@@ -1203,7 +1208,6 @@ export function Prompt(props: PromptProps) {
     const selectedModel = local.model.current()
     if (!agent || !selectedModel) return false
 
-    const { inputText, nonTextParts, editorParts } = outgoingParts()
     const queued = await sdk.client.session.queue
       .update(
         {
@@ -1370,12 +1374,10 @@ export function Prompt(props: PromptProps) {
       await local.agent.attachSession(sessionID)
     }
 
-    const { inputText, nonTextParts, editorParts } = outgoingParts()
+    const { inputText, nonTextParts, editorParts, commands } = outgoingParts()
 
     // Capture mode before it gets reset
     const currentMode = store.mode
-
-    const commands = extractSlashCommands(inputText, sync.data.command)
 
     if (store.mode === "shell") {
       move.startSubmit()
@@ -1402,7 +1404,7 @@ export function Prompt(props: PromptProps) {
             agent: agent.name,
             model: `${selectedModel.providerID}/${selectedModel.modelID}`,
             variant,
-            parts: nonTextParts.filter((x) => x.type === "file"),
+            parts: [...editorParts, ...nonTextParts.filter((x) => x.type === "file")],
           },
           { throwOnError: true },
         )
@@ -1412,6 +1414,7 @@ export function Prompt(props: PromptProps) {
           if (input.isDestroyed || store.prompt.input) return
           ref.set(draft)
         })
+      if (editorParts.length > 0) editor.markSelectionSent()
     } else {
       move.startSubmit()
       sdk.client.session
@@ -1533,10 +1536,7 @@ export function Prompt(props: PromptProps) {
     }
 
     const lineCount = (pastedContent.match(/\n/g)?.length ?? 0) + 1
-    if (
-      (lineCount >= 3 || pastedContent.length > 150) &&
-      kv.get("paste_summary_enabled", !sync.data.config.experimental?.disable_paste_summary)
-    ) {
+    if ((lineCount >= 3 || pastedContent.length > 150) && kv.get(PASTE_SUMMARY_KEY, false)) {
       pasteText(pastedContent, `[Pasted ~${lineCount} lines]`)
       return
     }

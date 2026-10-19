@@ -6,8 +6,8 @@ import { Locale } from "../../util/locale"
 import { useSDK } from "../../context/sdk"
 import { useRoute } from "../../context/route"
 import { useDialog, type DialogContext } from "../../ui/dialog"
-import type { PromptInfo } from "../../component/prompt/history"
-import { stripPromptPartIDs as strip } from "../../prompt/part"
+import { promptFromParts } from "../../prompt/part"
+import { typedText } from "../../prompt/slash"
 
 export function DialogForkFromTimeline(props: { sessionID: string; onMove: (messageID?: string) => void }) {
   const sync = useSync()
@@ -41,7 +41,7 @@ export function DialogForkFromTimeline(props: { sessionID: string; onMove: (mess
       ) as TextPart
       if (!part) continue
       result.push({
-        title: part.text.replace(/\n/g, " "),
+        title: typedText(part).replace(/\n/g, " "),
         value: message.id,
         footer: Locale.time(message.time.created),
         onSelect: async (dialog) => {
@@ -49,21 +49,10 @@ export function DialogForkFromTimeline(props: { sessionID: string; onMove: (mess
             sessionID: props.sessionID,
             messageID: message.id,
           })
-          const parts = sync.data.part[message.id] ?? []
-          const prompt = parts.reduce(
-            (agg, part) => {
-              if (part.type === "text") {
-                if (!part.synthetic) agg.input += part.text
-              }
-              if (part.type === "file") agg.parts.push(strip(part))
-              return agg
-            },
-            { input: "", parts: [] as PromptInfo["parts"] },
-          )
           route.navigate({
             sessionID: forked.data!.id,
             type: "session",
-            prompt,
+            prompt: promptFromParts(sync.data.part[message.id] ?? []),
           })
           dialog.clear()
         },

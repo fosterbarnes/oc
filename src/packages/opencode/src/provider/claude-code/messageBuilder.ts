@@ -2,6 +2,7 @@ import type { LanguageModelV3 } from "@ai-sdk/provider"
 import { log } from "./logger.js"
 import { showToast } from "./runtimeStatus.js"
 import { CLAUDE_CODE_PROVIDER_ID, STEERED_METADATA_KEY } from "./shared.js"
+import { WAKE_PROMPT_TEXT } from "./sessionManager.js"
 
 /** Historical transcript marker. The account-failover feature that wrote it is gone. */
 const ACCOUNT_FAILOVER_TOOL_CALL_PREFIX = "account_failover_"
@@ -175,6 +176,18 @@ function toImageBlock(part: any): any | null {
   }
 }
 
+const isWakeMarker = (part: any): boolean => part?.type === "text" && part.text === WAKE_PROMPT_TEXT
+
+/**
+ * Whether the newest message is oc's hidden wake prompt. Only the newest counts: the empty reply
+ * to a stale wake never reaches the prompt (message-v2.ts drops step-start-only messages), so an
+ * old marker can sit beside the user's next message.
+ */
+export function isWakeTurn(prompt: Prompt): boolean {
+  const last = prompt.at(-1)
+  return last?.role === "user" && Array.isArray(last.content) && last.content.some(isWakeMarker)
+}
+
 function getToolResultText(part: any): string {
   const value = part.output ?? part.result
 
@@ -300,6 +313,8 @@ export function getClaudeUserMessage(
           if (part.type === "text") {
             // Read mid-turn already (turnStream.ts `onSteer`); sending it again would repeat it.
             if (part.providerOptions?.[CLAUDE_CODE_PROVIDER_ID]?.[STEERED_METADATA_KEY]) continue
+            // oc's own marker, never Claude's input.
+            if (isWakeMarker(part)) continue
             if (part.text && part.text.trim()) {
               content.push({ type: "text", text: part.text })
             }

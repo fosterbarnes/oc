@@ -23,32 +23,89 @@ afterEach(async () => {
 
 const idle = { restartingFresh: false }
 
+// A stand-in resident server that exits on an authenticated `/global/shutdown`; prints its state record.
+async function fakeResident() {
+  const child = Bun.spawn(
+    [
+      process.execPath,
+      "-e",
+      [
+        "const server = Bun.serve({ port: 0, fetch(request) {",
+        `if (request.method !== 'POST' || new URL(request.url).pathname !== '/global/shutdown' || request.headers.get('authorization') !== 'Basic ${Buffer.from("opencode:test-secret").toString("base64")}') return new Response('', { status: 403 });`,
+        "setTimeout(() => process.exit(0), 20); return new Response('{}'); } });",
+        "console.log(JSON.stringify({ pid: process.pid, hostname: '127.0.0.1', port: server.port }));",
+      ].join(" "),
+    ],
+    { stdout: "pipe", stderr: "pipe", windowsHide: true },
+  )
+  const reader = child.stdout.getReader()
+  let output = ""
+  while (!output.includes("\n")) {
+    const chunk = await reader.read()
+    if (chunk.done) throw new Error("Resident test process exited before readiness")
+    output += new TextDecoder().decode(chunk.value)
+  }
+  reader.releaseLock()
+  return { child, state: JSON.parse(output) as { pid: number; hostname: string; port: number } }
+}
+
+// Identity as the server records it, under an executable that is not this test's.
+const foreignServer = (pid: number) => ({
+  pid,
+  parentPid: 1,
+  executable: "C:\\Other\\oc.exe",
+  startedAt: 0,
+  created: "134100000000000777",
+})
+
+test("shutdownAll stops a live server whose executable differs from the caller's", async () => {
+  await using tmp = await tmpdir()
+  const { child, state } = await fakeResident()
+  try {
+    const server = foreignServer(child.pid)
+    await Bun.write(Resident.serverStatePath(tmp.path), JSON.stringify({ ...state, ...server }))
+    await Bun.write(path.join(tmp.path, "oc-server.secret"), "test-secret")
+    const result = await Resident.shutdownAll({ directory: tmp.path, listProcesses: () => [server] })
+    expect(result.servers[0].stopped).toBe(true)
+    expect(await child.exited).toBe(0)
+  } finally {
+    if (child.exitCode === null) child.kill()
+    await child.exited
+  }
+}, 20_000)
+
+test("shutdownAll fails before touching terminals when the server cannot be stopped", async () => {
+  await using tmp = await tmpdir()
+  const { child, state } = await fakeResident()
+  try {
+    const server = foreignServer(child.pid)
+    await Bun.write(Resident.serverStatePath(tmp.path), JSON.stringify({ ...state, ...server }))
+    await Bun.write(path.join(tmp.path, "oc-server.secret"), "")
+    // An unprovable live TUI record makes the ledger read throw, so reaching it would change the error.
+    const executable = Global.resolveExecutablePath()
+    const tui = { pid: 10, parentPid: 11, executable, startedAt: 10_000, created: "134100000000000010" }
+    await fs.mkdir(path.join(tmp.path, "oc-tuis"))
+    await Bun.write(
+      path.join(tmp.path, "oc-tuis", "10.json"),
+      JSON.stringify({ pid: 10, instance: Global.Path.app, executable, startedAt: 10_000 }),
+    )
+    await expect(Resident.shutdownAll({ directory: tmp.path, listProcesses: () => [server, tui] })).rejects.toThrow(
+      "Resident server secret unavailable",
+    )
+    expect(child.exitCode).toBeNull()
+    expect(await Bun.file(Resident.serverStatePath(tmp.path)).exists()).toBe(true)
+  } finally {
+    if (child.exitCode === null) child.kill()
+    await child.exited
+  }
+}, 20_000)
+
 for (const control of ["stopServer", "shutdownAll"] as const) {
   test(`${control} still stops its resident server when the injected process lister fails`, async () => {
     await using tmp = await tmpdir()
-    const child = Bun.spawn(
-      [
-        process.execPath,
-        "-e",
-        [
-          "const server = Bun.serve({ port: 0, fetch(request) {",
-          `if (request.method !== 'POST' || new URL(request.url).pathname !== '/global/shutdown' || request.headers.get('authorization') !== 'Basic ${Buffer.from("opencode:test-secret").toString("base64")}') return new Response('', { status: 403 });`,
-          "setTimeout(() => process.exit(0), 20); return new Response('{}'); } });",
-          "console.log(JSON.stringify({ pid: process.pid, hostname: '127.0.0.1', port: server.port }));",
-        ].join(" "),
-      ],
-      { stdout: "pipe", stderr: "pipe", windowsHide: true },
-    )
+    const { child, state } = await fakeResident()
     try {
-      const reader = child.stdout.getReader()
-      let output = ""
-      while (!output.includes("\n")) {
-        const chunk = await reader.read()
-        if (chunk.done) throw new Error("Resident test process exited before readiness")
-        output += new TextDecoder().decode(chunk.value)
-      }
-      reader.releaseLock()
-      await Bun.write(Resident.serverStatePath(tmp.path), output.trim())
+      await Bun.write(Resident.serverStatePath(tmp.path), JSON.stringify(state))
       await Bun.write(path.join(tmp.path, "oc-server.secret"), "test-secret")
       // A record must survive an unavailable snapshot rather than being mistaken for a dead TUI.
       await fs.mkdir(path.join(tmp.path, "oc-tuis"))
@@ -347,7 +404,9 @@ describe("OC config", () => {
       for (const hostname of ["127.0.0.1", "localhost"]) {
         await Bun.write(path.join(directory, "oc.json"), JSON.stringify({ server: { hostname, port: foreign.port } }))
         const error = await Resident.startServer().catch((cause: unknown) => cause)
-        expect((error as Error).message).toContain(`Resident port ${hostname}:${foreign.port} is in use by another program`)
+        expect((error as Error).message).toContain(
+          `Resident port ${hostname}:${foreign.port} is in use by another program`,
+        )
       }
       expect(await fs.stat(Resident.serverStatePath(directory)).catch(() => undefined)).toBeUndefined()
       expect((await fetch(`http://127.0.0.1:${foreign.port}/`)).status).toBe(404)

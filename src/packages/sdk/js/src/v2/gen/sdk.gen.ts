@@ -5032,14 +5032,17 @@ export class Session2 extends HeyApiClient {
       command?: string
       variant?: string
       additionalCommands?: Array<string>
-      parts?: Array<{
-        id?: string
-        type: "file"
-        mime: string
-        filename?: string
-        url: string
-        source?: FilePartSource
-      }>
+      parts?: Array<
+        | TextPartInput
+        | {
+            id?: string
+            type: "file"
+            mime: string
+            filename?: string
+            url: string
+            source?: FilePartSource
+          }
+      >
     },
     options?: Options<never, ThrowOnError>,
   ) {
