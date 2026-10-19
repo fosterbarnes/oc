@@ -1,8 +1,8 @@
-v0.2.235 boobagesZuko
+v0.2.236 bareShmeeba
 
-pasting:
-Pressing Enter right after pasting an image with Ctrl+V now sends the image together with your text. Before, the text went out alone and the image landed in the next prompt. The same applies to pasting a file path that becomes an attachment, and to Alt+Enter queueing.
+subagents:
+A new "Session subagents" menu switches subagents on or off for the current chat only. Open it from the oc palette, with /sessionSub, or with the new Subagents button in the sidebar under oc Palette. Each subagent has a checkbox, and an "All subagents" row removes the task tool from that chat entirely. Agent files and config are not touched.
 
-Typing, pressing Ctrl+V and then Enter very quickly now sends the prompt with the image even when Ctrl is still held as Enter goes down. That key used to arrive as Ctrl+Enter and add a newline instead of sending. Ctrl+Enter still adds a newline normally; only within a moment of a Ctrl+V paste does it send.
+Switched-off subagents drop out of the list the model sees and their calls are refused. Naming an agent yourself with @agent still runs it. The sidebar button shows how many subagents are off in the chat. A Claude Code chat keeps its old list until its Claude process restarts, but calls to switched-off subagents are still refused.
 
-Under the hood: prompt pastes run through trackPaste, and submit and queuePrompt wait for any paste still reading before they read the draft. For 300 ms after Ctrl+V, or until the paste lands if that is later, a targeted ctrl+return binding runs prompt.submit and the Home "send and stay" binding is paused. Cause found with a temporary raw-input log (since removed): Enter came in as \x1b[13;5u 87 ms after Ctrl+V. Checks run: promptPasteSubmit.test.ts (Enter and Ctrl+Enter during a slow image read, 2 pass; each case fails with its fix removed); tui typecheck clean. Not checked live in the TUI after the last fix.
+Under the hood: the switched-off names live in the session's metadata as disabledSubagents and become task deny rules on each turn (disabledSubagentRules), because session permission rules can only be added to, so a subagent could never be switched back on. The task tool's agent list now also respects session rules (it only checked the agent's own permissions before), and the Claude Code task description comes from the turn's own tool list. Toggling also drops names of agents deleted since they were switched off. Checks run: opencode and tui typecheck clean; tool registry tests 19 pass, including a new one for a switched-off subagent. No TUI dialog test, no Claude fake-model scenario, not checked live in the TUI.

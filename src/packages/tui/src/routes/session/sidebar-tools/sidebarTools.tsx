@@ -10,6 +10,7 @@ import { useSDK } from "../../../context/sdk"
 import { useKV } from "../../../context/kv"
 import { useTuiConfig } from "../../../config"
 import { HeaderButton } from "./headerButton"
+import { DialogSessionSubagents, sessionDisabled } from "../../../component/dialog-session-subagents"
 import { SidebarToggle } from "../../../feature-plugins/sidebar/toggle"
 import { useTheme } from "../../../context/theme"
 import { useTuiPaths } from "../../../context/runtime"
@@ -34,14 +35,7 @@ import {
   type ScriptSettings,
   type SidebarSettings,
 } from "./settings.js"
-import {
-  dedupeRootPaths,
-  displayPath,
-  isDirectory,
-  normalizeRootPath,
-  rootSections,
-  sameRootPath,
-} from "./roots.js"
+import { dedupeRootPaths, displayPath, isDirectory, normalizeRootPath, rootSections, sameRootPath } from "./roots.js"
 import {
   clipEnd,
   MAX_TREE_ITEMS,
@@ -555,7 +549,6 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
   })
   const openScriptSettings = () => setTimeout(selectScriptSettings, 100)
 
-
   const sidebarCommands = createMemo(() => {
     const rootCommands = rootSections(sidebarSettings.recentFileRoots, [...favorites()])
     const commands = [
@@ -712,6 +705,11 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
   }
 
   const outlinedButtons = () => tuiConfig.sidebar_button_style === "outlined"
+  const subagentsLabel = () => {
+    const off = sessionDisabled(sync.session.get(props.sessionID)?.metadata)
+    if (off.includes("*")) return "Subagents: all off"
+    return off.length > 0 ? `Subagents: ${off.length} off` : "Subagents"
+  }
 
   return (
     <>
@@ -736,6 +734,13 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
           color={headerButtonColor}
           hoverColor={hoverColor}
           onClick={() => keymap.dispatchCommand("oc.settings_palette")}
+        />
+        <HeaderButton
+          value={subagentsLabel()}
+          outlined={outlinedButtons()}
+          color={headerButtonColor}
+          hoverColor={hoverColor}
+          onClick={() => dialog.replace(() => <DialogSessionSubagents sessionID={props.sessionID} />)}
         />
         <box flexDirection={outlinedButtons() ? "column" : "row"} gap={outlinedButtons() ? 0 : 1}>
           <HeaderButton

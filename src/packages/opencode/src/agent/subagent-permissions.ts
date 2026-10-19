@@ -25,3 +25,16 @@ export function deriveSubagentSessionPermission(input: {
     ...(canTask ? [] : [{ permission: "task" as const, pattern: "*" as const, action: "deny" as const }]),
   ]
 }
+
+/**
+ * Turn a session's switched-off subagents (`metadata.disabledSubagents`, written by the TUI; "*" = all) into
+ * `task` denies. Kept in metadata rather than the session's permission because that ruleset is append-only,
+ * so switching an agent back on could not drop its deny.
+ */
+export function disabledSubagentRules(metadata: Record<string, unknown> | undefined): PermissionV1.Ruleset {
+  const names = metadata?.disabledSubagents
+  if (!Array.isArray(names)) return []
+  return names
+    .filter((name): name is string => typeof name === "string")
+    .map((name) => ({ permission: "task", pattern: name, action: "deny" as const }))
+}

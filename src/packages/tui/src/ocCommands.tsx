@@ -6,6 +6,7 @@ import { DialogAbout } from "./component/dialog-about"
 import { DialogAgent } from "./component/dialog-agent"
 import { DialogModel } from "./component/dialog-model"
 import { DialogSessionCleanup } from "./component/dialog-session-cleanup"
+import { DialogSessionSubagents } from "./component/dialog-session-subagents"
 import { DialogSubagents } from "./component/dialog-subagents"
 import { useTuiConfig } from "./config"
 import { useKV } from "./context/kv"
@@ -134,6 +135,19 @@ export function createOcCommands(input: {
         slashName: "viewSub",
         run: () => {
           dialog.replace(() => <DialogSubagents />)
+        },
+      },
+      {
+        name: "oc.session_subagents",
+        title: "Session subagents",
+        desc: "Switch subagents on or off for this session",
+        category: "oc",
+        slashName: "sessionSub",
+        enabled: () => route.data.type === "session",
+        run: () => {
+          if (route.data.type !== "session") return
+          const sessionID = route.data.sessionID
+          dialog.replace(() => <DialogSessionSubagents sessionID={sessionID} />)
         },
       },
       {

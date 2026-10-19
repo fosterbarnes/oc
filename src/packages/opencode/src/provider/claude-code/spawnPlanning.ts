@@ -465,7 +465,10 @@ async function assembleProxyTools(input: Parameters<typeof planSpawn>[0]) {
       ? await input.loadLiveToolInfo()
       : { resolved: false, taskDescription: undefined, questionDescription: undefined, hasQuestion: false }
 
-  const gated = gateStaticDefs(input.proxyTools, live, taskEnabled, questionEnabled)
+  // The turn's own `task` entry reflects session subagent toggles; the registry fetch has no session.
+  const taskDescription =
+    modelTools?.find((tool) => tool.name === toolNameForHost("task", dialect))?.description ?? live.taskDescription
+  const gated = gateStaticDefs(input.proxyTools, { ...live, taskDescription }, taskEnabled, questionEnabled)
   const staticDefs = gated ? filterProxyByModelTools(gated, modelTools, dialect) : []
 
   // Opencode tools that belong to no MCP server are invisible to the MCP

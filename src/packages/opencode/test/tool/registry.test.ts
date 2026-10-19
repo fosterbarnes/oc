@@ -14,6 +14,7 @@ import { Plugin } from "@/plugin"
 import { Agent } from "@/agent/agent"
 import { InstanceState } from "@/effect/instance-state"
 import { Permission } from "@/permission"
+import { disabledSubagentRules } from "@/agent/subagent-permissions"
 
 import { ToolJsonSchema } from "@/tool/json-schema"
 import { MessageID, SessionID } from "@/session/schema"
@@ -103,20 +104,29 @@ afterEach(async () => {
 
 describe("tool.registry", () => {
   for (const todos of [undefined, false, true]) {
-    const scoped = testEffect(LayerNode.compile(root, [
-      [Config.node, TestConfig.layer({
-        get: () => Effect.succeed({ todos, agent: { build: { permission: { todowrite: "allow" } } } }),
-        directories: () => InstanceState.directory.pipe(Effect.map((dir) => [path.join(dir, ".opencode")])),
-      })],
-      [RuntimeFlags.node, RuntimeFlags.layer()],
-    ]))
+    const scoped = testEffect(
+      LayerNode.compile(root, [
+        [
+          Config.node,
+          TestConfig.layer({
+            get: () => Effect.succeed({ todos, agent: { build: { permission: { todowrite: "allow" } } } }),
+            directories: () => InstanceState.directory.pipe(Effect.map((dir) => [path.join(dir, ".opencode")])),
+          }),
+        ],
+        [RuntimeFlags.node, RuntimeFlags.layer()],
+      ]),
+    )
     scoped.instance(`todo capability ${String(todos)} gates built-in and custom registrations`, () =>
       Effect.gen(function* () {
         const instance = yield* TestInstance
         const directory = path.join(instance.directory, ".opencode", "tools")
         yield* Effect.promise(() => fs.mkdir(directory, { recursive: true }))
-        yield* Effect.promise(() => Bun.write(path.join(directory, "todowrite.ts"),
-          'export default { description: "shadow todo", args: {}, execute: async () => "ok" }'))
+        yield* Effect.promise(() =>
+          Bun.write(
+            path.join(directory, "todowrite.ts"),
+            'export default { description: "shadow todo", args: {}, execute: async () => "ok" }',
+          ),
+        )
         const registry = yield* ToolRegistry.Service
         const agents = yield* Agent.Service
         const agent = yield* agents.get("build")
@@ -125,11 +135,15 @@ describe("tool.registry", () => {
         expect(ids.includes("todowrite")).toBe(todos === true)
         expect(ids).toContain("task")
         const tools = yield* registry.tools({
-          providerID: ProviderV2.ID.make("openai"), modelID: ModelV2.ID.make("gpt-test"), agent,
+          providerID: ProviderV2.ID.make("openai"),
+          modelID: ModelV2.ID.make("gpt-test"),
+          agent,
         })
         expect(tools.filter((tool) => tool.id === "todowrite")).toHaveLength(todos === true ? 2 : 0)
-        const denied = Permission.disabled(tools.map((tool) => tool.id),
-          Permission.merge(agent.permission, Permission.fromConfig({ todowrite: "deny" })))
+        const denied = Permission.disabled(
+          tools.map((tool) => tool.id),
+          Permission.merge(agent.permission, Permission.fromConfig({ todowrite: "deny" })),
+        )
         expect(tools.filter((tool) => !denied.has(tool.id)).map((tool) => tool.id)).not.toContain("todowrite")
       }),
     )
@@ -199,6 +213,30 @@ describe("tool.registry", () => {
 
       expect(task?.jsonSchema).toBeDefined()
       expect((task?.jsonSchema?.properties as Record<string, unknown> | undefined)?.background).toBeUndefined()
+    }),
+  )
+
+  it.instance("task description leaves out subagents switched off for the session", () =>
+    Effect.gen(function* () {
+      const registry = yield* ToolRegistry.Service
+      const build = yield* (yield* Agent.Service).get("build")
+      if (!build) throw new Error("build agent not found")
+      const taskDescription = (metadata: Record<string, unknown>) =>
+        registry
+          .tools({
+            providerID: ProviderV2.ID.opencode,
+            modelID: ModelV2.ID.make("test"),
+            agent: build,
+            permission: disabledSubagentRules(metadata),
+          })
+          .pipe(Effect.map((tools) => tools.find((tool) => tool.id === "task")?.description ?? ""))
+
+      expect(yield* taskDescription({})).toContain("- explore:")
+      const off = yield* taskDescription({ disabledSubagents: ["explore"] })
+      expect(off).not.toContain("- explore:")
+      expect(off).toContain("- general:")
+      const ruleset = Permission.merge(build.permission, disabledSubagentRules({ disabledSubagents: ["*"] }))
+      expect(Permission.disabled(["task"], ruleset).has("task")).toBe(true)
     }),
   )
 

@@ -150,6 +150,30 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-18 (~23:30) - v0.2.236 bareShmeeba - Switch subagents on or off per session - Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Opus 5.5; low effort; Implementation (from spitball plan `~/.config/opencode/plans/sessionSubagentToggles.md`); completed
+- Version: 0.2.236 bareShmeeba
+- Added `disabledSubagentRules(metadata)` in `opencode/src/agent/subagent-permissions.ts`: `session.metadata.disabledSubagents` (names, `"*"` = all) -> `task` deny rules. Metadata, not `session.permission`, because session PATCH permission is append-only (`handlers/session.ts` merge) so re-enable could not drop a deny
+- Changed `session/prompt.ts` `turnPermission`: merges those denies after `session.permission`; skipped when the user message has an `agent` part (`bypassAgentCheck`) so explicit @agent still runs. Command-subtask path untouched (user-invoked)
+- Fixed `ToolRegistry.describeTask` (`tool/registry.ts`): filters agent list by `agent.permission` + session/turn `permission` (was agent only), so session task denies also leave the model-visible list
+- Changed `provider/claude-code/spawnPlanning.ts`: task proxy description prefers the turn's own `task` entry from `modelTools` over the session-less registry fetch. Spawn-time only: a reused Claude process keeps its old list; enforcement still denies
+- Added `tui/src/component/dialog-session-subagents.tsx` (`DialogSessionSubagents`, `sessionDisabled`): checkbox list, "All subagents" + non-primary non-hidden agents, each toggle PATCHes full metadata (other keys carried), optimistic with rollback on error
+- Added oc palette entry `oc.session_subagents` "Session subagents" (`/sessionSub`, enabled on session route) in `tui/src/ocCommands.tsx`; sidebar header button "Subagents" / "Subagents: N off" / "all off" in `sidebarTools.tsx` after "oc Palette"
+- Updated wiki `Agents-and-Skills.md` "Per-session on/off"
+- Verification: opencode + tui `bun run typecheck` exit 0; `bun test test/tool/registry.test.ts` 19 pass incl. new "task description leaves out subagents switched off for the session". No TUI dialog test, no Claude fake-model scenario, no live TUI run
+- Risk: metadata PATCH replaces the record; concurrent metadata writers could race the read-modify-write
+- Fixed (pass): toggle drops names of since-deleted agents from `disabledSubagents` so the sidebar "N off" count stays true; skipped when the agent list failed to load. tui `bun run typecheck` exit 0
+
+### User
+Subagents
+- New "Session subagents" menu (oc palette, `/sessionSub`, or the sidebar Subagents button) switches individual subagents, or all of them, off for the current chat only.
+- Switched-off subagents disappear from the model's list and their calls are refused; naming one with @agent still runs it.
+- The sidebar button shows how many subagents are off in this chat.
+
+---
+
 ## 2026-10-18 (~19:39) - v0.2.235 boobagesZuko - Fast Ctrl+V then Enter sends instead of adding a newline - Opus 5.5, low effort; Debug
 
 ### Agent
