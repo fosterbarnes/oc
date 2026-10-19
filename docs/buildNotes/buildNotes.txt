@@ -1,21 +1,6 @@
-v0.2.245 goatcheeseColosseum
-
-links:
-Left-clicking a link in a chat message now opens it in your browser; dragging over a link still selects text. Disable click to open links in the oc palette (/linkClick) turns this off; it is on by default. Link browser (/linkBrowser) lists your installed browsers and opens every link with the one you pick; System default resets it. If the picked browser is later uninstalled, clicking a link shows an error instead of silently doing nothing.
-
-slash commands:
-Messages sent with slash commands now show just the command names in gray plus the request you typed; clicking a command name expands or collapses the full command text. Revert, undo, edit, and fork put the commands and request back in the prompt box, and the Timeline and Fork dialogs list command messages by what you typed. Pasted text no longer runs slash commands it happens to mention, Alt+Enter refuses any draft that would run a command, a pending editor selection is sent with a command message, and sessions started with only commands no longer get titles from the combined-command wording.
-
-prompt:
-Long pastes now go into the prompt as plain text instead of a [Pasted ~N lines] placeholder. Enable paste summary in the oc palette (/pasteSummary) turns the placeholder back on.
-
-tools:
-Jev's five tools (classify, check, score, rank, ask) are now built into oc, so no jev MCP server starts per window. They appear only while TYPESAFE_API_KEY is set, one jev permission covers all five, and Claude sessions get them through proxyOpencodeTools.
+v0.2.246 nagasakiRoger
 
 claude code chats:
-A chat no longer gets stuck giving blank replies after a background-task wake-up arrives at the wrong moment; your next message goes through normally.
+Without a Jev key, the popup for the jev tools listed in proxyOpencodeTools now says they need TYPESAFE_API_KEY and an oc restart, instead of calling them tools oc does not have. Other unknown names still get the usual popup.
 
-revive:
-If a revive cannot stop the running oc server, it now fails before closing any oc window, so oc stays usable instead of leaving a hidden server running. A revive no longer refuses to stop a server that was started from a different oc executable.
-
-Under the hood: new util/browser.ts (registry browser scan, openLink) and openUrl app option; chat link clicks detect down/up on the same cell because opentui marks every mouseup on selectable text as dragging. Command parts carry ocCommands names, a shared promptFromParts replaces four reducers, and Command.COMPOSED_PREAMBLE is shared by prompt, titleGen, and tests; legacy SDK regenerated for SessionCommandData.parts. Native tool/jev.ts and jevClient.ts port jev-code's client and schemas. Wake detection now checks only the newest message (isWakeTurn) and drops wake marker parts. resident.ts splits stopServer into prepareStop and runStop, runs prepareStop before any terminal is touched, and drops the executable-vs-caller gate (the server secret proves ownership). Checks run: tui browser, part, and slash tests pass; opencode renameDigest, schema-decoding, prompt slash composition, autonomousTurn, jev (7), and config oc (29) tests pass; tui and opencode typecheck clean. Links, paste, and revive not checked live. packages/sdk/openapi.json is still stale and will be refreshed in its own commit.
+Under the hood: packages/sdk/openapi.json is regenerated from the server routes (last refreshed v0.2.172; adds /instance/reload, /agent/sub, /provider/summary, /provider/usage, /session/{id}/generate, /session/{id}/queue and their schemas). prePush.ps1 now regenerates it on every push with the same command as test.ps1, and the existing Prettier pass formats it, so it cannot drift again; AGENTS.md notes this. proxyToolSelection.ts splits keyless jev_* names out of the unknown list using apiKey() from tool/jevClient.ts. Checks run: test.ps1 -Category generated (only the spec changed; its last step exits 1 by design when output changes), the prePush OpenAPI step alone reproduced the same file, proxyOpencodeTools test passes, opencode typecheck clean, plus prePush on this push.

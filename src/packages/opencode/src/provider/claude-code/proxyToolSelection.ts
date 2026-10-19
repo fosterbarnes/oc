@@ -2,6 +2,7 @@
  * Which proxy tools one spawn exposes, which Claude built-ins it disables,
  * and how opencode's MCP and registry tools become proxy defs.
  */
+import { apiKey } from "@/tool/jevClient"
 import { log } from "./logger.js"
 import { showToast } from "./runtimeStatus.js"
 import { toolNameForHost, type HostToolDialect } from "./hostTools.js"
@@ -256,16 +257,25 @@ export function resolveProxyOpencodeToolDefs(options: {
     })
   }
 
+  // The registry hides the jev_* tools while no key is set (`tool/registry.ts`), so say that instead.
+  const keyless = apiKey() ? [] : unknown.filter((name) => name.toLowerCase().startsWith("jev_"))
+  if (keyless.length > 0)
+    showToast(
+      `Jev tools need TYPESAFE_API_KEY: ${keyless.join(", ")} stay off until it is set and oc restarts.`,
+      "warning",
+      "Jev key missing",
+    )
+  const missing = unknown.filter((name) => !keyless.includes(name))
   // Same reasoning as the `proxyTools` typo warning: an unrecognised name is
   // simply not forwarded, and silence looks from the outside like the option
   // was ignored.
-  if (unknown.length > 0) {
+  if (missing.length > 0) {
     log.warn("ignoring unknown proxyOpencodeTools entries", {
-      unknown,
+      unknown: missing,
       known: [...byLowerId.values()].map((item) => item.id).join(", "),
     })
     showToast(
-      `Claude Code setting proxyOpencodeTools lists tools oc does not have: ${unknown.join(", ")}. They are ignored.`,
+      `Claude Code setting proxyOpencodeTools lists tools oc does not have: ${missing.join(", ")}. They are ignored.`,
       "warning",
       "Config entry ignored",
     )

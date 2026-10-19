@@ -7,6 +7,10 @@ runNativeCommand bun @('turbo', 'typecheck') 'typecheck'
 runNativeCommand bun @('packages/tui/script/keybindDocs.ts', '--check') 'keybind docs check'
 & "$PSScriptRoot\countCode.ps1"
 & "$PSScriptRoot\readmeVersion.ps1"
+# Keep the tracked OpenAPI spec in step with the server routes; the Prettier pass below formats it.
+$openApi = @(& bun run --cwd "$srcRoot/packages/opencode" dev generate)
+if ($LASTEXITCODE) { throw "OpenAPI generate failed (exit $LASTEXITCODE)." }
+$openApi | Set-Content -LiteralPath "$srcRoot/packages/sdk/openapi.json" -Encoding utf8NoBOM
 # Format changed files the way upstream's format workflow does, so src stays Prettier-clean.
 $changed = @(git -C $srcRoot ls-files -m -o --exclude-standard)
 if ($LASTEXITCODE) { throw "git ls-files failed (exit $LASTEXITCODE)." }

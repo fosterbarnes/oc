@@ -150,6 +150,26 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-19 (~01:54) - v0.2.246 nagasakiRoger - OpenAPI spec refreshed and kept current; Jev missing-key toast - Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Opus 5.5; low effort; Implementation (/imp, tasks 2 and 3 of `~/.config/opencode/plans/2026-10-19-revive-orphan-openapi-jev.md`); completed
+- Version: 0.2.246 nagasakiRoger
+- Fixed stale `packages/sdk/openapi.json` (last refreshed v0.2.172): ran `.scripts/test.ps1 -Category generated` on a clean tree. Only the spec changed (+1515/-241: `/instance/reload`, `/agent/sub`, `/provider/summary`, `/provider/usage`, `/session/{id}/generate`, `/session/{id}/queue`, usage and error schemas, event reordering). The run's final "generated tracked files" step exits 1 by design when output changed. Client `generated*` files showed stat-only `M` with no content diff; restored them.
+- Added `.scripts/prePush.ps1`: regenerates `openapi.json` with the same command as `test.ps1` (`bun run --cwd packages/opencode dev generate`, utf8NoBOM); the existing Prettier pass formats it. Prevents drift instead of only detecting it. AGENTS.md Prettier bullet notes it.
+- Added Jev missing-key toast in `provider/claude-code/proxyToolSelection.ts` `resolveProxyOpencodeToolDefs`: unknown `jev_*` names while `apiKey()` (`tool/jevClient.ts`) is unset get "Jev tools need TYPESAFE_API_KEY ..." (title "Jev key missing"); other unknown names keep the generic toast and warn log. Deviation: plan recommended skipping; user asked to implement the rest.
+- Added `test/provider/claude-code/proxyOpencodeTools.test.ts`.
+- Verification: prePush OpenAPI snippet run alone, then Prettier: output hash equals the `test.ps1` output (3s). `bun test test/provider/claude-code/proxyOpencodeTools.test.ts` 1 pass; `bun run typecheck` (packages/opencode) exit 0. Full `prePush.ps1` not run.
+
+### User
+Under the hood
+- The published API description now matches the server again and refreshes itself before every push.
+
+Claude Code chats
+- Without a Jev key, the popup now says the Jev tools need `TYPESAFE_API_KEY` instead of calling them unknown.
+
+---
+
 ## 2026-10-19 (~01:43) - v0.2.245 goatcheeseColosseum - A failed revive no longer leaves the old server running - Opus 5.5, low effort; Implementation
 
 ### Agent

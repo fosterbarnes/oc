@@ -2949,6 +2949,71 @@
         ]
       }
     },
+    "/instance/reload": {
+      "post": {
+        "tags": ["instance"],
+        "operationId": "instance.reload",
+        "parameters": [
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Instance reloaded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "boolean",
+                  "description": "Instance reloaded"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BadRequestError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "ConflictError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConflictError"
+                }
+              }
+            }
+          }
+        },
+        "description": "Reload the current project's config, agents, commands, skills, providers, MCP servers, and server plugins. Refused with a conflict while session work is running.",
+        "summary": "Reload instance",
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.instance.reload({\n  ...\n})"
+          }
+        ]
+      }
+    },
     "/path": {
       "get": {
         "tags": ["instance"],
@@ -3442,6 +3507,204 @@
           {
             "lang": "js",
             "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.app.agents({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/agent/sub": {
+      "get": {
+        "tags": ["instance"],
+        "operationId": "app.agent.sub.list",
+        "parameters": [
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BadRequestError"
+                }
+              }
+            }
+          }
+        },
+        "description": "Names defined in the configured writable subagent file.",
+        "summary": "List editable subagents",
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.app.agent.sub.list({\n  ...\n})"
+          }
+        ]
+      },
+      "post": {
+        "tags": ["instance"],
+        "operationId": "app.agent.sub.add",
+        "parameters": [
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Subagent added",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "boolean",
+                  "description": "Subagent added"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BadRequestError"
+                }
+              }
+            }
+          }
+        },
+        "description": "Add an entry to the subagent file.",
+        "summary": "Add subagent",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "model": {
+                    "type": "string"
+                  },
+                  "variant": {
+                    "type": "string"
+                  },
+                  "description": {
+                    "type": "string"
+                  }
+                },
+                "required": ["name", "model"],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.app.agent.sub.add({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/agent/sub/{name}": {
+      "delete": {
+        "tags": ["instance"],
+        "operationId": "app.agent.sub.remove",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "schema": {
+              "type": "string"
+            },
+            "required": true
+          },
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Subagent removed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "boolean",
+                  "description": "Subagent removed"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BadRequestError"
+                }
+              }
+            }
+          }
+        },
+        "description": "Remove an entry from the subagent file.",
+        "summary": "Remove subagent",
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.app.agent.sub.remove({\n  ...\n})"
           }
         ]
       }
@@ -5860,6 +6123,145 @@
         ]
       }
     },
+    "/provider/summary": {
+      "get": {
+        "tags": ["provider"],
+        "operationId": "provider.summary",
+        "parameters": [
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Provider ids and names",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "all": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          }
+                        },
+                        "required": ["id", "name"],
+                        "additionalProperties": false
+                      }
+                    },
+                    "connected": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": ["all", "connected"],
+                  "additionalProperties": false,
+                  "description": "Provider ids and names"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BadRequestError"
+                }
+              }
+            }
+          }
+        },
+        "description": "Get the providers from provider.list with only their id and name, plus the connected provider ids.",
+        "summary": "List provider names",
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.provider.summary({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/provider/usage": {
+      "get": {
+        "tags": ["provider"],
+        "operationId": "provider.usage.state",
+        "parameters": [
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Provider quota observations",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ProviderUsageInfo"
+                  },
+                  "description": "Provider quota observations"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BadRequestError"
+                }
+              }
+            }
+          }
+        },
+        "description": "Get the last observed account-bound quota readings from live provider responses, for mount and reconnect rehydration.",
+        "summary": "Get provider quota observations",
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.provider.usage.state({\n  ...\n})"
+          }
+        ]
+      }
+    },
     "/provider/auth": {
       "get": {
         "tags": ["provider"],
@@ -8242,6 +8644,176 @@
         ]
       }
     },
+    "/session/{sessionID}/generate": {
+      "post": {
+        "tags": ["session"],
+        "operationId": "session.generate",
+        "parameters": [
+          {
+            "name": "sessionID",
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "pattern": "^ses"
+            },
+            "required": true
+          },
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Side answer; the session is not changed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "text": {
+                      "type": "string"
+                    },
+                    "providerID": {
+                      "type": "string"
+                    },
+                    "modelID": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["text", "providerID", "modelID"],
+                  "additionalProperties": false,
+                  "description": "Side answer; the session is not changed"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "BadRequest | InvalidRequestError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/effect_HttpApiError_BadRequest"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidRequestError"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidRequestError"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NotFoundError | ModelNotFoundError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/NotFoundError"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ModelNotFoundError"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "UnsupportedProviderError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnsupportedProviderError"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "UpstreamError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpstreamError"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "TimeoutError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TimeoutError"
+                }
+              }
+            }
+          }
+        },
+        "description": "Answer a side question from the session's context with one model call, without adding messages, marks, or resume state to the session.",
+        "summary": "Generate side answer",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "prompt": {
+                    "type": "string",
+                    "pattern": "\\S"
+                  },
+                  "model": {
+                    "type": "object",
+                    "properties": {
+                      "providerID": {
+                        "type": "string"
+                      },
+                      "modelID": {
+                        "type": "string"
+                      }
+                    },
+                    "required": ["providerID", "modelID"],
+                    "additionalProperties": false
+                  },
+                  "agent": {
+                    "type": "string"
+                  },
+                  "variant": {
+                    "type": "string"
+                  }
+                },
+                "required": ["prompt"],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.session.generate({\n  ...\n})"
+          }
+        ]
+      }
+    },
     "/session/{sessionID}/command": {
       "post": {
         "tags": ["session"],
@@ -8360,31 +8932,38 @@
                   "parts": {
                     "type": "array",
                     "items": {
-                      "type": "object",
-                      "properties": {
-                        "id": {
-                          "type": "string",
-                          "pattern": "^prt"
+                      "anyOf": [
+                        {
+                          "$ref": "#/components/schemas/TextPartInput"
                         },
-                        "type": {
-                          "type": "string",
-                          "enum": ["file"]
-                        },
-                        "mime": {
-                          "type": "string"
-                        },
-                        "filename": {
-                          "type": "string"
-                        },
-                        "url": {
-                          "type": "string"
-                        },
-                        "source": {
-                          "$ref": "#/components/schemas/FilePartSource"
+                        {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string",
+                              "pattern": "^prt"
+                            },
+                            "type": {
+                              "type": "string",
+                              "enum": ["file"]
+                            },
+                            "mime": {
+                              "type": "string"
+                            },
+                            "filename": {
+                              "type": "string"
+                            },
+                            "url": {
+                              "type": "string"
+                            },
+                            "source": {
+                              "$ref": "#/components/schemas/FilePartSource"
+                            }
+                          },
+                          "required": ["type", "mime", "url"],
+                          "additionalProperties": false
                         }
-                      },
-                      "required": ["type", "mime", "url"],
-                      "additionalProperties": false
+                      ]
                     }
                   }
                 },
@@ -9479,6 +10058,368 @@
           {
             "lang": "js",
             "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.session.resume.cancel({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/session/{sessionID}/queue": {
+      "get": {
+        "tags": ["session"],
+        "operationId": "session.queue.get",
+        "parameters": [
+          {
+            "name": "sessionID",
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "pattern": "^ses"
+            },
+            "required": true
+          },
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Queued prompts and pause state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "pause": {
+                      "type": "string",
+                      "enum": ["none", "restart", "error", "interrupted"]
+                    },
+                    "entries": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "pattern": "^msg"
+                          },
+                          "state": {
+                            "type": "string",
+                            "enum": ["pending", "dispatching"]
+                          },
+                          "text": {
+                            "type": "string"
+                          },
+                          "attachments": {
+                            "type": "integer"
+                          },
+                          "runAt": {
+                            "type": "integer"
+                          },
+                          "target": {
+                            "type": "string",
+                            "enum": ["current", "fork", "new"]
+                          }
+                        },
+                        "required": ["id", "state", "text", "attachments", "target"],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": ["pause", "entries"],
+                  "additionalProperties": false,
+                  "description": "Queued prompts and pause state"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "BadRequest | InvalidRequestError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/effect_HttpApiError_BadRequest"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidRequestError"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NotFoundError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotFoundError"
+                }
+              }
+            }
+          }
+        },
+        "description": "List the prompts queued while the session was busy, oldest first, and why the queue is paused. Queued prompts are kept in the database and survive restarts; a restart pauses them until resumed.",
+        "summary": "Get queued prompts",
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.session.queue.get({\n  ...\n})"
+          }
+        ]
+      },
+      "post": {
+        "tags": ["session"],
+        "operationId": "session.queue.update",
+        "parameters": [
+          {
+            "name": "sessionID",
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "pattern": "^ses"
+            },
+            "required": true
+          },
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Queue after the change",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "pause": {
+                      "type": "string",
+                      "enum": ["none", "restart", "error", "interrupted"]
+                    },
+                    "entries": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "pattern": "^msg"
+                          },
+                          "state": {
+                            "type": "string",
+                            "enum": ["pending", "dispatching"]
+                          },
+                          "text": {
+                            "type": "string"
+                          },
+                          "attachments": {
+                            "type": "integer"
+                          },
+                          "runAt": {
+                            "type": "integer"
+                          },
+                          "target": {
+                            "type": "string",
+                            "enum": ["current", "fork", "new"]
+                          }
+                        },
+                        "required": ["id", "state", "text", "attachments", "target"],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": ["pause", "entries"],
+                  "additionalProperties": false,
+                  "description": "Queue after the change"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "BadRequest | InvalidRequestError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/effect_HttpApiError_BadRequest"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidRequestError"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidRequestError"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NotFoundError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotFoundError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "ConflictError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConflictError"
+                }
+              }
+            }
+          }
+        },
+        "description": "Add, edit, or cancel a queued prompt, or resume a paused queue. Only pending prompts can be edited or cancelled; a prompt being sent returns a conflict.",
+        "summary": "Change queued prompts",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "type": {
+                        "type": "string",
+                        "enum": ["add"]
+                      },
+                      "id": {
+                        "type": "string",
+                        "pattern": "^msg"
+                      },
+                      "agent": {
+                        "type": "string"
+                      },
+                      "model": {
+                        "type": "object",
+                        "properties": {
+                          "providerID": {
+                            "type": "string"
+                          },
+                          "modelID": {
+                            "type": "string"
+                          }
+                        },
+                        "required": ["providerID", "modelID"],
+                        "additionalProperties": false
+                      },
+                      "variant": {
+                        "type": "string"
+                      },
+                      "parts": {
+                        "type": "array",
+                        "items": {
+                          "anyOf": [
+                            {
+                              "$ref": "#/components/schemas/TextPartInput"
+                            },
+                            {
+                              "$ref": "#/components/schemas/FilePartInput"
+                            },
+                            {
+                              "$ref": "#/components/schemas/AgentPartInput"
+                            }
+                          ]
+                        }
+                      },
+                      "runAt": {
+                        "type": "integer"
+                      },
+                      "target": {
+                        "type": "string",
+                        "enum": ["current", "fork", "new"]
+                      }
+                    },
+                    "required": ["type", "parts"],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "type": {
+                        "type": "string",
+                        "enum": ["edit"]
+                      },
+                      "id": {
+                        "type": "string",
+                        "pattern": "^msg"
+                      },
+                      "text": {
+                        "type": "string"
+                      }
+                    },
+                    "required": ["type", "id", "text"],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "type": {
+                        "type": "string",
+                        "enum": ["cancel"]
+                      },
+                      "id": {
+                        "type": "string",
+                        "pattern": "^msg"
+                      }
+                    },
+                    "required": ["type", "id"],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "type": {
+                        "type": "string",
+                        "enum": ["resume"]
+                      }
+                    },
+                    "required": ["type"],
+                    "additionalProperties": false
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.session.queue.update({\n  ...\n})"
           }
         ]
       }
@@ -16551,6 +17492,9 @@
             "$ref": "#/components/schemas/EventPluginAdded"
           },
           {
+            "$ref": "#/components/schemas/EventProviderUsageUpdated"
+          },
+          {
             "$ref": "#/components/schemas/EventProjectDirectoriesUpdated"
           },
           {
@@ -17159,6 +18103,9 @@
               },
               "variant": {
                 "type": "string"
+              },
+              "explicit": {
+                "type": "boolean"
               }
             },
             "required": ["providerID", "modelID"],
@@ -17175,6 +18122,16 @@
           },
           "permission": {
             "$ref": "#/components/schemas/PermissionRuleset"
+          },
+          "toolHost": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string",
+              "enum": ["auto", "oc", "harness"]
+            }
+          },
+          "noReply": {
+            "type": "boolean"
           }
         },
         "required": ["id", "sessionID", "role", "time", "agent", "model"],
@@ -20507,6 +21464,43 @@
                   },
                   "type": {
                     "type": "string",
+                    "enum": ["provider.usage.updated"]
+                  },
+                  "properties": {
+                    "type": "object",
+                    "properties": {
+                      "providerID": {
+                        "type": "string"
+                      },
+                      "accountID": {
+                        "type": "string"
+                      },
+                      "observedAt": {
+                        "type": "number"
+                      },
+                      "windows": {
+                        "type": "array",
+                        "items": {
+                          "$ref": "#/components/schemas/ProviderUsageWindow"
+                        }
+                      }
+                    },
+                    "required": ["providerID", "accountID", "observedAt", "windows"],
+                    "additionalProperties": false
+                  }
+                },
+                "required": ["id", "type", "properties"],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "pattern": "^evt_"
+                  },
+                  "type": {
+                    "type": "string",
                     "enum": ["project.directories.updated"]
                   },
                   "properties": {
@@ -22386,6 +23380,13 @@
                 },
                 "permission": {
                   "$ref": "#/components/schemas/PermissionConfig"
+                },
+                "toolHost": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string",
+                    "enum": ["auto", "oc", "harness"]
+                  }
                 }
               },
               "required": ["template"],
@@ -22544,6 +23545,19 @@
           },
           "username": {
             "type": "string"
+          },
+          "time": {
+            "type": "object",
+            "properties": {
+              "clock": {
+                "type": "string",
+                "enum": ["24h", "12h"]
+              },
+              "timezone": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
           },
           "mode": {
             "type": "object",
@@ -23778,6 +24792,23 @@
           }
         },
         "required": ["path", "added", "removed", "status"],
+        "additionalProperties": false
+      },
+      "ConflictError": {
+        "type": "object",
+        "properties": {
+          "_tag": {
+            "type": "string",
+            "enum": ["ConflictError"]
+          },
+          "message": {
+            "type": "string"
+          },
+          "resource": {
+            "type": "string"
+          }
+        },
+        "required": ["_tag", "message"],
         "additionalProperties": false
       },
       "Path": {
@@ -25921,6 +26952,106 @@
         "required": ["type", "prompt", "description", "agent"],
         "additionalProperties": false
       },
+      "ModelNotFoundError": {
+        "type": "object",
+        "properties": {
+          "_tag": {
+            "type": "string",
+            "enum": ["ModelNotFoundError"]
+          },
+          "providerID": {
+            "type": "string"
+          },
+          "modelID": {
+            "type": "string"
+          },
+          "suggestions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": ["_tag", "providerID", "modelID", "suggestions", "message"],
+        "additionalProperties": false
+      },
+      "UnsupportedProviderError": {
+        "type": "object",
+        "properties": {
+          "_tag": {
+            "type": "string",
+            "enum": ["UnsupportedProviderError"]
+          },
+          "providerID": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": ["_tag", "providerID", "message"],
+        "additionalProperties": false
+      },
+      "UpstreamError": {
+        "type": "object",
+        "properties": {
+          "_tag": {
+            "type": "string",
+            "enum": ["UpstreamError"]
+          },
+          "message": {
+            "type": "string"
+          },
+          "service": {
+            "type": "string"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string",
+                "enum": ["NaN"]
+              },
+              {
+                "type": "string",
+                "enum": ["Infinity"]
+              },
+              {
+                "type": "string",
+                "enum": ["-Infinity"]
+              },
+              {
+                "type": "string",
+                "enum": ["Infinity", "-Infinity", "NaN"]
+              }
+            ]
+          }
+        },
+        "required": ["_tag", "message"],
+        "additionalProperties": false
+      },
+      "TimeoutError": {
+        "type": "object",
+        "properties": {
+          "_tag": {
+            "type": "string",
+            "enum": ["TimeoutError"]
+          },
+          "message": {
+            "type": "string"
+          },
+          "operation": {
+            "type": "string"
+          }
+        },
+        "required": ["_tag", "message"],
+        "additionalProperties": false
+      },
       "SessionBusyError": {
         "type": "object",
         "properties": {
@@ -27168,6 +28299,9 @@
             "$ref": "#/components/schemas/PluginAdded"
           },
           {
+            "$ref": "#/components/schemas/ProviderUsageUpdated"
+          },
+          {
             "$ref": "#/components/schemas/ProjectDirectoriesUpdated"
           },
           {
@@ -27783,6 +28917,28 @@
       "PermissionV2Reply": {
         "type": "string",
         "enum": ["once", "always", "reject"]
+      },
+      "ProviderUsageWindow": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "usedPercent": {
+            "type": "number"
+          },
+          "observedAt": {
+            "type": "number"
+          },
+          "resetMs": {
+            "type": "number"
+          },
+          "minutes": {
+            "type": "integer"
+          }
+        },
+        "required": ["id", "usedPercent", "observedAt"],
+        "additionalProperties": false
       },
       "QuestionV2Option": {
         "type": "object",
@@ -30106,6 +31262,28 @@
           }
         },
         "required": ["ticket", "expires_in"],
+        "additionalProperties": false
+      },
+      "ProviderUsageInfo": {
+        "type": "object",
+        "properties": {
+          "providerID": {
+            "type": "string"
+          },
+          "accountID": {
+            "type": "string"
+          },
+          "observedAt": {
+            "type": "number"
+          },
+          "windows": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProviderUsageWindow"
+            }
+          }
+        },
+        "required": ["providerID", "accountID", "observedAt", "windows"],
         "additionalProperties": false
       },
       "WorkspaceEventConnectionStatus": {
@@ -34987,6 +36165,65 @@
         "required": ["id", "type", "data"],
         "additionalProperties": false
       },
+      "ProviderUsageUpdated": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^evt_"
+          },
+          "metadata": {
+            "type": "object"
+          },
+          "type": {
+            "type": "string",
+            "enum": ["provider.usage.updated"]
+          },
+          "durable": {
+            "type": "object",
+            "properties": {
+              "aggregateID": {
+                "type": "string"
+              },
+              "seq": {
+                "type": "integer"
+              },
+              "version": {
+                "type": "integer"
+              }
+            },
+            "required": ["aggregateID", "seq", "version"],
+            "additionalProperties": false
+          },
+          "location": {
+            "$ref": "#/components/schemas/LocationRef"
+          },
+          "data": {
+            "type": "object",
+            "properties": {
+              "providerID": {
+                "type": "string"
+              },
+              "accountID": {
+                "type": "string"
+              },
+              "observedAt": {
+                "type": "number"
+              },
+              "windows": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/ProviderUsageWindow"
+                }
+              }
+            },
+            "required": ["providerID", "accountID", "observedAt", "windows"],
+            "additionalProperties": false
+          }
+        },
+        "required": ["id", "type", "data"],
+        "additionalProperties": false
+      },
       "ProjectDirectoriesUpdated": {
         "type": "object",
         "properties": {
@@ -38788,6 +40025,43 @@
               }
             },
             "required": ["id"],
+            "additionalProperties": false
+          }
+        },
+        "required": ["id", "type", "properties"],
+        "additionalProperties": false
+      },
+      "EventProviderUsageUpdated": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^evt_"
+          },
+          "type": {
+            "type": "string",
+            "enum": ["provider.usage.updated"]
+          },
+          "properties": {
+            "type": "object",
+            "properties": {
+              "providerID": {
+                "type": "string"
+              },
+              "accountID": {
+                "type": "string"
+              },
+              "observedAt": {
+                "type": "number"
+              },
+              "windows": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/ProviderUsageWindow"
+                }
+              }
+            },
+            "required": ["providerID", "accountID", "observedAt", "windows"],
             "additionalProperties": false
           }
         },
