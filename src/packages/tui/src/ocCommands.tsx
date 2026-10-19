@@ -33,6 +33,16 @@ import { DialogSelect } from "./ui/dialog-select"
 import { useToast } from "./ui/toast"
 import { LINK_BROWSER_KEY, LINK_CLICK_KEY, scanBrowsers } from "./util/browser"
 import { Locale } from "./util/locale"
+import { writeTerminalEscape } from "./util/renderer"
+import {
+  fontEscape,
+  listMonospaceFonts,
+  TERMINAL_FONT_KEY,
+  type FontFamily,
+  type TerminalFont,
+} from "./util/terminalFont"
+import { detectTerminal } from "@opencode-ai/core/util/terminal"
+import { useRenderer } from "@opentui/solid"
 
 // oc palette entries, in three runs that App spreads at their palette positions. Call inside App.
 export function createOcCommands(input: {
@@ -46,6 +56,7 @@ export function createOcCommands(input: {
   const sdk = useSDK()
   const toast = useToast()
   const sync = useSync()
+  const renderer = useRenderer()
   const { claudeCliPath, controlServer } = input
   return {
     newSession: {
@@ -562,6 +573,113 @@ export function createOcCommands(input: {
                     toast.show({ message: `Subagent tabs applied but not saved: ${message}`, variant: "error" })
                   }
                   show(option.value)
+                }}
+              />
+            ))
+          }
+          show()
+        },
+      },
+      {
+        name: "oc.font",
+        title: "Font",
+        category: "oc",
+        group: "Layout",
+        get desc() {
+          const font: TerminalFont | undefined = kv.get(TERMINAL_FONT_KEY)
+          if (!font) return "Terminal default"
+          return [font.family, font.weight, font.size && `${font.size}pt`].filter(Boolean).join(" · ")
+        },
+        slashName: "font",
+        run: () => {
+          if (detectTerminal().kind !== "wezterm") {
+            toast.show({ message: "Font requires WezTerm", variant: "warning" })
+            return
+          }
+          // app.tsx sends the saved value to WezTerm; each pick reopens on the same row.
+          const save = (patch: TerminalFont, current: string) => {
+            kv.set(TERMINAL_FONT_KEY, { ...kv.get(TERMINAL_FONT_KEY), ...patch })
+            show(current)
+          }
+          const pickFamily = (fonts: FontFamily[], font: TerminalFont) =>
+            dialog.replace(() => (
+              <DialogSelect
+                title="Font family"
+                current={font.family}
+                options={fonts.map((item) => ({ value: item.name, title: item.name }))}
+                onSelect={(option) => {
+                  const weights = fonts.find((item) => item.name === option.value)?.weights ?? []
+                  const weight = [font.weight, "Regular"].find((item) => item && weights.includes(item)) ?? weights[0]
+                  save({ family: option.value, weight }, "family")
+                }}
+              />
+            ))
+          const pickWeight = (fonts: FontFamily[], font: TerminalFont) =>
+            dialog.replace(() => (
+              <DialogSelect
+                title="Font weight"
+                current={font.weight}
+                options={(fonts.find((item) => item.name === font.family)?.weights ?? []).map((weight) => ({
+                  value: weight,
+                  title: weight,
+                }))}
+                onSelect={(option) => save({ weight: option.value }, "weight")}
+              />
+            ))
+          const pickSize = (font: TerminalFont) =>
+            dialog.replace(() => (
+              <DialogPrompt
+                title="Font size (pt)"
+                value={font.size === undefined ? undefined : String(font.size)}
+                placeholder="4 to 48"
+                numeric={{ min: 4, max: 48, step: 1 }}
+                onConfirm={(value) => {
+                  const size = Number(value.trim())
+                  if (!Number.isFinite(size) || size < 4 || size > 48) {
+                    toast.show({ message: `Font size must be 4 to 48: ${value.trim()}`, variant: "error" })
+                    return
+                  }
+                  save({ size }, "size")
+                }}
+              />
+            ))
+          const show = (current?: string) => {
+            const font: TerminalFont = kv.get(TERMINAL_FONT_KEY) ?? {}
+            dialog.replace(() => (
+              <DialogSelect
+                title="Font"
+                current={current}
+                options={[
+                  { value: "family", title: `Family: ${font.family ?? "Terminal default"}` },
+                  ...(font.family ? [{ value: "weight", title: `Weight: ${font.weight ?? "Regular"}` }] : []),
+                  { value: "size", title: `Size: ${font.size ? `${font.size}pt` : "Terminal default"}` },
+                  ...(font.size
+                    ? [
+                        { value: "larger", title: "Size +0.5" },
+                        { value: "smaller", title: "Size -0.5" },
+                      ]
+                    : []),
+                  { value: "reset", title: "Reset to terminal default" },
+                ]}
+                onSelect={async (option) => {
+                  if (option.value === "size") return pickSize(font)
+                  if (option.value === "larger" || option.value === "smaller") {
+                    const size = (font.size ?? 0) + (option.value === "larger" ? 0.5 : -0.5)
+                    return save({ size: Math.min(48, Math.max(4, size)) }, option.value)
+                  }
+                  if (option.value === "reset") {
+                    // Sent here too: a tab whose KV predates another tab's pick sees no change to react to.
+                    writeTerminalEscape(renderer, fontEscape(undefined))
+                    kv.set(TERMINAL_FONT_KEY, undefined)
+                    return show("reset")
+                  }
+                  const fonts = await listMonospaceFonts().catch((cause) => {
+                    const message = cause instanceof Error ? cause.message : String(cause)
+                    toast.show({ message: `Could not list fonts: ${message}`, variant: "error" })
+                  })
+                  if (!fonts) return
+                  if (option.value === "family") pickFamily(fonts, font)
+                  else pickWeight(fonts, font)
                 }}
               />
             ))

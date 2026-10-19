@@ -33,3 +33,26 @@ end)
 ```
 
 Expect the square to change color when you switch agents (for example with Tab).
+
+## Font
+
+oc palette **Font** (`/font`) picks a monospace family, weight, and size. oc saves the choice and sends it as the user variable `oc_font` (JSON `{family, weight, size}`, empty to reset) when you change it and when oc starts. WezTerm applies fonts per window, so every tab in that window changes, and the font stays after oc exits until **Reset to terminal default**. Without this handler nothing changes:
+
+```lua
+wezterm.on('user-var-changed', function(window, pane, name, value)
+  if name ~= 'oc_font' then return end
+  local overrides = window:get_config_overrides() or {}
+  overrides.font, overrides.font_size = nil, nil
+  if value ~= '' then
+    local ok, spec = pcall(wezterm.serde.json_decode, value)
+    if not ok or type(spec) ~= 'table' then return end
+    if type(spec.family) == 'string' then
+      overrides.font = wezterm.font(spec.family, { weight = spec.weight or 'Regular' })
+    end
+    overrides.font_size = tonumber(spec.size)
+  end
+  window:set_config_overrides(overrides)
+end)
+```
+
+The family list comes from `wezterm ls-fonts --list-system`, filtered to fonts whose files mark them fixed pitch.

@@ -24,6 +24,8 @@ async function mountPrompt(input: {
   keybinds: Partial<TuiKeybind.Keybinds>
   onConfirm: (value: string) => void
   actions?: { command: string; title: string; onTrigger: () => void }[]
+  value?: string
+  numeric?: { min: number; max: number; step: number }
 }) {
   const state = path.join(input.root, "state")
   await mkdir(state, { recursive: true })
@@ -53,7 +55,13 @@ async function mountPrompt(input: {
   function Opener() {
     dialog = useDialog()
     dialog.replace(() => (
-      <DialogPrompt title="Rename Session" value="draft" actions={input.actions} onConfirm={input.onConfirm} />
+      <DialogPrompt
+        title="Rename Session"
+        value={input.value ?? "draft"}
+        numeric={input.numeric}
+        actions={input.actions}
+        onConfirm={input.onConfirm}
+      />
     ))
     return null
   }
@@ -165,6 +173,65 @@ async function focusedTextarea(prompt: Awaited<ReturnType<typeof mountPrompt>>) 
   if (!(textarea instanceof TextareaRenderable)) throw new Error("expected focused dialog textarea")
   return textarea
 }
+
+test("numeric dialog arrows step editable decimals and clamp without confirming; Escape cancels", async () => {
+  await using tmp = await tmpdir()
+  const confirmed: string[] = []
+  const prompt = await mountPrompt({
+    root: tmp.path,
+    keybinds: {},
+    value: "12.5",
+    numeric: { min: 4, max: 48, step: 1 },
+    onConfirm: (value) => confirmed.push(value),
+  })
+  try {
+    const textarea = await focusedTextarea(prompt)
+    expect(textarea.plainText).toBe("12.5")
+    prompt.app.mockInput.pressArrow("up")
+    expect(textarea.plainText).toBe("13.5")
+    prompt.app.mockInput.pressArrow("down")
+    expect(textarea.plainText).toBe("12.5")
+    for (const [value, direction, expected] of [
+      ["48", "up", "48"],
+      ["4", "down", "4"],
+      ["", "up", "4"],
+      ["", "down", "4"],
+      ["invalid", "up", "4"],
+      ["Infinity", "down", "4"],
+    ] as const) {
+      textarea.setText(value)
+      prompt.app.mockInput.pressArrow(direction)
+      expect(textarea.plainText).toBe(expected)
+    }
+    expect(confirmed).toEqual([])
+    textarea.setText("")
+    await prompt.app.mockInput.typeText("15.75")
+    prompt.app.mockInput.pressEnter()
+    expect(confirmed).toEqual(["15.75"])
+    prompt.app.mockInput.pressArrow("up")
+    prompt.app.mockInput.pressEscape()
+    expect(prompt.stackSize()).toBe(0)
+    expect(confirmed).toEqual(["15.75"])
+  } finally {
+    await prompt.cleanup()
+  }
+})
+
+test("text dialog arrows retain textarea navigation", async () => {
+  await using tmp = await tmpdir()
+  const prompt = await mountPrompt({ root: tmp.path, keybinds: {}, value: "first\nsecond", onConfirm: () => {} })
+  try {
+    const textarea = await focusedTextarea(prompt)
+    textarea.gotoBufferEnd()
+    prompt.app.mockInput.pressArrow("up")
+    expect(textarea.cursorOffset).toBe(5)
+    prompt.app.mockInput.pressArrow("down")
+    expect(textarea.cursorOffset).toBe(12)
+    expect(textarea.plainText).toBe("first\nsecond")
+  } finally {
+    await prompt.cleanup()
+  }
+})
 
 test("dialog prompt action wins over ctrl+c dialog close", async () => {
   await using tmp = await tmpdir()

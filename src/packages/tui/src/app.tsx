@@ -95,6 +95,7 @@ import { createTuiAttention } from "./attention"
 import * as TuiAudio from "./audio"
 import { win32AssertRawMode } from "./terminal-win32"
 import { destroyRenderer, writeTerminalEscape } from "./util/renderer"
+import { fontEscape, TERMINAL_FONT_KEY } from "./util/terminalFont"
 import { detectTerminal } from "@opencode-ai/core/util/terminal"
 import { cliErrorMessage, errorFormat } from "./util/error"
 import { validateHotkey } from "./hotkeyValidate"
@@ -675,6 +676,16 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
   const terminalTabState = { progress: 0, color: "" }
   // Lets the WezTerm config forward Ctrl+V to oc, which reads file-drop and image clipboards itself.
   if (terminal.kind === "wezterm") writeTerminalEscape(renderer, "\x1b]1337;SetUserVar=oc_tui=MQ==\x07")
+  // Font overrides are per WezTerm window, so the font stays after exit; an empty value
+  // goes out only on Reset, never at startup, so other oc tabs in the window keep theirs.
+  let sentFont = ""
+  createEffect(() => {
+    if (terminal.kind !== "wezterm") return
+    const escape = fontEscape(kv.get(TERMINAL_FONT_KEY))
+    if (escape === sentFont || (!sentFont && escape === fontEscape(undefined))) return
+    writeTerminalEscape(renderer, escape)
+    sentFont = escape
+  })
 
   // Update terminal window title based on current route and session
   createEffect(() => {

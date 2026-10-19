@@ -11,6 +11,7 @@ export type DialogPromptProps = {
   description?: () => JSX.Element
   placeholder?: string
   value?: string
+  numeric?: { min: number; max: number; step: number }
   busy?: boolean
   busyText?: string
   onConfirm?: (value: string) => void
@@ -44,6 +45,22 @@ export function DialogPrompt(props: DialogPromptProps) {
     props.onConfirm?.(textarea.plainText)
   }
 
+  function step(direction: number) {
+    const numeric = props.numeric
+    if (!numeric) return
+    const text = textarea.plainText.trim()
+    const value = Number(text)
+    textarea.setText(
+      String(
+        Math.min(
+          numeric.max,
+          Math.max(numeric.min, text && Number.isFinite(value) ? value + direction * numeric.step : numeric.min),
+        ),
+      ),
+    )
+    textarea.gotoLineEnd()
+  }
+
   useBindings(() => ({
     target: textareaTarget,
     enabled: textareaTarget() !== undefined && !props.busy,
@@ -64,6 +81,12 @@ export function DialogPrompt(props: DialogPromptProps) {
       })),
     ],
     bindings: [
+      ...(props.numeric
+        ? [
+            { key: "up", desc: "Increase value", group: "Dialog", cmd: () => step(1) },
+            { key: "down", desc: "Decrease value", group: "Dialog", cmd: () => step(-1) },
+          ]
+        : []),
       ...tuiConfig.keybinds.gather("dialog.prompt", ["dialog.prompt.submit"]),
       ...(props.actions ?? []).flatMap((item) => tuiConfig.keybinds.get(item.command)),
     ],
@@ -129,6 +152,14 @@ export function DialogPrompt(props: DialogPromptProps) {
       </box>
       <box paddingBottom={1} gap={1} flexDirection="row">
         <Show when={!props.busy} fallback={<text fg={theme.textMuted}>processing…</text>}>
+          <Show when={props.numeric}>
+            {(numeric) => (
+              <text fg={theme.text}>
+                ↑ <span style={{ fg: theme.textMuted }}>+{numeric().step}</span>
+                {"  "}↓ <span style={{ fg: theme.textMuted }}>-{numeric().step}</span>
+              </text>
+            )}
+          </Show>
           <Show when={submitShortcut()}>
             <text fg={theme.text}>
               {submitShortcut()} <span style={{ fg: theme.textMuted }}>submit</span>

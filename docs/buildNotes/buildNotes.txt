@@ -1,6 +1,8 @@
-v0.2.246 nagasakiRoger
+v0.2.249 caliburThornberry
 
-claude code chats:
-Without a Jev key, the popup for the jev tools listed in proxyOpencodeTools now says they need TYPESAFE_API_KEY and an oc restart, instead of calling them tools oc does not have. Other unknown names still get the usual popup.
+terminal font:
+The oc palette Font command (/font) now picks a monospace font family, weight, and size for the WezTerm window. oc remembers the choice and restores it on startup. Reset returns the window to the terminal default, including from tabs opened before another tab changed the font. This requires the oc_font Lua handler documented in docs/wezterm.md; other terminals show a warning.
 
-Under the hood: packages/sdk/openapi.json is regenerated from the server routes (last refreshed v0.2.172; adds /instance/reload, /agent/sub, /provider/summary, /provider/usage, /session/{id}/generate, /session/{id}/queue and their schemas). prePush.ps1 now regenerates it on every push with the same command as test.ps1, and the existing Prettier pass formats it, so it cannot drift again; AGENTS.md notes this. proxyToolSelection.ts splits keyless jev_* names out of the unknown list using apiKey() from tool/jevClient.ts. Checks run: test.ps1 -Category generated (only the spec changed; its last step exits 1 by design when output changes), the prePush OpenAPI step alone reproduced the same file, proxyOpencodeTools test passes, opencode typecheck clean, plus prePush on this push.
+Font Size opens with the saved size ready to edit. Up and Down adjust it by 1 within 4 to 48 pt, with visible arrow hints beside Enter; typed decimals still work. Enter applies the size and Esc cancels. The Font menu also offers half-point size steps.
+
+Under the hood: font discovery reads WezTerm's system font list and font-file fixed-pitch metadata, caches the available families, and sends settings through the oc_font user variable. Updated FORK.md and WezTerm documentation, and rotated buildNotes history into archive12. Recorded checks passed: terminalFont.test.ts (3 tests, 8 assertions), dialog-prompt.test.tsx (7 tests, 26 assertions), TUI typecheck, and git diff --check. prePush runs on this push. Live WezTerm font application remains unverified.
