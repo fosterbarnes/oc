@@ -1,11 +1,17 @@
 import { DialogSelect, type DialogSelectRef } from "../ui/dialog-select"
 import { useTheme } from "../context/theme"
 import { useDialog } from "../ui/dialog"
+import { useToast } from "../ui/toast"
+import { useTuiConfig } from "../config"
+import { persistTuiSetting } from "../ocSettings"
 import { onCleanup } from "solid-js"
 
 // `native`: pick opencode.exe's theme from oc; saves on select without previewing here.
+// With the Beta daily theme on, previews pause it, cancel resumes it, and a pick turns it off.
 export function DialogThemeList(props: { native?: boolean }) {
   const theme = useTheme()
+  const config = useTuiConfig()
+  const toast = useToast()
   const options = Object.keys(theme.all())
     .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }))
     .map((value) => ({
@@ -21,7 +27,9 @@ export function DialogThemeList(props: { native?: boolean }) {
   }
 
   onCleanup(() => {
-    if (!confirmed) preview(initial)
+    if (confirmed || props.native) return
+    preview(initial)
+    theme.resumeDaily()
   })
 
   return (
@@ -36,6 +44,10 @@ export function DialogThemeList(props: { native?: boolean }) {
         props.native ? theme.setNative(opt.value) : theme.set(opt.value)
         confirmed = true
         dialog.clear()
+        if (props.native || !config.daily_theme) return
+        config.setDailyTheme(false)
+        void persistTuiSetting(["daily_theme"], false)
+        toast.show({ message: "Daily theme off", variant: "info" })
       }}
       ref={(r) => {
         ref = r

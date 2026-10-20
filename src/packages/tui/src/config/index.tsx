@@ -105,6 +105,10 @@ export const Info = Schema.Struct({
   smooth_streaming: Schema.optional(Schema.Boolean).annotate({
     description: "Beta: reveal streamed replies and reasoning at a steady pace instead of in bursts (default: false)",
   }),
+  daily_theme: Schema.optional(Schema.Boolean).annotate({
+    description:
+      "Beta: use a new built-in theme each local day, the same for every oc user; overrides theme while on (default: false)",
+  }),
   auto_confirm_updates: Schema.optional(Schema.Boolean).annotate({
     description:
       "Third party updates install without the confirm dialog; this can close Claude Desktop, Cursor, and ChatGPT (default: false)",
@@ -128,6 +132,7 @@ export type Resolved = Omit<
   | "mouse"
   | "cursor"
   | "smooth_streaming"
+  | "daily_theme"
   | "auto_confirm_updates"
 > & {
   keybind_preset: KeybindPreset
@@ -135,10 +140,12 @@ export type Resolved = Omit<
   subagent_tabs: SubagentTabsSettings
   palette_keys: Record<string, string>
   smooth_streaming: boolean
+  daily_theme: boolean
   auto_confirm_updates: boolean
   setKeybindPreset: (preset: KeybindPreset) => void
   setSidebarButtonStyle: (style: SidebarButtonStyle) => void
   setSmoothStreaming: (on: boolean) => void
+  setDailyTheme: (on: boolean) => void
   setAutoConfirmUpdates: (on: boolean) => void
   setSubagentTabs: (settings: SubagentTabsSettings) => void
   setPaletteKey: (command: string, key: string | undefined) => void
@@ -181,6 +188,7 @@ export function resolve(input: Info, options: ResolveOptions): Resolved {
   })
   const [paletteKeys, setPaletteKeys] = createSignal<Record<string, string>>(input.palette_keys ?? {})
   const [smoothStreaming, setSmoothStreaming] = createSignal(input.smooth_streaming ?? false)
+  const [dailyTheme, setDailyTheme] = createSignal(input.daily_theme ?? false)
   const [autoConfirmUpdates, setAutoConfirmUpdates] = createSignal(input.auto_confirm_updates ?? false)
 
   return {
@@ -204,6 +212,10 @@ export function resolve(input: Info, options: ResolveOptions): Resolved {
       return smoothStreaming()
     },
     setSmoothStreaming,
+    get daily_theme() {
+      return dailyTheme()
+    },
+    setDailyTheme,
     get auto_confirm_updates() {
       return autoConfirmUpdates()
     },

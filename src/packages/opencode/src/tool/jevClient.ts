@@ -51,8 +51,25 @@ export async function systemOne(
     const outcome = await send(url, key, body, signal)
     if (outcome.ok) return outcome.response
     if (!outcome.retryable || attempt >= MAX_RETRIES) throw outcome.error
-    await Bun.sleep(outcome.retryAfterMs ?? Math.min(8_000, 500 * 2 ** attempt))
+    await sleep(outcome.retryAfterMs ?? Math.min(8_000, 500 * 2 ** attempt), signal)
   }
+}
+
+/** A retry wait that ends at once on abort; `Bun.sleep` would hold a `retry-after` of up to 30 s. */
+function sleep(ms: number, signal: AbortSignal | undefined) {
+  if (!signal) return Bun.sleep(ms)
+  signal.throwIfAborted()
+  return new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      signal.removeEventListener("abort", onAbort)
+      resolve()
+    }, ms)
+    function onAbort() {
+      clearTimeout(timer)
+      reject(signal!.reason)
+    }
+    signal.addEventListener("abort", onAbort, { once: true })
+  })
 }
 
 async function send(url: string, key: string, body: string, signal: AbortSignal | undefined) {

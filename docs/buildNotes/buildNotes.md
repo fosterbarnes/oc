@@ -169,6 +169,58 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-20 (~00:29) - v0.2.260 ffzBoogaloo - Jev skill hint for subagents - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation (/spit plan then /imp, implemented directly); completed
+- Version: 0.2.260 ffzBoogaloo (already bumped by the parallel Beta daily theme session; not bumped again)
+- Added `tool/skillHint.ts`: TypeSafe skill-suggestion recipe (docs.typesafe.ai/cookbooks/skill_suggestion.md, measured wrong loads 16.8% -> 7.3%, needless 9.8% -> 4.0% on Haiku 4.5). Request 1: `choice` over all described skills + 3 gate nouls (acts, procedure, prose inverted), mean < 0.3 stops. Request 2: top 3 with description + 700 chars of body, `choice` + per-candidate `fits_<i>` noul, best < 0.3 = no skill.
+- Added `TaskTool` `hintFor` (`tool/task.ts`): new sessions only (no `task_id`), needs `apiKey()` and the skill tool not disabled for the subagent, uses `Skill.available(subagent)`, 5 s cap via `AbortSignal.any`. Appends a synthetic `<skill_relevance>` text part. Failure logs `skill hint failed` and dispatches without a hint; success logs `skill hint` with skill/gate/fits.
+- Fixed `jevClient.ts` retry wait: abortable `sleep(ms, signal)` instead of `Bun.sleep`, so an abort no longer waits out a `retry-after` of up to 30 s.
+- Added `Skill.node` to the `test/tool/task.test.ts` layer group (TaskTool now needs `Skill.Service`).
+- Fixed `test/preload.ts`: deletes `TYPESAFE_API_KEY`. Without it, test subagent dispatches reached the real api.typesafe.ai whenever the shell had the key.
+- MISTAKE: the first `task.test.ts` run (41 pass) likely sent test prompts to TypeSafe live because the key was in the shell. Prevention: a new network call reachable from shared paths needs its env key in `test/preload.ts`.
+- Fixed `hintFor`: a user abort during the hint now fails the dispatch instead of being swallowed and starting the subagent anyway.
+- Fixed prePush typecheck: added `opencode/src/script.d.ts` (`*.ps1` as text), mirroring `tui/src/script.d.ts`. opencode's program reaches `tui/src/ocCommands.tsx` (`killall.ps1` import) via `cli/tui/layer.ts` -> `@opencode-ai/tui` -> `app.tsx`, but not tui's ambient decls; same pattern as `opencode/src/audio.d.ts`. opencode `bun run typecheck` exit 0.
+- Rejected: Jev picking subagent tiers. A live `jev_classify` on a clear tier-1 brief gave tier1 0.53 / tier2 0.46, confidence 0.37.
+- Risk: thresholds are the cookbook's, not tuned on oc's skills. Tune them from the `skill hint` log lines.
+- Risk: `jev_*` in the `spit` command permission does not match the `jev` permission the tools ask for (`tool/jev.ts`); with `"*": deny` a native turn should reject. Through the Claude Code proxy the call succeeded. Added `jev: allow` to the user's commands (home buildNotes).
+- Plan: `~/.config/opencode/plans/jevSkillHint.md`.
+- Verification: after the /pass fixes, `bun test` on `skillHint`, `jev`, `task`, `proxyOpencodeTools` tests: 54 pass. `bun run typecheck` reports only `tui/src/ocCommands.tsx(50,27)` missing `./killall.ps1`, from the parallel session's uncommitted work, not this change. Not checked live.
+
+### User
+Subagents
+- When a Jev key is set, each new subagent gets a one-line hint naming the skill that fits its task, or saying none does.
+- The subagent's task text is sent to TypeSafe for this; unset `TYPESAFE_API_KEY` to turn it off.
+
+Jev tools
+- Cancelling a Jev call during a rate-limit wait now stops it at once.
+
+---
+
+## 2026-10-20 (~00:20) - v0.2.260 ffzBoogaloo - Beta daily theme - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation (imp after spit); completed
+- Version: v0.2.260 ffzBoogaloo
+- Added `src/packages/tui/src/theme/daily.ts`: `dayNumber` (local date as day index), `msUntilNextDay`, `dailyTheme(day)` = per-cycle seeded Fisher-Yates (mulberry32, seed = cycle) over code-unit-sorted `DEFAULT_THEMES` keys. Deterministic worldwide per oc version; no repeat within an N-day cycle. Custom/plugin themes excluded on purpose (would break sync).
+- Added tui config `daily_theme` (default false) + `setDailyTheme` in `config/index.tsx`; `persistTuiSetting` key union in `ocSettings.ts`.
+- Added in `context/theme.tsx`: `store.day`, `store.dailyPaused`, `daily` memo; `values` resolves `daily() ?? store.active`. Daily never writes `store.active` or kv, so off restores saved pick. Midnight `setTimeout` re-arms, cleared in `onCleanup`. `theme.set` pauses daily (preview, plugins); toggling `daily_theme` unpauses. Exposed `daily`, `resumeDaily`.
+- Changed `component/dialog-theme-list.tsx`: cancel resumes daily; confirm with daily on turns it off, persists, toasts.
+- Added palette entry `oc.daily_theme` (Beta group, `/dailyTheme`) in `ocCommands.tsx`; desc `on: <theme>` / `off`.
+- Updated wiki `Configuration.md` with `daily_theme` row.
+- TODO: predetermined calendar (day/week/month schedules, user-made themes) replaces `dailyTheme`; adding/removing a built-in theme currently reshuffles the sequence.
+- Risk: plugin `theme.set` pauses daily for the session. Last day of a cycle can match first day of next (1/N).
+- Verification: `bun test test/dailyTheme.test.ts` 3 pass; `bun run typecheck` exit 0. Live TUI not checked.
+
+### User
+Themes
+- New Beta setting **Daily theme** in `ctrl+o` switches to a different built-in theme every day, the same one for every oc user.
+- It is off by default, and turning it off brings back the theme you had picked.
+- Picking a theme in **Themes** turns the daily theme off, and cancelling the theme list keeps it on.
+
+---
+
 ## 2026-10-20 (~00:11) - v0.2.259 fedsLmaoo - Pass on update progress and auto confirm - Claude Opus 5.5, low effort; Pass
 
 ### Agent

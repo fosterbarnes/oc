@@ -1,8 +1,12 @@
-v0.2.259 fedsLmaoo
+v0.2.260 ffzBoogaloo
 
-third party updates:
-Every Third party updates entry and Update all now show one live toast with a line per item: waiting, checking, awaiting confirm, updating with the CLI's latest output line, downloading with percent and size (for example 44% (62/138 MB)), verifying, and installing with elapsed seconds, then the result. The toast keeps a fixed width, and a line too long for it continues on one indented line below. Progress redraws do not fill /notices; only the final result or summary is kept there.
+subagents:
+When TYPESAFE_API_KEY is set, each new subagent gets a one-line hint in its prompt naming the skill that fits its task, or saying no skill does. Jev picks it using TypeSafe's skill-suggestion method, which in TypeSafe's own test cut wrong skill loads from 16.8% to 7.3%. The subagent still decides whether to load it. The task text is sent to TypeSafe for this; unset the key to turn it off. Resumed subagents get no hint, and if the hint fails or takes over 5 seconds the subagent starts without it.
 
-New Auto confirm updates toggle (/autoConfirmUpdates, auto_confirm_updates in tui.json, off by default) installs without the confirm prompt for single entries and Update all, so Claude Desktop, Cursor, and ChatGPT can close without asking. PowerShell still shows its Windows admin prompt.
+jev tools:
+Cancelling a Jev call during a rate-limit wait now stops it at once instead of waiting up to 30 seconds.
 
-Under the hood: runCliCommand streams output lines through a new lineSplitter. The four desktop and PowerShell update scripts download through a shared HttpClient Save-Download helper that prints OCSTEP and OCPROGRESS lines, checks the final download host before the body arrives for Cursor and PowerShell, and has no 100 s client timeout (the 10 minute run limit still bounds it). Parsers ignore progress lines. Toasts gained log and width options. Checks run: TUI typecheck; bun test for updateProgress, cliUpdate, desktopUpdate, and pwshUpdate (51 pass, including real Save-Download runs against a local server for redirect, progress, rejected host, and 404); live check-only runs of all four real update scripts. The install path and a slow real download were not run.
+themes:
+New Beta setting Daily theme in ctrl+o (/dailyTheme, daily_theme in tui.json, off by default) switches to a different built-in theme every day, the same one for every oc user. Turning it off brings back the theme you had picked. Picking a theme in Themes turns the daily theme off, and cancelling the theme list keeps it on.
+
+Under the hood: new tool/skillHint.ts makes two Jev calls: rank all skills with three need-a-skill checks, then rerank the top three on excerpts of their text. The task tool appends the hint as a synthetic text part. test/preload.ts now clears TYPESAFE_API_KEY so tests never reach the real API. A new opencode/src/script.d.ts declares .ps1 imports for the opencode typecheck, which reaches the TUI's killall.ps1 import. The daily theme lives in theme/daily.ts as a seeded shuffle of the built-in themes per cycle. Checks run: bun test for skillHint, jev, task, and proxyOpencodeTools (54 pass); bun test dailyTheme (3 pass); TUI and opencode typecheck. The skill hint and the daily theme were not checked live.

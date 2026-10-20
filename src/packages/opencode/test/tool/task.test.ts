@@ -16,6 +16,7 @@ import type { SessionPrompt } from "../../src/session/prompt"
 import { MessageID, PartID, SessionID } from "../../src/session/schema"
 import { SessionRunState } from "@/session/run-state"
 import { SessionStatus } from "@/session/status"
+import { Skill } from "@/skill"
 
 import { TaskTool, type TaskPromptOps } from "../../src/tool/task"
 import { Truncate } from "@/tool/truncate"
@@ -92,6 +93,7 @@ const layer = (flags: Partial<RuntimeFlags.Info> = {}) =>
       SessionProjector.node,
       SessionRunState.node,
       SessionStatus.node,
+      Skill.node,
       Truncate.node,
       ToolRegistry.node,
       Database.node,
@@ -224,43 +226,53 @@ function reply(
 
 describe("tool.task", () => {
   for (const action of ["approve", "reject", "already complete"] as const) {
-    it.instance(`session marking: completion ${action}`, () =>
-      Effect.gen(function* () {
-        const sessions = yield* Session.Service
-        const { chat, assistant } = yield* seed()
-        yield* sessions.setSessionInProgress({ sessionID: chat.id, sessionInProgress: true })
-        if (action === "already complete") {
-          yield* sessions.setSessionComplete({ sessionID: chat.id, sessionComplete: true })
-        }
-        const agent = yield* Agent.Service
-        const build = yield* agent.get("build")
-        const permission = yield* Permission.Service
-        const tool = yield* SessionCompleteTool
-        const def = yield* tool.init()
-        const fiber = yield* def.execute({}, {
-          sessionID: chat.id,
-          messageID: assistant.id,
-          agent: "build",
-          abort: new AbortController().signal,
-          messages: [],
-          metadata: () => Effect.void,
-          ask: (input) => permission.ask({ ...input, sessionID: chat.id, ruleset: build.permission }).pipe(Effect.orDie),
-        }).pipe(Effect.exit, Effect.forkChild)
-        if (action !== "already complete") {
-          const request = yield* pollWithTimeout(
-            permission.list().pipe(Effect.map((items) => items.find((item) => item.sessionID === chat.id))),
-            "completion never requested permission",
-          )
-          expect(request.permission).toBe("session_complete")
-          expect((yield* sessions.get(chat.id)).sessionComplete).toBe(false)
-          yield* permission.reply({ requestID: request.id, reply: action === "approve" ? "once" : "reject" })
-        }
-        expect(yield* Fiber.join(fiber)).toMatchObject({ _tag: action === "reject" ? "Failure" : "Success" })
-        expect(yield* sessions.get(chat.id)).toMatchObject({
-          sessionInProgress: action === "reject", sessionComplete: action !== "reject", sessionFailed: false,
-        })
-        expect(yield* permission.list()).toEqual([])
-      }),
+    it.instance(
+      `session marking: completion ${action}`,
+      () =>
+        Effect.gen(function* () {
+          const sessions = yield* Session.Service
+          const { chat, assistant } = yield* seed()
+          yield* sessions.setSessionInProgress({ sessionID: chat.id, sessionInProgress: true })
+          if (action === "already complete") {
+            yield* sessions.setSessionComplete({ sessionID: chat.id, sessionComplete: true })
+          }
+          const agent = yield* Agent.Service
+          const build = yield* agent.get("build")
+          const permission = yield* Permission.Service
+          const tool = yield* SessionCompleteTool
+          const def = yield* tool.init()
+          const fiber = yield* def
+            .execute(
+              {},
+              {
+                sessionID: chat.id,
+                messageID: assistant.id,
+                agent: "build",
+                abort: new AbortController().signal,
+                messages: [],
+                metadata: () => Effect.void,
+                ask: (input) =>
+                  permission.ask({ ...input, sessionID: chat.id, ruleset: build.permission }).pipe(Effect.orDie),
+              },
+            )
+            .pipe(Effect.exit, Effect.forkChild)
+          if (action !== "already complete") {
+            const request = yield* pollWithTimeout(
+              permission.list().pipe(Effect.map((items) => items.find((item) => item.sessionID === chat.id))),
+              "completion never requested permission",
+            )
+            expect(request.permission).toBe("session_complete")
+            expect((yield* sessions.get(chat.id)).sessionComplete).toBe(false)
+            yield* permission.reply({ requestID: request.id, reply: action === "approve" ? "once" : "reject" })
+          }
+          expect(yield* Fiber.join(fiber)).toMatchObject({ _tag: action === "reject" ? "Failure" : "Success" })
+          expect(yield* sessions.get(chat.id)).toMatchObject({
+            sessionInProgress: action === "reject",
+            sessionComplete: action !== "reject",
+            sessionFailed: false,
+          })
+          expect(yield* permission.list()).toEqual([])
+        }),
       { config: { agent: { build: { permission: { session_complete: "ask" } } } } },
     )
   }
@@ -319,15 +331,18 @@ describe("tool.task", () => {
         const complete = Effect.gen(function* () {
           yield* sessions.setTitle({ sessionID: chat.id, title })
           yield* sessions.setSessionComplete({ sessionID: chat.id, sessionComplete: false })
-          yield* def.execute({}, {
-            sessionID: chat.id,
-            messageID: assistant.id,
-            agent: "build",
-            abort: new AbortController().signal,
-            messages: [],
-            metadata: () => Effect.void,
-            ask: () => Effect.void,
-          })
+          yield* def.execute(
+            {},
+            {
+              sessionID: chat.id,
+              messageID: assistant.id,
+              agent: "build",
+              abort: new AbortController().signal,
+              messages: [],
+              metadata: () => Effect.void,
+              ask: () => Effect.void,
+            },
+          )
           return (yield* sessions.get(chat.id)).title
         })
 
@@ -355,15 +370,18 @@ describe("tool.task", () => {
         }
         const complete = Effect.gen(function* () {
           yield* sessions.setSessionComplete({ sessionID: chat.id, sessionComplete: false })
-          const result = yield* def.execute({ autoDelete: true }, {
-            sessionID: chat.id,
-            messageID: assistant.id,
-            agent: "build",
-            abort: new AbortController().signal,
-            messages: [],
-            metadata: () => Effect.void,
-            ask: () => Effect.void,
-          })
+          const result = yield* def.execute(
+            { autoDelete: true },
+            {
+              sessionID: chat.id,
+              messageID: assistant.id,
+              agent: "build",
+              abort: new AbortController().signal,
+              messages: [],
+              metadata: () => Effect.void,
+              ask: () => Effect.void,
+            },
+          )
           return { output: result.output, flag: (yield* sessions.get(chat.id)).metadata?.[AUTO_DELETE_KEY] }
         })
 
@@ -380,7 +398,8 @@ describe("tool.task", () => {
         // Pushed, but agent-push ran mid-session: the session and its history stay.
         yield* sessions.setMetadata({ sessionID: chat.id, metadata: {} })
         expect(yield* complete).toEqual({
-          output: "Marked the current session complete. Not marked for auto-delete: the session did not start with /agent-push.",
+          output:
+            "Marked the current session complete. Not marked for auto-delete: the session did not start with /agent-push.",
           flag: undefined,
         })
       }),
@@ -761,7 +780,10 @@ describe("tool.task", () => {
           },
         )
 
-        expect(seen?.model).toEqual({ providerID: ProviderV2.ID.make("test"), modelID: ModelV2.ID.make("vendor/model") })
+        expect(seen?.model).toEqual({
+          providerID: ProviderV2.ID.make("test"),
+          modelID: ModelV2.ID.make("vendor/model"),
+        })
         expect(seen?.variant).toBeUndefined()
         expect(seen?.agent).toBe("general")
         expect(seen?.explicitModel).toBe(true)
@@ -878,9 +900,7 @@ describe("tool.task", () => {
         )
 
         expect(Exit.isFailure(exit)).toBe(true)
-        expect(asked).toEqual([
-          expect.objectContaining({ permission: "task", patterns: ["general"] }),
-        ])
+        expect(asked).toEqual([expect.objectContaining({ permission: "task", patterns: ["general"] })])
         expect(prompted).toBe(false)
         expect(yield* sessions.children(chat.id)).toHaveLength(0)
       }),

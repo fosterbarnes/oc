@@ -26,6 +26,7 @@ import {
 } from "./harnessUpdate"
 import { bootstrapSession, listHomeDirs } from "./ocNewSession"
 import { PASTE_SUMMARY_KEY } from "./prompt/part"
+import { dailyTheme, dayNumber } from "./theme/daily"
 import { persistAgentModel, persistOcConfig, persistTuiSetting, readOcConfig, resolveOcDirectory } from "./ocSettings"
 import { useDialog } from "./ui/dialog"
 import { DialogAlert } from "./ui/dialog-alert"
@@ -874,6 +875,37 @@ export function createOcCommands(input: {
                   return
                 }
                 toast.show({ message: `Smooth streaming ${option.title}`, variant: "success" })
+              }}
+            />
+          ))
+        },
+      },
+      {
+        name: "oc.daily_theme",
+        title: "Daily theme",
+        category: "oc",
+        group: "Beta",
+        get desc() {
+          return tuiConfig.daily_theme ? `on: ${dailyTheme(dayNumber(new Date()))}` : "off"
+        },
+        slashName: "dailyTheme",
+        run: () => {
+          dialog.replace(() => (
+            <DialogSelect
+              title="Daily theme"
+              current={tuiConfig.daily_theme}
+              options={[
+                { value: true, title: "on", description: "Use today's built-in theme, the same for every oc user" },
+                { value: false, title: "off", description: "Use your selected theme" },
+              ]}
+              onSelect={(option) => {
+                dialog.clear()
+                tuiConfig.setDailyTheme(option.value)
+                void persistTuiSetting(["daily_theme"], option.value)
+                toast.show({
+                  message: option.value ? `Daily theme on: ${dailyTheme(dayNumber(new Date()))}` : "Daily theme off",
+                  variant: "success",
+                })
               }}
             />
           ))

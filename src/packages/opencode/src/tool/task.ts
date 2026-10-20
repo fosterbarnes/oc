@@ -18,6 +18,10 @@ import { Database } from "@opencode-ai/core/database/database"
 import { ProviderV2 } from "@opencode-ai/core/provider"
 import { ModelV2 } from "@opencode-ai/core/model"
 import { Provider } from "@/provider/provider"
+import { Permission } from "@/permission"
+import { Skill } from "../skill"
+import { apiKey } from "./jevClient"
+import { skillHint } from "./skillHint"
 
 export interface TaskPromptOps {
   cancel(sessionID: SessionID): Effect.Effect<void>
@@ -53,6 +57,8 @@ const BACKGROUND_UPDATED = [
   "DO NOT sleep, poll for progress, ask the task for status, or duplicate this task's work — avoid working with the same files or topics it is using.",
   "Work on non-overlapping tasks, or briefly tell the user what you sent and end your response.",
 ].join("\n")
+
+const HINT_TIMEOUT_MS = 5_000
 
 const BaseParameterFields = {
   description: Schema.String.annotate({ description: "A short (3-5 words) description of the task" }),
@@ -161,6 +167,26 @@ export const TaskTool = Tool.define(
     const flags = yield* RuntimeFlags.Service
     const database = yield* Database.Service
     const provider = yield* Provider.Service
+    const skill = yield* Skill.Service
+
+    // A Jev skill suggestion for a new subagent's brief. Optional: any failure dispatches without it.
+    const hintFor = Effect.fn("TaskTool.skillHint")(function* (task: string, subagent: Agent.Info, abort: AbortSignal) {
+      if (!apiKey() || Permission.disabled(["skill"], subagent.permission).has("skill")) return undefined
+      const skills = yield* skill.available(subagent)
+      const hint = yield* Effect.tryPromise({
+        try: () => skillHint(task, skills, AbortSignal.any([abort, AbortSignal.timeout(HINT_TIMEOUT_MS)])),
+        catch: (error) => error,
+      }).pipe(
+        // A user abort stops the dispatch; anything else only drops the hint.
+        Effect.catch((error) =>
+          abort.aborted
+            ? Effect.fail(error)
+            : Effect.logWarning("skill hint failed", { error: String(error) }).pipe(Effect.as(undefined)),
+        ),
+      )
+      if (hint) yield* Effect.logInfo("skill hint", { skill: hint.skill, gate: hint.gate, fits: hint.fits })
+      return hint?.text
+    })
 
     const run = Effect.fn("TaskTool.execute")(function* (
       params: Schema.Schema.Type<typeof Parameters>,
@@ -301,21 +327,23 @@ export const TaskTool = Tool.define(
       if (!ops) return yield* Effect.fail(new Error("TaskTool requires promptOps in ctx.extra"))
 
       const runTask = Effect.fn("TaskTool.runTask")(function* () {
-        const parts = yield* ops.resolvePromptParts(params.prompt)
-        const result = yield* ops
-          .prompt({
-            messageID: MessageID.ascending(),
-            sessionID: nextSession.id,
-            model: {
-              modelID: model.modelID,
-              providerID: model.providerID,
-            },
-            variant: turnVariant,
-            explicitModel: override !== undefined,
-            agent: next.name,
-            parts,
-            turnPermission: ctx.extra?.turnPermission,
-          })
+        const resolved = yield* ops.resolvePromptParts(params.prompt)
+        // A resumed subagent already has its context, so only a new one gets the hint.
+        const hint = session ? undefined : yield* hintFor(params.prompt, next, ctx.abort)
+        const parts = hint ? [...resolved, { type: "text" as const, synthetic: true, text: hint }] : resolved
+        const result = yield* ops.prompt({
+          messageID: MessageID.ascending(),
+          sessionID: nextSession.id,
+          model: {
+            modelID: model.modelID,
+            providerID: model.providerID,
+          },
+          variant: turnVariant,
+          explicitModel: override !== undefined,
+          agent: next.name,
+          parts,
+          turnPermission: ctx.extra?.turnPermission,
+        })
         if (result.info.role === "assistant" && result.info.error) {
           const message =
             "message" in result.info.error.data && typeof result.info.error.data.message === "string"

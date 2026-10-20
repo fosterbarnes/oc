@@ -19,7 +19,8 @@ import {
   upsertTheme,
   type ThemeJson,
 } from "../theme"
-import { createEffect, createMemo, onCleanup, onMount } from "solid-js"
+import { dailyTheme, dayNumber, msUntilNextDay } from "../theme/daily"
+import { createEffect, createMemo, on, onCleanup, onMount } from "solid-js"
 import { createStore, produce } from "solid-js/store"
 import { createSimpleContext } from "./helper"
 import { useKV } from "./kv"
@@ -91,6 +92,8 @@ type State = {
   mode: "dark" | "light"
   lock: "dark" | "light" | undefined
   active: string
+  day: number
+  dailyPaused: boolean
   ready: boolean
 }
 
@@ -99,6 +102,8 @@ const [store, setStore] = createStore<State>({
   mode: "dark",
   lock: undefined,
   active: DEFAULT_THEME,
+  day: dayNumber(new Date()),
+  dailyPaused: false,
   ready: false,
 })
 
@@ -133,6 +138,25 @@ export const { use: useTheme, provider: ThemeProvider } = createSimpleContext({
       const theme = config.theme
       if (theme) setStore("active", theme)
     })
+
+    // The daily pick never touches store.active or kv, so turning it off restores the saved theme.
+    // theme.set (picker preview, plugins) pauses it until the setting is toggled or resumeDaily runs.
+    const daily = createMemo(() => (config.daily_theme && !store.dailyPaused ? dailyTheme(store.day) : undefined))
+    createEffect(
+      on(
+        () => config.daily_theme,
+        () => setStore("dailyPaused", false),
+        { defer: true },
+      ),
+    )
+    let dayTimeout: ReturnType<typeof setTimeout> | undefined
+    const scheduleDay = () => {
+      dayTimeout = setTimeout(() => {
+        setStore("day", dayNumber(new Date()))
+        scheduleDay()
+      }, msUntilNextDay(new Date()))
+    }
+    scheduleDay()
 
     function syncCustomThemes() {
       return themes
@@ -254,12 +278,13 @@ export const { use: useTheme, provider: ThemeProvider } = createSimpleContext({
       renderer.off(CliRenderEvents.THEME_MODE, handle)
       renderer.removeInputHandler(handleThemeNotification)
       unsubscribeRefresh?.()
+      clearTimeout(dayTimeout)
       for (const timeout of themeRefreshTimeouts) clearTimeout(timeout)
       themeRefreshTimeouts.length = 0
     })
 
     const values = createMemo(() => {
-      const active = store.themes[store.active]
+      const active = store.themes[daily() ?? store.active]
       if (active) return resolveTheme(active, store.mode)
 
       const saved = kv.get(THEME_KEY)
@@ -268,7 +293,7 @@ export const { use: useTheme, provider: ThemeProvider } = createSimpleContext({
         if (theme) return resolveTheme(theme, store.mode)
       }
 
-      return resolveTheme(store.themes[DEFAULT_THEME],store.mode)
+      return resolveTheme(store.themes[DEFAULT_THEME], store.mode)
     })
 
     createEffect(() => renderer.setBackgroundColor(values().background))
@@ -298,9 +323,12 @@ export const { use: useTheme, provider: ThemeProvider } = createSimpleContext({
       set(theme: string) {
         if (!hasTheme(theme)) return false
         setStore("active", theme)
+        setStore("dailyPaused", true)
         kv.set(THEME_KEY, theme)
         return true
       },
+      daily,
+      resumeDaily: () => setStore("dailyPaused", false),
       // oc's palette sets opencode.exe's theme without previewing it here.
       setNative(theme: string) {
         if (!hasTheme(theme)) return false
