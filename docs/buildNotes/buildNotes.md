@@ -169,6 +169,29 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-20 (~05:56) - v0.2.263 cinematicSunbathing - stop subagents without deleting the session - Grok 4.6; Agent
+
+### Agent
+- Meta: Grok 4.6; Agent; completed
+- Version: 0.2.263 cinematicSunbathing
+- Cause: Claude auto-resume off left queued wakes; each subagent scheduled its own usage-reset prompt; Esc on the parent did not abort children. Session subagents toggle only denies future `task` calls.
+- Fixed `ScheduledResume.setEnabled(false)`: drops `entries`. `takeDue` while disabled also clears leftovers. `fireEntry` drops a claimed wake if disabled (`scheduledResume.ts`).
+- Added `cancelSession(sessionID)`: drops that session's wake and resume count. `SessionPrompt.cancel` walks children, then `cancelSession`, then pause/runner/question cancel (`prompt.ts`).
+- Added palette **Stop session subagents** `/stopSub` (`ocCommands.tsx`): aborts children of the current (or parent) chat; keeps parent history.
+- Claude auto-resume off option now says queued wakes cancelled (`claudeCommands.tsx`).
+- Live: aborted 26 children of `ses_ea85eea1fffeoYng6xnDiYzuWc` (`oc - Backport plan from opencode 1.19`) plus parent via resident server; resume file already `enabled:false` `entries:[]`.
+- Wiki: `Agents-and-Skills.md` stop/Esc; `Claude-Code.md` off cancels queue.
+- Verification: `bun test test/session/scheduledResume.test.ts` 23 pass; tui `tsgo --noEmit` clean. New cascade/palette not in the installed binary until rebuild.
+- TODO: user rebuild/install for `/stopSub` and Esc cascade.
+
+### User
+Subagents
+- The backport chat's 26 subagents were aborted in place. History stayed. Auto-resume was already off.
+- After a rebuild: Esc on the parent stops children; `/stopSub` stops children without aborting the parent; turning Claude auto-resume off cancels queued wakes so they do not come back at reset.
+
+---
+
+
 ## 2026-10-20 (~01:08) - v0.2.262 deliWife - cli typecheck finds the .ps1 text import - Claude Opus 5.5, low effort; Agent
 
 ### Agent

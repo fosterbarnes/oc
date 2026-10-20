@@ -56,6 +56,7 @@ import { agentPushTitle, PUSH_SESSION_KEY } from "@/tool/sessionComplete"
 import { SessionRunState } from "./run-state"
 import { SessionQueue } from "./queue"
 import { ScheduledDelivery } from "./scheduledDelivery"
+import { ScheduledResume } from "./scheduledResume"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { Database } from "@opencode-ai/core/database/database"
@@ -261,8 +262,12 @@ const layer = Layer.effect(
       })
     })
 
-    const cancel = Effect.fn("SessionPrompt.cancel")(function* (sessionID: SessionID) {
+    // Annotated because the child cascade makes the inferred type recursive.
+    const cancel: Interface["cancel"] = Effect.fn("SessionPrompt.cancel")(function* (sessionID: SessionID) {
       yield* Effect.logInfo("cancel", { "session.id": sessionID })
+      const kids = yield* sessions.children(sessionID)
+      yield* Effect.forEach(kids, (kid) => cancel(kid.id), { concurrency: "unbounded", discard: true })
+      ScheduledResume.cancelSession(sessionID)
       // Pause first so the drain cannot start the next queued prompt in the gap before the run stops.
       yield* queue.pause(sessionID, "interrupted")
       yield* state.cancel(sessionID)

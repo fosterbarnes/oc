@@ -170,6 +170,39 @@ export function createOcCommands(input: {
         },
       },
       {
+        name: "oc.stop_session_subagents",
+        title: "Stop session subagents",
+        desc: "Abort every child of this session; keeps the parent and its history",
+        category: "oc",
+        slashName: "stopSub",
+        enabled: () => route.data.type === "session",
+        run: async () => {
+          if (route.data.type !== "session") return
+          const current = sync.session.get(route.data.sessionID)
+          const root = current?.parentID ?? route.data.sessionID
+          const children = sync.data.session.filter((session) => session.parentID === root)
+          if (children.length === 0) {
+            toast.show({ message: "No subagents in this session", variant: "info" })
+            return
+          }
+          const confirmed = await DialogConfirm.show(
+            dialog,
+            "Stop session subagents",
+            `Abort ${children.length} subagent session${children.length === 1 ? "" : "s"}? The parent chat and its history stay.`,
+          )
+          if (!confirmed) return
+          dialog.clear()
+          const results = await Promise.all(children.map((child) => sdk.client.session.abort({ sessionID: child.id })))
+          const failed = results.filter((result) => result.error).length
+          toast.show({
+            message: failed
+              ? `Stopped ${children.length - failed} of ${children.length} subagents`
+              : `Stopped ${children.length} subagent${children.length === 1 ? "" : "s"}`,
+            variant: failed ? "error" : "success",
+          })
+        },
+      },
+      {
         name: "oc.notices",
         title: "Notices",
         category: "oc",

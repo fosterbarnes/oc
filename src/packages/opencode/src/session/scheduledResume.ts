@@ -116,6 +116,7 @@ export interface Store {
   readonly setPrompt: (prompt: string) => State
   readonly requestResume: (input: RequestInput, now?: number) => Entry | null
   readonly cancel: (id: string) => boolean
+  readonly cancelSession: (sessionID: string) => boolean
   /** Bookkeeping writes return false when the lock was not acquired; `persist` retries them. */
   readonly retry: (entry: Entry) => boolean
   /** Persist an owned claim before returning due entries. */
@@ -202,6 +203,8 @@ export function createStore(file: string | null, clock: () => number = Date.now)
     withLock(() => {
       const state = read()
       state.enabled = enabled
+      // Off means stop waiting: queued wakes would still fire if they stayed on disk.
+      if (!enabled) state.entries = []
       write(state)
       return state
     }) ??
@@ -251,7 +254,28 @@ export function createStore(file: string | null, clock: () => number = Date.now)
       return true
     }) ?? false
 
+  const cancelSession = (sessionID: string): boolean =>
+    withLock(() => {
+      const state = read()
+      const next = state.entries.filter((entry) => entry.sessionID !== sessionID)
+      const counted = sessionID in state.resumeCounts
+      if (next.length === state.entries.length && !counted) return false
+      state.entries = next
+      delete state.resumeCounts[sessionID]
+      write(state)
+      return true
+    }) ?? false
+
   const takeDue = async (now: number = clock()): Promise<Entry[]> => {
+    if (!read().enabled) {
+      withLock(() => {
+        const state = read()
+        if (state.enabled || state.entries.length === 0) return
+        state.entries = []
+        write(state)
+      })
+      return []
+    }
     const observed = read().entries
     const resolved = await Effect.runPromise(owner)
     identity = resolved
@@ -338,6 +362,7 @@ export function createStore(file: string | null, clock: () => number = Date.now)
     setPrompt,
     requestResume,
     cancel,
+    cancelSession,
     retry,
     takeDue,
     noteFired,
@@ -361,6 +386,7 @@ export const setPrompt = singleton.setPrompt
 /** Plain entry point for the claude-code turn hook: persists without Effect services. The poll loop fires it. */
 export const requestResume = singleton.requestResume
 export const cancel = singleton.cancel
+export const cancelSession = singleton.cancelSession
 export const takeDue = singleton.takeDue
 
 export interface FireServices {
@@ -397,6 +423,10 @@ export const fireEntry = Effect.fn("ScheduledResume.fireEntry")(function* (
   entry: Entry,
 ) {
   const fire = Effect.gen(function* () {
+    if (!store.getState().enabled) {
+      yield* drop(store, entry, "disabled")
+      return
+    }
     if (!store.owns(entry)) return
     const info = yield* services.session
       .get(entry.sessionID)

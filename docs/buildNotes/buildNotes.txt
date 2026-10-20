@@ -1,9 +1,9 @@
-v0.2.262 deliWife
+v0.2.263 cinematicSunbathing
 
-claude accounts:
-An agent can now prefer one Claude login with the claudeAccount key, set to a folder from the claude-code accounts list (claudeAccount: "~/.claude4"). Each new chat or subagent for that agent starts on that login and stays there. If the login is already at its usage limit, the chat starts on the usual login instead, and a limit hit later moves the chat on like any other. A folder that is not in accounts is ignored with one log warning.
+stopping subagents:
+Pressing Esc on a parent chat now also stops every subagent it started, instead of leaving them running. The new palette entry Stop session subagents (/stopSub) stops the subagents of the current chat (or of its parent, when run inside a subagent) without stopping the parent chat, and all chat history is kept.
 
-subagents dialog:
-Adding a Claude subagent while two or more Claude accounts are set up now has a Claude account step between efforts and the name. No preference leaves the key out; picking an account writes it as the accounts entry and adds the account to the default name and description (general-opus.5.5-claude4-xhigh). Changing the account of an existing entry still means deleting and re-adding it.
+claude auto-resume:
+Turning Claude auto-resume off now cancels wakes that were already queued, so chats no longer come back on their own at the next usage reset. The off option in the Claude commands now says so. Stopping a chat also drops its own queued wake.
 
-Under the hood: accounts.ts gains preferredAccount, turnAccount (session pin, then usable preferred account pinned so failover can move it, then the pool pick) and accountConfigEntry. The Claude Code model picks each turn's account through turnAccount. POST /agent/sub takes claudeAccount and SubagentFile.add writes it; the legacy SDK was regenerated. New cases in accountPool.test.ts and subagentFile.test.ts. The cli package typecheck now sees the .ps1 text-import declaration through a reference line in ocCommands.tsx, fixing a TS2307 that the turbo cache had hidden since v0.2.260. Checks run: cli typecheck, bun test for accountPool.test.ts and subagentFile.test.ts (32 pass), tsgo typecheck in opencode and tui. The TUI flow and a real account preference were not run live.
+Under the hood: ScheduledResume.setEnabled(false) clears its entries, takeDue clears leftovers while disabled, and fireEntry drops a claimed wake when disabled. New cancelSession(sessionID) drops one session's wake and resume count. SessionPrompt.cancel now cancels child sessions first, then calls cancelSession, then the usual pause, runner and question cancel. Checks run: bun test for scheduledResume.test.ts (23 pass) and tsgo typecheck in opencode and tui. The Esc cascade and /stopSub were not run live; they need a rebuild.

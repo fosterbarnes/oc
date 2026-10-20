@@ -167,6 +167,52 @@ describe("scheduledResume store", () => {
     }
   })
 
+  test("turning auto-resume off drops queued wakes", async () => {
+    const tmp = tmpFile()
+    try {
+      const store = ScheduledResume.createStore(tmp.file)
+      store.setEnabled(true)
+      store.requestResume({ sessionID: "s", directory: "/d", fireAt: 100, reason: "r" }, 10)
+      expect(store.setEnabled(false).entries).toEqual([])
+      expect(store.getState().enabled).toBe(false)
+      expect(await store.takeDue(500)).toEqual([])
+    } finally {
+      tmp.cleanup()
+    }
+  })
+
+  test("a disabled store does not fire a claimed wake", async () => {
+    const tmp = tmpFile()
+    try {
+      const store = ScheduledResume.createStore(tmp.file)
+      const due = await claimed(store)
+      store.setEnabled(false)
+      const { svc, prompts } = services()
+      await Effect.runPromise(ScheduledResume.fireEntry(svc, store, due))
+      expect(prompts).toEqual([])
+      expect(store.getState().entries).toEqual([])
+    } finally {
+      tmp.cleanup()
+    }
+  })
+
+  test("cancelSession drops that session's wake and resume count", () => {
+    const tmp = tmpFile()
+    try {
+      const store = ScheduledResume.createStore(tmp.file)
+      store.setEnabled(true)
+      store.requestResume({ sessionID: "s", directory: "/d", fireAt: 100, reason: "r" }, 10)
+      store.noteFired("s", "previous")
+      store.requestResume({ sessionID: "keep", directory: "/d", fireAt: 100, reason: "r" }, 10)
+      expect(store.cancelSession("s")).toBe(true)
+      expect(store.getState().entries.map((entry) => entry.sessionID)).toEqual(["keep" as SessionID])
+      expect(store.getState().resumeCounts).toEqual({})
+      expect(store.cancelSession("missing")).toBe(false)
+    } finally {
+      tmp.cleanup()
+    }
+  })
+
   test("cancel removes the entry without resetting the resume count", () => {
     const tmp = tmpFile()
     try {

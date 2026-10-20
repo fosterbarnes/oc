@@ -132,6 +132,7 @@ export function createClaudeAccountCommands() {
             options={[
               {
                 title: `Auto-resume: ${state.enabled ? "on" : "off"}`,
+                description: state.enabled ? undefined : "queued wakes cancelled",
                 value: "enabled",
                 onSelect: () => update(sdk.resume.set(!state.enabled)),
               },
