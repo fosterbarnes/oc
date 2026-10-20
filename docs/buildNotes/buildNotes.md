@@ -169,6 +169,62 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-19 (~23:16) - v0.2.257 spamTuesday - killall survivor line without repeated reason - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation (follow-up on user's second installed /killall run); completed
+- Version: 0.2.257 spamTuesday (already bumped this session, uncommitted)
+- Fixed `killall.ps1` "Still running" line: name and PID only; the failure reason (and service hint) is already printed in the stop results.
+- Finding: kernel paged pool 1.0 GB (22:52 boot) -> 1.1 (22:58) -> 1.6 (23:15) -> 1.66 GB (23:16) while process private stayed ~10-11 GB. Lead for the ~7.5 GB built up the previous day; identify the pool tag with `poolmon -b` (WDK, elevated).
+- Verification: script parses (0 errors); change is one log string.
+
+### User
+Processes
+- The kill summary no longer repeats the failure reason for a process that is still running.
+
+---
+
+## 2026-10-19 (~22:58) - v0.2.257 spamTuesday - killall report: memory split, CPU top 10, cleaner failures - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation (follow-up after user ran installed /procReport and /killall, then restarted); completed
+- Version: 0.2.257 spamTuesday (already bumped this session, uncommitted)
+- Finding: user's /killall stopped 11 of 12 targets; `codex-windows-sandbox-service` Access denied (service, unelevated). Commit 24.9 -> 22.4 GB with no AI left; fresh boot 14.9 GB, so ~7.5 GB built up outside oc/AI over 23 h.
+- Finding: System log 60 days has ~70 restarts, all clean `1074` (RuntimeBroker = Start menu, a few Windows Update), zero 41/6008/1001. Restarts are manual, not crashes. Four `wmiprvse.exe` restarts (08-27, 10-10 x3) = WMI-initiated, cause unknown.
+- Added to `killall.ps1` header: uptime; commit split into all-process private, paged pool, nonpaged pool, rest (`Memory` reads `PoolPagedBytes`/`PoolNonpagedBytes`); top 10 by CPU over the measured sample for all processes (sample loop now covers every process, `$sampleMs` measured). `allProcessesPrivateGB` in JSON.
+- Fixed `killall.ps1` stop lines: `Reason` unwraps .NET `InnerException` ("Access is denied." instead of "Exception calling Kill..."); result printed after name (no column overflow); failed services get a `Stop-Service <name>` hint.
+- Docs: `FORK.md` row text and status, wiki `Troubleshooting.md` report contents.
+- Verification: live `-ReportOnly` after reboot shows the split (11 GB processes, 1.1 + 0.6 GB pools, ~2 GB rest) and CPU top 10; `Stop-Identity` on `lsass.exe` returns "failed: Access is denied." (handle refused, nothing stopped).
+
+### User
+Processes
+- The process report now shows how memory splits between programs, the Windows kernel, and everything else, plus uptime and the 10 processes using the most CPU.
+- A process that cannot be stopped now shows a short reason, and services say how to stop them as administrator.
+
+---
+
+## 2026-10-19 (~22:08) - v0.2.257 spamTuesday - Kill all AI processes and process report - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation (imp from /spit plan `~/.config/opencode/plans/killall.md`); completed
+- Version: 0.2.257 spamTuesday
+- Added `packages/tui/src/killall.ps1`: stops oc/opencode/occ, claude, chatgpt, codex*, cursor* (name) plus `@anthropic-ai/claude-code`, `@openai/codex`, `cursor-agent`, `packages/opencode/src/index.ts` (command line) and all descendants, terminals included. Parent link needs child created no earlier than parent; stop holds the handle, rechecks CIM creation time, kills children first, waits 5 s. Keeps self, own descendants (console), and ancestors up to the first matching process. `-ReportOnly`, `-Yes`, `-Pause`.
+- Added log to `%LOCALAPPDATA%\oc\killall\killall-<stamp>.log/.json`: commit charge (`Win32_PerfFormattedData_PerfOS_Memory`), System log size and 41/1001/6008 count, top 15 private bytes, trees with memory/handles/CPU/age and 2 s CPU sample, Claude workers per owning oc (from `opencode-claude-code-<pid>` in `--mcp-config`), helpers whose parent PID is an exited oc (dead temp-dir owners), services, stop results, survivors, respawns.
+- Added palette group **Processes** (win32 only) in `ocCommands.tsx`: `oc.killall` (`/killall`, `DialogConfirm` first) and `oc.process_report` (`/procReport`). `launchKillall` writes the embedded script (`with { type: "text" }`, `script.d.ts` declares `*.ps1`) to `Global.Path.data` and runs `launchDetached`.
+- Added profile function `killai` (user PowerShell profile) running the repo script directly.
+- Finding: `sessionManager.ts` `DEFAULT_IDLE_PROCESS_TIMEOUT_MS = 0`, `MAX_ACTIVE_PROCESSES = 16`; each idle `claude.exe` ~500-570 MB private. User chose logging before setting `idleProcessTimeoutMs`. System log goes back to 2026-08-12 with zero 41/1001/6008 events despite reported restarts.
+- Docs: wiki `Troubleshooting.md` section, `FORK.md` row (medium).
+- Verification: `bun run typecheck` (tui) exit 0; Bun text import returns script content; live `-ReportOnly` run exit 0 with correct trees, owner mapping, issues; `Stop-Identity` exercised on a disposable `ping` (stopped / already exited / PID-reuse skip). Full stop mode not run (would stop the user's processes).
+
+### User
+Processes
+- New **Kill all AI processes** (`/killall`) stops every oc, Claude, ChatGPT, Codex, and Cursor process and everything they started, after a confirm.
+- New **Log AI process report** (`/procReport`) writes the same report without stopping anything.
+- Reports go to `%LOCALAPPDATA%\oc\killall` and show memory use, what each process is, which oc owns each Claude worker, and anything left behind.
+- `killai` in PowerShell runs the same thing when oc is frozen (`killai -ReportOnly` only logs).
+
+---
+
 ## 2026-10-19 (~21:32) - v0.2.256 fartniteRoommates - Update PowerShell palette entry - Claude Opus 5.5, low effort; Implementation
 
 ### Agent

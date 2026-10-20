@@ -28,10 +28,10 @@ Counts below are for **active** rows only. Retired work is listed separately and
 |---|---:|
 | ~done~ | 16 |
 | high | 51 |
-| medium | 19 |
+| medium | 20 |
 | low | 1 |
 | CRITICAL | 0 |
-| **Total** | **87** |
+| **Total** | **88** |
 
 ---
 
@@ -239,6 +239,7 @@ Build safely, install without fighting locks, and keep logs.
 | Cleaner hidden Windows commands | medium | Runs the Windows shell more directly and hides extra `taskkill` windows. | Escape-to-cancel confirmation is missing. |
 | Packaged Cursor helper | high | Cursor files sit next to the exe so they work outside the source tree. Canonical installer copies them. | None realistic. |
 | On-disk debug logs | medium | Channel-aware logs, 20 MB rotate, palette and HTTP toggle. | Live restart and installed palette acceptance are not recorded. |
+| Kill all AI processes (Windows) | medium | Palette group **Processes**: **Kill all AI processes** (`/killall`, confirm first) and **Log AI process report** (`/procReport`). Both write `packages/tui/src/killall.ps1` (embedded as text) to oc's data folder and run it in its own console, since it stops the oc that launched it. It stops every oc/opencode, Claude, ChatGPT, Codex, and Cursor process plus all descendants (terminals included), children first, PID plus creation time checked before each stop. Keeps itself, its console, and the shells above it. Logs to `%LOCALAPPDATA%\oc\killall` (`.log` + `.json`): commit charge split into all-process private memory, kernel paged/nonpaged pool, and the rest; uptime; top 15 by private bytes; top 10 by CPU over the sample; trees with memory/handles/CPU/age/idle sample, Claude workers per owning oc (from `opencode-claude-code-<pid>` temp paths), helpers left by an exited oc, then stop results, survivors, and respawns. Profile `killai` runs it when the TUI is frozen. Temporary workaround while the cause of runaway memory is found. | User ran installed `/procReport` and `/killall` (2026-10-19): all stopped except the Codex sandbox service (needs elevation), 2.5 GB commit freed. Cause of runaway memory still unknown. |
 
 ---
 

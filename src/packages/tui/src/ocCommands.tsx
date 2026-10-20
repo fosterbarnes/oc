@@ -43,7 +43,10 @@ import {
   type TerminalFont,
 } from "./util/terminalFont"
 import { detectTerminal } from "@opencode-ai/core/util/terminal"
+import { launchDetached } from "@opencode-ai/core/util/launchDetached"
 import { useRenderer } from "@opentui/solid"
+import { DialogConfirm } from "./ui/dialog-confirm"
+import killallScript from "./killall.ps1" with { type: "text" }
 
 // oc palette entries, in three runs that App spreads at their palette positions. Call inside App.
 export function createOcCommands(input: {
@@ -930,8 +933,43 @@ export function createOcCommands(input: {
         hidden: Global.native,
         run: () => void controlServer("restart"),
       },
+      ...(process.platform === "win32"
+        ? [
+            {
+              name: "oc.killall",
+              title: "Kill all AI processes",
+              desc: "oc, Claude, ChatGPT, Codex, Cursor, and everything they started; logs to %LOCALAPPDATA%\\oc\\killall",
+              slashName: "killall",
+              run: async () => {
+                const confirmed = await DialogConfirm.show(
+                  dialog,
+                  "Kill all AI processes",
+                  "Stops every oc, opencode, Claude, ChatGPT, Codex, and Cursor process and everything they " +
+                    "started, including this window. Unsaved work in those apps is lost.",
+                )
+                if (!confirmed) return
+                dialog.clear()
+                launchKillall(["-Yes", "-Pause"])
+              },
+            },
+            {
+              name: "oc.process_report",
+              title: "Log AI process report",
+              desc: "Same log as Kill all AI processes, stops nothing",
+              slashName: "procReport",
+              run: () => launchKillall(["-ReportOnly", "-Pause"]),
+            },
+          ].map((command) => ({ ...command, category: "oc", group: "Processes" }))
+        : []),
     ],
   }
+}
+
+// The script stops this oc too, so it runs from its own console window that outlives the TUI.
+function launchKillall(args: string[]) {
+  const file = path.join(Global.Path.data, "killall.ps1")
+  fs.writeFileSync(file, killallScript)
+  launchDetached(file, args)
 }
 
 // `UTC-05:00` for a zone at the given moment; `longOffset` names UTC itself plain `GMT`.
