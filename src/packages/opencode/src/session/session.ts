@@ -737,7 +737,11 @@ const layer: Layer.Layer<
         workspaceID: original.workspaceID,
         title,
         metadata: original.metadata
-          ? structuredClone(Object.fromEntries(Object.entries(original.metadata).filter(([key]) => key !== "ocAutoRename" && key !== "ocAutoDelete")))
+          ? structuredClone(
+              Object.fromEntries(
+                Object.entries(original.metadata).filter(([key]) => key !== "ocAutoRename" && key !== "ocAutoDelete"),
+              ),
+            )
           : undefined,
       })
       const msgs = yield* messages({ sessionID: input.sessionID })
@@ -769,6 +773,9 @@ const layer: Layer.Layer<
           yield* updatePart(p)
         }
       }
+      // Custom fork: the fork continues the origin's Claude Code conversation on its own branch.
+      const { forkClaudeSessions } = yield* Effect.promise(() => import("@/provider/claude-code/sessionManager"))
+      forkClaudeSessions(input.sessionID, session.id)
       return session
     })
 

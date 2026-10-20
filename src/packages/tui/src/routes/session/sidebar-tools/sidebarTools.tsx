@@ -61,6 +61,14 @@ import {
 const DIRECTORY_COLORS = ["#F7E9B5", "#F4E1A0", "#F1D98B", "#EED076", "#EBC861"]
 const DIRECTORY_INDICATOR_COLORS = ["#DCCF99", "#D5C184", "#CEB56F", "#C7A95A", "#C09D45"]
 
+export const USAGE_MENU_COMMAND = {
+  name: "sidebar.usage",
+  title: "Show usage",
+  category: "oc",
+  group: "Third party harness management",
+  namespace: "palette",
+}
+
 function directoryColor(depth: number, colors: string[]): string {
   return colors[Math.min(depth, colors.length - 1)]
 }
@@ -567,10 +575,7 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
         run: selectScriptSettings,
       },
       {
-        name: "sidebar.usage",
-        title: "Show usage",
-        category: "Sidebar",
-        namespace: "sidebar",
+        ...USAGE_MENU_COMMAND,
         run: usage.selectUsageMenu,
       },
       {

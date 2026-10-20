@@ -2,11 +2,17 @@ import type { OpencodeClient } from "@opencode-ai/sdk/v2"
 import { createEffect, createMemo, createSignal, on, onCleanup, onMount } from "solid-js"
 import { useSDK } from "./context/sdk"
 import { useSync } from "./context/sync"
-import { useDialog } from "./ui/dialog"
+import { useDialog, type DialogSelection } from "./ui/dialog"
 import { DialogPrompt } from "./ui/dialog-prompt"
 import { DialogSelect, type DialogSelectOption } from "./ui/dialog-select"
 import { useToast } from "./ui/toast"
 import { Locale } from "./util/locale"
+import path from "path"
+import { Flock } from "@opencode-ai/core/util/flock"
+import { useTuiPaths } from "./context/runtime"
+import { DialogConfirm } from "./ui/dialog-confirm"
+import { isRecord } from "./util/record"
+import { writeJsonAtomic } from "./util/persistence"
 
 export const WEEKDAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"] as const
 export type Weekday = (typeof WEEKDAYS)[number]
@@ -17,9 +23,7 @@ export type ClaudeWarmupAccount = ClaudeWarmupState["accounts"][number]
 export type ClaudeWarmupSchedule = ClaudeWarmupAccount["schedule"]
 type ClaudeWarmupSet = NonNullable<Awaited<ReturnType<OpencodeClient["global"]["setClaudeWarmup"]>>["data"]>
 
-export type ClaudeWarmupDraft =
-  | { mode: "daily"; times: string }
-  | { mode: "weekly"; days: Record<Weekday, string> }
+export type ClaudeWarmupDraft = { mode: "daily"; times: string } | { mode: "weekly"; days: Record<Weekday, string> }
 
 const WEEKDAY_TITLE: Record<Weekday, string> = {
   mon: "Monday",
@@ -94,12 +98,79 @@ export function emptyWeeklyDraft(): Record<Weekday, string> {
 }
 
 export function draftFromAccount(account: ClaudeWarmupAccount): ClaudeWarmupDraft {
-  if (account.schedule.mode === "weekly") {
+  return draftFromSchedule(account.schedule)
+}
+
+export function draftFromSchedule(schedule: ClaudeWarmupSchedule): ClaudeWarmupDraft {
+  if (schedule.mode === "weekly") {
     const days = emptyWeeklyDraft()
-    for (const day of WEEKDAYS) days[day] = formatTimes(account.schedule.days[day] ?? [])
+    for (const day of WEEKDAYS) days[day] = formatTimes(schedule.days[day] ?? [])
     return { mode: "weekly", days }
   }
-  return { mode: "daily", times: formatTimes(account.schedule.times) }
+  return { mode: "daily", times: formatTimes(schedule.times) }
+}
+
+export type WarmupPreset = { name: string; schedule: ClaudeWarmupSchedule }
+
+function presetName(value: unknown) {
+  if (typeof value !== "string" || /[\x00-\x1f\x7f-\x9f\u2028\u2029]/.test(value) || !value.trim()) {
+    throw new Error("Enter a preset name without control characters")
+  }
+  return value.trim()
+}
+
+function presetSchedule(value: unknown): ClaudeWarmupSchedule {
+  const times = (value: unknown): value is string[] =>
+    Array.isArray(value) && value.every((time) => typeof time === "string" && TIME_PATTERN.test(time))
+  const days = isRecord(value) && isRecord(value.days) ? value.days : undefined
+  if (
+    !isRecord(value) ||
+    !(value.mode === "daily"
+      ? times(value.times)
+      : value.mode === "weekly" && days && WEEKDAYS.every((day) => times(days[day])))
+  ) {
+    throw new Error("Invalid preset schedule")
+  }
+  const parsed = scheduleFromDraft(draftFromSchedule(value as ClaudeWarmupSchedule))
+  if (!parsed.ok) throw new Error(parsed.error)
+  return parsed.schedule
+}
+
+export async function readWarmupPresets(file: string): Promise<WarmupPreset[]> {
+  if (!path.isAbsolute(file)) throw new Error("Preset path must be absolute")
+  const value: unknown = await Bun.file(file)
+    .json()
+    .catch((error: unknown) => {
+      if (isRecord(error) && error.code === "ENOENT") return { presets: [] }
+      throw error
+    })
+  if (!isRecord(value) || !Array.isArray(value.presets)) throw new Error("Invalid preset file")
+  const presets = value.presets.map((entry): WarmupPreset => {
+    if (!isRecord(entry)) throw new Error("Invalid preset entry")
+    return { name: presetName(entry.name), schedule: presetSchedule(entry.schedule) }
+  })
+  if (new Set(presets.map((preset) => preset.name.toLowerCase())).size !== presets.length) {
+    throw new Error("Duplicate preset names")
+  }
+  return presets
+}
+
+export async function saveWarmupPreset(file: string, name: string, schedule: ClaudeWarmupSchedule, replace = false) {
+  if (!path.isAbsolute(file)) throw new Error("Preset path must be absolute")
+  const preset = { name: presetName(name), schedule: presetSchedule(schedule) }
+  return Flock.withLock(
+    file,
+    async () => {
+      const presets = await readWarmupPresets(file)
+      const index = presets.findIndex((item) => item.name.toLowerCase() === preset.name.toLowerCase())
+      if (index !== -1 && !replace) return { saved: false as const, name: presets[index].name }
+      if (index === -1) presets.push(preset)
+      else presets[index] = preset
+      await writeJsonAtomic(file, { presets })
+      return { saved: true as const }
+    },
+    { dir: path.join(path.dirname(file), "locks"), timeoutMs: 5_000 },
+  )
 }
 
 export function accountStateLabel(account: ClaudeWarmupAccount) {
@@ -371,6 +442,8 @@ export function accountOptions(input: {
   onMode: (mode: ClaudeWarmupDraft["mode"]) => void
   onTimes: (day: Weekday | undefined) => void
   onSave: () => void
+  onSavePreset: () => void
+  onLoadPreset: () => void
   onPause: () => void
   onResume: () => void
 }): DialogSelectOption<string>[] {
@@ -395,12 +468,8 @@ export function accountOptions(input: {
   })
   if (input.draft.mode === "daily") {
     rows.push(
-      timesOption(
-        "times",
-        `Times: ${displayTimes(input.draft.times) || "(none)"}`,
-        input.draft.times,
-        undefined,
-        () => input.onTimes(undefined),
+      timesOption("times", `Times: ${displayTimes(input.draft.times) || "(none)"}`, input.draft.times, undefined, () =>
+        input.onTimes(undefined),
       ),
     )
   } else {
@@ -436,6 +505,8 @@ export function accountOptions(input: {
       title: "Save",
       onSelect: input.onSave,
     },
+    { value: "savePreset", title: "Save preset…", onSelect: input.onSavePreset },
+    { value: "loadPreset", title: "Load preset…", onSelect: input.onLoadPreset },
   )
   if (hasScheduleTimes(input.account.schedule)) {
     rows.push({
@@ -452,11 +523,11 @@ export function createClaudeWarmupCommands() {
   const sync = useSync()
   const dialog = useDialog()
   const toast = useToast()
+  const paths = useTuiPaths()
   const [state, setState] = createSignal(emptyWarmupState())
   const discovery = createWarmupDiscovery({
     previous: state,
-    load: () =>
-      sdk.client.global.claudeWarmup().then((result) => readWarmupState(result, state())),
+    load: () => sdk.client.global.claudeWarmup().then((result) => readWarmupState(result, state())),
     apply: setState,
     notify: (message) => toast.show({ message, variant: "error" }),
   })
@@ -477,34 +548,57 @@ export function createClaudeWarmupCommands() {
   function openAccount(accountID: string) {
     const account = state().accounts.find((item) => item.accountID === accountID)
     if (!account) return
+    const parent = dialog.stack.at(-1)
+    const back = parent ? () => dialog.replace(parent.element, parent.onClose, { back: parent.back }) : undefined
+    const selection = createSignal({ filter: "", value: undefined as unknown })
     const [draft, setDraft] = createSignal(draftFromAccount(account))
     const [promptError, setPromptError] = createSignal<string>()
+    const [busy, setBusy] = createSignal(false)
+    const file = path.join(paths.state, "claudeWarmupPresets.json")
+    let generation = 0
+    const replace = (render: () => ReturnType<typeof DialogSelect>, back?: () => void, selection?: DialogSelection) => {
+      dialog.replace(
+        render,
+        () => {
+          generation += 1
+        },
+        { back, selection },
+      )
+      return generation
+    }
 
     const show = () => {
       const current = state().accounts.find((item) => item.accountID === accountID) ?? account
       const zone = zoneLabel(state().timeZone, state().utcOffset)
-      dialog.replace(() => (
-        <DialogSelect
-          title={commandTitle(current.label)}
-          footer={<text>{PREVIEW_QUALIFIER}</text>}
-          options={accountOptions({
-            account: current,
-            draft: draft(),
-            zone,
-            timeZone: state().timeZone,
-            utcOffset: state().utcOffset,
-            error: state().error,
-            onMode: (mode) => {
-              setDraft(applyModeChange(draft(), mode))
-              show()
-            },
-            onTimes: (day) => editTimes(day),
-            onSave: () => void save(current),
-            onPause: () => void persist(writeForAction("pause", current, draft())),
-            onResume: () => void persist(writeForAction("resume", current, draft())),
-          })}
-        />
-      ))
+      replace(
+        () => (
+          <DialogSelect
+            locked={busy()}
+            title={commandTitle(current.label)}
+            footer={<text>{PREVIEW_QUALIFIER}</text>}
+            options={accountOptions({
+              account: current,
+              draft: draft(),
+              zone,
+              timeZone: state().timeZone,
+              utcOffset: state().utcOffset,
+              error: state().error,
+              onMode: (mode) => {
+                setDraft(applyModeChange(draft(), mode))
+                show()
+              },
+              onTimes: (day) => editTimes(day),
+              onSave: () => void save(current),
+              onSavePreset: savePreset,
+              onLoadPreset: () => void loadPreset(),
+              onPause: () => void persist(writeForAction("pause", current, draft())),
+              onResume: () => void persist(writeForAction("resume", current, draft())),
+            })}
+          />
+        ),
+        back,
+        selection,
+      )
     }
 
     function editTimes(day: Weekday | undefined) {
@@ -518,33 +612,132 @@ export function createClaudeWarmupCommands() {
           : ""
       const [live, setLive] = createSignal(value)
       setPromptError()
-      dialog.replace(() => (
-        <DialogPrompt
-          title={day ? WEEKDAY_TITLE[day] : "Times"}
-          value={value}
-          placeholder="HH:mm, HH:mm"
-          description={() => <text>{promptPreviewText(live(), day, promptError())}</text>}
-          onContentChange={(next) => {
-            setPromptError()
-            setLive(next)
-          }}
-          onConfirm={(next) => {
-            const parsed = parseTimes(next)
-            if (!parsed.ok) {
-              setPromptError(parsed.error)
-              return
-            }
-            const formatted = formatTimes(parsed.times)
-            if (day) {
-              const weekly = current.mode === "weekly" ? current.days : emptyWeeklyDraft()
-              setDraft({ mode: "weekly", days: { ...weekly, [day]: formatted } })
-            } else {
-              setDraft({ mode: "daily", times: formatted })
-            }
-            show()
-          }}
-        />
-      ))
+      replace(
+        () => (
+          <DialogPrompt
+            title={day ? WEEKDAY_TITLE[day] : "Times"}
+            value={value}
+            placeholder="HH:mm, HH:mm"
+            description={() => <text>{promptPreviewText(live(), day, promptError())}</text>}
+            onContentChange={(next) => {
+              setPromptError()
+              setLive(next)
+            }}
+            onConfirm={(next) => {
+              const parsed = parseTimes(next)
+              if (!parsed.ok) {
+                setPromptError(parsed.error)
+                return
+              }
+              const formatted = formatTimes(parsed.times)
+              if (day) {
+                const weekly = current.mode === "weekly" ? current.days : emptyWeeklyDraft()
+                setDraft({ mode: "weekly", days: { ...weekly, [day]: formatted } })
+              } else {
+                setDraft({ mode: "daily", times: formatted })
+              }
+              show()
+            }}
+          />
+        ),
+        show,
+      )
+    }
+
+    function savePreset() {
+      if (busy()) return
+      const parsed = scheduleFromDraft(draft())
+      if (!parsed.ok) return toast.show({ message: parsed.error, variant: "error" })
+      const schedule = parsed.schedule
+      const [name, setName] = createSignal("")
+      const [error, setError] = createSignal("")
+      const prompt = () => {
+        const gen = replace(
+          () => (
+            <DialogPrompt
+              title="Save preset"
+              value={name()}
+              busy={busy()}
+              description={() => <text>{error()}</text>}
+              onContentChange={setName}
+              onConfirm={(value) => {
+                setName(value)
+                void submit(gen)
+              }}
+            />
+          ),
+          show,
+        )
+      }
+      async function submit(gen: number) {
+        if (busy() || gen !== generation) return
+        setBusy(true)
+        setError("")
+        try {
+          const result = await saveWarmupPreset(file, name(), schedule)
+          if (gen !== generation) return
+          if (!result.saved) {
+            // Esc on the confirmation returns to the name prompt; Cancel does the same below.
+            const confirmation = DialogConfirm.show(
+              dialog,
+              "Replace preset",
+              `Replace preset "${result.name}"?`,
+              undefined,
+              prompt,
+            )
+            const confirming = generation
+            const confirmed = await confirmation
+            if (confirming !== generation || dialog.stack.length || confirmed === undefined) return
+            if (!confirmed) return prompt()
+            // The confirmation clears synchronously before its promise resumes.
+            gen = replace(() => <DialogPrompt title="Save preset" value={name()} busy />, show)
+            await saveWarmupPreset(file, name(), schedule, true)
+            if (gen !== generation) return
+          }
+          toast.show({ message: "Preset saved", variant: "success" })
+          show()
+        } catch (failure) {
+          if (gen !== generation) return
+          setError(conciseError(failure))
+          prompt()
+        } finally {
+          setBusy(false)
+        }
+      }
+      prompt()
+    }
+
+    async function loadPreset() {
+      if (busy()) return
+      const gen = generation
+      setBusy(true)
+      try {
+        const presets = await readWarmupPresets(file)
+        if (gen !== generation) return
+        replace(
+          () => (
+            <DialogSelect
+              title="Load preset"
+              emptyView={<text>No saved presets</text>}
+              options={presets
+                .sort((a, b) => a.name.localeCompare(b.name))
+                .map((preset) => ({
+                  value: preset.name,
+                  title: preset.name,
+                  onSelect: () => {
+                    setDraft(draftFromSchedule(preset.schedule))
+                    show()
+                  },
+                }))}
+            />
+          ),
+          show,
+        )
+      } catch (failure) {
+        if (gen === generation) toast.show({ message: conciseError(failure), variant: "error" })
+      } finally {
+        setBusy(false)
+      }
     }
 
     async function save(current: ClaudeWarmupAccount) {
@@ -552,14 +745,24 @@ export function createClaudeWarmupCommands() {
     }
 
     async function persist(payload: ReturnType<typeof writeForAction>) {
-      const next = await persistWarmupSchedule(sdk.client, payload, state())
-      if (next.error) {
-        toast.show({ message: next.error, variant: "error" })
-        show()
-        return
+      if (busy()) return
+      const gen = generation
+      setBusy(true)
+      try {
+        const next = await persistWarmupSchedule(sdk.client, payload, state())
+        if (gen !== generation) return
+        if (next.error) {
+          toast.show({ message: next.error, variant: "error" })
+          show()
+          return
+        }
+        setState(next.state)
+        dialog.clear()
+      } catch (failure) {
+        if (gen === generation) toast.show({ message: conciseError(failure), variant: "error" })
+      } finally {
+        setBusy(false)
       }
-      setState(next.state)
-      dialog.clear()
     }
 
     show()

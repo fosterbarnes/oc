@@ -234,6 +234,8 @@ interface ClaudeSessionRecord {
   /** Pool account the conversation lives on; absent means the default account. */
   account?: string
   movedTo?: string
+  /** Copied from the chat this one was forked from; its first spawn branches with `--fork-session`. */
+  forked?: boolean
 }
 
 // One active CLI process per session key. Keyed by a composite
@@ -562,6 +564,36 @@ export async function prepareSessionDirectoryMove(sessionID: string, directory: 
   persistSessions()
 }
 
+/**
+ * Give a forked oc session copies of its origin's Claude conversations. Each copy
+ * resumes the origin's transcript once with `--fork-session`, so the two chats branch
+ * and the origin keeps its own; the CLI's new id then replaces the copy's (see
+ * `setClaudeSessionId`). A fork from an earlier message rewinds in `sessionSync.ts`.
+ */
+export function forkClaudeSessions(fromSessionID: string, toSessionID: string): void {
+  const sessions = loadedSessions()
+  const copies = [...sessions].filter(
+    ([key, record]) => describeSessionKey(key).session === fromSessionID && !record.movedTo,
+  )
+  if (!copies.length) return
+  for (const [key, record] of copies) {
+    const parts = key.split("::")
+    parts[2] = toSessionID
+    sessions.set(parts.join("::"), {
+      sessionId: record.sessionId,
+      anchors: [...record.anchors],
+      account: record.account,
+      forked: true,
+    })
+  }
+  capClaudeSessions()
+  persistSessions()
+}
+
+export function isPendingFork(key: string): boolean {
+  return loadedSessions().get(key)?.forked === true
+}
+
 /** Consume a durable intentional-move marker; unrelated conversation loss still asks. */
 export function takeSessionDirectoryMove(sessionID: string, directory: string): boolean {
   const keys = [...loadedSessions()]
@@ -699,7 +731,8 @@ function parseSessionsFile(text: string): [string, ClaudeSessionRecord][] | unde
         : []
       const account = typeof record.account === "string" ? record.account : undefined
       const movedTo = typeof record.movedTo === "string" ? record.movedTo : undefined
-      return [[key, { sessionId: record.sessionId, anchors, account, movedTo }]]
+      const forked = record.forked === true ? true : undefined
+      return [[key, { sessionId: record.sessionId, anchors, account, movedTo, forked }]]
     })
   } catch {
     return undefined
@@ -1045,7 +1078,7 @@ export function appendResumeIfNeeded(sessionKey: string, cliArgs: string[]): str
   }
   const sid = getClaudeSessionId(sessionKey)
   if (!sid) return cliArgs
-  return [...cliArgs, "--resume", sid]
+  return [...cliArgs, "--resume", sid, ...(isPendingFork(sessionKey) ? ["--fork-session"] : [])]
 }
 
 /**

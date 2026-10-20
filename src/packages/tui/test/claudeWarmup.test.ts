@@ -1,5 +1,8 @@
 import { expect, test } from "bun:test"
 import { createOpencodeClient } from "@opencode-ai/sdk/v2"
+import path from "path"
+import os from "os"
+import { mkdtemp, rm, mkdir } from "fs/promises"
 import {
   PREVIEW_QUALIFIER,
   accountOptions,
@@ -14,6 +17,10 @@ import {
   displayClock,
   displayTimes,
   draftFromAccount,
+  draftFromSchedule,
+  readWarmupPresets,
+  saveWarmupPreset,
+  emptyWeeklyDays,
   emptyWarmupState,
   formatLastAttempt,
   formatNextAt,
@@ -71,10 +78,7 @@ test("command generation is empty with no accounts and stable by account ID", ()
   expect(one[0].category).toBe("oc")
   expect(one[0].group).toBe("Third party harness management")
   const two = warmupCommands([weekly, daily], () => undefined)
-  expect(two.map((item) => item.name)).toEqual([
-    commandName(weekly.accountID),
-    commandName(daily.accountID),
-  ])
+  expect(two.map((item) => item.name)).toEqual([commandName(weekly.accountID), commandName(daily.accountID)])
   expect(two[0].name).not.toBe("oc.claude_warmup.0")
 })
 
@@ -218,6 +222,8 @@ test("account summary uses Times title, details rows, and the qualifier", () => 
     onMode: () => undefined,
     onTimes: () => undefined,
     onSave: () => undefined,
+    onSavePreset: () => undefined,
+    onLoadPreset: () => undefined,
     onPause: () => undefined,
     onResume: () => undefined,
   })
@@ -239,6 +245,8 @@ test("account summary uses Times title, details rows, and the qualifier", () => 
     onMode: () => undefined,
     onTimes: () => undefined,
     onSave: () => undefined,
+    onSavePreset: () => undefined,
+    onLoadPreset: () => undefined,
     onPause: () => undefined,
     onResume: () => undefined,
   }).find((option) => option.value === "times")
@@ -252,6 +260,8 @@ test("account summary uses Times title, details rows, and the qualifier", () => 
     onMode: () => undefined,
     onTimes: () => undefined,
     onSave: () => undefined,
+    onSavePreset: () => undefined,
+    onLoadPreset: () => undefined,
     onPause: () => undefined,
     onResume: () => undefined,
   }).find((option) => option.value === "day.sun")
@@ -285,6 +295,8 @@ test("12-hour format changes display only", () => {
       onMode: () => undefined,
       onTimes: () => undefined,
       onSave: () => undefined,
+      onSavePreset: () => undefined,
+      onLoadPreset: () => undefined,
       onPause: () => undefined,
       onResume: () => undefined,
     })
@@ -360,9 +372,7 @@ test("refresh rejection keeps inventory and surfaces a concise error", async () 
   ])
   expect(applied[0].accounts).toEqual([daily])
   expect(notes).toEqual(["timeout"])
-  expect(
-    readWarmupState({ error: { message: "probe failed" } }, previous).accounts,
-  ).toEqual([daily])
+  expect(readWarmupState({ error: { message: "probe failed" } }, previous).accounts).toEqual([daily])
   expect(readWarmupState({ error: { message: "probe failed" } }, previous).error).toBe("probe failed")
 })
 
@@ -416,22 +426,23 @@ test("signed-out accounts are omitted from commands", () => {
 })
 
 test("generated Global GET/PUT send flattened schedule to /global/claude/warmup", async () => {
-    const hits: { method: string; path: string; body?: unknown }[] = []
-    const inventory: ClaudeWarmupState = {
-      accounts: [daily],
-      timeZone: "America/New_York",
-      utcOffset: "UTC-04:00",
-      available: true,
-    }
-    const saved = {
-      ...daily,
-      enabled: true,
-      schedule: { mode: "daily" as const, times: ["07:00", "12:00"] },
-      lastAttempt: { scheduledAt: 1, attemptedAt: 2, outcome: "sent" as const },
-    }
-    const client = createOpencodeClient({
-      baseUrl: "http://warmup.test",
-      fetch: Object.assign(async (input: URL | RequestInfo) => {
+  const hits: { method: string; path: string; body?: unknown }[] = []
+  const inventory: ClaudeWarmupState = {
+    accounts: [daily],
+    timeZone: "America/New_York",
+    utcOffset: "UTC-04:00",
+    available: true,
+  }
+  const saved = {
+    ...daily,
+    enabled: true,
+    schedule: { mode: "daily" as const, times: ["07:00", "12:00"] },
+    lastAttempt: { scheduledAt: 1, attemptedAt: 2, outcome: "sent" as const },
+  }
+  const client = createOpencodeClient({
+    baseUrl: "http://warmup.test",
+    fetch: Object.assign(
+      async (input: URL | RequestInfo) => {
         const request = input instanceof Request ? input : new Request(input)
         const path = new URL(request.url).pathname
         const raw = request.method === "GET" ? undefined : await request.clone().text()
@@ -447,38 +458,206 @@ test("generated Global GET/PUT send flattened schedule to /global/claude/warmup"
           return Response.json(saved)
         }
         return new Response("not found", { status: 404 })
-      }, { preconnect: () => {} }),
-    })
-    const loaded = readWarmupState(await client.global.claudeWarmup(), emptyWarmupState())
-    expect(loaded.accounts).toEqual([daily])
-    expect(hits).toEqual([{ method: "GET", path: "/global/claude/warmup" }])
-    const invalid = await persistWarmupSchedule(
-      client,
-      writeForAction("save", daily, { mode: "daily", times: "07:00," }),
-      loaded,
-    )
-    expect(invalid.error).toBe("Enter a time after each comma")
-    expect(hits).toHaveLength(1)
-    const persisted = await persistWarmupSchedule(
-      client,
-      writeForAction("save", daily, { mode: "daily", times: "07:00, 12:00" }),
-      loaded,
-    )
-    expect(persisted.error).toBeUndefined()
-    expect(persisted.state.accounts[0]).toMatchObject({
-      accountID: "default",
-      label: ".claude",
-      schedule: saved.schedule,
-      lastAttempt: { outcome: "sent" },
-    })
-    expect(formatLastAttempt(persisted.state.accounts[0], "UTC")).toContain("Prompt sent")
-    expect(hits[1]).toEqual({
-      method: "PUT",
-      path: "/global/claude/warmup",
-      body: {
-        accountID: "default",
-        enabled: true,
-        schedule: { mode: "daily", times: ["07:00", "12:00"] },
       },
-    })
+      { preconnect: () => {} },
+    ),
+  })
+  const loaded = readWarmupState(await client.global.claudeWarmup(), emptyWarmupState())
+  expect(loaded.accounts).toEqual([daily])
+  expect(hits).toEqual([{ method: "GET", path: "/global/claude/warmup" }])
+  const invalid = await persistWarmupSchedule(
+    client,
+    writeForAction("save", daily, { mode: "daily", times: "07:00," }),
+    loaded,
+  )
+  expect(invalid.error).toBe("Enter a time after each comma")
+  expect(hits).toHaveLength(1)
+  const dir = await mkdtemp(path.join(os.tmpdir(), "warmup-sdk-"))
+  const presetDraft = await (async () => {
+    try {
+      const file = path.join(dir, "presets.json")
+      await saveWarmupPreset(file, "Selected", saved.schedule)
+      return draftFromSchedule((await readWarmupPresets(file))[0].schedule)
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })()
+  expect(hits).toHaveLength(1)
+  const persisted = await persistWarmupSchedule(client, writeForAction("save", daily, presetDraft), loaded)
+  expect(persisted.error).toBeUndefined()
+  expect(persisted.state.accounts[0]).toMatchObject({
+    accountID: "default",
+    label: ".claude",
+    schedule: saved.schedule,
+    lastAttempt: { outcome: "sent" },
+  })
+  expect(formatLastAttempt(persisted.state.accounts[0], "UTC")).toContain("Prompt sent")
+  expect(hits[1]).toEqual({
+    method: "PUT",
+    path: "/global/claude/warmup",
+    body: {
+      accountID: "default",
+      enabled: true,
+      schedule: { mode: "daily", times: ["07:00", "12:00"] },
+    },
+  })
+})
+
+async function presetFixture(run: (file: string) => Promise<void>) {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "warmup-presets-"))
+  try {
+    await run(path.join(dir, "presets.json"))
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+}
+
+test("presets round-trip complete independent daily and weekly snapshots", () =>
+  presetFixture(async (file) => {
+    expect(await readWarmupPresets(file)).toEqual([])
+    await saveWarmupPreset(file, "  Workdays  ", daily.schedule)
+    await saveWarmupPreset(file, "Weekend", weekly.schedule)
+    await saveWarmupPreset(file, "Empty daily", { mode: "daily", times: [] })
+    await saveWarmupPreset(file, "Empty weekly", { mode: "weekly", days: emptyWeeklyDays() })
+    await saveWarmupPreset(file, "__proto__", { mode: "daily", times: ["12:00", "07:00", "12:00"] })
+    const presets = await readWarmupPresets(file)
+    expect(presets.map((preset) => preset.name)).toEqual([
+      "Workdays",
+      "Weekend",
+      "Empty daily",
+      "Empty weekly",
+      "__proto__",
+    ])
+    expect(presets[0].schedule).toEqual(daily.schedule)
+    expect(presets[1].schedule).toEqual(weekly.schedule)
+    expect(presets[2].schedule).toEqual({ mode: "daily", times: [] })
+    expect(presets[3].schedule).toEqual({ mode: "weekly", days: emptyWeeklyDays() })
+    expect(presets[4].schedule).toEqual(daily.schedule)
+    const draft = draftFromSchedule(presets[1].schedule)
+    if (draft.mode !== "weekly") throw new Error("Expected weekly draft")
+    draft.days.mon = "09:00"
+    expect(presets[1].schedule).toEqual(weekly.schedule)
+    expect((await readWarmupPresets(file))[1].schedule).toEqual(weekly.schedule)
+  }))
+
+test("preset collision needs explicit replacement and preserves other names", () =>
+  presetFixture(async (file) => {
+    await saveWarmupPreset(file, "Work", daily.schedule)
+    await saveWarmupPreset(file, "Weekend", weekly.schedule)
+    const before = await Bun.file(file).text()
+    expect(await saveWarmupPreset(file, " work ", weekly.schedule)).toEqual({ saved: false, name: "Work" })
+    expect(await Bun.file(file).text()).toBe(before)
+    expect(await saveWarmupPreset(file, " WORK ", weekly.schedule, true)).toEqual({ saved: true })
+    expect(await readWarmupPresets(file)).toEqual([
+      { name: "WORK", schedule: weekly.schedule },
+      { name: "Weekend", schedule: weekly.schedule },
+    ])
+  }))
+
+test("concurrent preset additions merge and same-name creates collide under fixture locks", () =>
+  presetFixture(async (file) => {
+    expect(
+      await Promise.all([
+        saveWarmupPreset(file, "One", daily.schedule),
+        saveWarmupPreset(file, "Two", weekly.schedule),
+      ]),
+    ).toEqual([{ saved: true }, { saved: true }])
+    expect(await readWarmupPresets(file)).toHaveLength(2)
+    const results = await Promise.all([
+      saveWarmupPreset(file, "Same", daily.schedule),
+      saveWarmupPreset(file, " same ", weekly.schedule),
+    ])
+    expect(results.filter((result) => result.saved)).toHaveLength(1)
+    expect(results.filter((result) => !result.saved)).toHaveLength(1)
+    expect(await readWarmupPresets(file)).toHaveLength(3)
+  }))
+
+test("invalid names and persisted shapes never overwrite the library", () =>
+  presetFixture(async (file) => {
+    await saveWarmupPreset(file, "Valid", daily.schedule)
+    const before = await Bun.file(file).text()
+    for (const name of ["", "  ", "bad\nname", "bad\tname", "bad\x7fname", "bad\u2028name"]) {
+      await expect(saveWarmupPreset(file, name, daily.schedule)).rejects.toThrow()
+      expect(await Bun.file(file).text()).toBe(before)
+    }
+    await expect(saveWarmupPreset(file, "Invalid", { mode: "daily", times: ["24:00"] })).rejects.toThrow()
+    expect(await Bun.file(file).text()).toBe(before)
+    const entry = { name: "Valid", schedule: daily.schedule }
+    for (const value of [
+      "{",
+      "null",
+      "[]",
+      "{}",
+      JSON.stringify({ presets: [null] }),
+      JSON.stringify({ presets: [{ ...entry, name: 1 }] }),
+      JSON.stringify({ presets: [entry, { ...entry, name: " valid " }] }),
+      ...[
+        { mode: "other", times: [] },
+        { mode: "daily", times: [1] },
+        { mode: "daily", times: ["24:00"] },
+        { mode: "daily", times: [""] },
+        { mode: "daily", times: ["07:00,12:00"] },
+        { mode: "daily", times: ["00:00", "01:00", "02:00", "03:00", "04:00"] },
+        { mode: "weekly", days: { mon: [] } },
+        { mode: "weekly", days: { ...emptyWeeklyDays(), sun: null } },
+      ].map((schedule) => JSON.stringify({ presets: [{ name: "Bad", schedule }] })),
+    ]) {
+      await Bun.write(file, value)
+      await expect(readWarmupPresets(file)).rejects.toThrow()
+      await expect(saveWarmupPreset(file, "New", daily.schedule, true)).rejects.toThrow()
+      expect(await Bun.file(file).text()).toBe(value)
+    }
+  }))
+
+test("preset I/O errors are rejected instead of treated as missing", () =>
+  presetFixture(async (file) => {
+    await mkdir(file)
+    await expect(readWarmupPresets(file)).rejects.toThrow()
+    await expect(saveWarmupPreset(file, "Name", daily.schedule)).rejects.toThrow()
+    await rm(file, { recursive: true })
+    await rm(path.join(path.dirname(file), "locks"), { recursive: true })
+    await Bun.write(path.join(path.dirname(file), "locks"), "blocked")
+    await expect(saveWarmupPreset(file, "Name", daily.schedule)).rejects.toThrow()
+    expect(await readWarmupPresets(file)).toEqual([])
+    await expect(saveWarmupPreset("relative.json", "Name", daily.schedule)).rejects.toThrow("absolute")
+  }))
+
+test("failed atomic preset publication preserves the existing library", () =>
+  presetFixture(async (file) => {
+    // The destination fits a filesystem component; the unique atomic temporary suffix does not.
+    const target = path.join(path.dirname(file), `${"p".repeat(240)}.json`)
+    const before = JSON.stringify({ presets: [{ name: "Existing", schedule: daily.schedule }] })
+    await Bun.write(target, before)
+    await expect(saveWarmupPreset(target, "New", weekly.schedule)).rejects.toThrow()
+    expect(await Bun.file(target).text()).toBe(before)
+  }))
+
+test("preset menu actions dispatch independently of account Save", () => {
+  const calls: string[] = []
+  const options = accountOptions({
+    account: daily,
+    draft: draftFromAccount(daily),
+    zone: "",
+    timeZone: "UTC",
+    utcOffset: "",
+    onMode: () => undefined,
+    onTimes: () => undefined,
+    onSave: () => {
+      calls.push("save")
+    },
+    onSavePreset: () => {
+      calls.push("preset")
+    },
+    onLoadPreset: () => {
+      calls.push("load")
+    },
+    onPause: () => undefined,
+    onResume: () => undefined,
+  })
+  for (const value of ["savePreset", "loadPreset", "save"]) {
+    const option = options.find((option) => option.value === value)
+    expect(option?.title).toBe(value === "save" ? "Save" : value === "savePreset" ? "Save preset…" : "Load preset…")
+    option?.onSelect?.(undefined!)
+  }
+  expect(calls).toEqual(["preset", "load", "save"])
 })

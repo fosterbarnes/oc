@@ -1,8 +1,18 @@
 import { useRenderer, useTerminalDimensions } from "@opentui/solid"
-import { batch, createContext, createEffect, onCleanup, Show, useContext, type JSX, type ParentProps } from "solid-js"
+import {
+  batch,
+  createContext,
+  createEffect,
+  createSignal,
+  onCleanup,
+  Show,
+  useContext,
+  type JSX,
+  type ParentProps,
+} from "solid-js"
 import { useTheme } from "../context/theme"
 import { MouseButton, Renderable, RGBA } from "@opentui/core"
-import { createStore } from "solid-js/store"
+import { createStore, unwrap } from "solid-js/store"
 import { useToast } from "./toast"
 import { useBindings, useOpencodeModeStack } from "../keymap"
 import { useClipboard } from "../context/clipboard"
@@ -69,6 +79,10 @@ export function Dialog(
   )
 }
 
+export type DialogSelection = ReturnType<typeof createSignal<{ filter: string; value: unknown }>>
+// A screen's highlighted row and search, chained to the screen escape returns to
+type DialogMemory = { selection: DialogSelection; parent?: DialogMemory }
+
 function init() {
   const [store, setStore] = createStore({
     stack: [] as {
@@ -76,6 +90,8 @@ function init() {
       onClose?: () => void
       // Set on drill-in dialogs: escape reopens the parent instead of closing
       back?: () => void
+      selection: DialogSelection
+      parent?: DialogMemory
     }[],
     size: "medium" as "medium" | "large" | "xlarge",
   })
@@ -139,12 +155,22 @@ function init() {
     refocus()
   }
 
+  // Memory handed to the screen a back callback reopens, consumed by its replace
+  let returning: DialogMemory | undefined
   function escape() {
     if (renderer.getSelection()) {
       renderer.clearSelection()
     }
-    const back = store.stack.at(-1)?.back
-    if (back) return back()
+    // Raw entries: store proxies would break the identity checks in replace.
+    const current = unwrap(store.stack).at(-1)
+    if (current?.back) {
+      returning = current.parent
+      try {
+        return current.back()
+      } finally {
+        returning = undefined
+      }
+    }
     close()
   }
 
@@ -187,7 +213,7 @@ function init() {
       })
       refocus()
     },
-    replace(input: any, onClose?: () => void, options?: { back?: () => void }) {
+    replace(input: any, onClose?: () => void, options?: { back?: () => void; selection?: DialogSelection }) {
       refocusEpoch++
       if (refocusTimer) {
         clearTimeout(refocusTimer)
@@ -202,17 +228,24 @@ function init() {
           } catch {}
         }
       }
+      const returned = returning
+      returning = undefined
+      const current = unwrap(store.stack).at(-1)
+      const selection =
+        options?.selection ?? returned?.selection ?? createSignal({ filter: "", value: undefined as unknown })
+      // Reopened screens keep their own parent, redraws keep theirs, drill-ins remember the opener.
+      const parent = returned
+        ? returned.parent
+        : current?.selection === selection
+          ? current.parent
+          : options?.back && current
+            ? { selection: current.selection, parent: current.parent }
+            : undefined
       for (const item of store.stack) {
         if (item.onClose) item.onClose()
       }
       setStore("size", "medium")
-      setStore("stack", [
-        {
-          element: input,
-          onClose,
-          back: options?.back,
-        },
-      ])
+      setStore("stack", [{ element: input, onClose, back: options?.back, selection, parent }])
     },
     get stack() {
       return store.stack

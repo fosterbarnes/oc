@@ -169,6 +169,150 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-19 (~20:53) - v0.2.253 englandMachismo - Forked chats keep their Claude conversation - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation (spit -> imp); completed
+- Version: 0.2.253 englandMachismo
+- Fixed: Ctrl+P > fork on a Claude chat asked "Claude session lost" on the first message. Cause: `claude-code/sessions.json` is keyed by oc session id and `Session.fork` never told the provider.
+- Added `forkClaudeSessions(from, to)` + `isPendingFork` in `provider/claude-code/sessionManager.ts`: copies origin records (not `movedTo`) to the fork's key with `forked: true` (persisted, parsed). `setClaudeSessionId` rebuilds the record, so the CLI's new id clears the flag.
+- `Session.fork` (`session/session.ts`) calls it via dynamic import after copying messages. Synchronous, so scheduled `target: "fork"` entries are covered too (no event timing).
+- `cliArgs.ts`: `--fork-session` on rewind or pending fork; `appendResumeIfNeeded` adds it for pending forks too. Origin record untouched, so the origin keeps resuming its own transcript.
+- Fork from an earlier message: no new code; `rewindOnDrift` finds the shared anchor and adds `--resume-session-at`. `sessionSync.ts`: a pending fork with no matching anchor (older than the 20 kept) drops the record and starts fresh with the catch-up, instead of resuming turns the fork dropped.
+- Verification: `bun test test/provider/claude-code/sessionSync.test.ts` 8 pass (2 new: full fork branches + origin resumes without fork flag; partial fork rewinds to `-a1`); `cliArgs.test.ts` pass; `bun run typecheck` (opencode) exit 0. `Session.fork` -> provider wiring not covered by a test; needs live check.
+- ERROR: first test run failed only in cleanup (EBUSY: origin fixture removed the shared cwd while the fork's fake CLI ran). Fixed: fixtures clean up newest first and only the owner removes the cwd.
+
+### User
+Claude chats
+- Forking a Claude chat (Ctrl+P > fork) now continues the same Claude Code conversation in the fork instead of asking to start a new one.
+- The original chat is unaffected: it keeps its own Claude conversation, and the two branch from the fork point.
+- Forking from an earlier message rewinds the fork's Claude conversation to that point; if it is too far back, the fork starts a new Claude conversation with the last exchange.
+
+---
+
+## 2026-10-19 (~07:48) - v0.2.252 timeoutsEstimate - Esc-back restores selection in every menu - Claude Opus 5.5; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; Implementation; completed. Pass over all unpushed work (presets, Usage palette entry, Esc back, selection restore); user approved both changes below.
+- Version: 0.2.252 timeoutsEstimate (bumped earlier this session)
+- Changed `dialog.tsx`: selection memory is now shared. Drill-in `replace` with `back` records the opener as `parent: DialogMemory` (selection + its own parent); `escape()` hands `current.parent` to the replace the back callback runs, so every back link (model picker hidden/provider/category screens, palette hotkey, warm-up) restores row and search. Redraws that reuse the screen's selection keep their parent. Read entries via `unwrap`: store proxies broke the `===` redraw check, making a redrawn screen its own parent (palette came back with the editor's "Save preset" filter).
+- Removed hand-wired `selection` from `CommandPaletteDialog` hotkey back and warm-up root back (`claudeWarmup.tsx`); kept warm-up root's own selection signal for redraws.
+- Added `back` param to `DialogConfirm.show`; warm-up Replace preset confirm passes `prompt`, so Esc returns to the name prompt with the name kept (was: closed the whole editor).
+- Fixed `DialogSelect.moveTo` bumps `visibilityGeneration`: the frame-deferred current-row jump from the previous entry ran after `DialogModel`'s `ref.moveTo(highlighted)` and overrode it (`local.test.ts` category picker opened for the wrong model). Explicit moves now cancel pending deferred scrolls.
+- Reviewed sol palette dispatch change (palette stays open during `dispatchCommand`): commands that bail on `dialog.stack.length` are `hidden` and absent from the palette; command layers carry no mode, so dispatch is unaffected. Risk: plugin commands checking `api.ui.dialog.open` now see true while running from the palette.
+- MISTAKE: previous entry's `renderer.once("frame")` change ran only warm-up tests; it broke `local.test.ts` until this pass. Shared `DialogSelect` timing changes need the dialog-using suites (`local.test.ts`, `subagentDialog`, `commandPalette`) before handoff.
+- Updated sibling wiki `Keybinds.md` `esc` row (back keeps item and search; menus without a back step close).
+- Verification: full tui `bun test`: 635 pass, 2 fail (known `subagentDialog.test.tsx` pair, AGENTS.md Known failures), 640 tests / 99 files. Added Esc-on-confirm check to `claudeWarmupRendered.test.tsx`. `bun run typecheck` (tui): exit 0. No build/install.
+
+### User
+Menus
+- Pressing Esc to go back now returns to the item and search you had in every menu with a back step, including the model picker's screens.
+- In the warm-up editor, Esc on "Replace preset?" goes back to the name prompt instead of closing the editor.
+
+---
+
+## 2026-10-19 (~07:38) - v0.2.252 timeoutsEstimate - Scroll restored menu row into view on back - Claude Opus 5.5; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; Implementation; completed. Finished Sol session `ses_eacf22c70ffenl801QVVihZXvc`, which aborted mid-debug.
+- Version: 0.2.252 timeoutsEstimate
+- Fixed `DialogSelect` restore scroll (`dialog-select.tsx`): Esc back restored the highlighted palette row but left the list at the top until an arrow key. Two causes: (1) `scrollToSelection` read `target.y`; ScrollBox viewport culling skips `updateFromLayout` on off-screen rows, so never-drawn rows report y=0. Now reads Yoga `getLayoutNode().getComputedTop() - scroll.scrollTop`. (2) Palette rebuilds its rows after mount (`<For>` recreates them), so Sol's double `requestAnimationFrame` sometimes ran before the new rows had layout. Now waits on `renderer.once("frame")` (fires after a full render).
+- Fixed typecheck: restored selection value typed `unknown`; added `restoredValue as T | undefined` in `DialogSelect`.
+- Removed Sol debug `console.log`s from `dialog-select.tsx` and the layout dump plus unused imports from `test/claudeWarmupRendered.test.tsx`. Wrapped long palette back line in `command-palette.tsx`.
+- Kept: `preserveSelection` path still uses double rAF; not touched (outside this bug).
+- Verification: `bun test test/claudeWarmupRendered.test.tsx`: 5 pass, 0 fail (scroll test failed before fix, passed 3 repeat runs after). `bun run typecheck` (tui): exit 0. `git diff --check`: clean. No build/install.
+
+### User
+Menus
+- After pressing Esc to go back, the list now scrolls straight to the item you were on, without needing an arrow key first.
+
+---
+
+## 2026-10-19 (~03:34) - v0.2.251 witchNumbered - Restore menu selection on back - GPT-6.1 Sol; Implementation
+
+### Agent
+- Meta: GPT-6.1 Sol; Implementation; completed
+- Version: 0.2.251 witchNumbered (already bumped this session)
+- Added per-screen selection signal to dialog entries; `DialogSelect` snapshots selected value and filter on cleanup, restores both and scrolls selected row into view. New searches still reset selection normally.
+- Kept warm-up root selection across redraws and nested time/preset screens; returned parent carries its own selection. Palette hotkey back carries palette selection too. State lasts only for the dialog flow.
+- Expanded rendered regression: unfiltered Wednesday selection survives Esc and Enter reopens Wednesday; preset row and filtered palette entry reopen with Enter; no schedule writes. Updated existing checks to clear restored searches before inspecting other rows; pending-save menu remains locked and retains its search.
+- Verification: `bun test test/claudeWarmupRendered.test.tsx`: 4 pass, 0 fail, 41 assertions. Updated sibling wiki. No build/install or broad checks run.
+
+### User
+Menus
+- Going back restores the highlighted item and search text, including the command palette and warm-up schedule editor.
+
+---
+
+## 2026-10-19 (~03:30) - v0.2.251 witchNumbered - Warm-up editor back navigation - GPT-6.1 Sol; Implementation
+
+### Agent
+- Meta: GPT-6.1 Sol; Implementation; completed
+- Version: 0.2.251 witchNumbered
+- Fixed `claudeWarmup.tsx` account editor: capture opening dialog and its back callback; restore that parent on Esc, including after draft redraws and nested times/preset screens.
+- Changed `CommandPaletteDialog` dispatch: retain current screen until command runs so drill-ins can capture their actual parent; clear afterward only when command did not replace it.
+- Added rendered regression covering oc palette, full palette, alternate Usage parent, mode redraw, nested times back, root back, and final dismissal without schedule writes. `bun test test/claudeWarmupRendered.test.tsx`: 3 pass, 0 fail, 32 assertions.
+- Updated sibling wiki `Claude-Code.md`. No build/install or broader checks run.
+
+### User
+Warm-up schedules
+- Esc goes back one screen at a time, returning from the schedule editor to the menu that opened it.
+
+---
+
+## 2026-10-19 (~03:23) - v0.2.250 humblesSuppress - Usage palette namespace correction - GPT-6.1 Sol; Implementation
+
+### Agent
+- Meta: GPT-6.1 Sol; Implementation; completed
+- Version: 0.2.250 humblesSuppress (already bumped this session)
+- Fixed `USAGE_MENU_COMMAND` in `sidebarTools.tsx`: namespace `palette`, category `oc`, existing Show usage handler. `CommandPaletteDialog` queries reachable `palette` commands before its category filter; category alone never exposed the sidebar-scoped command.
+- Added `test/component/usagePalette.test.ts` against real OpenTUI keymap using the production descriptor. Checks the palette namespace/category query, group, and dispatch. Confirmed failure with old namespace (undefined entry), then 1 pass, 0 fail, 4 assertions with corrected namespace. `git diff --check` passed.
+- Corrected wiki calendar wording: open through Usage menu; its separate command remains sidebar-scoped.
+- MISTAKE: previous follow-up checked category but missed namespace and claimed availability without a registry test. Check both command-registration namespace and palette filters before declaring a palette entry reachable.
+- No build/install performed; user-installed check remains Ctrl+O -> Third party harness management -> Show usage.
+
+### User
+Usage
+- Show usage is now registered in the oc palette's command namespace, fixing its absence after the previous change.
+
+---
+
+## 2026-10-19 (~03:19) - v0.2.250 humblesSuppress - Usage menu in oc palette - GPT-6.1 Sol; Implementation
+
+### Agent
+- Meta: GPT-6.1 Sol; Implementation; completed
+- Version: 0.2.250 humblesSuppress (already bumped this session)
+- Changed existing `sidebar.usage` registration in `sidebarTools.tsx` to category `oc`, group Third party harness management. oc palette filters by category; Sidebar hid Show usage. Kept command identity and existing menu handler.
+- Updated sibling wiki `Sidebar.md` with in-session Ctrl+O entry; corrected calendar shortcut wording to full palette.
+- Verification: `git diff --check` passed. Metadata-only change; no tests/typecheck/build/install run. User check: Ctrl+O -> Third party harness management -> Show usage.
+
+### User
+Usage
+- Show usage now appears in the oc command palette under Third party harness management while a session is open.
+
+---
+
+## 2026-10-19 (~03:16) - v0.2.250 humblesSuppress - Named warm-up schedule presets - GPT-6.1 Sol; Implementation
+
+### Agent
+- Meta: GPT-6.1 Sol; Implementation; completed after user-authorized verification follow-up
+- Version: 0.2.250 humblesSuppress
+- Added Save preset/Load preset in `tui/src/claudeWarmup.tsx`: named daily/weekly snapshots, shared local `claudeWarmupPresets.json`, current time zone, draft-only load, explicit account Save activation, case-insensitive replacement confirmation.
+- Added strict preset validation and fresh read-modify-write under Flock with five-second timeout; awaited atomic publication preserves other tabs' additions and surfaces storage errors. Added busy/generation guards against duplicate submits and late dialog reopening.
+- Added focused real-file persistence/concurrency/error checks in `claudeWarmup.test.ts` and rendered save/load/replace/activation/dismissal checks in `claudeWarmupRendered.test.tsx`. Updated FORK and sibling wiki `Claude-Code.md`.
+- Fixed rendered test synchronization: Esc changed dialog content before keyboard focus moved; following picker search reached the account editor and Enter toggled its mode. Wait for focus transition on back/select, reject destroyed inputs, and distinguish name textarea from InputRenderable (a textarea subclass). Product code needed no fix for this timeout.
+- Verification: worker `bun test test/claudeWarmup.test.ts`: 23 pass, 0 fail, 194 assertions. Final parent `bun test test/claudeWarmupRendered.test.tsx`: 2 pass, 0 fail, 15 assertions. `git diff --check` passed before notes insertion. No build, install, broad checks, real Claude usage, or push; installed acceptance remains user-owned.
+- MISTAKE: initial rendered check shipped into the working tree with an unresolved timeout and stopped after two attempts. User authorized follow-up; diagnostic frame exposed the wrong focused picker. Synchronize dialog focus, not only stack identity or visual idle.
+- Preserved pre-existing `src/bun.lock` change. Plan: `C:\Users\Foster\.config\opencode\plans\claudeWarmupPresets.md`.
+
+### User
+Warm-up schedules
+- Save preset keeps multiple named daily or weekday schedules for reuse across accounts and restarts.
+- Load preset copies times into the editor; review them and press Save to activate for that account.
+- Reusing a name asks before replacing it, and saving a preset leaves active schedules alone.
+
+---
+
 ## 2026-10-19 (~02:33) - v0.2.249 caliburThornberry - Font size arrow hints - GPT-6.1 Sol; Implementation
 
 ### Agent

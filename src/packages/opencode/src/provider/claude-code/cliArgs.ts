@@ -12,7 +12,7 @@ import {
   type CliVersion,
 } from "./cliVersion.js"
 import { isReadOnlyPermissionMode } from "./permissionPresets.js"
-import { getClaudeSessionId, hasActiveProcess, takePendingRewind } from "./sessionManager.js"
+import { getClaudeSessionId, hasActiveProcess, isPendingFork, takePendingRewind } from "./sessionManager.js"
 import { isClaudeThinkingDisabled } from "./spawnEnv.js"
 
 export function buildCliArgs(opts: {
@@ -118,9 +118,11 @@ export function buildCliArgs(opts: {
     if (sessionId && !hasActiveProcess(sessionKey)) {
       args.push("--resume", sessionId)
       // Drift recovery (sessionSync.ts): keep the transcript only up to the
-      // last exchange opencode still shows, on a fork so the original stays.
+      // last exchange opencode still shows. That and a forked chat's first
+      // spawn branch the transcript, so the original stays.
       const rewindTo = takePendingRewind(sessionKey)
-      if (rewindTo) args.push("--resume-session-at", rewindTo, "--fork-session")
+      if (rewindTo) args.push("--resume-session-at", rewindTo)
+      if (rewindTo || isPendingFork(sessionKey)) args.push("--fork-session")
     }
   }
 

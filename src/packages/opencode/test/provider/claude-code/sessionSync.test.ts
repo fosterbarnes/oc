@@ -8,6 +8,7 @@ import { createClaudeCode } from "@/provider/claude-code/index.js"
 import {
   deleteActiveProcessAndWait,
   deleteClaudeSessionId,
+  forkClaudeSessions,
   getClaudeSessionId,
   markClaudeSessionLost,
   MAX_CLAUDE_SESSION_ENTRIES,
@@ -44,11 +45,13 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
 
 const cleanups: Array<() => Promise<void>> = []
 afterEach(async () => {
-  for (const cleanup of cleanups.splice(0)) await cleanup()
+  // Newest first, so a fork's process exits before its origin removes the shared cwd.
+  for (const cleanup of cleanups.splice(0).reverse()) await cleanup()
 })
 
-function fixture(conversation: string) {
-  const cwd = mkdtempSync(path.join(tmpdir(), "opencode-session-sync-"))
+// `sharedCwd` puts a second chat (a fork) in the first one's project, which removes it.
+function fixture(conversation: string, sharedCwd?: string) {
+  const cwd = sharedCwd ?? mkdtempSync(path.join(tmpdir(), "opencode-session-sync-"))
   const cliPath = path.join(cwd, "fake-claude.cjs")
   writeFileSync(cliPath, FAKE_CLI, { mode: 0o755 })
   const provider = createClaudeCode({
@@ -62,7 +65,7 @@ function fixture(conversation: string) {
   cleanups.push(async () => {
     await deleteActiveProcessAndWait(key)
     deleteClaudeSessionId(key)
-    rmSync(cwd, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 })
+    if (!sharedCwd) rmSync(cwd, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 })
   })
 
   async function send(prompt: LanguageModelV3Prompt, effort = "high") {
@@ -90,7 +93,7 @@ function fixture(conversation: string) {
       .split("\n")
       .map((line) => JSON.parse(line) as string[])
 
-  return { key, send, spawns }
+  return { cwd, key, send, spawns }
 }
 
 const user = (text: string) => ({ role: "user" as const, content: [{ type: "text" as const, text }] })
@@ -125,6 +128,47 @@ test("a reverted exchange rewinds the CLI to the last shared one", async () => {
   expect(rewind[rewind.indexOf("--resume") + 1]).toBe(sessionId)
   expect(rewind[rewind.indexOf("--resume-session-at") + 1]).toBe(`${sessionId}-a1`)
   expect(rewind).toContain("--fork-session")
+})
+
+test("a full fork branches the Claude conversation and the original keeps its own", async () => {
+  const origin = fixture("fork-origin")
+  const first = await origin.send([user("first")])
+  const second = await origin.send([user("first"), assistant(first), user("second")])
+  const sessionId = getClaudeSessionId(origin.key) ?? ""
+  forkClaudeSessions("fork-origin", "fork-full")
+  const fork = fixture("fork-full", origin.cwd)
+  const history = [user("first"), assistant(first), user("second"), assistant(second)]
+
+  const reply = await fork.send([...history, user("in fork")])
+  expect(reply).not.toContain("Claude conversation lost")
+  const spawn = fork.spawns().at(-1)!
+  expect(spawn[spawn.indexOf("--resume") + 1]).toBe(sessionId)
+  expect(spawn).toContain("--fork-session")
+  expect(spawn).not.toContain("--resume-session-at")
+  expect(getClaudeSessionId(fork.key)).toStartWith("fork-")
+
+  // The original resumes its own transcript, never a branch.
+  await deleteActiveProcessAndWait(origin.key)
+  await origin.send([...history, user("in origin")])
+  const resumed = origin.spawns().at(-1)!
+  expect(resumed[resumed.indexOf("--resume") + 1]).toBe(sessionId)
+  expect(resumed).not.toContain("--fork-session")
+  expect(getClaudeSessionId(origin.key)).toBe(sessionId)
+})
+
+test("a fork from an earlier message rewinds its branch to the fork point", async () => {
+  const origin = fixture("fork-partial-origin")
+  const first = await origin.send([user("first")])
+  await origin.send([user("first"), assistant(first), user("second")])
+  const sessionId = getClaudeSessionId(origin.key) ?? ""
+  forkClaudeSessions("fork-partial-origin", "fork-partial")
+  const fork = fixture("fork-partial", origin.cwd)
+
+  await fork.send([user("first"), assistant(first), user("instead")])
+  const spawn = fork.spawns().at(-1)!
+  expect(spawn[spawn.indexOf("--resume") + 1]).toBe(sessionId)
+  expect(spawn[spawn.indexOf("--resume-session-at") + 1]).toBe(`${sessionId}-a1`)
+  expect(spawn).toContain("--fork-session")
 })
 
 test("a lost conversation is announced and never resumed silently", async () => {

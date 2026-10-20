@@ -75,9 +75,7 @@ export function CommandPaletteDialog(props: { category?: string } = {}) {
     const reachable = keymap.getCommandEntries({
       ...query,
       visibility: "reachable",
-      filter: (command) =>
-        isVisiblePaletteCommand(command) &&
-        (!props.category || command.category === props.category),
+      filter: (command) => isVisiblePaletteCommand(command) && (!props.category || command.category === props.category),
     })
     const registeredBindings = keymap.getCommandBindings({
       visibility: "registered",
@@ -98,8 +96,9 @@ export function CommandPaletteDialog(props: { category?: string } = {}) {
       value: entry.command.name,
       suggested: isSuggestedPaletteCommand(entry),
       onSelect: (dialog: DialogContext) => {
-        dialog.clear()
+        const previous = dialog.stack.at(-1)
         keymap.dispatchCommand(entry.command.name)
+        if (dialog.stack.at(-1) === previous) dialog.clear()
       },
     })),
   )
@@ -140,7 +139,6 @@ export function CommandPaletteDialog(props: { category?: string } = {}) {
 
   return <DialogSelect ref={(value) => (ref = value)} title="Commands" options={list()} />
 }
-
 
 function paletteHeading(command: PaletteCommandEntry["command"], shown: string | undefined) {
   const category = typeof command.category === "string" ? command.category : undefined

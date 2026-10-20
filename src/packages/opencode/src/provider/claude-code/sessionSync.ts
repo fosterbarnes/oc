@@ -21,9 +21,11 @@ import { rawOpencodeClient, showToast } from "./runtimeStatus.js"
 import { getPendingProxyCalls } from "./proxyBroker.js"
 import {
   deleteActiveProcessAndWait,
+  deleteClaudeSessionId,
   describeSessionKey,
   getClaudeSessionId,
   getSessionAnchors,
+  isPendingFork,
   markClaudeSessionLost,
   MAX_CLAUDE_SESSION_ENTRIES,
   rewindClaudeSession,
@@ -106,6 +108,11 @@ async function rewindOnDrift(turn: TurnContext, prompt: Prompt, abortSignal?: Ab
   if (!latest || !newest || latest === newest.hash) return undefined
   const target = anchors.findLast((anchor) => anchor.hash === latest)
   if (!target) {
+    // Resuming would bring along turns the fork dropped, so it starts fresh instead.
+    if (isPendingFork(key)) {
+      deleteClaudeSessionId(key)
+      return "> **New Claude conversation:** this fork starts earlier than Claude Code can be rewound to, so it was given the last exchange and can read earlier turns.\n"
+    }
     log.info("opencode history differs from the claude conversation; no shared exchange to rewind to", {
       sessionKey: key,
       anchors: anchors.length,

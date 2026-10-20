@@ -90,7 +90,7 @@ export function DialogConfirm(props: DialogConfirmProps) {
   )
 }
 
-DialogConfirm.show = (dialog: DialogContext, title: string, message: string, label?: string) => {
+DialogConfirm.show = (dialog: DialogContext, title: string, message: string, label?: string, back?: () => void) => {
   return new Promise<DialogConfirmResult>((resolve) => {
     dialog.replace(
       () => (
@@ -103,6 +103,7 @@ DialogConfirm.show = (dialog: DialogContext, title: string, message: string, lab
         />
       ),
       () => resolve(undefined),
+      { back },
     )
   })
 }

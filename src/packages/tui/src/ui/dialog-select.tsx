@@ -11,7 +11,7 @@ import { useTheme, selectedForeground } from "../context/theme"
 import { entries, filter, flatMap, groupBy, pipe } from "remeda"
 import { batch, createEffect, createMemo, createSignal, For, Show, type JSX, on, onCleanup } from "solid-js"
 import { createStore } from "solid-js/store"
-import { useTerminalDimensions } from "@opentui/solid"
+import { useRenderer, useTerminalDimensions } from "@opentui/solid"
 import * as fuzzysort from "fuzzysort"
 import { isDeepEqual } from "remeda"
 import { useDialog, type DialogContext } from "./dialog"
@@ -102,13 +102,18 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
   type VisibleAction = (Action & { label: string }) | FooterHint
 
   const dialog = useDialog()
+  const renderer = useRenderer()
+  const memory = dialog.stack.at(-1)?.selection
+  const restored = memory?.[0]()
+  // The memory belongs to this dialog entry, so its value is one of this picker's options.
+  const restoredValue = restored?.value as T | undefined
   const { theme } = useTheme()
   const tuiConfig = useTuiConfig()
   const scrollAcceleration = createMemo(() => getScrollAcceleration(tuiConfig))
 
   const [store, setStore] = createStore({
     selected: 0,
-    filter: "",
+    filter: restored?.filter ?? "",
     input: "keyboard" as "keyboard" | "mouse",
   })
   const [focusedAction, setFocusedAction] = createSignal<number>()
@@ -119,7 +124,7 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
 
   createEffect(
     on(
-      () => props.current,
+      () => restoredValue ?? props.current,
       (current) => {
         if (current) {
           const currentIndex = flat().findIndex((opt) => isDeepEqual(opt.value, current))
@@ -226,6 +231,7 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
   const height = createMemo(() => Math.min(rows(), Math.floor(dimensions().height / 2) - 6))
 
   const selected = createMemo(() => flat()[store.selected])
+  onCleanup(() => memory?.[1]({ filter: store.filter, value: selected()?.value }))
 
   const shownActions = createMemo(() =>
     actions().filter((item) => !(typeof item.hidden === "function" ? item.hidden(selected()) : item.hidden)),
@@ -313,18 +319,19 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
       },
     ),
   )
-  let focusTimer: ReturnType<typeof setTimeout> | undefined
   onCleanup(() => {
     visibilityGeneration++
-    clearTimeout(focusTimer)
   })
 
   createEffect(
-    on([() => store.filter, () => props.current], ([filter, current]) => {
+    on([() => store.filter, () => restoredValue ?? props.current], ([filter, current], previous) => {
       if (filter.length > 0) resetSelection = true
-      clearTimeout(focusTimer)
-      focusTimer = setTimeout(() => {
-        if (filter.length > 0) {
+      const generation = ++visibilityGeneration
+      // Scroll after the next drawn frame: rows rebuilt after mount have no layout until then.
+      renderer.once("frame", () => {
+        if (generation !== visibilityGeneration) return
+        // A restored filter keeps the restored row on mount; later filter edits jump to the top.
+        if (filter.length > 0 && (previous !== undefined || restoredValue === undefined)) {
           moveTo(0, true, false)
         } else if (current) {
           const currentIndex = flat().findIndex((opt) => isDeepEqual(opt.value, current))
@@ -332,7 +339,7 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
             moveTo(currentIndex, true)
           }
         }
-      }, 0)
+      })
     }),
   )
 
@@ -347,6 +354,8 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
 
   function moveTo(next: number, center = false, preserve = true) {
     if (next < 0 || next >= flat().length) return
+    // An explicit move supersedes any deferred scroll still waiting for layout.
+    visibilityGeneration++
     setFocusedAction(undefined)
     setStore("selected", next)
     const option = selected()
@@ -376,7 +385,8 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
     }
     const target = scroll.getChildren()[index]
     if (!target) return
-    const y = target.y - scroll.y
+    // Yoga layout, not target.y: viewport culling leaves off-screen rows at y=0 until drawn.
+    const y = target.getLayoutNode().getComputedTop() - scroll.scrollTop
     if (center) {
       const centerOffset = Math.floor(scroll.height / 2)
       scroll.scrollBy(y - centerOffset)
@@ -637,6 +647,7 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
         <Show when={props.renderFilter !== false}>
           <box paddingTop={1}>
             <input
+              value={store.filter}
               onInput={(e) => {
                 if (props.locked) return
                 batch(() => {
