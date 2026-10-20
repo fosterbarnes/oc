@@ -202,13 +202,16 @@ const layer = Layer.effect(
     const fetchAndWrite = Effect.fn("ModelsDev.fetchAndWrite")(function* () {
       const text = yield* fetchApi()
       const tempfile = `${filepath}.${process.pid}.${Date.now()}.tmp`
+      // Best-effort: a cache-write failure must never kill catalog population; the next boot refetches.
       yield* fs.writeWithDirs(tempfile, text).pipe(
         Effect.andThen(fs.rename(tempfile, filepath)),
         Effect.catch((error) =>
-          Effect.gen(function* () {
-            yield* fs.remove(tempfile, { force: true }).pipe(Effect.ignore)
-            return yield* Effect.fail(error)
-          }),
+          fs
+            .remove(tempfile, { force: true })
+            .pipe(
+              Effect.ignore,
+              Effect.andThen(Effect.logWarning("Failed to cache models.dev catalog", { cause: error })),
+            ),
         ),
       )
       return text
@@ -254,7 +257,7 @@ const layer = Layer.effect(
 
     if (!Flag.OPENCODE_DISABLE_MODELS_FETCH && !process.argv.includes("--get-yargs-completions")) {
       // Schedule.spaced runs the effect once, then waits between completions.
-      yield* Effect.forkScoped(refresh().pipe(Effect.repeat(Schedule.spaced("60 minutes")), Effect.ignore))
+      yield* Effect.forkScoped(refresh().pipe(Effect.repeat(Schedule.spaced(ttl)), Effect.ignore))
     }
 
     return Service.of({ get, refresh })

@@ -112,7 +112,8 @@ export const prepare = Effect.fn("LLMRequestPrep.prepare")(function* (input: Pre
     ? ProviderTransform.smallOptions(input.model)
     : ProviderTransform.options({
         model: input.model,
-        sessionID: input.sessionID,
+        // Subagents share the parent's prompt cache key so they reuse its cached prefix.
+        sessionID: input.parentSessionID ?? input.sessionID,
         providerOptions: input.provider.options,
       })
   const options = mergeOptions(mergeOptions(mergeOptions(base, input.model.options), input.agent.options), variant)

@@ -270,6 +270,47 @@ describe("Session", () => {
     }),
   )
 
+  it.instance("omits active assistants from forks", () =>
+    Effect.gen(function* () {
+      const session = yield* SessionNs.Service
+      const created = yield* Effect.acquireRelease(session.create({}), (info) =>
+        session.remove(info.id).pipe(Effect.ignore),
+      )
+      const user = MessageID.ascending()
+      yield* session.updateMessage({
+        id: user,
+        sessionID: created.id,
+        role: "user",
+        time: { created: 1 },
+        agent: "user",
+        model: { providerID: "test", modelID: "test" },
+      } as SessionV1.User)
+      const assistant = (time: number, completed?: number) =>
+        session.updateMessage({
+          id: MessageID.ascending(),
+          sessionID: created.id,
+          role: "assistant",
+          parentID: user,
+          modelID: "test",
+          providerID: "test",
+          mode: "build",
+          agent: "build",
+          path: { cwd: "/", root: "/" },
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          time: completed === undefined ? { created: time } : { created: time, completed },
+        } as SessionV1.Assistant)
+      yield* assistant(2, 3)
+      yield* assistant(4)
+
+      const fork = yield* Effect.acquireRelease(session.fork({ sessionID: created.id }), (info) =>
+        session.remove(info.id).pipe(Effect.ignore),
+      )
+
+      expect((yield* session.messages({ sessionID: fork.id })).map((msg) => msg.info.time.created)).toEqual([1, 2])
+    }),
+  )
+
   it.instance("omits metadata when not provided", () =>
     Effect.gen(function* () {
       const session = yield* SessionNs.Service

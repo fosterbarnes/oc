@@ -1663,6 +1663,15 @@ describe("session.compaction.process", () => {
   )
 })
 
+describe("session.compaction.truncateToolOutput", () => {
+  test("compaction truncation does not split surrogate pairs", () => {
+    const prefix = "a".repeat(1_999)
+
+    expect(SessionCompaction.truncateToolOutput(`${prefix}😀suffix`)).toBe(`${prefix}😀\n[truncated]`)
+    expect(SessionCompaction.truncateToolOutput("😀".repeat(2_000))).toBe("😀".repeat(2_000))
+  })
+})
+
 describe("util.token.estimate", () => {
   test("estimates tokens from text (4 chars per token)", () => {
     const text = "x".repeat(4000)

@@ -169,6 +169,32 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-20 (~19:27) - v0.2.267 waaazoooBeethoven - upstream 1.19 port stage 4: providers, session, build/server - Claude Opus 5.5 (orchestrator) + Opus 5.5 high/medium workers; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; orchestrator, workers `general-opus.5.5-high` (4a, 4c) and `general-opus.5.5-medium` (4b, 4d), pairs in parallel; Implementation; Stage 4 of `~/.config/opencode/plans/upstream119/implementation.md` completed
+- Version: 0.2.267 waaazoooBeethoven
+- 4a Copilot/Codex (`a0a6963beb` `7129ed6e62` `a35f96f427` `50c5218bca` `206f51547c` `760f87fab1` `d52380024d` `94b9133910` `1fc05ca590`, feature Core 19 from `35ef229454`): Copilot login stores account `apiEndpoint` (`copilotBaseURL`), rejects accounts with chat disabled; Codex allowlist drops gpt-5.4/-mini (B7), every allowed model 400k/272k (B5, includes oc-only gpt-6-sol/luna), gpt-6.1-sol 628k/500k; Codex OAuth falls back 1455 -> 1457 with cancel request; subagent sessions send parent id as prompt cache key (`session/llm/request.ts`), Codex `session-id`, Copilot `X-Interaction-Id`; Copilot chat keeps late `reasoningOpaque`; Copilot Responses passes effort/sampling for all model ids, system role always `system`.
+- 4b provider/models (`023f76f6fc` `3441b95afc` `82947af8e3` `93afa91904` `7d1e212fb5` `a701129184` `35bb8e44ef` `d8129ca1e0`): models.dev refresh 5 min, cache write failure logged not fatal; SSE idle timer ignores `:` comment heartbeats (`wrapSSE`); Vertex default `global` (B6, legacy + core plugin); Copilot `grok-*`/`mai-code-*` use Responses (`gemini-*` stays chat per later upstream `1a9e29a0b9`); Console config responses closed unread; empty provider name falls back to catalog; `chunkTimeout` default 15 min.
+- 4c session/MCP/permissions (`bc5ff1cfd9` `1aae92c42a` `bfdbf43ef8` `b31747124b` `22f2604ffa` `59f0e3a378` `2937f0e635` `9c65a69937` `8889447f5a` `148042ab81` `757e565c23`): corrected sibling permission asks fail with `CorrectedError` so the turn continues (B2); MCP tool calls default 12 h fixed budget (no progress reset); Code Mode row shows error state; compaction truncates tool output by code point; fork skips incomplete assistant messages (running shells); `webfetch` per-URL permission rules; compaction prompt tweaks (Completed wording, max 15 files, single-line bullets); task `model: ""` ignored.
+- 4d build/server/db (`a48d44955e` `aeed4b6375` `89d37a0f6d` `8f0f4be03c` `d8e31d846a`): compiled binary starts with `--no-warnings`; `GET /api/integration/:id` returns 404 `IntegrationNotFoundError`; DB files chmod owner-only before open (non-Windows, not `:memory:`; D1); detached HEAD build channel `detached`, branch names sanitized (D2; `9b4882db54` not ported); server PTY-connect auth skip matches the routed endpoint + `ticket`, not a URL regex.
+- Regenerated legacy SDK (`apiEndpoint`) and client (`packages/client` `bun run generate`) for the integration error.
+- Verification: opencode permission `reply - reject` 4/0, mcp/catalog 6/0, compaction surrogate 1/0, session fork 3/0, config granular webfetch 1/0, task blank model 5/0, transform parent cache key 1/0, plugin github-copilot 9/0, plugin codex 50/0, header-timeout 13/0, provider empty name + Vertex 10/0; core copilot-chat-model 12/0, openai-responses 7/0, models 10/0, provider-opencode 13/0, session-compaction prompt 3/0, database 0/2 skipped (Windows), database-migration concurrent 1/0; httpapi exercise `--mode effect --include integration` pass=7 fail=0 (3 known missing `/agent/sub`). Typecheck left to prePush.
+- Fixed: prePush typecheck failed on two test typings (`config.test.ts` webfetch literal `as const`, `transform.test.ts` headers union cast); opencode typecheck pass, granular webfetch 1/0, transform parent 1/0.
+- ERROR: core `test/plugin/provider-google-vertex.test.ts` fails at import, `ReferenceError: Cannot access 'GoogleVertexAnthropicPlugin' before initialization` (`core/src/plugin/provider.ts:51`), also with Stage 4 changes stashed (worker check); not fixed (V2 provider plugin, import-order cycle). TODO: add to AGENTS.md known failures after a confirming run.
+- Risk: oc's legacy PTY-ticket check (`opencode/src/server/.../middleware/authorization.ts`, `shared/pty-ticket.ts`) still uses the URL regex; Codex OAuth callback still listens on all interfaces (pre-existing, upstream binds localhost).
+
+### User
+Providers
+- GitHub Copilot uses your account's own API endpoint and says clearly when chat is not enabled for the account.
+- ChatGPT (Codex) models get the larger context windows from upstream, gpt-5.4 models are gone, and Codex sign-in tries a second port when the first is busy.
+- Subagents reuse their parent's prompt cache, and Vertex now defaults to the `global` location.
+
+Sessions
+- Correcting one of several permission prompts no longer stops the whole turn, long MCP tool calls are no longer cut off after 60 seconds, and forking a busy session skips the reply still in progress.
+
+---
+
 ## 2026-10-20 (~18:34) - v0.2.266 eepCompare - upstream 1.19 port stage 3: core tools, shell, search, config, snapshots - Claude Opus 5.5 (orchestrator) + Opus 5.5 high/medium workers; Implementation
 
 ### Agent

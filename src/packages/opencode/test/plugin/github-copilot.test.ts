@@ -1,10 +1,10 @@
 import { expect, test } from "bun:test"
 import type { Hooks } from "@opencode-ai/plugin"
-import { CopilotAuthPlugin } from "@/plugin/github-copilot/copilot"
+import { CopilotAuthPlugin, copilotBaseURL, copilotEntitlementError } from "@/plugin/github-copilot/copilot"
 
 type ChatHeaders = NonNullable<Hooks["chat.headers"]>
 
-async function hook() {
+async function hook(session: { parentID?: string } = {}) {
   const hooks = await CopilotAuthPlugin({
     directory: "",
     project: {} as never,
@@ -15,7 +15,7 @@ async function hook() {
     client: {
       session: {
         message: async () => ({ data: { parts: [] } }),
-        get: async () => ({ data: {} }),
+        get: async () => ({ data: session }),
       },
     } as never,
   })
@@ -53,4 +53,36 @@ test("does not add interaction headers to other providers", async () => {
   const output = { headers: { "x-existing": "preserved" } }
   await headers(input("ses_one", "openai", "@ai-sdk/openai"), output)
   expect(output.headers).toEqual({ "x-existing": "preserved" })
+})
+
+test("uses the parent session ID as the interaction ID for child sessions", async () => {
+  const headers = await hook({ parentID: "ses_parent" })
+  const output = { headers: {} as Record<string, string> }
+  await headers(input("ses_child", "github-copilot", "@ai-sdk/github-copilot"), output)
+  expect(output.headers).toMatchObject({ "X-Interaction-Id": "ses_parent", "x-initiator": "agent" })
+})
+
+test("prefers the account-specific Copilot API endpoint", () => {
+  expect(
+    copilotBaseURL({
+      enterpriseUrl: "company.ghe.com",
+      apiEndpoint: "https://api.business.githubcopilot.com",
+    }),
+  ).toBe("https://api.business.githubcopilot.com")
+  expect(copilotBaseURL({ enterpriseUrl: "company.ghe.com" })).toBe("https://copilot-api.company.ghe.com")
+  expect(copilotBaseURL()).toBe("https://api.githubcopilot.com")
+})
+
+test("rejects accounts without Copilot chat access", () => {
+  expect(copilotEntitlementError({ chat_enabled: false, can_signup_for_limited: true })).toContain("Copilot Free")
+  expect(copilotEntitlementError({ chat_enabled: false, can_signup_for_limited: false })).toContain(
+    "subscription or a seat",
+  )
+  expect(copilotEntitlementError({ chat_enabled: false })).toContain("subscription or a seat")
+})
+
+test("only blocks on an explicit entitlement denial", () => {
+  expect(copilotEntitlementError({ chat_enabled: true })).toBeUndefined()
+  expect(copilotEntitlementError({ chat_enabled: true, can_signup_for_limited: true })).toBeUndefined()
+  expect(copilotEntitlementError({})).toBeUndefined()
 })

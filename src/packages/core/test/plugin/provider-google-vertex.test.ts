@@ -255,7 +255,7 @@ describe("GoogleVertexPlugin", () => {
     }),
   )
 
-  it.effect("defaults location to us-central1 when only project is configured", () =>
+  it.effect("defaults location to global when only project is configured", () =>
     withEnv(
       {
         GOOGLE_CLOUD_PROJECT: undefined,
@@ -277,7 +277,7 @@ describe("GoogleVertexPlugin", () => {
           yield* addPlugin()
           const provider = required(yield* catalog.provider.get(ProviderV2.ID.make("google-vertex")))
           expect(provider.request.body.project).toBe("config-project")
-          expect(provider.request.body.location).toBe("us-central1")
+          expect(provider.request.body.location).toBe("global")
         }),
     ),
   )

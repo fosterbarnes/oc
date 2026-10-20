@@ -2,7 +2,7 @@ import { Integration } from "@opencode-ai/core/integration"
 import { Effect } from "effect"
 import { HttpApiBuilder, HttpApiSchema } from "effect/unstable/httpapi"
 import { Api } from "../api"
-import { InvalidRequestError } from "@opencode-ai/protocol/errors"
+import { IntegrationNotFoundError, InvalidRequestError } from "@opencode-ai/protocol/errors"
 import { response } from "../location"
 
 const authorize = <A, R>(effect: Effect.Effect<A, Integration.AuthorizationError, R>) =>
@@ -30,7 +30,13 @@ export const IntegrationHandler = HttpApiBuilder.group(Api, "server.integration"
         "integration.get",
         Effect.fn(function* (ctx) {
           const service = yield* Integration.Service
-          return yield* response(service.get(ctx.params.integrationID))
+          const integration = yield* service.get(ctx.params.integrationID)
+          if (!integration)
+            return yield* new IntegrationNotFoundError({
+              integrationID: ctx.params.integrationID,
+              message: `Integration not found: ${ctx.params.integrationID}`,
+            })
+          return yield* response(Effect.succeed(integration))
         }),
       )
       .handle(

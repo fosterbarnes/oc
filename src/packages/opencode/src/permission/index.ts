@@ -40,15 +40,21 @@ export function evaluate(permission: string, pattern: string, ...rulesets: Permi
 }
 
 // File tools submit worktree-relative paths; absolute rules must match the actual target.
-export function evaluateFile(pattern: string, worktree: string, ...rulesets: PermissionV1.Ruleset[]): PermissionV1.Rule {
+export function evaluateFile(
+  pattern: string,
+  worktree: string,
+  ...rulesets: PermissionV1.Ruleset[]
+): PermissionV1.Rule {
   const absolute = path.resolve(worktree, pattern)
   const relative = path.relative(worktree, absolute)
-  return rulesets.flat().findLast((rule) => {
-    if (!Wildcard.match("edit", rule.permission)) return false
-    const target = path.isAbsolute(rule.pattern) ? absolute : relative
-    // In file globs **/ includes zero directories, unlike a command wildcard.
-    return Wildcard.match(target, rule.pattern.replaceAll("**/", "*").replaceAll("**\\", "*"))
-  }) ?? { permission: "edit", pattern: "*", action: "ask" }
+  return (
+    rulesets.flat().findLast((rule) => {
+      if (!Wildcard.match("edit", rule.permission)) return false
+      const target = path.isAbsolute(rule.pattern) ? absolute : relative
+      // In file globs **/ includes zero directories, unlike a command wildcard.
+      return Wildcard.match(target, rule.pattern.replaceAll("**/", "*").replaceAll("**\\", "*"))
+    }) ?? { permission: "edit", pattern: "*", action: "ask" }
+  )
 }
 
 function actualFilePath(file: string): string {
@@ -98,12 +104,15 @@ const layer = Layer.effect(
       for (const pattern of request.patterns) {
         const file = request.permission === "edit" ? path.resolve(instance.worktree, pattern) : undefined
         // Explicit denials cannot be bypassed by an earlier "always" approval.
-        const configured = file ? evaluateFile(file, instance.worktree, ruleset) : evaluate(request.permission, pattern, ruleset)
-        const rule = configured.action === "deny"
-          ? configured
-          : file
-            ? evaluateFile(file, instance.worktree, ruleset, approved)
-            : evaluate(request.permission, pattern, ruleset, approved)
+        const configured = file
+          ? evaluateFile(file, instance.worktree, ruleset)
+          : evaluate(request.permission, pattern, ruleset)
+        const rule =
+          configured.action === "deny"
+            ? configured
+            : file
+              ? evaluateFile(file, instance.worktree, ruleset, approved)
+              : evaluate(request.permission, pattern, ruleset, approved)
         const resolved = file ? actualFilePath(file) : undefined
         const escaped = resolved && evaluateFile(resolved, instance.worktree, ruleset).action === "deny"
         const stream = file && process.platform === "win32" && file.slice(path.parse(file).root.length).includes(":")
@@ -170,7 +179,13 @@ const layer = Layer.effect(
             requestID: item.info.id,
             reply: "reject",
           })
-          yield* Deferred.fail(item.deferred, new PermissionV1.RejectedError())
+          // Feedback applies to the whole batch, so parallel asks don't end the step.
+          yield* Deferred.fail(
+            item.deferred,
+            input.message
+              ? new PermissionV1.CorrectedError({ feedback: input.message })
+              : new PermissionV1.RejectedError(),
+          )
         }
         return
       }
@@ -237,7 +252,11 @@ export function merge(...rulesets: PermissionV1.Ruleset[]): PermissionV1.Rule[] 
   return rulesets.flat()
 }
 
-export function disabled(tools: string[], ruleset: PermissionV1.Ruleset, turnRuleset?: PermissionV1.Ruleset): Set<string> {
+export function disabled(
+  tools: string[],
+  ruleset: PermissionV1.Ruleset,
+  turnRuleset?: PermissionV1.Ruleset,
+): Set<string> {
   const edits = ["edit", "write", "apply_patch"]
   const reads = ["list_mcp_resources", "list_mcp_resource_templates", "read_mcp_resource"]
   return new Set(
@@ -248,8 +267,8 @@ export function disabled(tools: string[], ruleset: PermissionV1.Ruleset, turnRul
         const rule = [...ruleset, ...(turnRuleset ?? [])].findLast((rule) => rule.permission === permission)
         return !rule || (rule.pattern === "*" && rule.action === "deny")
       }
-      const rule = ruleset.findLast((rule) =>
-        Wildcard.match(permission, rule.permission) || Wildcard.match(tool, rule.permission),
+      const rule = ruleset.findLast(
+        (rule) => Wildcard.match(permission, rule.permission) || Wildcard.match(tool, rule.permission),
       )
       return rule?.pattern === "*" && rule.action === "deny"
     }),

@@ -714,7 +714,7 @@ const scenarios: Scenario[] = [
       path: route("/api/integration/{integrationID}", { integrationID: "missing" }),
       headers: ctx.headers(),
     }))
-    .json(200, object),
+    .json(404, object, "status"),
   http.protected
     .post("/api/integration/{integrationID}/connect/key", "v2.integration.connect.key")
     .at((ctx) => ({

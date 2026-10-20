@@ -252,12 +252,23 @@ describe("doStream", () => {
     expect(reasoningEndIndex).toBeLessThan(textStartIndex)
 
     // In this fixture, reasoning_opaque comes AFTER content has started (in chunk 4)
-    // So it arrives too late to be attached to reasoning-end. But it should still
-    // be captured and included in the finish event's providerMetadata.
+    // So it arrives too late to be attached to reasoning-end. It should still be
+    // captured on the completed text part and the finish event.
     const reasoningEnd = parts.find((p) => p.type === "reasoning-end")
     expect(reasoningEnd).toMatchObject({
       type: "reasoning-end",
       id: "reasoning-0",
+    })
+
+    const textEnd = parts.find((p) => p.type === "text-end")
+    expect(textEnd).toEqual({
+      type: "text-end",
+      id: "txt-0",
+      providerMetadata: {
+        copilot: {
+          reasoningOpaque: "/PMlTqxqSJZnUBDHgnnJKLVI4eZQ",
+        },
+      },
     })
 
     // reasoning_opaque should be in the finish event's providerMetadata
@@ -306,6 +317,17 @@ describe("doStream", () => {
     expect(reasoningEnd).toMatchObject({
       type: "reasoning-end",
       id: "reasoning-0",
+      providerMetadata: {
+        copilot: {
+          reasoningOpaque: "ExXaGwW7jBo39OXRe9EPoFGN1rOtLJBx",
+        },
+      },
+    })
+
+    const textEnd = parts.find((p) => p.type === "text-end")
+    expect(textEnd).toEqual({
+      type: "text-end",
+      id: "txt-0",
       providerMetadata: {
         copilot: {
           reasoningOpaque: "ExXaGwW7jBo39OXRe9EPoFGN1rOtLJBx",
@@ -498,7 +520,9 @@ describe("doStream", () => {
 
     expect(parts.filter((part) => part.type === "error")).toEqual([])
     expect(
-      parts.filter((part) => part.type === "reasoning-delta" || part.type === "reasoning-end" || part.type === "tool-call"),
+      parts.filter(
+        (part) => part.type === "reasoning-delta" || part.type === "reasoning-end" || part.type === "tool-call",
+      ),
     ).toMatchObject([
       { type: "reasoning-delta", delta: "Read the readme first." },
       { type: "reasoning-end", providerMetadata: { copilot: { reasoningOpaque: "opaque-first" } } },

@@ -194,18 +194,13 @@ for (const variant of variants) {
         autoloadPackageJson: true,
         target: compileTarget as any,
         outfile: `dist/${name}/bin/${binaryName}`,
-        execArgv: [`--user-agent=opencode/${runtimeVersion}`, "--use-system-ca", "--"],
+        execArgv: [`--user-agent=opencode/${runtimeVersion}`, "--use-system-ca", "--no-warnings", "--"],
         windows: {},
       },
       files: {
         [treeSitterWorkerPath]: treeSitterWorker,
       },
-      entrypoints: [
-        "./src/index.ts",
-        workerPath,
-        spawnWorkerPath,
-        treeSitterWorkerPath,
-      ],
+      entrypoints: ["./src/index.ts", workerPath, spawnWorkerPath, treeSitterWorkerPath],
       define: {
         FFF_LIBC: JSON.stringify(item.abi === "musl" ? "musl" : "gnu"),
         OPENCODE_VERSION: `'${runtimeVersion}'`,

@@ -33,6 +33,7 @@ import { RuntimeFlags } from "@/effect/runtime-flags"
 import { ProviderError } from "./error"
 import { LocalDiscovery } from "./localDiscovery"
 import { HttpClient } from "effect/unstable/http"
+import * as Sse from "effect/unstable/encoding/Sse"
 import { httpClient } from "@opencode-ai/core/effect/app-node-platform"
 
 const OPENAI_HEADER_TIMEOUT_DEFAULT = 300_000
@@ -43,15 +44,26 @@ function wrapSSE(res: Response, ms: number, ctl: AbortController) {
   if (!res.headers.get("content-type")?.includes("text/event-stream")) return res
 
   const reader = res.body.getReader()
+  const decoder = new TextDecoder()
+  // Only real SSE events move the idle deadline; `: keepalive` comments must not keep a dead stream alive.
+  let deadline: number | undefined
+  const parser = Sse.makeParser((event) => {
+    if (event._tag === "Event") deadline = Date.now() + ms
+  })
   const body = new ReadableStream<Uint8Array>({
     async pull(ctrl) {
+      const expires = deadline ?? Date.now() + ms
+      deadline = expires
       const part = await new Promise<Awaited<ReturnType<typeof reader.read>>>((resolve, reject) => {
-        const id = setTimeout(() => {
-          const err = new ProviderError.ResponseStreamError("SSE read timed out")
-          ctl.abort(err)
-          reader.cancel(err).catch(() => {})
-          reject(err)
-        }, ms)
+        const id = setTimeout(
+          () => {
+            const err = new ProviderError.ResponseStreamError("SSE read timed out")
+            ctl.abort(err)
+            reader.cancel(err).catch(() => {})
+            reject(err)
+          },
+          Math.max(0, expires - Date.now()),
+        )
 
         reader.read().then(
           (part) => {
@@ -70,6 +82,7 @@ function wrapSSE(res: Response, ms: number, ctl: AbortController) {
         return
       }
 
+      parser.feed(decoder.decode(part.value, { stream: true }))
       ctrl.enqueue(part.value)
     },
     async cancel(reason) {
@@ -98,7 +111,8 @@ function timeoutController(ms: number) {
 // fetch layer, on top of `options.fetch` when a custom fetch is configured.
 function timeoutFetch(options: Record<string, any>) {
   const customFetch = options["fetch"]
-  const chunkTimeout = options["chunkTimeout"] ?? 300_000
+  // Reasoning models can stream nothing for minutes, so the SSE idle default is generous.
+  const chunkTimeout = options["chunkTimeout"] ?? 900_000
   const headerTimeout = options["headerTimeout"] ?? 300_000
   const timeout = options["timeout"]
 
@@ -282,8 +296,10 @@ function custom(dep: CustomDep): Record<string, CustomLoader> {
             if (model.api.endpoint === "responses" && sdk.responses) return sdk.responses(modelID)
             if (model.api.endpoint === "chat" && sdk.chat) return sdk.chat(modelID)
           }
+          // Copilot serves Grok and MAI Code only on /responses; advertised endpoint metadata above wins.
           const match = /^gpt-(\d+)/.exec(modelID)
           if (match && Number(match[1]) >= 5 && !modelID.startsWith("gpt-5-mini")) return sdk.responses(modelID)
+          if (modelID.startsWith("grok-") || modelID.startsWith("mai-code-")) return sdk.responses(modelID)
           return sdk.chat(modelID)
         },
         options: {},
@@ -567,7 +583,7 @@ function custom(dep: CustomDep): Record<string, CustomLoader> {
           env["GOOGLE_VERTEX_LOCATION"] ??
           env["GOOGLE_CLOUD_LOCATION"] ??
           env["VERTEX_LOCATION"] ??
-          "us-central1",
+          "global",
       )
 
       const autoload = Boolean(project)
@@ -1553,7 +1569,7 @@ const layer = Layer.effect(
           const existing = database[providerID]
           const parsed: Info = {
             id: ProviderV2.ID.make(providerID),
-            name: provider.name ?? existing?.name ?? providerID,
+            name: provider.name || existing?.name || providerID,
             env: provider.env ?? existing?.env ?? [],
             options: mergeDeep(existing?.options ?? {}, provider.options ?? {}),
             source: "config",

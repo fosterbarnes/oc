@@ -6,18 +6,18 @@ import { setTimeout as sleep } from "node:timers/promises"
 import { createServer } from "http"
 import { OpenAIWebSocketPool } from "./ws-pool"
 import { OauthCallbackPage } from "@opencode-ai/core/oauth/page"
-import {
-  openaiAccountId,
-  parseCodexQuotaHeaders,
-  reportUsageObservation,
-} from "../../provider/usage-observations"
+import { openaiAccountId, parseCodexQuotaHeaders, reportUsageObservation } from "../../provider/usage-observations"
 
 const CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"
 const ISSUER = "https://auth.openai.com"
 const CODEX_API_ENDPOINT = "https://chatgpt.com/backend-api/codex/responses"
 const OAUTH_PORT = 1455
+const OAUTH_FALLBACK_PORT = 1457
+const OAUTH_BIND_ATTEMPTS = 10
+const OAUTH_BIND_RETRY_MS = 200
 const OAUTH_POLLING_SAFETY_MARGIN_MS = 3000
-const ALLOWED_MODELS = new Set(["gpt-5.5", "gpt-5.3-codex-spark", "gpt-5.4", "gpt-5.4-mini", "gpt-6-sol", "gpt-6-luna"])
+// ChatGPT accounts lost gpt-5.4 and gpt-5.4-mini in Codex on 2026-08-31 (replacements: gpt-5.6-terra, gpt-5.6-luna).
+const ALLOWED_MODELS = new Set(["gpt-5.5", "gpt-5.3-codex-spark", "gpt-6-sol", "gpt-6-luna"])
 const DISALLOWED_MODELS = new Set(["gpt-5.5-pro"])
 
 interface PkceCodes {
@@ -164,15 +164,16 @@ interface PendingOAuth {
 }
 
 let oauthServer: ReturnType<typeof createServer> | undefined
+let oauthPort = OAUTH_PORT
 let pendingOAuth: PendingOAuth | undefined
 
 async function startOAuthServer(): Promise<{ port: number; redirectUri: string }> {
   if (oauthServer) {
-    return { port: OAUTH_PORT, redirectUri: `http://localhost:${OAUTH_PORT}/auth/callback` }
+    return { port: oauthPort, redirectUri: `http://localhost:${oauthPort}/auth/callback` }
   }
 
-  oauthServer = createServer((req, res) => {
-    const url = new URL(req.url || "/", `http://localhost:${OAUTH_PORT}`)
+  const server = createServer((req, res) => {
+    const url = new URL(req.url || "/", "http://localhost")
 
     if (url.pathname === "/auth/callback") {
       const code = url.searchParams.get("code")
@@ -210,7 +211,7 @@ async function startOAuthServer(): Promise<{ port: number; redirectUri: string }
       const current = pendingOAuth
       pendingOAuth = undefined
 
-      exchangeCodeForTokens(code, `http://localhost:${OAUTH_PORT}/auth/callback`, current.pkce)
+      exchangeCodeForTokens(code, `http://localhost:${oauthPort}/auth/callback`, current.pkce)
         .then((tokens) => current.resolve(tokens))
         .catch((err) => current.reject(err))
 
@@ -231,14 +232,37 @@ async function startOAuthServer(): Promise<{ port: number; redirectUri: string }
     res.end("Not found")
   })
 
-  await new Promise<void>((resolve, reject) => {
-    oauthServer!.listen(OAUTH_PORT, () => {
-      resolve()
-    })
-    oauthServer!.on("error", reject)
-  })
+  oauthPort = await listenOAuthServer(server)
+  oauthServer = server
+  return { port: oauthPort, redirectUri: `http://localhost:${oauthPort}/auth/callback` }
+}
 
-  return { port: OAUTH_PORT, redirectUri: `http://localhost:${OAUTH_PORT}/auth/callback` }
+async function listenOAuthServer(server: ReturnType<typeof createServer>) {
+  if (await bindOAuthServer(server, OAUTH_PORT, 1)) return OAUTH_PORT
+  // Another login (a stale OpenCode or Codex CLI) usually holds the port; ask it to cancel, then retry.
+  await fetch(`http://localhost:${OAUTH_PORT}/cancel`, { signal: AbortSignal.timeout(2000) }).catch(() => undefined)
+  await sleep(OAUTH_BIND_RETRY_MS)
+  if (await bindOAuthServer(server, OAUTH_PORT, OAUTH_BIND_ATTEMPTS - 1)) return OAUTH_PORT
+  if (await bindOAuthServer(server, OAUTH_FALLBACK_PORT, OAUTH_BIND_ATTEMPTS)) return OAUTH_FALLBACK_PORT
+  throw new Error(
+    `OpenAI browser login needs local port ${OAUTH_PORT} or ${OAUTH_FALLBACK_PORT}, but both are already in use. Stop the processes using those ports or choose ChatGPT Pro/Plus (headless), then try again.`,
+  )
+}
+
+// Resolves false when the port is still in use after `attempts` tries; other listen errors reject.
+async function bindOAuthServer(server: ReturnType<typeof createServer>, port: number, attempts: number) {
+  const error = await new Promise<NodeJS.ErrnoException | undefined>((resolve) => {
+    server.once("error", resolve)
+    server.listen(port, () => {
+      server.off("error", resolve)
+      resolve(undefined)
+    })
+  })
+  if (!error) return true
+  if (error.code !== "EADDRINUSE") throw error
+  if (attempts <= 1) return false
+  await sleep(OAUTH_BIND_RETRY_MS)
+  return bindOAuthServer(server, port, attempts - 1)
 }
 
 function stopOAuthServer() {
@@ -317,14 +341,11 @@ export async function CodexAuthPlugin(input: PluginInput, options: CodexAuthPlug
                   output: 0,
                   cache: { read: 0, write: 0 },
                 },
+                // Match Codex CLI so context consumption and subscription usage stay consistent between clients.
                 limit:
-                  model.id.includes("gpt-5.5") || model.id.includes("gpt-5.6")
-                    ? {
-                        context: 400_000,
-                        input: 272_000,
-                        output: 128_000,
-                      }
-                    : model.limit,
+                  model.api.id === "gpt-6.1-sol"
+                    ? { ...model.limit, context: 628_000, input: 500_000 }
+                    : { ...model.limit, context: 400_000, input: 272_000 },
               },
             ]),
         )
@@ -575,15 +596,25 @@ export async function CodexAuthPlugin(input: PluginInput, options: CodexAuthPlug
         },
       ],
     },
-    "chat.headers": async (input, output) => {
-      if (input.model.providerID !== "openai") return
+    "chat.headers": async (incoming, output) => {
+      if (incoming.model.providerID !== "openai") return
+      const session = await input.client.session
+        .get({
+          path: { id: incoming.sessionID },
+          query: { directory: input.directory },
+          throwOnError: true,
+        })
+        .catch(() => undefined)
       output.headers.originator = "opencode"
       output.headers["User-Agent"] = `opencode/${InstallationVersion} (${os.platform()} ${os.release()}; ${os.arch()})`
-      output.headers["session-id"] = input.sessionID
+      // ChatGPT routes its prompt cache on this header, so children share the parent's.
+      // The WebSocket pool keys on x-session-affinity, which stays the child's own ID.
+      output.headers["session-id"] = session?.data.parentID ?? incoming.sessionID
       // Temporary fetch-layer hack: title generation currently shares the conversation
       // session ID, so the OpenAI plugin marks it for HTTP fallback until transport
       // context can be passed directly instead of smuggled through headers.
-      if (websocketFetchInstalled && (input.agent === "title" || input.agent === "rename")) output.headers[OpenAIWebSocketPool.TITLE_HEADER] = "true"
+      if (websocketFetchInstalled && (incoming.agent === "title" || incoming.agent === "rename"))
+        output.headers[OpenAIWebSocketPool.TITLE_HEADER] = "true"
     },
     "chat.params": async (input, output) => {
       if (input.model.providerID !== "openai") return

@@ -15,6 +15,16 @@ test("compaction prompt preserves detailed work state and relevant files", () =>
   expect(prompt).toContain("## Relevant Files")
 })
 
+test("compaction prompt scopes Completed to finished work and bounds relevant files", () => {
+  const prompt = SessionCompaction.buildPrompt({ context: ["conversation history"] })
+
+  expect(prompt).toContain('### Completed\n- [finished work or changes made; otherwise "(none)"]')
+  expect(prompt).not.toContain("verified facts")
+  expect(prompt).toContain("constraints/preferences stated by the user")
+  expect(prompt).toContain("List at most 15 Relevant Files, most important first.")
+  expect(prompt).toContain("Use terse, single-line bullets, not prose paragraphs or nested lists.")
+})
+
 test("compaction prompt gives update instructions for a prior summary", () => {
   const prompt = SessionCompaction.buildPrompt({
     context: ["new conversation"],

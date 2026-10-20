@@ -101,10 +101,10 @@ export const OpencodePlugin = define<HttpClient.HttpClient | EventV2.Service | S
       providers = credential
         ? yield* fetchProviders(http, credential).pipe(
             Effect.catch((cause) =>
-               Effect.logWarning("failed to load OpenCode provider config", { cause }).pipe(
-                 Effect.annotateLogs({ channel: "plugin" }),
-                 Effect.as(undefined),
-               ),
+              Effect.logWarning("failed to load OpenCode provider config", { cause }).pipe(
+                Effect.annotateLogs({ channel: "plugin" }),
+                Effect.as(undefined),
+              ),
             ),
           )
         : undefined
@@ -204,7 +204,8 @@ function fetchProviders(http: HttpClient.HttpClient, value: CredentialValue) {
   const server = typeof metadata?.server === "string" ? metadata.server : defaultServer
   const orgID = typeof metadata?.orgID === "string" ? metadata.orgID : undefined
   const token = value.type === "oauth" ? value.access : value.key
-  return http
+  // Scoped so responses whose body is never read (404, errors) are released here instead of by a GC-time abort.
+  return HttpClient.withScope(http)
     .execute(
       HttpClientRequest.get(`${server}/api/config`).pipe(
         HttpClientRequest.acceptJson,
@@ -220,6 +221,7 @@ function fetchProviders(http: HttpClient.HttpClient, value: CredentialValue) {
           Effect.map((remote) => remote.config.provider),
         )
       }),
+      Effect.scoped,
     )
 }
 

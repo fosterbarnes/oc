@@ -66,6 +66,14 @@ export type ProviderNotFoundError = {
 export const isProviderNotFoundError = (value: unknown): value is ProviderNotFoundError =>
   typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "ProviderNotFoundError"
 
+export type IntegrationNotFoundError = {
+  readonly _tag: "IntegrationNotFoundError"
+  readonly integrationID: string
+  readonly message: string
+}
+export const isIntegrationNotFoundError = (value: unknown): value is IntegrationNotFoundError =>
+  typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "IntegrationNotFoundError"
+
 export type PermissionNotFoundError = {
   readonly _tag: "PermissionNotFoundError"
   readonly requestID: string
@@ -2007,7 +2015,7 @@ export type IntegrationsGetOutput = {
       | { readonly type: "credential"; readonly id: string; readonly label: string }
       | { readonly type: "env"; readonly name: string }
     >
-  } | null
+  }
 }
 
 export type IntegrationsConnectKeyInput = {

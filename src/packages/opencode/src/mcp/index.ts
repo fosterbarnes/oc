@@ -823,7 +823,8 @@ const layer = Layer.effect(
     ) {
       return yield* withClient(
         clientName,
-        (client, timeout) => client.getPrompt({ name, arguments: args }, { timeout }),
+        (client, timeout) =>
+          client.getPrompt({ name, arguments: args }, { timeout: timeout ?? McpCatalog.DEFAULT_EXECUTION_TIMEOUT }),
         "getPrompt",
         { promptName: name },
       )

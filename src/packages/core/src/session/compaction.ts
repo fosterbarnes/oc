@@ -19,11 +19,11 @@ const SUMMARY_TEMPLATE = `Output exactly the Markdown structure shown inside <te
 - [one or two brief sentences describing what the user is trying to accomplish]
 
 ## Important Details
-- [constraints/preferences, decisions and why, important facts/assumptions, exact context needed to continue, or "(none)"]
+- [constraints/preferences stated by the user, decisions and why, important facts/assumptions, exact context needed to continue, or "(none)"]
 
 ## Work State
 ### Completed
-- [finished work, verified facts, or changes made; otherwise "(none)"]
+- [finished work or changes made; otherwise "(none)"]
 
 ### Active
 - [current work, partial changes, or investigation state; otherwise "(none)"]
@@ -41,7 +41,8 @@ const SUMMARY_TEMPLATE = `Output exactly the Markdown structure shown inside <te
 
 Rules:
 - Keep every section, even when empty.
-- Use terse bullets, not prose paragraphs.
+- Keep each section concise. Use terse, single-line bullets, not prose paragraphs or nested lists.
+- List at most 15 Relevant Files, most important first. Do not list every file that was read or changed.
 - Preserve exact file paths, symbols, commands, error strings, URLs, and identifiers when known.
 - Do not mention the summary process or that context was compacted.`
 const SUMMARY_UPDATE_INSTRUCTIONS = `The <prior-summary> summarizes everything that happened before the <conversation>. Construct a new summary that combines both. The <prior-summary> is discarded after this: anything you do not carry into the new summary is lost.

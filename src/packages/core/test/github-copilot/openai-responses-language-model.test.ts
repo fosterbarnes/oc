@@ -77,6 +77,30 @@ describe("doGenerate", () => {
     expect(providerMetadata?.copilot?.responseId).toBe("resp_1")
     expect(providerMetadata?.openai).toBeUndefined()
   })
+
+  test("passes reasoning and sampling settings through for any model id", async () => {
+    const mockFetch = createMockFetch({
+      id: "resp_1",
+      created_at: 0,
+      model: "test-model",
+      output: [],
+      usage: { input_tokens: 1, output_tokens: 1 },
+    })
+    const model = createModel(mockFetch)
+
+    const { warnings } = await model.doGenerate({
+      prompt: [{ role: "system", content: "Be brief" }, ...TEST_PROMPT],
+      temperature: 0.5,
+      providerOptions: { copilot: { reasoningEffort: "high", reasoningSummary: "auto", serviceTier: "flex" } },
+    } as any)
+
+    const body = JSON.parse((mockFetch.mock.calls[0] as any)[1].body)
+    expect(body.reasoning).toEqual({ effort: "high", summary: "auto" })
+    expect(body.temperature).toBe(0.5)
+    expect(body.service_tier).toBe("flex")
+    expect(body.input[0]).toEqual({ role: "system", content: "Be brief" })
+    expect(warnings).toEqual([])
+  })
 })
 
 describe("convertToOpenAIResponsesInput", () => {

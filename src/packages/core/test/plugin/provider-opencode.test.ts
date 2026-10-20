@@ -257,6 +257,28 @@ describe("OpencodePlugin", () => {
     ),
   )
 
+  it.effect("releases unread Console config responses when the fetch completes", () =>
+    Effect.gen(function* () {
+      const credentials = yield* Credential.Service
+      const signals: AbortSignal[] = []
+      const http = HttpClient.make((request, _url, signal) => {
+        signals.push(signal)
+        return Effect.succeed(HttpClientResponse.fromWeb(request, new Response("unavailable", { status: 404 })))
+      })
+      yield* credentials.create({
+        integrationID: Integration.ID.make("opencode"),
+        value: Credential.Key.make({ type: "key", key: "secret", metadata: { server: "https://console.test" } }),
+      })
+      yield* addPlugin(http)
+
+      // An unreleased response is only aborted when garbage collected.
+      yield* eventually(
+        Effect.sync(() => signals),
+        (items) => items.length > 0 && items.every((signal) => signal.aborted),
+      )
+    }),
+  )
+
   it.effect("uses a public key and disables paid models without credentials", () =>
     withEnv({ OPENCODE_API_KEY: undefined }, () =>
       Effect.gen(function* () {

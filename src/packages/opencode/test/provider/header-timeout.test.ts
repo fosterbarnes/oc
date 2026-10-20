@@ -129,6 +129,33 @@ it.live("configured chunkTimeout raises a retryable response stream error when S
   }),
 )
 
+it.live("chunkTimeout ignores SSE comment heartbeats", () =>
+  Effect.gen(function* () {
+    const server = yield* Effect.acquireRelease(
+      Effect.promise(() => heartbeatServer(10)),
+      (server) => Effect.sync(() => closeServer(server.server)),
+    )
+
+    yield* provideTmpdirInstance(
+      () =>
+        Effect.gen(function* () {
+          const provider = yield* Provider.Service
+          const model = yield* provider.getModel(ProviderV2.ID.make("test"), ModelV2.ID.make("test-model"))
+          const result = streamText({
+            model: yield* provider.getLanguage(model),
+            onError() {},
+            messages: [{ role: "user", content: "hello" }],
+          })
+
+          expect(yield* Effect.promise(() => firstStreamError(result.fullStream))).toBeInstanceOf(
+            ProviderError.ResponseStreamError,
+          )
+        }),
+      { config: providerConfig(server.url, { chunkTimeout: 100 }) },
+    )
+  }),
+)
+
 it.live("chunkTimeout can be disabled with false", () =>
   Effect.gen(function* () {
     const server = yield* Effect.acquireRelease(
@@ -392,6 +419,20 @@ async function delayedBodyServer(delay: number): Promise<{ server: Server; url: 
     setTimeout(() => {
       res.end('data: {"choices":[{"delta":{"content":"late"}}]}\n\ndata: [DONE]\n\n')
     }, delay)
+  })
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve))
+  const address = server.address()
+  if (!address || typeof address === "string") throw new Error("server did not bind to a TCP port")
+  return { server, url: `http://127.0.0.1:${address.port}` }
+}
+
+// Sends one real event, then only `: keepalive` comments until the client disconnects.
+async function heartbeatServer(interval: number): Promise<{ server: Server; url: string }> {
+  const server = createServer((_, res) => {
+    res.writeHead(200, { "content-type": "text/event-stream" })
+    res.write('data: {"choices":[{"delta":{"content":"partial"}}]}\n\n')
+    const id = setInterval(() => res.write(": keepalive\n\n"), interval)
+    res.on("close", () => clearInterval(id))
   })
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve))
   const address = server.address()

@@ -14177,6 +14177,16 @@
                 }
               }
             }
+          },
+          "404": {
+            "description": "IntegrationNotFoundError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationNotFoundError"
+                }
+              }
+            }
           }
         },
         "description": "Retrieve one integration and its authentication methods.",
@@ -17667,6 +17677,9 @@
             "type": "string"
           },
           "enterpriseUrl": {
+            "type": "string"
+          },
+          "apiEndpoint": {
             "type": "string"
           }
         },
@@ -22827,7 +22840,7 @@
                 "$ref": "#/components/schemas/PermissionActionConfig"
               },
               "webfetch": {
-                "$ref": "#/components/schemas/PermissionActionConfig"
+                "$ref": "#/components/schemas/PermissionRuleConfig"
               },
               "websearch": {
                 "$ref": "#/components/schemas/PermissionActionConfig"
@@ -27997,6 +28010,23 @@
           }
         },
         "required": ["_tag", "providerID", "message"],
+        "additionalProperties": false
+      },
+      "IntegrationNotFoundError": {
+        "type": "object",
+        "properties": {
+          "_tag": {
+            "type": "string",
+            "enum": ["IntegrationNotFoundError"]
+          },
+          "integrationID": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": ["_tag", "integrationID", "message"],
         "additionalProperties": false
       },
       "OutputFormat1": {

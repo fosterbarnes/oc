@@ -8,6 +8,7 @@ import { MessageV2 } from "@/session/message-v2"
 
 const CLIENT_ID = "Ov23li8tweQw6odWQebz"
 const API_VERSION = "2026-06-01"
+const USER_API_VERSION = "2025-04-01"
 const UTILITY_MODELS = ["gpt-5.4-nano", "gpt-4.1", "gpt-4o", "gpt-4o-mini"]
 // Add a small safety buffer when polling to avoid hitting the server
 // slightly too early due to clock skew / timer drift.
@@ -23,8 +24,41 @@ function getUrls(domain: string) {
   }
 }
 
-function base(enterpriseUrl?: string) {
-  return enterpriseUrl ? `https://copilot-api.${normalizeDomain(enterpriseUrl)}` : "https://api.githubcopilot.com"
+// Prefer the account-specific endpoint from /copilot_internal/user (Business and
+// other plans can be served by a different host than api.githubcopilot.com).
+export function copilotBaseURL(auth?: { enterpriseUrl?: string; apiEndpoint?: string }) {
+  if (auth?.apiEndpoint) return auth.apiEndpoint
+  return auth?.enterpriseUrl
+    ? `https://copilot-api.${normalizeDomain(auth.enterpriseUrl)}`
+    : "https://api.githubcopilot.com"
+}
+
+// GitHub reports Copilot access on /copilot_internal/user; OAuth itself succeeds
+// for any GitHub account, so this is the only signal that the account can chat.
+export function copilotEntitlementError(user: { chat_enabled?: unknown; can_signup_for_limited?: unknown }) {
+  if (user.chat_enabled !== false) return
+  if (user.can_signup_for_limited)
+    return "This GitHub account is not signed up for GitHub Copilot. Sign up for Copilot Free at https://github.com/features/copilot/plans and connect again."
+  return "This GitHub account does not have GitHub Copilot access. It needs an active Copilot subscription or a seat assigned by an organization."
+}
+
+// A failed or malformed lookup returns undefined so a GitHub hiccup never blocks login.
+async function copilotUser(domain: string, token: string) {
+  const response = await fetch(
+    `${domain === "github.com" ? "https://api.github.com" : `https://api.${domain}`}/copilot_internal/user`,
+    {
+      headers: {
+        Accept: "application/json",
+        Authorization: `Bearer ${token}`,
+        "User-Agent": `opencode/${InstallationVersion}`,
+        "X-GitHub-Api-Version": USER_API_VERSION,
+      },
+    },
+  ).catch(() => undefined)
+  if (!response?.ok) return undefined
+  const user: unknown = await response.json().catch(() => undefined)
+  if (!user || typeof user !== "object") return undefined
+  return user as { chat_enabled?: unknown; can_signup_for_limited?: unknown; endpoints?: { api?: unknown } }
 }
 
 // Check if a message is a synthetic user msg used to attach an image from a tool call
@@ -62,13 +96,15 @@ export async function CopilotAuthPlugin(input: PluginInput): Promise<Hooks> {
       async models(provider, ctx) {
         if (ctx.auth?.type !== "oauth") {
           models = {}
-          return Object.fromEntries(Object.entries(provider.models).map(([id, model]) => [id, fix(model, base())]))
+          return Object.fromEntries(
+            Object.entries(provider.models).map(([id, model]) => [id, fix(model, copilotBaseURL())]),
+          )
         }
 
         const auth = ctx.auth
 
         return CopilotModels.get(
-          base(auth.enterpriseUrl),
+          copilotBaseURL(auth),
           {
             ...(provider.options?.headers as Record<string, string> | undefined),
             Authorization: `Bearer ${auth.refresh}`,
@@ -87,7 +123,7 @@ export async function CopilotAuthPlugin(input: PluginInput): Promise<Hooks> {
           .catch((error) => {
             models = {}
             return Object.fromEntries(
-              Object.entries(provider.models).map(([id, model]) => [id, fix(model, base(auth.enterpriseUrl))]),
+              Object.entries(provider.models).map(([id, model]) => [id, fix(model, copilotBaseURL(auth))]),
             )
           })
       },
@@ -285,6 +321,11 @@ export async function CopilotAuthPlugin(input: PluginInput): Promise<Hooks> {
                   }
 
                   if (data.access_token) {
+                    const user = await copilotUser(domain, data.access_token)
+                    // Only an explicit entitlement answer blocks login.
+                    const denied = user && copilotEntitlementError(user)
+                    if (denied) throw new Error(denied)
+
                     const result: {
                       type: "success"
                       refresh: string
@@ -292,6 +333,7 @@ export async function CopilotAuthPlugin(input: PluginInput): Promise<Hooks> {
                       expires: number
                       provider?: string
                       enterpriseUrl?: string
+                      apiEndpoint?: string
                     } = {
                       type: "success",
                       refresh: data.access_token,
@@ -301,6 +343,11 @@ export async function CopilotAuthPlugin(input: PluginInput): Promise<Hooks> {
 
                     if (deploymentType === "enterprise") {
                       result.enterpriseUrl = domain
+                    }
+
+                    const apiEndpoint = user?.endpoints?.api
+                    if (typeof apiEndpoint === "string" && apiEndpoint) {
+                      result.apiEndpoint = apiEndpoint.replace(/\/+$/, "")
                     }
 
                     return result
@@ -361,8 +408,21 @@ export async function CopilotAuthPlugin(input: PluginInput): Promise<Hooks> {
     "chat.headers": async (incoming, output) => {
       if (!incoming.model.providerID.includes("github-copilot")) return
 
+      const session = await sdk.session
+        .get({
+          path: {
+            id: incoming.sessionID,
+          },
+          query: {
+            directory: input.directory,
+          },
+          throwOnError: true,
+        })
+        .catch(() => undefined)
+
       output.headers["X-GitHub-Api-Version"] = API_VERSION
-      output.headers["X-Interaction-Id"] = incoming.sessionID
+      // Subagents share the parent's interaction id so cache routing stays with the parent.
+      output.headers["X-Interaction-Id"] = session?.data.parentID ?? incoming.sessionID
       if (incoming.agent === "title") {
         output.headers["X-Interaction-Type"] = "agent-session-name-generation"
       }
@@ -397,18 +457,7 @@ export async function CopilotAuthPlugin(input: PluginInput): Promise<Hooks> {
         return
       }
 
-      const session = await sdk.session
-        .get({
-          path: {
-            id: incoming.sessionID,
-          },
-          query: {
-            directory: input.directory,
-          },
-          throwOnError: true,
-        })
-        .catch(() => undefined)
-      if (!session || !session.data.parentID) return
+      if (!session?.data.parentID) return
       // mark subagent sessions as agent initiated matching standard that other copilot tools have
       output.headers["x-initiator"] = "agent"
     },

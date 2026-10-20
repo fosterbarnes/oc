@@ -9,6 +9,8 @@ import { dynamicTool, jsonSchema, type JSONSchema7, type Tool } from "ai"
 import { Effect } from "effect"
 
 const DEFAULT_TIMEOUT = 30_000
+// Tool and prompt execution budget when no MCP timeout is configured; the SDK default (60s) cuts off long tools.
+export const DEFAULT_EXECUTION_TIMEOUT = 12 * 60 * 60 * 1_000
 const MAX_LIST_PAGES = 1_000
 
 const TolerantListToolsResultSchema = ListToolsResultSchema.extend({
@@ -64,10 +66,9 @@ export function convertTool(
         },
         CallToolResultSchema,
         {
-          resetTimeoutOnProgress: true,
           signal: options.abortSignal,
-          timeout,
-          // The MCP SDK only sends a progress token when this hook is present, enabling timeout resets.
+          // Hard wall-clock budget; progress tokens stay available but no longer reset the timer.
+          timeout: timeout ?? DEFAULT_EXECUTION_TIMEOUT,
           onprogress: () => {},
         },
       )

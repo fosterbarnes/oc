@@ -828,6 +828,35 @@ describe("tool.task", () => {
   )
 
   it.instance(
+    "blank model and task_id options are ignored",
+    () =>
+      Effect.gen(function* () {
+        const { chat, assistant } = yield* seed()
+        let seen: SessionPrompt.TurnInput | undefined
+        const def = yield* (yield* TaskTool).init()
+
+        const result = yield* def.execute(
+          { description: "inspect bug", prompt: "look", subagent_type: "general", model: "", task_id: "" },
+          {
+            sessionID: chat.id,
+            messageID: assistant.id,
+            agent: "build",
+            abort: new AbortController().signal,
+            extra: { promptOps: stubOps({ onPrompt: (input) => (seen = input) }) },
+            messages: [],
+            metadata: () => Effect.void,
+            ask: () => Effect.void,
+          },
+        )
+
+        expect(seen).toBeDefined()
+        expect(seen?.explicitModel).toBeFalsy()
+        expect(result.metadata.sessionId).toBeDefined()
+      }),
+    { config: modelConfig },
+  )
+
+  it.instance(
     "invalid, disabled, or unknown models fail before any child session is created",
     () =>
       Effect.gen(function* () {

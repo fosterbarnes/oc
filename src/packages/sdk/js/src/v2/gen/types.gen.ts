@@ -115,6 +115,7 @@ export type OAuth = {
   expires: number
   accountId?: string
   enterpriseUrl?: string
+  apiEndpoint?: string
 }
 
 export type ApiAuth = {

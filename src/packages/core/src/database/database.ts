@@ -5,6 +5,8 @@ import { layer as sqliteLayer } from "#sqlite"
 import { Context, Effect, Layer } from "effect"
 import { Global } from "../global"
 import { Flag } from "../flag/flag"
+import { closeSync, existsSync, openSync } from "node:fs"
+import { chmod } from "node:fs/promises"
 import { isAbsolute, join } from "path"
 import { DatabaseMigration } from "./migration"
 import { InstallationChannel } from "../installation/version"
@@ -37,7 +39,28 @@ const layer = Layer.effect(
 )
 
 export function layerFromPath(filename: string) {
-  return layer.pipe(Layer.provide(sqliteLayer({ filename })))
+  return Layer.unwrap(
+    Effect.promise(() => restrictToOwner(filename)).pipe(
+      Effect.as(layer.pipe(Layer.provide(sqliteLayer({ filename })))),
+    ),
+  )
+}
+
+// SQLite creates new sidecars with the database's mode, but does not tighten existing sidecars.
+// Windows relies on the user profile directory's inherited ACLs instead of POSIX modes.
+async function restrictToOwner(filename: string) {
+  if (process.platform === "win32" || filename === ":memory:") return
+  // Opening and closing an existing database can release another connection's POSIX locks.
+  // Create missing files synchronously so another fiber cannot open one before it is restricted.
+  if (!existsSync(filename)) closeSync(openSync(filename, "a", 0o600))
+  await chmod(filename, 0o600)
+  await Promise.all(
+    [`${filename}-wal`, `${filename}-shm`].map((file) =>
+      chmod(file, 0o600).catch((error: NodeJS.ErrnoException) => {
+        if (error.code !== "ENOENT") throw error
+      }),
+    ),
+  )
 }
 
 export function path() {

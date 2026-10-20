@@ -841,6 +841,45 @@ it.instance(
 )
 
 it.instance(
+  "reply - reject with message corrects all pending for same session",
+  () =>
+    Effect.gen(function* () {
+      const a = yield* ask({
+        id: PermissionV1.ID.make("per_test4c"),
+        sessionID: SessionID.make("session_same"),
+        permission: "bash",
+        patterns: ["ls"],
+        metadata: {},
+        always: [],
+        ruleset: [],
+      }).pipe(Effect.forkScoped)
+
+      const b = yield* ask({
+        id: PermissionV1.ID.make("per_test4d"),
+        sessionID: SessionID.make("session_same"),
+        permission: "edit",
+        patterns: ["foo.ts"],
+        metadata: {},
+        always: [],
+        ruleset: [],
+      }).pipe(Effect.forkScoped)
+
+      yield* waitForPending(2)
+      yield* reply({ requestID: PermissionV1.ID.make("per_test4c"), reply: "reject", message: "Use pwd" })
+
+      const [ea, eb] = yield* Effect.all([Fiber.await(a), Fiber.await(b)])
+      for (const exit of [ea, eb]) {
+        expect(Exit.isFailure(exit)).toBe(true)
+        if (!Exit.isFailure(exit)) continue
+        const err = Cause.squash(exit.cause)
+        expect(err).toBeInstanceOf(PermissionV1.CorrectedError)
+        expect(String(err)).toContain("Use pwd")
+      }
+    }),
+  { git: true },
+)
+
+it.instance(
   "reply - always resolves matching pending requests in same session",
   () =>
     Effect.gen(function* () {

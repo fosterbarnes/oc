@@ -298,6 +298,7 @@ describe("plugin.codex", () => {
             "gpt-5.7-pro",
             "gpt-6-sol",
             "gpt-6-luna",
+            "gpt-6.1-sol",
           ].map((id) => [id, { id, api: { id }, limit, cost: {}, options: {} }]),
         ),
         "gpt-5.4-pro": {
@@ -314,18 +315,35 @@ describe("plugin.codex", () => {
           cost: {},
           options: { reasoningEffort: "high" },
         },
+        "gpt-6.1-sol-fast": {
+          id: "gpt-6.1-sol-fast",
+          api: { id: "gpt-6.1-sol" },
+          limit,
+          cost: {},
+          options: {},
+        },
+        "gpt-5.5-small-output": {
+          id: "gpt-5.5-small-output",
+          api: { id: "gpt-5.5" },
+          limit: { context: 1_050_000, input: 922_000, output: 64_000 },
+          cost: {},
+          options: {},
+        },
       },
     }
 
     const models = await hooks.provider!.models!(provider as never, { auth: { type: "oauth" } } as never)
 
-    expect(models["gpt-5.4"]?.limit).toEqual(limit)
+    expect(models["gpt-5.4"]).toBeUndefined()
     expect(models["gpt-5.5"]?.limit).toEqual({ context: 400_000, input: 272_000, output: 128_000 })
     expect(models["gpt-5.6-sol"]?.limit).toEqual({ context: 400_000, input: 272_000, output: 128_000 })
     expect(models["gpt-5.6-terra"]?.limit).toEqual({ context: 400_000, input: 272_000, output: 128_000 })
     expect(models["gpt-5.6-luna"]?.limit).toEqual({ context: 400_000, input: 272_000, output: 128_000 })
-    expect(models["gpt-6-sol"]?.limit).toEqual(limit)
-    expect(models["gpt-6-luna"]?.limit).toEqual(limit)
+    expect(models["gpt-6-sol"]?.limit).toEqual({ context: 400_000, input: 272_000, output: 128_000 })
+    expect(models["gpt-6-luna"]?.limit).toEqual({ context: 400_000, input: 272_000, output: 128_000 })
+    expect(models["gpt-6.1-sol"]?.limit).toEqual({ context: 628_000, input: 500_000, output: 128_000 })
+    expect(models["gpt-6.1-sol-fast"]?.limit).toEqual({ context: 628_000, input: 500_000, output: 128_000 })
+    expect(models["gpt-5.5-small-output"]?.limit).toEqual({ context: 400_000, input: 272_000, output: 64_000 })
     expect(models["gpt-5.4-pro"]).toBeUndefined()
     expect(models["gpt-5.7-pro"]).toBeDefined()
     expect(models["gpt-5.6-sol-high"]).toBeDefined()
@@ -346,6 +364,10 @@ describe("plugin.codex", () => {
     ["gpt-5.10-astra", true],
     ["gpt-5.40", true],
     ["gpt-5", false],
+    ["gpt-5.4", false],
+    ["gpt-5.4-mini", false],
+    ["gpt-6-sol", true],
+    ["gpt-6-luna", true],
     ["gpt-5.4-astra", false],
     ["gpt-5.04-astra", false],
     ["gpt-4.1", false],
@@ -367,6 +389,27 @@ describe("plugin.codex", () => {
     const models = await hooks.provider!.models!(provider as never, { auth: { type: "oauth" } } as never)
 
     expect(Object.keys(models)).toEqual(allowed ? [id] : [])
+  })
+
+  test("shares the parent session ID in the session-id header", async () => {
+    const parents: Record<string, string | undefined> = { ses_child: "ses_parent", ses_root: undefined }
+    const hooks = await CodexAuthPlugin({
+      directory: "",
+      client: {
+        session: { get: async (input: { path: { id: string } }) => ({ data: { parentID: parents[input.path.id] } }) },
+      },
+    } as never)
+    const headers = async (sessionID: string) => {
+      const output = { headers: {} as Record<string, string> }
+      await hooks["chat.headers"]!(
+        { sessionID, agent: "build", model: { providerID: "openai" }, message: { sessionID } } as never,
+        output,
+      )
+      return output.headers
+    }
+
+    expect((await headers("ses_child"))["session-id"]).toBe("ses_parent")
+    expect((await headers("ses_root"))["session-id"]).toBe("ses_root")
   })
 
   test("deduplicates concurrent Codex token refreshes", async () => {

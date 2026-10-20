@@ -65,6 +65,40 @@ describe("McpCatalog.convertTool", () => {
       content: [{ type: "text", text: JSON.stringify(structuredContent) }],
     })
   })
+
+  test("uses the execution budget instead of the SDK default when no timeout is configured", async () => {
+    const calls: any[] = []
+    const client = {
+      callTool: async (_params: unknown, _schema: unknown, requestOptions: unknown) => {
+        calls.push(requestOptions)
+        return { content: [] }
+      },
+    } as unknown as Client
+
+    await McpCatalog.convertTool(mcpTool(), client).execute?.({}, options)
+
+    expect(calls[0].timeout).toBe(McpCatalog.DEFAULT_EXECUTION_TIMEOUT)
+    expect(calls[0].resetTimeoutOnProgress).toBeUndefined()
+  })
+
+  test("applies the configured MCP execution timeout", async () => {
+    const server = new Server({ name: "timeout", version: "1.0.0" }, { capabilities: { tools: {} } })
+    server.setRequestHandler(CallToolRequestSchema, async () => {
+      await Bun.sleep(100)
+      return { content: [] }
+    })
+    const client = new Client({ name: "timeout-test", version: "1.0.0" })
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair()
+    await Promise.all([client.connect(clientTransport), server.connect(serverTransport)])
+
+    try {
+      await expect(McpCatalog.convertTool(mcpTool(), client, 10).execute?.({}, options)).rejects.toThrow(
+        "Request timed out",
+      )
+    } finally {
+      await Promise.all([client.close(), server.close()])
+    }
+  })
 })
 
 test("preserves output schema validation across paginated tool discovery", async () => {

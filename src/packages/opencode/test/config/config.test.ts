@@ -2380,6 +2380,12 @@ test("parseManagedPlist parses permission rules", async () => {
   expect(bash?.["curl *"]).toBe("deny")
 })
 
+test("parses granular webfetch permissions", () => {
+  const webfetch = { "*": "ask", "https://en.wikipedia.org/*": "allow" } as const
+  const config = ConfigParse.schema(ConfigV1.Info, { permission: { webfetch } }, "test:webfetch")
+  expect(config.permission?.webfetch).toEqual(webfetch)
+})
+
 test("parseManagedPlist parses enabled_providers", async () => {
   const config = ConfigParse.schema(
     ConfigV1.Info,

@@ -49,8 +49,20 @@ type CompletedCompaction = {
   summary: string | undefined
 }
 
-const truncate = (value: string) =>
-  value.length <= TOOL_OUTPUT_MAX_CHARS ? value : `${value.slice(0, TOOL_OUTPUT_MAX_CHARS)}\n[truncated]`
+// Counts code points so the cut never leaves a lone surrogate in the compaction prompt.
+export const truncateToolOutput = (value: string) => {
+  if (value.length <= TOOL_OUTPUT_MAX_CHARS) return value
+  let end = 0
+  for (let count = 0; count < TOOL_OUTPUT_MAX_CHARS && end < value.length; count++) {
+    const code = value.charCodeAt(end)
+    end +=
+      code >= 0xd800 && code <= 0xdbff && value.charCodeAt(end + 1) >= 0xdc00 && value.charCodeAt(end + 1) <= 0xdfff
+        ? 2
+        : 1
+  }
+  if (end === value.length) return value
+  return `${value.slice(0, end)}\n[truncated]`
+}
 
 const serialize = (message: SessionV1.WithParts) => {
   if (message.info.role === "user") {
@@ -76,7 +88,7 @@ const serialize = (message: SessionV1.WithParts) => {
         )
         const output = part.state.time.compacted
           ? "[Old tool result content cleared]"
-          : truncate([part.state.output, ...attachments].join("\n"))
+          : truncateToolOutput([part.state.output, ...attachments].join("\n"))
         return [call, `[Tool result]: ${output}`]
       }
       if (part.state.status === "error") return [call, `[Tool error]: ${part.state.error}`]
@@ -572,7 +584,9 @@ const layer = Layer.effect(
       overflow?: boolean
     }) {
       const previous = input.auto
-        ? (yield* session.messages({ sessionID: input.sessionID }).pipe(Effect.orDie)).findLast((message) => message.info.role === "user")
+        ? (yield* session.messages({ sessionID: input.sessionID }).pipe(Effect.orDie)).findLast(
+            (message) => message.info.role === "user",
+          )
         : undefined
       const msg = yield* session.updateMessage({
         id: MessageID.ascending(),

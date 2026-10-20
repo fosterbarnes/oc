@@ -131,6 +131,15 @@ it.instance(
 )
 
 it.instance(
+  "empty configured provider name keeps the catalog name",
+  Effect.gen(function* () {
+    const providers = yield* list
+    expect(providers[ProviderV2.ID.anthropic].name).toBe("Anthropic")
+  }),
+  { config: { provider: { anthropic: { name: "", options: { apiKey: "config-api-key" } } } } },
+)
+
+it.instance(
   "disabled_providers excludes provider",
   Effect.gen(function* () {
     yield* setProcessEnv("ANTHROPIC_API_KEY", "test-api-key")
@@ -1949,6 +1958,18 @@ it.instance("Google Vertex: uses REP endpoint for Gemini continental multi-regio
     const language = yield* provider.getLanguage(model)
     expect(languageBaseURL(language)).toBe(
       "https://aiplatform.eu.rep.googleapis.com/v1beta1/projects/test-project/locations/eu/publishers/google",
+    )
+  }),
+)
+
+it.instance("Google Vertex: defaults location to global", () =>
+  Effect.gen(function* () {
+    yield* set("GOOGLE_CLOUD_PROJECT", "test-project")
+    const provider = yield* Provider.Service
+    const model = yield* provider.getModel(ProviderV2.ID.make("google-vertex"), ModelV2.ID.make("gemini-3.5-flash"))
+    const language = yield* provider.getLanguage(model)
+    expect(languageBaseURL(language)).toBe(
+      "https://aiplatform.googleapis.com/v1beta1/projects/test-project/locations/global/publishers/google",
     )
   }),
 )

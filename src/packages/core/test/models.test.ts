@@ -176,6 +176,28 @@ describe("ModelsDev Service", () => {
     }),
   )
 
+  it.live("get() still populates the catalog when the cache write fails", () =>
+    Effect.gen(function* () {
+      // A non-empty directory at the cache path makes the temp-file rename fail.
+      yield* Effect.promise(() => mkdir(path.join(cacheFile, "blocker"), { recursive: true }))
+      const state = yield* Ref.make({ ...initialState, body: JSON.stringify(fixture2) })
+      const context = yield* Layer.build(buildLayer(state))
+      const result = yield* Effect.acquireUseRelease(
+        Effect.sync(() => {
+          Flag.OPENCODE_DISABLE_MODELS_FETCH = false
+        }),
+        () => ModelsDev.Service.use((s) => s.get()).pipe(Effect.provide(context)),
+        () =>
+          Effect.sync(() => {
+            Flag.OPENCODE_DISABLE_MODELS_FETCH = true
+          }),
+      ).pipe(Effect.ensuring(Effect.promise(() => rm(cacheFile, { recursive: true, force: true }))))
+      expect(result).toEqual(fixture2)
+      const final = yield* Ref.get(state)
+      expect(final.calls.length).toBe(1)
+    }),
+  )
+
   it.live("get() is single-flight under concurrent calls", () =>
     Effect.gen(function* () {
       yield* writeCache(fixture)

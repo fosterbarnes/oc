@@ -228,8 +228,9 @@ export const TaskTool = Tool.define(
         return yield* Effect.fail(new Error(`Configured default_subagent "${subagentType}" is a primary agent`))
       }
 
-      const override = params.model === undefined ? undefined : parseModelOverride(params.model)
-      if (params.model !== undefined && !override) {
+      // Models sometimes send `model: ""` for an omitted option; treat it as absent.
+      const override = params.model ? parseModelOverride(params.model) : undefined
+      if (params.model && !override) {
         return yield* Effect.fail(
           new Error(`Invalid model "${params.model}": use provider/model or provider/model#variant`),
         )
