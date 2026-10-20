@@ -169,6 +169,24 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-19 (~23:24) - v0.2.258 alchemistNolan - detailed prompt-bar line for a lone subagent - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation (after /spit plan); completed
+- Version: 0.2.258 alchemistNolan
+- Changed `contextUsage` (`tui/src/util/contextUsage.ts`): also returns `modelID`/`variant` of the last assistant reply (additive).
+- Added `formatSubagentUsage` (`tui/src/util/session.ts`): `↳<Label>-<modelID>-<Variant> <tokens> (<pct>%)`; trailing `-N-N` becomes `-N.N` (claude-opus-5-5 -> claude-opus-5.5); variant titlecased; percent omitted when limit unknown.
+- Changed prompt `subagentUsage` (`tui/src/component/prompt/index.tsx`): exactly one child with usage -> `formatSubagentUsage`; 2+ keep the old `Label N%` list (still skips unknown-percent children). TODO: multi format, user wants it to follow the single format.
+- Risk: `shortModelName` in `dialog-subagents.tsx:32` has the same `.$1.$2` bug (claude-opus-5-5 -> opus.5.5 after prefix strip); left untouched.
+- Verification: `bun test test/cli/tui/contextUsage.test.ts` 5 pass (new formatter case caught the dot bug first run); tui `bun run typecheck` exit 0. No pane check.
+
+### User
+Prompt bar
+- With one subagent, the prompt bar now shows its agent, model, effort, tokens, and context %, for example `↳General-gpt-5.6-sol-Low 10.3K (10%)`.
+- With several subagents, it still shows the short `General 10% . Explore 4%` list for now.
+
+---
+
 ## 2026-10-19 (~23:16) - v0.2.257 spamTuesday - killall survivor line without repeated reason - Claude Opus 5.5, low effort; Implementation
 
 ### Agent

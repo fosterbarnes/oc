@@ -45,7 +45,7 @@ import { useRenderer, useTerminalDimensions, type JSX } from "@opentui/solid"
 import type { AssistantMessage, FilePart, UserMessage } from "@opencode-ai/sdk/v2"
 import { Locale } from "../../util/locale"
 import { contextUsage } from "../../util/contextUsage"
-import { subagentLabel } from "../../util/session"
+import { formatSubagentUsage, subagentLabel } from "../../util/session"
 import { errorMessage } from "../../util/error"
 import { formatDuration } from "../../util/format"
 import { createColors, createFrames } from "../../ui/spinner"
@@ -334,6 +334,7 @@ export function Prompt(props: PromptProps) {
   })
 
   // Direct children with loaded messages, newest first; unloaded past children are skipped.
+  // One child gets the detailed line; several keep the compact `Label N%` list.
   const subagentUsage = createMemo(() => {
     const sessionID = props.sessionID
     if (!sessionID || !kv.get("subagent_usage_enabled", true)) return
@@ -341,12 +342,14 @@ export function Prompt(props: PromptProps) {
       .filter((item) => item.parentID === sessionID)
       .toSorted((a, b) => b.time.created - a.time.created)
       .flatMap((item) => {
-        const percent = contextUsage(sync.data.message[item.id] ?? [], sync.data.provider)?.percent
-        return percent === undefined ? [] : [`${subagentLabel(item.title)} ${percent}%`]
+        const usage = contextUsage(sync.data.message[item.id] ?? [], sync.data.provider)
+        return usage ? [{ ...usage, label: subagentLabel(item.title) }] : []
       })
-    if (entries.length === 0) return
-    const shown = entries.slice(0, 3).join(" . ")
-    return entries.length > 3 ? `${shown} +${entries.length - 3}` : shown
+    if (entries.length === 1) return formatSubagentUsage(entries[0])
+    const compact = entries.flatMap((item) => (item.percent === undefined ? [] : [`${item.label} ${item.percent}%`]))
+    if (compact.length === 0) return
+    const shown = compact.slice(0, 3).join(" . ")
+    return compact.length > 3 ? `${shown} +${compact.length - 3}` : shown
   })
 
   const [store, setStore] = createStore<{
