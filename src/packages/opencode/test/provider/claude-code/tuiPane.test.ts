@@ -12,12 +12,7 @@ import { cliIt, hostEnv, isolatedEnv, type CliFixture } from "../../lib/cli-proc
 import { pollWithTimeout } from "../../lib/effect"
 import { reply } from "../../lib/llm-server"
 import { chatConfig, claudeEnv, expectIsolated, initRepo, outsideProfile } from "./chatFixture"
-import {
-  installQuotaFakeCli,
-  quotaChatConfig,
-  quotaReleasePath,
-  QUOTA_MENU_HOURLY_UPDATED,
-} from "./quotaFixture"
+import { installQuotaFakeCli, quotaChatConfig, quotaReleasePath, QUOTA_MENU_HOURLY_UPDATED } from "./quotaFixture"
 
 const cliPath = process.env.CLAUDE_CLI_PATH ?? Bun.which("claude")
 const muxPath = Bun.which("wezterm-mux-server")
@@ -26,59 +21,70 @@ const opencodeRoot = path.resolve(import.meta.dir, "../../..")
 describe.skipIf(!process.env.OC_TUI_PANE || !cliPath || !muxPath)("oc TUI in a WezTerm pane", () => {
   cliIt.live(
     "steering actions preserve edited text and show QUEUED, SENT, and whole-turn revert",
-    (fixture) => Effect.gen(function* () {
-      const pane = yield* openPane(fixture, { steering: true })
-      const ready = path.join(pane.project, "steeringReady")
-      const release = path.join(pane.project, "steeringRelease")
-      const final = Promise.withResolvers<void>()
-      yield* Effect.addFinalizer(() => Effect.sync(() => final.resolve()))
-      const project = pane.project.replaceAll("\\", "/")
-      yield* fixture.llm.tool("mcp__opencode_proxy__bash", {
-        command: `& "${process.execPath}" -e "await Bun.write('${project}/steeringReady', 'ready'); await new Promise(resolve => { const watcher = require('fs').watch('${project}', (_, name) => { if (name === 'steeringRelease') { watcher.close(); resolve(); } }); });"`,
-        description: "Hold steering tool",
-      })
-      yield* fixture.llm.push(reply().wait(final.promise).text("STEERING-PANE-DONE").stop())
-      yield* pane.waitFor("Ask anything")
-      yield* pane.type("STEERING-PANE-START\r")
-      yield* pollWithTimeout(Effect.promise(() => Bun.file(ready).exists()).pipe(
-        Effect.map((exists) => exists ? true : undefined)), "proxy tool never became ready", "30 seconds")
-      yield* pane.type("PANE-EDIT-ME\r")
-      yield* pane.waitFor("QUEUED")
-      yield* pane.click("PANE-EDIT-ME")
-      yield* pane.waitFor("take back and put in the prompt")
-      yield* pane.type("\r")
-      yield* pane.waitFor("PANE-EDIT-ME", (shown) => !shown.includes("QUEUED") && shown.split("PANE-EDIT-ME").length === 2)
-      yield* pane.type("\x15")
-      yield* pane.type("PANE-DELETE-ME\r")
-      yield* pane.waitFor("QUEUED")
-      yield* pane.click("PANE-DELETE-ME")
-      yield* pane.waitFor("take back before it is sent")
-      yield* pane.type("\x1b[B\r")
-      yield* pane.waitFor("STEERING-PANE-START", (shown) => !shown.includes("PANE-DELETE-ME") && !shown.includes("QUEUED"))
-      yield* pane.type("PANE-DELIVERED\r")
-      yield* pane.waitFor("QUEUED")
-      yield* Effect.promise(() => Bun.write(release, "release"))
-      yield* fixture.llm.wait(2)
-      yield* pane.waitFor("SENT")
-      yield* pane.click("PANE-DELIVERED")
-      yield* pane.waitFor("Revert whole turn")
-      yield* pane.type("\r")
-      yield* pane.waitFor("Revert failed")
-      final.resolve()
-      yield* pane.waitFor("STEERING-PANE-DONE", (shown) => !/esc\s+interrupt/.test(shown))
-      yield* Effect.sleep("2 seconds")
-      yield* pane.click("PANE-DELIVERED")
-      yield* Effect.sleep("1 second")
-      yield* pane.waitFor("Revert whole turn")
-      yield* pane.type("\r")
-      yield* pane.waitFor("2 message reverted")
-      const inputs = yield* fixture.llm.inputs
-      expect(inputs).toHaveLength(2)
-      expect(JSON.stringify(inputs[1].messages)).toContain("PANE-DELIVERED")
-      expect(JSON.stringify(inputs)).not.toContain("PANE-EDIT-ME")
-      expect(JSON.stringify(inputs)).not.toContain("PANE-DELETE-ME")
-      expectIsolated(inputs)
-    }),
+    (fixture) =>
+      Effect.gen(function* () {
+        const pane = yield* openPane(fixture, { steering: true })
+        const ready = path.join(pane.project, "steeringReady")
+        const release = path.join(pane.project, "steeringRelease")
+        const final = Promise.withResolvers<void>()
+        yield* Effect.addFinalizer(() => Effect.sync(() => final.resolve()))
+        const project = pane.project.replaceAll("\\", "/")
+        yield* fixture.llm.tool("mcp__opencode_proxy__bash", {
+          command: `& "${process.execPath}" -e "await Bun.write('${project}/steeringReady', 'ready'); await new Promise(resolve => { const watcher = require('fs').watch('${project}', (_, name) => { if (name === 'steeringRelease') { watcher.close(); resolve(); } }); });"`,
+          description: "Hold steering tool",
+        })
+        yield* fixture.llm.push(reply().wait(final.promise).text("STEERING-PANE-DONE").stop())
+        yield* pane.waitFor("Ask anything")
+        yield* pane.type("STEERING-PANE-START\r")
+        yield* pollWithTimeout(
+          Effect.promise(() => Bun.file(ready).exists()).pipe(Effect.map((exists) => (exists ? true : undefined))),
+          "proxy tool never became ready",
+          "30 seconds",
+        )
+        yield* pane.type("PANE-EDIT-ME\r")
+        yield* pane.waitFor("QUEUED")
+        yield* pane.click("PANE-EDIT-ME")
+        yield* pane.waitFor("take back and put in the prompt")
+        yield* pane.type("\r")
+        yield* pane.waitFor(
+          "PANE-EDIT-ME",
+          (shown) => !shown.includes("QUEUED") && shown.split("PANE-EDIT-ME").length === 2,
+        )
+        yield* pane.type("\x15")
+        yield* pane.type("PANE-DELETE-ME\r")
+        yield* pane.waitFor("QUEUED")
+        yield* pane.click("PANE-DELETE-ME")
+        yield* pane.waitFor("take back before it is sent")
+        yield* pane.type("\x1b[B\r")
+        yield* pane.waitFor(
+          "STEERING-PANE-START",
+          (shown) => !shown.includes("PANE-DELETE-ME") && !shown.includes("QUEUED"),
+        )
+        yield* pane.type("PANE-DELIVERED\r")
+        yield* pane.waitFor("QUEUED")
+        yield* Effect.promise(() => Bun.write(release, "release"))
+        yield* fixture.llm.wait(2)
+        yield* pane.waitFor("SENT")
+        yield* pane.click("PANE-DELIVERED")
+        yield* pane.waitFor("Revert whole turn")
+        yield* pane.type("\r")
+        yield* pane.waitFor("Revert failed")
+        final.resolve()
+        yield* pane.waitFor("STEERING-PANE-DONE", (shown) => !/esc\s+interrupt/.test(shown))
+        yield* pane.waitFor("read mid-turn")
+        yield* Effect.sleep("2 seconds")
+        yield* pane.click("PANE-DELIVERED")
+        yield* Effect.sleep("1 second")
+        yield* pane.waitFor("Revert whole turn")
+        yield* pane.type("\r")
+        yield* pane.waitFor("2 message reverted")
+        const inputs = yield* fixture.llm.inputs
+        expect(inputs).toHaveLength(2)
+        expect(JSON.stringify(inputs[1].messages)).toContain("PANE-DELIVERED")
+        expect(JSON.stringify(inputs)).not.toContain("PANE-EDIT-ME")
+        expect(JSON.stringify(inputs)).not.toContain("PANE-DELETE-ME")
+        expectIsolated(inputs)
+      }),
     180_000,
   )
   cliIt.live(
@@ -494,10 +500,12 @@ const openPane = Effect.fnUntraced(function* (
     : {
         ...chatConfig(fixture.llm.url),
         model: "claude-code/claude-sonnet-4-5",
-        ...(options.steering && { provider: {
-          ...chatConfig(fixture.llm.url).provider,
-          "claude-code": { options: { proxyTools: ["Task", "Question"], proxyOpencodeTools: ["bash"] } },
-        } }),
+        ...(options.steering && {
+          provider: {
+            ...chatConfig(fixture.llm.url).provider,
+            "claude-code": { options: { proxyTools: ["Task", "Question"], proxyOpencodeTools: ["bash"] } },
+          },
+        }),
         ...(options.autoRename && { agent: { rename: { model: "test/test-model" } } }),
       }
   const db = path.join(fixture.home, "opencode.db")
@@ -627,14 +635,24 @@ const openPane = Effect.fnUntraced(function* (
     }),
     type: (text: string) => Effect.promise(() => wez(["send-text", "--pane-id", String(paneID), "--no-paste", text])),
     paste: (text: string) => Effect.promise(() => wez(["send-text", "--pane-id", String(paneID), text])),
-    click: (text: string) => screen.pipe(Effect.flatMap((shown) => {
-      const lines = shown.split(/\r?\n/)
-      const row = lines.findIndex((line) => line.includes(text))
-      if (row < 0) return Effect.fail(new Error(`Cannot click absent text: ${text}`))
-      const column = lines[row].indexOf(text) + 2
-      return Effect.promise(() => wez(["send-text", "--pane-id", String(paneID), "--no-paste",
-        `\x1b[<0;${column};${row + 1}M\x1b[<0;${column};${row + 1}m`]))
-    })),
+    click: (text: string) =>
+      screen.pipe(
+        Effect.flatMap((shown) => {
+          const lines = shown.split(/\r?\n/)
+          const row = lines.findIndex((line) => line.includes(text))
+          if (row < 0) return Effect.fail(new Error(`Cannot click absent text: ${text}`))
+          const column = lines[row].indexOf(text) + 2
+          return Effect.promise(() =>
+            wez([
+              "send-text",
+              "--pane-id",
+              String(paneID),
+              "--no-paste",
+              `\x1b[<0;${column};${row + 1}M\x1b[<0;${column};${row + 1}m`,
+            ]),
+          )
+        }),
+      ),
     // Polls the visible screen; on timeout the error carries the last screen.
     waitFor: (text: string, matches: (shown: string) => boolean = () => true) =>
       pollWithTimeout(

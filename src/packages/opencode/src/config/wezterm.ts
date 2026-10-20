@@ -1,7 +1,7 @@
 import { Revive } from "./revive"
 
 // The restarter inherits the old pane's mux socket; pinning it keeps list/kill off the new window's mux.
-export function oldPanes(restart: Revive.RestartContext) {
+export function oldPanes(restart: Pick<Revive.RestartContext, "paneID" | "tabs">) {
   const socket = process.env.WEZTERM_UNIX_SOCKET
   if (!socket) return undefined
   const list = weztermList(socket)
@@ -10,8 +10,7 @@ export function oldPanes(restart: Revive.RestartContext) {
 
 export function closeOwnedPanes(old: NonNullable<ReturnType<typeof oldPanes>>) {
   const list = weztermList(old.socket)
-  for (const pane of old.panes.filter((pane) => windowOf(list, pane.id) === pane.window))
-    killPane(pane.id, old.socket)
+  for (const pane of old.panes.filter((pane) => windowOf(list, pane.id) === pane.window)) killPane(pane.id, old.socket)
 }
 
 function weztermList(socket: string) {

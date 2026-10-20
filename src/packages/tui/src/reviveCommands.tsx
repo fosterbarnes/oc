@@ -14,6 +14,7 @@ import { useSDK } from "./context/sdk"
 import { useSync } from "./context/sync"
 import { readOcConfig } from "./ocSettings"
 import { useDialog } from "./ui/dialog"
+import { DialogConfirm } from "./ui/dialog-confirm"
 import { DialogPrompt } from "./ui/dialog-prompt"
 import { DialogSelect } from "./ui/dialog-select"
 import type { ToastContext } from "./ui/toast"
@@ -43,42 +44,57 @@ export function reviveCommands(toast: ToastContext) {
       model: local.model.current(),
       variant: local.model.variant.current(),
       noReply: true,
-      parts: [{
-        type: "text",
-        text: reviveText(at, versions),
-        synthetic: true,
-        metadata: { kind: "revive", versions, at },
-      }],
+      parts: [
+        {
+          type: "text",
+          text: reviveText(at, versions),
+          synthetic: true,
+          metadata: { kind: "revive", versions, at },
+        },
+      ],
     })
     if (result.error) toast.error(new Error(`Failed to mark revive: ${JSON.stringify(result.error)}`))
   }
   // First /revive: where oc's source comes from. Building and installing need git (download) and Bun.
   const chooseSource = async (): Promise<Source | undefined> => {
-    const kind = await new Promise<Source["source"] | undefined>((resolve) => dialog.replace(() => (
-      <DialogSelect
-        title="Run oc from its source code?"
-        renderFilter={false}
-        options={[
-          { value: "existing" as const, title: "Use my oc source folder", description: "build from it" },
-          { value: "download" as const, title: "Download the oc source to...", description: "your copy to edit" },
-          { value: "none" as const, title: "Just restart", description: "no build" },
-        ]}
-        onSelect={(option) => resolve(option.value)}
-      />
-    ), () => resolve(undefined)))
+    const kind = await new Promise<Source["source"] | undefined>((resolve) =>
+      dialog.replace(
+        () => (
+          <DialogSelect
+            title="Run oc from its source code?"
+            renderFilter={false}
+            options={[
+              { value: "existing" as const, title: "Use my oc source folder", description: "build from it" },
+              { value: "download" as const, title: "Download the oc source to...", description: "your copy to edit" },
+              { value: "none" as const, title: "Just restart", description: "no build" },
+            ]}
+            onSelect={(option) => resolve(option.value)}
+          />
+        ),
+        () => resolve(undefined),
+      ),
+    )
     if (kind === undefined) return
     if (kind === "none") return { source: "none" }
-    const input = await DialogPrompt.show(dialog,
-      kind === "existing" ? "oc source folder" : "Download the oc source to", {
+    const input = await DialogPrompt.show(
+      dialog,
+      kind === "existing" ? "oc source folder" : "Download the oc source to",
+      {
         placeholder: "C:\\path\\to\\oc",
         value: kind === "download" ? path.join(Global.Path.data, "source") : "",
-      })
+      },
+    )
     if (!input?.trim()) return
     const sourceDir = path.resolve(input.trim().replace(/^"(.*)"$/, "$1"))
     // Revive.WORKSPACE + Revive.BUILD_SCRIPT: the build script /revive runs.
-    if (kind === "existing" && !fs.existsSync(path.join(sourceDir, "src", "packages", "opencode", "script", "build.ts"))) {
-      toast.show({ message: `Not an oc source folder (no src\\packages\\opencode\\script\\build.ts): ${sourceDir}`,
-        variant: "error" })
+    if (
+      kind === "existing" &&
+      !fs.existsSync(path.join(sourceDir, "src", "packages", "opencode", "script", "build.ts"))
+    ) {
+      toast.show({
+        message: `Not an oc source folder (no src\\packages\\opencode\\script\\build.ts): ${sourceDir}`,
+        variant: "error",
+      })
       return
     }
     return { source: kind, sourceDir }
@@ -104,9 +120,13 @@ export function reviveCommands(toast: ToastContext) {
     const supervisor = Global.native ? undefined : process.env.OC_SUPERVISOR_PID
     if (supervisor) {
       const file = path.join(Global.Path.state, "oc-revive", `${supervisor}.json`)
-      return fs.promises.mkdir(path.dirname(file), { recursive: true })
+      return fs.promises
+        .mkdir(path.dirname(file), { recursive: true })
         .then(() => fs.promises.writeFile(file, JSON.stringify(context)))
-        .then(() => exit(), (error) => toast.error(error))
+        .then(
+          () => exit(),
+          (error) => toast.error(error),
+        )
     }
     if (Global.native) {
       const file = path.join(Global.Path.state, "oc-revive", `${process.pid}.json`)
@@ -122,12 +142,15 @@ export function reviveCommands(toast: ToastContext) {
   // The revive pipeline lives in oc: a native window hands off to the oc executable beside it.
   const launchHelper = (context: Record<string, unknown>, wait = false) => {
     const bun = /^bun(?:\.exe)?$/i.test(path.basename(process.execPath))
-    const helper = Global.native && !bun
-      ? path.join(path.dirname(process.execPath), `oc${path.extname(process.execPath)}`)
-      : process.execPath
+    const helper =
+      Global.native && !bun
+        ? path.join(path.dirname(process.execPath), `oc${path.extname(process.execPath)}`)
+        : process.execPath
     const args = [
       ...(bun ? [process.argv[1]] : []),
-      "oc", "--revive", Buffer.from(JSON.stringify(context)).toString("base64url"),
+      "oc",
+      "--revive",
+      Buffer.from(JSON.stringify(context)).toString("base64url"),
     ]
     const child = wait
       ? spawn(helper, args, {
@@ -138,7 +161,9 @@ export function reviveCommands(toast: ToastContext) {
       : launchDetached(helper, args, { env: { OC_FLAVOR: "oc" } })
     if (wait) {
       let error = ""
-      child.stderr?.on("data", (chunk) => { error = (error + chunk.toString()).slice(-4000) })
+      child.stderr?.on("data", (chunk) => {
+        error = (error + chunk.toString()).slice(-4000)
+      })
       child.once("exit", (code) => {
         if (code) toast.error(new Error(error.trim() || `Revive helper launch failed: exit code ${code}`))
       })
@@ -176,19 +201,41 @@ export function reviveCommands(toast: ToastContext) {
       title: "Build native opencode and open it in a new tab",
       category: "System",
       slashName: "revive-single",
-      run: () => {
+      run: async () => {
         if (!readOcConfig().reviveBuild) {
           toast.show({ message: "No oc source saved; run /revive once to choose one", variant: "error" })
           return
         }
         const sessionID = route.data.type === "session" ? route.data.sessionID : undefined
-        // The helper opens the new tab; this window, the server, and other tabs keep running.
-        launchHelper({
-          mode: "single",
-          terminal: detectTerminal().kind,
-          directory: (sessionID ? sync.session.get(sessionID)?.directory : undefined) ?? sdk.directory ?? process.cwd(),
-          ...(sessionID ? { sessionID } : {}),
-        }, true)
+        const terminal = detectTerminal()
+        // WezTerm closes this pane once the new tab runs. A native pane runs its reply in-process,
+        // so closing it mid-reply stops that reply.
+        if (
+          Global.native &&
+          terminal.kind === "wezterm" &&
+          terminal.paneID &&
+          sessionID &&
+          (sync.data.session_status[sessionID]?.type ?? "idle") !== "idle"
+        ) {
+          const confirmed = await DialogConfirm.show(
+            dialog,
+            "A reply is still running here",
+            "This tab closes when the new one opens, which stops the reply.",
+          )
+          if (!confirmed) return
+        }
+        // The helper opens the new tab; the server and other tabs keep running.
+        launchHelper(
+          {
+            mode: "single",
+            terminal: terminal.kind,
+            directory:
+              (sessionID ? sync.session.get(sessionID)?.directory : undefined) ?? sdk.directory ?? process.cwd(),
+            ...(sessionID ? { sessionID } : {}),
+            ...(terminal.kind === "wezterm" && terminal.paneID ? { paneID: terminal.paneID } : {}),
+          },
+          true,
+        )
       },
     },
     {
@@ -209,17 +256,22 @@ export function reviveCommands(toast: ToastContext) {
           toast.show({ message: `oc v${InstallationDisplayVersion} is the latest release`, variant: "info" })
           return
         }
-        const choice = await new Promise<"update" | "skip" | undefined>((resolve) => dialog.replace(() => (
-          <DialogSelect
-            title={`oc v${release.version} is available (installed: v${InstallationDisplayVersion})`}
-            renderFilter={false}
-            options={[
-              { value: "update" as const, title: "Update and restart", description: "stops oc, installs, reopens" },
-              { value: "skip" as const, title: "Skip this version", description: "no startup notice for it" },
-            ]}
-            onSelect={(option) => resolve(option.value)}
-          />
-        ), () => resolve(undefined)))
+        const choice = await new Promise<"update" | "skip" | undefined>((resolve) =>
+          dialog.replace(
+            () => (
+              <DialogSelect
+                title={`oc v${release.version} is available (installed: v${InstallationDisplayVersion})`}
+                renderFilter={false}
+                options={[
+                  { value: "update" as const, title: "Update and restart", description: "stops oc, installs, reopens" },
+                  { value: "skip" as const, title: "Skip this version", description: "no startup notice for it" },
+                ]}
+                onSelect={(option) => resolve(option.value)}
+              />
+            ),
+            () => resolve(undefined),
+          ),
+        )
         dialog.clear()
         if (choice === "skip") kv.set(SKIPPED_VERSION, release.version)
         if (choice === "update") return revive("update", { release: release.version })

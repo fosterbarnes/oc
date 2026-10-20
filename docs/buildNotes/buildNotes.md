@@ -169,6 +169,48 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-19 (~21:09) - v0.2.255 drangleicUndercut - /revive-single closes the pane it ran from (WezTerm) - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation (/spit then /imp); completed
+- Version: 0.2.255 drangleicUndercut
+- Added `paneID` to the `/revive-single` context in `tui/src/reviveCommands.tsx` (`oc.revive_single`), mirroring `revive()`.
+- Added busy guard there: `Global.native` + WezTerm pane + `sync.data.session_status[sessionID]` not idle -> `DialogConfirm.show`; cancel aborts before the helper launches. Only native, because its reply runs in-process; an oc pane's reply keeps running on the resident server.
+- Added in `reviveSingle` (`config/reviveHost.ts`, hosted branch): records the original pane with `oldPanes({ paneID })` before the build (skipped when not WezTerm or when it equals own `WEZTERM_PANE`); after spawning native, races `exited` vs `REPLACEMENT_SETTLE_MS`, then `closeOwnedPanes(old)` (same-window check), errors logged and ignored. Build failure path unchanged, so the original pane stays.
+- Changed `oldPanes` param in `config/wezterm.ts` to `Pick<RestartContext, "paneID" | "tabs">`.
+- Kept Windows Terminal and plain consoles unchanged (no per-tab close CLI).
+- Risk: a reply started after confirming (during the build) is still stopped by the close; 1.5s settle is not proof native drew.
+- Updated `FORK.md` section 7 and wiki `Launching.md` (Native test builds).
+- Plan: `C:\Users\Foster\.config\opencode\plans\reviveSingleClosePane.md`.
+- Verification: `bun run typecheck` passed in `packages/tui` and `packages/opencode`. No unit test added (pane selection is existing `Revive.ownedPanes`/`closeOwnedPanes`). Live WezTerm check not run; needs a user build.
+
+### User
+Revive single
+- In WezTerm, `/revive-single` now closes the tab or pane you ran it from once the new opencode is running, leaving every other tab alone.
+- Running it from a native opencode tab while a reply is in progress asks first, because closing that tab stops the reply.
+- A failed build keeps the original tab open, and Windows Terminal or plain consoles behave as before.
+
+---
+
+## 2026-10-19 (~21:08) - v0.2.254 unfortunateCoffe - Steered messages keep a "read mid-turn" label - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation (spit -> imp); completed
+- Version: 0.2.254 unfortunateCoffe
+- Diagnosed `ses_ead947310ffe1FAf89dHyMGtUi` ("queue not working"): the Enter steer was delivered (`.claude3` transcript `cce9f95b`: `queued_command`, `absorbed_mid_turn` 04:59:42Z), but Claude's reply ignored it. Once the turn ended, the `SENT` badge reverted to the timestamp, so the steer looked unsent below the reply. The user's revert then triggered a rewind; the blank replies afterwards were the v0.2.238 stale-wake bug (fixed v0.2.243/245; user still ran 0.2.238).
+- Added `steered` memo in `UserMessage` (`tui/src/routes/session/index.tsx`): the non-queued fallback shows `read mid-turn` (joined with the timestamp when on); `metadataVisible` includes it. Uses persisted `metadata.steered`, so the label survives restarts.
+- Changed `~/.config/opencode/opencode.jsonc` Claude provider `logging.level` debug -> info: debug filled the 5 MB `opencode-claude-code/plugin.log` in hours, so the 1 AM evidence was gone. Info keeps the steer, wake, and rewind lines.
+- Updated wiki `Sessions.md` "Steering a running turn".
+- Verification: `bun run typecheck` (tui) exit 0; `OC_TUI_PANE=1 bun test ./test/provider/claude-code/tuiPane.test.ts -t "steering actions"` 1 pass (now waits for `read mid-turn` after the turn ends).
+- MISTAKE: the first pane run used a relative `cd` that persisted from the typecheck call and ran in the wrong package. Use absolute `Set-Location` in background runs.
+
+### User
+Claude chats
+- A message you send while Claude is working now keeps a "read mid-turn" label after the turn ends, so you can tell it was delivered even when Claude's reply did not answer it.
+- To get a separate answer to a new question while Claude is busy, queue it with Alt+Enter instead.
+
+---
+
 ## 2026-10-19 (~20:53) - v0.2.253 englandMachismo - Forked chats keep their Claude conversation - Claude Opus 5.5, low effort; Implementation
 
 ### Agent

@@ -95,11 +95,10 @@ async function revivePipeline(context: Revive.ReviveContext) {
   const steps = build ? Revive.buildSteps(build) : undefined
   // One install at a time per installation: the build output, file swap and server start are shared.
   const { tabs, failure } = await withInstallLock(installs ? installDir : undefined, async () => {
-    for (const command of steps?.commands ?? []) await log.step(command.join(" "), () => runVisible(command, steps?.cwd))
+    for (const command of steps?.commands ?? [])
+      await log.step(command.join(" "), () => runVisible(command, steps?.cwd))
     const output = release
-      ? await log.step(`Downloading and verifying oc v${release}`, () =>
-          Revive.downloadRelease(release),
-        )
+      ? await log.step(`Downloading and verifying oc v${release}`, () => Revive.downloadRelease(release))
       : steps?.output
     const sources = output ? await log.step("Checking build output", () => Revive.installSources(output)) : undefined
     // Ctrl+C from here would leave oc stopped or half installed.
@@ -118,13 +117,15 @@ async function revivePipeline(context: Revive.ReviveContext) {
         : undefined
       if (context.native) return
       // The install stays undoable until the new server is ready; a failed start restores the old files.
-      await log.step("Starting server", () => startServer()).catch(async (error: unknown) => {
-        if (!rollback) throw error
-        // Restore even if the stop fails: rollback renames, which works on running files.
-        await log.step("Stopping the new server", () => shutdownAll({ keepPanes })).catch(() => undefined)
-        await log.step("Restoring the previous install", () => rollback(error))
-        throw error
-      })
+      await log
+        .step("Starting server", () => startServer())
+        .catch(async (error: unknown) => {
+          if (!rollback) throw error
+          // Restore even if the stop fails: rollback renames, which works on running files.
+          await log.step("Stopping the new server", () => shutdownAll({ keepPanes })).catch(() => undefined)
+          await log.step("Restoring the previous install", () => rollback(error))
+          throw error
+        })
     })().then(
       () => undefined,
       (error: unknown) => ({ error }),
@@ -152,7 +153,8 @@ async function revivePipeline(context: Revive.ReviveContext) {
 
 // /revive-single: the TUI's hidden helper opens a new tab running this pipeline again (`hosted`), which
 // builds and installs only native opencode, then becomes that opencode. The server and every other
-// window keep running; a failed build leaves the installed opencode as it was.
+// window keep running; a failed build leaves the installed opencode as it was. In WezTerm the pane that
+// ran the command closes once native is up.
 async function reviveSingle(context: Revive.ReviveContext) {
   const log = reviveLog()
   if (/^bun(?:\.exe)?$/i.test(path.basename(process.execPath)))
@@ -167,6 +169,13 @@ async function reviveSingle(context: Revive.ReviveContext) {
     )
     return
   }
+  // The new tab shares the old pane's mux, so its socket can find and close that pane; recorded with its
+  // window before the build so a reused pane id is never closed.
+  const paneID =
+    context.terminal === "wezterm" && context.paneID !== process.env.WEZTERM_PANE ? context.paneID : undefined
+  const old = paneID
+    ? await log.step("Recording the original pane", () => oldPanes({ paneID })).catch(() => undefined)
+    : undefined
   const installDir = path.dirname(executablePath())
   const native = await (async () => {
     const build = Revive.parseBuild((await read()).revive?.build)
@@ -185,19 +194,28 @@ async function reviveSingle(context: Revive.ReviveContext) {
     process.exit(1)
   })
   const args = [native, context.directory, ...(context.sessionID ? ["--session", context.sessionID] : [])]
-  process.exit(await Bun.spawn(args, { stdio: ["inherit", "inherit", "inherit"] }).exited)
+  const child = Bun.spawn(args, { stdio: ["inherit", "inherit", "inherit"] })
+  // Same acknowledgement as the restarter: native started and survived the settle window.
+  const settled = await Promise.race([
+    child.exited.then(() => false),
+    Bun.sleep(REPLACEMENT_SETTLE_MS).then(() => true),
+  ])
+  if (settled && old) await log.step("Closing the original pane", () => closeOwnedPanes(old)).catch(() => undefined)
+  process.exit(await child.exited)
 }
 
 // Terminal CLIs report whether they opened the tab. Only cmd's new-console path needs a detached hop.
 export async function openReviveTab(command: ReturnType<typeof Revive.openTabCommand>, directory: string) {
   if (command.file === "cmd.exe")
-    return awaitLaunch(launchDetached(command.file, command.args, {
-      cwd: directory,
-      env: command.env,
-      windowStyle: "Normal",
-      windowsVerbatimArguments: command.windowsVerbatimArguments,
-      settleMs: REPLACEMENT_SETTLE_MS,
-    }))
+    return awaitLaunch(
+      launchDetached(command.file, command.args, {
+        cwd: directory,
+        env: command.env,
+        windowStyle: "Normal",
+        windowsVerbatimArguments: command.windowsVerbatimArguments,
+        settleMs: REPLACEMENT_SETTLE_MS,
+      }),
+    )
   await runVisible([command.file, ...command.args], directory, command.env)
 }
 
@@ -285,8 +303,7 @@ export async function restartTerminal(
       : undefined
   const command = Revive.reopenCommand(restart)
   await log.step(`Opening ${restart.terminal} with ${restart.launcher}`, () => launch(command))
-  if (old)
-    await log.step("Closing this instance's old panes", () => closeOwnedPanes(old)).catch(() => undefined)
+  if (old) await log.step("Closing this instance's old panes", () => closeOwnedPanes(old)).catch(() => undefined)
   if (!restart.native && !wezterm)
     await log.step("Closing the old window", () => closeWindow(restart)).catch(() => undefined)
   if (!restart.installDir) return

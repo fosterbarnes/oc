@@ -1656,7 +1656,8 @@ function UserMessage(props: {
   const queued = createMemo(() => props.pending !== undefined && props.index > props.pending)
   const color = createMemo(() => local.agent.color(props.message.agent))
   const queuedFg = createMemo(() => selectedForeground(theme, color()))
-  const metadataVisible = createMemo(() => queued() || ctx.showTimestamps())
+  const steered = createMemo(() => isSteered(props.parts))
+  const metadataVisible = createMemo(() => queued() || steered() || ctx.showTimestamps())
 
   const compaction = createMemo(() => props.parts.find((x) => x.type === "compaction"))
   // The summary reply may come from a different model than the session (agent.compaction).
@@ -1757,19 +1758,22 @@ function UserMessage(props: {
             <Show
               when={queued()}
               fallback={
-                <Show when={ctx.showTimestamps()}>
+                // After the turn ends a steered message sits below the reply it went into, so it
+                // keeps a label: otherwise a steer Claude ignored looks unsent.
+                <Show when={steered() || ctx.showTimestamps()}>
                   <text selectable={false} fg={theme.textMuted}>
-                    <span style={{ fg: theme.textMuted }}>
-                      {Locale.todayTimeOrDateTime(props.message.time.created)}
-                    </span>
+                    {[
+                      steered() && "read mid-turn",
+                      ctx.showTimestamps() && Locale.todayTimeOrDateTime(props.message.time.created),
+                    ]
+                      .filter(Boolean)
+                      .join(" . ")}
                   </text>
                 </Show>
               }
             >
               <text selectable={false} fg={theme.textMuted}>
-                <span style={{ bg: color(), fg: queuedFg(), bold: true }}>
-                  {isSteered(props.parts) ? " SENT " : " QUEUED "}
-                </span>
+                <span style={{ bg: color(), fg: queuedFg(), bold: true }}>{steered() ? " SENT " : " QUEUED "}</span>
               </text>
             </Show>
             <text

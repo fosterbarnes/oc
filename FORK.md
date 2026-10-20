@@ -220,7 +220,7 @@ Try a change beside production without stopping it. Replaces the removed `ocdebu
 
 | Feature | Level | What it does | What's left |
 |---|---|---|---|
-| `/revive-single` | medium | Opens a new tab (WezTerm, Windows Terminal) or console window that builds only native `opencode.exe` from `revive.build.source` (`build.ts --single --native-only`), installs just that file with rollback, then runs it in the same directory and session. The current window, other oc windows, and the resident server keep running. A failed build waits for Enter and leaves the old `opencode.exe`. Shares production data; needs a saved source (run `/revive` once). | Live check in WezTerm, Windows Terminal, and a plain console. |
+| `/revive-single` | medium | Opens a new tab (WezTerm, Windows Terminal) or console window that builds only native `opencode.exe` from `revive.build.source` (`build.ts --single --native-only`), installs just that file with rollback, then runs it in the same directory and session. Other windows and tabs and the resident server keep running. In WezTerm the pane that ran it closes once native survives `REPLACEMENT_SETTLE_MS` (`oldPanes`/`closeOwnedPanes`, same-window check); a native pane with a running reply confirms first. A failed build waits for Enter and leaves the old `opencode.exe`. Shares production data; needs a saved source (run `/revive` once). | Live check in WezTerm, Windows Terminal, and a plain console. |
 
 ---
 

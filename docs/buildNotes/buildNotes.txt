@@ -1,15 +1,9 @@
-v0.2.253 englandMachismo
+v0.2.255 drangleicUndercut
 
-claude forks:
-Forking a Claude chat (Ctrl+P > fork) now continues the same Claude Code conversation in the fork instead of asking to start a new one. The original chat keeps its own Claude conversation, and the two branch from the fork point. Forking from an earlier message rewinds the fork's Claude conversation to that point; if that point is too far back, the fork starts a new Claude conversation with the last exchange.
+revive single:
+In WezTerm, /revive-single now closes the tab or pane you ran it from once the new opencode is running, leaving every other tab alone. Running it from a native opencode tab while a reply is in progress asks first, because closing that tab stops the reply. A failed build keeps the original tab open, and Windows Terminal or plain consoles behave as before.
 
-warm-up schedules:
-Save preset keeps named daily or weekday schedules for reuse across accounts and restarts. Load preset copies the times into the editor; press Save to activate them for that account. Reusing a name asks before replacing it, and saving a preset leaves active schedules alone. Esc in the schedule editor now goes back one screen at a time to the menu that opened it, and Esc on "Replace preset?" returns to the name prompt instead of closing the editor.
+claude chats:
+A message you send while Claude is working now keeps a "read mid-turn" label after the turn ends, so you can tell it was delivered even when Claude's reply did not answer it. To get a separate answer to a new question while Claude is busy, queue it with Alt+Enter instead.
 
-menus:
-Pressing Esc to go back now returns to the item and search you had in every menu with a back step, including the command palette and the model picker's screens, and the list scrolls straight to that item.
-
-usage:
-Show usage now appears in the oc command palette under Third party harness management while a session is open.
-
-Under the hood: forked oc sessions copy the origin's Claude session records with a pending-fork flag, so the first spawn adds --fork-session and the origin's transcript is never written by the fork. Dialog selection memory is shared through each screen's parent, and explicit list moves cancel pending deferred scrolls. Warm-up presets use strict validation and locked read-modify-write storage. Recorded checks passed: sessionSync.test.ts (8 pass) and cliArgs.test.ts, opencode typecheck, full tui bun test (635 pass, 2 known subagentDialog failures), claudeWarmup.test.ts, claudeWarmupRendered.test.tsx, usagePalette.test.ts, tui typecheck, and git diff --check. prePush runs on this push. Live checks of forked Claude chats and warm-up presets in the installed app remain with the user.
+Under the hood: /revive-single passes the WezTerm pane id to the revive host, which records the original pane before the build and closes it with the existing owned-pane check after native has settled. The steered label reads the persisted steered metadata, so it survives restarts. The Claude provider log level in the user config moved from debug to info so steer and rewind evidence is not rotated away within hours. Checks run: tui and opencode typecheck, and the tuiPane "steering actions" check (1 pass). prePush runs on this push. A live WezTerm check of /revive-single needs a user build.
