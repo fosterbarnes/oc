@@ -1,4 +1,4 @@
-import { runCliCommand } from "./cliUpdate"
+import { runCliCommand, type CliCommandResult } from "./cliUpdate"
 
 const inflight = new Set<string>()
 
@@ -32,11 +32,15 @@ export function compareDesktopVersions(a: string, b: string): number {
   return 0
 }
 
+// Progress lines from DOWNLOAD_HELPERS; `updateProgress.ts` reads them live, results ignore them.
+export const STEP_PREFIX = "OCSTEP: "
+export const PROGRESS_PREFIX = "OCPROGRESS: "
+
 function nonEmptyLines(output: string) {
   return output
     .split(/\r?\n/)
     .map((line) => line.trim())
-    .filter(Boolean)
+    .filter((line) => line && !line.startsWith(STEP_PREFIX) && !line.startsWith(PROGRESS_PREFIX))
 }
 
 // The update scripts catch their own errors, print the message on an OCERR line, and exit 1.
@@ -115,6 +119,71 @@ function Get-MsixIdentity {
 }
 `
 
+// Write-OcStep names the current phase (downloading, verifying, installing; text after the first
+// word is detail). Save-Download streams the file with HttpClient so it can print OCPROGRESS
+// "<received> <total>" lines (total 0 when the server sends no length): on each whole percent at
+// most every 200 ms, else every second. AllowHost, when given, checks the final host after
+// redirects before the body is read. Both write straight to stdout: Write-Output inside a function
+// would become its return value.
+export const DOWNLOAD_HELPERS = String.raw`
+function Write-OcStep {
+  param([string]$Step)
+  [Console]::Out.WriteLine("OCSTEP: $Step")
+  [Console]::Out.Flush()
+}
+
+function Save-Download {
+  param([string]$Uri, [string]$OutFile, [scriptblock]$AllowHost)
+  Write-OcStep "downloading"
+  Add-Type -AssemblyName System.Net.Http
+  $client = New-Object System.Net.Http.HttpClient
+  # The default 100 s limit could cut a large download on a slow link; the caller's 10 min kill bounds it.
+  $client.Timeout = [System.Threading.Timeout]::InfiniteTimeSpan
+  $response = $null
+  try {
+    try { $response = $client.GetAsync($Uri, [System.Net.Http.HttpCompletionOption]::ResponseHeadersRead).GetAwaiter().GetResult() }
+    catch { throw "Download failed: $($_.Exception.GetBaseException().Message)" }
+    if (-not $response.IsSuccessStatusCode) { throw "Download failed: HTTP $([int]$response.StatusCode)" }
+    $finalHost = $response.RequestMessage.RequestUri.Host
+    if ($AllowHost -and -not (& $AllowHost $finalHost)) { throw "Download redirected to unexpected host '$finalHost'" }
+    $total = [long]$response.Content.Headers.ContentLength
+    $source = $null
+    $target = $null
+    try {
+      $source = $response.Content.ReadAsStreamAsync().GetAwaiter().GetResult()
+      $target = [System.IO.File]::Create($OutFile)
+      $buffer = New-Object byte[] 81920
+      $received = [long]0
+      $lastPercent = -1
+      $lastMs = [long]0
+      $clock = [System.Diagnostics.Stopwatch]::StartNew()
+      [Console]::Out.WriteLine("OCPROGRESS: 0 $total")
+      while (($read = $source.Read($buffer, 0, $buffer.Length)) -gt 0) {
+        $target.Write($buffer, 0, $read)
+        $received += $read
+        $ms = $clock.ElapsedMilliseconds
+        $percent = if ($total -gt 0) { [int][Math]::Floor(100 * $received / $total) } else { -1 }
+        if (($percent -ne $lastPercent -and $ms - $lastMs -ge 200) -or $ms - $lastMs -ge 1000) {
+          [Console]::Out.WriteLine("OCPROGRESS: $received $total")
+          [Console]::Out.Flush()
+          $lastPercent = $percent
+          $lastMs = $ms
+        }
+      }
+      [Console]::Out.WriteLine("OCPROGRESS: $received $total")
+      [Console]::Out.Flush()
+    } catch { throw "Download failed: $($_.Exception.GetBaseException().Message)" }
+    finally {
+      if ($target) { $target.Dispose() }
+      if ($source) { $source.Dispose() }
+    }
+  } finally {
+    if ($response) { $response.Dispose() }
+    $client.Dispose()
+  }
+}
+`
+
 export async function runDesktopCheck(input: {
   key: string
   label: string
@@ -131,7 +200,7 @@ export async function runDesktopCheck(input: {
       return {
         ok: false,
         alreadyRunning: false,
-        message: `Failed to check ${input.label}: ${result.lastLine || result.error || `exit code ${result.code}`}`,
+        message: `Failed to check ${input.label}: ${failureDetail(result)}`,
       }
     }
     const parsed = parseDesktopCheckOutput(result.output, input.label, input.extraMessages)
@@ -167,18 +236,19 @@ export async function runDesktopInstall(input: {
   key: string
   label: string
   script: string
+  onLine?: (line: string) => void
 }): Promise<DesktopInstallResult> {
   if (inflight.has(input.key)) {
     return { ok: false, alreadyRunning: true, message: `${input.label} update already running` }
   }
   inflight.add(input.key)
   try {
-    const result = await runPowershell(input.script)
+    const result = await runPowershell(input.script, input.onLine)
     if (!result.ok && !scriptError(result.output)) {
       return {
         ok: false,
         alreadyRunning: false,
-        message: `Failed to update ${input.label}: ${result.lastLine || result.error || `exit code ${result.code}`}`,
+        message: `Failed to update ${input.label}: ${failureDetail(result)}`,
       }
     }
     const parsed = parseDesktopInstallOutput(result.output, input.label)
@@ -198,13 +268,19 @@ export function windowsPowershellEnv(env: NodeJS.ProcessEnv = process.env): Node
   return Object.fromEntries(Object.entries(env).filter(([key]) => key.toLowerCase() !== "psmodulepath"))
 }
 
-function runPowershell(script: string) {
+function runPowershell(script: string, onLine?: (line: string) => void) {
   return runCliCommand(
     "powershell.exe",
     ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script],
     undefined,
     windowsPowershellEnv(),
+    onLine,
   )
+}
+
+// A script killed mid-download ends on a progress line, which says nothing about the failure.
+function failureDetail(result: CliCommandResult) {
+  return nonEmptyLines(result.output).at(-1) || result.error || `exit code ${result.code}`
 }
 
 export function expectedVersionAssignment(version?: string) {
@@ -248,6 +324,7 @@ function Get-MsixPublisherId {
 }
 
 ${GET_MSIX_IDENTITY}
+${DOWNLOAD_HELPERS}
 
 $installed = Get-InstalledClaudeVersion
 if (-not $installed) { throw "Claude Desktop not installed" }
@@ -283,8 +360,8 @@ $tmp = Join-Path ([System.IO.Path]::GetTempPath()) ("claude-desktop-update-" + [
 New-Item -ItemType Directory -Path $tmp | Out-Null
 try {
   $file = Join-Path $tmp "Claude.msix"
-  try { Invoke-WebRequest -UseBasicParsing -Uri $location -OutFile $file }
-  catch { throw "Download failed: $($_.Exception.Message)" }
+  Save-Download -Uri $location -OutFile $file
+  Write-OcStep "verifying"
   $sig = Get-AuthenticodeSignature -FilePath $file
   if ($sig.Status -ne "Valid") { throw "Signature check failed: $($sig.Status)" }
   $identity = Get-MsixIdentity -Path $file
@@ -295,6 +372,7 @@ try {
     throw "Package publisher '$($identity.Publisher)' is not Claude's expected publisher"
   }
   if ($identity.Version -le $installed) { throw "Downloaded package is not newer ($($identity.Version))" }
+  Write-OcStep "installing"
   try { Add-AppxPackage -Path $file -ForceApplicationShutdown }
   catch { throw "Install failed: $($_.Exception.Message)" }
   $after = Get-InstalledClaudeVersion
@@ -316,7 +394,10 @@ export async function checkClaudeDesktop(): Promise<DesktopCheckResult> {
   return runDesktopCheck({ key: CLAUDE_KEY, label: "Claude Desktop", script: desktopScript(true) })
 }
 
-export async function installClaudeDesktop(expectedVersion: string): Promise<DesktopInstallResult> {
+export async function installClaudeDesktop(
+  expectedVersion: string,
+  onLine?: (line: string) => void,
+): Promise<DesktopInstallResult> {
   if (!/^\d+(\.\d+){1,3}$/.test(expectedVersion)) {
     return { ok: false, alreadyRunning: false, message: "Confirmed version is invalid" }
   }
@@ -324,5 +405,6 @@ export async function installClaudeDesktop(expectedVersion: string): Promise<Des
     key: CLAUDE_KEY,
     label: "Claude Desktop",
     script: desktopScript(false, expectedVersion),
+    onLine,
   })
 }

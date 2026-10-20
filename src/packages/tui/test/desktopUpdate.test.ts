@@ -1,8 +1,11 @@
-import { expect, test } from "bun:test"
+import { afterAll, describe, expect, test } from "bun:test"
+import { mkdtemp, rm } from "node:fs/promises"
+import os from "node:os"
 import path from "node:path"
 import { runCliCommand } from "../src/cliUpdate"
 import {
   compareDesktopVersions,
+  DOWNLOAD_HELPERS,
   parseDesktopCheckOutput,
   parseDesktopInstallOutput,
   windowsPowershellEnv,
@@ -87,6 +90,11 @@ test("parses a failed install from the last line", () => {
   })
 })
 
+test("ignores progress lines when reading a failed install", () => {
+  const output = "OCSTEP: downloading\nOCPROGRESS: 0 100\nInstall failed: Access is denied\nOCPROGRESS: 50 100\n"
+  expect(parseDesktopInstallOutput(output)).toEqual({ ok: false, message: "Install failed: Access is denied" })
+})
+
 test("parses ChatGPT and Cursor labels with the shared checker", () => {
   expect(parseDesktopCheckOutput("UPDATE 1.0 2.0\n", "ChatGPT Desktop")).toEqual({
     ok: true,
@@ -133,3 +141,64 @@ test.skipIf(process.platform !== "win32")(
   },
   60_000,
 )
+
+// Runs DOWNLOAD_HELPERS the way the update scripts do (Stop + OCERR trap) against a local server.
+async function runSaveDownload(uri: string, allowHost: string) {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "oc-save-download-"))
+  const file = path.join(dir, "download.bin")
+  const script = String.raw`
+$ErrorActionPreference = "Stop"
+$ProgressPreference = "SilentlyContinue"
+trap { Write-Output "OCERR: $($_.Exception.Message)"; exit 1 }
+${DOWNLOAD_HELPERS}
+Save-Download -Uri "${uri}" -OutFile "${file}" -AllowHost { param($h) ${allowHost} }
+Write-Output "SIZE $((Get-Item -LiteralPath "${file}").Length)"
+`
+  const lines: string[] = []
+  try {
+    const result = await runCliCommand(
+      "powershell.exe",
+      ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script],
+      60_000,
+      windowsPowershellEnv(),
+      (line) => lines.push(line),
+    )
+    return { result, lines }
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+}
+
+describe.skipIf(process.platform !== "win32")("Save-Download", () => {
+  const size = 3 * 1024 * 1024
+  const server = Bun.serve({
+    port: 0,
+    fetch(request) {
+      const url = new URL(request.url)
+      if (url.pathname === "/redirect") return Response.redirect(`${url.origin}/file`, 302)
+      if (url.pathname === "/file") return new Response(new Uint8Array(size))
+      return new Response("missing", { status: 404 })
+    },
+  })
+  afterAll(() => server.stop(true))
+  const base = () => `http://127.0.0.1:${server.port}`
+
+  test("follows a redirect, reports progress, and writes the whole file", async () => {
+    const { result, lines } = await runSaveDownload(`${base()}/redirect`, '$h -eq "127.0.0.1"')
+    expect(result.lastLine).toBe(`SIZE ${size}`)
+    expect(lines[0]).toBe("OCSTEP: downloading")
+    expect(lines[1]).toBe(`OCPROGRESS: 0 ${size}`)
+    expect(lines.filter((line) => line.startsWith("OCPROGRESS: ")).at(-1)).toBe(`OCPROGRESS: ${size} ${size}`)
+  }, 60_000)
+
+  test("refuses a final host the allowlist rejects before writing", async () => {
+    const { result, lines } = await runSaveDownload(`${base()}/redirect`, "$false")
+    expect(result.lastLine).toBe("OCERR: Download redirected to unexpected host '127.0.0.1'")
+    expect(lines.some((line) => line.startsWith("OCPROGRESS: "))).toBe(false)
+  }, 60_000)
+
+  test("reports an HTTP error status", async () => {
+    const { result } = await runSaveDownload(`${base()}/gone`, "$true")
+    expect(result.lastLine).toBe("OCERR: Download failed: HTTP 404")
+  }, 60_000)
+})

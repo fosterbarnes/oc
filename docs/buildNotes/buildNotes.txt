@@ -1,6 +1,8 @@
-v0.2.258 alchemistNolan
+v0.2.259 fedsLmaoo
 
-prompt bar:
-When a chat has exactly one subagent, the prompt bar now shows a detailed line for it: agent, model, effort, token count, and context use, for example ↳General-gpt-5.6-sol-Low 10.3K (10%). Claude model versions read with a dot (claude-opus-5.5). If the model's context limit is unknown, the line shows tokens without a percent instead of hiding the subagent. With two or more subagents the bar keeps the short "General 10% . Explore 4%" list for now.
+third party updates:
+Every Third party updates entry and Update all now show one live toast with a line per item: waiting, checking, awaiting confirm, updating with the CLI's latest output line, downloading with percent and size (for example 44% (62/138 MB)), verifying, and installing with elapsed seconds, then the result. The toast keeps a fixed width, and a line too long for it continues on one indented line below. Progress redraws do not fill /notices; only the final result or summary is kept there.
 
-Under the hood: contextUsage also returns the model ID and effort of the last assistant reply, and the new formatSubagentUsage in util/session.ts builds the line. Checks run: the TUI contextUsage test file (5 pass, including new formatter cases) and the TUI typecheck. Not checked live in the TUI.
+New Auto confirm updates toggle (/autoConfirmUpdates, auto_confirm_updates in tui.json, off by default) installs without the confirm prompt for single entries and Update all, so Claude Desktop, Cursor, and ChatGPT can close without asking. PowerShell still shows its Windows admin prompt.
+
+Under the hood: runCliCommand streams output lines through a new lineSplitter. The four desktop and PowerShell update scripts download through a shared HttpClient Save-Download helper that prints OCSTEP and OCPROGRESS lines, checks the final download host before the body arrives for Cursor and PowerShell, and has no 100 s client timeout (the 10 minute run limit still bounds it). Parsers ignore progress lines. Toasts gained log and width options. Checks run: TUI typecheck; bun test for updateProgress, cliUpdate, desktopUpdate, and pwshUpdate (51 pass, including real Save-Download runs against a local server for redirect, progress, rejected host, and 404); live check-only runs of all four real update scripts. The install path and a slow real download were not run.

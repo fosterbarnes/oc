@@ -1,4 +1,10 @@
-import { expectedVersionAssignment, GET_MSIX_IDENTITY, runDesktopCheck, runDesktopInstall } from "./desktopUpdate"
+import {
+  DOWNLOAD_HELPERS,
+  expectedVersionAssignment,
+  GET_MSIX_IDENTITY,
+  runDesktopCheck,
+  runDesktopInstall,
+} from "./desktopUpdate"
 import type { DesktopCheckResult, DesktopInstallResult } from "./desktopUpdate"
 
 // Fixed script for the OpenAI Store package: highest OpenAI.Codex package with the
@@ -27,6 +33,7 @@ function Get-InstalledChatgptVersion {
 }
 
 ${GET_MSIX_IDENTITY}
+${DOWNLOAD_HELPERS}
 
 $installed = Get-InstalledChatgptVersion
 if (-not $installed) { throw "ChatGPT Desktop not installed" }
@@ -58,14 +65,15 @@ $tmp = Join-Path ([System.IO.Path]::GetTempPath()) ("chatgpt-desktop-update-" + 
 New-Item -ItemType Directory -Path $tmp | Out-Null
 try {
   $file = Join-Path $tmp $fileName
-  try { Invoke-WebRequest -UseBasicParsing -Uri $url -OutFile $file }
-  catch { throw "Download failed: $($_.Exception.Message)" }
+  Save-Download -Uri $url -OutFile $file
+  Write-OcStep "verifying"
   $identity = Get-MsixIdentity -Path $file
   $sig = Get-AuthenticodeSignature -FilePath $file
   if ($sig.Status -ne "Valid") { throw "Signature check failed: $($sig.Status)" }
   if ($identity.Name -ne $PackageName) { throw "Package name '$($identity.Name)' is not ChatGPT Desktop's expected package" }
   if ($identity.Publisher -ne $ExpectedPublisher) { throw "Package publisher '$($identity.Publisher)' is not ChatGPT Desktop's expected publisher" }
   if ($identity.Version -ne $latest) { throw "Downloaded package version ($($identity.Version)) does not match feed version ($latest)" }
+  Write-OcStep "installing"
   try { Add-AppxPackage -Path $file -ForceApplicationShutdown }
   catch { throw "Install failed: $($_.Exception.Message)" }
   $after = Get-InstalledChatgptVersion
@@ -87,7 +95,10 @@ export async function checkChatgptDesktop(): Promise<DesktopCheckResult> {
   return runDesktopCheck({ key: CHATGPT_KEY, label: "ChatGPT Desktop", script: chatgptDesktopScript(true) })
 }
 
-export async function installChatgptDesktop(expectedVersion: string): Promise<DesktopInstallResult> {
+export async function installChatgptDesktop(
+  expectedVersion: string,
+  onLine?: (line: string) => void,
+): Promise<DesktopInstallResult> {
   if (!/^\d+(\.\d+){1,3}$/.test(expectedVersion)) {
     return { ok: false, alreadyRunning: false, message: "Confirmed version is invalid" }
   }
@@ -95,5 +106,6 @@ export async function installChatgptDesktop(expectedVersion: string): Promise<De
     key: CHATGPT_KEY,
     label: "ChatGPT Desktop",
     script: chatgptDesktopScript(false, expectedVersion),
+    onLine,
   })
 }

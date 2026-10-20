@@ -9,12 +9,16 @@ export type ToastOptions = {
   message: string
   variant: "info" | "success" | "warning" | "error"
   duration: number
+  // Fixed box width (still capped by the terminal); live redraws use it so the box does not jump.
+  width?: number
 }
-type ToastInput = Omit<ToastOptions, "duration"> & { duration?: number }
+// `log: false` keeps the toast out of Notices (live progress redraws).
+type ToastInput = Omit<ToastOptions, "duration"> & { duration?: number; log?: boolean }
 export type ToastNotice = Omit<ToastOptions, "duration"> & { time: number }
 
 // Toasts vanish after a few seconds; the oc Notices palette entry lists these.
 const _NOTICE_LIMIT = 100
+export const TOAST_MAX_WIDTH = 60
 
 export function Toast() {
   const toast = useToast()
@@ -30,7 +34,8 @@ export function Toast() {
           alignItems="flex-start"
           top={2}
           right={2}
-          maxWidth={Math.min(60, dimensions().width - 6)}
+          width={current().width ?? "auto"}
+          maxWidth={Math.min(TOAST_MAX_WIDTH, dimensions().width - 6)}
           paddingLeft={2}
           paddingRight={2}
           paddingTop={1}
@@ -68,15 +73,17 @@ function init() {
   let timeoutHandle: NodeJS.Timeout | null = null
 
   const toast = {
-    show(options: ToastInput) {
+    show({ log = true, ...options }: ToastInput) {
       const toastOptions = { ...options, duration: options.duration ?? 5000 }
       setStore("currentToast", toastOptions)
-      setStore("notices", (notices) =>
-        [
-          { title: options.title, message: options.message, variant: options.variant, time: Date.now() },
-          ...notices,
-        ].slice(0, _NOTICE_LIMIT),
-      )
+      if (log) {
+        setStore("notices", (notices) =>
+          [
+            { title: options.title, message: options.message, variant: options.variant, time: Date.now() },
+            ...notices,
+          ].slice(0, _NOTICE_LIMIT),
+        )
+      }
       if (timeoutHandle) clearTimeout(timeoutHandle)
       timeoutHandle = setTimeout(() => {
         setStore("currentToast", null)

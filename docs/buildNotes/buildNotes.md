@@ -169,6 +169,81 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-20 (~00:11) - v0.2.259 fedsLmaoo - Pass on update progress and auto confirm - Claude Opus 5.5, low effort; Pass
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Pass (/pass over this session's update progress, auto confirm, toast width, row wrap); completed
+- Version: 0.2.259 fedsLmaoo (unchanged; not committed since the previous bump)
+- Fixed: `Save-Download` (`desktopUpdate.ts`) set `HttpClient.Timeout` infinite; the default 100 s could cut a large download on a slow link. The `runCliCommand` 10 min kill still bounds it.
+- Fixed stale FORK.md rows (Claude/Cursor/ChatGPT Desktop, PowerShell): "always confirms first" -> "confirms first unless **Auto confirm updates** is on".
+- Moved `_INDENT` beside the other constants in `updateProgress.ts`.
+- Reviewed, no change: line splitting across chunk boundaries, progress-line filtering in parsers, final-phase reset of detail, `stop()` idempotence, getter-preserving placement of the toggle entry.
+- Verification: `bun test test/updateProgress.test.ts test/desktopUpdate.test.ts` 24 pass (includes live `Save-Download`); `bun run typecheck` (tui) exit 0; `git diff --check` clean. A slow real download was not run.
+
+### User
+Third party updates
+- Large app downloads on a slow connection no longer risk stopping after 100 seconds.
+
+---
+
+## 2026-10-20 (~00:07) - v0.2.259 fedsLmaoo - Update progress rows wrap to a second line - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation (follow-up, user request); completed
+- Version: 0.2.259 fedsLmaoo (unchanged; not committed since the previous bump)
+- Changed `formatUpdateRow` (`updateProgress.ts`): a row over 52 cols breaks at the last space within 52 (hard break when none) and continues on one line indented 2; text past that line is cut with `...` (`clip`). Cap at two lines keeps a long CLI line from growing the toast.
+- Changed `test/updateProgress.test.ts`: wrap case and cut-after-second-line case replace the old truncation case.
+- Verification: `bun test test/updateProgress.test.ts` 7 pass; `bun run typecheck` (tui) exit 0. Toast not visually checked by agent.
+
+### User
+Third party updates
+- A progress line too long for the toast now continues on the line below instead of being cut short.
+
+---
+
+## 2026-10-20 (~00:05) - v0.2.259 fedsLmaoo - Fixed-width update progress toast - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation (follow-up to the progress entry below, user live check); completed
+- Version: 0.2.259 fedsLmaoo (unchanged; not committed since the previous bump)
+- Fixed: progress toast width jumped as row text changed (box was content-sized, `maxWidth` only).
+- Added optional `width` to `ToastOptions` and exported `TOAST_MAX_WIDTH` (60) in `ui/toast.tsx`; box uses `width ?? "auto"`, still capped by `maxWidth`.
+- Changed `createUpdateProgress` render to pass `width: TOAST_MAX_WIDTH`. Rows stay cut at 52 cols (54 inner).
+- Verification: `bun run typecheck` (tui) exit 0; `bun test test/updateProgress.test.ts` 6 pass. Width not visually checked by agent.
+
+### User
+Third party updates
+- The update progress toast now keeps one fixed width instead of resizing as each line changes.
+
+---
+
+## 2026-10-19 (~23:45) - v0.2.259 fedsLmaoo - Third party update progress and auto confirm - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation (/spit plan `~/.config/opencode/plans/thirdPartyUpdateProgress.md`, then /imp, no subagents); completed
+- Version: 0.2.259 fedsLmaoo
+- Added `log?: boolean` to `ToastInput` (`ui/toast.tsx`); `log: false` skips Notices.
+- Added `lineSplitter` + 5th param `onLine` to `runCliCommand` (`cliUpdate.ts`); splits on CR/LF, strips ANSI, flushes partial on finish. Forwarded through `runCliUpdate`, `runVersionedCliUpdate` (update command only, not version probes).
+- Added `DOWNLOAD_HELPERS` in `desktopUpdate.ts`: `Write-OcStep` and `Save-Download` (HttpClient, ResponseHeadersRead, status check, final host via `RequestMessage.RequestUri` checked before body, 80 KB stream, `OCPROGRESS: <received> <total>` on percent change >=200 ms or every 1 s). Writes via `[Console]::Out` because Write-Output in a function becomes its return value.
+- Changed all four scripts (Claude, Cursor, ChatGPT, PowerShell) to `Save-Download` + `OCSTEP` verifying/installing. Cursor and PowerShell keep their host allowlists; Claude and ChatGPT keep no final-host check (as before).
+- Changed `nonEmptyLines` to drop `OCSTEP:`/`OCPROGRESS:` lines; added `failureDetail` so a killed script never reports a progress line as its error.
+- Added `updateProgress.ts`: rows, `applyUpdateLine`, `formatUpdateRow` (52-col cut), `createUpdateProgress` (redraw on change, 1 s tick only while a timed phase is shown, `stop()` fades after 5 s).
+- Changed `harnessUpdate.ts`: `runSingleUpdate`/`updateCli` for single entries; `updateDesktopHarness` and `updateAllHarnesses` take `autoConfirm` and skip `DialogConfirm` when on; Update all title "Update all (auto confirm)".
+- Added `auto_confirm_updates` (config schema, signal + setter, `persistTuiSetting` key) and palette entry `oc.auto_confirm_updates` (`/autoConfirmUpdates`) outside the mapped update list, because spreading would freeze the `desc` getter.
+- Deviation: plan had the auto-confirm toast title list what closes; kept to "(auto confirm)" to fit the 60-col toast; the warning lives in the toggle descriptions and config doc.
+- Docs: FORK.md row; wiki `Configuration.md` setting row, `Claude-Code.md` Update paragraph.
+- Verification: spikes confirmed live stdout from `powershell.exe -Command` and HttpClient final host/length in 5.1 (GitHub release-assets, downloads.cursor.com). `bun run typecheck` (tui) exit 0. `bun test test/updateProgress.test.ts test/cliUpdate.test.ts test/desktopUpdate.test.ts test/pwshUpdate.test.ts` 51 pass, including live `Save-Download` against a local Bun server (redirect, progress, reject host, 404). Live check-only of all four real scripts parsed and reported up to date. Install path not run (all current; would change user apps).
+- Risk: progress redraws can cover an unrelated toast within 1 s (still in Notices); a single entry during Update all shares the one toast slot.
+
+### User
+Third party updates
+- Each update now shows a live toast with a line per item: checking, waiting for your confirmation, download percent and size, verifying, and installing time, then the result.
+- CLI updates show the updater's latest output line while they run.
+- New **Auto confirm updates** toggle (`/autoConfirmUpdates`, off by default) installs without the confirm prompt, which can close Claude Desktop, Cursor, and ChatGPT without asking; PowerShell still asks for admin approval.
+- Progress updates do not fill `/notices`; only the final result is kept there.
+
+---
+
 ## 2026-10-19 (~23:24) - v0.2.258 alchemistNolan - detailed prompt-bar line for a lone subagent - Claude Opus 5.5, low effort; Implementation
 
 ### Agent

@@ -76,9 +76,7 @@ export const SubagentTabs = Schema.Struct({
 
 export const Info = Schema.Struct({
   $schema: Schema.optional(Schema.String),
-  openEditedWith: Schema.optional(
-    Schema.Union([Schema.String, Schema.Record(Schema.String, Schema.String)]),
-  ).annotate({
+  openEditedWith: Schema.optional(Schema.Union([Schema.String, Schema.Record(Schema.String, Schema.String)])).annotate({
     description:
       'Editor used when opening file paths from the TUI, or a map of extension to editor with an optional default, e.g. { "default": "code", ".md": "typora" }',
   }),
@@ -107,6 +105,10 @@ export const Info = Schema.Struct({
   smooth_streaming: Schema.optional(Schema.Boolean).annotate({
     description: "Beta: reveal streamed replies and reasoning at a steady pace instead of in bursts (default: false)",
   }),
+  auto_confirm_updates: Schema.optional(Schema.Boolean).annotate({
+    description:
+      "Third party updates install without the confirm dialog; this can close Claude Desktop, Cursor, and ChatGPT (default: false)",
+  }),
 })
 export type Info = Schema.Schema.Type<typeof Info>
 
@@ -114,15 +116,30 @@ export type KeybindPreset = (typeof TuiKeybindPreset.Names)[number]
 export type SidebarButtonStyle = NonNullable<Info["sidebar_button_style"]>
 export type SubagentTabsSettings = { click: "inline" | "tab"; auto_open: boolean; return_to_parent: boolean }
 
-export type Resolved = Omit<Info, "attention" | "keybind_preset" | "sidebar_button_style" | "subagent_tabs" | "palette_keys" | "keybinds" | "leader_timeout" | "mouse" | "cursor" | "smooth_streaming"> & {
+export type Resolved = Omit<
+  Info,
+  | "attention"
+  | "keybind_preset"
+  | "sidebar_button_style"
+  | "subagent_tabs"
+  | "palette_keys"
+  | "keybinds"
+  | "leader_timeout"
+  | "mouse"
+  | "cursor"
+  | "smooth_streaming"
+  | "auto_confirm_updates"
+> & {
   keybind_preset: KeybindPreset
   sidebar_button_style: SidebarButtonStyle
   subagent_tabs: SubagentTabsSettings
   palette_keys: Record<string, string>
   smooth_streaming: boolean
+  auto_confirm_updates: boolean
   setKeybindPreset: (preset: KeybindPreset) => void
   setSidebarButtonStyle: (style: SidebarButtonStyle) => void
   setSmoothStreaming: (on: boolean) => void
+  setAutoConfirmUpdates: (on: boolean) => void
   setSubagentTabs: (settings: SubagentTabsSettings) => void
   setPaletteKey: (command: string, key: string | undefined) => void
   attention: {
@@ -164,6 +181,7 @@ export function resolve(input: Info, options: ResolveOptions): Resolved {
   })
   const [paletteKeys, setPaletteKeys] = createSignal<Record<string, string>>(input.palette_keys ?? {})
   const [smoothStreaming, setSmoothStreaming] = createSignal(input.smooth_streaming ?? false)
+  const [autoConfirmUpdates, setAutoConfirmUpdates] = createSignal(input.auto_confirm_updates ?? false)
 
   return {
     ...input,
@@ -186,6 +204,10 @@ export function resolve(input: Info, options: ResolveOptions): Resolved {
       return smoothStreaming()
     },
     setSmoothStreaming,
+    get auto_confirm_updates() {
+      return autoConfirmUpdates()
+    },
+    setAutoConfirmUpdates,
     get palette_keys() {
       return paletteKeys()
     },
@@ -193,8 +215,11 @@ export function resolve(input: Info, options: ResolveOptions): Resolved {
       if (key === undefined && paletteKeys()[command] === undefined) return
       if (key !== undefined) {
         const leaderBinding = lookups[preset()].get("leader")[0]?.key
-        const leaderKey =
-          !leaderBinding ? "" : typeof leaderBinding === "string" ? leaderBinding.trim().toLowerCase() : ""
+        const leaderKey = !leaderBinding
+          ? ""
+          : typeof leaderBinding === "string"
+            ? leaderBinding.trim().toLowerCase()
+            : ""
         const result = validateHotkey({
           key,
           leaderKey,

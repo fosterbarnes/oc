@@ -1,4 +1,4 @@
-import { expectedVersionAssignment, runDesktopCheck, runDesktopInstall } from "./desktopUpdate"
+import { DOWNLOAD_HELPERS, expectedVersionAssignment, runDesktopCheck, runDesktopInstall } from "./desktopUpdate"
 import type { DesktopCheckResult, DesktopInstallResult } from "./desktopUpdate"
 
 // Fixed script for the per-user Inno Setup install: registry DisplayVersion of the
@@ -22,6 +22,8 @@ function Test-CursorHost {
   $h = $HostName.ToLowerInvariant()
   return $h -eq "cursor.com" -or $h -eq "cursor.sh" -or $h -eq "downloads.cursor.com" -or $h.EndsWith(".cursor.com") -or $h.EndsWith(".cursor.sh")
 }
+
+${DOWNLOAD_HELPERS}
 
 function Get-CursorInstall {
   $key = Get-Item -LiteralPath $UninstallKey -ErrorAction SilentlyContinue
@@ -71,14 +73,13 @@ $tmp = Join-Path ([System.IO.Path]::GetTempPath()) ("cursor-desktop-update-" + [
 New-Item -ItemType Directory -Path $tmp | Out-Null
 try {
   $file = Join-Path $tmp "CursorSetup.exe"
-  try { $response = Invoke-WebRequest -UseBasicParsing -Uri $downloadUrl -OutFile $file -PassThru }
-  catch { throw "Download failed: $($_.Exception.Message)" }
-  $finalHost = $response.BaseResponse.ResponseUri.Host
-  if (-not (Test-CursorHost $finalHost)) { throw "Download redirected to unexpected host '$finalHost'" }
+  Save-Download -Uri $downloadUrl -OutFile $file -AllowHost { param($h) Test-CursorHost $h }
+  Write-OcStep "verifying"
   $sig = Get-AuthenticodeSignature -FilePath $file
   if ($sig.Status -ne "Valid") { throw "Signature check failed: $($sig.Status)" }
   $signer = $sig.SignerCertificate.GetNameInfo([System.Security.Cryptography.X509Certificates.X509NameType]::SimpleName, $false)
   if ($signer -ne "Anysphere, Inc.") { throw "Signature signer '$signer' is not Cursor's expected signer" }
+  Write-OcStep "installing"
   $proc = Start-Process -FilePath $file -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CLOSEAPPLICATIONS", "/MERGETASKS=!runcode" -PassThru
   if (-not $proc.WaitForExit(600000)) {
     $proc.Kill()
@@ -109,7 +110,10 @@ export async function checkCursorDesktop(): Promise<DesktopCheckResult> {
   })
 }
 
-export async function installCursorDesktop(expectedVersion: string): Promise<DesktopInstallResult> {
+export async function installCursorDesktop(
+  expectedVersion: string,
+  onLine?: (line: string) => void,
+): Promise<DesktopInstallResult> {
   if (!/^\d+(\.\d+){1,3}$/.test(expectedVersion)) {
     return { ok: false, alreadyRunning: false, message: "Confirmed version is invalid" }
   }
@@ -117,5 +121,6 @@ export async function installCursorDesktop(expectedVersion: string): Promise<Des
     key: CURSOR_KEY,
     label: "Cursor Desktop",
     script: cursorDesktopScript(false, expectedVersion),
+    onLine,
   })
 }

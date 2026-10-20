@@ -1,4 +1,4 @@
-import { expectedVersionAssignment, runDesktopCheck, runDesktopInstall } from "./desktopUpdate"
+import { DOWNLOAD_HELPERS, expectedVersionAssignment, runDesktopCheck, runDesktopInstall } from "./desktopUpdate"
 import type { DesktopCheckResult, DesktopInstallResult } from "./desktopUpdate"
 
 // Fixed script for the machine-wide PowerShell 7 MSI install: installed version from the MSI's
@@ -24,6 +24,8 @@ function Test-GithubHost {
   $h = $HostName.ToLowerInvariant()
   return $h -eq "github.com" -or $h -eq "objects.githubusercontent.com" -or $h -eq "release-assets.githubusercontent.com"
 }
+
+${DOWNLOAD_HELPERS}
 
 function Get-InstalledPwshVersion {
   $entries = Get-ChildItem -LiteralPath "HKLM:\SOFTWARE\Microsoft\PowerShellCore\InstalledVersions" -ErrorAction SilentlyContinue | ForEach-Object { Get-ItemProperty -LiteralPath $_.PSPath }
@@ -60,14 +62,13 @@ $tmp = Join-Path ([System.IO.Path]::GetTempPath()) ("pwsh-update-" + [System.Gui
 New-Item -ItemType Directory -Path $tmp | Out-Null
 try {
   $file = Join-Path $tmp "PowerShell.msi"
-  try { $response = Invoke-WebRequest -UseBasicParsing -Uri $url -OutFile $file -PassThru }
-  catch { throw "Download failed: $($_.Exception.Message)" }
-  $finalHost = $response.BaseResponse.ResponseUri.Host
-  if (-not (Test-GithubHost $finalHost)) { throw "Download redirected to unexpected host '$finalHost'" }
+  Save-Download -Uri $url -OutFile $file -AllowHost { param($h) Test-GithubHost $h }
+  Write-OcStep "verifying"
   $sig = Get-AuthenticodeSignature -FilePath $file
   if ($sig.Status -ne "Valid") { throw "Signature check failed: $($sig.Status)" }
   $signer = $sig.SignerCertificate.GetNameInfo([System.Security.Cryptography.X509Certificates.X509NameType]::SimpleName, $false)
   if ($signer -ne "Microsoft Corporation") { throw "Signature signer '$signer' is not Microsoft" }
+  Write-OcStep "installing needs admin approval"
   try { $proc = Start-Process -FilePath "msiexec.exe" -ArgumentList "/i", ('"{0}"' -f $file), "/qn", "/norestart", "MSIRESTARTMANAGERCONTROL=DisableShutdown" -Verb RunAs -PassThru }
   catch { throw "Cancelled at the admin prompt" }
   if (-not $proc.WaitForExit(600000)) { throw "Install still running after 10 minutes" }
@@ -95,9 +96,12 @@ export async function checkPowershell(): Promise<DesktopCheckResult> {
   return runDesktopCheck({ key: PWSH_KEY, label: "PowerShell", script: pwshScript(true) })
 }
 
-export async function installPowershell(expectedVersion: string): Promise<DesktopInstallResult> {
+export async function installPowershell(
+  expectedVersion: string,
+  onLine?: (line: string) => void,
+): Promise<DesktopInstallResult> {
   if (!/^\d+(\.\d+){1,3}$/.test(expectedVersion)) {
     return { ok: false, alreadyRunning: false, message: "Confirmed version is invalid" }
   }
-  return runDesktopInstall({ key: PWSH_KEY, label: "PowerShell", script: pwshScript(false, expectedVersion) })
+  return runDesktopInstall({ key: PWSH_KEY, label: "PowerShell", script: pwshScript(false, expectedVersion), onLine })
 }

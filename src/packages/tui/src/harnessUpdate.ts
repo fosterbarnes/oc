@@ -12,11 +12,21 @@ import { checkPowershell, installPowershell } from "./pwshUpdate"
 import type { DialogContext } from "./ui/dialog"
 import { DialogConfirm } from "./ui/dialog-confirm"
 import type { ToastContext } from "./ui/toast"
+import { createUpdateProgress, type UpdatePhase, type UpdateProgress } from "./updateProgress"
 
 // Every harness updater resolves to one of these so "Update all" can run them in sequence and
 // summarize; the single-harness palette entries show the same result as one toast.
 type HarnessUpdateStatus = "ok" | "notInstalled" | "busy" | "declined" | "failed"
 type HarnessUpdateResult = { label: string; status: HarnessUpdateStatus; message: string }
+type OnLine = (line: string) => void
+
+const _STATUS_PHASE: Record<HarnessUpdateStatus, UpdatePhase> = {
+  ok: "done",
+  notInstalled: "not installed",
+  busy: "already running",
+  declined: "skipped",
+  failed: "failed",
+}
 
 function harnessResult(label: string, status: HarnessUpdateStatus, message: string): HarnessUpdateResult {
   return { label, status, message }
@@ -32,10 +42,10 @@ function showHarnessResult(toast: ToastContext, result: HarnessUpdateResult) {
 // `claude update` updates whichever install `cliPath` resolves to. A chat's live `claude` process
 // keeps its old binary; the next process oc starts uses the update. The shell resolves npm's
 // `claude.cmd` shim on Windows.
-async function runClaudeCodeUpdate(cliPath: string): Promise<HarnessUpdateResult> {
+async function runClaudeCodeUpdate(cliPath: string, onLine?: OnLine): Promise<HarnessUpdateResult> {
   const label = "Claude Code"
   if (!which(cliPath)) return harnessResult(label, "notInstalled", `${label} not found: ${cliPath}`)
-  const result = await runCliUpdate(cliPath)
+  const result = await runCliUpdate(cliPath, onLine)
   if (result.alreadyRunning) return harnessResult(label, "busy", `${label} update already running`)
   if (result.error && result.code === null && !result.lastLine) {
     return harnessResult(label, "failed", `Failed to update ${label}: ${result.error}`)
@@ -48,35 +58,57 @@ async function runClaudeCodeUpdate(cliPath: string): Promise<HarnessUpdateResult
 async function runVersionedHarnessUpdate(
   label: string,
   resolve: () => Promise<{ executable: string } | { error: string; notInstalled?: true }>,
+  onLine?: OnLine,
 ): Promise<HarnessUpdateResult> {
   const resolved = await resolve()
   if ("error" in resolved) {
     return harnessResult(label, resolved.notInstalled ? "notInstalled" : "failed", resolved.error)
   }
-  const result = await runVersionedCliUpdate(label, resolved.executable)
+  const result = await runVersionedCliUpdate(label, resolved.executable, onLine)
   if (result.alreadyRunning) return harnessResult(label, "busy", result.message)
   return harnessResult(label, result.ok ? "ok" : "failed", result.message)
 }
 
+// Single palette entries: a one-line progress toast, then the result toast replaces it.
+async function runSingleUpdate(
+  toast: ToastContext,
+  label: string,
+  run: (progress: UpdateProgress) => Promise<HarnessUpdateResult>,
+) {
+  const progress = createUpdateProgress(toast, `Update ${label}`, [label])
+  let result: HarnessUpdateResult
+  try {
+    result = await run(progress)
+    progress.set(label, _STATUS_PHASE[result.status])
+  } finally {
+    progress.stop()
+  }
+  showHarnessResult(toast, result)
+}
+
+function updateCli(toast: ToastContext, label: string, run: (onLine: OnLine) => Promise<HarnessUpdateResult>) {
+  void runSingleUpdate(toast, label, (progress) => {
+    progress.set(label, "updating")
+    return run(progress.onLine(label))
+  })
+}
+
 export function updateClaudeCode(cliPath: string, toast: ToastContext) {
-  toast.show({ message: "Updating Claude Code...", variant: "info", duration: 120_000 })
-  void runClaudeCodeUpdate(cliPath).then((result) => showHarnessResult(toast, result))
+  updateCli(toast, "Claude Code", (onLine) => runClaudeCodeUpdate(cliPath, onLine))
 }
 
 export function updateCursorCli(toast: ToastContext) {
-  toast.show({ message: "Updating Cursor CLI...", variant: "info", duration: 120_000 })
-  void runVersionedHarnessUpdate("Cursor CLI", resolveCursorCli).then((result) => showHarnessResult(toast, result))
+  updateCli(toast, "Cursor CLI", (onLine) => runVersionedHarnessUpdate("Cursor CLI", resolveCursorCli, onLine))
 }
 
 export function updateCodexCli(toast: ToastContext) {
-  toast.show({ message: "Updating Codex CLI...", variant: "info", duration: 120_000 })
-  void runVersionedHarnessUpdate("Codex CLI", resolveCodexCli).then((result) => showHarnessResult(toast, result))
+  updateCli(toast, "Codex CLI", (onLine) => runVersionedHarnessUpdate("Codex CLI", resolveCodexCli, onLine))
 }
 
 type DesktopHarness = {
   label: string
   check: () => Promise<DesktopCheckResult>
-  install: (version: string) => Promise<DesktopInstallResult>
+  install: (version: string, onLine?: OnLine) => Promise<DesktopInstallResult>
   // Completes "Updating ..." in the confirm prompt.
   closes: string
 }
@@ -118,72 +150,98 @@ async function checkDesktopHarness(harness: DesktopHarness): Promise<HarnessUpda
   return { harness, oldVersion: checked.oldVersion, newVersion: checked.newVersion }
 }
 
-async function installDesktopHarness(pending: PendingDesktopUpdate): Promise<HarnessUpdateResult> {
-  const result = await pending.harness.install(pending.newVersion)
+async function installDesktopHarness(pending: PendingDesktopUpdate, onLine?: OnLine): Promise<HarnessUpdateResult> {
+  const result = await pending.harness.install(pending.newVersion, onLine)
   if (result.alreadyRunning) return harnessResult(pending.harness.label, "busy", result.message)
   return harnessResult(pending.harness.label, result.ok ? "ok" : "failed", result.message)
 }
 
-export function updateDesktopHarness(harness: DesktopHarness, toast: ToastContext, dialog: DialogContext) {
-  void (async () => {
-    toast.show({ message: `Checking ${harness.label}...`, variant: "info" })
+// `autoConfirm` is the `auto_confirm_updates` TUI setting: install without the confirm dialog.
+export function updateDesktopHarness(
+  harness: DesktopHarness,
+  toast: ToastContext,
+  dialog: DialogContext,
+  autoConfirm: boolean,
+) {
+  const label = harness.label
+  void runSingleUpdate(toast, label, async (progress) => {
+    progress.set(label, "checking")
     const checked = await checkDesktopHarness(harness)
-    if ("status" in checked) return showHarnessResult(toast, checked)
-    const confirmed = await DialogConfirm.show(
-      dialog,
-      `Update ${harness.label}`,
-      `Updating ${harness.closes}. Update ${checked.oldVersion} -> ${checked.newVersion}?`,
-    )
-    if (confirmed !== true) return
-    toast.show({ message: `Updating ${harness.label}...`, variant: "info", duration: 120_000 })
-    showHarnessResult(toast, await installDesktopHarness(checked))
-  })()
+    if ("status" in checked) return checked
+    const versions = `${checked.oldVersion} -> ${checked.newVersion}`
+    if (!autoConfirm) {
+      progress.set(label, "awaiting confirm", versions)
+      const confirmed = await DialogConfirm.show(
+        dialog,
+        `Update ${label}`,
+        `Updating ${harness.closes}. Update ${versions}?`,
+      )
+      if (confirmed !== true) return harnessResult(label, "declined", "skipped")
+    }
+    progress.set(label, "updating", versions)
+    return installDesktopHarness(checked, progress.onLine(label))
+  })
 }
 
 // CLIs first since updating them interrupts nothing; desktop apps and PowerShell last because
 // installing closes apps or asks for admin approval. Their checks all run before one combined
 // confirm so the run never stalls on several prompts.
 let updateAllRunning = false
-export async function updateAllHarnesses(cliPath: string, toast: ToastContext, dialog: DialogContext) {
+export async function updateAllHarnesses(
+  cliPath: string,
+  toast: ToastContext,
+  dialog: DialogContext,
+  autoConfirm: boolean,
+) {
   if (updateAllRunning) return toast.show({ message: "Update all already running", variant: "info" })
   updateAllRunning = true
+  const clis: [string, (onLine: OnLine) => Promise<HarnessUpdateResult>][] = [
+    ["Claude Code", (onLine) => runClaudeCodeUpdate(cliPath, onLine)],
+    ["Cursor CLI", (onLine) => runVersionedHarnessUpdate("Cursor CLI", resolveCursorCli, onLine)],
+    ["Codex CLI", (onLine) => runVersionedHarnessUpdate("Codex CLI", resolveCodexCli, onLine)],
+  ]
+  const desktops = process.platform === "win32" ? [CLAUDE_DESKTOP, CURSOR_DESKTOP, CHATGPT_DESKTOP, POWERSHELL] : []
+  const progress = createUpdateProgress(toast, autoConfirm ? "Update all (auto confirm)" : "Update all", [
+    ...clis.map(([label]) => label),
+    ...desktops.map((harness) => harness.label),
+  ])
   try {
-    const progress = (message: string) => toast.show({ message, variant: "info", duration: 600_000 })
     const results: HarnessUpdateResult[] = []
-    const clis: [string, () => Promise<HarnessUpdateResult>][] = [
-      ["Claude Code", () => runClaudeCodeUpdate(cliPath)],
-      ["Cursor CLI", () => runVersionedHarnessUpdate("Cursor CLI", resolveCursorCli)],
-      ["Codex CLI", () => runVersionedHarnessUpdate("Codex CLI", resolveCodexCli)],
-    ]
-    for (const [label, run] of clis) {
-      progress(`Update all: updating ${label}...`)
-      results.push(await run())
+    const record = (result: HarnessUpdateResult) => {
+      results.push(result)
+      progress.set(result.label, _STATUS_PHASE[result.status])
     }
-    const desktops = process.platform === "win32" ? [CLAUDE_DESKTOP, CURSOR_DESKTOP, CHATGPT_DESKTOP, POWERSHELL] : []
+    for (const [label, run] of clis) {
+      progress.set(label, "updating")
+      record(await run(progress.onLine(label)))
+    }
     const pending: PendingDesktopUpdate[] = []
     for (const harness of desktops) {
-      progress(`Update all: checking ${harness.label}...`)
+      progress.set(harness.label, "checking")
       const checked = await checkDesktopHarness(harness)
-      if ("status" in checked) results.push(checked)
+      if ("status" in checked) record(checked)
       else pending.push(checked)
     }
+    const versions = (item: PendingDesktopUpdate) => `${item.oldVersion} -> ${item.newVersion}`
     if (pending.length > 0) {
-      toast.show({ message: "Update all: waiting for confirmation", variant: "info", duration: 600_000 })
-      const list = pending
-        .map((item) => `${item.harness.label} ${item.oldVersion} -> ${item.newVersion} (${item.harness.closes})`)
-        .join("; ")
-      const confirmed = await DialogConfirm.show(dialog, "Confirm updates", `Updating: ${list}. Continue?`)
+      for (const item of pending)
+        progress.set(item.harness.label, autoConfirm ? "waiting" : "awaiting confirm", versions(item))
+      const list = pending.map((item) => `${item.harness.label} ${versions(item)} (${item.harness.closes})`).join("; ")
+      const confirmed =
+        autoConfirm || (await DialogConfirm.show(dialog, "Confirm updates", `Updating: ${list}. Continue?`)) === true
       for (const item of pending) {
-        if (confirmed !== true) {
-          results.push(harnessResult(item.harness.label, "declined", "skipped"))
+        if (!confirmed) {
+          record(harnessResult(item.harness.label, "declined", "skipped"))
           continue
         }
-        progress(`Update all: updating ${item.harness.label}...`)
-        results.push(await installDesktopHarness(item))
+        progress.set(item.harness.label, "updating", versions(item))
+        record(await installDesktopHarness(item, progress.onLine(item.harness.label)))
       }
     }
+    progress.stop()
     showUpdateAllSummary(toast, results)
   } finally {
+    progress.stop()
     updateAllRunning = false
   }
 }

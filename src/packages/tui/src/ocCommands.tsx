@@ -883,7 +883,7 @@ export function createOcCommands(input: {
         {
           name: "oc.update_all_harnesses",
           title: "Update all",
-          run: () => void updateAllHarnesses(claudeCliPath(), toast, dialog),
+          run: () => void updateAllHarnesses(claudeCliPath(), toast, dialog, tuiConfig.auto_confirm_updates),
         },
         {
           name: "oc.update_claude_code",
@@ -897,26 +897,64 @@ export function createOcCommands(input: {
               {
                 name: "oc.update_claude_desktop",
                 title: "Update Claude Desktop",
-                run: () => updateDesktopHarness(CLAUDE_DESKTOP, toast, dialog),
+                run: () => updateDesktopHarness(CLAUDE_DESKTOP, toast, dialog, tuiConfig.auto_confirm_updates),
               },
               {
                 name: "oc.update_cursor_desktop",
                 title: "Update Cursor Desktop",
-                run: () => updateDesktopHarness(CURSOR_DESKTOP, toast, dialog),
+                run: () => updateDesktopHarness(CURSOR_DESKTOP, toast, dialog, tuiConfig.auto_confirm_updates),
               },
               {
                 name: "oc.update_chatgpt_desktop",
                 title: "Update ChatGPT Desktop",
-                run: () => updateDesktopHarness(CHATGPT_DESKTOP, toast, dialog),
+                run: () => updateDesktopHarness(CHATGPT_DESKTOP, toast, dialog, tuiConfig.auto_confirm_updates),
               },
               {
                 name: "oc.update_powershell",
                 title: "Update PowerShell",
-                run: () => updateDesktopHarness(POWERSHELL, toast, dialog),
+                run: () => updateDesktopHarness(POWERSHELL, toast, dialog, tuiConfig.auto_confirm_updates),
               },
             ]
           : []),
       ].map((command) => ({ ...command, category: "oc", group: "Third party updates" })),
+      {
+        name: "oc.auto_confirm_updates",
+        title: "Auto confirm updates",
+        category: "oc",
+        group: "Third party updates",
+        get desc() {
+          return tuiConfig.auto_confirm_updates ? "on" : "off"
+        },
+        slashName: "autoConfirmUpdates",
+        run: () => {
+          dialog.replace(() => (
+            <DialogSelect
+              title="Auto confirm updates"
+              current={tuiConfig.auto_confirm_updates}
+              options={[
+                {
+                  value: true,
+                  title: "on",
+                  description: "Install right away; can close Claude Desktop, Cursor, and ChatGPT without asking",
+                },
+                { value: false, title: "off", description: "Ask before installing apps" },
+              ]}
+              onSelect={(option) => {
+                dialog.clear()
+                tuiConfig.setAutoConfirmUpdates(option.value)
+                try {
+                  persistTuiSetting(["auto_confirm_updates"], option.value)
+                } catch (cause) {
+                  const message = cause instanceof Error ? cause.message : String(cause)
+                  toast.show({ message: `Auto confirm updates applied but not saved: ${message}`, variant: "error" })
+                  return
+                }
+                toast.show({ message: `Auto confirm updates ${option.title}`, variant: "success" })
+              }}
+            />
+          ))
+        },
+      },
       {
         name: "server.shutdown",
         title: "Shut down",

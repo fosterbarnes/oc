@@ -5,6 +5,7 @@ import path from "node:path"
 import {
   CODEX_CLI_INSTALL_HINT,
   CURSOR_CLI_INSTALL_URL,
+  lineSplitter,
   resetCliUpdateState,
   resolveCodexCli,
   resolveCursorCli,
@@ -240,6 +241,28 @@ test("second activation of the same executable reports already running", async (
   const done = await first
   expect(done.alreadyRunning).toBe(false)
   expect(done.ok).toBe(true)
+})
+
+test("splits chunks into lines on CR, LF, and partial chunk boundaries", () => {
+  const lines: string[] = []
+  const splitter = lineSplitter((line) => lines.push(line))
+  splitter.push("Checking\r\nDown")
+  splitter.push("loading 10%\rDownloading 50%\r")
+  splitter.push("\n\u001b[32mDone\u001b[0m")
+  expect(lines).toEqual(["Checking", "Downloading 10%", "Downloading 50%"])
+  splitter.flush()
+  expect(lines.at(-1)).toBe("Done")
+})
+
+test("streams output lines before the command exits", async () => {
+  const lines: string[] = []
+  let firstAt = 0
+  const script = 'process.stdout.write("one\\n"); setTimeout(() => process.stderr.write("two\\rthree"), 500)'
+  await runCliCommand(process.execPath, ["-e", script], undefined, undefined, (line) => {
+    if (lines.push(line) === 1) firstAt = Date.now()
+  })
+  expect(lines).toEqual(["one", "two", "three"])
+  expect(Date.now() - firstAt).toBeGreaterThanOrEqual(300)
 })
 
 test("spawn error and close produce one completion result", async () => {

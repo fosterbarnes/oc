@@ -63,20 +63,44 @@ function firstLineOf(text: string) {
   )
 }
 
+// Splits one stream into lines for `onLine`. `\r` counts as a break so spinner and progress
+// redraws arrive as they happen; a trailing partial line waits for the next chunk or `flush`.
+export function lineSplitter(onLine: (line: string) => void) {
+  let partial = ""
+  const emit = (text: string) => {
+    const line = stripAnsi(text).trim()
+    if (line) onLine(line)
+  }
+  return {
+    push(chunk: string) {
+      const parts = (partial + chunk).split(/\r\n|\r|\n/)
+      partial = parts.pop() ?? ""
+      for (const part of parts) emit(part)
+    },
+    flush() {
+      emit(partial)
+      partial = ""
+    },
+  }
+}
+
 export function runCliCommand(
   executable: string,
   args: string[],
   timeoutMs = CLI_TIMEOUT_MS,
   env?: NodeJS.ProcessEnv,
+  onLine?: (line: string) => void,
 ): Promise<CliCommandResult> {
   return new Promise((resolve) => {
     let settled = false
     let output = ""
     let timer: ReturnType<typeof setTimeout> | undefined
+    const streams = onLine ? [lineSplitter(onLine), lineSplitter(onLine)] : []
     const finish = (partial: { ok: boolean; code: number | null; error?: string }) => {
       if (settled) return
       settled = true
       clearTimeout(timer)
+      for (const stream of streams) stream.flush()
       const capped = capOutput(output)
       resolve({
         ...partial,
@@ -108,9 +132,11 @@ export function runCliCommand(
     }, timeoutMs)
     child.stdout?.on("data", (chunk) => {
       output += String(chunk)
+      streams[0]?.push(String(chunk))
     })
     child.stderr?.on("data", (chunk) => {
       output += String(chunk)
+      streams[1]?.push(String(chunk))
     })
     child.on("error", (cause) => {
       finish({ ok: false, code: null, error: cause.message })
@@ -121,7 +147,7 @@ export function runCliCommand(
   })
 }
 
-export async function runCliUpdate(executable: string): Promise<CliUpdateResult> {
+export async function runCliUpdate(executable: string, onLine?: (line: string) => void): Promise<CliUpdateResult> {
   const key = inflightKey(executable)
   if (inflight.has(key)) {
     return {
@@ -135,7 +161,7 @@ export async function runCliUpdate(executable: string): Promise<CliUpdateResult>
   }
   inflight.add(key)
   try {
-    const result = await runCliCommand(executable, [UPDATE_ARG])
+    const result = await runCliCommand(executable, [UPDATE_ARG], undefined, undefined, onLine)
     return { ...result, alreadyRunning: false }
   } finally {
     inflight.delete(key)
@@ -181,7 +207,7 @@ export async function resolveCursorCli(
   return { executable: agent }
 }
 
-export async function runVersionedCliUpdate(label: string, executable: string) {
+export async function runVersionedCliUpdate(label: string, executable: string, onLine?: (line: string) => void) {
   const key = inflightKey(executable)
   if (inflight.has(key)) {
     return { ok: false, alreadyRunning: true, message: `${label} update already running` }
@@ -189,7 +215,7 @@ export async function runVersionedCliUpdate(label: string, executable: string) {
   inflight.add(key)
   try {
     const before = await probeCliVersion(executable)
-    const result = await runCliCommand(executable, [UPDATE_ARG])
+    const result = await runCliCommand(executable, [UPDATE_ARG], undefined, undefined, onLine)
     if (!result.ok) {
       return {
         ok: false,
