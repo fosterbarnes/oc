@@ -24,6 +24,7 @@ loop; the OpenCode 2 execution engine itself is not brought back.
 | Upstream release, publish, translation, and download-stats scripts | 0.3.0 | Built for upstream's npm packages and website. |
 | Localized `README.*.md` | v0.1.5 | oc docs are English only. |
 | `experimental.disable_paste_summary` config option | v0.2.241 | Paste summary is off by default and toggled with `/pasteSummary` (kv). The schema still accepts the key so existing configs load; the TUI ignores it. |
+| Session sharing (`/share`, `/unshare`, `run --share`, share-URL import, sidebar share link) | v0.2.264 | Upstream service discontinued (`d320177aa4`). The SDK `session.share`/`unshare` routes stay: share fails, unshare clears the stored link. |
 
 ## Not planned
 
@@ -44,7 +45,6 @@ loop; the OpenCode 2 execution engine itself is not brought back.
 | In-TUI session tabs and terminal panes | 0.3.0 | Must fit oc's real terminal tabs. |
 | Remote pairing (pair, OpenTunnel, QR codes) | 0.3.0 | Local use comes first. |
 | Console-managed policies and Console sign-in | 0.3.0 | Hosted service; revisit if useful without it. |
-| Share links (`/share`) | 0.3.0 | They publish to opencode.ai pages. |
 | GitHub Action (`src/github`) | 0.3.0 | Needs an oc release to point at. |
 | VS Code extension (`src/sdks/vscode`) | 0.3.0 | Needs an oc release to point at. |
 | Stats poster and media generation (speech, video, images) | 0.3.0 | Not core to a coding agent. |

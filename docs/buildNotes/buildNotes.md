@@ -169,6 +169,28 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-20 (~17:24) - v0.2.264 meatspinMichael - upstream 1.19 port stage 1: version 1.19.3, reasoning options, share removal - Claude Opus 5.5 (orchestrator) + Opus 5.5 medium/high workers; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; orchestrator, workers `general-opus.5.5-medium` (1a) and `general-opus.5.5-high` (1b) in parallel; Implementation; Stage 1 of `~/.config/opencode/plans/upstream119/implementation.md` completed
+- Version: 0.2.264 meatspinMichael
+- Changed OpenCode package version 1.18.29 -> 1.19.3 (decision V1): 13 `package.json` (`src/packages/*`, `src/sdks/vscode`), 12 `src/bun.lock` workspace lines, `.opencode/package.json` plugin pin and `.opencode/package-lock.json` version lines (resolved/integrity still 1.18.29: lock needs `npm install` refresh).
+- Ported `d12161eecd`: `core/src/v1/config/provider.ts` `ReasoningOption` + model `reasoning_options`; `opencode/src/provider/provider.ts` config reasoning options replace catalog variants, config `variants` still merge on top; `transform.ts` `reasoningVariants` takes `Pick<ModelsDev.Model, "reasoning_options">`. Test ported into `test/provider/provider.test.ts`. Regenerated legacy SDK (`packages/sdk/js/script/build.ts`): `src/v2/gen/types.gen.ts` +`reasoning_options`.
+- Ported `d320177aa4` share removal (decision SH1): deleted `share/share-next.ts` + test; `SessionShare` now fails `share`, `unshare` only clears the stored link, `create` no longer auto-shares; removed `ShareNext` from app/bootstrap runtimes, server, `import`/`pr` share-URL import, `github.handler.ts`, `src/github/action.yml`; `run --share` hidden and prints discontinued; removed TUI `session_share`/`session_unshare` keybinds + CommandMap, sidebar share URL, session share/unshare commands, share tips. Kept like upstream: SDK `session.share`/`unshare` routes, `handlers/tui.ts` `session_share` alias, `session_share` DB table.
+- Docs: `SCOPE.md` share row moved to Removed from upstream; `UPSTREAM-SYNC.md` step 8 now says the package version tracks the synced upstream release, share-client line updated. Wiki had no share mentions.
+- Verification: `bun test test/provider/provider.test.ts` 103 pass 0 fail; `test/cli/import.test.ts` + `help-snapshots.test.ts` pass; httpapi exercise `session.share`/`session.unshare` pass (3 known missing `/agent/sub` scenarios). Typecheck left to prePush.
+- ERROR: oc `task` reported 1b as failed after one failed Edit call inside the worker although it finished (same false failure as the sweep scouts). TODO: fix task result reporting so a recovered tool error does not mark the subagent failed.
+
+### User
+Upstream sync
+- The sidebar version now reads OG v1.19.3, matching the upstream release this port syncs to.
+- Models in your config can list `reasoning_options`, and oc builds their effort variants from it.
+
+Session sharing
+- `/share`, `/unshare`, the sidebar share link, share tips, and importing shared-session URLs are gone because upstream shut the share service down; `oc run --share` now just prints that sharing was discontinued.
+
+---
+
 ## 2026-10-20 (~05:56) - v0.2.263 cinematicSunbathing - stop subagents without deleting the session - Grok 4.6; Agent
 
 ### Agent

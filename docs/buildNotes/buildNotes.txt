@@ -1,9 +1,9 @@
-v0.2.263 cinematicSunbathing
+v0.2.264 meatspinMichael
 
-stopping subagents:
-Pressing Esc on a parent chat now also stops every subagent it started, instead of leaving them running. The new palette entry Stop session subagents (/stopSub) stops the subagents of the current chat (or of its parent, when run inside a subagent) without stopping the parent chat, and all chat history is kept.
+upstream sync:
+The sidebar version now reads OG v1.19.3, matching the upstream release this port syncs to. Models in your config can list reasoning_options, and oc builds their effort variants from it.
 
-claude auto-resume:
-Turning Claude auto-resume off now cancels wakes that were already queued, so chats no longer come back on their own at the next usage reset. The off option in the Claude commands now says so. Stopping a chat also drops its own queued wake.
+session sharing:
+/share, /unshare, the sidebar share link, share tips, and importing shared-session URLs are gone because upstream shut the share service down. oc run --share now just prints that sharing was discontinued.
 
-Under the hood: ScheduledResume.setEnabled(false) clears its entries, takeDue clears leftovers while disabled, and fireEntry drops a claimed wake when disabled. New cancelSession(sessionID) drops one session's wake and resume count. SessionPrompt.cancel now cancels child sessions first, then calls cancelSession, then the usual pause, runner and question cancel. Checks run: bun test for scheduledResume.test.ts (23 pass) and tsgo typecheck in opencode and tui. The Esc cascade and /stopSub were not run live; they need a rebuild.
+Under the hood: package version bumped 1.18.29 to 1.19.3 across the workspace and bun.lock. Ported upstream d12161eecd (ReasoningOption in core config, config reasoning_options replace catalog variants, regenerated SDK types) and d320177aa4 (deleted share-next and its test, removed ShareNext from runtimes, server, import, pr, github handler and action, TUI share keybinds and commands). SDK share routes and the session_share table are kept, like upstream. Checks run: bun test for provider.test.ts (103 pass), import.test.ts and help-snapshots.test.ts pass, httpapi exercise session.share and session.unshare pass (3 known missing /agent/sub scenarios).

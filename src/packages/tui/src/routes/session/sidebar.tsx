@@ -98,9 +98,6 @@ export function Sidebar(props: { sessionID: string; horizontal?: boolean }) {
                     </Show>
                   </text>
                 </Show>
-                <Show when={session()!.share?.url}>
-                  <text fg={theme.textMuted}>{session()!.share!.url}</text>
-                </Show>
               </box>
             </pluginRuntime.Slot>
             <SidebarTools sessionID={props.sessionID}>

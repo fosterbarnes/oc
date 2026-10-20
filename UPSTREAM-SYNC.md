@@ -43,11 +43,13 @@ upstream fixes are cherry-picked into the customized parent by hand.
 8. After hand-porting upstream changes, run `.scripts\bumpVersion.ps1` to
    bump the last number of `.version/version` (for example `0.0.8` to
    `0.0.9`) and roll a new tag into `.version/versionTag`. Do this before
-   the Windows dist build so the TUI display version matches. Do not bump
-   OpenCode's package version. After porting up to an upstream release, update
-   `baselineSha` by hand to that release's upstream SHA. Once the port is
-   committed, record it in Git with a tree-preserving merge so the merge base
-   advances:
+   the Windows dist build so the TUI display version matches. OpenCode's
+   package version (the package.json `version` fields and the `.opencode`
+   plugin pin) tracks the upstream release the port synced through. After
+   porting up to an upstream release, update `baselineSha` by hand to that
+   release's upstream SHA and set the package version to that release. Once
+   the port is committed, record it in Git with a tree-preserving merge so the
+   merge base advances:
    `git fetch https://github.com/anomalyco/opencode <sha>`, then
    `git merge -s ours --no-ff <sha> -m "Record upstream sync through <short sha>"`.
 9. Leave the parent changes uncommitted for review. Do not reset, stash, commit,
@@ -68,7 +70,8 @@ browser app (`packages/app`), desktop (`packages/desktop`), the hosted SaaS and
 deployment tree (`packages/console`, `stats`, `enterprise`, `slack`,
 `function`, `containers`, `identity`, `sst.config.ts`, `infra/`, and every
 `sst-env.d.ts`), the docs site (`packages/web`), and `packages/storybook`.
-Skip those paths in the diff; the share client in `packages/opencode` stays.
+Skip those paths in the diff. Share commands and the share client were removed
+too (upstream discontinued the share service, `d320177aa4`).
 
 These are examples, not an exhaustive allowlist. Compare the validated
 baseline, current parent, and refreshed upstream before deciding whether any
