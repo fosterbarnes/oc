@@ -1,7 +1,7 @@
 import { PermissionV1 } from "@opencode-ai/core/v1/permission"
 import { describe, expect } from "bun:test"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
-import { Cause, Effect, Exit, Layer } from "effect"
+import { Cause, Effect, Exit, Fiber, Layer } from "effect"
 import type * as Scope from "effect/Scope"
 import os from "os"
 import path from "path"
@@ -1136,6 +1136,67 @@ describe("tool.shell abort", () => {
       }),
     ),
   )
+})
+
+describe("tool.shell exit", () => {
+  const heldStdio = path.join(projectRoot, "../core/test/fixture/held-stdio.cjs").replaceAll("\\", "/")
+
+  each("finishes when a detached grandchild keeps stdio open", () =>
+    Effect.gen(function* () {
+      const tmp = yield* tmpdirScoped()
+      const pidFile = path.join(tmp, "child.pid").replaceAll("\\", "/")
+      // The grandchild PID comes from the fixture this test started; it exits on its own after 15s.
+      yield* Effect.addFinalizer(() =>
+        Effect.tryPromise(async () => {
+          const pid = Number(await Bun.file(pidFile).text())
+          if (pid > 0) process.kill(pid, "SIGKILL")
+        }).pipe(Effect.ignore),
+      )
+      // Warm the instance and parser so the timing below measures only the held-stdio command.
+      yield* runIn(projectRoot, run({ command: "echo warm" }))
+      const started = Date.now()
+      const result = yield* runIn(
+        projectRoot,
+        run({ command: `node ${quote(heldStdio)} exit ${quote(pidFile)}`, timeout: 30_000 }),
+      )
+      // Without the capture deadline this waits until the grandchild exits after 15s.
+      expect(Date.now() - started).toBeLessThan(8_000)
+      expect(result.output).toContain("foreground-out")
+      expect(result.output).toContain("foreground-err")
+      expect(result.output).not.toContain("terminated command after exceeding timeout")
+      expect(result.metadata.exit).toBe(0)
+    }),
+  )
+
+  if (process.platform !== "win32") {
+    it.live("reports a command killed by an external signal", () =>
+      Effect.gen(function* () {
+        const tmp = yield* tmpdirScoped()
+        const pidFile = path.join(tmp, "shell.pid")
+        const killer = yield* Effect.promise(async () => {
+          const deadline = Date.now() + 5_000
+          while (
+            Date.now() < deadline &&
+            !(await Bun.file(pidFile)
+              .text()
+              .catch(() => ""))
+          )
+            await Bun.sleep(10)
+          const pid = Number(await Bun.file(pidFile).text())
+          if (pid > 0) process.kill(pid, "SIGTERM")
+        }).pipe(Effect.forkScoped)
+        const started = Date.now()
+        // exec keeps the reported PID on the sleeping process, so the signal ends the whole command.
+        const command = `echo $$ > ${squote(pidFile)}.tmp && mv ${squote(pidFile)}.tmp ${squote(pidFile)} && exec sleep 30`
+        const result = yield* runIn(projectRoot, run({ command }))
+        yield* Fiber.join(killer)
+        expect(Date.now() - started).toBeLessThan(10_000)
+        expect(result.metadata.exit).toBeNull()
+        expect(result.metadata).toMatchObject({ signal: "SIGTERM" })
+        expect(result.output).toContain("Killed by SIGTERM")
+      }),
+    )
+  }
 })
 
 describe("tool.shell truncation", () => {

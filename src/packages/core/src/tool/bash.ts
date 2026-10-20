@@ -159,7 +159,7 @@ const layer = Layer.effectDiscard(
               const shell = configuredShell ? Shell.preferred(configuredShell) : defaultShell()
               const command =
                 process.platform === "win32"
-                  ? ChildProcess.make(shell, Shell.args(shell, input.command, target.canonical), {
+                  ? ChildProcess.make(shell, Shell.args(shell, input.command), {
                       cwd: target.canonical,
                       stdin: "ignore",
                       detached: false,

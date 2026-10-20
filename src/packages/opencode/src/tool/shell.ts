@@ -19,6 +19,7 @@ import * as Truncate from "./truncate"
 import { Plugin } from "@/plugin"
 import { ChildProcess } from "effect/unstable/process"
 import { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
+import { CrossSpawnSpawner } from "@opencode-ai/core/cross-spawn-spawner"
 import { ShellPrompt, type Parameters } from "./shell/prompt"
 import { BashArity } from "@/permission/arity"
 import { ShellJobs } from "@/background/shellJobs"
@@ -466,6 +467,7 @@ export const ShellTool = Tool.define(
       let cut = false
       let expired = false
       let aborted = false
+      let signal: string | undefined
       let published = ""
       let publishedAt = -Infinity
       const pendingMetadata = yield* Queue.sliding<void>(1)
@@ -569,8 +571,17 @@ export const ShellTool = Tool.define(
 
           const timeout = Effect.sleep(`${input.timeout + 100} millis`)
 
+          // raceAll ignores early failures, so a signal exit must succeed here or the race waits for the timeout.
           const exit = yield* Effect.raceAll([
-            handle.exitCode.pipe(Effect.map((code) => ({ kind: "exit" as const, code }))),
+            handle.exitCode.pipe(
+              Effect.map((code): { kind: "exit"; code: number | null } => ({ kind: "exit", code })),
+              Effect.catch((error) =>
+                Effect.sync(() => {
+                  if (error.cause instanceof CrossSpawnSpawner.KilledBySignal) signal = error.cause.signal
+                  return { kind: "exit" as const, code: null }
+                }),
+              ),
+            ),
             abort.pipe(Effect.map(() => ({ kind: "abort" as const, code: null }))),
             timeout.pipe(Effect.map(() => ({ kind: "timeout" as const, code: null }))),
           ])
@@ -596,6 +607,7 @@ export const ShellTool = Tool.define(
         )
       }
       if (aborted) meta.push("User aborted the command")
+      if (signal) meta.push(`Killed by ${signal}`)
       const raw = list.map((item) => item.text).join("")
       const end = tail(raw, limits.maxLines, limits.maxBytes)
       if (end.cut) cut = true
@@ -618,6 +630,7 @@ export const ShellTool = Tool.define(
         metadata: {
           output: last || preview(output),
           exit: code,
+          ...(signal ? { signal } : {}),
           truncated: cut,
           ...(cut && file ? { outputPath: file } : {}),
         },
@@ -632,35 +645,37 @@ export const ShellTool = Tool.define(
       ctx: Tool.Context,
     ) {
       const ops = ctx.extra?.promptOps
-      const info = yield* jobs.start({
-        sessionID: ctx.sessionID,
-        command: input.command,
-        spawn: cmd(input.shell, input.command, input.cwd, input.env),
-        cwd: input.cwd,
-        timeoutMs: input.timeout,
-        watch: ops
-          ? ({ info: job, output }) =>
-              ops.partMetadata({
-                sessionID: ctx.sessionID,
-                messageID: ctx.messageID,
-                callID: ctx.callID ?? "",
-                metadata: { output, background: { jobID: job.id, status: job.status } },
-              })
-          : undefined,
-        onExit: ops
-          ? (job) =>
-              Effect.promise(() => ShellJobs.outputOf(job)).pipe(
-                Effect.flatMap((output) =>
-                  notifySession(ops, {
-                    sessionID: ctx.sessionID,
-                    agent: ctx.agent,
-                    turnPermission: ctx.extra?.turnPermission,
-                    text: renderNotice(job, output),
-                  }),
-                ),
-              )
-          : undefined,
-      }).pipe(Effect.orDie)
+      const info = yield* jobs
+        .start({
+          sessionID: ctx.sessionID,
+          command: input.command,
+          spawn: cmd(input.shell, input.command, input.cwd, input.env),
+          cwd: input.cwd,
+          timeoutMs: input.timeout,
+          watch: ops
+            ? ({ info: job, output }) =>
+                ops.partMetadata({
+                  sessionID: ctx.sessionID,
+                  messageID: ctx.messageID,
+                  callID: ctx.callID ?? "",
+                  metadata: { output, background: { jobID: job.id, status: job.status } },
+                })
+            : undefined,
+          onExit: ops
+            ? (job) =>
+                Effect.promise(() => ShellJobs.outputOf(job)).pipe(
+                  Effect.flatMap((output) =>
+                    notifySession(ops, {
+                      sessionID: ctx.sessionID,
+                      agent: ctx.agent,
+                      turnPermission: ctx.extra?.turnPermission,
+                      text: renderNotice(job, output),
+                    }),
+                  ),
+                )
+            : undefined,
+        })
+        .pipe(Effect.orDie)
       return {
         title: input.command,
         metadata: {

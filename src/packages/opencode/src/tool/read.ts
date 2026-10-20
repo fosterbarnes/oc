@@ -98,6 +98,17 @@ export const ReadTool = Tool.define<
       return yield* Effect.fail(new Error(`File not found: ${filepath}`))
     })
 
+    // Models type a plain space where real names use U+00A0 or U+202F (macOS screenshot names).
+    // Returns the one sibling file whose name matches once those become spaces.
+    const alternatePath = Effect.fn("ReadTool.alternatePath")(function* (filepath: string) {
+      const dir = path.dirname(filepath)
+      const base = path.basename(filepath).replace(/[  ]/g, " ")
+      const matches = (yield* fs.readDirectoryEntries(dir).pipe(Effect.catch(() => Effect.succeed([])))).filter(
+        (entry) => entry.type === "file" && entry.name.replace(/[  ]/g, " ") === base,
+      )
+      return matches.length === 1 ? path.join(dir, matches[0].name) : undefined
+    })
+
     const list = Effect.fn("ReadTool.list")(function* (filepath: string) {
       const items = yield* fs.readDirectoryEntries(filepath)
       return yield* Effect.forEach(
@@ -238,9 +249,7 @@ export const ReadTool = Tool.define<
       if (process.platform === "win32") {
         filepath = FSUtil.normalizePath(filepath)
       }
-      const title = path.relative(instance.worktree, filepath)
-
-      const stat = yield* fs.stat(filepath).pipe(
+      const requested = yield* fs.stat(filepath).pipe(
         Effect.catchIf(
           (err) => "reason" in err && err.reason._tag === "NotFound",
           () => Effect.succeed(undefined),
@@ -249,7 +258,7 @@ export const ReadTool = Tool.define<
 
       yield* assertExternalDirectoryEffect(ctx, filepath, {
         bypass: Boolean(ctx.extra?.["bypassCwdCheck"]),
-        kind: stat?.type === "Directory" ? "directory" : "file",
+        kind: requested?.type === "Directory" ? "directory" : "file",
       })
 
       yield* ctx.ask({
@@ -259,7 +268,20 @@ export const ReadTool = Tool.define<
         metadata: {},
       })
 
-      if (!stat) return yield* miss(filepath)
+      const alternate = requested ? undefined : yield* alternatePath(filepath)
+      if (!requested && !alternate) return yield* miss(filepath)
+      if (alternate) {
+        // The sibling shares the directory approved above; only the read permission needs its real name.
+        filepath = alternate
+        yield* ctx.ask({
+          permission: "read",
+          patterns: [path.relative(instance.worktree, filepath)],
+          always: ["*"],
+          metadata: {},
+        })
+      }
+      const stat = requested ?? (yield* fs.stat(filepath))
+      const title = path.relative(instance.worktree, filepath)
 
       if (stat.type === "Directory") {
         const items = yield* list(filepath)

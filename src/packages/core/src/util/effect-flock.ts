@@ -260,9 +260,10 @@ export namespace EffectFlock {
         const handle = yield* Effect.acquireRelease(acquireHandle(lockfile, key), (handle) => release(handle))
 
         // Heartbeat fiber — scoped, so it's interrupted before release runs
-        yield* fs
-          .utimes(handle.heartbeatPath, new Date(), new Date())
-          .pipe(Effect.ignore, Effect.repeat(Schedule.spaced(HEARTBEAT_MS)), Effect.forkScoped)
+        yield* Effect.suspend(() => {
+          const now = new Date()
+          return fs.utimes(handle.heartbeatPath, now, now)
+        }).pipe(Effect.ignore, Effect.repeat(Schedule.spaced(HEARTBEAT_MS)), Effect.forkScoped)
       })
 
       const withLock: Interface["withLock"] = Function.dual(

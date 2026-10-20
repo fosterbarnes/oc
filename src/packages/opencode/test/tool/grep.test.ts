@@ -4,7 +4,7 @@ import fs from "fs/promises"
 import os from "os"
 import path from "path"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
-import { Effect, Layer } from "effect"
+import { Cause, Effect, Exit, Layer } from "effect"
 import { GrepTool } from "../../src/tool/grep"
 import { provideInstance, testInstanceStoreLayer, TestInstance, tmpdirScoped } from "../fixture/fixture"
 import { SessionID, MessageID } from "../../src/session/schema"
@@ -188,6 +188,38 @@ describe("tool.grep", () => {
       )
       expect(result.metadata.matches).toBe(0)
       expect(result.output).toBe("No files found")
+    }),
+  )
+
+  it.instance("reports a missing search path", () =>
+    Effect.gen(function* () {
+      yield* TestInstance
+      const info = yield* GrepTool
+      const grep = yield* info.init()
+      const exit = yield* grep.execute({ pattern: "needle", path: "missing" }, ctx).pipe(Effect.exit)
+      expect(Exit.isFailure(exit)).toBe(true)
+      if (Exit.isFailure(exit)) {
+        const err = Cause.squash(exit.cause)
+        expect(err instanceof Error ? err.message : String(err)).toBe("Search path does not exist: missing")
+      }
+    }),
+  )
+
+  it.instance("notes matches skipped on oversized lines", () =>
+    Effect.gen(function* () {
+      const test = yield* TestInstance
+      yield* Effect.promise(() =>
+        Bun.write(path.join(test.directory, "mixed.txt"), `needle-huge ${"x".repeat(70 * 1024)}\nneedle-small\n`),
+      )
+      const info = yield* GrepTool
+      const grep = yield* info.init()
+      const result = yield* grep.execute({ pattern: "needle", path: test.directory }, ctx)
+      expect(result.metadata.matches).toBe(1)
+      expect(result.output).toContain("Line 2: needle-small")
+      expect(result.output).toEndWith("(skipped 1 matches on lines over 64 KB)")
+
+      const only = yield* grep.execute({ pattern: "needle-huge", path: test.directory }, ctx)
+      expect(only.output).toBe("No files found\n\n(skipped 1 matches on lines over 64 KB)")
     }),
   )
 

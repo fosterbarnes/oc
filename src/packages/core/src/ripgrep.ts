@@ -52,6 +52,7 @@ export interface FindInput {
   readonly cwd: string
   readonly pattern: string
   readonly limit: number
+  readonly exclude?: readonly string[]
   readonly hidden?: boolean
   readonly follow?: boolean
   readonly signal?: AbortSignal
@@ -74,6 +75,8 @@ export interface GrepInput {
   readonly include?: string
   readonly limit: number
   readonly signal?: AbortSignal
+  /** Called for each match dropped because its JSON record exceeds MAX_RECORD_BYTES. */
+  readonly onOversized?: () => Effect.Effect<void>
 }
 
 export interface Interface {
@@ -163,6 +166,8 @@ const layer = Layer.effect(
             ...(input.hidden ? ["--hidden"] : []),
             ...(input.follow ? ["--follow"] : []),
             `--glob=${input.pattern}`,
+            // Positive globs override rg's hidden-file filter; exclude before applying the result limit.
+            ...(input.hidden ? [] : ["--glob=!**/.*"]),
             "--glob=!**/.git/**",
             ".",
           ],
@@ -195,6 +200,7 @@ const layer = Layer.effect(
             ...(input.hidden ? ["--hidden"] : []),
             ...(input.follow ? ["--follow"] : []),
             ...(input.pattern === "*" ? [] : [`--glob=${input.pattern}`]),
+            ...(input.exclude ?? []).map((pattern) => `--glob=!${pattern}`),
             "--glob=!**/.git/**",
             ".",
           ],
@@ -231,7 +237,10 @@ const layer = Layer.effect(
           ],
           parse: (line) =>
             (Buffer.byteLength(line, "utf8") > MAX_RECORD_BYTES
-              ? Effect.succeed(undefined)
+              ? // rg --json writes the type tag first, so oversized matches are detectable without parsing.
+                (line.startsWith('{"type":"match"') && input.onOversized ? input.onOversized() : Effect.void).pipe(
+                  Effect.as(undefined),
+                )
               : Effect.try({
                   try: () => JSON.parse(line) as unknown,
                   catch: (cause) => failure("Invalid ripgrep JSON output", cause),

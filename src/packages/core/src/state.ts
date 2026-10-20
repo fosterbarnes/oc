@@ -30,13 +30,15 @@ const CurrentBatch = Context.Reference<Set<Reload> | undefined>("@opencode/State
   defaultValue: () => undefined,
 })
 
-export function batch<A, E, R>(effect: Effect.Effect<A, E, R>) {
+/** flush: false is terminal teardown: states whose transforms are removed skip their pending reloads. */
+export function batch<A, E, R>(effect: Effect.Effect<A, E, R>, options: { readonly flush?: boolean } = {}) {
   return Effect.gen(function* () {
+    const flush = options.flush !== false
     const current = yield* CurrentBatch
-    if (current) return yield* effect
+    if (current && flush) return yield* effect
     const reloads = new Set<Reload>()
     const result = yield* effect.pipe(Effect.provideService(CurrentBatch, reloads))
-    yield* Effect.forEach(reloads, (reload) => reload(), { discard: true })
+    if (flush) yield* Effect.forEach(reloads, (reload) => reload(), { discard: true })
     return result
   })
 }
@@ -46,7 +48,11 @@ export interface Options<State, DraftApi> {
   readonly initial: () => State
   /** Wraps mutable state in a domain-specific draft API. */
   readonly draft: MakeDraft<State, DraftApi>
-  /** Runs after all active transforms and before the rebuilt state becomes visible. */
+  /**
+   * Runs after the rebuilt state becomes visible. Update events published here
+   * act as read barriers: subscribers refetching on the event observe the
+   * committed state.
+   */
   readonly finalize?: (draft: DraftApi) => Effect.Effect<void>
 }
 
@@ -64,9 +70,8 @@ export function create<State, DraftApi>(options: Options<State, DraftApi>): Inte
   const semaphore = Semaphore.makeUnsafe(1)
 
   const commit = Effect.fn("State.commit")(function* (next: State) {
-    const api = options.draft(next)
-    if (options.finalize) yield* options.finalize(api)
     state = next
+    if (options.finalize) yield* options.finalize(options.draft(next))
   })
 
   const apply = (transform: TransformCallback<DraftApi>, draft: DraftApi) =>

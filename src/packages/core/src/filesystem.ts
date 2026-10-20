@@ -31,6 +31,8 @@ export type ListInput = typeof ListInput.Type
 
 export { FindInput }
 
+export const DEFAULT_SEARCH_TIMEOUT_MS = 30_000
+
 export class GlobInput extends Schema.Class<GlobInput>("FileSystem.GlobInput")({
   pattern: Schema.String,
   path: RelativePath.pipe(Schema.optional),

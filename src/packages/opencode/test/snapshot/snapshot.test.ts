@@ -3,6 +3,8 @@ import { $ } from "bun"
 import { CrossSpawnSpawner } from "@opencode-ai/core/cross-spawn-spawner"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { FSUtil } from "@opencode-ai/core/fs-util"
+import { Global } from "@opencode-ai/core/global"
+import { Hash } from "@opencode-ai/core/util/hash"
 import fs from "fs/promises"
 import path from "path"
 import { Effect, Fiber, Layer } from "effect"
@@ -10,6 +12,7 @@ import { Snapshot } from "../../src/snapshot"
 import {
   disposeAllInstances,
   provideInstance,
+  requireInstance,
   testInstanceStoreLayer,
   TestInstance,
   tmpdirScoped,
@@ -105,6 +108,38 @@ const withGitConfigGlobal = <A, E, R>(config: string, self: Effect.Effect<A, E, 
         else delete process.env.GIT_CONFIG_GLOBAL
       }),
   )
+
+it.instance(
+  "configures new snapshot repositories through one included file",
+  withTrackedSnapshot(() =>
+    Effect.gen(function* () {
+      const ctx = yield* requireInstance
+      const gitdir = path.join(Global.Path.data, "snapshot", ctx.project.id, Hash.fast(ctx.worktree))
+      expect((yield* readText(path.join(gitdir, "config"))).match(/opencode\.gitconfig/g)).toHaveLength(1)
+      const value = yield* Effect.promise(() =>
+        $`git --git-dir ${gitdir} config --local --includes core.autocrlf`.text(),
+      )
+      expect(value).toBe("false\n")
+    }),
+  ),
+  { git: true },
+)
+
+it.instance(
+  "revert restores both sides of a rename",
+  withTrackedSnapshot(({ tmp, snapshot, before }) =>
+    Effect.gen(function* () {
+      yield* Effect.promise(() => fs.rename(`${tmp.path}/a.txt`, `${tmp.path}/renamed.txt`))
+      const patch = yield* snapshot.patch(before)
+      expect(patch.files).toContain(fwd(tmp.path, "a.txt"))
+      expect(patch.files).toContain(fwd(tmp.path, "renamed.txt"))
+      yield* snapshot.revert([patch])
+      expect(yield* readText(`${tmp.path}/a.txt`)).toBe(tmp.extra.aContent)
+      expect(yield* exists(`${tmp.path}/renamed.txt`)).toBe(false)
+    }),
+  ),
+  { git: true },
+)
 
 it.instance(
   "tracks deleted files correctly",

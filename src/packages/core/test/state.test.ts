@@ -6,6 +6,79 @@ import { testEffect } from "./lib/effect"
 const it = testEffect(Layer.empty)
 
 describe("State", () => {
+  it.effect("commits rebuilt state before finalize runs", () =>
+    Effect.gen(function* () {
+      const observed: string[][] = []
+      const state: State.Interface<{ values: string[] }, { add: (item: string) => void }> = State.create({
+        initial: () => ({ values: [] as string[] }),
+        draft: (draft) => ({ add: (item: string) => draft.values.push(item) }),
+        finalize: () => Effect.sync(() => observed.push([...state.get().values])),
+      })
+
+      yield* state.transform((draft) => {
+        draft.add("value")
+      })
+
+      // Update events publish from finalize, so consumers reading on the event
+      // must observe the rebuilt state, not the previous one.
+      expect(observed).toEqual([["value"]])
+    }),
+  )
+
+  it.effect("discards teardown rebuilds while still running cleanup", () =>
+    Effect.gen(function* () {
+      let finalized = 0
+      let disposed = 0
+      const state = State.create({
+        initial: () => ({ values: [] as string[] }),
+        draft: (draft) => ({ add: (item: string) => draft.values.push(item) }),
+        finalize: () => Effect.sync(() => finalized++),
+      })
+      const scope = yield* Scope.make()
+      yield* Scope.addFinalizer(
+        scope,
+        Effect.sync(() => disposed++),
+      )
+      yield* state
+        .transform((draft) => {
+          draft.add("value")
+        })
+        .pipe(Scope.provide(scope))
+      expect(finalized).toBe(1)
+
+      yield* State.batch(Scope.close(scope, Exit.void), { flush: false })
+      expect(disposed).toBe(1)
+      expect(finalized).toBe(1)
+    }),
+  )
+
+  it.effect("keeps teardown suppression separate from an enclosing live batch", () =>
+    Effect.gen(function* () {
+      const finalized: string[] = []
+      const closing = State.create({
+        initial: () => ({}),
+        draft: (draft) => draft,
+        finalize: () => Effect.sync(() => finalized.push("closing")),
+      })
+      const live = State.create({
+        initial: () => ({}),
+        draft: (draft) => draft,
+        finalize: () => Effect.sync(() => finalized.push("live")),
+      })
+      const scope = yield* Scope.make()
+      yield* closing.transform(() => {}).pipe(Scope.provide(scope))
+      finalized.length = 0
+
+      yield* State.batch(
+        Effect.gen(function* () {
+          yield* live.transform(() => {})
+          yield* State.batch(Scope.close(scope, Exit.void), { flush: false })
+        }),
+      )
+      expect(finalized).toEqual(["live"])
+    }),
+  )
+
   it.effect("commits a transform atomically when its updater is interrupted", () =>
     Effect.gen(function* () {
       const rebuilding = yield* Deferred.make<void>()

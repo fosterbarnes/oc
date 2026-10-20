@@ -443,6 +443,28 @@ description: A skill in the .agents/skills directory.
     ),
   )
 
+  it.live("prefers the nearest skill source over a parent directory copy", () =>
+    Effect.gen(function* () {
+      const tmp = yield* Effect.acquireRelease(
+        Effect.promise(() => tmpdir({ git: true })),
+        (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+      )
+      const nested = path.join(tmp.path, "packages", "app")
+      const skill = (dir: string, description: string) =>
+        Bun.write(
+          path.join(dir, ".agents", "skills", "review", "SKILL.md"),
+          `---\nname: review\ndescription: ${description}\n---\n\n# Review\n`,
+        )
+      yield* Effect.promise(() => Promise.all([skill(tmp.path, "Parent"), skill(nested, "Nested")]))
+
+      yield* Effect.gen(function* () {
+        const review = yield* (yield* Skill.Service).get("review")
+        expect(review?.description).toBe("Nested")
+        expect(review?.location).toBe(path.join(nested, ".agents", "skills", "review", "SKILL.md"))
+      }).pipe(provideInstance(nested))
+    }),
+  )
+
   itWithoutClaudeCodeSkills.live("skips Claude Code skills when disabled", () =>
     provideTmpdirInstance(
       (dir) =>

@@ -169,6 +169,37 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-20 (~18:34) - v0.2.266 eepCompare - upstream 1.19 port stage 3: core tools, shell, search, config, snapshots - Claude Opus 5.5 (orchestrator) + Opus 5.5 high/medium workers; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; orchestrator, workers `general-opus.5.5-high` (3a-3d, pairs in parallel) and `general-opus.5.5-medium` (3e); Implementation; Stage 3 of `~/.config/opencode/plans/upstream119/implementation.md` completed
+- Version: 0.2.266 eepCompare
+- 3a patch/edit/read (`63e2054f50` `96dc560833` `e770415fd5` `3ea8895299` `6ec17e5d55` `532292b5f3` `bc47030d4d` `d484f070d1` `0cb434775c`): `patch/index.ts` clearer errors, padded markers, CRLF lines, real EOF anchors, no `…`->`...` folding, malformed hunks rejected; edit + apply_patch share one per-file lock; edit keeps mixed CRLF/LF per region and fails on no-op edits; read retries a missing path against one NBSP-normalized sibling. Kept oc's Begin/End search-anywhere rule (strict rule is `dbfbb13ccc`, not in scope).
+- 3b shell/process (`f8c46684eb` `90fb6562ce` `a6b49b3f74` `01edae4a7f` `813c41ff6c` `cf606660fb` `1dcc6551d9` `e22c1622e0`): spawner stops draining pipes 1 s after exit and buffers output eagerly (D6 test `finishes when a detached grandchild keeps stdio open`, fixture `core/test/fixture/held-stdio.cjs`); Windows ProcessTree/killTree kept (`stop` renamed `send`); `Shell.args(file, command)` drops cwd, bash/zsh run plain `-c` (no `-l`, no rc sourcing), PowerShell adds `-NoLogo -NonInteractive`; shell tool settles on exit-code read failure, reports `KilledBySignal` + `metadata.signal`; `$ARGUMENTS` replacement keeps `$&` etc. literal.
+- 3c search/git (`8f4b62eb49` `3bda0ce123` `945d1c8cb2` `c7ceccf869` `3b0195e045` `45d58717a4` `20929b3081` `cae205a3d9` `9d55b223bb` `6dbb5f5008` `4ea368e09e` `39e1ce55bc` `126b7b633b`): grep/glob fail on missing path, 30 s search timeout; watcher ignores built-in dirs at any depth; FFF only for VCS locations, off for home; home scans capped, protected dirs skipped; fallback index refresh 10 s; repo discovery stops at nearest marker (`fs-util` `up` `mode: "first"`); `check-ignore` fatal fails refresh; glob drops dotfiles before limit when hidden off; repository host segments validated; Windows ripgrep zip via System32 `tar.exe`. B8: grep appends "(skipped N matches on lines over 64 KB)" (`Ripgrep.GrepInput.onOversized`).
+- 3d config/location/state (`baacb2e776` `b2ce195bda` `f725443e30` `36da0d5c77` `1f2c59a1b6` `cbef698861` `c22942c1f3` `d5154fb74e` `c458ad72d3` `f09eee5002` `ccc6a3fd59`): OTLP setup failure falls back to local logs; location keys normalized (Windows spelling); failed location boot evicted for retry; state committed before finalize, `{ flush: false }` for plugin teardown; unreachable well-known config skipped with warning; gray-matter cache bypassed; missing/unreadable `{file:}` -> empty + warning; `{env:}` escaped only when it breaks JSON. `ConfigVariable.substitute` is now an Effect (4 callers updated). Skipped `2c8e2a2b28` (superseded by `36da0d5c77`).
+- MISTAKE: plan put `f112a73c06` (core config walk without stop) in 3d as "core only", but core config is live, so it loaded `~\.opencode` and `C:\.opencode` above the repo root, against B1. Reverted `core/src/config.ts` + its test edits. Rule: a user "stop at repo root" decision applies to every live config path, not one package.
+- 3e snapshot/refs/skills (`0bb24a46c1` `59ad593d9c` `2b6dd2559c` `d68031bc0d` `b2c7246134` `bc5ebf00a4` `b0c8a8c827`): lazy snapshot repo discovery; snapshot repo config via one included `opencode.gitconfig`; nearest skill source wins; undo restores renamed files (`--no-renames`); git references refresh at most daily (attempt time in `.git/opencode-refresh-attempt`, no KV in oc); Windows snapshot `git add` retried twice; flock heartbeat writes fresh time.
+- Verification (workers + orchestrator): opencode patch 41/0, apply_patch 32/0, read 43/0, edit 33/0, shell 95/0, prompt `-t` replacement 1/0, grep+glob 13/0, config 119/0, config/tui 36/0, snapshot 55/0 (3 Windows skips), skill 19/0; core spawner 32/0 (1 POSIX skip), process 24/0, shell 11/0, ripgrep 10/0, search+ripgrep 16/0, ignore 2/0, filesystem 28/0, git+snapshot 12/0, repository 13/0, location-layer 6/0, state 7/0, markdown 4/0, observability 10/0, config 18/0 (after revert), snapshot 6/0, repository-cache 9/0. Not run: POSIX signal test, typecheck (prePush).
+- Risk: `!` commands no longer see `.bashrc`/`.zshrc` aliases or functions (upstream `01edae4a7f`).
+- Fixed (agent-push): prePush typecheck failed on `core/test/state.test.ts` (transform callback returned `push`'s number); `add` and the transform now use block bodies. State 7/0 and core typecheck pass.
+- Fixed (agent-push): opencode typecheck failed on `opencode/test/patch/patch.test.ts` (helpers widened hunk `type` to `string`); `update` and `added` typed as `Patch.Hunk`. Patch 41/0 and opencode typecheck pass.
+
+### User
+Agent tools
+- Patches and edits are stricter and clearer: bad patches fail with a precise error, CRLF and mixed line-ending files keep their endings, and two edits to one file can no longer overwrite each other.
+- Grep and glob say when a path does not exist, stop after 30 seconds, and grep tells you when it skipped matches on very long lines.
+
+Shell
+- A command that leaves a background process holding its output no longer hangs the shell tool until timeout, and commands killed by a signal say so.
+- `!` shell commands start faster and no longer load your `.bashrc`/`.zshrc`, so aliases from those files are not available there.
+
+Config and projects
+- A config URL that cannot be reached, or a missing `{file:...}` reference, now logs a warning instead of breaking startup.
+- Undoing changes restores renamed files, and the nearest project's skills win over ones from parent folders.
+
+---
+
 ## 2026-10-20 (~17:58) - v0.2.265 casseroleMillions - upstream 1.19 port stage 2: dependency fixes - Claude Opus 5.5 (orchestrator) + Opus 5.5 medium worker; Implementation
 
 ### Agent

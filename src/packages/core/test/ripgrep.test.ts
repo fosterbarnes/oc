@@ -11,6 +11,40 @@ import { testEffect } from "./lib/effect"
 const it = testEffect(LayerNode.compile(Ripgrep.node))
 
 describe("Ripgrep", () => {
+  for (const hidden of [undefined, false, true]) {
+    for (const limit of hidden ? [10] : [1, 10]) {
+      it.live(`glob honors hidden=${hidden} before limit=${limit}`, () =>
+        Effect.acquireUseRelease(
+          Effect.promise(() => tmpdir()),
+          (tmp) =>
+            Effect.gen(function* () {
+              yield* Effect.promise(() =>
+                Promise.all(
+                  ["src/visible.ts", ".hidden.ts", "src/.hidden.ts", ".hidden/nested.ts", ".git/config.ts"].map(
+                    (file) => Bun.write(path.join(tmp.path, file), "needle\n"),
+                  ),
+                ),
+              )
+              const files = yield* (yield* Ripgrep.Service).glob({
+                cwd: tmp.path,
+                pattern: "**/*.ts",
+                limit,
+                ...(hidden === undefined ? {} : { hidden }),
+              })
+
+              expect(files.map((item) => item.path).sort()).toEqual(
+                (hidden
+                  ? [".hidden.ts", ".hidden/nested.ts", "src/.hidden.ts", "src/visible.ts"]
+                  : ["src/visible.ts"]
+                ).map((file) => RelativePath.make(file)),
+              )
+            }),
+          (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+        ),
+      )
+    }
+  }
+
   it.live("keeps ignored files out of catch-all find results", () =>
     Effect.acquireUseRelease(
       Effect.promise(() => tmpdir()),
@@ -62,6 +96,29 @@ describe("Ripgrep", () => {
       (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
     ),
   )
+  it.live("excludes protected directory trees from catch-all find results", () =>
+    Effect.acquireUseRelease(
+      Effect.promise(() => tmpdir()),
+      (tmp) =>
+        Effect.gen(function* () {
+          yield* Effect.promise(() => fs.mkdir(path.join(tmp.path, "Pictures")))
+          yield* Effect.promise(() => fs.writeFile(path.join(tmp.path, "Pictures", "private.jpg"), "private\n"))
+          yield* Effect.promise(() => fs.writeFile(path.join(tmp.path, "visible.txt"), "visible\n"))
+
+          const files = yield* (yield* Ripgrep.Service).find({
+            cwd: tmp.path,
+            pattern: "*",
+            limit: 10,
+            exclude: ["Pictures/**"],
+          })
+
+          expect(files.map((item) => item.path)).toContain(RelativePath.make("visible.txt"))
+          expect(files.map((item) => item.path)).not.toContain(RelativePath.make("Pictures/private.jpg"))
+        }),
+      (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+    ),
+  )
+
   it.live("does not split surrogate pairs in oversized line previews", () =>
     Effect.acquireUseRelease(
       Effect.promise(() => tmpdir()),
@@ -89,17 +146,18 @@ describe("Ripgrep", () => {
       (tmp) =>
         Effect.gen(function* () {
           const huge = "needle-huge " + "x".repeat(70 * 1024)
-          yield* Effect.promise(() =>
-            fs.writeFile(path.join(tmp.path, "mixed.txt"), `${huge}\nneedle-small\n`),
-          )
+          yield* Effect.promise(() => fs.writeFile(path.join(tmp.path, "mixed.txt"), `${huge}\nneedle-small\n`))
 
+          let oversized = 0
           const matches = yield* (yield* Ripgrep.Service).grep({
             cwd: tmp.path,
             pattern: "needle",
             limit: 10,
+            onOversized: () => Effect.sync(() => void oversized++),
           })
 
           expect(matches.map((item) => item.text.trim())).toEqual(["needle-small"])
+          expect(oversized).toBe(1)
         }),
       (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
     ),

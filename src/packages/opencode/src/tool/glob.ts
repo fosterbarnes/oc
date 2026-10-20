@@ -1,6 +1,7 @@
 import path from "path"
 import { Effect, Schema } from "effect"
 import { InstanceState } from "@/effect/instance-state"
+import { FileSystem } from "@opencode-ai/core/filesystem"
 import { FSUtil } from "@opencode-ai/core/fs-util"
 import { Ripgrep } from "@opencode-ai/core/ripgrep"
 import { assertExternalDirectoryEffect } from "./external-directory"
@@ -37,7 +38,12 @@ export const GlobTool = Tool.define(
 
           let search = params.path ?? ins.directory
           search = path.isAbsolute(search) ? search : path.resolve(ins.directory, search)
-          const info = yield* fs.stat(search).pipe(Effect.catch(() => Effect.succeed(undefined)))
+          const info = yield* fs.stat(search).pipe(
+            Effect.catchReason("PlatformError", "NotFound", () =>
+              Effect.die(new Error(`Search path does not exist: ${params.path ?? "."}`)),
+            ),
+            Effect.catch(() => Effect.succeed(undefined)),
+          )
           if (info?.type === "File") {
             throw new Error(`glob path must be a directory: ${search}`)
           }
@@ -47,7 +53,17 @@ export const GlobTool = Tool.define(
           })
 
           const limit = 100
-          const files = yield* ripgrep.glob({ cwd: search, pattern: params.pattern, limit })
+          const files = yield* ripgrep.glob({ cwd: search, pattern: params.pattern, limit }).pipe(
+            Effect.timeoutOrElse({
+              duration: FileSystem.DEFAULT_SEARCH_TIMEOUT_MS,
+              orElse: () =>
+                Effect.die(
+                  new Error(
+                    `Search timed out after ${FileSystem.DEFAULT_SEARCH_TIMEOUT_MS / 1_000} seconds. Consider using a more specific path or pattern.`,
+                  ),
+                ),
+            }),
+          )
           const truncated = files.length === limit
 
           const output = []

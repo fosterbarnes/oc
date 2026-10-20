@@ -161,7 +161,10 @@ const discoverRoots = Effect.fnUntraced(function* (
       .up({ targets: externalDirs, start: directory, stop: worktree })
       .pipe(Effect.catch(() => Effect.succeed([] as string[])))
 
-    for (const root of upDirs) {
+    // `up` is nearest-first and later roots win, so push outer directories first. Keep target
+    // order within each directory so .agents still overrides .claude there.
+    const byParent = Map.groupBy(upDirs, (root) => path.dirname(root))
+    for (const root of [...byParent.values()].toReversed().flat()) {
       roots.push({ dir: root, pattern: EXTERNAL_SKILL_PATTERN, dot: true })
     }
   }

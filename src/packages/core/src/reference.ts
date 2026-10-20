@@ -91,7 +91,8 @@ const layer = Layer.effect(
                 source,
               }),
             )
-            yield* cache.ensure({ reference: repository, branch: source.branch, refresh: true }).pipe(
+            // Location boots and config reloads rebuild this state often; fetch at most once a day.
+            yield* cache.ensure({ reference: repository, branch: source.branch, refresh: "daily" }).pipe(
               Effect.catchCause((cause) =>
                 Effect.logWarning("failed to materialize reference", {
                   name,

@@ -523,6 +523,81 @@ describe("tool.edit", () => {
         expectCrlf(output)
       }),
     )
+
+    it.instance("matches across mixed line endings and keeps each region's endings", () =>
+      Effect.gen(function* () {
+        const test = yield* TestInstance
+        const mostlyLf = path.join(test.directory, "mostly-lf.txt")
+        const mostlyCrlf = path.join(test.directory, "mostly-crlf.txt")
+        yield* put(mostlyLf, "head\r\nAAA OLD BBB\ntail\n")
+        yield* put(mostlyCrlf, "one\r\ntwo\r\nthree\nfour\r\n")
+
+        yield* run({ filePath: mostlyLf, oldString: "AAA OLD BBB", newString: "AAA NEW\nLINE2" })
+        yield* run({ filePath: mostlyLf, oldString: "LINE2\ntail", newString: "LINE2\nTAIL" })
+        yield* run({ filePath: mostlyCrlf, oldString: "o\nthree\nfo", newString: "O\nTHREE\nFO" })
+        yield* run({ filePath: mostlyCrlf, oldString: "one", newString: "ONE\nUNO" })
+
+        expect(yield* load(mostlyLf)).toBe("head\r\nAAA NEW\nLINE2\nTAIL\n")
+        expect(yield* load(mostlyCrlf)).toBe("ONE\r\nUNO\r\ntwO\r\nTHREE\nFOur\r\n")
+      }),
+    )
+
+    it.instance("keeps the endings of unchanged and in-place lines inside a multi-line match", () =>
+      Effect.gen(function* () {
+        const test = yield* TestInstance
+        // A CRLF file with a block pasted in from an LF editor, edited with surrounding context.
+        const filePath = path.join(test.directory, "store.cs")
+        yield* put(filePath, "All(item.Sku);\r\n\r\nFind(sku);\r\n\r\nvoid Add()\n{\n  _items[item.Sku] = item;\n}\r\n")
+
+        yield* run({
+          filePath,
+          oldString: "All(item.Sku);\n\nFind(sku);\n\nvoid Add()\n{\n  _items[item.Sku] = item;\n}",
+          newString:
+            "All(item.Code);\n\nFind(code);\n\nvoid Add()\n{\n  _items[item.Code] = item;\n}\n\nbool Remove(string code)\n{\n}",
+        })
+
+        expect(yield* load(filePath)).toBe(
+          "All(item.Code);\r\n\r\nFind(code);\r\n\r\nvoid Add()\n{\n  _items[item.Code] = item;\n}\r\n\r\nbool Remove(string code)\r\n{\r\n}\r\n",
+        )
+      }),
+    )
+
+    it.instance("applies edits that differ only in \\r to the exact bytes", () =>
+      Effect.gen(function* () {
+        const test = yield* TestInstance
+        const strip = path.join(test.directory, "strip.sh")
+        const whole = path.join(test.directory, "whole.sh")
+        const add = path.join(test.directory, "add.bat")
+        yield* put(strip, "a\r\nb\r\n")
+        yield* put(whole, "x\r\ny\r\n")
+        yield* put(add, "p\nq\n")
+
+        yield* run({ filePath: strip, oldString: "\r", newString: "", replaceAll: true })
+        yield* run({ filePath: whole, oldString: "x\r\ny\r\n", newString: "x\ny\n" })
+        yield* run({ filePath: add, oldString: "p\nq", newString: "p\r\nq" })
+        expect((yield* fail({ filePath: add, oldString: "p\nq", newString: "p\r\nq" })).message).toContain(
+          "already has those line endings",
+        )
+
+        expect(yield* load(strip)).toBe("a\nb\n")
+        expect(yield* load(whole)).toBe("x\ny\n")
+        expect(yield* load(add)).toBe("p\r\nq\n")
+      }),
+    )
+
+    it.instance("fails instead of reporting success when the edit leaves the file unchanged", () =>
+      Effect.gen(function* () {
+        const test = yield* TestInstance
+        const filePath = path.join(test.directory, "same.txt")
+        yield* put(filePath, "value = 1\n")
+
+        // The line-trimmed matcher finds the line, and the replacement writes the same bytes back.
+        expect((yield* fail({ filePath, oldString: " value = 1", newString: "value = 1" })).message).toContain(
+          "No changes to apply: the edit leaves",
+        )
+        expect(yield* load(filePath)).toBe("value = 1\n")
+      }),
+    )
   })
 
   describe("concurrent editing", () => {

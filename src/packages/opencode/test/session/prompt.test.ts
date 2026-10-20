@@ -2945,6 +2945,21 @@ it.instance("slash composition expands shared arguments and shell snippets witho
   }),
 )
 
+it.instance("command arguments keep replacement patterns literal", () =>
+  Effect.gen(function* () {
+    const { llm } = yield* useServerConfig((url) => ({
+      ...providerCfg(url),
+      command: { explain: { template: "Explain $ARGUMENTS / $ARGUMENTS." } },
+    }))
+    const { prompt, chat, sessions } = yield* boot()
+    yield* llm.text("done")
+    yield* prompt.command({ sessionID: chat.id, command: "explain", arguments: "$& $$ $` $'" })
+    const text = (yield* sessions.messages({ sessionID: chat.id }))[0].parts.find((part) => part.type === "text")
+    if (text?.type !== "text") throw new Error("Expected command text")
+    expect(text.text).toContain("Explain $& $$ $` $' / $& $$ $` $'.")
+  }),
+)
+
 it.instance("slash composition carries the editor selection into the command turn", () =>
   Effect.gen(function* () {
     const { llm } = yield* useServerConfig((url) => ({

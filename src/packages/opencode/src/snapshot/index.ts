@@ -25,6 +25,24 @@ const limit = 2 * 1024 * 1024
 const core = ["-c", "core.longpaths=true", "-c", "core.symlinks=true"]
 const cfg = ["-c", "core.autocrlf=false", ...core]
 const quote = [...cfg, "-c", "core.quotepath=false"]
+// Included from $GIT_DIR/config via include.path (git >= 1.7.10). manyFiles/index tuning keeps the
+// first add bounded on very large worktrees.
+const snapshotConfigFile = "opencode.gitconfig"
+const snapshotConfigInclude = `[include]
+	path = ${snapshotConfigFile}
+`
+const snapshotConfig = `[core]
+	autocrlf = false
+	longpaths = true
+	symlinks = true
+	fsmonitor = false
+	untrackedCache = true
+[feature]
+	manyFiles = true
+[index]
+	version = 4
+	threads = true
+`
 interface GitResult {
   readonly code: ChildProcessSpawner.ExitCode
   readonly text: string
@@ -145,13 +163,23 @@ const layer: Layer.Layer<Service, never, FSUtil.Service | AppProcess.Service | C
 
         const stage = Effect.fnUntraced(function* (files: string[]) {
           if (!files.length) return
-          const result = yield* git(
+          const add = git(
             [...cfg, ...args(["add", "--all", "--sparse", "--pathspec-from-file=-", "--pathspec-file-nul"])],
             {
               cwd: state.worktree,
               stdin: encodeTopLevelLiteralPathspecs(files),
             },
           )
+          // On Windows, Git exits non-zero instead of reusing a loose object another process is finalizing.
+          // Objects are content-addressed, so one of at most two retries finds that copy in place.
+          const result =
+            process.platform === "win32"
+              ? yield* add.pipe(
+                  Effect.flatMap((result) => (result.code === 0 ? Effect.succeed(result) : Effect.fail(result))),
+                  Effect.retry({ times: 2, schedule: Schedule.spaced("50 millis") }),
+                  Effect.catch((result) => Effect.succeed(result)),
+                )
+              : yield* add
           if (result.code === 0) return
           yield* Effect.logWarning("failed to add snapshot files", {
             exitCode: result.code,
@@ -191,6 +219,20 @@ const layer: Layer.Layer<Service, never, FSUtil.Service | AppProcess.Service | C
           yield* fs.ensureDir(path.join(state.gitdir, "info")).pipe(Effect.orDie)
           yield* fs.writeFileString(target, text ? `${text}\n` : "").pipe(Effect.orDie)
         })
+
+        // Write snapshot settings to one owned file and include it, instead of spawning git config per key.
+        const configure = Effect.fnUntraced(
+          function* () {
+            yield* fs.writeFileString(path.join(state.gitdir, snapshotConfigFile), snapshotConfig)
+            const file = path.join(state.gitdir, "config")
+            const current = yield* fs.readFileString(file)
+            if (current.includes(snapshotConfigInclude)) return
+            yield* fs.writeFileString(file, `${current.endsWith("\n") ? "\n" : "\n\n"}${snapshotConfigInclude}`, {
+              flag: "a",
+            })
+          },
+          Effect.catch((cause) => Effect.logWarning("failed to configure snapshot repository", { cause })),
+        )
 
         // Reuse the hashes for the git storage between the original repo and snapshot
         // on huge repos like chromium checkout the git add --all rebuilding the
@@ -325,15 +367,7 @@ const layer: Layer.Layer<Service, never, FSUtil.Service | AppProcess.Service | C
                 yield* git(["init"], {
                   env: { GIT_DIR: state.gitdir, GIT_WORK_TREE: state.worktree },
                 })
-                yield* git(["--git-dir", state.gitdir, "config", "core.autocrlf", "false"])
-                yield* git(["--git-dir", state.gitdir, "config", "core.longpaths", "true"])
-                yield* git(["--git-dir", state.gitdir, "config", "core.symlinks", "true"])
-                yield* git(["--git-dir", state.gitdir, "config", "core.fsmonitor", "false"])
-                // Tuning for very large worktrees so the first add stays bounded.
-                yield* git(["--git-dir", state.gitdir, "config", "feature.manyFiles", "true"])
-                yield* git(["--git-dir", state.gitdir, "config", "index.version", "4"])
-                yield* git(["--git-dir", state.gitdir, "config", "index.threads", "true"])
-                yield* git(["--git-dir", state.gitdir, "config", "core.untrackedCache", "true"])
+                yield* configure()
                 yield* seed()
                 yield* Effect.logInfo("initialized")
               }
@@ -350,8 +384,12 @@ const layer: Layer.Layer<Service, never, FSUtil.Service | AppProcess.Service | C
           return yield* locked(
             Effect.gen(function* () {
               yield* add()
+              // Revert needs both paths of a rename, not only its destination.
               const result = yield* git(
-                [...quote, ...args(["diff", "--cached", "--no-ext-diff", "--name-only", hash, "--", "."])],
+                [
+                  ...quote,
+                  ...args(["diff", "--cached", "--no-ext-diff", "--no-renames", "--name-only", hash, "--", "."]),
+                ],
                 {
                   cwd: state.directory,
                 },

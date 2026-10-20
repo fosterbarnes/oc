@@ -6,7 +6,7 @@
  * observe the checkout move underneath them.
  */
 import path from "path"
-import { Context, Effect, Layer, Schema } from "effect"
+import { Clock, Context, Duration, Effect, Layer, Schema } from "effect"
 import { FSUtil } from "./fs-util"
 import { Git } from "./git"
 import { Global } from "./global"
@@ -14,6 +14,9 @@ import { Repository } from "./repository"
 import { AbsolutePath } from "./schema"
 import { makeGlobalNode } from "./effect/app-node"
 import { EffectFlock } from "./util/effect-flock"
+
+const refreshInterval = Duration.toMillis(Duration.days(1))
+const refreshAttemptFile = "opencode-refresh-attempt"
 
 export type Result = {
   readonly repository: string
@@ -27,7 +30,8 @@ export type Result = {
 
 export type EnsureInput = {
   readonly reference: Repository.RemoteReference
-  readonly refresh?: boolean
+  /** `daily` throttles existing checkouts; `true` forces a refresh. */
+  readonly refresh?: boolean | "daily"
   readonly branch?: string
 }
 
@@ -137,6 +141,23 @@ const layer: Layer.Layer<Service, never, FSUtil.Service | Git.Service | EffectFl
       const flock = yield* EffectFlock.Service
       const global = yield* Global.Service
 
+      // The last refresh attempt lives in the checkout's git dir, so it is dropped with a stale checkout.
+      const attemptFile = (repository: Git.Repository) => path.join(repository.gitDirectory, refreshAttemptFile)
+      const lastAttempt = (repository: Git.Repository) =>
+        fs.readFileStringSafe(attemptFile(repository)).pipe(
+          Effect.map((text) => {
+            const value = Number(text)
+            return text && Number.isFinite(value) ? value : undefined
+          }),
+          (effect) => cacheOperation(effect, "read refresh time", attemptFile(repository)),
+        )
+      const recordAttempt = (repository: Git.Repository, time: number) =>
+        cacheOperation(
+          fs.writeFileString(attemptFile(repository), String(time)),
+          "record refresh time",
+          attemptFile(repository),
+        )
+
       return Service.of({
         ensure: Effect.fn("RepositoryCache.ensure")(function* (input) {
           if (input.branch) yield* validateBranch(input.branch)
@@ -167,11 +188,15 @@ const layer: Layer.Layer<Service, never, FSUtil.Service | Git.Service | EffectFl
                   yield* cacheOperation(fs.remove(localPath, { recursive: true }), "remove stale cache", localPath)
                 }
 
-                const status = !reuse
-                  ? ("cloned" as const)
-                  : input.refresh
-                    ? ("refreshed" as const)
-                    : ("cached" as const)
+                const now = yield* Clock.currentTimeMillis
+                const refresh =
+                  input.refresh === "daily"
+                    ? !existing || now - ((yield* lastAttempt(existing)) ?? 0) >= refreshInterval
+                    : input.refresh
+                const status = !reuse ? ("cloned" as const) : refresh ? ("refreshed" as const) : ("cached" as const)
+
+                // Record attempts before network work so offline/auth failures don't retry on every boot.
+                if (status === "refreshed" && existing) yield* recordAttempt(existing, now)
 
                 if (status === "cloned") {
                   yield* git.repo
@@ -217,6 +242,7 @@ const layer: Layer.Layer<Service, never, FSUtil.Service | Git.Service | EffectFl
                 }
 
                 const checkout = yield* git.repo.discover(AbsolutePath.make(localPath))
+                if (status === "cloned" && checkout) yield* recordAttempt(checkout, now)
 
                 return {
                   repository,

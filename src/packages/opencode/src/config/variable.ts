@@ -2,8 +2,9 @@ export * as ConfigVariable from "./variable"
 
 import path from "path"
 import os from "os"
+import { Effect } from "effect"
+import { type ParseError, parse } from "jsonc-parser"
 import { Filesystem } from "@/util/filesystem"
-import { InvalidError } from "@opencode-ai/core/v1/config/error"
 
 type ParseSource =
   | {
@@ -18,7 +19,6 @@ type ParseSource =
 
 type SubstituteInput = ParseSource & {
   text: string
-  missing?: "error" | "empty"
   env?: Record<string, string>
 }
 
@@ -30,13 +30,28 @@ function dir(input: ParseSource) {
   return input.type === "path" ? path.dirname(input.path) : input.dir
 }
 
-/** Apply {env:VAR} and {file:path} substitutions to config text. */
-export async function substitute(input: SubstituteInput) {
-  const missing = input.missing ?? "error"
-  let text = input.text.replace(/\{env:([^}]+)\}/g, (_, varName) => {
-    return (input.env?.[varName] ?? process.env[varName]) || ""
-  })
+function invalidJson(text: string) {
+  const errors: ParseError[] = []
+  parse(text, errors, { allowTrailingComma: true })
+  return errors.length > 0
+}
 
+/** Apply {env:VAR} and {file:path} substitutions to config text. */
+export const substitute = Effect.fn("ConfigVariable.substitute")(function* (input: SubstituteInput) {
+  const env = (escape: boolean) =>
+    input.text.replace(/\{env:([^}]+)\}/g, (_, name: string) => {
+      const value = (input.env?.[name] ?? process.env[name]) || ""
+      return escape ? JSON.stringify(value).slice(1, -1) : value
+    })
+  const raw = yield* substituteFiles(input, env(false))
+  // Escape only when raw values break the JSON (e.g. Windows paths), so configs that parse today keep
+  // their meaning. Plain-string inputs such as remote config URLs and headers never parse, so keep raw.
+  if (!input.text.includes("{env:") || !invalidJson(raw)) return raw
+  const escaped = yield* substituteFiles(input, env(true))
+  return invalidJson(escaped) ? raw : escaped
+})
+
+const substituteFiles = Effect.fnUntraced(function* (input: SubstituteInput, text: string) {
   const fileMatches = Array.from(text.matchAll(/\{file:[^}]+\}/g))
   if (!fileMatches.length) return text
 
@@ -64,28 +79,26 @@ export async function substitute(input: SubstituteInput) {
     }
 
     const resolvedPath = path.isAbsolute(filePath) ? filePath : path.resolve(configDir, filePath)
-    const fileContent = (
-      await Filesystem.readText(resolvedPath).catch((error: NodeJS.ErrnoException) => {
-        if (missing === "empty") return ""
+    // Like a missing {env:VAR}, a missing or unreadable file substitutes empty so one stale
+    // secret reference cannot fail the whole config load.
+    const fileContent = yield* Effect.tryPromise({
+      try: () => Filesystem.readText(resolvedPath),
+      catch: (error) => error,
+    }).pipe(
+      Effect.catch((error) =>
+        Effect.logWarning("config file reference is missing or unreadable", {
+          source: configSource,
+          reference: token,
+          path: resolvedPath,
+          error: String(error),
+        }).pipe(Effect.as("")),
+      ),
+    )
 
-        const errMsg = `bad file reference: "${token}"`
-        if (error.code === "ENOENT") {
-          throw new InvalidError(
-            {
-              path: configSource,
-              message: errMsg + ` ${resolvedPath} does not exist`,
-            },
-            { cause: error },
-          )
-        }
-        throw new InvalidError({ path: configSource, message: errMsg }, { cause: error })
-      })
-    ).trim()
-
-    out += JSON.stringify(fileContent).slice(1, -1)
+    out += JSON.stringify(fileContent.trim()).slice(1, -1)
     cursor = index + token.length
   }
 
   out += text.slice(cursor)
   return out
-}
+})

@@ -7,7 +7,7 @@ import { InstanceState } from "@/effect/instance-state"
 import { Patch } from "../patch"
 import { createTwoFilesPatch, diffLines } from "diff"
 import { assertExternalDirectoryEffect } from "./external-directory"
-import { trimDiff } from "./edit"
+import { trimDiff, withFileLocks } from "./edit"
 import { LSP } from "@/lsp/lsp"
 import { FSUtil } from "@opencode-ai/core/fs-util"
 import DESCRIPTION from "./apply_patch.txt"
@@ -41,7 +41,7 @@ export const ApplyPatchTool = Tool.define(
         const parseResult = Patch.parsePatch(params.patchText)
         hunks = parseResult.hunks
       } catch (error) {
-        return yield* Effect.fail(new Error(`apply_patch verification failed: ${error}`))
+        return yield* Effect.fail(new Error(`apply_patch verification failed: ${errorMessage(error)}`))
       }
 
       if (hunks.length === 0) {
@@ -52,6 +52,17 @@ export const ApplyPatchTool = Tool.define(
         return yield* Effect.fail(new Error("apply_patch verification failed: no hunks found"))
       }
 
+      const instance = yield* InstanceState.context
+      const targets = hunks.flatMap((hunk) =>
+        [hunk.path, ...(hunk.type === "update" && hunk.move_path ? [hunk.move_path] : [])].map((file) =>
+          path.resolve(instance.directory, file),
+        ),
+      )
+      return yield* apply(hunks, ctx).pipe(withFileLocks(targets))
+    })
+
+    // Reads, the permission prompt, and writes all run under the per-file locks shared with edit
+    const apply = Effect.fn("ApplyPatchTool.apply")(function* (hunks: Patch.Hunk[], ctx: Tool.Context) {
       const instance = yield* InstanceState.context
 
       // Validate file paths and check permissions
@@ -105,14 +116,14 @@ export const ApplyPatchTool = Tool.define(
 
           case "update": {
             // Check if file exists for update
-            const stats = yield* afs.stat(filePath).pipe(Effect.catch(() => Effect.succeed(undefined)))
-            if (!stats || stats.type === "Directory") {
-              return yield* Effect.fail(
-                new Error(`apply_patch verification failed: Failed to read file to update: ${filePath}`),
-              )
-            }
+            const readFailed = (reason: string) =>
+              new Error(`apply_patch verification failed: Failed to read file to update ${filePath}: ${reason}`)
+            const stats = yield* afs.stat(filePath).pipe(Effect.mapError((error) => readFailed(errorMessage(error))))
+            if (stats.type === "Directory") return yield* Effect.fail(readFailed("path is a directory"))
 
-            const source = yield* Bom.readFile(afs, filePath)
+            const source = yield* Bom.readFile(afs, filePath).pipe(
+              Effect.mapError((error) => readFailed(errorMessage(error))),
+            )
             const oldContent = source.text
             let newContent = oldContent
             let bom = source.bom
@@ -127,7 +138,7 @@ export const ApplyPatchTool = Tool.define(
               newContent = fileUpdate.content
               bom = fileUpdate.bom
             } catch (error) {
-              return yield* Effect.fail(new Error(`apply_patch verification failed: ${error}`))
+              return yield* Effect.fail(new Error(`apply_patch verification failed: ${errorMessage(error)}`))
             }
 
             const diff = trimDiff(createTwoFilesPatch(filePath, filePath, oldContent, newContent))
@@ -160,13 +171,7 @@ export const ApplyPatchTool = Tool.define(
 
           case "delete": {
             const source = yield* Bom.readFile(afs, filePath).pipe(
-              Effect.catch((error) =>
-                Effect.fail(
-                  new Error(
-                    `apply_patch verification failed: ${error instanceof Error ? error.message : String(error)}`,
-                  ),
-                ),
-              ),
+              Effect.mapError((error) => new Error(`apply_patch verification failed: ${errorMessage(error)}`)),
             )
             const contentToDelete = source.text
             const deleteDiff = trimDiff(createTwoFilesPatch(filePath, filePath, contentToDelete, ""))
@@ -315,3 +320,7 @@ export const ApplyPatchTool = Tool.define(
     }
   }),
 )
+
+function errorMessage(error: unknown) {
+  return error instanceof Error ? error.message : String(error)
+}

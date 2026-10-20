@@ -1,6 +1,7 @@
 import path from "path"
 import { Effect, Schema } from "effect"
 import { InstanceState } from "@/effect/instance-state"
+import { FileSystem } from "@opencode-ai/core/filesystem"
 import { FSUtil } from "@opencode-ai/core/fs-util"
 import { Ripgrep } from "@opencode-ai/core/ripgrep"
 import { assertExternalDirectoryEffect } from "./external-directory"
@@ -58,16 +59,36 @@ export const GrepTool = Tool.define(
           })
 
           const search = FSUtil.resolve(requested)
-          const info = yield* fs.stat(search).pipe(Effect.catch(() => Effect.succeed(undefined)))
+          const info = yield* fs.stat(search).pipe(
+            Effect.catchReason("PlatformError", "NotFound", () =>
+              Effect.die(new Error(`Search path does not exist: ${params.path ?? "."}`)),
+            ),
+            Effect.catch(() => Effect.succeed(undefined)),
+          )
           const cwd = info?.type === "Directory" ? search : path.dirname(search)
-          const result = yield* ripgrep.grep({
-            cwd,
-            pattern: params.pattern,
-            file: info?.type === "File" ? path.basename(search) : undefined,
-            include: params.include,
-            limit: 100,
-          })
-          if (result.length === 0) return empty
+          let oversized = 0
+          const result = yield* ripgrep
+            .grep({
+              cwd,
+              pattern: params.pattern,
+              file: info?.type === "File" ? path.basename(search) : undefined,
+              include: params.include,
+              limit: 100,
+              onOversized: () => Effect.sync(() => void oversized++),
+            })
+            .pipe(
+              Effect.timeoutOrElse({
+                duration: FileSystem.DEFAULT_SEARCH_TIMEOUT_MS,
+                orElse: () =>
+                  Effect.die(
+                    new Error(
+                      `Search timed out after ${FileSystem.DEFAULT_SEARCH_TIMEOUT_MS / 1_000} seconds. Consider using a more specific path or pattern.`,
+                    ),
+                  ),
+              }),
+            )
+          const skipped = oversized > 0 ? `(skipped ${oversized} matches on lines over 64 KB)` : undefined
+          if (result.length === 0) return skipped ? { ...empty, output: `${empty.output}\n\n${skipped}` } : empty
 
           const rows = result.map((item) => ({
             path: path.resolve(
@@ -101,6 +122,7 @@ export const GrepTool = Tool.define(
             output.push("")
             output.push("(Results truncated. Consider using a more specific path or pattern.)")
           }
+          if (skipped) output.push("", skipped)
 
           return {
             title: params.pattern,

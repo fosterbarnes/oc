@@ -606,3 +606,43 @@ describe("tool.read binary detection", () => {
     }),
   )
 })
+
+describe("tool.read non-breaking space recovery", () => {
+  it.live("recovers a unique file whose non-breaking spaces differ", () =>
+    Effect.gen(function* () {
+      const dir = yield* tmpdirScoped({ git: true })
+      const recovered = "Screenshot 2026-08-27 3.15 PM.txt"
+      yield* put(path.join(dir, recovered), "hello")
+
+      const { items, next } = asks()
+      const result = yield* exec(dir, { filePath: path.join(dir, "Screenshot 2026-08-27 3.15 PM.txt") }, next)
+      expect(result.output).toContain("1: hello")
+      expect(result.output).toContain(recovered)
+      expect(items.filter((item) => item.permission === "read").map((item) => item.patterns)).toEqual([
+        ["Screenshot 2026-08-27 3.15 PM.txt"],
+        [recovered],
+      ])
+    }),
+  )
+
+  it.live("does not recover ambiguous files", () =>
+    Effect.gen(function* () {
+      const dir = yield* tmpdirScoped()
+      yield* put(path.join(dir, "report final.txt"), "one")
+      yield* put(path.join(dir, "report final.txt"), "two")
+
+      const err = yield* fail(dir, { filePath: path.join(dir, "report final.txt") })
+      expect(err.message).toContain("File not found")
+    }),
+  )
+
+  it.live("does not recover a directory", () =>
+    Effect.gen(function* () {
+      const dir = yield* tmpdirScoped()
+      yield* put(path.join(dir, "report final", "inner.txt"), "inner")
+
+      const err = yield* fail(dir, { filePath: path.join(dir, "report final") })
+      expect(err.message).toContain("File not found")
+    }),
+  )
+})

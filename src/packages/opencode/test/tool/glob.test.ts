@@ -129,4 +129,36 @@ describe("tool.glob", () => {
       }
     }),
   )
+
+  it.instance("reports a missing search path", () =>
+    Effect.gen(function* () {
+      yield* TestInstance
+      const info = yield* GlobTool
+      const glob = yield* info.init()
+      const exit = yield* glob.execute({ pattern: "*", path: "missing" }, ctx).pipe(Effect.exit)
+      expect(Exit.isFailure(exit)).toBe(true)
+      if (Exit.isFailure(exit)) {
+        const err = Cause.squash(exit.cause)
+        expect(err instanceof Error ? err.message : String(err)).toBe("Search path does not exist: missing")
+      }
+    }),
+  )
+
+  it.instance("excludes hidden files before limiting results", () =>
+    Effect.gen(function* () {
+      const test = yield* TestInstance
+      yield* Effect.promise(() =>
+        Promise.all(
+          ["src/visible.ts", ".hidden.ts", "src/.hidden.ts", ".hidden/nested.ts"].map((file) =>
+            Bun.write(path.join(test.directory, file), "needle\n"),
+          ),
+        ),
+      )
+      const info = yield* GlobTool
+      const glob = yield* info.init()
+      const result = yield* glob.execute({ pattern: "**/*.ts", path: test.directory }, ctx)
+      expect(result.metadata.count).toBe(1)
+      expect(result.output).toBe(path.join(test.directory, "src", "visible.ts"))
+    }),
+  )
 })

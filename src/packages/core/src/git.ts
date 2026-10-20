@@ -182,7 +182,7 @@ const layer = Layer.effect(
       locks.withLock(repository.gitDirectory)(effect)
 
     const discover = Effect.fn("Git.repo.discover")(function* (input: AbsolutePath) {
-      const dotgit = yield* fs.up({ targets: [".git"], start: input }).pipe(
+      const dotgit = yield* fs.up({ targets: [".git"], start: input, mode: "first" }).pipe(
         Effect.map((matches) => matches[0]),
         Effect.catch(() => Effect.succeed(undefined)),
       )
@@ -443,22 +443,16 @@ const layer = Layer.effect(
         ],
         { concurrency: 2 },
       )
-      const candidates = Array.from(new Set([...tracked, ...untracked]))
+      const candidates = Array.from(new Set([...tracked, ...untracked])).map((file) => RelativePath.make(file))
       if (!candidates.length) return { skipped: [] }
-      const ignored = input.ignores
-        ? new Set(
-            (yield* repositoryOperation("refresh", input.ignores, ["check-ignore", "--no-index", "--stdin", "-z"], {
-              stdin: candidates.join("\0") + "\0",
-            }).pipe(Effect.catch(() => Effect.succeed({ text: "", stderr: "" })))).text
-              .split("\0")
-              .filter(Boolean),
-          )
-        : new Set<string>()
-      const allowed = candidates.filter((item) => !ignored.has(item))
+      const excluded = input.ignores
+        ? yield* ignored({ repository: input.ignores, paths: candidates })
+        : new Set<RelativePath>()
+      const allowed = candidates.filter((item) => !excluded.has(item))
       const maximum = input.maximumUntrackedFileBytes
       const skipped = maximum
         ? (yield* Effect.forEach(
-            untracked.filter((item) => allowed.includes(item)),
+            untracked.filter((item) => allowed.includes(RelativePath.make(item))),
             (item) =>
               fs.stat(path.join(input.repository.worktree, item)).pipe(
                 Effect.map((info) =>
@@ -469,8 +463,8 @@ const layer = Layer.effect(
             { concurrency: 8 },
           )).filter((item): item is RelativePath => item !== undefined)
         : []
-      const stage = allowed.filter((item) => !skipped.includes(RelativePath.make(item)))
-      const remove = [...ignored, ...skipped]
+      const stage = allowed.filter((item) => !skipped.includes(item))
+      const remove = [...excluded, ...skipped]
       if (remove.length)
         yield* repositoryOperation(
           "refresh",
@@ -901,16 +895,20 @@ const layer = Layer.effect(
       force: boolean
     }) {
       const listed = yield* worktreeList(input.repository)
-      if (listed.some((item) => path.resolve(item.directory) === path.resolve(input.directory))) yield* worktreeRun(
-        "remove",
-        input.repository,
-        ["worktree", "remove", ...(input.force ? ["--force"] : []), input.directory],
-        input.directory,
-        input.repository.commonDirectory,
-      )
-      if (yield* fs.existsSafe(input.directory)) return yield* new WorktreeError({
-        operation: "remove", directory: input.directory, message: "Copy directory still exists",
-      })
+      if (listed.some((item) => path.resolve(item.directory) === path.resolve(input.directory)))
+        yield* worktreeRun(
+          "remove",
+          input.repository,
+          ["worktree", "remove", ...(input.force ? ["--force"] : []), input.directory],
+          input.directory,
+          input.repository.commonDirectory,
+        )
+      if (yield* fs.existsSafe(input.directory))
+        return yield* new WorktreeError({
+          operation: "remove",
+          directory: input.directory,
+          message: "Copy directory still exists",
+        })
     })
 
     const worktreeList = Effect.fn("Git.worktree.list")(function* (repository: Repository) {

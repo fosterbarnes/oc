@@ -102,7 +102,7 @@ async function migrateFoldedPlugins(filepath: string) {
   )
 }
 
-async function substituteWellKnownRemoteConfig(input: {
+const substituteWellKnownRemoteConfig = Effect.fnUntraced(function* (input: {
   value: unknown
   dir: string
   source: string
@@ -110,34 +110,22 @@ async function substituteWellKnownRemoteConfig(input: {
 }) {
   if (!isRecord(input.value) || typeof input.value.url !== "string") return undefined
 
-  const url = await ConfigVariable.substitute({
-    text: input.value.url,
-    type: "virtual",
-    dir: input.dir,
-    source: input.source,
-    env: input.env,
-  })
+  const substitute = (text: string) =>
+    ConfigVariable.substitute({ text, type: "virtual", dir: input.dir, source: input.source, env: input.env })
+  const url = yield* substitute(input.value.url)
   const headers = isRecord(input.value.headers)
     ? Object.fromEntries(
-        await Promise.all(
-          Object.entries(input.value.headers)
-            .filter((entry): entry is [string, string] => typeof entry[1] === "string")
-            .map(async ([key, value]) => [
-              key,
-              await ConfigVariable.substitute({
-                text: value,
-                type: "virtual",
-                dir: input.dir,
-                source: input.source,
-                env: input.env,
-              }),
-            ]),
+        yield* Effect.forEach(
+          Object.entries(input.value.headers).filter(
+            (entry): entry is [string, string] => typeof entry[1] === "string",
+          ),
+          ([key, value]) => Effect.map(substitute(value), (text) => [key, text] as const),
         ),
       )
     : undefined
 
   return { url, headers }
-}
+})
 
 async function resolveLoadedPlugins<T extends { plugin?: ConfigPluginV1.Spec[] }>(config: T, filepath: string) {
   if (!config.plugin) return config
@@ -303,12 +291,10 @@ const layer = Layer.effect(
       env?: Record<string, string>,
     ) {
       const source = "path" in options ? options.path : options.source
-      const expanded = yield* Effect.promise(() =>
-        ConfigVariable.substitute(
-          "path" in options
-            ? { text, type: "path", path: options.path, env }
-            : { text, type: "virtual", ...options, env },
-        ),
+      const expanded = yield* ConfigVariable.substitute(
+        "path" in options
+          ? { text, type: "path", path: options.path, env }
+          : { text, type: "virtual", ...options, env },
       )
       const parsed = ConfigParse.jsonc(expanded, source)
       const data = yield* decodeConfig(parsed, source)
@@ -450,28 +436,39 @@ const layer = Layer.effect(
             const url = key.replace(/\/+$/, "")
             authEnv[value.key] = value.token
             const wellknownURL = `${url}/.well-known/opencode`
-            yield* Effect.logDebug("fetching remote config", { url: wellknownURL })
-            const wellknown = yield* fetchRemoteJson(wellknownURL, undefined, ConfigV1.WellKnown, url)
-            const remote = yield* Effect.promise(() =>
-              substituteWellKnownRemoteConfig({
+            const remoteConfig = yield* Effect.gen(function* () {
+              yield* Effect.logDebug("fetching remote config", { url: wellknownURL })
+              const wellknown = yield* fetchRemoteJson(wellknownURL, undefined, ConfigV1.WellKnown, url)
+              const remote = yield* substituteWellKnownRemoteConfig({
                 value: wellknown.remote_config,
                 dir: url,
                 source: wellknownURL,
                 env: authEnv,
-              }),
+              })
+              const fetchedConfig = remote
+                ? yield* Effect.gen(function* () {
+                    yield* Effect.logDebug("fetching remote config", { url: remote.url })
+                    const data = yield* fetchRemoteJson(remote.url, remote.headers, Schema.Json, url)
+                    if (isRecord(data) && isRecord(data.config)) return data.config
+                    if (isRecord(data)) return data
+                    return yield* Effect.die(
+                      new Error(`failed to decode remote config from ${remote.url}: expected object`),
+                    )
+                  })
+                : {}
+              return mergeConfig(isRecord(wellknown.config) ? wellknown.config : {}, fetchedConfig)
+            }).pipe(
+              // An unreachable well-known endpoint skips that remote config instead of
+              // failing the whole load. A login page still surfaces as a re-auth error.
+              Effect.catchDefect((defect) =>
+                RemoteAuthError.isInstance(defect)
+                  ? Effect.die(defect)
+                  : Effect.logWarning("failed to load wellknown config", { url, error: String(defect) }).pipe(
+                      Effect.as(undefined),
+                    ),
+              ),
             )
-            const fetchedConfig = remote
-              ? yield* Effect.gen(function* () {
-                  yield* Effect.logDebug("fetching remote config", { url: remote.url })
-                  const data = yield* fetchRemoteJson(remote.url, remote.headers, Schema.Json, url)
-                  if (isRecord(data) && isRecord(data.config)) return data.config
-                  if (isRecord(data)) return data
-                  return yield* Effect.die(
-                    new Error(`failed to decode remote config from ${remote.url}: expected object`),
-                  )
-                })
-              : {}
-            const remoteConfig = mergeConfig(isRecord(wellknown.config) ? wellknown.config : {}, fetchedConfig)
+            if (!remoteConfig) continue
             if (!remoteConfig.$schema) remoteConfig.$schema = "https://opencode.ai/config.json"
             const source = wellknownURL
             const next = yield* loadConfig(
@@ -831,9 +828,7 @@ const layer = Layer.effect(
             Effect.gen(function* () {
               const text = yield* readConfigFile(filepath)
               if (!text) return
-              const expanded = yield* Effect.promise(() =>
-                ConfigVariable.substitute({ text, type: "path", path: filepath }),
-              )
+              const expanded = yield* ConfigVariable.substitute({ text, type: "path", path: filepath })
               yield* decodeConfig(ConfigParse.jsonc(expanded, filepath), filepath)
             }),
           { discard: true },

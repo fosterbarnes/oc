@@ -97,7 +97,14 @@ describe("tool.apply_patch freeform", () => {
   it.live("rejects invalid patch format", () =>
     Effect.gen(function* () {
       const { ctx } = makeCtx()
-      yield* expectFailure(execute({ patchText: "invalid patch" }, ctx), "apply_patch verification failed")
+      yield* expectFailure(
+        execute({ patchText: "invalid patch" }, ctx),
+        "apply_patch verification failed: The first line of the patch must be '*** Begin Patch'",
+      )
+      yield* expectFailure(
+        execute({ patchText: "*** Begin Patch\n*** Add File: foo\n+hello" }, ctx),
+        "apply_patch verification failed: The last line of the patch must be '*** End Patch'",
+      )
     }),
   )
 
@@ -334,13 +341,57 @@ describe("tool.apply_patch freeform", () => {
 
   it.instance("rejects update when target file is missing", () =>
     Effect.gen(function* () {
+      const test = yield* TestInstance
       const { ctx } = makeCtx()
       const patchText = "*** Begin Patch\n*** Update File: missing.txt\n@@\n-nope\n+better\n*** End Patch"
 
       yield* expectFailure(
         execute({ patchText }, ctx),
-        "apply_patch verification failed: Failed to read file to update",
+        `apply_patch verification failed: Failed to read file to update ${path.join(test.directory, "missing.txt")}: `,
       )
+    }),
+  )
+
+  it.instance("identifies a directory used as an update target", () =>
+    Effect.gen(function* () {
+      const test = yield* TestInstance
+      const { ctx } = makeCtx()
+      yield* makeDir(path.join(test.directory, "nested"))
+      const patchText = "*** Begin Patch\n*** Update File: nested\n@@\n-old\n+new\n*** End Patch"
+
+      yield* expectFailure(
+        execute({ patchText }, ctx),
+        `apply_patch verification failed: Failed to read file to update ${path.join(test.directory, "nested")}: path is a directory`,
+      )
+    }),
+  )
+
+  it.instance("serializes concurrent patch transactions", () =>
+    Effect.gen(function* () {
+      const test = yield* TestInstance
+      const target = path.join(test.directory, "concurrent.txt")
+      yield* writeText(target, "one\ntwo\n")
+      // The first permission prompt stalls so an unlocked second patch would read the same original.
+      let asks = 0
+      const ctx: ToolCtx = {
+        ...baseCtx,
+        ask: () => (++asks === 1 ? Effect.sleep("50 millis") : Effect.void),
+      }
+
+      yield* Effect.all(
+        [
+          execute(
+            { patchText: "*** Begin Patch\n*** Update File: concurrent.txt\n@@\n-one\n+ONE\n*** End Patch" },
+            ctx,
+          ),
+          execute(
+            { patchText: "*** Begin Patch\n*** Update File: concurrent.txt\n@@\n-two\n+TWO\n*** End Patch" },
+            ctx,
+          ),
+        ],
+        { concurrency: "unbounded" },
+      )
+      expect(yield* readText(target)).toBe("ONE\nTWO\n")
     }),
   )
 
@@ -371,7 +422,10 @@ describe("tool.apply_patch freeform", () => {
       const { ctx } = makeCtx()
       const patchText = "*** Begin Patch\n*** Frobnicate File: foo\n*** End Patch"
 
-      yield* expectFailure(execute({ patchText }, ctx), "apply_patch verification failed")
+      yield* expectFailure(
+        execute({ patchText }, ctx),
+        "apply_patch verification failed: Invalid hunk at line 2: '*** Frobnicate File: foo' is not a valid hunk header. Valid hunk headers: '*** Add File: {path}', '*** Delete File: {path}', '*** Update File: {path}'",
+      )
     }),
   )
 
@@ -412,6 +466,36 @@ describe("tool.apply_patch freeform", () => {
 
       yield* execute({ patchText }, ctx)
       expect(yield* readText(target)).toBe("alpha\nend\n")
+    }),
+  )
+
+  it.instance("applies an end of file anchor to a file without a trailing newline", () =>
+    Effect.gen(function* () {
+      const test = yield* TestInstance
+      const { ctx } = makeCtx()
+      const target = path.join(test.directory, "tail.txt")
+      yield* writeText(target, "first\nsecond")
+
+      const patchText =
+        "*** Begin Patch\n*** Update File: tail.txt\n@@\n first\n-second\n+second updated\n*** End of File\n*** End Patch"
+
+      yield* execute({ patchText }, ctx)
+      expect(yield* readText(target)).toBe("first\nsecond updated\n")
+    }),
+  )
+
+  it.instance("applies an end of file chunk to the final duplicate", () =>
+    Effect.gen(function* () {
+      const test = yield* TestInstance
+      const { ctx } = makeCtx()
+      const target = path.join(test.directory, "duplicates.txt")
+      yield* writeText(target, "marker\nend\nmiddle\nmarker\nend\n")
+
+      const patchText =
+        "*** Begin Patch\n*** Update File: duplicates.txt\n@@\n-marker\n-end\n+marker changed\n+end\n*** End of File\n*** End Patch"
+
+      yield* execute({ patchText }, ctx)
+      expect(yield* readText(target)).toBe("marker\nend\nmiddle\nmarker changed\nend\n")
     }),
   )
 

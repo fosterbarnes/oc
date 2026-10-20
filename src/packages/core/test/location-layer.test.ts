@@ -1,7 +1,7 @@
 import fs from "fs/promises"
 import path from "path"
 import { describe, expect } from "bun:test"
-import { Effect, Equal, Hash, Schema } from "effect"
+import { Effect, Equal, Exit, Hash, RcMap, Schema } from "effect"
 import { Tool } from "@opencode-ai/core/tool/tool"
 import { define } from "@opencode-ai/plugin/v2/effect"
 import { AgentV2 } from "@opencode-ai/core/agent"
@@ -56,6 +56,64 @@ describe("LocationServiceMap", () => {
       ),
     ),
   )
+
+  it.live("normalizes equivalent refs to one cached location graph", () =>
+    Effect.acquireRelease(
+      Effect.promise(() => tmpdir()),
+      (dir) => Effect.promise(() => dir[Symbol.asyncDispose]()),
+    ).pipe(
+      Effect.flatMap((dir) =>
+        Effect.scoped(
+          Effect.gen(function* () {
+            const locations = yield* LocationServiceMap.Service
+            const directory = AbsolutePath.make(dir.path)
+            const alternate = AbsolutePath.make(directory.replaceAll("\\", "/"))
+            const absent = Location.Ref.make({ directory: alternate })
+            const present = Location.Ref.make({ directory, workspaceID: undefined })
+            if (process.platform === "win32") expect(absent.directory).not.toBe(present.directory)
+
+            const first = yield* locations.contextEffect(absent)
+            expect(yield* locations.contextEffect(present)).toBe(first)
+            expect(Array.from(yield* RcMap.keys(locations.rcMap))).toEqual([
+              Location.Ref.make({ directory, workspaceID: undefined }),
+            ])
+
+            // Invalidating with the other spelling must evict the booted entry.
+            yield* locations.invalidate(absent)
+            expect(Array.from(yield* RcMap.keys(locations.rcMap))).toHaveLength(0)
+          }),
+        ),
+      ),
+    ),
+  )
+
+  for (const invalidate of [false, true]) {
+    it.live(`retries a location after its missing directory is created${invalidate ? " with invalidation" : ""}`, () =>
+      Effect.acquireRelease(
+        Effect.promise(() => tmpdir()),
+        (dir) => Effect.promise(() => dir[Symbol.asyncDispose]()),
+      ).pipe(
+        Effect.flatMap((dir) =>
+          Effect.gen(function* () {
+            const locations = yield* LocationServiceMap.Service
+            const directory = path.join(dir.path, "repaired")
+            const ref = Location.Ref.make({ directory: AbsolutePath.make(directory) })
+            const load = Location.Service.pipe(Effect.provide(locations.get(ref)), Effect.scoped)
+
+            expect(Exit.isFailure(yield* Effect.exit(load))).toBe(true)
+            if (!invalidate) expect(Array.from(yield* RcMap.keys(locations.rcMap))).toHaveLength(0)
+
+            yield* Effect.promise(() => fs.mkdir(directory))
+            if (invalidate) yield* locations.invalidate(ref)
+            const repaired = yield* load
+            expect(repaired.directory).toBe(ref.directory)
+            // A successful graph remains cached after its last borrower releases.
+            expect(yield* load).toBe(repaired)
+          }),
+        ),
+      ),
+    )
+  }
 
   it.live("isolates location state while sharing location policy with catalog", () =>
     Effect.acquireRelease(

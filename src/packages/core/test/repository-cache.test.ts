@@ -2,19 +2,109 @@ import { describe, expect } from "bun:test"
 import fs from "fs/promises"
 import path from "path"
 import { pathToFileURL } from "url"
-import { Effect, Layer } from "effect"
+import { Clock, Duration, Effect, Layer } from "effect"
 import { AppNodeBuilder } from "@opencode-ai/core/effect/app-node-builder"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { Global } from "@opencode-ai/core/global"
 import { Repository } from "@opencode-ai/core/repository"
 import { RepositoryCache } from "@opencode-ai/core/repository-cache"
-import { branch, git, gitRemote } from "./fixture/git"
+import { branch, commit, git, gitRemote } from "./fixture/git"
 import { tmpdir } from "./fixture/tmpdir"
 import { testEffect } from "./lib/effect"
 
 const it = testEffect(Layer.empty)
 
 describe("RepositoryCache", () => {
+  it.live("persists the daily throttle across cache recreation and serializes competing refreshes", () =>
+    withRemote((fixture) =>
+      Effect.gen(function* () {
+        const initial = yield* Effect.gen(function* () {
+          const cache = yield* RepositoryCache.Service
+          return yield* cache.ensure({ reference: fixture.reference, refresh: "daily" })
+        }).pipe(Effect.provide(cacheLayer(fixture.root)))
+        expect(initial.status).toBe("cloned")
+        yield* Effect.promise(() => commit(fixture.source, "two\n", "advance main"))
+
+        yield* Effect.gen(function* () {
+          const cache = yield* RepositoryCache.Service
+          expect((yield* cache.ensure({ reference: fixture.reference, refresh: "daily" })).status).toBe("cached")
+          expect(yield* read(path.join(initial.localPath, "README.md"))).toBe("one\n")
+          yield* writeAttempt(initial.localPath, (yield* Clock.currentTimeMillis) - Duration.toMillis(Duration.days(1)))
+        }).pipe(Effect.provide(cacheLayer(fixture.root)))
+
+        const results = yield* Effect.all(
+          [0, 1].map(() =>
+            Effect.gen(function* () {
+              const cache = yield* RepositoryCache.Service
+              return yield* cache.ensure({ reference: fixture.reference, refresh: "daily" })
+            }).pipe(Effect.provide(cacheLayer(fixture.root))),
+          ),
+          { concurrency: "unbounded" },
+        )
+        expect(results.map((result) => result.status).toSorted()).toEqual(["cached", "refreshed"])
+        expect(yield* read(path.join(initial.localPath, "README.md"))).toBe("two\n")
+
+        // A missing checkout must be recreated even when the last attempt is recent.
+        yield* Effect.promise(() => fs.rm(initial.localPath, { recursive: true }))
+        yield* Effect.gen(function* () {
+          const cache = yield* RepositoryCache.Service
+          expect((yield* cache.ensure({ reference: fixture.reference, refresh: "daily" })).status).toBe("cloned")
+        }).pipe(Effect.provide(cacheLayer(fixture.root)))
+        expect(yield* read(path.join(initial.localPath, "README.md"))).toBe("two\n")
+      }),
+    ),
+  )
+
+  it.live("throttles failed refresh attempts", () =>
+    withRemote((fixture) =>
+      Effect.gen(function* () {
+        const cache = yield* RepositoryCache.Service
+        const initial = yield* cache.ensure({ reference: fixture.reference, refresh: "daily" })
+        const yesterday = (yield* Clock.currentTimeMillis) - Duration.toMillis(Duration.days(1))
+        yield* writeAttempt(initial.localPath, yesterday)
+        yield* Effect.promise(() =>
+          fs.rename(path.join(fixture.root, "origin.git"), path.join(fixture.root, "offline.git")),
+        )
+
+        const error = yield* Effect.flip(cache.ensure({ reference: fixture.reference, refresh: "daily" }))
+        expect(error).toBeInstanceOf(RepositoryCache.FetchFailedError)
+        const stored = yield* readAttempt(initial.localPath)
+        expect(stored).toBeGreaterThan(yesterday)
+        expect((yield* cache.ensure({ reference: fixture.reference, refresh: "daily" })).status).toBe("cached")
+        expect(yield* readAttempt(initial.localPath)).toBe(stored)
+        expect(yield* read(path.join(initial.localPath, "README.md"))).toBe("one\n")
+
+        yield* Effect.promise(async () => {
+          await fs.rename(path.join(fixture.root, "offline.git"), path.join(fixture.root, "origin.git"))
+          await commit(fixture.source, "two\n", "advance main")
+        })
+        yield* writeAttempt(initial.localPath, yesterday)
+        expect((yield* cache.ensure({ reference: fixture.reference, refresh: "daily" })).status).toBe("refreshed")
+        expect(yield* read(path.join(initial.localPath, "README.md"))).toBe("two\n")
+      }).pipe(Effect.provide(cacheLayer(fixture.root))),
+    ),
+  )
+
+  it.live("refreshes existing untracked checkouts and keeps branch freshness independent", () =>
+    withRemote((fixture) =>
+      Effect.gen(function* () {
+        const cache = yield* RepositoryCache.Service
+        yield* Effect.promise(() => branch(fixture.source, "feature", "feature\n"))
+        const main = yield* cache.ensure({ reference: fixture.reference, refresh: "daily" })
+        const feature = yield* cache.ensure({ reference: fixture.reference, branch: "feature", refresh: "daily" })
+        yield* Effect.promise(() => fs.rm(attemptFile(feature.localPath)))
+        yield* Effect.promise(() => commit(fixture.source, "new feature\n", "advance feature"))
+
+        expect((yield* cache.ensure({ reference: fixture.reference, refresh: "daily" })).status).toBe("cached")
+        expect(
+          (yield* cache.ensure({ reference: fixture.reference, branch: "feature", refresh: "daily" })).status,
+        ).toBe("refreshed")
+        expect(yield* read(path.join(main.localPath, "README.md"))).toBe("one\n")
+        expect(yield* read(path.join(feature.localPath, "README.md"))).toBe("new feature\n")
+      }).pipe(Effect.provide(cacheLayer(fixture.root))),
+    ),
+  )
+
   it.live("replaces a stale cache directory before cloning", () =>
     withRemote((fixture) =>
       Effect.gen(function* () {
@@ -137,6 +227,16 @@ function withRemote<A, E, R>(body: (fixture: Awaited<ReturnType<typeof gitRemote
     (input) => body(input.fixture),
     (input) => Effect.promise(() => input.root[Symbol.asyncDispose]()),
   )
+}
+
+const attemptFile = (checkout: string) => path.join(checkout, ".git", "opencode-refresh-attempt")
+
+function writeAttempt(checkout: string, time: number) {
+  return Effect.promise(() => fs.writeFile(attemptFile(checkout), String(time)))
+}
+
+function readAttempt(checkout: string) {
+  return Effect.promise(() => fs.readFile(attemptFile(checkout), "utf8")).pipe(Effect.map(Number))
 }
 
 function read(file: string) {

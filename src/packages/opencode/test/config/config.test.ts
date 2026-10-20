@@ -8,6 +8,7 @@ import { FetchHttpClient, HttpClient, HttpClientResponse } from "effect/unstable
 import { Config } from "@/config/config"
 import { ConfigManaged } from "@/config/managed"
 import { ConfigParse } from "../../src/config/parse"
+import { ConfigVariable } from "../../src/config/variable"
 import { ConfigV2Compat } from "../../src/config/v2-compat"
 import { snapshot } from "./snapshot"
 import { Npm } from "@opencode-ai/core/npm"
@@ -824,6 +825,60 @@ it.instance("handles file inclusion with replacement tokens", () =>
     expect(config.username).toBe("const out = await Bun.$`echo hi`")
   }),
 )
+
+it.instance("substitutes empty for missing or unreadable file references and escapes breaking env values", () =>
+  withProcessEnvs(
+    { OPENCODE_TEST_MCP_TOKEN: String.raw`C:\Users\new\"secret"`, OPENCODE_TEST_FLAG: "false" },
+    Effect.gen(function* () {
+      const test = yield* TestInstance
+      yield* FSUtil.use.writeWithDirs(path.join(test.directory, "token.txt"), 'file\n"token"')
+      yield* FSUtil.use.writeWithDirs(
+        path.join(test.directory, "opencode.jsonc"),
+        `{
+          "$schema": "https://opencode.ai/config.json",
+          // Ignored reference: {file:.}
+          "username": "user-{file:missing.txt}",
+          "snapshot": {env:OPENCODE_TEST_FLAG},
+          "mcp": {
+            "remote": {
+              "type": "remote",
+              "url": "https://example.com/mcp",
+              "headers": {
+                "Authorization": "Bearer {env:OPENCODE_TEST_MCP_TOKEN}",
+                "X-Token": "{file:token.txt}",
+                "X-Missing": "Bearer {file:~/.opencode-test-missing/key}",
+                "X-Folder": "{file:.}"
+              }
+            }
+          }
+        }`,
+      )
+      const config = yield* Config.use.get()
+      expect(config.username).toBe("user-")
+      expect(config.snapshot).toBe(false)
+      const remote = config.mcp?.remote
+      expect(remote && "headers" in remote ? remote.headers : undefined).toEqual({
+        Authorization: String.raw`Bearer C:\Users\new\"secret"`,
+        "X-Token": 'file\n"token"',
+        "X-Missing": "Bearer ",
+        "X-Folder": "",
+      })
+    }),
+  ),
+)
+
+test("keeps env values unescaped when the config already parses", async () => {
+  const text = await Effect.runPromise(
+    ConfigVariable.substitute({
+      type: "virtual",
+      source: "test",
+      dir: "/",
+      text: '{ "quoted": "{env:QUOTED}", "fragment": {env:FRAGMENT} }',
+      env: { QUOTED: String.raw`a\"b`, FRAGMENT: '{"k":"v"}' },
+    }),
+  )
+  expect(JSON.parse(text)).toEqual({ quoted: 'a"b', fragment: { k: "v" } })
+})
 
 const accountTokenIt = configIt({
   account: Layer.mock(Account.Service)({
@@ -1936,12 +1991,29 @@ const invalidRemoteWellKnown = wellKnown({
   remote: "not an object",
 })
 
-invalidRemoteWellKnown.it.instance("wellknown remote_config rejects non-object config responses", () =>
+invalidRemoteWellKnown.it.instance("wellknown remote_config skips non-object config responses", () =>
   Effect.gen(function* () {
     const exit = yield* Config.use.get().pipe(Effect.exit)
     expect(invalidRemoteWellKnown.seen.remote).toBe("https://config.example.com/opencode.json")
-    expect(Exit.isFailure(exit)).toBe(true)
+    expect(Exit.isSuccess(exit)).toBe(true)
   }),
+)
+
+const unavailableWellKnown = wellKnown({
+  config: { mcp: { jira: { type: "remote", url: "https://jira.example.com/mcp", enabled: true } } },
+  remoteConfig: { url: "https://config.example.com/opencode.json" },
+})
+
+unavailableWellKnown.it.instance(
+  "tolerates unavailable wellknown config",
+  () =>
+    Effect.gen(function* () {
+      const config = yield* Config.use.get()
+      expect(unavailableWellKnown.seen.wellKnown).toBe("https://example.com/.well-known/opencode")
+      expect(config.mcp?.jira).toBeUndefined()
+      expect(config.username).toBe("project")
+    }),
+  { git: true, config: { username: "project" } },
 )
 
 const loginPageWellKnown = wellKnown({

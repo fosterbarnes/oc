@@ -23,19 +23,101 @@ function normalizeLineEndings(text: string): string {
   return text.replaceAll("\r\n", "\n")
 }
 
-function detectLineEnding(text: string): "\n" | "\r\n" {
-  return text.includes("\r\n") ? "\r\n" : "\n"
+// Strings that differ only in \r change line endings themselves, so they apply to the exact bytes.
+// Every other edit matches the LF view Read shows the model, then writes each replacement with the
+// endings of the source region it replaces, so CRLF and mixed files keep their bytes outside the edit.
+function replaceKeepingEndings(source: string, oldString: string, newString: string, replaceAll?: boolean) {
+  if (oldString.replaceAll("\r", "") === newString.replaceAll("\r", "")) {
+    return replace(source, oldString, newString, replaceAll)
+  }
+  const view = normalizeLineEndings(source)
+  const removed = [...source.matchAll(/\r\n/g)].map((match, index) => match.index - index)
+  const replacement = normalizeLineEndings(newString)
+  const fileEnding = lineEnding(source, "\n")
+  const matches = findMatches(view, normalizeLineEndings(oldString), replacement, replaceAll).map((match) => ({
+    start: match.start + countBefore(removed, match.start),
+    end: match.end + countBefore(removed, match.end),
+  }))
+  return applyMatches(source, matches, (match) => {
+    const region = source.slice(match.start, match.end)
+    return withRegionEndings(region, replacement, lineEnding(region, fileEnding))
+  })
 }
 
-function convertToLineEnding(text: string, ending: "\n" | "\r\n"): string {
-  if (ending === "\n") return text
-  return text.replaceAll("\n", "\r\n")
+// The dominant line ending in text, or fallback on a tie (including no line breaks).
+function lineEnding(text: string, fallback: string) {
+  const crlf = text.split("\r\n").length - 1
+  const lf = text.split("\n").length - 1 - crlf
+  if (crlf === lf) return fallback
+  return crlf > lf ? "\r\n" : "\n"
+}
+
+// Joins the replacement's lines with endings taken from the matched region. A line the replacement keeps
+// (longest common subsequence, ignoring trailing whitespace) reuses that line's ending, a line changed in
+// place reuses the ending of the line it replaces, and only lines beyond those take fallback.
+function withRegionEndings(region: string, replacement: string, fallback: string) {
+  const before = region.split(/\r?\n/)
+  const endings = [...region.matchAll(/\r?\n/g)].map((match) => match[0])
+  const after = replacement.split("\n")
+  const source = alignLines(
+    before.map((line) => line.trimEnd()),
+    after.map((line) => line.trimEnd()),
+  )
+  return after
+    .map((line, index) => (index === after.length - 1 ? line : line + (endings[source[index]!] ?? fallback)))
+    .join("")
+}
+
+// For each line of after, the index of the before line it keeps (longest common subsequence) or, between
+// kept lines, the line it takes the place of; undefined for lines with no counterpart.
+function alignLines(before: string[], after: string[]) {
+  const width = after.length + 1
+  const table = new Uint32Array((before.length + 1) * width)
+  for (let i = before.length - 1; i >= 0; i--)
+    for (let j = after.length - 1; j >= 0; j--)
+      table[i * width + j] =
+        before[i] === after[j]
+          ? table[(i + 1) * width + j + 1] + 1
+          : Math.max(table[(i + 1) * width + j], table[i * width + j + 1])
+  const result: (number | undefined)[] = []
+  const gap = { before: [] as number[], after: [] as number[] }
+  const flush = () => {
+    gap.after.forEach((j, k) => (result[j] = gap.before[k]))
+    gap.before = []
+    gap.after = []
+  }
+  let i = 0
+  let j = 0
+  while (i < before.length && j < after.length) {
+    if (before[i] === after[j]) {
+      flush()
+      result[j++] = i++
+      continue
+    }
+    if (table[(i + 1) * width + j] >= table[i * width + j + 1]) gap.before.push(i++)
+    else gap.after.push(j++)
+  }
+  while (i < before.length) gap.before.push(i++)
+  while (j < after.length) gap.after.push(j++)
+  flush()
+  return result
+}
+
+// Number of sorted positions strictly before offset.
+function countBefore(positions: number[], offset: number) {
+  let low = 0
+  let high = positions.length
+  while (low < high) {
+    const middle = (low + high) >> 1
+    if (positions[middle] < offset) low = middle + 1
+    else high = middle
+  }
+  return low
 }
 
 const locks = new Map<string, Semaphore.Semaphore>()
 
-function lock(filePath: string) {
-  const resolvedFilePath = FSUtil.resolve(filePath)
+function lock(resolvedFilePath: string) {
   const hit = locks.get(resolvedFilePath)
   if (hit) return hit
 
@@ -43,6 +125,15 @@ function lock(filePath: string) {
   locks.set(resolvedFilePath, next)
   return next
 }
+
+// Serialize a whole read/prepare/write transaction per file. edit and apply_patch share these
+// locks; taking them in sorted order keeps overlapping multi-file patches from deadlocking.
+export const withFileLocks =
+  (filePaths: ReadonlyArray<string>) =>
+  <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+    [...new Set(filePaths.map(FSUtil.resolve))]
+      .sort()
+      .reduceRight((result, file) => lock(file).withPermits(1)(result), effect)
 
 export const Parameters = Schema.Struct({
   filePath: Schema.String.annotate({ description: "The absolute path to the file to modify" }),
@@ -85,7 +176,7 @@ export const EditTool = Tool.define(
           let diff = ""
           let contentOld = ""
           let contentNew = ""
-          yield* lock(filePath).withPermits(1)(
+          yield* withFileLocks([filePath])(
             Effect.gen(function* () {
               if (params.oldString === "") {
                 const existed = yield* afs.existsSafe(filePath)
@@ -126,11 +217,15 @@ export const EditTool = Tool.define(
               const source = yield* Bom.readFile(afs, filePath)
               contentOld = source.text
 
-              const ending = detectLineEnding(contentOld)
-              const old = convertToLineEnding(normalizeLineEndings(params.oldString), ending)
-              const replacement = convertToLineEnding(normalizeLineEndings(params.newString), ending)
-
-              const next = Bom.split(replace(contentOld, old, replacement, params.replaceAll))
+              const replaced = replaceKeepingEndings(contentOld, params.oldString, params.newString, params.replaceAll)
+              if (replaced === contentOld) {
+                throw new Error(
+                  params.oldString.replaceAll("\r", "") === params.newString.replaceAll("\r", "")
+                    ? `No changes to apply: ${filePath} already has those line endings.`
+                    : `No changes to apply: the edit leaves ${filePath} unchanged. Line endings follow the file; to change them, write \\r explicitly in oldString or newString.`,
+                )
+              }
+              const next = Bom.split(replaced)
               const desiredBom = source.bom || next.bom
               contentNew = next.text
 
@@ -680,6 +775,14 @@ export function trimDiff(diff: string): string {
 }
 
 export function replace(content: string, oldString: string, newString: string, replaceAll = false): string {
+  return applyMatches(content, findMatches(content, oldString, newString, replaceAll), () => newString)
+}
+
+type Match = { start: number; end: number }
+
+// The spans of content that oldString resolves to through the replacer chain: every occurrence of the
+// first matching search when replaceAll, otherwise its single unique occurrence.
+function findMatches(content: string, oldString: string, newString: string, replaceAll = false): Match[] {
   if (oldString === newString) {
     throw new Error("No changes to apply: oldString and newString are identical.")
   }
@@ -704,7 +807,7 @@ export function replace(content: string, oldString: string, newString: string, r
   ]) {
     for (const search of replacer(content, oldString)) {
       const index = content.indexOf(search)
-      if (index === -1) continue
+      if (index === -1 || search === "") continue
       notFound = false
       if (isDisproportionateMatch(search, oldString)) {
         throw new Error(
@@ -712,11 +815,15 @@ export function replace(content: string, oldString: string, newString: string, r
         )
       }
       if (replaceAll) {
-        return content.replaceAll(search, newString)
+        const matches: Match[] = []
+        for (let at = index; at !== -1; at = content.indexOf(search, at + search.length)) {
+          matches.push({ start: at, end: at + search.length })
+        }
+        return matches
       }
       const lastIndex = content.lastIndexOf(search)
       if (index !== lastIndex) continue
-      return content.substring(0, index) + newString + content.substring(index + search.length)
+      return [{ start: index, end: index + search.length }]
     }
   }
 
@@ -726,6 +833,12 @@ export function replace(content: string, oldString: string, newString: string, r
     )
   }
   throw new Error("Found multiple matches for oldString. Provide more surrounding context to make the match unique.")
+}
+
+function applyMatches(content: string, matches: Match[], replacement: (match: Match) => string) {
+  return matches
+    .toReversed()
+    .reduce((text, match) => text.slice(0, match.start) + replacement(match) + text.slice(match.end), content)
 }
 
 function isDisproportionateMatch(search: string, oldString: string) {

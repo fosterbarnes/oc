@@ -86,10 +86,250 @@ describe("Patch namespace", () => {
       }
     })
 
-    test("should throw error for invalid patch format", () => {
-      const invalidPatch = `This is not a valid patch`
+    test("identifies the missing patch boundary", () => {
+      expect(() => Patch.parsePatch("This is not a valid patch")).toThrow(
+        "The first line of the patch must be '*** Begin Patch'",
+      )
+      expect(() => Patch.parsePatch("*** Begin Patch\n*** Add File: add.txt\n+added")).toThrow(
+        "The last line of the patch must be '*** End Patch'",
+      )
+    })
 
-      expect(() => Patch.parsePatch(invalidPatch)).toThrow("Invalid patch format")
+    const update = (path: string, chunks: Patch.UpdateFileChunk[], move_path?: string): Patch.Hunk => ({
+      type: "update",
+      path,
+      move_path,
+      chunks,
+    })
+
+    test("parses an empty patch", () => {
+      expect(Patch.parsePatch("*** Begin Patch\n*** End Patch").hunks).toEqual([])
+    })
+
+    test("ignores a Codex environment preamble", () => {
+      expect(
+        Patch.parsePatch("*** Begin Patch\n*** Environment ID: remote\n*** Add File: file.txt\n+content\n*** End Patch")
+          .hunks,
+      ).toEqual([{ type: "add", path: "file.txt", contents: "content" }])
+    })
+
+    test("parses an update followed by an add", () => {
+      expect(
+        Patch.parsePatch(
+          "*** Begin Patch\n*** Update File: update.txt\n@@\n+line\n*** Add File: add.txt\n+content\n*** End Patch",
+        ).hunks,
+      ).toEqual([
+        update("update.txt", [{ old_lines: [], new_lines: ["line"] }]),
+        { type: "add", path: "add.txt", contents: "content" },
+      ])
+    })
+
+    test("strips quoted heredoc wrappers", () => {
+      const patch = "*** Begin Patch\n*** Add File: add.txt\n+added\n*** End Patch"
+      const added: Patch.Hunk[] = [{ type: "add", path: "add.txt", contents: "added" }]
+      expect(Patch.parsePatch(`<<'EOF'\n${patch}\nEOF`).hunks).toEqual(added)
+      expect(Patch.parsePatch(`<<"EOF"\n${patch}\nEOF`).hunks).toEqual(added)
+    })
+
+    test("rejects a heredoc wrapper missing the end marker", () => {
+      expect(() => Patch.parsePatch("<<EOF\n*** Begin Patch\n*** Add File: add.txt\n+added\nEOF")).toThrow(
+        "The last line of the patch must be '*** End Patch'",
+      )
+    })
+
+    test("parses whitespace-padded hunk headers and patch markers", () => {
+      const expected = [update("file.txt", [{ old_lines: ["one"], new_lines: ["two"] }])]
+      for (const patch of [
+        "*** Begin Patch\n  *** Update File: file.txt\n@@\n-one\n+two\n*** End Patch",
+        " *** Begin Patch\n*** Update File: file.txt\n@@\n-one\n+two\n*** End Patch ",
+        "*** Begin Patch \n*** Update File: file.txt\n@@\n-one\n+two\n *** End Patch",
+      ]) {
+        expect(Patch.parsePatch(patch).hunks).toEqual(expected)
+      }
+    })
+
+    test("parses relative and absolute hunk paths", () => {
+      expect(
+        Patch.parsePatch(
+          "*** Begin Patch\n*** Add File: relative.txt\n+content\n*** Delete File: /tmp/delete.txt\n*** Update File: /tmp/update.txt\n@@\n-old\n+new\n*** End Patch",
+        ).hunks,
+      ).toEqual([
+        { type: "add", path: "relative.txt", contents: "content" },
+        { type: "delete", path: "/tmp/delete.txt" },
+        update("/tmp/update.txt", [{ old_lines: ["old"], new_lines: ["new"] }]),
+      ])
+    })
+
+    test("strips one carriage return from CRLF patch lines", () => {
+      expect(
+        Patch.parsePatch("*** Begin Patch\r\n*** Update File: file.txt\r\n@@\r\n-old\r\n+new\r\n*** End Patch\r\n")
+          .hunks,
+      ).toEqual([update("file.txt", [{ old_lines: ["old"], new_lines: ["new"] }])])
+      expect(
+        Patch.parsePatch("*** Begin Patch\r\n*** Update File: file.txt\r\n@@\r\n-old\r\r\n+new\r\n*** End Patch\r\n")
+          .hunks,
+      ).toEqual([update("file.txt", [{ old_lines: ["old\r"], new_lines: ["new"] }])])
+    })
+
+    test("preserves the end-of-file marker", () => {
+      expect(
+        Patch.parsePatch("*** Begin Patch\n*** Update File: file.txt\n@@\n+quux\n*** End of File\n\n*** End Patch")
+          .hunks,
+      ).toEqual([update("file.txt", [{ old_lines: [], new_lines: ["quux"], is_end_of_file: true }])])
+    })
+
+    test("allows an end-of-file marker before a chunk or move", () => {
+      expect(
+        Patch.parsePatch("*** Begin Patch\n*** Update File: file.txt\n*** End of File\n@@\n-old\n+new\n*** End Patch")
+          .hunks,
+      ).toEqual([update("file.txt", [{ old_lines: ["old"], new_lines: ["new"] }])])
+      expect(
+        Patch.parsePatch("*** Begin Patch\n*** Update File: file.txt\n*** End of File\n-old\n+new\n*** End Patch")
+          .hunks,
+      ).toEqual([update("file.txt", [{ old_lines: ["old"], new_lines: ["new"] }])])
+      expect(
+        Patch.parsePatch(
+          "*** Begin Patch\n*** Update File: old.txt\n*** End of File\n*** Move to: new.txt\n@@\n-old\n+new\n*** End Patch",
+        ).hunks,
+      ).toEqual([update("old.txt", [{ old_lines: ["old"], new_lines: ["new"] }], "new.txt")])
+    })
+
+    test("parses an update without an explicit first chunk header", () => {
+      expect(
+        Patch.parsePatch("*** Begin Patch\n*** Update File: file.txt\n import foo\n+bar\n*** End Patch").hunks,
+      ).toEqual([update("file.txt", [{ old_lines: ["import foo"], new_lines: ["import foo", "bar"] }])])
+    })
+
+    test("keeps indented markers as context lines", () => {
+      expect(
+        Patch.parsePatch(
+          "*** Begin Patch\n*** Update File: a.txt\n@@\n-old a\n+new a\n *** Update File: b.txt\n@@\n-old b\n+new b\n*** End Patch",
+        ).hunks,
+      ).toEqual([
+        update("a.txt", [
+          { old_lines: ["old a", "*** Update File: b.txt"], new_lines: ["new a", "*** Update File: b.txt"] },
+          { old_lines: ["old b"], new_lines: ["new b"] },
+        ]),
+      ])
+      const context = ["before", "*** Move to: moved.txt", "*** End of File"]
+      expect(
+        Patch.parsePatch(
+          "*** Begin Patch\n*** Update File: file.txt\n@@\n before\n *** Move to: moved.txt\n *** End of File\n*** End Patch",
+        ).hunks,
+      ).toEqual([update("file.txt", [{ old_lines: context, new_lines: context }])])
+    })
+
+    test("preserves update context indentation and bare empty lines", () => {
+      expect(
+        Patch.parsePatch("*** Begin Patch\n*** Update File: file.txt\n@@   section\n-old\n+new\n*** End Patch").hunks,
+      ).toEqual([update("file.txt", [{ old_lines: ["old"], new_lines: ["new"], change_context: "  section" }])])
+      const context = ["context before", "", "context after"]
+      expect(
+        Patch.parsePatch(
+          "*** Begin Patch\n*** Update File: file.txt\n@@\n context before\n\n context after\n*** End Patch",
+        ).hunks,
+      ).toEqual([update("file.txt", [{ old_lines: context, new_lines: context }])])
+    })
+
+    test("rejects invalid add and delete lines", () => {
+      expect(() => Patch.parsePatch("*** Begin Patch\n*** Add File: file.txt\nbad\n*** End Patch")).toThrow(
+        "Invalid hunk at line 3: 'bad' is not a valid hunk header",
+      )
+      expect(() => Patch.parsePatch("*** Begin Patch\n*** Delete File: file.txt\nbad\n*** End Patch")).toThrow(
+        "Invalid hunk at line 3: 'bad' is not a valid hunk header",
+      )
+    })
+
+    test("rejects an empty update hunk", () => {
+      expect(() => Patch.parsePatch("*** Begin Patch\n*** Update File: file.txt\n*** End Patch")).toThrow(
+        "Invalid hunk at line 2: Update file hunk for path 'file.txt' is empty",
+      )
+      expect(() =>
+        Patch.parsePatch(
+          "*** Begin Patch\n*** Update File: old.txt\n*** Move to: new.txt\n*** Delete File: other.txt\n*** End Patch",
+        ),
+      ).toThrow("Invalid hunk at line 2: Update file hunk for path 'old.txt' is empty")
+      expect(() =>
+        Patch.parsePatch("*** Begin Patch\n*** Update File: file.txt\n*** End of File\n*** End Patch"),
+      ).toThrow("Invalid hunk at line 2: Update file hunk for path 'file.txt' is empty")
+    })
+
+    test("rejects an empty update chunk", () => {
+      expect(() => Patch.parsePatch("*** Begin Patch\n*** Update File: file.txt\n@@\n*** End Patch")).toThrow(
+        "Invalid hunk at line 4: Update hunk does not contain any lines",
+      )
+      expect(() =>
+        Patch.parsePatch("*** Begin Patch\n*** Update File: file.txt\n@@\n*** End of File\n*** End Patch"),
+      ).toThrow("Invalid hunk at line 4: Update hunk does not contain any lines")
+      expect(() =>
+        Patch.parsePatch("*** Begin Patch\n*** Update File: file.txt\n@@\n@@\n-old\n+new\n*** End Patch"),
+      ).toThrow("Invalid hunk at line 4: Unexpected line found in update hunk: '@@'")
+      expect(() =>
+        Patch.parsePatch(
+          "*** Begin Patch\n*** Update File: file.txt\n@@\n*** Update File: other.txt\n@@\n-old\n+new\n*** End Patch",
+        ),
+      ).toThrow("Invalid hunk at line 4: Unexpected line found in update hunk: '*** Update File: other.txt'")
+      expect(() => Patch.parsePatch("*** Begin Patch\n*** Update File: file.txt\n@@\nbad\n*** End Patch")).toThrow(
+        "Invalid hunk at line 4: Unexpected line found in update hunk: 'bad'",
+      )
+    })
+
+    test("rejects an invalid update line", () => {
+      expect(() =>
+        Patch.parsePatch("*** Begin Patch\n*** Update File: file.txt\n@@\n-old\nbad\n*** End Patch"),
+      ).toThrow("Invalid hunk at line 5: Expected update hunk to start with a @@ context marker, got: 'bad'")
+      expect(() => Patch.parsePatch("*** Begin Patch\n*** Update File: file.txt\n@@foo\n*** End Patch")).toThrow(
+        "Invalid hunk at line 3: Unexpected line found in update hunk: '@@foo'",
+      )
+      expect(() =>
+        Patch.parsePatch(
+          "*** Begin Patch\n*** Update File: file.txt\n@@\n-old\n*** Frobnicate File: foo\n*** End Patch",
+        ),
+      ).toThrow(
+        "Invalid hunk at line 5: Expected update hunk to start with a @@ context marker, got: '*** Frobnicate File: foo'",
+      )
+    })
+
+    test("rejects invalid and pathless hunk headers", () => {
+      expect(() => Patch.parsePatch("*** Begin Patch\n*** Frobnicate File: foo\n*** End Patch")).toThrow(
+        "Invalid hunk at line 2: '*** Frobnicate File: foo' is not a valid hunk header",
+      )
+      for (const header of ["*** Add File:", "*** Add File: ", "*** Delete File: ", "*** Update File: "]) {
+        expect(() => Patch.parsePatch(`*** Begin Patch\n${header}\n*** End Patch`)).toThrow(
+          `Invalid hunk at line 2: '${header.trim()}' is not a valid hunk header`,
+        )
+      }
+      expect(() =>
+        Patch.parsePatch("*** Begin Patch\n*** Update File: old.txt\n*** Move to: \n@@\n-old\n+new\n*** End Patch"),
+      ).toThrow("Invalid hunk at line 3: '*** Move to:' is not a valid hunk header")
+    })
+  })
+
+  describe("deriveNewContentsFromChunks", () => {
+    test("does not fall back to a non-EOF match", () => {
+      expect(() =>
+        Patch.deriveNewContentsFromChunks(
+          "update.txt",
+          [{ old_lines: ["marker", "end"], new_lines: ["changed", "end"], is_end_of_file: true }],
+          "marker\nend\nmiddle\n",
+        ),
+      ).toThrow("Failed to find expected lines")
+    })
+
+    test("does not normalize ellipses", () => {
+      expect(() =>
+        Patch.deriveNewContentsFromChunks("ellipsis.txt", [{ old_lines: ["wait..."], new_lines: ["done"] }], "wait…\n"),
+      ).toThrow("Failed to find expected lines")
+    })
+
+    test("prefers a later exact match over an earlier normalized match", () => {
+      expect(
+        Patch.deriveNewContentsFromChunks(
+          "quotes.txt",
+          [{ old_lines: ['He said "hello"'], new_lines: ['He said "goodbye"'] }],
+          'He said “hello”\nmiddle\nHe said "hello"\n',
+        ).content,
+      ).toBe('He said “hello”\nmiddle\nHe said "goodbye"\n')
     })
   })
 

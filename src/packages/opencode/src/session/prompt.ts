@@ -579,7 +579,7 @@ const layer = Layer.effect(
 
           const cfg = yield* config.get()
           const sh = Shell.preferred(cfg.shell)
-          const args = Shell.args(sh, input.command, cwd)
+          const args = Shell.args(sh, input.command)
           let output = ""
           let aborted = false
 
@@ -1749,7 +1749,7 @@ const layer = Layer.effect(
             return args[argIndex]
           })
           const usesArgumentsPlaceholder = templateCommand.includes("$ARGUMENTS")
-          let template = withArgs.replaceAll("$ARGUMENTS", input.arguments)
+          let template = withArgs.replaceAll("$ARGUMENTS", () => input.arguments)
 
           if (
             selected.length === 1 &&
@@ -1784,7 +1784,7 @@ const layer = Layer.effect(
                       .pipe(Effect.orDie)
                   }
                   const handle = yield* spawner.spawn(
-                    ChildProcess.make(sh, Shell.args(sh, cmd, ctx.directory), {
+                    ChildProcess.make(sh, Shell.args(sh, cmd), {
                       cwd: ctx.directory,
                       stdin: "ignore",
                       stdout: "pipe",
