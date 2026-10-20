@@ -1,9 +1,6 @@
-v0.2.264 meatspinMichael
+v0.2.265 casseroleMillions
 
-upstream sync:
-The sidebar version now reads OG v1.19.3, matching the upstream release this port syncs to. Models in your config can list reasoning_options, and oc builds their effort variants from it.
+dependencies:
+Installing a plugin from a git branch subfolder works again, plugin installs skip npm audits, and MCP sign-in no longer races when two tools refresh the same token. diff, bun-pty, pacote, and OpenTelemetry are updated to upstream's fixed versions; no UI change.
 
-session sharing:
-/share, /unshare, the sidebar share link, share tips, and importing shared-session URLs are gone because upstream shut the share service down. oc run --share now just prints that sharing was discontinued.
-
-Under the hood: package version bumped 1.18.29 to 1.19.3 across the workspace and bun.lock. Ported upstream d12161eecd (ReasoningOption in core config, config reasoning_options replace catalog variants, regenerated SDK types) and d320177aa4 (deleted share-next and its test, removed ShareNext from runtimes, server, import, pr, github handler and action, TUI share keybinds and commands). SDK share routes and the session_share table are kept, like upstream. Checks run: bun test for provider.test.ts (103 pass), import.test.ts and help-snapshots.test.ts pass, httpapi exercise session.share and session.unshare pass (3 known missing /agent/sub scenarios).
+Under the hood: upstream 1.19 port stage 2. Ported d432823515 (diff 8.0.4, malformed-header test moved to getRevertDiffFiles), 334f7a3510 (core bun-pty 0.4.9), 3a2203eaac (pacote@21.5.1 patch replaces 21.5.0; core pins pacote 21.5.1 and a root overrides.pacote makes the nested arborist copy use it so the patch applies), c9df4ba80d (npm installs with audit: false), a5b6ead43e (lazy @npmcli/config load), dddb5eb96f (OpenTelemetry 2.8.0 / 0.219.0 plus upstream's extra pins), and 2f8fa6afef (MCP SDK 1.29.0 patch serializes token refresh). Kept FFF 0.9.4, which already honors **/ ignores; its search test now waits for the scan. Checks run: bun test in core for npm.test.ts (8 pass), observability-otlp.test.ts (1 pass), filesystem/search.test.ts (3 pass), npm-config.test.ts (5 pass); opencode mcp/oauth-refresh.test.ts (1 pass); tui util/revert-diff.test.ts (4 pass); prePush.

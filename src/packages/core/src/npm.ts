@@ -87,7 +87,11 @@ const layer = Layer.effect(
         yield* flock.acquire(`npm-install:${input.dir}`)
         const { Arborist } = yield* Effect.promise(() => import("@npmcli/arborist"))
         const add = input.add ?? []
-        const npmOptions = yield* NpmConfig.load(input.dir)
+        const npmOptions = {
+          ...(yield* NpmConfig.load(input.dir)),
+          // Audit reports are unused here, but Arborist waits for them before completing an install.
+          audit: false,
+        }
         const arborist = new Arborist({
           ...npmOptions,
           path: input.dir,

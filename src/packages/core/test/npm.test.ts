@@ -23,6 +23,29 @@ const writePackage = (dir: string, pkg: Record<string, unknown>) =>
 const npmLayer = (cache: string) =>
   AppNodeBuilder.build(Npm.node, [[Global.node, Global.layerWith({ cache, state: path.join(cache, "state") })]])
 
+async function createGitFixture(directory: string) {
+  const repository = path.join(directory, "repository")
+  const subdirectory = path.join(repository, "packages", "subdirectory-plugin")
+  await fs.mkdir(path.join(subdirectory, "dependency"), { recursive: true })
+  await writePackage(subdirectory, {
+    name: "fixture-subdirectory-plugin",
+    exports: "./index.js",
+    dependencies: { "fixture-subdirectory-dependency": "file:./dependency" },
+  })
+  await writePackage(path.join(subdirectory, "dependency"), {
+    name: "fixture-subdirectory-dependency",
+    exports: "./index.js",
+  })
+  await Bun.write(path.join(subdirectory, "index.js"), "export default { subdirectory: true }\n")
+  await Bun.write(path.join(subdirectory, "dependency", "index.js"), "export const dependency = true\n")
+
+  await Bun.$`git init -q -b fixture-branch ${repository}`
+  await Bun.$`git -C ${repository} add .`
+  await Bun.$`git -C ${repository} -c user.name=fixture -c user.email=fixture@example.com commit -qm fixture`
+  const commit = await Bun.$`git -C ${repository} rev-parse HEAD`.text().then((value) => value.trim())
+  return { repository, commit }
+}
+
 describe("Npm.sanitize", () => {
   test("keeps normal scoped package specs unchanged", () => {
     expect(Npm.sanitize("@opencode/acme")).toBe("@opencode/acme")
@@ -57,6 +80,27 @@ describe("Npm.add", () => {
 
     expect(entry.entrypoint).toBeDefined()
   })
+
+  test.each(["commit", "branch"])(
+    "installs a Git package from an npm ::path: subdirectory at a %s",
+    async (ref) => {
+      await using tmp = await tmpdir()
+      const fixture = await createGitFixture(tmp.path)
+      const spec = `git+file://${fixture.repository}#${ref === "commit" ? fixture.commit : "fixture-branch"}::path:packages/subdirectory-plugin`
+      const entry = await Effect.gen(function* () {
+        const npm = yield* Npm.Service
+        return yield* npm.add(spec)
+      }).pipe(Effect.scoped, Effect.provide(npmLayer(path.join(tmp.path, "cache"))), Effect.runPromise)
+
+      expect(entry.directory).toEndWith(path.join("node_modules", "fixture-subdirectory-plugin"))
+      expect(await Bun.file(path.join(entry.directory, "index.js")).text()).toContain("subdirectory: true")
+      expect(
+        await fs.stat(path.join(path.dirname(entry.directory), "fixture-subdirectory-dependency", "package.json")),
+      ).toBeTruthy()
+    },
+    // Real Git installs exceed Bun's default timeout on Windows.
+    30_000,
+  )
 
   test("resolves an importable file URL under Node", async () => {
     await using tmp = await tmpdir()
@@ -148,5 +192,57 @@ describe("Npm.install", () => {
 
     await expect(fs.stat(path.join(tmp.path, "node_modules", "prod-pkg"))).resolves.toBeDefined()
     await expect(fs.stat(path.join(tmp.path, "node_modules", "dev-pkg"))).rejects.toThrow()
+  })
+
+  test("installs without requesting registry audits", async () => {
+    await using tmp = await tmpdir()
+    const pkg = path.join(tmp.path, "tarball", "package")
+    await fs.mkdir(pkg, { recursive: true })
+    await writePackage(pkg, { name: "@fixture/registry-plugin", exports: "./index.js" })
+    await Bun.write(path.join(pkg, "index.js"), "export const version = '1.0.0'\n")
+    await Bun.$`tar -czf package.tgz package`.cwd(path.dirname(pkg))
+    const tarball = await Bun.file(path.join(path.dirname(pkg), "package.tgz")).bytes()
+    const state = { audits: 0 }
+    await using server = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      fetch(request) {
+        const url = new URL(request.url)
+        if (url.pathname.startsWith("/-/npm/v1/security/")) {
+          state.audits++
+          return Response.json({})
+        }
+        if (decodeURIComponent(url.pathname) === "/@fixture/registry-plugin")
+          return Response.json({
+            name: "@fixture/registry-plugin",
+            "dist-tags": { latest: "1.0.0" },
+            versions: {
+              "1.0.0": {
+                name: "@fixture/registry-plugin",
+                version: "1.0.0",
+                dist: { tarball: `${url.origin}/1.0.0.tgz` },
+              },
+            },
+          })
+        if (url.pathname === "/1.0.0.tgz") return new Response(tarball)
+        return new Response("missing", { status: 404 })
+      },
+    })
+    const project = path.join(tmp.path, "project")
+    await writePackage(project, { name: "fixture", dependencies: { "@fixture/registry-plugin": "1.0.0" } })
+    await Bun.write(
+      path.join(project, ".npmrc"),
+      `registry=${server.url}\n@fixture:registry=${server.url}\ncache=${path.join(tmp.path, "npm-cache")}\nfetch-retries=0\naudit=true\n`,
+    )
+
+    // test/preload.ts disables audits through the environment, which outranks .npmrc.
+    const audit = process.env.NPM_CONFIG_AUDIT
+    delete process.env.NPM_CONFIG_AUDIT
+    await Npm.install(project).finally(() => {
+      process.env.NPM_CONFIG_AUDIT = audit
+    })
+
+    await expect(fs.stat(path.join(project, "node_modules", "@fixture", "registry-plugin"))).resolves.toBeDefined()
+    expect(state.audits).toBe(0)
   })
 })

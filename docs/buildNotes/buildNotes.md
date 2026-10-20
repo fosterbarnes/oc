@@ -169,6 +169,26 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-20 (~17:58) - v0.2.265 casseroleMillions - upstream 1.19 port stage 2: dependency fixes - Claude Opus 5.5 (orchestrator) + Opus 5.5 medium worker; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; orchestrator, worker `general-opus.5.5-medium`; Implementation; Stage 2 of `~/.config/opencode/plans/upstream119/implementation.md` completed
+- Version: 0.2.265 casseroleMillions
+- Ported `d432823515`: `diff` catalog 8.0.4; malformed-header test retargeted to `getRevertDiffFiles` (`tui/test/util/revert-diff.test.ts`).
+- Ported `334f7a3510`: core `bun-pty` 0.4.9.
+- Ported `3a2203eaac`: `src/patches/pacote@21.5.1.patch` (upstream copy) replaces 21.5.0 patch; core pins `pacote` 21.5.1; added root `overrides.pacote` 21.5.1 because the lock kept nested `@npmcli/arborist/pacote` 21.5.0, so the patch never applied (git `::path:` branch-subdirectory install failed). Test in `core/test/npm.test.ts`.
+- Ported `c9df4ba80d` (`core/src/npm.ts` installs with `audit: false`), `a5b6ead43e` (`core/src/npm-config.ts` loads `@npmcli/config` lazily; `npmPath` stays module-level), `dddb5eb96f` (OpenTelemetry 2.8.0 / 0.219.0 + upstream's 4 extra pins in core and opencode; `core/test/observability-otlp.test.ts`).
+- Ported `2f8fa6afef`: MCP SDK 1.29.0 patch serializes token refresh; `opencode/test/mcp/oauth-refresh.test.ts`.
+- Kept FFF 0.9.4 (`97ccafce3b`, decision D5): it already honors `**/` ignores; `core/test/filesystem/search.test.ts` now waits for the scan and checks both an ignored and a found file.
+- Verification: after `bun install`: core `npm.test.ts` 8 pass 0 fail (7/1 before the override), `observability-otlp.test.ts` 1/0, `filesystem/search.test.ts` 3/0, `npm-config.test.ts` 5/0; opencode `mcp/oauth-refresh.test.ts` 1/0; tui `util/revert-diff.test.ts` 4/0. Typecheck left to prePush.
+
+### User
+Dependencies
+- Installing a plugin from a git branch subfolder works, plugin installs skip npm audits, and MCP sign-in no longer races when two tools refresh the same token.
+- Updated diff, bun-pty, pacote, and OpenTelemetry to upstream's fixed versions; no UI change.
+
+---
+
 ## 2026-10-20 (~17:24) - v0.2.264 meatspinMichael - upstream 1.19 port stage 1: version 1.19.3, reasoning options, share removal - Claude Opus 5.5 (orchestrator) + Opus 5.5 medium/high workers; Implementation
 
 ### Agent
