@@ -169,6 +169,22 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-20 (~00:43) - v0.2.261 coleslawEnders - agent-push keeps the title of a session it did not open - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation (after /spit plan); completed
+- Version: 0.2.261 coleslawEnders
+- Fixed `SessionPrompt.command` (`opencode/src/session/prompt.ts`): `agentPushTitle` now set only inside the first-message check, same rule as `PUSH_SESSION_KEY`. Mid-session push keeps its title.
+- Kept `sessionComplete.ts`: `#<sha>` append still keys on the exact placeholder title, so mid-session pushes no longer get the hash or the bare-title failure marker.
+- Updated `test/session/prompt.test.ts`: mid-session test now expects the old title; first-message test also asserts the placeholder title.
+- Verification: `bun test test/session/prompt.test.ts -t "agent-push"` from `packages/opencode`: 2 pass, 0 fail.
+
+### User
+agent-push
+- Running /agent-push partway through a session no longer renames it; only a session that starts with /agent-push gets the push title and commit hash.
+
+---
+
 ## 2026-10-20 (~00:29) - v0.2.260 ffzBoogaloo - Jev skill hint for subagents - Claude Opus 5.5, low effort; Implementation
 
 ### Agent

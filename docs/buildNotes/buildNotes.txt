@@ -1,12 +1,6 @@
-v0.2.260 ffzBoogaloo
+v0.2.261 coleslawEnders
 
-subagents:
-When TYPESAFE_API_KEY is set, each new subagent gets a one-line hint in its prompt naming the skill that fits its task, or saying no skill does. Jev picks it using TypeSafe's skill-suggestion method, which in TypeSafe's own test cut wrong skill loads from 16.8% to 7.3%. The subagent still decides whether to load it. The task text is sent to TypeSafe for this; unset the key to turn it off. Resumed subagents get no hint, and if the hint fails or takes over 5 seconds the subagent starts without it.
+agent-push:
+Running /agent-push partway through a session no longer renames it. Only a session that starts with /agent-push gets the push title and the pushed commit hash.
 
-jev tools:
-Cancelling a Jev call during a rate-limit wait now stops it at once instead of waiting up to 30 seconds.
-
-themes:
-New Beta setting Daily theme in ctrl+o (/dailyTheme, daily_theme in tui.json, off by default) switches to a different built-in theme every day, the same one for every oc user. Turning it off brings back the theme you had picked. Picking a theme in Themes turns the daily theme off, and cancelling the theme list keeps it on.
-
-Under the hood: new tool/skillHint.ts makes two Jev calls: rank all skills with three need-a-skill checks, then rerank the top three on excerpts of their text. The task tool appends the hint as a synthetic text part. test/preload.ts now clears TYPESAFE_API_KEY so tests never reach the real API. A new opencode/src/script.d.ts declares .ps1 imports for the opencode typecheck, which reaches the TUI's killall.ps1 import. The daily theme lives in theme/daily.ts as a seeded shuffle of the built-in themes per cycle. Checks run: bun test for skillHint, jev, task, and proxyOpencodeTools (54 pass); bun test dailyTheme (3 pass); TUI and opencode typecheck. The skill hint and the daily theme were not checked live.
+Under the hood: SessionPrompt.command now sets the agent-push title inside the same first-message check that marks a session for auto-delete. The session prompt tests now expect a mid-session push to keep its title and a first-message push to set it. Checks run: bun test for the agent-push prompt tests (2 pass).

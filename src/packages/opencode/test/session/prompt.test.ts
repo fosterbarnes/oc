@@ -2970,7 +2970,7 @@ it.instance("slash composition carries the editor selection into the command tur
   }),
 )
 
-it.instance("agent-push mid-session replaces the title with its placeholder", () =>
+it.instance("agent-push mid-session keeps the title", () =>
   Effect.gen(function* () {
     const { llm } = yield* useServerConfig((url) => ({
       ...providerCfg(url),
@@ -2983,7 +2983,7 @@ it.instance("agent-push mid-session replaces the title with its placeholder", ()
     yield* llm.text("pushed")
     yield* prompt.command({ sessionID: chat.id, command: "agent-push", arguments: "" })
     const after = yield* sessions.get(chat.id)
-    expect(after.title).toBe(`${path.basename(chat.directory)} - agent-push:`)
+    expect(after.title).toBe("work in progress")
     // Not the first message, so this session can never auto-delete.
     expect(after.metadata?.[PUSH_SESSION_KEY]).toBeUndefined()
   }),
@@ -3005,7 +3005,9 @@ it.instance("agent-push as the first message marks the session as a push session
     })
     yield* llm.text("pushed")
     yield* prompt.command({ sessionID: chat.id, command: "agent-push", arguments: "" })
-    expect((yield* sessions.get(chat.id)).metadata?.[PUSH_SESSION_KEY]).toBe(true)
+    const after = yield* sessions.get(chat.id)
+    expect(after.title).toBe(`${path.basename(chat.directory)} - agent-push:`)
+    expect(after.metadata?.[PUSH_SESSION_KEY]).toBe(true)
   }),
 )
 

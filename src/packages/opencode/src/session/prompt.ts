@@ -1882,11 +1882,12 @@ const layer = Layer.effect(
 
       if (names.includes("agent-push")) {
         const session = yield* sessions.get(input.sessionID).pipe(Effect.orDie)
-        yield* sessions.setTitle({ sessionID: input.sessionID, title: agentPushTitle(session.directory) })
-        // Opened by /agent-push: only such a session may auto-delete after its push (`sessionComplete.ts`).
-        // The synthetic message a new session starts with does not count.
+        // Opened by /agent-push: only such a session gets the push title and may auto-delete after its
+        // push (`sessionComplete.ts`); a mid-session push keeps its title. The synthetic message a new
+        // session starts with does not count.
         const earlier = yield* sessions.messages({ sessionID: input.sessionID }).pipe(Effect.orDie)
         if (!earlier.some((message) => message.info.role === "assistant" || isRealUserMessage(message))) {
+          yield* sessions.setTitle({ sessionID: input.sessionID, title: agentPushTitle(session.directory) })
           yield* sessions.setMetadata({
             sessionID: input.sessionID,
             metadata: { ...session.metadata, [PUSH_SESSION_KEY]: true },
