@@ -1,9 +1,6 @@
-v0.2.255 drangleicUndercut
+v0.2.256 fartniteRoommates
 
-revive single:
-In WezTerm, /revive-single now closes the tab or pane you ran it from once the new opencode is running, leaving every other tab alone. Running it from a native opencode tab while a reply is in progress asks first, because closing that tab stops the reply. A failed build keeps the original tab open, and Windows Terminal or plain consoles behave as before.
+third party updates:
+A new Update PowerShell entry (Windows) checks for a newer PowerShell 7 release, asks you to confirm, then installs it after a Windows admin prompt. Open PowerShell windows, including the one oc runs in, are never closed; they keep the old version until reopened, and Windows may ask for a restart to finish. Update all now includes PowerShell, and its single confirm prompt says what each update will do. The palette group is renamed to Third party updates.
 
-claude chats:
-A message you send while Claude is working now keeps a "read mid-turn" label after the turn ends, so you can tell it was delivered even when Claude's reply did not answer it. To get a separate answer to a new question while Claude is busy, queue it with Alt+Enter instead.
-
-Under the hood: /revive-single passes the WezTerm pane id to the revive host, which records the original pane before the build and closes it with the existing owned-pane check after native has settled. The steered label reads the persisted steered metadata, so it survives restarts. The Claude provider log level in the user config moved from debug to info so steer and rewind evidence is not rotated away within hours. Checks run: tui and opencode typecheck, and the tuiPane "steering actions" check (1 pass). prePush runs on this push. A live WezTerm check of /revive-single needs a user build.
+Under the hood: the updater reads the machine-wide MSI install from the PowerShellCore registry entry, gets the latest stable version from Microsoft's buildinfo feed, downloads the GitHub MSI with an allowlisted final host and a Microsoft Authenticode signer pin, and runs msiexec elevated with Restart Manager shutdown disabled. The MSI restores its saved install options itself, so none are passed. Versions 7.7 and later are refused because Microsoft ships no MSI for them. Checks run: the new pwshUpdate parser tests (6 pass) and a live check-only run that found 7.6.6 -> 7.6.7. The install step needs a user build and a live run.

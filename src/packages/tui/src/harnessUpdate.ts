@@ -8,6 +8,7 @@ import {
   type DesktopCheckResult,
   type DesktopInstallResult,
 } from "./desktopUpdate"
+import { checkPowershell, installPowershell } from "./pwshUpdate"
 import type { DialogContext } from "./ui/dialog"
 import { DialogConfirm } from "./ui/dialog-confirm"
 import type { ToastContext } from "./ui/toast"
@@ -98,6 +99,12 @@ export const CHATGPT_DESKTOP: DesktopHarness = {
   install: installChatgptDesktop,
   closes: "closes ChatGPT/Codex Desktop and any sessions running inside it",
 }
+export const POWERSHELL: DesktopHarness = {
+  label: "PowerShell",
+  check: checkPowershell,
+  install: installPowershell,
+  closes: "asks for admin approval and leaves open PowerShell windows on the old version until reopened",
+}
 
 type PendingDesktopUpdate = { harness: DesktopHarness; oldVersion: string; newVersion: string }
 
@@ -133,9 +140,9 @@ export function updateDesktopHarness(harness: DesktopHarness, toast: ToastContex
   })()
 }
 
-// CLIs first since updating them interrupts nothing; desktop apps last because installing closes
-// them. Desktop checks all run before one combined confirm so the run never stalls on several
-// prompts.
+// CLIs first since updating them interrupts nothing; desktop apps and PowerShell last because
+// installing closes apps or asks for admin approval. Their checks all run before one combined
+// confirm so the run never stalls on several prompts.
 let updateAllRunning = false
 export async function updateAllHarnesses(cliPath: string, toast: ToastContext, dialog: DialogContext) {
   if (updateAllRunning) return toast.show({ message: "Update all already running", variant: "info" })
@@ -152,7 +159,7 @@ export async function updateAllHarnesses(cliPath: string, toast: ToastContext, d
       progress(`Update all: updating ${label}...`)
       results.push(await run())
     }
-    const desktops = process.platform === "win32" ? [CLAUDE_DESKTOP, CURSOR_DESKTOP, CHATGPT_DESKTOP] : []
+    const desktops = process.platform === "win32" ? [CLAUDE_DESKTOP, CURSOR_DESKTOP, CHATGPT_DESKTOP, POWERSHELL] : []
     const pending: PendingDesktopUpdate[] = []
     for (const harness of desktops) {
       progress(`Update all: checking ${harness.label}...`)
@@ -161,13 +168,11 @@ export async function updateAllHarnesses(cliPath: string, toast: ToastContext, d
       else pending.push(checked)
     }
     if (pending.length > 0) {
-      toast.show({ message: "Update all: waiting for desktop app confirmation", variant: "info", duration: 600_000 })
-      const list = pending.map((item) => `${item.harness.label} ${item.oldVersion} -> ${item.newVersion}`).join(", ")
-      const confirmed = await DialogConfirm.show(
-        dialog,
-        "Update desktop apps",
-        `Updating closes these apps and any sessions running inside them: ${list}. Continue?`,
-      )
+      toast.show({ message: "Update all: waiting for confirmation", variant: "info", duration: 600_000 })
+      const list = pending
+        .map((item) => `${item.harness.label} ${item.oldVersion} -> ${item.newVersion} (${item.harness.closes})`)
+        .join("; ")
+      const confirmed = await DialogConfirm.show(dialog, "Confirm updates", `Updating: ${list}. Continue?`)
       for (const item of pending) {
         if (confirmed !== true) {
           results.push(harnessResult(item.harness.label, "declined", "skipped"))

@@ -17,6 +17,7 @@ import {
   CHATGPT_DESKTOP,
   CLAUDE_DESKTOP,
   CURSOR_DESKTOP,
+  POWERSHELL,
   updateAllHarnesses,
   updateClaudeCode,
   updateCodexCli,
@@ -905,9 +906,14 @@ export function createOcCommands(input: {
                 title: "Update ChatGPT Desktop",
                 run: () => updateDesktopHarness(CHATGPT_DESKTOP, toast, dialog),
               },
+              {
+                name: "oc.update_powershell",
+                title: "Update PowerShell",
+                run: () => updateDesktopHarness(POWERSHELL, toast, dialog),
+              },
             ]
           : []),
-      ].map((command) => ({ ...command, category: "oc", group: "Third party harness updates" })),
+      ].map((command) => ({ ...command, category: "oc", group: "Third party updates" })),
       {
         name: "server.shutdown",
         title: "Shut down",

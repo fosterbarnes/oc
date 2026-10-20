@@ -169,6 +169,29 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-19 (~21:32) - v0.2.256 fartniteRoommates - Update PowerShell palette entry - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation (/spit plan `~/.config/opencode/plans/pwshUpdate.md`, then /imp); completed
+- Version: 0.2.256 fartniteRoommates
+- Added `packages/tui/src/pwshUpdate.ts`: fixed powershell.exe script on the `runDesktopCheck`/`runDesktopInstall` frame. Installed version from `HKLM:\SOFTWARE\Microsoft\PowerShellCore\InstalledVersions` (InstallLocation `Program Files\PowerShell\7`), latest from `aka.ms/pwsh-buildinfo-stable` `ReleaseTag`, GitHub MSI with final-host allowlist (github.com, objects/release-assets.githubusercontent.com), Authenticode Valid + `Microsoft Corporation` CN pin, `Start-Process msiexec -Verb RunAs` `/qn /norestart MSIRESTARTMANAGERCONTROL=DisableShutdown`, 10 min wait; 3010 = success with "restart Windows to finish"; 1602/1618/UAC cancel mapped to messages.
+- Added: refuses 7.7+ at check time (Microsoft ships no MSI from 7.7, MS Learn install page).
+- Kept: no MSI properties passed; v7.6.6 `assets/wix/Product.wxs` restores ADD_PATH, context menus, remoting, MU, telemetry from its saved `InstallerPropertiesKey`.
+- Added `POWERSHELL` harness in `harnessUpdate.ts`, included in `updateAllHarnesses` win32 confirm list; combined confirm now lists each item's own `closes` phrase (title "Confirm updates") since pwsh closes nothing.
+- Added `oc.update_powershell` to `ocCommands.tsx`; renamed palette group "Third party harness updates" -> "Third party updates".
+- Updated FORK.md (new row; fixed stale "Third party harness management" heading on update rows) and wiki `Claude-Code.md`.
+- Verification: `bun test test/pwshUpdate.test.ts` (tui) 6 pass; live check-only `checkPowershell()` returned 7.6.6 -> 7.6.7; MSI URL redirects to release-assets.githubusercontent.com. Install path not run (needs UAC, user-driven).
+- Risk: with DisableShutdown, files held by running pwsh are replaced at reboot; new pwsh windows before reboot may mix versions. Needs user live check.
+
+### User
+Third party updates
+- New **Update PowerShell** entry (Windows) checks for a newer PowerShell 7, asks you to confirm, then installs it after a Windows admin prompt.
+- **Update all** now includes PowerShell and shows what each confirm-first update will do in one prompt.
+- Open PowerShell windows, including the one oc runs in, are never closed; they keep the old version until reopened, and Windows may ask for a restart.
+- The palette group is renamed to **Third party updates**.
+
+---
+
 ## 2026-10-19 (~21:09) - v0.2.255 drangleicUndercut - /revive-single closes the pane it ran from (WezTerm) - Claude Opus 5.5, low effort; Implementation
 
 ### Agent
