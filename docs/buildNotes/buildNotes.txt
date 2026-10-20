@@ -1,6 +1,9 @@
-v0.2.261 coleslawEnders
+v0.2.262 deliWife
 
-agent-push:
-Running /agent-push partway through a session no longer renames it. Only a session that starts with /agent-push gets the push title and the pushed commit hash.
+claude accounts:
+An agent can now prefer one Claude login with the claudeAccount key, set to a folder from the claude-code accounts list (claudeAccount: "~/.claude4"). Each new chat or subagent for that agent starts on that login and stays there. If the login is already at its usage limit, the chat starts on the usual login instead, and a limit hit later moves the chat on like any other. A folder that is not in accounts is ignored with one log warning.
 
-Under the hood: SessionPrompt.command now sets the agent-push title inside the same first-message check that marks a session for auto-delete. The session prompt tests now expect a mid-session push to keep its title and a first-message push to set it. Checks run: bun test for the agent-push prompt tests (2 pass).
+subagents dialog:
+Adding a Claude subagent while two or more Claude accounts are set up now has a Claude account step between efforts and the name. No preference leaves the key out; picking an account writes it as the accounts entry and adds the account to the default name and description (general-opus.5.5-claude4-xhigh). Changing the account of an existing entry still means deleting and re-adding it.
+
+Under the hood: accounts.ts gains preferredAccount, turnAccount (session pin, then usable preferred account pinned so failover can move it, then the pool pick) and accountConfigEntry. The Claude Code model picks each turn's account through turnAccount. POST /agent/sub takes claudeAccount and SubagentFile.add writes it; the legacy SDK was regenerated. New cases in accountPool.test.ts and subagentFile.test.ts. The cli package typecheck now sees the .ps1 text-import declaration through a reference line in ocCommands.tsx, fixing a TS2307 that the turbo cache had hidden since v0.2.260. Checks run: cli typecheck, bun test for accountPool.test.ts and subagentFile.test.ts (32 pass), tsgo typecheck in opencode and tui. The TUI flow and a real account preference were not run live.

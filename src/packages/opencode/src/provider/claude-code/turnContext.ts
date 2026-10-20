@@ -7,6 +7,7 @@ import type { ClaudeCodeConfig, ReasoningEffort } from "./types.js"
 import { resolveAgentEffort, resolveAgentModel } from "./agentModels.js"
 import {
   hasExplicitModel,
+  resolveAgentAccount,
   resolveOpencodeAgent,
   resolveOpencodeAgentPrompt,
   resolveSessionAffinity,
@@ -56,6 +57,7 @@ export async function resolveTurnContext(
     modelId,
     variant: readReasoningEffort(options.providerOptions, config.provider),
     agentPrompt: resolveOpencodeAgentPrompt(options.providerOptions, config.provider),
+    agentAccount: resolveAgentAccount(options.providerOptions, config.provider),
     compactionMode,
     effectiveModelId,
     reasoningEffort,

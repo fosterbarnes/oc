@@ -37,6 +37,24 @@ it("add inserts entry at end of agents map", async () => {
   }
 })
 
+it("add writes claudeAccount when given", async () => {
+  const file = path.join(os.tmpdir(), `sub-${Date.now()}.md`)
+  try {
+    seed(file)
+    await SubagentFile.add(
+      { name: "beta", model: "claude-code/claude-opus-5-5", variant: "xhigh", claudeAccount: "~/.claude4" },
+      file,
+    )
+    expect(matter(await Bun.file(file).text()).data.agents.beta).toEqual({
+      model: "claude-code/claude-opus-5-5",
+      variant: "xhigh",
+      claudeAccount: "~/.claude4",
+    })
+  } finally {
+    rmSync(file, { force: true })
+  }
+})
+
 it("duplicate name is rejected", async () => {
   const file = path.join(os.tmpdir(), `sub-${Date.now()}.md`)
   try {

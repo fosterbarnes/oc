@@ -40,6 +40,8 @@ const IN_TEST = process.env.BUN_TEST != null
 const limitedUntil = new Map<string, number>()
 /** opencode session id -> pool account id. A pinned chat ignores the global current account. */
 const sessionAccounts = new Map<string, string>()
+/** `claudeAccount` dirs already warned about as missing from the pool. */
+const unknownPreferred = new Set<string>()
 let currentAccount: string | undefined
 let poolFile: string | null = IN_TEST ? null : DEFAULT_POOL_FILE
 let cacheDir: string | null = IN_TEST ? null : DEFAULT_USAGE_CACHE_DIR
@@ -61,6 +63,11 @@ export function poolAccountIds(accounts: string[] | undefined): string[] {
     return sameDir(resolved, defaultDir) ? DEFAULT_ACCOUNT : resolved
   })
   return ids.length ? [...new Set(ids)] : [DEFAULT_ACCOUNT]
+}
+
+/** The `accounts` entry, as the user wrote it, that resolves to a pool id. */
+export function accountConfigEntry(id: string, accounts: string[] | undefined): string | undefined {
+  return accounts?.find((dir) => poolAccountIds([dir])[0] === id)
 }
 
 function ensureLoaded(ids?: string[], now = Date.now()): void {
@@ -202,6 +209,44 @@ export function sessionPin(sessionID: string | undefined, ids: string[], now = D
   ensureLoaded(ids, now)
   const id = sessionAccounts.get(sessionID)
   return id && ids.includes(id) ? id : undefined
+}
+
+/** The pool id for a config dir as written in `accounts` (`~/.claude4`), while it is usable. */
+export function preferredAccount(dir: string, ids: string[], now = Date.now()): string | undefined {
+  ensureLoaded(ids, now)
+  const wanted = canonicalAccountId(path.resolve(expandHome(dir)))
+  const same = (id: string) =>
+    process.platform === "win32"
+      ? canonicalAccountId(id).toLowerCase() === wanted.toLowerCase()
+      : canonicalAccountId(id) === wanted
+  const id = ids.find(same)
+  if (!id) {
+    if (!unknownPreferred.has(dir)) {
+      unknownPreferred.add(dir)
+      log.warn("claudeAccount is not in the claude-code accounts pool; ignoring it", { claudeAccount: dir })
+    }
+    return undefined
+  }
+  return (limitedUntil.get(id) ?? 0) <= now ? id : undefined
+}
+
+/**
+ * The account a turn runs on: the session's pin, else the agent's preferred account (`claudeAccount`)
+ * when usable, pinned so failover can move the session off it, else the pool's pick.
+ */
+export function turnAccount(
+  sessionID: string | undefined,
+  preferredDir: string | undefined,
+  ids: string[],
+  now = Date.now(),
+): string {
+  const pin = sessionPin(sessionID, ids, now)
+  if (pin) return pin
+  const preferred =
+    sessionID && sessionID !== "default" && preferredDir ? preferredAccount(preferredDir, ids, now) : undefined
+  if (!preferred) return poolAccount(ids, now)
+  pinSessionAccount(sessionID!, preferred, ids, now)
+  return preferred
 }
 
 /**

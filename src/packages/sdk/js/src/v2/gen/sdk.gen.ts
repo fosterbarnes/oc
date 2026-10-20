@@ -623,6 +623,7 @@ export class Sub extends HeyApiClient {
       model?: string
       variant?: string
       description?: string
+      claudeAccount?: string
     },
     options?: Options<never, ThrowOnError>,
   ) {
@@ -637,6 +638,7 @@ export class Sub extends HeyApiClient {
             { in: "body", key: "model" },
             { in: "body", key: "variant" },
             { in: "body", key: "description" },
+            { in: "body", key: "claudeAccount" },
           ],
         },
       ],

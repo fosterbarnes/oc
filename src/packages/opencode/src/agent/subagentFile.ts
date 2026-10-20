@@ -9,6 +9,8 @@ export interface AddInput {
   model: string
   variant?: string
   description?: string
+  // An `accounts` entry from the claude-code provider options (`~/.claude4`).
+  claudeAccount?: string
 }
 
 export function defaultFile() {
@@ -36,6 +38,7 @@ export async function add(input: AddInput, file = defaultFile()) {
   const entry = {
     model: input.model,
     ...(input.variant !== undefined ? { variant: input.variant } : {}),
+    ...(input.claudeAccount !== undefined ? { claudeAccount: input.claudeAccount } : {}),
     ...(input.description !== undefined ? { description: input.description } : {}),
   }
   const lines = [...parsed.lines]

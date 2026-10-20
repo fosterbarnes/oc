@@ -5,6 +5,7 @@
  */
 import type { LanguageModelV3CallOptions } from "@ai-sdk/provider"
 import {
+  CLAUDE_CODE_ACCOUNT_OPTION,
   CLAUDE_CODE_AGENT_OPTION,
   CLAUDE_CODE_AGENT_PROMPT_OPTION,
   CLAUDE_CODE_COMMAND_PERMISSION_OPTION,
@@ -30,9 +31,7 @@ function isPlan(value: unknown): value is CommandToolPlan {
   if (typeof value !== "object" || value === null) return false
   const plan = value as Record<string, unknown>
   return (
-    Array.isArray(plan.native) &&
-    plan.native.every((id) => typeof id === "string") &&
-    typeof plan.closed === "boolean"
+    Array.isArray(plan.native) && plan.native.every((id) => typeof id === "string") && typeof plan.closed === "boolean"
   )
 }
 
@@ -63,6 +62,11 @@ export function resolveSessionAffinity(providerOptions: ProviderOptions, provide
 /** The oc agent this call runs for; tells compaction and title calls apart from ordinary turns. */
 export function resolveOpencodeAgent(providerOptions: ProviderOptions, providerKey: string): string | undefined {
   return hostOption(providerOptions, providerKey, CLAUDE_CODE_AGENT_OPTION)
+}
+
+/** The config dir the agent's `claudeAccount` key prefers, as written in the agent config. */
+export function resolveAgentAccount(providerOptions: ProviderOptions, providerKey: string): string | undefined {
+  return hostOption(providerOptions, providerKey, CLAUDE_CODE_ACCOUNT_OPTION)
 }
 
 /** The active oc agent's own prompt, appended to Claude Code's system prompt at spawn. */

@@ -4,6 +4,8 @@ import type { SessionV1 } from "@opencode-ai/core/v1/session"
 export const CLAUDE_CODE_PROVIDER_ID = "claude-code"
 export const CLAUDE_CODE_SESSION_OPTION = "opencodeSessionID"
 export const CLAUDE_CODE_AGENT_OPTION = "opencodeAgent"
+// Agent config key: a Claude config dir from `accounts` that the agent's sessions start on.
+export const CLAUDE_CODE_ACCOUNT_OPTION = "claudeAccount"
 // Set on command turns (turn rules or `toolHost`): a JSON `CommandToolPlan`.
 export const CLAUDE_CODE_COMMAND_PERMISSION_OPTION = "opencodeCommandPermission"
 

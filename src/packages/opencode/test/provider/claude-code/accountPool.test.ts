@@ -12,6 +12,7 @@ import {
   _resetAccountPool,
   _setAccountPoolFile,
   _setUsageCacheDir,
+  accountConfigEntry,
   DEFAULT_ACCOUNT,
   earliestLimitedUntil,
   expandHome,
@@ -23,8 +24,10 @@ import {
   poolAccount,
   poolAccountIds,
   poolState,
+  preferredAccount,
   sessionPin,
   setCurrentAccount,
+  turnAccount,
 } from "@/provider/claude-code/accounts.js"
 import { _resetRateLimitReports } from "@/provider/claude-code/cliEvents.js"
 import { createClaudeCode } from "@/provider/claude-code/index.js"
@@ -146,6 +149,64 @@ test("failover moves a pinned chat's pin to the next usable account without touc
   setCurrentAccount("c", ids, now)
   expect(failoverAccount("ses_2", ids, now)).toBe("c")
   expect(sessionPin("ses_2", ids, now)).toBeUndefined()
+})
+
+test("an agent's claudeAccount starts a fresh session there, pinned, and failover moves it off for good", () => {
+  withConfigDir(undefined, () => {
+    const ids = poolAccountIds(["~/.claude", "~/.claude2", "~/.claude4"])
+    const claude4 = path.resolve(expandHome("~/.claude4"))
+    const now = Date.now()
+    expect(turnAccount("ses_1", "~/.claude4", ids, now)).toBe(claude4)
+    expect(sessionPin("ses_1", ids, now)).toBe(claude4)
+    // The global pick is untouched.
+    expect(poolAccount(ids, now)).toBe(DEFAULT_ACCOUNT)
+    // Absolute and differently cased spellings name the same account.
+    const spelled = process.platform === "win32" ? claude4.toUpperCase() : claude4
+    expect(turnAccount("ses_2", spelled, ids, now)).toBe(claude4)
+
+    markAccountLimited(claude4, now + 60_000, now)
+    expect(failoverAccount("ses_1", ids, now)).toBe(DEFAULT_ACCOUNT)
+    expect(turnAccount("ses_1", "~/.claude4", ids, now + 1)).toBe(DEFAULT_ACCOUNT)
+    // After the limit resets the session stays where failover put it.
+    expect(turnAccount("ses_1", "~/.claude4", ids, now + 120_000)).toBe(DEFAULT_ACCOUNT)
+  })
+})
+
+test("a limited, unknown, or out-of-oc claudeAccount falls back to the pool pick without pinning", () => {
+  withConfigDir(undefined, () => {
+    const ids = poolAccountIds(["~/.claude", "~/.claude4"])
+    const claude4 = path.resolve(expandHome("~/.claude4"))
+    const now = Date.now()
+    markAccountLimited(claude4, now + 60_000, now)
+    expect(turnAccount("ses_1", "~/.claude4", ids, now)).toBe(DEFAULT_ACCOUNT)
+    expect(sessionPin("ses_1", ids, now)).toBeUndefined()
+    expect(turnAccount("ses_2", "~/.claudeMissing", ids, now)).toBe(DEFAULT_ACCOUNT)
+    expect(sessionPin("ses_2", ids, now)).toBeUndefined()
+    // Outside oc (session "default") the preference never applies.
+    expect(turnAccount("default", "~/.claude2", poolAccountIds(["~/.claude", "~/.claude2"]), now)).toBe(DEFAULT_ACCOUNT)
+    expect(turnAccount("ses_3", undefined, ids, now)).toBe(DEFAULT_ACCOUNT)
+    expect(sessionPin("ses_3", ids, now)).toBeUndefined()
+  })
+})
+
+test("a pool id maps back to its accounts entry as written", () => {
+  withConfigDir(undefined, () => {
+    const accounts = ["~/.claude", "~/.claude4"]
+    expect(accountConfigEntry(DEFAULT_ACCOUNT, accounts)).toBe("~/.claude")
+    expect(accountConfigEntry(path.resolve(expandHome("~/.claude4")), accounts)).toBe("~/.claude4")
+    expect(accountConfigEntry(path.resolve(expandHome("~/.claudeMissing")), accounts)).toBeUndefined()
+  })
+})
+
+test("a claudeAccount naming the inherited config dir resolves to the default account", () => {
+  const custom = path.resolve(expandHome("~/.claude4"))
+  withConfigDir(custom, () => {
+    const ids = poolAccountIds(["~/.claude", "~/.claude4"])
+    expect(ids).toEqual([path.resolve(expandHome("~/.claude")), DEFAULT_ACCOUNT])
+    expect(preferredAccount("~/.claude4", ids)).toBe(DEFAULT_ACCOUNT)
+    expect(turnAccount("ses_1", "~/.claude4", ids)).toBe(DEFAULT_ACCOUNT)
+    expect(sessionPin("ses_1", ids)).toBe(DEFAULT_ACCOUNT)
+  })
 })
 
 test("a rejection without a reset time sits the account out for an hour", () => {

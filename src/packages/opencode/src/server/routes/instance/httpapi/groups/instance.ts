@@ -191,6 +191,8 @@ export const InstanceApi = HttpApi.make("instance")
             model: Schema.String,
             variant: Schema.optional(Schema.String),
             description: Schema.optional(Schema.String),
+            // Claude pool account id (`/session/claude/account`); written as its `accounts` entry.
+            claudeAccount: Schema.optional(Schema.String),
           }),
           success: described(Schema.Boolean, "Subagent added"),
         }).annotateMerge(

@@ -1,5 +1,6 @@
 import { Agent } from "@/agent/agent"
 import { SubagentFile } from "@/agent/subagentFile"
+import { accountConfigEntry } from "@/provider/claude-code/accounts"
 import { Command } from "@/command"
 import { Config } from "@/config/config"
 import * as InstanceState from "@/effect/instance-state"
@@ -116,11 +117,22 @@ export const instanceHandlers = HttpApiBuilder.group(InstanceHttpApi, "instance"
     })
 
     const addAgentSub = Effect.fn("InstanceHttpApi.agentSub")(function* (ctx: {
-      payload: { name: string; model: string; variant?: string; description?: string }
+      payload: { name: string; model: string; variant?: string; description?: string; claudeAccount?: string }
     }) {
       const cfg = yield* config.get()
       const file = cfg.subagentFile ?? SubagentFile.defaultFile()
-      yield* Effect.promise(() => SubagentFile.add(ctx.payload, file))
+      const { claudeAccount, ...input } = ctx.payload
+      const accounts = cfg.provider?.["claude-code"]?.options?.accounts
+      const entry =
+        claudeAccount === undefined
+          ? undefined
+          : accountConfigEntry(
+              claudeAccount,
+              Array.isArray(accounts) ? accounts.filter((dir) => typeof dir === "string") : undefined,
+            )
+      if (claudeAccount !== undefined && entry === undefined)
+        return yield* Effect.die(new Error(`Claude account is not in claude-code accounts: ${claudeAccount}`))
+      yield* Effect.promise(() => SubagentFile.add({ ...input, claudeAccount: entry }, file))
       return true
     })
 

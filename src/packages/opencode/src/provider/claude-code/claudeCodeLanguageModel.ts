@@ -11,7 +11,7 @@ import { translateStreamForHost } from "./hostTools.js"
 import { getClaudeUserMessage, isWakeTurn, visibleThreadTokens } from "./messageBuilder.js"
 import { getRuntimeMcpStatus, fetchSessionRunState } from "./runtimeStatus.js"
 import { getActiveProcess, getClaudeSessionId, describeSessionKey, retireOtherAccount } from "./sessionManager.js"
-import { poolAccount, poolAccountIds, poolAccountLabel, sessionPin } from "./accounts.js"
+import { poolAccountIds, poolAccountLabel, turnAccount } from "./accounts.js"
 import { log } from "./logger.js"
 import { detectCliVersion } from "./cliVersion.js"
 import { setProxyDeadlineGuard } from "./proxyDeadline.js"
@@ -133,7 +133,7 @@ export class ClaudeCodeLanguageModel implements LanguageModelV3 {
     const hasPriorConversation = options.prompt.some((m) => m.role === "assistant")
     resetStaleSession(turn, hasPriorConversation)
     const accountIds = poolAccountIds(this.config.accounts)
-    const account = sessionPin(turn.affinity, accountIds) ?? poolAccount(accountIds)
+    const account = turnAccount(turn.affinity, turn.agentAccount, accountIds)
     const accountSwitched = await retireOtherAccount(turn.sessionKey, account)
     const hasActiveProcess = !!getActiveProcess(turn.sessionKey)
     // oc's compaction prompt is never sent: Claude Code compacts its own

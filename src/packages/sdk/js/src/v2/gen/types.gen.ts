@@ -9447,6 +9447,7 @@ export type AppAgentSubAddData = {
     model: string
     variant?: string
     description?: string
+    claudeAccount?: string
   }
   path?: never
   query?: {

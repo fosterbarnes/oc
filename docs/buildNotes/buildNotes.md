@@ -169,6 +169,62 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-20 (~01:08) - v0.2.262 deliWife - cli typecheck finds the .ps1 text import - Claude Opus 5.5, low effort; Agent
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Agent (agent-push prePush failure); completed
+- Version: 0.2.262 deliWife
+- Fixed `@opencode-ai/cli` typecheck: `tui/src/ocCommands.tsx` imports `./killall.ps1` (since v0.2.260) but cli's program never included `tui/src/script.d.ts`. Added `/// <reference path="./script.d.ts" />` at the top, same pattern as `attention.ts` + `audio.d.ts`.
+- ERROR: prePush typecheck failed with TS2307 on `killall.ps1`; earlier pushes passed through the turbo cache.
+- Verification: `bun run typecheck` in packages/cli clean.
+
+### User
+Build
+- No UI change; fixes a type check that blocked pushing.
+
+---
+
+## 2026-10-20 (~01:05) - v0.2.262 deliWife - Subagents dialog can set a Claude account - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation (follow-up to the claudeAccount entry below); completed
+- Version: 0.2.262 deliWife (no second bump: same uncommitted session)
+- Added `claudeAccount` (pool id) to `POST /agent/sub` payload (`httpapi/groups/instance.ts`); handler maps it to the `accounts` entry as written via new `accountConfigEntry` (`provider/claude-code/accounts.ts`), dies on unknown id. `SubagentFile.add` writes `claudeAccount` after `variant`.
+- Added TUI step `chooseAccount` in `tui/src/component/dialog-subagents.tsx` between efforts and name: only for provider `claude-code` with 2+ pool accounts (`sdk.claudeAccount.state()`); "No preference" omits the key. Default name and description gain the account (`general-opus.5.5-claude4-xhigh`, "prefers .claude4"). Back goes to efforts, or to the list when the model has none.
+- Regenerated legacy SDK (`packages/sdk/js/script/build.ts`): `sdk.gen.ts`/`types.gen.ts` +3 lines.
+- Tests: `accountConfigEntry` case in `accountPool.test.ts`; `claudeAccount` write case in `test/agent/subagentFile.test.ts`.
+- Verification: both test files 32 pass 0 fail; `tsgo --noEmit` clean in opencode and tui. TUI flow not run live.
+- TODO: no way to change the account of an existing entry from the dialog; delete and re-add.
+- Kept: `bun.lock` shows modified in git status with no content diff (line endings); not touched by this session.
+
+### User
+Subagents dialog
+- Adding a Claude subagent with two or more Claude accounts now asks which account it should prefer, or none.
+
+---
+
+## 2026-10-20 (~00:59) - v0.2.262 deliWife - agents can prefer a Claude account (claudeAccount) - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation (/imp of `~/.config/opencode/plans/upstream119/prereqAdvisorAccount.md`); completed
+- Version: 0.2.262 deliWife
+- Added `CLAUDE_CODE_ACCOUNT_OPTION = "claudeAccount"` (`provider/claude-code/shared.ts`) and `resolveAgentAccount` (`callOptions.ts`); `turnContext.ts` exposes `turn.agentAccount`. Agent frontmatter unknown keys already land in `options` (`core/v1/config/agent.ts` `normalize`).
+- Added `preferredAccount(dir, ids, now)` and `turnAccount(sessionID, preferredDir, ids, now)` in `accounts.ts`. Order: existing session pin, else usable preferred account (pinned via `pinSessionAccount` so `failoverAccount` moves it and it never snaps back), else `poolAccount`. Matches by `canonicalAccountId`, case-insensitive on win32, so `~/.claude4`, absolute paths, and the inherited `default` dir all match. Skipped for affinity `default`. Unknown dir: one `log.warn` per dir, then pool pick.
+- Changed `claudeCodeLanguageModel.ts` account line to `turnAccount(turn.affinity, turn.agentAccount, accountIds)`.
+- Added 3 tests in `test/provider/claude-code/accountPool.test.ts` (prefer+pin+failover no snap-back, limited/unknown/default-affinity fallback, inherited-dir -> `default`).
+- Added user config entry `general-opus.5.5-xhigh-claude4` in `~/.config/opencode/agents/sub/general.md` (user approved).
+- Docs: `oc.wiki/Claude-Code.md` paragraph under Several Claude accounts; `FORK.md` Claude account pool row.
+- Verification: `bun test test/provider/claude-code/accountPool.test.ts` 22 pass 0 fail; `bun run typecheck` (tsgo) clean in packages/opencode. No live run.
+- MISTAKE: first draft of the default-affinity test assumed an unsticky global pick; `poolAccount` is sticky across calls in one test. Fixed the test.
+
+### User
+Claude accounts
+- An agent can name a preferred Claude login with `claudeAccount: "~/.claude4"`; its new chats and subagents start on that login.
+- If that login is at its usage limit, the chat starts on the usual login, and a later limit moves it on like any chat.
+- New subagent `general-opus.5.5-xhigh-claude4` runs Opus 5.5 xhigh on the `~/.claude4` login.
+
+---
+
 ## 2026-10-20 (~00:43) - v0.2.261 coleslawEnders - agent-push keeps the title of a session it did not open - Claude Opus 5.5, low effort; Implementation
 
 ### Agent

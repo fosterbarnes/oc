@@ -3630,6 +3630,9 @@
                   },
                   "description": {
                     "type": "string"
+                  },
+                  "claudeAccount": {
+                    "type": "string"
                   }
                 },
                 "required": ["name", "model"],

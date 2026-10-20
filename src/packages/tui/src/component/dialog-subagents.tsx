@@ -4,7 +4,7 @@ import type { Agent } from "@opencode-ai/sdk/v2"
 import { DialogSelect, type DialogSelectOption, type DialogSelectRef } from "../ui/dialog-select"
 import { createResource, createMemo, createSignal, createEffect } from "solid-js"
 import { useDialog } from "../ui/dialog"
-import { useSDK } from "../context/sdk"
+import { useSDK, type ClaudeAccountOption } from "../context/sdk"
 import { useTheme } from "../context/theme"
 import { useClipboard } from "../context/clipboard"
 import { useToast } from "../ui/toast"
@@ -205,7 +205,7 @@ export function DialogSubagents(props: { highlight?: string }) {
   function chooseEfforts(providerID: string, modelID: string) {
     const model = modelInfo({ providerID, modelID })
     if (model.variants.length === 0) {
-      void continueAdd(providerID, modelID, [undefined])
+      void chooseAccount(providerID, modelID, [undefined])
       return
     }
     dialog.replace(
@@ -213,7 +213,7 @@ export function DialogSubagents(props: { highlight?: string }) {
         <DialogSubagentEfforts
           model={model.name}
           efforts={model.variants}
-          onConfirm={(selected) => void continueAdd(providerID, modelID, selected)}
+          onConfirm={(selected) => void chooseAccount(providerID, modelID, selected)}
         />
       ),
       undefined,
@@ -221,11 +221,62 @@ export function DialogSubagents(props: { highlight?: string }) {
     )
   }
 
-  async function continueAdd(providerID: string, modelID: string, selectedEfforts: Array<string | undefined>) {
+  // Claude entries may prefer one pool account (`claudeAccount`); skipped with fewer than two accounts.
+  async function chooseAccount(providerID: string, modelID: string, efforts: Array<string | undefined>) {
+    const accounts =
+      providerID === "claude-code"
+        ? await sdk.claudeAccount.state().catch((error) => {
+            toast.error(error)
+            return undefined
+          })
+        : []
+    if (!accounts) {
+      reopen()
+      return
+    }
+    if (accounts.length < 2) {
+      void continueAdd(providerID, modelID, efforts)
+      return
+    }
+    const back = modelInfo({ providerID, modelID }).variants.length
+      ? () => chooseEfforts(providerID, modelID)
+      : () => reopen()
+    dialog.replace(
+      () => (
+        <DialogSelect
+          title="Claude account"
+          current=""
+          options={[
+            { title: "No preference", value: "" },
+            ...accounts.map((account) => ({ title: account.label, value: account.id })),
+          ]}
+          onSelect={(option) =>
+            void continueAdd(
+              providerID,
+              modelID,
+              efforts,
+              accounts.find((account) => account.id === option.value),
+            )
+          }
+        />
+      ),
+      undefined,
+      { back },
+    )
+  }
+
+  async function continueAdd(
+    providerID: string,
+    modelID: string,
+    selectedEfforts: Array<string | undefined>,
+    account?: ClaudeAccountOption,
+  ) {
     const displayName = modelInfo({ providerID, modelID }).name
-    const short = shortModelName(modelID)
+    const accountName = account?.label.replace(/^\./, "").toLowerCase()
+    const short = [shortModelName(modelID), accountName].filter(Boolean).join("-")
     const effort = selectedEfforts.length === 1 ? selectedEfforts[0] : undefined
     const defaultName = effort ? `general-${short}-${effort}` : `general-${short}`
+    const label = [displayName, account && `prefers ${account.label}`].filter(Boolean).join(", ")
 
     const baseName = (await DialogPrompt.show(dialog, "Name", { value: defaultName }))?.trim()
     if (!baseName) {
@@ -242,7 +293,8 @@ export function DialogSubagents(props: { highlight?: string }) {
             name: entryName,
             model: `${providerID}/${modelID}`,
             variant: effort,
-            description: effort ? `${displayName}, ${effort}.` : `${displayName}.`,
+            description: effort ? `${label}, ${effort}.` : `${label}.`,
+            claudeAccount: account?.id,
           },
           { throwOnError: true },
         )
