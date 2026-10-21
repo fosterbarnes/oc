@@ -17,6 +17,8 @@ $yapWords = "$repoRoot\.res\yapBot.json"
 $readme = "$repoRoot\README.md"
 $buildNotes = "$repoRoot\docs\buildNotes\buildNotes.txt"
 $ghRepo = 'fosterbarnes/oc'
+# Commit subject labels in decision order; AGENTS.md (buildNotes.txt section) defines each.
+$commitLabels = 'sync', 'fix', 'feat.', 'patch', 'perf.', 'deps.', 'scripts', 'cleanup', 'docs', 'misc.'
 
 function runNativeCommand {
     param(
@@ -213,6 +215,24 @@ function requireVersionTag {
         throw "Invalid $versionTag`: expected one camelCase two-word tag"
     }
     $contents
+}
+
+# Throws unless $Subject is "<Prefix> [<label> | <summary>]", optionally "; <label> | <summary>".
+# Summaries: no edge spaces, no trailing period, none of [ ] | ;. .NET regex is case-sensitive.
+function assertCommitSubject {
+    param([Parameter(Mandatory)][string]$Subject, [Parameter(Mandatory)][string]$Prefix)
+    $labels = ($commitLabels | ForEach-Object { [regex]::Escape($_) }) -join '|'
+    $segment = "($labels) \| [^\s\[\]|;](?:[^\[\]|;]*[^\s.\[\]|;])?"
+    $match = [regex]::Match($Subject, "^$([regex]::Escape($Prefix)) \[$segment(?:; $segment)?\]$")
+    if (-not $match.Success) {
+        throw "Line 1 must be '$Prefix [<label> | <summary>]', optionally '; <label> | <summary>'. " +
+            "Labels: $($commitLabels -join ' ')"
+    }
+    $first, $second = $match.Groups[1].Value, $match.Groups[2].Value
+    if ($second -and $first -eq $second) { throw "Line 1 repeats label '$first'; merge the segments." }
+    if ($second -and 'misc.' -in $first, $second) { throw "'misc.' must be the only segment." }
+    if ($Subject -match '[^\x20-\x7E]') { throw 'Line 1 must be plain ASCII.' }
+    if ($Subject.Length -gt 72) { throw "Line 1 is $($Subject.Length) characters; the limit is 72." }
 }
 
 function writeClearedLine {

@@ -10,7 +10,7 @@ $current = requireVersion
 if ($Tags) { getVersionTags 10; return }
 if ($SetTag) {
     $set = setVersionTag $SetTag
-    Write-Host "line 1: v$current $set"
+    Write-Host "line 1: v$current $set [<label> | <summary>]"
     return
 }
 $tagWord = requireVersionTag
@@ -22,7 +22,8 @@ $bumpFix = "Code changed but the version is still $current. Run .scripts\bumpVer
 
 if ($Context) {
     Write-Host "branch: $(git branch --show-current)  version: $current $tagWord"
-    Write-Host "line 1: v$current $tagWord"
+    Write-Host "line 1: v$current $tagWord [<label> | <summary>]"
+    Write-Host "labels (decision order; rules in AGENTS.md 'buildNotes.txt' section): $($commitLabels -join ' ')"
     Write-Host '--- status'
     git status --short 2>$null
     Write-Host '--- new buildNotes.md lines'
@@ -40,7 +41,7 @@ if ($Context) {
 if ($unbumped) { throw "$bumpFix Changed: $($unbumped -join ', ')" }
 if (-not $notesChanged) { throw 'buildNotes.txt is unchanged since the last commit; write the new message first.' }
 $lines = @([IO.File]::ReadAllLines($buildNotes))
-if ($lines[0].Trim() -ne "v$current $tagWord") { throw "buildNotes.txt line 1 must be v$current $tagWord." }
+assertCommitSubject $lines[0].Trim() "v$current $tagWord"
 if ($lines.Count -lt 3 -or $lines[1].Trim() -or -not ($lines[2..($lines.Count - 1)] -join '').Trim()) {
     throw 'buildNotes.txt needs line 1, one blank line, then a non-empty body.'
 }

@@ -185,6 +185,28 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-21 (~18:49) - v0.2.278 sausageGaiden - Commit subjects carry a classifier and short summary - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation (/imp from plan `~/.config/opencode/plans/2026-10-21-commit-classifiers.md`); completed
+- Version: 0.2.278 sausageGaiden
+- Added `.scripts/scriptHelper.ps1` `$commitLabels` (decision order: sync fix feat. patch perf. deps. scripts cleanup docs misc.) and `assertCommitSubject`: line 1 `v<ver> <tag> [<label> | <summary>]`, optional `; <label> | <summary>`; distinct labels, misc. alone, no trailing period, no `[ ] | ;` in summary, ASCII, <=72 chars
+- Changed `.scripts/agentPush.ps1`: line 1 check calls `assertCommitSubject`; `-Context` and `-SetTag` print the bracket template; `-Context` prints labels plus pointer to AGENTS.md rules
+- Added `.scripts/tests/commitSubject.tests.ps1` (3 good, 14 bad subjects, no git or files)
+- Changed `AGENTS.md` buildNotes.txt section: format, label decision list, tie-breakers, misc. rules, summary rules. Replaced stale upstream "Commits and PR Titles" conventional-commit text with pointer to that section
+- Changed `SCRIPTS.md` agentPush row: mentions classifier check and test
+- Note: `~/.claude/skills/agent-push/SKILL.md` step 4 now says fix a rejected line 1 and rerun (user-level, logged in `C:\Users\Foster\buildNotes.md`)
+- Kept `push.ps1` free-form; manual pushes not validated
+- Verification: `pwsh -NoProfile -File .scripts\tests\commitSubject.tests.ps1` -> "Commit subject checks passed (3 good, 14 bad)."; spot-printed each rule's own error message; `agentPush.ps1 -Context` prints template and labels. Real push not run
+
+### User
+Commits
+- Agent-pushed commit titles now end with a label and a short summary, like `v0.2.278 sausageGaiden [scripts | commit subject labels]`.
+- Labels: sync, fix, feat., patch, perf., deps., scripts, cleanup, docs, misc.; AGENTS.md says when to use each, and when not to use misc.
+- The agent push refuses a title that breaks the format before any slow checks run.
+
+---
+
 ## 2026-10-21 (~17:53) - v0.2.277 tuberculosisHtml - A message Claude reads mid-turn splits the reply there, like other models - Claude Opus 5.5, low effort; Implementation
 
 ### Agent
