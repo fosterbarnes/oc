@@ -6,13 +6,23 @@ import { HttpApi, HttpApiEndpoint, HttpApiError, HttpApiGroup, OpenApi } from "e
 import { QuestionNotFoundError } from "../errors"
 import { Authorization } from "../middleware/authorization"
 import { InstanceContextMiddleware } from "../middleware/instance-context"
-import { WorkspaceRoutingMiddleware, WorkspaceRoutingQuery } from "../middleware/workspace-routing"
+import {
+  WorkspaceRoutingMiddleware,
+  WorkspaceRoutingQuery,
+  WorkspaceRoutingQueryFields,
+} from "../middleware/workspace-routing"
 import { described } from "./metadata"
 
 const root = "/question"
 const ReplyPayload = Schema.Struct({
   answers: Schema.Array(Question.Answer).annotate({
     description: "User answers in order of questions (each answer is an array of selected labels)",
+  }),
+})
+const RejectQuery = Schema.Struct({
+  ...WorkspaceRoutingQueryFields,
+  message: Schema.optional(Schema.String).annotate({
+    description: "Optional message for the assistant; it continues with it instead of stopping",
   }),
 })
 const AskPayload = Schema.Struct({
@@ -64,14 +74,15 @@ export const QuestionApi = HttpApi.make("question")
         ),
         HttpApiEndpoint.post("reject", `${root}/:requestID/reject`, {
           params: { requestID: QuestionID },
-          query: WorkspaceRoutingQuery,
+          query: RejectQuery,
           success: described(Schema.Boolean, "Question rejected successfully"),
           error: [HttpApiError.BadRequest, QuestionNotFoundError],
         }).annotateMerge(
           OpenApi.annotations({
             identifier: "question.reject",
             summary: "Reject question request",
-            description: "Reject a question request from the AI assistant.",
+            description:
+              "Reject a question request from the AI assistant, optionally with a message the assistant receives and continues from.",
           }),
         ),
       )

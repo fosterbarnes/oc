@@ -440,8 +440,13 @@ export const ShellTool = Tool.define(
         { cwd, sessionID: ctx.sessionID, callID: ctx.callID },
         { env: {} },
       )
+      // Agent markers let scripts and CLIs detect they run under an agent; plugin env may still override them.
       return {
         ...process.env,
+        AGENT: "1",
+        OPENCODE: "1",
+        AI_AGENT: envValue("AI_AGENT") || "opencode",
+        OPENCODE_SESSION_ID: ctx.sessionID,
         ...extra.env,
       }
     })

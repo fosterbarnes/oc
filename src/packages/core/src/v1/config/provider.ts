@@ -44,6 +44,25 @@ export const Model = Schema.Struct({
       }),
     ]),
   ),
+  compatibility: Schema.optional(
+    Schema.Struct({
+      reasoningField: Schema.optional(
+        InterleavedField.annotate({
+          description: "Assistant-message field the model streams reasoning in and reads it back from",
+        }),
+      ),
+      maxTokensField: Schema.optional(
+        Schema.Literals(["max_completion_tokens", "max_tokens"]).annotate({
+          description: "Request field for the output token limit (default max_tokens)",
+        }),
+      ),
+      requireFinishReason: Schema.optional(
+        Schema.Boolean.annotate({
+          description: "Fail a streamed reply that ends without a finish_reason instead of accepting it",
+        }),
+      ),
+    }).annotate({ description: "OpenAI-compatible chat quirks (@ai-sdk/openai-compatible models only)" }),
+  ),
   cost: Schema.optional(
     Schema.Struct({
       input: Schema.Finite,

@@ -70,7 +70,7 @@ export function renderStarted(info: ShellJobs.Info) {
     `status=${info.status}`,
     `outLog: ${info.outLog}`,
     `errLog: ${info.errLog}`,
-    "The job runs in the background. Read it with bgStatus; you are notified when it exits.",
+    "The job runs in the background. You are notified when it exits; do not sleep or poll. If you need output before then, read outLog directly or use bgStatus.",
   ].join("\n")
 }
 
@@ -82,7 +82,7 @@ export function renderNotice(info: ShellJobs.Info, output: string) {
     `command: ${info.command}`,
     `outLog: ${info.outLog}`,
     `errLog: ${info.errLog}`,
-    output || "(no output)",
+    output ? `Log tail below; the full output is in outLog and errLog.\n${output}` : "(no output)",
     "</background_shell>",
   ].join("\n")
 }

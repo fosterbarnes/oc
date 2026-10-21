@@ -6,7 +6,7 @@ import { Watcher } from "@opencode-ai/core/filesystem/watcher"
 import { InstanceState } from "@/effect/instance-state"
 import { Patch } from "../patch"
 import { createTwoFilesPatch, diffLines } from "diff"
-import { assertExternalDirectoryEffect } from "./external-directory"
+import { assertExternalDirectoryEffect, expandHome } from "./external-directory"
 import { trimDiff, withFileLocks } from "./edit"
 import { LSP } from "@/lsp/lsp"
 import { FSUtil } from "@opencode-ai/core/fs-util"
@@ -55,7 +55,7 @@ export const ApplyPatchTool = Tool.define(
       const instance = yield* InstanceState.context
       const targets = hunks.flatMap((hunk) =>
         [hunk.path, ...(hunk.type === "update" && hunk.move_path ? [hunk.move_path] : [])].map((file) =>
-          path.resolve(instance.directory, file),
+          path.resolve(instance.directory, expandHome(file)),
         ),
       )
       return yield* apply(hunks, ctx).pipe(withFileLocks(targets))
@@ -81,7 +81,7 @@ export const ApplyPatchTool = Tool.define(
       let totalDiff = ""
 
       for (const hunk of hunks) {
-        const filePath = path.resolve(instance.directory, hunk.path)
+        const filePath = path.resolve(instance.directory, expandHome(hunk.path))
         yield* assertExternalDirectoryEffect(ctx, filePath)
 
         switch (hunk.type) {
@@ -150,7 +150,7 @@ export const ApplyPatchTool = Tool.define(
               if (change.removed) deletions += change.count || 0
             }
 
-            const movePath = hunk.move_path ? path.resolve(instance.directory, hunk.move_path) : undefined
+            const movePath = hunk.move_path ? path.resolve(instance.directory, expandHome(hunk.move_path)) : undefined
             yield* assertExternalDirectoryEffect(ctx, movePath)
 
             fileChanges.push({

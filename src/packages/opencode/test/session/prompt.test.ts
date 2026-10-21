@@ -1165,6 +1165,36 @@ it.instance("static loop consumes queued replies across turns", () =>
   }),
 )
 
+it.instance("loop continues a reply cut off at the output limit, at most twice", () =>
+  Effect.gen(function* () {
+    const { llm } = yield* useServerConfig(providerCfg)
+    const prompt = yield* SessionPrompt.Service
+    const sessions = yield* Session.Service
+    const chat = yield* sessions.create({ title: "Pinned" })
+    yield* prompt.prompt({
+      sessionID: chat.id,
+      agent: "build",
+      noReply: true,
+      parts: [{ type: "text", text: "hello" }],
+    })
+    yield* llm.push(reply().text("one").length())
+    yield* llm.push(reply().text("two").length())
+    yield* llm.push(reply().text("three").length())
+    yield* llm.text("unused")
+
+    const result = yield* prompt.loop({ sessionID: chat.id })
+    expect(yield* llm.calls).toBe(3)
+    if (result.info.role === "assistant") expect(result.info.finish).toBe("length")
+    const messages = yield* sessions.messages({ sessionID: chat.id })
+    const continues = messages.filter(
+      (message) =>
+        message.info.role === "user" &&
+        message.parts.some((part) => part.type === "text" && part.synthetic && part.metadata?.output_limit_continue),
+    )
+    expect(continues).toHaveLength(2)
+  }),
+)
+
 it.instance("loop continues when finish is tool-calls", () =>
   Effect.gen(function* () {
     const { llm } = yield* useServerConfig(providerCfg)
@@ -1287,6 +1317,50 @@ it.instance("loop continues when finish is stop but assistant has tool parts", (
     }
   }),
 )
+
+for (const dismissal of [
+  { name: "a question dismissed with a message continues the turn", message: "Skip it and use defaults", calls: 2 },
+  { name: "a bare question dismissal stops the turn", message: undefined, calls: 1 },
+]) {
+  it.instance(dismissal.name, () =>
+    Effect.gen(function* () {
+      const { llm } = yield* useServerConfig(providerCfg)
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const question = yield* Question.Service
+      const session = yield* sessions.create({
+        title: "Dismissed question",
+        permission: [{ permission: "*", pattern: "*", action: "allow" }],
+      })
+      yield* prompt.prompt({
+        sessionID: session.id,
+        agent: "build",
+        noReply: true,
+        parts: [{ type: "text", text: "ask me first" }],
+      })
+      yield* llm.tool("question", {
+        questions: [{ question: "Which config?", header: "Config", options: [{ label: "A", description: "A" }] }],
+      })
+      yield* llm.text("continued without an answer")
+
+      const loop = yield* prompt.loop({ sessionID: session.id }).pipe(Effect.forkChild)
+      const pending = yield* pollWithTimeout(
+        question.list().pipe(Effect.map((list) => list.find((item) => item.sessionID === session.id))),
+        "question was not asked",
+      )
+      yield* question.reject(pending.id, dismissal.message)
+      yield* Fiber.join(loop)
+
+      expect(yield* llm.calls).toBe(dismissal.calls)
+      const tool = (yield* MessageV2.filterCompactedEffect(session.id))
+        .flatMap((msg) => msg.parts)
+        .find((part) => part.type === "tool" && part.tool === "question")
+      expect(tool?.type === "tool" && tool.state.status === "error" ? tool.state.error : "").toContain(
+        dismissal.message ?? "The user dismissed this question",
+      )
+    }),
+  )
+}
 
 it.instance("failed subtask preserves metadata on error tool state", () =>
   Effect.gen(function* () {

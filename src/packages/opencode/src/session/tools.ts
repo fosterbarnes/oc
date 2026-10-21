@@ -412,7 +412,7 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
   if (flags.experimentalCodeMode) return tools
 
   for (const [key, entry] of Object.entries(yield* mcp.tools())) {
-    const item = McpCatalog.convertTool(entry.def, entry.client, entry.timeout, entry.beforeCall)
+    const item = McpCatalog.convertTool(entry.def, entry.client, entry.timeout, entry.beforeCall, input.session.id)
     const execute = item.execute
     if (!execute) continue
 

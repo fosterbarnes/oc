@@ -46,6 +46,8 @@ export function convertTool(
   client: Client,
   timeout?: number,
   beforeCall?: () => Effect.Effect<void, Error>,
+  // Sent as `_meta.sessionID`: an opaque correlation id for the invoking session, not a tool argument.
+  sessionID?: string,
 ): Tool {
   const inputSchema: JSONSchema7 = {
     ...(mcpTool.inputSchema as JSONSchema7),
@@ -63,6 +65,7 @@ export function convertTool(
         {
           name: mcpTool.name,
           arguments: (args || {}) as Record<string, unknown>,
+          ...(sessionID === undefined ? {} : { _meta: { sessionID } }),
         },
         CallToolResultSchema,
         {

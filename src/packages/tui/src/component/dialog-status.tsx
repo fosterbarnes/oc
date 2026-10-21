@@ -69,6 +69,7 @@ export function DialogStatus() {
                         disabled: theme.textMuted,
                         needs_auth: theme.warning,
                         needs_client_registration: theme.error,
+                        connecting: theme.warning,
                       } as Record<string, typeof theme.success>
                     )[item.status],
                   }}
@@ -82,6 +83,7 @@ export function DialogStatus() {
                       <Match when={item.status === "connected"}>Connected</Match>
                       <Match when={item.status === "failed" && item}>{(val) => val().error}</Match>
                       <Match when={item.status === "disabled"}>Disabled in configuration</Match>
+                      <Match when={(item.status as string) === "connecting"}>Connecting</Match>
                       <Match when={(item.status as string) === "needs_auth"}>
                         Needs authentication (run: opencode mcp auth {key})
                       </Match>

@@ -8,6 +8,7 @@ import path from "path"
 import { realpathSync } from "node:fs"
 import { PermissionV1 } from "@opencode-ai/core/v1/permission"
 import { EventV2Bridge } from "@/event-v2-bridge"
+import { Plugin } from "@/plugin"
 
 export const Event = PermissionV1.Event
 
@@ -74,6 +75,7 @@ const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
     const events = yield* EventV2Bridge.Service
+    const plugin = yield* Plugin.Service
     const state = yield* InstanceState.make<State>(
       Effect.fn("Permission.state")(function* (ctx) {
         void ctx
@@ -137,6 +139,29 @@ const layer = Layer.effect(
         metadata: request.metadata,
         always: request.always,
         tool: request.tool,
+      }
+      // Plugins decide only what oc's rules would prompt for: config allow and deny never reach here.
+      const decided = yield* plugin.trigger(
+        "permission.ask",
+        {
+          id,
+          type: info.permission,
+          pattern: [...info.patterns],
+          sessionID: info.sessionID,
+          messageID: info.tool?.messageID ?? "",
+          callID: info.tool?.callID,
+          title: `${info.permission}: ${info.patterns.join(", ")}`,
+          metadata: info.metadata,
+          time: { created: Date.now() },
+        },
+        { status: "ask" as "ask" | "deny" | "allow" },
+      )
+      yield* Effect.logInfo("plugin decision", { id, status: decided.status })
+      if (decided.status === "allow") return
+      if (decided.status === "deny") {
+        return yield* new PermissionV1.DeniedError({
+          ruleset: info.patterns.map((pattern) => ({ permission: info.permission, pattern, action: "deny" })),
+        })
       }
       yield* Effect.logInfo("asking", { id, permission: info.permission, patterns: info.patterns })
 
@@ -280,6 +305,6 @@ export function visibleTools<T>(tools: Record<string, T>, ruleset: PermissionV1.
   return Object.fromEntries(Object.entries(tools).filter(([name]) => !hidden.has(name)))
 }
 
-export const node = LayerNode.make({ service: Service, layer: layer, deps: [EventV2Bridge.node] })
+export const node = LayerNode.make({ service: Service, layer: layer, deps: [EventV2Bridge.node, Plugin.node] })
 
 export * as Permission from "."

@@ -29,12 +29,16 @@ const LogLevelRef = Schema.Literals(["DEBUG", "INFO", "WARN", "ERROR"]).annotate
   description: "Log level",
 })
 
+export const WebSearchProvider = Schema.Literals(["exa", "parallel", "firecrawl", "tavily"])
+export type WebSearchProvider = typeof WebSearchProvider.Type
+
 const CompactionLimitEntryV1 = Schema.Struct({
   tokens: Schema.optional(PositiveInt).annotate({
     description: "Token threshold for this provider. Falls back to the global limit tokens, then 200000.",
   }),
   action: Schema.optional(Schema.Literals(["compact", "handoff", "off"])).annotate({
-    description: "Action for this provider when it crosses its threshold. Overrides the global limit action. off disables it for this provider.",
+    description:
+      "Action for this provider when it crosses its threshold. Overrides the global limit action. off disables it for this provider.",
   }),
 })
 
@@ -55,7 +59,8 @@ export const Info = Schema.Struct({
       order: Schema.optional(Schema.Record(Schema.String, Schema.Finite)),
     }),
   ).annotate({
-    description: "Custom command palette order by command name. Listed commands are sorted by number and appear before unlisted commands; unlisted commands keep their source order",
+    description:
+      "Custom command palette order by command name. Listed commands are sorted by number and appear before unlisted commands; unlisted commands keep their source order",
   }),
   skills: Schema.optional(ConfigSkillsV1.Info).annotate({ description: "Additional skill folder paths" }),
   references: Schema.optional(ConfigReference.Info).annotate({
@@ -70,7 +75,8 @@ export const Info = Schema.Struct({
       "Enable or disable snapshot tracking. When false, filesystem snapshots are not recorded and undoing or reverting will not undo/redo file changes. Defaults to true.",
   }),
   todos: Schema.optional(Schema.Boolean).annotate({
-    description: "Enable todo tools and the todo sidebar. Defaults to false; tool permissions still apply when enabled.",
+    description:
+      "Enable todo tools and the todo sidebar. Defaults to false; tool permissions still apply when enabled.",
   }),
   plugin: Schema.optional(Schema.mutable(Schema.Array(ConfigPluginV1.Spec))),
   share: Schema.optional(Schema.Literals(["manual", "auto", "disabled"])).annotate({
@@ -168,6 +174,19 @@ export const Info = Schema.Struct({
   layout: Schema.optional(ConfigLayoutV1.Layout).annotate({ description: "@deprecated Always uses stretch layout." }),
   permission: Schema.optional(ConfigPermissionV1.Info),
   tools: Schema.optional(Schema.Record(Schema.String, Schema.Boolean)),
+  websearch: Schema.optional(
+    Schema.Union([
+      Schema.Literal(false),
+      Schema.Struct({
+        provider: Schema.optional(Schema.Union([Schema.Literal("random"), WebSearchProvider])).annotate({
+          description: 'Web search backend for every session. "random" (default) keeps one of exa/parallel per session',
+        }),
+        apiKey: Schema.optional(Schema.String).annotate({
+          description: "API key for the configured provider; overrides its environment variable",
+        }),
+      }),
+    ]),
+  ).annotate({ description: "Web search tool settings. Set to false to disable the websearch tool" }),
   attachment: Schema.optional(ConfigAttachmentV1.Info).annotate({
     description: "Attachment processing configuration, including image size limits and resizing behavior",
   }),
@@ -211,7 +230,8 @@ export const Info = Schema.Struct({
             description: "Token threshold for the context limit action (default: 200000)",
           }),
           action: Schema.optional(Schema.Literals(["compact", "handoff", "off"])).annotate({
-            description: "When the session crosses the token threshold: compact in place, hand off to a new session, or do nothing",
+            description:
+              "When the session crosses the token threshold: compact in place, hand off to a new session, or do nothing",
           }),
           providers: Schema.optional(Schema.Record(Schema.String, CompactionLimitEntryV1)).annotate({
             description:
@@ -245,5 +265,3 @@ export const Info = Schema.Struct({
 }).annotate({ identifier: "Config" })
 
 export type Info = DeepMutable<Schema.Schema.Type<typeof Info>>
-
-

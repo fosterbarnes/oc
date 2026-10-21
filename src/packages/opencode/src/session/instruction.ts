@@ -46,6 +46,7 @@ export interface Interface {
     messages: SessionV1.WithParts[],
     filepath: string,
     messageID: MessageID,
+    directory?: boolean,
   ) => Effect.Effect<{ filepath: string; content: string }[], FSUtil.Error>
 }
 
@@ -201,6 +202,7 @@ const layer: Layer.Layer<
       messages: SessionV1.WithParts[],
       filepath: string,
       messageID: MessageID,
+      directory = false,
     ) {
       const sys = yield* systemPaths()
       const already = extract(messages)
@@ -209,9 +211,10 @@ const layer: Layer.Layer<
       const root = path.resolve(yield* InstanceState.directory)
 
       const target = path.resolve(filepath)
-      let current = path.dirname(target)
+      // A directory read starts at the directory itself so its own instruction file is found.
+      let current = directory ? target : path.dirname(target)
 
-      // Walk upward from the file being read and attach nearby instruction files once per message.
+      // Walk upward from the path being read and attach nearby instruction files once per message.
       while (current.startsWith(root) && current !== root) {
         const found = yield* find(current)
         if (!found || found === target || sys.has(found) || already.has(found)) {

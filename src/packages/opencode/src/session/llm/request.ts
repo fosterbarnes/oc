@@ -171,7 +171,15 @@ export const prepare = Effect.fn("LLMRequestPrep.prepare")(function* (input: Pre
         : undefined,
       topP: input.agent.topP ?? ProviderTransform.topP(input.model),
       topK: ProviderTransform.topK(input.model),
-      maxOutputTokens: ProviderTransform.maxOutputTokens(input.model, input.flags.outputTokenMax),
+      // OpenAI counts a requested output limit against rate limits, so it keeps the provider default.
+      maxOutputTokens:
+        input.model.providerID === "openai"
+          ? undefined
+          : ProviderTransform.maxOutputTokens(
+              input.model,
+              input.flags.outputTokenMax,
+              estimatePromptTokens(messages, input.tools),
+            ),
       options,
     },
   )
@@ -251,6 +259,36 @@ export const prepare = Effect.fn("LLMRequestPrep.prepare")(function* (input: Pre
     },
   }
 })
+
+// Media counts as a flat allowance: its base64 text says nothing about its token cost.
+const MEDIA_TOKENS = 1_600
+const MEDIA_PART_TYPES = new Set(["image", "file", "media", "image-data", "file-data", "image-url", "file-url"])
+
+/** Rough prompt size in tokens: text, tool calls and results, and tool definitions. */
+export function estimatePromptTokens(messages: ModelMessage[], tools: Record<string, Tool>) {
+  let chars = 0
+  let media = 0
+  const visit = (value: unknown): void => {
+    if (typeof value === "string") {
+      chars += value.length
+      return
+    }
+    if (Array.isArray(value)) return value.forEach(visit)
+    if (typeof value !== "object" || value === null || ArrayBuffer.isView(value)) return
+    const record = value as Record<string, unknown>
+    if (typeof record.type === "string" && MEDIA_PART_TYPES.has(record.type)) {
+      media++
+      return
+    }
+    for (const [key, item] of Object.entries(record)) if (key !== "providerOptions") visit(item)
+  }
+  visit(messages)
+  for (const tool of Object.values(tools)) {
+    visit(tool.description)
+    visit(JSON.stringify((tool.inputSchema as { jsonSchema?: unknown } | undefined)?.jsonSchema ?? {}))
+  }
+  return Math.ceil(chars / 4) + media * MEDIA_TOKENS
+}
 
 function resolveTools(input: Pick<PrepareInput, "tools" | "agent" | "permission" | "user">) {
   const disabled = Permission.disabled(

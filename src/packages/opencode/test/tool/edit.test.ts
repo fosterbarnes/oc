@@ -150,7 +150,7 @@ describe("tool.edit", () => {
 
         const result = yield* run({ filePath: filepath, oldString: "old content", newString: "new content" })
 
-        expect(result.output).toContain("Edit applied successfully")
+        expect(result.output).toStartWith(`Edited ${filepath} (1 replacement)`)
         expect(yield* load(filepath)).toBe("new content here")
       }),
     )
@@ -257,9 +257,23 @@ describe("tool.edit", () => {
         const filepath = path.join(test.directory, "file.txt")
         yield* put(filepath, "foo bar foo baz foo")
 
-        yield* run({ filePath: filepath, oldString: "foo", newString: "qux", replaceAll: true })
+        const result = yield* run({ filePath: filepath, oldString: "foo", newString: "qux", replaceAll: true })
 
+        expect(result.output).toBe(`Edited ${filepath} (3 replacements)`)
         expect(yield* load(filepath)).toBe("qux bar qux baz qux")
+      }),
+    )
+
+    it.instance("names the fix when oldString matches more than once", () =>
+      Effect.gen(function* () {
+        const test = yield* TestInstance
+        const filepath = path.join(test.directory, "file.txt")
+        yield* put(filepath, "foo bar foo")
+
+        const message = (yield* fail({ filePath: filepath, oldString: "foo", newString: "qux" })).message
+        expect(message).toContain("expected exactly one")
+        expect(message).toContain("set replaceAll to true")
+        expect(yield* load(filepath)).toBe("foo bar foo")
       }),
     )
 

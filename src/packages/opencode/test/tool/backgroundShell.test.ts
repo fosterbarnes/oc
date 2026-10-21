@@ -74,7 +74,10 @@ function noticeOps(notices: string[]): TaskPromptOps {
       Effect.sync(() => {
         const text = input.parts.map((part) => (part.type === "text" ? part.text : "")).join("\n")
         notices.push(text)
-        return { info: { id: MessageID.ascending(), role: "assistant", parentID: input.messageID }, parts: [] } as unknown as SessionV1.WithParts
+        return {
+          info: { id: MessageID.ascending(), role: "assistant", parentID: input.messageID },
+          parts: [],
+        } as unknown as SessionV1.WithParts
       }),
     loop: () => Effect.die("loop not expected"),
     available: () => Effect.void,
@@ -225,7 +228,10 @@ describe("background shell jobs", () => {
         const id = jobIDOf(started.output)
         const info = yield* until(jobs.get(sessionID, id), (job) => job.status !== "running")
         expect(info.status).toBe("timed_out")
-        yield* until(Effect.sync(() => (notices.length > 0 ? notices : undefined)), (items) => items.length === 1)
+        yield* until(
+          Effect.sync(() => (notices.length > 0 ? notices : undefined)),
+          (items) => items.length === 1,
+        )
         expect(notices[0]).toContain(`<background_shell id="${id}" state="timed_out"`)
       }),
     )
@@ -242,9 +248,15 @@ describe("background shell jobs", () => {
           ctxFor(sessionID, { extra: { promptOps: noticeOps(notices) } }),
         )
         const id = jobIDOf(started.output)
-        yield* until(Effect.sync(() => (notices.length > 0 ? notices : undefined)), (items) => items.length === 1)
+        yield* until(
+          Effect.sync(() => (notices.length > 0 ? notices : undefined)),
+          (items) => items.length === 1,
+        )
         expect(notices[0]).toContain(`<background_shell id="${id}" state="exited" exitCode="0">`)
         expect(notices[0]).toContain("NOTICE-DONE")
+        expect(started.output).toMatch(/outLog: .*out\.log/)
+        expect(notices[0]).toMatch(/outLog: .*out\.log/)
+        expect(notices[0]).toContain("the full output is in outLog and errLog")
         yield* Effect.sleep("200 millis")
         expect(notices).toHaveLength(1)
       }),
@@ -265,7 +277,14 @@ describe("background shell jobs", () => {
         const running = yield* until(jobs.get(sessionID, id), (job) => job.pid !== undefined)
         yield* jobs.removeSession(sessionID)
         expect(yield* jobs.list(sessionID)).toEqual([])
-        expect(yield* Effect.promise(() => fs.stat(running.outLog).then(() => true, () => false))).toBe(false)
+        expect(
+          yield* Effect.promise(() =>
+            fs.stat(running.outLog).then(
+              () => true,
+              () => false,
+            ),
+          ),
+        ).toBe(false)
         yield* until(Effect.succeed(alive(running.pid!) ? undefined : true), (done) => done)
       }),
     ),
@@ -278,8 +297,7 @@ describe("background shell jobs", () => {
         const shell = yield* initShell()
         const jobs = yield* ShellJobs.Service
         const denied = ctxFor(sessionID, {
-          ask: (request) =>
-            request.permission === "bgRun" ? Effect.die(new Error("bgRun denied")) : Effect.void,
+          ask: (request) => (request.permission === "bgRun" ? Effect.die(new Error("bgRun denied")) : Effect.void),
         })
         const exit = yield* shell
           .execute({ command: script("console.log('never')"), background: true }, denied)

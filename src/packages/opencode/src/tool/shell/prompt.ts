@@ -20,7 +20,8 @@ export function parameterSchema() {
         "Optional timeout in milliseconds. A background command is stopped when it expires; omit for no limit.",
     }),
     workdir: Schema.optional(Schema.String).annotate({
-      description: `The working directory to run the command in. Defaults to the current directory. Use this instead of 'cd' commands.`,
+      description:
+        "Working directory to execute the command in. Defaults to the current working directory. When possible, avoid changing directories in the command and set the working directory here instead.",
     }),
     background: Schema.optional(Schema.Boolean).annotate({
       description:

@@ -112,7 +112,6 @@ describe("ConfigV2Compat.lower", () => {
       model: { providerID: "example", model: "model", variant: "high" },
       plugins: [{ package: "native-plugin", options: { token: secret } }],
       providers: { example: { settings: { apiKey: secret } } },
-      websearch: secret,
       warming: true,
       experimental: { portable_shell_scanner: true },
       agents: { reviewer: { request: { headers: { Authorization: secret } } } },
@@ -135,7 +134,6 @@ describe("ConfigV2Compat.lower", () => {
         expect.objectContaining({ kind: "unsupported", path: ["model", "variant"] }),
         expect.objectContaining({ kind: "unsupported", path: ["plugins"] }),
         expect.objectContaining({ kind: "unsupported", path: ["providers"] }),
-        expect.objectContaining({ kind: "unsupported", path: ["websearch"] }),
         expect.objectContaining({ kind: "unsupported", path: ["warming"] }),
         expect.objectContaining({ kind: "unsupported", path: ["experimental", "portable_shell_scanner"] }),
         expect.objectContaining({ kind: "unsupported", path: ["agents", "reviewer", "request", "headers"] }),
@@ -306,32 +304,34 @@ describe("ConfigV2Compat.lower", () => {
 })
 
 describe("V2 configuration loading", () => {
-  it.instance("logs compatibility diagnostics without writing the lowered projection", () =>
-    Effect.gen(function* () {
-      const instance = yield* TestInstance
-      const fs = yield* FSUtil.Service
-      const file = path.join(instance.directory, "opencode.jsonc")
-      const text =
-        '{\n  // Retain this comment\n  "$schema": "https://opencode.ai/config.json",\n  "plugins": ["native-only"]\n}\n'
-      yield* fs.writeWithDirs(file, text)
-      const messages: unknown[] = []
-      const config = yield* Config.use.get().pipe(
-        Effect.provide(
-          Logger.layer([
-            Logger.make<unknown, void>((options) => {
-              messages.push(options.message)
-            }),
-          ]),
-        ),
-      )
+  it.instance(
+    "logs compatibility diagnostics without writing the lowered projection",
+    () =>
+      Effect.gen(function* () {
+        const instance = yield* TestInstance
+        const fs = yield* FSUtil.Service
+        const file = path.join(instance.directory, "opencode.jsonc")
+        const text =
+          '{\n  // Retain this comment\n  "$schema": "https://opencode.ai/config.json",\n  "plugins": ["native-only"]\n}\n'
+        yield* fs.writeWithDirs(file, text)
+        const messages: unknown[] = []
+        const config = yield* Config.use.get().pipe(
+          Effect.provide(
+            Logger.layer([
+              Logger.make<unknown, void>((options) => {
+                messages.push(options.message)
+              }),
+            ]),
+          ),
+        )
 
-      expect(config.plugin).toEqual([])
-      expect(messages).toContainEqual([
-        "configuration compatibility diagnostic",
-        expect.objectContaining({ source: file, kind: "unsupported", path: ["plugins"] }),
-      ])
-      expect(yield* fs.readFileString(file)).toBe(text)
-    }),
+        expect(config.plugin).toEqual([])
+        expect(messages).toContainEqual([
+          "configuration compatibility diagnostic",
+          expect.objectContaining({ source: file, kind: "unsupported", path: ["plugins"] }),
+        ])
+        expect(yield* fs.readFileString(file)).toBe(text)
+      }),
     { git: true },
   )
 

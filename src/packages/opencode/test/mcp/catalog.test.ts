@@ -99,6 +99,27 @@ describe("McpCatalog.convertTool", () => {
       await Promise.all([client.close(), server.close()])
     }
   })
+
+  test("sends the session id in request _meta, not as an argument", async () => {
+    const seen: unknown[] = []
+    const server = new Server({ name: "meta", version: "1.0.0" }, { capabilities: { tools: {} } })
+    server.setRequestHandler(CallToolRequestSchema, async (request) => {
+      seen.push(request.params)
+      return { content: [] }
+    })
+    const client = new Client({ name: "meta-test", version: "1.0.0" })
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair()
+    await Promise.all([client.connect(clientTransport), server.connect(serverTransport)])
+
+    try {
+      await McpCatalog.convertTool(mcpTool(), client, undefined, undefined, "ses_meta").execute?.({ a: 1 }, options)
+      await McpCatalog.convertTool(mcpTool(), client).execute?.({}, options)
+      expect(seen[0]).toMatchObject({ name: "screenshot", arguments: { a: 1 }, _meta: { sessionID: "ses_meta" } })
+      expect(seen[1]).not.toHaveProperty("_meta.sessionID")
+    } finally {
+      await Promise.all([client.close(), server.close()])
+    }
+  })
 })
 
 test("preserves output schema validation across paginated tool discovery", async () => {

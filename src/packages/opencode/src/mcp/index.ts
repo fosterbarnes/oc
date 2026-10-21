@@ -65,6 +65,8 @@ export const ToolsChanged = McpEvent.ToolsChanged
 
 export const BrowserOpenFailed = McpEvent.BrowserOpenFailed
 
+export const StatusChanged = McpEvent.StatusChanged
+
 export const Failed = NamedError.create("MCPFailed", {
   name: Schema.String,
 })
@@ -99,6 +101,9 @@ const StatusNeedsClientRegistration = Schema.Struct({
   status: Schema.Literal("needs_client_registration"),
   error: Schema.String,
 }).annotate({ identifier: "MCPStatusNeedsClientRegistration" })
+const StatusConnecting = Schema.Struct({ status: Schema.Literal("connecting") }).annotate({
+  identifier: "MCPStatusConnecting",
+})
 
 export const Status = Schema.Union([
   StatusConnected,
@@ -106,6 +111,7 @@ export const Status = Schema.Union([
   StatusFailed,
   StatusNeedsAuth,
   StatusNeedsClientRegistration,
+  StatusConnecting,
 ]).annotate({ identifier: "MCPStatus", discriminator: "status" })
 export type Status = Schema.Schema.Type<typeof Status>
 
@@ -465,6 +471,7 @@ const layer = Layer.effect(
           Effect.logWarning("MCP connection closed", { server: name }).pipe(
             Effect.annotateLogs({ channel: "mcp" }),
             Effect.andThen(events.publish(ToolsChanged, { server: name })),
+            Effect.andThen(events.publish(StatusChanged, { server: name })),
             Effect.andThen(name === Everything.NAME && mcp.type === "local" ? reconnect(s, name, mcp) : Effect.void),
             Effect.ignore,
           ),
@@ -646,18 +653,34 @@ const layer = Layer.effect(
         }))
     })
 
+    const publishStatus = (name: string) => events.publish(StatusChanged, { server: name }).pipe(Effect.ignore)
+
     const createAndStore = Effect.fn("MCP.createAndStore")(function* (name: string, mcp: ConfigMCPV1.Info) {
       const s = yield* InstanceState.get(state)
-      const result = yield* create(name, mcp)
+      // Show "connecting" for the handshake instead of a stale disabled/failed status.
+      const previous = s.status[name]
+      s.status[name] = { status: "connecting" }
+      yield* publishStatus(name)
 
-      s.status[name] = result.status
-      if (!result.mcpClient) {
-        yield* closeClient(s, name)
-        delete s.clients[name]
-        return result.status
-      }
+      return yield* Effect.gen(function* () {
+        const result = yield* create(name, mcp)
 
-      return yield* storeClient(s, name, result.mcpClient, result.defs!, result.instructions, mcp, mcp.timeout)
+        s.status[name] = result.status
+        if (!result.mcpClient) {
+          yield* closeClient(s, name)
+          delete s.clients[name]
+          return result.status
+        }
+
+        return yield* storeClient(s, name, result.mcpClient, result.defs!, result.instructions, mcp, mcp.timeout)
+      }).pipe(
+        Effect.onInterrupt(() =>
+          Effect.sync(() => {
+            if (s.status[name]?.status === "connecting") s.status[name] = previous ?? { status: "disabled" }
+          }),
+        ),
+        Effect.ensuring(publishStatus(name)),
+      )
     })
 
     function reconnect(s: State, name: string, mcp: ConfigMCPV1.Info) {
@@ -698,6 +721,7 @@ const layer = Layer.effect(
       yield* closeClient(s, name)
       delete s.clients[name]
       s.status[name] = { status: "disabled" }
+      yield* publishStatus(name)
     })
 
     function requestTimeout(s: State, name: string, configured: McpEntry | undefined, fallback?: number) {

@@ -15,7 +15,7 @@ import { EventV2Bridge } from "@/event-v2-bridge"
 import { Format } from "../format"
 import { InstanceState } from "@/effect/instance-state"
 import { Snapshot } from "@/snapshot"
-import { assertExternalDirectoryEffect } from "./external-directory"
+import { assertExternalDirectoryEffect, expandHome } from "./external-directory"
 import { FSUtil } from "@opencode-ai/core/fs-util"
 import * as Bom from "@/util/bom"
 
@@ -28,7 +28,8 @@ function normalizeLineEndings(text: string): string {
 // endings of the source region it replaces, so CRLF and mixed files keep their bytes outside the edit.
 function replaceKeepingEndings(source: string, oldString: string, newString: string, replaceAll?: boolean) {
   if (oldString.replaceAll("\r", "") === newString.replaceAll("\r", "")) {
-    return replace(source, oldString, newString, replaceAll)
+    const matches = findMatches(source, oldString, newString, replaceAll)
+    return { text: applyMatches(source, matches, () => newString), count: matches.length }
   }
   const view = normalizeLineEndings(source)
   const removed = [...source.matchAll(/\r\n/g)].map((match, index) => match.index - index)
@@ -38,10 +39,11 @@ function replaceKeepingEndings(source: string, oldString: string, newString: str
     start: match.start + countBefore(removed, match.start),
     end: match.end + countBefore(removed, match.end),
   }))
-  return applyMatches(source, matches, (match) => {
+  const text = applyMatches(source, matches, (match) => {
     const region = source.slice(match.start, match.end)
     return withRegionEndings(region, replacement, lineEnding(region, fileEnding))
   })
+  return { text, count: matches.length }
 }
 
 // The dominant line ending in text, or fallback on a tie (including no line breaks).
@@ -137,12 +139,13 @@ export const withFileLocks =
 
 export const Parameters = Schema.Struct({
   filePath: Schema.String.annotate({ description: "The absolute path to the file to modify" }),
-  oldString: Schema.String.annotate({ description: "The text to replace" }),
+  oldString: Schema.String.annotate({ description: "Exact text to find and replace" }),
   newString: Schema.String.annotate({
-    description: "The text to replace it with (must be different from oldString)",
+    description: "Text to replace oldString with (must differ from oldString)",
   }),
   replaceAll: Schema.optional(Schema.Boolean).annotate({
-    description: "Replace all occurrences of oldString (default false)",
+    description:
+      "Whether to replace every occurrence of oldString. When false, oldString must match exactly once. Defaults to false.",
   }),
 })
 
@@ -168,14 +171,14 @@ export const EditTool = Tool.define(
           }
 
           const instance = yield* InstanceState.context
-          const filePath = path.isAbsolute(params.filePath)
-            ? params.filePath
-            : path.join(instance.directory, params.filePath)
+          const requested = expandHome(params.filePath)
+          const filePath = path.isAbsolute(requested) ? requested : path.join(instance.directory, requested)
           yield* assertExternalDirectoryEffect(ctx, filePath)
 
           let diff = ""
           let contentOld = ""
           let contentNew = ""
+          let replacements = 0
           yield* withFileLocks([filePath])(
             Effect.gen(function* () {
               if (params.oldString === "") {
@@ -217,7 +220,9 @@ export const EditTool = Tool.define(
               const source = yield* Bom.readFile(afs, filePath)
               contentOld = source.text
 
-              const replaced = replaceKeepingEndings(contentOld, params.oldString, params.newString, params.replaceAll)
+              const result = replaceKeepingEndings(contentOld, params.oldString, params.newString, params.replaceAll)
+              const replaced = result.text
+              replacements = result.count
               if (replaced === contentOld) {
                 throw new Error(
                   params.oldString.replaceAll("\r", "") === params.newString.replaceAll("\r", "")
@@ -288,7 +293,10 @@ export const EditTool = Tool.define(
             },
           })
 
-          let output = "Edit applied successfully."
+          let output =
+            replacements === 0
+              ? `Created ${filePath}`
+              : `Edited ${filePath} (${replacements} replacement${replacements === 1 ? "" : "s"})`
           yield* lsp.touchFile(filePath, "document")
           const diagnostics = yield* lsp.diagnostics()
           const normalizedFilePath = FSUtil.normalizePath(filePath)
@@ -301,7 +309,7 @@ export const EditTool = Tool.define(
               diff,
               filediff,
             },
-            title: `${path.relative(instance.worktree, filePath)}`,
+            title: path.relative(instance.worktree, filePath),
             output,
           }
         }),
@@ -774,10 +782,6 @@ export function trimDiff(diff: string): string {
   return trimmedLines.join("\n")
 }
 
-export function replace(content: string, oldString: string, newString: string, replaceAll = false): string {
-  return applyMatches(content, findMatches(content, oldString, newString, replaceAll), () => newString)
-}
-
 type Match = { start: number; end: number }
 
 // The spans of content that oldString resolves to through the replacer chain: every occurrence of the
@@ -832,7 +836,9 @@ function findMatches(content: string, oldString: string, newString: string, repl
       "Could not find oldString in the file. It must match exactly, including whitespace, indentation, and line endings.",
     )
   }
-  throw new Error("Found multiple matches for oldString. Provide more surrounding context to make the match unique.")
+  throw new Error(
+    "Found multiple matches for oldString, but expected exactly one. Add more surrounding context to make oldString unique, or set replaceAll to true to replace every occurrence.",
+  )
 }
 
 function applyMatches(content: string, matches: Match[], replacement: (match: Match) => string) {

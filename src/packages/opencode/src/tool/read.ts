@@ -28,10 +28,10 @@ class ReadStop extends Schema.TaggedErrorClass<ReadStop>()("ReadStop", {}) {}
 export const Parameters = Schema.Struct({
   filePath: Schema.String.annotate({ description: "The absolute path to the file or directory to read" }),
   offset: Schema.optional(NonNegativeInt).annotate({
-    description: "The line number to start reading from (1-indexed)",
+    description: "The line or directory entry to start reading from (1-based)",
   }),
   limit: Schema.optional(NonNegativeInt).annotate({
-    description: "The maximum number of lines to read (defaults to 2000)",
+    description: "The maximum number of lines or directory entries to read (defaults to 2000)",
   }),
 })
 
@@ -290,23 +290,28 @@ export const ReadTool = Tool.define<
         const start = offset - 1
         const sliced = items.slice(start, start + limit)
         const truncated = start + sliced.length < items.length
+        const loaded = yield* instruction.resolve(ctx.messages, filepath, ctx.messageID, true)
+        const output = [
+          `<path>${filepath}</path>`,
+          `<type>directory</type>`,
+          `<entries>`,
+          sliced.join("\n"),
+          truncated
+            ? `\n(Showing ${sliced.length} of ${items.length} entries. Use 'offset' parameter to read beyond entry ${offset + sliced.length})`
+            : `\n(${items.length} entries)`,
+          `</entries>`,
+        ].join("\n")
 
         return {
           title,
-          output: [
-            `<path>${filepath}</path>`,
-            `<type>directory</type>`,
-            `<entries>`,
-            sliced.join("\n"),
-            truncated
-              ? `\n(Showing ${sliced.length} of ${items.length} entries. Use 'offset' parameter to read beyond entry ${offset + sliced.length})`
-              : `\n(${items.length} entries)`,
-            `</entries>`,
-          ].join("\n"),
+          output:
+            loaded.length > 0
+              ? `${output}\n\n<system-reminder>\n${loaded.map((item) => item.content).join("\n\n")}\n</system-reminder>`
+              : output,
           metadata: {
             preview: sliced.slice(0, 20).join("\n"),
             truncated,
-            loaded: [] as string[],
+            loaded: loaded.map((item) => item.filepath),
             display: {
               type: "directory" as const,
               path: filepath,

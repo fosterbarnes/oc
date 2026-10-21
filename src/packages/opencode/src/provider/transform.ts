@@ -15,12 +15,39 @@ function mimeToModality(mime: string): Modality | undefined {
   return undefined
 }
 
-export const OUTPUT_TOKEN_MAX = 32_000
+// No reply needs more, however much the model allows.
+export const OUTPUT_TOKEN_MAX = 256_000
+// Used when the catalog has no output limit for the model.
+export const OUTPUT_TOKEN_FALLBACK = 32_000
+// Thinking budgets stay at the old output cap, so they never crowd out the reply.
+const THINKING_BUDGET_MAX = 32_000
+// Prompt text is estimated at about 4 characters per token, which can run low on dense text such as code.
+const ESTIMATE_ERROR = 0.15
+// Never ask for less, even when the estimate says the window is full.
+const OUTPUT_TOKEN_MIN = 1_024
 
 // OpenAI Responses `include` value that returns the encrypted reasoning state
 // needed for stateless multi-turn reasoning (store: false). Hoisted so every
 // branch that requests it stays in lockstep.
 const INCLUDE_ENCRYPTED_REASONING = ["reasoning.encrypted_content"] as const
+
+// OpenAI-compatible catalog providers whose Chat Completions body accepts `prompt_cache_key`
+// (upstream's audited list). Strict providers reject unknown body fields, so others never get it.
+const PROMPT_CACHE_KEY_PROVIDERS = new Set([
+  "abliteration-ai",
+  "anyapi",
+  "auriko",
+  "edenai",
+  "fireworks-ai",
+  "jalapeno",
+  "llama",
+  "moonshotai",
+  "moonshotai-cn",
+  "morph",
+  "snowflake-cortex",
+  "tencent-tokenhub",
+  "upstage",
+])
 
 export function sanitizeSurrogates(content: string) {
   return content.replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, "\uFFFD")
@@ -1312,7 +1339,12 @@ export function options(input: {
   }
 
   if (input.providerOptions?.setCacheKey !== false) {
-    if (input.model.api.npm === "@ai-sdk/deepinfra" || input.model.api.npm === "@ai-sdk/cerebras") {
+    if (
+      input.model.api.npm === "@ai-sdk/deepinfra" ||
+      input.model.api.npm === "@ai-sdk/cerebras" ||
+      input.model.api.npm === "@openrouter/ai-sdk-provider" ||
+      (input.model.api.npm === "@ai-sdk/openai-compatible" && PROMPT_CACHE_KEY_PROVIDERS.has(input.model.providerID))
+    ) {
       result["prompt_cache_key"] = input.sessionID
     } else if (
       input.model.api.npm === "@ai-sdk/openai" ||
@@ -1469,8 +1501,12 @@ export function providerOptions(model: Provider.Model, options: { [x: string]: a
   return { [key]: normalized }
 }
 
-export function maxOutputTokens(model: Provider.Model, outputTokenMax = OUTPUT_TOKEN_MAX): number {
-  return Math.min(model.limit.output, outputTokenMax) || outputTokenMax
+/** The model's output limit, capped, and fitted to the room an estimated prompt leaves in the context window. */
+export function maxOutputTokens(model: Provider.Model, outputTokenMax = OUTPUT_TOKEN_MAX, promptTokens?: number) {
+  const requested = Math.min(model.limit.output || OUTPUT_TOKEN_FALLBACK, outputTokenMax)
+  if (promptTokens === undefined || model.limit.context <= 0) return requested
+  const room = model.limit.context - Math.ceil(promptTokens * (1 + ESTIMATE_ERROR))
+  return Math.min(requested, Math.max(OUTPUT_TOKEN_MIN, room))
 }
 
 type JsonRecord = Record<string, unknown>
@@ -1741,7 +1777,7 @@ function effortVariants(model: Provider.Model, values: readonly unknown[]) {
 }
 
 function budgetVariants(model: Provider.Model, min?: number, max?: number) {
-  const maximum = Math.min(max ?? OUTPUT_TOKEN_MAX - 1, model.limit.output - 1, OUTPUT_TOKEN_MAX - 1)
+  const maximum = Math.min(max ?? THINKING_BUDGET_MAX - 1, model.limit.output - 1, THINKING_BUDGET_MAX - 1)
   if (maximum <= 0) return {}
   const high = Math.min(Math.max(min ?? 0, Math.floor((maximum + 1) / 2)), maximum)
   return Object.fromEntries(

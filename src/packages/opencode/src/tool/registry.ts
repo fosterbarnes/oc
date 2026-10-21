@@ -8,6 +8,8 @@ import { PlanCloseoutTool } from "./planCloseout"
 import { SessionCompleteTool } from "./sessionComplete"
 import { SessionFailedTool } from "./sessionFailed"
 import { SessionTailTool } from "./sessionTail"
+import { SessionRenameTool } from "./sessionRename"
+import { ModelsTool } from "./models"
 import { RunAfterTurnTool } from "./runAfterTurn"
 import { TimeTool } from "./time"
 import { ScheduleCancelTool, ScheduleListTool, SchedulePromptTool } from "./schedule"
@@ -30,6 +32,7 @@ import { InvalidTool } from "./invalid"
 import { SkillTool } from "./skill"
 import * as Tool from "./tool"
 import { Config } from "@/config/config"
+import { ConfigV1 } from "@opencode-ai/core/v1/config/config"
 import { type ToolContext as PluginToolContext, type ToolDefinition } from "@opencode-ai/plugin"
 import type { JSONSchema7, JSONSchema7Definition } from "@ai-sdk/provider"
 import { Schema } from "effect"
@@ -70,7 +73,13 @@ import { MCP } from "@/mcp"
 import { PermissionV1 } from "@opencode-ai/core/v1/permission"
 import { McpCatalog } from "@/mcp/catalog"
 
-export function webSearchEnabled(providerID: ProviderV2.ID, flags = { exa: false, parallel: false }) {
+export function webSearchEnabled(
+  providerID: ProviderV2.ID,
+  flags = { exa: false, parallel: false },
+  configured?: ConfigV1.Info["websearch"],
+) {
+  if (configured === false) return false
+  if (configured?.provider) return true
   return (
     providerID === ProviderV2.ID.opencode ||
     providerID === ProviderV2.ID.make("opencode-go") ||
@@ -126,6 +135,8 @@ const layer = Layer.effect(
     const sessionComplete = yield* SessionCompleteTool
     const sessionFailed = yield* SessionFailedTool
     const sessionTail = yield* SessionTailTool
+    const sessionRename = yield* SessionRenameTool
+    const models = yield* ModelsTool
     const runAfterTurn = yield* RunAfterTurnTool
     const time = yield* TimeTool
     const schedulePrompt = yield* SchedulePromptTool
@@ -270,6 +281,8 @@ const layer = Layer.effect(
           sessionComplete: Tool.init(sessionComplete),
           sessionFailed: Tool.init(sessionFailed),
           sessionTail: Tool.init(sessionTail),
+          sessionRename: Tool.init(sessionRename),
+          models: Tool.init(models),
           runAfterTurn: Tool.init(runAfterTurn),
           time: Tool.init(time),
           schedulePrompt: Tool.init(schedulePrompt),
@@ -292,9 +305,11 @@ const layer = Layer.effect(
             tool.edit,
             tool.write,
             tool.task,
+            tool.models,
             tool.sessionComplete,
             tool.sessionFailed,
             tool.sessionTail,
+            tool.sessionRename,
             tool.runAfterTurn,
             tool.time,
             tool.schedulePrompt,
@@ -363,9 +378,14 @@ const layer = Layer.effect(
     })
 
     const tools: Interface["tools"] = Effect.fn("ToolRegistry.tools")(function* (input) {
+      const cfg = yield* config.get()
       const filtered = (yield* all()).filter((tool) => {
         if (tool.id === WebSearchTool.id) {
-          return webSearchEnabled(input.providerID, { exa: flags.enableExa, parallel: flags.enableParallel })
+          return webSearchEnabled(
+            input.providerID,
+            { exa: flags.enableExa, parallel: flags.enableParallel },
+            cfg.websearch,
+          )
         }
 
         // Without a key every jev call would fail, so the tools stay hidden.

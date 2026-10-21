@@ -232,6 +232,7 @@ export const Definitions = {
   "dialog.close": keybind("ctrl+c", "Close dialog"),
   "dialog.session_rename.copy": keybind("ctrl+c", "Copy session name"),
   "dialog.mcp.toggle": keybind("space", "Toggle MCP in MCP dialog"),
+  "dialog.mcp.reconnect": keybind("ctrl+r", "Reconnect MCP in MCP dialog"),
   "dialog.session.status.cycle": keybind("ctrl+s", "Cycle session picker status filter"),
   "dialog.move_session.new": keybind("ctrl+m", "New project copy"),
   "dialog.move_session.delete": keybind("ctrl+d", "Delete project copy"),

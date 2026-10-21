@@ -34,9 +34,9 @@ const replyEffect = Effect.fn("QuestionTest.reply")(function* (input: {
   yield* question.reply(input)
 })
 
-const rejectEffect = Effect.fn("QuestionTest.reject")(function* (id: QuestionID) {
+const rejectEffect = Effect.fn("QuestionTest.reject")(function* (id: QuestionID, message?: string) {
   const question = yield* Question.Service
-  yield* question.reject(id)
+  yield* question.reject(id, message)
 })
 
 const cancelEffect = Effect.fn("QuestionTest.cancel")(function* (sessionID: SessionID) {
@@ -234,6 +234,35 @@ it.instance(
       const exit = yield* Fiber.await(fiber)
       expect(exit._tag).toBe("Failure")
       if (exit._tag === "Failure") expect(exit.cause.toString()).toContain("QuestionRejectedError")
+    }),
+  { git: true },
+)
+
+it.instance(
+  "reject - carries the dismiss message to the agent",
+  () =>
+    Effect.gen(function* () {
+      const ask = (question: string) =>
+        askEffect({
+          sessionID: SessionID.make("ses_test"),
+          questions: [{ question, header: "Action", options: [{ label: "Go", description: "Go" }] }],
+        }).pipe(Effect.flip, Effect.forkScoped)
+
+      const withMessage = yield* ask("First?")
+      const first = yield* waitForPending(1)
+      yield* rejectEffect(first[0].id, "  Use the staging database instead  ")
+      const error = yield* Fiber.join(withMessage)
+      expect(error.feedback).toBe("Use the staging database instead")
+      expect(error.message).toBe(
+        "The user dismissed this question with the following message: Use the staging database instead",
+      )
+
+      const blank = yield* ask("Second?")
+      const second = yield* waitForPending(1)
+      yield* rejectEffect(second[0].id, "   ")
+      const bare = yield* Fiber.join(blank)
+      expect(bare.feedback).toBeUndefined()
+      expect(bare.message).toBe("The user dismissed this question")
     }),
   { git: true },
 )

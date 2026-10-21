@@ -22,3 +22,23 @@ describe("provider stream errors", () => {
       })
   })
 })
+
+describe("content filter message", () => {
+  test("names the policy area and reason from Anthropic stop details", () => {
+    const metadata = {
+      anthropic: { stopDetails: { type: "refusal", category: "cyber", explanation: "Request asked for malware" } },
+    }
+    expect(ProviderError.contentFilterMessage(metadata)).toBe(
+      "The response was blocked by the provider's content filter (cyber): Request asked for malware",
+    )
+  })
+
+  test("falls back to the plain message without details", () => {
+    expect(ProviderError.contentFilterMessage(undefined)).toBe(
+      "The response was blocked by the provider's content filter",
+    )
+    expect(ProviderError.contentFilterMessage({ anthropic: { stopDetails: { type: "refusal" } } })).toBe(
+      "The response was blocked by the provider's content filter",
+    )
+  })
+})

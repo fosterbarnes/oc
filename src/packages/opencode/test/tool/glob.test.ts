@@ -161,4 +161,22 @@ describe("tool.glob", () => {
       expect(result.output).toBe(path.join(test.directory, "src", "visible.ts"))
     }),
   )
+
+  it.instance("includes hidden files when hidden is true", () =>
+    Effect.gen(function* () {
+      const test = yield* TestInstance
+      yield* Effect.promise(() =>
+        Promise.all(
+          ["src/visible.ts", ".hidden.ts", ".hidden/nested.ts"].map((file) =>
+            Bun.write(path.join(test.directory, file), "needle\n"),
+          ),
+        ),
+      )
+      const info = yield* GlobTool
+      const glob = yield* info.init()
+      const result = yield* glob.execute({ pattern: "**/*.ts", path: test.directory, hidden: true }, ctx)
+      expect(result.metadata.count).toBe(3)
+      expect(result.output).toContain(path.join(test.directory, ".hidden", "nested.ts"))
+    }),
+  )
 })

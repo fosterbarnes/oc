@@ -7,6 +7,8 @@ import os from "os"
 import { createHash } from "node:crypto"
 import { SessionID, MessageID, PartID } from "./schema"
 import { claudeSteerSinks, isClaudeCodeProvider, STEERED_METADATA_KEY } from "@/provider/claude-code/shared"
+import { CURSOR_PROVIDER_ID } from "@/provider/cursor/shared"
+import { ProviderError } from "@/provider/error"
 import { EffectBridge } from "@/effect/bridge"
 import { MessageV2 } from "./message-v2"
 import { SessionRevert } from "./revert"
@@ -111,6 +113,22 @@ function isOrphanedInterruptedTool(part: SessionV1.ToolPart) {
   // cleanup() marks abandoned tool_use blocks this way after retries/aborts.
   // They are not pending work and must not trigger an assistant-prefill request.
   return part.state.status === "error" && part.state.metadata?.interrupted === true
+}
+
+const OUTPUT_LIMIT_CONTINUE_KEY = "output_limit_continue"
+const OUTPUT_LIMIT_CONTINUE_MAX = 2
+const OUTPUT_LIMIT_CONTINUE_PROMPT =
+  "Your last response hit the output token limit (stop reason: length). Do not apologize, recap, or repeat yourself. Break the remaining work into smaller pieces."
+
+// Output-limit continue prompts since the last real user message.
+function outputLimitStreak(msgs: SessionV1.WithParts[]) {
+  let count = 0
+  for (const msg of msgs.toReversed()) {
+    if (msg.info.role !== "user") continue
+    if (!msg.parts.some((part) => part.type === "text" && part.metadata?.[OUTPUT_LIMIT_CONTINUE_KEY])) break
+    count++
+  }
+  return count
 }
 
 // Every user message after this reply was read by Claude while the reply ran (`steerClaudeTurn`), so it answers them.
@@ -1426,6 +1444,41 @@ const layer = Layer.effect(
                 continue
               }
             }
+            // A reply cut off at the output limit continues, up to twice. Claude Code and Cursor run their own turns.
+            if (
+              lastAssistant.finish === "length" &&
+              !lastAssistant.error &&
+              !isClaudeCodeProvider(lastAssistant.providerID) &&
+              lastAssistant.providerID !== CURSOR_PROVIDER_ID &&
+              !(yield* pendingBeforeExit(lastUser.id))
+            ) {
+              if (outputLimitStreak(msgs) < OUTPUT_LIMIT_CONTINUE_MAX) {
+                const continueMsg = yield* sessions.updateMessage({
+                  id: MessageID.ascending(),
+                  sessionID,
+                  role: "user",
+                  time: { created: Date.now() },
+                  agent: lastUser.agent,
+                  model: lastUser.model,
+                  ...(lastUser.permission ? { permission: lastUser.permission } : {}),
+                  ...(lastUser.toolHost ? { toolHost: lastUser.toolHost } : {}),
+                })
+                yield* sessions.updatePart({
+                  id: PartID.ascending(),
+                  messageID: continueMsg.id,
+                  sessionID,
+                  type: "text",
+                  text: OUTPUT_LIMIT_CONTINUE_PROMPT,
+                  synthetic: true,
+                  metadata: { [OUTPUT_LIMIT_CONTINUE_KEY]: true },
+                } satisfies SessionV1.TextPart)
+                continue
+              }
+              yield* Effect.logWarning("reply still truncated after output limit continuations", {
+                "session.id": sessionID,
+                messageID: lastAssistant.id,
+              })
+            }
             yield* Effect.logInfo("exiting loop", { "session.id": sessionID })
             if (yield* pendingBeforeExit(lastUser.id)) continue
             break
@@ -1632,7 +1685,7 @@ const layer = Layer.effect(
               // partial text that was cut off by the provider's filter.
               if (handle.message.finish === "content-filter") {
                 handle.message.error = new SessionV1.ContentFilterError({
-                  message: "The response was blocked by the provider's content filter",
+                  message: handle.blockedMessage ?? ProviderError.contentFilterMessage(undefined),
                 }).toObject()
                 yield* sessions.updateMessage(handle.message)
                 yield* events.publish(Session.Event.Error, { sessionID, error: handle.message.error })

@@ -1,10 +1,10 @@
 import { Duration, Effect, Schema } from "effect"
 import { HttpClient, HttpClientRequest } from "effect/unstable/http"
 
-export const EXA_URL = process.env.EXA_API_KEY
-  ? `https://mcp.exa.ai/mcp?exaApiKey=${encodeURIComponent(process.env.EXA_API_KEY)}`
-  : "https://mcp.exa.ai/mcp"
+export const exaUrl = (apiKey?: string) =>
+  apiKey ? `https://mcp.exa.ai/mcp?exaApiKey=${encodeURIComponent(apiKey)}` : "https://mcp.exa.ai/mcp"
 export const PARALLEL_URL = "https://search.parallel.ai/mcp"
+export const FIRECRAWL_URL = "https://mcp.firecrawl.dev/v2/mcp"
 
 const McpResult = Schema.Struct({
   result: Schema.Struct({
@@ -53,6 +53,11 @@ export const ParallelSearchArgs = Schema.Struct({
   search_queries: Schema.Array(Schema.String),
   session_id: Schema.optional(Schema.String),
   model_name: Schema.optional(Schema.String),
+})
+
+export const FirecrawlSearchArgs = Schema.Struct({
+  query: Schema.String,
+  limit: Schema.Number,
 })
 
 const McpRequest = <F extends Schema.Struct.Fields>(args: Schema.Struct<F>) =>

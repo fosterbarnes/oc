@@ -248,3 +248,22 @@ describe("idempotence", () => {
     })
   }
 })
+
+describe("tool name repair", () => {
+  const available = ["read", "session_rename", "web-fetch", "github_get_issue", "github_getIssue"]
+  const cases: [string, string | undefined][] = [
+    ["read", "read"],
+    ["Read", "read"],
+    ["SessionRename", "session_rename"],
+    ["session-rename", "session_rename"],
+    ["functions.read", "read"],
+    ["web_fetch", "web-fetch"],
+    ["github_getissue", undefined],
+    ["unknown_tool", undefined],
+  ]
+  for (const [name, expected] of cases) {
+    test(`${name} -> ${expected ?? "unrepaired"}`, () => {
+      expect(ToolInputRepair.repairToolName(name, available)).toBe(expected)
+    })
+  }
+})

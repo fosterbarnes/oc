@@ -4594,6 +4594,78 @@
         ]
       }
     },
+    "/mcp/{name}/reconnect": {
+      "post": {
+        "tags": ["mcp"],
+        "operationId": "mcp.reconnect",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "schema": {
+              "type": "string"
+            },
+            "required": true
+          },
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "MCP server reconnected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "boolean",
+                  "description": "MCP server reconnected"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BadRequestError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "McpServerNotFoundError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpServerNotFoundError"
+                }
+              }
+            }
+          }
+        },
+        "description": "Close an MCP server's connection and connect it again.",
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.mcp.reconnect({\n  ...\n})"
+          }
+        ]
+      }
+    },
     "/project": {
       "get": {
         "tags": ["project"],
@@ -5838,6 +5910,14 @@
               "type": "string"
             },
             "required": false
+          },
+          {
+            "name": "message",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
           }
         ],
         "responses": {
@@ -5880,7 +5960,7 @@
             }
           }
         },
-        "description": "Reject a question request from the AI assistant.",
+        "description": "Reject a question request from the AI assistant, optionally with a message the assistant receives and continues from.",
         "summary": "Reject question request",
         "x-codeSamples": [
           {
@@ -17568,6 +17648,9 @@
             "$ref": "#/components/schemas/EventMcpBrowserOpenFailed"
           },
           {
+            "$ref": "#/components/schemas/EventMcpStatusChanged"
+          },
+          {
             "$ref": "#/components/schemas/EventCommandExecuted"
           },
           {
@@ -22178,6 +22261,31 @@
                   },
                   "type": {
                     "type": "string",
+                    "enum": ["mcp.status.changed"]
+                  },
+                  "properties": {
+                    "type": "object",
+                    "properties": {
+                      "server": {
+                        "type": "string"
+                      }
+                    },
+                    "required": ["server"],
+                    "additionalProperties": false
+                  }
+                },
+                "required": ["id", "type", "properties"],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "pattern": "^evt_"
+                  },
+                  "type": {
+                    "type": "string",
                     "enum": ["command.executed"]
                   },
                   "properties": {
@@ -23150,6 +23258,33 @@
                     }
                   ]
                 },
+                "compatibility": {
+                  "type": "object",
+                  "properties": {
+                    "reasoningField": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "enum": ["reasoning", "reasoning_content", "reasoning_text"]
+                        },
+                        {
+                          "type": "string"
+                        }
+                      ]
+                    },
+                    "maxTokensField": {
+                      "type": "string",
+                      "enum": ["max_completion_tokens", "max_tokens"],
+                      "description": "Request field for the output token limit (default max_tokens)"
+                    },
+                    "requireFinishReason": {
+                      "type": "boolean",
+                      "description": "Fail a streamed reply that ends without a finish_reason instead of accepting it"
+                    }
+                  },
+                  "additionalProperties": false,
+                  "description": "OpenAI-compatible chat quirks (@ai-sdk/openai-compatible models only)"
+                },
                 "cost": {
                   "type": "object",
                   "properties": {
@@ -23836,6 +23971,28 @@
               "type": "boolean"
             }
           },
+          "websearch": {
+            "anyOf": [
+              {
+                "type": "boolean",
+                "enum": [false]
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "provider": {
+                    "type": "string",
+                    "enum": ["random", "exa", "parallel", "firecrawl", "tavily"]
+                  },
+                  "apiKey": {
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false
+              }
+            ],
+            "description": "Web search tool settings. Set to false to disable the websearch tool"
+          },
           "attachment": {
             "$ref": "#/components/schemas/AttachmentConfig"
           },
@@ -24278,6 +24435,19 @@
             "additionalProperties": {
               "type": "string"
             }
+          },
+          "compatibility": {
+            "type": "object",
+            "properties": {
+              "maxTokensField": {
+                "type": "string",
+                "enum": ["max_completion_tokens", "max_tokens"]
+              },
+              "requireFinishReason": {
+                "type": "boolean"
+              }
+            },
+            "additionalProperties": false
           },
           "release_date": {
             "type": "string"
@@ -25213,6 +25383,17 @@
         "required": ["status", "error"],
         "additionalProperties": false
       },
+      "MCPStatusConnecting": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": ["connecting"]
+          }
+        },
+        "required": ["status"],
+        "additionalProperties": false
+      },
       "MCPStatus": {
         "anyOf": [
           {
@@ -25229,6 +25410,9 @@
           },
           {
             "$ref": "#/components/schemas/MCPStatusNeedsClientRegistration"
+          },
+          {
+            "$ref": "#/components/schemas/MCPStatusConnecting"
           }
         ]
       },
@@ -28446,6 +28630,9 @@
           },
           {
             "$ref": "#/components/schemas/McpBrowserOpenFailed"
+          },
+          {
+            "$ref": "#/components/schemas/McpStatusChanged"
           },
           {
             "$ref": "#/components/schemas/CommandExecuted"
@@ -37411,6 +37598,53 @@
         "required": ["id", "type", "data"],
         "additionalProperties": false
       },
+      "McpStatusChanged": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^evt_"
+          },
+          "metadata": {
+            "type": "object"
+          },
+          "type": {
+            "type": "string",
+            "enum": ["mcp.status.changed"]
+          },
+          "durable": {
+            "type": "object",
+            "properties": {
+              "aggregateID": {
+                "type": "string"
+              },
+              "seq": {
+                "type": "integer"
+              },
+              "version": {
+                "type": "integer"
+              }
+            },
+            "required": ["aggregateID", "seq", "version"],
+            "additionalProperties": false
+          },
+          "location": {
+            "$ref": "#/components/schemas/LocationRef"
+          },
+          "data": {
+            "type": "object",
+            "properties": {
+              "server": {
+                "type": "string"
+              }
+            },
+            "required": ["server"],
+            "additionalProperties": false
+          }
+        },
+        "required": ["id", "type", "data"],
+        "additionalProperties": false
+      },
       "CommandExecuted": {
         "type": "object",
         "properties": {
@@ -40671,6 +40905,31 @@
               }
             },
             "required": ["mcpName", "url"],
+            "additionalProperties": false
+          }
+        },
+        "required": ["id", "type", "properties"],
+        "additionalProperties": false
+      },
+      "EventMcpStatusChanged": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^evt_"
+          },
+          "type": {
+            "type": "string",
+            "enum": ["mcp.status.changed"]
+          },
+          "properties": {
+            "type": "object",
+            "properties": {
+              "server": {
+                "type": "string"
+              }
+            },
+            "required": ["server"],
             "additionalProperties": false
           }
         },

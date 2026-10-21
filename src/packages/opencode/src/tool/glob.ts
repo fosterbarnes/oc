@@ -13,6 +13,9 @@ export const Parameters = Schema.Struct({
   path: Schema.optional(Schema.String).annotate({
     description: `The directory to search in. If not specified, the current working directory will be used. IMPORTANT: Omit this field to use the default directory. DO NOT enter "undefined" or "null" - simply omit it for the default behavior. Must be a valid directory path if provided.`,
   }),
+  hidden: Schema.optional(Schema.Boolean).annotate({
+    description: "Include hidden files and directories (default: false).",
+  }),
 })
 
 export const GlobTool = Tool.define(
@@ -23,7 +26,7 @@ export const GlobTool = Tool.define(
     return {
       description: DESCRIPTION,
       parameters: Parameters,
-      execute: (params: { pattern: string; path?: string }, ctx: Tool.Context) =>
+      execute: (params: Schema.Schema.Type<typeof Parameters>, ctx: Tool.Context) =>
         Effect.gen(function* () {
           const ins = yield* InstanceState.context
           yield* ctx.ask({
@@ -53,17 +56,19 @@ export const GlobTool = Tool.define(
           })
 
           const limit = 100
-          const files = yield* ripgrep.glob({ cwd: search, pattern: params.pattern, limit }).pipe(
-            Effect.timeoutOrElse({
-              duration: FileSystem.DEFAULT_SEARCH_TIMEOUT_MS,
-              orElse: () =>
-                Effect.die(
-                  new Error(
-                    `Search timed out after ${FileSystem.DEFAULT_SEARCH_TIMEOUT_MS / 1_000} seconds. Consider using a more specific path or pattern.`,
+          const files = yield* ripgrep
+            .glob({ cwd: search, pattern: params.pattern, limit, hidden: params.hidden })
+            .pipe(
+              Effect.timeoutOrElse({
+                duration: FileSystem.DEFAULT_SEARCH_TIMEOUT_MS,
+                orElse: () =>
+                  Effect.die(
+                    new Error(
+                      `Search timed out after ${FileSystem.DEFAULT_SEARCH_TIMEOUT_MS / 1_000} seconds. Consider using a more specific path or pattern.`,
+                    ),
                   ),
-                ),
-            }),
-          )
+              }),
+            )
           const truncated = files.length === limit
 
           const output = []

@@ -44,8 +44,11 @@ export const questionHandlers = HttpApiBuilder.group(InstanceHttpApi, "question"
       return true
     })
 
-    const reject = Effect.fn("QuestionHttpApi.reject")(function* (ctx: { params: { requestID: QuestionID } }) {
-      yield* svc.reject(ctx.params.requestID).pipe(
+    const reject = Effect.fn("QuestionHttpApi.reject")(function* (ctx: {
+      params: { requestID: QuestionID }
+      query: { message?: string }
+    }) {
+      yield* svc.reject(ctx.params.requestID, ctx.query.message).pipe(
         Effect.catchTag("Question.NotFoundError", (error) =>
           Effect.fail(
             new QuestionNotFoundError({

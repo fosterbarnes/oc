@@ -673,6 +673,12 @@ export const {
           break
         }
 
+        case "mcp.status.changed": {
+          const workspace = project.workspace.current()
+          void sdk.client.mcp.status({ workspace }).then((x) => setStore("mcp", reconcile(x.data ?? {})))
+          break
+        }
+
         case "vcs.branch.updated": {
           if (workspace === project.workspace.current()) {
             setStore("vcs", { branch: event.properties.branch })

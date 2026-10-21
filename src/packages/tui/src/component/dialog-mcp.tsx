@@ -7,8 +7,11 @@ import { useTheme } from "../context/theme"
 import { TextAttributes } from "@opentui/core"
 import { useSDK } from "../context/sdk"
 
-function Status(props: { enabled: boolean; loading: boolean }) {
+function Status(props: { enabled: boolean; loading: boolean; connecting: boolean }) {
   const { theme } = useTheme()
+  if (props.connecting) {
+    return <span style={{ fg: theme.warning }}>◌ Connecting</span>
+  }
   if (props.loading) {
     return <span style={{ fg: theme.textMuted }}>⋯ Loading</span>
   }
@@ -39,7 +42,13 @@ export function DialogMcp() {
         value: name,
         title: name,
         description: status.status === "failed" ? "failed" : status.status,
-        footer: <Status enabled={local.mcp.isEnabled(name)} loading={loadingMcp.has(name)} />,
+        footer: (
+          <Status
+            enabled={local.mcp.isEnabled(name)}
+            loading={loadingMcp.has(name)}
+            connecting={status.status === "connecting"}
+          />
+        ),
         details: "error" in status ? [status.error] : undefined,
         detailsColor: theme.error,
         detailsWrap: true,
@@ -48,35 +57,43 @@ export function DialogMcp() {
     )
   })
 
+  // Each server runs independently; ignore repeats while its own action or handshake runs
+  const run = async (name: string, label: string, action: () => Promise<unknown>) => {
+    if (loading().has(name) || sync.data.mcp[name]?.status === "connecting") return
+
+    setLoading((prev) => new Set(prev).add(name))
+    try {
+      await action()
+      // Refresh MCP status from server
+      const status = await sdk.client.mcp.status()
+      if (status.data) {
+        sync.set("mcp", status.data)
+      } else {
+        console.error("Failed to refresh MCP status: no data returned")
+      }
+    } catch (error) {
+      console.error(`Failed to ${label} MCP:`, error)
+    } finally {
+      setLoading((prev) => {
+        const next = new Set(prev)
+        next.delete(name)
+        return next
+      })
+    }
+  }
+
   const actions = createMemo(() => [
     {
       command: "dialog.mcp.toggle",
       title: "toggle",
-      onTrigger: async (option: DialogSelectOption<string>) => {
-        // Each server toggles independently; ignore repeats while its own toggle runs
-        const name = option.value
-        if (loading().has(name)) return
-
-        setLoading((prev) => new Set(prev).add(name))
-        try {
-          await local.mcp.toggle(name)
-          // Refresh MCP status from server
-          const status = await sdk.client.mcp.status()
-          if (status.data) {
-            sync.set("mcp", status.data)
-          } else {
-            console.error("Failed to refresh MCP status: no data returned")
-          }
-        } catch (error) {
-          console.error("Failed to toggle MCP:", error)
-        } finally {
-          setLoading((prev) => {
-            const next = new Set(prev)
-            next.delete(name)
-            return next
-          })
-        }
-      },
+      onTrigger: (option: DialogSelectOption<string>) =>
+        run(option.value, "toggle", () => local.mcp.toggle(option.value)),
+    },
+    {
+      command: "dialog.mcp.reconnect",
+      title: "reconnect",
+      onTrigger: (option: DialogSelectOption<string>) =>
+        run(option.value, "reconnect", () => sdk.client.mcp.reconnect({ name: option.value })),
     },
   ])
 

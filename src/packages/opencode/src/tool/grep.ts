@@ -9,12 +9,18 @@ import DESCRIPTION from "./grep.txt"
 import * as Tool from "./tool"
 
 export const Parameters = Schema.Struct({
-  pattern: Schema.String.annotate({ description: "The regex pattern to search for in file contents" }),
+  pattern: Schema.String.annotate({ description: "Regular expression or literal text to match in file contents" }),
   path: Schema.optional(Schema.String).annotate({
     description: "The directory to search in. Defaults to the current working directory.",
   }),
   include: Schema.optional(Schema.String).annotate({
     description: 'File pattern to include in the search (e.g. "*.js", "*.{ts,tsx}")',
+  }),
+  literal: Schema.optional(Schema.Boolean).annotate({
+    description: "Treat `pattern` as exact text instead of a regular expression (default: false).",
+  }),
+  caseSensitive: Schema.optional(Schema.Boolean).annotate({
+    description: "Use case-sensitive matching (default: true).",
   }),
 })
 
@@ -26,7 +32,7 @@ export const GrepTool = Tool.define(
     return {
       description: DESCRIPTION,
       parameters: Parameters,
-      execute: (params: { pattern: string; path?: string; include?: string }, ctx: Tool.Context) =>
+      execute: (params: Schema.Schema.Type<typeof Parameters>, ctx: Tool.Context) =>
         Effect.gen(function* () {
           const empty = {
             title: params.pattern,
@@ -73,6 +79,8 @@ export const GrepTool = Tool.define(
               pattern: params.pattern,
               file: info?.type === "File" ? path.basename(search) : undefined,
               include: params.include,
+              literal: params.literal,
+              caseSensitive: params.caseSensitive,
               limit: 100,
               onOversized: () => Effect.sync(() => void oversized++),
             })

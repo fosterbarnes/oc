@@ -74,6 +74,8 @@ export interface GrepInput {
   readonly file?: string
   readonly include?: string
   readonly limit: number
+  readonly literal?: boolean
+  readonly caseSensitive?: boolean
   readonly signal?: AbortSignal
   /** Called for each match dropped because its JSON record exceeds MAX_RECORD_BYTES. */
   readonly onOversized?: () => Effect.Effect<void>
@@ -229,6 +231,8 @@ const layer = Layer.effect(
             "--json",
             "--hidden",
             "--no-messages",
+            ...(input.literal ? ["--fixed-strings"] : []),
+            ...(input.caseSensitive === false ? ["--ignore-case"] : []),
             ...(input.include ? [`--glob=${input.include}`] : []),
             "--glob=!**/.git/**",
             "--",

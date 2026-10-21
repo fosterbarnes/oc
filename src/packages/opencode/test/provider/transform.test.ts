@@ -291,7 +291,7 @@ describe("ProviderTransform.options - setCacheKey", () => {
     expect(result.promptCacheKey).toBe(sessionID)
   })
 
-  test("should not send an undocumented OpenRouter prompt_cache_key", () => {
+  test("should send prompt_cache_key to OpenRouter", () => {
     const result = ProviderTransform.options({
       model: {
         ...mockModel,
@@ -301,7 +301,20 @@ describe("ProviderTransform.options - setCacheKey", () => {
       sessionID,
       providerOptions: {},
     })
-    expect(result.prompt_cache_key).toBeUndefined()
+    expect(result.prompt_cache_key).toBe(sessionID)
+  })
+
+  test("should send prompt_cache_key only to allowlisted OpenAI-compatible providers", () => {
+    const options = (providerID: string) =>
+      ProviderTransform.options({
+        model: { ...mockModel, providerID, api: { ...mockModel.api, npm: "@ai-sdk/openai-compatible" } },
+        sessionID,
+        providerOptions: {},
+      })
+    expect(options("fireworks-ai").prompt_cache_key).toBe(sessionID)
+    expect(options("moonshotai").prompt_cache_key).toBe(sessionID)
+    expect(options("custom").prompt_cache_key).toBeUndefined()
+    expect(options("custom").promptCacheKey).toBeUndefined()
   })
 })
 
@@ -6341,5 +6354,42 @@ describe("ProviderTransform.options - kimi family adaptive thinking", () => {
     }
     const result = ProviderTransform.options({ model, sessionID: "s1", providerOptions: {} })
     expect(result.thinking).toBeUndefined()
+  })
+})
+
+describe("ProviderTransform.maxOutputTokens", () => {
+  const model = (limit: { context: number; output: number }) =>
+    ({ limit }) as unknown as Parameters<typeof ProviderTransform.maxOutputTokens>[0]
+
+  test("caps at 256k and falls back to 32k without a catalog limit", () => {
+    expect(ProviderTransform.maxOutputTokens(model({ context: 1_000_000, output: 400_000 }))).toBe(256_000)
+    expect(ProviderTransform.maxOutputTokens(model({ context: 400_000, output: 128_000 }))).toBe(128_000)
+    expect(ProviderTransform.maxOutputTokens(model({ context: 200_000, output: 0 }))).toBe(32_000)
+    expect(ProviderTransform.maxOutputTokens(model({ context: 200_000, output: 64_000 }), 10_000)).toBe(10_000)
+  })
+
+  test("fits the reply to the room the prompt leaves, never below 1k", () => {
+    const big = model({ context: 200_000, output: 128_000 })
+    expect(ProviderTransform.maxOutputTokens(big, undefined, 1_000)).toBe(128_000)
+    expect(ProviderTransform.maxOutputTokens(big, undefined, 100_000)).toBe(200_000 - 115_000)
+    expect(ProviderTransform.maxOutputTokens(big, undefined, 190_000)).toBe(1_024)
+    expect(ProviderTransform.maxOutputTokens(model({ context: 0, output: 8_000 }), undefined, 190_000)).toBe(8_000)
+  })
+
+  test("prompt estimate counts text and tools, and media as a flat allowance", () => {
+    const messages: ModelMessage[] = [
+      { role: "system", content: "x".repeat(400) },
+      {
+        role: "user",
+        content: [
+          { type: "text", text: "y".repeat(400) },
+          { type: "image", image: "z".repeat(4_000_000), mediaType: "image/png" },
+        ],
+      },
+    ]
+    const tools = { read: { description: "d".repeat(400), inputSchema: jsonSchema({ type: "object" }) } }
+    const estimate = LLMRequestPrep.estimatePromptTokens(messages, tools)
+    expect(estimate).toBeGreaterThan(300 + 1_600)
+    expect(estimate).toBeLessThan(400 + 1_600)
   })
 })

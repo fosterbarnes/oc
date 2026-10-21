@@ -582,6 +582,20 @@ describe("tool.read loaded instructions", () => {
       expect(result.metadata.loaded).toContain(path.join(dir, "subdir", "AGENTS.md"))
     }),
   )
+
+  it.live("loads the read directory's own AGENTS.md", () =>
+    Effect.gen(function* () {
+      const dir = yield* tmpdirScoped()
+      yield* put(path.join(dir, "subdir", "AGENTS.md"), "# Folder Instructions")
+      yield* put(path.join(dir, "subdir", "test.txt"), "test content")
+
+      const result = yield* exec(dir, { filePath: path.join(dir, "subdir") })
+      expect(result.output).toContain("test.txt")
+      expect(result.output).toContain("<system-reminder>")
+      expect(result.output).toContain("Folder Instructions")
+      expect(result.metadata.loaded).toEqual([path.join(dir, "subdir", "AGENTS.md")])
+    }),
+  )
 })
 
 describe("tool.read binary detection", () => {

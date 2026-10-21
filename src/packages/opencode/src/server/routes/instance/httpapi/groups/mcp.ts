@@ -36,6 +36,7 @@ export const McpPaths = {
   authAuthenticate: "/mcp/:name/auth/authenticate",
   connect: "/mcp/:name/connect",
   disconnect: "/mcp/:name/disconnect",
+  reconnect: "/mcp/:name/reconnect",
 } as const
 
 export const McpApi = HttpApi.make("mcp")
@@ -134,6 +135,17 @@ export const McpApi = HttpApi.make("mcp")
           OpenApi.annotations({
             identifier: "mcp.disconnect",
             description: "Disconnect an MCP server.",
+          }),
+        ),
+        HttpApiEndpoint.post("reconnect", McpPaths.reconnect, {
+          params: { name: Schema.String },
+          query: WorkspaceRoutingQuery,
+          success: described(Schema.Boolean, "MCP server reconnected"),
+          error: McpServerNotFoundError,
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "mcp.reconnect",
+            description: "Close an MCP server's connection and connect it again.",
           }),
         ),
       )

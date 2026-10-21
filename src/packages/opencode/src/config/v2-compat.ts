@@ -116,7 +116,7 @@ export function lower(input: unknown, source = "configuration"): Result {
 
   const result: Record<string, unknown> = { ...parsed.value }
   const diagnostics: Diagnostic[] = []
-  for (const key of ["plugins", "providers", "websearch", "warming"])
+  for (const key of ["plugins", "providers", "warming"])
     if (Object.hasOwn(parsed.value, key)) unsupported([key], diagnostics)
 
   normalizeSettings(parsed.value, result, diagnostics)

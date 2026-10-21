@@ -86,6 +86,16 @@ function json(input: unknown) {
   return undefined
 }
 
+/** Content-filter message with the provider's policy area and reason when it gives them (Anthropic `stop_details`). */
+export function contentFilterMessage(providerMetadata: unknown) {
+  const details = Object.values(json(providerMetadata) ?? {})
+    .map((entry) => json(entry)?.stopDetails)
+    .find((value) => value && typeof value === "object")
+  const category = typeof details?.category === "string" && details.category ? ` (${details.category})` : ""
+  const explanation = typeof details?.explanation === "string" && details.explanation ? `: ${details.explanation}` : ""
+  return `The response was blocked by the provider's content filter${category}${explanation}`
+}
+
 export type ParsedStreamError =
   | {
       type: "context_overflow"

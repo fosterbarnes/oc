@@ -1,6 +1,6 @@
 import * as Tool from "./tool"
 import { CallToolResultSchema, type CallToolResult } from "@modelcontextprotocol/sdk/types.js"
-import { Cause, Effect, Schema } from "effect"
+import { Cause, Effect, Option, Schema } from "effect"
 import { CodeMode, Tool as SandboxTool, toolError } from "@opencode-ai/codemode"
 import { MCP } from "@/mcp"
 import { McpCatalog } from "@/mcp/catalog"
@@ -72,7 +72,11 @@ const lastSegment = (uri: string) => {
 
 const dataUrl = (mime: string, base64: string) => `data:${mime};base64,${base64}`
 
-function projectMcpResult(result: CallToolResult, collect: (attachment: Attachment) => void): unknown {
+function projectMcpResult(
+  result: CallToolResult,
+  collect: (attachment: Attachment) => void,
+  hasOutputSchema = false,
+): unknown {
   const text: string[] = []
   let files = 0
   let images = 0
@@ -107,12 +111,20 @@ function projectMcpResult(result: CallToolResult, collect: (attachment: Attachme
   }
 
   if (result.structuredContent !== undefined && result.structuredContent !== null) return result.structuredContent
-  if (text.length > 0) return text.join("\n")
+  if (text.length > 0) return parseJsonText(text.join("\n"), hasOutputSchema)
   if (files > 0) {
     const noun = files === images ? "image" : "file"
     return `[${files} ${noun}${files === 1 ? "" : "s"} attached to the result]`
   }
   return null
+}
+
+const decodeJsonText = Schema.decodeUnknownOption(Schema.UnknownFromJsonString)
+
+// Programs treat JSON returned as text as an object, so parse it when the server declares no output schema.
+function parseJsonText(text: string, hasOutputSchema: boolean) {
+  if (hasOutputSchema || !(text.startsWith("{") || text.startsWith("["))) return text
+  return Option.getOrElse(decodeJsonText(text), () => text)
 }
 
 type Run = (input: unknown) => Effect.Effect<unknown, unknown>
@@ -149,7 +161,7 @@ const invokeChildTool = Effect.fn("CodeMode.invokeChildTool")(function* (input: 
     // Deliberately mirrors McpCatalog.convertTool's transport call so the MCP service stays free of tool-loop concerns.
     return yield* Effect.promise(async () => {
       const raw = await input.entry.tool.client.callTool(
-        { name: input.entry.tool.def.name, arguments: input.args },
+        { name: input.entry.tool.def.name, arguments: input.args, _meta: { sessionID: input.ctx.sessionID } },
         CallToolResultSchema,
         {
           resetTimeoutOnProgress: true,
@@ -228,7 +240,11 @@ export const CodeModeTool = Tool.define(
               callID: `${ctx.callID ?? entry.key}/${childCalls}`,
               ctx,
             })
-            return projectMcpResult(result, (attachment: Attachment) => void attachments.push(attachment))
+            return projectMcpResult(
+              result,
+              (attachment: Attachment) => void attachments.push(attachment),
+              entry.tool.def.outputSchema !== undefined,
+            )
           }).pipe(
             Effect.catchCause((cause) => {
               if (Cause.hasInterruptsOnly(cause)) return Effect.interrupt

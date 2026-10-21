@@ -15,6 +15,19 @@ export function repairInput(value: unknown, schema: JSONSchema7): unknown {
   return repairNode(value, schema, schema, 0)
 }
 
+// Maps a misnamed tool call to the one available tool whose name differs only in case, separators
+// (`_`, `-`, `.`, spaces) or a leaked `functions.` prefix. Ambiguous or unknown names stay unrepaired.
+export function repairToolName(name: string, available: readonly string[]): string | undefined {
+  if (available.includes(name)) return name
+  const key = toolNameKey(name.replace(/^functions\./, ""))
+  const matches = available.filter((candidate) => toolNameKey(candidate) === key)
+  return matches.length === 1 ? matches[0] : undefined
+}
+
+function toolNameKey(name: string) {
+  return name.toLowerCase().replace(/[\s_.-]/g, "")
+}
+
 // Keeps the advertised schema for the model. Repairs run in the input validator, before any validation the tool already has,
 // and in execute for callers that skip AI SDK validation.
 export function withInputRepair(tool: AITool, schema: JSONSchema7): AITool {

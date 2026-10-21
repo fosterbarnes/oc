@@ -112,6 +112,10 @@ describe("mcp HttpApi", () => {
         const disconnected = yield* request(handler, "/mcp/demo/disconnect", tmp.directory, { method: "POST" })
         expect(disconnected.status).toBe(200)
         expect(yield* json(disconnected)).toBe(true)
+
+        const reconnected = yield* request(handler, "/mcp/demo/reconnect", tmp.directory, { method: "POST" })
+        expect(reconnected.status).toBe(200)
+        expect(yield* json(reconnected)).toBe(true)
       }),
     {
       config: {
@@ -203,6 +207,7 @@ describe("mcp HttpApi", () => {
           { method: "DELETE", route: "/mcp/missing/auth" },
           { method: "POST", route: "/mcp/missing/connect" },
           { method: "POST", route: "/mcp/missing/disconnect" },
+          { method: "POST", route: "/mcp/missing/reconnect" },
         ]) {
           const response = yield* request(handler, input.route, tmp.directory, {
             method: input.method,

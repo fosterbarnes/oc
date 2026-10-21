@@ -94,6 +94,22 @@ describe("session.system", () => {
     }
   })
 
+  test("GPT prompts say they run in OpenCode and keep oc's apply_patch guidance", () => {
+    for (const id of ["gpt-5", "gpt-6"]) {
+      const prompt = SystemPrompt.provider({ api: { id } } as Provider.Model)[0]
+      expect(prompt.startsWith("You are an AI agent running in OpenCode")).toBe(true)
+      expect(prompt).not.toContain("${OPENCODE_TOOL_GUIDANCE}")
+      expect(prompt).toContain("Do not chain shell commands")
+    }
+    expect(SystemPrompt.provider({ api: { id: "gpt-5" } } as Provider.Model)[0]).toContain("Use apply_patch")
+  })
+
+  test("the Claude prompt carries the code comment guidance", () => {
+    const prompt = SystemPrompt.provider({ api: { id: "claude-sonnet-5-5" } } as Provider.Model)[0]
+    expect(prompt).toContain("# Code comments")
+    expect(prompt).toContain("match the surrounding comment density")
+  })
+
   test("selects the Meta prompt for Muse Spark model IDs", () => {
     for (const id of ["meta/muse-spark-preview", "muse-spark-1.1", "muse-spark-1.2"]) {
       const prompt = SystemPrompt.provider({ api: { id } } as Provider.Model)[0]

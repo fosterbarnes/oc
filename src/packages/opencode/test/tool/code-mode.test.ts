@@ -94,6 +94,41 @@ async function failure(effect: Effect.Effect<unknown>) {
 }
 
 describe("code mode execute", () => {
+  test("parses JSON text from tools without an output schema", async () => {
+    const json = () => ({ content: [{ type: "text", text: '{"count":2,"items":["a","b"]}' }] })
+    const tool = await build({
+      plain_list: mcpTool("list", json),
+      typed_list: mcpTool("list", json, undefined, { type: "object" }),
+      plain_broken: mcpTool("broken", () => ({ content: [{ type: "text", text: "{not json" }] })),
+    })
+    const out = await Effect.runPromise(
+      tool.execute(
+        {
+          code: "const a = await tools.plain.list({}); const b = await tools.typed.list({}); const c = await tools.plain.broken({}); return [a.count, typeof b, c]",
+        },
+        ctx,
+      ),
+    )
+    expect(JSON.parse(out.output)).toEqual([2, "string", "{not json"])
+  })
+
+  test("sends the session id to MCP servers in request _meta", async () => {
+    const seen: unknown[] = []
+    const tool = await build({
+      echo_call: {
+        def: { name: "call", description: "call", inputSchema: { type: "object", properties: {} } } as MCPToolDef,
+        client: {
+          callTool: async (params: unknown) => {
+            seen.push(params)
+            return { content: [] }
+          },
+        } as unknown as MCP.McpTool["client"],
+      },
+    })
+    await Effect.runPromise(tool.execute({ code: "return await tools.echo.call({ x: 1 })" }, ctx))
+    expect(seen[0]).toEqual({ name: "call", arguments: { x: 1 }, _meta: { sessionID: ctx.sessionID } })
+  })
+
   test("defines execute input with an Effect schema", async () => {
     const decode = Schema.decodeUnknownEffect(Parameters)
     await expect(Effect.runPromise(decode({ code: "return 1" }))).resolves.toEqual({ code: "return 1" })

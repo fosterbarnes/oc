@@ -18,7 +18,7 @@ import { iife } from "@/util/iife"
 import { Global } from "@opencode-ai/core/global"
 import path from "path"
 import { pathToFileURL } from "url"
-import { Effect, Layer, Context, Schema, Types } from "effect"
+import { Effect, Layer, Context, Option, Schema, Types } from "effect"
 import { EffectBridge } from "@/effect/bridge"
 import { InstanceState } from "@/effect/instance-state"
 import { EffectPromise } from "@/effect/promise"
@@ -141,6 +141,76 @@ function timeoutFetch(options: Record<string, any>) {
     if (!chunkAbortCtl) return res
     return wrapSSE(res, chunkTimeout, chunkAbortCtl)
   }
+}
+
+type Quirks = NonNullable<ReturnType<typeof openAICompatibleQuirks>>
+
+// Model `compatibility` settings that need wire rewrites: @ai-sdk/openai-compatible only sends
+// `max_tokens`, only reads streamed reasoning from `reasoning_content`/`reasoning`, and accepts a
+// stream that ends without a finish_reason.
+function openAICompatibleQuirks(model: Model) {
+  if (!model.api.npm.includes("@ai-sdk/openai-compatible")) return
+  const field = typeof model.capabilities.interleaved === "object" ? model.capabilities.interleaved.field : undefined
+  const quirks = {
+    renameMaxTokens: model.compatibility?.maxTokensField === "max_completion_tokens",
+    // `reasoning_details` is structured, not text, so it never moves to `reasoning_content`.
+    reasoningField:
+      field && !["reasoning", "reasoning_content", "reasoning_details"].includes(field) ? field : undefined,
+    requireFinishReason: model.compatibility?.requireFinishReason === true,
+  }
+  if (!quirks.renameMaxTokens && !quirks.reasoningField && !quirks.requireFinishReason) return
+  return quirks
+}
+
+const decodeJson = Schema.decodeUnknownOption(Schema.UnknownFromJsonString)
+
+function compatibilityFetch(fetchFn: ReturnType<typeof timeoutFetch>, quirks: Quirks) {
+  return async (input: any, init?: BunFetchRequestInit) => {
+    const res = await fetchFn(input, quirks.renameMaxTokens ? renameMaxTokens(init) : init)
+    if (!quirks.reasoningField && !quirks.requireFinishReason) return res
+    if (!res.body || !res.headers.get("content-type")?.includes("text/event-stream")) return res
+    return new Response(res.body.pipeThrough(compatibilityStream(quirks)), res)
+  }
+}
+
+function renameMaxTokens(init?: BunFetchRequestInit) {
+  const body = typeof init?.body === "string" ? Option.getOrUndefined(decodeJson(init.body)) : undefined
+  if (!isRecord(body) || !("max_tokens" in body)) return init
+  return { ...init, body: JSON.stringify({ ...omit(body, ["max_tokens"]), max_completion_tokens: body.max_tokens }) }
+}
+
+// Rewrites SSE `data:` lines: moves a custom reasoning field to `reasoning_content`, and fails the
+// stream at EOF when a finish_reason is required but no chunk carried one.
+function compatibilityStream(quirks: Quirks) {
+  const decoder = new TextDecoder()
+  const encoder = new TextEncoder()
+  const state = { buffer: "", finished: false }
+  const rewrite = (line: string) => {
+    if (!line.startsWith("data:")) return line
+    if (/"finish_reason"\s*:\s*"/.test(line)) state.finished = true
+    const field = quirks.reasoningField
+    if (!field || !line.includes(`"${field}"`)) return line
+    const chunk = Option.getOrUndefined(decodeJson(line.slice(5).trim()))
+    if (!isRecord(chunk) || !Array.isArray(chunk.choices)) return line
+    const choices = chunk.choices.map((choice) => {
+      if (!isRecord(choice) || !isRecord(choice.delta) || typeof choice.delta[field] !== "string") return choice
+      return { ...choice, delta: { ...omit(choice.delta, [field]), reasoning_content: choice.delta[field] } }
+    })
+    return `data: ${JSON.stringify({ ...chunk, choices })}`
+  }
+  return new TransformStream<Uint8Array, Uint8Array>({
+    transform(bytes, ctrl) {
+      const lines = (state.buffer + decoder.decode(bytes, { stream: true })).split("\n")
+      state.buffer = lines.pop() ?? ""
+      if (lines.length > 0) ctrl.enqueue(encoder.encode(lines.map(rewrite).join("\n") + "\n"))
+    },
+    flush(ctrl) {
+      const rest = state.buffer + decoder.decode()
+      if (rest) ctrl.enqueue(encoder.encode(rewrite(rest)))
+      if (quirks.requireFinishReason && !state.finished)
+        ctrl.error(new ProviderError.ResponseStreamError("OpenAI-compatible stream ended without finish_reason"))
+    },
+  })
 }
 
 function googleVertexAnthropicBaseURL(project: string | undefined, location: string | undefined) {
@@ -1164,6 +1234,13 @@ export const Model = Schema.Struct({
   status: ModelStatus,
   options: Schema.Record(Schema.String, Schema.Any),
   headers: Schema.Record(Schema.String, Schema.String),
+  // Config `compatibility.reasoningField` lands in `capabilities.interleaved` instead.
+  compatibility: optional(
+    Schema.Struct({
+      maxTokensField: optional(Schema.Literals(["max_completion_tokens", "max_tokens"])),
+      requireFinishReason: optional(Schema.Boolean),
+    }),
+  ),
   release_date: Schema.String,
   variants: optional(Schema.Record(Schema.String, Schema.Record(Schema.String, Schema.Any))),
 }).annotate({ identifier: "Model" })
@@ -1626,6 +1703,7 @@ const layer = Layer.effect(
                   pdf: model.modalities?.output?.includes("pdf") ?? existingModel?.capabilities.output.pdf ?? false,
                 },
                 interleaved:
+                  (model.compatibility?.reasoningField ? { field: model.compatibility.reasoningField } : undefined) ??
                   (typeof model.interleaved === "string" ? { field: model.interleaved } : model.interleaved) ??
                   existingModel?.capabilities.interleaved ??
                   (!existingModel && apiNpm === "@ai-sdk/openai-compatible" && apiID.includes("deepseek")
@@ -1647,6 +1725,12 @@ const layer = Layer.effect(
                 output: model.limit?.output ?? existingModel?.limit?.output ?? 0,
               },
               headers: mergeDeep(existingModel?.headers ?? {}, model.headers ?? {}),
+              compatibility: model.compatibility
+                ? {
+                    maxTokensField: model.compatibility.maxTokensField,
+                    requireFinishReason: model.compatibility.requireFinishReason,
+                  }
+                : existingModel?.compatibility,
               family: model.family ?? existingModel?.family ?? "",
               release_date: model.release_date ?? existingModel?.release_date ?? "",
               variants: {},
@@ -1902,17 +1986,20 @@ const layer = Layer.effect(
             ...model.headers,
           }
 
+        const compatibility = openAICompatibleQuirks(model)
         const key = Hash.fast(
           JSON.stringify({
             providerID: model.providerID,
             npm: model.api.npm,
             options,
+            compatibility,
           }),
         )
         const existing = s.sdk.get(key)
         if (existing) return existing
 
         options["fetch"] = timeoutFetch(options)
+        if (compatibility) options["fetch"] = compatibilityFetch(options["fetch"], compatibility)
         delete options["chunkTimeout"]
         delete options["headerTimeout"]
 

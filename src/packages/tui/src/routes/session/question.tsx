@@ -49,9 +49,11 @@ export function QuestionPrompt(props: {
     custom: [] as string[],
     selected: 0,
     editing: false,
+    dismissing: false,
   })
 
   let textarea: TextareaRenderable | undefined
+  let dismissInput: TextareaRenderable | undefined
 
   const question = createMemo(() => questions()[store.tab])
   const confirm = createMemo(() => !single() && store.tab === questions().length)
@@ -72,26 +74,30 @@ export function QuestionPrompt(props: {
     setSending(true)
     // A restored question has no live request; the answer goes back as a follow-up message instead.
     const sent: Promise<unknown> = props.restored
-      ? sdk.client.session.promptAsync({
-          sessionID: props.request.sessionID,
-          directory: props.directory,
-          workspace: props.workspace,
-          agent: props.agent,
-          model: props.model ? { providerID: props.model.providerID, modelID: props.model.id } : undefined,
-          variant: props.model?.variant === "default" ? undefined : props.model?.variant,
-          parts: [{ type: "text", text: questionAnswerText(props.request, answers) }],
-        }, { throwOnError: true })
-      : sdk.client.question.reply({
-          requestID: props.request.id,
-          directory: props.directory,
-          workspace: props.workspace,
-          answers,
-        }, { throwOnError: true })
+      ? sdk.client.session.promptAsync(
+          {
+            sessionID: props.request.sessionID,
+            directory: props.directory,
+            workspace: props.workspace,
+            agent: props.agent,
+            model: props.model ? { providerID: props.model.providerID, modelID: props.model.id } : undefined,
+            variant: props.model?.variant === "default" ? undefined : props.model?.variant,
+            parts: [{ type: "text", text: questionAnswerText(props.request, answers) }],
+          },
+          { throwOnError: true },
+        )
+      : sdk.client.question.reply(
+          {
+            requestID: props.request.id,
+            directory: props.directory,
+            workspace: props.workspace,
+            answers,
+          },
+          { throwOnError: true },
+        )
     void sent
       .then(() => onDismiss?.())
-      .catch((error) =>
-        toast.show({ title: "Failed to send answer", message: errorMessage(error), variant: "error" }),
-      )
+      .catch((error) => toast.show({ title: "Failed to send answer", message: errorMessage(error), variant: "error" }))
       .finally(() => setSending(false))
   }
 
@@ -99,18 +105,23 @@ export function QuestionPrompt(props: {
     reply(questions().map((_, i) => store.answers[i] ?? []))
   }
 
-  function reject() {
+  // A message goes back to the agent, which continues with it instead of stopping the turn.
+  function reject(message?: string) {
     if (sending()) return
     if (props.restored) {
       props.onDismiss?.()
       return
     }
     void sdk.client.question
-      .reject({
-        requestID: props.request.id,
-        directory: props.directory,
-        workspace: props.workspace,
-      }, { throwOnError: true })
+      .reject(
+        {
+          requestID: props.request.id,
+          directory: props.directory,
+          workspace: props.workspace,
+          message: message?.trim() || undefined,
+        },
+        { throwOnError: true },
+      )
       .then(() => props.onDismiss?.())
       .catch((error) =>
         toast.show({ title: "Failed to dismiss question", message: errorMessage(error), variant: "error" }),
@@ -263,14 +274,43 @@ export function QuestionPrompt(props: {
     ],
   }))
 
+  useBindings(() => ({
+    mode: QUESTION_MODE,
+    enabled: idle() && store.dismissing,
+    bindings: [
+      {
+        key: "escape",
+        desc: "Cancel dismiss message",
+        group: "Question",
+        cmd: () => setStore("dismissing", false),
+      },
+      {
+        key: "return",
+        desc: "Dismiss question with message",
+        group: "Question",
+        cmd: () => reject(dismissInput?.plainText),
+      },
+    ],
+  }))
+
   useBindings(() => {
     const opts = options()
     const total = opts.length + (custom() ? 1 : 0)
     const max = Math.min(total, 9)
+    const dismissWithMessage = props.restored
+      ? []
+      : [
+          {
+            key: "m",
+            desc: "Dismiss question with message",
+            group: "Question",
+            cmd: () => setStore("dismissing", true),
+          },
+        ]
 
     return {
       mode: QUESTION_MODE,
-      enabled: idle() && !store.editing,
+      enabled: idle() && !store.editing && !store.dismissing,
       commands: [
         {
           name: "app.exit",
@@ -308,6 +348,7 @@ export function QuestionPrompt(props: {
           ? [
               { key: "return", desc: "Submit answer", group: "Question", cmd: () => submit() },
               { key: "escape", desc: "Reject question", group: "Question", cmd: () => reject() },
+              ...dismissWithMessage,
               ...tuiConfig.keybinds.get("app.exit"),
             ]
           : [
@@ -336,6 +377,7 @@ export function QuestionPrompt(props: {
               { key: "j", desc: "Next answer", group: "Question", cmd: () => moveTo((store.selected + 1) % total) },
               { key: "return", desc: "Select answer", group: "Question", cmd: () => selectOption() },
               { key: "escape", desc: "Reject question", group: "Question", cmd: () => reject() },
+              ...dismissWithMessage,
               ...tuiConfig.keybinds.get("app.exit"),
             ]),
       ],
@@ -537,8 +579,40 @@ export function QuestionPrompt(props: {
             }}
           </For>
         </Show>
+
+        <Show when={store.dismissing}>
+          <box paddingLeft={1}>
+            <text fg={theme.text}>Dismiss with a message for the agent</text>
+            <textarea
+              ref={(val: TextareaRenderable) => {
+                dismissInput = val
+                val.traits = { status: "DISMISS" }
+                queueMicrotask(() => val.focus())
+              }}
+              placeholder="Message the agent continues with"
+              placeholderColor={theme.textMuted}
+              minHeight={1}
+              maxHeight={6}
+              textColor={theme.text}
+              focusedTextColor={theme.text}
+              cursorColor={theme.primary}
+              cursorStyle={tuiConfig.cursor}
+            />
+          </box>
+        </Show>
       </box>
+      <Show when={store.dismissing}>
+        <box flexDirection="row" flexShrink={0} gap={2} paddingLeft={2} paddingRight={3} paddingBottom={1}>
+          <text fg={theme.text}>
+            enter <span style={{ fg: theme.textMuted }}>dismiss</span>
+          </text>
+          <text fg={theme.text}>
+            esc <span style={{ fg: theme.textMuted }}>cancel</span>
+          </text>
+        </box>
+      </Show>
       <box
+        visible={!store.dismissing}
         flexDirection="row"
         flexShrink={0}
         gap={1}
@@ -568,6 +642,11 @@ export function QuestionPrompt(props: {
           <text fg={theme.text}>
             esc <span style={{ fg: theme.textMuted }}>dismiss</span>
           </text>
+          <Show when={!props.restored}>
+            <text fg={theme.text}>
+              m <span style={{ fg: theme.textMuted }}>dismiss with message</span>
+            </text>
+          </Show>
         </box>
       </box>
     </box>

@@ -1100,6 +1100,19 @@ describe("tool.shell abort", () => {
     )
   }
 
+  it.live("sets agent env vars for commands", () =>
+    runIn(
+      projectRoot,
+      Effect.gen(function* () {
+        const code =
+          "console.log([process.env.AGENT,process.env.OPENCODE,process.env.OPENCODE_SESSION_ID].join(String.fromCharCode(44)))"
+        const text = `${bin} -e ${evalarg(code)}`
+        const result = yield* run({ command: PS.has(sh()) ? `& ${text}` : text })
+        expect(result.output).toContain("1,1,ses_test")
+      }),
+    ),
+  )
+
   it.live("returns non-zero exit code", () =>
     runIn(
       projectRoot,

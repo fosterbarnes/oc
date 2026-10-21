@@ -290,6 +290,7 @@ Bold marks keys where the oc layout differs from opencode. `-` means unbound.
 | Close dialog | **-** | `ctrl+c` |
 | Copy session name | `ctrl+c` | `ctrl+c` |
 | Toggle MCP in MCP dialog | `space` | `space` |
+| Reconnect MCP in MCP dialog | `ctrl+r` | `ctrl+r` |
 | Cycle session picker status filter | `ctrl+s` | `ctrl+s` |
 | New project copy | `ctrl+m` | `ctrl+m` |
 | Delete project copy | `ctrl+d` | `ctrl+d` |

@@ -14,7 +14,7 @@ import {
   type Tool,
 } from "@modelcontextprotocol/sdk/types.js"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
-import { Cause, Effect, Exit } from "effect"
+import { Cause, Effect, Exit, Fiber } from "effect"
 import type { MCP as MCPNS } from "../../src/mcp/index"
 import { MCP } from "../../src/mcp/index"
 import { McpOAuthCallback } from "../../src/mcp/oauth-callback"
@@ -624,4 +624,21 @@ it.live("McpOAuthCallback.cancelPending rejects the pending callback", () =>
       }),
     () => Effect.promise(() => McpOAuthCallback.stop()).pipe(Effect.ignore),
   ),
+)
+
+it.instance("reports connecting during the handshake, then the settled status", () =>
+  Effect.gen(function* () {
+    const server = yield* hangingLifecycleServer()
+    const mcp = yield* MCP.Service
+    const fiber = yield* mcp.add("slow-remote", remote(server.url, 1_000)).pipe(Effect.forkChild)
+
+    yield* pollWithTimeout(
+      mcp.status().pipe(Effect.map((status) => (status["slow-remote"]?.status === "connecting" ? true : undefined))),
+      "server never reported connecting",
+    )
+    expect(Object.keys(yield* mcp.tools())).toEqual([])
+
+    yield* Fiber.join(fiber)
+    expect((yield* mcp.status())["slow-remote"]?.status).toBe("failed")
+  }),
 )

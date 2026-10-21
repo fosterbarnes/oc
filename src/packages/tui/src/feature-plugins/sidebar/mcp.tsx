@@ -25,6 +25,7 @@ function View(props: { api: TuiPluginApi }) {
     if (status === "disabled") return theme().textMuted
     if (status === "needs_auth") return theme().warning
     if (status === "needs_client_registration") return theme().error
+    if (status === "connecting") return theme().warning
     return theme().textMuted
   }
 
@@ -67,6 +68,7 @@ function View(props: { api: TuiPluginApi }) {
                     <Match when={item.status === "disabled"}>Disabled</Match>
                     <Match when={item.status === "needs_auth"}>Needs auth</Match>
                     <Match when={item.status === "needs_client_registration"}>Needs client ID</Match>
+                    <Match when={item.status === "connecting"}>Connecting</Match>
                   </Switch>
                 </text>
               </box>

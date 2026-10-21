@@ -1,11 +1,11 @@
 import { PermissionV1 } from "@opencode-ai/core/v1/permission"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
-import { describe, expect } from "bun:test"
+import { describe, expect, test } from "bun:test"
 import path from "path"
 import { Effect } from "effect"
 import { CrossSpawnSpawner } from "@opencode-ai/core/cross-spawn-spawner"
 import type { Tool } from "@/tool/tool"
-import { assertExternalDirectoryEffect } from "../../src/tool/external-directory"
+import { assertExternalDirectoryEffect, expandHome } from "../../src/tool/external-directory"
 import { Filesystem } from "@/util/filesystem"
 import { TestInstance, tmpdirScoped } from "../fixture/fixture"
 import type { Permission } from "../../src/permission"
@@ -153,4 +153,15 @@ describe("tool.assertExternalDirectory", () => {
       { git: true },
     )
   }
+})
+
+describe("expandHome", () => {
+  test("expands a leading ~ for file tool paths", () => {
+    const home = path.join(path.sep, "home", "user")
+    expect(expandHome("~", home)).toBe(home)
+    expect(expandHome("~/notes/a.txt", home)).toBe(path.join(home, "notes", "a.txt"))
+    expect(expandHome("~\\notes", home)).toBe(process.platform === "win32" ? path.join(home, "notes") : "~\\notes")
+    expect(expandHome("~user/a.txt", home)).toBe("~user/a.txt")
+    expect(expandHome("src/~/a.txt", home)).toBe("src/~/a.txt")
+  })
 })

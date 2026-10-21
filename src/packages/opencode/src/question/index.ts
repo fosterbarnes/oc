@@ -24,8 +24,13 @@ export const Replied = QuestionV1.Replied
 export const Rejected = QuestionV1.Rejected
 export const Event = QuestionV1.Event
 
-export class RejectedError extends Schema.TaggedErrorClass<RejectedError>()("QuestionRejectedError", {}) {
+// A dismissal with feedback is ordinary model-visible tool output: the agent continues instead of
+// the step ending (see SessionProcessor and llm.ts, which only stop on a bare dismissal).
+export class RejectedError extends Schema.TaggedErrorClass<RejectedError>()("QuestionRejectedError", {
+  feedback: Schema.optional(Schema.String),
+}) {
   override get message() {
+    if (this.feedback) return `The user dismissed this question with the following message: ${this.feedback}`
     return "The user dismissed this question"
   }
 }
@@ -55,7 +60,7 @@ export interface Interface {
     requestID: QuestionID
     answers: ReadonlyArray<Answer>
   }) => Effect.Effect<void, NotFoundError>
-  readonly reject: (requestID: QuestionID) => Effect.Effect<void, NotFoundError>
+  readonly reject: (requestID: QuestionID, message?: string) => Effect.Effect<void, NotFoundError>
   readonly cancel: (sessionID: SessionID) => Effect.Effect<void>
   readonly list: () => Effect.Effect<ReadonlyArray<Request>>
 }
@@ -144,7 +149,7 @@ const layer = Layer.effect(
       yield* Deferred.succeed(existing.deferred, input.answers)
     })
 
-    const reject = Effect.fn("Question.reject")(function* (requestID: QuestionID) {
+    const reject = Effect.fn("Question.reject")(function* (requestID: QuestionID, message?: string) {
       const pending = (yield* InstanceState.get(state)).pending
       const existing = pending.get(requestID)
       if (!existing) {
@@ -157,7 +162,8 @@ const layer = Layer.effect(
         sessionID: existing.info.sessionID,
         requestID: existing.info.id,
       })
-      yield* Deferred.fail(existing.deferred, new RejectedError())
+      const feedback = message?.trim()
+      yield* Deferred.fail(existing.deferred, new RejectedError(feedback ? { feedback } : undefined))
     })
 
     const cancel = Effect.fn("Question.cancel")(function* (sessionID: SessionID) {

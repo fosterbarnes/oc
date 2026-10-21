@@ -79,6 +79,7 @@ export type Event =
   | EventTuiSessionSelect2
   | EventMcpToolsChanged
   | EventMcpBrowserOpenFailed
+  | EventMcpStatusChanged
   | EventCommandExecuted
   | EventProjectUpdated
   | EventSessionStatus
@@ -1526,6 +1527,13 @@ export type GlobalEvent = {
       }
     | {
         id: string
+        type: "mcp.status.changed"
+        properties: {
+          server: string
+        }
+      }
+    | {
+        id: string
         type: "command.executed"
         properties: {
           name: string
@@ -1733,7 +1741,7 @@ export type PermissionConfig =
       external_directory?: PermissionRuleConfig
       todowrite?: PermissionActionConfig
       question?: PermissionActionConfig
-      webfetch?: PermissionActionConfig
+      webfetch?: PermissionRuleConfig
       websearch?: PermissionActionConfig
       lsp?: PermissionRuleConfig
       doom_loop?: PermissionActionConfig
@@ -1860,6 +1868,20 @@ export type ProviderConfig = {
         | {
             field: "reasoning" | "reasoning_content" | "reasoning_text" | string
           }
+      /**
+       * OpenAI-compatible chat quirks (@ai-sdk/openai-compatible models only)
+       */
+      compatibility?: {
+        reasoningField?: "reasoning" | "reasoning_content" | "reasoning_text" | string
+        /**
+         * Request field for the output token limit (default max_tokens)
+         */
+        maxTokensField?: "max_completion_tokens" | "max_tokens"
+        /**
+         * Fail a streamed reply that ends without a finish_reason instead of accepting it
+         */
+        requireFinishReason?: boolean
+      }
       cost?: {
         input: number
         output: number
@@ -2111,6 +2133,15 @@ export type Config = {
   tools?: {
     [key: string]: boolean
   }
+  /**
+   * Web search tool settings. Set to false to disable the websearch tool
+   */
+  websearch?:
+    | false
+    | {
+        provider?: "random" | "exa" | "parallel" | "firecrawl" | "tavily"
+        apiKey?: string
+      }
   attachment?: AttachmentConfig
   enterprise?: {
     url?: string
@@ -2249,6 +2280,10 @@ export type Model = {
   }
   headers: {
     [key: string]: string
+  }
+  compatibility?: {
+    maxTokensField?: "max_completion_tokens" | "max_tokens"
+    requireFinishReason?: boolean
   }
   release_date: string
   variants?: {
@@ -2572,12 +2607,17 @@ export type McpStatusNeedsClientRegistration = {
   error: string
 }
 
+export type McpStatusConnecting = {
+  status: "connecting"
+}
+
 export type McpStatus =
   | McpStatusConnected
   | McpStatusDisabled
   | McpStatusFailed
   | McpStatusNeedsAuth
   | McpStatusNeedsClientRegistration
+  | McpStatusConnecting
 
 export type McpUnsupportedOAuthError = {
   error: string
@@ -3472,6 +3512,12 @@ export type ProviderNotFoundError = {
   message: string
 }
 
+export type IntegrationNotFoundError = {
+  _tag: "IntegrationNotFoundError"
+  integrationID: string
+  message: string
+}
+
 export type OutputFormat1 =
   | {
       type: "text"
@@ -3612,6 +3658,7 @@ export type V2Event =
   | TuiSessionSelect
   | McpToolsChanged
   | McpBrowserOpenFailed
+  | McpStatusChanged
   | CommandExecuted
   | ProjectUpdated
   | SessionStatus2
@@ -6618,6 +6665,23 @@ export type McpBrowserOpenFailed = {
   }
 }
 
+export type McpStatusChanged = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "mcp.status.changed"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    server: string
+  }
+}
+
 export type CommandExecuted = {
   id: string
   metadata?: {
@@ -7697,6 +7761,14 @@ export type EventMcpBrowserOpenFailed = {
   properties: {
     mcpName: string
     url: string
+  }
+}
+
+export type EventMcpStatusChanged = {
+  id: string
+  type: "mcp.status.changed"
+  properties: {
+    server: string
   }
 }
 
@@ -9914,6 +9986,40 @@ export type McpDisconnectResponses = {
 
 export type McpDisconnectResponse = McpDisconnectResponses[keyof McpDisconnectResponses]
 
+export type McpReconnectData = {
+  body?: never
+  path: {
+    name: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/mcp/{name}/reconnect"
+}
+
+export type McpReconnectErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * McpServerNotFoundError
+   */
+  404: McpServerNotFoundError
+}
+
+export type McpReconnectError = McpReconnectErrors[keyof McpReconnectErrors]
+
+export type McpReconnectResponses = {
+  /**
+   * MCP server reconnected
+   */
+  200: boolean
+}
+
+export type McpReconnectResponse = McpReconnectResponses[keyof McpReconnectResponses]
+
 export type ProjectListData = {
   body?: never
   path?: never
@@ -10450,6 +10556,7 @@ export type QuestionRejectData = {
   query?: {
     directory?: string
     workspace?: string
+    message?: string
   }
   url: "/question/{requestID}/reject"
 }
@@ -13721,6 +13828,10 @@ export type V2IntegrationGetErrors = {
    * UnauthorizedError
    */
   401: UnauthorizedError
+  /**
+   * IntegrationNotFoundError
+   */
+  404: IntegrationNotFoundError
 }
 
 export type V2IntegrationGetError = V2IntegrationGetErrors[keyof V2IntegrationGetErrors]

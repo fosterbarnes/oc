@@ -201,6 +201,7 @@ function fake(
     get message() {
       return msg
     },
+    blockedMessage: undefined,
     updateToolCall: Effect.fn("TestSessionProcessor.updateToolCall")(() => Effect.succeed(undefined)),
     completeToolCall: Effect.fn("TestSessionProcessor.completeToolCall")(() => Effect.void),
     toolPartReady: () => Effect.void,

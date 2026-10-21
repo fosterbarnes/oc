@@ -593,6 +593,14 @@ export class Reply {
     return this
   }
 
+  length() {
+    this.#finish = "length"
+    this.#hang = false
+    this.#error = undefined
+    this.#reset = false
+    return this
+  }
+
   toolCalls() {
     this.#finish = "tool_calls"
     this.#hang = false
@@ -769,7 +777,11 @@ export class TestLLMServer extends Context.Service<TestLLMServer, TestLLMServer.
         const current = hit(req.originalUrl, body)
         const sendAs = (item: Sse) => {
           if (mode === "responses") return send(responses(item, modelFrom(body)))
-          if (mode === "messages") return send(messages(item, modelFrom(body), () => `toolu_${++toolCalls}`), true)
+          if (mode === "messages")
+            return send(
+              messages(item, modelFrom(body), () => `toolu_${++toolCalls}`),
+              true,
+            )
           return send(item)
         }
         if (isTitleRequest(body)) {

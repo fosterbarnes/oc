@@ -257,7 +257,11 @@ describe("opencode run (non-interactive subprocess)", () => {
         const denied = yield* opencode.run("request permission", { permission: { bash: "ask" } })
         opencode.expectExit(denied, 0)
         expect(denied.stderr).toContain("permission requested: bash")
-        expect(denied.stdout).toBe("")
+        // The rejection carries feedback, so the model sees it and the run continues.
+        expect(denied.stdout).toContain("continued after rejection")
+        expect(JSON.stringify(yield* llm.inputs)).toContain(
+          "This non-interactive run cannot ask the user for permission",
+        )
 
         yield* llm.reset
         yield* llm.tool("bash", { command: "rm -f allowed-file", description: "Remove a test file" })

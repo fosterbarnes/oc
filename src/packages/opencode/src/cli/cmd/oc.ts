@@ -185,7 +185,6 @@ const DiagnosticsCommand = cmd({
     const child = spawn(OcConfig.executablePath(), runtimeArgs(metadata.arguments), {
       cwd: os.homedir(),
       stdio: ["inherit", "inherit", "pipe"],
-      env: { ...process.env, OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS: "true" },
     })
     let stderr = ""
     child.stderr?.on("data", (chunk) => (stderr += String(chunk)))

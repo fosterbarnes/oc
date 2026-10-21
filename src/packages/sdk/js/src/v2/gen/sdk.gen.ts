@@ -128,6 +128,8 @@ import type {
   McpDisconnectErrors,
   McpDisconnectResponses,
   McpLocalConfig,
+  McpReconnectErrors,
+  McpReconnectResponses,
   McpRemoteConfig,
   McpStatusErrors,
   McpStatusResponses,
@@ -2876,6 +2878,36 @@ export class Mcp extends HeyApiClient {
     })
   }
 
+  /**
+   * Close an MCP server's connection and connect it again.
+   */
+  public reconnect<ThrowOnError extends boolean = false>(
+    parameters: {
+      name: string
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "name" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<McpReconnectResponses, McpReconnectErrors, ThrowOnError>({
+      url: "/mcp/{name}/reconnect",
+      ...options,
+      ...params,
+    })
+  }
+
   private _auth?: Auth2
   get auth(): Auth2 {
     return (this._auth ??= new Auth2({ client: this.client }))
@@ -3446,13 +3478,14 @@ export class Question extends HeyApiClient {
   /**
    * Reject question request
    *
-   * Reject a question request from the AI assistant.
+   * Reject a question request from the AI assistant, optionally with a message the assistant receives and continues from.
    */
   public reject<ThrowOnError extends boolean = false>(
     parameters: {
       requestID: string
       directory?: string
       workspace?: string
+      message?: string
     },
     options?: Options<never, ThrowOnError>,
   ) {
@@ -3464,6 +3497,7 @@ export class Question extends HeyApiClient {
             { in: "path", key: "requestID" },
             { in: "query", key: "directory" },
             { in: "query", key: "workspace" },
+            { in: "query", key: "message" },
           ],
         },
       ],

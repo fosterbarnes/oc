@@ -98,6 +98,17 @@ export const mcpHandlers = HttpApiBuilder.group(InstanceHttpApi, "mcp", (handler
       return true
     })
 
+    // Disconnect first so a stdio server's old process exits before the new one starts.
+    const reconnect = Effect.fn("McpHttpApi.reconnect")(function* (ctx: { params: { name: string } }) {
+      yield* mcp.disconnect(ctx.params.name).pipe(
+        Effect.andThen(mcp.connect(ctx.params.name)),
+        Effect.catchTag("MCP.NotFoundError", (error) =>
+          Effect.fail(new McpServerNotFoundError({ name: error.name, message: `MCP server not found: ${error.name}` })),
+        ),
+      )
+      return true
+    })
+
     return handlers
       .handle("status", status)
       .handle("add", add)
@@ -107,5 +118,6 @@ export const mcpHandlers = HttpApiBuilder.group(InstanceHttpApi, "mcp", (handler
       .handle("authRemove", authRemove)
       .handle("connect", connect)
       .handle("disconnect", disconnect)
+      .handle("reconnect", reconnect)
   }),
 )

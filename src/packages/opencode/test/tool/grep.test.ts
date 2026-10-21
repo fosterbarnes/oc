@@ -131,6 +131,23 @@ describe("tool.grep", () => {
     }),
   )
 
+  it.instance("matches literal text and ignores case on request", () =>
+    Effect.gen(function* () {
+      const test = yield* TestInstance
+      yield* Effect.promise(() => Bun.write(path.join(test.directory, "test.txt"), "a.b(c)\naxb(c)\nHELLO\n"))
+      const info = yield* GrepTool
+      const grep = yield* info.init()
+      const literal = yield* grep.execute({ pattern: "a.b(c)", path: test.directory, literal: true }, ctx)
+      expect(literal.metadata.matches).toBe(1)
+      expect(literal.output).toContain("Line 1: a.b(c)")
+
+      const sensitive = yield* grep.execute({ pattern: "hello", path: test.directory }, ctx)
+      expect(sensitive.metadata.matches).toBe(0)
+      const insensitive = yield* grep.execute({ pattern: "hello", path: test.directory, caseSensitive: false }, ctx)
+      expect(insensitive.output).toContain("Line 3: HELLO")
+    }),
+  )
+
   it.instance("does not report an unknown total when results are truncated", () =>
     Effect.gen(function* () {
       const test = yield* TestInstance

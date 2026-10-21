@@ -5,6 +5,7 @@ import { Cause, Deferred, Effect, Exit, Fiber, Layer } from "effect"
 import { EventV2Bridge } from "../../src/event-v2-bridge"
 import { CrossSpawnSpawner } from "@opencode-ai/core/cross-spawn-spawner"
 import { Permission } from "../../src/permission"
+import { Plugin } from "../../src/plugin"
 import { InstanceBootstrap } from "../../src/project/bootstrap"
 import { InstanceStore } from "../../src/project/instance-store"
 import { TestInstance, tmpdirScoped } from "../fixture/fixture"
@@ -1208,6 +1209,63 @@ it.instance(
       const exit = yield* Fiber.await(fiber)
       expect(Exit.isFailure(exit)).toBe(true)
       if (Exit.isFailure(exit)) expect(Cause.squash(exit.cause)).toBeInstanceOf(PermissionV1.RejectedError)
+    }),
+  { git: true },
+)
+
+// permission.ask plugin hook: decides only what the rules would prompt for
+
+const pluginAsks: Array<{ type: string; pattern?: string | string[] }> = []
+const decidingPlugin = Plugin.Service.of({
+  init: () => Effect.void,
+  list: () => Effect.succeed([]),
+  status: () => Effect.succeed([]),
+  trigger: (name, input, output) =>
+    Effect.sync(() => {
+      if (name !== "permission.ask") return output
+      const request = input as { type: string; pattern?: string | string[] }
+      pluginAsks.push(request)
+      const command = [request.pattern ?? []].flat()[0] ?? ""
+      if (command.startsWith("plugin-allow")) Object.assign(output as object, { status: "allow" })
+      if (command.startsWith("plugin-deny")) Object.assign(output as object, { status: "deny" })
+      return output
+    }),
+} satisfies Plugin.Interface)
+const pluginIt = testEffect(
+  AppNodeBuilder.build(
+    LayerNode.group([Permission.node, EventV2Bridge.node, CrossSpawnSpawner.node, InstanceStore.node]),
+    [
+      [InstanceStore.bootstrapNode, noopBootstrap],
+      [Plugin.node, Layer.succeed(Plugin.Service, decidingPlugin)],
+    ],
+  ),
+)
+
+pluginIt.instance(
+  "permission.ask hook - plugins decide asks but never override allow or deny rules",
+  () =>
+    Effect.gen(function* () {
+      pluginAsks.length = 0
+      const bash = (command: string, action: PermissionV1.Action) =>
+        ask({
+          sessionID: SessionID.make("session_plugin"),
+          permission: "bash",
+          patterns: [command],
+          metadata: {},
+          always: [],
+          ruleset: [{ permission: "bash", pattern: "*", action }],
+        })
+
+      expect(yield* bash("plugin-allow ls", "ask")).toBeUndefined()
+      expect(yield* fail(bash("plugin-deny rm", "ask"))).toBeInstanceOf(PermissionV1.DeniedError)
+      expect(yield* fail(bash("plugin-allow rm", "deny"))).toBeInstanceOf(PermissionV1.DeniedError)
+      expect(yield* bash("plugin-deny ls", "allow")).toBeUndefined()
+      expect(pluginAsks.map((request) => request.pattern)).toEqual([["plugin-allow ls"], ["plugin-deny rm"]])
+
+      const fiber = yield* bash("plugin-ask ls", "ask").pipe(Effect.forkScoped)
+      expect(yield* waitForPending(1)).toHaveLength(1)
+      yield* rejectAll()
+      expect(Exit.isFailure(yield* Fiber.await(fiber))).toBe(true)
     }),
   { git: true },
 )

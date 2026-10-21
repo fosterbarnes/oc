@@ -19,6 +19,7 @@ import { SessionRetry } from "./retry"
 import { SessionStatus } from "./status"
 import { SessionSummary } from "./summary"
 import type { Provider } from "@/provider/provider"
+import { ProviderError } from "@/provider/error"
 import { Question } from "@/question"
 import { errorMessage } from "@/util/error"
 import { isRecord } from "@/util/record"
@@ -31,6 +32,8 @@ export type Result = "compact" | "stop" | "continue"
 
 export interface Handle {
   readonly message: SessionV1.Assistant
+  /** Why the provider blocked the reply, set on a content-filter finish. */
+  readonly blockedMessage: string | undefined
   readonly updateToolCall: (
     toolCallID: string,
     update: (part: SessionV1.ToolPart) => SessionV1.ToolPart,
@@ -115,6 +118,7 @@ const layer = Layer.effect(
         reasoningMap: {},
       }
       let aborted = false
+      let blockedMessage: string | undefined
       let turnPermission: PermissionV1.Ruleset = []
       const partReady: Record<string, Deferred.Deferred<void>> = {}
       const readyFor = (toolCallID: string) => (partReady[toolCallID] ??= Deferred.makeUnsafe<void>())
@@ -210,7 +214,10 @@ const layer = Layer.effect(
             time: { start: match.part.state.time.start, end: Date.now() },
           },
         })
-        if (error instanceof PermissionV1.RejectedError || error instanceof Question.RejectedError) {
+        if (
+          error instanceof PermissionV1.RejectedError ||
+          (error instanceof Question.RejectedError && !error.feedback)
+        ) {
           ctx.blocked = ctx.shouldBreak
         }
         yield* settleToolCall(toolCallID)
@@ -474,6 +481,8 @@ const layer = Layer.effect(
               metadata: value.providerMetadata,
             })
             ctx.assistantMessage.finish = value.reason
+            if (value.reason === "content-filter")
+              blockedMessage = ProviderError.contentFilterMessage(value.providerMetadata)
             ctx.assistantMessage.cost += usage.cost
             ctx.assistantMessage.tokens = usage.tokens
             liveUsage = undefined
@@ -669,7 +678,9 @@ const layer = Layer.effect(
 
       const process = Effect.fn("SessionProcessor.process")(function* (streamInput: LLM.StreamInput) {
         turnPermission = Permission.merge(
-          streamInput.agent.permission, streamInput.permission ?? [], streamInput.user.permission ?? [],
+          streamInput.agent.permission,
+          streamInput.permission ?? [],
+          streamInput.user.permission ?? [],
         )
         yield* Effect.logInfo("process", {
           "session.id": input.sessionID,
@@ -687,13 +698,16 @@ const layer = Layer.effect(
           Object.entries(streamInput.tools).map(([name, tool]) => {
             const execute = tool.execute
             if (!execute) return [name, tool]
-            return [name, {
-              ...tool,
-              execute: (...args: Parameters<typeof execute>) => {
-                toolStarted = true
-                return execute(...args)
+            return [
+              name,
+              {
+                ...tool,
+                execute: (...args: Parameters<typeof execute>) => {
+                  toolStarted = true
+                  return execute(...args)
+                },
               },
-            }]
+            ]
           }),
         )
 
@@ -769,11 +783,18 @@ const layer = Layer.effect(
         get message() {
           return ctx.assistantMessage
         },
+        get blockedMessage() {
+          return blockedMessage
+        },
         updateToolCall,
         completeToolCall,
         toolPartReady: (toolCallID) =>
           Deferred.await(readyFor(toolCallID)).pipe(
-            Effect.tap(() => Effect.sync(() => { toolStarted = true })),
+            Effect.tap(() =>
+              Effect.sync(() => {
+                toolStarted = true
+              }),
+            ),
           ),
         process,
       } satisfies Handle

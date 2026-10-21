@@ -12,6 +12,7 @@ import { LLMClient } from "@opencode-ai/llm/route"
 import type { LLMClientService } from "@opencode-ai/llm/route"
 import { GitLabWorkflowLanguageModel } from "gitlab-ai-provider"
 import { ProviderTransform } from "@/provider/transform"
+import { ToolInputRepair } from "@/tool/inputRepair"
 import { Config } from "@/config/config"
 import type { Agent } from "@/agent/agent"
 import type { MessageV2 } from "./message-v2"
@@ -31,6 +32,8 @@ import * as OtelTracer from "@effect/opentelemetry/Tracer"
 import { LLMAISDK } from "./llm/ai-sdk"
 import { LLMNativeRuntime } from "./llm/native-runtime"
 import { LLMRequestPrep } from "./llm/request"
+import { PromptCacheDiagnostics } from "./llm/promptCacheDiagnostics"
+import { CURSOR_PROVIDER_ID } from "@/provider/cursor/shared"
 import { hostToolExecutors, isClaudeCodeProvider, type HostToolResult } from "@/provider/claude-code/shared"
 import { setUsagePublisher } from "@/provider/usage-observations"
 import { ProviderUsage } from "@opencode-ai/core/provider-usage"
@@ -96,6 +99,9 @@ const live: Layer.Layer<
       usageBridge.fork(events.publish(ProviderUsage.Event.Updated, observation))
     })
     yield* Effect.addFinalizer(() => Effect.sync(unsubscribeUsage))
+    const promptCacheSnapshots = flags.promptCacheDiagnostics
+      ? new Map<string, PromptCacheDiagnostics.Snapshot>()
+      : undefined
 
     const run = Effect.fn("LLM.run")(function* (input: StreamRequest) {
       yield* Effect.logInfo("stream", {
@@ -126,6 +132,36 @@ const live: Layer.Layer<
         flags,
         isWorkflow,
       })
+      // Small calls (titles) share the session id but not its prompt, so they are not compared.
+      if (
+        promptCacheSnapshots &&
+        !input.small &&
+        input.model.providerID !== CURSOR_PROVIDER_ID &&
+        !isClaudeCodeProvider(input.model.providerID)
+      ) {
+        const current = PromptCacheDiagnostics.snapshot({
+          providerID: input.model.providerID,
+          modelID: input.model.id,
+          system: prepared.system,
+          messages: prepared.messages,
+          tools: prepared.tools,
+          params: prepared.params,
+          options: prepared.params.options,
+          toolChoice: input.toolChoice,
+        })
+        const comparison = PromptCacheDiagnostics.compare(promptCacheSnapshots.get(input.sessionID), current)
+        promptCacheSnapshots.delete(input.sessionID)
+        promptCacheSnapshots.set(input.sessionID, current)
+        const oldest = promptCacheSnapshots.keys().next().value
+        if (promptCacheSnapshots.size > 100 && oldest !== undefined) promptCacheSnapshots.delete(oldest)
+        yield* Effect.logInfo("prompt cache prefix", {
+          "session.id": input.sessionID,
+          toolCount: current.tools.length,
+          systemParts: current.system.length,
+          messageCount: current.messages.length,
+          ...comparison,
+        })
+      }
 
       // Wire up toolExecutor for DWS workflow models so that tool calls
       // from the workflow service are executed via opencode's tool system
@@ -137,7 +173,12 @@ const live: Layer.Layer<
       // Claude Code runs oc tools inside its own stream (providerExecuted), so it needs the bound tools.
       // Tool-less calls (title, summary) share the session id and must not replace the turn's executor.
       if (isClaudeCodeProvider(input.model.providerID) && Object.keys(prepared.tools).length > 0) {
-        const executeHostTool = async (name: string, args: Record<string, unknown>, callID: string, signal?: AbortSignal) => {
+        const executeHostTool = async (
+          name: string,
+          args: Record<string, unknown>,
+          callID: string,
+          signal?: AbortSignal,
+        ) => {
           const execute = prepared.tools[name]?.execute
           if (!execute) throw new Error(`Unknown tool: ${name}`)
           const abortSignal = signal ? AbortSignal.any([input.abort, signal]) : input.abort
@@ -150,16 +191,22 @@ const live: Layer.Layer<
               experimental_context: { awaitToolPart: true },
             }),
           ).catch((error) => {
-            if (error instanceof PermissionV1.RejectedError || error instanceof Question.RejectedError)
+            if (
+              error instanceof PermissionV1.RejectedError ||
+              (error instanceof Question.RejectedError && !error.feedback)
+            )
               return { output: "Denied by user.", denied: error }
             throw error
           })) as HostToolResult
           if (!result.attachments?.some((attachment) => attachment.mime.startsWith("image/"))) return result
           return {
             ...result,
-            attachments: await bridge.promise(Effect.forEach(result.attachments, (attachment) =>
-              attachment.mime.startsWith("image/") ? image.normalize(attachment) : Effect.succeed(attachment),
-            ), { signal: abortSignal }),
+            attachments: await bridge.promise(
+              Effect.forEach(result.attachments, (attachment) =>
+                attachment.mime.startsWith("image/") ? image.normalize(attachment) : Effect.succeed(attachment),
+              ),
+              { signal: abortSignal },
+            ),
           }
         }
         hostToolExecutors.set(input.sessionID, executeHostTool)
@@ -349,11 +396,11 @@ const live: Layer.Layer<
           includeRawChunks:
             input.model.providerID.includes("github-copilot") || isClaudeCodeProvider(input.model.providerID),
           async experimental_repairToolCall(failed) {
-            const lower = failed.toolCall.toolName.toLowerCase()
-            if (lower !== failed.toolCall.toolName && prepared.tools[lower]) {
+            const repaired = ToolInputRepair.repairToolName(failed.toolCall.toolName, Object.keys(prepared.tools))
+            if (repaired && repaired !== failed.toolCall.toolName) {
               return {
                 ...failed.toolCall,
-                toolName: lower,
+                toolName: repaired,
               }
             }
             return {

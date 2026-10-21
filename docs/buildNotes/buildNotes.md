@@ -169,6 +169,37 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-20 (~21:20) - v0.2.269 nigiriFartsds - upstream 1.19 port stage 7: core features (tools, output limits, compat options, questions, web search, MCP) - Claude Opus 5.5 (orchestrator) + Opus 5.5 high workers; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; orchestrator, workers `general-opus.5.5-high` x4 (7a+7b, then 7c+7d in parallel); Implementation; Stage 7 of `~/.config/opencode/plans/upstream119/implementation.md` completed (picks in `picks.md`)
+- Version: 0.2.269 nigiriFartsds
+- 7a tools: edit result text + guidance (Core 2); shell env `AGENT=1`, `OPENCODE=1`, `AI_AGENT`, `OPENCODE_SESSION_ID` (Core 5); read keeps oc XML output, folder reads load that folder's AGENTS.md (Core 6); grep `literal`/`caseSensitive`, glob `hidden` (`core/src/ripgrep.ts`; Core 8); new `session_rename` tool via `Session.setTitle` (`tool/sessionRename.ts`; Core 10); `~` paths in edit/write/apply_patch (`external-directory.ts` `expandHome`; Core 11); new `models` tool (`tool/models.ts`; Core 15); background shell end notice names log paths (`shellJobs.ts`; Core 17); `ToolInputRepair.repairToolName` (case/separator/`functions.` prefix, single match) wired by orchestrator into `session/llm.ts` `experimental_repairToolCall`, unmatched still `invalid` (Plugin 3).
+- 7b providers/output: `OUTPUT_TOKEN_MAX` 256k (fallback 32k), maxOutputTokens fits estimated prompt, `length` stop auto-continues up to 2 times (Core 1); `ProviderError.contentFilterMessage` (Core 3); prompt cache prefix diagnostics behind a flag (`session/llm/promptCacheDiagnostics.ts`; Core 4); config `compatibility.reasoningField`/`maxTokensField`/`requireFinishReason` for `@ai-sdk/openai-compatible` (fetch wrapper maps streamed reasoning field; `requireFinishReason` default off) (AI 2); `prompt_cache_key` to OpenRouter + 13 allowlisted compatible providers (AI 25). AI 28 Responses controls already reachable via `@ai-sdk/openai` providerOptions; refusals not added.
+- 7c session/permissions: question reject takes optional `message` (route query, TUI `m` key); with a message the agent continues (Core 14); refreshed `gpt.txt`, `gpt-astra.txt`, Claude "Code comments" section, display-name identity line, no tool trimming (Core 16); `run` auto-reject sends feedback message (CLI 1); background subagents without the experimental flag, flag + gates + launcher env line removed (Other 2); v1 `permission.ask` hook wired: runs only when rules would prompt, plugin may allow/deny/ask (Plugin 4).
+- 7d MCP/web search: config `websearch: false | { provider, apiKey }` with Firecrawl (MCP) and Tavily (REST) backends; pick order env `OPENCODE_WEBSEARCH_PROVIDER` > config > flags > session checksum (Core 7); MCP JSON text parsed in Code Mode, `_meta.sessionID` sent (orchestrator wired direct calls in `session/tools.ts`) (Core 12); MCP `connecting` status + non-durable `mcp.status.changed` event, shown in sidebar/status/dialog (Core 18); `POST /mcp/:name/reconnect` + MCP dialog `ctrl+r` reconnect (CLI 3).
+- Docs: FORK.md new rows (output limits, compat quirks, question dismiss message, background subagents default, run continues, plugin permission decisions; Tool input repair + background shell rows updated); wiki Agents-and-Skills, Configuration, Keybinds, Launching, Sessions, Sidebar; `docs/keybinds.md` regenerated.
+- Codegen: legacy SDK (`compatibility`, question `message`, `mcp.reconnect`, `connecting`) + client `bun run generate`.
+- Verification: opencode edit 34/0, shell 96/0, read 44/0, grep 10/0, glob 5/0, sessionRename 2/0, external-directory 8/0, models 2/0, backgroundShell 12/0, inputRepair 59/0, transform 590/0, overflow 16/0, error 3/0, promptCacheDiagnostics 5/0, compatibility 3/0, provider 105/0, prompt `-t` output limit/content-filter 2/0 and question dismiss 2/0, question dismiss 1/0, run-process 1/0, task background 8/0, registry 1/0, footer.view 3/0, runtime-flags 36/0, permission/next 8/0, system 3/0, mcp/catalog 7/0, websearch 17/0, mcp/lifecycle 24/0, httpapi-mcp + public-openapi 23/0, httpapi coverage pass=223 (3 known missing); keybind docs `--check` 0. Typecheck left to prePush.
+- Fixed (agent-push): prePush typecheck failed on stale test mocks; added `reconnect` handler to `test/server/httpapi-mcp-oauth.test.ts`, `blockedMessage` to the fake processor handle in `test/session/compaction.test.ts`.
+- ERROR: Claude plan session limit stopped both 7a/7b workers mid-run (resumed after reset); 7d reported failed on a nonzero bash exit although it finished (known false failure).
+- TODO: AI 28 refusals (`@ai-sdk/openai` 3.0.88 drops refusal deltas; needs a fetch-level stream rewrite). FORK.md count table was already inconsistent before this stage (worker counted high 55, medium 28, low 8).
+
+### User
+Agent tools
+- New `models` and `session_rename` tools, grep can match literally or ignore case, glob can include dotfiles, `~/` works in file tools, and a misnamed tool call is fixed when the intended tool is obvious.
+
+Models
+- Long replies are no longer capped at 32k output tokens and continue automatically when cut off, and OpenAI-compatible or local models can set `compatibility` options for their reasoning and token fields.
+
+Sessions and permissions
+- Press `m` on an agent question to dismiss it with a note the agent reads, background subagents work without the experimental flag, and plugins can approve or deny permission prompts.
+
+Web search and MCP
+- Choose the web search provider in config (Exa, Parallel, Firecrawl, or Tavily), see MCP servers as "Connecting" while they start, and reconnect one with `ctrl+r` in the MCP dialog.
+
+---
+
 ## 2026-10-20 (~20:26) - v0.2.268 sirHoedown - upstream 1.19 port stage 5: TUI fixes - Claude Opus 5.5 (orchestrator) + Opus 5.5 high/medium workers; Implementation
 
 ### Agent

@@ -170,3 +170,12 @@ describe("overflow resolveLimit per provider", () => {
     expect(overLimit({ cfg, tokens: tokens(150), model: model("cursor") })).toBe(false)
   })
 })
+
+describe("overflow output reserve", () => {
+  test("large output limits keep the 32k compaction reserve", () => {
+    const cfg = {} as ConfigV1.Info
+    const large = model("openai", { context: 400_000, output: 128_000 })
+    expect(isOverflow({ cfg, tokens: tokens(367_999), model: large })).toBe(false)
+    expect(isOverflow({ cfg, tokens: tokens(368_000), model: large })).toBe(true)
+  })
+})

@@ -1,9 +1,19 @@
+import os from "os"
 import path from "path"
 import { Effect } from "effect"
 import { InstanceState } from "@/effect/instance-state"
 import type * as Tool from "./tool"
 import { containsPath } from "../project/instance-context"
 import { FSUtil } from "@opencode-ai/core/fs-util"
+
+// Expands a leading `~` (and `~\` on Windows) to the home directory for file tool paths.
+export function expandHome(input: string, home = os.homedir()) {
+  if (input === "~") return home
+  if (input.startsWith("~/") || (process.platform === "win32" && input.startsWith("~\\"))) {
+    return path.join(home, input.slice(2))
+  }
+  return input
+}
 
 type Kind = "file" | "directory"
 
