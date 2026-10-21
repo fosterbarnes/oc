@@ -1055,6 +1055,44 @@ describe("tool.task", () => {
     }),
   )
 
+  it.instance("execute succeeds when the child answers after a failed tool call", () =>
+    Effect.gen(function* () {
+      const { chat, assistant } = yield* seed()
+      const tool = yield* TaskTool
+      const def = yield* tool.init()
+
+      const result = yield* def.execute(
+        {
+          description: "inspect directory",
+          prompt: "list the directory",
+          subagent_type: "general",
+        },
+        {
+          sessionID: chat.id,
+          messageID: assistant.id,
+          agent: "build",
+          abort: new AbortController().signal,
+          extra: {
+            promptOps: {
+              ...stubOps(),
+              // One turn holding a failed tool call and then the final reply, as Claude Code reports it.
+              prompt: (input) =>
+                Effect.sync(() => {
+                  const message = reply(input, "Report written.", undefined, "ls: cannot access 'x'")
+                  return { ...message, parts: message.parts.toReversed() }
+                }),
+            },
+          },
+          messages: [],
+          metadata: () => Effect.void,
+          ask: () => Effect.void,
+        },
+      )
+
+      expect(result.output).toContain("Report written.")
+    }),
+  )
+
   it.instance("execute asks by default and skips checks when bypassed", () =>
     Effect.gen(function* () {
       const { chat, assistant } = yield* seed()

@@ -169,6 +169,22 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-20 (~23:52) - v0.2.272 actuallyLoster - subagents no longer fail on a tool error they recovered from - Claude Opus 5.5; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; no workers; Implementation; completed
+- Version: 0.2.272 actuallyLoster
+- Fixed `tool/task.ts` `runTask`: it failed the task when any tool part in the child's final message had status error. Claude Code runs a whole turn as one assistant message, so a recovered early tool error (e.g. a failed `ls`) marked a finished subagent failed. Now only a tool error after the last non-empty text part (unanswered) fails; returned text is the last non-empty text part.
+- Added test "execute succeeds when the child answers after a failed tool call" (`test/tool/task.test.ts`); existing "terminal child tool errors" test still covers real failures.
+- Verification: `bun test test/tool/task.test.ts` 42 pass 0 fail; new test + terminal-error test fail (2) on the old `task.ts` and pass (2) with the fix. Typecheck left to prePush.
+- Fixed: TODO from v0.2.264-v0.2.271 (5 false "Subagent failed" results during the upstream port).
+
+### User
+Subagents
+- A subagent that hits a failing tool call, recovers, and finishes is no longer reported as failed.
+
+---
+
 ## 2026-10-20 (~23:43) - v0.2.271 shlangingCosmos - upstream 1.19 port stage 9: closeout (sync baseline, SCOPE later rows) - Claude Opus 5.5; Implementation
 
 ### Agent

@@ -342,11 +342,15 @@ export const TaskTool = Tool.define(
               : result.info.error.name
           return yield* Effect.fail(new Error(`Subagent failed (task_id: ${nextSession.id}): ${message}`))
         }
-        const failed = result.parts.findLast((item) => item.type === "tool" && item.state.status === "error")
+        // Only a tool error the subagent never answered fails the task. One turn can hold many tool
+        // calls (Claude Code runs a whole turn as one message), so a recovered error is followed by text.
+        const textIndex = result.parts.findLastIndex((item) => item.type === "text" && item.text.trim() !== "")
+        const failed = result.parts.slice(textIndex + 1).findLast((item) => item.type === "tool")
         if (failed?.type === "tool" && failed.state.status === "error") {
           return yield* Effect.fail(new Error(`Subagent failed (task_id: ${nextSession.id}): ${failed.state.error}`))
         }
-        return result.parts.findLast((item) => item.type === "text")?.text ?? ""
+        const text = result.parts[textIndex]
+        return text?.type === "text" ? text.text : ""
       })
 
       const inject = Effect.fn("TaskTool.injectBackgroundResult")(function* (

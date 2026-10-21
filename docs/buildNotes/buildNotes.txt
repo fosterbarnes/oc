@@ -1,6 +1,6 @@
-v0.2.271 shlangingCosmos
+v0.2.272 actuallyLoster
 
-upstream sync:
-oc is now synced through OpenCode v1.19.3 plus the OpenCode 2 fixes and the features picked for this port. The upstream features left for later are listed in SCOPE.md under Planned for later.
+subagents:
+A subagent that hits a failing tool call, recovers, and finishes its work is no longer reported as failed. Only a tool error the subagent never answered with a reply still fails the task, such as a rejected permission that ends its turn.
 
-Under the hood: upstream 1.19 port stage 9 (closeout). .scripts/upstream-sync.state.json baselineSha moves from abce98e0eb to a1f604bbe0 (upstream v1 = v1.19.3); dev fixes and features were swept through upstream dev db45c950a9 and ported in v0.2.264-v0.2.270. SCOPE.md gains 8 grouped Planned for later rows (native-runtime provider features, ACP, plugin hooks and storage, MCP elicitation/resources/auth, session navigation including paged history, usage and permission views, update and auth items, TUI look and config). Docs and state only; no tests needed.
+Under the hood: tool/task.ts runTask failed the task when any tool part in the child's final message had an error. Claude Code runs a whole turn as one assistant message, so one early failed command (for example an ls of a file not yet written) marked a finished subagent failed; this caused 5 false "Subagent failed" results during the upstream 1.19 port. Now only a tool error after the last non-empty text part fails, and the returned text is that last non-empty text part. Added test "execute succeeds when the child answers after a failed tool call". Checks run: test/tool/task.test.ts 42 pass 0 fail; the new test and the existing terminal tool error test fail on the old task.ts and pass with the fix; prePush. This push also carries the local merge commit recording the upstream sync through a1f604bbe0 (v1.19.3).
