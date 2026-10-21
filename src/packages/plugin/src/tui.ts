@@ -168,6 +168,23 @@ export type TuiDialogSelectOption<Value = unknown> = {
   onSelect?: () => void
 }
 
+export type TuiDialogSelectAction<Value = unknown> = {
+  /** Key that triggers the action, e.g. "ctrl+d". Shown in the dialog footer. */
+  bind: string
+  title: string
+  side?: "left" | "right"
+} & (
+  | {
+      /** Unavailable while no option is selected. */
+      selection?: "required"
+      onTrigger: (option: TuiDialogSelectOption<Value>) => void
+    }
+  | {
+      selection: "none"
+      onTrigger: () => void
+    }
+)
+
 export type TuiDialogSelectProps<Value = unknown> = {
   title: string
   placeholder?: string
@@ -177,6 +194,10 @@ export type TuiDialogSelectProps<Value = unknown> = {
   onFilter?: (query: string) => void
   onSelect?: (option: TuiDialogSelectOption<Value>) => void
   skipFilter?: boolean
+  /** Replaces the built-in fuzzy filter. Gets the query (also when empty) and the enabled options; returns matches in display order, listed flat. */
+  search?: (query: string, options: TuiDialogSelectOption<Value>[]) => TuiDialogSelectOption<Value>[]
+  /** Footer actions, also triggered by their `bind` key. Triggering one does not close the dialog. */
+  actions?: TuiDialogSelectAction<Value>[]
   current?: Value
 }
 

@@ -1729,7 +1729,11 @@ const layer = Layer.effect(
     const loop: (input: LoopInput) => Effect.Effect<SessionV1.WithParts> = Effect.fn("SessionPrompt.loop")(function* (
       input: LoopInput,
     ) {
-      return yield* state.ensureRunning(input.sessionID, lastAssistant(input.sessionID), runLoop(input.sessionID))
+      // Only a run that ends on its own marks the session unread; a cancel or shutdown interrupts it first.
+      const work = runLoop(input.sessionID).pipe(
+        Effect.tap(() => sessions.setIdle(input.sessionID).pipe(Effect.ignore)),
+      )
+      return yield* state.ensureRunning(input.sessionID, lastAssistant(input.sessionID), work)
     })
 
     const shell: (input: ShellInput) => Effect.Effect<SessionV1.WithParts, Session.BusyError> = Effect.fn(

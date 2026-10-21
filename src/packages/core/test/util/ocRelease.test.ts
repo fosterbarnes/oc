@@ -44,6 +44,7 @@ beforeAll(() => {
         // `digest` exactly as GitHub's release API returns it.
         return Response.json({
           tag_name: "v0.3.1",
+          body: "## Fixes\n- one\n",
           assets: [
             { name: "a.zip", browser_download_url: "u", digest: `sha256:${"ab".repeat(32)}` },
             { name: "b.zip", browser_download_url: "v", digest: "sha256:XYZ" },
@@ -61,6 +62,7 @@ afterAll(() => server.stop(true))
 test("lookup parses the release, keeps valid SHA-256 digests, and drops malformed assets", async () => {
   expect(await OcRelease.lookup(undefined, server.url.origin)).toEqual({
     version: "0.3.1",
+    notes: "## Fixes\n- one",
     assets: [
       { name: "a.zip", url: "u", sha256: "ab".repeat(32) },
       { name: "b.zip", url: "v" },

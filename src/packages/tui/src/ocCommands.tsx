@@ -217,8 +217,22 @@ export function createOcCommands(input: {
               options={notices.map((notice, index) => ({
                 value: index,
                 title: notice.title ? `${notice.title}: ${notice.message}` : notice.message,
+                description: notice.action?.label,
                 footer: Locale.todayTimeOrDateTime(notice.time),
               }))}
+              actions={[
+                {
+                  command: "dialog.notices.action",
+                  title: "run action",
+                  hidden: (option) => !option || !notices[option.value]?.action,
+                  onTrigger: (option) => {
+                    const action = notices[option.value]?.action
+                    if (!action) return
+                    dialog.clear()
+                    action.run()
+                  },
+                },
+              ]}
               onSelect={(option) => {
                 const notice = notices[option.value]!
                 void DialogAlert.show(

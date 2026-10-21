@@ -1,5 +1,5 @@
 import { Prompt, type PromptRef } from "../component/prompt"
-import { createEffect, createMemo, createSignal, onMount } from "solid-js"
+import { createEffect, createMemo, createSignal, onMount, untrack } from "solid-js"
 import { Logo } from "../component/logo"
 import { useSync } from "../context/sync"
 import { useArgs } from "../context/args"
@@ -43,16 +43,18 @@ export function Home() {
   const bind = (r: PromptRef | undefined) => {
     setRef(r)
     promptRef.set(r)
-    if (once || !r) return
-    if (route.prompt) {
-      r.set(route.prompt)
-      once = true
-      return
-    }
-    if (!args.prompt) return
+    if (once || !r || route.prompt || !args.prompt) return
     r.set({ input: args.prompt, parts: [] })
     once = true
   }
+
+  // Any navigate({ type: "home", prompt }) fills the composer, not only the first mount
+  createEffect(() => {
+    const composer = ref()
+    const prompt = route.prompt
+    if (!composer || !prompt) return
+    untrack(() => composer.set(prompt))
+  })
 
   // Wait for everything submit needs before auto-submitting --prompt; it runs once. With -s or -c the
   // session route submits it (home can be up while a fork is pending).

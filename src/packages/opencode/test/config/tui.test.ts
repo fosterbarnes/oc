@@ -83,43 +83,45 @@ const getTuiPluginOrigins = (directory: string) =>
     ),
   )
 
-it.instance("keeps server and tui plugin merge semantics aligned", () =>
-  withCleanState(
-    Effect.gen(function* () {
-      const fs = yield* FSUtil.Service
-      const test = yield* TestInstance
-      const local = path.join(test.directory, ".opencode")
-      yield* fs.makeDirectory(local, { recursive: true })
+it.instance(
+  "keeps server and tui plugin merge semantics aligned",
+  () =>
+    withCleanState(
+      Effect.gen(function* () {
+        const fs = yield* FSUtil.Service
+        const test = yield* TestInstance
+        const local = path.join(test.directory, ".opencode")
+        yield* fs.makeDirectory(local, { recursive: true })
 
-      yield* fs.writeJson(path.join(Global.Path.config, "opencode.json"), {
-        plugin: [["shared-plugin@1.0.0", { source: "global" }], "global-only@1.0.0"],
-      })
-      yield* fs.writeJson(path.join(Global.Path.config, "tui.json"), {
-        plugin: [["shared-plugin@1.0.0", { source: "global" }], "global-only@1.0.0"],
-      })
-      yield* fs.writeJson(path.join(local, "opencode.json"), {
-        plugin: [["shared-plugin@2.0.0", { source: "local" }], "local-only@1.0.0"],
-      })
-      yield* fs.writeJson(path.join(local, "tui.json"), {
-        plugin: [["shared-plugin@2.0.0", { source: "local" }], "local-only@1.0.0"],
-      })
+        yield* fs.writeJson(path.join(Global.Path.config, "opencode.json"), {
+          plugin: [["shared-plugin@1.0.0", { source: "global" }], "global-only@1.0.0"],
+        })
+        yield* fs.writeJson(path.join(Global.Path.config, "tui.json"), {
+          plugin: [["shared-plugin@1.0.0", { source: "global" }], "global-only@1.0.0"],
+        })
+        yield* fs.writeJson(path.join(local, "opencode.json"), {
+          plugin: [["shared-plugin@2.0.0", { source: "local" }], "local-only@1.0.0"],
+        })
+        yield* fs.writeJson(path.join(local, "tui.json"), {
+          plugin: [["shared-plugin@2.0.0", { source: "local" }], "local-only@1.0.0"],
+        })
 
-      const server = yield* Config.use.get()
-      const tui = yield* getTuiConfig(test.directory)
-      const tuiOrigins = yield* getTuiPluginOrigins(test.directory)
-      const serverPlugins = (server.plugin ?? []).map((item) => ConfigPlugin.pluginSpecifier(item))
-      const tuiPlugins = (tui.plugin ?? []).map((item) => ConfigPlugin.pluginSpecifier(item))
+        const server = yield* Config.use.get()
+        const tui = yield* getTuiConfig(test.directory)
+        const tuiOrigins = yield* getTuiPluginOrigins(test.directory)
+        const serverPlugins = (server.plugin ?? []).map((item) => ConfigPlugin.pluginSpecifier(item))
+        const tuiPlugins = (tui.plugin ?? []).map((item) => ConfigPlugin.pluginSpecifier(item))
 
-      expect(serverPlugins).toEqual(tuiPlugins)
-      expect(serverPlugins).toContain("shared-plugin@2.0.0")
-      expect(serverPlugins).not.toContain("shared-plugin@1.0.0")
+        expect(serverPlugins).toEqual(tuiPlugins)
+        expect(serverPlugins).toContain("shared-plugin@2.0.0")
+        expect(serverPlugins).not.toContain("shared-plugin@1.0.0")
 
-      const serverOrigins = server.plugin_origins ?? []
-      expect(serverOrigins.map((item) => ConfigPlugin.pluginSpecifier(item.spec))).toEqual(serverPlugins)
-      expect(tuiOrigins.map((item) => ConfigPlugin.pluginSpecifier(item.spec))).toEqual(tuiPlugins)
-      expect(serverOrigins.map((item) => item.scope)).toEqual(tuiOrigins.map((item) => item.scope))
-    }),
-  ),
+        const serverOrigins = server.plugin_origins ?? []
+        expect(serverOrigins.map((item) => ConfigPlugin.pluginSpecifier(item.spec))).toEqual(serverPlugins)
+        expect(tuiOrigins.map((item) => ConfigPlugin.pluginSpecifier(item.spec))).toEqual(tuiPlugins)
+        expect(serverOrigins.map((item) => item.scope)).toEqual(tuiOrigins.map((item) => item.scope))
+      }),
+    ),
   { git: true },
 )
 
@@ -138,6 +140,33 @@ it.instance("loads tui config with the same precedence order as server config pa
       const config = yield* getTuiConfig(test.directory)
       expect(config.theme).toBe("local")
       expect(config.diff_style).toBe("stacked")
+    }),
+  ),
+)
+
+it.instance("reload re-reads saved files and files lists watch targets", () =>
+  withCleanState(
+    Effect.gen(function* () {
+      const fs = yield* FSUtil.Service
+      const test = yield* TestInstance
+      const file = path.join(test.directory, ".opencode", "tui.json")
+      yield* fs.writeWithDirs(file, JSON.stringify({ theme: "before" }))
+
+      const { files, config } = yield* TuiConfig.Service.use((svc) =>
+        Effect.gen(function* () {
+          yield* fs.writeWithDirs(file, JSON.stringify({ theme: "after" }))
+          return { files: yield* svc.files(), config: yield* svc.reload() }
+        }),
+      ).pipe(
+        Effect.provide(
+          AppNodeBuilder.build(TuiConfig.node).pipe(
+            Layer.provide(Layer.succeed(CurrentWorkingDirectory, test.directory)),
+          ),
+        ),
+      )
+      expect(config.theme).toBe("after")
+      expect(files).toContain(path.join(Global.Path.config, "tui.json"))
+      expect(files.map((item) => path.resolve(item))).toContain(path.resolve(file))
     }),
   ),
 )

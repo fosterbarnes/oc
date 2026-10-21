@@ -1,15 +1,19 @@
 import { intro, log, outro, spinner } from "@clack/prompts"
 import { Effect } from "effect"
 
+import { rm } from "node:fs/promises"
 import { ConfigPaths } from "@/config/paths"
+import { ConfigPlugin } from "@/config/plugin"
 import { Global } from "@opencode-ai/core/global"
-import { installPlugin, patchPluginConfig, readPluginManifest } from "../../plugin/install"
-import { resolvePluginTarget } from "../../plugin/shared"
+import { NpmUpdate } from "@opencode-ai/core/npm-update"
+import { installPlugin, patchPluginConfig, readPluginManifest, removePluginConfig } from "../../plugin/install"
+import { isPathPluginSpec, parsePluginSpecifier, resolvePluginTarget, type PluginKind } from "../../plugin/shared"
 import { errorMessage } from "../../util/error"
 import { Filesystem } from "@/util/filesystem"
 import { Process } from "@/util/process"
 import { UI } from "../ui"
-import { effectCmd } from "../effect-cmd"
+import { cmd } from "./cmd"
+import { effectCmd, fail } from "../effect-cmd"
 import { InstanceRef } from "@/effect/instance-ref"
 
 type Spin = {
@@ -175,9 +179,47 @@ export function createPlugTask(input: PlugInput, dep: PlugDeps = defaultPlugDeps
   }
 }
 
-export const PluginCommand = effectCmd({
-  command: "plugin <module>",
-  aliases: ["plug"],
+export type PluginRow = {
+  name: string
+  spec: string
+  kinds: PluginKind[]
+  scope: ConfigPlugin.Scope
+  sources: string[]
+}
+
+// One row per plugin identity (package name, or file URL for path plugins) across the server
+// (opencode.json) and TUI (tui.json) configs, the same external set the TUI /plugins manager loads.
+export function pluginInventory(origins: { kind: PluginKind; origin: ConfigPlugin.Origin }[]) {
+  return origins.reduce<PluginRow[]>((rows, item) => {
+    const spec = ConfigPlugin.pluginSpecifier(item.origin.spec)
+    const name = isPathPluginSpec(spec) ? spec : parsePluginSpecifier(spec).pkg
+    const row = rows.find((entry) => entry.name === name)
+    if (!row)
+      return [...rows, { name, spec, kinds: [item.kind], scope: item.origin.scope, sources: [item.origin.source] }]
+    if (!row.kinds.includes(item.kind)) row.kinds.push(item.kind)
+    if (!row.sources.includes(item.origin.source)) row.sources.push(item.origin.source)
+    return rows
+  }, [])
+}
+
+const loadInventory = Effect.fn("Cli.plug.inventory")(function* () {
+  const { Config } = yield* Effect.promise(() => import("@/config/config"))
+  const { TuiConfig } = yield* Effect.promise(() => import("@/config/tui"))
+  const config = yield* Config.Service.use((cfg) => cfg.get())
+  const tui = yield* Effect.promise(() => TuiConfig.pluginOrigins())
+  return pluginInventory([
+    ...(config.plugin_origins ?? []).map((origin) => ({ kind: "server" as const, origin })),
+    ...tui.map((origin) => ({ kind: "tui" as const, origin })),
+  ])
+})
+
+function findRows(rows: PluginRow[], mod: string) {
+  const name = isPathPluginSpec(mod) ? mod : parsePluginSpecifier(mod).pkg
+  return rows.filter((row) => row.name === name || row.spec === mod)
+}
+
+const PluginInstallCommand = effectCmd({
+  command: "$0 <module>",
   describe: "install plugin and update config",
   builder: (yargs) =>
     yargs
@@ -227,4 +269,117 @@ export const PluginCommand = effectCmd({
     outro("Done")
     if (!ok) process.exitCode = 1
   }),
+})
+
+const PluginListCommand = effectCmd({
+  command: "list",
+  aliases: ["ls"],
+  describe: "list configured plugins with their installed versions",
+  handler: Effect.fn("Cli.plug.list")(function* () {
+    const rows = yield* loadInventory()
+    if (!rows.length) {
+      console.log("No external plugins configured")
+      return
+    }
+    const width = Math.max(...rows.map((row) => row.spec.length))
+    for (const row of rows) {
+      const version = isPathPluginSpec(row.spec)
+        ? "local path"
+        : ((yield* Effect.promise(() => NpmUpdate.installedVersion(row.spec))) ?? "not installed")
+      console.log(`${row.spec.padEnd(width)}  ${row.kinds.join("+").padEnd(10)}  ${row.scope.padEnd(6)}  ${version}`)
+    }
+  }),
+})
+
+const PluginRemoveCommand = effectCmd({
+  command: "remove <module>",
+  aliases: ["rm"],
+  describe: "remove a plugin from every config file that lists it",
+  builder: (yargs) => yargs.positional("module", { type: "string", demandOption: true, describe: "npm module name" }),
+  handler: Effect.fn("Cli.plug.remove")(function* (args) {
+    const rows = findRows(yield* loadInventory(), args.module)
+    if (!rows.length) return yield* fail(`Plugin "${args.module}" is not configured`)
+    const sources = [...new Set(rows.flatMap((row) => row.sources))]
+    // Plugins found in a `plugin/` folder have that folder as their source, not a config file.
+    const files = sources.filter((file) => /\.jsonc?$/.test(file))
+    const removed = yield* Effect.promise(() =>
+      Promise.all(files.map((file) => removePluginConfig(file, rows[0].spec))).then((hits) =>
+        files.filter((_, i) => hits[i]),
+      ),
+    )
+    for (const file of removed) console.log(`Removed from ${file}`)
+    for (const dir of sources.filter((file) => !files.includes(file))) {
+      console.log(`Loaded from the plugin folder ${dir}; delete its file there to remove it`)
+    }
+    // Path plugins are stored relative to their config file, so a resolved spec may not match.
+    if (!removed.length && files.length) return yield* fail(`Could not find "${args.module}" in ${files.join(", ")}`)
+  }),
+})
+
+const PluginUpdateCommand = effectCmd({
+  command: "update [module]",
+  describe: "update npm plugins that have a newer version (all when no module is given)",
+  builder: (yargs) =>
+    yargs
+      .positional("module", { type: "string", describe: "npm module name" })
+      .option("check", { type: "boolean", default: false, describe: "only report available updates" }),
+  handler: Effect.fn("Cli.plug.update")(function* (args) {
+    const all = yield* loadInventory()
+    const rows = (args.module ? findRows(all, args.module) : all).filter((row) => !isPathPluginSpec(row.spec))
+    if (!rows.length) {
+      if (args.module) return yield* fail(`Plugin "${args.module}" is not a configured npm plugin`)
+      console.log("No npm plugins configured")
+      return
+    }
+    for (const row of rows) {
+      const status = yield* Effect.promise(() =>
+        NpmUpdate.check(row.spec).catch((error: unknown) => new Error(errorMessage(error))),
+      )
+      if (status instanceof Error) {
+        UI.error(`${row.spec}: ${status.message}`)
+        process.exitCode = 1
+        continue
+      }
+      if (!status) {
+        console.log(`${row.spec}: pinned, not updated`)
+        continue
+      }
+      if (!status.outdated) {
+        console.log(`${row.spec}: up to date (${status.installed ?? "not installed"})`)
+        continue
+      }
+      if (args.check) {
+        console.log(`${row.spec}: ${status.installed} -> ${status.latest} available`)
+        continue
+      }
+      const updated = yield* Effect.promise(() =>
+        rm(NpmUpdate.cacheDir(row.spec), { recursive: true, force: true })
+          .then(() => resolvePluginTarget(row.spec))
+          .then(
+            () => true,
+            (error: unknown) => new Error(errorMessage(error)),
+          ),
+      )
+      if (updated instanceof Error) {
+        UI.error(`${row.spec}: update failed: ${updated.message}`)
+        process.exitCode = 1
+        continue
+      }
+      console.log(`${row.spec}: updated ${status.installed} -> ${status.latest}; restart oc to load it`)
+    }
+  }),
+})
+
+export const PluginCommand = cmd({
+  command: "plugin",
+  aliases: ["plug"],
+  describe: "install, list, remove, and update plugins",
+  builder: (yargs) =>
+    yargs
+      .command(PluginInstallCommand)
+      .command(PluginListCommand)
+      .command(PluginRemoveCommand)
+      .command(PluginUpdateCommand)
+      .demandCommand(),
+  async handler() {},
 })

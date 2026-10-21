@@ -16,6 +16,7 @@ describe("CLI command loading", () => {
   test("resolves command aliases", () => {
     expect(resolveCommandToLoad(["auth", "list"])).toBe("providers")
     expect(resolveCommandToLoad(["plug", "module"])).toBe("plugin")
+    expect(resolveCommandToLoad(["update"])).toBe("upgrade")
   })
 
   test("executable default oc maps to oc launch", () => {

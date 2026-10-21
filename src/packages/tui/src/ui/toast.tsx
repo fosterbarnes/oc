@@ -12,6 +12,12 @@ export type ToastOptions = {
   duration: number
   // Fixed box width (still capped by the terminal); live redraws use it so the box does not jump.
   width?: number
+  // Clicking the toast runs it; Notices keeps it so the action stays reachable after the toast is gone.
+  action?: ToastAction
+}
+export type ToastAction = {
+  label: string
+  run: () => void
 }
 // `log: false` keeps the toast out of Notices (live progress redraws).
 type ToastInput = Omit<ToastOptions, "duration"> & { duration?: number; log?: boolean }
@@ -45,6 +51,9 @@ export function Toast() {
           borderColor={current().variant === "info" ? theme.warning : theme[current().variant]}
           border={["left", "right"]}
           customBorderChars={SplitBorder.customBorderChars}
+          onMouseOver={toast.pause}
+          onMouseOut={toast.resume}
+          onMouseUp={toast.activate}
         >
           <Show when={current().title}>
             <text attributes={TextAttributes.BOLD} marginBottom={1} fg={theme.text}>
@@ -54,6 +63,13 @@ export function Toast() {
           <text fg={theme.text} wrapMode="word" width="100%">
             {current().message}
           </text>
+          <Show when={current().action}>
+            {(action) => (
+              <text fg={theme.accent} attributes={TextAttributes.BOLD} marginTop={1}>
+                › {action().label} (click)
+              </text>
+            )}
+          </Show>
           <Show when={current().variant === "warning" || current().variant === "error"}>
             <text fg={theme.textMuted} marginTop={1}>
               /notices to read again
@@ -72,6 +88,17 @@ function init() {
   })
 
   let timeoutHandle: NodeJS.Timeout | null = null
+  // Hover pauses the dismiss timer so an action toast can be clicked
+  let startedAt = 0
+  let remaining = 0
+  let paused = false
+
+  const start = (duration: number) => {
+    if (timeoutHandle) clearTimeout(timeoutHandle)
+    remaining = duration
+    startedAt = Date.now()
+    timeoutHandle = setTimeout(() => toast.dismiss(), duration).unref()
+  }
 
   const toast = {
     show({ log = true, ...options }: ToastInput) {
@@ -80,18 +107,46 @@ function init() {
       if (log) {
         setStore("notices", (notices) =>
           [
-            { title: options.title, message: options.message, variant: options.variant, time: Date.now() },
+            {
+              title: options.title,
+              message: options.message,
+              variant: options.variant,
+              action: options.action,
+              time: Date.now(),
+            },
             ...notices,
           ].slice(0, _NOTICE_LIMIT),
         )
       }
-      if (timeoutHandle) clearTimeout(timeoutHandle)
-      timeoutHandle = setTimeout(() => {
-        setStore("currentToast", null)
-      }, toastOptions.duration).unref()
+      paused = false
+      start(toastOptions.duration)
     },
     error: (err: unknown) => {
       toast.show({ variant: "error", message: errorMessage(err) })
+    },
+    dismiss() {
+      if (timeoutHandle) clearTimeout(timeoutHandle)
+      timeoutHandle = null
+      paused = false
+      setStore("currentToast", null)
+    },
+    pause() {
+      if (!store.currentToast || paused) return
+      paused = true
+      remaining = Math.max(0, remaining - (Date.now() - startedAt))
+      if (timeoutHandle) clearTimeout(timeoutHandle)
+      timeoutHandle = null
+    },
+    resume() {
+      if (!store.currentToast || !paused) return
+      paused = false
+      start(remaining)
+    },
+    /** Click on the toast: dismisses it and runs its action, if any. */
+    activate() {
+      const action = store.currentToast?.action
+      toast.dismiss()
+      action?.run()
     },
     get currentToast(): ToastOptions | null {
       return store.currentToast

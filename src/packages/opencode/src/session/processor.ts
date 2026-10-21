@@ -340,10 +340,19 @@ const layer = Layer.effect(
             yield* ensureToolCall(value)
             return
 
-          case "tool-input-delta":
-            if (ctx.toolcalls[value.id]) return
-            yield* ensureToolCall(value)
+          case "tool-input-delta": {
+            const call = ctx.toolcalls[value.id] ?? (yield* ensureToolCall(value)).call
+            if (!value.text) return
+            // Live preview only (the TUI appends to pending `state.raw`); tool-call carries the final input.
+            yield* session.updatePartDelta({
+              sessionID: call.sessionID,
+              messageID: call.messageID,
+              partID: call.partID,
+              field: "state.raw",
+              delta: value.text,
+            })
             return
+          }
 
           case "tool-input-end": {
             if (ctx.toolcalls[value.id]) return

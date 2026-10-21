@@ -26,6 +26,7 @@ const COMMANDS = new Set([
 const ALIASES = {
   auth: "providers",
   plug: "plugin",
+  update: "upgrade",
 } as const
 
 const VALUE_OPTIONS = new Set([

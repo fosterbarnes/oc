@@ -1,4 +1,5 @@
 import type { TuiDialogSelectOption, TuiPluginApi, TuiSlotProps } from "@opencode-ai/plugin/tui"
+import { createUniqueId } from "solid-js"
 import type { TuiConfig } from "../config"
 import type { useEvent } from "../context/event"
 import type { useRoute } from "../context/route"
@@ -98,7 +99,10 @@ function mapOptionCb<Value>(cb?: (item: TuiDialogSelectOption<Value>) => void) {
   return (item: SelectOption<Value>) => cb(pickOption(item))
 }
 
-function stateApi(sync: ReturnType<typeof useSync>, currentModel: NonNullable<TuiPluginApi["state"]["currentModel"]>): TuiPluginApi["state"] {
+function stateApi(
+  sync: ReturnType<typeof useSync>,
+  currentModel: NonNullable<TuiPluginApi["state"]["currentModel"]>,
+): TuiPluginApi["state"] {
   return {
     get ready() {
       return sync.ready
@@ -236,6 +240,8 @@ export function createTuiApiAdapters(input: Input): Omit<TuiPluginApi, "lifecycl
         return <DialogPrompt {...props} description={props.description} />
       },
       DialogSelect(props) {
+        const id = createUniqueId()
+        const search = props.search
         return (
           <DialogSelect
             title={props.title}
@@ -246,6 +252,25 @@ export function createTuiApiAdapters(input: Input): Omit<TuiPluginApi, "lifecycl
             onFilter={props.onFilter}
             onSelect={mapOptionCb(props.onSelect)}
             skipFilter={props.skipFilter}
+            search={
+              search &&
+              ((query) =>
+                search(
+                  query,
+                  props.options.filter((option) => !option.disabled),
+                ).map(mapOption))
+            }
+            actions={props.actions?.map((action, index) => {
+              const base = {
+                command: `plugin.dialog.select.${id}.${index}`,
+                title: action.title,
+                side: action.side,
+                bind: action.bind,
+              }
+              if (action.selection === "none")
+                return { ...base, selection: action.selection, onTrigger: action.onTrigger }
+              return { ...base, onTrigger: mapOptionCb(action.onTrigger)! }
+            })}
             current={props.current}
           />
         )

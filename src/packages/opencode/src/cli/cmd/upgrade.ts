@@ -7,6 +7,7 @@ import { OcRelease } from "@opencode-ai/core/util/ocRelease"
 // binaries, and reopens the terminal. This command only reports whether an update exists.
 export const UpgradeCommand = {
   command: "upgrade",
+  aliases: ["update"],
   describe: "check for a newer oc release",
   handler: async () => {
     UI.empty()

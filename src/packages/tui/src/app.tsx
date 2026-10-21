@@ -74,6 +74,10 @@ import { LINK_CLICK_KEY, openLink } from "./util/browser"
 import { PromptRefProvider, usePromptRef } from "./context/prompt"
 import { TuiConfigProvider, useTuiConfig, type TuiConfig } from "./config"
 import { TuiKeybind } from "./config/keybind"
+import { createLiveConfig, watchConfigFiles, type ConfigWatch } from "./config/live"
+import { showFailureToast } from "./component/dialog-error-details"
+import { releaseNotesAfterUpdate } from "./component/dialog-release-notes"
+import { createFailureAnnouncer, mcpFailures, serverPluginFailures } from "./failureToasts"
 import { createTuiApiAdapters } from "./plugin/adapters"
 import { createTuiApi } from "./plugin/api"
 import { createPluginRuntime, PluginRuntimeProvider, usePluginRuntime, type TuiPluginHost } from "./plugin/runtime"
@@ -173,6 +177,7 @@ export type TuiInput = {
   url: string
   args: Args
   config: TuiConfig.Resolved
+  configWatch?: ConfigWatch<TuiConfig.Resolved>
   onSnapshot?: () => Promise<string[]>
   onSessionChange?: (sessionID: string) => void
   directory?: string
@@ -262,9 +267,25 @@ export const run = Effect.fn("Tui.run")(function* (input: TuiInput) {
       )
       win32AssertRawMode()
       const keymap = createDefaultOpenTuiKeymap(renderer)
+      const liveConfig = createLiveConfig(input.config)
       yield* Effect.acquireRelease(
-        Effect.sync(() => registerOpencodeKeymap(keymap, renderer, input.config)),
+        Effect.sync(() => registerOpencodeKeymap(keymap, renderer, liveConfig.config)),
         (unregister) => Effect.sync(unregister),
+      )
+      // tui.json saves apply in place; renderer options (mouse) still need a restart
+      yield* Effect.acquireRelease(
+        Effect.sync(() => {
+          const configWatch = input.configWatch
+          if (!configWatch) return () => {}
+          let pending: Promise<unknown> = Promise.resolve()
+          return watchConfigFiles(configWatch.files, () => {
+            pending = pending
+              .then(configWatch.reload)
+              .then(liveConfig.replace)
+              .catch((error) => console.error("Failed to reload TUI config", error))
+          })
+        }),
+        (unwatch) => Effect.sync(unwatch),
       )
       yield* Effect.addFinalizer(() =>
         Effect.promise(async () => {
@@ -348,7 +369,7 @@ export const run = Effect.fn("Tui.run")(function* (input: TuiInput) {
                                           : undefined
                                       }
                                     >
-                                      <TuiConfigProvider config={input.config}>
+                                      <TuiConfigProvider config={liveConfig.config}>
                                         <PluginRuntimeProvider value={pluginRuntime}>
                                           <SDKProvider
                                             url={input.url}
@@ -647,6 +668,8 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
       Slot: pluginRuntime.Slot,
     }),
   )
+  // Plugin and MCP failures: error toast -> details dialog (copy, investigate in a new session)
+  const announceFailure = createFailureAnnouncer((failure) => showFailureToast(toast, dialog, failure))
   const [ready, setReady] = createSignal(false)
   props.pluginHost
     .start({
@@ -661,7 +684,28 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
     .finally(() => {
       setReady(true)
       hideIntroLogo()
+      const failures = props.pluginHost.failures?.() ?? []
+      announceFailure(
+        "tui-plugin",
+        failures.map((item) => ({ ...item, key: item.error })),
+      )
     })
+  createEffect(() => {
+    if (sync.status === "loading") return
+    announceFailure("mcp", mcpFailures(sync.data.mcp))
+  })
+  createEffect(
+    on(
+      () => sync.status === "loading",
+      (loading) => {
+        if (loading) return
+        void sdk.client.plugin
+          .status()
+          .then((result) => announceFailure("server-plugin", serverPluginFailures(result.data ?? [])))
+          .catch((error) => console.error("Failed to read server plugin status", error))
+      },
+    ),
+  )
 
   // Retained selection owns copy/dismiss before modal-close or session-abort bindings.
   const offSelectionKeys = Selection.registerKeys(keymap, renderer, toast, clipboard)
@@ -1050,6 +1094,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
         category: "Agent",
         hidden: local.model.variant.list().length === 0,
         slashName: "variants",
+        slashAliases: ["thinking", "effort"],
         run: () => {
           if (local.model.variant.list().length === 0) {
             return toast.show({
@@ -1444,6 +1489,14 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
       if (!value || sync.data.config.autoupdate === false) return
       void updateNotice(toast, kv.get(SKIPPED_VERSION))
     }),
+  )
+  createEffect(
+    on(
+      () => ready() && kv.ready,
+      (value) => {
+        if (value) void releaseNotesAfterUpdate(kv, dialog, toast)
+      },
+    ),
   )
 
   const plugin = createMemo(() => {

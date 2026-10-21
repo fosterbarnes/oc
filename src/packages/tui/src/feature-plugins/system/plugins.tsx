@@ -3,7 +3,8 @@ import type { BuiltinTuiPlugin } from "../builtins"
 import { useTerminalDimensions } from "@opentui/solid"
 import { fileURLToPath } from "url"
 import { DialogSelect, type DialogSelectOption } from "../../ui/dialog-select"
-import { Show, createEffect, createMemo, createSignal } from "solid-js"
+import { Show, createEffect, createMemo, createSignal, onMount } from "solid-js"
+import { NpmUpdate } from "@opencode-ai/core/npm-update"
 import { useBindings } from "../../keymap"
 
 const id = "internal:plugin-manager"
@@ -132,13 +133,20 @@ function Install(props: { api: TuiPluginApi }) {
   )
 }
 
-function row(api: TuiPluginApi, item: TuiPluginStatus, width: number): DialogSelectOption<string> {
+function row(api: TuiPluginApi, item: TuiPluginStatus, width: number, latest?: string): DialogSelectOption<string> {
   return {
     title: item.id,
     value: item.id,
     category: item.source === "internal" ? "Internal" : "External",
     description: meta(item, width),
-    footer: state(api, item),
+    footer: (
+      <>
+        {state(api, item)}
+        <Show when={latest}>
+          <span style={{ fg: api.theme.current.warning }}> · update {latest} (oc plug update)</span>
+        </Show>
+      </>
+    ),
     disabled: item.id === id,
   }
 }
@@ -151,6 +159,20 @@ function View(props: { api: TuiPluginApi }) {
   const size = useTerminalDimensions()
   const [list, setList] = createSignal(props.api.plugins.list())
   const [lock, setLock] = createSignal(false)
+  // Plugin id -> newer npm version. Checked once per open; installing stays `oc plug update`.
+  const [updates, setUpdates] = createSignal<Record<string, string>>({})
+
+  onMount(() => {
+    for (const item of list().filter((entry) => entry.source === "npm")) {
+      void NpmUpdate.check(item.spec)
+        .then((status) => {
+          const latest = status?.outdated ? status.latest : undefined
+          if (latest) setUpdates((prev) => ({ ...prev, [item.id]: latest }))
+        })
+        // Offline or registry errors only hide the marker; `oc plug update --check` reports them.
+        .catch(() => {})
+    }
+  })
 
   createEffect(() => {
     const width = size().width
@@ -173,7 +195,7 @@ function View(props: { api: TuiPluginApi }) {
         if (x !== y) return x - y
         return a.id.localeCompare(b.id)
       })
-      .map((item) => row(props.api, item, size().width)),
+      .map((item) => row(props.api, item, size().width, updates()[item.id])),
   )
 
   const flip = (x: string) => {

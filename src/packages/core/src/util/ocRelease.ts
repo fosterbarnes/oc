@@ -8,7 +8,8 @@ export const REPO = "fosterbarnes/oc"
 export type Variant = "oc" | "native"
 // `sha256` is the digest GitHub computes on upload and shows on the release page; /update requires it.
 export type Asset = { name: string; url: string; sha256?: string }
-export type Release = { version: string; assets: Asset[] }
+// `notes` is the release body (markdown) that pushRelease.ps1 writes; shown once after /update.
+export type Release = { version: string; assets: Asset[]; notes?: string }
 
 const PREFIX: Record<Variant, string> = { oc: "", native: "native-" }
 
@@ -45,11 +46,13 @@ export function isNewer(left: string, right: string) {
 }
 
 function parse(input: unknown): Release {
-  const value = input as { tag_name?: unknown; assets?: unknown }
+  const value = input as { tag_name?: unknown; assets?: unknown; body?: unknown }
   if (typeof value?.tag_name !== "string" || !Array.isArray(value.assets))
     throw new Error("oc release lookup returned an unexpected response")
+  const notes = typeof value.body === "string" ? value.body.trim() : ""
   return {
     version: value.tag_name.replace(/^v/, ""),
+    ...(notes ? { notes } : {}),
     assets: value.assets.flatMap((item: { name?: unknown; browser_download_url?: unknown; digest?: unknown }) => {
       if (typeof item?.name !== "string" || typeof item.browser_download_url !== "string") return []
       const sha256 = typeof item.digest === "string" ? /^sha256:([0-9a-f]{64})$/.exec(item.digest)?.[1] : undefined

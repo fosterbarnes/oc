@@ -75,6 +75,8 @@ export type AutocompleteOption = {
   path?: string
   // Slash entry origin; colors the row so each kind reads at a glance.
   kind?: "tui" | "command" | "mcp" | "skill"
+  // @ mention type, shown right-aligned on the row.
+  mention?: "agent" | "reference" | "resource"
 }
 
 export function Autocomplete(props: {
@@ -386,11 +388,13 @@ export function Autocomplete(props: {
     if (!store.visible || store.visible === "/") return []
 
     const options: AutocompleteOption[] = []
-    const width = props.anchor().width - 4
+    // Leaves room for the right-aligned "resource" label.
+    const width = props.anchor().width - 14
 
     for (const res of Object.values(sync.data.mcp_resource)) {
       options.push({
         display: Locale.truncateMiddle(res.name, width),
+        mention: "resource",
         // Match the name only; matching the URI caused unrelated fuzzy hits.
         value: res.name,
         description: res.description,
@@ -424,6 +428,7 @@ export function Autocomplete(props: {
       .map(
         (agent): AutocompleteOption => ({
           display: "@" + agent.name,
+          mention: "agent",
           onSelect: () => {
             insertPart(agent.name, {
               type: "agent",
@@ -445,6 +450,7 @@ export function Autocomplete(props: {
       .map(
         (reference): AutocompleteOption => ({
           display: "@" + reference.name,
+          mention: "reference",
           description: ` ${reference.source.type === "git" ? reference.source.repository : reference.source.path}`,
           onSelect: () => {
             insertPart(reference.name, {
@@ -856,9 +862,24 @@ export function Autocomplete(props: {
                 {option().display}
               </text>
               <Show when={option().description}>
-                <text fg={index === store.selected ? selectedForeground(theme) : theme.textMuted} wrapMode="none">
+                <text
+                  fg={index === store.selected ? selectedForeground(theme) : theme.textMuted}
+                  wrapMode="none"
+                  flexShrink={1}
+                  minWidth={0}
+                >
                   {" " + option().description?.replace(/\s+/g, " ").trim()}
                 </text>
+              </Show>
+              <Show when={option().mention}>
+                {(mention) => (
+                  <>
+                    <box flexGrow={1} minWidth={2} />
+                    <text fg={index === store.selected ? selectedForeground(theme) : theme.textMuted} flexShrink={0}>
+                      {mention()}
+                    </text>
+                  </>
+                )}
               </Show>
             </box>
           )}

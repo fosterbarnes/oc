@@ -2,15 +2,17 @@
 // route. The returned function is called inside that route's `sessionCommandList` memo, so the
 // titles still track `session()`.
 import type { Accessor } from "solid-js"
-import { useRouteData } from "../../context/route"
+import { useRoute, useRouteData } from "../../context/route"
 import { useSDK } from "../../context/sdk"
 import type { useSync } from "../../context/sync"
 import { useDialog } from "../../ui/dialog"
+import { DialogConfirm } from "../../ui/dialog-confirm"
 import { useToast } from "../../ui/toast"
 import { errorMessage } from "../../util/error"
 
 export function createOcSessionCommands(session: Accessor<ReturnType<ReturnType<typeof useSync>["session"]["get"]>>) {
   const route = useRouteData("session")
+  const { navigate } = useRoute()
   const sdk = useSDK()
   const toast = useToast()
   const dialog = useDialog()
@@ -28,7 +30,10 @@ export function createOcSessionCommands(session: Accessor<ReturnType<ReturnType<
         const before = session()?.title
         const result = await sdk.client.session.rename({ sessionID: route.sessionID })
         if (result.error || !result.data) {
-          toast.show({ message: result.error ? errorMessage(result.error) : "Failed to rename session", variant: "error" })
+          toast.show({
+            message: result.error ? errorMessage(result.error) : "Failed to rename session",
+            variant: "error",
+          })
           return
         }
         const model = result.data.model ? `\nModel used: ${result.data.model}` : ""
@@ -100,6 +105,31 @@ export function createOcSessionCommands(session: Accessor<ReturnType<ReturnType<
           return
         }
         dialog.clear()
+      },
+    },
+    {
+      title: "Delete this session",
+      value: "session.delete.current",
+      category: "Session",
+      slash: {
+        name: "delete",
+      },
+      run: async () => {
+        const current = session()
+        if (!current) return
+        const confirmed = await DialogConfirm.show(
+          dialog,
+          "Delete this session",
+          `Permanently delete "${current.title}" and its subagent sessions. This cannot be undone.`,
+        )
+        if (!confirmed) return
+        const result = await sdk.client.session.delete({ sessionID: current.id }).catch((error: unknown) => ({ error }))
+        if (result.error) {
+          toast.show({ variant: "error", title: "Failed to delete session", message: errorMessage(result.error) })
+          return
+        }
+        // app.tsx's session.deleted handler also routes home and shows the "was deleted" notice
+        if (route.sessionID === current.id) navigate({ type: "home" })
       },
     },
   ]

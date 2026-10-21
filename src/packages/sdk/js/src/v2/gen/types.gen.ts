@@ -214,6 +214,8 @@ export type Session = {
     updated: number
     compacting?: number
     archived?: number
+    idle?: number
+    viewed?: number
   }
   sessionComplete?: boolean
   sessionFailed?: boolean
@@ -2417,6 +2419,8 @@ export type GlobalSession = {
     updated: number
     compacting?: number
     archived?: number
+    idle?: number
+    viewed?: number
   }
   sessionComplete?: boolean
   sessionFailed?: boolean
@@ -2792,6 +2796,8 @@ export type Session1 = {
     updated: number
     compacting?: number
     archived?: number
+    idle?: number
+    viewed?: number
   }
   sessionComplete?: boolean
   sessionFailed?: boolean
@@ -2849,6 +2855,8 @@ export type Session2 = {
     updated: number
     compacting?: number
     archived?: number
+    idle?: number
+    viewed?: number
   }
   sessionComplete?: boolean
   sessionFailed?: boolean
@@ -2906,6 +2914,8 @@ export type Session3 = {
     updated: number
     compacting?: number
     archived?: number
+    idle?: number
+    viewed?: number
   }
   sessionComplete?: boolean
   sessionFailed?: boolean
@@ -2963,6 +2973,8 @@ export type Session4 = {
     updated: number
     compacting?: number
     archived?: number
+    idle?: number
+    viewed?: number
   }
   sessionComplete?: boolean
   sessionFailed?: boolean
@@ -3020,6 +3032,8 @@ export type Session5 = {
     updated: number
     compacting?: number
     archived?: number
+    idle?: number
+    viewed?: number
   }
   sessionComplete?: boolean
   sessionFailed?: boolean
@@ -3077,6 +3091,8 @@ export type Session6 = {
     updated: number
     compacting?: number
     archived?: number
+    idle?: number
+    viewed?: number
   }
   sessionComplete?: boolean
   sessionFailed?: boolean
@@ -3134,6 +3150,8 @@ export type Session7 = {
     updated: number
     compacting?: number
     archived?: number
+    idle?: number
+    viewed?: number
   }
   sessionComplete?: boolean
   sessionFailed?: boolean
@@ -3272,6 +3290,8 @@ export type Session8 = {
     updated: number
     compacting?: number
     archived?: number
+    idle?: number
+    viewed?: number
   }
   sessionComplete?: boolean
   sessionFailed?: boolean
@@ -3329,6 +3349,8 @@ export type Session9 = {
     updated: number
     compacting?: number
     archived?: number
+    idle?: number
+    viewed?: number
   }
   sessionComplete?: boolean
   sessionFailed?: boolean
@@ -11035,6 +11057,7 @@ export type SessionUpdateData = {
     permission?: PermissionRuleset
     time?: {
       archived?: number
+      viewed?: number
     }
   }
   path: {

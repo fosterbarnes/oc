@@ -352,3 +352,55 @@ test.each([false, 0, "", null, "current", undefined])(
     }
   },
 )
+
+test("search replaces the fuzzy filter and lists results flat in its order", async () => {
+  await using tmp = await tmpdir()
+  const queries: string[] = []
+  const options: DialogSelectOption<string>[] = [
+    { title: "Alpha", value: "alpha", category: "One" },
+    { title: "Beta", value: "beta", category: "Two" },
+  ]
+  const { app, selected } = await mountSelect(tmp.path, options, {
+    search: (query) => {
+      queries.push(query)
+      return query ? options.toReversed() : options
+    },
+  })
+
+  try {
+    expect(queries).toContain("")
+    // Flat: categories show beside rows instead of as headings
+    expect(
+      app
+        .captureCharFrame()
+        .split("\n")
+        .map((line) => line.trim()),
+    ).not.toContain("One")
+    app.mockInput.pressKey("z")
+    await app.waitFor(() => queries.includes("z"))
+    app.mockInput.pressEnter()
+    expect(selected).toEqual(["beta"])
+  } finally {
+    app.renderer.destroy()
+  }
+})
+
+test("actions with bind trigger by that key and show it in the footer", async () => {
+  await using tmp = await tmpdir()
+  const rows: string[] = []
+  const command = "plugin.dialog.select.test.0"
+  const { app, keymap } = await mountSelect(tmp.path, [{ title: "Alpha", value: "alpha" }], {
+    actions: [{ command, title: "remove", bind: "ctrl+r", onTrigger: (option) => rows.push(option.value) }],
+  })
+
+  try {
+    await app.waitFor(
+      () => !!keymap.getCommandBindings({ visibility: "active", commands: [command] }).get(command)?.length,
+    )
+    await app.waitForFrame((frame) => frame.includes("remove"))
+    app.mockInput.pressKey("r", { ctrl: true })
+    expect(rows).toEqual(["alpha"])
+  } finally {
+    app.renderer.destroy()
+  }
+})

@@ -1,7 +1,7 @@
 import { SessionV1 } from "@opencode-ai/core/v1/session"
 import { describe, expect } from "bun:test"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
-import { Effect, Exit, Layer } from "effect"
+import { Effect, Exit, Fiber, Layer } from "effect"
 import fs from "node:fs/promises"
 import path from "node:path"
 import { Shell } from "@opencode-ai/core/shell"
@@ -145,6 +145,48 @@ describe("background shell jobs", () => {
         expect(info.exitCode).toBe(0)
         expect(yield* Effect.promise(() => fs.readFile(info.outLog, "utf8"))).toContain("OUT-LINE")
         expect(yield* Effect.promise(() => fs.readFile(info.errLog, "utf8"))).toContain("ERR-LINE")
+      }),
+    ),
+  )
+
+  it.live("Ctrl+B moves a running foreground call into a job that keeps its output and notifies on exit", () =>
+    inInstance(
+      Effect.gen(function* () {
+        const sessionID = `ses_bg_move_${Date.now()}`
+        const shell = yield* initShell()
+        const jobs = yield* ShellJobs.Service
+        const notices: string[] = []
+        let live = ""
+        const call = yield* shell
+          .execute(
+            { command: script("console.log('BEFORE'); setTimeout(() => console.log('AFTER'), 3000)") },
+            ctxFor(sessionID, {
+              extra: { promptOps: noticeOps(notices) },
+              metadata: (input) => Effect.sync(() => void (live = String(input.metadata?.output ?? ""))),
+            }),
+          )
+          .pipe(Effect.forkChild)
+        yield* until(
+          Effect.sync(() => live),
+          (output) => output.includes("BEFORE"),
+        )
+        expect(yield* jobs.background(sessionID)).toBe(true)
+        const moved = yield* Fiber.join(call)
+        expect(moved.output).toContain("moved this command to the background")
+        expect(moved.metadata).toMatchObject({ exit: null, background: { status: "running" } })
+        const info = yield* until(jobs.get(sessionID, jobIDOf(moved.output)), (job) => job.status !== "running")
+        expect(info.status).toBe("exited")
+        expect(info.exitCode).toBe(0)
+        const log = yield* Effect.promise(() => fs.readFile(info.outLog, "utf8"))
+        expect(log.indexOf("BEFORE")).toBeGreaterThanOrEqual(0)
+        expect(log.indexOf("AFTER")).toBeGreaterThan(log.indexOf("BEFORE"))
+        yield* until(
+          Effect.sync(() => notices.length),
+          (count) => count > 0,
+        )
+        expect(notices[0]).toContain(`<background_shell id="${info.id}" state="exited"`)
+        // No foreground call is left to move.
+        expect(yield* jobs.background(sessionID)).toBe(false)
       }),
     ),
   )

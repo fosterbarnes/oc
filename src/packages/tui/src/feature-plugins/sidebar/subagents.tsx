@@ -37,16 +37,33 @@ export function visibleSubagents(
     .toSorted((a, b) => a.child.time.created - b.child.time.created)
 }
 
+const _FILTERS = ["all", "running", "idle"] as const
+export type SubagentFilter = (typeof _FILTERS)[number]
+const _FILTER_KEY = "sidebar_subagents_filter"
+
+/** running = working, retrying, or waiting on the user; idle = done or failed. */
+export function filterSubagents<T extends { label: string }>(list: T[], filter: SubagentFilter) {
+  if (filter === "all") return list
+  const idle = (item: T) => item.label === "done" || item.label === "failed"
+  return list.filter((item) => idle(item) === (filter === "idle"))
+}
+
 function View(props: { api: TuiPluginApi; session_id: string }) {
   const [open, setOpen] = sectionOpen(props.api, "subagents", true)
   const [now, setNow] = createSignal(Date.now())
   const timer = setInterval(() => setNow(Date.now()), 5_000)
   onCleanup(() => clearInterval(timer))
   const theme = () => props.api.theme.current
-  const list = createMemo(() => visibleSubagents(props.api.state, props.session_id, now()))
+  const all = createMemo(() => visibleSubagents(props.api.state, props.session_id, now()))
+  const filter = (): SubagentFilter => {
+    const value = props.api.kv.get<string>(_FILTER_KEY, "all")
+    return _FILTERS.find((item) => item === value) ?? "all"
+  }
+  const list = createMemo(() => filterSubagents(all(), filter()))
+  const cycleFilter = () => props.api.kv.set(_FILTER_KEY, _FILTERS[(_FILTERS.indexOf(filter()) + 1) % _FILTERS.length])
 
   return (
-    <Show when={list().length > 0}>
+    <Show when={all().length > 0}>
       <box>
         <box flexDirection="row" gap={1} onMouseDown={() => list().length > 2 && setOpen((value) => !value)}>
           <Show when={list().length > 2}>
@@ -55,7 +72,20 @@ function View(props: { api: TuiPluginApi; session_id: string }) {
           <text fg={theme().text} selectable={false}>
             <b>Sub-agents</b>
           </text>
+          <text
+            fg={theme().textMuted}
+            selectable={false}
+            onMouseDown={(evt) => {
+              evt.stopPropagation()
+              cycleFilter()
+            }}
+          >
+            [{filter()}]
+          </text>
         </box>
+        <Show when={list().length === 0}>
+          <text fg={theme().textMuted}>No {filter()} sub-agents</text>
+        </Show>
         <Show when={list().length <= 2 || open()}>
           <For each={list()}>
             {(item) => (

@@ -26,6 +26,7 @@ import { useEvent } from "../../context/event"
 import { SplitBorder } from "../../ui/border"
 import { useTuiPaths, useTuiTerminalEnvironment } from "../../context/runtime"
 import { Spinner } from "../../component/spinner"
+import { sessionUnread } from "../../component/dialog-session-list"
 import { PatchDiff } from "../../component/patch-diff"
 import { createSyntaxStyleMemo, generateSubtleSyntax, selectedForeground, useTheme } from "../../context/theme"
 import { BoxRenderable, ScrollBoxRenderable, addDefaultParsers, MouseButton, TextAttributes, RGBA } from "@opentui/core"
@@ -42,7 +43,7 @@ import type {
 } from "@opencode-ai/sdk/v2"
 import { useLocal } from "../../context/local"
 import { Locale } from "../../util/locale"
-import { webSearchProviderLabel } from "../../util/tool-display"
+import { partialToolInput, readRange, webSearchProviderLabel } from "../../util/tool-display"
 import { Dynamic, useRenderer, useTerminalDimensions, type JSX } from "@opentui/solid"
 import { useSDK } from "../../context/sdk"
 import { useEditorContext } from "../../context/editor"
@@ -54,6 +55,15 @@ import { DialogMessage } from "./dialog-message"
 import { promptFromParts } from "../../prompt/part"
 import { commandUse } from "../../prompt/slash"
 import { DialogConfirm } from "../../ui/dialog-confirm"
+import { DialogShellOutput } from "../../component/dialog-shell-output"
+import {
+  activityRuns,
+  activitySummary,
+  isTranscriptView,
+  nextTranscriptView,
+  type ActivityRun,
+  type TranscriptView,
+} from "./transcriptView"
 import { DialogTimeline } from "./dialog-timeline"
 import { DialogForkFromTimeline } from "./dialog-fork-from-timeline"
 import { DialogSessionRename } from "../../component/dialog-session-rename"
@@ -152,6 +162,8 @@ const sessionBindingCommands = [
   "session.toggle.actions",
   "session.toggle.scrollbar",
   "session.toggle.generic_tool_output",
+  "session.shell.output",
+  "session.transcript.view",
   "session.first",
   "session.last",
   "session.messages_last_user",
@@ -186,6 +198,12 @@ const context = createContext<{
   showTimestamps: () => boolean
   showDetails: () => boolean
   showGenericToolOutput: () => boolean
+  transcriptView: () => TranscriptView
+  /** Head part id of the run this part belongs to; undefined in the full view or outside a run. */
+  activityRunID: (partID: string) => string | undefined
+  activityRun: (runID: string) => ActivityRun | undefined
+  runExpanded: (runID: string) => boolean
+  toggleRun: (runID: string) => void
   diffWrapMode: () => "word" | "none"
   providers: () => ReadonlyMap<string, Provider>
   sync: ReturnType<typeof useSync>
@@ -251,18 +269,13 @@ export function Session() {
     const index = messages().findIndex((message) => message.id === messageID)
     return index === -1 ? messages() : messages().slice(0, index)
   }
+  // Running calls Ctrl+B can move to the background: subagents (when the server supports it) and bash.
   const foregroundTasks = createMemo(() =>
-    sync.data.capabilities.experimentalBackgroundSubagents
-      ? messages().flatMap((message) =>
-          (sync.data.part[message.id] ?? []).filter(
-            (part): part is ToolPart =>
-              part.type === "tool" &&
-              part.tool === "task" &&
-              part.state.status === "running" &&
-              part.state.metadata?.background !== true,
-          ),
-        )
-      : [],
+    messages().flatMap((message) =>
+      (sync.data.part[message.id] ?? []).filter(
+        (part): part is ToolPart => part.type === "tool" && backgroundable(part, sync.data.capabilities),
+      ),
+    ),
   )
   // Requests from this session and every subagent below it, so nested subagents are never stuck
   // waiting on a prompt nobody sees.
@@ -302,6 +315,11 @@ export function Session() {
   const [diffWrapMode] = kv.signal<"word" | "none">("diff_wrap_mode", "word")
   const [_animationsEnabled, _setAnimationsEnabled] = kv.signal("animations_enabled", true)
   const [showGenericToolOutput, setShowGenericToolOutput] = kv.signal("generic_tool_output_visibility", false)
+  const [storedTranscriptView, setTranscriptView] = kv.signal<TranscriptView>("transcript_view", "full")
+  const transcriptView = createMemo(() => {
+    const value = storedTranscriptView()
+    return isTranscriptView(value) ? value : "full"
+  })
 
   const wide = createMemo(() => dimensions().width > 120)
   const sidebarHorizontal = createMemo(() => sidebarPosition() === "top" || sidebarPosition() === "bottom")
@@ -456,6 +474,31 @@ export function Session() {
   const modeStack = useOpencodeModeStack()
   const dialog = useDialog()
   const renderer = useRenderer()
+
+  // Showing a session in a focused terminal acknowledges its last finished run, clearing unread in the list.
+  const [focused, setFocused] = createSignal(true)
+  const onFocus = () => setFocused(true)
+  const onBlur = () => setFocused(false)
+  renderer.on("focus", onFocus)
+  renderer.on("blur", onBlur)
+  onCleanup(() => {
+    renderer.off("focus", onFocus)
+    renderer.off("blur", onBlur)
+  })
+  const acknowledged = new Map<string, number>()
+  createEffect(() => {
+    const current = session()
+    if (!focused() || !current || !sessionUnread(current)) return
+    const sessionID = current.id
+    const idle = current.time.idle!
+    if (acknowledged.get(sessionID) === idle) return
+    acknowledged.set(sessionID, idle)
+    // A failed acknowledgement is retried on the next session update or focus change.
+    const forget = () => acknowledged.delete(sessionID)
+    sdk.client.session.update({ sessionID, time: { viewed: idle } }).then((result) => {
+      if (result.error) forget()
+    }, forget)
+  })
 
   event.on("session.status", (evt) => {
     if (evt.properties.sessionID !== route.sessionID) return
@@ -868,6 +911,38 @@ export function Session() {
       },
     },
     {
+      title: `Switch to ${nextTranscriptView(transcriptView())} transcript view`,
+      value: "session.transcript.view",
+      category: "Session",
+      run: () => {
+        const next = nextTranscriptView(transcriptView())
+        setTranscriptView(() => next)
+        setExpandedRuns(new Set<string>())
+        toast.show({ message: `Transcript view: ${next}`, variant: "info" })
+        dialog.clear()
+      },
+    },
+    {
+      title: "View shell output",
+      value: "session.shell.output",
+      category: "Session",
+      run: () => {
+        // The newest running bash call, else the newest one.
+        const shells = messages().flatMap((message) =>
+          (sync.data.part[message.id] ?? []).filter(
+            (part): part is ToolPart => part.type === "tool" && part.tool === "bash",
+          ),
+        )
+        const part = shells.findLast((item) => item.state.status === "running") ?? shells.at(-1)
+        if (!part) {
+          toast.show({ message: "No shell commands in this session", variant: "info" })
+          dialog.clear()
+          return
+        }
+        openShellOutput(dialog, sync, part)
+      },
+    },
+    {
       title: "Page up",
       value: "session.page.up",
       category: "Session",
@@ -996,6 +1071,9 @@ export function Session() {
       title: "Copy last assistant message",
       value: "messages.copy",
       category: "Session",
+      slash: {
+        name: "copy",
+      },
       run: () => {
         const lastAssistantMessage = messagesBeforeRevert().findLast((message) => message.role === "assistant")
         if (!lastAssistantMessage) {
@@ -1037,7 +1115,7 @@ export function Session() {
       value: "session.copy",
       category: "Session",
       slash: {
-        name: "copy",
+        name: "copy-all",
       },
       run: async () => {
         try {
@@ -1143,7 +1221,7 @@ export function Session() {
       },
     },
     {
-      title: "Background subagents",
+      title: "Move running subagents and shell commands to the background",
       value: "session.background",
       category: "Session",
       hidden: true,
@@ -1264,6 +1342,15 @@ export function Session() {
     return messages().findIndex((message) => message.id === messageID)
   })
 
+  // Built only outside the full view. Rows read their run's head id, so streaming deltas rebuild this map
+  // but a row re-renders only when its run membership changes.
+  const runs = createMemo(() => {
+    if (transcriptView() === "full") return new Map<string, ActivityRun>()
+    const index = revertMessageIndex()
+    return activityRuns(index === -1 ? messages() : messages().slice(0, index), (id) => sync.data.part[id] ?? [])
+  })
+  const [expandedRuns, setExpandedRuns] = createSignal<ReadonlySet<string>>(new Set())
+
   const revertDiffFiles = createMemo(() => getRevertDiffFiles(revertInfo()?.diff ?? ""))
 
   const revertRevertedMessages = createMemo(() => {
@@ -1304,6 +1391,16 @@ export function Session() {
           showTimestamps,
           showDetails,
           showGenericToolOutput,
+          transcriptView,
+          activityRunID: (partID) => runs().get(partID)?.id,
+          activityRun: (runID) => runs().get(runID),
+          runExpanded: (runID) => expandedRuns().has(runID),
+          toggleRun: (runID) =>
+            setExpandedRuns((prev) => {
+              const next = new Set(prev)
+              if (!next.delete(runID)) next.add(runID)
+              return next
+            }),
           diffWrapMode,
           providers,
           sync,
@@ -1794,15 +1891,26 @@ function AssistantMessage(props: { message: AssistantMessage; parts: Part[]; las
       <For each={props.parts}>
         {(part, index) => {
           const component = createMemo(() => PART_MAPPING[part.type as keyof typeof PART_MAPPING])
+          // Grouped and summary views: the run's first part draws the run row; members show only while expanded.
+          const runID = createMemo(() => ctx.activityRunID(part.id))
+          const visible = createMemo(() => {
+            const id = runID()
+            return !id || (ctx.transcriptView() === "grouped" && ctx.runExpanded(id))
+          })
           return (
-            <Show when={component()}>
-              <Dynamic
-                last={index() === props.parts.length - 1}
-                component={component()}
-                part={part as any}
-                message={props.message}
-              />
-            </Show>
+            <>
+              <Show when={runID() === part.id}>
+                <ActivityRunRow runID={part.id} />
+              </Show>
+              <Show when={component() && visible()}>
+                <Dynamic
+                  last={index() === props.parts.length - 1}
+                  component={component()}
+                  part={part as any}
+                  message={props.message}
+                />
+              </Show>
+            </>
           )
         }}
       </For>
@@ -1812,16 +1920,9 @@ function AssistantMessage(props: { message: AssistantMessage; parts: Part[]; las
             {childShortcut()}
             <span style={{ fg: theme.textMuted }}> view subagents</span>
             <Show
-              when={
-                sync.data.capabilities.experimentalBackgroundSubagents &&
-                props.parts.some(
-                  (x) =>
-                    x.type === "tool" &&
-                    x.tool === "task" &&
-                    x.state.status === "running" &&
-                    x.state.metadata?.background !== true,
-                )
-              }
+              when={props.parts.some(
+                (x) => x.type === "tool" && x.tool === "task" && backgroundable(x, sync.data.capabilities),
+              )}
             >
               <span style={{ fg: theme.textMuted }}> · </span>
               {backgroundShortcut()}
@@ -1878,6 +1979,45 @@ function AssistantMessage(props: { message: AssistantMessage; parts: Part[]; las
         </Match>
       </Switch>
     </>
+  )
+}
+
+// One row per run of thinking and tool parts: "+ 3 commands, 2 reads" (grouped: click to expand).
+function ActivityRunRow(props: { runID: string }) {
+  const ctx = use()
+  const { theme } = useTheme()
+  const renderer = useRenderer()
+  const [hover, setHover] = createSignal(false)
+  const summary = createMemo(() => {
+    const run = ctx.activityRun(props.runID)
+    return run ? activitySummary(run) : { label: "", active: false, failed: false }
+  })
+  const label = createMemo(() => summary().label)
+  const toggleable = () => ctx.transcriptView() === "grouped"
+  const expanded = () => toggleable() && ctx.runExpanded(props.runID)
+  return (
+    <Show when={label()}>
+      <InlineToolRow
+        icon={summary().failed ? "✗" : !toggleable() ? "·" : expanded() ? "−" : "+"}
+        iconColor={summary().failed ? theme.error : undefined}
+        color={hover() ? theme.text : theme.textMuted}
+        complete={true}
+        pending={label()}
+        spinner={!expanded() && summary().active}
+        onMouseOver={() => toggleable() && setHover(true)}
+        onMouseOut={() => setHover(false)}
+        onMouseUp={
+          toggleable()
+            ? () => {
+                if (renderer.getSelection()?.getSelectedText()) return
+                ctx.toggleRun(props.runID)
+              }
+            : undefined
+        }
+      >
+        {label()}
+      </InlineToolRow>
+    </Show>
   )
 }
 
@@ -2035,12 +2175,27 @@ function ToolPart(props: { last: boolean; part: ToolPart; message: AssistantMess
     return true
   })
 
+  // Arguments stream into `state.raw` while pending. Small inputs re-parse on every delta; large
+  // write/edit payloads only after growing by a quarter, so the total parse work stays linear.
+  let parsedLength = 0
+  let parsed: Record<string, unknown> = {}
+  const streamedInput = createMemo(() => {
+    const state = props.part.state
+    if (state.status !== "pending") return
+    const raw = state.raw ?? ""
+    if (raw.length < parsedLength || raw.length <= 2048 || raw.length - parsedLength >= parsedLength / 4) {
+      parsedLength = raw.length
+      parsed = partialToolInput(raw)
+    }
+    return parsed
+  })
+
   const toolprops = {
     get metadata() {
       return props.part.state.status === "pending" ? {} : (props.part.state.metadata ?? {})
     },
     get input() {
-      return props.part.state.input ?? {}
+      return streamedInput() ?? props.part.state.input ?? {}
     },
     get output() {
       return props.part.state.status === "completed" ? props.part.state.output : undefined
@@ -2396,6 +2551,8 @@ function Shell(props: ToolProps) {
   const { theme } = useTheme()
   const pathFormatter = usePathFormatter()
   const ctx = use()
+  const dialog = useDialog()
+  const sync = useSync()
   const isRunning = createMemo(() => props.part.state.status === "running")
   const output = createMemo(() => stripAnsi(stringValue(props.metadata.output)?.trim() ?? ""))
   const [expanded, setExpanded] = createSignal(false)
@@ -2430,6 +2587,7 @@ function Shell(props: ToolProps) {
     if (!background) return
     return `background ${background.jobID} ${background.status}`
   })
+  const backgroundShortcut = useCommandShortcut("session.background")
 
   return (
     <Switch>
@@ -2463,16 +2621,34 @@ function Shell(props: ToolProps) {
             <Show when={limitedOutput()}>
               <text fg={theme.text}>{limitedOutput()}</text>
             </Show>
-            <Show when={collapsed().overflow}>
-              <text
-                selectable={false}
-                fg={theme.textMuted}
-                onMouseUp={(evt) => {
-                  if (evt.button === MouseButton.LEFT) setExpanded((prev) => !prev)
-                }}
-              >
-                {expanded() ? "Collapse" : "Expand"}
-              </text>
+            <Show when={isRunning() || job() || collapsed().overflow}>
+              <box flexDirection="row" gap={2}>
+                <Show when={collapsed().overflow}>
+                  <text
+                    selectable={false}
+                    fg={theme.textMuted}
+                    onMouseUp={(evt) => {
+                      if (evt.button === MouseButton.LEFT) setExpanded((prev) => !prev)
+                    }}
+                  >
+                    {expanded() ? "Collapse" : "Expand"}
+                  </text>
+                </Show>
+                <text
+                  selectable={false}
+                  fg={theme.textMuted}
+                  onMouseUp={(evt) => {
+                    if (evt.button === MouseButton.LEFT) openShellOutput(dialog, sync, props.part)
+                  }}
+                >
+                  Full output
+                </text>
+                <Show when={isRunning() && !job() && backgroundShortcut()}>
+                  <text selectable={false} fg={theme.textMuted}>
+                    <span style={{ fg: theme.text }}>{backgroundShortcut()}</span> move to background
+                  </text>
+                </Show>
+              </box>
             </Show>
           </box>
         </BlockTool>
@@ -2583,7 +2759,8 @@ function Read(props: ToolProps) {
           if (filePath) ctx.openFile(filePath)
         }}
       >
-        Read {pathFormatter.format(stringValue(props.input.filePath))} {input(props.input, ["filePath"])}
+        Read {pathFormatter.format(stringValue(props.input.filePath))}
+        {readRange(props.input)} {input(props.input, ["filePath", "offset", "limit"])}
       </InlineTool>
       <For each={loaded()}>
         {(filepath) => (
@@ -3167,6 +3344,24 @@ function input(input: Record<string, unknown>, omit?: string[]): string {
   })
   if (primitives.length === 0) return ""
   return `[${primitives.map(([key, value]) => `${key}=${value}`).join(", ")}]`
+}
+
+// Reads the part from the store on every access, so the dialog keeps following it after the row unmounts.
+function openShellOutput(dialog: ReturnType<typeof useDialog>, sync: ReturnType<typeof useSync>, part: ToolPart) {
+  dialog.replace(() => (
+    <DialogShellOutput
+      part={() =>
+        sync.data.part[part.messageID]?.find((item): item is ToolPart => item.type === "tool" && item.id === part.id)
+      }
+    />
+  ))
+}
+
+// A running foreground call that Ctrl+B (session.background) can move to the background.
+function backgroundable(part: ToolPart, capabilities: { experimentalBackgroundSubagents: boolean }) {
+  if (part.state.status !== "running" || part.state.metadata?.background) return false
+  if (part.tool === "bash") return true
+  return part.tool === "task" && capabilities.experimentalBackgroundSubagents
 }
 
 function stringValue(value: unknown) {

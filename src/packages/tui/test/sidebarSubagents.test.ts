@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test"
 import type { Message, Session, SessionStatus } from "@opencode-ai/sdk/v2"
-import { visibleSubagents } from "../src/feature-plugins/sidebar/subagents"
+import { filterSubagents, visibleSubagents } from "../src/feature-plugins/sidebar/subagents"
 
 const child: Session = {
   id: "child",
@@ -81,4 +81,11 @@ test("finished children expire at two minutes or the next root turn", () => {
 test("completion time wins over later metadata updates", () => {
   expect(visibleSubagents(state({ completed: 500 }), "child", 120_500)).toEqual([])
   expect(visibleSubagents(state({ completed: 500, turn: 501 }), "child", 1_000)).toEqual([])
+})
+
+test("running/idle filter splits by label", () => {
+  const list = ["working", "waiting", "retrying", "done", "failed"].map((label) => ({ label }))
+  expect(filterSubagents(list, "all")).toBe(list)
+  expect(filterSubagents(list, "running").map((item) => item.label)).toEqual(["working", "waiting", "retrying"])
+  expect(filterSubagents(list, "idle").map((item) => item.label)).toEqual(["done", "failed"])
 })

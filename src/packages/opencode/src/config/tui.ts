@@ -40,6 +40,8 @@ export type HostMetadata = {
 
 export interface Interface {
   readonly get: () => Effect.Effect<Resolved>
+  readonly files: () => Effect.Effect<string[]>
+  readonly reload: () => Effect.Effect<Resolved, Error>
   readonly pluginOrigins: () => Effect.Effect<ConfigPlugin.Origin[]>
   readonly waitForDependencies: () => Effect.Effect<void>
 }
@@ -220,6 +222,13 @@ const loadState = Effect.fn("TuiConfig.loadState")(function* (ctx: { directory: 
     config: result,
     pluginOrigins: acc.plugin_origins,
     dirs: result.plugin?.length ? dirs : [],
+    // Every file this load could read, existing or not, so the TUI can watch for saves
+    files: unique([
+      ...ConfigPaths.fileInDirectory(Global.Path.config, "tui"),
+      ...(Flag.OPENCODE_TUI_CONFIG ? [Flag.OPENCODE_TUI_CONFIG] : []),
+      ...projectFiles,
+      ...dirs.flatMap((dir) => ConfigPaths.fileInDirectory(dir, "tui")),
+    ]),
   }
 })
 
@@ -247,13 +256,22 @@ const layer = Layer.effect(
       },
     )
 
+    const afs = yield* FSUtil.Service
     const get = Effect.fn("TuiConfig.get")(() => Effect.succeed(data.config))
+    const files = Effect.fn("TuiConfig.files")(() => Effect.succeed(data.files))
+    // Re-reads the files for the TUI's save watcher; plugin dependencies are not reinstalled
+    const reload = Effect.fn("TuiConfig.reload")(() =>
+      loadState({ directory }).pipe(
+        Effect.map((next) => next.config),
+        Effect.provideService(FSUtil.Service, afs),
+      ),
+    )
     const pluginOrigins = Effect.fn("TuiConfig.pluginOrigins")(() => Effect.succeed(data.pluginOrigins))
 
     const waitForDependencies = Effect.fn("TuiConfig.waitForDependencies")(() =>
       Effect.forEach(deps, Fiber.join, { concurrency: "unbounded" }).pipe(Effect.ignore(), Effect.asVoid),
     )
-    return Service.of({ get, pluginOrigins, waitForDependencies })
+    return Service.of({ get, files, reload, pluginOrigins, waitForDependencies })
   }).pipe(Effect.withSpan("TuiConfig.layer")),
 )
 
@@ -267,6 +285,14 @@ export async function waitForDependencies() {
 
 export async function get() {
   return runPromise((svc) => svc.get())
+}
+
+/** Live-reload hooks handed to the TUI (`TuiInput.configWatch`). */
+export async function watch() {
+  return {
+    files: await runPromise((svc) => svc.files()),
+    reload: () => runPromise((svc) => svc.reload()),
+  }
 }
 
 export async function pluginOrigins() {

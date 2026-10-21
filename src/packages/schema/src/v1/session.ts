@@ -572,6 +572,8 @@ export const SessionInfo = Schema.Struct({
     updated: NonNegativeInt,
     compacting: optional(NonNegativeInt),
     archived: optional(Schema.Finite),
+    idle: optional(NonNegativeInt),
+    viewed: optional(NonNegativeInt),
   }),
   sessionComplete: Schema.optional(Schema.Boolean),
   sessionFailed: Schema.optional(Schema.Boolean),

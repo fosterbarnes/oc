@@ -311,6 +311,39 @@ describe("Session", () => {
     }),
   )
 
+  it.instance("records finished root runs as unread until the viewed watermark catches up", () =>
+    Effect.gen(function* () {
+      const session = yield* SessionNs.Service
+      const root = yield* Effect.acquireRelease(session.create({ title: "unread" }), (info) =>
+        session.remove(info.id).pipe(Effect.ignore),
+      )
+      const child = yield* session.create({ title: "child", parentID: root.id })
+
+      yield* session.setViewed({ sessionID: root.id, idle: 1 })
+      expect((yield* session.get(root.id)).time.viewed).toBeUndefined()
+
+      yield* session.setIdle(root.id)
+      const first = (yield* session.get(root.id)).time
+      expect(first.idle).toBeNumber()
+      expect(first.viewed).toBeUndefined()
+
+      yield* session.setViewed({ sessionID: root.id, idle: first.idle! + 1 })
+      expect((yield* session.get(root.id)).time.viewed).toBeUndefined()
+      yield* session.setViewed({ sessionID: root.id, idle: first.idle! })
+      expect((yield* session.get(root.id)).time.viewed).toBe(first.idle!)
+
+      yield* session.setIdle(root.id)
+      const second = (yield* session.get(root.id)).time
+      expect(second.idle!).toBeGreaterThan(first.idle!)
+      expect(second.viewed).toBe(first.idle!)
+      yield* session.setViewed({ sessionID: root.id, idle: first.idle! })
+      expect((yield* session.get(root.id)).time.viewed).toBe(first.idle!)
+
+      yield* session.setIdle(child.id)
+      expect((yield* session.get(child.id)).time.idle).toBeUndefined()
+    }),
+  )
+
   it.instance("omits metadata when not provided", () =>
     Effect.gen(function* () {
       const session = yield* SessionNs.Service

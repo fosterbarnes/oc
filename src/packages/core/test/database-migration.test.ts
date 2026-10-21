@@ -31,6 +31,7 @@ import { SessionProjector } from "@opencode-ai/core/session/projector"
 import { SessionV1 } from "@opencode-ai/core/v1/session"
 import { tmpdir } from "./fixture/tmpdir"
 import sessionInProgressMigration from "@opencode-ai/core/database/migration/20261001064009_session_in_progress"
+import sessionViewedStateMigration from "@opencode-ai/core/database/migration/20261020143000_sessionViewedState"
 
 const run = <A, E>(effect: Effect.Effect<A, E, SqlClientService>) =>
   Effect.runPromise(
@@ -63,6 +64,34 @@ describe("DatabaseMigration", () => {
           session_in_progress: 0,
         })
         expect(yield* db.all(sql`SELECT * FROM event`)).toEqual([{ id: "legacy", data: '{"title":"keep"}' }])
+      }),
+    )
+  })
+
+  test("adds unset viewed state to existing sessions and fresh databases", async () => {
+    await run(
+      Effect.gen(function* () {
+        const db = yield* makeDb
+        yield* db.run(sql`CREATE TABLE session (id text PRIMARY KEY, time_archived integer)`)
+        yield* db.run(sql`INSERT INTO session VALUES ('old', NULL), ('archived', 5)`)
+
+        yield* DatabaseMigration.applyOnly(db, [sessionViewedStateMigration])
+
+        expect(yield* db.all(sql`SELECT * FROM session ORDER BY id`)).toEqual([
+          { id: "archived", time_archived: 5, time_idle: null, time_viewed: null },
+          { id: "old", time_archived: null, time_idle: null, time_viewed: null },
+        ])
+      }),
+    )
+    await run(
+      Effect.gen(function* () {
+        const db = yield* makeDb
+        yield* DatabaseMigration.apply(db)
+        expect(
+          yield* db.all(
+            sql`SELECT name FROM pragma_table_info('session') WHERE name IN ('time_idle', 'time_viewed') ORDER BY name`,
+          ),
+        ).toEqual([{ name: "time_idle" }, { name: "time_viewed" }])
       }),
     )
   })

@@ -1,6 +1,7 @@
 import { Account } from "@/account/account"
 import { Agent } from "@/agent/agent"
 import { BackgroundJob } from "@/background/job"
+import { ShellJobs } from "@/background/shellJobs"
 import { Config } from "@/config/config"
 import { InstanceState } from "@/effect/instance-state"
 import { MCP } from "@/mcp"
@@ -33,6 +34,7 @@ export const experimentalHandlers = HttpApiBuilder.group(InstanceHttpApi, "exper
     const worktreeSvc = yield* Worktree.Service
     const sessions = yield* Session.Service
     const background = yield* BackgroundJob.Service
+    const shellJobs = yield* ShellJobs.Service
 
     const capabilities = Effect.fn("ExperimentalHttpApi.capabilities")(function* () {
       return { backgroundSubagents: true }
@@ -164,7 +166,9 @@ export const experimentalHandlers = HttpApiBuilder.group(InstanceHttpApi, "exper
           job.metadata.background !== true,
       )
       const promoted = yield* Effect.forEach(jobs, (job) => background.promote(job.id), { concurrency: "unbounded" })
-      return promoted.some((job) => job !== undefined)
+      // Running foreground bash calls move into oc's background shell jobs.
+      const shells = yield* shellJobs.background(ctx.params.sessionID)
+      return shells || promoted.some((job) => job !== undefined)
     })
 
     const resource = Effect.fn("ExperimentalHttpApi.resource")(function* () {

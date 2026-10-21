@@ -64,6 +64,12 @@ export function awaitingInput(sessionID: string, pending: PendingRequests) {
   return !!pending.permission[sessionID]?.length || !!pending.question[sessionID]?.length
 }
 
+/** A finished run (`time.idle`) nobody has viewed yet; the server records idle on root sessions only. */
+export function sessionUnread(session: { time: { idle?: number; viewed?: number } }) {
+  const { idle, viewed } = session.time
+  return idle !== undefined && (viewed === undefined || idle > viewed)
+}
+
 export function orderAwaitingInputFirst(ids: string[], pending: PendingRequests) {
   return [...ids.filter((id) => awaitingInput(id, pending)), ...ids.filter((id) => !awaitingInput(id, pending))]
 }
@@ -326,9 +332,11 @@ export function DialogSessionList() {
         ? () => <text fg={theme.warning}>?</text>
         : isWorking
           ? (color: RGBA) => <Spinner color={color} />
-          : pinnedSet.has(x.id)
-            ? () => <text fg={theme.accent}>◆</text>
-            : undefined
+          : sessionUnread(x)
+            ? () => <text fg={theme.primary}>●</text>
+            : pinnedSet.has(x.id)
+              ? () => <text fg={theme.accent}>◆</text>
+              : undefined
       return {
         title: isDeleting ? `Press ${deleteHint()} again to confirm` : x.title,
         titleView:

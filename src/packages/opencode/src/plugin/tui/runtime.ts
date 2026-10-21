@@ -42,7 +42,12 @@ import { ConfigPluginV1 } from "@opencode-ai/core/v1/config/plugin"
 import { createCommandShim } from "@opencode-ai/tui/plugin/command-shim"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { Effect } from "effect"
-import { createPluginRuntime, type PluginRuntime, type TuiPluginHost } from "@opencode-ai/tui/plugin/runtime"
+import {
+  createPluginRuntime,
+  type PluginRuntime,
+  type TuiPluginFailure,
+  type TuiPluginHost,
+} from "@opencode-ai/tui/plugin/runtime"
 
 ensureRuntimePluginSupport({ additional: keymapRuntimeModules })
 
@@ -125,6 +130,16 @@ const EMPTY_TUI: TuiPluginModule = {
   tui: async () => {},
 }
 
+// Load-phase failures the TUI toasts after start (TuiPluginHost.failures); cleanup errors stay log-only
+const _LOAD_FAILURES = new Set([
+  "failed to load tui plugin",
+  "failed to initialize tui plugin",
+  "failed to resolve tui plugin",
+  "failed to resolve tui plugin entry",
+  "tui plugin incompatible",
+])
+const loadFailures = new Map<string, TuiPluginFailure>()
+
 function fail(message: string, data: Record<string, unknown>) {
   if (!("error" in data)) {
     console.error(`[tui.plugin] ${message}`, data)
@@ -134,6 +149,13 @@ function fail(message: string, data: Record<string, unknown>) {
   const text = `${message}: ${errorMessage(data.error)}`
   const next = { ...data, error: errorData(data.error) }
   console.error(`[tui.plugin] ${text}`, next)
+  const source = typeof data.path === "string" ? data.path : typeof data.id === "string" ? data.id : undefined
+  if (!source || !_LOAD_FAILURES.has(message)) return
+  loadFailures.set(`${source}\n${text}`, {
+    title: `TUI plugin failed: ${path.parse(source).name || source}`,
+    error: text,
+    context: `Runtime: tui\nSource: ${source}`,
+  })
 }
 
 function warn(message: string, data: Record<string, unknown>) {
@@ -1125,6 +1147,7 @@ export function createLegacyTuiPluginHost(): TuiPluginHost {
   return {
     start: init,
     dispose,
+    failures: () => [...loadFailures.values()],
   }
 }
 

@@ -1,7 +1,7 @@
 import { cmd } from "./cmd"
 import { UI } from "@/cli/ui"
 import { errorMessage } from "@opencode-ai/tui/util/error"
-import { validateSession } from "../tui/validate-session"
+import { validateServer, validateSession } from "../tui/validate-session"
 import { ServerAuth } from "@/server/auth"
 
 export const AttachCommand = cmd({
@@ -126,6 +126,7 @@ export const AttachCommand = cmd({
     const config = await TuiConfig.get()
 
     try {
+      await validateServer({ url: args.url, headers })
       await validateSession({
         url: args.url,
         sessionID: args.session,
@@ -161,6 +162,7 @@ export const AttachCommand = cmd({
       run({
         url: args.url,
         config,
+        configWatch: await TuiConfig.watch(),
         pluginHost: createLegacyTuiPluginHost(),
         args: {
           continue: args.continue,

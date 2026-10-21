@@ -418,6 +418,31 @@ async function patchOne(dir: string, target: Target, spec: string, force: boolea
   }
 }
 
+// Removes every entry for the spec's package (or the exact path spec) from one config file.
+// Returns false when the file does not list it.
+export async function removePluginConfig(file: string, spec: string, dep: PatchDeps = defaultPatchDeps) {
+  await using _ = await Flock.acquire(`plug-config:${Filesystem.resolve(file.replace(/\.jsonc?$/, ""))}`)
+  if (!(await dep.exists(file))) return false
+  const text = await dep.readText(file)
+  const errs: JsoncParseError[] = []
+  const list = pluginList(parseJsonc(text, errs, { allowTrailingComma: true }))
+  if (errs.length) throw new Error(`Invalid JSON in ${file} (${printParseErrorCode(errs[0].error)})`)
+  const pkg = parsePluginSpecifier(spec).pkg
+  const hits = (list ?? [])
+    .map((item, i) => ({ i, spec: pluginSpec(item) }))
+    .filter(
+      (item) =>
+        item.spec === spec ||
+        (!!item.spec && !item.spec.startsWith("file://") && parsePluginSpecifier(item.spec).pkg === pkg),
+    )
+  if (!hits.length) return false
+  await dep.write(
+    file,
+    hits.toReversed().reduce((out, item) => patch(out, ["plugin", item.i], undefined), text),
+  )
+  return true
+}
+
 export async function patchPluginConfig(input: PatchInput, dep: PatchDeps = defaultPatchDeps): Promise<PatchResult> {
   const dir = patchDir(input)
   const items: PatchItem[] = []

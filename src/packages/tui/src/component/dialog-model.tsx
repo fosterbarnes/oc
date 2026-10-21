@@ -101,20 +101,22 @@ export function DialogModel(props: {
           filter(([_, info]) => info.status !== "deprecated"),
           filter(([_, info]) => (props.providerID ? info.providerID === props.providerID : true)),
           filter(([model]) => isHidden({ providerID: provider.id, modelID: model }) === !!props.hiddenOnly),
-          map(([model, info]) => ({
-            value: { providerID: provider.id, modelID: model },
-            title: info.name ?? model,
-            releaseDate: info.release_date,
-            description: favorites.some((item) => item.providerID === provider.id && item.modelID === model)
-              ? "(Favorite)"
-              : undefined,
-            category: connected() ? provider.name : undefined,
-            disabled: provider.id === "opencode" && model.includes("-nano"),
-            footer: info.cost?.input === 0 && provider.id === "opencode" ? "Free" : undefined,
-            onSelect() {
-              onSelect(provider.id, model)
-            },
-          })),
+          map(([model, info]) => {
+            const favorite = favorites.some((item) => item.providerID === provider.id && item.modelID === model)
+            return {
+              value: { providerID: provider.id, modelID: model },
+              title: info.name ?? model,
+              releaseDate: info.release_date,
+              favorite,
+              description: favorite ? "(Favorite)" : undefined,
+              category: connected() ? provider.name : undefined,
+              disabled: provider.id === "opencode" && model.includes("-nano"),
+              footer: info.cost?.input === 0 && provider.id === "opencode" ? "Free" : undefined,
+              onSelect() {
+                onSelect(provider.id, model)
+              },
+            }
+          }),
           filter((option) => {
             if (!showSections) return true
             if (
@@ -163,9 +165,11 @@ export function DialogModel(props: {
 
     if (needle) {
       return [
-        ...sortModelOptions(
-          fuzzysort.go(needle, providerOptions, { keys: ["title", "category"] }).map((x) => x.obj),
-          false,
+        ...prioritizeFavorites(
+          sortModelOptions(
+            fuzzysort.go(needle, providerOptions, { keys: ["title", "category"] }).map((x) => x.obj),
+            false,
+          ),
         ),
         ...fuzzysort.go(needle, popularProviders, { keys: ["title"] }).map((x) => x.obj),
       ]
@@ -550,6 +554,11 @@ function DialogFavoriteCategory(props: {
       ]}
     />
   )
+}
+
+// Stable: keeps the incoming order within favorites and within the rest
+export function prioritizeFavorites<T extends { favorite: boolean }>(options: T[]) {
+  return options.toSorted((a, b) => Number(b.favorite) - Number(a.favorite))
 }
 
 export function sortModelOptions<T extends { footer?: string; releaseDate: string | number; title: string }>(

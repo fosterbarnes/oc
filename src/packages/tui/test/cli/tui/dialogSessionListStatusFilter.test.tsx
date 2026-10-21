@@ -7,7 +7,7 @@ import { expect, test } from "bun:test"
 import { mkdir } from "node:fs/promises"
 import path from "node:path"
 import { onCleanup } from "solid-js"
-import { DialogSessionList } from "../../../src/component/dialog-session-list"
+import { DialogSessionList, sessionUnread } from "../../../src/component/dialog-session-list"
 import { TuiConfigProvider } from "../../../src/config"
 import { ArgsProvider } from "../../../src/context/args"
 import { ExitProvider } from "../../../src/context/exit"
@@ -296,6 +296,26 @@ test("real picker cycles/clicks all filters, keeps search and attachment, and re
   expect(picker.activeStatus("all")).toBe(true)
   expect(picker.editor().plainText).toBe("")
   expect(picker.route.data).toMatchObject({ type: "session", sessionID: "current" })
+})
+
+test("unread finished runs show a gutter dot beside manual marks until viewed", async () => {
+  expect(sessionUnread({ time: {} })).toBe(false)
+  expect(sessionUnread({ time: { idle: 5 } })).toBe(true)
+  expect(sessionUnread({ time: { idle: 5, viewed: 5 } })).toBe(false)
+  expect(sessionUnread({ time: { idle: 6, viewed: 5 } })).toBe(true)
+
+  await using tmp = await tmpdir()
+  const rows = [
+    session("fresh", "Fresh work", { time: { created: 1, updated: 4, idle: 5 } }),
+    session("done", "Done work", { sessionComplete: true, time: { created: 1, updated: 3, idle: 6, viewed: 5 } }),
+    session("seen", "Seen work", { time: { created: 1, updated: 2, idle: 5, viewed: 5 } }),
+  ]
+  await using picker = await mount({ root: tmp.path, rows })
+  const frame = await picker.frame()
+  expect(frame).toMatch(/●\s+Fresh work/)
+  expect(frame).toMatch(/●\s+✓ Done work/)
+  expect(frame).not.toMatch(/●\s+Seen work/)
+  expect(frame).toContain("Seen work")
 })
 
 test("real picker filters pinned/current extras and retains quick slots without switching sessions", async () => {

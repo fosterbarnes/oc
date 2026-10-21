@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto"
 import { createWriteStream, type WriteStream } from "node:fs"
 import fs from "node:fs/promises"
 import path from "node:path"
-import { Context, Effect, Fiber, Layer, Schedule, Scope, Stream } from "effect"
+import { Context, Deferred, Effect, Exit, Fiber, Layer, Schedule, Scope, Stream } from "effect"
 import type * as PlatformError from "effect/PlatformError"
 import type { ChildProcess } from "effect/unstable/process"
 import { ChildProcessSpawner, type ChildProcessHandle } from "effect/unstable/process/ChildProcessSpawner"
@@ -49,8 +49,26 @@ export type StartInput = {
   onExit?: (info: Info) => Effect.Effect<void>
 }
 
+// A foreground bash call the user moved to the background: the process is already running and the
+// call's own reader keeps consuming its output, writing it through `Adopted.write` from then on.
+export type AdoptInput = Pick<StartInput, "sessionID" | "command" | "cwd" | "watch" | "onExit"> & {
+  handle: ChildProcessHandle
+  /** The caller's output reader; awaited (with a flush grace) and then stopped when the process exits. */
+  pump: Fiber.Fiber<unknown, unknown>
+  /** Owns the process (its spawn finalizer kills it). Closed when the job ends or the instance shuts down. */
+  scope: Scope.Closeable
+  startedAt: number
+}
+
+export type Adopted = { info: Info; write: (chunk: string) => void }
+
 export interface Interface {
   readonly start: (input: StartInput) => Effect.Effect<Info, PlatformError.PlatformError>
+  readonly adopt: (input: AdoptInput) => Effect.Effect<Adopted>
+  /** Registers a running foreground call; the latch resolves when the user moves it to the background. */
+  readonly foreground: (sessionID: string) => Effect.Effect<Deferred.Deferred<void>, never, Scope.Scope>
+  /** Resolves the session's foreground latches; false when no foreground call is running. */
+  readonly background: (sessionID: string) => Effect.Effect<boolean>
   readonly list: (sessionID: string) => Effect.Effect<Info[]>
   readonly get: (sessionID: string, id: string) => Effect.Effect<Info | undefined>
   readonly kill: (sessionID: string, id: string) => Effect.Effect<Info | undefined>
@@ -178,7 +196,8 @@ export async function readTail(file: string, lines: number, maxChars: number) {
   const { bytesRead } = await handle.read(buf, 0, buf.length, start)
   await handle.close()
   const bytes = buf.subarray(0, bytesRead)
-  const text = bytes.length >= 2 && bytes[0] === 0xff && bytes[1] === 0xfe ? bytes.toString("utf16le") : bytes.toString("utf8")
+  const text =
+    bytes.length >= 2 && bytes[0] === 0xff && bytes[1] === 0xfe ? bytes.toString("utf16le") : bytes.toString("utf8")
   const rows = stripAnsi(text).split(/\r?\n/)
   if (rows.at(-1) === "") rows.pop()
   return rows.slice(-lines).join("\n").slice(-maxChars)
@@ -224,11 +243,11 @@ const make = Effect.fn("ShellJobs.make")(function* () {
       yield* watch({ info: job.info, output })
     })
 
-  const watch = Effect.fn("ShellJobs.watch")(function* (job: Job, input: StartInput) {
-    const pumps = yield* Effect.forkIn(
-      Effect.all([pump(job.handle.stdout, job.out), pump(job.handle.stderr, job.err)], { concurrency: "unbounded" }),
-      scope,
-    )
+  const watch = Effect.fn("ShellJobs.watch")(function* (
+    job: Job,
+    input: Pick<StartInput, "timeoutMs" | "watch" | "onExit">,
+    pumps: Fiber.Fiber<unknown, unknown>,
+  ) {
     const ticker = input.watch
       ? yield* Effect.forkIn(emit(job, input.watch).pipe(Effect.repeat(Schedule.spaced("1 second"))), scope)
       : undefined
@@ -238,7 +257,7 @@ const make = Effect.fn("ShellJobs.make")(function* () {
 
     const exitCode = yield* job.handle.exitCode.pipe(Effect.orElseSucceed(() => null))
     // A grandchild can hold the pipes open after the shell exits; stop reading after a short flush.
-    yield* Fiber.join(pumps).pipe(Effect.timeoutOption(FLUSH_GRACE))
+    yield* Fiber.await(pumps).pipe(Effect.timeoutOption(FLUSH_GRACE))
     yield* Fiber.interrupt(pumps)
     if (timer) yield* Fiber.interrupt(timer)
     if (ticker) yield* Fiber.interrupt(ticker)
@@ -254,25 +273,31 @@ const make = Effect.fn("ShellJobs.make")(function* () {
     }
   })
 
-  const start = Effect.fn("ShellJobs.start")(function* (input: StartInput) {
+  const prepare = Effect.fn("ShellJobs.prepare")(function* (sessionID: string) {
     const id = "bg_" + randomBytes(5).toString("hex")
-    const dir = jobDir(input.sessionID, id)
+    const dir = jobDir(sessionID, id)
     yield* Effect.promise(() => fs.mkdir(dir, { recursive: true }))
-    // Read before the spawn: output pumps start only after the job record exists, so no wait may sit between.
-    const ownerCreated = yield* Effect.promise(() => ownCreated())
-    const handle = yield* spawner.spawn(input.spawn).pipe(Effect.provideService(Scope.Scope, scope))
+    return { id, dir, ownerCreated: yield* Effect.promise(() => ownCreated()) }
+  })
+
+  const register = Effect.fn("ShellJobs.register")(function* (
+    input: Pick<StartInput, "sessionID" | "command" | "cwd">,
+    slot: { id: string; dir: string; ownerCreated: string | undefined },
+    handle: ChildProcessHandle,
+    startedAt: number,
+  ) {
     const info: Info = {
-      id,
+      id: slot.id,
       sessionID: input.sessionID,
       command: input.command,
       cwd: input.cwd,
       owner: process.pid,
-      ownerCreated,
+      ownerCreated: slot.ownerCreated,
       status: "running",
       pid: Number(handle.pid),
-      startedAt: Date.now(),
-      outLog: path.join(dir, "out.log"),
-      errLog: path.join(dir, "err.log"),
+      startedAt,
+      outLog: path.join(slot.dir, "out.log"),
+      errLog: path.join(slot.dir, "err.log"),
     }
     const job: Job = {
       info,
@@ -281,9 +306,55 @@ const make = Effect.fn("ShellJobs.make")(function* () {
       err: createWriteStream(info.errLog, { flags: "a" }).on("error", () => undefined),
     }
     yield* persist(info)
-    live.set(id, job)
-    yield* Effect.forkIn(watch(job, input), scope)
-    return info
+    live.set(slot.id, job)
+    return job
+  })
+
+  const start = Effect.fn("ShellJobs.start")(function* (input: StartInput) {
+    // Prepared before the spawn: output pumps start only after the job record exists, so no wait may sit between.
+    const slot = yield* prepare(input.sessionID)
+    const handle = yield* spawner.spawn(input.spawn).pipe(Effect.provideService(Scope.Scope, scope))
+    const job = yield* register(input, slot, handle, Date.now())
+    const pumps = yield* Effect.forkIn(
+      Effect.all([pump(handle.stdout, job.out), pump(handle.stderr, job.err)], { concurrency: "unbounded" }),
+      scope,
+    )
+    yield* Effect.forkIn(watch(job, input, pumps), scope)
+    return job.info
+  })
+
+  // Stdout and stderr arrive interleaved from the caller's reader, so all output lands in outLog.
+  const adopt = Effect.fn("ShellJobs.adopt")(function* (input: AdoptInput) {
+    const job = yield* register(input, yield* prepare(input.sessionID), input.handle, input.startedAt)
+    // Interrupted with the instance scope, which then closes the process scope and so kills the process.
+    yield* Effect.forkIn(
+      watch(job, input, input.pump).pipe(Effect.ensuring(Scope.close(input.scope, Exit.void))),
+      scope,
+    )
+    return { info: job.info, write: (chunk: string) => void job.out.write(chunk) }
+  })
+
+  const waiting = new Map<string, Set<Deferred.Deferred<void>>>()
+
+  const foreground = (sessionID: string) =>
+    Effect.acquireRelease(
+      Deferred.make<void>().pipe(
+        Effect.tap((latch) =>
+          Effect.sync(() => waiting.set(sessionID, (waiting.get(sessionID) ?? new Set()).add(latch))),
+        ),
+      ),
+      (latch) =>
+        Effect.sync(() => {
+          const latches = waiting.get(sessionID)
+          latches?.delete(latch)
+          if (latches?.size === 0) waiting.delete(sessionID)
+        }),
+    )
+
+  const background = Effect.fn("ShellJobs.background")(function* (sessionID: string) {
+    const latches = [...(waiting.get(sessionID) ?? [])]
+    yield* Effect.forEach(latches, (latch) => Deferred.succeed(latch, undefined), { discard: true })
+    return latches.length > 0
   })
 
   const list = Effect.fn("ShellJobs.list")(function* (sessionID: string) {
@@ -327,7 +398,7 @@ const make = Effect.fn("ShellJobs.make")(function* () {
     yield* Effect.promise(() => fs.rm(sessionDir(sessionID), { recursive: true, force: true }))
   })
 
-  return { start, list, get, kill, removeSession }
+  return { start, adopt, foreground, background, list, get, kill, removeSession }
 })
 
 export async function outputOf(info: Info) {
@@ -343,6 +414,9 @@ const layer = Layer.effect(
     const state = yield* InstanceState.make(() => make().pipe(Effect.provideService(ChildProcessSpawner, spawner)))
     return Service.of({
       start: (input) => InstanceState.useEffect(state, (jobs) => jobs.start(input)),
+      adopt: (input) => InstanceState.useEffect(state, (jobs) => jobs.adopt(input)),
+      foreground: (sessionID) => InstanceState.useEffect(state, (jobs) => jobs.foreground(sessionID)),
+      background: (sessionID) => InstanceState.useEffect(state, (jobs) => jobs.background(sessionID)),
       list: (sessionID) => InstanceState.useEffect(state, (jobs) => jobs.list(sessionID)),
       get: (sessionID, id) => InstanceState.useEffect(state, (jobs) => jobs.get(sessionID, id)),
       kill: (sessionID, id) => InstanceState.useEffect(state, (jobs) => jobs.kill(sessionID, id)),

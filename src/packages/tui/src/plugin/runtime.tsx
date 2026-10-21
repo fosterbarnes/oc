@@ -66,6 +66,14 @@ export type TuiPluginHost = {
     dispose?: () => void
   }): Promise<void>
   dispose(): Promise<void>
+  /** Plugins that failed to load or initialize, read once `start` settles. */
+  failures?(): TuiPluginFailure[]
+}
+
+export type TuiPluginFailure = {
+  title: string
+  error: string
+  context?: string
 }
 
 const Context = createContext<PluginRuntime>()

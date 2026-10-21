@@ -642,6 +642,11 @@ export const {
             event.properties.messageID,
             produce((draft) => {
               const part = draft[match.index]
+              // Streamed tool arguments; dropped once the call leaves pending (input is final then).
+              if (event.properties.field === "state.raw") {
+                if (part.type === "tool" && part.state.status === "pending") part.state.raw += event.properties.delta
+                return
+              }
               const field = event.properties.field as keyof typeof part
               const existing = part[field] as string | undefined
               ;(part[field] as string) = (existing ?? "") + event.properties.delta

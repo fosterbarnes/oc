@@ -35,13 +35,17 @@ import { computePromptTraits } from "../../prompt/traits"
 import {
   attachmentLabel,
   deduplicateImageParts,
+  expandPastedChip,
   expandPastedTextPlaceholders,
   expandTrackedPastedText,
+  isPastedChipLabel,
   PASTE_SUMMARY_KEY,
   typedSlashCommands,
 } from "../../prompt/part"
 import { usePromptStash } from "../../prompt/stash"
 import { DialogStash } from "../dialog-stash"
+import { DialogImagePreview } from "../dialog-image-preview"
+import { openFolder } from "../../util/openFolder"
 import { type AutocompleteRef, Autocomplete } from "./autocomplete"
 import { useRenderer, useTerminalDimensions, type JSX } from "@opentui/solid"
 import type { AssistantMessage, FilePart, UserMessage } from "@opencode-ai/sdk/v2"
@@ -490,6 +494,17 @@ export function Prompt(props: PromptProps) {
           const sessionID = props.sessionID
           if (!sessionID) return
           dialog.replace(() => <DialogQueue sessionID={sessionID} />)
+        },
+      },
+      {
+        title: "Edit last queued prompt",
+        name: "session.queued_prompt.undo",
+        category: "Session",
+        enabled:
+          !!props.sessionID && !props.disabled && queue.snapshot().entries.some((entry) => entry.state === "pending"),
+        run: () => {
+          dialog.clear()
+          void unqueueLast()
         },
       },
       {
@@ -1208,6 +1223,38 @@ export function Prompt(props: PromptProps) {
     }
   }
 
+  // Cancels the newest pending queued prompt and appends its text to the input. Queue entries only
+  // expose text, so prompts with attachments stay in the queue rather than losing their files.
+  async function unqueueLast() {
+    const sessionID = props.sessionID
+    if (!sessionID || props.disabled) return
+    const entry = queue.snapshot().entries.findLast((item) => item.state === "pending")
+    if (!entry) return toast.show({ message: "No queued prompt to edit", variant: "warning" })
+    if (entry.attachments > 0) {
+      return toast.show({
+        message: "Last queued prompt has attachments: edit it in Queued prompts",
+        variant: "warning",
+      })
+    }
+    if (store.mode === "shell") {
+      return toast.show({ message: "Leave shell mode to edit a queued prompt", variant: "warning" })
+    }
+    const cancelled = await sdk.client.session.queue
+      .update({ sessionID, body: { type: "cancel", id: entry.id } }, { throwOnError: true })
+      .then(
+        () => true,
+        (error) => {
+          toast.show({ title: "Queue change failed", message: errorMessage(error), variant: "error" })
+          return false
+        },
+      )
+    queue.refresh()
+    if (!cancelled || !input || input.isDestroyed) return
+    input.gotoBufferEnd()
+    input.insertText(input.plainText ? `\n${entry.text}` : entry.text)
+    input.focus()
+  }
+
   async function queueInner(schedule?: Schedule) {
     if (!props.sessionID || props.disabled) return false
     if (store.mode === "shell") {
@@ -1537,6 +1584,17 @@ export function Prompt(props: PromptProps) {
     )
   }
 
+  // Backspace at a `[Pasted ~N lines]` chip's end turns it back into editable text.
+  function expandPastedChipEndingAt(offset: number) {
+    for (const extmark of input.extmarks.getAllForTypeId(promptPartTypeId)) {
+      if (extmark.end !== offset) continue
+      const part = store.prompt.parts[store.extmarkToPartIndex.get(extmark.id) ?? -1]
+      if (part?.type !== "text" || !part.source?.text || !isPastedChipLabel(part.source.text.value)) continue
+      return expandPastedChip(input, extmark.id, part.text)
+    }
+    return false
+  }
+
   async function pasteInputText(text: string) {
     const normalizedText = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n")
     const pastedContent = normalizedText.trim()
@@ -1615,7 +1673,11 @@ export function Prompt(props: PromptProps) {
         draft.extmarkToPartIndex.set(extmarkId, partIndex)
       }),
     )
-    return
+    // No preview when a submit is already waiting on this paste: the draft goes out with it.
+    if (!file.mime.startsWith("image/") || submitting) return
+    dialog.replace(() => (
+      <DialogImagePreview label={virtualText} filename={file.filename ?? "clipboard"} data={file.content} />
+    ))
   }
 
   function clearPrompt() {
@@ -1667,6 +1729,22 @@ export function Prompt(props: PromptProps) {
 
   const narrow = createMemo(() => dimensions().width < 44)
   const [locationWidth, setLocationWidth] = createSignal(dimensions().width)
+  const [locationHovered, setLocationHovered] = createSignal(false)
+
+  // Footer path: left click copies it, right click opens it in the system file manager.
+  function onLocationMouseUp(event: MouseEvent) {
+    if (renderer.getSelection()?.getSelectedText()) return
+    const directory = location()?.directory ?? paths.cwd
+    if (event.button === 2) {
+      openFolder(directory).catch(() => toast.show({ message: `Could not open ${directory}`, variant: "error" }))
+      return
+    }
+    if (event.button !== 0) return
+    clipboard
+      .write?.(directory)
+      .then(() => toast.show({ message: `Copied ${directory}`, variant: "success" }))
+      .catch(() => toast.show({ message: "Failed to copy path", variant: "error" }))
+  }
 
   const placeholderText = createMemo(() => {
     if (props.showPlaceholder === false) return undefined
@@ -1771,11 +1849,13 @@ export function Prompt(props: PromptProps) {
                 setCursorVersion((value) => value + 1)
               }}
               onCursorChange={() => setCursorVersion((value) => value + 1)}
-              onKeyDown={(e: { preventDefault(): void }) => {
+              onKeyDown={(e: KeyEvent) => {
                 if (props.disabled) {
                   e.preventDefault()
                   return
                 }
+                if (e.name !== "backspace" || e.ctrl || e.meta || e.option || input.hasSelection()) return
+                if (expandPastedChipEndingAt(input.cursorOffset)) e.preventDefault()
               }}
               onSubmit={() => {
                 // IME: double-defer so the last composed character (e.g. Korean
@@ -2079,7 +2159,13 @@ export function Prompt(props: PromptProps) {
                     }}
                   >
                     {/* Keep the path's tail (project folder) visible when the footer is tight. */}
-                    <text fg={theme.textMuted} wrapMode="none">
+                    <text
+                      fg={locationHovered() ? theme.text : theme.textMuted}
+                      wrapMode="none"
+                      onMouseOver={() => setLocationHovered(true)}
+                      onMouseOut={() => setLocationHovered(false)}
+                      onMouseUp={onLocationMouseUp}
+                    >
                       {Locale.truncateLeft(location()?.directory ?? paths.cwd, Math.max(1, locationWidth()))}
                     </text>
                   </box>

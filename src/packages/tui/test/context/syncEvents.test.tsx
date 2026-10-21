@@ -188,7 +188,10 @@ test("removal events for an unknown session leave later events applied", async (
 test("message.removed deletes the message's parts", async () => {
   await using tmp = await tmpdir()
   await Bun.write(`${tmp.path}/kv.json`, "{}")
-  const { app, emit, sync } = await mount(sessionRoutes(() => json([])), tmp.path)
+  const { app, emit, sync } = await mount(
+    sessionRoutes(() => json([])),
+    tmp.path,
+  )
 
   try {
     await sync.session.sync(sessionID)
@@ -214,10 +217,64 @@ test("message.removed deletes the message's parts", async () => {
   }
 })
 
+test("streamed tool arguments append to a pending tool's raw input", async () => {
+  await using tmp = await tmpdir()
+  await Bun.write(`${tmp.path}/kv.json`, "{}")
+  const { app, emit, sync } = await mount(
+    sessionRoutes(() => json([])),
+    tmp.path,
+  )
+  const raw = () => {
+    const part = sync.data.part[messageID]?.[0]
+    return part?.type === "tool" && part.state.status === "pending" ? part.state.raw : undefined
+  }
+
+  try {
+    await sync.session.sync(sessionID)
+    emit(global({ id: "evt_message", type: "message.updated", properties: { sessionID, info: assistant } }))
+    emit(
+      global({
+        id: "evt_part",
+        type: "message.part.updated",
+        properties: {
+          sessionID,
+          time: 1,
+          part: {
+            id: partID,
+            sessionID,
+            messageID,
+            type: "tool",
+            tool: "read",
+            callID: "call_1",
+            state: { status: "pending", input: {}, raw: "" },
+          },
+        },
+      }),
+    )
+    await wait(() => raw() === "")
+    for (const [index, delta] of ['{"filePath":', '"src/a.ts"'].entries())
+      emit(
+        global({
+          id: `evt_delta_${index}`,
+          type: "message.part.delta",
+          properties: { sessionID, messageID, partID, field: "state.raw", delta },
+        }),
+      )
+    await wait(() => raw() === '{"filePath":"src/a.ts"')
+
+    expect(Object.hasOwn(sync.data.part[messageID][0], "state.raw")).toBe(false)
+  } finally {
+    app.renderer.destroy()
+  }
+})
+
 test("session.deleted removes the session's transcript, todos, diff, and status", async () => {
   await using tmp = await tmpdir()
   await Bun.write(`${tmp.path}/kv.json`, "{}")
-  const { app, emit, sync } = await mount(sessionRoutes(() => json([])), tmp.path)
+  const { app, emit, sync } = await mount(
+    sessionRoutes(() => json([])),
+    tmp.path,
+  )
 
   try {
     await sync.session.sync(sessionID)

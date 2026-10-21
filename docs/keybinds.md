@@ -130,7 +130,7 @@ Bold marks keys where the oc layout differs from opencode. `-` means unbound.
 | Mark session failed or not failed | `ctrl+shift+backspace` | `ctrl+shift+backspace` |
 | Mark session in progress or unmarked | `ctrl+shift+i` | `ctrl+shift+i` |
 | Interrupt current session | `escape` | `escape` |
-| Background synchronous subagents | **`ctrl+shift+b`** | `ctrl+b` |
+| Move running subagents and shell commands to the background | **`ctrl+shift+b`** | `ctrl+b` |
 | Compact the session | `ctrl+x c` | `ctrl+x c` |
 | Go to first child session | **`ctrl+b`, `ctrl+x down`** | `ctrl+x down` |
 | Go to next child session | `right` | `right` |
@@ -206,6 +206,8 @@ Bold marks keys where the oc layout differs from opencode. `-` means unbound.
 | Scroll messages down by half page | `ctrl+alt+d` | `ctrl+alt+d` |
 | Navigate to first message | `ctrl+g`, `home` | `ctrl+g`, `home` |
 | Navigate to last message | `ctrl+alt+g`, `end` | `ctrl+alt+g`, `end` |
+| Navigate to next message | `alt+down` | `alt+down` |
+| Navigate to previous message | `alt+up` | `alt+up` |
 | Copy message | `ctrl+x y` | `ctrl+x y` |
 | Undo message | `ctrl+x u` | `ctrl+x u` |
 | Redo message | `ctrl+x r` | `ctrl+x r` |
@@ -300,6 +302,9 @@ Bold marks keys where the oc layout differs from opencode. `-` means unbound.
 | Move favorite category up | `shift+up` | `shift+up` |
 | Move favorite category down | `shift+down` | `shift+down` |
 | Delete favorite category | `ctrl+d` | `ctrl+d` |
+| Run the selected notice's action | `ctrl+r` | `ctrl+r` |
+| Investigate error in a new session | `i` | `i` |
+| Copy error details | `c` | `c` |
 | Install plugin from plugin dialog | `shift+i` | `shift+i` |
 
 ### Permission

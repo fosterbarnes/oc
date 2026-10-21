@@ -112,6 +112,8 @@ export function fromRow(row: SessionRow): Info {
       updated: row.time_updated,
       compacting: row.time_compacting ?? undefined,
       archived: row.time_archived ?? undefined,
+      idle: row.time_idle ?? undefined,
+      viewed: row.time_viewed ?? undefined,
     },
     sessionComplete: row.session_complete === 1,
     sessionFailed: row.session_failed === 1,
@@ -157,6 +159,8 @@ export function toRow(info: Info) {
     time_updated: info.time.updated,
     time_compacting: info.time.compacting,
     time_archived: info.time.archived,
+    time_idle: info.time.idle,
+    time_viewed: info.time.viewed,
     session_complete: info.sessionComplete ? 1 : 0,
     session_failed: info.sessionFailed ? 1 : 0,
     session_in_progress: info.sessionInProgress ? 1 : 0,
@@ -210,6 +214,9 @@ const Time = Schema.Struct({
   updated: NonNegativeInt,
   compacting: optional(NonNegativeInt),
   archived: optional(ArchivedTimestamp),
+  // Unread when the last finished run (`idle`) is newer than the last acknowledged one (`viewed`).
+  idle: optional(NonNegativeInt),
+  viewed: optional(NonNegativeInt),
 })
 
 const Revert = Schema.Struct({
@@ -449,6 +456,10 @@ export interface Interface {
     sessionFailed?: boolean
     sessionInProgress?: boolean
   }) => Effect.Effect<void>
+  /** Records a finished run on a root session; it lists as unread until `setViewed` acknowledges it. */
+  readonly setIdle: (sessionID: SessionID) => Effect.Effect<void, NotFound>
+  /** Acknowledges the `time.idle` value a viewer saw. */
+  readonly setViewed: (input: { sessionID: SessionID; idle: number }) => Effect.Effect<void, NotFound>
   readonly setMetadata: (input: typeof SetMetadataInput.Type) => Effect.Effect<void>
   readonly setAgentModel: (input: {
     sessionID: SessionID
@@ -855,6 +866,21 @@ const layer: Layer.Layer<
       yield* setSessionMarks(input)
     })
 
+    // Subagent runs wake their parent, whose own run end carries the unread signal.
+    const setIdle = Effect.fn("Session.setIdle")(function* (sessionID: SessionID) {
+      const current = yield* get(sessionID)
+      if (current.parentID) return
+      // Strictly increasing: viewed stores the acknowledged idle value, so a new run end must exceed it.
+      yield* patch(sessionID, { time: { idle: Math.max(Date.now(), (current.time.idle ?? 0) + 1) } })
+    })
+
+    const setViewed = Effect.fn("Session.setViewed")(function* (input: { sessionID: SessionID; idle: number }) {
+      const { time } = yield* get(input.sessionID)
+      // A watermark newer than the recorded run end, or not newer than the last view, changes nothing.
+      if (time.idle === undefined || input.idle > time.idle || (time.viewed ?? -1) >= input.idle) return
+      yield* patch(input.sessionID, { time: { viewed: input.idle } })
+    })
+
     const setMetadata = Effect.fn("Session.setMetadata")(function* (input: typeof SetMetadataInput.Type) {
       yield* patch(input.sessionID, { metadata: input.metadata, time: { updated: Date.now() } }).pipe(Effect.orDie)
     })
@@ -1014,6 +1040,8 @@ const layer: Layer.Layer<
       setSessionMarks,
       setSessionFailed,
       setSessionInProgress,
+      setIdle,
+      setViewed,
       setMetadata,
       setAgentModel,
       setPermission,

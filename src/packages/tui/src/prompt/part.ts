@@ -1,3 +1,4 @@
+import type { TextareaRenderable } from "@opentui/core"
 import type { Part } from "@opencode-ai/sdk/v2"
 import { displaySlice } from "./display"
 import type { PromptInfo } from "./history"
@@ -87,6 +88,21 @@ export function deduplicateImageParts<Part extends AttachmentPart>(parts: readon
     seen.add(key)
     return true
   })
+}
+
+export function isPastedChipLabel(label: string) {
+  return /^\[Pasted ~\d+ lines\]$/.test(label)
+}
+
+// Swaps a `[Pasted ~N lines]` chip for its text so it can be edited in place. The prompt's content
+// sync then drops the chip's part, since its extmark is gone.
+export function expandPastedChip(input: TextareaRenderable, extmarkId: number, text: string) {
+  const extmark = input.extmarks.get(extmarkId)
+  if (!extmark) return false
+  input.extmarks.delete(extmarkId)
+  input.setSelection(extmark.start, extmark.end)
+  input.insertText(text)
+  return true
 }
 
 export function expandTrackedPastedText(text: string, ranges: { start: number; end: number; text: string }[]) {

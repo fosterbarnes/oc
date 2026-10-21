@@ -126,19 +126,21 @@ exports[`opencode CLI help-text snapshots every documented command emits stable 
 debugging and troubleshooting tools
 
 Commands:
-  opencode debug config        show resolved configuration
-  opencode debug lsp           LSP debugging utilities
-  opencode debug rg            ripgrep debugging utilities
-  opencode debug file          file system debugging utilities
-  opencode debug scrap         list all known projects
-  opencode debug skill         list all available skills
-  opencode debug snapshot      snapshot debugging utilities
-  opencode debug startup       print startup timing
-  opencode debug agent <name>  show agent configuration details
-  opencode debug v2            debug v2 catalog and built-in plugins
-  opencode debug info          show debug information
-  opencode debug paths         show global paths (data, config, cache, state)
-  opencode debug wait          wait indefinitely (for debugging)
+  opencode debug config         show resolved configuration
+  opencode debug lsp            LSP debugging utilities
+  opencode debug rg             ripgrep debugging utilities
+  opencode debug file           file system debugging utilities
+  opencode debug scrap          list all known projects
+  opencode debug skill          list all available skills
+  opencode debug snapshot       snapshot debugging utilities
+  opencode debug startup        print startup timing
+  opencode debug agent <name>   show agent configuration details
+  opencode debug v2             debug v2 catalog and built-in plugins
+  opencode debug info           show debug information
+  opencode debug paths [name]   show global paths (data, config, cache, state, db), or only the
+                                named one
+  opencode debug profile <pid>  capture a CPU profile or heap snapshot from a running oc process
+  opencode debug wait           wait indefinitely (for debugging)
 
 Options:
   -h, --help          show help                                                            [boolean]
@@ -396,12 +398,20 @@ Options:
 `;
 
 exports[`opencode CLI help-text snapshots every documented command emits stable help text: opencode plugin --help 1`] = `
-"opencode plugin <module>
+"opencode plugin
 
-install plugin and update config
+install, list, remove, and update plugins
+
+Commands:
+  opencode plugin <module>         install plugin and update config                        [default]
+  opencode plugin list             list configured plugins with their installed versions
+                                                                                       [aliases: ls]
+  opencode plugin remove <module>  remove a plugin from every config file that lists it[aliases: rm]
+  opencode plugin update [module]  update npm plugins that have a newer version (all when no module
+                                   is given)
 
 Positionals:
-  module  npm module name                                                        [string] [required]
+  module  npm module name                                                                   [string]
 
 Options:
   -h, --help          show help                                                            [boolean]

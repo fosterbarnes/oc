@@ -4356,6 +4356,7 @@ export class Session2 extends HeyApiClient {
       permission?: PermissionRuleset
       time?: {
         archived?: number
+        viewed?: number
       }
     },
     options?: Options<never, ThrowOnError>,

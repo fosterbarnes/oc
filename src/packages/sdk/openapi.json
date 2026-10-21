@@ -7136,6 +7136,10 @@
                     "properties": {
                       "archived": {
                         "type": "number"
+                      },
+                      "viewed": {
+                        "type": "integer",
+                        "minimum": 0
                       }
                     },
                     "additionalProperties": false
@@ -18056,6 +18060,14 @@
               },
               "archived": {
                 "type": "number"
+              },
+              "idle": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "viewed": {
+                "type": "integer",
+                "minimum": 0
               }
             },
             "required": ["created", "updated"],
@@ -24809,6 +24821,14 @@
               },
               "archived": {
                 "type": "number"
+              },
+              "idle": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "viewed": {
+                "type": "integer",
+                "minimum": 0
               }
             },
             "required": ["created", "updated"],
@@ -25932,6 +25952,14 @@
               },
               "archived": {
                 "type": "number"
+              },
+              "idle": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "viewed": {
+                "type": "integer",
+                "minimum": 0
               }
             },
             "required": ["created", "updated"],
@@ -26113,6 +26141,14 @@
               },
               "archived": {
                 "type": "number"
+              },
+              "idle": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "viewed": {
+                "type": "integer",
+                "minimum": 0
               }
             },
             "required": ["created", "updated"],
@@ -26294,6 +26330,14 @@
               },
               "archived": {
                 "type": "number"
+              },
+              "idle": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "viewed": {
+                "type": "integer",
+                "minimum": 0
               }
             },
             "required": ["created", "updated"],
@@ -26475,6 +26519,14 @@
               },
               "archived": {
                 "type": "number"
+              },
+              "idle": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "viewed": {
+                "type": "integer",
+                "minimum": 0
               }
             },
             "required": ["created", "updated"],
@@ -26656,6 +26708,14 @@
               },
               "archived": {
                 "type": "number"
+              },
+              "idle": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "viewed": {
+                "type": "integer",
+                "minimum": 0
               }
             },
             "required": ["created", "updated"],
@@ -26837,6 +26897,14 @@
               },
               "archived": {
                 "type": "number"
+              },
+              "idle": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "viewed": {
+                "type": "integer",
+                "minimum": 0
               }
             },
             "required": ["created", "updated"],
@@ -27018,6 +27086,14 @@
               },
               "archived": {
                 "type": "number"
+              },
+              "idle": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "viewed": {
+                "type": "integer",
+                "minimum": 0
               }
             },
             "required": ["created", "updated"],
@@ -27461,6 +27537,14 @@
               },
               "archived": {
                 "type": "number"
+              },
+              "idle": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "viewed": {
+                "type": "integer",
+                "minimum": 0
               }
             },
             "required": ["created", "updated"],
@@ -27642,6 +27726,14 @@
               },
               "archived": {
                 "type": "number"
+              },
+              "idle": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "viewed": {
+                "type": "integer",
+                "minimum": 0
               }
             },
             "required": ["created", "updated"],

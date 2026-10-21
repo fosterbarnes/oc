@@ -224,6 +224,8 @@ export default {
           \`time_updated\` integer NOT NULL,
           \`time_compacting\` integer,
           \`time_archived\` integer,
+          \`time_idle\` integer,
+          \`time_viewed\` integer,
           \`session_complete\` integer DEFAULT 0 NOT NULL,
           \`session_failed\` integer DEFAULT 0 NOT NULL,
           \`session_in_progress\` integer DEFAULT 0 NOT NULL,

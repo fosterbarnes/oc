@@ -304,6 +304,7 @@ export const TuiThreadCommand = cmd({
               return [tui, server]
             },
             config,
+            configWatch: await TuiConfig.watch(),
             pluginHost: createLegacyTuiPluginHost(),
             directory: cwd,
             fetch: transport.fetch,

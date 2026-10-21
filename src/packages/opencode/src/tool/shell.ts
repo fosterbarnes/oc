@@ -1,4 +1,4 @@
-import { Clock, Effect, Fiber, Queue, Stream } from "effect"
+import { Clock, Deferred, Effect, Exit, Fiber, Queue, Scope, Stream } from "effect"
 import os from "os"
 import { createWriteStream } from "node:fs"
 import * as Tool from "./tool"
@@ -24,7 +24,7 @@ import { ShellPrompt, type Parameters } from "./shell/prompt"
 import { BashArity } from "@/permission/arity"
 import { ShellJobs } from "@/background/shellJobs"
 import { notifySession, type TaskPromptOps } from "./task"
-import { renderNotice, renderStarted } from "./shellJobs"
+import { renderMoved, renderNotice, renderStarted } from "./shellJobs"
 
 export { Parameters } from "./shell/prompt"
 
@@ -219,6 +219,48 @@ function pathArgs(list: Part[], ps: boolean, cmd = false) {
     out.push(item.text)
   }
   return out
+}
+
+// The tool part's `background` metadata; the TUI tails outLog/errLog in its shell output dialog.
+function jobMetadata(info: ShellJobs.Info) {
+  return { jobID: info.id, status: info.status, outLog: info.outLog, errLog: info.errLog }
+}
+
+// One metadata shape for every return path, so foreground, moved, and background results unify.
+type Metadata = {
+  output: string
+  exit: number | null
+  signal?: string
+  truncated: boolean
+  outputPath?: string
+  background?: ReturnType<typeof jobMetadata>
+}
+
+// Background job hooks: live output into the call's (already completed) tool part, and an exit notice
+// that wakes the session. Without promptOps (no session loop) the job just runs.
+function jobHooks(ctx: Tool.Context): Pick<ShellJobs.StartInput, "watch" | "onExit"> {
+  const ops: TaskPromptOps | undefined = ctx.extra?.promptOps
+  if (!ops) return {}
+  return {
+    watch: ({ info, output }) =>
+      ops.partMetadata({
+        sessionID: ctx.sessionID,
+        messageID: ctx.messageID,
+        callID: ctx.callID ?? "",
+        metadata: { output, background: jobMetadata(info) },
+      }),
+    onExit: (info) =>
+      Effect.promise(() => ShellJobs.outputOf(info)).pipe(
+        Effect.flatMap((output) =>
+          notifySession(ops, {
+            sessionID: ctx.sessionID,
+            agent: ctx.agent,
+            turnPermission: ctx.extra?.turnPermission,
+            text: renderNotice(info, output),
+          }),
+        ),
+      ),
+  }
 }
 
 function preview(text: string) {
@@ -516,11 +558,21 @@ export const ShellTool = Tool.define(
         },
       })
 
-      const code: number | null = yield* Effect.scoped(
+      // The process and its output reader live in their own scope so Ctrl+B can hand both to a
+      // background job (ShellJobs.adopt) that outlives this call. Set once that happens.
+      const proc = yield* Scope.make()
+      let moved: ShellJobs.Adopted | undefined
+      const startedAt = Date.now()
+
+      const result: { code: number | null; moved?: ShellJobs.Info } = yield* Effect.scoped(
         Effect.gen(function* () {
           yield* Effect.addFinalizer(flushMetadata)
           yield* Effect.addFinalizer(closeSink)
-          const handle = yield* spawner.spawn(cmd(input.shell, input.command, input.cwd, input.env))
+          yield* Effect.addFinalizer(() => (moved ? Effect.void : Scope.close(proc, Exit.void)))
+          const promote = yield* jobs.foreground(ctx.sessionID)
+          const handle = yield* spawner
+            .spawn(cmd(input.shell, input.command, input.cwd, input.env))
+            .pipe(Effect.provideService(Scope.Scope, proc))
 
           yield* Effect.forkScoped(
             Effect.gen(function* () {
@@ -530,8 +582,10 @@ export const ShellTool = Tool.define(
               yield* flushMetadata()
             }).pipe(Effect.forever),
           )
-          const pump = yield* Effect.forkScoped(
+          const pump = yield* Effect.forkIn(
             Stream.runForEach(Stream.decodeText(handle.all), (chunk) => {
+              const job = moved
+              if (job) return Effect.sync(() => job.write(chunk))
               const size = Buffer.byteLength(chunk, "utf-8")
               list.push({ text: chunk, size })
               used += size
@@ -565,6 +619,7 @@ export const ShellTool = Tool.define(
 
               return updateMetadata
             }),
+            proc,
           )
 
           const abort = Effect.callback<void>((resume) => {
@@ -589,8 +644,28 @@ export const ShellTool = Tool.define(
             ),
             abort.pipe(Effect.map(() => ({ kind: "abort" as const, code: null }))),
             timeout.pipe(Effect.map(() => ({ kind: "timeout" as const, code: null }))),
+            Deferred.await(promote).pipe(Effect.map(() => ({ kind: "background" as const, code: null }))),
           ])
 
+          if (exit.kind === "background") {
+            // No timeout once moved: the user chose to let it run; bgKill stops it.
+            const job = yield* jobs.adopt({
+              sessionID: ctx.sessionID,
+              command: input.command,
+              cwd: input.cwd,
+              handle,
+              pump,
+              scope: proc,
+              startedAt,
+              ...jobHooks(ctx),
+            })
+            // One synchronous step, so no chunk lands between the copy and the switch to the job log.
+            yield* Effect.sync(() => {
+              job.write(list.map((item) => item.text).join(""))
+              moved = job
+            })
+            return { code: null, moved: job.info }
+          }
           if (exit.kind === "abort") {
             aborted = true
             yield* handle.kill({ forceKillAfter: "3 seconds" }).pipe(Effect.orDie)
@@ -601,10 +676,20 @@ export const ShellTool = Tool.define(
           }
 
           yield* Fiber.join(pump)
-          return exit.kind === "exit" ? exit.code : null
+          return { code: exit.kind === "exit" ? exit.code : null }
         }),
       ).pipe(Effect.orDie)
 
+      if (result.moved) {
+        const metadata: Metadata = {
+          output: last,
+          exit: null,
+          truncated: false,
+          background: jobMetadata(result.moved),
+        }
+        return { title: input.command, metadata, output: renderMoved(result.moved) }
+      }
+      const code = result.code
       const meta: string[] = []
       if (expired) {
         meta.push(
@@ -630,17 +715,14 @@ export const ShellTool = Tool.define(
       if (meta.length > 0) {
         output += "\n\n<shell_metadata>\n" + meta.join("\n") + "\n</shell_metadata>"
       }
-      return {
-        title: input.command,
-        metadata: {
-          output: last || preview(output),
-          exit: code,
-          ...(signal ? { signal } : {}),
-          truncated: cut,
-          ...(cut && file ? { outputPath: file } : {}),
-        },
-        output,
+      const metadata: Metadata = {
+        output: last || preview(output),
+        exit: code,
+        ...(signal ? { signal } : {}),
+        truncated: cut,
+        ...(cut && file ? { outputPath: file } : {}),
       }
+      return { title: input.command, metadata, output }
     })
 
     // The call returns once the process runs. Live output and the exit notice go through promptOps, because
@@ -649,7 +731,6 @@ export const ShellTool = Tool.define(
       input: { shell: string; command: string; cwd: string; env: NodeJS.ProcessEnv; timeout?: number },
       ctx: Tool.Context,
     ) {
-      const ops = ctx.extra?.promptOps
       const info = yield* jobs
         .start({
           sessionID: ctx.sessionID,
@@ -657,40 +738,11 @@ export const ShellTool = Tool.define(
           spawn: cmd(input.shell, input.command, input.cwd, input.env),
           cwd: input.cwd,
           timeoutMs: input.timeout,
-          watch: ops
-            ? ({ info: job, output }) =>
-                ops.partMetadata({
-                  sessionID: ctx.sessionID,
-                  messageID: ctx.messageID,
-                  callID: ctx.callID ?? "",
-                  metadata: { output, background: { jobID: job.id, status: job.status } },
-                })
-            : undefined,
-          onExit: ops
-            ? (job) =>
-                Effect.promise(() => ShellJobs.outputOf(job)).pipe(
-                  Effect.flatMap((output) =>
-                    notifySession(ops, {
-                      sessionID: ctx.sessionID,
-                      agent: ctx.agent,
-                      turnPermission: ctx.extra?.turnPermission,
-                      text: renderNotice(job, output),
-                    }),
-                  ),
-                )
-            : undefined,
+          ...jobHooks(ctx),
         })
         .pipe(Effect.orDie)
-      return {
-        title: input.command,
-        metadata: {
-          output: "",
-          exit: null,
-          truncated: false,
-          background: { jobID: info.id, status: info.status },
-        },
-        output: renderStarted(info),
-      }
+      const metadata: Metadata = { output: "", exit: null, truncated: false, background: jobMetadata(info) }
+      return { title: input.command, metadata, output: renderStarted(info) }
     })
 
     return () =>

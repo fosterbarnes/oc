@@ -169,6 +169,39 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-20 (~23:10) - v0.2.270 houndevatorsMisty - upstream 1.19 port stage 8: CLI and TUI features - Claude Opus 5.5 (orchestrator) + Opus 5.5 high/medium workers; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; orchestrator, workers `general-opus.5.5-medium` (8a, 8d, 8e) and `general-opus.5.5-high` (8b, 8c); Implementation; Stage 8 of `~/.config/opencode/plans/upstream119/implementation.md` completed (picks in `picks.md`)
+- Version: 0.2.270 houndevatorsMisty
+- 8a CLI: `oc update` aliases `upgrade` (`cli/commandLoader.ts`); `debug paths <name>` (+`db`), unknown name exits 1; `attach` checks `GET /api/health` (5 s) before validateSession; `oc debug profile <pid> [--heap] [--seconds]` writes a request file in `<state>/diag`, every CLI process watches it (`cli/heap.ts`) and writes `.cpuprofile`/`.heapsnapshot` to the log dir; `oc plug list|remove|update [--check]` over opencode.json + tui.json plugins, shared `core/src/npm-update.ts` check also drives an "update X.Y.Z" marker on /plugins External rows (no auto-install). Help snapshots updated.
+- 8b unread sessions: migration `20261020143000_sessionViewedState` adds nullable `session.time_idle`/`time_viewed` (`migration.gen.ts`, `schema.gen.ts`, `schema.json`, `core/src/session/sql.ts`, projector, `schema/src/v1/session.ts`); `Session.setIdle` (roots only, run ended on its own, from `prompt.ts` loop) and `setViewed` (watermark); `PATCH /session/:id` accepts `time.viewed`; TUI session route records viewed while shown + terminal focused; session list gutter shows unread `●` (priority: awaiting input, spinner, unread, pin). `bun script/migration.ts` regenerates identical schema (no changes); `--check` fails on Windows only by CRLF (test is Linux-only).
+- 8c transcript/shell: transcript views full/grouped/summary (`routes/session/transcriptView.ts`, keybind `transcript_view`, unbound); read rows `path:10-60`; `ui/file-path.tsx` semantic truncation (file-changes dialog, home footer); processor forwards tool-input deltas as `message.part.delta` `state.raw`, TUI parses partial JSON (`util/partial-json*.ts`) for pending rows; `session_background` (ctrl+b) also moves a running foreground bash call into a background job (`background/shellJobs.ts`, `handlers/experimental.ts`); shell rows get a Full output dialog (`component/dialog-shell-output.tsx`, keybind `session_shell_output`, unbound).
+- 8d prompt/commands: Backspace at a `[Pasted ~N lines]` chip expands it; image paste preview dialog (`component/dialog-image-preview.tsx`; Kitty/Sixel only, metadata always; no transcript images); footer path click copies, right click opens Explorer (`util/openFolder.ts`); `messages_previous`/`messages_next` = alt+up/alt+down; `/copy` = last reply, `/copy-all` = transcript; `@` rows labelled agent/reference/resource; `/effort` and `/thinking` open `/variants`; palette "Edit last queued prompt" (`session_queued_prompt_undo`, unbound; upstream ctrl+u clashes).
+- 8e notices/dialogs: toast actions (`ui/toast.tsx` `action`, kept in notice history, `dialog.notices.action` ctrl+r); plugin/MCP failure toast -> `component/dialog-error-details.tsx` with `i` investigate (prefilled new session) and `c` copy; release notes shown once after an oc update from the GitHub release body (`ocRelease.ts` keeps `body`); sidebar subagents filter all/running/idle (kv `sidebar_subagents_filter`); favorites rank first in model search; palette/`/delete` "Delete this session" with confirm -> home; TUI config files watched and reloaded on save (`config/tui.ts` returns `files`); plugin `TuiDialogSelectProps` filter + row actions (`TuiDialogSelectAction`). Skipped TUI 21 (oc renders no agent-switch notice).
+- Docs: FORK.md rows added/edited per chunk; wiki Launching, Configuration, Troubleshooting, Sessions, Keybinds, Agents-and-Skills, Sidebar; `docs/keybinds.md` regenerated (`--check` 0). Codegen: legacy SDK + client after 8b (session `time.idle`/`time.viewed`, PATCH `time.viewed`).
+- Verification: all 29 changed test files run by orchestrator, every one 0 fail (265 pass), incl. core database-migration 21, ocRelease 5; opencode commandLoader 8, attach 5, config/tui 37, processor-effect 20, session 10, backgroundShell 13, debug-paths 3, heap 2, npm-update 7, plug-manage 3; tui dialog-select 22, dialogSessionListStatusFilter 7, syncEvents 11, sidebarSubagents 4, tool-display 13, model-options 3, toastAction 2, dialogImagePreview 3, dialogShellOutput 3, configLive 2, failureToasts 3, pastedChip 3, releaseNotes 1, transcriptView 5, file-path 8, openFolder 1, partial-json 6; help-snapshots 1/0 after update. Typecheck left to prePush.
+- ERROR: 8e reported failed on a nonzero bash exit although it finished (known false failure).
+- Fixed (agent-push, typecheck missed by workers): `core/src/npm-update.ts` tag/range narrowing; `tui/src/app.tsx` reload chain `Promise<unknown>`; `tool/shell.ts` shared `Metadata` type for run/moved/background returns; `config/tui.ts` `reload` declares `Error`. Verified: full turbo typecheck 16/16; shell, shellMetadata, backgroundShell, config/tui 151 tests (shell "basic [bash]" cold-start timeout, passed on rerun), npm-update 7, configLive 2.
+- Risk: every oc process now runs a file watcher on `<state>/diag`; `alt+up`/`alt+down` may be taken by the terminal (Windows Terminal pane focus); npm update check sends no registry auth.
+
+### User
+CLI
+- `oc update` works like `oc upgrade`, `oc plug` can list, remove, and update plugins, `oc debug paths db` prints one path, and `oc debug profile <pid>` captures a CPU profile or heap snapshot of a running oc.
+
+Sessions
+- Sessions that finished while you were elsewhere show a `●` in the session list until you open them, and you can delete the current session from the palette or with `/delete`.
+- `/copy` now copies the last reply and `/copy-all` copies the whole transcript; `alt+up` and `alt+down` jump between messages.
+
+Transcript and shell
+- Tool rows fill in while the model is still writing the call, read rows show line ranges, and the transcript can switch to grouped or summary views (bind `transcript_view`).
+- `ctrl+b` also moves a running shell command to the background, and shell rows have a Full output view.
+
+Notices and dialogs
+- Plugin or MCP failures pop a toast you can open for details and investigate in a new session, release notes show once after an update, and the TUI config reloads when you save it.
+
+---
+
 ## 2026-10-20 (~21:20) - v0.2.269 nigiriFartsds - upstream 1.19 port stage 7: core features (tools, output limits, compat options, questions, web search, MCP) - Claude Opus 5.5 (orchestrator) + Opus 5.5 high workers; Implementation
 
 ### Agent

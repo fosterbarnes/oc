@@ -74,6 +74,14 @@ export function renderStarted(info: ShellJobs.Info) {
   ].join("\n")
 }
 
+/** Text returned by a foreground bash call the user moved to the background (Ctrl+B) before it finished. */
+export function renderMoved(info: ShellJobs.Info) {
+  return [
+    "The user moved this command to the background before it finished; it keeps running.",
+    renderStarted(info),
+  ].join("\n")
+}
+
 /** Synthetic message sent to the session when a background job exits. */
 export function renderNotice(info: ShellJobs.Info, output: string) {
   const exit = info.exitCode == null ? "" : ` exitCode="${info.exitCode}"`

@@ -38,6 +38,8 @@ export interface DialogSelectProps<T> {
   onFilter?: (query: string) => void
   onSelect?: (option: DialogSelectOption<T>) => void
   skipFilter?: boolean
+  /** Replaces the built-in fuzzy filter: returns matches in display order, listed flat. */
+  search?: (query: string) => DialogSelectOption<T>[]
   renderFilter?: boolean
   locked?: boolean
   preserveSelection?: boolean
@@ -65,6 +67,8 @@ export interface DialogSelectProps<T> {
 type DialogSelectActionBase<T> = {
   command: string
   title: string
+  /** Key for commands without a config keybind (plugin dialog actions). */
+  bind?: string
   side?: "left" | "right"
   hidden?: boolean | ((option: DialogSelectOption<T> | undefined) => boolean)
   disabled?: boolean | ((option: DialogSelectOption<T> | undefined) => boolean)
@@ -180,6 +184,7 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
   )
 
   const filtered = createMemo(() => {
+    if (props.search) return props.search(store.filter).filter((x) => x.disabled !== true)
     if (props.skipFilter || props.renderFilter === false) return props.options.filter((x) => x.disabled !== true)
     const needle = store.filter.toLowerCase()
     const options = pipe(
@@ -205,7 +210,7 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
     setFocusedAction(undefined)
   })
 
-  const flatten = createMemo(() => props.flat && store.filter.length > 0)
+  const flatten = createMemo(() => props.search !== undefined || (props.flat && store.filter.length > 0))
 
   const grouped = createMemo<[string, DialogSelectOption<T>[]][]>(() => {
     if (flatten()) return filtered().length ? [["", filtered()]] : []
@@ -531,7 +536,9 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
           "dialog.select.end",
           "dialog.select.submit",
         ]),
-        ...visible.flatMap((item) => tuiConfig.keybinds.get(item.command)),
+        ...visible.flatMap((item) =>
+          item.bind ? [{ key: item.bind, cmd: item.command }] : tuiConfig.keybinds.get(item.command),
+        ),
         ...(visible.length
           ? [
               {
