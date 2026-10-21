@@ -10,7 +10,7 @@ $current = requireVersion
 if ($Tags) { getVersionTags 10; return }
 if ($SetTag) {
     $set = setVersionTag $SetTag
-    Write-Host "line 1: v$current $set [<label> | <summary>]"
+    Write-Host "line 1: v$current $set [<label> > <summary>]"
     return
 }
 $tagWord = requireVersionTag
@@ -22,7 +22,7 @@ $bumpFix = "Code changed but the version is still $current. Run .scripts\bumpVer
 
 if ($Context) {
     Write-Host "branch: $(git branch --show-current)  version: $current $tagWord"
-    Write-Host "line 1: v$current $tagWord [<label> | <summary>]"
+    Write-Host "line 1: v$current $tagWord [<label> > <summary>]"
     Write-Host "labels (decision order; rules in AGENTS.md 'buildNotes.txt' section): $($commitLabels -join ' ')"
     Write-Host '--- status'
     git status --short 2>$null

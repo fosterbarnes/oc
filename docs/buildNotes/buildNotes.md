@@ -185,6 +185,24 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-21 (~18:57) - v0.2.279 fpGabana - Commit subject separator is now > instead of | - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation; completed
+- Version: 0.2.279 fpGabana
+- Changed `assertCommitSubject` (`.scripts/scriptHelper.ps1`): separator ` > ` replaces ` | `; summaries now ban `>` instead of `|`; error text updated
+- Changed `.scripts/agentPush.ps1` `-Context`/`-SetTag` template to `[<label> > <summary>]`
+- Changed `AGENTS.md` buildNotes.txt and Commits sections: format, example, banned chars, summary example
+- Changed `.scripts/tests/commitSubject.tests.ps1`: cases use `>`; added old `|` form as a bad case
+- Kept b6972ae (v0.2.278) subject with `|`; history not rewritten
+- Verification: `pwsh -NoProfile -File .scripts\tests\commitSubject.tests.ps1` -> "Commit subject checks passed (3 good, 15 bad)."; `agentPush.ps1 -Context` prints `[<label> > <summary>]`
+
+### User
+Commits
+- Commit title labels now use `>` instead of `|`, for example `[fix > OpenAI refusal text]`.
+
+---
+
 ## 2026-10-21 (~18:49) - v0.2.278 sausageGaiden - Commit subjects carry a classifier and short summary - Claude Opus 5.5, low effort; Implementation
 
 ### Agent

@@ -217,15 +217,15 @@ function requireVersionTag {
     $contents
 }
 
-# Throws unless $Subject is "<Prefix> [<label> | <summary>]", optionally "; <label> | <summary>".
-# Summaries: no edge spaces, no trailing period, none of [ ] | ;. .NET regex is case-sensitive.
+# Throws unless $Subject is "<Prefix> [<label> > <summary>]", optionally "; <label> > <summary>".
+# Summaries: no edge spaces, no trailing period, none of [ ] > ;. .NET regex is case-sensitive.
 function assertCommitSubject {
     param([Parameter(Mandatory)][string]$Subject, [Parameter(Mandatory)][string]$Prefix)
     $labels = ($commitLabels | ForEach-Object { [regex]::Escape($_) }) -join '|'
-    $segment = "($labels) \| [^\s\[\]|;](?:[^\[\]|;]*[^\s.\[\]|;])?"
+    $segment = "($labels) > [^\s\[\]>;](?:[^\[\]>;]*[^\s.\[\]>;])?"
     $match = [regex]::Match($Subject, "^$([regex]::Escape($Prefix)) \[$segment(?:; $segment)?\]$")
     if (-not $match.Success) {
-        throw "Line 1 must be '$Prefix [<label> | <summary>]', optionally '; <label> | <summary>'. " +
+        throw "Line 1 must be '$Prefix [<label> > <summary>]', optionally '; <label> > <summary>'. " +
             "Labels: $($commitLabels -join ' ')"
     }
     $first, $second = $match.Groups[1].Value, $match.Groups[2].Value

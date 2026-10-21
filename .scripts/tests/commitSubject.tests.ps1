@@ -5,25 +5,26 @@ $ErrorActionPreference = 'Stop'
 
 $prefix = 'v0.2.278 fooBar'
 $pass = @(
-    "$prefix [patch | image preview opt-in]"
-    "$prefix [fix | OpenAI refusal text; deps. | Bun 1.4.2]"
-    "$prefix [misc. | gitattributes line endings]"
+    "$prefix [patch > image preview opt-in]"
+    "$prefix [fix > OpenAI refusal text; deps. > Bun 1.4.2]"
+    "$prefix [misc. > gitattributes line endings]"
 )
 $fail = @(
-    'v0.2.277 fooBar [fix | x y]'
+    'v0.2.277 fooBar [fix > x y]'
     $prefix
-    "$prefix [bug | x y]"
-    "$prefix [Fix | x y]"
-    "$prefix [feat | x y]"
+    "$prefix [bug > x y]"
+    "$prefix [Fix > x y]"
+    "$prefix [feat > x y]"
     "$prefix [fix: x y]"
-    "$prefix [fix | x y.]"
-    "$prefix [fix |  x y]"
-    "$prefix [fix | a|b]"
-    "$prefix [fix | a b; patch | c d; docs | e f]"
-    "$prefix [fix | a b; fix | c d]"
-    "$prefix [feat. | a b; misc. | c d]"
-    "$prefix [fix | a $([char]0x2014) b]"
-    "$prefix [fix | $('x' * 50)]"
+    "$prefix [fix | x y]"
+    "$prefix [fix > x y.]"
+    "$prefix [fix >  x y]"
+    "$prefix [fix > a>b]"
+    "$prefix [fix > a b; patch > c d; docs > e f]"
+    "$prefix [fix > a b; fix > c d]"
+    "$prefix [feat. > a b; misc. > c d]"
+    "$prefix [fix > a $([char]0x2014) b]"
+    "$prefix [fix > $('x' * 50)]"
 )
 
 foreach ($subject in $pass) { assertCommitSubject $subject $prefix }
