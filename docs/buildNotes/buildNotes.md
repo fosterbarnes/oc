@@ -169,6 +169,22 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-21 (~00:00) - v0.2.273 bunsPastrami - break the core provider plugin import cycle - Claude Opus 5.5; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; no workers; Implementation; completed
+- Version: 0.2.273 bunsPastrami
+- Fixed import cycle: every core plugin imported `define` from `plugin/internal.ts`, which imports the full `ProviderPlugins` list, so loading a plugin module first (e.g. `provider-google-vertex.test.ts` via `aisdk`) read `GoogleVertexAnthropicPlugin` before it finished loading (`ReferenceError ... before initialization`, `plugin/provider.ts:51`).
+- Added `core/src/plugin/define.ts` (`Requirements`, `Plugin`, `define`; type-only imports, no runtime edges). `internal.ts` re-exports them so `PluginInternal.Plugin` / `PluginInternal.define` keep working; dropped unused `Scope` import. 34 plugin modules (`plugin/*.ts`, `plugin/provider/*.ts`) now import `define` from `./define` / `../define` (one-line literal replace). Mirrors upstream, which moved `define` out of `internal`.
+- Verification: core `test/plugin/provider-google-vertex.test.ts` 9 pass 0 fail (was 0/1 at import); with `provider-opencode.test.ts` together 22/0 (both failed together before); all `test/plugin` 228 pass 0 fail across 40 files; core `tsgo --noEmit` exit 0.
+- Fixed: ERROR/TODO from v0.2.267 and v0.2.271 (Vertex plugin test import failure).
+
+### User
+Internal
+- No visible change: a startup ordering bug in the built-in provider plugins is fixed, so their tests run cleanly again.
+
+---
+
 ## 2026-10-20 (~23:52) - v0.2.272 actuallyLoster - subagents no longer fail on a tool error they recovered from - Claude Opus 5.5; Implementation
 
 ### Agent

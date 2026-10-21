@@ -1,6 +1,6 @@
-v0.2.272 actuallyLoster
+v0.2.273 bunsPastrami
 
-subagents:
-A subagent that hits a failing tool call, recovers, and finishes its work is no longer reported as failed. Only a tool error the subagent never answered with a reply still fails the task, such as a rejected permission that ends its turn.
+provider plugins:
+Fixed a startup ordering bug in the built-in provider plugins that could fail module loading with a before-initialization error.
 
-Under the hood: tool/task.ts runTask failed the task when any tool part in the child's final message had an error. Claude Code runs a whole turn as one assistant message, so one early failed command (for example an ls of a file not yet written) marked a finished subagent failed; this caused 5 false "Subagent failed" results during the upstream 1.19 port. Now only a tool error after the last non-empty text part fails, and the returned text is that last non-empty text part. Added test "execute succeeds when the child answers after a failed tool call". Checks run: test/tool/task.test.ts 42 pass 0 fail; the new test and the existing terminal tool error test fail on the old task.ts and pass with the fix; prePush. This push also carries the local merge commit recording the upstream sync through a1f604bbe0 (v1.19.3).
+Under the hood: moved the shared plugin definition and types into plugin/define.ts with no runtime dependencies, updated 34 plugin modules to import it directly, and kept the internal.ts re-exports. This breaks the provider plugin import cycle and resolves the Vertex plugin test failures recorded in v0.2.267 and v0.2.271. Checks already recorded in buildNotes.md: provider-google-vertex.test.ts 9 pass 0 fail; together with provider-opencode.test.ts 22 pass 0 fail; all core test/plugin tests 228 pass 0 fail across 40 files; core tsgo --noEmit exit 0. The push runs prePush.
