@@ -1,6 +1,11 @@
-v0.2.275 portablySucking
+v0.2.277 tuberculosisHtml
 
-image paste preview:
-Pasting an image no longer opens the preview dialog by default. Clicking an [Image N] chip in the prompt opens the preview for that image. "Enable image paste preview" in ctrl+o (/imagePreview) brings back the preview on every paste.
+Claude mid-turn messages:
+When Claude reads a message you sent while it was working, the reply now splits there: what it did before stays above your message and the rest of the turn continues below it, as with other models. The message keeps its "read mid-turn" label, and the reply footer time still counts the whole turn. Messages sent during a slash command now join that turn at its next tool step instead of stopping it, and the command's rules stay on until the turn ends. Background subagent and shell notices reach Claude mid-turn instead of interrupting it, and a wake after a background job no longer restarts Claude's process.
 
-Under the hood: new IMAGE_PASTE_PREVIEW_KEY (image_paste_preview_enabled, default false) in prompt/part.ts gates DialogImagePreview in pasteAttachment. New palette entry oc.image_paste_preview in ocCommands.tsx. The textarea's onMouseUp maps the clicked cell to a text offset with the new offsetAtCell helper, finds the prompt part extmark there, and previews the image file part from its data url (non-data urls are skipped). Hit-testing works per cell, so chips split across wrapped rows still match. Checks already recorded in buildNotes.md: pastedChip.test.ts 6 pass 0 fail (3 new); tui typecheck exit 0. Live click was not tested. The push runs prePush.
+Subagents:
+A subagent that errors after writing its final reply passes that reply to the parent with the error.
+
+Under the hood: new LLM event input-read (llm schema events.ts, mapped in session/llm/ai-sdk.ts). Steering.onReplay saves the receipt, then StreamWriter.splitAt arms a raw claudeCodeInputRead chunk before the next part; SessionProcessor.splitAt closes the old reply with step-finish tool-calls and opens a new assistant whose parent is the steer. readMidTurn and steerClaudeTurn resolve the turn's first reply through the steer receipt; instruction claims clear for first and final reply; sessionSync.promptExchangeHashes skips steered users so split turns hash as one Claude exchange. steerClaudeTurn compares permission/toolHost/tools/system/format by difference (undefined inherits). SESSION_NOTICE_KEY marks notifySession parts so only those synthetic texts steer. retireStaleProcess returns early for a wake attaching to autonomousTurn. runTask adds "Its last reply:" for errored subagents. Reverting a steer still reverts the whole Claude turn. buildNotes rotated to buildNotes.archive13.md.
+
+Checks already recorded in buildNotes.md: bun run typecheck for opencode, llm, tui exit 0; steering.test.ts 13 pass plus the fixed identical-steer test passing alone, with the known pre-existing "permission-bearing command" failure; tuiPane.test.ts "steering actions" 1 pass; user live checks S1 and S2 on installed v0.2.277 pass. The push runs prePush.

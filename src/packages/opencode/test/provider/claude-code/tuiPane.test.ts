@@ -71,13 +71,17 @@ describe.skipIf(!process.env.OC_TUI_PANE || !cliPath || !muxPath)("oc TUI in a W
         yield* pane.waitFor("Revert failed")
         final.resolve()
         yield* pane.waitFor("STEERING-PANE-DONE", (shown) => !/esc\s+interrupt/.test(shown))
-        yield* pane.waitFor("read mid-turn")
+        // The reply split where Claude read the message: the rest of the turn renders below it.
+        yield* pane.waitFor(
+          "read mid-turn",
+          (shown) => shown.indexOf("PANE-DELIVERED") < shown.lastIndexOf("STEERING-PANE-DONE"),
+        )
         yield* Effect.sleep("2 seconds")
         yield* pane.click("PANE-DELIVERED")
         yield* Effect.sleep("1 second")
         yield* pane.waitFor("Revert whole turn")
         yield* pane.type("\r")
-        yield* pane.waitFor("2 message reverted")
+        yield* pane.waitFor("2 messages reverted")
         const inputs = yield* fixture.llm.inputs
         expect(inputs).toHaveLength(2)
         expect(JSON.stringify(inputs[1].messages)).toContain("PANE-DELIVERED")

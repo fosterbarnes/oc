@@ -196,6 +196,13 @@ export const UsageUpdate = Schema.Struct({
 }).annotate({ identifier: "LLM.Event.Usage" })
 export type UsageUpdate = Schema.Schema.Type<typeof UsageUpdate>
 
+/** A caller's user message a running agent-loop step read mid-stream; the output after it answers that message. */
+export const InputRead = Schema.Struct({
+  type: Schema.tag("input-read"),
+  messageID: Schema.String,
+}).annotate({ identifier: "LLM.Event.InputRead" })
+export type InputRead = Schema.Schema.Type<typeof InputRead>
+
 export const Finish = Schema.Struct({
   type: Schema.tag("finish"),
   reason: FinishReason,
@@ -229,6 +236,7 @@ const llmEventTagged = Schema.Union([
   ToolError,
   StepFinish,
   UsageUpdate,
+  InputRead,
   Finish,
   ProviderErrorEvent,
 ]).pipe(Schema.toTaggedUnion("type"))
@@ -276,6 +284,7 @@ export const LLMEvent = Object.assign(llmEventTagged, {
       usage: input.usage === undefined ? undefined : Usage.from(input.usage),
     }),
   usage: (input: { readonly usage: UsageInput }) => UsageUpdate.make({ usage: Usage.from(input.usage) }),
+  inputRead: InputRead.make,
   finish: (input: WithUsage<Finish>) =>
     Finish.make({
       ...input,
@@ -298,6 +307,7 @@ export const LLMEvent = Object.assign(llmEventTagged, {
     toolError: llmEventTagged.guards["tool-error"],
     stepFinish: llmEventTagged.guards["step-finish"],
     usage: llmEventTagged.guards.usage,
+    inputRead: llmEventTagged.guards["input-read"],
     finish: llmEventTagged.guards.finish,
     providerError: llmEventTagged.guards["provider-error"],
   },

@@ -268,6 +268,9 @@ class ClaudeTurn {
       busy: () => this.inStreamCalls > 0,
       activeProcess: () => this.activeProcess,
       write: (line) => this.proc.stdin?.write(line),
+      read: (messageID) => {
+        if (!this.closed) this.out.splitAt(messageID)
+      },
       receiptFailed: (error) => {
         this.autoContinue.aborted = true
         this.steering.retire("Claude read a message whose delivery receipt could not be saved")
@@ -591,6 +594,8 @@ class ClaudeTurn {
   private async retireStaleProcess() {
     const ap = this.activeProcess
     if (!ap || this.turn.compactionMode) return
+    // A wake attaches to the turn the CLI is already running; changed settings wait for the next turn.
+    if (this.input.wake && ap.autonomousTurn) return
     if (ap.toolCatalogHash !== this.input.catalogHash) {
       await deleteActiveProcessAndWait(this.sk)
       this.activeProcess = undefined

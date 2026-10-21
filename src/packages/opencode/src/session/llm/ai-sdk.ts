@@ -281,7 +281,10 @@ export function toLLMEvents(
         // The Claude Code provider runs a whole agent loop in one step and reports each
         // model call's usage here so context stays live until the step finishes.
         const live = isRecord(event.rawValue) ? usage(event.rawValue.claudeCodeUsage) : undefined
-        return live ? [LLMEvent.usage({ usage: live })] : []
+        if (live) return [LLMEvent.usage({ usage: live })]
+        // It also marks where Claude read a message sent mid-turn (StreamWriter `splitAt`).
+        const read = isRecord(event.rawValue) ? event.rawValue.claudeCodeInputRead : undefined
+        return typeof read === "string" ? [LLMEvent.inputRead({ messageID: read })] : []
       })
 
     default: {

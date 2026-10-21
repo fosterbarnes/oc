@@ -19,6 +19,7 @@ import type { TurnContext } from "./turnContext.js"
 import { log } from "./logger.js"
 import { rawOpencodeClient, showToast } from "./runtimeStatus.js"
 import { getPendingProxyCalls } from "./proxyBroker.js"
+import { CLAUDE_CODE_PROVIDER_ID, STEERED_METADATA_KEY } from "./shared.js"
 import {
   deleteActiveProcessAndWait,
   deleteClaudeSessionId,
@@ -190,6 +191,8 @@ function promptExchangeHashes(prompt: Prompt): string[] {
   let current: string | undefined
   for (const message of prompt) {
     if (message.role === "user") {
+      // Read mid-turn: the reply after it is the same Claude exchange (`SessionProcessor.splitAt`).
+      if (isSteered(message)) continue
       if (current !== undefined) exchanges.push(exchangeHash(exchanges.length, current))
       current = undefined
       continue
@@ -199,6 +202,15 @@ function promptExchangeHashes(prompt: Prompt): string[] {
   }
   if (current !== undefined) exchanges.push(exchangeHash(exchanges.length, current))
   return exchanges
+}
+
+function isSteered(message: Prompt[number]) {
+  return (
+    Array.isArray(message.content) &&
+    message.content.some(
+      (part) => part.type === "text" && !!part.providerOptions?.[CLAUDE_CODE_PROVIDER_ID]?.[STEERED_METADATA_KEY],
+    )
+  )
 }
 
 // Whitespace is dropped: opencode may trim part text it stores.

@@ -21,6 +21,8 @@ export type SteeringHost = {
   busy: () => boolean
   activeProcess: () => ActiveProcess | undefined
   write: (line: string) => void
+  /** Claude read a steer and its delivery receipt is saved. */
+  read: (messageID: string) => void
   /** Claude read a steer whose delivery receipt could not be saved. */
   receiptFailed: (error: unknown) => void
 }
@@ -130,8 +132,11 @@ export class Steering {
       this.writtenIds.add(steer.messageID)
       this.written.push({ ...steer, uuid, read: false })
       this.host.write(
-        JSON.stringify({ type: "user", uuid, message: { role: "user", content: [{ type: "text", text: steer.text }] } }) +
-          "\n",
+        JSON.stringify({
+          type: "user",
+          uuid,
+          message: { role: "user", content: [{ type: "text", text: steer.text }] },
+        }) + "\n",
       )
       log.info("steered user message into running turn", {
         sessionKey: this.host.turn.sessionKey,
@@ -147,7 +152,10 @@ export class Steering {
     if (!steer) return
     steer.read = true
     log.info("claude consumed steered message", { messageID: steer.messageID, uuid: steer.uuid })
-    const ack = steer.delivered().catch((error) => this.host.receiptFailed(error))
+    const ack = steer.delivered().then(
+      () => this.host.read(steer.messageID),
+      (error) => this.host.receiptFailed(error),
+    )
     this.acks.add(ack)
     void ack.then(() => this.acks.delete(ack))
   }

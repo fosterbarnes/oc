@@ -5,6 +5,7 @@ import path from "path"
 import { SessionV1 } from "@opencode-ai/core/v1/session"
 import os from "os"
 import { createHash } from "node:crypto"
+import { isDeepEqual } from "remeda"
 import { SessionID, MessageID, PartID } from "./schema"
 import { claudeSteerSinks, isClaudeCodeProvider, STEERED_METADATA_KEY } from "@/provider/claude-code/shared"
 import { CURSOR_PROVIDER_ID } from "@/provider/cursor/shared"
@@ -53,7 +54,7 @@ import { Image } from "@/image/image"
 import { decodeDataUrl } from "@/util/data-url"
 import { Cause, Effect, Exit, Latch, Layer, Option, Scope, Context, Schema, Semaphore, Types } from "effect"
 import { InstanceState } from "@/effect/instance-state"
-import { TaskTool, type TaskPromptOps } from "@/tool/task"
+import { SESSION_NOTICE_KEY, TaskTool, type TaskPromptOps } from "@/tool/task"
 import { agentPushTitle, PUSH_SESSION_KEY } from "@/tool/sessionComplete"
 import { SessionRunState } from "./run-state"
 import { SessionQueue } from "./queue"
@@ -131,11 +132,12 @@ function outputLimitStreak(msgs: SessionV1.WithParts[]) {
   return count
 }
 
-// Every user message after this reply was read by Claude while the reply ran (`steerClaudeTurn`), so it answers them.
-function readMidTurn(msgs: SessionV1.WithParts[], assistantID: string) {
-  const later = msgs.filter((msg) => msg.info.role === "user" && msg.info.id > assistantID)
+// Claude read every user message after `userID` while its turn ran (`steerClaudeTurn`), and this reply, split off
+// at the newest one it read (`SessionProcessor.splitAt`), finished that turn, so it answered them all.
+function readMidTurn(msgs: SessionV1.WithParts[], userID: string, assistant: SessionV1.Assistant) {
+  const later = msgs.filter((msg) => msg.info.role === "user" && msg.info.id > userID)
   return (
-    later.length > 0 &&
+    later.some((msg) => msg.info.id === assistant.parentID) &&
     later.every((msg) => msg.parts.some((part) => part.type === "text" && part.metadata?.[STEERED_METADATA_KEY]))
   )
 }
@@ -1201,25 +1203,38 @@ const layer = Layer.effect(
       return yield* loop({ sessionID: input.sessionID })
     })
 
-    // A plain-text message sent while a Claude Code turn runs goes into that turn instead of waiting for
-    // it to end. Once Claude reads it, its parts are flagged, which the loop's exit rule counts as answered.
-    // Any other message ends the turn at its next tool boundary and runs as the next step.
+    // A plain-text message or session notice sent while a Claude Code turn runs goes into that turn instead
+    // of waiting for it to end. Once Claude reads it, its parts are flagged and the running reply continues
+    // in a new one under it (`SessionProcessor.splitAt`); the loop's exit rule counts it as answered. Any other
+    // message ends the turn at its next tool boundary and runs as the next step.
     const steerClaudeTurn = Effect.fnUntraced(function* (message: SessionV1.WithParts) {
       if (message.info.role !== "user") return
       const sink = claudeSteerSinks.get(message.info.sessionID)
       if (!sink) return
       const msgs = yield* sessions.messages({ sessionID: message.info.sessionID }).pipe(Effect.orDie)
-      const assistant = msgs.findLast((msg) => msg.info.role === "assistant" && !msg.info.time.completed)?.info
+      const running = msgs.findLast((msg) => msg.info.role === "assistant" && !msg.info.time.completed)?.info
+      if (running?.role !== "assistant") return
+      // A reply split off at an earlier steer still belongs to the turn its first reply started: that one
+      // carries the turn's settings, and a revert of this steer goes back to it (revert.ts).
+      const receipt = msgs
+        .find((msg) => msg.info.id === running.parentID)
+        ?.parts.find(
+          (part): part is SessionV1.TextPart => part.type === "text" && !!part.metadata?.[STEERED_METADATA_KEY],
+        )?.metadata
+      const assistant = receipt ? msgs.find((msg) => msg.info.id === receipt.steeredAssistantID)?.info : running
       if (assistant?.role !== "assistant") return
       const parent = msgs.find((msg) => msg.info.id === assistant.parentID)?.info
       if (parent?.role !== "user") return
       if (claudeSteerSinks.get(message.info.sessionID) !== sink) return
+      // Session notices (background task and shell results) join the turn like typed text.
       const texts = message.parts.filter(
-        (part): part is SessionV1.TextPart => part.type === "text" && !part.synthetic && !part.ignored,
+        (part): part is SessionV1.TextPart =>
+          part.type === "text" && !part.ignored && (!part.synthetic || !!part.metadata?.[SESSION_NOTICE_KEY]),
       )
-      // The executor and CLI spawn options are bound to the original user for the whole stream, so
-      // settings-bearing turns need their own step, in both directions. Files, agent mentions and
-      // other parts also need the next step, which knows how to send them.
+      // The executor and CLI spawn options are bound to the original user for the whole stream. A
+      // message without settings of its own joins the turn and keeps its settings, as a native step
+      // would read it; one asking for different settings needs its own step. Files, agent mentions
+      // and other parts also need the next step, which knows how to send them.
       const waiting = [
         message.info,
         ...msgs.flatMap((msg) =>
@@ -1231,16 +1246,11 @@ const layer = Layer.effect(
       const separate =
         texts.length === 0 ||
         texts.length !== message.parts.length ||
-        [parent, ...waiting].some(
-          (user) =>
-            user.permission !== undefined ||
-            user.toolHost !== undefined ||
-            user.tools !== undefined ||
-            user.system !== undefined ||
-            user.format !== undefined,
-        ) ||
         waiting.some(
           (user) =>
+            (["permission", "toolHost", "tools", "system", "format"] as const).some(
+              (key) => user[key] !== undefined && !isDeepEqual(user[key], parent[key]),
+            ) ||
             parent.model.providerID !== user.model.providerID ||
             parent.model.modelID !== user.model.modelID ||
             parent.agent !== user.agent ||
@@ -1367,7 +1377,7 @@ const layer = Layer.effect(
             lastAssistant?.finish &&
             !["tool-calls", "unknown"].includes(lastAssistant.finish) &&
             !hasToolCalls &&
-            (lastAssistant.parentID === lastUser.id || readMidTurn(msgs, lastAssistant.id))
+            (lastAssistant.parentID === lastUser.id || readMidTurn(msgs, lastUser.id, lastAssistant))
           ) {
             const lastUserMsg = msgs.findLast((message) => message.info.id === lastUser.id)
             if (lastUserMsg && SessionHandoff.isHandoffMessage(lastUserMsg)) {
@@ -1713,7 +1723,10 @@ const layer = Layer.effect(
             }
             return "continue" as const
           }).pipe(
-            Effect.ensuring(instruction.clear(handle.message.id)),
+            // A Claude steer may have moved the step to a new reply (`SessionProcessor.splitAt`).
+            Effect.ensuring(
+              Effect.suspend(() => Effect.forEach(new Set([msg.id, handle.message.id]), instruction.clear)),
+            ),
             Effect.onInterrupt(() => finalizeInterruptedAssistant),
           )
           // Blocked, failed, and structured-output turns end the run; messages sent during them wait.

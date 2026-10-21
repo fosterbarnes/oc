@@ -114,6 +114,9 @@ function renderOutput(input: {
   ].join("\n")
 }
 
+/** Text part metadata marking a session notice, which a running Claude Code turn may take mid-turn. */
+export const SESSION_NOTICE_KEY = "sessionNotice"
+
 /**
  * Appends one synthetic notice to a session and wakes its loop. Only maintenance is waited on: a running
  * turn takes the notice through runner coalescing. A cancel that lands while the notice waits drops it.
@@ -140,7 +143,7 @@ export const notifySession = Effect.fn("TaskTool.notifySession")(function* (
       agent: input.agent,
       variant: input.variant,
       turnPermission: input.turnPermission,
-      parts: [{ type: "text", synthetic: true, text: input.text }],
+      parts: [{ type: "text", synthetic: true, text: input.text, metadata: { [SESSION_NOTICE_KEY]: true } }],
     }),
   )
   if (Exit.isFailure(delivered)) {
@@ -335,21 +338,27 @@ export const TaskTool = Tool.define(
           parts,
           turnPermission: ctx.extra?.turnPermission,
         })
+        const textIndex = result.parts.findLastIndex((item) => item.type === "text" && item.text.trim() !== "")
+        const text = result.parts[textIndex]
         if (result.info.role === "assistant" && result.info.error) {
           const message =
             "message" in result.info.error.data && typeof result.info.error.data.message === "string"
               ? result.info.error.data.message
               : result.info.error.name
+          // A provider can fail the message that already holds the final reply; keep it for the parent.
+          if (text?.type === "text") {
+            return yield* Effect.fail(
+              new Error(`Subagent failed (task_id: ${nextSession.id}): ${message}\n\nIts last reply:\n${text.text}`),
+            )
+          }
           return yield* Effect.fail(new Error(`Subagent failed (task_id: ${nextSession.id}): ${message}`))
         }
         // Only a tool error the subagent never answered fails the task. One turn can hold many tool
         // calls (Claude Code runs a whole turn as one message), so a recovered error is followed by text.
-        const textIndex = result.parts.findLastIndex((item) => item.type === "text" && item.text.trim() !== "")
         const failed = result.parts.slice(textIndex + 1).findLast((item) => item.type === "tool")
         if (failed?.type === "tool" && failed.state.status === "error") {
           return yield* Effect.fail(new Error(`Subagent failed (task_id: ${nextSession.id}): ${failed.state.error}`))
         }
-        const text = result.parts[textIndex]
         return text?.type === "text" ? text.text : ""
       })
 

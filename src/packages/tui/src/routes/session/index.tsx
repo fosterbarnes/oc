@@ -1806,8 +1806,8 @@ function UserMessage(props: {
             <Show
               when={queued()}
               fallback={
-                // After the turn ends a steered message sits below the reply it went into, so it
-                // keeps a label: otherwise a steer Claude ignored looks unsent.
+                // A steered message sits where Claude read it, with the rest of the turn below it;
+                // the label says it went into a running turn rather than starting one.
                 <Show when={steered() || ctx.showTimestamps()}>
                   <text selectable={false} fg={theme.textMuted}>
                     {[
@@ -1869,7 +1869,13 @@ function AssistantMessage(props: { message: AssistantMessage; parts: Part[]; las
   const duration = createMemo(() => {
     if (!final()) return 0
     if (!props.message.time.completed) return 0
-    const user = messages().find((x) => x.role === "user" && x.id === props.message.parentID)
+    const parent = messages().find((x) => x.role === "user" && x.id === props.message.parentID)
+    // A reply split off at a message Claude read mid-turn times the whole turn, from its first message.
+    const receipt = (sync.data.part[parent?.id ?? ""] ?? []).find(
+      (part): part is TextPart => part.type === "text" && !!part.metadata?.steered,
+    )
+    const root = receipt?.metadata?.steeredParentID
+    const user = messages().find((x) => x.role === "user" && !!root && x.id === root) ?? parent
     if (!user || !user.time) return 0
     return props.message.time.completed - user.time.created
   })

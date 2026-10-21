@@ -13,7 +13,7 @@ import { Session } from "./session"
 import { LLM } from "./llm"
 import { MessageV2 } from "./message-v2"
 import { isOverflow } from "./overflow"
-import { PartID } from "./schema"
+import { MessageID, PartID } from "./schema"
 import type { SessionID } from "./schema"
 import { SessionRetry } from "./retry"
 import { SessionStatus } from "./status"
@@ -271,6 +271,72 @@ const layer = Layer.effect(
         }
         Deferred.doneUnsafe(readyFor(input.id), Effect.void)
         return { call: ctx.toolcalls[input.id], part }
+      })
+
+      // A provider that runs a whole agent loop in one step (Claude Code) read a user message sent mid-turn.
+      // Like a native step boundary, this reply ends there and a new one, answering that message, takes the
+      // rest of the stream, so the message shows where it was read. Usage and cost land on the last reply.
+      const splitAt = Effect.fn("SessionProcessor.splitAt")(function* (parentID: MessageID) {
+        yield* Effect.forEach(Object.keys(ctx.reasoningMap), finishReasoning)
+        if (ctx.currentText) {
+          const end = Date.now()
+          ctx.currentText.time = { start: ctx.currentText.time?.start ?? end, end }
+          yield* session.updatePart(ctx.currentText)
+          ctx.currentText = undefined
+        }
+        const previous = ctx.assistantMessage
+        yield* createPart({
+          id: PartID.ascending(),
+          reason: "tool-calls",
+          snapshot: yield* snapshot.track(),
+          messageID: previous.id,
+          sessionID: ctx.sessionID,
+          type: "step-finish",
+          tokens: previous.tokens,
+          cost: 0,
+        })
+        if (ctx.snapshot) {
+          const patch = yield* snapshot.patch(ctx.snapshot)
+          if (patch.files.length) {
+            yield* createPart({
+              id: PartID.ascending(),
+              messageID: previous.id,
+              sessionID: ctx.sessionID,
+              type: "patch",
+              hash: patch.hash,
+              files: patch.files,
+            })
+          }
+        }
+        previous.finish = "tool-calls"
+        previous.time.completed = Date.now()
+        yield* session.updateMessage(previous)
+        ctx.assistantMessage = {
+          id: MessageID.ascending(),
+          parentID,
+          role: "assistant",
+          mode: previous.mode,
+          agent: previous.agent,
+          variant: previous.variant,
+          path: previous.path,
+          cost: 0,
+          tokens: structuredClone(previous.tokens),
+          modelID: previous.modelID,
+          providerID: previous.providerID,
+          time: { created: Date.now() },
+          sessionID: previous.sessionID,
+        }
+        yield* session.updateMessage(ctx.assistantMessage)
+        ctx.snapshot = yield* snapshot.track()
+        yield* createPart({
+          id: PartID.ascending(),
+          messageID: ctx.assistantMessage.id,
+          sessionID: ctx.sessionID,
+          snapshot: ctx.snapshot,
+          type: "step-start",
+        })
+        // The first reply is saved for good; a retry would rebuild it into the new one.
+        toolStarted = true
       })
 
       const isFilePart = (value: unknown): value is SessionV1.FilePart => Schema.is(SessionV1.FilePart)(value)
@@ -543,6 +609,10 @@ const layer = Layer.effect(
               { ...SessionV1.Event.MessageUpdated, durable: undefined },
               { sessionID: ctx.sessionID, info: structuredClone(ctx.assistantMessage) },
             )
+            return
+
+          case "input-read":
+            yield* splitAt(MessageID.make(value.messageID))
             return
 
           case "text-start":
