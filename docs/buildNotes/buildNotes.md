@@ -185,6 +185,29 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-21 (~19:05) - v0.2.280 chuaStimming - Tab types a tab in the prompt, Shift+Tab cycles agents - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation; completed
+- Version: 0.2.280 chuaStimming
+- Added keybind `input_tab` (`config/keybind.ts`, default `none`, command `prompt.tab`); hidden command `prompt.tab` in `component/prompt/index.tsx` runs `input.insertText("\t")`
+- Added targeted `useBindings` for `prompt.tab` on `inputTarget`, enabled only when autocomplete hidden so `prompt.autocomplete.complete` keeps Tab
+- Changed oc preset (`config/keybindPreset.ts`): `agent_cycle: shift+tab`, `agent_cycle_reverse: none`, `input_tab: tab`. Stock `opencode` preset unchanged (Tab cycles agents)
+- Note: explicit insert needed; opentui `TextareaRenderable.handleKeyPress` drops sequences with char code < 32, so `\t` never inserts on its own
+- Note: prompt traits `capture: ["tab"]` is not keymap capture; targeted binding wins over global `agent.cycle` like Ctrl+Enter does
+- Regenerated `docs/keybinds.md` via `packages/tui/script/keybindDocs.ts`; wiki `Configuration.md` and `Agents-and-Skills.md` `tab_order` rows now name the agent-cycle key per layout
+- Risk: tab char rendering width/cursor in textarea not live-checked
+- Verification: `bunx tsc --noEmit` in `packages/tui` clean; no live TUI check
+
+### User
+Prompt keys
+- In the oc layout, Tab now types a tab character in the prompt instead of switching agents.
+- Shift+Tab now switches to the next agent; "previous agent" has no default key but can be bound as `agent_cycle_reverse`.
+- Tab still completes the highlighted item when the `@` or `/` list is open.
+- The stock opencode layout keeps Tab for agent switching.
+
+---
+
 ## 2026-10-21 (~18:57) - v0.2.279 fpGabana - Commit subject separator is now > instead of | - Claude Opus 5.5, low effort; Implementation
 
 ### Agent

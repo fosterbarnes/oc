@@ -185,8 +185,8 @@ Bold marks keys where the oc layout differs from opencode. `-` means unbound.
 | Action | oc | opencode |
 |---|---|---|
 | List agents | `ctrl+x a` | `ctrl+x a` |
-| Next agent | `tab` | `tab` |
-| Previous agent | `shift+tab` | `shift+tab` |
+| Next agent | **`shift+tab`** | `tab` |
+| Previous agent | **-** | `shift+tab` |
 
 ### Variant
 
@@ -233,6 +233,7 @@ Bold marks keys where the oc layout differs from opencode. `-` means unbound.
 |---|---|---|
 | Clear input field | `ctrl+c` | `ctrl+c` |
 | Paste from clipboard | `ctrl+v` | `ctrl+v` |
+| Insert tab in input | **`tab`** | - |
 | Submit input | `return` | `return` |
 | Insert newline in input | `shift+return`, `ctrl+return`, `ctrl+j` | `shift+return`, `ctrl+return`, `ctrl+j` |
 | Move cursor left in input | **`left`** | `left`, `ctrl+b` |

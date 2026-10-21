@@ -17,6 +17,10 @@ export const oc: TuiKeybind.KeybindOverrides = {
   // ctrl+d: variant cycle in the prompt, delete in the session list (dialog layer wins).
   variant_cycle: "ctrl+d,ctrl+t",
   stash_delete: "none",
+  // Tab types a tab in the prompt; Shift+Tab takes over agent cycling.
+  agent_cycle: "shift+tab",
+  agent_cycle_reverse: "none",
+  input_tab: "tab",
   input_delete: "delete,shift+delete",
   input_line_home: "none",
   input_select_all: "ctrl+a,super+a",

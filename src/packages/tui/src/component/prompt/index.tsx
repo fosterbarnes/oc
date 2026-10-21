@@ -442,6 +442,13 @@ export function Prompt(props: PromptProps) {
         },
       },
       {
+        title: "Insert tab",
+        name: "prompt.tab",
+        category: "Prompt",
+        hidden: true,
+        run: () => input.insertText("\t"),
+      },
+      {
         title: "Submit prompt",
         name: "prompt.submit",
         category: "Prompt",
@@ -1060,6 +1067,15 @@ export function Prompt(props: PromptProps) {
       target: inputTarget,
       enabled: inputTarget() !== undefined && !props.disabled && store.prompt.input !== "",
       bindings: tuiConfig.keybinds.get("prompt.clear"),
+    }
+  })
+
+  // Hidden while autocomplete is open so Tab still completes the selected item.
+  useBindings(() => {
+    return {
+      target: inputTarget,
+      enabled: inputTarget() !== undefined && !props.disabled && !auto()?.visible,
+      bindings: tuiConfig.keybinds.get("prompt.tab"),
     }
   })
 

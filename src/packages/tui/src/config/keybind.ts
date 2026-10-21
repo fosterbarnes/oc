@@ -185,6 +185,7 @@ export const Definitions = {
 
   input_clear: keybind("ctrl+c", "Clear input field"),
   input_paste: keybind({ key: "ctrl+v", preventDefault: false }, "Paste from clipboard"),
+  input_tab: keybind("none", "Insert tab in input"),
   input_submit: keybind("return", "Submit input"),
   input_newline: keybind("shift+return,ctrl+return,ctrl+j", "Insert newline in input"),
   input_move_left: keybind("left,ctrl+b", "Move cursor left in input"),
@@ -426,6 +427,7 @@ export const CommandMap = {
   workspace_set: "workspace.set",
   input_clear: "prompt.clear",
   input_paste: "prompt.paste",
+  input_tab: "prompt.tab",
   input_submit: "input.submit",
   input_newline: "input.newline",
   input_move_left: "input.move.left",

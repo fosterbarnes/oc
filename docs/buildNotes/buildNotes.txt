@@ -1,6 +1,6 @@
-v0.2.279 fpGabana [patch > commit label separator]
+v0.2.280 chuaStimming [patch > Tab types tab, Shift+Tab cycles agents]
 
-commit titles:
-Commit title labels now use > instead of | between the label and the summary, for example [fix > OpenAI refusal text; deps. > Bun 1.4.2]. Summaries may now contain |, but not >. The agent push rejects the old | form.
+prompt keys:
+In the oc keybind layout, Tab now types a tab character in the prompt instead of switching agents. Shift+Tab now switches to the next agent. Previous agent has no default key; bind it with agent_cycle_reverse in tui.json. Tab still completes the highlighted item while the @ or / list is open. The stock opencode layout keeps Tab for agent switching.
 
-Under the hood: assertCommitSubject in .scripts/scriptHelper.ps1 matches " > " and bans > in summaries; agentPush.ps1 -Context and -SetTag print [<label> > <summary>]; AGENTS.md format, examples, and banned characters updated; commitSubject.tests.ps1 cases switched to > with the old | form added as a rejected case. v0.2.278's title keeps its |. Checks already recorded in buildNotes.md: commitSubject.tests.ps1 passed (3 good, 15 bad); agentPush.ps1 -Context printed the new template. The push runs prePush.
+Under the hood: new input_tab keybind (prompt.tab command, unbound in the opencode layout) inserts a tab through a binding on the prompt input, because the opentui textarea drops control characters on its own. docs/keybinds.md regenerated with keybindDocs.ts; wiki tab_order rows name the agent-cycle key per layout. Checks: bunx tsc --noEmit in packages/tui passed; tab rendering in the textarea was not live-checked. The push runs prePush.
