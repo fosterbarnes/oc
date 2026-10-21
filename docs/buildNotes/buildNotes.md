@@ -169,6 +169,27 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-21 (~02:03) - v0.2.275 portablySucking - Image paste preview off by default, click image chip to preview - Claude Opus 5.5; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; default effort; Implementation (imp after spit); completed
+- Version: 0.2.275 portablySucking
+- Added `IMAGE_PASTE_PREVIEW_KEY` (`image_paste_preview_enabled`, default false) in `packages/tui/src/prompt/part.ts`; `pasteAttachment` in `component/prompt/index.tsx` opens `DialogImagePreview` only when set.
+- Added palette entry `oc.image_paste_preview` (`/imagePreview`, group Layout) in `ocCommands.tsx`, same shape as paste summary.
+- Added click-to-preview: textarea `onMouseUp={previewImageChipAt}`; left click, no selection; maps cell -> offset -> `extmarks.getAtOffset` (promptPartTypeId) -> `extmarkToPartIndex` -> image file part; decodes `data:...;base64,` url. Non-data urls skipped.
+- Added `offsetAtCell(input, x, y)` in `prompt/part.ts`. Note: cursorOffset unusable for chip hits; opentui snaps cursor out of virtual extmarks. Note: `lineInfo.lineStartCols` is a global offset per wrapped row (newline counts 1), verified by probe; `lineWidthCols` bounds the row.
+- Note: word wrap splits chips mid-label (`some words [` / `Image 1] `); hit-testing handles it per cell.
+- Changed wiki `Agents-and-Skills.md` Images bullet (unpushed, `..\oc.wiki`).
+- Verification: `bun test test/prompt/pastedChip.test.ts` 6 pass 0 fail (3 new: wrap+newline, scrolled viewport, chip split across rows); `bun run typecheck` in packages/tui exit 0. Live click not tested.
+
+### User
+Prompt
+- Pasting an image no longer pops up the preview dialog by default.
+- Clicking an `[Image N]` chip in the prompt opens the preview for that image.
+- **Enable image paste preview** in `ctrl+o` (`/imagePreview`) brings back the preview on every paste.
+
+---
+
 ## 2026-10-21 (~00:19) - v0.2.274 phatCrystal - Bun 1.4.2 pin, streamed refusals as text, upstream119 closeout - Claude Opus 5.5; Implementation
 
 ### Agent

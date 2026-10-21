@@ -38,7 +38,9 @@ import {
   expandPastedChip,
   expandPastedTextPlaceholders,
   expandTrackedPastedText,
+  IMAGE_PASTE_PREVIEW_KEY,
   isPastedChipLabel,
+  offsetAtCell,
   PASTE_SUMMARY_KEY,
   typedSlashCommands,
 } from "../../prompt/part"
@@ -1674,10 +1676,25 @@ export function Prompt(props: PromptProps) {
       }),
     )
     // No preview when a submit is already waiting on this paste: the draft goes out with it.
-    if (!file.mime.startsWith("image/") || submitting) return
-    dialog.replace(() => (
-      <DialogImagePreview label={virtualText} filename={file.filename ?? "clipboard"} data={file.content} />
-    ))
+    if (!file.mime.startsWith("image/") || submitting || !kv.get(IMAGE_PASTE_PREVIEW_KEY, false)) return
+    previewImage(virtualText, file.filename, file.content)
+  }
+
+  function previewImage(label: string, filename: string | undefined, data: string) {
+    dialog.replace(() => <DialogImagePreview label={label} filename={filename ?? "clipboard"} data={data} />)
+  }
+
+  // Left click on an `[Image N]` chip previews that image. Drags that select text are left alone.
+  function previewImageChipAt(event: MouseEvent) {
+    if (event.button !== 0 || input.hasSelection()) return
+    const offset = offsetAtCell(input, event.x, event.y)
+    if (offset === undefined) return
+    const extmark = input.extmarks.getAtOffset(offset).find((mark) => mark.typeId === promptPartTypeId)
+    const part = extmark && store.prompt.parts[store.extmarkToPartIndex.get(extmark.id) ?? -1]
+    if (part?.type !== "file" || !part.mime.startsWith("image/")) return
+    const base64 = part.url.indexOf(";base64,")
+    if (!part.url.startsWith("data:") || base64 < 0) return
+    previewImage(part.source?.text.value ?? "Image", part.filename, part.url.slice(base64 + ";base64,".length))
   }
 
   function clearPrompt() {
@@ -1918,6 +1935,7 @@ export function Prompt(props: PromptProps) {
                 }, 0)
               }}
               onMouseDown={(r: MouseEvent) => r.target?.focus()}
+              onMouseUp={previewImageChipAt}
               focusedBackgroundColor={theme.backgroundElement}
               cursorColor={props.disabled ? theme.backgroundElement : theme.text}
               cursorStyle={tuiConfig.cursor}

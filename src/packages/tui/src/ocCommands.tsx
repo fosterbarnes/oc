@@ -26,7 +26,7 @@ import {
   updateDesktopHarness,
 } from "./harnessUpdate"
 import { bootstrapSession, listHomeDirs } from "./ocNewSession"
-import { PASTE_SUMMARY_KEY } from "./prompt/part"
+import { IMAGE_PASTE_PREVIEW_KEY, PASTE_SUMMARY_KEY } from "./prompt/part"
 import { dailyTheme, dayNumber } from "./theme/daily"
 import { persistAgentModel, persistOcConfig, persistTuiSetting, readOcConfig, resolveOcDirectory } from "./ocSettings"
 import { useDialog } from "./ui/dialog"
@@ -564,6 +564,20 @@ export function createOcCommands(input: {
         slashName: "pasteSummary",
         run: () => {
           kv.set(PASTE_SUMMARY_KEY, !kv.get(PASTE_SUMMARY_KEY, false))
+          dialog.clear()
+        },
+      },
+      {
+        name: "oc.image_paste_preview",
+        get title() {
+          return kv.get(IMAGE_PASTE_PREVIEW_KEY, false) ? "Disable image paste preview" : "Enable image paste preview"
+        },
+        category: "oc",
+        group: "Layout",
+        desc: "Open the image preview when an image is pasted. Clicking an [Image N] chip always previews it",
+        slashName: "imagePreview",
+        run: () => {
+          kv.set(IMAGE_PASTE_PREVIEW_KEY, !kv.get(IMAGE_PASTE_PREVIEW_KEY, false))
           dialog.clear()
         },
       },

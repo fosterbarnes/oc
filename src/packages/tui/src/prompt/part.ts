@@ -6,6 +6,8 @@ import { extractSlashCommands, typedText } from "./slash"
 
 // KV flag: long pastes collapse to a `[Pasted ~N lines]` placeholder. Off by default.
 export const PASTE_SUMMARY_KEY = "paste_summary_enabled"
+// KV flag: pasting an image opens its preview dialog. Off by default; clicking the chip still previews.
+export const IMAGE_PASTE_PREVIEW_KEY = "image_paste_preview_enabled"
 
 export function stripPromptPartIDs<Part extends { id: string; messageID: string; sessionID: string }>(part: Part) {
   const { id: _id, messageID: _messageID, sessionID: _sessionID, ...rest } = part
@@ -103,6 +105,18 @@ export function expandPastedChip(input: TextareaRenderable, extmarkId: number, t
   input.setSelection(extmark.start, extmark.end)
   input.insertText(text)
   return true
+}
+
+// Text offset under a screen cell of the textarea, or undefined past the end of that visual line.
+// Clicks can't use cursorOffset: the cursor snaps out of virtual extmarks such as chips.
+// `lineStartCols` holds each wrapped line's start as a global offset (newlines count as 1).
+export function offsetAtCell(input: TextareaRenderable, x: number, y: number) {
+  const viewport = input.editorView.getViewport()
+  const row = viewport.offsetY + y - input.y
+  const col = viewport.offsetX + x - input.x
+  const { lineStartCols, lineWidthCols } = input.lineInfo
+  if (row < 0 || row >= lineStartCols.length || col < 0 || col >= lineWidthCols[row]) return undefined
+  return lineStartCols[row] + col
 }
 
 export function expandTrackedPastedText(text: string, ranges: { start: number; end: number; text: string }[]) {
