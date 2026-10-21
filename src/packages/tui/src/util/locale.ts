@@ -29,9 +29,7 @@ export function zone() {
 // zone change; `toLocale*String` would keep the startup zone (see `applyTimeZone`).
 export function format(input: number, options: Intl.DateTimeFormatOptions) {
   _zone()
-  return new Intl.DateTimeFormat(undefined, { ...options, hourCycle: _clock() === "12h" ? "h12" : "h23" }).format(
-    input,
-  )
+  return new Intl.DateTimeFormat(undefined, { ...options, hourCycle: _clock() === "12h" ? "h12" : "h23" }).format(input)
 }
 
 export function time(input: number): string {
@@ -60,7 +58,8 @@ export function todayTimeOrDateTime(input: number): string {
 }
 
 export function number(num: number): string {
-  if (num >= 1000000) {
+  // 999950+ would round to "1000.0K"
+  if (num >= 999950) {
     return (num / 1000000).toFixed(1) + "M"
   } else if (num >= 1000) {
     return (num / 1000).toFixed(1) + "K"

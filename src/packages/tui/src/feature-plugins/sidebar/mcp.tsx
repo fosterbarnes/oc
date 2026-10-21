@@ -48,7 +48,7 @@ function View(props: { api: TuiPluginApi }) {
         <Show when={list().length <= 2 || open()}>
           <For each={list()}>
             {(item) => (
-              <box flexDirection="row" gap={1}>
+              <box flexDirection="row" gap={1} minWidth={0}>
                 <text
                   flexShrink={0}
                   style={{
@@ -57,19 +57,17 @@ function View(props: { api: TuiPluginApi }) {
                 >
                   •
                 </text>
-                <text fg={theme().text} wrapMode="word">
-                  {item.name}{" "}
-                  <span style={{ fg: theme().textMuted }}>
-                    <Switch fallback={item.status}>
-                      <Match when={item.status === "connected"}>Connected</Match>
-                      <Match when={item.status === "failed"}>
-                        <i>{item.error}</i>
-                      </Match>
-                      <Match when={item.status === "disabled"}>Disabled</Match>
-                      <Match when={item.status === "needs_auth"}>Needs auth</Match>
-                      <Match when={item.status === "needs_client_registration"}>Needs client ID</Match>
-                    </Switch>
-                  </span>
+                <text fg={theme().text} wrapMode="none" truncate flexGrow={1} flexShrink={1} minWidth={0}>
+                  {item.name}
+                </text>
+                <text fg={item.status === "failed" ? theme().error : theme().textMuted} wrapMode="none" flexShrink={0}>
+                  <Switch fallback={item.status}>
+                    <Match when={item.status === "connected"}>Connected</Match>
+                    <Match when={item.status === "failed"}>Error</Match>
+                    <Match when={item.status === "disabled"}>Disabled</Match>
+                    <Match when={item.status === "needs_auth"}>Needs auth</Match>
+                    <Match when={item.status === "needs_client_registration"}>Needs client ID</Match>
+                  </Switch>
                 </text>
               </box>
             )}

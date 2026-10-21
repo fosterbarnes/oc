@@ -65,6 +65,7 @@ test("brackets navigate diff hunks", async () => {
     await viewer.app.waitForFrame((frame) => frame.includes("const first"))
     await viewer.app.waitFor(() => Boolean(findScrollBox(viewer.app.renderer.root)))
     await viewer.app.flush()
+    expect(findDiffs(viewer.app.renderer.root)).toHaveLength(3)
     const scroll = findScrollBox(viewer.app.renderer.root)!
     const initial = scroll.scrollTop
 
@@ -75,6 +76,8 @@ test("brackets navigate diff hunks", async () => {
     await viewer.app.renderOnce()
     const first = scroll.scrollTop
     expect(first).toBeGreaterThan(initial)
+    // oc's footer leaves room for one hunk, so the header shows once the next hunk is in view.
+    expect(viewer.app.captureCharFrame()).toContain("@@ -20,3 +20,3 @@")
 
     viewer.commands.get("diff.next_hunk")!.run?.({} as never)
     await viewer.app.renderOnce()
@@ -93,6 +96,60 @@ test("brackets navigate diff hunks", async () => {
     viewer.commands.get("diff.next_hunk")!.run?.({} as never)
     await viewer.app.renderOnce()
     expect(scroll.scrollTop).toBe(first)
+  } finally {
+    viewer.app.renderer.destroy()
+  }
+})
+
+test("virtualizes a large added file without losing its end", async () => {
+  const lines = [
+    "+{",
+    ...Array.from(
+      { length: 7500 },
+      (_, index) =>
+        `+  "row-${String(index).padStart(4, "0")}": "${"value".repeat(index % 7 === 0 ? 24 : 1)}"${index === 7499 ? "" : ","}`,
+    ),
+    "+}",
+  ]
+  const viewer = await renderDiffViewer([addedFile("snapshot.json", lines)], 24)
+  try {
+    await viewer.app.waitForFrame((frame) => frame.includes("row-0000"))
+    expect(mountedDiffLines(viewer.app.renderer.root)).toBeLessThan(2000)
+    await scrollToEnd(viewer, "row-7499")
+    expect(viewer.app.captureCharFrame()).toContain("row-7499")
+    expect(mountedDiffLines(viewer.app.renderer.root)).toBeLessThan(2000)
+  } finally {
+    viewer.app.renderer.destroy()
+  }
+})
+
+test("keeps the line-number gutter the same width across virtual chunks", async () => {
+  const additions = Array.from({ length: 10500 }, (_, index) => `+line-${String(index + 1).padStart(5, "0")}`)
+  const viewer = await renderDiffViewer([addedFile("wide.txt", additions)], 24)
+  const column = (text: string) =>
+    viewer.app
+      .captureCharFrame()
+      .split("\n")
+      .find((line) => line.includes(text))
+      ?.indexOf(text)
+  try {
+    await viewer.app.waitForFrame((frame) => frame.includes("line-00001"))
+    await viewer.app.flush()
+    const top = column("line-00001")
+    await scrollToEnd(viewer, "line-10500")
+    expect(top).toBeDefined()
+    expect(column("line-10500")).toBe(top)
+  } finally {
+    viewer.app.renderer.destroy()
+  }
+})
+
+test("does not virtualize added files at or below the size threshold", async () => {
+  const additions = Array.from({ length: 3000 }, (_, index) => `+small line ${index}`)
+  const viewer = await renderDiffViewer([addedFile("small.txt", additions)], 24)
+  try {
+    await viewer.app.waitForFrame((frame) => frame.includes("small line 0"))
+    expect(findDiffs(viewer.app.renderer.root)).toHaveLength(1)
   } finally {
     viewer.app.renderer.destroy()
   }
@@ -193,6 +250,31 @@ function findScrollBox(root: Renderable): ScrollBoxRenderable | undefined {
 function containsDiff(root: Renderable): boolean {
   if (root instanceof DiffRenderable) return true
   return root.getChildren().some(containsDiff)
+}
+
+function findDiffs(root: Renderable): DiffRenderable[] {
+  return [...(root instanceof DiffRenderable ? [root] : []), ...root.getChildren().flatMap(findDiffs)]
+}
+
+function mountedDiffLines(root: Renderable) {
+  return findDiffs(root).reduce((total, node) => total + node.diff.split("\n").length, 0)
+}
+
+function addedFile(file: string, additions: string[]) {
+  return {
+    file,
+    status: "added",
+    additions: additions.length,
+    deletions: 0,
+    patch: `--- /dev/null\n+++ b/${file}\n@@ -0,0 +1,${additions.length} @@\n${additions.join("\n")}`,
+  }
+}
+
+async function scrollToEnd(viewer: Awaited<ReturnType<typeof renderDiffViewer>>, text: string) {
+  const scroll = findScrollBox(viewer.app.renderer.root)!
+  scroll.scrollTo(scroll.scrollHeight)
+  await viewer.app.flush()
+  if (!viewer.app.captureCharFrame().includes(text)) await viewer.app.waitForFrame((frame) => frame.includes(text))
 }
 
 const session = {

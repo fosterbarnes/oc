@@ -42,6 +42,21 @@ test("returns nothing before any assistant output", () => {
   expect(contextUsage([assistant(0)], providers)).toBeUndefined()
 })
 
+test("ignores replies at or after the revert boundary", () => {
+  const user: Message = {
+    id: "msg_user_2",
+    sessionID: "ses_child",
+    role: "user",
+    time: { created: 2 },
+    agent: "general",
+    model: { providerID: "anthropic", modelID: "sonnet" },
+  }
+  const messages: Message[] = [assistant(10_000), user, assistant(30_000)]
+  expect(contextUsage(messages, providers)?.tokens).toBe(40_000)
+  expect(contextUsage(messages, providers, "msg_user_2")?.tokens).toBe(20_000)
+  expect(contextUsage(messages, providers, "msg_missing")).toBeUndefined()
+})
+
 test("labels a child session from the task tool title", () => {
   expect(subagentLabel("Find callers (@explore subagent)")).toBe("Explore")
   expect(subagentLabel("Child session - 2026-10-18T00:00:00.000Z")).toBe("Subagent")

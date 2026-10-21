@@ -18,8 +18,10 @@ import { OPENCODE_BASE_MODE, useBindings, useCommandShortcut } from "../../keyma
 import { usePathFormatter } from "../../context/path-format"
 import { useToast } from "../../ui/toast"
 import { errorMessage } from "../../util/error"
+import { isRecord } from "../../util/record"
+import { PatchDiff } from "../../component/patch-diff"
 
-type PermissionStage = "permission" | "always" | "reject"
+type PermissionStage = "permission" | "reject"
 
 function EditBody(props: { request: PermissionRequest }) {
   const themeState = useTheme()
@@ -59,8 +61,9 @@ function EditBody(props: { request: PermissionRequest }) {
             },
           }}
         >
-          <diff
+          <PatchDiff
             diff={diff()}
+            hunkFg={theme.diffHunkHeader}
             view={view()}
             filetype={ft()}
             syntaxStyle={syntax()}
@@ -131,7 +134,8 @@ function PermissionRequestPrompt(props: { request: PermissionRequest; directory?
 
   const session = createMemo(() => sync.data.session.find((s) => s.id === props.request.sessionID))
 
-  // Resolves true on success. On failure the prompt stays so the user can retry.
+  // Resolves true on success. On failure the prompt stays so the user can retry. A request the
+  // server no longer knows (already answered or expired) is dropped instead of leaving a stuck prompt.
   const reply = (input: { reply: "once" | "always" | "reject"; message?: string }) =>
     sdk.client.permission
       .reply(
@@ -146,10 +150,25 @@ function PermissionRequestPrompt(props: { request: PermissionRequest; directory?
       .then(
         () => true,
         (error) => {
+          if (permissionNotFound(error)) return true
           toast.show({ message: `Permission reply failed: ${errorMessage(error)}`, variant: "error" })
           return false
         },
       )
+      .then((ok) => {
+        if (ok) removeRequest()
+        return ok
+      })
+
+  const removeRequest = () => {
+    const requests = sync.data.permission[props.request.sessionID]
+    if (!requests?.some((request) => request.id === props.request.id)) return
+    sync.set(
+      "permission",
+      props.request.sessionID,
+      requests.filter((request) => request.id !== props.request.id),
+    )
+  }
 
   const input = createMemo(() => {
     const tool = props.request.tool
@@ -165,46 +184,33 @@ function PermissionRequestPrompt(props: { request: PermissionRequest; directory?
 
   const { theme } = useTheme()
 
+  // Shown in place of the request body while "Allow always" is highlighted, so choosing it needs no
+  // second confirmation.
+  const alwaysBody = () => (
+    <Switch>
+      <Match when={props.request.always.length === 1 && props.request.always[0] === "*"}>
+        <TextBody title={"This will allow " + props.request.permission + " until OpenCode is restarted."} />
+      </Match>
+      <Match when={true}>
+        <box paddingLeft={1} gap={1}>
+          <text fg={theme.textMuted}>This will allow the following patterns until OpenCode is restarted</text>
+          <box>
+            <For each={props.request.always}>
+              {(pattern) => (
+                <text fg={theme.text}>
+                  {"- "}
+                  {pattern}
+                </text>
+              )}
+            </For>
+          </box>
+        </box>
+      </Match>
+    </Switch>
+  )
+
   return (
     <Switch>
-      <Match when={store.stage === "always"}>
-        <Prompt
-          title="Always allow"
-          body={
-            <Switch>
-              <Match when={props.request.always.length === 1 && props.request.always[0] === "*"}>
-                <TextBody title={"This will allow " + props.request.permission + " until OpenCode is restarted."} />
-              </Match>
-              <Match when={true}>
-                <box paddingLeft={1} gap={1}>
-                  <text fg={theme.textMuted}>This will allow the following patterns until OpenCode is restarted</text>
-                  <box>
-                    <For each={props.request.always}>
-                      {(pattern) => (
-                        <text fg={theme.text}>
-                          {"- "}
-                          {pattern}
-                        </text>
-                      )}
-                    </For>
-                  </box>
-                </box>
-              </Match>
-            </Switch>
-          }
-          options={{ confirm: "Confirm", cancel: "Cancel" }}
-          escapeKey="cancel"
-          onSelect={(option) => {
-            if (option === "cancel") {
-              setStore("stage", "permission")
-              return
-            }
-            void reply({ reply: "always" }).then((ok) => {
-              if (ok) setStore("stage", "permission")
-            })
-          }}
-        />
-      </Match>
       <Match when={store.stage === "reject"}>
         <RejectPrompt
           onConfirm={(message) => {
@@ -396,9 +402,7 @@ function PermissionRequestPrompt(props: { request: PermissionRequest; directory?
 
             return {
               icon: "⚙",
-              title: permission === "session_complete"
-                ? "Mark this session complete?"
-                : `Call tool ${permission}`,
+              title: permission === "session_complete" ? "Mark this session complete?" : `Call tool ${permission}`,
               body: (
                 <box paddingLeft={1}>
                   <text fg={theme.textMuted}>{"Tool: " + permission}</text>
@@ -428,13 +432,14 @@ function PermissionRequestPrompt(props: { request: PermissionRequest; directory?
             <Prompt
               title="Permission required"
               header={header()}
-              body={current.body}
+              // Fresh body per switch: a removed renderable cannot be mounted again.
+              body={(option) => (option === "always" ? alwaysBody() : info().body)}
               options={{ once: "Allow once", always: "Allow always", reject: "Reject" }}
               escapeKey="reject"
               fullscreen
               onSelect={(option) => {
                 if (option === "always") {
-                  setStore("stage", "always")
+                  void reply({ reply: "always" })
                   return
                 }
                 if (option === "reject") {
@@ -454,6 +459,16 @@ function PermissionRequestPrompt(props: { request: PermissionRequest; directory?
         })()}
       </Match>
     </Switch>
+  )
+}
+
+// The SDK wraps error bodies as `Error({ cause: { body } })`; the server tags a missing request.
+function permissionNotFound(error: unknown) {
+  return (
+    error instanceof Error &&
+    isRecord(error.cause) &&
+    isRecord(error.cause.body) &&
+    error.cause.body._tag === "PermissionNotFoundError"
   )
 }
 
@@ -542,7 +557,7 @@ function RejectPrompt(props: { onConfirm: (message: string) => void; onCancel: (
 function Prompt<const T extends Record<string, string>>(props: {
   title: string
   header?: JSX.Element
-  body: JSX.Element
+  body: JSX.Element | ((option: keyof T) => JSX.Element)
   options: T
   escapeKey?: keyof T
   fullscreen?: boolean
@@ -677,7 +692,7 @@ function Prompt<const T extends Record<string, string>>(props: {
             {props.header}
           </box>
         </Show>
-        {props.body}
+        {typeof props.body === "function" ? props.body(store.selected) : props.body}
       </box>
       <box
         flexDirection={narrow() ? "column" : "row"}

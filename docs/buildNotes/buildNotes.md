@@ -169,6 +169,34 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-20 (~20:26) - v0.2.268 sirHoedown - upstream 1.19 port stage 5: TUI fixes - Claude Opus 5.5 (orchestrator) + Opus 5.5 high/medium workers; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; orchestrator, workers `general-opus.5.5-high` (5a, 5c) and `general-opus.5.5-medium` (5b, 5d; 5d needed 3 runs after two CLI cut-offs); Implementation; Stage 5 of `~/.config/opencode/plans/upstream119/implementation.md` completed
+- Version: 0.2.268 sirHoedown
+- 5a dialogs (`58201a32c1` `a4b91d33d9` `ed1636e3bd` `8e3e94aa26` `865f512a44` `b04d8d53e6` `41349ff20a` `26e27c7a7f` `7a22ac865d` `b62dc4a636` `f6aa1a67f0` `a779027303` `5df9cecf03` `cb852434b1` `2bf6a9813a` `0ee9f61e3d` `0ee5ef6c43` `22dea2453b`): `ui/dialog-select.tsx` clamps/preserves selection across list updates, honors falsy `current`, `selection: "none"` actions, separate no-match vs empty views, scroll after layout, real-mouse-move selection (no input-mode store), gutter text color, wrapped error details; `ui/dialog.tsx` mounts each dialog once; `dialog-prompt` single-line (new `multiline` prop for queue edit and /btw); MCP dialog toggles servers independently and shows errors; plugins dialog drops current marker; spinner glyph no longer shrinks.
+- 5b prompt/keys (`0481dba88e` `a5f7f8d3b5` `58a36a1560` `238ce304a9` `55f490b898` `d177f29dba` `97ba700fac` `474c3588c1` `d62049aab4`; `311e32da93` no-op): narrow-terminal layout (logo, prompt padding, model/footer truncation); repeated pasted image reuses its `[Image N]` label and is sent once; footer path truncates from the left; alt+return = `prompt_queue` only (B10; `docs/keybinds.md` regenerated via `packages/tui/script/keybindDocs.ts`, wiki `Sessions.md`); autocomplete descriptions flattened, selection kept visible after wheel scroll; agent/model fade plays once; renderer listener budget 15.
+- 5c session view (`655adbf46e` `f92e490bb6` `047d434aa2` `8d989f6829` `a8fc664b6d` `71f81dc0fe` `2f740cec5d` `9c39e75ce2` `f268956c75` `60b88daddf` `aaed6eaa45` `3c1f87d2d4` `fe0d9579a7` `cf4b4c2312` `cc9011c1ae` `e89206d397`): per-hunk diffs with `@@` rows (`util/diff.ts`, `component/patch-diff.tsx`), added files over 3000 lines render in chunks in the diff viewer; stale permission prompts dismissed on PermissionNotFound; "Allow always" previews patterns and replies at once; nested subagent permissions/questions surface in the parent; execute child calls one row each; task resume rows "Continue"; shell rows show newest output with "(N earlier lines)" label, command capped at 2 rows; copy/export fetch the full transcript; table cell padding; shell files highlight as bash. B12 revert banner pluralizes.
+- Orchestrator: finished `e89206d397` in `component/prompt/index.tsx`: `/editor` with no `$VISUAL`/`$EDITOR` shows an error toast (caller check, not a throw in `editor.ts`, so export-to-file without an editor still saves).
+- 5d theme/app/sidebar (`cd942d0669` `910e37f6d8` `0eaa75ec0f` `8c1808ab74` `83cfafc884` `ced3d5e02a` `b866900417` `f7b222e95a` `667c274c7f` `0d8e64112f` `21dac524f3` `e47b9b5453` `61d812fcd6` `c82340a97b` `2e4abeb25d` `f51dc62721` `8c1ce954d0` `2e7ac8c8ea` `bd23808adf` `52a10f573f`; `8381153418` already present): home paths use `~/a/b`; context usage ignores reverted replies; root session cost includes all descendant sessions (B9, `util/session.ts` `sessionCost`; gap: children outside the 100-session / 30-day list are not counted); `<Toast />` mounted once at app root (top 2, right 2 of the full terminal); `--prompt` on resume/continue/fork submits once after agent/model are ready (`local.agent.ready`); deleted-session toast names the session; footer MCP row click opens the MCP list; sidebar MCP errors contained; system-theme palette probed after first frame, cached in kv `system_theme_palette`, only when `system` is active; toast errors use `errorMessage`; external-mode fetch has no timeout; compact numbers roll to `1.0M`; ARM64 x64 emulation shown.
+- Verification: tui dialog-select 20/0, dialogMountOnce 1/0, dialogSessionListStatusFilter 6/0, prompt/part 9/0, collapse-tool-output/diff-viewer/added-patch/inline-tool-wrap-snapshot/filetype/session/notifications/permissionPrompt combined 50/0, syncQuestions 13/0, app-lifecycle 9/0, util/locale 5/0, runtime 2/0, contextUsage 6/0, util/session 4/0; keybind docs `--check` exit 0. Typecheck left to prePush.
+- ERROR: Claude Code CLI closed its output twice mid-run for the 5d worker (no result); a fresh worker finished from the progress file.
+
+### User
+Dialogs and prompt
+- Lists keep your selection when they refresh, show "no matches" separately from "empty", and the MCP dialog toggles several servers at once and shows each server's error.
+- `alt+return` now only queues a prompt; use `shift+return`, `ctrl+return`, or `ctrl+j` for a newline.
+- `/editor` tells you to set `$VISUAL` or `$EDITOR` instead of doing nothing, and the prompt fits narrow terminals better.
+
+Session view
+- Diffs show each hunk separately, very large new files open in chunks, shell output shows the newest lines, and subagent permission prompts and questions appear in the parent session.
+- The revert banner says "messages" for more than one, and copy/export include the whole transcript.
+
+Sidebar and app
+- The session cost now includes what its subagents spent, toasts sit in the top-right of the whole window, and the system theme no longer slows startup.
+
+---
+
 ## 2026-10-20 (~19:27) - v0.2.267 waaazoooBeethoven - upstream 1.19 port stage 4: providers, session, build/server - Claude Opus 5.5 (orchestrator) + Opus 5.5 high/medium workers; Implementation
 
 ### Agent

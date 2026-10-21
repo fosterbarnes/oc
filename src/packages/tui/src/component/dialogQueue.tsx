@@ -40,10 +40,13 @@ export function createQueueSnapshot(sessionID: () => string | undefined) {
     onCleanup(() => clearInterval(timer))
   })
   createEffect(
-    on(() => sessionID(), () => {
-      setSnapshot(EMPTY)
-      refresh()
-    }),
+    on(
+      () => sessionID(),
+      () => {
+        setSnapshot(EMPTY)
+        refresh()
+      },
+    ),
   )
   return { snapshot, refresh }
 }
@@ -82,9 +85,10 @@ export function DialogQueue(props: { sessionID: string }) {
 
   const options = createMemo(() => {
     const snapshot = queue.snapshot()
-    const resume = snapshot.pause !== "none"
-      ? [{ title: "Resume queue", value: "resume", description: "Send the next queued prompt" }]
-      : []
+    const resume =
+      snapshot.pause !== "none"
+        ? [{ title: "Resume queue", value: "resume", description: "Send the next queued prompt" }]
+        : []
     const entries = snapshot.entries.map((entry) => {
       const confirming = toCancel() === entry.id
       return {
@@ -94,7 +98,8 @@ export function DialogQueue(props: { sessionID: string }) {
         value: entry.id,
         bg: confirming ? theme.error : undefined,
         description: entry.state === "dispatching" ? "Sending" : scheduleLabel(entry),
-        footer: entry.attachments > 0 ? `${entry.attachments} attachment${entry.attachments === 1 ? "" : "s"}` : undefined,
+        footer:
+          entry.attachments > 0 ? `${entry.attachments} attachment${entry.attachments === 1 ? "" : "s"}` : undefined,
       }
     })
     if (resume.length === 0 && entries.length === 0) return [{ title: "Queue is empty", value: "none" }]
@@ -109,16 +114,21 @@ export function DialogQueue(props: { sessionID: string }) {
       return
     }
     const back = () => dialog.replace(() => <DialogQueue sessionID={props.sessionID} />)
-    dialog.replace(() => (
-      <DialogPrompt
-        title="Edit queued prompt"
-        value={entry.text}
-        onConfirm={(text) => {
-          if (!text.trim()) return
-          void update({ type: "edit", id, text }).then(back)
-        }}
-      />
-    ), undefined, { back })
+    dialog.replace(
+      () => (
+        <DialogPrompt
+          title="Edit queued prompt"
+          value={entry.text}
+          multiline
+          onConfirm={(text) => {
+            if (!text.trim()) return
+            void update({ type: "edit", id, text }).then(back)
+          }}
+        />
+      ),
+      undefined,
+      { back },
+    )
   }
 
   return (

@@ -1,6 +1,6 @@
 import { TextAttributes } from "@opentui/core"
 import { DialogSelect, type DialogSelectOption } from "../ui/dialog-select"
-import { createResource, createMemo, createSignal } from "solid-js"
+import { createResource, createMemo, createSignal, Match, Switch } from "solid-js"
 import { useDialog } from "../ui/dialog"
 import { useSDK } from "../context/sdk"
 import { useTheme } from "../context/theme"
@@ -40,7 +40,6 @@ export function DialogSkill(props: DialogSkillProps) {
       title: skill.name.padEnd(maxWidth),
       description: skill.description?.replace(/\s+/g, " ").trim(),
       value: skill.name,
-      category: "Skills",
       onSelect: () => {
         props.onSelect(skill.name)
         dialog.clear()
@@ -51,19 +50,37 @@ export function DialogSkill(props: DialogSkillProps) {
   return (
     <DialogSelect
       title="Skills"
-      placeholder="Search skills…"
       options={options()}
-      renderFilter={!showError()}
-      locked={showError()}
+      renderFilter={!showError() && !skills.loading}
+      locked={showError() || skills.loading}
       emptyView={
-        showError() ? (
-          <box paddingLeft={4} paddingRight={4}>
-            <text fg={theme.error} attributes={TextAttributes.BOLD}>
-              Could not load skills
-            </text>
-            <text fg={theme.textMuted}>{errorMessage(loadError())}</text>
-          </box>
-        ) : undefined
+        <Switch
+          fallback={
+            <box paddingLeft={4} paddingRight={4} paddingTop={1}>
+              <text fg={theme.textMuted}>No skills available</text>
+            </box>
+          }
+        >
+          <Match when={showError()}>
+            <box paddingLeft={4} paddingRight={4} paddingTop={1}>
+              <text fg={theme.error} attributes={TextAttributes.BOLD}>
+                Could not load skills
+              </text>
+              <text fg={theme.textMuted}>{errorMessage(loadError())}</text>
+              <text fg={theme.textMuted}>Close and reopen Skills to try again.</text>
+            </box>
+          </Match>
+          <Match when={skills.loading}>
+            <box paddingLeft={4} paddingRight={4} paddingTop={1}>
+              <text fg={theme.textMuted}>Loading skills…</text>
+            </box>
+          </Match>
+        </Switch>
+      }
+      noMatchView={
+        <box paddingLeft={4} paddingRight={4} paddingTop={1}>
+          <text fg={theme.textMuted}>No skills found</text>
+        </box>
       }
     />
   )

@@ -1,6 +1,13 @@
 import { describe, expect, test } from "bun:test"
 import type { Part } from "@opencode-ai/sdk/v2"
-import { expandTrackedPastedText, promptFromParts, stripPromptPartIDs, typedSlashCommands } from "../../src/prompt/part"
+import {
+  attachmentLabel,
+  deduplicateImageParts,
+  expandTrackedPastedText,
+  promptFromParts,
+  stripPromptPartIDs,
+  typedSlashCommands,
+} from "../../src/prompt/part"
 
 describe("prompt part", () => {
   test("strips persisted IDs from reused parts", () => {
@@ -86,5 +93,46 @@ describe("prompt part", () => {
       [{ name: "spit" }, { name: "think" }, { name: "imp" }],
     )
     expect(commands).toEqual({ names: ["spit", "think"], arguments: "你好 notes: run /imp now $&\n" })
+  })
+})
+
+describe("prompt attachments", () => {
+  const image = (url: string, label: string, filename = "clipboard") => ({
+    type: "file" as const,
+    mime: "image/png",
+    filename,
+    url,
+    source: { type: "file" as const, path: filename, text: { start: 0, end: label.length, value: label } },
+  })
+
+  test("reuses labels for identical image data", () => {
+    const parts = [image("data:image/png;base64,AAA", "[Image 1]")]
+    expect(attachmentLabel(parts, { mime: "image/png", url: "data:image/png;base64,AAA", filename: "clipboard" })).toBe(
+      "[Image 1]",
+    )
+    expect(attachmentLabel(parts, { mime: "image/png", url: "data:image/png;base64,BBB", filename: "clipboard" })).toBe(
+      "[Image 2]",
+    )
+  })
+
+  test("does not reuse a label when the filename differs", () => {
+    const parts = [image("data:image/png;base64,AAA", "[Image 1]", "one.png")]
+    expect(attachmentLabel(parts, { mime: "image/png", url: "data:image/png;base64,AAA", filename: "two.png" })).toBe(
+      "[Image 2]",
+    )
+  })
+
+  test("numbers PDFs independently and never repeats a removed number", () => {
+    const parts = [image("data:image/png;base64,BBB", "[Image 2]")]
+    expect(attachmentLabel(parts, { mime: "application/pdf", url: "data:application/pdf;base64,CCC" })).toBe("[PDF 1]")
+    expect(attachmentLabel(parts, { mime: "image/png", url: "data:image/png;base64,CCC" })).toBe("[Image 3]")
+  })
+
+  test("sends a repeated image once and keeps other parts", () => {
+    const first = image("data:image/png;base64,AAA", "[Image 1]")
+    const second = image("data:image/png;base64,BBB", "[Image 2]")
+    const pdf = { type: "file" as const, mime: "application/pdf", url: "data:application/pdf;base64,CCC" }
+    const parts = [first, pdf, second, { ...first, source: { ...first.source } }, pdf]
+    expect(deduplicateImageParts(parts)).toEqual([first, pdf, second, pdf])
   })
 })

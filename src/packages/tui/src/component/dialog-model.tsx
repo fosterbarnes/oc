@@ -1,11 +1,6 @@
 import { createMemo, createSignal, onMount } from "solid-js"
 import { RGBA } from "@opentui/core"
-import {
-  useLocal,
-  moveModelFavorite,
-  FAVORITE_CATEGORY_THEME_COLORS,
-  isFavoriteCategoryColor,
-} from "../context/local"
+import { useLocal, moveModelFavorite, FAVORITE_CATEGORY_THEME_COLORS, isFavoriteCategoryColor } from "../context/local"
 import { useTheme } from "../context/theme"
 import { Locale } from "../util/locale"
 import { map, pipe, flatMap, entries, filter, sortBy, take } from "remeda"
@@ -248,6 +243,7 @@ export function DialogModel(props: {
         {
           command: "model.dialog.provider",
           title: connected() ? "Connect provider" : "View all providers",
+          selection: "none",
           onTrigger() {
             dialog.replace(() => <DialogProvider />, undefined, { back: reopen })
           },
@@ -363,8 +359,8 @@ function DialogFavoriteCategory(props: {
     () =>
       local.model
         .favorite()
-        .find((item) => item.providerID === props.model.providerID && item.modelID === props.model.modelID)
-        ?.category ?? "",
+        .find((item) => item.providerID === props.model.providerID && item.modelID === props.model.modelID)?.category ??
+      "",
   )
 
   function count(category?: string) {
@@ -443,7 +439,12 @@ function DialogFavoriteCategory(props: {
           renderFilter={false}
           current={current.startsWith("#") ? "custom" : current}
           options={[
-            { title: "Default", value: "", footer: <span style={{ fg: theme.accent }}>■■■</span>, onSelect: () => choose() },
+            {
+              title: "Default",
+              value: "",
+              footer: <span style={{ fg: theme.accent }}>■■■</span>,
+              onSelect: () => choose(),
+            },
             ...FAVORITE_CATEGORY_THEME_COLORS.map((color) => ({
               title: Locale.titlecase(color),
               value: color,
@@ -453,7 +454,9 @@ function DialogFavoriteCategory(props: {
             {
               title: "Custom hex…",
               value: "custom",
-              footer: current.startsWith("#") ? <span style={{ fg: RGBA.fromHex(current) }}>{current}</span> : undefined,
+              footer: current.startsWith("#") ? (
+                <span style={{ fg: RGBA.fromHex(current) }}>{current}</span>
+              ) : undefined,
               onSelect: () =>
                 dialog.replace(
                   () => (

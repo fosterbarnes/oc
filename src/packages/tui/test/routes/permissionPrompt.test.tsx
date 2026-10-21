@@ -35,7 +35,13 @@ async function mountPrompt(root: string) {
   const override: FetchHandler = (url) => {
     if (!url.pathname.endsWith("/reply")) return undefined
     replies.push(url.pathname)
-    return replyStatus.value === 200 ? json(true) : json({ message: "reply rejected" }, { status: replyStatus.value })
+    if (replyStatus.value === 200) return json(true)
+    if (replyStatus.value === 404)
+      return json(
+        { _tag: "PermissionNotFoundError", requestID: "per_1", message: "Permission request not found" },
+        { status: 404 },
+      )
+    return json({ message: "reply rejected" }, { status: replyStatus.value })
   }
   const calls = createFetch(override)
   const events = createEventSource()
@@ -126,21 +132,49 @@ async function mountPrompt(root: string) {
   }
 }
 
-test("replacing the request during the confirm step opens the first step for the new request", async () => {
+async function waitForReplies(prompt: Awaited<ReturnType<typeof mountPrompt>>, count: number) {
+  const start = Date.now()
+  while (prompt.replies.length < count) {
+    if (Date.now() - start > 2000) throw new Error("reply never sent")
+    await prompt.app.renderOnce()
+    await Bun.sleep(10)
+  }
+}
+
+test("highlighting Allow always previews its patterns and selecting it replies in one step", async () => {
   await using tmp = await tmpdir()
   const prompt = await mountPrompt(tmp.path)
 
   try {
     await frameWith(prompt.app, "Shell command")
     prompt.app.mockInput.pressArrow("right")
-    prompt.app.mockInput.pressEnter()
-    await frameWith(prompt.app, "Always allow")
-
-    prompt.setRequest(request("per_2"))
-    const frame = await frameWith(prompt.app, "Shell command")
-
-    expect(frame).not.toContain("Always allow")
+    const frame = await frameWith(prompt.app, "- ls *")
+    expect(frame).toContain("This will allow the following patterns")
     expect(prompt.replies).toEqual([])
+
+    prompt.replyStatus.value = 200
+    prompt.app.mockInput.pressEnter()
+    await waitForReplies(prompt, 1)
+    expect(prompt.replies).toEqual(["/permission/per_1/reply"])
+  } finally {
+    await prompt.cleanup()
+  }
+})
+
+test("a reply for a request the server no longer has does not show an error", async () => {
+  await using tmp = await tmpdir()
+  const prompt = await mountPrompt(tmp.path)
+
+  try {
+    await frameWith(prompt.app, "Shell command")
+    prompt.replyStatus.value = 404
+    prompt.app.mockInput.pressEnter()
+    await waitForReplies(prompt, 1)
+    for (let frame = 0; frame < 10; frame++) {
+      await prompt.app.renderOnce()
+      await Bun.sleep(10)
+    }
+    expect(prompt.app.captureCharFrame()).not.toContain("Permission reply failed")
   } finally {
     await prompt.cleanup()
   }

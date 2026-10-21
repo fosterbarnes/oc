@@ -32,6 +32,7 @@ import { useArgs } from "./args"
 import { batch, createSignal, onCleanup, onMount } from "solid-js"
 import { usePermission } from "./permission"
 import { useRoute } from "./route"
+import { sessionDescendants } from "../util/session"
 
 const emptyConsoleState: ConsoleState = {
   consoleManagedProviders: [],
@@ -110,9 +111,12 @@ function isQuestionInfo(value: unknown): value is QuestionInfo {
     Array.isArray(value.options) &&
     value.options.every(
       (option: unknown) =>
-        !!option && typeof option === "object" &&
-        "label" in option && typeof option.label === "string" &&
-        "description" in option && typeof option.description === "string",
+        !!option &&
+        typeof option === "object" &&
+        "label" in option &&
+        typeof option.label === "string" &&
+        "description" in option &&
+        typeof option.description === "string",
     )
   )
 }
@@ -252,7 +256,9 @@ export const {
         questionRequests.set(request.id, request)
         if (settledQuestions.has(request.id)) dismissQuestion(request)
       })
-      const questionGroups = groupBySession((questions?.data ?? []).filter((request) => !settledQuestions.has(request.id)))
+      const questionGroups = groupBySession(
+        (questions?.data ?? []).filter((request) => !settledQuestions.has(request.id)),
+      )
       const permissionGroups = groupBySession(permissions?.data ?? [])
       Object.keys(questionGroups).forEach((id) => ids.add(id))
       Object.keys(permissionGroups).forEach((id) => ids.add(id))
@@ -351,8 +357,11 @@ export const {
 
     event.subscribe((event, { directory, workspace }) => {
       if (
-        event.type === "question.asked" || event.type === "question.replied" || event.type === "question.rejected" ||
-        event.type === "permission.asked" || event.type === "permission.replied"
+        event.type === "question.asked" ||
+        event.type === "question.replied" ||
+        event.type === "question.rejected" ||
+        event.type === "permission.asked" ||
+        event.type === "permission.replied"
       ) {
         const id = event.properties.sessionID
         promptRevisions.set(id, (promptRevisions.get(id) ?? 0) + 1)
@@ -417,7 +426,8 @@ export const {
         case "question.replied":
         case "question.rejected": {
           settledQuestions.add(event.properties.requestID)
-          const request = questionRequests.get(event.properties.requestID) ??
+          const request =
+            questionRequests.get(event.properties.requestID) ??
             store.question[event.properties.sessionID]?.find((request) => request.id === event.properties.requestID)
           if (request) dismissQuestion(request)
           break
@@ -890,9 +900,9 @@ export const {
         void recoverFromRestart()
         if (!restartPending && route.data.type === "session") {
           setPromptReady(route.data.sessionID, false)
-          void result.session.sync(route.data.sessionID).catch((error) =>
-            console.error("Failed to refresh session prompts", error),
-          )
+          void result.session
+            .sync(route.data.sessionID)
+            .catch((error) => console.error("Failed to refresh session prompts", error))
         }
       }),
     )
@@ -955,10 +965,7 @@ export const {
       },
       session: {
         questions(sessionID: string): (QuestionRequest & { restored?: boolean })[] {
-          const live = [
-            sessionID,
-            ...store.session.filter((session) => session.parentID === sessionID).map((session) => session.id),
-          ]
+          const live = [sessionID, ...sessionDescendants(store.session, sessionID).map((session) => session.id)]
             .toSorted()
             .flatMap((id) => store.question[id] ?? [])
           if (live.length || !promptReady[sessionID]) return live

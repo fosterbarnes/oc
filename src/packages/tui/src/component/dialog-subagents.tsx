@@ -366,6 +366,7 @@ export function DialogSubagents(props: { highlight?: string }) {
         {
           command: "subagent.add",
           title: "add",
+          selection: "none",
           onTrigger: startAdd,
         },
         {

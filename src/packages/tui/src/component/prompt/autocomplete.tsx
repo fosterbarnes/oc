@@ -121,7 +121,6 @@ export function Autocomplete(props: {
     index: 0,
     selected: 0,
     visible: false as AutocompleteRef["visible"],
-    input: "keyboard" as "keyboard" | "mouse",
   })
 
   const [positionTick, setPositionTick] = createSignal(0)
@@ -187,14 +186,6 @@ export function Autocomplete(props: {
   createEffect(() => {
     const next = filter()
     setSearch(next ? next : "")
-  })
-
-  // When the filter changes due to how TUI works, the mousemove might still be triggered
-  // via a synthetic event as the layout moves underneath the cursor. This is a workaround to make sure the input mode remains keyboard so
-  // that the mouseover event doesn't trigger when filtering.
-  createEffect(() => {
-    filter()
-    setStore("input", "keyboard")
   })
 
   function insertPart(text: string, part: PromptInfo["parts"][number]) {
@@ -594,6 +585,15 @@ export function Autocomplete(props: {
     }
   }
 
+  // Wheel scrolling moves the window without moving the selection: clamp it back into view.
+  function syncSelectionWindow() {
+    if (!scroll || !options().length) return
+    const first = Math.min(scroll.scrollTop, options().length - 1)
+    const last = Math.min(options().length - 1, first + Math.min(height(), options().length) - 1)
+    const selected = Math.max(first, Math.min(last, store.selected))
+    if (selected !== store.selected) setStore("selected", selected)
+  }
+
   function select() {
     const selected = options()[store.selected]
     if (!selected) return
@@ -636,7 +636,6 @@ export function Autocomplete(props: {
         run() {
           const key = options()[store.selected]?.favoriteKey
           if (!key) return
-          setStore("input", "keyboard")
           kv.set(
             "slash.favorites",
             favoriteKeys().has(key) ? favorites().filter((item) => item !== key) : [...favorites(), key],
@@ -657,7 +656,6 @@ export function Autocomplete(props: {
         title: "Previous autocomplete item",
         category: "Autocomplete",
         run() {
-          setStore("input", "keyboard")
           move(-1)
         },
       },
@@ -666,7 +664,6 @@ export function Autocomplete(props: {
         title: "Next autocomplete item",
         category: "Autocomplete",
         run() {
-          setStore("input", "keyboard")
           move(1)
         },
       },
@@ -805,7 +802,8 @@ export function Autocomplete(props: {
     )
   })
 
-  let scroll: ScrollBoxRenderable
+  let scroll: ScrollBoxRenderable | undefined
+  onCleanup(() => scroll?.verticalScrollBar.off("change", syncSelectionWindow))
   const scrollAcceleration = createMemo(() => getScrollAcceleration(tuiConfig))
 
   return (
@@ -821,7 +819,11 @@ export function Autocomplete(props: {
       borderColor={theme.border}
     >
       <scrollbox
-        ref={(r: ScrollBoxRenderable) => (scroll = r)}
+        ref={(r: ScrollBoxRenderable) => {
+          scroll?.verticalScrollBar.off("change", syncSelectionWindow)
+          scroll = r
+          scroll.verticalScrollBar.on("change", syncSelectionWindow)
+        }}
         backgroundColor={theme.backgroundMenu}
         height={height()}
         scrollbarOptions={{ visible: false }}
@@ -841,17 +843,8 @@ export function Autocomplete(props: {
               paddingRight={1}
               backgroundColor={index === store.selected ? theme.primary : undefined}
               flexDirection="row"
-              onMouseMove={() => {
-                setStore("input", "mouse")
-              }}
-              onMouseOver={() => {
-                if (store.input !== "mouse") return
-                moveTo(index)
-              }}
-              onMouseDown={() => {
-                setStore("input", "mouse")
-                moveTo(index)
-              }}
+              onMouseMove={() => moveTo(index)}
+              onMouseDown={() => moveTo(index)}
               onMouseUp={() => select()}
             >
               <Show when={store.visible === "/"}>
@@ -864,7 +857,7 @@ export function Autocomplete(props: {
               </text>
               <Show when={option().description}>
                 <text fg={index === store.selected ? selectedForeground(theme) : theme.textMuted} wrapMode="none">
-                  {" " + option().description?.trimStart()}
+                  {" " + option().description?.replace(/\s+/g, " ").trim()}
                 </text>
               </Show>
             </box>

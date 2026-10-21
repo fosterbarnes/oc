@@ -1,13 +1,7 @@
 /** @jsxImportSource @opentui/solid */
 import type { TuiPlugin, TuiPluginApi, TuiRouteCurrent } from "@opencode-ai/plugin/tui"
 import type { SnapshotFileDiff, VcsFileDiff } from "@opencode-ai/sdk/v2"
-import {
-  TextAttributes,
-  type BorderSides,
-  type BoxRenderable,
-  type DiffRenderable,
-  type ScrollBoxRenderable,
-} from "@opentui/core"
+import { TextAttributes, type BorderSides, type BoxRenderable, type ScrollBoxRenderable } from "@opentui/core"
 import { LANGUAGE_EXTENSIONS } from "../../util/filetype"
 import { useBindings, useCommandShortcut } from "../../keymap"
 import { useTheme } from "../../context/theme"
@@ -18,6 +12,7 @@ import { DiffViewerFileTree } from "./diff-viewer-file-tree"
 import { Panel, PanelGroup, Separator } from "./diff-viewer-ui"
 import { DialogSelect } from "../../ui/dialog-select"
 import { getScrollAcceleration } from "../../util/scroll"
+import { PatchDiff, type PatchDiffRef } from "../../component/patch-diff"
 import {
   allExpandedFileTreeDirectories,
   buildFileTree,
@@ -168,7 +163,7 @@ function DiffViewer(props: { api: TuiPluginApi }) {
   const helpShortcut = useCommandShortcut("diff.help")
   let scroll: ScrollBoxRenderable | undefined
   const patchNodeByFileIndex = new Map<number, BoxRenderable>()
-  const diffNodeByFileIndex = new Map<number, DiffRenderable>()
+  const patchDiffByFileIndex = new Map<number, PatchDiffRef>()
   const [selectedHunk, setSelectedHunk] = createSignal<SelectedHunk | undefined>()
   const [pendingPatchScrollFileIndex, setPendingPatchScrollFileIndex] = createSignal<number | undefined>()
   const [patchFillerHeight, setPatchFillerHeight] = createSignal(0)
@@ -283,19 +278,18 @@ function DiffViewer(props: { api: TuiPluginApi }) {
     const patchScroll = scroll
     if (!patchScroll) return
     const hunks = visiblePatchFiles()
-      .flatMap((entry) => {
-        const node = diffNodeByFileIndex.get(entry.fileIndex)
-        if (!node || node.isDestroyed) return []
-        const contentY = patchScroll.scrollTop + node.y - patchScroll.viewport.y
-        return node.diff
-          .split("\n")
-          .flatMap((line, row) => (line.startsWith("@@") ? [row] : []))
-          .map((row, hunkIndex) => ({
-            fileIndex: entry.fileIndex,
-            hunkIndex,
-            contentY: contentY + row,
-          }))
-      })
+      .flatMap(
+        (entry) =>
+          patchDiffByFileIndex
+            .get(entry.fileIndex)
+            ?.hunks()
+            .map((node, hunkIndex) => ({
+              fileIndex: entry.fileIndex,
+              hunkIndex,
+              // Later hunks sit under a one-row `@@` header; land on the header.
+              contentY: patchScroll.scrollTop + node.y - patchScroll.viewport.y - (hunkIndex > 0 ? 1 : 0),
+            })) ?? [],
+      )
       .sort((left, right) => left.contentY - right.contentY)
     const selected = selectedHunk()
     const selectedIndex =
@@ -756,9 +750,7 @@ function DiffViewer(props: { api: TuiPluginApi }) {
           <text fg={theme().text}>Diff </text>
           <text fg={theme().textMuted}>{diffSourceLabel(mode())}</text>
           <box flexGrow={1} />
-          <text fg={theme().textMuted}>
-            {`${files().length} ${files().length === 1 ? "file" : "files"}`}
-          </text>
+          <text fg={theme().textMuted}>{`${files().length} ${files().length === 1 ? "file" : "files"}`}</text>
         </Panel>
 
         <box flexGrow={1} minHeight={0}>
@@ -840,9 +832,12 @@ function DiffViewer(props: { api: TuiPluginApi }) {
                             >
                               {(patch) => (
                                 <box border={patchLeftBorder()} borderColor={theme().border}>
-                                  <diff
-                                    ref={(element: DiffRenderable) => diffNodeByFileIndex.set(entry.fileIndex, element)}
+                                  <PatchDiff
+                                    ref={(component) => patchDiffByFileIndex.set(entry.fileIndex, component)}
                                     diff={patch()}
+                                    scroll={() => scroll}
+                                    hunkFg={reviewed() ? theme().textMuted : theme().diffHunkHeader}
+                                    lineNumberBg="transparent"
                                     view={view()}
                                     filetype={reviewed() ? PLAIN_TEXT_FILETYPE : filetype(entry.file.file)}
                                     syntaxStyle={themeState.syntax()}

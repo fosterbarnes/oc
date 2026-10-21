@@ -150,7 +150,6 @@ function showInstall(api: TuiPluginApi) {
 function View(props: { api: TuiPluginApi }) {
   const size = useTerminalDimensions()
   const [list, setList] = createSignal(props.api.plugins.list())
-  const [cur, setCur] = createSignal<string | undefined>()
   const [lock, setLock] = createSignal(false)
 
   createEffect(() => {
@@ -202,31 +201,25 @@ function View(props: { api: TuiPluginApi }) {
     <DialogSelect
       title="Plugins"
       options={rows()}
-      current={cur()}
-      onMove={(item) => setCur(item.value)}
+      preserveSelection={true}
       actions={[
         {
           title: "toggle",
           command: "plugins.toggle",
           hidden: lock(),
-          onTrigger: (item) => {
-            setCur(item.value)
-            flip(item.value)
-          },
+          onTrigger: (item) => flip(item.value),
         },
         {
           title: "install",
           command: "dialog.plugins.install",
+          selection: "none",
           hidden: lock(),
           onTrigger: () => {
             showInstall(props.api)
           },
         },
       ]}
-      onSelect={(item) => {
-        setCur(item.value)
-        flip(item.value)
-      }}
+      onSelect={(item) => flip(item.value)}
     />
   )
 }

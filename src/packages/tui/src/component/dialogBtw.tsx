@@ -91,6 +91,7 @@ export function DialogBtw(props: { target: BtwTarget; question?: string }) {
         <DialogPrompt
           title="/btw"
           placeholder="Ask a side question"
+          multiline
           onConfirm={(value) => {
             const text = value.trim()
             if (text) ask(text)

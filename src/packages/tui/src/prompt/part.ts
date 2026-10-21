@@ -39,6 +39,56 @@ function isPastedTextPart(part: unknown): part is { type: "text"; text: string; 
   return Boolean(text && typeof text === "object" && "value" in text && typeof text.value === "string")
 }
 
+type AttachmentPart = { type: string; mime?: string; url?: string; filename?: string; source?: unknown }
+
+function attachmentLabelOf(part: AttachmentPart) {
+  const source = part.source
+  if (!source || typeof source !== "object" || !("text" in source)) return undefined
+  const text = source.text
+  if (!text || typeof text !== "object" || !("value" in text) || typeof text.value !== "string") return undefined
+  return text.value || undefined
+}
+
+function isImage(part: AttachmentPart) {
+  return part.type === "file" && !!part.mime?.startsWith("image/")
+}
+
+// Pasting the same image again reuses its `[Image N]` label. New labels count up from the highest
+// existing number, so removing an earlier attachment never repeats a label.
+export function attachmentLabel(
+  parts: readonly AttachmentPart[],
+  file: { mime: string; url: string; filename?: string },
+) {
+  const kind = file.mime === "application/pdf" ? "PDF" : "Image"
+  const existing =
+    kind === "Image"
+      ? parts
+          .filter((part) => isImage(part) && part.url === file.url && part.filename === file.filename)
+          .map(attachmentLabelOf)
+          .find(Boolean)
+      : undefined
+  if (existing) return existing
+  const pattern = new RegExp(`^\\[${kind} (\\d+)\\]$`)
+  const highest = parts.reduce((max, part) => {
+    const match = attachmentLabelOf(part)?.match(pattern)
+    return match ? Math.max(max, Number(match[1])) : max
+  }, 0)
+  return `[${kind} ${highest + 1}]`
+}
+
+// One file part per pasted label keeps extmarks simple; the sent message carries each image once.
+export function deduplicateImageParts<Part extends AttachmentPart>(parts: readonly Part[]) {
+  const seen = new Set<string>()
+  return parts.filter((part) => {
+    const label = attachmentLabelOf(part)
+    if (!isImage(part) || !label) return true
+    const key = JSON.stringify([part.url, part.filename ?? null, label])
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+}
+
 export function expandTrackedPastedText(text: string, ranges: { start: number; end: number; text: string }[]) {
   return ranges
     .slice()

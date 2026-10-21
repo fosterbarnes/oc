@@ -51,9 +51,11 @@ export function DialogStatus() {
           esc
         </text>
       </box>
-      <Show when={Object.keys(sync.data.mcp).length > 0} fallback={<text fg={theme.text}>No MCP Servers</text>}>
+      <Show when={Object.keys(sync.data.mcp).length > 0} fallback={<text fg={theme.text}>No MCP servers</text>}>
         <box>
-          <text fg={theme.text}>{`${Object.keys(sync.data.mcp).length} MCP Servers`}</text>
+          <text fg={theme.text}>
+            {`${Object.keys(sync.data.mcp).length} MCP server${Object.keys(sync.data.mcp).length === 1 ? "" : "s"}`}
+          </text>
           <For each={Object.entries(sync.data.mcp)}>
             {([key, item]) => (
               <box flexDirection="row" gap={1}>
@@ -157,7 +159,9 @@ export function DialogStatus() {
                 </text>
                 <text wrapMode="word" fg={theme.text}>
                   <b>{item.name}</b>
-                  <Show when={item.version}>{(version) => <span style={{ fg: theme.textMuted }}> @{version()}</span>}</Show>
+                  <Show when={item.version}>
+                    {(version) => <span style={{ fg: theme.textMuted }}> @{version()}</span>}
+                  </Show>
                 </text>
               </box>
             )}

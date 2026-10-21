@@ -171,17 +171,18 @@ describe("internal notifications TUI plugin", () => {
     ])
   })
 
-  test("uses sound-only notifications and subagent_done sound for subagent sessions", async () => {
+  test("notifies for subagent requests while keeping completions sound-only", async () => {
     const harness = await setup()
 
     harness.emit({ id: "event-1", type: "question.asked", properties: question("question-1", "subagent") })
+    harness.emit({ id: "event-2", type: "permission.asked", properties: permission("permission-1", "subagent") })
     harness.emit({
-      id: "event-2",
+      id: "event-3",
       type: "session.status",
       properties: { sessionID: "subagent", status: { type: "busy" } },
     })
     harness.emit({
-      id: "event-3",
+      id: "event-4",
       type: "session.status",
       properties: { sessionID: "subagent", status: { type: "idle" } },
     })
@@ -190,8 +191,14 @@ describe("internal notifications TUI plugin", () => {
       {
         title: "Subagent session",
         message: "Question needs input",
-        notification: false,
+        notification: { when: "blurred" },
         sound: { name: "question", when: "always" },
+      },
+      {
+        title: "Subagent session",
+        message: "Permission needs input",
+        notification: { when: "blurred" },
+        sound: { name: "permission", when: "always" },
       },
       {
         title: "Subagent session",

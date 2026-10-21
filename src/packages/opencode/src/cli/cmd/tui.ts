@@ -40,6 +40,12 @@ function createWorkerFetch(client: RpcClient): typeof fetch {
   return fn as typeof fetch
 }
 
+// Bun's fetch aborts requests after its default idle deadline (about five minutes). External mode
+// holds requests open for long work (v1 session.shell waits for the command, event streams), so it
+// opts out while keeping every other init option, including `signal`.
+const noTimeoutFetch = ((input: RequestInfo | URL, init?: RequestInit) =>
+  fetch(input, { ...init, timeout: false } as BunFetchRequestInit)) as typeof fetch
+
 function createEventSource(client: RpcClient): EventSource {
   return {
     subscribe: async (handler) => {
@@ -229,8 +235,10 @@ export const TuiThreadCommand = cmd({
         stopped = true
         process.off("SIGUSR2", reload)
         const { captureDescendants, stopDescendants } = await import("../tui/descendants")
-        const snapshot = await (native ? captureDescendants() : Promise.resolve([]))
-          .then((records) => ({ records }), (error: unknown) => ({ error }))
+        const snapshot = await (native ? captureDescendants() : Promise.resolve([])).then(
+          (records) => ({ records }),
+          (error: unknown) => ({ error }),
+        )
         try {
           await withTimeout(client.call("shutdown", undefined), 4500).catch((error) => {
             if (native) throw error
@@ -259,7 +267,7 @@ export const TuiThreadCommand = cmd({
       const transport = external
         ? {
             url: (await client.call("server", network)).url,
-            fetch: undefined,
+            fetch: noTimeoutFetch,
             events: undefined,
             headers,
           }

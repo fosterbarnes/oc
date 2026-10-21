@@ -172,17 +172,17 @@ let customThemes: Record<string, ThemeJson> = {}
 let systemTheme: ThemeJson | undefined
 const listeners = new Set<(themes: Record<string, ThemeJson>) => void>()
 
-function listThemes() {
+function listThemes(): Record<string, ThemeJson> {
   // Priority: defaults < plugin installs < custom files < generated system.
-  const themes = {
+  // `system` stays listed before the palette probe, which only runs while it is active.
+  const themes: Record<string, ThemeJson> = {
     ...DEFAULT_THEMES,
     ...pluginThemes,
     ...customThemes,
   }
-  if (!systemTheme) return themes
   return {
     ...themes,
-    system: systemTheme,
+    system: systemTheme ?? themes.system ?? themes.opencode,
   }
 }
 

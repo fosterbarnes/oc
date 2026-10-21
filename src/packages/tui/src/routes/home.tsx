@@ -2,7 +2,6 @@ import { Prompt, type PromptRef } from "../component/prompt"
 import { createEffect, createMemo, createSignal, onMount } from "solid-js"
 import { Logo } from "../component/logo"
 import { useSync } from "../context/sync"
-import { Toast } from "../ui/toast"
 import { useArgs } from "../context/args"
 import { useRouteData } from "../context/route"
 import { usePromptRef } from "../context/prompt"
@@ -55,13 +54,15 @@ export function Home() {
     once = true
   }
 
-  // Wait for sync and model store to be ready before auto-submitting --prompt
+  // Wait for everything submit needs before auto-submitting --prompt; it runs once. With -s or -c the
+  // session route submits it (home can be up while a fork is pending).
   createEffect(() => {
     const r = ref()
     if (sent) return
     if (!r) return
-    if (!sync.ready || !local.model.ready) return
-    if (!args.prompt) return
+    if (!sync.ready || !local.model.ready || !local.agent.ready) return
+    if (!local.agent.current() || !local.model.current()) return
+    if (!args.prompt || args.sessionID || args.continue) return
     if (r.current.input !== args.prompt) return
     sent = true
     r.submit()
@@ -85,7 +86,6 @@ export function Home() {
         </box>
         <pluginRuntime.Slot name="home_bottom" />
         <box flexGrow={1} minHeight={0} />
-        <Toast />
       </box>
       <box width="100%" flexShrink={0}>
         <pluginRuntime.Slot name="home_footer" mode="single_winner" />

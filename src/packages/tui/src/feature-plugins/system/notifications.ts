@@ -18,10 +18,12 @@ type SessionError = Extract<Event, { type: "session.error" }>["properties"]["err
 function notify(api: TuiPluginApi, sessionID: string | undefined, message: string, sound: TuiAttentionSoundName) {
   const session = sessionID ? api.state.session.get(sessionID) : undefined
   const isSubagent = session?.parentID !== undefined
+  // A subagent waiting on the user blocks its parent, so requests still notify; completions stay sound-only.
+  const actionable = sound === "permission" || sound === "question"
   void api.attention.notify({
     title: session?.title,
     message,
-    notification: isSubagent ? false : { when: "blurred" },
+    notification: isSubagent && !actionable ? false : { when: "blurred" },
     sound: { name: sound, when: "always" },
   })
 }

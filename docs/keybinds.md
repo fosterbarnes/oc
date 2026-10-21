@@ -232,7 +232,7 @@ Bold marks keys where the oc layout differs from opencode. `-` means unbound.
 | Clear input field | `ctrl+c` | `ctrl+c` |
 | Paste from clipboard | `ctrl+v` | `ctrl+v` |
 | Submit input | `return` | `return` |
-| Insert newline in input | `shift+return`, `ctrl+return`, `alt+return`, `ctrl+j` | `shift+return`, `ctrl+return`, `alt+return`, `ctrl+j` |
+| Insert newline in input | `shift+return`, `ctrl+return`, `ctrl+j` | `shift+return`, `ctrl+return`, `ctrl+j` |
 | Move cursor left in input | **`left`** | `left`, `ctrl+b` |
 | Move cursor right in input | `right`, `ctrl+f` | `right`, `ctrl+f` |
 | Move cursor up in input | **`up`, `ctrl+shift+up`** | `up` |

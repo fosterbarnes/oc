@@ -1,7 +1,8 @@
-import type { AssistantMessage } from "@opencode-ai/sdk/v2"
 import type { TuiPlugin, TuiPluginApi } from "@opencode-ai/plugin/tui"
 import type { BuiltinTuiPlugin } from "../builtins"
 import { createMemo, Show } from "solid-js"
+import { lastAssistantWithUsage } from "../../util/contextUsage"
+import { sessionCost } from "../../util/session"
 import { sectionOpen } from "./open"
 import { SidebarToggle } from "./toggle"
 
@@ -17,10 +18,10 @@ function View(props: { api: TuiPluginApi; session_id: string }) {
   const theme = () => props.api.theme.current
   const msg = createMemo(() => props.api.state.session.messages(props.session_id))
   const session = createMemo(() => props.api.state.session.get(props.session_id))
-  const cost = createMemo(() => session()?.cost ?? 0)
+  const cost = createMemo(() => sessionCost(session(), props.api.state.session.children))
 
   const state = createMemo(() => {
-    const last = msg().findLast((item): item is AssistantMessage => item.role === "assistant" && item.tokens.output > 0)
+    const last = lastAssistantWithUsage(msg(), session()?.revert?.messageID)
     if (!last) {
       return {
         tokens: 0,
@@ -47,9 +48,7 @@ function View(props: { api: TuiPluginApi; session_id: string }) {
         <text fg={theme().text} selectable={false}>
           <b>Context</b>
           <Show when={!open()}>
-            <span style={{ fg: theme().textMuted }}>
-              {` (${state().percent ?? 0}% used, ${money.format(cost())})`}
-            </span>
+            <span style={{ fg: theme().textMuted }}>{` (${state().percent ?? 0}% used, ${money.format(cost())})`}</span>
           </Show>
         </text>
       </box>

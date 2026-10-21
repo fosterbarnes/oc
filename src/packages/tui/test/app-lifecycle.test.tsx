@@ -559,3 +559,160 @@ test("recovery keeps the main prompt focused and palette usable with no replay",
     mock.restore()
   }
 })
+
+test("session startup prompt is submitted exactly once", async () => {
+  const setup = await createTestRenderer({ width: 80, height: 24, useThread: false })
+  const core = await import("@opentui/core")
+  mock.module("@opentui/core", () => ({ ...core, createCliRenderer: async () => setup.renderer }))
+  const events = createEventSource()
+  const session = {
+    id: "dummy",
+    title: "Demo session",
+    slug: "dummy",
+    projectID: "project",
+    directory,
+    version: "0.0.0-test",
+    time: { created: 0, updated: 0 },
+  }
+  const provider = {
+    id: "provider",
+    name: "Provider",
+    env: [],
+    options: {},
+    models: { model: { id: "model", providerID: "provider", name: "Model" } },
+  }
+  const calls = createFetch((url) => {
+    if (url.pathname === "/experimental/session") return json([session])
+    if (url.pathname === `/session/${session.id}`) return json(session)
+    if (url.pathname === `/session/${session.id}/todo` || url.pathname === `/session/${session.id}/diff`)
+      return json([])
+    if (url.pathname === "/agent") return json([{ name: "build", mode: "primary", permission: [], options: {} }])
+    if (url.pathname === "/config/providers") return json({ providers: [provider], default: { provider: "model" } })
+  })
+  const bodies: unknown[] = []
+  const submitted = Promise.withResolvers<void>()
+  // v1 lists messages with GET and submits a prompt with POST on the same path.
+  const fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const request = new Request(input, init)
+    if (new URL(request.url).pathname !== `/session/${session.id}/message`) return calls.fetch(request)
+    if (request.method !== "POST") return json([])
+    bodies.push(await request.json())
+    submitted.resolve()
+    return json({})
+  }) as typeof globalThis.fetch
+
+  try {
+    const { run } = await import("../src/app")
+    const task = Effect.runPromise(
+      run({
+        url: "http://test",
+        directory,
+        config: createTuiResolvedConfig({ plugin_enabled: {} }),
+        fetch,
+        events: events.source,
+        args: { sessionID: session.id, prompt: "RESUME_READY" },
+        pluginHost: {
+          // Slots render their built-in children only once set up.
+          async start(input) {
+            input.runtime.setupSlots(input.api)
+          },
+          async dispose() {},
+        },
+      }).pipe(Effect.provide(AppNodeBuilder.build(Global.node))),
+    )
+    await Promise.race([
+      submitted.promise,
+      Bun.sleep(3000).then(() => {
+        throw new Error("startup prompt was not submitted")
+      }),
+    ])
+    await Bun.sleep(50)
+    setup.renderer.destroy()
+    await task
+
+    expect(bodies).toHaveLength(1)
+    expect(bodies[0]).toMatchObject({ parts: [{ type: "text", text: "RESUME_READY" }] })
+  } finally {
+    if (!setup.renderer.isDestroyed) setup.renderer.destroy()
+    mock.restore()
+  }
+})
+
+test("home startup prompt is submitted exactly once", async () => {
+  const setup = await createTestRenderer({ width: 80, height: 24, useThread: false })
+  const core = await import("@opentui/core")
+  mock.module("@opentui/core", () => ({ ...core, createCliRenderer: async () => setup.renderer }))
+  const events = createEventSource()
+  const session = {
+    id: "dummy",
+    title: "Demo session",
+    slug: "dummy",
+    projectID: "project",
+    directory,
+    version: "0.0.0-test",
+    time: { created: 0, updated: 0 },
+  }
+  const provider = {
+    id: "provider",
+    name: "Provider",
+    env: [],
+    options: {},
+    models: { model: { id: "model", providerID: "provider", name: "Model" } },
+  }
+  const calls = createFetch((url) => {
+    if (url.pathname === "/experimental/session") return json([])
+    if (url.pathname === `/session/${session.id}`) return json(session)
+    if (url.pathname === `/session/${session.id}/todo` || url.pathname === `/session/${session.id}/diff`)
+      return json([])
+    if (url.pathname === "/agent") return json([{ name: "build", mode: "primary", permission: [], options: {} }])
+    if (url.pathname === "/config/providers") return json({ providers: [provider], default: { provider: "model" } })
+  })
+  const bodies: unknown[] = []
+  const submitted = Promise.withResolvers<void>()
+  // Home submit creates the session with POST /session, then posts the prompt to its message path.
+  const fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const request = new Request(input, init)
+    const pathname = new URL(request.url).pathname
+    if (pathname === "/session" && request.method === "POST") return json(session)
+    if (pathname !== `/session/${session.id}/message`) return calls.fetch(request)
+    if (request.method !== "POST") return json([])
+    bodies.push(await request.json())
+    submitted.resolve()
+    return json({})
+  }) as typeof globalThis.fetch
+
+  try {
+    const { run } = await import("../src/app")
+    const task = Effect.runPromise(
+      run({
+        url: "http://test",
+        directory,
+        config: createTuiResolvedConfig({ plugin_enabled: {} }),
+        fetch,
+        events: events.source,
+        args: { prompt: "HOME_READY" },
+        pluginHost: {
+          async start(input) {
+            input.runtime.setupSlots(input.api)
+          },
+          async dispose() {},
+        },
+      }).pipe(Effect.provide(AppNodeBuilder.build(Global.node))),
+    )
+    await Promise.race([
+      submitted.promise,
+      Bun.sleep(3000).then(() => {
+        throw new Error("startup prompt was not submitted")
+      }),
+    ])
+    await Bun.sleep(50)
+    setup.renderer.destroy()
+    await task
+
+    expect(bodies).toHaveLength(1)
+    expect(bodies[0]).toMatchObject({ parts: [{ type: "text", text: "HOME_READY" }] })
+  } finally {
+    if (!setup.renderer.isDestroyed) setup.renderer.destroy()
+    mock.restore()
+  }
+})

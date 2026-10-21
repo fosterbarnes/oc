@@ -33,7 +33,7 @@ function Mcp(props: { api: TuiPluginApi }) {
 
   return (
     <Show when={has()}>
-      <box gap={1} flexDirection="row" flexShrink={0}>
+      <box gap={1} flexDirection="row" flexShrink={0} onMouseUp={() => props.api.keymap.dispatchCommand("mcp.list")}>
         <text fg={theme().text}>
           <Switch>
             <Match when={err()}>

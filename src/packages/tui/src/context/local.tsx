@@ -130,7 +130,12 @@ export function moveModelFavorite<T extends ModelFavorite>(
   return others.toSpliced(at, 0, moved)
 }
 
-export function resolveCurrentModel<T>(selected: T | undefined, cli: T | undefined, agent: T | undefined, fallback: T | undefined) {
+export function resolveCurrentModel<T>(
+  selected: T | undefined,
+  cli: T | undefined,
+  agent: T | undefined,
+  fallback: T | undefined,
+) {
   return selected ?? cli ?? agent ?? fallback
 }
 
@@ -307,10 +312,19 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
         list() {
           return agents()
         },
+        // True once the saved agent.json pick is loaded; current() falls back to the first agent before that.
+        get ready() {
+          return agentStore.ready
+        },
         current() {
           const id = sessionID()
           const sessionName = id ? (agentStore.session[id] ?? sync.session.get(id)?.agent) : undefined
-          const name = resolveSessionAgent(pick(sessionName)?.name, pick(agentStore.current)?.name, args.agent, undefined)
+          const name = resolveSessionAgent(
+            pick(sessionName)?.name,
+            pick(agentStore.current)?.name,
+            args.agent,
+            undefined,
+          )
           return pick(name) ?? agents().at(0)
         },
         hasSession(id = sessionID()) {
@@ -1001,5 +1015,4 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
     }
     return result
   },
-
 })

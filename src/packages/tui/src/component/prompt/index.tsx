@@ -33,6 +33,8 @@ import { createStore, produce, unwrap } from "solid-js/store"
 import { usePromptHistory, type PromptInfo } from "../../prompt/history"
 import { computePromptTraits } from "../../prompt/traits"
 import {
+  attachmentLabel,
+  deduplicateImageParts,
   expandPastedTextPlaceholders,
   expandTrackedPastedText,
   PASTE_SUMMARY_KEY,
@@ -45,7 +47,7 @@ import { useRenderer, useTerminalDimensions, type JSX } from "@opentui/solid"
 import type { AssistantMessage, FilePart, UserMessage } from "@opencode-ai/sdk/v2"
 import { Locale } from "../../util/locale"
 import { contextUsage } from "../../util/contextUsage"
-import { formatSubagentUsage, subagentLabel } from "../../util/session"
+import { formatSubagentUsage, sessionCost, subagentLabel } from "../../util/session"
 import { errorMessage } from "../../util/error"
 import { formatDuration } from "../../util/format"
 import { createColors, createFrames } from "../../ui/spinner"
@@ -113,6 +115,8 @@ const money = new Intl.NumberFormat("en-US", {
 })
 
 const DRAFT_RETENTION_MIN_CHARS = 20
+// Prompts remount per route; the agent/model fade-in plays once per local context, not per session.
+const revealedPromptMetadata = new WeakSet<object>()
 
 function randomIndex(count: number) {
   if (count <= 0) return 0
@@ -321,9 +325,15 @@ export function Prompt(props: PromptProps) {
 
   const usage = createMemo(() => {
     if (!props.sessionID) return
-    const context = contextUsage(sync.data.message[props.sessionID] ?? [], sync.data.provider)
+    const context = contextUsage(
+      sync.data.message[props.sessionID] ?? [],
+      sync.data.provider,
+      sync.session.get(props.sessionID)?.revert?.messageID,
+    )
     if (!context) return
-    const cost = sync.session.get(props.sessionID)?.cost ?? 0
+    const cost = sessionCost(sync.session.get(props.sessionID), (id) =>
+      sync.data.session.filter((item) => item.parentID === id),
+    )
     return {
       context:
         context.percent === undefined
@@ -342,7 +352,7 @@ export function Prompt(props: PromptProps) {
       .filter((item) => item.parentID === sessionID)
       .toSorted((a, b) => b.time.created - a.time.created)
       .flatMap((item) => {
-        const usage = contextUsage(sync.data.message[item.id] ?? [], sync.data.provider)
+        const usage = contextUsage(sync.data.message[item.id] ?? [], sync.data.provider, item.revert?.messageID)
         return usage ? [{ ...usage, label: subagentLabel(item.title) }] : []
       })
     if (entries.length === 1) return formatSubagentUsage(entries[0])
@@ -578,6 +588,11 @@ export function Prompt(props: PromptProps) {
           const nonTextParts = store.prompt.parts.filter((p) => p.type !== "text")
 
           const value = text
+          // openEditor returns undefined without an editor, which would leave /editor silent.
+          if (!process.env.VISUAL && !process.env.EDITOR) {
+            toast.show({ message: "Set $VISUAL or $EDITOR to open an external editor", variant: "error" })
+            return
+          }
           const content = await openEditor({
             renderer,
             value,
@@ -1156,7 +1171,7 @@ export function Prompt(props: PromptProps) {
     const inputText = expandTrackedPastedText(store.prompt.input, pastes)
 
     // Filter out text parts (pasted content) since they're now expanded inline
-    const nonTextParts = store.prompt.parts.filter((part) => part.type !== "text")
+    const nonTextParts = deduplicateImageParts(store.prompt.parts.filter((part) => part.type !== "text"))
 
     const editorSelection = editorContext()
     const editorParts =
@@ -1384,15 +1399,22 @@ export function Prompt(props: PromptProps) {
 
     if (store.mode === "shell") {
       move.startSubmit()
-      void sdk.client.session.shell({
-        sessionID,
-        agent: agent.name,
-        model: {
-          providerID: selectedModel.providerID,
-          modelID: selectedModel.modelID,
-        },
-        command: inputText,
-      })
+      void sdk.client.session
+        .shell(
+          {
+            sessionID,
+            agent: agent.name,
+            model: {
+              providerID: selectedModel.providerID,
+              modelID: selectedModel.modelID,
+            },
+            command: inputText,
+          },
+          { throwOnError: true },
+        )
+        .catch((error) => {
+          toast.show({ title: "Failed to run shell command", message: errorMessage(error), variant: "error" })
+        })
       setStore("mode", "normal")
     } else if (commands.names.length) {
       move.startSubmit()
@@ -1556,13 +1578,8 @@ export function Prompt(props: PromptProps) {
   async function pasteAttachment(file: { filename?: string; filepath?: string; content: string; mime: string }) {
     const currentOffset = input.cursorOffset
     const extmarkStart = currentOffset
-    const pdf = file.mime === "application/pdf"
-    const count = store.prompt.parts.filter((x) => {
-      if (x.type !== "file") return false
-      if (pdf) return x.mime === "application/pdf"
-      return x.mime.startsWith("image/")
-    }).length
-    const virtualText = pdf ? `[PDF ${count + 1}]` : `[Image ${count + 1}]`
+    const url = `data:${file.mime};base64,${file.content}`
+    const virtualText = attachmentLabel(store.prompt.parts, { mime: file.mime, url, filename: file.filename })
     const extmarkEnd = extmarkStart + virtualText.length
     const textToInsert = virtualText + " "
 
@@ -1580,7 +1597,7 @@ export function Prompt(props: PromptProps) {
       type: "file" as const,
       mime: file.mime,
       filename: file.filename,
-      url: `data:${file.mime};base64,${file.content}`,
+      url,
       source: {
         type: "file",
         path: file.filepath ?? file.filename ?? "",
@@ -1632,23 +1649,39 @@ export function Prompt(props: PromptProps) {
     return !!current
   })
 
-  const agentMetaAlpha = createFadeIn(() => !!local.agent.current(), animationsEnabled)
-  const modelMetaAlpha = createFadeIn(() => !!local.agent.current() && store.mode === "normal", animationsEnabled)
+  const animateMetadata = !revealedPromptMetadata.has(local)
+  const metadataAnimationsEnabled = () => animationsEnabled() && animateMetadata
+  const agentMetaAlpha = createFadeIn(() => !!local.agent.current(), metadataAnimationsEnabled)
+  const modelMetaAlpha = createFadeIn(
+    () => !!local.agent.current() && store.mode === "normal",
+    metadataAnimationsEnabled,
+  )
   const variantMetaAlpha = createFadeIn(
     () => !!local.agent.current() && store.mode === "normal" && showVariant(),
-    animationsEnabled,
+    metadataAnimationsEnabled,
   )
+  createEffect(() => {
+    if (local.agent.current()) revealedPromptMetadata.add(local)
+  })
   const borderHighlight = createMemo(() => tint(theme.border, highlight(), agentMetaAlpha()))
+
+  const narrow = createMemo(() => dimensions().width < 44)
+  const [locationWidth, setLocationWidth] = createSignal(dimensions().width)
 
   const placeholderText = createMemo(() => {
     if (props.showPlaceholder === false) return undefined
-    if (store.mode === "shell") {
-      if (!shell().length) return undefined
-      const example = shell()[store.placeholder % shell().length]
-      return `Run a command... "${example}"`
-    }
-    if (!list().length) return undefined
-    return `Ask anything... "${list()[store.placeholder % list().length]}"`
+    const value = (() => {
+      if (store.mode === "shell") {
+        if (!shell().length) return undefined
+        return `Run a command… "${shell()[store.placeholder % shell().length]}"`
+      }
+      if (!list().length) return undefined
+      return `Ask anything… "${list()[store.placeholder % list().length]}"`
+    })()
+    // Narrow terminals: fit one line inside the border and padding. Wider prompts vary in width
+    // (configurable home width, full-width session), so they keep the full text.
+    if (!value || !narrow()) return value
+    return Locale.truncate(value, Math.max(1, dimensions().width - 5))
   })
 
   const spinnerDef = createMemo(() => {
@@ -1714,8 +1747,8 @@ export function Prompt(props: PromptProps) {
           }}
         >
           <box
-            paddingLeft={2}
-            paddingRight={2}
+            paddingLeft={narrow() ? 1 : 2}
+            paddingRight={narrow() ? 1 : 2}
             paddingTop={1}
             flexShrink={0}
             backgroundColor={theme.backgroundElement}
@@ -1811,27 +1844,34 @@ export function Prompt(props: PromptProps) {
               syntaxStyle={syntax()}
             />
             <box flexDirection="row" flexShrink={0} paddingTop={1} gap={1} justifyContent="space-between">
-              <box flexDirection="row" gap={1}>
+              <box flexDirection="row" gap={1} flexGrow={1} flexShrink={1} minWidth={0}>
                 <Show when={local.agent.current()} fallback={<box height={1} />}>
                   {(agent) => (
                     <>
                       <text fg={fadeColor(highlight(), agentMetaAlpha())}>
                         {store.mode === "shell" ? "Shell" : local.agent.label(agent().name)}
                       </text>
-                      <Show when={store.mode === "normal" && local.permission.mode === "auto"}>
+                      <Show when={store.mode === "normal" && local.permission.mode === "auto" && !narrow()}>
                         <text fg={fadeColor(theme.textMuted, agentMetaAlpha())}>auto</text>
                       </Show>
-                      <Show when={store.mode === "normal"}>
-                        <box flexDirection="row" gap={1}>
+                      <Show when={store.mode === "normal" && dimensions().width >= 28}>
+                        <box flexDirection="row" gap={1} flexGrow={1} flexShrink={1} minWidth={0}>
                           <text fg={fadeColor(theme.textMuted, modelMetaAlpha())}>.</text>
                           <text
-                            flexShrink={0}
+                            flexShrink={1}
+                            minWidth={0}
+                            wrapMode="none"
+                            truncate
                             fg={fadeColor(leader() ? theme.textMuted : theme.text, modelMetaAlpha())}
                           >
                             {local.model.parsed().model}
                           </text>
-                          <text fg={fadeColor(theme.textMuted, modelMetaAlpha())}>{currentProviderLabel()}</text>
-                          <Show when={showVariant()}>
+                          <Show when={dimensions().width >= 50}>
+                            <text flexShrink={0} fg={fadeColor(theme.textMuted, modelMetaAlpha())}>
+                              {currentProviderLabel()}
+                            </text>
+                          </Show>
+                          <Show when={showVariant() && dimensions().width >= 70}>
                             <text fg={fadeColor(theme.textMuted, variantMetaAlpha())}>.</text>
                             <text>
                               <span style={{ fg: fadeColor(theme.warning, variantMetaAlpha()), bold: true }}>
@@ -1879,7 +1919,7 @@ export function Prompt(props: PromptProps) {
             }
           />
         </box>
-        <box width="100%" flexDirection="row" justifyContent="space-between">
+        <box width="100%" flexDirection="row" justifyContent="space-between" gap={2}>
           <Switch>
             <Match when={status().type !== "idle"}>
               <box
@@ -2028,15 +2068,27 @@ export function Prompt(props: PromptProps) {
             <Match when={true}>
               {props.hint ?? (
                 <Show when={props.sessionID} fallback={<text />}>
-                  <box marginLeft={1}>
-                    <text fg={theme.textMuted}>{location()?.directory ?? paths.cwd}</text>
+                  <box
+                    marginLeft={1}
+                    flexGrow={1}
+                    flexShrink={1}
+                    minWidth={0}
+                    onSizeChange={function (this: BoxRenderable) {
+                      const width = this.width
+                      queueMicrotask(() => setLocationWidth(width))
+                    }}
+                  >
+                    {/* Keep the path's tail (project folder) visible when the footer is tight. */}
+                    <text fg={theme.textMuted} wrapMode="none">
+                      {Locale.truncateLeft(location()?.directory ?? paths.cwd, Math.max(1, locationWidth()))}
+                    </text>
                   </box>
                 </Show>
               )}
             </Match>
           </Switch>
           <Show when={status().type !== "retry"}>
-            <box gap={2} flexDirection="row">
+            <box gap={2} flexDirection="row" flexShrink={0}>
               <Show when={editorContextLabelState() !== "none" ? editorFileLabelDisplay() : undefined}>
                 {(file) => (
                   <text fg={editorContextLabelState() === "pending" ? theme.secondary : theme.textMuted}>{file()}</text>
@@ -2061,29 +2113,31 @@ export function Prompt(props: PromptProps) {
                         </box>
                       )}
                     </Match>
-                    <Match when={true}>
+                    <Match when={!narrow()}>
                       <text fg={theme.text}>
                         {agentShortcut()} <span style={{ fg: theme.textMuted }}>agents</span>
                       </text>
                     </Match>
                   </Switch>
-                  <Show when={props.sessionID && scheduleShortcut()}>
+                  <Show when={!narrow()}>
+                    <Show when={props.sessionID && scheduleShortcut()}>
+                      <text fg={theme.text}>
+                        {scheduleShortcut()} <span style={{ fg: theme.textMuted }}>schedule</span>
+                      </text>
+                    </Show>
+                    <Show when={ocPaletteShortcut()}>
+                      <text fg={theme.text}>
+                        {ocPaletteShortcut()} <span style={{ fg: theme.textMuted }}>oc commands</span>
+                      </text>
+                    </Show>
                     <text fg={theme.text}>
-                      {scheduleShortcut()} <span style={{ fg: theme.textMuted }}>schedule</span>
+                      {paletteShortcut()} <span style={{ fg: theme.textMuted }}>commands</span>
                     </text>
                   </Show>
-                  <Show when={ocPaletteShortcut()}>
-                    <text fg={theme.text}>
-                      {ocPaletteShortcut()} <span style={{ fg: theme.textMuted }}>oc commands</span>
-                    </text>
-                  </Show>
-                  <text fg={theme.text}>
-                    {paletteShortcut()} <span style={{ fg: theme.textMuted }}>commands</span>
-                  </text>
                 </Match>
                 <Match when={store.mode === "shell"}>
                   <text fg={theme.text}>
-                    esc <span style={{ fg: theme.textMuted }}>exit shell mode</span>
+                    esc <span style={{ fg: theme.textMuted }}>{narrow() ? "shell" : "exit shell mode"}</span>
                   </text>
                 </Match>
               </Switch>

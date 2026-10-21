@@ -11,7 +11,7 @@ import { ExitProvider, useExit } from "./context/exit"
 import { EpilogueProvider } from "./context/epilogue"
 import { Selection } from "./util/selection"
 import { Locale } from "./util/locale"
-import { createCliRenderer, MouseButton, type MouseEvent } from "@opentui/core"
+import { CliRenderEvents, createCliRenderer, MouseButton, type MouseEvent } from "@opentui/core"
 import { RouteProvider, useRoute } from "./context/route"
 import {
   Switch,
@@ -65,7 +65,7 @@ import { createClearSavedImagesCommand } from "./savedImages"
 import { createContextLimitCommands } from "./contextLimit"
 import { createClaudeWarmupCommands } from "./claudeWarmup"
 import { createClaudeAccountCommands } from "./claudeCommands"
-import { ToastProvider, useToast } from "./ui/toast"
+import { Toast, ToastProvider, useToast } from "./ui/toast"
 import { isDefaultTitle } from "./util/session"
 import { KVProvider, useKV } from "./context/kv"
 import * as Model from "./util/model"
@@ -245,6 +245,8 @@ export const run = Effect.fn("Tui.run")(function* (input: TuiInput) {
             destroyRenderer(renderer)
           }),
       )
+      // Several components subscribe to renderer events; the default limit of 10 warns into the TUI.
+      renderer.setMaxListeners(15)
       const terminal = detectTerminal()
       const ledgerPath = path.join(global.state, "oc-tuis", `${process.pid}.json`)
       const ledger: Ledger = {
@@ -284,8 +286,6 @@ export const run = Effect.fn("Tui.run")(function* (input: TuiInput) {
       const pluginRuntime = createPluginRuntime()
 
       yield* Effect.tryPromise(async () => {
-        // Prewarm palette before ThemeProvider mounts so `system` theme avoids a first-paint fallback flash.
-        void renderer.getPalette({ size: 16 }).catch(() => undefined)
         // Nothing paints until this resolves; ConPTY usually swallows the query, so keep it short.
         const mode = (await renderer.waitForThemeMode(100)) ?? "dark"
         if (renderer.isDestroyed) return
@@ -434,6 +434,16 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
   const toast = useToast()
   const themeState = useTheme()
   const { theme, mode, setMode, locked, lock, unlock } = themeState
+  let systemThemeTimeout: ReturnType<typeof setTimeout> | undefined
+  const prepareSystemTheme = () => {
+    // The native writer can still be flushing the frame when FRAME fires. Keep OSC probes behind visible app output.
+    systemThemeTimeout = setTimeout(themeState.prepareSystem, 50)
+  }
+  onMount(() => renderer.once(CliRenderEvents.FRAME, prepareSystemTheme))
+  onCleanup(() => {
+    renderer.off(CliRenderEvents.FRAME, prepareSystemTheme)
+    if (systemThemeTimeout) clearTimeout(systemThemeTimeout)
+  })
   const sync = useSync()
   const project = useProject()
   const exit = useExit()
@@ -733,7 +743,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
         return
       }
 
-      const title = session.title.length > 40 ? session.title.slice(0, 37) + "..." : session.title
+      const title = session.title.length > 40 ? session.title.slice(0, 37) + "…" : session.title
       renderer.setTerminalTitle(`${prefix}${title}`)
       return
     }
@@ -744,6 +754,8 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
   })
 
   const args = useArgs()
+  // Home seeds `--prompt` itself; a resumed or forked session gets it through the route.
+  const startupPrompt = args.prompt ? { input: args.prompt, parts: [] } : undefined
   onMount(() => {
     batch(() => {
       if (args.agent) local.agent.set(args.agent)
@@ -758,7 +770,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
         local.model.set({ providerID, modelID }, { recent: true })
       }
       if (args.sessionID && !args.fork) {
-        route.navigate({ type: "session", sessionID: args.sessionID })
+        route.navigate({ type: "session", sessionID: args.sessionID, prompt: startupPrompt })
       }
     })
     if (args.palette) {
@@ -789,13 +801,13 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
       if (args.fork) {
         void sdk.client.session.fork({ sessionID: match }).then((result) => {
           if (result.data?.id) {
-            route.navigate({ type: "session", sessionID: result.data.id })
+            route.navigate({ type: "session", sessionID: result.data.id, prompt: startupPrompt })
           } else {
             toast.show({ message: "Failed to fork session", variant: "error" })
           }
         })
       } else {
-        route.navigate({ type: "session", sessionID: match })
+        route.navigate({ type: "session", sessionID: match, prompt: startupPrompt })
       }
     }
   })
@@ -809,7 +821,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
     forked = true
     void sdk.client.session.fork({ sessionID: args.sessionID }).then((result) => {
       if (result.data?.id) {
-        route.navigate({ type: "session", sessionID: result.data.id })
+        route.navigate({ type: "session", sessionID: result.data.id, prompt: startupPrompt })
       } else {
         toast.show({ message: "Failed to fork session", variant: "error" })
       }
@@ -1405,10 +1417,11 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
 
   event.on("session.deleted", (evt) => {
     if (route.data.type === "session" && route.data.sessionID === evt.properties.info.id) {
+      const title = evt.properties.info.title
       route.navigate({ type: "home" })
       toast.show({
         variant: "info",
-        message: "The current session was deleted",
+        message: title ? `Session "${title}" was deleted` : "The current session was deleted",
       })
     }
   })
@@ -1479,6 +1492,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
         </box>
         <pluginRuntime.Slot name="app" />
       </Show>
+      <Toast />
     </box>
   )
 }

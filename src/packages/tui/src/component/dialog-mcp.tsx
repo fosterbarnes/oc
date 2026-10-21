@@ -22,8 +22,9 @@ export function DialogMcp() {
   const local = useLocal()
   const sync = useSync()
   const sdk = useSDK()
+  const { theme } = useTheme()
   const [, setRef] = createSignal<DialogSelectRef<unknown>>()
-  const [loading, setLoading] = createSignal<string | null>(null)
+  const [loading, setLoading] = createSignal<ReadonlySet<string>>(new Set())
 
   const options = createMemo(() => {
     // Track sync data and loading state to trigger re-render when they change
@@ -38,7 +39,10 @@ export function DialogMcp() {
         value: name,
         title: name,
         description: status.status === "failed" ? "failed" : status.status,
-        footer: <Status enabled={local.mcp.isEnabled(name)} loading={loadingMcp === name} />,
+        footer: <Status enabled={local.mcp.isEnabled(name)} loading={loadingMcp.has(name)} />,
+        details: "error" in status ? [status.error] : undefined,
+        detailsColor: theme.error,
+        detailsWrap: true,
         category: undefined,
       })),
     )
@@ -49,12 +53,13 @@ export function DialogMcp() {
       command: "dialog.mcp.toggle",
       title: "toggle",
       onTrigger: async (option: DialogSelectOption<string>) => {
-        // Prevent toggling while an operation is already in progress
-        if (loading() !== null) return
+        // Each server toggles independently; ignore repeats while its own toggle runs
+        const name = option.value
+        if (loading().has(name)) return
 
-        setLoading(option.value)
+        setLoading((prev) => new Set(prev).add(name))
         try {
-          await local.mcp.toggle(option.value)
+          await local.mcp.toggle(name)
           // Refresh MCP status from server
           const status = await sdk.client.mcp.status()
           if (status.data) {
@@ -65,7 +70,11 @@ export function DialogMcp() {
         } catch (error) {
           console.error("Failed to toggle MCP:", error)
         } finally {
-          setLoading(null)
+          setLoading((prev) => {
+            const next = new Set(prev)
+            next.delete(name)
+            return next
+          })
         }
       },
     },
@@ -74,7 +83,7 @@ export function DialogMcp() {
   return (
     <DialogSelect
       ref={setRef}
-      title="MCPs"
+      title="MCP servers"
       options={options()}
       actions={actions()}
       onSelect={(_option) => {

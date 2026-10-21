@@ -81,6 +81,7 @@ export {
 } from "../theme"
 
 const THEME_REFRESH_DELAYS = [250, 1000] as const
+const SYSTEM_PALETTE_KEY = "system_theme_palette"
 // oc.exe and opencode.exe share kv.json but keep separate theme picks and defaults.
 const NATIVE_THEME_KEY = "theme_native"
 const NATIVE_DEFAULT_THEME = "opencode"
@@ -136,7 +137,9 @@ export const { use: useTheme, provider: ThemeProvider } = createSimpleContext({
 
     createEffect(() => {
       const theme = config.theme
-      if (theme) setStore("active", theme)
+      if (!theme) return
+      setStore("active", theme)
+      if (theme === "system") refreshSystemTheme()
     })
 
     // The daily pick never touches store.active or kv, so turning it off restores the saved theme.
@@ -173,14 +176,24 @@ export const { use: useTheme, provider: ThemeProvider } = createSimpleContext({
     }
 
     onMount(() => {
-      void Promise.allSettled([resolveSystemTheme(store.mode), syncCustomThemes()]).finally(() => {
+      // Terminal palette queries serialize with frame output. Use the mode fallback for the first paint;
+      // App asks for the system palette after that frame and updates the theme in place.
+      void syncCustomThemes().finally(() => {
         setStore("ready", true)
       })
     })
 
-    let systemThemeSignature: string | undefined
-    let systemThemeMode: "dark" | "light" | undefined
-    let hasResolvedSystemTheme = false
+    // Last probed palette, so `system` paints with real colors before the post-frame probe returns.
+    const cachedSystemPalette: TerminalColors | undefined = kv.get(SYSTEM_PALETTE_KEY)
+    let systemThemeSignature = cachedSystemPalette ? JSON.stringify(cachedSystemPalette) : undefined
+    let systemThemeMode = cachedSystemPalette
+      ? (store.lock ?? terminalMode(cachedSystemPalette) ?? store.mode)
+      : undefined
+    let hasResolvedSystemTheme = cachedSystemPalette !== undefined
+    if (cachedSystemPalette && systemThemeMode) {
+      if (store.active === "system" && store.mode !== systemThemeMode) setStore("mode", systemThemeMode)
+      setSystemTheme(generateSystem(cachedSystemPalette, systemThemeMode))
+    }
     function resolveSystemTheme(mode: "dark" | "light" = store.mode) {
       return renderer
         .getPalette({ size: 16 })
@@ -199,6 +212,7 @@ export const { use: useTheme, provider: ThemeProvider } = createSimpleContext({
           systemThemeSignature = signature
           systemThemeMode = next
           setSystemTheme(generateSystem(colors, next))
+          kv.set(SYSTEM_PALETTE_KEY, colors)
         })
         .catch(() => {
           if (hasResolvedSystemTheme) return
@@ -211,6 +225,7 @@ export const { use: useTheme, provider: ThemeProvider } = createSimpleContext({
     let systemRefreshQueued = false
     let systemRefreshMode = store.mode
     function refreshSystemTheme(mode: "dark" | "light" = store.mode) {
+      if (store.active !== "system") return
       systemRefreshMode = mode
       if (systemRefreshRunning) {
         systemRefreshQueued = true
@@ -325,8 +340,10 @@ export const { use: useTheme, provider: ThemeProvider } = createSimpleContext({
         setStore("active", theme)
         setStore("dailyPaused", true)
         kv.set(THEME_KEY, theme)
+        if (theme === "system") refreshSystemTheme()
         return true
       },
+      prepareSystem: () => refreshSystemTheme(),
       daily,
       resumeDaily: () => setStore("dailyPaused", false),
       // oc's palette sets opencode.exe's theme without previewing it here.

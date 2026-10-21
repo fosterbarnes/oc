@@ -81,6 +81,7 @@ export function DialogSessionList() {
   const tuiConfig = useTuiConfig()
   const [toDelete, setToDelete] = createSignal<string>()
   const [deleted, setDeleted] = createSignal(new Set<string>())
+  const [filter, setFilter] = createSignal("")
   const [search, setSearch] = createDebouncedSignal("", 150)
   const [status, setStatus] = createSignal<SessionStatusFilter>()
   const statusHint = useCommandShortcut("dialog.session.status.cycle")
@@ -100,10 +101,7 @@ export function DialogSessionList() {
     })
   }
 
-  async function toggleMark(
-    sessionID: string,
-    mark: "sessionComplete" | "sessionFailed" | "sessionInProgress",
-  ) {
+  async function toggleMark(sessionID: string, mark: "sessionComplete" | "sessionFailed" | "sessionInProgress") {
     const session = sessions().find((item) => item.id === sessionID)
     if (!session) return
     const result = await sdk.client.session.update({ sessionID, [mark]: !session[mark] })
@@ -172,6 +170,15 @@ export function DialogSessionList() {
         return true
       })
   })
+
+  const emptyMessage = createMemo(() => {
+    if (browseResponse.loading) return "Loading sessions…"
+    return status() ? "No matching sessions" : "No sessions available"
+  })
+  // The filter updates per keystroke; search() lags by the debounce, then the fetch runs.
+  const noMatchMessage = createMemo(() =>
+    filter() !== search() || searchResponse.loading ? "Searching sessions…" : "No matching sessions",
+  )
 
   onCleanup(
     event.on("session.deleted", (event) => {
@@ -318,7 +325,7 @@ export function DialogSessionList() {
       const gutter = awaitingInput(x.id, sync.data)
         ? () => <text fg={theme.warning}>?</text>
         : isWorking
-          ? () => <Spinner />
+          ? (color: RGBA) => <Spinner color={color} />
           : pinnedSet.has(x.id)
             ? () => <text fg={theme.accent}>◆</text>
             : undefined
@@ -410,14 +417,22 @@ export function DialogSessionList() {
       }
       emptyView={
         <box paddingLeft={4} paddingRight={4} paddingTop={1}>
-          <text fg={theme.textMuted}>No matching sessions</text>
+          <text fg={theme.textMuted}>{emptyMessage()}</text>
+        </box>
+      }
+      noMatchView={
+        <box paddingLeft={4} paddingRight={4} paddingTop={1}>
+          <text fg={theme.textMuted}>{noMatchMessage()}</text>
         </box>
       }
       options={options()}
       skipFilter={true}
       preserveSelection={true}
       current={currentSessionID()}
-      onFilter={setSearch}
+      onFilter={(query) => {
+        setFilter(query)
+        setSearch(query)
+      }}
       onMove={(option) => {
         setToDelete(undefined)
       }}

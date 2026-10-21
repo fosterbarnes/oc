@@ -86,7 +86,7 @@ type DialogMemory = { selection: DialogSelection; parent?: DialogMemory }
 function init() {
   const [store, setStore] = createStore({
     stack: [] as {
-      element: JSX.Element
+      element: () => JSX.Element
       onClose?: () => void
       // Set on drill-in dialogs: escape reopens the parent instead of closing
       back?: () => void
@@ -213,7 +213,11 @@ function init() {
       })
       refocus()
     },
-    replace(input: any, onClose?: () => void, options?: { back?: () => void; selection?: DialogSelection }) {
+    replace(
+      input: () => JSX.Element,
+      onClose?: () => void,
+      options?: { back?: () => void; selection?: DialogSelection },
+    ) {
       refocusEpoch++
       if (refocusTimer) {
         clearTimeout(refocusTimer)
@@ -285,7 +289,11 @@ export function DialogProvider(props: ParentProps) {
       >
         <Show when={value.stack.length}>
           <Dialog onClose={() => value.clear()} size={value.size}>
-            {value.stack.at(-1)!.element}
+            {/* Render each entry once: inserting the element function directly would re-run it, remounting
+                the dialog with fresh state, whenever a signal it reads at its root (e.g. a top-level <Show>) changes. */}
+            <Show when={value.stack.at(-1)} keyed>
+              {(item) => item.element()}
+            </Show>
           </Dialog>
         </Show>
       </box>

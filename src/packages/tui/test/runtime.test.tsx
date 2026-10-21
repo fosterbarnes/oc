@@ -6,7 +6,8 @@ import { TuiPathsProvider, useTuiPaths } from "../src/context/runtime"
 
 test("abbreviates paths within home boundaries", () => {
   expect(abbreviateHome("/home/test", "/home/test")).toBe("~")
-  expect(abbreviateHome("/home/test/project", "/home/test")).toBe("~" + path.sep + "project")
+  expect(abbreviateHome("/home/test/project", "/home/test")).toBe("~/project")
+  expect(abbreviateHome(path.join("/home/test", "a", "b"), "/home/test")).toBe("~/a/b")
   expect(abbreviateHome("/home/tester/project", "/home/test")).toBe("/home/tester/project")
   expect(abbreviateHome("/tmp/project", "/home/test")).toBe("/tmp/project")
 })

@@ -14,6 +14,7 @@ import {
   Switch,
   untrack,
   useContext,
+  type Accessor,
 } from "solid-js"
 import path from "node:path"
 import os from "node:os"
@@ -25,6 +26,7 @@ import { useEvent } from "../../context/event"
 import { SplitBorder } from "../../ui/border"
 import { useTuiPaths, useTuiTerminalEnvironment } from "../../context/runtime"
 import { Spinner } from "../../component/spinner"
+import { PatchDiff } from "../../component/patch-diff"
 import { createSyntaxStyleMemo, generateSubtleSyntax, selectedForeground, useTheme } from "../../context/theme"
 import { BoxRenderable, ScrollBoxRenderable, addDefaultParsers, MouseButton, TextAttributes, RGBA } from "@opentui/core"
 import { Prompt, type PromptRef } from "../../component/prompt"
@@ -61,7 +63,7 @@ import { filetype } from "../../util/filetype"
 import parsers from "../../parsers-config"
 import { errorMessage } from "../../util/error"
 import { createOcSessionCommands } from "./ocSessionCommands"
-import { Toast, useToast } from "../../ui/toast"
+import { useToast } from "../../ui/toast"
 import { useKV } from "../../context/kv.tsx"
 import stripAnsi from "strip-ansi"
 import { usePromptRef } from "../../context/prompt"
@@ -80,7 +82,7 @@ import { useArgs } from "../../context/args"
 import { useClipboard } from "../../context/clipboard"
 import { nextThinkingMode, reasoningSummary, useThinkingMode, type ThinkingMode } from "../../context/thinking"
 import { getScrollAcceleration } from "../../util/scroll"
-import { collapseToolOutput } from "../../util/collapse-tool-output"
+import { collapseShellOutput, collapseToolOutput } from "../../util/collapse-tool-output"
 import { usePluginRuntime } from "../../plugin/runtime"
 import { DialogRetryAction } from "../../component/dialog-retry-action"
 import { getRevertDiffFiles } from "../../util/revert-diff"
@@ -98,6 +100,7 @@ import { openSessionTab, unavailable as tabUnavailable } from "../../util/sessio
 import { detectTerminal } from "@opencode-ai/core/util/terminal"
 import { contextUsage } from "../../util/contextUsage"
 import { subagentFeed } from "../../util/subagentFeed"
+import { sessionDescendants } from "../../util/session"
 
 addDefaultParsers(parsers.parsers)
 
@@ -261,10 +264,13 @@ export function Session() {
         )
       : [],
   )
-  const permissions = createMemo(() => {
-    if (session()?.parentID) return []
-    return children().flatMap((x) => sync.data.permission[x.id] ?? [])
-  })
+  // Requests from this session and every subagent below it, so nested subagents are never stuck
+  // waiting on a prompt nobody sees.
+  const permissions = createMemo(() =>
+    [route.sessionID, ...sessionDescendants(sync.data.session, route.sessionID).map((x) => x.id)].flatMap(
+      (id) => sync.data.permission[id] ?? [],
+    ),
+  )
   const questions = createMemo(() => sync.session.questions(route.sessionID))
   const visible = createMemo(() => !session()?.parentID && permissions().length === 0 && questions().length === 0)
   const disabled = createMemo(() => permissions().length > 0 || questions().length > 0)
@@ -315,6 +321,9 @@ export function Session() {
   const toast = useToast()
   const sdk = useSDK()
   const editor = useEditorContext()
+  // The synced store holds only the latest 100 messages; a transcript needs the whole session.
+  const transcriptMessages = (sessionID: string) =>
+    sdk.client.session.messages({ sessionID }, { throwOnError: true }).then((result) => result.data)
 
   // The old build writes the revive mark before it exits. While the mark is still the newest
   // message (not yet sent to the agent), restamp it with this build's versions.
@@ -360,8 +369,10 @@ export function Session() {
     )
   }
 
+  const [synced, setSynced] = createSignal(false)
   createEffect(() => {
     const sessionID = route.sessionID
+    setSynced(false)
     // A load superseded by another session or by unmount must not change workspace, editor, or route.
     const load = { cancelled: false }
     onCleanup(() => {
@@ -395,7 +406,9 @@ export function Session() {
       }
       editor.reconnect(result.data.directory)
       await sync.session.sync(sessionID)
-      if (!load.cancelled && scroll) scroll.scrollBy(100_000)
+      if (load.cancelled) return
+      if (scroll) scroll.scrollBy(100_000)
+      setSynced(true)
     })().catch((error) => {
       if (load.cancelled) return
       toast.show({
@@ -427,12 +440,12 @@ export function Session() {
   let seeded = false
   let scroll: ScrollBoxRenderable
   let scrollFrame: BoxRenderable
-  let prompt: PromptRef | undefined
+  const [prompt, setPrompt] = createSignal<PromptRef>()
   let toBottomTimer: ReturnType<typeof setTimeout> | undefined
   const bind = (r: PromptRef | undefined) => {
     // guarded in-tree prompt focus: ignore destroyed refs
     if (r && (r as unknown as { isDestroyed?: boolean }).isDestroyed) return
-    prompt = r
+    setPrompt(r)
     promptRef.set(r)
     // no prompt replay: only seed initial route prompt once
     if (seeded || !route.prompt || !r) return
@@ -552,6 +565,17 @@ export function Session() {
 
   const local = useLocal()
 
+  // `--prompt` with -s, -c or --fork rides in as the route prompt; submit it once after sync.
+  let sent = false
+  createEffect(() => {
+    const current = prompt()
+    if (sent || !current || !synced() || !local.model.ready || !local.agent.ready) return
+    if (!local.agent.current() || !local.model.current()) return
+    if (!args.prompt || route.prompt?.input !== args.prompt || current.current.input !== args.prompt) return
+    sent = true
+    current.submit()
+  })
+
   function enterChild(sessionID: string) {
     navigate({
       type: "session",
@@ -665,7 +689,7 @@ export function Session() {
               if (child) scroll.scrollBy(child.y - scroll.y - 1)
             }}
             sessionID={route.sessionID}
-            setPrompt={(promptInfo) => prompt?.set(promptInfo)}
+            setPrompt={(promptInfo) => prompt()?.set(promptInfo)}
           />
         ))
       },
@@ -738,7 +762,7 @@ export function Session() {
           .then(() => {
             toBottom()
           })
-        prompt?.set(promptFromParts(sync.data.part[message.id] ?? []))
+        prompt()?.set(promptFromParts(sync.data.part[message.id] ?? []))
         dialog.clear()
       },
     },
@@ -759,7 +783,7 @@ export function Session() {
           void sdk.client.session.unrevert({
             sessionID: route.sessionID,
           })
-          prompt?.set({ input: "", parts: [] })
+          prompt()?.set({ input: "", parts: [] })
           return
         }
         void sdk.client.session.revert({
@@ -1019,17 +1043,12 @@ export function Session() {
         try {
           const sessionData = session()
           if (!sessionData) return
-          const sessionMessages = messages()
-          const transcript = formatTranscript(
-            sessionData,
-            sessionMessages.map((msg) => ({ info: msg, parts: sync.data.part[msg.id] ?? [] })),
-            {
-              thinking: true,
-              toolDetails: showDetails(),
-              assistantMetadata: showAssistantMetadata(),
-              providers: sync.data.provider,
-            },
-          )
+          const transcript = formatTranscript(sessionData, await transcriptMessages(sessionData.id), {
+            thinking: true,
+            toolDetails: showDetails(),
+            assistantMetadata: showAssistantMetadata(),
+            providers: sync.data.provider,
+          })
           await clipboard.write?.(transcript)
           toast.show({ message: "Session transcript copied to clipboard!", variant: "success" })
         } catch {
@@ -1061,7 +1080,6 @@ export function Session() {
         try {
           const sessionData = session()
           if (!sessionData) return
-          const sessionMessages = messages()
 
           const defaultFilename = `session-${sessionData.id.slice(0, 8)}.md`
 
@@ -1076,18 +1094,17 @@ export function Session() {
 
           if (options === null) return
 
-          const transcript = formatTranscript(
-            sessionData,
-            sessionMessages.map((msg) => ({ info: msg, parts: sync.data.part[msg.id] ?? [] })),
-            {
-              thinking: options.thinking,
-              toolDetails: options.toolDetails,
-              assistantMetadata: options.assistantMetadata,
-              providers: sync.data.provider,
-            },
-          )
+          const transcript = formatTranscript(sessionData, await transcriptMessages(sessionData.id), {
+            thinking: options.thinking,
+            toolDetails: options.toolDetails,
+            assistantMetadata: options.assistantMetadata,
+            providers: sync.data.provider,
+          })
 
-          if (options.openWithoutSaving) {
+          // openEditor returns undefined without an editor, which would leave this option silent.
+          if (options.openWithoutSaving && !process.env.VISUAL && !process.env.EDITOR) {
+            toast.show({ message: "Set $VISUAL or $EDITOR to open an external editor", variant: "error" })
+          } else if (options.openWithoutSaving) {
             // Just open in editor without saving
             await openEditor({
               renderer,
@@ -1376,7 +1393,7 @@ export function Session() {
                                 <text
                                   selectable={false}
                                   fg={theme.textMuted}
-                                >{`${revert()!.reverted.length} message reverted`}</text>
+                                >{`${revert()!.reverted.length} ${revert()!.reverted.length === 1 ? "message" : "messages"} reverted`}</text>
                                 <text selectable={false} fg={theme.textMuted}>
                                   <span style={{ fg: theme.text }}>{redoShortcut()}</span> or /redo to restore
                                 </text>
@@ -1415,7 +1432,7 @@ export function Session() {
                               <DialogMessage
                                 messageID={message.id}
                                 sessionID={route.sessionID}
-                                setPrompt={(promptInfo) => prompt?.set(promptInfo)}
+                                setPrompt={(promptInfo) => prompt()?.set(promptInfo)}
                                 waiting={
                                   pending() !== undefined &&
                                   index() > pending()! &&
@@ -1519,7 +1536,6 @@ export function Session() {
                 </Show>
               </box>
             </Show>
-            <Toast />
           </box>
           <Show when={sidebarVisible() && !sidebarLeading()}>
             <Switch>
@@ -1996,7 +2012,7 @@ function TextPart(props: { last: boolean; part: TextPart; message: AssistantMess
           streaming={streaming()}
           internalBlockMode="top-level"
           content={shown()}
-          tableOptions={{ style: "grid" }}
+          tableOptions={{ style: "grid", cellPaddingX: 1 }}
           conceal={ctx.conceal()}
           fg={theme.markdownText}
           bg={theme.background}
@@ -2336,6 +2352,7 @@ function BlockTool(props: {
         blocks?.set(el, () => (props.spinner ? props.title?.replace(/^# /, "") : props.title))
       }}
       border={["left"]}
+      flexShrink={0}
       paddingTop={1}
       paddingBottom={1}
       paddingLeft={2}
@@ -2383,12 +2400,15 @@ function Shell(props: ToolProps) {
   const output = createMemo(() => stripAnsi(stringValue(props.metadata.output)?.trim() ?? ""))
   const [expanded, setExpanded] = createSignal(false)
   const maxLines = 10
-  const maxChars = createMemo(() => maxLines * Math.max(20, ctx.width - 6))
-  const collapsed = createMemo(() => collapseToolOutput(output(), maxLines, maxChars()))
-  const limited = createMemo(() => {
-    if (expanded() || !collapsed().overflow) return output()
-    return collapsed().output
+  // The spinner takes two columns from the command row while running.
+  const maxChars = createMemo(() => maxLines * Math.max(20, ctx.width - 6 - (isRunning() ? 2 : 0)))
+  const command = createMemo(() => {
+    const value = stringValue(props.input.command) ?? ""
+    return isRunning() ? value : `$ ${value}`
   })
+  const collapsed = createMemo(() => collapseShellOutput(command(), output(), maxLines, maxChars()))
+  const limitedInput = createMemo(() => (expanded() ? command() : collapsed().input))
+  const limitedOutput = createMemo(() => (expanded() ? output() : collapsed().output))
 
   const workdirDisplay = createMemo(() => {
     const workdir = stringValue(props.input.workdir)
@@ -2416,14 +2436,32 @@ function Shell(props: ToolProps) {
       <Match when={stringValue(props.metadata.output) !== undefined}>
         <BlockTool title={title()} part={props.part}>
           <box gap={1}>
-            <Show when={isRunning()} fallback={<text fg={theme.text}>$ {stringValue(props.input.command)}</text>}>
-              <Spinner color={theme.text}>{stringValue(props.input.command)}</Spinner>
+            <Show
+              when={isRunning()}
+              fallback={
+                <text fg={theme.text} wrapMode={expanded() ? "word" : "char"} maxHeight={expanded() ? undefined : 2}>
+                  {limitedInput()}
+                </text>
+              }
+            >
+              <box flexDirection="row" gap={1}>
+                <Spinner color={theme.text} />
+                <text
+                  fg={theme.text}
+                  wrapMode={expanded() ? "word" : "char"}
+                  maxHeight={expanded() ? undefined : 2}
+                  flexGrow={1}
+                  minWidth={0}
+                >
+                  {limitedInput()}
+                </text>
+              </box>
             </Show>
             <Show when={job()}>
               <text fg={theme.textMuted}>{job()}</text>
             </Show>
-            <Show when={output()}>
-              <text fg={theme.text}>{limited()}</text>
+            <Show when={limitedOutput()}>
+              <text fg={theme.text}>{limitedOutput()}</text>
             </Show>
             <Show when={collapsed().overflow}>
               <text
@@ -2649,14 +2687,19 @@ function Task(props: ToolProps) {
     return assistant - first
   })
 
+  // `task_id` resumes an earlier child session; its row reads as a continuation of that task.
+  const continuation = createMemo(() => Boolean(stringValue(props.input.task_id)))
+
   const header = createMemo(() => {
     const description = stringValue(props.input.description)
     if (!description) return ""
-    const title = formatSubagentTitle(
-      Locale.titlecase(stringValue(props.input.subagent_type) ?? "General"),
-      description,
-      props.metadata.background === true,
-    )
+    const title =
+      (continuation() ? "Continue " : "") +
+      formatSubagentTitle(
+        Locale.titlecase(stringValue(props.input.subagent_type) ?? "General"),
+        description,
+        props.metadata.background === true,
+      )
     const model = formatSubagentModel(
       props.metadata.model as { providerID: string; modelID: string } | undefined,
       stringValue(props.metadata.variant),
@@ -2687,7 +2730,8 @@ function Task(props: ToolProps) {
       } else content.push(`↳ ${formatSubagentToolcalls(tools().length)}`)
     }
 
-    if (!isRunning() && props.part.state.status === "completed") {
+    // Child-session totals span every earlier run, so a continuation row stays a single line.
+    if (!isRunning() && props.part.state.status === "completed" && !continuation()) {
       content.push(`↳ ${formatCompletedSubagentDetail(tools().length, Locale.duration(duration()))}`)
     }
 
@@ -2707,7 +2751,7 @@ function Task(props: ToolProps) {
       when={cardRows()}
       fallback={
         <InlineTool
-          icon={props.part.state.status === "completed" ? "✓" : "│"}
+          icon={continuation() && !isRunning() ? "↳" : props.part.state.status === "completed" ? "✓" : "│"}
           separate={true}
           color={retry() ? theme.error : undefined}
           spinner={isRunning()}
@@ -2783,6 +2827,58 @@ function executeCalls(value: unknown): ExecuteCall[] {
   })
 }
 
+export function executeCallSummary(call: ExecuteCall) {
+  const args = input(call.input ?? {}).replace(/\s+/g, " ")
+  return `↳ ${call.tool}${call.status === "error" ? " (failed)" : ""}${args ? ` ${args}` : ""}`
+}
+
+// One row per child call; click expands the full input.
+function ExecuteCallView(props: { call: Accessor<ExecuteCall> }) {
+  const { theme } = useTheme()
+  const renderer = useRenderer()
+  const [expanded, setExpanded] = createSignal(false)
+  const [hover, setHover] = createSignal(false)
+  const entries = createMemo(() => Object.entries(props.call().input ?? {}))
+  const expandable = createMemo(() => entries().length > 0)
+  const title = createMemo(() => `↳ ${props.call().tool}${props.call().status === "error" ? " (failed)" : ""}`)
+
+  return (
+    <box
+      paddingLeft={3 + INLINE_TOOL_ICON_WIDTH}
+      onMouseOver={() => expandable() && setHover(true)}
+      onMouseOut={() => setHover(false)}
+      onMouseUp={() => {
+        if (!expandable() || renderer.getSelection()?.getSelectedText()) return
+        setExpanded((value) => !value)
+      }}
+    >
+      <text
+        wrapMode="none"
+        truncate
+        fg={props.call().status === "error" ? theme.error : hover() ? theme.text : theme.textMuted}
+      >
+        {expanded() ? title() : executeCallSummary(props.call())}
+      </text>
+      <Show when={expanded()}>
+        <box paddingLeft={2}>
+          <For each={entries()}>
+            {([key, value]) => (
+              <box flexDirection="row">
+                <text flexShrink={0} fg={theme.textMuted}>
+                  {key}:{" "}
+                </text>
+                <text flexGrow={1} wrapMode="word" fg={theme.text}>
+                  {typeof value === "string" ? value : JSON.stringify(value, null, 2)}
+                </text>
+              </box>
+            )}
+          </For>
+        </box>
+      </Show>
+    </box>
+  )
+}
+
 // The `execute` tool streams child tool calls through metadata, not a child session like Task.
 function Execute(props: ToolProps) {
   const ctx = use()
@@ -2793,14 +2889,6 @@ function Execute(props: ToolProps) {
   const hasRuntimeError = createMemo(() => props.metadata.error === true || props.part.state.status === "error")
   const outputPreview = createMemo(() => collapseToolOutput(output(), 4, 4 * Math.max(20, ctx.width - 6)).output)
   const showOutput = createMemo(() => output() && hasRuntimeError())
-  const content = createMemo(() => {
-    const lines = ["execute"]
-    for (const call of calls()) {
-      const args = input(call.input ?? {})
-      lines.push(`↳ ${call.tool}${args ? ` ${args}` : ""}${call.status === "error" ? " (failed)" : ""}`)
-    }
-    return lines.join("\n")
-  })
 
   return (
     <>
@@ -2812,8 +2900,9 @@ function Execute(props: ToolProps) {
         complete={true}
         part={props.part}
       >
-        {content()}
+        execute
       </InlineTool>
+      <Index each={calls()}>{(call) => <ExecuteCallView call={call} />}</Index>
       <Show when={showOutput()}>
         <box paddingLeft={3}>
           <For each={outputPreview().split("\n")}>
@@ -2862,8 +2951,10 @@ function Edit(props: ToolProps) {
             >
               Open file
             </text>
-            <diff
+            <PatchDiff
               diff={diffContent()}
+              hunkFg={theme.diffHunkHeader}
+              lineNumberBg="transparent"
               view={view()}
               filetype={ft()}
               syntaxStyle={syntax()}
@@ -2917,8 +3008,10 @@ function ApplyPatch(props: ToolProps) {
   function Diff(p: { diff: string; filePath: string }) {
     return (
       <box paddingLeft={1}>
-        <diff
+        <PatchDiff
           diff={p.diff}
+          hunkFg={theme.diffHunkHeader}
+          lineNumberBg="transparent"
           view={view()}
           filetype={filetype(p.filePath)}
           syntaxStyle={syntax()}

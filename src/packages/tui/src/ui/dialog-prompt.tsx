@@ -14,6 +14,8 @@ export type DialogPromptProps = {
   numeric?: { min: number; max: number; step: number }
   busy?: boolean
   busyText?: string
+  // Three wrapped rows for prompt-length text; otherwise a single unwrapped row.
+  multiline?: boolean
   onConfirm?: (value: string) => void
   onCancel?: () => void
   onContentChange?: (value: string) => void
@@ -132,7 +134,8 @@ export function DialogPrompt(props: DialogPromptProps) {
       <box gap={1}>
         {props.description?.()}
         <textarea
-          height={3}
+          height={props.multiline ? 3 : 1}
+          wrapMode={props.multiline ? "word" : "none"}
           ref={(val: TextareaRenderable) => {
             textarea = val
             setTextareaTarget(val)

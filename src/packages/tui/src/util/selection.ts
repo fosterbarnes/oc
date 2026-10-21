@@ -35,6 +35,7 @@ type Renderer = {
 
 type SelectionKeyEvent = {
   ctrl?: boolean
+  baseCode?: number
   name: string
   preventDefault: () => void
   stopPropagation: () => void
@@ -101,7 +102,8 @@ export function handleSelectionKey(
     return
   }
 
-  if (event.ctrl && event.name === "c") {
+  // Kitty can report a non-Latin key name with a Latin base-layout C.
+  if (event.ctrl && (event.name === "c" || event.baseCode === 99 || event.baseCode === 67)) {
     copy(renderer, toast, clipboard)
 
     event.preventDefault()

@@ -325,6 +325,7 @@ export function DialogMoveSession(props: DialogMoveSessionProps) {
                 {
                   command: "dialog.move_session.new",
                   title: "new",
+                  selection: "none",
                   onTrigger: () => props.onSelect({ type: "new" }),
                 },
                 {
@@ -340,6 +341,7 @@ export function DialogMoveSession(props: DialogMoveSessionProps) {
                 {
                   command: "dialog.move_session.refresh",
                   title: "refresh",
+                  selection: "none",
                   onTrigger: () => void refetch(),
                 },
               ]

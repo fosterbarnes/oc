@@ -5,7 +5,7 @@ import { useTheme } from "../../context/theme"
 import { SplitBorder } from "../../ui/border"
 import { contextUsage } from "../../util/contextUsage"
 import { Locale } from "../../util/locale"
-import { subagentLabel } from "../../util/session"
+import { sessionCost, subagentLabel } from "../../util/session"
 import { useTerminalDimensions } from "@opentui/solid"
 import { useCommandShortcut, useOpencodeKeymap } from "../../keymap"
 
@@ -31,9 +31,9 @@ export function SubagentFooter() {
   })
 
   const usage = createMemo(() => {
-    const context = contextUsage(messages(), sync.data.provider)
+    const context = contextUsage(messages(), sync.data.provider, session()?.revert?.messageID)
     if (!context) return
-    const cost = session()?.cost ?? 0
+    const cost = sessionCost(session(), (id) => sync.data.session.filter((item) => item.parentID === id))
 
     const money = new Intl.NumberFormat("en-US", {
       style: "currency",
