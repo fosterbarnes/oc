@@ -55,6 +55,14 @@ loop; the OpenCode 2 execution engine itself is not brought back.
 | Skill `disable-model-invocation` frontmatter | 0.3.0 | Claude Code already honors it; oc's own skill list does not yet. |
 | Replace the sidebar Plugins section with a load-failure toast | 0.3.0 | `/plugins` already lists plugins. |
 | Repeating scheduled prompts | 0.2.213 | A repeat interval on `session_queue` rows (schema change and migration). Until then a scheduled prompt re-arms itself. |
+| Native-runtime provider features (Bedrock Mantle Messages, Anthropic `between_tools`, cache kept across effort switches, Responses WebSocket, Google Interactions, provider-side compaction, tool namespaces, request tuning) | v0.2.271 | Upstream builds them in its native `ai` runtime; oc runs the AI SDK path. Revisit per feature when a model needs it. |
+| ACP updates (compaction reports, model/agent sync, ACP on OpenCode 2) | v0.2.271 | ACP is not an oc focus; revisit on demand. |
+| More plugin hooks and plugin storage (model request, prompt interception, title/compaction, shell create, session retry, durable storage, live package updates, git packages) | v0.2.271 | A plugin that needs them; oc's v1 hooks cover current use. |
+| MCP elicitation, MCP resources as model tools, MCP auth rework | v0.2.271 | Elicitation would route to oc's question dialog; waits on a server that uses it. |
+| Session navigation (projects + sessions open menu, paged history loading, `--session` creating a missing id, attach skills to prompts, per-tab drafts, `cd`-style path autocomplete, session export revamp, jump to background tool starts, session warming, turn diff route) | v0.2.271 | Fits after the current session list and transcript work settles. |
+| Usage and permission views (compaction/title usage in totals, per-turn tokens and throughput, edit saved permissions, portable shell permission scanner) | v0.2.271 | Needs oc-side design for the sidebar and permission store. |
+| Periodic update check with idle apply, auth export/import, Poe OAuth, background service env config | v0.2.271 | oc's update and auth flows come first; installs stay user-driven. |
+| TUI look and config (OpenCode 2 theme format, new dialog designs, question form refinements, per-session terminal env, hot-reload local TUI plugins, webfetch markdown renderer) | v0.2.271 | Must fit oc's theme rules and existing dialogs. |
 
 ## Retired oc features
 

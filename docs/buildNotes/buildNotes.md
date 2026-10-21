@@ -169,6 +169,24 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-20 (~23:43) - v0.2.271 shlangingCosmos - upstream 1.19 port stage 9: closeout (sync baseline, SCOPE later rows) - Claude Opus 5.5; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; orchestrator, no workers; Implementation; Stage 9 of `~/.config/opencode/plans/upstream119/implementation.md` completed; upstream 1.19 port done
+- Version: 0.2.271 shlangingCosmos
+- Updated `.scripts/upstream-sync.state.json` `baselineSha` `abce98e0eb` -> `a1f604bbe0` (upstream v1 = v1.19.3), `updatedAt`. Dev fixes/features swept through upstream `dev` `db45c950a9` (window: not reachable from `8d05153965`), ported in v0.2.264-v0.2.270.
+- Added 8 grouped "Planned for later" rows to `SCOPE.md` covering every feature the sweep or user marked later (native-runtime provider features, ACP, plugin hooks/storage, MCP elicitation/resources/auth, session navigation incl. paged history `3b8949b1ee`, usage/permission views, update/auth items, TUI look/config); items already covered by existing rows not duplicated.
+- Removed: `~/.config/opencode/plans/upstream119/impl/*.progress.md`.
+- Not ported (decided): `6e55ddd078`, `f112a73c06` (B1, reverted v0.2.266), `0762d63b6a`, `9b4882db54`, `50a1add183`, `5438dfb751`, `c85b09de6f`, codemode/llm package fixes (Stage 6 skipped), TUI 21 (no notice renderer).
+- TODO: B3 default context for limitless custom models (discovery); AI 28 refusals (AI SDK drops refusal deltas); L1 `cb863b8ea5` live check; Bun upgrade to upstream's version (with `1e4e9c5d85`); fix oc `task` false-failure on a recovered tool error; core `provider-google-vertex.test.ts` import-order failure.
+- Verification: docs/state only; no tests needed.
+
+### User
+Upstream sync
+- oc is now synced through OpenCode v1.19.3 plus the OpenCode 2 fixes and the features you picked; the features left for later are listed in SCOPE.md.
+
+---
+
 ## 2026-10-20 (~23:10) - v0.2.270 houndevatorsMisty - upstream 1.19 port stage 8: CLI and TUI features - Claude Opus 5.5 (orchestrator) + Opus 5.5 high/medium workers; Implementation
 
 ### Agent
