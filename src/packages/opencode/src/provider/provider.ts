@@ -143,23 +143,25 @@ function timeoutFetch(options: Record<string, any>) {
   }
 }
 
-type Quirks = NonNullable<ReturnType<typeof openAICompatibleQuirks>>
+type Quirks = NonNullable<ReturnType<typeof openAIWireQuirks>>
 
-// Model `compatibility` settings that need wire rewrites: @ai-sdk/openai-compatible only sends
-// `max_tokens`, only reads streamed reasoning from `reasoning_content`/`reasoning`, and accepts a
-// stream that ends without a finish_reason.
-function openAICompatibleQuirks(model: Model) {
-  if (!model.api.npm.includes("@ai-sdk/openai-compatible")) return
+// Wire rewrites for OpenAI-shaped SDKs. None of them stream refusals (`response.refusal.delta`,
+// chat `delta.refusal`), so a refusal would show as an empty reply. Model `compatibility` settings
+// add @ai-sdk/openai-compatible quirks: it only sends `max_tokens`, only reads streamed reasoning
+// from `reasoning_content`/`reasoning`, and accepts a stream that ends without a finish_reason.
+function openAIWireQuirks(model: Model) {
+  const compatible = model.api.npm.includes("@ai-sdk/openai-compatible")
+  if (!compatible && model.api.npm !== "@ai-sdk/openai" && model.api.npm !== "@ai-sdk/azure") return
   const field = typeof model.capabilities.interleaved === "object" ? model.capabilities.interleaved.field : undefined
-  const quirks = {
-    renameMaxTokens: model.compatibility?.maxTokensField === "max_completion_tokens",
+  return {
+    renameMaxTokens: compatible && model.compatibility?.maxTokensField === "max_completion_tokens",
     // `reasoning_details` is structured, not text, so it never moves to `reasoning_content`.
     reasoningField:
-      field && !["reasoning", "reasoning_content", "reasoning_details"].includes(field) ? field : undefined,
-    requireFinishReason: model.compatibility?.requireFinishReason === true,
+      compatible && field && !["reasoning", "reasoning_content", "reasoning_details"].includes(field)
+        ? field
+        : undefined,
+    requireFinishReason: compatible && model.compatibility?.requireFinishReason === true,
   }
-  if (!quirks.renameMaxTokens && !quirks.reasoningField && !quirks.requireFinishReason) return
-  return quirks
 }
 
 const decodeJson = Schema.decodeUnknownOption(Schema.UnknownFromJsonString)
@@ -167,7 +169,6 @@ const decodeJson = Schema.decodeUnknownOption(Schema.UnknownFromJsonString)
 function compatibilityFetch(fetchFn: ReturnType<typeof timeoutFetch>, quirks: Quirks) {
   return async (input: any, init?: BunFetchRequestInit) => {
     const res = await fetchFn(input, quirks.renameMaxTokens ? renameMaxTokens(init) : init)
-    if (!quirks.reasoningField && !quirks.requireFinishReason) return res
     if (!res.body || !res.headers.get("content-type")?.includes("text/event-stream")) return res
     return new Response(res.body.pipeThrough(compatibilityStream(quirks)), res)
   }
@@ -179,24 +180,22 @@ function renameMaxTokens(init?: BunFetchRequestInit) {
   return { ...init, body: JSON.stringify({ ...omit(body, ["max_tokens"]), max_completion_tokens: body.max_tokens }) }
 }
 
-// Rewrites SSE `data:` lines: moves a custom reasoning field to `reasoning_content`, and fails the
-// stream at EOF when a finish_reason is required but no chunk carried one.
+// Rewrites SSE `data:` lines (see `rewriteChunk`), and fails the stream at EOF when a
+// finish_reason is required but no chunk carried one.
 function compatibilityStream(quirks: Quirks) {
   const decoder = new TextDecoder()
   const encoder = new TextEncoder()
   const state = { buffer: "", finished: false }
+  const field = quirks.reasoningField
   const rewrite = (line: string) => {
     if (!line.startsWith("data:")) return line
     if (/"finish_reason"\s*:\s*"/.test(line)) state.finished = true
-    const field = quirks.reasoningField
-    if (!field || !line.includes(`"${field}"`)) return line
+    // OpenAI chat chunks carry `"refusal":null`; only a string value or a refusal event needs parsing.
+    const refusal = /"refusal"\s*:\s*"|"response\.refusal\.delta"/.test(line)
+    if (!refusal && !(field && line.includes(`"${field}"`))) return line
     const chunk = Option.getOrUndefined(decodeJson(line.slice(5).trim()))
-    if (!isRecord(chunk) || !Array.isArray(chunk.choices)) return line
-    const choices = chunk.choices.map((choice) => {
-      if (!isRecord(choice) || !isRecord(choice.delta) || typeof choice.delta[field] !== "string") return choice
-      return { ...choice, delta: { ...omit(choice.delta, [field]), reasoning_content: choice.delta[field] } }
-    })
-    return `data: ${JSON.stringify({ ...chunk, choices })}`
+    if (!isRecord(chunk)) return line
+    return `data: ${JSON.stringify(rewriteChunk(chunk, field))}`
   }
   return new TransformStream<Uint8Array, Uint8Array>({
     transform(bytes, ctrl) {
@@ -211,6 +210,28 @@ function compatibilityStream(quirks: Quirks) {
         ctrl.error(new ProviderError.ResponseStreamError("OpenAI-compatible stream ended without finish_reason"))
     },
   })
+}
+
+// Responses refusal deltas become text deltas (the message item already opens and closes the text
+// part); a chat `delta.refusal` becomes `delta.content`; a custom reasoning field moves to
+// `reasoning_content`.
+function rewriteChunk(chunk: Record<string, unknown>, reasoningField: string | undefined) {
+  if (chunk.type === "response.refusal.delta") return { ...chunk, type: "response.output_text.delta" }
+  if (!Array.isArray(chunk.choices)) return chunk
+  const choices = chunk.choices.map((choice) => {
+    if (!isRecord(choice) || !isRecord(choice.delta)) return choice
+    const source = choice.delta
+    const reasoned =
+      reasoningField && typeof source[reasoningField] === "string"
+        ? { ...omit(source, [reasoningField]), reasoning_content: source[reasoningField] }
+        : source
+    const delta =
+      typeof reasoned.refusal === "string" && !reasoned.content
+        ? { ...omit(reasoned, ["refusal"]), content: reasoned.refusal }
+        : reasoned
+    return { ...choice, delta }
+  })
+  return { ...chunk, choices }
 }
 
 function googleVertexAnthropicBaseURL(project: string | undefined, location: string | undefined) {
@@ -1986,7 +2007,7 @@ const layer = Layer.effect(
             ...model.headers,
           }
 
-        const compatibility = openAICompatibleQuirks(model)
+        const compatibility = openAIWireQuirks(model)
         const key = Hash.fast(
           JSON.stringify({
             providerID: model.providerID,

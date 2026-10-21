@@ -27,11 +27,11 @@ Counts below are for **active** rows only. Retired work is listed separately and
 | Level | Count |
 |---|---:|
 | ~done~ | 16 |
-| high | 57 |
-| medium | 20 |
-| low | 1 |
+| high | 61 |
+| medium | 32 |
+| low | 8 |
 | CRITICAL | 0 |
-| **Total** | **94** |
+| **Total** | **117** |
 
 ---
 
@@ -66,7 +66,7 @@ Use Claude Code or Cursor from OpenCode without treating them as ordinary API-on
 | Update PowerShell from the palette (Windows) | high | Palette heading **Third party updates** entry **Update PowerShell** (Windows only, also in **Update all**) checks `aka.ms/pwsh-buildinfo-stable` against the machine-wide MSI install in `Program Files\PowerShell\7`, confirms first unless **Auto confirm updates** is on, then downloads only that confirmed version's GitHub MSI (final host allowlisted, Authenticode Valid plus Microsoft signer pin) and runs an elevated silent `msiexec` (UAC prompt) with `MSIRESTARTMANAGERCONTROL=DisableShutdown` so running pwsh shells, oc's parent included, are never closed. The MSI restores its saved install options itself. Exit 3010 reports "restart Windows to finish". Refuses 7.7+ (no MSI from Microsoft) and non-MSI installs ("not installed"). | Live check after a rebuild: oc survives, new pwsh windows start cleanly before and after reboot. |
 | Third party update progress and auto confirm | medium | Every **Third party updates** entry and **Update all** show one live toast with a line per item: waiting, checking, awaiting confirm, updating (CLI's latest output line), downloading with percent and MB, verifying, installing with elapsed seconds, then the result. Desktop and PowerShell downloads stream through HttpClient and check the final download host before the file arrives. Progress redraws stay out of `/notices`; the result or summary is logged. **Auto confirm updates** (`auto_confirm_updates` in `tui.json`, off by default) skips the confirm dialog for single entries and **Update all**, so Claude Desktop, Cursor, and ChatGPT can close without asking; PowerShell's UAC prompt still appears. | Live check after a rebuild with an update pending; install step shows elapsed time only (installers report no percent). |
 | Output limits fit the context window | high | Upstream's native output sizing on oc's AI SDK path: `maxOutputTokens` is the model's `limit.output` up to 256k (32k when unknown), shrunk to what fits after the estimated prompt (`transform.ts` `OUTPUT_TOKEN_MAX`, `request.ts`); thinking budgets and the compaction reserve stay at 32k. A reply that finishes with `length` gets a hidden continue prompt, up to twice in a row (`prompt.ts` `OUTPUT_LIMIT_CONTINUE_MAX`); Claude Code and Cursor run their own turns and are skipped. | Fake-model tests pass; no live long-reply check on an API provider. |
-| OpenAI-compatible model quirks | high | Model `compatibility` (`reasoningField`, `maxTokensField`, `requireFinishReason`, from upstream's native `packages/ai`) for `@ai-sdk/openai-compatible` models. `reasoningField` sets `capabilities.interleaved.field` for replay; `compatibilityFetch` in `provider.ts` renames `max_tokens`, moves a custom streamed reasoning field to `reasoning_content`, and fails a stream with no `finish_reason` when required (retryable). oc's default stays lenient, unlike upstream's strict default. Documented on the wiki Configuration page. | Fake-server tests pass; no live local-model check. |
+| OpenAI-compatible model quirks | high | Model `compatibility` (`reasoningField`, `maxTokensField`, `requireFinishReason`, from upstream's native `packages/ai`) for `@ai-sdk/openai-compatible` models. `reasoningField` sets `capabilities.interleaved.field` for replay; `compatibilityFetch` in `provider.ts` renames `max_tokens`, moves a custom streamed reasoning field to `reasoning_content`, and fails a stream with no `finish_reason` when required (retryable). oc's default stays lenient, unlike upstream's strict default. Documented on the wiki Configuration page. The same wrapper shows streamed refusals as reply text for `@ai-sdk/openai`, `@ai-sdk/azure`, and `@ai-sdk/openai-compatible` (Responses `response.refusal.delta`, chat `delta.refusal`), which the AI SDK drops. | Fake-server tests pass; no live local-model or live refusal check. Non-streamed refusals are still dropped. |
 
 ---
 

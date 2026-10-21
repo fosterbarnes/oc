@@ -53,7 +53,6 @@ loop; the OpenCode 2 execution engine itself is not brought back.
 | Diff viewer and review scopes | 0.3.0 | Upstream builds it on OpenCode 2 session data. |
 | MCP Code Mode expansion | 0.3.0 | Tied to the OpenCode 2 agent runtime. |
 | Skill `disable-model-invocation` frontmatter | 0.3.0 | Claude Code already honors it; oc's own skill list does not yet. |
-| Replace the sidebar Plugins section with a load-failure toast | 0.3.0 | `/plugins` already lists plugins. |
 | Repeating scheduled prompts | 0.2.213 | A repeat interval on `session_queue` rows (schema change and migration). Until then a scheduled prompt re-arms itself. |
 | Native-runtime provider features (Bedrock Mantle Messages, Anthropic `between_tools`, cache kept across effort switches, Responses WebSocket, Google Interactions, provider-side compaction, tool namespaces, request tuning) | v0.2.271 | Upstream builds them in its native `ai` runtime; oc runs the AI SDK path. Revisit per feature when a model needs it. |
 | ACP updates (compaction reports, model/agent sync, ACP on OpenCode 2) | v0.2.271 | ACP is not an oc focus; revisit on demand. |

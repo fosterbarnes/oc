@@ -169,6 +169,39 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-21 (~00:19) - v0.2.274 phatCrystal - Bun 1.4.2 pin, streamed refusals as text, upstream119 closeout - Claude Opus 5.5; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; default reasoning; Implementation (`/imp` on `plans/upstream119/closeout.md`); completed except user-driven Bun steps
+- Version: v0.2.274 phatCrystal
+- Kept the other session's Bun edits: `src/package.json` `packageManager` bun@1.4.2, catalog `@types/bun` 1.4.0, override `bun-types` 1.4.2; `AGENTS.md` Bun note (bytecode stays on). Ran `bun install` from `src`: `src/bun.lock` now resolves `@types/bun` 1.4.0 / `bun-types` 1.4.2.
+- Kept `.scripts/scriptHelper.ps1` `testBunHasFfiFix` unchanged: 1.4.2 passes without `--canary`.
+- Not ported `1e4e9c5d85` (bytecode off on Bun 1.4.0): oc never compiles with 1.4.0 and oven-sh/bun#40270 is fixed in 1.4.1. Recorded in `implementation.md`.
+- Fixed AI 28: `provider.ts` `openAICompatibleQuirks` -> `openAIWireQuirks`, now also for `@ai-sdk/openai` and `@ai-sdk/azure`; new `rewriteChunk` turns Responses `response.refusal.delta` into `response.output_text.delta` and chat `delta.refusal` into `delta.content`. Line precheck skips the `"refusal":null` on every OpenAI chat chunk. `compatibilityFetch` now always rewrites SSE bodies for these SDKs.
+- Checked first: `@ai-sdk/openai` 3.0.131 (`ai-v6`) and 4.0.99 (`latest`) have no refusal stream handling, so a bump would not fix it.
+- Removed `SCOPE.md` row "Replace the sidebar Plugins section with a load-failure toast" (user: toast added v0.2.270, sidebar stays).
+- Fixed `FORK.md` count table: recounted active rows 16/61/32/8/0 = 117 (one `removed` row in section 4 not counted). Updated the "OpenAI-compatible model quirks" row for refusals.
+- Skipped B3 (user runs no local model servers). Deleted `plans/upstream119/sweep/` (user approved).
+- Installed Bun 1.4.2 locally (user request): `bun upgrade --stable` gave 1.4.3, so reinstalled exact 1.4.2 via `bun.sh/install.ps1 -Version 1.4.2` (`1.4.2+744846f84`).
+- ERROR: typecheck failed with bun-types 1.4.x: 75 TS2345 in `@ff-labs/fff-bun` 0.9.4 `src/ffi.ts` (`FFIType.ptr` returns `Pointer | bigint | null` since bun-types 1.4.0; 0.9.4 ships raw `.ts` as its types, so `skipLibCheck` does not cover it). No oc code errors.
+- Fixed: bumped `@ff-labs/fff-bun` 0.9.4 -> 0.10.5 (upstream dev version; ships `dist/*.d.ts`) in `packages/core` and `packages/opencode` `package.json`; `bun install` refreshed `src/bun.lock`. Upstream's 0.10.5 patch (NodeNext `.js` imports) not needed in oc. Supersedes D5 "stay on 0.9.4".
+- Verification: `bun test test/provider/compatibility.test.ts` (opencode): 5 pass, 0 fail (2 new refusal tests). `.scripts\test.ps1 -Category typecheck`: 16/16 successful. `bun test test/filesystem/search.test.ts` (core): 6 pass, 0 fail. `.scripts\build.ps1`: both `oc` and native `opencode` built and passed `--version` (0.2.274). Live starts not run.
+- User installed and revived oc v0.2.274 (Bun 1.4.2 build starts). L1 `cb863b8ea5` dropped: user reports ctrl+c on an empty shell-mode prompt does not exit oc.
+- TODO: user live checks in `plans/upstream119/liveChecks.md` (includes FFF `@` file search and refusal text). Non-streamed refusals are still dropped. buildNotes.md is now ~1019 lines: next entry rotates to `buildNotes.archive13.md`.
+
+### User
+Models
+- When an OpenAI, Azure, or OpenAI-compatible model refuses a request, the refusal now shows as the reply instead of an empty message.
+
+Build
+- oc now pins Bun 1.4.2, matching upstream, and the local Bun is now 1.4.2.
+- The file search library (FFF) moved to 0.10.5 so the typecheck passes with the new Bun types.
+
+Docs
+- SCOPE.md no longer lists the sidebar Plugins toast idea, and FORK.md's feature counts are correct again.
+
+---
+
 ## 2026-10-21 (~00:00) - v0.2.273 bunsPastrami - break the core provider plugin import cycle - Claude Opus 5.5; Implementation
 
 ### Agent

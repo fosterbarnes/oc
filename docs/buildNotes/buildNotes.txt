@@ -1,6 +1,12 @@
-v0.2.273 bunsPastrami
+v0.2.274 phatCrystal
 
-provider plugins:
-Fixed a startup ordering bug in the built-in provider plugins that could fail module loading with a before-initialization error.
+model refusals:
+When an OpenAI, Azure, or OpenAI-compatible model refuses a request, the refusal now shows as the reply text instead of an empty message. Refusals in non-streamed replies are still dropped.
 
-Under the hood: moved the shared plugin definition and types into plugin/define.ts with no runtime dependencies, updated 34 plugin modules to import it directly, and kept the internal.ts re-exports. This breaks the provider plugin import cycle and resolves the Vertex plugin test failures recorded in v0.2.267 and v0.2.271. Checks already recorded in buildNotes.md: provider-google-vertex.test.ts 9 pass 0 fail; together with provider-opencode.test.ts 22 pass 0 fail; all core test/plugin tests 228 pass 0 fail across 40 files; core tsgo --noEmit exit 0. The push runs prePush.
+bun and file search:
+oc now builds with Bun 1.4.2, matching upstream. The file search library (FFF) moved from 0.9.4 to 0.10.5, upstream's version, because 0.9.4 failed the typecheck against the Bun 1.4 types.
+
+docs:
+SCOPE.md no longer lists replacing the sidebar Plugins section with a toast; the failure toast exists and the sidebar section stays. FORK.md's completion counts are recounted (117 active rows).
+
+Under the hood: provider.ts openAIWireQuirks (was openAICompatibleQuirks) now also wraps @ai-sdk/openai and @ai-sdk/azure, and rewriteChunk turns Responses response.refusal.delta into output text deltas and chat delta.refusal into content. packageManager bun@1.4.2, @types/bun 1.4.0, bun-types 1.4.2, bun.lock refreshed. Bytecode stays on; upstream 1e4e9c5d85 not ported because oc never compiles with Bun 1.4.0. Upstream fix cb863b8ea5 dropped after a live check. Checks already recorded in buildNotes.md: provider compatibility.test.ts 5 pass 0 fail (2 new refusal tests); core filesystem search.test.ts 6 pass 0 fail; test.ps1 typecheck 16/16 successful; build.ps1 built oc and native opencode and both passed --version; the installed build started live. The push runs prePush.

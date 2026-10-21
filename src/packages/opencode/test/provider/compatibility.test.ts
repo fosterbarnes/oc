@@ -28,6 +28,24 @@ const finished = [
   "data: [DONE]",
 ]
 const unfinished = ['data: {"choices":[{"delta":{"content":"cut"}}]}', "data: [DONE]"]
+const chatRefusal = [
+  'data: {"choices":[{"delta":{"role":"assistant","content":null,"refusal":""}}]}',
+  'data: {"choices":[{"delta":{"refusal":"I can\'t help"}}]}',
+  'data: {"choices":[{"delta":{"refusal":" with that."}}]}',
+  'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}',
+  "data: [DONE]",
+]
+// Recorded shape of an OpenAI Responses refusal stream.
+const responsesRefusal = [
+  'data: {"type":"response.created","response":{"id":"resp_1","object":"response","created_at":1,"model":"test-model","status":"in_progress","output":[]}}',
+  'data: {"type":"response.output_item.added","output_index":0,"item":{"type":"message","id":"msg_1","status":"in_progress","role":"assistant","content":[]}}',
+  'data: {"type":"response.content_part.added","item_id":"msg_1","output_index":0,"content_index":0,"part":{"type":"refusal","refusal":""}}',
+  'data: {"type":"response.refusal.delta","item_id":"msg_1","output_index":0,"content_index":0,"delta":"I can\'t help"}',
+  'data: {"type":"response.refusal.delta","item_id":"msg_1","output_index":0,"content_index":0,"delta":" with that."}',
+  'data: {"type":"response.refusal.done","item_id":"msg_1","output_index":0,"content_index":0,"refusal":"I can\'t help with that."}',
+  'data: {"type":"response.output_item.done","output_index":0,"item":{"type":"message","id":"msg_1","status":"completed","role":"assistant","content":[{"type":"refusal","refusal":"I can\'t help with that."}]}}',
+  'data: {"type":"response.completed","response":{"id":"resp_1","object":"response","created_at":1,"model":"test-model","status":"completed","output":[],"usage":{"input_tokens":1,"output_tokens":5}}}',
+]
 
 it.live("compatibility settings rename max tokens and read a custom reasoning field", () =>
   Effect.gen(function* () {
@@ -96,6 +114,40 @@ it.live("streams without a finish_reason still finish by default", () =>
   }),
 )
 
+it.live("chat refusals stream as text", () =>
+  Effect.gen(function* () {
+    const server = yield* Effect.acquireRelease(
+      Effect.promise(() => sseServer(chatRefusal)),
+      (server) => Effect.sync(() => server.server.close()),
+    )
+    yield* provideTmpdirInstance(
+      () =>
+        Effect.gen(function* () {
+          const result = yield* stream({})
+          expect(yield* Effect.promise(() => result.text)).toBe("I can't help with that.")
+        }),
+      { config: compatibilityConfig(server.url, {}) },
+    )
+  }),
+)
+
+it.live("Responses refusals stream as text", () =>
+  Effect.gen(function* () {
+    const server = yield* Effect.acquireRelease(
+      Effect.promise(() => sseServer(responsesRefusal)),
+      (server) => Effect.sync(() => server.server.close()),
+    )
+    yield* provideTmpdirInstance(
+      () =>
+        Effect.gen(function* () {
+          const result = yield* stream({})
+          expect(yield* Effect.promise(() => result.text)).toBe("I can't help with that.")
+        }),
+      { config: compatibilityConfig(server.url, {}, "@ai-sdk/openai") },
+    )
+  }),
+)
+
 function stream(options: { maxOutputTokens?: number }) {
   return Effect.gen(function* () {
     const provider = yield* Provider.Service
@@ -108,13 +160,14 @@ function stream(options: { maxOutputTokens?: number }) {
   })
 }
 
-function compatibilityConfig(url: string, compatibility: Record<string, unknown>) {
+function compatibilityConfig(url: string, compatibility: Record<string, unknown>, npm?: string) {
   const config = testProviderConfig(url)
   return {
     ...config,
     provider: {
       test: {
         ...config.provider.test,
+        npm: npm ?? config.provider.test.npm,
         models: { "test-model": { ...config.provider.test.models["test-model"], compatibility } },
       },
     },
