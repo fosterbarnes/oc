@@ -26,7 +26,7 @@ import {
   updateDesktopHarness,
 } from "./harnessUpdate"
 import { bootstrapSession, listHomeDirs } from "./ocNewSession"
-import { IMAGE_PASTE_PREVIEW_KEY, PASTE_SUMMARY_KEY } from "./prompt/part"
+import { IMAGE_PASTE_PREVIEW_KEY, PASTE_SUMMARY_KEY, PROMPT_TAB_KEY, type PromptTabAction } from "./prompt/part"
 import { dailyTheme, dayNumber } from "./theme/daily"
 import { persistAgentModel, persistOcConfig, persistTuiSetting, readOcConfig, resolveOcDirectory } from "./ocSettings"
 import { useDialog } from "./ui/dialog"
@@ -49,6 +49,13 @@ import { launchDetached } from "@opencode-ai/core/util/launchDetached"
 import { useRenderer } from "@opentui/solid"
 import { DialogConfirm } from "./ui/dialog-confirm"
 import killallScript from "./killall.ps1" with { type: "text" }
+
+const _TAB_OPTIONS: { value: PromptTabAction; title: string; description: string }[] = [
+  { value: "text", title: "text", description: "Insert a tab" },
+  { value: "agent", title: "agent", description: "Next agent" },
+  { value: "variant", title: "reasoning", description: "Next reasoning effort" },
+  { value: "favorite", title: "favorites", description: "Next favorite model" },
+]
 
 // oc palette entries, in three runs that App spreads at their palette positions. Call inside App.
 export function createOcCommands(input: {
@@ -499,6 +506,30 @@ export function createOcCommands(input: {
                   return
                 }
                 toast.show({ message: `Keybind layout: ${option.value}`, variant: "success" })
+              }}
+            />
+          ))
+        },
+      },
+      {
+        name: "oc.prompt_tab_action",
+        title: "Tab key",
+        category: "oc",
+        group: "Layout",
+        get desc() {
+          const current = kv.get(PROMPT_TAB_KEY, "text")
+          return _TAB_OPTIONS.find((option) => option.value === current)?.title ?? "text"
+        },
+        slashName: "tabKey",
+        run: () => {
+          dialog.replace(() => (
+            <DialogSelect
+              title="Tab key"
+              current={kv.get(PROMPT_TAB_KEY, "text")}
+              options={_TAB_OPTIONS}
+              onSelect={(option) => {
+                kv.set(PROMPT_TAB_KEY, option.value)
+                dialog.clear()
               }}
             />
           ))

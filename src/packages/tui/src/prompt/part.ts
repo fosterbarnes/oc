@@ -8,6 +8,9 @@ import { extractSlashCommands, typedText } from "./slash"
 export const PASTE_SUMMARY_KEY = "paste_summary_enabled"
 // KV flag: pasting an image opens its preview dialog. Off by default; clicking the chip still previews.
 export const IMAGE_PASTE_PREVIEW_KEY = "image_paste_preview_enabled"
+// KV value: what Tab does in the prompt when `input_tab` is bound (oc layout). Default "text".
+export const PROMPT_TAB_KEY = "prompt_tab_action"
+export type PromptTabAction = "text" | "agent" | "variant" | "favorite"
 
 export function stripPromptPartIDs<Part extends { id: string; messageID: string; sessionID: string }>(part: Part) {
   const { id: _id, messageID: _messageID, sessionID: _sessionID, ...rest } = part

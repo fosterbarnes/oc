@@ -35,7 +35,7 @@ loop; the OpenCode 2 execution engine itself is not brought back.
 | Upstream update channel and `upgrade --major` | 0.3.0 | They install stock OpenCode. oc updates come from oc's own GitHub releases. |
 | Option to turn off the background server | 0.3.0 | The resident server is part of oc. Native `opencode.exe` already runs without it. |
 | OpenCode 2 workspace, sandbox, and environment drivers | 0.3.0 | Part of the OpenCode 2 execution engine. |
-| `/goal` autonomous goal command | 0.3.0 | Upstream dropped it; oc's SuperGo agents cover the use. |
+| `/goal` autonomous goal command | 0.3.0 | Upstream dropped it. |
 
 ## Planned for later
 

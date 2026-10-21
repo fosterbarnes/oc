@@ -185,6 +185,49 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-21 (~19:39) - v0.2.281 yrOptic - Tab key setting: text, agent, reasoning effort, or favorite model - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Opus 5.5; low effort; Implementation (plan `~/.config/opencode/plans/promptTabAction.md`); completed
+- Version: 0.2.281 yrOptic (already bumped by the uncommitted SuperPlan removal; not bumped again)
+- Added `PROMPT_TAB_KEY` (`prompt_tab_action`) + `PromptTabAction` type in `prompt/part.ts`
+- Changed `prompt.tab` run (`component/prompt/index.tsx`): reads KV, `agent` -> `local.agent.move(1)`, `variant` -> `local.model.variant.cycle()`, `favorite` -> `local.model.cycleFavorite(1)`, else `insertText("\t")`. No keybind change; autocomplete gate unchanged
+- Added palette entry `oc.prompt_tab_action` "Tab key" (`ocCommands.tsx`, group Layout, `/tabKey`, desc = current option title), DialogSelect after `oc.keybind_preset`; options in module const `_TAB_OPTIONS`
+- Kept Shift+Tab = `agent_cycle` in every mode; opencode layout unaffected (`input_tab: none`), entry still visible there
+- Updated wiki `Keybinds.md`: `tab` and `shift+tab` rows
+- Verification: `bun run typecheck` in `packages/tui` exit 0. Not live-checked (user check: each mode, `/`+Tab completion, persists after restart)
+
+### User
+Prompt keys
+- New **Tab key** setting in `ctrl+o` (or `/tabKey`) picks what Tab does in the prompt: type a tab (default), switch agent, cycle reasoning effort, or cycle favorite models.
+- Shift+Tab still switches to the next agent in every mode.
+- Tab still completes the highlighted item while the `@` or `/` list is open.
+
+---
+
+## 2026-10-21 (~19:17) - v0.2.281 computerCriminally - Removed SuperPlan/SuperGo (sp, go, spa, goa) and plan tools - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation (/imp from plan `~/.config/opencode/plans/2026-10-21-remove-sp-go.md`); completed
+- Version: 0.2.281 computerCriminally
+- Removed `plan_execute`, `plan_next_phase`, `plan_closeout` tools: deleted `src/tool/planExecute.ts`, `planNextPhase.ts`, `planCloseout.ts`, `test/tool/planExecute.test.ts`; dropped wiring in `tool/registry.ts`, default denies in `agent/agent.ts`, `runPlanExecute` + `ToolDefs` key in `cli/cmd/run/tool.ts`. Kept `plan_exit` (upstream plan mode).
+- Removed config outside repo: `~/.claude/commands/{sp,go}.md`, `~/.opencode/commands/{sp,go}.md`, `~/.config/opencode/agents/{superPlan++,Go}.md`, `prompts/{sp,go}.md`, `archive/{agent,agentA,commands}`, `archive/roleAgents/*.md`. Dropped dead `plan_*` denies in `~/.opencode/commands/{spit,spitS}.md`.
+- Changed `agents/Debug.md` and `Debug-a.md` stall handoff: switch to `superPlan++` -> run `/spit`.
+- Kept `prompts/roles/`: still used by `skills/foster/subagents` and `skills/oc/add-subagent` (plan wrongly called it orphaned).
+- Docs: FORK.md (dropped SuperPlan + Archive finished plans rows, renamed routing row, intro, :42, :149), SCOPE.md `/goal` note, `docs/dev/publicReadiness.md`, `docs/dev/v0.3.0.md`. Wiki `Companion-Tools.md`, `Configuration.md` permission rows.
+- Kept history mentions: `docs/dev/publicForkPlan.md:135`, `test/permissionPlanEdit.test.ts:26` title, buildNotes archives.
+- Risk: sessions saved with agent `Go`/`superPlan++` reopen on the default agent. Do not resurrect plan tools.
+- Verification: `bun run typecheck` (tsgo --noEmit) in `packages/opencode` exit 0; leftover greps over src, docs, wiki, `~/.config/opencode`, `~/.opencode`, `~/.claude` clean except the kept history mentions.
+
+### User
+Agents and commands
+- The superPlan++ and Go agents, the /sp and /go commands (oc and Claude Code), and the archived spa/goa variants are gone.
+- The plan execution, next-phase, and closeout tools are removed from oc.
+- Debug agents now point you to /spit when they stall instead of superPlan++.
+- The wiki no longer lists SuperPlan/SuperGo or the three plan tool permissions.
+
+---
+
 ## 2026-10-21 (~19:05) - v0.2.280 chuaStimming - Tab types a tab in the prompt, Shift+Tab cycles agents - Claude Opus 5.5, low effort; Implementation
 
 ### Agent

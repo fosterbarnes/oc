@@ -1,6 +1,9 @@
-v0.2.280 chuaStimming [patch > Tab types tab, Shift+Tab cycles agents]
+v0.2.281 yrOptic [feat. > Tab key setting, SuperPlan/SuperGo removed]
 
 prompt keys:
-In the oc keybind layout, Tab now types a tab character in the prompt instead of switching agents. Shift+Tab now switches to the next agent. Previous agent has no default key; bind it with agent_cycle_reverse in tui.json. Tab still completes the highlighted item while the @ or / list is open. The stock opencode layout keeps Tab for agent switching.
+New Tab key setting in ctrl+o (or /tabKey) picks what Tab does in the prompt in the oc layout: type a tab (default), switch to the next agent, cycle reasoning effort, or cycle favorite models. Shift+Tab still switches to the next agent in every mode, and Tab still completes the highlighted item while the @ or / list is open. The stock opencode layout is unaffected.
 
-Under the hood: new input_tab keybind (prompt.tab command, unbound in the opencode layout) inserts a tab through a binding on the prompt input, because the opentui textarea drops control characters on its own. docs/keybinds.md regenerated with keybindDocs.ts; wiki tab_order rows name the agent-cycle key per layout. Checks: bunx tsc --noEmit in packages/tui passed; tab rendering in the textarea was not live-checked. The push runs prePush.
+agents and commands:
+The superPlan++ and Go agents, the /sp and /go commands, and the archived spa/goa variants are gone. The plan execution, next-phase, and closeout tools are removed from oc; upstream plan mode (plan_exit) stays. Debug agents now point to /spit when they stall. Docs and wiki no longer list SuperPlan/SuperGo or the three plan tool permissions.
+
+Under the hood: prompt.tab reads the prompt_tab_action KV value and calls the existing agent, variant, or favorite cycle functions directly; no keybind changes. Plan tool files, their test, registry wiring, and default denies were deleted. Checks: bun run typecheck in packages/tui and packages/opencode passed; the Tab modes were not live-checked. The push runs prePush.

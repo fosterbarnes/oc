@@ -38,7 +38,7 @@ Sources: `packages/opencode/src/provider/cursor/runtime.ts`, `packages/opencode/
 
 | Item | What happens on a fresh machine | Decision to make |
 |---|---|---|
-| **SuperPlan / SuperGo / Debug profiles live in global config** | Installing the repository's executable does not reproduce the agents, prompts, routing, or model choices. Those workflows may simply be absent. | Which profiles are shipped product features, and which are personal presets? |
+| **Debug profiles live in global config** | Installing the repository's executable does not reproduce the agents, prompts, routing, or model choices. Those workflows may simply be absent. | Which profiles are shipped product features, and which are personal presets? |
 | **Plugins point to personal sibling checkouts** | The current global config references local files for session tooling, Copilot auto-model, and bgShell under `$HOME/Documents/GitHub/...`. Those integrations are unavailable elsewhere; copying the config preserves invalid paths. | Which plugins should be distributed, optional, or excluded from the public defaults? |
 | **MCP integrations depend on local projects and binaries** | The Everything MCP points to a sibling checkout and an Everything SDK DLL in the Apps folder. Jev likewise points to a local CLI file. A copied configuration cannot start those servers. | Give each optional integration a portable setup recipe? |
 | **Instructions and skills use personal absolute paths** | Global instructions, model-specific prompts, and skill paths reference personal home-directory paths. A fresh installation does not contain them. | What is the smallest self-contained default configuration? |

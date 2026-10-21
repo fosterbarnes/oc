@@ -42,6 +42,8 @@ import {
   isPastedChipLabel,
   offsetAtCell,
   PASTE_SUMMARY_KEY,
+  PROMPT_TAB_KEY,
+  type PromptTabAction,
   typedSlashCommands,
 } from "../../prompt/part"
 import { usePromptStash } from "../../prompt/stash"
@@ -446,7 +448,14 @@ export function Prompt(props: PromptProps) {
         name: "prompt.tab",
         category: "Prompt",
         hidden: true,
-        run: () => input.insertText("\t"),
+        // The oc "Tab key" setting picks the action; unknown values type a tab.
+        run: () => {
+          const action: PromptTabAction = kv.get(PROMPT_TAB_KEY, "text")
+          if (action === "agent") return local.agent.move(1)
+          if (action === "variant") return void local.model.variant.cycle()
+          if (action === "favorite") return void local.model.cycleFavorite(1)
+          input.insertText("\t")
+        },
       },
       {
         title: "Submit prompt",
