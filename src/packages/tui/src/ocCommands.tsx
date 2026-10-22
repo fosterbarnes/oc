@@ -623,10 +623,20 @@ export function createOcCommands(input: {
         desc: "Rows of tool calls, thinking, and output shown for each running subagent",
         slashName: "subagentRows",
         run: () => {
-          const steps = [0, 3, 4, 6]
-          const index = steps.indexOf(kv.get("subagent_card_rows", 4))
-          kv.set("subagent_card_rows", steps[(index + 1) % steps.length])
-          dialog.clear()
+          dialog.replace(() => (
+            <DialogSelect
+              title="Subagent live rows"
+              current={kv.get("subagent_card_rows", 4)}
+              options={[0, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((rows) => ({
+                value: rows,
+                title: rows ? String(rows) : "off",
+              }))}
+              onSelect={(option) => {
+                kv.set("subagent_card_rows", option.value)
+                dialog.clear()
+              }}
+            />
+          ))
         },
       },
       {

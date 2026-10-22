@@ -185,6 +185,20 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-21 (~20:47) - v0.2.285 depositMeebo - Subagent live rows picks from a list - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation; completed, live check pending
+- Version: 0.2.285 depositMeebo
+- Changed `ocCommands.tsx` `oc.subagent_card_rows` run: `DialogSelect` (off, 2-10, `current` = kv value) replaces the 0/3/4/6 cycle; title, `/subagentRows`, default 4 kept.
+- Verification: none run (no palette test); live check pending.
+
+### User
+Layout
+- "Subagent live rows" in the oc palette now opens a list where you pick off or 2 to 10 rows.
+
+---
+
 ## 2026-10-21 (~20:35) - v0.2.284 rottenThiollier - Claude failover picks the account with the most 5-hour usage left - Claude Opus 5.5, low effort; Implementation
 
 ### Agent
