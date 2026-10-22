@@ -1,6 +1,6 @@
-v0.2.282 cherrysFritz [patch > prompt bar shows only running subagents]
+v0.2.283 toastYurrrrr [docs > WezTerm split tabs keep oc's tab title]
 
-prompt bar:
-Subagent usage in the bar under the prompt now lists only subagents that are still running (busy or retrying). Each one disappears the moment it finishes, fails, or is aborted. A subagent waiting on a permission or question prompt stays visible. With several running, the compact list shrinks to the detailed single line once only one is left.
+wezterm docs:
+The WezTerm setup doc's tab title snippet now keeps oc's title and colored agent marker when a shell pane in the same split tab is focused, instead of showing pwsh. A top-level title_pane helper uses the focused pane when it is oc, otherwise the tab's pane flagged with oc_tui=1, otherwise the focused pane as before. The doc now says to put the helper at the top level of the config and merge the handler body.
 
-Under the hood: the subagentUsage memo filters child sessions by session_status (missing counts as idle) before computing context usage. FORK.md and the wiki describe the new behavior. Checks: bun run typecheck in packages/tui; the bar was not live-checked. The push runs prePush.
+Under the hood: no oc code change. The live config change is in the separate wezFig repo. Checks: the wezFig config loads in wezterm show-keys; the tab title callback was not live-checked. The push runs prePush.

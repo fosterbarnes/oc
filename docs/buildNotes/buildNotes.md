@@ -185,6 +185,21 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-21 (~20:23) - v0.2.283 toastYurrrrr - WezTerm split tabs keep oc's tab title - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation; completed, live check pending
+- Version: 0.2.283 toastYurrrrr (bumped at push: agentPush counts buildNotes.txt as a change)
+- Changed `docs/wezterm.md` tab snippet: `title_pane(tab)` returns title + `oc_agent_color` from the active pane if `oc_tui == '1'`, else the tab's `oc_tui` pane via `wezterm.mux.get_tab(tab.tab_id):panes_with_info()`, else the active pane. Fixes split tabs showing `pwsh` when the shell pane is focused.
+- Real change lives in wezFig `wezterm.lua` `format-tab-title` (separate repo, uncommitted; its buildNotes has the entry).
+- Verification: wezFig config loads via `wezterm show-keys`; callback not exercised. Live check pending.
+
+### User
+WezTerm
+- No oc change; the WezTerm setup doc now shows how to keep oc's tab title and color when a shell pane beside oc is focused.
+
+---
+
 ## 2026-10-21 (~20:18) - v0.2.282 cherrysFritz - Prompt bar shows only running subagents - Claude Opus 5.5, low effort; Implementation
 
 ### Agent

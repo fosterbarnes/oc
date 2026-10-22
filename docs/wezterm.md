@@ -6,14 +6,26 @@ oc is used daily in WezTerm. Put config in `~/.wezterm.lua` or `~/.config/wezter
 
 When the terminal helper reports WezTerm, oc sets the user variable `oc_agent_color` (`OSC 1337 SetUserVar`) to the active agent's hex color. The tab title still starts with a plain `■ ` (or `⦿ ` in a native `opencode` window). A `format-tab-title` handler strips that prefix and redraws the marker in `oc_agent_color`. Without this snippet the square stays uncolored.
 
-Add this inside an existing `format-tab-title` handler, or use it as the handler:
+Add `title_pane` at the top level of the config and merge the handler body into an existing `format-tab-title` handler, or use it as the handler. In a split tab, `title_pane` picks oc's pane (user variable `oc_tui=1`), so the tab keeps oc's title and color when a shell pane beside it is focused:
 
 ```lua
 local wezterm = require 'wezterm'
 
+local function title_pane(tab)
+  local active = tab.active_pane
+  if active.user_vars.oc_tui == '1' then
+    return active.title, active.user_vars.oc_agent_color
+  end
+  local mux_tab = wezterm.mux.get_tab(tab.tab_id)
+  for _, info in ipairs(mux_tab and mux_tab:panes_with_info() or {}) do
+    local vars = info.pane:get_user_vars()
+    if vars.oc_tui == '1' then return info.pane:get_title(), vars.oc_agent_color end
+  end
+  return active.title, active.user_vars.oc_agent_color
+end
+
 wezterm.on('format-tab-title', function(tab, tabs, panes, config, hover, max_width)
-  local agent_color = tab.active_pane.user_vars.oc_agent_color
-  local title = tab.active_pane.title
+  local title, agent_color = title_pane(tab)
   local marker = '■'
   if title:sub(1, #'⦿ ') == '⦿ ' then
     marker = '⦿'
