@@ -64,13 +64,20 @@ $isccDefines = @(
     "/DLicenseFile=$($repoRoot -replace '\\','/')/LICENSE"
 )
 
+# The setup ships the whole publish folder, so start it empty: no stale files from older publishes.
 $publishFolder = "$installerFolder\publish"
+if (Test-Path -LiteralPath $publishFolder) {
+    Remove-Item -LiteralPath $publishFolder -Recurse -Force
+    if (Test-Path -LiteralPath $publishFolder) { throw "Could not clear $publishFolder" }
+}
+# No inner compression or native self-extract: Inno already compresses, and both would cost every
+# ocSetup start (decompression) or the first one (extraction to %TEMP%\.net). The WPF native DLLs
+# sit next to ocSetup.exe instead.
 runNativeCommand dotnet @(
     'publish', "$installerFolder\ocSetup\ocSetup.csproj", '-c', 'Release', '-r', 'win-x64', '-o', $publishFolder,
-    '--self-contained', 'true', '-p:PublishSingleFile=true', '-p:IncludeNativeLibrariesForSelfExtract=true',
-    '-p:EnableCompressionInSingleFile=true'
+    '--self-contained', 'true', '-p:PublishSingleFile=true', '-p:DebugType=none'
 ) 'dotnet publish ocSetup'
-$isccArgs = @($isccDefines) + "/DOcSetupExe=$($publishFolder -replace '\\','/')/ocSetup.exe"
+$isccArgs = @($isccDefines) + "/DOcSetupDir=$($publishFolder -replace '\\','/')"
 runNativeCommand $isccPath (@($isccArgs) + "$installerFolder\oc.installer.iss") 'ISCC'
 
 # Only after a successful build: pushRelease.ps1 uploads every exe in Output.

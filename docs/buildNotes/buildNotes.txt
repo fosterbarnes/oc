@@ -1,9 +1,18 @@
-v0.2.294 cawfeeeeRafter [fix > setup tag rendering; patch > tag width]
+v0.2.295 krankyVvitch [feat. > ocSetup shortcuts, parallel installs]
 
 dependencies window:
-The window now draws with software rendering. In a VMware VM the Codex CLI row's "Default" tag was drawn as a clipped "Missing"; the code cannot produce that text, so this was a GPU text-rendering glitch. The Required and Default tags are now the same width with centered text. The dependency list no longer has a Close button; the window's X closes it, and the completion screen keeps its Close button.
+The oc dependencies window has a new "Desktop shortcut" column. Tick it on any installed item, or one you are about to install, to get a desktop icon; none are ticked by default. CLI shortcuts (Codex, Claude Code, Cursor) open the CLI in a terminal, inside WezTerm when it is installed. An existing desktop icon with the same name is left alone. When only shortcuts are ticked, the button reads "Create shortcuts".
 
-scripts:
-.scripts\buildInstaller.ps1 now removes older setup exes from .installer\Output after a successful build, so only the new setup remains and pushRelease.ps1 no longer uploads stale ones.
+Installs are faster. Git, Node.js, WezTerm, and the Claude and Cursor CLI installers download ahead of time, up to three at once, so installs no longer wait on each download, and each installer is checked again right before it runs. Codex CLI and the Codex (ChatGPT) desktop app install alongside the others; everything that changes PATH or asks for admin approval still installs one at a time. Rows show "Waiting" and "Downloaded, waiting to install" while queued.
 
-Under the hood: dotnet build of the dependencies window passed with 0 warnings and 0 errors; buildInstaller.ps1 passed a PowerShell parse check but was not run. The Codex tag fix still needs a VM retest.
+The window starts checking dependencies while it opens, and the completion screen appears right away after installing instead of waiting for a re-check.
+
+desktop apps:
+Codex (ChatGPT) desktop installs again: the direct download no longer has to match the Store's newer build number. This also fixes the TUI update for it.
+
+Claude desktop now installs with one admin prompt, as Anthropic requires for its background service, and appears for your account. Claude desktop updates from the TUI also ask for admin approval once.
+
+setup exe:
+The setup exe should be noticeably smaller: oc.exe and opencode.exe share most of their bytes, which are now compressed once. The dependencies window no longer unpacks itself on every start or extracts files to the temp folder.
+
+Under the hood: dependencies.ts gains prepare/install rows, a download/install split in its install script, a three-wide prefetch pool, two install lanes, and shortcut targets on deps list; new DesktopShortcut.cs uses IShellLinkW. Inno uses solid LZMA2 with a 256 MB dictionary; ocSetup publishes without inner compression or self-extract and the setup ships its publish folder. Checks: bun test dependencies, desktopUpdate, and chatgptDesktopUpdate (36 pass), tui typecheck, oc deps list and an unknown-id install from source, a live Git download plus tamper check, PowerShell parse of the Claude script, dotnet build of ocSetup with 0 warnings, Appx shortcut links resolved in a temp folder, build script parse. Not run: installer build, real installs, VM run.

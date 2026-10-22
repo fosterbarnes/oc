@@ -11,7 +11,8 @@ import type { DesktopCheckResult, DesktopInstallResult } from "./desktopUpdate"
 // exact OpenAI.Codex_2p2nqsd0c76g0 family, latest buildVersion from OpenAI's
 // windows-store-update.json feed (identity and product id pinned so a changed
 // schema fails closed), skip when current, floating ChatGPT-x64/arm64.msix
-// download whose manifest version must equal the feed version, manifest Name plus
+// download whose manifest version must be newer than the installed one (the feed is the
+// Store build, which the direct MSIX can lag), manifest Name plus
 // publisher pin via the ZipFile approach, Authenticode Valid required, install with
 // -ForceApplicationShutdown, temp dir removed in finally. Errors go to an OCERR line
 // and exit 1 (trap). No user input is interpolated; the check/install mode is
@@ -73,7 +74,8 @@ try {
   if ($sig.Status -ne "Valid") { throw "Signature check failed: $($sig.Status)" }
   if ($identity.Name -ne $PackageName) { throw "Package name '$($identity.Name)' is not ChatGPT Desktop's expected package" }
   if ($identity.Publisher -ne $ExpectedPublisher) { throw "Package publisher '$($identity.Publisher)' is not ChatGPT Desktop's expected publisher" }
-  if ($identity.Version -ne $latest) { throw "Downloaded package version ($($identity.Version)) does not match feed version ($latest)" }
+  # The feed is the Store build; the direct MSIX can be an older build, so only require it to be newer.
+  if ($identity.Version -le $installed) { throw "The direct download ($($identity.Version)) is not newer than the installed version ($installed)" }
   Write-OcStep "installing"
   try { Add-AppxPackage -Path $file -ForceApplicationShutdown }
   catch { throw "Install failed: $($_.Exception.Message)" }

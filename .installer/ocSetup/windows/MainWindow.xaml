@@ -71,8 +71,21 @@
         <Border x:Name="ListPanel" Margin="{StaticResource PageMargin}" Style="{StaticResource ContentPanelStyle}">
             <ScrollViewer VerticalScrollBarVisibility="Auto">
                 <!-- Tags line up after the widest label among tagged rows: each tagged row puts a
-                     hidden copy of its checkbox in a shared-size column; untagged rows collapse it. -->
-                <ItemsControl x:Name="RowsList" Grid.IsSharedSizeScope="True">
+                     hidden copy of its checkbox in a shared-size column; untagged rows collapse it.
+                     The shortcut column shares its width with the header above it. -->
+                <StackPanel Grid.IsSharedSizeScope="True">
+                <Grid Margin="0,0,0,6">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" SharedSizeGroup="Shortcut" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Grid.Column="1"
+                               Margin="16,0,0,0"
+                               FontSize="11"
+                               Foreground="{StaticResource SecondaryTextBrush}"
+                               Text="Desktop shortcut" />
+                </Grid>
+                <ItemsControl x:Name="RowsList">
                     <ItemsControl.ItemTemplate>
                         <DataTemplate DataType="{x:Type viewModels:DependencyRow}">
                             <StackPanel Margin="0,0,0,10" ToolTip="{Binding ToolTip}">
@@ -80,6 +93,7 @@
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="*" />
                                         <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="Auto" SharedSizeGroup="Shortcut" />
                                     </Grid.ColumnDefinitions>
                                     <CheckBox HorizontalAlignment="Left"
                                               Content="{Binding Label}"
@@ -122,6 +136,23 @@
                                                VerticalAlignment="Center"
                                                Foreground="{StaticResource SecondaryTextBrush}"
                                                Text="{Binding StatusText}" />
+                                    <!-- Hidden (not collapsed) on rows without a shortcut keeps the column aligned. -->
+                                    <CheckBox Grid.Column="2"
+                                              Margin="16,0,0,0"
+                                              HorizontalAlignment="Center"
+                                              IsChecked="{Binding WantsShortcut}"
+                                              IsEnabled="{Binding CanShortcut}"
+                                              ToolTip="Create a desktop shortcut">
+                                        <CheckBox.Style>
+                                            <Style TargetType="{x:Type CheckBox}" BasedOn="{StaticResource {x:Type CheckBox}}">
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding HasShortcut}" Value="False">
+                                                        <Setter Property="Visibility" Value="Hidden" />
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </CheckBox.Style>
+                                    </CheckBox>
                                 </Grid>
                                 <ProgressBar Visibility="{Binding IsProgressVisible, Converter={StaticResource BooleanToVisibility}}"
                                              IsIndeterminate="{Binding IsProgressIndeterminate}"
@@ -131,6 +162,7 @@
                         </DataTemplate>
                     </ItemsControl.ItemTemplate>
                 </ItemsControl>
+                </StackPanel>
             </ScrollViewer>
         </Border>
 

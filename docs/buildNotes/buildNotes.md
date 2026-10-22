@@ -185,6 +185,80 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-22 (~01:09) - v0.2.295 krankyVvitch - desktop shortcut column; ChatGPT and Claude desktop install fixes - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation (/imp of `~/.config/opencode/plans/ocSetupShortcutsAndDesktopFixes.md`); completed, VM run pending
+- Version: 0.2.295 krankyVvitch (same session, already bumped since the last commit)
+- ERROR (VM, user screenshot): Codex (ChatGPT) desktop failed "Downloaded package version (26.1016.6573.0) does not match feed version (26.1016.8120.0)"; Claude desktop failed "0x80073D28 ... administrator privileges are required".
+- Fixed `chatgptDesktopUpdate.ts`: `windows-store-update.json` is the Store build (`storeProductId 9PLM9XGG6VKS`); the direct `ChatGPT-x64.msix` (976 MB, Last-Modified 2026-10-21) can lag it, so the equality check never passed. Now requires downloaded > installed; name/publisher/signature pins kept. Also fixes the TUI update menu.
+- Fixed `desktopUpdate.ts` `DESKTOP_SCRIPT`: the Claude MSIX carries the Cowork service; per-user `Add-AppxPackage` without admin fails 0x80073D28 (Anthropic deploy doc https://support.claude.com/en/articles/12622703-deploy-claude-desktop-for-windows). Now an elevated child runs `Add-AppxProvisionedPackage -Online -PackagePath ... -SkipLicense -Regions all` (`-EncodedCommand`, error text written to a file in the script's temp dir since RunAs cannot redirect), then `Add-AppxPackage -RegisterByFamilyName -MainPackage Claude_pzs8sxrjxfjjc -ForceApplicationShutdown` as the user (right account even when another admin approves). Applies to TUI Claude updates too: one UAC prompt per update.
+- Changed `dependencies.ts`: claudeDesktop out of the parallel lane (elevates); parallel list now codexCli, codexDesktop.
+- Added desktop shortcut data: `DependencyShortcut { name, target?, terminal?, appId? }` on `list` items from per-row `shortcut.find` (installed rows only). Targets: pwsh.exe, Git Bash (`gitBash()` from `<root>\cmd\git.exe`), Everything.exe, wezterm-gui.exe, CLI paths (terminal), Appx AUMIDs `OpenAI.Codex_2p2nqsd0c76g0!App` / `Claude_pzs8sxrjxfjjc!Claude` (from Get-StartApps), `%LOCALAPPDATA%\Programs\cursor\Cursor.exe`. Node has none.
+- Added ocSetup "Desktop shortcut" column: header + per-row CheckBox (hidden on node, none ticked), `DependencyRow.WantsShortcut/CanShortcut/HasShortcut` (usable when installed or ticked for install; unticking install of a missing row clears it); button reads "Create shortcuts" when only shortcuts are ticked; after installs the list reloads before shortcuts are made; Done panel lists created/skipped/failed shortcuts and the PATH line only when installs ran.
+- Added `helpers/DesktopShortcut.cs`: IShellLinkW COM interop; exe links; CLI links = pwsh (or powershell.exe) `-NoLogo -NoExit -Command "& '<cli>'"`, inside `wezterm-gui start --` when WezTerm is found; Appx links from the `shell:AppsFolder\<AUMID>` PIDL (`SHParseDisplayName` + `SetIDList`). Existing `Desktop\<name>.lnk` is skipped, never overwritten.
+- Verification: `bun test` dependencies + desktopUpdate + chatgptDesktopUpdate 36 pass; tui `tsgo` exit 0; `OC_FLAVOR=oc bun run src/index.ts oc deps list` on this PC returned the expected shortcut for all 11 rows; PowerShell parser 0 errors on `DESKTOP_SCRIPT` and on the generated elevated command (path with a quote); `dotnet build ocSetup -c Release` 0 warnings 0 errors, bin/obj removed; AppsFolder PIDL links for Claude and ChatGPT created and resolved in a temp folder (then deleted), unregistered AUMID fails at parse. Not run: Claude provisioning, ChatGPT install, any shortcut on the real desktop, the window visually.
+- TODO (VM): confirm Everything `/S` and Cursor's silent install add no desktop icon (Cursor: add `!desktopicon` to MERGETASKS if it does); `-RegisterByFamilyName` after provisioning; CLI shortcut via `.cmd` shim inside WezTerm.
+- Updated skill `oc-installer` (contract, shortcut rules, Claude/ChatGPT notes) and wiki `Install.md`.
+
+### User
+Install
+- The dependencies window has a "Desktop shortcut" column: tick it on any installed or selected item to get a desktop icon; none are ticked by default.
+- CLI shortcuts (Codex, Claude Code, Cursor) open the CLI in a terminal (inside WezTerm when installed); an existing icon with the same name is left alone.
+- Codex (ChatGPT) desktop installs again: the download no longer has to match the Store's newer build number.
+- Claude desktop now installs with one admin prompt, as Anthropic requires for its background service, and shows up for your account.
+
+---
+
+## 2026-10-22 (~00:49) - v0.2.295 krankyVvitch - prefetched dependency downloads and a parallel install lane - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation (/imp of `~/.config/opencode/plans/ocDepsParallelInstall.md`); completed, VM run pending
+- Version: 0.2.295 krankyVvitch (same session as the entry below, version already bumped since the last commit)
+- Changed `tui/src/dependencies.ts` `Dependency`: exactly one of `install` or `prepare(dir, onLine) -> Install`; new `parallel?`. `prepared(spec)` builds `prepare` for git, node, wezterm, claudeCli, cursorCli (same specs as before). pwsh, desktops, codexCli, everything keep `install` (shared update scripts / npm / two-step Everything).
+- Changed `INSTALL_SCRIPT`: `$Mode` download|install + `$File`; download = `Save-Download` + verify; install = verify again (`Test-Installer`) then install. Caller owns the folder. `runInstaller` = mkdtemp + download + install + rm (Everything only). `runInstallScript` holds the shared prefix/runner.
+- Rewrote `runInstalls`: emits `queued` per selected id; `startPrefetch` runs `prepare` rows 3 at a time in table order into `<temp>\oc-deps-*\<id>` (two scripts share the name install.ps1), emits `ready` or `failed` at once; serial and `parallel` lanes run concurrently in table order, each row awaits its selected `needs` (either lane) via `Promise.withResolvers`, settles in `finally`; `refreshEnv` now runs per started install inside the failure catch (a PATH read error fails that row instead of throwing out of the run). Temp folder removed after prefetch ends, also on error.
+- Parallel rows: codexCli (npm, needs node), codexDesktop, claudeDesktop (Appx). Everything else stays serial: MSI one-at-a-time (1618), PATH read-modify-write races (HKLM and HKCU, vendor scripts assumed to write), one UAC prompt at a time.
+- Added ocSetup `DependencyRow.ApplyEvent` phases: `queued` -> "Waiting", `ready` -> "Downloaded, waiting to install".
+- Added tests: table invariant (one install path per row, parallel list pinned), serial no-overlap + parallel overlap + cross-lane need wait, failed serial need skips parallel dependent, prefetch limit 3 / table order / failed-at-once / dependents skipped / each install gets its own folder / temp removed after a thrown install. Updated the two existing `runInstalls` tests (`queued` events, 2 PATH reads).
+- Fixed during tests: async `mkdir` let prefetches start out of table order; now `mkdirSync` inside each row's chain (also turns a mkdir failure into that row's `failed` instead of hanging its lane).
+- Updated skill `oc-installer` contract (phases, scheduling, lane rule, `prepare` vs `install`).
+- Verification: `bun test test/dependencies.test.ts` 10 pass (3 runs); tui `tsgo --noEmit` exit 0; `OC_FLAVOR=oc bun run src/index.ts oc deps install bogusId` -> "Unknown dependency: bogusId", exit 1. Live smoke (scratch, no install): git `prepare` downloaded + verified Git-2.56.0.2-64-bit.exe in 3.6 s (steps downloading, verifying); after appending a byte, install mode stopped with "Checksum mismatch" before running anything. `dotnet build ocSetup -c Release` 0 errors, bin/obj removed. Not run: any real install, the VM flow, oc/setup rebuild.
+- Risk: PATH behavior of vendor scripts is assumed; only the three non-PATH rows are parallel. pwsh (first, monolithic) shares bandwidth with 3 prefetches; lower `PREFETCH_LIMIT` to 2 if the VM shows it noticeably delayed.
+
+### User
+Install
+- The dependencies window now downloads Git, Node.js, WezTerm, and the Claude and Cursor CLI installers ahead of time, up to three at once, so installs no longer wait on each download.
+- Codex CLI and the Codex and Claude desktop apps install alongside the others; everything that changes PATH or asks for admin approval still installs one at a time.
+- Rows show "Waiting" and "Downloaded, waiting to install" while queued.
+- Each downloaded installer is checked again right before it runs.
+
+---
+
+## 2026-10-22 (~00:25) - v0.2.295 krankyVvitch - faster ocSetup and smaller setup exe - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation (/imp of `~/.config/opencode/plans/ocSetupPerformance.md`, steps 1, 2, 4; step 3 reverted by its gate; step 5 waits for VM retest); completed, installer not rebuilt
+- Version: 0.2.295 krankyVvitch
+- Changed `.installer\oc.installer.iss` `[Setup]`: `Compression=lzma2/max`, `SolidCompression=yes`, `LZMADictionarySize=262144`, `LZMAUseSeparateProcess=yes`. `oc.exe` and `opencode.exe` are both 224.8 MB Bun builds (different hashes, shared runtime); a solid stream with a dictionary larger than one binary stores that runtime once. `[Files]`: `opencode.exe` moved directly under `oc.exe`.
+- Changed ocSetup publish (`.scripts\buildInstaller.ps1`): dropped `EnableCompressionInSingleFile` and `IncludeNativeLibrariesForSelfExtract`, added `-p:DebugType=none`; `.installer\publish` is cleared before publishing. `.iss` `OcSetupExe` define -> `OcSetupDir`, ships `publish\*` (ocSetup.exe + WPF `*_cor3.dll`) into `{app}`. No more per-start decompression or `%TEMP%\.net` extraction. ReadyToRun rejected (self-contained framework is already precompiled).
+- Changed `.installer\ocSetup\windows\MainWindow.xaml.cs`: first `deps list` starts in the constructor (`_loadTask`), `Window_Loaded` awaits it (keeps crashes on the dispatcher handler); after install `ShowDone` shows at once and the list reloads behind it; `OpenOcButton_Click` awaits `_loadTask` (just-installed WezTerm still used, shortcuts retargeted) and disables itself; `LoadRowsAsync` wraps new `ReadRowsAsync` with `_isLoading`, and Install stays disabled while loading.
+- Measured baseline (dev PC): dist `oc.exe oc deps list` median 1.38 s (cold 2.5 s). Per row: freshEnv 240 ms, pwsh check ~900, cursorCli ~800, desktop checks ~550-615, other CLIs 80-260.
+- Reverted step 3 (start PATH-independent detections before `freshEnv`): measured ~1.20-1.25 s vs ~1.17-1.24 s before; the extra concurrent PowerShell start slowed the desktop checks. `dependencies.ts` unchanged.
+- Updated skill `~/.config/opencode/skills/oc/oc-installer/SKILL.md` "Setup behavior" line for the new publish and compression.
+- Verification: `bun test test/dependencies.test.ts` 6 pass (run before the revert; file now unchanged); `dotnet build ocSetup -c Release` 0 warnings 0 errors, bin/obj removed; `buildInstaller.ps1` PowerShell parse 0 errors. Not run: `dotnet publish`, ISCC compile (dictionary size vs ISCC limit unverified), setup size, ocSetup start time, VM install.
+- Risk: setup extraction needs ~256 MB RAM. If ISCC rejects the dictionary, check its bitness and the `LZMAUseSeparateProcess` limit (1048576 KB). A missing native DLL would stop ocSetup from starting; the wildcard ships the whole cleaned publish folder.
+- TODO: remove temp debug logging after the VM retest (plan step 5).
+
+### User
+Install
+- The setup exe should be noticeably smaller: oc.exe and opencode.exe share most of their bytes, which are now compressed once.
+- The dependencies window opens faster: it no longer unpacks itself on every start or extracts files to the temp folder.
+- The dependency check starts while the window is still opening.
+- After installing, the completion screen appears right away instead of waiting for a re-check; "Open oc and close" still waits for that check so a newly installed WezTerm is used.
+
+---
+
 ## 2026-10-22 (~00:14) - v0.2.294 cawfeeeeRafter - session pass: installer tweaks - Claude Opus 5.5, low effort; Pass
 
 ### Agent

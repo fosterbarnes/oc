@@ -25,23 +25,25 @@ public partial class MainWindow : Window
     private string? _weztermGui;
     private IReadOnlyList<DependencyRow> _rows = [];
     private bool _isRunning;
+    // The current list load: Install stays disabled while it runs and Open oc awaits it.
+    private Task _loadTask = Task.CompletedTask;
+    private bool _isLoading;
 
     public MainWindow()
     {
         InitializeComponent();
         SourceInitialized += (_, _) => WindowsTitleBarTheme.ApplyImmersiveDarkMode(this);
+
+        // Started here rather than on Loaded so the check overlaps building the window.
+        if (File.Exists(_ocPath)) _loadTask = LoadRowsAsync();
+        else StatusText.Text = "oc.exe not found next to ocSetup.exe";
     }
 
+    // Awaited here so an exception from the first load still reaches the dispatcher handler.
     private async void Window_Loaded(object sender, RoutedEventArgs e)
     {
         DebugLog.Write($"window loaded; oc.exe exists: {File.Exists(_ocPath)}");
-        if (!File.Exists(_ocPath))
-        {
-            StatusText.Text = "oc.exe not found next to ocSetup.exe";
-            return;
-        }
-
-        await LoadRowsAsync();
+        await _loadTask;
     }
 
     // Closing is the only path for both the X button and Close. The install process is not
@@ -59,25 +61,75 @@ public partial class MainWindow : Window
     private async void InstallButton_Click(object sender, RoutedEventArgs e)
     {
         var ids = _rows.Where(row => row.IsChecked).Select(row => row.Id).ToArray();
-        DebugLog.Write($"install clicked: {string.Join(", ", ids)}");
+        var shortcutIds = _rows.Where(row => row.WantsShortcut).Select(row => row.Id).ToArray();
+        DebugLog.Write($"install clicked: {string.Join(", ", ids)}; shortcuts: {string.Join(", ", shortcutIds)}");
         _runFailures.Clear();
-        SetRunning(true);
-
         _runInstalled.Clear();
-        var (exitCode, _) = await RunOcAsync(HandleInstallLine, ["oc", "deps", "install", .. ids]);
 
-        SetRunning(false);
-        await LoadRowsAsync();
-        ShowDone(exitCode == 0);
+        var installed = true;
+        if (ids.Length > 0)
+        {
+            SetRunning(true);
+            var (exitCode, _) = await RunOcAsync(HandleInstallLine, ["oc", "deps", "install", .. ids]);
+            SetRunning(false);
+            installed = exitCode == 0;
+        }
+
+        if (shortcutIds.Length == 0)
+        {
+            // The summary comes from the install events; the list refreshes behind it.
+            ShowDone(installed, ids.Length > 0, []);
+            _loadTask = LoadRowsAsync();
+            await _loadTask;
+            return;
+        }
+
+        // Rows installed just now only get their shortcut target from the reloaded list.
+        if (ids.Length > 0)
+        {
+            _loadTask = LoadRowsAsync();
+            await _loadTask;
+        }
+        var (created, shortcutLines) = CreateShortcuts(shortcutIds);
+        ShowDone(installed && created, ids.Length > 0, shortcutLines);
     }
 
-    private void ShowDone(bool ok)
+    // Creates the ticked shortcuts; false when one could not be made (an existing one is not a failure).
+    private (bool Ok, List<string> Lines) CreateShortcuts(string[] ids)
+    {
+        var pwsh = _rows.FirstOrDefault(row => row.Id == "pwsh")?.Item.Shortcut?.Target;
+        var created = new List<string>();
+        var lines = new List<string>();
+        var ok = true;
+        foreach (var row in _rows.Where(row => ids.Contains(row.Id) && row.Item.Shortcut is not null))
+        {
+            var shortcut = row.Item.Shortcut!;
+            try
+            {
+                if (DesktopShortcut.Create(shortcut, _weztermGui, pwsh)) created.Add(shortcut.Name);
+                else lines.Add($"{shortcut.Name} shortcut: already on the desktop");
+            }
+            catch (Exception exception)
+            {
+                DebugLog.Write($"shortcut {shortcut.Name} failed: {exception}"); // WIP: temp debug logging
+                lines.Add($"{shortcut.Name} shortcut: {exception.Message}");
+                ok = false;
+            }
+            row.WantsShortcut = false;
+        }
+
+        if (created.Count > 0) lines.Insert(0, $"Desktop shortcuts: {string.Join(", ", created)}");
+        return (ok, lines);
+    }
+
+    private void ShowDone(bool ok, bool ranInstall, IEnumerable<string> shortcutLines)
     {
         DoneHeading.Text = ok ? "Setup complete" : "Setup finished with errors";
         var lines = new List<string>();
         if (_runInstalled.Count > 0) lines.Add($"Installed: {string.Join(", ", _runInstalled)}");
         lines.AddRange(_runFailures.Select(failure => $"{Label(failure.Key)}: {failure.Value}"));
-        lines.Add("Terminals that were already open need a restart to see the new PATH.");
+        lines.AddRange(shortcutLines);
+        if (ranInstall) lines.Add("Terminals that were already open need a restart to see the new PATH.");
         DoneDetails.Text = string.Join(Environment.NewLine, lines);
         SetDoneVisible(true);
     }
@@ -92,8 +144,11 @@ public partial class MainWindow : Window
 
     private void BackButton_Click(object sender, RoutedEventArgs e) => SetDoneVisible(false);
 
-    private void OpenOcButton_Click(object sender, RoutedEventArgs e)
+    // Waits for the post-install list so a just-installed WezTerm is used and the shortcuts point at it.
+    private async void OpenOcButton_Click(object sender, RoutedEventArgs e)
     {
+        OpenOcButton.IsEnabled = false;
+        await _loadTask;
         DebugLog.Write($"open oc; wezterm: {_weztermGui ?? "none"}"); // WIP: temp debug logging
         OcLauncher.Open(_ocPath, _weztermGui);
         Close();
@@ -102,6 +157,18 @@ public partial class MainWindow : Window
     private string Label(string id) => _rows.FirstOrDefault(row => row.Id == id)?.Label ?? id;
 
     private async Task LoadRowsAsync()
+    {
+        _isLoading = true;
+        RefreshButtons();
+        try { await ReadRowsAsync(); }
+        finally
+        {
+            _isLoading = false;
+            RefreshButtons();
+        }
+    }
+
+    private async Task ReadRowsAsync()
     {
         StatusText.Text = "Checking dependencies...";
         var lines = new List<string>();
@@ -118,7 +185,6 @@ public partial class MainWindow : Window
         _rows = CreateRows(items);
         RowsList.ItemsSource = _rows;
         StatusText.Text = "";
-        RefreshButtons();
 
         // Once WezTerm is installed, oc's shortcuts open in it.
         var wezterm = items.FirstOrDefault(item => item.Id == "wezterm" && item.Status == "found");
@@ -139,7 +205,8 @@ public partial class MainWindow : Window
             row.Needed = rows.Where(other => row.Item.Needs.Contains(other.Id)).ToList();
             row.PropertyChanged += (_, e) =>
             {
-                if (e.PropertyName == nameof(DependencyRow.IsChecked)) RefreshButtons();
+                if (e.PropertyName is nameof(DependencyRow.IsChecked) or nameof(DependencyRow.WantsShortcut))
+                    RefreshButtons();
             };
         }
 
@@ -170,8 +237,12 @@ public partial class MainWindow : Window
         RefreshButtons();
     }
 
-    private void RefreshButtons() =>
-        InstallButton.IsEnabled = !_isRunning && _rows.Any(row => row.IsChecked);
+    private void RefreshButtons()
+    {
+        var installs = _rows.Any(row => row.IsChecked);
+        InstallButton.Content = installs ? "Install selected" : "Create shortcuts";
+        InstallButton.IsEnabled = !_isRunning && !_isLoading && (installs || _rows.Any(row => row.WantsShortcut));
+    }
 
     // Runs oc.exe and returns its exit code and stderr. Stdout lines go to onOutputLine on the UI
     // thread, because the awaits resume on the dispatcher.

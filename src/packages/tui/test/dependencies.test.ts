@@ -1,6 +1,9 @@
 import { expect, test } from "bun:test"
+import { existsSync } from "node:fs"
+import path from "node:path"
 import {
   DEPENDENCIES,
+  gitBash,
   lineEvent,
   psString,
   runInstalls,
@@ -17,6 +20,25 @@ test("table ids are unique and every need comes earlier in install order", () =>
     for (const need of dep.needs) expect(ids.indexOf(need)).toBeLessThan(index)
   }
   expect(DEPENDENCIES.filter((dep) => dep.required).map((dep) => dep.id)).toEqual(["pwsh"])
+})
+
+test("each row installs one way and only proven-safe rows run in parallel", () => {
+  for (const dep of DEPENDENCIES) expect(!!dep.install !== !!dep.prepare).toBe(true)
+  // Parallel rows must never elevate, write PATH, or run an MSI (see Dependency.parallel).
+  expect(DEPENDENCIES.filter((dep) => dep.parallel).map((dep) => dep.id)).toEqual(["codexCli", "codexDesktop"])
+})
+
+test("every row but Node.js offers a desktop shortcut; Appx rows use their pinned app ids", () => {
+  expect(DEPENDENCIES.filter((dep) => !dep.shortcut).map((dep) => dep.id)).toEqual(["node"])
+  const appId = (id: string) => DEPENDENCIES.find((dep) => dep.id === id)!.shortcut!.find({}, { status: "found" }).appId
+  expect(appId("codexDesktop")).toBe("OpenAI.Codex_2p2nqsd0c76g0!App")
+  expect(appId("claudeDesktop")).toBe("Claude_pzs8sxrjxfjjc!Claude")
+})
+
+test("finds Git Bash from git's cmd folder only", () => {
+  expect(gitBash("C:\\Program Files\\Git\\cmd\\git.exe")).toBe("C:\\Program Files\\Git\\git-bash.exe")
+  expect(gitBash("C:\\tools\\git.exe")).toBeUndefined()
+  expect(gitBash(undefined)).toBeUndefined()
 })
 
 test("maps script step and progress lines to events", () => {
@@ -50,7 +72,12 @@ test("quotes PowerShell literals including curly quotes", () => {
   expect(psString("a\u2019b")).toBe("'a\u2019\u2019b'")
 })
 
-function fakeDep(id: string, needs: string[], lines: string[], result: { ok: boolean; message: string }): Dependency {
+function fakeDep(
+  id: string,
+  needs: string[],
+  lines: string[],
+  result: { ok: boolean; message: string },
+): Extract<Dependency, { prepare?: never }> {
   return {
     id,
     label: id.toUpperCase(),
@@ -86,6 +113,9 @@ test("installs in table order and skips items whose need failed", async () => {
   )
   expect(ok).toBe(false)
   expect(events).toEqual([
+    { id: "node", phase: "queued" },
+    { id: "git", phase: "queued" },
+    { id: "codexCli", phase: "queued" },
     { id: "node", phase: "start" },
     { id: "node", phase: "downloading" },
     { id: "node", phase: "downloading", received: 10, total: 20 },
@@ -95,7 +125,8 @@ test("installs in table order and skips items whose need failed", async () => {
     { id: "git", phase: "done", message: "Installed Git" },
     { id: "codexCli", phase: "skipped", message: "Needs NODE, which did not install" },
   ])
-  expect(refreshes).toBe(3)
+  // One PATH read per started install; the skipped row starts nothing.
+  expect(refreshes).toBe(2)
 })
 
 test("a thrown install becomes a failed event and unknown ids are refused", async () => {
@@ -127,4 +158,109 @@ test("a thrown install becomes a failed event and unknown ids are refused", asyn
       async () => ({}),
     ),
   ).rejects.toThrow("Unknown dependency: nope")
+})
+
+// Shared shape of the scheduler fakes: a slow install that logs when it runs.
+function timedDep(id: string, log: string[], extra: Partial<Dependency> = {}): Dependency {
+  return {
+    ...fakeDep(id, [], [], { ok: true, message: `Installed ${id}` }),
+    install: async () => {
+      log.push(`${id}+`)
+      await Bun.sleep(20)
+      log.push(`${id}-`)
+      return { ok: true, message: `Installed ${id}` }
+    },
+    ...extra,
+  } as Dependency
+}
+
+test("serial rows never overlap; parallel rows overlap them and wait for cross-lane needs", async () => {
+  const log: string[] = []
+  const deps = [
+    timedDep("pwsh", log),
+    timedDep("claudeDesktop", log, { parallel: true }),
+    timedDep("node", log),
+    timedDep("codexCli", log, { parallel: true, needs: ["node"] }),
+  ]
+  expect(
+    await runInstalls(
+      deps,
+      ["pwsh", "claudeDesktop", "node", "codexCli"],
+      () => {},
+      async () => ({}),
+    ),
+  ).toBe(true)
+  expect(log.indexOf("pwsh-")).toBeLessThan(log.indexOf("node+"))
+  expect(log.indexOf("claudeDesktop+")).toBeLessThan(log.indexOf("pwsh-"))
+  expect(log.indexOf("codexCli+")).toBeGreaterThan(log.indexOf("node-"))
+})
+
+test("a failed need in the serial lane skips its parallel dependent", async () => {
+  const log: string[] = []
+  const deps = [
+    { ...timedDep("node", log), install: async () => ({ ok: false, message: "Install cancelled" }) } as Dependency,
+    timedDep("codexCli", log, { parallel: true, needs: ["node"] }),
+  ]
+  const events: InstallEvent[] = []
+  expect(
+    await runInstalls(
+      deps,
+      ["node", "codexCli"],
+      (event) => events.push(event),
+      async () => ({}),
+    ),
+  ).toBe(false)
+  expect(log).toEqual([])
+  expect(events.at(-1)).toEqual({ id: "codexCli", phase: "skipped", message: "Needs NODE, which did not install" })
+})
+
+test("prefetches up to 3 in table order and reports a failed download at once", async () => {
+  const started: string[] = []
+  const dirs: string[] = []
+  let active = 0
+  let maxActive = 0
+  const prepDep = (id: string, extra: Partial<Dependency> = {}, fail = false): Dependency =>
+    ({
+      ...fakeDep(id, [], [], { ok: true, message: "" }),
+      install: undefined,
+      prepare: async (dir: string, onLine: (line: string) => void) => {
+        started.push(id)
+        dirs.push(dir)
+        expect(existsSync(dir)).toBe(true)
+        maxActive = Math.max(maxActive, ++active)
+        onLine("OCSTEP: downloading")
+        await Bun.sleep(20)
+        active--
+        if (fail) throw new Error("Checksum mismatch")
+        return async () => {
+          await Bun.sleep(30)
+          if (id === "e") throw new Error("Installer crashed")
+          return { ok: true, message: `Installed from ${path.basename(dir)}` }
+        }
+      },
+      ...extra,
+    }) as Dependency
+  const deps = [prepDep("a"), prepDep("b", {}, true), prepDep("c", { needs: ["b"] }), prepDep("d"), prepDep("e")]
+  const events: InstallEvent[] = []
+  const ok = await runInstalls(
+    deps,
+    ["a", "b", "c", "d", "e"],
+    (event) => events.push(event),
+    async () => ({}),
+  )
+
+  expect(ok).toBe(false)
+  expect(started).toEqual(["a", "b", "c", "d", "e"])
+  expect(maxActive).toBe(3)
+  const phases = events.map((event) => `${event.id}:${event.phase}`)
+  expect(phases.slice(0, 5)).toEqual(["a:queued", "b:queued", "c:queued", "d:queued", "e:queued"])
+  // Reported when the download fails, not when the serial lane reaches b.
+  expect(phases.indexOf("b:failed")).toBeLessThan(phases.indexOf("a:done"))
+  expect(phases).toContain("a:ready")
+  expect(phases).not.toContain("b:start")
+  expect(events).toContainEqual({ id: "a", phase: "done", message: "Installed from a" })
+  expect(events).toContainEqual({ id: "c", phase: "skipped", message: "Needs B, which did not install" })
+  expect(events).toContainEqual({ id: "e", phase: "failed", message: "Installer crashed" })
+  // The run's temp folder is removed even though an install threw.
+  expect(existsSync(path.dirname(dirs[0]!))).toBe(false)
 })

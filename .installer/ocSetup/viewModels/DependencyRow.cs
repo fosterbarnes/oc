@@ -11,6 +11,7 @@ public sealed class DependencyRow : INotifyPropertyChanged
 {
     private bool _isChecked;
     private bool _isBusy;
+    private bool _wantsShortcut;
     private string _statusText;
     private bool _isProgressVisible;
     private bool _isProgressIndeterminate = true;
@@ -49,7 +50,15 @@ public sealed class DependencyRow : INotifyPropertyChanged
         get => _isChecked;
         set
         {
-            if (!Set(ref _isChecked, value) || !value) return;
+            if (!Set(ref _isChecked, value)) return;
+
+            Notify(nameof(CanShortcut));
+            // A row that will not be installed has nothing for its shortcut to point at.
+            if (!value)
+            {
+                if (!IsInstalled) WantsShortcut = false;
+                return;
+            }
 
             foreach (var need in Needed)
             {
@@ -63,9 +72,18 @@ public sealed class DependencyRow : INotifyPropertyChanged
         get => _isBusy;
         set
         {
-            if (Set(ref _isBusy, value)) Notify(nameof(CanCheck));
+            if (!Set(ref _isBusy, value)) return;
+
+            Notify(nameof(CanCheck));
+            Notify(nameof(CanShortcut));
         }
     }
+
+    // Desktop shortcut box: off by default; usable for installed rows and rows ticked for install.
+    public bool HasShortcut => Item.Shortcut is not null;
+    public bool CanShortcut => HasShortcut && !_isBusy && (IsInstalled || _isChecked);
+    public bool WantsShortcut { get => _wantsShortcut; set => Set(ref _wantsShortcut, value); }
+    private bool IsInstalled => Item.Status is "found" or "outdated";
 
     public string StatusText { get => _statusText; private set => Set(ref _statusText, value); }
 
@@ -87,6 +105,12 @@ public sealed class DependencyRow : INotifyPropertyChanged
     {
         switch (install.Phase)
         {
+            case "queued":
+                ShowResult("Waiting");
+                break;
+            case "ready":
+                ShowResult("Downloaded, waiting to install");
+                break;
             case "start":
                 ShowProgress("Starting", null);
                 break;

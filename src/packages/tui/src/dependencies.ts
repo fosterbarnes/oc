@@ -1,5 +1,7 @@
 import { spawn } from "node:child_process"
-import { existsSync } from "node:fs"
+import { existsSync, mkdirSync } from "node:fs"
+import { mkdtemp, rm } from "node:fs/promises"
+import { tmpdir } from "node:os"
 import path from "node:path"
 import { which } from "@opencode-ai/core/util/which"
 import { checkChatgptDesktop, installChatgptDesktopLatest } from "./chatgptDesktopUpdate"
@@ -19,25 +21,44 @@ import {
 import { checkPowershell, installPowershellLatest } from "./pwshUpdate"
 
 // Dependency setup behind `oc oc deps` (the installer's ocSetup window is its only caller): detect
-// what oc's features need and install the missing ones one at a time, in table order. Apps that
-// already have a harness update script reuse it with $AllowFresh; the rest download a vendor
-// installer through INSTALL_SCRIPT, pinned by sha256 and/or Authenticode signer.
+// what oc's features need and install the missing ones in table order. Apps that already have a
+// harness update script reuse it with $AllowFresh; the rest download a vendor installer through
+// INSTALL_SCRIPT, pinned by sha256 and/or Authenticode signer. Those downloads run ahead of their
+// install turn (`prepare`). Installs run one at a time, except `parallel` rows, which install
+// beside that serial lane.
 
 export type DependencyStatus = "found" | "missing" | "outdated" | "error"
 // `path` is the resolved executable for CLI rows (ocSetup points the oc shortcuts at WezTerm with it).
 type Detection = { status: DependencyStatus; version?: string; latest?: string; message?: string; path?: string }
+// What ocSetup's "Desktop shortcut" box launches: an exe (`target`), a CLI to run in a terminal
+// (`target` + `terminal`), or an Appx app (`appId`, its AUMID). `name` alone: the row has a
+// shortcut, but nothing is installed to point at yet.
+export type DependencyShortcut = { name: string; target?: string; terminal?: boolean; appId?: string }
+type ShortcutTarget = Omit<DependencyShortcut, "name">
 export type DependencyInfo = Detection & {
   id: string
   label: string
   required: boolean
   defaultSelected: boolean
   needs: string[]
+  shortcut?: DependencyShortcut
 }
-export type InstallPhase = "start" | "downloading" | "verifying" | "installing" | "done" | "failed" | "skipped"
+// `queued`: selected, nothing started. `ready`: downloaded and verified, waiting for its install turn.
+export type InstallPhase =
+  | "queued"
+  | "start"
+  | "downloading"
+  | "verifying"
+  | "ready"
+  | "installing"
+  | "done"
+  | "failed"
+  | "skipped"
 export type InstallEvent = { id: string; phase: InstallPhase; received?: number; total?: number; message?: string }
 type InstallResult = { ok: boolean; message: string }
 type OnLine = (line: string) => void
 type Env = NodeJS.ProcessEnv
+type Install = (env: Env, onLine: OnLine) => Promise<InstallResult>
 
 export type Dependency = {
   id: string
@@ -45,11 +66,20 @@ export type Dependency = {
   required?: boolean
   defaultSelected: boolean
   needs: string[]
+  // Installs beside the serial lane. Only for rows that never elevate, write PATH, or run an MSI:
+  // one UAC prompt at a time, PATH is read-modify-write, and Windows Installer allows one install.
+  parallel?: boolean
   detect: (env: Env) => Promise<Detection>
-  install: (env: Env, onLine: OnLine) => Promise<InstallResult>
-}
+  // Desktop shortcut; `find` runs only for installed rows and returns {} when it finds nothing.
+  shortcut?: { name: string; find: (env: Env, detected: Detection) => ShortcutTarget }
+} & (
+  | { install: Install; prepare?: never }
+  // Downloads and verifies into `dir` ahead of the install turn, then returns the install step.
+  | { prepare: (dir: string, onLine: OnLine) => Promise<Install>; install?: never }
+)
 
 const VERSION_TIMEOUT_MS = 15_000
+const PREFETCH_LIMIT = 3
 const INSTALL_TIMEOUT_MS = 20 * 60 * 1000
 const GITHUB_HOSTS = ["github.com", "objects.githubusercontent.com", "release-assets.githubusercontent.com"]
 const SILENT_INNO_ARGS = ["/VERYSILENT", "/NORESTART", "/NOCANCEL", "/SP-", "/SUPPRESSMSGBOXES"]
@@ -69,6 +99,11 @@ export const DEPENDENCIES: Dependency[] = [
       const checked = fromCheck(await checkPowershell())
       return checked.status === "missing" ? detectCli(which("pwsh", env), env) : checked
     },
+    shortcut: {
+      name: "PowerShell 7",
+      find: (env) =>
+        exeAt(which("pwsh", env) ?? path.join(process.env.ProgramFiles ?? "", "PowerShell", "7", "pwsh.exe")),
+    },
     install: (_env, onLine) => fromInstall(installPowershellLatest(onLine)),
   },
   {
@@ -77,19 +112,15 @@ export const DEPENDENCIES: Dependency[] = [
     defaultSelected: true,
     needs: [],
     detect: (env) => detectCli(which("git", env), env),
-    install: async (env, onLine) =>
-      runInstaller(
-        {
-          label: "Git for Windows",
-          ...(await githubAsset("git-for-windows/git", /^Git-[\d.]+-64-bit\.exe$/)),
-          signer: "Johannes Schindelin",
-          kind: "exe",
-          args: SILENT_INNO_ARGS,
-          elevate: true,
-        },
-        env,
-        onLine,
-      ),
+    shortcut: { name: "Git Bash", find: (_env, detected) => exeAt(gitBash(detected.path)) },
+    prepare: prepared(async () => ({
+      label: "Git for Windows",
+      ...(await githubAsset("git-for-windows/git", /^Git-[\d.]+-64-bit\.exe$/)),
+      signer: "Johannes Schindelin",
+      kind: "exe",
+      args: SILENT_INNO_ARGS,
+      elevate: true,
+    })),
   },
   {
     id: "node",
@@ -97,12 +128,13 @@ export const DEPENDENCIES: Dependency[] = [
     defaultSelected: true,
     needs: [],
     detect: (env) => detectCli(which("node", env), env),
-    install: async (env, onLine) =>
-      runInstaller(
-        { label: "Node.js", ...(await nodeLts()), signer: "OpenJS Foundation", kind: "msi", elevate: true },
-        env,
-        onLine,
-      ),
+    prepare: prepared(async () => ({
+      label: "Node.js",
+      ...(await nodeLts()),
+      signer: "OpenJS Foundation",
+      kind: "msi",
+      elevate: true,
+    })),
   },
   {
     id: "everything",
@@ -116,6 +148,7 @@ export const DEPENDENCIES: Dependency[] = [
       if (!app && !es) return { status: "missing" }
       return { status: "missing", message: `${app ? "es.exe" : "Everything"} not found` }
     },
+    shortcut: { name: "Everything", find: (env) => exeAt(everythingExe(env)) },
     install: installEverything,
   },
   {
@@ -124,16 +157,16 @@ export const DEPENDENCIES: Dependency[] = [
     defaultSelected: true,
     needs: [],
     detect: (env) => detectCli(which("wezterm", env), env),
-    install: async (env, onLine) => {
+    shortcut: {
+      name: "WezTerm",
+      find: (_env, detected) => exeAt(detected.path && path.join(path.dirname(detected.path), "wezterm-gui.exe")),
+    },
+    prepare: prepared(async () => {
       const download = await githubAsset("wezterm/wezterm", /^WezTerm-[\w-]+-setup\.exe$/)
       // WezTerm's installer is unsigned; its release ships a .sha256 file next to each asset.
       const sha256 = download.sha256 ?? (await fetchSha256(`${download.url}.sha256`))
-      return runInstaller(
-        { label: "WezTerm", ...download, sha256, kind: "exe", args: SILENT_INNO_ARGS, elevate: true },
-        env,
-        onLine,
-      )
-    },
+      return { label: "WezTerm", ...download, sha256, kind: "exe", args: SILENT_INNO_ARGS, elevate: true }
+    }),
   },
   // Harness rows keep one order for CLIs and desktop apps: Codex, Claude, Cursor.
   {
@@ -141,7 +174,10 @@ export const DEPENDENCIES: Dependency[] = [
     label: "Codex CLI",
     defaultSelected: true,
     needs: ["node"],
+    // npm writes only %APPDATA%\npm, which the Node.js installer already put on PATH.
+    parallel: true,
     detect: async (env) => detectResolved(await resolveCodexCli(env), env),
+    shortcut: { name: "Codex CLI", find: terminalAt },
     install: async (env, onLine) => {
       const npm = which("npm", env)
       if (!npm) return { ok: false, message: "npm not found; install Node.js first" }
@@ -157,18 +193,15 @@ export const DEPENDENCIES: Dependency[] = [
     defaultSelected: true,
     needs: ["git"],
     detect: (env) => detectCli(which("claude", env), env),
-    install: (env, onLine) =>
-      runInstaller(
-        {
-          label: "Claude Code CLI",
-          url: "https://claude.ai/install.ps1",
-          fileName: "install.ps1",
-          hosts: ["claude.ai", "downloads.claude.ai"],
-          kind: "ps1",
-        },
-        env,
-        onLine,
-      ),
+    shortcut: { name: "Claude Code", find: terminalAt },
+    // Vendor scripts may edit the user PATH, so both CLI scripts stay in the serial lane.
+    prepare: prepared(async () => ({
+      label: "Claude Code CLI",
+      url: "https://claude.ai/install.ps1",
+      fileName: "install.ps1",
+      hosts: ["claude.ai", "downloads.claude.ai"],
+      kind: "ps1",
+    })),
   },
   {
     id: "cursorCli",
@@ -176,25 +209,26 @@ export const DEPENDENCIES: Dependency[] = [
     defaultSelected: false,
     needs: [],
     detect: async (env) => detectResolved(await resolveCursorCli(env), env),
-    install: (env, onLine) =>
-      runInstaller(
-        {
-          label: "Cursor CLI",
-          url: "https://cursor.com/install?win32=true",
-          fileName: "install.ps1",
-          hosts: ["cursor.com"],
-          kind: "ps1",
-        },
-        env,
-        onLine,
-      ),
+    shortcut: { name: "Cursor CLI", find: terminalAt },
+    prepare: prepared(async () => ({
+      label: "Cursor CLI",
+      url: "https://cursor.com/install?win32=true",
+      fileName: "install.ps1",
+      hosts: ["cursor.com"],
+      kind: "ps1",
+    })),
   },
+  // ChatGPT is a per-user Appx (no elevation, PATH, or MSI), so it runs in parallel. Claude's
+  // package carries a service and is provisioned elevated, so it stays serial.
   {
     id: "codexDesktop",
     label: "Codex (ChatGPT) desktop",
     defaultSelected: false,
     needs: [],
+    parallel: true,
     detect: async () => fromCheck(await checkChatgptDesktop()),
+    // AUMIDs: the family names pinned in the update scripts plus the Application Id (Get-StartApps).
+    shortcut: { name: "ChatGPT", find: () => ({ appId: "OpenAI.Codex_2p2nqsd0c76g0!App" }) },
     install: (_env, onLine) => fromInstall(installChatgptDesktopLatest(onLine)),
   },
   {
@@ -203,6 +237,7 @@ export const DEPENDENCIES: Dependency[] = [
     defaultSelected: false,
     needs: [],
     detect: async () => fromCheck(await checkClaudeDesktop()),
+    shortcut: { name: "Claude", find: () => ({ appId: "Claude_pzs8sxrjxfjjc!Claude" }) },
     install: (_env, onLine) => fromInstall(installClaudeDesktopLatest(onLine)),
   },
   {
@@ -211,6 +246,11 @@ export const DEPENDENCIES: Dependency[] = [
     defaultSelected: false,
     needs: [],
     detect: async () => fromCheck(await checkCursorDesktop()),
+    // Cursor's per-user installer location.
+    shortcut: {
+      name: "Cursor",
+      find: () => exeAt(path.join(process.env.LOCALAPPDATA ?? "", "Programs", "cursor", "Cursor.exe")),
+    },
     install: (_env, onLine) => fromInstall(installCursorDesktopLatest(onLine)),
   },
 ]
@@ -218,22 +258,50 @@ export const DEPENDENCIES: Dependency[] = [
 export async function listDependencies(deps = DEPENDENCIES): Promise<DependencyInfo[]> {
   const env = await freshEnv()
   return Promise.all(
-    deps.map(async (dep) => ({
-      id: dep.id,
-      label: dep.label,
-      required: dep.required ?? false,
-      defaultSelected: dep.defaultSelected,
-      needs: dep.needs,
-      ...(await dep.detect(env).catch((cause): Detection => ({ status: "error", message: errorText(cause) }))),
-    })),
+    deps.map(async (dep) => {
+      const detected = await dep
+        .detect(env)
+        .catch((cause): Detection => ({ status: "error", message: errorText(cause) }))
+      const installed = detected.status === "found" || detected.status === "outdated"
+      return {
+        id: dep.id,
+        label: dep.label,
+        required: dep.required ?? false,
+        defaultSelected: dep.defaultSelected,
+        needs: dep.needs,
+        ...detected,
+        ...(dep.shortcut && {
+          shortcut: { name: dep.shortcut.name, ...(installed ? dep.shortcut.find(env, detected) : {}) },
+        }),
+      }
+    }),
   )
+}
+
+/** Git Bash beside a Git for Windows install, from its `<root>\cmd\git.exe`. */
+export function gitBash(git: string | undefined) {
+  if (!git || path.basename(path.dirname(git)).toLowerCase() !== "cmd") return undefined
+  return path.join(path.dirname(path.dirname(git)), "git-bash.exe")
+}
+
+function exeAt(file: string | null | undefined): ShortcutTarget {
+  return file && existsSync(file) ? { target: file } : {}
+}
+
+// CLI rows: the detected executable, run in a terminal by the shortcut.
+function terminalAt(_env: Env, detected: Detection): ShortcutTarget {
+  return detected.path ? { target: detected.path, terminal: true } : {}
 }
 
 export function installDependencies(ids: string[], emit: (event: InstallEvent) => void) {
   return runInstalls(DEPENDENCIES, ids, emit, freshEnv)
 }
 
-/** Installs the selected ids in table order; true only when every one succeeded. */
+/**
+ * Installs the selected ids; true only when every one succeeded. `prepare` rows download first,
+ * PREFETCH_LIMIT at a time. Installs run in table order in two lanes: serial, and `parallel` rows
+ * beside it. A row waits for its selected `needs` in either lane and is skipped if one failed.
+ */
 export async function runInstalls(
   deps: Dependency[],
   ids: string[],
@@ -242,29 +310,100 @@ export async function runInstalls(
 ) {
   const unknown = ids.filter((id) => !deps.some((dep) => dep.id === id))
   if (unknown.length) throw new Error(`Unknown dependency: ${unknown.join(", ")}`)
-  const failed = new Set<string>()
-  // Each install can change PATH (Node before npm for Codex), so detection re-reads it every step.
-  let env = await refreshEnv()
-  for (const dep of deps.filter((item) => ids.includes(item.id))) {
-    const blocker = dep.needs.find((id) => failed.has(id))
-    if (blocker) {
-      failed.add(dep.id)
-      const label = deps.find((item) => item.id === blocker)?.label ?? blocker
-      emit({ id: dep.id, phase: "skipped", message: `Needs ${label}, which did not install` })
-      continue
-    }
-    emit({ id: dep.id, phase: "start" })
-    const result = await dep
-      .install(env, (line) => {
-        const event = lineEvent(dep.id, line)
-        if (event) emit(event)
-      })
-      .catch((cause): InstallResult => ({ ok: false, message: errorText(cause) }))
-    if (!result.ok) failed.add(dep.id)
-    emit({ id: dep.id, phase: result.ok ? "done" : "failed", message: result.message })
-    env = await refreshEnv()
+  const selected = deps.filter((dep) => ids.includes(dep.id))
+  for (const dep of selected) emit({ id: dep.id, phase: "queued" })
+  const lineTo = (id: string) => (line: string) => {
+    const event = lineEvent(id, line)
+    if (event) emit(event)
   }
-  return failed.size === 0
+
+  const dir = await mkdtemp(path.join(tmpdir(), "oc-deps-"))
+  const prefetch = startPrefetch(selected, dir, emit, lineTo)
+  const settled = new Map(selected.map((dep) => [dep.id, Promise.withResolvers<boolean>()]))
+
+  async function installOne(dep: Dependency) {
+    for (const need of dep.needs) {
+      if (!settled.has(need) || (await settled.get(need)!.promise)) continue
+      const label = deps.find((item) => item.id === need)?.label ?? need
+      emit({ id: dep.id, phase: "skipped", message: `Needs ${label}, which did not install` })
+      return false
+    }
+    // A failed download was reported when it happened.
+    const install = dep.prepare ? await prefetch.get(dep.id) : dep.install
+    if (!install) return false
+    emit({ id: dep.id, phase: "start" })
+    // Each install can change PATH (Node before npm for Codex), so every install re-reads it.
+    const result = await refreshEnv()
+      .then((env) => install(env, lineTo(dep.id)))
+      .catch((cause): InstallResult => ({ ok: false, message: errorText(cause) }))
+    emit({ id: dep.id, phase: result.ok ? "done" : "failed", message: result.message })
+    return result.ok
+  }
+
+  async function runLane(lane: Dependency[]) {
+    for (const dep of lane) {
+      let ok = false
+      try {
+        ok = await installOne(dep)
+      } finally {
+        settled.get(dep.id)!.resolve(ok)
+      }
+    }
+  }
+
+  try {
+    await Promise.all([
+      runLane(selected.filter((dep) => !dep.parallel)),
+      runLane(selected.filter((dep) => dep.parallel)),
+    ])
+    const results = await Promise.all([...settled.values()].map((item) => item.promise))
+    return results.every(Boolean)
+  } finally {
+    // Downloads for skipped rows may still be running; let them end before removing their folder.
+    await prefetch.done
+    await rm(dir, { recursive: true, force: true })
+  }
+}
+
+// Runs every selected `prepare` in table order, PREFETCH_LIMIT at a time. `get` resolves to the
+// install step, or undefined after a failure (reported at once as `failed`).
+function startPrefetch(
+  selected: Dependency[],
+  dir: string,
+  emit: (event: InstallEvent) => void,
+  lineTo: (id: string) => OnLine,
+) {
+  const queue = selected.filter((dep) => dep.prepare)
+  const results = new Map(queue.map((dep) => [dep.id, Promise.withResolvers<Install | undefined>()]))
+  let next = 0
+  async function worker() {
+    while (next < queue.length) {
+      const dep = queue[next++]!
+      // One folder per row: two vendor scripts share the name install.ps1. Made synchronously so
+      // downloads start in table order, inside the chain so a failure becomes this row's `failed`.
+      const rowDir = path.join(dir, dep.id)
+      const install = await Promise.resolve()
+        .then(() => {
+          mkdirSync(rowDir)
+          return dep.prepare!(rowDir, lineTo(dep.id))
+        })
+        .then(
+          (step) => {
+            emit({ id: dep.id, phase: "ready" })
+            return step
+          },
+          (cause) => {
+            emit({ id: dep.id, phase: "failed", message: errorText(cause) })
+            return undefined
+          },
+        )
+      results.get(dep.id)!.resolve(install)
+    }
+  }
+  return {
+    get: (id: string) => results.get(id)!.promise,
+    done: Promise.all(Array.from({ length: PREFETCH_LIMIT }, worker)),
+  }
 }
 
 /** Maps a script's OCSTEP / OCPROGRESS line to an install event; other output is not reported. */
@@ -430,12 +569,44 @@ async function nodeLts(): Promise<Download> {
   return { url: `https://nodejs.org/dist/${release.version}/${fileName}`, fileName, hosts: ["nodejs.org"] }
 }
 
+// Builds a row's `prepare`: resolve the spec (release lookups), download and verify it into the
+// row's folder, and return the step that installs that file.
+function prepared(resolve: () => Promise<InstallerSpec>) {
+  return async (dir: string, onLine: OnLine): Promise<Install> => {
+    const spec = await resolve()
+    const file = path.join(dir, spec.fileName)
+    const fetched = await runInstallScript("download", spec, file, process.env, onLine)
+    if (!fetched.ok) throw new Error(fetched.message)
+    return (env, installLine) => runInstallScript("install", spec, file, env, installLine)
+  }
+}
+
+// Download and install in one turn (Everything's two conditional steps).
 async function runInstaller(spec: InstallerSpec, env: Env, onLine: OnLine): Promise<InstallResult> {
+  const dir = await mkdtemp(path.join(tmpdir(), "oc-deps-"))
+  try {
+    const file = path.join(dir, spec.fileName)
+    const fetched = await runInstallScript("download", spec, file, env, onLine)
+    return fetched.ok ? await runInstallScript("install", spec, file, env, onLine) : fetched
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+}
+
+async function runInstallScript(
+  mode: "download" | "install",
+  spec: InstallerSpec,
+  file: string,
+  env: Env,
+  onLine: OnLine,
+): Promise<InstallResult> {
   // Vendor install scripts (Claude, Cursor) are trusted by their HTTPS host; binaries need a pin.
   if (spec.kind !== "ps1" && !spec.sha256 && !spec.signer) {
     return { ok: false, message: `${spec.label} has no checksum or signer to verify` }
   }
   const prefix = [
+    `$Mode = ${psString(mode)}`,
+    `$File = ${psString(file)}`,
     `$Label = ${psString(spec.label)}`,
     `$Url = ${psString(spec.url)}`,
     `$FileName = ${psString(spec.fileName)}`,
@@ -466,10 +637,11 @@ function errorText(cause: unknown) {
   return cause instanceof Error ? cause.message : String(cause)
 }
 
-// Download (host allowlist after redirects), verify ($Sha256 and/or exact $Signer CN), then
-// install by $Kind: exe with $InstallArgs, msi through msiexec, ps1 (vendor install script) in a
-// child Windows PowerShell, or one $ZipEntry extracted to $ZipDest. $Elevate runs the installer
-// through a UAC prompt. All inputs come from the prefix lines as single-quoted literals. Errors go
+// $Mode "download": download to $File (host allowlist after redirects) and verify ($Sha256 and/or
+// exact $Signer CN). $Mode "install": verify $File again, then install by $Kind: exe with
+// $InstallArgs, msi through msiexec, ps1 (vendor install script) in a child Windows PowerShell, or
+// one $ZipEntry extracted to $ZipDest. $Elevate runs the installer through a UAC prompt. The caller
+// owns $File's folder. All inputs come from the prefix lines as single-quoted literals. Errors go
 // to an OCERR line and exit 1 (trap).
 const INSTALL_SCRIPT = String.raw`
 $ErrorActionPreference = "Stop"
@@ -495,48 +667,51 @@ function Invoke-Installer {
   return $proc.ExitCode
 }
 
-$tmp = Join-Path ([System.IO.Path]::GetTempPath()) ("oc-deps-" + [System.Guid]::NewGuid().ToString("N"))
-New-Item -ItemType Directory -Path $tmp | Out-Null
-try {
-  $file = Join-Path $tmp $FileName
-  Save-Download -Uri $Url -OutFile $file -AllowHost { param($h) $AllowHosts -contains $h.ToLowerInvariant() }
-  Write-OcStep "verifying"
-  if ($Sha256 -and (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash -ne $Sha256) { throw "Checksum mismatch for $FileName" }
+function Test-Installer {
+  if ($Sha256 -and (Get-FileHash -LiteralPath $File -Algorithm SHA256).Hash -ne $Sha256) { throw "Checksum mismatch for $FileName" }
   if ($Signer) {
-    $sig = Get-AuthenticodeSignature -FilePath $file
+    $sig = Get-AuthenticodeSignature -FilePath $File
     if ($sig.Status -ne "Valid") { throw "Signature check failed: $($sig.Status)" }
     $name = $sig.SignerCertificate.GetNameInfo([System.Security.Cryptography.X509Certificates.X509NameType]::SimpleName, $false)
     if ($name -ne $Signer) { throw "Signature signer '$name' is not $Signer" }
   }
-  if ($Elevate) { Write-OcStep "installing needs admin approval" } else { Write-OcStep "installing" }
-  switch ($Kind) {
-    "zip" {
-      Add-Type -AssemblyName System.IO.Compression.FileSystem
-      $zip = [System.IO.Compression.ZipFile]::OpenRead($file)
-      try {
-        $entry = $zip.Entries | Where-Object { $_.Name -eq $ZipEntry } | Select-Object -First 1
-        if (-not $entry) { throw "$ZipEntry not found in $FileName" }
-        New-Item -ItemType Directory -Path $ZipDest -Force | Out-Null
-        [System.IO.Compression.ZipFileExtensions]::ExtractToFile($entry, (Join-Path $ZipDest $ZipEntry), $true)
-      } finally { $zip.Dispose() }
-    }
-    "ps1" {
-      & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $file
-      if ($LASTEXITCODE -ne 0) { throw "Install script exited with code $LASTEXITCODE" }
-    }
-    "msi" {
-      $code = Invoke-Installer "msiexec.exe" @("/i", ('"{0}"' -f $file), "/qn", "/norestart")
-      if ($code -eq 1602) { throw "Install cancelled" }
-      if ($code -eq 1618) { throw "Another installer is running; try again when it finishes" }
-      if ($code -ne 0 -and $code -ne 3010) { throw "Install failed: msiexec exit code $code" }
-    }
-    default {
-      $code = Invoke-Installer $file $InstallArgs
-      if ($code -ne 0) { throw "Install failed: exit code $code" }
-    }
-  }
-  Write-Output "Installed $Label"
-} finally {
-  Remove-Item -LiteralPath $tmp -Recurse -Force -ErrorAction SilentlyContinue
 }
+
+if ($Mode -eq "download") {
+  Save-Download -Uri $Url -OutFile $File -AllowHost { param($h) $AllowHosts -contains $h.ToLowerInvariant() }
+  Write-OcStep "verifying"
+  Test-Installer
+  exit 0
+}
+
+# The file may have waited in user temp since its download, so it is checked again right before it runs.
+Test-Installer
+if ($Elevate) { Write-OcStep "installing needs admin approval" } else { Write-OcStep "installing" }
+switch ($Kind) {
+  "zip" {
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $zip = [System.IO.Compression.ZipFile]::OpenRead($File)
+    try {
+      $entry = $zip.Entries | Where-Object { $_.Name -eq $ZipEntry } | Select-Object -First 1
+      if (-not $entry) { throw "$ZipEntry not found in $FileName" }
+      New-Item -ItemType Directory -Path $ZipDest -Force | Out-Null
+      [System.IO.Compression.ZipFileExtensions]::ExtractToFile($entry, (Join-Path $ZipDest $ZipEntry), $true)
+    } finally { $zip.Dispose() }
+  }
+  "ps1" {
+    & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $File
+    if ($LASTEXITCODE -ne 0) { throw "Install script exited with code $LASTEXITCODE" }
+  }
+  "msi" {
+    $code = Invoke-Installer "msiexec.exe" @("/i", ('"{0}"' -f $File), "/qn", "/norestart")
+    if ($code -eq 1602) { throw "Install cancelled" }
+    if ($code -eq 1618) { throw "Another installer is running; try again when it finishes" }
+    if ($code -ne 0 -and $code -ne 3010) { throw "Install failed: msiexec exit code $code" }
+  }
+  default {
+    $code = Invoke-Installer $File $InstallArgs
+    if ($code -ne 0) { throw "Install failed: exit code $code" }
+  }
+}
+Write-Output "Installed $Label"
 `

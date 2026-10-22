@@ -298,10 +298,10 @@ export function scriptModeLines(checkOnly: boolean, expectedVersion?: string, al
   ].join("\n")
 }
 
-// Fixed script modeled on Anthropic's Install-Claude.ps1, trimmed to user scope:
-// highest Claude_pzs8sxrjxfjjc package, official latest-release redirect pinned to
-// downloads.claude.ai, skip when current, Authenticode Valid with the signer subject equal
-// to the manifest publisher, plus publisher family-hash pin, install with
+// Fixed script modeled on Anthropic's Install-Claude.ps1: highest Claude_pzs8sxrjxfjjc
+// package, official latest-release redirect pinned to downloads.claude.ai, skip when current,
+// Authenticode Valid with the signer subject equal to the manifest publisher, plus publisher
+// family-hash pin, elevated machine-wide provisioning then per-user registration with
 // -ForceApplicationShutdown, temp dir removed in finally. Errors go to an OCERR line and
 // exit 1 (trap). No user input is interpolated; the check/install mode is selected by the
 // $CheckOnly prefix line only.
@@ -383,8 +383,22 @@ try {
     throw "Package publisher '$($identity.Publisher)' is not Claude's expected publisher"
   }
   if ($identity.Version -le $installed) { throw "Downloaded package is not newer ($($identity.Version))" }
-  Write-OcStep "installing"
-  try { Add-AppxPackage -Path $file -ForceApplicationShutdown }
+  # The package carries the Cowork service, which a per-user Add-AppxPackage cannot register
+  # (0x80073D28). Provision it machine-wide in an elevated child (Anthropic's documented command),
+  # then register it for this user, so it lands on the signed-in account even when another admin
+  # approves the prompt. The child writes its error to a file: RunAs cannot redirect output.
+  Write-OcStep "installing needs admin approval"
+  $errorFile = Join-Path $tmp "provision-error.txt"
+  $command = '$ErrorActionPreference = ''Stop''; try {{ Add-AppxProvisionedPackage -Online -PackagePath ''{0}'' -SkipLicense -Regions all | Out-Null }} catch {{ Set-Content -LiteralPath ''{1}'' -Value $_.Exception.Message; exit 1 }}' -f ($file -replace "'", "''"), ($errorFile -replace "'", "''")
+  $encoded = [Convert]::ToBase64String([System.Text.Encoding]::Unicode.GetBytes($command))
+  try { $proc = Start-Process -FilePath "powershell.exe" -ArgumentList "-NoProfile", "-NonInteractive", "-EncodedCommand", $encoded -Verb RunAs -WindowStyle Hidden -PassThru }
+  catch { throw "Cancelled at the admin prompt" }
+  if (-not $proc.WaitForExit(600000)) { throw "Install still running after 10 minutes" }
+  if ($proc.ExitCode -ne 0) {
+    $detail = if (Test-Path -LiteralPath $errorFile) { (Get-Content -LiteralPath $errorFile -Raw).Trim() } else { "exit code $($proc.ExitCode)" }
+    throw "Install failed: $detail"
+  }
+  try { Add-AppxPackage -RegisterByFamilyName -MainPackage $PackageFamilyName -ForceApplicationShutdown }
   catch { throw "Install failed: $($_.Exception.Message)" }
   $after = Get-InstalledClaudeVersion
   if (-not $after) { throw "Install finished but Claude Desktop was not found" }

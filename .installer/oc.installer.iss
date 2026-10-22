@@ -25,8 +25,8 @@
 #ifndef NativeBin
 #define NativeBin "..\src\packages\opencode\dist\opencode-native-windows-x64\bin"
 #endif
-#ifndef OcSetupExe
-#define OcSetupExe "publish\ocSetup.exe"
+#ifndef OcSetupDir
+#define OcSetupDir "publish"
 #endif
 
 [Setup]
@@ -53,16 +53,25 @@ ArchitecturesInstallIn64BitMode=x64compatible
 ChangesEnvironment=yes
 OutputDir=Output
 OutputBaseFilename=oc_v{#AppVersion}_windows-x64-setup
+; One LZMA stream with a dictionary bigger than one Bun binary (~225 MB): opencode.exe then
+; compresses against oc.exe's identical runtime instead of storing it twice. Setup needs about
+; the dictionary size in RAM while extracting.
+Compression=lzma2/max
+SolidCompression=yes
+LZMADictionarySize=262144
+LZMAUseSeparateProcess=yes
 
 [Tasks]
 Name: startmenuicon; Description: "Create a Start Menu shortcut"; GroupDescription: "{cm:AdditionalIcons}"
 Name: desktopicon; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"
 
 [Files]
+; oc.exe and opencode.exe stay adjacent so the solid stream finds their shared runtime.
 Source: "{#OcBin}\oc.exe"; DestDir: "{app}"; Flags: ignoreversion
-Source: "{#OcBin}\cursor-runtime\*"; DestDir: "{app}\cursor-runtime"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "{#NativeBin}\opencode.exe"; DestDir: "{app}"; Flags: ignoreversion
-Source: "{#OcSetupExe}"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#OcBin}\cursor-runtime\*"; DestDir: "{app}\cursor-runtime"; Flags: ignoreversion recursesubdirs createallsubdirs
+; ocSetup.exe plus the WPF native DLLs published next to it.
+Source: "{#OcSetupDir}\*"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#LicenseFile}"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
