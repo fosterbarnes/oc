@@ -1,8 +1,8 @@
-v0.2.291 wrigglingIommi [docs > feature request issue form]
+v0.2.292 safariShittin [patch > Claude account switch waits for work]
 
-github issues:
-The feature request form on GitHub is now written for oc instead of upstream OpenCode. It asks for the problem you hit and the change you want as separate fields, plus an optional area of oc, any workaround you use today, and your oc version. A required checkbox asks you to search existing issues and check SCOPE.md (linked) for things already declined or planned. The emoji name and forced "[FEATURE]:" title prefix are gone.
+claude accounts:
+Switching the Claude account from the palette, globally or for one session, no longer cuts off work that is running. A chat that is mid-turn, or that has background jobs running (background shell commands, agents, Monitor watches), finishes that work on its current account and moves to the new one on its next message. New chats and subagents use the new account right away.
 
-The FAQ link on the new issue page now opens the wiki FAQ; it pointed at a README section that no longer exists.
+The sidebar marks the account a chat is actually running on, and flips to the new one once the chat's work ends. The switch dialogs now say the change applies after running work finishes.
 
-Under the hood: feature-request.yml follows bug-report.yml's style with stable field ids; its Area dropdown mirrors the FORK.md section names and needs updating if those are renamed. Checks: both templates parse as YAML (PyYAML). GitHub's rendering of the form was not checked, since it only validates server-side. The push runs prePush.
+Under the hood: the language model keeps a session's account while its Claude process has a turn in flight or running CLI tasks, tracked from the CLI's stream-json task_started / task_notification / task_updated lines, and skips the account retire in that case. Usage-limit failover is unchanged. The account pool state reports the running account as current for a session. Claude's tool note and the wiki now say only a failover, restart or /reload ends background jobs. Checks: accountPool.test.ts 24/24; sessionManager.test.ts 29 pass, with 2 older log-capture tests failing that assert console output the Claude logger no longer writes (likely stale, not touched by this change); tsgo typecheck clean. No live check yet. The push runs prePush.

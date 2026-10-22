@@ -96,6 +96,11 @@ export interface ActiveProcess {
    */
   autonomousTurn?: boolean
   /**
+   * CLI tasks started and not yet reported finished, id -> backgrounded. They die with this
+   * child; while any run, the child keeps its account (`workingAccount`). See `noteTaskLine`.
+   */
+  backgroundTasks?: Map<string, boolean>
+  /**
    * Set once the child's stdout closed, its stdin failed, or it was killed. Such a
    * child cannot finish a turn, so no turn is handed it and LRU evicts it first.
    */
@@ -369,8 +374,38 @@ export function noteTurnStarted(ap: ActiveProcess): void {
  * case) must still mark the CLI idle rather than leak into the next turn.
  */
 export function noteTurnLine(ap: ActiveProcess, line: string): void {
-  if (!ap.turnInFlight) return
-  if (isTerminalResultLine(line)) settleTurn(ap)
+  if (!ap.turnInFlight || !isTerminalResultLine(line)) return
+  // A foreground task cannot outlive its turn, even if its notification never came.
+  for (const [id, backgrounded] of ap.backgroundTasks ?? []) {
+    if (!backgrounded) ap.backgroundTasks!.delete(id)
+  }
+  settleTurn(ap)
+}
+
+const TERMINAL_TASK_STATUSES = new Set(["completed", "failed", "stopped", "killed"])
+
+/**
+ * Track CLI tasks (background Bash, agents, Monitor watches) from their stream-json
+ * `task_started` / `task_updated` / `task_notification` lines. Feed every stdout line here.
+ */
+export function noteTaskLine(ap: ActiveProcess, line: string): void {
+  // stream-json is compact JSON; this skips every non-task line before JSON.parse.
+  if (!line.includes('"subtype":"task_')) return
+  let msg: { type?: unknown; subtype?: unknown; task_id?: unknown; is_backgrounded?: unknown; patch?: unknown }
+  try {
+    msg = JSON.parse(line)
+  } catch {
+    return
+  }
+  if (msg.type !== "system" || typeof msg.task_id !== "string") return
+  const tasks = (ap.backgroundTasks ??= new Map())
+  if (msg.subtype === "task_started") tasks.set(msg.task_id, msg.is_backgrounded !== false)
+  else if (msg.subtype === "task_notification") tasks.delete(msg.task_id)
+  else if (msg.subtype === "task_updated" && tasks.has(msg.task_id)) {
+    const patch = (msg.patch ?? {}) as { status?: unknown; is_backgrounded?: unknown; isBackgrounded?: unknown }
+    if (typeof patch.status === "string" && TERMINAL_TASK_STATUSES.has(patch.status)) tasks.delete(msg.task_id)
+    else if (patch.is_backgrounded === true || patch.isBackgrounded === true) tasks.set(msg.task_id, true)
+  }
 }
 
 export function isTurnInFlight(ap: ActiveProcess): boolean {
@@ -805,6 +840,33 @@ export function setClaudeSessionId(key: string, sessionId: string, account?: str
 }
 
 /**
+ * The pool account the key's live process is still working on (a turn in flight or a running
+ * CLI task), if any. An account switch never cuts that work; the next idle turn picks it up.
+ * Reads the map directly so the check leaves LRU order and idle timers alone.
+ */
+export function workingAccount(key: string): string | undefined {
+  return processWorkingAccount(activeProcesses.get(key))
+}
+
+/** `workingAccount` for whichever live process serves an opencode session; drives the sidebar's account. */
+export function sessionWorkingAccount(sessionID: string): string | undefined {
+  for (const [key, ap] of activeProcesses) {
+    if (ap.opencodeSessionID !== sessionID && describeSessionKey(key).session !== sessionID) continue
+    const account = processWorkingAccount(ap)
+    if (account) return account
+  }
+  return undefined
+}
+
+/** A stopped (`turnAbandoned`) turn releases the account; tasks it started still run and hold it. */
+function processWorkingAccount(ap: ActiveProcess | undefined): string | undefined {
+  if (!ap || ap.closing) return undefined
+  const inTurn = ap.turnInFlight && !ap.turnAbandoned
+  if (!inTurn && !ap.backgroundTasks?.size) return undefined
+  return ap.account ?? DEFAULT_ACCOUNT
+}
+
+/**
  * Retire the key's process and conversation when they belong to a pool
  * account other than `account`: a transcript cannot resume across accounts.
  * True when a conversation was dropped, which the caller replaces with the
@@ -951,6 +1013,7 @@ export function spawnClaudeProcess(
     // Read before `noteTurnLine`, which clears it on the abandoned turn's own `result`.
     const abandoned = ap.turnAbandoned === true
     noteTurnLine(ap, line)
+    noteTaskLine(ap, line)
     if (lineEmitter.listenerCount("line") === 0) {
       if (abandoned) return
       bufferUnattendedLine(ap, line)

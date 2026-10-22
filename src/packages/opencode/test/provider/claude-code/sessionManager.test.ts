@@ -29,12 +29,15 @@ import {
   scheduleIdleProcessEviction,
   noteTurnStarted,
   noteTurnLine,
+  noteTaskLine,
+  sessionWorkingAccount,
   isTurnInFlight,
   awaitTurnIdle,
   interruptTurn,
   setActiveProcess,
   setClaudeSessionId,
   spawnClaudeProcess,
+  workingAccount,
   type ActiveProcess,
 } from "@/provider/claude-code/sessionManager.js"
 import { getPendingProxyCalls, queuePendingProxyCall } from "@/provider/claude-code/proxyBroker.js"
@@ -326,6 +329,72 @@ test("a turn is in flight from the envelope write until the terminal result line
   noteTurnLine(ap, JSON.stringify({ type: "result", subtype: "success" }))
   assert.equal(isTurnInFlight(ap), false)
   assert.equal(await idle, true)
+})
+
+test("workingAccount names the account only while a live turn is in flight", () => {
+  const key = "working-account"
+  const { activeProcess: ap } = fakeActiveProcess({ exitOn: "SIGTERM", delayMs: 0 })
+  try {
+    assert.equal(workingAccount(key), undefined, "no process")
+    setActiveProcess(key, ap)
+    assert.equal(workingAccount(key), undefined, "idle process")
+    noteTurnStarted(ap)
+    assert.equal(workingAccount(key), "default", "unset account is the default one")
+    ap.account = "C:/acct/.claude4"
+    assert.equal(workingAccount(key), "C:/acct/.claude4")
+    ap.turnAbandoned = true
+    assert.equal(workingAccount(key), undefined, "a stopped turn may switch")
+    ap.turnAbandoned = false
+    ap.closing = true
+    assert.equal(workingAccount(key), undefined, "a closing child may switch")
+    ap.closing = false
+    noteTurnLine(ap, JSON.stringify({ type: "result", subtype: "success" }))
+    assert.equal(workingAccount(key), undefined, "finished turn")
+  } finally {
+    deleteActiveProcess(key)
+  }
+})
+
+test("background tasks hold the account past their turn until the CLI reports them done", () => {
+  const key = "working-account-tasks"
+  const { activeProcess: ap } = fakeActiveProcess({ exitOn: "SIGTERM", delayMs: 0 })
+  ap.account = "C:/acct/.claude4"
+  ap.opencodeSessionID = "ses_tasks"
+  const line = (msg: object) => {
+    const text = JSON.stringify(msg)
+    noteTurnLine(ap, text)
+    noteTaskLine(ap, text)
+  }
+  const started = (task_id: string, extra: object = {}) =>
+    line({ type: "system", subtype: "task_started", task_id, task_type: "local_bash", ...extra })
+  const result = () => line({ type: "result", subtype: "success" })
+  try {
+    setActiveProcess(key, ap)
+    noteTurnStarted(ap)
+    started("bg", { is_backgrounded: true })
+    started("fg", { is_backgrounded: false })
+    started("unknown")
+    result()
+    assert.deepEqual([...ap.backgroundTasks.keys()], ["bg", "unknown"], "foreground task dropped at result")
+    assert.equal(workingAccount(key), "C:/acct/.claude4", "running background tasks hold")
+    assert.equal(sessionWorkingAccount("ses_tasks"), "C:/acct/.claude4")
+    assert.equal(sessionWorkingAccount("ses_other"), undefined)
+    line({ type: "system", subtype: "task_notification", task_id: "bg", status: "completed" })
+    line({ type: "system", subtype: "task_updated", task_id: "unknown", patch: { status: "running" } })
+    assert.equal(workingAccount(key), "C:/acct/.claude4", "a non-terminal update keeps the task")
+    line({ type: "system", subtype: "task_updated", task_id: "unknown", patch: { status: "killed" } })
+    assert.equal(workingAccount(key), undefined, "all tasks done")
+
+    noteTurnStarted(ap)
+    started("bg2", { is_backgrounded: true })
+    ap.turnAbandoned = true
+    result()
+    assert.equal(workingAccount(key), "C:/acct/.claude4", "a stopped turn's background task still holds")
+    ap.closing = true
+    assert.equal(workingAccount(key), undefined, "a closing child holds nothing")
+  } finally {
+    deleteActiveProcess(key)
+  }
 })
 
 test("interruptTurn writes an interrupt control request and waits for the result", async () => {

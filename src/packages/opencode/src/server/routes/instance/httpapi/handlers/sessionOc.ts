@@ -4,6 +4,7 @@
 import { Config } from "@/config/config"
 import { InstanceStore } from "@/project/instance-store"
 import { pinSessionAccount, poolAccountIds, poolState, setCurrentAccount } from "@/provider/claude-code/accounts"
+import { sessionWorkingAccount } from "@/provider/claude-code/sessionManager"
 import { SessionPrompt } from "@/session/prompt"
 import { ScheduledDelivery } from "@/session/scheduledDelivery"
 import { ScheduledResume } from "@/session/scheduledResume"
@@ -133,10 +134,14 @@ export const makeOcSessionHandlers = Effect.fnUntraced(function* ({
     return poolAccountIds(Array.isArray(accounts) ? accounts.filter((dir) => typeof dir === "string") : undefined)
   })
 
+  // A session still working keeps its account until the work ends, so it is reported as current.
+  const claudeState = (ids: string[], sessionID: string | undefined) =>
+    poolState(ids, Date.now(), sessionID, sessionID ? sessionWorkingAccount(sessionID) : undefined)
+
   const claudeAccountState = Effect.fn("SessionHttpApi.claudeAccountState")(function* (ctx: {
     query: typeof ClaudeAccountQuery.Type
   }) {
-    return { accounts: poolState(yield* claudePool(), Date.now(), ctx.query.sessionID) }
+    return { accounts: claudeState(yield* claudePool(), ctx.query.sessionID) }
   })
 
   const claudeAccountSet = Effect.fn("SessionHttpApi.claudeAccountSet")(function* (ctx: {
@@ -146,7 +151,7 @@ export const makeOcSessionHandlers = Effect.fnUntraced(function* ({
     const { id, sessionID } = ctx.payload
     const ok = sessionID ? pinSessionAccount(sessionID, id, ids) : id !== undefined && setCurrentAccount(id, ids)
     if (!ok) return yield* new HttpApiError.BadRequest({})
-    return { accounts: poolState(ids, Date.now(), sessionID) }
+    return { accounts: claudeState(ids, sessionID) }
   })
 
   // Both sleepers wake on local writes. Cross-process changes reconcile at most once a minute.

@@ -314,11 +314,12 @@ export function forgetSessionPin(sessionID: string, now = Date.now()): void {
 
 /**
  * Pool accounts with the active one flagged and any live limit. Selection mirrors `poolAccount`;
- * with a session it is that session's pin when set (`pinned`), else the global pick.
+ * with a session it is that session's pin when set (`pinned`), else the global pick. `running`,
+ * the account the session's work is still on (`sessionWorkingAccount`), wins until that work ends.
  */
-export function poolState(ids: string[], now = Date.now(), sessionID?: string) {
+export function poolState(ids: string[], now = Date.now(), sessionID?: string, running?: string) {
   const pin = sessionPin(sessionID, ids, now)
-  const active = pin ?? poolAccount(ids, now)
+  const active = running && ids.includes(running) ? running : (pin ?? poolAccount(ids, now))
   return ids.map((id) => {
     const until = limitedUntil.get(id) ?? 0
     return {

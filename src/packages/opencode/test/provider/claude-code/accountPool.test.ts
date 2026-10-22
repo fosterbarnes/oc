@@ -128,6 +128,12 @@ test("a session pin beats the global account, survives a reload, and unpins clea
       { id: "a", label: "a", current: false },
       { id: "b", label: "b", current: true, pinned: true },
     ])
+    // Work still running on another account is reported as current; one outside the pool is ignored.
+    expect(poolState(ids, now, "ses_1", "a")).toEqual([
+      { id: "a", label: "a", current: true },
+      { id: "b", label: "b", current: false, pinned: true },
+    ])
+    expect(poolState(ids, now, "ses_1", "zzz").find((account) => account.current)?.id).toBe("b")
 
     _resetAccountPool()
     _setAccountPoolFile(file)

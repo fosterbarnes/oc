@@ -185,6 +185,27 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-21 (~22:22) - v0.2.292 safariShittin - Claude account switch waits for running work - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation (/imp of `~/.config/opencode/plans/claudeAccountSwitchWaitForWork.md` + `claudeAccountSwitchBackgroundAndSidebar.md`); completed
+- Version: 0.2.292 safariShittin
+- Added `sessionManager.ts` `workingAccount(key)`, `sessionWorkingAccount(sessionID)`, private `processWorkingAccount`: live process holds its account while `turnInFlight && !turnAbandoned` or `backgroundTasks` non-empty; `closing` holds nothing. Map read directly (no LRU touch).
+- Added `ActiveProcess.backgroundTasks` (id -> backgrounded) + `noteTaskLine` fed from the stdout `rl.on("line")` handler: CLI stream-json `system/task_started` adds (`is_backgrounded !== false`), `task_notification` deletes, `task_updated` with terminal `patch.status` deletes. Pre-filter `"subtype":"task_` before JSON.parse. `noteTurnLine` drops foreground entries at the terminal `result`. Not copied on respawn (tasks die with the child). Event shapes read from CLI 2.1.306 `claude.exe` strings; `task_updated` patch keys unverified.
+- Changed `claudeCodeLanguageModel.ts`: a working session keeps its account and skips `turnAccount` + `retireOtherAccount`; palette switch applies on the next idle turn. New sessions and subagents get the new account at once. Failover unchanged (switches at the rejected `result`).
+- Changed `accounts.ts` `poolState(..., running?)`: running account (in pool) wins `current`; `sessionOc.ts` passes `sessionWorkingAccount` for state and set, so the sidebar shows the account the chat is on now. No SDK change.
+- Changed `prompts.ts:79` and `tui/src/claudeCommands.tsx` dialog titles; wiki `Claude-Code.md` (background jobs, Several Claude accounts).
+- Verification: `bun test` `sessionManager.test.ts` + `accountPool.test.ts`: accountPool 24/24; sessionManager 29 pass, 2 fail ("an error on a dead child's stdin is logged, not thrown", "LRU eviction kills nothing while every process is mid-turn"), both capture `console.error` log lines while `logger.ts` (changed v0.2.233, after the test's last edit v0.2.221) never writes stderr; code paths untouched here, likely stale, not added to Known failures (TODO). /pass: comment and dialog-title wording now covers background tasks. `tsgo --noEmit` clean. No live check.
+- Risk: long `Monitor` watches hold a manual switch until they end; a lost `task_notification` holds until the process exits (idle/LRU eviction or restart). Kept: idle eviction still kills background tasks.
+
+### User
+Claude accounts
+- Switching the Claude account from the palette no longer interrupts a chat that is mid-turn or has background jobs running; that chat finishes the work and moves on its next message.
+- New chats and subagents use the newly chosen account right away.
+- The sidebar marks the account a chat is actually using until its running work finishes.
+
+---
+
 ## 2026-10-21 (~22:09) - v0.2.291 wrigglingIommi - oc feature request issue form - Claude Opus 5.5, low effort; Implementation
 
 ### Agent

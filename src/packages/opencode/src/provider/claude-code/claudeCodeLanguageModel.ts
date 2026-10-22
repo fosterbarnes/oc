@@ -10,7 +10,13 @@ import type { ClaudeCodeConfig } from "./types.js"
 import { translateStreamForHost } from "./hostTools.js"
 import { getClaudeUserMessage, isWakeTurn, visibleThreadTokens } from "./messageBuilder.js"
 import { getRuntimeMcpStatus, fetchSessionRunState } from "./runtimeStatus.js"
-import { getActiveProcess, getClaudeSessionId, describeSessionKey, retireOtherAccount } from "./sessionManager.js"
+import {
+  getActiveProcess,
+  getClaudeSessionId,
+  describeSessionKey,
+  retireOtherAccount,
+  workingAccount,
+} from "./sessionManager.js"
 import { poolAccountIds, poolAccountLabel, turnAccount } from "./accounts.js"
 import { log } from "./logger.js"
 import { detectCliVersion } from "./cliVersion.js"
@@ -133,8 +139,11 @@ export class ClaudeCodeLanguageModel implements LanguageModelV3 {
     const hasPriorConversation = options.prompt.some((m) => m.role === "assistant")
     resetStaleSession(turn, hasPriorConversation)
     const accountIds = poolAccountIds(this.config.accounts)
-    const account = turnAccount(turn.affinity, turn.agentAccount, accountIds)
-    const accountSwitched = await retireOtherAccount(turn.sessionKey, account)
+    // Running work (turn or CLI tasks) finishes on its account; a palette switch applies after it.
+    const working = workingAccount(turn.sessionKey)
+    const keepWorking = working !== undefined && accountIds.includes(working)
+    const account = keepWorking ? working : turnAccount(turn.affinity, turn.agentAccount, accountIds)
+    const accountSwitched = keepWorking ? false : await retireOtherAccount(turn.sessionKey, account)
     const hasActiveProcess = !!getActiveProcess(turn.sessionKey)
     // oc's compaction prompt is never sent: Claude Code compacts its own
     // conversation, which needs one to exist.

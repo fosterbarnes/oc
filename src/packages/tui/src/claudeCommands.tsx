@@ -42,7 +42,7 @@ export function createClaudeAccountCommands() {
       if (!accounts) return
       dialog.replace(() => (
         <DialogSelect
-          title="Switch Claude account (sessions restart their Claude context on the next turn)"
+          title="Switch Claude account (busy sessions switch after their running work)"
           current={accounts.find((account) => account.current)?.id}
           options={accounts.map((account) => ({
             title: account.label,
@@ -86,7 +86,7 @@ export function createClaudeAccountCommands() {
       }
       dialog.replace(() => (
         <DialogSelect
-          title="Claude account for this session (its Claude context restarts on the next turn)"
+          title="Claude account for this session (applies after its running work finishes)"
           current={pinned?.id ?? "global"}
           options={[
             {
