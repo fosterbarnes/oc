@@ -1,9 +1,6 @@
-v0.2.281 yrOptic [feat. > Tab key setting, SuperPlan/SuperGo removed]
+v0.2.282 cherrysFritz [patch > prompt bar shows only running subagents]
 
-prompt keys:
-New Tab key setting in ctrl+o (or /tabKey) picks what Tab does in the prompt in the oc layout: type a tab (default), switch to the next agent, cycle reasoning effort, or cycle favorite models. Shift+Tab still switches to the next agent in every mode, and Tab still completes the highlighted item while the @ or / list is open. The stock opencode layout is unaffected.
+prompt bar:
+Subagent usage in the bar under the prompt now lists only subagents that are still running (busy or retrying). Each one disappears the moment it finishes, fails, or is aborted. A subagent waiting on a permission or question prompt stays visible. With several running, the compact list shrinks to the detailed single line once only one is left.
 
-agents and commands:
-The superPlan++ and Go agents, the /sp and /go commands, and the archived spa/goa variants are gone. The plan execution, next-phase, and closeout tools are removed from oc; upstream plan mode (plan_exit) stays. Debug agents now point to /spit when they stall. Docs and wiki no longer list SuperPlan/SuperGo or the three plan tool permissions.
-
-Under the hood: prompt.tab reads the prompt_tab_action KV value and calls the existing agent, variant, or favorite cycle functions directly; no keybind changes. Plan tool files, their test, registry wiring, and default denies were deleted. Checks: bun run typecheck in packages/tui and packages/opencode passed; the Tab modes were not live-checked. The push runs prePush.
+Under the hood: the subagentUsage memo filters child sessions by session_status (missing counts as idle) before computing context usage. FORK.md and the wiki describe the new behavior. Checks: bun run typecheck in packages/tui; the bar was not live-checked. The push runs prePush.

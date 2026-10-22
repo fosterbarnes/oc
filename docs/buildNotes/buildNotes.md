@@ -185,6 +185,23 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-21 (~20:18) - v0.2.282 cherrysFritz - Prompt bar shows only running subagents - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation; completed
+- Version: 0.2.282 cherrysFritz
+- Changed prompt `subagentUsage` (`tui/src/component/prompt/index.tsx`): filter children to `session_status` type != idle (missing = idle) before `contextUsage`. Finished/failed/aborted children leave the bar immediately; no grace period (sidebar keeps 2 min). Permission/question waits stay `busy` server-side (idle only at `run-state.ts:88,110`, `processor.ts:743,755`), so waiting children stay visible.
+- Removed the "unloaded past children" caveat: past children are idle, so it no longer applies.
+- Docs: `FORK.md` subagent usage row; wiki `Agents-and-Skills.md` "Subagent usage in the prompt bar" (wiki push is user's).
+- Plan: `~/.config/opencode/plans/subagentUsageRunningOnly.md`.
+- Verification: no typecheck or tests run (one-line filter, no covering test). Live check pending.
+
+### User
+Prompt bar
+- Subagent usage in the bar under the prompt now shows only subagents that are still running and disappears when they finish.
+
+---
+
 ## 2026-10-21 (~19:39) - v0.2.281 yrOptic - Tab key setting: text, agent, reasoning effort, or favorite model - Claude Opus 5.5, low effort; Implementation
 
 ### Agent

@@ -351,13 +351,13 @@ export function Prompt(props: PromptProps) {
     }
   })
 
-  // Direct children with loaded messages, newest first; unloaded past children are skipped.
+  // Running direct children (busy or retrying) with loaded messages, newest first.
   // One child gets the detailed line; several keep the compact `Label N%` list.
   const subagentUsage = createMemo(() => {
     const sessionID = props.sessionID
     if (!sessionID || !kv.get("subagent_usage_enabled", true)) return
     const entries = sync.data.session
-      .filter((item) => item.parentID === sessionID)
+      .filter((item) => item.parentID === sessionID && (sync.data.session_status?.[item.id]?.type ?? "idle") !== "idle")
       .toSorted((a, b) => b.time.created - a.time.created)
       .flatMap((item) => {
         const usage = contextUsage(sync.data.message[item.id] ?? [], sync.data.provider, item.revert?.messageID)
