@@ -1,5 +1,12 @@
-import { DOWNLOAD_HELPERS, runDesktopCheck, runDesktopInstall, scriptModeLines } from "./desktopUpdate"
-import type { DesktopCheckResult, DesktopInstallResult } from "./desktopUpdate"
+import {
+  DOWNLOAD_HELPERS,
+  prepareDesktopInstall,
+  runDesktopCheck,
+  runDesktopInstall,
+  scriptModeLines,
+  UPDATE_DIR_HELPERS,
+} from "./desktopUpdate"
+import type { DesktopCheckResult, DesktopInstallResult, ScriptPrepare } from "./desktopUpdate"
 
 // Fixed script for the machine-wide PowerShell 7 MSI install: installed version from the MSI's
 // PowerShellCore\InstalledVersions entry for Program Files\PowerShell\7, latest stable from
@@ -26,6 +33,7 @@ function Test-GithubHost {
 }
 
 ${DOWNLOAD_HELPERS}
+${UPDATE_DIR_HELPERS}
 
 function Get-InstalledPwshVersion {
   $entries = Get-ChildItem -LiteralPath "HKLM:\SOFTWARE\Microsoft\PowerShellCore\InstalledVersions" -ErrorAction SilentlyContinue | ForEach-Object { Get-ItemProperty -LiteralPath $_.PSPath }
@@ -59,16 +67,16 @@ if ($CheckOnly) {
 
 $arch = if ($env:PROCESSOR_ARCHITECTURE -eq "ARM64") { "arm64" } else { "x64" }
 $url = "https://github.com/PowerShell/PowerShell/releases/download/v$latest/PowerShell-$latest-win-$arch.msi"
-$tmp = Join-Path ([System.IO.Path]::GetTempPath()) ("pwsh-update-" + [System.Guid]::NewGuid().ToString("N"))
-New-Item -ItemType Directory -Path $tmp | Out-Null
+$tmp = New-UpdateDir "pwsh-update-"
 try {
   $file = Join-Path $tmp "PowerShell.msi"
-  Save-Download -Uri $url -OutFile $file -AllowHost { param($h) Test-GithubHost $h }
+  if (-not $PrepareDir -or $PrepareOnly) { Save-Download -Uri $url -OutFile $file -AllowHost { param($h) Test-GithubHost $h } }
   Write-OcStep "verifying"
   $sig = Get-AuthenticodeSignature -FilePath $file
-  if ($sig.Status -ne "Valid") { throw "Signature check failed: $($sig.Status)" }
+  if ($sig.Status -ne "Valid") { throw "Signature check failed: $($sig.Status) ($($sig.StatusMessage))" }
   $signer = $sig.SignerCertificate.GetNameInfo([System.Security.Cryptography.X509Certificates.X509NameType]::SimpleName, $false)
   if ($signer -ne "Microsoft Corporation") { throw "Signature signer '$signer' is not Microsoft" }
+  if ($PrepareOnly) { Write-Output "PREPARED $latest"; exit 0 }
   Write-OcStep "installing needs admin approval"
   try { $proc = Start-Process -FilePath "msiexec.exe" -ArgumentList "/i", ('"{0}"' -f $file), "/qn", "/norestart", "MSIRESTARTMANAGERCONTROL=DisableShutdown" -Verb RunAs -PassThru }
   catch { throw "Cancelled at the admin prompt" }
@@ -82,12 +90,12 @@ try {
   $note = if ($code -eq 3010) { " (restart Windows to finish)" } else { "" }
   Write-Output "Updated PowerShell $installed -> $after$note"
 } finally {
-  Remove-Item -LiteralPath $tmp -Recurse -Force -ErrorAction SilentlyContinue
+  Remove-UpdateDir $tmp
 }
 `
 
-function pwshScript(checkOnly: boolean, expectedVersion?: string, allowFresh = false) {
-  return `${scriptModeLines(checkOnly, expectedVersion, allowFresh)}\n${PWSH_SCRIPT}`
+function pwshScript(checkOnly: boolean, expectedVersion?: string, allowFresh = false, prepare?: ScriptPrepare) {
+  return `${scriptModeLines(checkOnly, expectedVersion, allowFresh, prepare)}\n${PWSH_SCRIPT}`
 }
 
 const PWSH_KEY = "powershell"
@@ -106,7 +114,13 @@ export async function installPowershell(
   return runDesktopInstall({ key: PWSH_KEY, label: "PowerShell", script: pwshScript(false, expectedVersion), onLine })
 }
 
-/** Installs or updates to the latest release without a prior check (`oc oc deps install`). */
-export async function installPowershellLatest(onLine?: (line: string) => void): Promise<DesktopInstallResult> {
-  return runDesktopInstall({ key: PWSH_KEY, label: "PowerShell", script: pwshScript(false, undefined, true), onLine })
+/** Downloads the latest release into `dir` and returns its install step (`oc oc deps install`). */
+export function preparePowershell(dir: string, onLine?: (line: string) => void) {
+  return prepareDesktopInstall({
+    key: PWSH_KEY,
+    label: "PowerShell",
+    script: (expectedVersion, prepare) => pwshScript(false, expectedVersion, true, prepare),
+    dir,
+    onLine,
+  })
 }

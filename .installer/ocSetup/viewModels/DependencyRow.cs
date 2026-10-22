@@ -5,10 +5,13 @@ using OcSetup.Models;
 
 namespace OcSetup.ViewModels;
 
-// One dependency row. Checking a row checks its missing `Needed` rows; the window sets
-// IsChecked for the defaults after wiring Needed.
+// One dependency row. Rows start from the list's table line (status "checking", busy) and get
+// their detected item through Update. Checking a row checks its missing `Needed` rows; the window
+// sets IsChecked for the defaults only after every row is detected.
 public sealed class DependencyRow : INotifyPropertyChanged
 {
+    // Failure text from the last install run; replaces the list status once the row is detected.
+    private readonly string? _runStatus;
     private bool _isChecked;
     private bool _isBusy;
     private bool _wantsShortcut;
@@ -20,16 +23,18 @@ public sealed class DependencyRow : INotifyPropertyChanged
     public DependencyRow(DependencyItem item, string? runStatus)
     {
         Item = item;
-        _statusText = runStatus ?? ListStatus(item);
+        _runStatus = runStatus;
+        _statusText = RowStatus(item);
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;
 
-    public DependencyItem Item { get; }
+    public DependencyItem Item { get; private set; }
     public string Id => Item.Id;
     public string Label => Item.Label;
     public IReadOnlyList<DependencyRow> Needed { get; set; } = [];
 
+    public bool IsChecking => Item.Status == "checking";
     public bool IsLocked => Item.Required && (Item.Status is "missing" or "outdated");
     public bool DefaultChecked => IsLocked || (Item.Status == "missing" && Item.DefaultSelected);
     public bool CanCheck => !_isBusy && Item.Status != "found" && !IsLocked;
@@ -102,6 +107,14 @@ public sealed class DependencyRow : INotifyPropertyChanged
 
     public double ProgressValue { get => _progressValue; private set => Set(ref _progressValue, value); }
 
+    /// <summary>The row's detected item from the list; every derived property may change.</summary>
+    public void Update(DependencyItem item)
+    {
+        Item = item;
+        _statusText = RowStatus(item);
+        Notify("");
+    }
+
     public void ApplyEvent(InstallEvent install)
     {
         switch (install.Phase)
@@ -164,8 +177,12 @@ public sealed class DependencyRow : INotifyPropertyChanged
         IsProgressVisible = false;
     }
 
+    private string RowStatus(DependencyItem item) =>
+        item.Status == "checking" ? ListStatus(item) : _runStatus ?? ListStatus(item);
+
     private static string ListStatus(DependencyItem item) => item.Status switch
     {
+        "checking" => "Checking",
         "found" => string.IsNullOrEmpty(item.Version) ? "Found" : $"Found {item.Version}",
         "missing" => "Missing",
         "outdated" => $"Update {item.Version} -> {item.Latest}",

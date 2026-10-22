@@ -196,6 +196,225 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-22 (~05:57) - v0.2.298 mortadellaBoners - VM runs 6-7 confirmed; temp debug logging removed - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation (plan `~/.config/opencode/plans/ocSetupVmRun5Fixes.md` Issue 3); completed; final VM run pending
+- Version: 0.2.298 mortadellaBoners (not bumped again; already bumped since last commit)
+- Run 6 (`logs\run6`; `logs\run6-stale` was the old 04:35 exe): 11/11 done, engine exit 4.4 s after the last row (2 s cleanup cap + 2.4 s launcher), ChatGPT `found 26.1016.6573.0`. Cleanup result unchecked (VM reverted).
+- Run 7 (`logs\run7`, same exe): 11/11, exit 3.2 s after last row; `ocSetup-cleanup.log`: `oc-deps-* removed at try 1 after 3 s`; `%TEMP%` had no `oc-deps-*` after 5 min. Holder never queried (first retry succeeded), so the cause stays unknown and does not matter.
+- Removed engine debug logging (`dependencies.ts`): `DEBUG`/`debugLine` and every call, Restart Manager holder query, cleanup log. `removeRunDir` row-by-row removal + 2 s cap + `removeDirLater` handoff kept.
+- Removed ocSetup trace logging: `helpers/DebugLog.cs` deleted; `App.xaml.cs` start/args/OnStartup/exit lines and `StartStallProbe`; `MainWindow.xaml.cs` ctor/loaded/closing/install/shortcut/open oc/rows rendered/table bound/run/pid/stdout/exit lines, `OC_DEPS_DEBUG`, `ReadErrorAsync` (stderr back to `ReadToEndAsync`); `OcLauncher.cs` retarget line. Kept: 20 fps `Timeline` cap, 100 ms tooltips, `_DRAIN_MS` exit + drain.
+- Added `helpers/ErrorLog.cs` (`%TEMP%\ocSetup-error.log`): crash (message box names it), unobserved task, failed shortcut retarget. Deviation from plan's crash-only `ocSetup-crash.log`: the retarget catch would otherwise be silent, so the file is named for errors.
+- Removed `.installer/oc.installer.iss` `SetupLogging=yes` and `DeinitializeSetup` desktop log copy.
+- Updated oc-companion skill (errors line, ChatGPT latest, run 7 result, open item removed) and oc-installer skill (desktop log pattern now historical).
+- Verification: `bun test test/dependencies.test.ts test/desktopUpdate.test.ts` 38 pass; `bun run typecheck` exit 0; `.scripts\buildCompanion.ps1` 0 warnings 0 errors; `git grep "WIP: temp debug" -- .installer src/packages/tui` none. Not run: `.runCompanion.ps1 -Fake` (GUI).
+- Built final VM package: `build.ps1 -Release` binaries basic checks pass (known zip-step exit 1), `buildInstaller.ps1` OK; staged as `ocInstallerTest\oc_v0.2.298_windows-x64-setup-final.exe` (SHA256 C2F22473...CD04) because the run 7 exe in the share stayed locked (5 retries); TESTING.md names the `-final` file.
+
+### User
+Dependency setup
+- Run 7 on a fresh VM confirmed the leftover ChatGPT download is deleted in the background a few seconds after setup finishes.
+- The setup and the dependency window no longer write debug logs to the desktop.
+- If the dependency window crashes, its error box points at `ocSetup-error.log` in your temp folder.
+
+---
+
+## 2026-10-22 (~05:27) - v0.2.298 mortadellaBoners - Stuck temp cleanup retried in background; ChatGPT latest = direct MSIX - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation (imp of plan `~/.config/opencode/plans/ocSetupVmRun5Fixes.md` Issues 1 + 2); completed; Issue 3 (remove temp debug logging) waits for VM run 6
+- Version: 0.2.298 mortadellaBoners (already bumped this session series; not bumped again)
+- Changed `removeRunDir` (`src/packages/tui/src/dependencies.ts`): `CLEANUP_LIMIT_MS` 10 s -> 2 s; timeout or thrown removal (was swallowed, folder left) now awaits `handOff(dir)`. `remove`/`handOff` injectable for tests; exported.
+- Added `removeDirLater` + `REMOVE_DIR_LATER_SCRIPT`: short non-detached powershell.exe launcher runs `Start-Process powershell.exe -WindowStyle Hidden ... Invoke-Expression $env:OC_CLEANUP_SCRIPT`; retry loop 60 x 5 s `Remove-Item -LiteralPath -Recurse -Force`. Launch waits `LAUNCH_LIMIT_MS` 5 s max. Start-Process (ShellExecute) inherits no handles, so ocSetup's pipes are not held.
+- ERROR: Bun 1.4.2 `spawn(..., { detached: true })` of powershell.exe or pwsh.exe exits 0 at once without running the command (any stdio, with or without windowsHide); cmd.exe works. Never use Bun `detached` for PowerShell; use the Start-Process launcher.
+- Added WIP Restart Manager holder query (`Add-Type` `OcRestartManager`, `RmStartSession`/`RmRegisterResources`/`RmGetList`) on the first failed try, plus outcome lines, to `Desktop\ocSetup-cleanup.log` only with `OC_DEPS_DEBUG`. Separate file so it never contends with ocSetup's log. Remove with Issue 3.
+- Fixed `chatgptDesktopUpdate.ts`: latest = `x-ms-meta-package_version` from a HEAD of `ChatGPT-<arch>.msix` (identity `OpenAI.Codex` and `x-ms-meta-architecture` pinned, fail closed). Dropped Store feed `windows-store-update.json` (buildVersion 26.1016.8120.0 vs file 26.1016.6573.0 made a fresh install read outdated). Downloaded manifest version must now equal latest ("Latest version changed ... confirm again"), replacing the newer-than-installed check from the archive14 fix.
+- Added test `removeRunDir hands a stuck or failed folder off instead of waiting` (`test/dependencies.test.ts`).
+- Updated oc-companion skill (cleanup handoff, cleanup log). Plan status updated. Decided: keep crash-only logging permanently in Issue 3.
+- MISTAKE: `sed -i` in Git Bash turned `test/dependencies.test.ts` CRLF into LF; restored CRLF. Use Edit for project files, never sed -i.
+- Verification: `bun test test/dependencies.test.ts` 18 pass; `bun run typecheck` clean; `checkChatgptDesktop()` on this PC: up to date 26.1016.6573.0; PS 5.1 HEAD headers read case-insensitively (x64 and arm64 metadata present); live check with a file held open (FileShare None): engine returned in 2.6 s, log named `PowerShell 7 (pid 3184)`, folder removed at try 2 after 5 s. Not run: buildCompanion, VM run 6.
+
+### User
+Dependency setup
+- The summary now shows about 2 seconds after the last row instead of waiting up to 10 seconds on a temp file that cannot be deleted yet.
+- A leftover download folder (such as the 930 MB ChatGPT installer) is now deleted in the background within a few minutes instead of staying in your temp folder.
+- ChatGPT desktop no longer shows "outdated" right after installing; it compares against the version that can actually be downloaded.
+
+---
+
+## 2026-10-22 (~04:58) - v0.2.298 mortadellaBoners - Run end no longer waits on temp cleanup - Claude Opus 5.5, low effort; Debug
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Debug; completed
+- Version: 0.2.298 mortadellaBoners
+- Run 4 (VM): all 11 rows done in 133 s from Install (run 3: 256 s, run 2: 680 s), Claude Code CLI via npm 8 s, Cursor CLI 12 s (was 111 s), node first; summary still never shown
+- Found: engine logged `all settled` at +133 s, never `run end`, so it hung in `runInstalls`' `finally` after `prefetch.done` (all prepares had emitted ready): removing the run folder. Local Bun 1.4.2 `rm` threw EBUSY at once in every case tried, so the VM blocker is something not reproduced here (likely a provisioned MSIX or a file an elevated process holds)
+- Added `removeRunDir` + `CLEANUP_LIMIT_MS` 10 s (`dependencies.ts`): removes row folders one by one with WIP `cleanup <row> at <ms>` lines, races a 10 s abortable `sleep`, then returns; `process.exit` ends a still-pending removal. Leftover: one `%TEMP%\oc-deps-*` folder
+- Verification: `bun test test/dependencies.test.ts` 17 pass (no added delay, so the abort works); `bun run typecheck` exit 0; timeout path not exercised locally (no hang to reproduce)
+- TODO: run 5 log names the blocking row folder; decide then whether to delete that file earlier or leave it
+
+### User
+Dependency window
+- The install summary no longer waits forever after the last row finishes; it shows within about 10 seconds even if a temp file cannot be removed yet.
+
+---
+
+## 2026-10-22 (~04:31) - v0.2.298 mortadellaBoners - Taller dependency window - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation; completed
+- Version: 0.2.298 mortadellaBoners
+- Changed `MainWindow.xaml` Height 520 -> 600: during installs each row with a progress bar grows ~9 px, so 11 rows overflowed into a scrollbar on the VM (run 4 screenshot)
+- Verification: `buildCompanion.ps1` 0 errors; not visually checked; not in the staged run 4 installer (next build)
+
+### User
+Dependency window
+- The window is taller, so all rows and their progress bars fit during an install without scrolling.
+
+---
+
+## 2026-10-22 (~04:24) - v0.2.298 mortadellaBoners - Fixes from VM run 3: Claude Code via npm, ready-first installs, run end - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation; completed; plan `~/.config/opencode/plans/ocSetupVmRun3Fixes.md`
+- Version: 0.2.298 mortadellaBoners (already bumped this session)
+- Run 3 (VM): 256 s Install to last row (run 2: 680 s); summary never shown (no engine `exit` logged for 53 s after the last row); Claude Code CLI failed on GCS egress quota (2nd run in a row); Cursor CLI 110 s; node sat ready 49 s behind pwsh's download; Appx exit/close delay gone
+- Changed claudeCli in `dependencies.ts`: `npm install -g @anthropic-ai/claude-code` (documented, same native binary via optional dep, auto-updates); needs node (was git). Added `npmGlobalInstall` (codexCli shares it) and `Lock` `"npm"` on both rows
+- Changed scheduler in `runInstalls`: ready-first; a row waits for locks only after needs + download, takes all locks at once when free and no earlier waiting row shares one (`acquire`/`release`, `held`, `waiting`); replaces per-lock queues
+- Changed `INSTALL_SCRIPT` ps1 branch: `-Command` with `$ProgressPreference='SilentlyContinue'` inherited, `& '<file>'; exit $LASTEXITCODE`. Measured: Cursor's 78 MB zip 22.1 s with progress vs 2.9 s without (PS 5.1, hidden, piped). Difference from -File: a trailing failing native command now fails the script
+- Changed run-dir cleanup to non-fatal (`rm` EBUSY logged, not thrown). Measured: Bun 1.4.2 `rm` recursive force throws EBUSY at once (file without share-delete, folder as cwd), no hang; so the run 3 hang was not `rm`
+- Changed `RunEngineAsync` (`MainWindow.xaml.cs`): ends on engine process exit + `_DRAIN_MS` 2 s drain, not stdout EOF; logs "stdout still open after the engine exited" (WIP) to show a pipe leak next run
+- Added WIP OCDEBUG `<label> spec <ms>`, `all settled`, `run end, cleanup <ms>`. Removed exit/close OCDEBUG in `cliUpdate.ts` and all OCTRACE lines (`desktopUpdate.ts`, `chatgptDesktopUpdate.ts`)
+- Tests: lock pin (npm), "a row still downloading does not hold up a later ready row", renamed starvation test; first scheduler test order (git start before codexCli skipped)
+- Updated `oc-companion` skill (locks, scheduling, npm Claude, drain)
+- Verification: `bun test test/dependencies.test.ts test/desktopUpdate.test.ts` 37 pass; `bun run typecheck` exit 0; `buildCompanion.ps1` 0 errors; ps1 wrapper checked in PS 5.1 (path with `'`, exit 3, Write-Error -> 1, progress off); fake install all 11 rows 13.1 s, schedule correct; release build + installer, staged SHA256 38911F0E...4964 with TESTING.md for run 4. Not run: real npm Claude install (VM run 4)
+- ERROR: `build.ps1 -Release` still fails at the zip step (`bun: command not found: zip`, build.ts:269) after both basic checks pass; installer unaffected
+- TODO: run 4 decides the hang cause (engine `run end` line vs "stdout still open"); then remove remaining WIP debug logging
+
+### User
+Dependency window
+- Claude Code CLI now installs through npm instead of Anthropic's install script, whose download server failed in the last two test runs.
+- Installs whose download is done no longer wait behind ones still downloading, so Node.js and the tools that need it start much sooner.
+- Cursor CLI installs faster: its download no longer runs with the slow PowerShell progress bar.
+- The window finishes the run when the installer engine exits, so the summary and desktop shortcuts appear.
+
+---
+
+## 2026-10-22 (~03:57) - v0.2.298 mortadellaBoners - Dependency installs: all downloads up front, lock-based scheduling - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation; completed (VM run 3 pending, user)
+- Version: 0.2.298 (session bump, uncommitted)
+- Plan: `~/.config/opencode/plans/ocSetupOrchestration.md`. VM run 2: 680 s Install→done, all serial; ~175 s of downloads inside install turns; 233 s between the Appx scripts' "Updated" line and process close; cursorCli 115 s; claudeCli failed (Anthropic GCS egress quota).
+- Changed `runInstalls` scheduler: `Dependency.parallel` -> `locks: Lock[]` (`"admin" | "userPath"`). A row starts when its selected needs settled, its download is ready, and it heads every lock queue (table order; `turn`/`leave` + one `changed` signal). Lock table pinned by test (node holds both; codexCli none). `PREFETCH_LIMIT` 3 -> 4.
+- Added prepare/install split to the 4 harness scripts: `scriptModeLines(..., prepare?)` adds `$PrepareDir`/`$PrepareOnly`; `UPDATE_DIR_HELPERS` (`New-UpdateDir`/`Remove-UpdateDir`); scripts print `PREPARED <latest>` and exit before installing; install reruns with `$ExpectedVersion = <latest>` and skips Save-Download. `prepareDesktopInstall` + `prepareClaudeDesktop`/`prepareChatgptDesktop`/`prepareCursorDesktop`/`preparePowershell` replace the `install*Latest` exports (only `oc oc deps` used them). TUI update menu path unchanged (prefix lines empty/false).
+- Changed Everything to `prepareEverything` (downloads app + es zip ahead); removed `runInstaller`. `harnessPrepared` wraps harness prepares. Moved `psString` to `desktopUpdate.ts` (re-exported from dependencies).
+- Added vendor `ps1` retry once after 15 s (`VENDOR_RETRY_MS`) and `scriptErrorRecord` (vendor error record as the failure message, 200 chars).
+- Added WIP diagnostics: `runCliCommand` logs `exit` vs `close` under `OC_DEPS_DEBUG`; `OCTRACE provisioned/registered/cleaned up` lines in `Install-MsixElevated` and the two Appx scripts.
+- Verification: tui tests (dependencies, desktopUpdate incl. new Windows PowerShell prepare round trip, updateProgress) 43 pass; tui typecheck 0; real read-only checks for Claude/ChatGPT/Cursor/pwsh OK; `depsDev --fake install` all 11: 12.6 s, admin chain serial, userPath chain after node, codexCli beside. Release binaries built (zip step fails, known); setup SHA 119E2B13... staged with TESTING.md (`logs\run3`).
+- Risk: lock table infers node/Cursor/vendor-script user PATH writes from vendor defaults.
+- TODO: from VM run 3 logs decide the Appx exit/close fix; then remove all WIP debug logging and `SetupLogging=yes`.
+
+### User
+oc dependencies window
+- Every download starts as soon as you click Install, and installs that do not conflict now run at the same time, so a full install should take far less time.
+- Admin prompts still appear one at a time.
+- A failed Claude Code CLI install is retried once and shows the real reason when it fails.
+
+---
+
+## 2026-10-22 (~03:16) - v0.2.298 mortadellaBoners - Fixes from VM run 1: Codex desktop elevated, download retry, faster checks - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation; completed (VM run 2 pending, user)
+- Version: 0.2.298 (session bump, uncommitted)
+- Plan/findings: `~/.config/opencode/plans/ocSetupVmRun1Fixes.md`, `ocSetupVmRun1.md`.
+- Added `INSTALL_MSIX_ELEVATED` (`Install-MsixElevated`, `desktopUpdate.ts`) from Claude's elevated provisioning block; Claude and ChatGPT scripts both call it. Fixed codexDesktop 0x80073D28 on a fresh VM; removed its `parallel` (test pins `["codexCli"]`). TUI update menu now prompts UAC for ChatGPT too.
+- Changed `Save-Download`: User-Agent (`... WindowsPowerShell/<ver> oc-setup`; HttpClient sent none, claude.ai gave 429) and retry for network errors/429/5xx, 3 attempts, Retry-After capped 30 s else 2 s/5 s, `OCSTEP: downloading retry N of 3 (...)`. Tests: `/flaky` 429 then OK, `/agent` UA required.
+- Changed every `Signature check failed` throw (4 update scripts + `INSTALL_SCRIPT`) to include `$sig.StatusMessage`. Claude desktop `UnknownError` cause still unknown; read it from VM run 2.
+- Changed detection: pwsh skips `checkPowershell` without `Program Files\PowerShell\7\pwsh.exe`; codex/claude desktop `appxMissing` (`%LOCALAPPDATA%\Packages\<family>`); cursorDesktop needs Cursor.exe in the per-user or Program Files folder. No Windows PowerShell start for missing rows.
+- Changed `freshEnv`: two parallel `reg query` (HKLM Session Manager\Environment, HKCU\Environment; HKCU exit 1 = none) + exported `parseRegPath`/`expandEnv`; matched .NET `GetEnvironmentVariable` output exactly on the dev PC (4341 chars).
+- Changed ocSetup: `RunEngineAsync` starts the engine via `Task.Run` (first oc.exe start blocked UI 683 ms on VM); App static ctor overrides `Timeline.DesiredFrameRate` default to 20 (software rendering; removed per-storyboard setting on dots).
+- Changed `packages/opencode/script/build.ts`: `cursor-runtime` copy skips `test/` (dist now main.mjs + package.json).
+- Verification: deps + desktopUpdate tests 33 pass (incl. 2 new Save-Download); tui/opencode typecheck exit 0; buildCompanion 0/0; dev `depsDev.ts list` statuses unchanged; build.ps1 -Release binaries basic checks passed (zip step fails, known); buildInstaller OK; staged setup SHA FB97F78F... + TESTING.md (run 2, `logs\run2`).
+- ERROR: `build.ps1 -Release` zip step still fails (`zip` not found); not in scope.
+- Risk: `appxMissing` assumes Windows creates the per-user Packages folder on registration (true for both on the dev PC); VM run 2 post-install list confirms.
+
+### User
+oc dependencies window
+- Codex (ChatGPT) desktop now installs with an admin prompt, like Claude desktop, instead of failing.
+- Downloads retry when a site rate-limits them.
+- The dependency list finishes much faster on a new PC because missing apps are found without starting PowerShell.
+- The window appears sooner the first time and stutters less during installs.
+- The setup no longer installs Cursor runtime test files.
+
+---
+
+## 2026-10-22 (~02:58) - v0.2.298 mortadellaBoners - VM test logs on the desktop - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation; completed
+- Version: 0.2.298 (uncommitted bump from this session)
+- Changed `.installer/ocSetup/helpers/DebugLog.cs`: log at `Desktop\ocSetup-debug.log`, `%TEMP%` only for `--dev` runs (user preference: VM logs on the desktop).
+- Added WIP `DeinitializeSetup` in `.installer/oc.installer.iss`: copies the setup log (`{log}`) to `Desktop\ocSetup-install.log` with `CopyFile`.
+- Updated skills `oc-installer` (desktop log rule, VM share is `Z:\Shared Folder\ocInstallerTest`) and `oc-companion` (log path, OCDEBUG).
+- Rebuilt `.installer\Output\oc_v0.2.298_windows-x64-setup.exe` (ISCC 0 errors). Not copied to the VM share: the user's VM run was already using the earlier package (logs in `%TEMP%`); TESTING.md says so.
+- Verification: installer compile succeeded; desktop logging not run (next VM pass).
+
+### User
+Testing
+- Future test builds put their logs on the desktop (`ocSetup-install.log`, `ocSetup-debug.log`).
+
+---
+
+## 2026-10-22 (~02:49) - v0.2.298 mortadellaBoners - VM perf run instrumentation and setup build - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation; completed (VM run pending, user)
+- Version: 0.2.298 (already bumped this session, uncommitted)
+- Added WIP `debugLine` in `src/packages/tui/src/dependencies.ts`: with `OC_DEPS_DEBUG` set, stderr `OCDEBUG +ms` lines for module load, list PATH dir count, per-row detect start/done (ms, status, version, message), install selection, per-install PATH refresh ms, and every non-event installer script line (OCERR, vendor output).
+- Changed `MainWindow.RunEngineAsync`: sets `OC_DEPS_DEBUG=1`; `ReadErrorAsync` logs OCDEBUG lines as they arrive (`engine:`) and keeps them out of the returned error text.
+- Added WIP log lines: `App` args, CPU count, memory, elevation at start; CPU ms and peak memory at exit; `Window_Closing` state.
+- Removed depsDev `time`/`timed` OCTIME probes (replaced by engine `debugLine`).
+- Added WIP `SetupLogging=yes` to `.installer/oc.installer.iss` (`%TEMP%\Setup Log <date> #NNN.txt`).
+- Built `.scripts\build.ps1 -Release` (binaries 0.2.298 OK) and `.scripts\buildInstaller.ps1` -> `.installer\Output\oc_v0.2.298_windows-x64-setup.exe` (SHA256 0A7972E8...C6D4). Staged with `TESTING.md` in `D:\VirtualBox VMs\Shared Folder\ocInstallerTest` (+ `logs\`).
+- Verification: tui typecheck exit 0; deps tests 12 pass; buildCompanion 0 warnings/errors; dev launch log shows `engine:` lines and empty stderr; built `oc.exe oc deps list` with OC_DEPS_DEBUG: table + 11 rows + 24 debug lines.
+- ERROR: `build.ps1 -Release` exits 1 at the release zip step (`bun: command not found: zip`, `packages/opencode/script/build.ts:268`) after both binaries build and pass `--version`. Installer does not use the zips. Not fixed.
+- TODO: after the VM logs, remove all `WIP: temp debug logging` perf probes and `SetupLogging=yes`.
+
+### User
+Testing
+- The v0.2.298 setup with temporary debug logging is in the VM shared folder with a TESTING.md checklist.
+- No UI change beyond the previous entry.
+
+---
+
+## 2026-10-22 (~02:37) - v0.2.298 mortadellaBoners - ocSetup streamed dependency list, fresh PATH, loading dots - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation (stages: instrument + measure, plan, implement); completed
+- Version: 0.2.298
+- Findings and plan: `~/.config/opencode/plans/ocSetupPerf.md`, `ocSetupPerfPlan.md`. Time-to-rows was ~1.7-1.95 s; engine `list` ~75% of it. `freshEnv` powershell spawn (~230 ms) gated every detect; `which` sync ~20-47 ms/lookup on a 112-dir PATH; slow tails cursorCli ~850 ms, pwsh check 0.7-1 s, desktop checks ~0.55 s. Compiled `oc.exe oc deps list` 1.39-1.44 s vs bun source ~1.6 s (no engine-startup issue). ReadyToRun: -30 ms first frame, +15 MB: rejected. Published first launch +~280 ms before managed start (VM to confirm).
+- Changed `src/packages/tui/src/dependencies.ts`: `listDependencies(deps, onRow?)` uses `process.env` (no `freshEnv`); new `printDependencyList(print, deps)` prints the table (status `checking`) then one line per row as detected; `rowInfo` shared builder; `DependencyInfo.status` adds `checking`. Install keeps `freshEnv` per row.
+- Changed `DepsCommand` list (`packages/opencode/src/cli/cmd/oc.ts`) and `script/depsDev.ts` to `printDependencyList`.
+- Added `.installer/ocSetup/helpers/FreshPath.cs` (Machine + User Path); `RunEngineAsync` sets engine `Path` from it; `OcLauncher.Open` reuses it.
+- Changed `MainWindow.ReadRowsAsync`: `[` line = busy table rows, `{` line = `DependencyRow.Update`; after exit 0 rows unbusy, then defaults (`DefaultChecked` moved out of `CreateRows`). Failure or a row still checking = error text, rows stay busy (no install from unknown state).
+- Changed `DependencyRow`: `Item` private set, `Update` (Notify all), `IsChecking`, run-failure text kept in `_runStatus` and shown once detected.
+- Added `LoadingDotsStyle` (`MainWindow.xaml` resources, not `theme/controls.xaml` base copy): 3 dots, staggered opacity, runs only while visible (IsVisible trigger), 20 fps (software rendering). Bottom bar "Checking dependencies" + dots (`LoadingDots`, toggled in `LoadRowsAsync`); row status cell dots bound to `IsChecking`.
+- Added WIP perf probes (keep until VM pass, then remove): `DebugLog` `+ms` since process start, `App.StartStallProbe`, MainWindow timeline lines, depsDev `time`/`timed` OCTIME stderr.
+- Updated skill `~/.config/opencode/skills/oc/oc-companion/SKILL.md` list contract.
+- Verification: `bun test test/dependencies.test.ts` 12 pass; tui + opencode `bun run typecheck` exit 0; `buildCompanion.ps1` 0 warnings/errors; `depsDev.ts list` = 1 table + 11 row lines; 4 dev launches (real read-only list): table bound 423-485 ms (before first frame 451-546), last row 1479-1579 ms, no post-load idle CPU. Dots animation not visually checked (GUI). Installs not run.
+- Risk: startup UI stall 315-364 ms (was ~260) because table rows build in the first frame.
+
+### User
+ocSetup
+- The dependency list now appears right away, and each row fills in its status as its check finishes.
+- "Checking" text in the bottom bar and on each row has animated dots while the check runs.
+- Checkboxes and Install unlock once every row is checked, with the same defaults as before.
+- The dependency check starts about 230 ms sooner because it no longer starts PowerShell just to read PATH.
+
+---
+
 ## 2026-10-22 (~02:45) - v0.2.297 stacheChamber - Pass: ocSetup icon/dot session - Claude Opus 5.5, low effort; Pass
 
 ### Agent

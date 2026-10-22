@@ -139,11 +139,35 @@ function Save-Download {
   $client = New-Object System.Net.Http.HttpClient
   # The default 100 s limit could cut a large download on a slow link; the caller's 10 min kill bounds it.
   $client.Timeout = [System.Threading.Timeout]::InfiniteTimeSpan
+  # HttpClient sends no User-Agent by default; vendor hosts behind Cloudflare (claude.ai) answered
+  # that with HTTP 429. Same shape as Invoke-RestMethod's agent.
+  $client.DefaultRequestHeaders.TryAddWithoutValidation("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) WindowsPowerShell/$($PSVersionTable.PSVersion) oc-setup") | Out-Null
   $response = $null
   try {
-    try { $response = $client.GetAsync($Uri, [System.Net.Http.HttpCompletionOption]::ResponseHeadersRead).GetAwaiter().GetResult() }
-    catch { throw "Download failed: $($_.Exception.GetBaseException().Message)" }
-    if (-not $response.IsSuccessStatusCode) { throw "Download failed: HTTP $([int]$response.StatusCode)" }
+    # Network errors, 429, and 5xx are retried (3 attempts) before any byte is written, waiting
+    # Retry-After (at most 30 s) or 2 s then 5 s. Other statuses fail at once.
+    $waits = @(2, 5)
+    for ($attempt = 1; ; $attempt++) {
+      $failure = $null
+      try { $response = $client.GetAsync($Uri, [System.Net.Http.HttpCompletionOption]::ResponseHeadersRead).GetAwaiter().GetResult() }
+      catch { $failure = $_.Exception.GetBaseException().Message }
+      if (-not $failure -and $response.IsSuccessStatusCode) { break }
+      $code = if ($failure) { 0 } else { [int]$response.StatusCode }
+      $retryable = $failure -or $code -eq 429 -or $code -ge 500
+      if (-not $retryable -or $attempt -ge 3) {
+        if ($failure) { throw "Download failed: $failure" }
+        throw "Download failed: HTTP $code"
+      }
+      $wait = $waits[$attempt - 1]
+      # PowerShell unwraps the Nullable Delta: it is a TimeSpan or $null.
+      if (-not $failure -and $response.Headers.RetryAfter -and $null -ne $response.Headers.RetryAfter.Delta) {
+        $wait = [Math]::Min(30, [int]$response.Headers.RetryAfter.Delta.TotalSeconds)
+      }
+      if ($response) { $response.Dispose(); $response = $null }
+      $reason = if ($failure) { $failure } else { "HTTP $code" }
+      Write-OcStep "downloading retry $($attempt + 1) of 3 ($reason)"
+      Start-Sleep -Seconds $wait
+    }
     $finalHost = $response.RequestMessage.RequestUri.Host
     if ($AllowHost -and -not (& $AllowHost $finalHost)) { throw "Download redirected to unexpected host '$finalHost'" }
     $total = [long]$response.Content.Headers.ContentLength
@@ -288,15 +312,102 @@ export function expectedVersionAssignment(version?: string) {
   return `$ExpectedVersion = "${version}"`
 }
 
+/** A PowerShell single-quoted literal. PowerShell also treats curly single quotes as quotes. */
+export function psString(value: string) {
+  return `'${value.replace(/['‘’‚‛]/g, "$&$&")}'`
+}
+
+// `oc oc deps` downloads ahead of the install turn: $PrepareOnly downloads and verifies into
+// $PrepareDir and prints "PREPARED <version>"; a later run with the same $PrepareDir and
+// $PrepareOnly off re-verifies that file and installs it. The caller owns the folder.
+export type ScriptPrepare = { dir: string; only: boolean }
+
 // Prefix lines that pick an update script's mode. $AllowFresh lets the install run when the app is
-// missing (`oc oc deps install`); the harness update menu never sets it.
-export function scriptModeLines(checkOnly: boolean, expectedVersion?: string, allowFresh = false) {
+// missing (`oc oc deps install`); the harness update menu never sets it or $PrepareDir.
+export function scriptModeLines(
+  checkOnly: boolean,
+  expectedVersion?: string,
+  allowFresh = false,
+  prepare?: ScriptPrepare,
+) {
   return [
     `$CheckOnly = $${checkOnly}`,
     expectedVersionAssignment(expectedVersion),
     `$AllowFresh = $${allowFresh}`,
+    `$PrepareDir = ${psString(prepare?.dir ?? "")}`,
+    `$PrepareOnly = $${prepare?.only ?? false}`,
   ].join("\n")
 }
+
+/**
+ * Prefetch for a harness update script (`oc oc deps install`): runs it with $PrepareOnly (fresh
+ * install allowed) and returns the install step, which runs it again on the prepared file with
+ * the prepared version as $ExpectedVersion, so a release that changed in between fails cleanly
+ * ("Latest version changed"). An app already up to date gets a step that only reports that.
+ */
+export async function prepareDesktopInstall(input: {
+  key: string
+  label: string
+  script: (expectedVersion: string | undefined, prepare: ScriptPrepare) => string
+  dir: string
+  onLine?: (line: string) => void
+}): Promise<(onLine?: (line: string) => void) => Promise<DesktopInstallResult>> {
+  const result = await runPowershell(input.script(undefined, { dir: input.dir, only: true }), input.onLine)
+  const version = /^PREPARED (\S+)\s*$/m.exec(result.output)?.[1]
+  if (result.ok && version) {
+    return (onLine) =>
+      runDesktopInstall({
+        key: input.key,
+        label: input.label,
+        script: input.script(version, { dir: input.dir, only: false }),
+        onLine,
+      })
+  }
+  const upToDate = nonEmptyLines(result.output).find((line) => line.startsWith(`${input.label} is up to date`))
+  if (result.ok && upToDate) return async () => ({ ok: true, alreadyRunning: false, message: upToDate })
+  throw new Error(scriptError(result.output) ?? failureDetail(result))
+}
+
+// The temp folder of an update script: $PrepareDir when `oc oc deps` owns it, else a new folder
+// that Remove-UpdateDir deletes.
+export const UPDATE_DIR_HELPERS = String.raw`
+function New-UpdateDir {
+  param([string]$Prefix)
+  if ($PrepareDir) { return $PrepareDir }
+  $dir = Join-Path ([System.IO.Path]::GetTempPath()) ($Prefix + [System.Guid]::NewGuid().ToString("N"))
+  New-Item -ItemType Directory -Path $dir | Out-Null
+  return $dir
+}
+
+function Remove-UpdateDir {
+  param([string]$Dir)
+  if (-not $PrepareDir) { Remove-Item -LiteralPath $Dir -Recurse -Force -ErrorAction SilentlyContinue }
+}
+`
+
+// Install-MsixElevated: packages that carry a service (Claude's Cowork, ChatGPT's) fail a per-user
+// Add-AppxPackage with 0x80073D28. Provision the package machine-wide in an elevated child
+// (Anthropic's documented command), then register it for this user, so it lands on the signed-in
+// account even when another admin approves the prompt. The child writes its error to a file in
+// $WorkDir: RunAs cannot redirect output.
+export const INSTALL_MSIX_ELEVATED = String.raw`
+function Install-MsixElevated {
+  param([string]$File, [string]$FamilyName, [string]$WorkDir)
+  Write-OcStep "installing needs admin approval"
+  $errorFile = Join-Path $WorkDir "provision-error.txt"
+  $command = '$ErrorActionPreference = ''Stop''; try {{ Add-AppxProvisionedPackage -Online -PackagePath ''{0}'' -SkipLicense -Regions all | Out-Null }} catch {{ Set-Content -LiteralPath ''{1}'' -Value $_.Exception.Message; exit 1 }}' -f ($File -replace "'", "''"), ($errorFile -replace "'", "''")
+  $encoded = [Convert]::ToBase64String([System.Text.Encoding]::Unicode.GetBytes($command))
+  try { $proc = Start-Process -FilePath "powershell.exe" -ArgumentList "-NoProfile", "-NonInteractive", "-EncodedCommand", $encoded -Verb RunAs -WindowStyle Hidden -PassThru }
+  catch { throw "Cancelled at the admin prompt" }
+  if (-not $proc.WaitForExit(600000)) { throw "Install still running after 10 minutes" }
+  if ($proc.ExitCode -ne 0) {
+    $detail = if (Test-Path -LiteralPath $errorFile) { (Get-Content -LiteralPath $errorFile -Raw).Trim() } else { "exit code $($proc.ExitCode)" }
+    throw "Install failed: $detail"
+  }
+  try { Add-AppxPackage -RegisterByFamilyName -MainPackage $FamilyName -ForceApplicationShutdown }
+  catch { throw "Install failed: $($_.Exception.Message)" }
+}
+`
 
 // Fixed script modeled on Anthropic's Install-Claude.ps1: highest Claude_pzs8sxrjxfjjc
 // package, official latest-release redirect pinned to downloads.claude.ai, skip when current,
@@ -335,6 +446,8 @@ function Get-MsixPublisherId {
 
 ${GET_MSIX_IDENTITY}
 ${DOWNLOAD_HELPERS}
+${UPDATE_DIR_HELPERS}
+${INSTALL_MSIX_ELEVATED}
 
 $installed = Get-InstalledClaudeVersion
 if (-not $installed -and -not $AllowFresh) { throw "Claude Desktop not installed" }
@@ -367,14 +480,13 @@ if ($CheckOnly) {
   exit 0
 }
 
-$tmp = Join-Path ([System.IO.Path]::GetTempPath()) ("claude-desktop-update-" + [System.Guid]::NewGuid().ToString("N"))
-New-Item -ItemType Directory -Path $tmp | Out-Null
+$tmp = New-UpdateDir "claude-desktop-update-"
 try {
   $file = Join-Path $tmp "Claude.msix"
-  Save-Download -Uri $location -OutFile $file
+  if (-not $PrepareDir -or $PrepareOnly) { Save-Download -Uri $location -OutFile $file }
   Write-OcStep "verifying"
   $sig = Get-AuthenticodeSignature -FilePath $file
-  if ($sig.Status -ne "Valid") { throw "Signature check failed: $($sig.Status)" }
+  if ($sig.Status -ne "Valid") { throw "Signature check failed: $($sig.Status) ($($sig.StatusMessage))" }
   $identity = Get-MsixIdentity -Path $file
   if ($sig.SignerCertificate.Subject -ne $identity.Publisher) {
     throw "Signer '$($sig.SignerCertificate.Subject)' does not match package publisher '$($identity.Publisher)'"
@@ -383,33 +495,19 @@ try {
     throw "Package publisher '$($identity.Publisher)' is not Claude's expected publisher"
   }
   if ($identity.Version -le $installed) { throw "Downloaded package is not newer ($($identity.Version))" }
-  # The package carries the Cowork service, which a per-user Add-AppxPackage cannot register
-  # (0x80073D28). Provision it machine-wide in an elevated child (Anthropic's documented command),
-  # then register it for this user, so it lands on the signed-in account even when another admin
-  # approves the prompt. The child writes its error to a file: RunAs cannot redirect output.
-  Write-OcStep "installing needs admin approval"
-  $errorFile = Join-Path $tmp "provision-error.txt"
-  $command = '$ErrorActionPreference = ''Stop''; try {{ Add-AppxProvisionedPackage -Online -PackagePath ''{0}'' -SkipLicense -Regions all | Out-Null }} catch {{ Set-Content -LiteralPath ''{1}'' -Value $_.Exception.Message; exit 1 }}' -f ($file -replace "'", "''"), ($errorFile -replace "'", "''")
-  $encoded = [Convert]::ToBase64String([System.Text.Encoding]::Unicode.GetBytes($command))
-  try { $proc = Start-Process -FilePath "powershell.exe" -ArgumentList "-NoProfile", "-NonInteractive", "-EncodedCommand", $encoded -Verb RunAs -WindowStyle Hidden -PassThru }
-  catch { throw "Cancelled at the admin prompt" }
-  if (-not $proc.WaitForExit(600000)) { throw "Install still running after 10 minutes" }
-  if ($proc.ExitCode -ne 0) {
-    $detail = if (Test-Path -LiteralPath $errorFile) { (Get-Content -LiteralPath $errorFile -Raw).Trim() } else { "exit code $($proc.ExitCode)" }
-    throw "Install failed: $detail"
-  }
-  try { Add-AppxPackage -RegisterByFamilyName -MainPackage $PackageFamilyName -ForceApplicationShutdown }
-  catch { throw "Install failed: $($_.Exception.Message)" }
+  if ($PrepareOnly) { Write-Output "PREPARED $latest"; exit 0 }
+  # The package carries the Cowork service, which a per-user Add-AppxPackage cannot register.
+  Install-MsixElevated -File $file -FamilyName $PackageFamilyName -WorkDir $tmp
   $after = Get-InstalledClaudeVersion
   if (-not $after) { throw "Install finished but Claude Desktop was not found" }
   Write-Output "Updated Claude Desktop $installed -> $after"
 } finally {
-  Remove-Item -LiteralPath $tmp -Recurse -Force -ErrorAction SilentlyContinue
+  Remove-UpdateDir $tmp
 }
 `
 
-function desktopScript(checkOnly: boolean, expectedVersion?: string, allowFresh = false) {
-  return `${scriptModeLines(checkOnly, expectedVersion, allowFresh)}\n${DESKTOP_SCRIPT}`
+function desktopScript(checkOnly: boolean, expectedVersion?: string, allowFresh = false, prepare?: ScriptPrepare) {
+  return `${scriptModeLines(checkOnly, expectedVersion, allowFresh, prepare)}\n${DESKTOP_SCRIPT}`
 }
 
 const CLAUDE_KEY = "claude-desktop"
@@ -433,12 +531,13 @@ export async function installClaudeDesktop(
   })
 }
 
-/** Installs or updates to the latest release without a prior check (`oc oc deps install`). */
-export async function installClaudeDesktopLatest(onLine?: (line: string) => void): Promise<DesktopInstallResult> {
-  return runDesktopInstall({
+/** Downloads the latest release into `dir` and returns its install step (`oc oc deps install`). */
+export function prepareClaudeDesktop(dir: string, onLine?: (line: string) => void) {
+  return prepareDesktopInstall({
     key: CLAUDE_KEY,
     label: "Claude Desktop",
-    script: desktopScript(false, undefined, true),
+    script: (expectedVersion, prepare) => desktopScript(false, expectedVersion, true, prepare),
+    dir,
     onLine,
   })
 }

@@ -362,10 +362,10 @@ const DepsCommand = cmd({
     yargs
       .command({
         command: "list",
-        describe: "print dependency status as JSON",
+        describe: "print the dependency table, then each row's status as JSON lines",
         handler: async () => {
-          const { listDependencies } = await import("@opencode-ai/tui/dependencies")
-          console.log(JSON.stringify(await listDependencies()))
+          const { printDependencyList } = await import("@opencode-ai/tui/dependencies")
+          await printDependencyList(console.log)
         },
       })
       .command({

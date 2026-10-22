@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 // The `oc oc deps` engine run from source for ocSetup's `--dev` mode (.scripts\.runCompanion.ps1).
-// Same output contract as DepsCommand in packages/opencode/src/cli/cmd/oc.ts:
+// Same output contract as DepsCommand in packages/opencode/src/cli/cmd/oc.ts (list: the table
+// line, then one line per row as detected; see printDependencyList):
 //   depsDev.ts [--fake] [--fail <id>]... list | install <ids..>
 // --fake keeps the real table and scheduler (order, needs, lanes, prefetch) and replaces only
 // detection and the download/install work, so nothing is installed. Fake installs are remembered
@@ -12,7 +13,7 @@ import { parseArgs } from "node:util"
 import {
   DEPENDENCIES,
   installDependencies,
-  listDependencies,
+  printDependencyList,
   runInstalls,
   type Dependency,
   type InstallEvent,
@@ -90,7 +91,7 @@ function fake(dep: Dependency): Dependency {
     ...base,
     prepare: undefined,
     install: async (_env, onLine) => {
-      // Install-only rows (Everything, desktop apps) download inside their install turn.
+      // Install-only rows (Codex CLI's npm install) download inside their install turn.
       await fakeDownload(onLine)
       return fakeInstall(dep, onLine)
     },
@@ -99,7 +100,7 @@ function fake(dep: Dependency): Dependency {
 
 const deps = values.fake ? DEPENDENCIES.map(fake) : DEPENDENCIES
 if (command === "list") {
-  console.log(JSON.stringify(await listDependencies(deps)))
+  await printDependencyList(console.log, deps)
 } else if (command === "install" && ids.length) {
   const ok = values.fake ? await runInstalls(deps, ids, emit, async () => ({})) : await installDependencies(ids, emit)
   if (!ok) process.exitCode = 1

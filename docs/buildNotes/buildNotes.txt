@@ -1,11 +1,15 @@
-v0.2.297 stacheChamber [patch > ocSetup icon header and tag dots]
+v0.2.298 mortadellaBoners [perf. > ocSetup parallel installs]
 
 oc dependencies window:
-The install and desktop shortcut checkboxes sit side by side at the left of each row, with the app name after them, and the window is a little wider with slightly larger text. The column header is now three thin Lucide line icons: a download arrow over the install column, a monitor over the desktop shortcut column, and a checklist over the tag column. Hover any of them for an explanation; they appear together with the list instead of before it.
+The dependency list appears right away and each row fills in its status as its check finishes, with animated dots while it checks. Missing apps are recognized without starting PowerShell, so the list finishes much sooner on a new PC.
 
-Required and Default are now small purple dots before the app name: filled for Required, a ring for Default. Hovering a dot names it. Tooltips open after 100 ms instead of the system hover delay, and buttons have slightly rounded corners matching the checkboxes.
+Every download starts as soon as you click Install, and installs that do not conflict run at the same time while admin prompts still appear one at a time. A full install of all 11 rows on a fresh VM went from 680 s to about 2 minutes. Cursor CLI installs faster because its download no longer runs with the slow PowerShell progress bar.
 
-wiki:
-The install page describes the dots and header icons.
+Codex (ChatGPT) desktop now installs with an admin prompt like Claude desktop instead of failing, and it no longer shows "outdated" right after installing: it compares against the version that can actually be downloaded. Claude Code CLI installs through npm instead of Anthropic's install script, whose download server failed on test runs. Downloads retry when a site rate-limits them, and a failing vendor script is retried once and shows its real error.
 
-Under the hood: icon shapes live in the new theme/icons.xaml (Lucide, ISC license, copied path data, no package), drawn as 24x24 strokes scaled to 16 px. The tooltip delay is a metadata override in App's static constructor. Rows use fixed 16 px cells instead of shared size groups. buildNotes.md rotated to buildNotes.archive14.md. Checks: XAML files parse as XML and WPF Geometry.Parse reads all three icons. Not run: ocSetup build or the window itself.
+The summary appears a few seconds after the last row instead of hanging, and a temp download that cannot be deleted yet (the 930 MB ChatGPT installer) is removed in the background. The window is taller so every row fits, stutters less during installs, and opens oc with a fresh PATH. If it crashes, the error box points at ocSetup-error.log in your temp folder.
+
+setup:
+The setup no longer ships Cursor runtime test files.
+
+Under the hood: downloads run ahead of each install turn (prepare/install split for the PowerShell 7, Claude, ChatGPT, and Cursor update scripts), and a lock-based scheduler (admin, user PATH, npm) starts any row whose download and needs are ready. Run cleanup waits 2 s, then hands a held folder to a hidden PowerShell started with Start-Process, because a Bun detached spawn of powershell.exe exits without running. ChatGPT's latest version comes from the download's own metadata header instead of the Store feed. The temporary VM debug logging is removed. Checks: dependencies and desktopUpdate tests (38 pass), tui and opencode typecheck, buildCompanion with 0 warnings and errors, live check of the held-file cleanup, and VM runs 2 through 7 (run 7: all 11 rows installed, summary 3.2 s after the last row, temp folder removed). build.ps1 -Release still fails at the release zip step (zip not found, known); the installer does not use the zips. Not run: the -Fake companion window and the final VM run without debug logs.

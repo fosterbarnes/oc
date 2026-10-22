@@ -41,13 +41,11 @@ public static class OcLauncher
             link.WorkingDirectory = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
             link.IconLocation = $"{ocExe},0";
             link.Save();
-            DebugLog.Write($"shortcut -> WezTerm: {path}"); // WIP: temp debug logging
         }
     }
 
     /// <summary>
-    /// Opens oc in a new window. The child gets PATH fresh from the registry: this process started
-    /// before the dependency installs changed it.
+    /// Opens oc in a new window with PATH fresh from the registry.
     /// </summary>
     public static void Open(string ocExe, string? weztermGui)
     {
@@ -56,9 +54,7 @@ public static class OcLauncher
             : new ProcessStartInfo(weztermGui) { ArgumentList = { "start", "--", ocExe } };
         startInfo.UseShellExecute = false;
         startInfo.WorkingDirectory = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-        startInfo.Environment["Path"] = string.Join(';',
-            Environment.GetEnvironmentVariable("Path", EnvironmentVariableTarget.Machine),
-            Environment.GetEnvironmentVariable("Path", EnvironmentVariableTarget.User));
+        startInfo.Environment["Path"] = FreshPath.Read();
         Process.Start(startInfo)?.Dispose();
     }
 }

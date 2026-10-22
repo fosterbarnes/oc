@@ -1,6 +1,6 @@
 namespace OcSetup.Models;
 
-// One entry from `oc oc deps list`.
+// One entry from `oc oc deps list`. Status "checking" only on the table line, before detection.
 public sealed record DependencyItem(
     string Id,
     string Label,

@@ -1,16 +1,54 @@
 import { expect, test } from "bun:test"
 import { existsSync } from "node:fs"
+import { mkdir, mkdtemp, rm } from "node:fs/promises"
+import { tmpdir } from "node:os"
 import path from "node:path"
 import {
   DEPENDENCIES,
+  expandEnv,
   gitBash,
   lineEvent,
+  parseRegPath,
   psString,
+  removeRunDir,
   runInstalls,
+  scriptErrorRecord,
   versionOf,
   type Dependency,
   type InstallEvent,
 } from "../src/dependencies"
+
+test("parseRegPath reads REG_EXPAND_SZ and REG_SZ values from reg query output", () => {
+  const machine =
+    "\r\nHKEY_LOCAL_MACHINE\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment\r\n" +
+    "    Path    REG_EXPAND_SZ    %SystemRoot%\\system32;C:\\Program Files\\Git\\cmd\r\n\r\n"
+  expect(parseRegPath(machine)).toBe("%SystemRoot%\\system32;C:\\Program Files\\Git\\cmd")
+  expect(parseRegPath("\r\nHKEY_CURRENT_USER\\Environment\r\n    Path    REG_SZ    C:\\Tools\r\n")).toBe("C:\\Tools")
+  expect(parseRegPath("ERROR: The system was unable to find the specified registry key or value.\r\n")).toBeUndefined()
+})
+
+test("scriptErrorRecord joins a vendor script's wrapped error up to its At line", () => {
+  // Trimmed real output of claude.ai/install.ps1 on a VM.
+  const output = [
+    "C:\\Users\\a\\AppData\\Local\\Temp\\oc-deps-x\\claudeCli\\install.ps1 : Failed to download binary: This workload is",
+    "drawing too much egress bandwidth from Cloud Storage.",
+    "At C:\\Users\\a\\AppData\\Local\\Temp\\oc-deps-x\\claudeCli\\install.ps1:63 char:5",
+    '+     Write-Error "Failed to download binary: $_"',
+    "OCERR: Install script exited with code 1",
+  ].join("\r\n")
+  expect(scriptErrorRecord(output)).toBe(
+    "Failed to download binary: This workload is drawing too much egress bandwidth from Cloud Storage.",
+  )
+  expect(scriptErrorRecord("OCERR: Install script exited with code 1")).toBeUndefined()
+  expect(scriptErrorRecord(`x.ps1 : ${"a".repeat(300)}`)!.length).toBe(200)
+})
+
+test("expandEnv matches names case-insensitively and keeps unknown names", () => {
+  const env = { SystemRoot: "C:\\Windows", USERPROFILE: "C:\\Users\\a" }
+  expect(expandEnv("%systemroot%\\system32;%UserProfile%\\bin;%NOPE%\\x", env)).toBe(
+    "C:\\Windows\\system32;C:\\Users\\a\\bin;%NOPE%\\x",
+  )
+})
 
 test("table ids are unique and every need comes earlier in install order", () => {
   const ids = DEPENDENCIES.map((dep) => dep.id)
@@ -22,10 +60,22 @@ test("table ids are unique and every need comes earlier in install order", () =>
   expect(DEPENDENCIES.filter((dep) => dep.required).map((dep) => dep.id)).toEqual(["pwsh"])
 })
 
-test("each row installs one way and only proven-safe rows run in parallel", () => {
+test("each row installs one way and holds the locks for what its installer touches", () => {
   for (const dep of DEPENDENCIES) expect(!!dep.install !== !!dep.prepare).toBe(true)
-  // Parallel rows must never elevate, write PATH, or run an MSI (see Dependency.parallel).
-  expect(DEPENDENCIES.filter((dep) => dep.parallel).map((dep) => dep.id)).toEqual(["codexCli", "codexDesktop"])
+  // A missing lock is a silent race (two UAC prompts, two MSIs, lost PATH entries): pin the table.
+  expect(Object.fromEntries(DEPENDENCIES.map((dep) => [dep.id, dep.locks]))).toEqual({
+    pwsh: ["admin"],
+    git: ["admin"],
+    node: ["admin", "userPath"],
+    everything: ["admin"],
+    wezterm: ["admin"],
+    codexCli: ["npm"],
+    claudeCli: ["npm"],
+    cursorCli: ["userPath"],
+    codexDesktop: ["admin"],
+    claudeDesktop: ["admin"],
+    cursorDesktop: ["userPath"],
+  })
 })
 
 test("every row but Node.js offers a desktop shortcut; Appx rows use their pinned app ids", () => {
@@ -83,6 +133,7 @@ function fakeDep(
     label: id.toUpperCase(),
     defaultSelected: true,
     needs,
+    locks: ["admin"],
     detect: async () => ({ status: "missing" }),
     install: async (_env, onLine) => {
       for (const line of lines) onLine(line)
@@ -91,7 +142,7 @@ function fakeDep(
   }
 }
 
-test("installs in table order and skips items whose need failed", async () => {
+test("rows sharing a lock install in table order; a failed need skips its dependent at once", async () => {
   const deps = [
     fakeDep("node", [], ["OCSTEP: downloading", "OCPROGRESS: 10 20", "OCERR: Install cancelled"], {
       ok: false,
@@ -121,9 +172,9 @@ test("installs in table order and skips items whose need failed", async () => {
     { id: "node", phase: "downloading", received: 10, total: 20 },
     { id: "node", phase: "failed", message: "Install cancelled" },
     { id: "git", phase: "start" },
+    { id: "codexCli", phase: "skipped", message: "Needs NODE, which did not install" },
     { id: "git", phase: "installing" },
     { id: "git", phase: "done", message: "Installed Git" },
-    { id: "codexCli", phase: "skipped", message: "Needs NODE, which did not install" },
   ])
   // One PATH read per started install; the skipped row starts nothing.
   expect(refreshes).toBe(2)
@@ -174,32 +225,81 @@ function timedDep(id: string, log: string[], extra: Partial<Dependency> = {}): D
   } as Dependency
 }
 
-test("serial rows never overlap; parallel rows overlap them and wait for cross-lane needs", async () => {
+test("rows sharing a lock never overlap; disjoint locks overlap; needs cross locks", async () => {
   const log: string[] = []
   const deps = [
     timedDep("pwsh", log),
-    timedDep("claudeDesktop", log, { parallel: true }),
-    timedDep("node", log),
-    timedDep("codexCli", log, { parallel: true, needs: ["node"] }),
+    timedDep("cursorCli", log, { locks: ["userPath"] }),
+    timedDep("node", log, { locks: ["admin", "userPath"] }),
+    timedDep("codexCli", log, { locks: [], needs: ["node"] }),
   ]
   expect(
     await runInstalls(
       deps,
-      ["pwsh", "claudeDesktop", "node", "codexCli"],
+      ["pwsh", "cursorCli", "node", "codexCli"],
       () => {},
       async () => ({}),
     ),
   ).toBe(true)
   expect(log.indexOf("pwsh-")).toBeLessThan(log.indexOf("node+"))
-  expect(log.indexOf("claudeDesktop+")).toBeLessThan(log.indexOf("pwsh-"))
+  expect(log.indexOf("cursorCli+")).toBeLessThan(log.indexOf("pwsh-"))
+  expect(log.indexOf("cursorCli-")).toBeLessThan(log.indexOf("node+"))
   expect(log.indexOf("codexCli+")).toBeGreaterThan(log.indexOf("node-"))
 })
 
-test("a failed need in the serial lane skips its parallel dependent", async () => {
+// node is waiting and earlier in the table, so cursorCli cannot take userPath (free) ahead of it
+// and starve node, which also needs admin.
+test("a free lock goes to the earliest waiting row that wants it", async () => {
+  const log: string[] = []
+  const deps = [
+    timedDep("pwsh", log),
+    timedDep("node", log, { locks: ["admin", "userPath"] }),
+    timedDep("cursorCli", log, { locks: ["userPath"] }),
+  ]
+  expect(
+    await runInstalls(
+      deps,
+      ["pwsh", "node", "cursorCli"],
+      () => {},
+      async () => ({}),
+    ),
+  ).toBe(true)
+  expect(log).toEqual(["pwsh+", "pwsh-", "node+", "node-", "cursorCli+", "cursorCli-"])
+})
+
+// On a VM, node sat downloaded for 49 s behind pwsh, which was still downloading.
+test("a row still downloading does not hold up a later ready row", async () => {
+  const log: string[] = []
+  const deps = [
+    {
+      ...timedDep("pwsh", log),
+      install: undefined,
+      prepare: async () => {
+        await Bun.sleep(60)
+        return async () => {
+          log.push("pwsh+")
+          return { ok: true, message: "Installed pwsh" }
+        }
+      },
+    } as Dependency,
+    timedDep("node", log, { locks: ["admin", "userPath"] }),
+  ]
+  expect(
+    await runInstalls(
+      deps,
+      ["pwsh", "node"],
+      () => {},
+      async () => ({}),
+    ),
+  ).toBe(true)
+  expect(log).toEqual(["node+", "node-", "pwsh+"])
+})
+
+test("a failed need under one lock skips its dependent under another", async () => {
   const log: string[] = []
   const deps = [
     { ...timedDep("node", log), install: async () => ({ ok: false, message: "Install cancelled" }) } as Dependency,
-    timedDep("codexCli", log, { parallel: true, needs: ["node"] }),
+    timedDep("codexCli", log, { locks: [], needs: ["node"] }),
   ]
   const events: InstallEvent[] = []
   expect(
@@ -214,7 +314,7 @@ test("a failed need in the serial lane skips its parallel dependent", async () =
   expect(events.at(-1)).toEqual({ id: "codexCli", phase: "skipped", message: "Needs NODE, which did not install" })
 })
 
-test("prefetches up to 3 in table order and reports a failed download at once", async () => {
+test("prefetches up to 4 in table order and reports a failed download at once", async () => {
   const started: string[] = []
   const dirs: string[] = []
   let active = 0
@@ -251,7 +351,7 @@ test("prefetches up to 3 in table order and reports a failed download at once", 
 
   expect(ok).toBe(false)
   expect(started).toEqual(["a", "b", "c", "d", "e"])
-  expect(maxActive).toBe(3)
+  expect(maxActive).toBe(4)
   const phases = events.map((event) => `${event.id}:${event.phase}`)
   expect(phases.slice(0, 5)).toEqual(["a:queued", "b:queued", "c:queued", "d:queued", "e:queued"])
   // Reported when the download fails, not when the serial lane reaches b.
@@ -263,4 +363,29 @@ test("prefetches up to 3 in table order and reports a failed download at once", 
   expect(events).toContainEqual({ id: "e", phase: "failed", message: "Installer crashed" })
   // The run's temp folder is removed even though an install threw.
   expect(existsSync(path.dirname(dirs[0]!))).toBe(false)
+})
+
+test("removeRunDir hands a stuck or failed folder off instead of waiting", async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), "oc-deps-test-"))
+  await mkdir(path.join(dir, "codexDesktop"))
+  try {
+    const handed: string[] = []
+    // A remover that never returns, like Bun's rm of the held ChatGPT MSIX on the VM.
+    const started = performance.now()
+    await removeRunDir(
+      dir,
+      () => new Promise(() => {}),
+      async (target) => void handed.push(target),
+    )
+    expect(performance.now() - started).toBeLessThan(3_000)
+    // A remover that throws (EBUSY) hands off at once.
+    await removeRunDir(
+      dir,
+      () => Promise.reject(new Error("EBUSY")),
+      async (target) => void handed.push(target),
+    )
+    expect(handed).toEqual([dir, dir])
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
 })

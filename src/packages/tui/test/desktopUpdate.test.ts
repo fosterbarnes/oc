@@ -8,8 +8,48 @@ import {
   DOWNLOAD_HELPERS,
   parseDesktopCheckOutput,
   parseDesktopInstallOutput,
+  prepareDesktopInstall,
+  scriptModeLines,
+  UPDATE_DIR_HELPERS,
   windowsPowershellEnv,
 } from "../src/desktopUpdate"
+
+// The prepare/install contract of the harness update scripts, run through real Windows PowerShell:
+// prepare writes into the given folder and prints PREPARED; install gets that version back as
+// $ExpectedVersion, reuses the file, and leaves the caller's folder in place.
+describe.skipIf(process.platform !== "win32")("prepareDesktopInstall", () => {
+  const fakeScript = String.raw`
+$ErrorActionPreference = "Stop"
+trap { Write-Output "OCERR: $($_.Exception.Message)"; exit 1 }
+${UPDATE_DIR_HELPERS}
+$latest = "1.2.3"
+if ($ExpectedVersion -and $ExpectedVersion -ne $latest) { throw "Latest version changed" }
+$tmp = New-UpdateDir "fake-update-"
+try {
+  $file = Join-Path $tmp "Fake.bin"
+  if (-not $PrepareDir -or $PrepareOnly) { Set-Content -LiteralPath $file -Value "payload" }
+  if (-not (Test-Path -LiteralPath $file)) { throw "prepared file missing" }
+  if ($PrepareOnly) { Write-Output "PREPARED $latest"; exit 0 }
+  Write-Output "Updated Fake 0.0 -> $ExpectedVersion"
+} finally { Remove-UpdateDir $tmp }
+`
+  test("prepares into the folder, then installs that file", async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), "oc-prepare-"))
+    try {
+      const install = await prepareDesktopInstall({
+        key: "fake",
+        label: "Fake",
+        script: (expectedVersion, prepare) =>
+          `${scriptModeLines(false, expectedVersion, true, prepare)}\n${fakeScript}`,
+        dir,
+      })
+      expect(await install()).toEqual({ ok: true, alreadyRunning: false, message: "Updated Fake 0.0 -> 1.2.3" })
+      expect(await Bun.file(path.join(dir, "Fake.bin")).exists()).toBe(true)
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  }, 60_000)
+})
 
 test("reports the script's OCERR message instead of the PowerShell error id", () => {
   const output = "OCERR: Update check failed: no redirect from https://claude.ai\n+ FullyQualifiedErrorId : boom\n"
@@ -171,12 +211,25 @@ Write-Output "SIZE $((Get-Item -LiteralPath "${file}").Length)"
 
 describe.skipIf(process.platform !== "win32")("Save-Download", () => {
   const size = 3 * 1024 * 1024
+  let flakyHits = 0
   const server = Bun.serve({
     port: 0,
     fetch(request) {
       const url = new URL(request.url)
       if (url.pathname === "/redirect") return Response.redirect(`${url.origin}/file`, 302)
       if (url.pathname === "/file") return new Response(new Uint8Array(size))
+      // Rate-limits the first request (as claude.ai did on the VM), then serves the file.
+      if (url.pathname === "/flaky") {
+        flakyHits++
+        if (flakyHits === 1) return new Response("slow down", { status: 429, headers: { "Retry-After": "0" } })
+        return new Response(new Uint8Array(size))
+      }
+      if (url.pathname === "/agent") {
+        const agent = request.headers.get("user-agent") ?? ""
+        return agent.includes("oc-setup")
+          ? new Response(new Uint8Array(size))
+          : new Response("no agent", { status: 403 })
+      }
       return new Response("missing", { status: 404 })
     },
   })
@@ -200,5 +253,17 @@ describe.skipIf(process.platform !== "win32")("Save-Download", () => {
   test("reports an HTTP error status", async () => {
     const { result } = await runSaveDownload(`${base()}/gone`, "$true")
     expect(result.lastLine).toBe("OCERR: Download failed: HTTP 404")
+  }, 60_000)
+
+  test("retries a rate-limited request", async () => {
+    const { result, lines } = await runSaveDownload(`${base()}/flaky`, "$true")
+    expect(result.lastLine).toBe(`SIZE ${size}`)
+    expect(lines).toContain("OCSTEP: downloading retry 2 of 3 (HTTP 429)")
+    expect(flakyHits).toBe(2)
+  }, 60_000)
+
+  test("sends a User-Agent", async () => {
+    const { result } = await runSaveDownload(`${base()}/agent`, "$true")
+    expect(result.lastLine).toBe(`SIZE ${size}`)
   }, 60_000)
 })

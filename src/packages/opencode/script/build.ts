@@ -222,9 +222,10 @@ for (const variant of variants) {
 
     const cursorRuntimeTarget = `dist/${name}/bin/cursor-runtime`
     await $`mkdir -p ${cursorRuntimeTarget}`
-    for (const file of await Array.fromAsync(
-      new Bun.Glob("**/*").scan({ cwd: cursorRuntimeSource, onlyFiles: true }),
-    )) {
+    // The runtime's tests stay out of the binaries' folder (and so out of the setup and zips).
+    for (const file of (
+      await Array.fromAsync(new Bun.Glob("**/*").scan({ cwd: cursorRuntimeSource, onlyFiles: true }))
+    ).filter((file) => !/^test[\\/]/.test(file))) {
       await Bun.write(path.join(cursorRuntimeTarget, file), Bun.file(path.join(cursorRuntimeSource, file)))
     }
 

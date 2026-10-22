@@ -1,5 +1,12 @@
-import { DOWNLOAD_HELPERS, runDesktopCheck, runDesktopInstall, scriptModeLines } from "./desktopUpdate"
-import type { DesktopCheckResult, DesktopInstallResult } from "./desktopUpdate"
+import {
+  DOWNLOAD_HELPERS,
+  prepareDesktopInstall,
+  runDesktopCheck,
+  runDesktopInstall,
+  scriptModeLines,
+  UPDATE_DIR_HELPERS,
+} from "./desktopUpdate"
+import type { DesktopCheckResult, DesktopInstallResult, ScriptPrepare } from "./desktopUpdate"
 
 // Fixed script for the per-user Inno Setup install: registry DisplayVersion of the
 // _is1 key (no process spawn, works when Cursor is closed), system-wide installs
@@ -24,6 +31,7 @@ function Test-CursorHost {
 }
 
 ${DOWNLOAD_HELPERS}
+${UPDATE_DIR_HELPERS}
 
 function Get-CursorInstall {
   $key = Get-Item -LiteralPath $UninstallKey -ErrorAction SilentlyContinue
@@ -69,16 +77,16 @@ if ($CheckOnly) {
   exit 0
 }
 
-$tmp = Join-Path ([System.IO.Path]::GetTempPath()) ("cursor-desktop-update-" + [System.Guid]::NewGuid().ToString("N"))
-New-Item -ItemType Directory -Path $tmp | Out-Null
+$tmp = New-UpdateDir "cursor-desktop-update-"
 try {
   $file = Join-Path $tmp "CursorSetup.exe"
-  Save-Download -Uri $downloadUrl -OutFile $file -AllowHost { param($h) Test-CursorHost $h }
+  if (-not $PrepareDir -or $PrepareOnly) { Save-Download -Uri $downloadUrl -OutFile $file -AllowHost { param($h) Test-CursorHost $h } }
   Write-OcStep "verifying"
   $sig = Get-AuthenticodeSignature -FilePath $file
-  if ($sig.Status -ne "Valid") { throw "Signature check failed: $($sig.Status)" }
+  if ($sig.Status -ne "Valid") { throw "Signature check failed: $($sig.Status) ($($sig.StatusMessage))" }
   $signer = $sig.SignerCertificate.GetNameInfo([System.Security.Cryptography.X509Certificates.X509NameType]::SimpleName, $false)
   if ($signer -ne "Anysphere, Inc.") { throw "Signature signer '$signer' is not Cursor's expected signer" }
+  if ($PrepareOnly) { Write-Output "PREPARED $latest"; exit 0 }
   Write-OcStep "installing"
   $proc = Start-Process -FilePath $file -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CLOSEAPPLICATIONS", "/MERGETASKS=!runcode" -PassThru
   if (-not $proc.WaitForExit(600000)) {
@@ -90,12 +98,17 @@ try {
   if (-not $after) { throw "Install finished but Cursor Desktop was not found" }
   Write-Output "Updated Cursor Desktop $installed -> $($after.Version)"
 } finally {
-  Remove-Item -LiteralPath $tmp -Recurse -Force -ErrorAction SilentlyContinue
+  Remove-UpdateDir $tmp
 }
 `
 
-function cursorDesktopScript(checkOnly: boolean, expectedVersion?: string, allowFresh = false) {
-  return `${scriptModeLines(checkOnly, expectedVersion, allowFresh)}\n${CURSOR_DESKTOP_SCRIPT}`
+function cursorDesktopScript(
+  checkOnly: boolean,
+  expectedVersion?: string,
+  allowFresh = false,
+  prepare?: ScriptPrepare,
+) {
+  return `${scriptModeLines(checkOnly, expectedVersion, allowFresh, prepare)}\n${CURSOR_DESKTOP_SCRIPT}`
 }
 
 const CURSOR_KEY = "cursor-desktop"
@@ -124,12 +137,13 @@ export async function installCursorDesktop(
   })
 }
 
-/** Installs or updates to the latest release without a prior check (`oc oc deps install`). */
-export async function installCursorDesktopLatest(onLine?: (line: string) => void): Promise<DesktopInstallResult> {
-  return runDesktopInstall({
+/** Downloads the latest release into `dir` and returns its install step (`oc oc deps install`). */
+export function prepareCursorDesktop(dir: string, onLine?: (line: string) => void) {
+  return prepareDesktopInstall({
     key: CURSOR_KEY,
     label: "Cursor Desktop",
-    script: cursorDesktopScript(false, undefined, true),
+    script: (expectedVersion, prepare) => cursorDesktopScript(false, expectedVersion, true, prepare),
+    dir,
     onLine,
   })
 }

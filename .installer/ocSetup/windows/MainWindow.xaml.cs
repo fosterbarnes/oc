@@ -20,6 +20,8 @@ public partial class MainWindow : Window
         Environment.GetCommandLineArgs() is [_, "--dev", _, ..] commandLine ? commandLine[2..] : [];
     private static readonly bool _isDev = _devEngine.Length > 0;
     private static readonly string[] _engine = _isDev ? _devEngine : [_ocPath, "oc", "deps"];
+    // How long engine output is still read after the engine exits (see RunEngineAsync).
+    private const int _DRAIN_MS = 2000;
     private static readonly JsonSerializerOptions _jsonOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
@@ -49,11 +51,7 @@ public partial class MainWindow : Window
     }
 
     // Awaited here so an exception from the first load still reaches the dispatcher handler.
-    private async void Window_Loaded(object sender, RoutedEventArgs e)
-    {
-        DebugLog.Write($"window loaded; engine exists: {File.Exists(_engine[0])}");
-        await _loadTask;
-    }
+    private async void Window_Loaded(object sender, RoutedEventArgs e) => await _loadTask;
 
     // Closing is the only path for both the X button and Close. The install process is not
     // killed: it may be in the middle of an installer.
@@ -71,7 +69,6 @@ public partial class MainWindow : Window
     {
         var ids = _rows.Where(row => row.IsChecked).Select(row => row.Id).ToArray();
         var shortcutIds = _rows.Where(row => row.WantsShortcut).Select(row => row.Id).ToArray();
-        DebugLog.Write($"install clicked: {string.Join(", ", ids)}; shortcuts: {string.Join(", ", shortcutIds)}");
         _runFailures.Clear();
         _runInstalled.Clear();
 
@@ -127,7 +124,6 @@ public partial class MainWindow : Window
             }
             catch (Exception exception)
             {
-                DebugLog.Write($"shortcut {shortcut.Name} failed: {exception}"); // WIP: temp debug logging
                 lines.Add($"{shortcut.Name} shortcut: {exception.Message}");
                 ok = false;
             }
@@ -165,7 +161,6 @@ public partial class MainWindow : Window
     {
         OpenOcButton.IsEnabled = false;
         await _loadTask;
-        DebugLog.Write($"open oc; wezterm: {_weztermGui ?? "none"}; dev: {_isDev}"); // WIP: temp debug logging
         if (!_isDev) OcLauncher.Open(_ocPath, _weztermGui);
         Close();
     }
@@ -175,46 +170,66 @@ public partial class MainWindow : Window
     private async Task LoadRowsAsync()
     {
         _isLoading = true;
+        LoadingDots.Visibility = Visibility.Visible;
         RefreshButtons();
         try { await ReadRowsAsync(); }
         finally
         {
             _isLoading = false;
+            LoadingDots.Visibility = Visibility.Collapsed;
             RefreshButtons();
         }
     }
 
+    // `list` prints the table (every row "checking") first, then one line per row as it is
+    // detected. Rows stay busy until the last one: defaults and needs read the detected statuses.
     private async Task ReadRowsAsync()
     {
-        StatusText.Text = "Checking dependencies...";
-        var lines = new List<string>();
-        var (exitCode, error) = await RunEngineAsync(lines.Add, ["list"]);
+        StatusText.Text = "Checking dependencies";
+        var hasTable = false;
+        var (exitCode, error) = await RunEngineAsync(HandleListLine, ["list"]);
 
-        var json = lines.FirstOrDefault(line => line.StartsWith('['));
-        if (exitCode != 0 || json is null)
+        if (exitCode != 0 || !hasTable || _rows.Any(row => row.IsChecking))
         {
             StatusText.Text = $"Could not read dependencies (exit {exitCode}). {error.Trim()}";
             return;
         }
 
-        var items = JsonSerializer.Deserialize<DependencyItem[]>(json, _jsonOptions) ?? [];
-        _rows = CreateRows(items);
-        RowsList.ItemsSource = _rows;
-        HeaderIcons.Visibility = Visibility.Visible;
+        foreach (var row in _rows) row.IsBusy = false;
+        // Set after Needed is wired so that checking a default row also checks its needs.
+        foreach (var defaultRow in _rows.Where(candidate => candidate.DefaultChecked))
+            defaultRow.IsChecked = true;
         StatusText.Text = "";
 
         // Once WezTerm is installed, oc's shortcuts open in it.
-        var wezterm = items.FirstOrDefault(item => item.Id == "wezterm" && item.Status == "found");
-        _weztermGui = OcLauncher.WezTermGui(wezterm?.Path);
+        var wezterm = _rows.FirstOrDefault(row => row.Id == "wezterm" && row.Item.Status == "found");
+        _weztermGui = OcLauncher.WezTermGui(wezterm?.Item.Path);
         if (_weztermGui is null || _isDev) return;
         // Shortcut retargeting is a convenience; a COM or file error must not take the window down.
         try { OcLauncher.UseWezTermForShortcuts(_weztermGui, _ocPath); }
-        catch (Exception exception) { DebugLog.Write($"shortcut retarget failed: {exception}"); }
+        catch (Exception exception) { ErrorLog.Write($"shortcut retarget failed: {exception}"); }
+
+        void HandleListLine(string line)
+        {
+            if (line.StartsWith('['))
+            {
+                _rows = CreateRows(JsonSerializer.Deserialize<DependencyItem[]>(line, _jsonOptions) ?? []);
+                RowsList.ItemsSource = _rows;
+                HeaderIcons.Visibility = Visibility.Visible;
+                hasTable = true;
+            }
+            else if (hasTable && line.StartsWith('{'))
+            {
+                var item = JsonSerializer.Deserialize<DependencyItem>(line, _jsonOptions)!;
+                _rows.First(row => row.Id == item.Id).Update(item);
+            }
+        }
     }
 
+    // Busy rows from the list's table line; ReadRowsAsync frees them and sets the defaults.
     private List<DependencyRow> CreateRows(DependencyItem[] items)
     {
-        var rows = items.Select(item => new DependencyRow(item, _runFailures.GetValueOrDefault(item.Id)))
+        var rows = items.Select(item => new DependencyRow(item, _runFailures.GetValueOrDefault(item.Id)) { IsBusy = true })
             .ToList();
 
         foreach (var row in rows)
@@ -226,10 +241,6 @@ public partial class MainWindow : Window
                     RefreshButtons();
             };
         }
-
-        // Set after Needed is wired so that checking a default row also checks its needs.
-        foreach (var defaultRow in rows.Where(candidate => candidate.DefaultChecked))
-            defaultRow.IsChecked = true;
 
         return rows;
     }
@@ -277,23 +288,29 @@ public partial class MainWindow : Window
             StandardErrorEncoding = Encoding.UTF8,
         };
         foreach (var arg in _engine[1..].Concat(args)) startInfo.ArgumentList.Add(arg);
+        // `list` detects with this PATH (the engine does not re-read it), so tools installed after
+        // this window opened are found.
+        startInfo.Environment["Path"] = FreshPath.Read();
 
-        // WIP: temp debug logging of every engine call, its output, and its exit.
-        DebugLog.Write($"run: {string.Join(' ', startInfo.ArgumentList.Prepend(_engine[0]))}");
-        var clock = Stopwatch.StartNew();
-        using var process = Process.Start(startInfo)
+        // Off the UI thread: the first start of a new oc.exe waited ~0.7 s on a VM (Defender scan),
+        // and the first list starts from the constructor, before the first frame.
+        using var process = await Task.Run(() => Process.Start(startInfo))
             ?? throw new InvalidOperationException($"{Path.GetFileName(_engine[0])} did not start.");
-        DebugLog.Write($"pid {process.Id}");
         var errorTask = process.StandardError.ReadToEndAsync();
-        while (await process.StandardOutput.ReadLineAsync() is { } line)
+        // The run ends when the engine exits, plus a short drain: what it wrote before exiting is
+        // already in the pipe, while a process that inherited the pipe (started by an installer) can
+        // keep it open long after. On a VM the window waited on the pipe and never showed the summary.
+        var exitedAndDrained = process.WaitForExitAsync().ContinueWith(_ => Task.Delay(_DRAIN_MS)).Unwrap();
+        while (true)
         {
-            DebugLog.Write($"stdout: {line}");
+            var read = process.StandardOutput.ReadLineAsync();
+            if (await Task.WhenAny(read, exitedAndDrained) != read) break;
+            if (await read is not { } line) break;
             onOutputLine(line);
         }
 
         await process.WaitForExitAsync();
-        var error = await errorTask;
-        DebugLog.Write($"exit {process.ExitCode} after {clock.ElapsedMilliseconds} ms; stderr: {error}");
+        var error = await Task.WhenAny(errorTask, exitedAndDrained) == errorTask ? await errorTask : "";
         return (process.ExitCode, error);
     }
 }

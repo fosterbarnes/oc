@@ -1,22 +1,25 @@
 import {
   DOWNLOAD_HELPERS,
   GET_MSIX_IDENTITY,
+  INSTALL_MSIX_ELEVATED,
+  prepareDesktopInstall,
   runDesktopCheck,
   runDesktopInstall,
   scriptModeLines,
+  UPDATE_DIR_HELPERS,
 } from "./desktopUpdate"
-import type { DesktopCheckResult, DesktopInstallResult } from "./desktopUpdate"
+import type { DesktopCheckResult, DesktopInstallResult, ScriptPrepare } from "./desktopUpdate"
 
 // Fixed script for the OpenAI Store package: highest OpenAI.Codex package with the
-// exact OpenAI.Codex_2p2nqsd0c76g0 family, latest buildVersion from OpenAI's
-// windows-store-update.json feed (identity and product id pinned so a changed
-// schema fails closed), skip when current, floating ChatGPT-x64/arm64.msix
-// download whose manifest version must be newer than the installed one (the feed is the
-// Store build, which the direct MSIX can lag), manifest Name plus
-// publisher pin via the ZipFile approach, Authenticode Valid required, install with
-// -ForceApplicationShutdown, temp dir removed in finally. Errors go to an OCERR line
-// and exit 1 (trap). No user input is interpolated; the check/install mode is
-// selected by the $CheckOnly prefix line only.
+// exact OpenAI.Codex_2p2nqsd0c76g0 family, latest = the version of the floating
+// ChatGPT-x64/arm64.msix itself, read from its blob metadata headers with a HEAD request
+// (identity and architecture pinned so changed metadata fails closed; the Store feed's
+// buildVersion can be ahead of this file, which made a fresh install read "outdated"), skip
+// when current, downloaded manifest version must equal that latest, manifest Name plus
+// publisher pin via the ZipFile approach, Authenticode Valid required, elevated provisioning
+// then per-user registration (Install-MsixElevated), temp dir removed in finally (unless
+// $PrepareDir). Errors go to an OCERR line and exit 1 (trap). No user input is interpolated;
+// the mode is selected by the scriptModeLines prefix only.
 const CHATGPT_DESKTOP_SCRIPT = String.raw`
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
@@ -25,7 +28,9 @@ trap { Write-Output "OCERR: $($_.Exception.Message)"; exit 1 }
 $PackageName = "OpenAI.Codex"
 $PackageFamilyName = "OpenAI.Codex_2p2nqsd0c76g0"
 $ExpectedPublisher = "CN=50BDFD77-8903-4850-9FFE-6E8522F64D5B"
-$FeedUri = "https://persistent.oaistatic.com/codex-app-prod/windows-store-update.json"
+$Arch = if ($env:PROCESSOR_ARCHITECTURE -eq "ARM64") { "arm64" } else { "x64" }
+$fileName = "ChatGPT-$Arch.msix"
+$url = "https://persistent.oaistatic.com/codex-app-prod/$fileName"
 
 function Get-InstalledChatgptVersion {
   $pkgs = Get-AppxPackage -Name $PackageName -ErrorAction SilentlyContinue | Where-Object { $_.PackageFamilyName -eq $PackageFamilyName }
@@ -35,18 +40,21 @@ function Get-InstalledChatgptVersion {
 
 ${GET_MSIX_IDENTITY}
 ${DOWNLOAD_HELPERS}
+${UPDATE_DIR_HELPERS}
+${INSTALL_MSIX_ELEVATED}
 
 $installed = Get-InstalledChatgptVersion
 if (-not $installed -and -not $AllowFresh) { throw "ChatGPT Desktop not installed" }
 if (-not $installed) { $installed = [version]"0.0" }
 
-try { $feed = Invoke-RestMethod -Uri $FeedUri -UseBasicParsing }
+try { $head = Invoke-WebRequest -Uri $url -Method Head -UseBasicParsing -UserAgent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) WindowsPowerShell/$($PSVersionTable.PSVersion) oc-setup" }
 catch { throw "Update check failed: $($_.Exception.Message)" }
-if ($feed -is [string]) { $feed = $feed | ConvertFrom-Json }
-if ([string]$feed.packageIdentity -ne $PackageName) { throw "Update check failed: unexpected packageIdentity '$($feed.packageIdentity)'" }
-if ([string]$feed.storeProductId -ne "9PLM9XGG6VKS") { throw "Update check failed: unexpected storeProductId '$($feed.storeProductId)'" }
-$latestRaw = [string]$feed.buildVersion
-if ($latestRaw -notmatch "^\d+(\.\d+){1,3}$") { throw "Update check failed: unexpected buildVersion '$latestRaw'" }
+$meta = @{}
+foreach ($key in "x-ms-meta-package_identity", "x-ms-meta-architecture", "x-ms-meta-package_version") { $meta[$key] = [string]$head.Headers[$key] }
+if ($meta["x-ms-meta-package_identity"] -ne $PackageName) { throw "Update check failed: unexpected package identity '$($meta["x-ms-meta-package_identity"])'" }
+if ($meta["x-ms-meta-architecture"] -ne $Arch) { throw "Update check failed: unexpected architecture '$($meta["x-ms-meta-architecture"])'" }
+$latestRaw = $meta["x-ms-meta-package_version"]
+if ($latestRaw -notmatch "^\d+(\.\d+){1,3}$") { throw "Update check failed: unexpected package version '$latestRaw'" }
 $latest = [version]$latestRaw
 
 if ($ExpectedVersion -and [string]$latest -ne $ExpectedVersion) {
@@ -61,34 +69,36 @@ if ($CheckOnly) {
   exit 0
 }
 
-$fileName = if ($env:PROCESSOR_ARCHITECTURE -eq "ARM64") { "ChatGPT-arm64.msix" } else { "ChatGPT-x64.msix" }
-$url = "https://persistent.oaistatic.com/codex-app-prod/$fileName"
-$tmp = Join-Path ([System.IO.Path]::GetTempPath()) ("chatgpt-desktop-update-" + [System.Guid]::NewGuid().ToString("N"))
-New-Item -ItemType Directory -Path $tmp | Out-Null
+$tmp = New-UpdateDir "chatgpt-desktop-update-"
 try {
   $file = Join-Path $tmp $fileName
-  Save-Download -Uri $url -OutFile $file
+  if (-not $PrepareDir -or $PrepareOnly) { Save-Download -Uri $url -OutFile $file }
   Write-OcStep "verifying"
   $identity = Get-MsixIdentity -Path $file
   $sig = Get-AuthenticodeSignature -FilePath $file
-  if ($sig.Status -ne "Valid") { throw "Signature check failed: $($sig.Status)" }
+  if ($sig.Status -ne "Valid") { throw "Signature check failed: $($sig.Status) ($($sig.StatusMessage))" }
   if ($identity.Name -ne $PackageName) { throw "Package name '$($identity.Name)' is not ChatGPT Desktop's expected package" }
   if ($identity.Publisher -ne $ExpectedPublisher) { throw "Package publisher '$($identity.Publisher)' is not ChatGPT Desktop's expected publisher" }
-  # The feed is the Store build; the direct MSIX can be an older build, so only require it to be newer.
-  if ($identity.Version -le $installed) { throw "The direct download ($($identity.Version)) is not newer than the installed version ($installed)" }
-  Write-OcStep "installing"
-  try { Add-AppxPackage -Path $file -ForceApplicationShutdown }
-  catch { throw "Install failed: $($_.Exception.Message)" }
+  # A new upload between the HEAD request and the download changes the version.
+  if ([version]$identity.Version -ne $latest) { throw "Latest version changed ($($identity.Version), expected $latest); confirm again" }
+  if ($PrepareOnly) { Write-Output "PREPARED $latest"; exit 0 }
+  # A per-user Add-AppxPackage fails with 0x80073D28 (seen on a fresh VM), as Claude's did.
+  Install-MsixElevated -File $file -FamilyName $PackageFamilyName -WorkDir $tmp
   $after = Get-InstalledChatgptVersion
   if (-not $after) { throw "Install finished but ChatGPT Desktop was not found" }
   Write-Output "Updated ChatGPT Desktop $installed -> $after"
 } finally {
-  Remove-Item -LiteralPath $tmp -Recurse -Force -ErrorAction SilentlyContinue
+  Remove-UpdateDir $tmp
 }
 `
 
-function chatgptDesktopScript(checkOnly: boolean, expectedVersion?: string, allowFresh = false) {
-  return `${scriptModeLines(checkOnly, expectedVersion, allowFresh)}\n${CHATGPT_DESKTOP_SCRIPT}`
+function chatgptDesktopScript(
+  checkOnly: boolean,
+  expectedVersion?: string,
+  allowFresh = false,
+  prepare?: ScriptPrepare,
+) {
+  return `${scriptModeLines(checkOnly, expectedVersion, allowFresh, prepare)}\n${CHATGPT_DESKTOP_SCRIPT}`
 }
 
 const CHATGPT_KEY = "chatgpt-desktop"
@@ -112,12 +122,13 @@ export async function installChatgptDesktop(
   })
 }
 
-/** Installs or updates to the latest release without a prior check (`oc oc deps install`). */
-export async function installChatgptDesktopLatest(onLine?: (line: string) => void): Promise<DesktopInstallResult> {
-  return runDesktopInstall({
+/** Downloads the latest release into `dir` and returns its install step (`oc oc deps install`). */
+export function prepareChatgptDesktop(dir: string, onLine?: (line: string) => void) {
+  return prepareDesktopInstall({
     key: CHATGPT_KEY,
     label: "ChatGPT Desktop",
-    script: chatgptDesktopScript(false, undefined, true),
+    script: (expectedVersion, prepare) => chatgptDesktopScript(false, expectedVersion, true, prepare),
+    dir,
     onLine,
   })
 }
