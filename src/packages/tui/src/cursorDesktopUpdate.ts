@@ -1,4 +1,4 @@
-import { DOWNLOAD_HELPERS, expectedVersionAssignment, runDesktopCheck, runDesktopInstall } from "./desktopUpdate"
+import { DOWNLOAD_HELPERS, runDesktopCheck, runDesktopInstall, scriptModeLines } from "./desktopUpdate"
 import type { DesktopCheckResult, DesktopInstallResult } from "./desktopUpdate"
 
 // Fixed script for the per-user Inno Setup install: registry DisplayVersion of the
@@ -40,10 +40,10 @@ function Get-CursorInstall {
 }
 
 $found = Get-CursorInstall
-if (-not $found) { throw "Cursor Desktop not installed" }
+if (-not $found -and -not $AllowFresh) { throw "Cursor Desktop not installed" }
 $local = $env:LOCALAPPDATA
-if (-not $local -or -not $found.Dir.StartsWith("$local\", [StringComparison]::OrdinalIgnoreCase)) { throw "Cursor Desktop system install not supported" }
-$installed = $found.Version
+if ($found -and (-not $local -or -not $found.Dir.StartsWith("$local\", [StringComparison]::OrdinalIgnoreCase))) { throw "Cursor Desktop system install not supported" }
+$installed = if ($found) { $found.Version } else { [version]"0.0" }
 
 $platform = if ($env:PROCESSOR_ARCHITECTURE -eq "ARM64") { "win32-arm64-user" } else { "win32-x64-user" }
 $api = "https://cursor.com/api/download?platform=$platform&releaseTrack=stable"
@@ -94,9 +94,8 @@ try {
 }
 `
 
-function cursorDesktopScript(checkOnly: boolean, expectedVersion?: string) {
-  const prefix = `${checkOnly ? "$CheckOnly = $true" : "$CheckOnly = $false"}\n${expectedVersionAssignment(expectedVersion)}`
-  return `${prefix}\n${CURSOR_DESKTOP_SCRIPT}`
+function cursorDesktopScript(checkOnly: boolean, expectedVersion?: string, allowFresh = false) {
+  return `${scriptModeLines(checkOnly, expectedVersion, allowFresh)}\n${CURSOR_DESKTOP_SCRIPT}`
 }
 
 const CURSOR_KEY = "cursor-desktop"
@@ -121,6 +120,16 @@ export async function installCursorDesktop(
     key: CURSOR_KEY,
     label: "Cursor Desktop",
     script: cursorDesktopScript(false, expectedVersion),
+    onLine,
+  })
+}
+
+/** Installs or updates to the latest release without a prior check (`oc oc deps install`). */
+export async function installCursorDesktopLatest(onLine?: (line: string) => void): Promise<DesktopInstallResult> {
+  return runDesktopInstall({
+    key: CURSOR_KEY,
+    label: "Cursor Desktop",
+    script: cursorDesktopScript(false, undefined, true),
     onLine,
   })
 }

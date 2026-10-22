@@ -1,8 +1,15 @@
-v0.2.292 safariShittin [patch > Claude account switch waits for work]
+v0.2.293 theorizedStrem [feat. > Windows setup and dependency window]
 
-claude accounts:
-Switching the Claude account from the palette, globally or for one session, no longer cuts off work that is running. A chat that is mid-turn, or that has background jobs running (background shell commands, agents, Monitor watches), finishes that work on its current account and moves to the new one on its next message. New chats and subagents use the new account right away.
+installer:
+oc now has a Windows setup exe. It installs oc for your user in %LOCALAPPDATA%\Programs\oc, adds it to PATH, creates Start menu and optional desktop shortcuts, and closes running oc windows before upgrading or uninstalling. One self-contained setup: nothing needs to be installed first.
 
-The sidebar marks the account a chat is actually running on, and flips to the new one once the chat's work ends. The switch dialogs now say the change applies after running work finishes.
+dependencies window:
+After setup, the oc dependencies window (also in the Start menu) lists PowerShell 7, Git, Node.js, Everything + es.exe, WezTerm, the Codex, Claude Code, and Cursor CLIs, and the Codex, Claude, and Cursor desktop apps. It shows what is already installed, tags PowerShell as Required and Git, Node.js, Everything, WezTerm, Codex CLI, and Claude Code CLI as Default, and installs the checked ones with live progress. Machine-wide installers ask for admin approval one at a time. A completion screen lists what installed or failed and offers to open oc. Once WezTerm is installed, the oc shortcuts open oc inside it.
 
-Under the hood: the language model keeps a session's account while its Claude process has a turn in flight or running CLI tasks, tracked from the CLI's stream-json task_started / task_notification / task_updated lines, and skips the account retire in that case. Usage-limit failover is unchanged. The account pool state reports the running account as current for a session. Claude's tool note and the wiki now say only a failover, restart or /reload ends background jobs. Checks: accountPool.test.ts 24/24; sessionManager.test.ts 29 pass, with 2 older log-capture tests failing that assert console output the Claude logger no longer writes (likely stale, not touched by this change); tsgo typecheck clean. No live check yet. The push runs prePush.
+look:
+oc.exe and opencode.exe now carry the oc icon instead of Bun's.
+
+scripts:
+The developer install script now installs to %LOCALAPPDATA%\Programs\oc instead of Apps\opencode. .scripts\buildInstaller.ps1 builds the setup (needs Inno Setup 6.7+), and pushRelease.ps1 uploads it with the release.
+
+Under the hood: a hidden oc oc deps list/install command drives the window from one dependency table (tui dependencies.ts); the existing PowerShell and desktop app update scripts gained a fresh-install mode, and other vendor installers are pinned by sha256 and/or Authenticode signer. The window is a small WPF app (.installer\ocSetup) with temporary debug logging still in. Checks run: bun test for dependencies plus the four update-script test files (44 pass), tui and opencode typecheck, dotnet build of the window (0 warnings), build.ps1 and buildInstaller.ps1 builds, and several fresh-VM installs by the user.

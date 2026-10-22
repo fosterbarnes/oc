@@ -7,8 +7,10 @@ $srcRoot = "$repoRoot\src"
 $projectName = 'opencode'
 $buildScript = "$srcRoot\packages\opencode\script\build.ts"
 $distFolder = "$srcRoot\packages\opencode\dist"
-# Per-user install target for install.ps1 and the revive scripts.
-$installDir = "$HOME\Apps\opencode"
+$installerFolder = "$repoRoot\.installer"
+$installerOutput = "$installerFolder\Output"
+# Per-user install target for install.ps1, the revive scripts, and the Inno setup (.installer\oc.installer.iss).
+$installDir = "$env:LOCALAPPDATA\Programs\oc"
 $occShortcut = Join-Path ([Environment]::GetFolderPath('Desktop')) 'occ.lnk'
 $versionFolder = "$srcRoot\.version"
 $version = "$versionFolder\version"

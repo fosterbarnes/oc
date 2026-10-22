@@ -4,7 +4,7 @@ Custom fork of opencode that focuses on building on existing features simply and
 
 Not ready for widespread use until 0.3.0, especially on Linux and macOS. As of current date, testing and feature work is being done on Windows 10 LTSC IoT (i know lol). Linux and macOS feature parity is planned for v0.3.0.
 
-Current version: [v0.2.292](https://github.com/fosterbarnes/oc/commits/main)
+Current version: [v0.2.293](https://github.com/fosterbarnes/oc/commits/main)
 
 ## Standout features
 
@@ -90,8 +90,16 @@ WezTerm is the recommended terminal for oc. It is what the maintainer uses daily
 
 ## Install
 
-<!-- TODO(release): there is no public installer yet. The release zip has no oc.exe/occ.exe,
-and .scripts/install.ps1 targets a fixed personal folder. Update these steps when that is fixed. -->
+<!-- TODO(release): no release has shipped the setup exe yet, and the release zip has no
+oc.exe/occ.exe. Update these steps when the first setup exe is published. -->
+
+Run `oc_v<version>_windows-x64-setup.exe` from [Releases](https://github.com/fosterbarnes/oc/releases).
+It installs oc for your user, then opens **oc dependencies** to install what oc uses (PowerShell 7,
+Git, Node.js, Everything, WezTerm, the Claude Code and Codex CLIs, and optionally Cursor and the
+desktop apps)
+([how](https://github.com/fosterbarnes/oc/wiki/Install#setup-exe)).
+
+Or install from the zip:
 
 1. Download the latest `windows-x64` zip from [Releases](https://github.com/fosterbarnes/oc/releases).
 2. Extract it to a folder you keep, for example `%LOCALAPPDATA%\oc`.
@@ -135,7 +143,7 @@ How everything works is in the [wiki](https://github.com/fosterbarnes/oc/wiki):
 
 ## Progress
 
-[408,065](scc.txt) lines of code and counting...
+[408,778](scc.txt) lines of code and counting...
 
 <!-- code-count:start -->
 
@@ -145,11 +153,11 @@ How everything works is in the [wiki](https://github.com/fosterbarnes/oc/wiki):
 | HTML | 1 | 1,161 | 79 | 0 | 1,082 |
 | JavaScript | 9 | 1,454 | 129 | 53 | 1,272 |
 | Nix | 3 | 258 | 23 | 26 | 209 |
-| Powershell | 30 | 1,859 | 135 | 120 | 1,604 |
+| Powershell | 31 | 1,941 | 144 | 123 | 1,674 |
 | SQL | 2 | 5 | 0 | 0 | 5 |
 | Shell | 1 | 120 | 17 | 17 | 86 |
-| TypeScript | 2,257 | 458,075 | 38,326 | 16,799 | 402,950 |
-| **Total** | **2,308** | **463,849** | **38,764** | **17,020** | **408,065** |
+| TypeScript | 2,259 | 458,791 | 38,364 | 16,834 | 403,593 |
+| **Total** | **2,311** | **464,647** | **38,811** | **17,058** | **408,778** |
 
 <!-- code-count:end -->
 

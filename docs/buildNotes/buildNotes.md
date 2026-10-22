@@ -185,6 +185,175 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-22 (~01:05) - v0.2.293 theorizedStrem - session pass: guard shortcut retarget - Claude Opus 5.5, low effort; Pass
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; /pass over this session's installer work; completed
+- Version: 0.2.293 theorizedStrem (same session, no bump)
+- Fixed `.installer\ocSetup\windows\MainWindow.xaml.cs` `LoadRowsAsync`: a WScript.Shell/COM or file error while retargeting the oc shortcuts to WezTerm is logged instead of crashing the window.
+- Checked: no stale `-dotnet` / `DotnetFlavor` / `-Flavor` references in repo docs, scripts, `.iss`, or wiki; Desktop test folder gone (user moved it); `src/bun.lock` and `opencode/package.json` show as modified with no content diff (line endings from the build).
+- Kept (intentional): temp debug logging (TODO), `pushRelease.ps1` failing without a setup exe.
+- Verification: `dotnet build` 0 warnings 0 errors; 44 tests pass across dependencies + 4 update-script files. Setups not rebuilt for this one-line guard.
+
+### User
+Install
+- The dependencies window no longer closes if updating the oc shortcuts for WezTerm fails.
+
+---
+
+## 2026-10-22 (~00:55) - v0.2.293 theorizedStrem - single self-contained setup; round 6 build - Claude Opus 5.5, low effort; Build
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Build; completed, VM test is the user's
+- Version: 0.2.293 theorizedStrem (same session, no bump)
+- Removed the framework-dependent `-dotnet` setup: `.installer\oc.installer.iss` drops `DotnetFlavor`/`SetupSuffix` and the .NET 10 registry check (`InitializeSetup`); `OcSetupExe` default `publish\ocSetup.exe`; `.scripts\buildInstaller.ps1` drops `-Flavor`, publishes ocSetup self-contained single-file to `.installer\publish`. SCRIPTS.md, FORK.md (row text and remaining checks), wiki `Install.md` updated. Deleted stale `.installer\publish` + `.installer\Output` and the old `-dotnet` exe in the VM folder before rebuilding.
+- Built: `build.ps1` basic checks 0.2.293; `buildInstaller.ps1` one compile, no warnings; built `oc.exe oc deps list` order pwsh, git, node, everything, wezterm, codexCli, claudeCli, cursorCli, codexDesktop, claudeDesktop, cursorDesktop. Copied `oc_v0.2.293_windows-x64-setup.exe` (180.8 MB, SHA256 6EB24F36...E9F475) + TESTING.md round 6 to `D:\VirtualBox VMs\Shared Folder\ocInstallerTest`.
+- TODO: "oc Development Dependencies" section (user, next session); remove temp debug logging.
+
+### User
+Install
+- There is now one setup exe; it bundles everything the dependencies window needs, so no .NET install is required.
+
+---
+
+## 2026-10-22 (~00:45) - v0.2.293 theorizedStrem - ocSetup tags aligned in one column - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation; not rebuilt
+- Version: 0.2.293 theorizedStrem (same session, no bump)
+- Changed `.installer\ocSetup\windows\MainWindow.xaml` row template: Required/Default tags sit in a `SharedSizeGroup="TaggedLabel"` column (`Grid.IsSharedSizeScope` on `RowsList`) after a hidden copy of the checkbox; untagged rows collapse that copy, so the column width is the widest tagged label only (Codex desktop's longer label does not push tags right). Real checkbox stays underneath; hidden copy and the background-less overlay grid are not hit-testable.
+- Verification: `dotnet build -c Release` 0 warnings 0 errors. Layout not seen yet.
+
+### User
+Install
+- Required and Default tags in the dependencies window now line up in one column.
+
+---
+
+## 2026-10-22 (~00:35) - v0.2.293 theorizedStrem - dependency rows ordered Codex, Claude, Cursor - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation; not rebuilt (user asked to wait)
+- Version: 0.2.293 theorizedStrem (same session, no bump)
+- Changed `dependencies.ts` `DEPENDENCIES` order: CLIs and desktop apps both Codex, Claude, Cursor (comment added). Install order follows the table; `needs` still point earlier (node, git).
+- Verification: `bun test test/dependencies.test.ts` 6 pass (includes the needs-earlier check).
+
+### User
+Install
+- The dependencies window lists Codex, then Claude, then Cursor for both the CLIs and the desktop apps.
+
+---
+
+## 2026-10-22 (~00:20) - v0.2.293 theorizedStrem - Claude and Codex CLI default, oc exe icon - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation; built, copy to VM folder blocked by a lock
+- Version: 0.2.293 theorizedStrem (same session, no bump)
+- Changed `dependencies.ts` defaults: `claudeCli` and `codexCli` `defaultSelected: true`, `cursorCli` stays false (user corrected an earlier Cursor-default edit mid-turn). README and wiki `Install.md` updated.
+- Fixed oc shortcuts showing Bun's icon: `opencode/script/build.ts` passes `compile.windows.icon` = `src/.res/icon.ico` (`windowsIcon`) for win32 targets when building on Windows; cross-compiles keep `{}`. Applies to `oc.exe` and `opencode.exe`.
+- Verification: `bun test test/dependencies.test.ts` 6 pass; `build.ps1` basic checks 0.2.293; `buildInstaller.ps1` both flavors compiled. Icon not visually checked.
+- ERROR: copying to `D:\VirtualBox VMs\Shared Folder\ocInstallerTest` failed: setup exe in use by another process (VM likely has it open). Not forced.
+
+### User
+Install
+- Claude Code CLI and Codex CLI are now checked by default in the dependencies window; Cursor CLI is optional.
+- oc.exe and opencode.exe now show oc's icon instead of Bun's, including on the desktop and Start menu shortcuts.
+
+---
+
+## 2026-10-21 (~23:58) - v0.2.293 theorizedStrem - ocSetup completion view, default tags, WezTerm shortcuts - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation; built, VM retest pending
+- Version: 0.2.293 theorizedStrem (same session, no bump)
+- Added `path` (resolved executable) to `oc oc deps list` CLI rows (`dependencies.ts` `detectCli`); `DependencyItem.Path` in ocSetup.
+- Added `.installer\ocSetup\helpers\OcLauncher.cs`: `WezTermGui` (wezterm-gui.exe beside detected wezterm.exe), `UseWezTermForShortcuts` (WScript.Shell COM; Start menu `Programs\oc.lnk` + `Desktop\oc.lnk`, only when target is this oc.exe or already WezTerm -> `wezterm-gui.exe start -- "oc.exe"`, icon oc.exe), `Open` (oc or WezTerm+oc with PATH rebuilt from Machine+User registry). Shortcuts are retargeted after every list load that finds WezTerm.
+- Added completion view (`DonePanel`): heading "Setup complete" / "Setup finished with errors", installed list, failures, PATH note, "Open oc now?" with **Open oc and close**, **Close**, **Back to list**. Replaces the old bottom status line.
+- Added Required/Default tags with tooltips (`DependencyRow.TagText/HasTag/TagToolTip`).
+- Verification: `dotnet build` 0 warnings 0 errors; `bun test test/dependencies.test.ts` 6 pass; tui `tsgo` exit 0; rebuilt oc (basic checks 0.2.293) and both setups (exit 0); built `oc.exe oc deps list` includes `path`. Package refreshed with TESTING.md round 4.
+- TODO (user, next session): "oc Development Dependencies" collapsed section listing and installing the dev toolchain. TODO: remove temp debug logging.
+- Risk: Inno uninstall deletes the retargeted `.lnk` files only because the paths are unchanged; unverified.
+
+### User
+Install
+- The dependencies window tags PowerShell 7 as Required and Git, Node.js, Everything, and WezTerm as Default.
+- After installing, a completion screen lists what installed or failed and offers to open oc and close.
+- When WezTerm is installed, the oc shortcuts and "Open oc" launch oc inside WezTerm.
+
+---
+
+## 2026-10-21 (~23:35) - v0.2.293 theorizedStrem - fix ocSetup crash on ProgressBar binding - Claude Opus 5.5, low effort; Debug
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Debug; fix built, VM retest pending
+- Version: 0.2.293 theorizedStrem (same session, no bump)
+- ERROR: VM: ocSetup dispatcher crash when rows render: "A TwoWay or OneWayToSource binding cannot work on the read-only property 'ProgressValue'". `RangeBase.Value` binds TwoWay by default; `DependencyRow.ProgressValue` has a private setter.
+- Fixed `.installer\ocSetup\windows\MainWindow.xaml`: `Value="{Binding ProgressValue, Mode=OneWay}"`. Other bindings checked: `IsChecked` has a public setter, the rest default OneWay.
+- Rebuilt both setups (exit 0, no warnings); `Desktop\ocInstallerTest\` refreshed with new SHA256 and TESTING.md round 3. Temp debug logging still in (TODO remove).
+- Verification: compile only; VM run is the user's.
+
+### User
+Install
+- Fixed the dependencies window closing right after it finished checking.
+
+---
+
+## 2026-10-21 (~23:16) - v0.2.293 theorizedStrem - temp crash logging in ocSetup - Claude Opus 5.5, low effort; Debug
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Debug; instrumentation only, cause not found yet
+- Version: 0.2.293 theorizedStrem (same session, no bump)
+- ERROR: user VM run: ocSetup appeared to crash after setup's **Set up dependencies**; no details yet.
+- Added WIP temp logging: `.installer\ocSetup\helpers\DebugLog.cs` (`%TEMP%\ocSetup-debug.log`); `App.xaml.cs` static ctor logs start and hooks AppDomain/TaskScheduler, `OnStartup` hooks DispatcherUnhandledException; each crash logs the stack and shows a MessageBox with the log path; `MainWindow.RunOcAsync` logs args, pid, every stdout line, stderr, exit code, duration. TODO: remove all `WIP: temp debug logging` once fixed.
+- Rebuilt both setups (`buildInstaller.ps1` exit 0); package refreshed at `Desktop\ocInstallerTest\` with new SHA256 and a crash-capture TESTING.md.
+- MISTAKE: copied into `Desktop\ocInstallerTest` after the user had moved that folder away; `Copy-Item -Destination` created a file with that name. Removed it and recreated the folder. Rule: `Test-Path -PathType Container` the destination before copying into it.
+
+### User
+Install
+- The dependencies window now writes a debug log to `%TEMP%\ocSetup-debug.log` and shows a message with the reason if it crashes (temporary, for testing).
+
+---
+
+## 2026-10-21 (~23:20) - v0.2.293 theorizedStrem - first installer build and VM test package - Claude Opus 5.5, low effort; Build
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Build (user asked); completed
+- Version: 0.2.293 theorizedStrem (same session as the setup entry below, no second bump)
+- Updated Inno Setup 6.7.1 -> 6.7.3 on the build PC (signer `Pyrsys B.V.` Valid, silent RunAs install exit 0, uninstall key reads 6.7.3).
+- Fixed `.installer\oc.installer.iss`: `FileCopy` -> `CopyFile` (ISCC 6.7.3 rename hint).
+- Built: `.scripts\build.ps1` exit 0 (basic checks 0.2.293); built `oc.exe oc deps list` printed the JSON array; `.scripts\buildInstaller.ps1` exit 0, both flavors compile with no warnings: `oc_v0.2.293_windows-x64-setup.exe` 180.9 MB, `-setup-dotnet.exe` 125.9 MB.
+- Package: `Desktop\ocInstallerTest\` with both setups and `TESTING.md` (VM checklist + SHA256).
+- Verification: compile and smoke only; no install run yet (VM test is the user's).
+
+### User
+Install
+- Built the first oc setup exes and a VM test folder on the Desktop with a step-by-step checklist.
+
+---
+
+## 2026-10-21 (~22:54) - v0.2.293 theorizedStrem - Windows setup exe and dependency window - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation (/imp of `~/.config/opencode/plans/ocWindowsInstaller.md`; 2 `general-haiku-5.5-high` subagents built `.installer\ocSetup` and the Inno/scripts side, reviewed after); completed except live installer runs
+- Version: 0.2.293 theorizedStrem
+- Added `tui/src/dependencies.ts`: `DEPENDENCIES` table (pwsh required; git/node/everything/wezterm default; claudeCli needs git, codexCli needs node; cursorCli; claude/cursor/codex desktop), `listDependencies`, `installDependencies` -> `runInstalls` (table order, `needs`-failure skip, PATH re-read from Machine+User registry after each install via `freshEnv`), `lineEvent` (OCSTEP/OCPROGRESS -> NDJSON events), generic `INSTALL_SCRIPT` (download with host allowlist, sha256 and/or exact signer CN, exe/msi/ps1/zip, `Start-Process -Verb RunAs` per machine-wide installer). Values reach PS as single-quoted literals (`psString`, curly quotes doubled too).
+- Verified vendor facts 2026-10-21: Git `Git-*-64-bit.exe` signer `Johannes Schindelin` + GitHub digest; Node LTS MSI from `nodejs.org/dist/index.json`, signer `OpenJS Foundation`; Everything pinned 1.4.1.1032 sha256 `c42efad0...` + signer `voidtools PTY LTD` (bump `EVERYTHING_VERSION`/`EVERYTHING_SHA256` together); es.exe from `voidtools/es` x64 zip (digest) into oc.exe's folder; WezTerm setup unsigned, sha256 from sibling `.sha256` asset; `claude.ai/install.ps1` 302 -> `downloads.claude.ai`; Cursor `cursor.com/install?win32=true`; Codex via `npm install -g @openai/codex`. Git `/CURRENTUSER` unverified, so Git installs machine-wide.
+- Added `$AllowFresh` to the pwsh, Claude desktop, Cursor desktop, ChatGPT desktop scripts (missing install -> version 0.0, proceeds) and `scriptModeLines` in `desktopUpdate.ts` replacing four inline prefixes; new `install*Latest(onLine)` exports. Harness update menu never sets it: behavior unchanged.
+- Added hidden `oc oc deps list` / `oc oc deps install <ids..>` (`cli/cmd/oc.ts` `DepsCommand`, under `oc` so a folder named `deps` still launches); tui export `./dependencies`. No `--json` flag (output is always JSON); plan deviation.
+- Added `.installer\ocSetup` WPF (base theme copied, themed CheckBox added because the default template draws black text), `.installer\oc.installer.iss` (per-user `{localappdata}\Programs\oc`, occ hard link via `CreateHardLinkW`, HKCU PATH add/remove, `oc --shutdown-all` before install/uninstall, `DotnetFlavor` registry check -> MsgBox + download page), `.scripts\buildInstaller.ps1` (`-Flavor`, Inno >= 6.7 guard from the `Inno Setup 6_is1` key, ImageMagick wizard images into gitignored `.installer\images`).
+- Changed `scriptHelper.ps1` `$installDir` -> `%LOCALAPPDATA%\Programs\oc` (+ `$installerFolder`, `$installerOutput`); `pushRelease.ps1` uploads `.installer\Output\*.exe` and now throws when none exist; AGENTS.md line 10, SCRIPTS.md, FORK.md row, README, wiki `Install.md` updated.
+- Verification: `bun test` dependencies + 4 update-script test files 44 pass; `tsgo` typecheck tui and opencode exit 0; `OC_FLAVOR=oc bun run src/index.ts oc deps list` on this PC: 11 rows, all found except Codex desktop outdated, 4.5 s; `dotnet build ocSetup -c Release` 0 warnings 0 errors; PS parse check of edited scripts 0 errors; `buildInstaller.ps1 -h` ok. Not run: ISCC compile, `dotnet publish`, any install path of `oc oc deps install`, the WPF window visually.
+- Risk: Everything `/S` silent defaults and post-install `-startup` launch unverified; closing ocSetup mid-install leaves oc writing to a closed pipe; `.iss` Pascal never compiled.
+
+### User
+Install
+- A Windows setup exe can now be built: it installs oc for your user in `%LOCALAPPDATA%\Programs\oc`, adds it to PATH, and closes running oc windows before upgrading.
+- After setup, an **oc dependencies** window lists PowerShell 7, Git, Node.js, Everything, WezTerm, and the Claude, Cursor, and Codex apps, shows which are installed, and installs the ones you check with progress.
+- The `-dotnet` setup is smaller but needs the .NET 10 Desktop Runtime; without it, setup stops and opens the download page.
+- The developer install script now installs to `%LOCALAPPDATA%\Programs\oc` instead of `Apps\opencode`.
+
+---
+
 ## 2026-10-21 (~22:22) - v0.2.292 safariShittin - Claude account switch waits for running work - Claude Opus 5.5, low effort; Implementation
 
 ### Agent

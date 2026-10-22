@@ -1,9 +1,9 @@
 import {
   DOWNLOAD_HELPERS,
-  expectedVersionAssignment,
   GET_MSIX_IDENTITY,
   runDesktopCheck,
   runDesktopInstall,
+  scriptModeLines,
 } from "./desktopUpdate"
 import type { DesktopCheckResult, DesktopInstallResult } from "./desktopUpdate"
 
@@ -36,7 +36,8 @@ ${GET_MSIX_IDENTITY}
 ${DOWNLOAD_HELPERS}
 
 $installed = Get-InstalledChatgptVersion
-if (-not $installed) { throw "ChatGPT Desktop not installed" }
+if (-not $installed -and -not $AllowFresh) { throw "ChatGPT Desktop not installed" }
+if (-not $installed) { $installed = [version]"0.0" }
 
 try { $feed = Invoke-RestMethod -Uri $FeedUri -UseBasicParsing }
 catch { throw "Update check failed: $($_.Exception.Message)" }
@@ -84,9 +85,8 @@ try {
 }
 `
 
-function chatgptDesktopScript(checkOnly: boolean, expectedVersion?: string) {
-  const prefix = `${checkOnly ? "$CheckOnly = $true" : "$CheckOnly = $false"}\n${expectedVersionAssignment(expectedVersion)}`
-  return `${prefix}\n${CHATGPT_DESKTOP_SCRIPT}`
+function chatgptDesktopScript(checkOnly: boolean, expectedVersion?: string, allowFresh = false) {
+  return `${scriptModeLines(checkOnly, expectedVersion, allowFresh)}\n${CHATGPT_DESKTOP_SCRIPT}`
 }
 
 const CHATGPT_KEY = "chatgpt-desktop"
@@ -106,6 +106,16 @@ export async function installChatgptDesktop(
     key: CHATGPT_KEY,
     label: "ChatGPT Desktop",
     script: chatgptDesktopScript(false, expectedVersion),
+    onLine,
+  })
+}
+
+/** Installs or updates to the latest release without a prior check (`oc oc deps install`). */
+export async function installChatgptDesktopLatest(onLine?: (line: string) => void): Promise<DesktopInstallResult> {
+  return runDesktopInstall({
+    key: CHATGPT_KEY,
+    label: "ChatGPT Desktop",
+    script: chatgptDesktopScript(false, undefined, true),
     onLine,
   })
 }

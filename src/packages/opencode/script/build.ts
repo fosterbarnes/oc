@@ -9,6 +9,7 @@ const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 const dir = path.resolve(__dirname, "..")
 const cursorRuntimeSource = path.resolve(dir, "../cursor-runtime")
+const windowsIcon = path.resolve(dir, "../../.res/icon.ico")
 
 process.chdir(dir)
 
@@ -195,7 +196,9 @@ for (const variant of variants) {
         target: compileTarget as any,
         outfile: `dist/${name}/bin/${binaryName}`,
         execArgv: [`--user-agent=opencode/${runtimeVersion}`, "--use-system-ca", "--no-warnings", "--"],
-        windows: {},
+        // oc's icon instead of Bun's for Windows exes (shortcuts, taskbar, Explorer). Setting
+        // Windows resources needs a Windows host, so cross-compiles keep Bun's icon.
+        windows: item.os === "win32" && process.platform === "win32" ? { icon: windowsIcon } : {},
       },
       files: {
         [treeSitterWorkerPath]: treeSitterWorker,

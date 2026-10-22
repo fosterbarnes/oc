@@ -1,4 +1,4 @@
-import { DOWNLOAD_HELPERS, expectedVersionAssignment, runDesktopCheck, runDesktopInstall } from "./desktopUpdate"
+import { DOWNLOAD_HELPERS, runDesktopCheck, runDesktopInstall, scriptModeLines } from "./desktopUpdate"
 import type { DesktopCheckResult, DesktopInstallResult } from "./desktopUpdate"
 
 // Fixed script for the machine-wide PowerShell 7 MSI install: installed version from the MSI's
@@ -35,7 +35,8 @@ function Get-InstalledPwshVersion {
 }
 
 $installed = Get-InstalledPwshVersion
-if (-not $installed) { throw "PowerShell not installed" }
+if (-not $installed -and -not $AllowFresh) { throw "PowerShell not installed" }
+if (-not $installed) { $installed = [version]"0.0" }
 
 try { $info = Invoke-RestMethod -Uri "https://aka.ms/pwsh-buildinfo-stable" -UseBasicParsing }
 catch { throw "Update check failed: $($_.Exception.Message)" }
@@ -85,9 +86,8 @@ try {
 }
 `
 
-function pwshScript(checkOnly: boolean, expectedVersion?: string) {
-  const prefix = `${checkOnly ? "$CheckOnly = $true" : "$CheckOnly = $false"}\n${expectedVersionAssignment(expectedVersion)}`
-  return `${prefix}\n${PWSH_SCRIPT}`
+function pwshScript(checkOnly: boolean, expectedVersion?: string, allowFresh = false) {
+  return `${scriptModeLines(checkOnly, expectedVersion, allowFresh)}\n${PWSH_SCRIPT}`
 }
 
 const PWSH_KEY = "powershell"
@@ -104,4 +104,9 @@ export async function installPowershell(
     return { ok: false, alreadyRunning: false, message: "Confirmed version is invalid" }
   }
   return runDesktopInstall({ key: PWSH_KEY, label: "PowerShell", script: pwshScript(false, expectedVersion), onLine })
+}
+
+/** Installs or updates to the latest release without a prior check (`oc oc deps install`). */
+export async function installPowershellLatest(onLine?: (line: string) => void): Promise<DesktopInstallResult> {
+  return runDesktopInstall({ key: PWSH_KEY, label: "PowerShell", script: pwshScript(false, undefined, true), onLine })
 }

@@ -353,6 +353,35 @@ const ConfigCommand = cmd({
   handler: async () => {},
 })
 
+// Hidden: the installer's ocSetup window is the only caller. `list` prints one JSON array;
+// `install` prints one JSON event per line and exits 1 unless every id installed.
+const DepsCommand = cmd({
+  command: "deps",
+  describe: false,
+  builder: (yargs: Argv) =>
+    yargs
+      .command({
+        command: "list",
+        describe: "print dependency status as JSON",
+        handler: async () => {
+          const { listDependencies } = await import("@opencode-ai/tui/dependencies")
+          console.log(JSON.stringify(await listDependencies()))
+        },
+      })
+      .command({
+        command: "install <ids..>",
+        describe: "install dependencies, printing JSON progress lines",
+        builder: (nested) => nested.positional("ids", { type: "string", array: true, demandOption: true }),
+        handler: async (args) => {
+          const { installDependencies } = await import("@opencode-ai/tui/dependencies")
+          const ok = await installDependencies(args.ids.map(String), (event) => console.log(JSON.stringify(event)))
+          if (!ok) process.exitCode = 1
+        },
+      })
+      .demandCommand(),
+  handler: async () => {},
+})
+
 export const OcCommand = cmd({
   command: "oc",
   describe: "manage OpenCode launcher settings",
@@ -386,6 +415,7 @@ export const OcCommand = cmd({
         describe: "Close the old oc window and open a new terminal using an encoded context",
       })
       .command(ConfigCommand)
+      .command(DepsCommand)
       .command({
         command: "server start",
         describe: "start or reuse the resident OpenCode server",

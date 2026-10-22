@@ -40,3 +40,8 @@ desktop.ini
 *.lnk
 .scripts/*.exe
 .res/yapBot.json
+.installer/Output/
+.installer/publish/
+.installer/images/
+.installer/ocSetup/bin/
+.installer/ocSetup/obj/

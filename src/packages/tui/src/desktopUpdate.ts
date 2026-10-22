@@ -288,6 +288,16 @@ export function expectedVersionAssignment(version?: string) {
   return `$ExpectedVersion = "${version}"`
 }
 
+// Prefix lines that pick an update script's mode. $AllowFresh lets the install run when the app is
+// missing (`oc oc deps install`); the harness update menu never sets it.
+export function scriptModeLines(checkOnly: boolean, expectedVersion?: string, allowFresh = false) {
+  return [
+    `$CheckOnly = $${checkOnly}`,
+    expectedVersionAssignment(expectedVersion),
+    `$AllowFresh = $${allowFresh}`,
+  ].join("\n")
+}
+
 // Fixed script modeled on Anthropic's Install-Claude.ps1, trimmed to user scope:
 // highest Claude_pzs8sxrjxfjjc package, official latest-release redirect pinned to
 // downloads.claude.ai, skip when current, Authenticode Valid with the signer subject equal
@@ -327,7 +337,8 @@ ${GET_MSIX_IDENTITY}
 ${DOWNLOAD_HELPERS}
 
 $installed = Get-InstalledClaudeVersion
-if (-not $installed) { throw "Claude Desktop not installed" }
+if (-not $installed -and -not $AllowFresh) { throw "Claude Desktop not installed" }
+if (-not $installed) { $installed = [version]"0.0" }
 
 $arch = if ($env:PROCESSOR_ARCHITECTURE -eq "ARM64") { "arm64" } else { "x64" }
 $redirect = "https://claude.ai/api/desktop/win32/$arch/msix/latest/redirect"
@@ -383,9 +394,8 @@ try {
 }
 `
 
-function desktopScript(checkOnly: boolean, expectedVersion?: string) {
-  const prefix = `${checkOnly ? "$CheckOnly = $true" : "$CheckOnly = $false"}\n${expectedVersionAssignment(expectedVersion)}`
-  return `${prefix}\n${DESKTOP_SCRIPT}`
+function desktopScript(checkOnly: boolean, expectedVersion?: string, allowFresh = false) {
+  return `${scriptModeLines(checkOnly, expectedVersion, allowFresh)}\n${DESKTOP_SCRIPT}`
 }
 
 const CLAUDE_KEY = "claude-desktop"
@@ -405,6 +415,16 @@ export async function installClaudeDesktop(
     key: CLAUDE_KEY,
     label: "Claude Desktop",
     script: desktopScript(false, expectedVersion),
+    onLine,
+  })
+}
+
+/** Installs or updates to the latest release without a prior check (`oc oc deps install`). */
+export async function installClaudeDesktopLatest(onLine?: (line: string) => void): Promise<DesktopInstallResult> {
+  return runDesktopInstall({
+    key: CLAUDE_KEY,
+    label: "Claude Desktop",
+    script: desktopScript(false, undefined, true),
     onLine,
   })
 }
