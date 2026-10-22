@@ -200,6 +200,7 @@ public partial class MainWindow : Window
         var items = JsonSerializer.Deserialize<DependencyItem[]>(json, _jsonOptions) ?? [];
         _rows = CreateRows(items);
         RowsList.ItemsSource = _rows;
+        HeaderIcons.Visibility = Visibility.Visible;
         StatusText.Text = "";
 
         // Once WezTerm is installed, oc's shortcuts open in it.

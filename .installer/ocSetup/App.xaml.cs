@@ -1,4 +1,5 @@
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Interop;
 using System.Windows.Media;
 using OcSetup.Helpers;
@@ -14,6 +15,10 @@ public partial class App : Application
         DebugLog.Write($"--- start: {Environment.ProcessPath} | base {AppContext.BaseDirectory} | {Environment.OSVersion} | .NET {Environment.Version}");
         AppDomain.CurrentDomain.UnhandledException += (_, args) => Crash("appdomain", args.ExceptionObject as Exception);
         TaskScheduler.UnobservedTaskException += (_, args) => DebugLog.Write($"unobserved task: {args.Exception}");
+        // Every tooltip opens after 100 ms instead of the system hover time (about 400 ms). Must run
+        // before any element reads the property, which seals its metadata.
+        ToolTipService.InitialShowDelayProperty.OverrideMetadata(typeof(FrameworkElement),
+            new FrameworkPropertyMetadata(100));
     }
 
     protected override void OnStartup(StartupEventArgs e)

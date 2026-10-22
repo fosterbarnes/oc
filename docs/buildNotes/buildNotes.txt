@@ -1,14 +1,11 @@
-v0.2.296 hyperfocusRebirth [fix > sidebar panes; scripts > ocSetup dev]
+v0.2.297 stacheChamber [patch > ocSetup icon header and tag dots]
 
-sidebar scripts:
-Scripts started from the sidebar in WezTerm close their pane again after a successful run; a failed run keeps the pane open with the error. A cleanup in v0.2.162 had removed both the marker the sidebar sets and the step that closes the pane, which also affected base-style scripts in other projects.
+oc dependencies window:
+The install and desktop shortcut checkboxes sit side by side at the left of each row, with the app name after them, and the window is a little wider with slightly larger text. The column header is now three thin Lucide line icons: a download arrow over the install column, a monitor over the desktop shortcut column, and a checklist over the tag column. Hover any of them for an explanation; they appear together with the list instead of before it.
 
-install folder:
-install.ps1 and the revive scripts now install to the folder your oc actually runs from (the first PATH entry holding oc.exe and occ.exe) instead of always using %LOCALAPPDATA%\Programs\oc. A first-time setup suggests that folder too.
+Required and Default are now small purple dots before the app name: filled for Required, a ring for Default. Hovering a dot names it. Tooltips open after 100 ms instead of the system hover delay, and buttons have slightly rounded corners matching the checkboxes.
 
-dev scripts:
-.runCompanion.ps1 opens the oc dependencies window in a few seconds without building oc or the installer. -Fake uses the real dependency table and install order with fake statuses and installs, so nothing is installed; without it the real engine runs from source, and -OcExe uses a built oc.exe. Dev windows say "(dev)" in the title and never touch shortcuts or open oc. While it is open, r or up arrow rebuilds and reopens it and q closes it. .run.ps1 asks after oc exits: r restarts, q quits. buildCompanion.ps1 builds the window alone; buildInstaller.ps1 now calls it for the publish step.
+wiki:
+The install page describes the dots and header icons.
 
-The retired buildDebug, installDebug, and .runDebug scripts and the .install.ps1 -d switch are gone, along with leftover ocdebug handling in install.ps1. FORK.md notes the removed Debug agents need replacing.
-
-Under the hood: ocSetup takes --dev <command> (engine override plus no writes outside the window); new tui/script/depsDev.ts mirrors oc oc deps; scriptHelper.ps1 gains runLoop, resolveInstallDir, and the kill-pane step in closeOut; the Inno setup's default folder follows PATH; the oc-installer skill now covers the setup exe only and a new oc-companion skill covers the window and engine. Checks: depsDev fake list and fake install with a failing row, tui typecheck, buildCompanion.ps1 Debug build, openSidebar tests (75 pass, 2 skip), PowerShell parse of scriptHelper, .run, and .runCompanion, installDir.tests.ps1 and reviveCleanup.tests.ps1. Not run: installer build, ISCC, install.ps1, the companion window, scripts live in a WezTerm pane.
+Under the hood: icon shapes live in the new theme/icons.xaml (Lucide, ISC license, copied path data, no package), drawn as 24x24 strokes scaled to 16 px. The tooltip delay is a metadata override in App's static constructor. Rows use fixed 16 px cells instead of shared size groups. buildNotes.md rotated to buildNotes.archive14.md. Checks: XAML files parse as XML and WPF Geometry.Parse reads all three icons. Not run: ocSetup build or the window itself.

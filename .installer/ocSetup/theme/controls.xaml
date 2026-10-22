@@ -107,6 +107,7 @@
                             Background="{TemplateBinding Background}"
                             BorderBrush="{TemplateBinding BorderBrush}"
                             BorderThickness="{TemplateBinding BorderThickness}"
+                            CornerRadius="{StaticResource SmallCornerRadius}"
                             Padding="{TemplateBinding Padding}"
                             SnapsToDevicePixels="True">
                         <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
@@ -144,7 +145,7 @@
                             Background="{StaticResource ControlAltBrush}"
                             BorderBrush="{StaticResource BorderStrongBrush}"
                             BorderThickness="1"
-                            CornerRadius="1"
+                            CornerRadius="{StaticResource SmallCornerRadius}"
                             Padding="{TemplateBinding Padding}"
                             SnapsToDevicePixels="True">
                         <ContentPresenter HorizontalAlignment="Center"

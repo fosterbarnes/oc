@@ -1,0 +1,12 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <!-- Lucide icons (lucide.dev, ISC license, Copyright (c) 2026 Lucide Icons and Contributors).
+         Path data copied per icon from the 24x24 SVGs; circles rewritten as two arcs. They are
+         stroke icons: draw with Stroke (width 2, round caps and joins) on a 24x24 Path, no Fill. -->
+    <!-- lucide download -->
+    <Geometry x:Key="InstallIconGeometry">M12 15V3 M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4 M7 10l5 5 5-5</Geometry>
+    <!-- lucide monitor-dot -->
+    <Geometry x:Key="ShortcutIconGeometry">M12 17v4 M22 12.307V15a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h8.693 M8 21h8 M16 6a3 3 0 1 0 6 0a3 3 0 1 0-6 0</Geometry>
+    <!-- lucide list-checks -->
+    <Geometry x:Key="TagIconGeometry">M13 5h8 M13 12h8 M13 19h8 M3 17l2 2 4-4 M3 7l2 2 4-4</Geometry>
+</ResourceDictionary>

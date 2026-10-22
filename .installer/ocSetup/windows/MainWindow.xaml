@@ -3,11 +3,12 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:viewModels="clr-namespace:OcSetup.ViewModels"
         Title="oc dependencies"
-        Width="560"
+        Width="720"
         Height="520"
         WindowStartupLocation="CenterScreen"
         Background="{StaticResource AppBackgroundBrush}"
         Foreground="{StaticResource PrimaryTextBrush}"
+        FontSize="14"
         Loaded="Window_Loaded"
         Closing="Window_Closing">
     <Window.Resources>
@@ -41,9 +42,12 @@
                                       StrokeThickness="2"
                                       Visibility="Collapsed" />
                             </Border>
-                            <ContentPresenter Margin="8,0,0,0" VerticalAlignment="Center" />
+                            <ContentPresenter x:Name="Content" Margin="8,0,0,0" VerticalAlignment="Center" />
                         </StackPanel>
                         <ControlTemplate.Triggers>
+                            <Trigger Property="HasContent" Value="False">
+                                <Setter TargetName="Content" Property="Visibility" Value="Collapsed" />
+                            </Trigger>
                             <Trigger Property="IsChecked" Value="True">
                                 <Setter TargetName="Mark" Property="Visibility" Value="Visible" />
                                 <Setter TargetName="Box" Property="Background" Value="{StaticResource AccentBrush}" />
@@ -70,76 +74,70 @@
 
         <Border x:Name="ListPanel" Margin="{StaticResource PageMargin}" Style="{StaticResource ContentPanelStyle}">
             <ScrollViewer VerticalScrollBarVisibility="Auto">
-                <!-- Tags line up after the widest label among tagged rows: each tagged row puts a
-                     hidden copy of its checkbox in a shared-size column; untagged rows collapse it.
-                     The shortcut column shares its width with the header above it. -->
-                <StackPanel Grid.IsSharedSizeScope="True">
-                <Grid Margin="0,0,0,6">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="Auto" SharedSizeGroup="Shortcut" />
-                    </Grid.ColumnDefinitions>
-                    <TextBlock Grid.Column="1"
-                               Margin="16,0,0,0"
-                               FontSize="11"
-                               Foreground="{StaticResource SecondaryTextBrush}"
-                               Text="Desktop shortcut" />
-                </Grid>
+                <!-- Header icons and row cells are all 16 wide with the same margins, so each icon
+                     sits over its column without shared sizing. -->
+                <StackPanel>
+                <!-- Shown with the rows once the list loads (ReadRowsAsync). -->
+                <StackPanel x:Name="HeaderIcons" Margin="0,0,0,6" Orientation="Horizontal" Visibility="Collapsed">
+                    <!-- Transparent borders make the whole 16x16 cell hoverable, not just the glyph. -->
+                    <StackPanel.Resources>
+                        <Style TargetType="{x:Type Border}">
+                            <Setter Property="Width" Value="16" />
+                            <Setter Property="Height" Value="16" />
+                            <Setter Property="Background" Value="Transparent" />
+                        </Style>
+                        <!-- Lucide stroke icons: a fixed 24x24 Path keeps the SVG viewBox (Stretch
+                             would fit each icon to its own bounds); the Viewbox scales it to 16. -->
+                        <Style TargetType="{x:Type Path}">
+                            <Setter Property="Width" Value="24" />
+                            <Setter Property="Height" Value="24" />
+                            <Setter Property="Stroke" Value="{StaticResource SecondaryTextBrush}" />
+                            <Setter Property="StrokeThickness" Value="2" />
+                            <Setter Property="StrokeStartLineCap" Value="Round" />
+                            <Setter Property="StrokeEndLineCap" Value="Round" />
+                            <Setter Property="StrokeLineJoin" Value="Round" />
+                        </Style>
+                    </StackPanel.Resources>
+                    <Border AutomationProperties.Name="Install or update" ToolTip="Install or update">
+                        <Viewbox>
+                            <Path Data="{StaticResource InstallIconGeometry}" />
+                        </Viewbox>
+                    </Border>
+                    <Border Margin="8,0,0,0"
+                            AutomationProperties.Name="Create desktop shortcut"
+                            ToolTip="Create desktop shortcut">
+                        <Viewbox>
+                            <Path Data="{StaticResource ShortcutIconGeometry}" />
+                        </Viewbox>
+                    </Border>
+                    <Border Margin="12,0,0,0"
+                            AutomationProperties.Name="Filled dot: Required. Ring: Default."
+                            ToolTip="● Required: oc needs this&#10;○ Default: checked by default when missing">
+                        <Viewbox>
+                            <Path Data="{StaticResource TagIconGeometry}" />
+                        </Viewbox>
+                    </Border>
+                </StackPanel>
                 <ItemsControl x:Name="RowsList">
                     <ItemsControl.ItemTemplate>
                         <DataTemplate DataType="{x:Type viewModels:DependencyRow}">
                             <StackPanel Margin="0,0,0,10" ToolTip="{Binding ToolTip}">
                                 <Grid>
                                     <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="Auto" />
                                         <ColumnDefinition Width="*" />
                                         <ColumnDefinition Width="Auto" />
-                                        <ColumnDefinition Width="Auto" SharedSizeGroup="Shortcut" />
                                     </Grid.ColumnDefinitions>
                                     <CheckBox HorizontalAlignment="Left"
-                                              Content="{Binding Label}"
+                                              AutomationProperties.Name="{Binding Label}"
                                               IsChecked="{Binding IsChecked}"
                                               IsEnabled="{Binding CanCheck}" />
-                                    <Grid HorizontalAlignment="Left">
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="Auto" SharedSizeGroup="TaggedLabel" />
-                                            <ColumnDefinition Width="Auto" SharedSizeGroup="TagBadge" />
-                                        </Grid.ColumnDefinitions>
-                                        <CheckBox Content="{Binding Label}" Focusable="False">
-                                            <CheckBox.Style>
-                                                <Style TargetType="{x:Type CheckBox}" BasedOn="{StaticResource {x:Type CheckBox}}">
-                                                    <Setter Property="Visibility" Value="Hidden" />
-                                                    <Style.Triggers>
-                                                        <DataTrigger Binding="{Binding HasTag}" Value="False">
-                                                            <Setter Property="Visibility" Value="Collapsed" />
-                                                        </DataTrigger>
-                                                    </Style.Triggers>
-                                                </Style>
-                                            </CheckBox.Style>
-                                        </CheckBox>
-                                        <Border Grid.Column="1"
-                                                Margin="8,0,0,0"
-                                                Padding="6,1"
-                                                VerticalAlignment="Center"
-                                                BorderBrush="{StaticResource AccentBorderBrush}"
-                                                BorderThickness="1"
-                                                CornerRadius="{StaticResource SmallCornerRadius}"
-                                                ToolTip="{Binding TagToolTip}"
-                                                Visibility="{Binding HasTag, Converter={StaticResource BooleanToVisibility}}">
-                                            <TextBlock HorizontalAlignment="Center"
-                                                       FontSize="11"
-                                                       Foreground="{StaticResource FocusBrush}"
-                                                       Text="{Binding TagText}" />
-                                        </Border>
-                                    </Grid>
-                                    <TextBlock Grid.Column="1"
-                                               Margin="16,0,0,0"
-                                               VerticalAlignment="Center"
-                                               Foreground="{StaticResource SecondaryTextBrush}"
-                                               Text="{Binding StatusText}" />
-                                    <!-- Hidden (not collapsed) on rows without a shortcut keeps the column aligned. -->
-                                    <CheckBox Grid.Column="2"
-                                              Margin="16,0,0,0"
-                                              HorizontalAlignment="Center"
+                                    <!-- Hidden (not collapsed) on rows without a shortcut keeps the labels aligned. -->
+                                    <CheckBox Grid.Column="1"
+                                              Margin="8,0,0,0"
+                                              AutomationProperties.Name="{Binding Label, StringFormat={}{0} desktop shortcut}"
                                               IsChecked="{Binding WantsShortcut}"
                                               IsEnabled="{Binding CanShortcut}"
                                               ToolTip="Create a desktop shortcut">
@@ -153,6 +151,62 @@
                                             </Style>
                                         </CheckBox.Style>
                                     </CheckBox>
+                                    <!-- Tag dot: filled = Required, ring = Default (shape, not just color).
+                                         16x16 transparent cell is the hover target; hidden (not
+                                         collapsed) on untagged rows keeps the labels aligned. -->
+                                    <Border Grid.Column="2"
+                                            Width="16"
+                                            Height="16"
+                                            Margin="12,0,0,0"
+                                            Background="Transparent"
+                                            AutomationProperties.Name="{Binding TagText}"
+                                            ToolTip="{Binding TagToolTip}">
+                                        <Border.Style>
+                                            <Style TargetType="{x:Type Border}">
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding HasTag}" Value="False">
+                                                        <Setter Property="Visibility" Value="Hidden" />
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </Border.Style>
+                                        <Ellipse Width="8" Height="8">
+                                            <Ellipse.Style>
+                                                <Style TargetType="{x:Type Ellipse}">
+                                                    <Setter Property="Stroke" Value="{StaticResource AccentBorderBrush}" />
+                                                    <Setter Property="StrokeThickness" Value="1.5" />
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding Item.Required}" Value="True">
+                                                            <Setter Property="Fill" Value="{StaticResource AccentBrush}" />
+                                                            <Setter Property="Stroke" Value="{StaticResource AccentBrush}" />
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </Ellipse.Style>
+                                        </Ellipse>
+                                    </Border>
+                                    <!-- Dims like the old checkbox content did when install is locked. -->
+                                    <TextBlock Grid.Column="3"
+                                               Margin="12,0,0,0"
+                                               HorizontalAlignment="Left"
+                                               VerticalAlignment="Center"
+                                               Text="{Binding Label}"
+                                               TextTrimming="CharacterEllipsis">
+                                        <TextBlock.Style>
+                                            <Style TargetType="{x:Type TextBlock}">
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding CanCheck}" Value="False">
+                                                        <Setter Property="Opacity" Value="0.55" />
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </TextBlock.Style>
+                                    </TextBlock>
+                                    <TextBlock Grid.Column="4"
+                                               Margin="16,0,0,0"
+                                               VerticalAlignment="Center"
+                                               Foreground="{StaticResource SecondaryTextBrush}"
+                                               Text="{Binding StatusText}" />
                                 </Grid>
                                 <ProgressBar Visibility="{Binding IsProgressVisible, Converter={StaticResource BooleanToVisibility}}"
                                              IsIndeterminate="{Binding IsProgressIndeterminate}"

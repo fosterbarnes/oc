@@ -34,12 +34,13 @@ public sealed class DependencyRow : INotifyPropertyChanged
     public bool DefaultChecked => IsLocked || (Item.Status == "missing" && Item.DefaultSelected);
     public bool CanCheck => !_isBusy && Item.Status != "found" && !IsLocked;
 
-    // Tag beside the label: what the setup installs unless unchecked.
+    // Tag dot beside the label: what the setup installs unless unchecked. The dot has no text,
+    // so the tooltip leads with the tag name.
     public string? TagText => Item.Required ? "Required" : Item.DefaultSelected ? "Default" : null;
     public bool HasTag => TagText is not null;
     public string? TagToolTip => Item.Required
-        ? "oc needs this; always installed when missing"
-        : Item.DefaultSelected ? "Checked by default when missing" : null;
+        ? "Required: oc needs this; always installed when missing"
+        : Item.DefaultSelected ? "Default: checked by default when missing" : null;
 
     public string? ToolTip => Needed.Count == 0
         ? null

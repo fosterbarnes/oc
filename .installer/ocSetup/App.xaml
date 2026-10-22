@@ -8,6 +8,7 @@
                 <ResourceDictionary Source="theme/colors.xaml" />
                 <ResourceDictionary Source="theme/spacing.xaml" />
                 <ResourceDictionary Source="theme/controls.xaml" />
+                <ResourceDictionary Source="theme/icons.xaml" />
             </ResourceDictionary.MergedDictionaries>
         </ResourceDictionary>
     </Application.Resources>
