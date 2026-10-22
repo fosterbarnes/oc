@@ -9,8 +9,22 @@ $buildScript = "$srcRoot\packages\opencode\script\build.ts"
 $distFolder = "$srcRoot\packages\opencode\dist"
 $installerFolder = "$repoRoot\.installer"
 $installerOutput = "$installerFolder\Output"
-# Per-user install target for install.ps1, the revive scripts, and the Inno setup (.installer\oc.installer.iss).
-$installDir = "$env:LOCALAPPDATA\Programs\oc"
+# ocSetup companion: buildCompanion.ps1 publishes it for the setup and builds the dev copy .runCompanion.ps1 starts.
+$companionProject = "$installerFolder\ocSetup\ocSetup.csproj"
+$companionPublish = "$installerFolder\publish"
+$companionDevExe = "$installerFolder\ocSetup\bin\dev\ocSetup.exe"
+# Install target for install.ps1 and the revive scripts: the PATH folder holding oc.exe + occ.exe (setup lets
+# users pick any folder; older installs used others), else the setup default (.installer\oc.installer.iss).
+# occ.exe rules out unrelated oc.exe tools such as the OpenShift CLI, and unlinked dist bin folders.
+function resolveInstallDir([string]$PathValue = $env:Path) {
+    foreach ($entry in $PathValue -split ';') {
+        $dir = $entry.Trim().Trim('"').TrimEnd('\')
+        if ($dir -and (Test-Path -LiteralPath "$dir\oc.exe" -PathType Leaf) -and
+            (Test-Path -LiteralPath "$dir\occ.exe" -PathType Leaf)) { return $dir }
+    }
+    "$env:LOCALAPPDATA\Programs\oc"
+}
+$installDir = resolveInstallDir
 $occShortcut = Join-Path ([Environment]::GetFolderPath('Desktop')) 'occ.lnk'
 $versionFolder = "$srcRoot\.version"
 $version = "$versionFolder\version"
@@ -132,7 +146,7 @@ function assertExternalInstall {
     $hostProcess = Get-CimInstance Win32_Process -Filter "ProcessId = $hostPid" -ErrorAction SilentlyContinue
     if (-not $hostProcess) { return }
     $hostName = [IO.Path]::GetFileNameWithoutExtension([string]$hostProcess.Name).ToLowerInvariant()
-    if ($hostName -notin @('opencode', 'oc', 'occ', 'ocdebug')) { return }
+    if ($hostName -notin @('opencode', 'oc', 'occ')) { return }
     throw @"
 Refusing to install from an active OpenCode process. The installer stops OpenCode before replacing its binaries.
 
@@ -242,6 +256,11 @@ function writeClearedLine {
     Write-Host "`r$Text$(' ' * [Math]::Max(0, $PadWidth - $Text.Length))" -NoNewline:$NoNewline
 }
 
+$weztermExe = (Get-Command wezterm.exe -ErrorAction SilentlyContinue)?.Source
+
+# Ends a script started with `pwsh -File`; a no-op for nested `& other.ps1` calls and an open
+# prompt. SCRIPT_OWN_PANE is set by the oc sidebar for panes it made for one script
+# (sidebar-tools/scriptRunner.ts): those panes are killed on success, so do not remove either side.
 function closeOut {
     param([int]$Seconds = 5)
     $caller = $MyInvocation.PSCommandPath
@@ -269,7 +288,46 @@ function closeOut {
         }
         writeClearedLine -Text 'closing...' -PadWidth $pad.Length
     }
+    # A failed or missing wezterm call must not stop the exit below.
+    try {
+        if ($env:SCRIPT_OWN_PANE -and $env:WEZTERM_PANE -and $weztermExe) {
+            & $weztermExe @('cli', 'kill-pane', '--pane-id', $env:WEZTERM_PANE)
+        }
+    } catch { }
     [Environment]::Exit(0)
+}
+
+# Dev run loop for every .run*.ps1: q = quit, r or UpArrow = restart.
+# GUI apps: $Start returns the started Process and keys are read while it runs (send build output
+# to Out-Host inside $Start). -Console apps (a TUI owns the keyboard): $Start runs in the
+# foreground and keys are read after it exits. Redirected input (agent runs) starts once.
+function runLoop {
+    param([Parameter(Mandatory)][string]$Name, [Parameter(Mandatory)][scriptblock]$Start, [switch]$Console)
+    $legend = "q = quit`nr , up arrow = restart"
+    if ([Console]::IsInputRedirected) { & $Start | Out-Null; return }
+    while ($true) {
+        if ($Console) {
+            & $Start
+            Write-Host "=== $Name exited ===`n$legend"
+            if ([Console]::ReadKey($true).Key -in [ConsoleKey]::R, [ConsoleKey]::UpArrow) { continue }
+            return
+        }
+        $proc = & $Start
+        if ($proc -isnot [Diagnostics.Process]) { throw "runLoop: the $Name start block must return only its Process." }
+        Write-Host "=== running $Name... ===`n$legend"
+        $action = $null
+        while (-not $proc.HasExited) {
+            Start-Sleep -Milliseconds 50
+            if (-not [Console]::KeyAvailable) { continue }
+            $key = [Console]::ReadKey($true).Key
+            if ($key -in [ConsoleKey]::R, [ConsoleKey]::UpArrow) { $action = 'restart'; break }
+            if ($key -eq [ConsoleKey]::Q) { $action = 'quit'; break }
+        }
+        if ($action) { Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue }
+        if ($action -eq 'restart') { continue }
+        if (-not $action -and $proc.ExitCode) { throw "$Name exited with code $($proc.ExitCode)." }
+        return
+    }
 }
 
 Set-Location -LiteralPath $srcRoot

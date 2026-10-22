@@ -1,18 +1,14 @@
-v0.2.295 krankyVvitch [feat. > ocSetup shortcuts, parallel installs]
+v0.2.296 hyperfocusRebirth [fix > sidebar panes; scripts > ocSetup dev]
 
-dependencies window:
-The oc dependencies window has a new "Desktop shortcut" column. Tick it on any installed item, or one you are about to install, to get a desktop icon; none are ticked by default. CLI shortcuts (Codex, Claude Code, Cursor) open the CLI in a terminal, inside WezTerm when it is installed. An existing desktop icon with the same name is left alone. When only shortcuts are ticked, the button reads "Create shortcuts".
+sidebar scripts:
+Scripts started from the sidebar in WezTerm close their pane again after a successful run; a failed run keeps the pane open with the error. A cleanup in v0.2.162 had removed both the marker the sidebar sets and the step that closes the pane, which also affected base-style scripts in other projects.
 
-Installs are faster. Git, Node.js, WezTerm, and the Claude and Cursor CLI installers download ahead of time, up to three at once, so installs no longer wait on each download, and each installer is checked again right before it runs. Codex CLI and the Codex (ChatGPT) desktop app install alongside the others; everything that changes PATH or asks for admin approval still installs one at a time. Rows show "Waiting" and "Downloaded, waiting to install" while queued.
+install folder:
+install.ps1 and the revive scripts now install to the folder your oc actually runs from (the first PATH entry holding oc.exe and occ.exe) instead of always using %LOCALAPPDATA%\Programs\oc. A first-time setup suggests that folder too.
 
-The window starts checking dependencies while it opens, and the completion screen appears right away after installing instead of waiting for a re-check.
+dev scripts:
+.runCompanion.ps1 opens the oc dependencies window in a few seconds without building oc or the installer. -Fake uses the real dependency table and install order with fake statuses and installs, so nothing is installed; without it the real engine runs from source, and -OcExe uses a built oc.exe. Dev windows say "(dev)" in the title and never touch shortcuts or open oc. While it is open, r or up arrow rebuilds and reopens it and q closes it. .run.ps1 asks after oc exits: r restarts, q quits. buildCompanion.ps1 builds the window alone; buildInstaller.ps1 now calls it for the publish step.
 
-desktop apps:
-Codex (ChatGPT) desktop installs again: the direct download no longer has to match the Store's newer build number. This also fixes the TUI update for it.
+The retired buildDebug, installDebug, and .runDebug scripts and the .install.ps1 -d switch are gone, along with leftover ocdebug handling in install.ps1. FORK.md notes the removed Debug agents need replacing.
 
-Claude desktop now installs with one admin prompt, as Anthropic requires for its background service, and appears for your account. Claude desktop updates from the TUI also ask for admin approval once.
-
-setup exe:
-The setup exe should be noticeably smaller: oc.exe and opencode.exe share most of their bytes, which are now compressed once. The dependencies window no longer unpacks itself on every start or extracts files to the temp folder.
-
-Under the hood: dependencies.ts gains prepare/install rows, a download/install split in its install script, a three-wide prefetch pool, two install lanes, and shortcut targets on deps list; new DesktopShortcut.cs uses IShellLinkW. Inno uses solid LZMA2 with a 256 MB dictionary; ocSetup publishes without inner compression or self-extract and the setup ships its publish folder. Checks: bun test dependencies, desktopUpdate, and chatgptDesktopUpdate (36 pass), tui typecheck, oc deps list and an unknown-id install from source, a live Git download plus tamper check, PowerShell parse of the Claude script, dotnet build of ocSetup with 0 warnings, Appx shortcut links resolved in a temp folder, build script parse. Not run: installer build, real installs, VM run.
+Under the hood: ocSetup takes --dev <command> (engine override plus no writes outside the window); new tui/script/depsDev.ts mirrors oc oc deps; scriptHelper.ps1 gains runLoop, resolveInstallDir, and the kill-pane step in closeOut; the Inno setup's default folder follows PATH; the oc-installer skill now covers the setup exe only and a new oc-companion skill covers the window and engine. Checks: depsDev fake list and fake install with a failing row, tui typecheck, buildCompanion.ps1 Debug build, openSidebar tests (75 pass, 2 skip), PowerShell parse of scriptHelper, .run, and .runCompanion, installDir.tests.ps1 and reviveCleanup.tests.ps1. Not run: installer build, ISCC, install.ps1, the companion window, scripts live in a WezTerm pane.

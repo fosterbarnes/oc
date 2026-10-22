@@ -59,6 +59,11 @@ function runCommand(command: string, args: string[], cwd: string): Promise<RunRe
   })
 }
 
+// Marks a pane the sidebar made for this script: `closeOut` in a repo's .scripts\scriptHelper.ps1
+// kills the pane on success (base and oc). PowerShell syntax: the WezTerm pane runs the default
+// shell (pwsh) and the Windows Terminal path starts pwsh explicitly.
+const OWN_PANE = "$env:SCRIPT_OWN_PANE='1'; "
+
 function shellArgs(command: string): string[] {
   const encoded = Buffer.from(command, "utf16le").toString("base64")
   return ["-NoLogo", "-NoExit", "-EncodedCommand", encoded]
@@ -156,7 +161,7 @@ export function windowsTerminalScriptArgs(script: Script, cwd: string): string[]
   return [
     ...windowsTerminalArgs(script.terminal, script.filePath ? path.dirname(script.filePath) : cwd, script.weztermSize),
     "pwsh",
-    ...shellArgs(scriptCommand(script)),
+    ...shellArgs(`${OWN_PANE}${scriptCommand(script)}`),
   ]
 }
 
@@ -200,7 +205,7 @@ export function weztermSendArgs(script: Script, paneID: string, submit: boolean)
     "--pane-id",
     paneID,
     "--no-paste",
-    `${scriptCommand(script)}${submit ? "\r" : ""}`,
+    `${OWN_PANE}${scriptCommand(script)}${submit ? "\r" : ""}`,
   ]
 }
 

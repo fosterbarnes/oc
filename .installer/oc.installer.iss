@@ -36,7 +36,7 @@ AppVersion={#AppVersion}
 AppPublisher={#AppPublisher}
 AppPublisherURL={#AppURL}
 AppSupportURL={#AppURL}
-DefaultDirName={localappdata}\Programs\oc
+DefaultDirName={code:DefaultAppDir}
 DisableProgramGroupPage=yes
 UninstallDisplayIcon={app}\oc.exe
 WizardStyle=modern dark
@@ -94,6 +94,20 @@ const
 // Hard links need the Win32 call; Inno has no built-in for them.
 function CreateHardLinkW(lpFileName, lpExistingFileName: String; lpSecurityAttributes: Integer): Boolean;
 external 'CreateHardLinkW@kernel32.dll stdcall';
+
+// First install only (upgrades reuse the previous folder): adopt an oc already on PATH so setup
+// replaces it instead of adding a second install behind it. occ.exe rules out other oc.exe tools.
+// Same rule as resolveInstallDir in .scripts\scriptHelper.ps1.
+function DefaultAppDir(Param: String): String;
+var
+  Occ: String;
+begin
+  Occ := FileSearch('occ.exe', GetEnv('PATH'));
+  if (Occ <> '') and FileExists(ExtractFilePath(Occ) + 'oc.exe') then
+    Result := RemoveBackslashUnlessRoot(ExtractFilePath(Occ))
+  else
+    Result := ExpandConstant('{localappdata}\Programs\oc');
+end;
 
 procedure InitializeWizard;
 begin

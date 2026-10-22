@@ -643,7 +643,8 @@ test("placing a script in Windows Terminal uses native instead of reporting unsu
   assert.equal(script.terminal, "wezterm-horizontal")
 })
 
-test("places commands without submitting them and submits only when running", () => {
+// The prefix lets closeOut in .scripts\scriptHelper.ps1 kill the pane the sidebar made.
+test("places commands without submitting them, submits only when running, and marks the pane as owned", () => {
   const script = {
     name: "build",
     command: "npm run build",
@@ -657,7 +658,7 @@ test("places commands without submitting them and submits only when running", ()
     "--pane-id",
     "7",
     "--no-paste",
-    "npm run build",
+    "$env:SCRIPT_OWN_PANE='1'; npm run build",
   ])
   assert.deepEqual(weztermSendArgs(script, "7", true), [
     "cli",
@@ -665,7 +666,7 @@ test("places commands without submitting them and submits only when running", ()
     "--pane-id",
     "7",
     "--no-paste",
-    "npm run build\r",
+    "$env:SCRIPT_OWN_PANE='1'; npm run build\r",
   ])
 })
 
@@ -835,8 +836,7 @@ test("returns a neutral state for failed OpenAI usage requests", async () => {
     const result = await probeOpenAIUsage({
       authPath,
       nowMs,
-      fetchImpl: async () =>
-        new Response("", { status: 429, headers: { "Retry-After": "120" } }),
+      fetchImpl: async () => new Response("", { status: 429, headers: { "Retry-After": "120" } }),
     })
     assert.equal(result.ok, false)
     if (!result.ok) {
@@ -1285,9 +1285,13 @@ test("a Claude pool with one live account reads as live even when another is cac
     login(".claudeSecond", nowMs)
     const body = { five_hour: { utilization: 1, resets_at: null }, seven_day: { utilization: 0, resets_at: null } }
     mkdirSync(path.join(root, ".cache", "opencode"), { recursive: true })
-    writeFileSync(path.join(root, ".cache", "opencode", "claude-usage-claudeSecond.json"), JSON.stringify({
-      ...body, _configDir: path.join(root, ".claudeSecond").replace(/\\/g, "/"),
-    }))
+    writeFileSync(
+      path.join(root, ".cache", "opencode", "claude-usage-claudeSecond.json"),
+      JSON.stringify({
+        ...body,
+        _configDir: path.join(root, ".claudeSecond").replace(/\\/g, "/"),
+      }),
+    )
     const result = await probeClaudeCodePool(["~/.claude", "~/.claudeSecond"], {
       homeDir: root,
       nowMs,
@@ -1582,7 +1586,11 @@ test("does not fall back to desktop when configured OpenCode Cursor auth fails",
       },
     })
     assert.equal(called, true)
-    assert.deepEqual(result, { ok: false, reason: "reauthenticate", metadata: { status: 401, accountSource: "opencode" } })
+    assert.deepEqual(result, {
+      ok: false,
+      reason: "reauthenticate",
+      metadata: { status: 401, accountSource: "opencode" },
+    })
   } finally {
     rmSync(root, { recursive: true, force: true })
   }

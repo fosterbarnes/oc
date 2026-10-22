@@ -56,7 +56,7 @@ Features are written once. The only per-binary code is a gate on one build const
 ### 5. Scripts
 
 - `build.ts`: variants `oc` -> `dist/opencode-windows-x64/bin/oc.exe`, `debug` -> `ocdebug.exe`, `native` -> `dist/opencode-native-windows-x64/bin/opencode.exe`. Flags `--oc-only`, `--native-only` (alongside the existing `--debug-only`).
-- `build.ps1 [-Native] [-Oc]`: default builds oc + debug + native; one switch builds only that flavor. `buildDebug.ps1` unchanged.
+- `build.ps1 [-Native] [-Oc]`: default builds oc + debug + native; one switch builds only that flavor.
 - `.run.ps1 [-Native]`: `-Native` sets `OC_FLAVOR=native`; default runs `bun dev . oc launch` (resident) so dev matches oc. See question 2.
 - `install.ps1 [-Native] [-Oc]`: stops oc/occ/opencode/ocdebug. Migration: deletes the old `oc.exe`/`occ.exe` hard links before copying (copying onto a hard link overwrites the shared file). Copies `oc.exe` + recreates `occ.exe` link, copies `opencode.exe`. Sets `oc.json` `executable` to `oc.exe` via `oc.exe oc config set executable`, or by asking you (question 4).
 - `.install.ps1` passes the flags through.

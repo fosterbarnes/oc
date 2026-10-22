@@ -57,7 +57,7 @@ Evidence: the current `~/.config/opencode/opencode.jsonc` and FORK.md sections 2
 | **Helper packaging varies by install path** | The canonical installer copies Agentify and Cursor folders. Any other distribution path that skips them produces an executable that launches normally while those providers fail. | Define one required application layout that every distribution path preserves. |
 | **Build tooling can change the user's Bun installation** | The scripts can run `bun upgrade --canary` to avoid the known-bad runtime. Someone building the fork can unexpectedly alter their global tooling. | State the supported build version and decide how deliberately upgrades should happen. |
 
-Sources: `.scripts/install.ps1`, `.scripts/installDebug.ps1`, `.scripts/revive.ps1`, `.scripts/reviveAndInstall.ps1`, `SCRIPTS.md`, and `packages/opencode/src/config/oc.ts`.
+Sources: `.scripts/install.ps1`, `.scripts/revive.ps1`, `.scripts/reviveAndInstall.ps1`, `SCRIPTS.md`, and `packages/opencode/src/config/oc.ts`.
 
 ## Suggested review order
 

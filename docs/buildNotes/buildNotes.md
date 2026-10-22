@@ -185,6 +185,100 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-22 (~01:43) - v0.2.296 - install scripts follow the oc on PATH - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation; completed; plan `~/.config/opencode/plans/installDirFollowsPath.md`
+- Version: 0.2.296 (already bumped this cycle; not bumped again)
+- Fixed `.scripts/scriptHelper.ps1` `$installDir`: new `resolveInstallDir` returns first PATH entry holding `oc.exe` + `occ.exe`, else `%LOCALAPPDATA%\Programs\oc`. Before: hardcoded default, so `install.ps1` made a second install behind the live one on PATH and `revive.ps1`/`reviveAndInstall.ps1` threw on a custom folder. Here it resolves `C:\Users\Foster\Apps\opencode`.
+- Added `install.ps1` "Installing to <dir>" line.
+- Changed `.installer/oc.installer.iss`: `DefaultDirName={code:DefaultAppDir}` (FileSearch `occ.exe` on PATH + sibling `oc.exe`, else default). First install only; Inno defaults `UsePreviousAppDir`/`DisableDirPage=auto` keep upgrades in the chosen folder.
+- Added `.scripts/tests/installDir.tests.ps1` (oc.exe-only dir, quoted trailing-backslash entry, PATH order, empty/missing entries).
+- Updated `SCRIPTS.md` install row, `FORK.md` setup row.
+- Verification: `installDir.tests.ps1` and `reviveCleanup.tests.ps1` passed. `.iss` not compiled (no ISCC run); `install.ps1` not run.
+- Risk: `DefaultAppDir` unverified until ISCC build + VM first-install check.
+
+### User
+Install
+- `install.ps1` and the revive scripts now install to the folder your `oc` actually runs from, instead of always using `%LOCALAPPDATA%\Programs\oc`.
+- A first-time setup suggests your existing oc folder when one is already on PATH.
+
+---
+
+## 2026-10-22 (~01:42) - v0.2.296 hyperfocusRebirth - sidebar script panes close again; q / r run loop - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation; completed
+- Version: 0.2.296 hyperfocusRebirth (already bumped this session; not bumped again)
+- Fixed sidebar panes never closing: v0.2.162 (`9f5a737`) removed the `$env:SCRIPT_OWN_PANE='1'; ` prefix from `sidebar-tools/scriptRunner.ts` and the `kill-pane` block from `closeOut` as unused, but `closeOut` in oc and every base-derived project reads it. Restored both (`OWN_PANE` constant for `weztermSendArgs` + `windowsTerminalScriptArgs`; `$weztermExe` + kill-pane before `Exit(0)` in `.scripts/scriptHelper.ps1`). Kept oc's `-File`-match-first order (nested `&` calls stay no-ops without base's pipeline env); no `-KeepOpen` (throw + `-NoExit` already keeps errors visible).
+- Added `runLoop` in `scriptHelper.ps1` (base `.run.ps1` loop: q quit, r/UpArrow restart; GUI mode polls keys while the Process runs, `-Console` reads keys after a TUI exits; redirected input runs once). Used by `.scripts/.run.ps1` (`-Console`) and `.scripts/.runCompanion.ps1` (r = `buildCompanion.ps1` + relaunch via `ProcessStartInfo.ArgumentList`; fake state cleared per start). `-Watch` unchanged.
+- AGENTS.md: script pane behavior line so neither side is removed again. `oc-companion` skill: r/q note.
+- Verification: `bun test test/feature-plugins/openSidebar.test.ts` 75 pass / 2 skip / 0 fail; PowerShell parser 0 errors for `scriptHelper.ps1`, `.run.ps1`, `.runCompanion.ps1`. Not run: any script live in a WezTerm pane (user check).
+
+### User
+Scripts
+- Scripts started from the oc sidebar in WezTerm close their pane after a successful run again; a failed run keeps the pane open with the error.
+- `.run.ps1` asks after oc exits: r or up arrow starts it again, q quits.
+- `.runCompanion.ps1`: while the window is open, r or up arrow rebuilds and reopens it, q closes it.
+
+---
+
+## 2026-10-22 (~01:38) - v0.2.296 - Debug agents removed; FORK.md replace TODO - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation; completed
+- Version: 0.2.296
+- Changed `FORK.md` "Debug and Luna routing" row: TODO to replace the removed `Debug`/`Debug-a` agents (needed retired ocdebug.exe); dropped "Debug agents" from companion-pieces list. Agent files and ocdebug data removal logged in `C:\Users\Foster\buildNotes.md`.
+- Risk: `C:\Users\Foster\Apps\opencode` is still the live install and on PATH, while `install.ps1` `$installDir` is now `%LOCALAPPDATA%\Programs\oc` (absent). The next `install.ps1` run installs to the new folder while PATH still resolves the old one.
+- Verification: docs-only; none needed.
+
+### User
+Docs
+- FORK.md notes that the Debug agents were removed and need replacing; no UI change.
+
+---
+
+## 2026-10-22 (~01:34) - v0.2.296 - remove ocdebug script vestiges - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation; completed; plan `~/.config/opencode/plans/removeOcDebugVestiges.md`
+- Version: 0.2.296 (already bumped this cycle by another session; not bumped again)
+- Removed `.scripts/buildDebug.ps1`, `installDebug.ps1`, `.runDebug.ps1` (throw-only stubs since ocdebug retirement).
+- Removed `.install.ps1` `-d`/`$DebugInstance` branch and help token.
+- Removed dead legacy ocdebug handling in `.scripts/install.ps1` (stop list, messages, `$debugDestination` backup) and `scriptHelper.ps1` active-host check: `$installDir` is `Programs\oc` since v0.2.293, where ocdebug.exe never existed.
+- Changed `.scripts/tests/reviveCleanup.tests.ps1`: dropped retired-entrypoint loop; parsed scripts now fail on any `ocdebug` text.
+- Removed stub rows in `SCRIPTS.md`; stale refs in `docs/dev/publicReadiness.md`, `nativeSplitPlan.md`. Kept "ocdebug retired" notes in AGENTS/FORK/SCOPE/SCRIPTS.
+- Verification: `reviveCleanup.tests.ps1` passed; `git grep` for debug script names hits only `docs/buildNotes` archives.
+- TODO (user): `~/.config/opencode/agents/Debug-a.md` still depends on installDebug/ocdebug.exe; old `C:\Users\Foster\Apps\opencode` install (incl. ocdebug.exe) left untouched.
+
+### User
+Scripts
+- The retired `buildDebug`, `installDebug`, and `.runDebug` scripts and the `.install.ps1 -d` switch are gone.
+- `install.ps1` no longer looks for or stops `ocdebug`; no behavior change for normal installs.
+
+---
+
+## 2026-10-22 (~01:26) - v0.2.296 hyperfocusRebirth - ocSetup companion dev loop; installer/companion skill split - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation; completed
+- Version: 0.2.296 hyperfocusRebirth
+- Added `src/packages/tui/script/depsDev.ts`: `oc oc deps` contract from source; `--fake` maps `DEPENDENCIES` with fake detect/prepare/install and runs the real `runInstalls` (lanes, prefetch, needs skip); `--fail <id>` (prepare rows fail mid-download, others at install); fake installs persist in `%TEMP%\ocSetup-fake-state.json`.
+- Added ocSetup `--dev <command...>` (`.installer/ocSetup/windows/MainWindow.xaml.cs`): `_engine` replaces `oc.exe oc deps`; dev blocks WezTerm retarget, desktop shortcuts, and `OcLauncher.Open`; title " (dev)". `RunOcAsync` -> `RunEngineAsync`, callers pass `list` / `install`. One flag on purpose: an overridden engine would otherwise retarget the real `oc.lnk`.
+- Added `.scripts/buildCompanion.ps1` (Debug into `.installer\ocSetup\bin\dev`, stops a running dev copy; `-Publish` = publish block moved from `buildInstaller.ps1`, which now calls it) and `.scripts/.runCompanion.ps1` (`-Fake`, `-FailId`, `-OcExe`, `-Watch`). New `$companionProject`/`$companionPublish`/`$companionDevExe` in `scriptHelper.ps1`.
+- Split skills: `~/.config/opencode/skills/oc/oc-installer` now setup exe only; new `oc-companion` (engine, contract, GUI, dev loop). Each references the other. FORK.md setup row mentions the dev loop.
+- Verification: `bun script/depsDev.ts --fake list` JSON line (0.6 s); `--fake --fail node install git node codexCli everything` -> node failed, codexCli skipped, exit 1; tui `bun run typecheck` exit 0; `buildCompanion.ps1` exit 0, `bin\dev\ocSetup.exe` present. Not run: `buildCompanion.ps1 -Publish`, `buildInstaller.ps1`, `-Watch`, the window itself (user live check).
+- Fixed in pass: `-Watch` dropped the `run` subcommand (.NET 10 `dotnet watch --help`: `dotnet-watch [options] [-- args]`); `fakeDownload(onLine, fail)` replaced the `""` id hack. Re-ran fake install, typecheck, `buildCompanion.ps1`: all pass.
+
+### User
+Installer development
+- `.scripts\.runCompanion.ps1 -Fake` opens the "oc dependencies" window in a few seconds with fake statuses and fake installs, without building oc or the installer.
+- `.runCompanion.ps1` without `-Fake` uses the real dependency engine straight from source; `-OcExe` uses a built oc.exe instead.
+- Dev windows say "(dev)" in the title and never create or change shortcuts or open oc.
+- No change to the shipped setup or window.
+
+---
+
 ## 2026-10-22 (~01:09) - v0.2.295 krankyVvitch - desktop shortcut column; ChatGPT and Claude desktop install fixes - Claude Opus 5.5, low effort; Implementation
 
 ### Agent

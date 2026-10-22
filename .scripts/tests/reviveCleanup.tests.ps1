@@ -2,7 +2,7 @@
 $ErrorActionPreference = 'Stop'
 $scripts = Split-Path $PSScriptRoot -Parent
 
-foreach ($name in 'build.ps1', 'install.ps1', 'buildDebug.ps1', 'installDebug.ps1', '.runDebug.ps1', 'scriptHelper.ps1') {
+foreach ($name in 'build.ps1', 'install.ps1', 'scriptHelper.ps1') {
     $tokens = $null
     $errors = $null
     $ast = [Management.Automation.Language.Parser]::ParseFile(
@@ -20,15 +20,7 @@ foreach ($name in 'build.ps1', 'install.ps1', 'buildDebug.ps1', 'installDebug.ps
     if ($name -eq 'build.ps1' -and $ast.Extent.Text.Contains('--with-debug')) {
         throw 'Build wrapper still passes the removed debug flag.'
     }
+    # The ocdebug flavor is gone; build and install scripts must not stop, back up, or name it.
+    if ($ast.Extent.Text -match 'ocdebug') { throw "$name still references the removed ocdebug flavor." }
 }
-
-# Retired entrypoints must fail before reaching any old build, process stop, or install logic.
-foreach ($name in 'buildDebug.ps1', 'installDebug.ps1', '.runDebug.ps1') {
-    $rejected = $false
-    try { & (Join-Path $scripts $name) } catch {
-        if ($_.Exception.Message -notlike 'ocdebug was retired.*') { throw }
-        $rejected = $true
-    }
-    if (-not $rejected) { throw "$name did not reject its retired entrypoint." }
-}
-'Revive cleanup checks passed: script syntax, artifact references, retired entrypoints.'
+'Revive cleanup checks passed: script syntax, removed debug references.'

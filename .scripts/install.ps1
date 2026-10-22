@@ -17,15 +17,15 @@ $installNative = -not $Oc
 $ocBinary = "$distFolder\opencode-windows-x64\bin\oc.exe"
 $nativeBinary = "$distFolder\opencode-native-windows-x64\bin\opencode.exe"
 $cursorRuntime = "$distFolder\opencode-windows-x64\bin\cursor-runtime"
-# Keep legacy ocdebug processes in shutdown/backup handling, but never require or reinstall that flavor.
-$processNames = @('opencode', 'oc', 'occ', 'ocdebug')
+Write-Host "Installing to $installDir"
+$processNames = @('opencode', 'oc', 'occ')
 $running = @($processNames | ForEach-Object { Get-Process -Name $_ -ErrorAction SilentlyContinue })
 if ($running) {
-    Write-Host 'Stopping running oc, opencode, and ocdebug processes...'
+    Write-Host 'Stopping running oc and opencode processes...'
     $running | Stop-Process -Force
     $deadline = (Get-Date).AddSeconds(30)
     while (@($processNames | ForEach-Object { Get-Process -Name $_ -ErrorAction SilentlyContinue })) {
-        if ((Get-Date) -gt $deadline) { throw 'oc, opencode, or ocdebug is still running after Stop-Process.' }
+        if ((Get-Date) -gt $deadline) { throw 'oc or opencode is still running after Stop-Process.' }
         Start-Sleep -Milliseconds 200
     }
 }
@@ -53,7 +53,6 @@ New-Item -ItemType Directory -Path $installDir -Force | Out-Null
 $ocDestination = Join-Path $installDir 'oc.exe'
 $occLink = Join-Path $installDir 'occ.exe'
 $nativeDestination = Join-Path $installDir 'opencode.exe'
-$debugDestination = Join-Path $installDir 'ocdebug.exe'
 $obsoleteAliases = @('ocbug.exe', 'oc-debug.exe')
 
 # Remove a name before writing it: copying onto a hard link also rewrites the file's other names
@@ -66,7 +65,7 @@ function replaceFile([string]$Source, [string]$Destination) {
 
 # Timestamped rollback copy of the current install (U16). Only the newest 3 backups are kept.
 $backupDir = Join-Path $installDir ('backup-' + (Get-Date -Format 'yyyyMMdd-HHmmss'))
-$backupTargets = @($ocDestination, $occLink, $nativeDestination, $debugDestination)
+$backupTargets = @($ocDestination, $occLink, $nativeDestination)
 $backedUp = @()
 foreach ($target in $backupTargets) {
     if (Test-Path -LiteralPath $target -PathType Leaf) {

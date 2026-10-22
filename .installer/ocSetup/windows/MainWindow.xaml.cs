@@ -13,6 +13,13 @@ namespace OcSetup.Windows;
 public partial class MainWindow : Window
 {
     private static readonly string _ocPath = Path.Combine(AppContext.BaseDirectory, "oc.exe");
+    // `ocSetup.exe --dev <command...>` (.scripts\.runCompanion.ps1): the engine is that command
+    // instead of `oc.exe oc deps`, and nothing outside the window is written (shortcut retarget,
+    // desktop shortcuts) or started (oc). The two always go together.
+    private static readonly string[] _devEngine =
+        Environment.GetCommandLineArgs() is [_, "--dev", _, ..] commandLine ? commandLine[2..] : [];
+    private static readonly bool _isDev = _devEngine.Length > 0;
+    private static readonly string[] _engine = _isDev ? _devEngine : [_ocPath, "oc", "deps"];
     private static readonly JsonSerializerOptions _jsonOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
@@ -34,15 +41,17 @@ public partial class MainWindow : Window
         InitializeComponent();
         SourceInitialized += (_, _) => WindowsTitleBarTheme.ApplyImmersiveDarkMode(this);
 
+        if (_isDev) Title += " (dev)";
+
         // Started here rather than on Loaded so the check overlaps building the window.
-        if (File.Exists(_ocPath)) _loadTask = LoadRowsAsync();
-        else StatusText.Text = "oc.exe not found next to ocSetup.exe";
+        if (File.Exists(_engine[0])) _loadTask = LoadRowsAsync();
+        else StatusText.Text = _isDev ? $"Engine not found: {_engine[0]}" : "oc.exe not found next to ocSetup.exe";
     }
 
     // Awaited here so an exception from the first load still reaches the dispatcher handler.
     private async void Window_Loaded(object sender, RoutedEventArgs e)
     {
-        DebugLog.Write($"window loaded; oc.exe exists: {File.Exists(_ocPath)}");
+        DebugLog.Write($"window loaded; engine exists: {File.Exists(_engine[0])}");
         await _loadTask;
     }
 
@@ -70,7 +79,7 @@ public partial class MainWindow : Window
         if (ids.Length > 0)
         {
             SetRunning(true);
-            var (exitCode, _) = await RunOcAsync(HandleInstallLine, ["oc", "deps", "install", .. ids]);
+            var (exitCode, _) = await RunEngineAsync(HandleInstallLine, ["install", .. ids]);
             SetRunning(false);
             installed = exitCode == 0;
         }
@@ -97,6 +106,13 @@ public partial class MainWindow : Window
     // Creates the ticked shortcuts; false when one could not be made (an existing one is not a failure).
     private (bool Ok, List<string> Lines) CreateShortcuts(string[] ids)
     {
+        if (_isDev)
+        {
+            var wanted = _rows.Where(row => ids.Contains(row.Id) && row.Item.Shortcut is not null).ToList();
+            foreach (var row in wanted) row.WantsShortcut = false;
+            return (true, [$"Desktop shortcuts not created (dev): {string.Join(", ", wanted.Select(row => row.Item.Shortcut!.Name))}"]);
+        }
+
         var pwsh = _rows.FirstOrDefault(row => row.Id == "pwsh")?.Item.Shortcut?.Target;
         var created = new List<string>();
         var lines = new List<string>();
@@ -149,8 +165,8 @@ public partial class MainWindow : Window
     {
         OpenOcButton.IsEnabled = false;
         await _loadTask;
-        DebugLog.Write($"open oc; wezterm: {_weztermGui ?? "none"}"); // WIP: temp debug logging
-        OcLauncher.Open(_ocPath, _weztermGui);
+        DebugLog.Write($"open oc; wezterm: {_weztermGui ?? "none"}; dev: {_isDev}"); // WIP: temp debug logging
+        if (!_isDev) OcLauncher.Open(_ocPath, _weztermGui);
         Close();
     }
 
@@ -172,7 +188,7 @@ public partial class MainWindow : Window
     {
         StatusText.Text = "Checking dependencies...";
         var lines = new List<string>();
-        var (exitCode, error) = await RunOcAsync(lines.Add, ["oc", "deps", "list"]);
+        var (exitCode, error) = await RunEngineAsync(lines.Add, ["list"]);
 
         var json = lines.FirstOrDefault(line => line.StartsWith('['));
         if (exitCode != 0 || json is null)
@@ -189,7 +205,7 @@ public partial class MainWindow : Window
         // Once WezTerm is installed, oc's shortcuts open in it.
         var wezterm = items.FirstOrDefault(item => item.Id == "wezterm" && item.Status == "found");
         _weztermGui = OcLauncher.WezTermGui(wezterm?.Path);
-        if (_weztermGui is null) return;
+        if (_weztermGui is null || _isDev) return;
         // Shortcut retargeting is a convenience; a COM or file error must not take the window down.
         try { OcLauncher.UseWezTermForShortcuts(_weztermGui, _ocPath); }
         catch (Exception exception) { DebugLog.Write($"shortcut retarget failed: {exception}"); }
@@ -244,13 +260,13 @@ public partial class MainWindow : Window
         InstallButton.IsEnabled = !_isRunning && !_isLoading && (installs || _rows.Any(row => row.WantsShortcut));
     }
 
-    // Runs oc.exe and returns its exit code and stderr. Stdout lines go to onOutputLine on the UI
-    // thread, because the awaits resume on the dispatcher.
-    private static async Task<(int ExitCode, string Error)> RunOcAsync(
+    // Runs the engine (`oc.exe oc deps` or the dev command) and returns its exit code and stderr.
+    // Stdout lines go to onOutputLine on the UI thread, because the awaits resume on the dispatcher.
+    private static async Task<(int ExitCode, string Error)> RunEngineAsync(
         Action<string> onOutputLine,
         string[] args)
     {
-        var startInfo = new ProcessStartInfo(_ocPath)
+        var startInfo = new ProcessStartInfo(_engine[0])
         {
             UseShellExecute = false,
             CreateNoWindow = true,
@@ -259,12 +275,13 @@ public partial class MainWindow : Window
             StandardOutputEncoding = Encoding.UTF8,
             StandardErrorEncoding = Encoding.UTF8,
         };
-        foreach (var arg in args) startInfo.ArgumentList.Add(arg);
+        foreach (var arg in _engine[1..].Concat(args)) startInfo.ArgumentList.Add(arg);
 
-        // WIP: temp debug logging of every oc call, its output, and its exit.
-        DebugLog.Write($"run: {_ocPath} {string.Join(' ', args)}");
+        // WIP: temp debug logging of every engine call, its output, and its exit.
+        DebugLog.Write($"run: {string.Join(' ', startInfo.ArgumentList.Prepend(_engine[0]))}");
         var clock = Stopwatch.StartNew();
-        using var process = Process.Start(startInfo) ?? throw new InvalidOperationException("oc.exe did not start.");
+        using var process = Process.Start(startInfo)
+            ?? throw new InvalidOperationException($"{Path.GetFileName(_engine[0])} did not start.");
         DebugLog.Write($"pid {process.Id}");
         var errorTask = process.StandardError.ReadToEndAsync();
         while (await process.StandardOutput.ReadLineAsync() is { } line)

@@ -16,5 +16,6 @@ $bunArgs.Add('.')
 # Bun dev runs under bun.exe, so oc's executable-name launch default does not apply; ask for it.
 if (-not $Native -and -not $AppLaunchArgs) { $bunArgs.Add('oc'); $bunArgs.Add('launch') }
 foreach ($arg in @($AppLaunchArgs)) { if ($null -ne $arg) { $bunArgs.Add($arg) } }
-runNativeCommand -FilePath bun -ArgumentList $bunArgs.ToArray() -Name 'OpenCode development run'
+# -Console: the TUI owns the keyboard, so r / q are read after it exits.
+runLoop -Name 'oc' -Console { runNativeCommand -FilePath bun -ArgumentList $bunArgs.ToArray() -Name 'OpenCode development run' }
 closeOut 0
