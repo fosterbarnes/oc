@@ -185,6 +185,61 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-21 (~21:16) - v0.2.286 boozledReviewing - Pass: lone /revive from Home - Claude Opus 5.5, low effort; Pass
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; /pass (chain step 1 of 3, live chain note observed in this turn); completed
+- Version: 0.2.286 boozledReviewing
+- Fixed `component/prompt/index.tsx` `submitInner`: since revive entries insert text, a lone `/revive` typed on Home went through the chain path and created an empty session first. A single-revive chain without a session now calls `reviveChain.revive` (`useRevive().start`) directly, after history append and `ref.reset()`.
+- Reviewed: chain parse, runner, resume claim, pipeline settle points, autocomplete insert; no other issues found. `src/bun.lock` and `packages/opencode/package.json` show as modified with an empty diff (line endings from the user's build); left alone.
+- Verification: tui tsgo clean. Live: this /pass turn arrived with the chain note "step 1 of 3 ... /revive, /agent-push".
+
+### User
+Revive
+- Typing `/revive` on its own from the Home screen restarts oc without leaving an empty chat behind.
+
+---
+
+## 2026-10-21 (~21:12) - v0.2.286 boozledReviewing - Revive in slash menu after other commands - Claude Opus 5.5, low effort; Debug
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Debug (follow-up to revive chains, same version); completed
+- Version: 0.2.286 boozledReviewing
+- Fixed `component/prompt/autocomplete.tsx`: TUI slash entries were offered only at prompt index 0, so `/pass /rev` never listed `/revive`. Revive entries (`REVIVE_MODES` from `prompt/slash.ts`) now show at any position and insert `/name ` instead of dispatching (`AutocompleteOption.inserts` skips `hide()` in `select`). At index 0, picking `/revive` now inserts too; Enter on the draft runs it via the chain path.
+- Moved the server-command insertion into `insertSlash(name)`, shared by both.
+- Verification: tui tsgo clean; `bun test test/component/autocomplete.test.ts test/component/slashMenuLayout.test.tsx` 3/3.
+
+### User
+Revive
+- `/revive`, `/revive-no-install`, and `/revive-single` now appear in the slash menu after other commands, and picking one types it into the message instead of restarting right away.
+
+---
+
+## 2026-10-21 (~21:03) - v0.2.286 boozledReviewing - Revive between slash commands - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation (/imp of plan `~/.config/opencode/plans/2026-10-21-reviveChain.md`); completed
+- Version: 0.2.286 boozledReviewing
+- Added `extractChain` (`tui/src/prompt/slash.ts`): typed `/revive`, `/revive-no-install`, `/revive-single` split a draft into ordered steps; free text is one shared request (user decision: stream-of-consciousness style); command-free chains send each text segment as its own prompt. `typedSlashCommands` returns `chain` (pastes stay opaque).
+- Added `tui/src/reviveChain.tsx` `useReviveChain`: `run` awaits each `session.command`/`session.prompt` (resolves at turn end; `info.error` or throw stops the chain), adds a synthetic `kind: "chain"` note per step, waits for idle before a revive, writes the rest via ReviveResume; `resume` claims on session open; failed/stopped chains go back to an empty prompt; `watchOwn` handles failures while the writer TUI stays alive (single, helper launch).
+- Added `core/src/util/reviveResume.ts`: `<sessionID>-<at>.<pending|ready|failed>.json` under `state/oc-revive/resume`; `settle` idempotent; `claim` uses an exclusive-create `.claim` lock; writer skips its own ready file; ready older than 15 min is restored, not sent; pending older than 1 day removed.
+- Changed `reviveCommands.tsx`: extracted `useRevive` (`start(mode, sessionID, resume)` returns false when nothing started, `revive`); session passed explicitly; `revive.path` settles ready before launching; helper exit/error settles failed.
+- Added `ReviveContext.resume` (`config/revive.ts` + parseContext); settle points in `reviveHost.ts` (catch before native reopen, before terminal handoff, single failure, before native spawn) and `cli/cmd/oc.ts` (shutdown failure).
+- Wired `component/prompt/index.tsx` submit (chain branch before commands) and `routes/session/index.tsx` claim effect (once per session after sync).
+- Docs: wiki `Launching.md` "Revive between commands"; `FORK.md` revive row.
+- Verification: tsgo typecheck core, opencode, tui clean. `bun test` core `test/util/reviveResume.test.ts` 3/3, tui `test/prompt/slash.test.ts` + `part.test.ts` 14/14, opencode `test/config/revive.test.ts` 26/26. No live revive run (user-driven).
+- ERROR: Bun 1.4.2 on Windows: two concurrent `fs.rename` of the same source both fulfil; do not use rename as a claim lock (exclusive `wx` create works).
+- MISTAKE: edited `config/revive.ts` and `prompt/part.ts` with inline python; prevention: use Edit/Write for project files (the part.ts private-use regex chars needed it; content verified by bytes).
+- Risk: an agent asking approval in plain text (not the question tool) lets the chain continue; revive-first chain from Home may reopen Home with `oc` launcher (chain then waits for the session to be opened, 15 min TTL).
+
+### User
+Revive
+- You can now put `/revive`, `/revive-no-install`, or `/revive-single` among other slash commands, for example `/pass /revive /agent-push`, and oc runs them in order.
+- Commands before a revive run first and finish; commands after it are sent automatically once oc comes back.
+- If a step fails, you press Esc, or the revive build fails, the remaining commands are not sent and appear in your prompt instead.
+
+---
+
 ## 2026-10-21 (~20:47) - v0.2.285 depositMeebo - Subagent live rows picks from a list - Claude Opus 5.5, low effort; Implementation
 
 ### Agent

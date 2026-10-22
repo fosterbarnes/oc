@@ -3,6 +3,7 @@ import os from "os"
 import path from "path"
 import { Global } from "@opencode-ai/core/global"
 import { launchDetached } from "@opencode-ai/core/util/launchDetached"
+import { ReviveResume } from "@opencode-ai/core/util/reviveResume"
 import { TuiLedger } from "./tuiLedger"
 import { Revive } from "./revive"
 import { executablePath, read, write } from "./oc"
@@ -30,6 +31,8 @@ export async function revive(context: Revive.ReviveContext) {
     await revivePipeline(context)
   } catch (error) {
     await log.write(`Revive failed: ${error instanceof Error ? error.message : String(error)}`)
+    // Before any reopen, so the reopened TUI restores the follow-up steps instead of sending them.
+    if (context.resume) await ReviveResume.settle(context.resume, "failed")
     // Hosted revives recover in place. A native window has already exited, even on build failure.
     if (context.native && (!context.tuiPid || !isPidAlive(context.tuiPid))) {
       await log.step("Reopening native after failure", () =>
@@ -138,6 +141,7 @@ async function revivePipeline(context: Revive.ReviveContext) {
   // A hosting launcher shows the error and reattaches. A hidden helper has no window left, so it
   // still reopens the terminal on the old version before reporting.
   if (failure && (context.supervisorPid || context.native)) throw failure.error
+  if (context.resume) await ReviveResume.settle(context.resume, failure ? "failed" : "ready")
   await log.step(`Handing off to the terminal restarter (log: ${log.file})`, () =>
     awaitLaunch(
       launchDetached(process.execPath, [
@@ -189,10 +193,12 @@ async function reviveSingle(context: Revive.ReviveContext) {
     return Revive.nativeExecutable(executablePath())
   })().catch(async (error: unknown) => {
     await log.write(`Revive single failed: ${error instanceof Error ? error.message : String(error)}`)
+    if (context.resume) await ReviveResume.settle(context.resume, "failed")
     console.log("Press Enter to close")
     for await (const _ of console) break
     process.exit(1)
   })
+  if (context.resume) await ReviveResume.settle(context.resume, "ready")
   const args = [native, context.directory, ...(context.sessionID ? ["--session", context.sessionID] : [])]
   const child = Bun.spawn(args, { stdio: ["inherit", "inherit", "inherit"] })
   // Same acknowledgement as the restarter: native started and survived the settle window.

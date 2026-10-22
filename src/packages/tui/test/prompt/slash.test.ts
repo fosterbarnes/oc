@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import { commandUse, extractSlashCommands, slashTriggerIndex, typedText } from "../../src/prompt/slash"
+import { commandUse, extractChain, extractSlashCommands, slashTriggerIndex, typedText } from "../../src/prompt/slash"
 import { promptOffsetWidth } from "../../src/prompt/display"
 
 test("slash composition locates the current trigger across Unicode, buffer replacement, and separators", () => {
@@ -25,6 +25,43 @@ test("slash composition extracts ordered unique names while preserving request t
     arguments: "hello  world /unknown /usr/bin https://example.com/spit",
   })
   expect(extractSlashCommands("ordinary text", available)).toEqual({ names: [], arguments: "ordinary text" })
+})
+
+test("revive chains split typed commands into ordered steps around each revive", () => {
+  const available = [{ name: "pass" }, { name: "agent-push" }]
+  expect(extractChain("/pass and cleanup", available)).toBeUndefined()
+  expect(extractChain("/revive /pass", available)).toEqual({
+    steps: [
+      { type: "revive", mode: "install" },
+      { type: "send", names: ["pass"] },
+    ],
+    request: "",
+  })
+  // Stream-of-consciousness text is one request shared by every command step.
+  expect(extractChain("/pass pass and cleanup then /revive revive then /agent-push push", available)).toEqual({
+    steps: [
+      { type: "send", names: ["pass"] },
+      { type: "revive", mode: "install" },
+      { type: "send", names: ["agent-push"] },
+    ],
+    request: "pass and cleanup then\nrevive then  push",
+  })
+  expect(extractChain("/pass /revive-no-install /pass /revive-single", available)?.steps).toEqual([
+    { type: "send", names: ["pass"] },
+    { type: "revive", mode: "no-install" },
+    { type: "send", names: ["pass"] },
+    { type: "revive", mode: "single" },
+  ])
+  // Without commands, each text segment is its own prompt; paths and URLs are not revives.
+  expect(extractChain("say hi /revive say bye /revive/x https://a.b/revive", available)).toEqual({
+    steps: [
+      { type: "send", names: [], text: "say hi" },
+      { type: "revive", mode: "install" },
+      { type: "send", names: [], text: "say bye /revive/x https://a.b/revive" },
+    ],
+    request: "",
+  })
+  expect(extractChain("/revive", available)).toEqual({ steps: [{ type: "revive", mode: "install" }], request: "" })
 })
 
 test("command messages restore the typed commands instead of their templates", () => {

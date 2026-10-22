@@ -63,6 +63,7 @@ import { useDialog } from "../../ui/dialog"
 import { DialogProvider as DialogProviderConnect } from "../dialog-provider"
 import { DialogAlert } from "../../ui/dialog-alert"
 import { useToast } from "../../ui/toast"
+import { useReviveChain } from "../../reviveChain"
 import { useKV } from "../../context/kv"
 import { createFadeIn } from "../../util/signal"
 import { DialogSkill } from "../dialog-skill"
@@ -187,6 +188,7 @@ export function Prompt(props: PromptProps) {
   const dialog = useDialog()
   const promptRef = usePromptRef()
   const toast = useToast()
+  const reviveChain = useReviveChain()
   const status = createMemo(() => sync.data.session_status?.[props.sessionID ?? ""] ?? { type: "idle" })
   const [resumes, setResumes] = createSignal<{ sessionID: string; fireAt: number }[]>([])
   const resumeAt = createMemo(() => resumes().find((entry) => entry.sessionID === props.sessionID)?.fireAt)
@@ -1427,6 +1429,15 @@ export function Prompt(props: PromptProps) {
       return false
     }
 
+    // A lone revive from Home needs no session; creating one would leave an empty chat behind.
+    const lone = props.sessionID || store.mode !== "normal" ? undefined : outgoingParts().commands.chain?.steps
+    if (lone?.length === 1 && lone[0].type === "revive") {
+      history.append({ ...store.prompt, mode: store.mode })
+      ref.reset()
+      void reviveChain.revive(lone[0].mode, undefined)
+      return true
+    }
+
     let sessionID = props.sessionID
     let finishMoveProgress = false
     if (sessionID == null) {
@@ -1490,6 +1501,16 @@ export function Prompt(props: PromptProps) {
           toast.show({ title: "Failed to run shell command", message: errorMessage(error), variant: "error" })
         })
       setStore("mode", "normal")
+    } else if (commands.chain) {
+      move.startSubmit()
+      // Runs past this submit: each step waits for the previous turn, a revive hands the rest on.
+      void reviveChain.run(
+        sessionID,
+        { ...commands.chain, done: [] },
+        { agent: agent.name, model: selectedModel, variant },
+        { editor: editorParts, attachments: nonTextParts },
+      )
+      if (editorParts.length > 0) editor.markSelectionSent()
     } else if (commands.names.length) {
       move.startSubmit()
       const draft = unwrap(store.prompt)

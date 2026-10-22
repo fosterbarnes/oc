@@ -77,6 +77,7 @@ import { useToast } from "../../ui/toast"
 import { useKV } from "../../context/kv.tsx"
 import stripAnsi from "strip-ansi"
 import { usePromptRef } from "../../context/prompt"
+import { useReviveChain } from "../../reviveChain"
 import { useEpilogue } from "../../context/epilogue"
 import { normalizePath } from "../../util/path"
 import { PermissionPrompt } from "./permission"
@@ -617,6 +618,16 @@ export function Session() {
     if (!args.prompt || route.prompt?.input !== args.prompt || current.current.input !== args.prompt) return
     sent = true
     current.submit()
+  })
+
+  // Steps typed after a revive (`/revive /agent-push`) continue here once the session is ready.
+  const reviveChain = useReviveChain()
+  const resumeChecked = new Set<string>()
+  createEffect(() => {
+    const sessionID = route.sessionID
+    if (resumeChecked.has(sessionID) || !prompt() || !synced() || !local.model.ready || !local.agent.ready) return
+    resumeChecked.add(sessionID)
+    void reviveChain.resume(sessionID).catch((error: unknown) => toast.error(error))
   })
 
   function enterChild(sessionID: string) {

@@ -44,12 +44,16 @@ export type ReviveContext = {
   sourceDir?: string
   // Revived from a native window: reopen native and leave the resident server alone.
   native?: boolean
+  // ReviveResume id of the steps typed after this revive; the pipeline settles it ready or failed.
+  resume?: string
 }
 
 /** One tab of the revived WezTerm window: an oc session, or a plain shell in its working directory. */
 // `paneID` is the old-window pane the tab moves out of. Shell tabs are no longer produced; they stay
 // decodable for contexts written by an older build.
-export type Tab = { kind: "oc"; directory: string; sessionID?: string; paneID?: string } | { kind: "shell"; cwd: string }
+export type Tab =
+  | { kind: "oc"; directory: string; sessionID?: string; paneID?: string }
+  | { kind: "shell"; cwd: string }
 
 /** Handed from the revive pipeline to the detached terminal restarter (worker 2). */
 export type RestartContext = {
@@ -111,6 +115,7 @@ export function parseContext(input: unknown): ReviveContext {
     !optional(value.native, flag) ||
     !optional(value.hosted, flag) ||
     !optional(value.tuiPid, pid) ||
+    !optional(value.resume, text) ||
     !optional(value.shellIdentity, processIdentity) ||
     (value.shellIdentity !== undefined && (value.shellIdentity as TuiLedger.Process).pid !== value.shellPid) ||
     !optional(value.source, (item) => item === "existing" || item === "download" || item === "none") ||
@@ -185,10 +190,7 @@ export function windowTabs(
 /** Old-window panes the restarter may close: owned tabs plus the trigger, only while they still exist. */
 export function ownedPanes(listJson: string, restart: Pick<RestartContext, "paneID" | "tabs">) {
   const live = new Set((JSON.parse(listJson) as Array<{ pane_id: number }>).map((pane) => String(pane.pane_id)))
-  const owned = [
-    restart.paneID,
-    ...(restart.tabs ?? []).map((tab) => (tab.kind === "oc" ? tab.paneID : undefined)),
-  ]
+  const owned = [restart.paneID, ...(restart.tabs ?? []).map((tab) => (tab.kind === "oc" ? tab.paneID : undefined))]
   return [...new Set(owned.filter((id): id is string => id !== undefined && live.has(id)))]
 }
 
@@ -238,10 +240,7 @@ export function buildSteps(build: BuildConfig, variant?: "native") {
       ["bun", "run", BUILD_SCRIPT, "--single"],
     ],
     // The native build ships only its executable; it shares the oc build's support files.
-    output: [
-      path.join(dist, `opencode-${platform}-${process.arch}`, "bin"),
-      native,
-    ],
+    output: [path.join(dist, `opencode-${platform}-${process.arch}`, "bin"), native],
   }
 }
 
@@ -429,7 +428,13 @@ export async function install(sources: readonly InstallSource[], directory: stri
   const rollback = async (error: unknown) => {
     const failed: string[] = []
     for (const [index, target] of placed.toReversed().entries()) {
-      if (!(await fsp.lstat(target).then(() => true, () => false))) continue
+      if (
+        !(await fsp.lstat(target).then(
+          () => true,
+          () => false,
+        ))
+      )
+        continue
       await retry(() => fsp.rename(target, `${target}.old-${stamp + 1 + index}`)).catch(() => failed.push(target))
     }
     for (const item of moved.toReversed())

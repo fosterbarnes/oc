@@ -94,6 +94,24 @@ describe("prompt part", () => {
     )
     expect(commands).toEqual({ names: ["spit", "think"], arguments: "你好 notes: run /imp now $&\n" })
   })
+
+  test("splits a revive chain in typed text only and expands pastes in its request", () => {
+    const marker = "[Pasted ~2 lines]"
+    const prefix = "/pass "
+    const commands = typedSlashCommands(
+      `${prefix}${marker} /revive /agent-push`,
+      [{ start: Bun.stringWidth(prefix), end: Bun.stringWidth(prefix + marker), text: "then /revive-single $&" }],
+      [{ name: "pass" }, { name: "agent-push" }],
+    )
+    expect(commands.chain).toEqual({
+      steps: [
+        { type: "send", names: ["pass"] },
+        { type: "revive", mode: "install" },
+        { type: "send", names: ["agent-push"] },
+      ],
+      request: "then /revive-single $&",
+    })
+  })
 })
 
 describe("prompt attachments", () => {

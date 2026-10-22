@@ -287,44 +287,50 @@ test.skipIf(process.platform !== "win32")("native terminal restart preserves the
   }
 })
 
-test.skipIf(process.platform !== "win32")("terminal restart closes the old shell only after the launch succeeds", async () => {
-  const shell = Bun.spawn(["pwsh", "-NoProfile", "-NonInteractive", "-Command", "[Console]::ReadLine()"], {
-    stdin: "pipe",
-    stdout: "ignore",
-    stderr: "ignore",
-    windowsHide: true,
-  })
-  try {
-    const shellIdentity = TuiLedger.listProcesses().find((item) => item.pid === shell.pid)
-    if (!shellIdentity) throw new Error("test shell identity unavailable")
-    const input = { ...restart, shellPid: shell.pid, shellIdentity }
-    await expect(
-      ReviveHost.restartTerminal(input, async () => {
-        throw new Error("launch rejected")
-      }),
-    ).rejects.toThrow("launch rejected")
-    expect(Resident.isPidAlive(shell.pid)).toBe(true)
-    await ReviveHost.restartTerminal(input, async () => {
-      expect(Resident.isPidAlive(shell.pid)).toBe(true)
+test.skipIf(process.platform !== "win32")(
+  "terminal restart closes the old shell only after the launch succeeds",
+  async () => {
+    const shell = Bun.spawn(["pwsh", "-NoProfile", "-NonInteractive", "-Command", "[Console]::ReadLine()"], {
+      stdin: "pipe",
+      stdout: "ignore",
+      stderr: "ignore",
+      windowsHide: true,
     })
-    await shell.exited
-  } finally {
-    shell.kill()
-  }
-})
+    try {
+      const shellIdentity = TuiLedger.listProcesses().find((item) => item.pid === shell.pid)
+      if (!shellIdentity) throw new Error("test shell identity unavailable")
+      const input = { ...restart, shellPid: shell.pid, shellIdentity }
+      await expect(
+        ReviveHost.restartTerminal(input, async () => {
+          throw new Error("launch rejected")
+        }),
+      ).rejects.toThrow("launch rejected")
+      expect(Resident.isPidAlive(shell.pid)).toBe(true)
+      await ReviveHost.restartTerminal(input, async () => {
+        expect(Resident.isPidAlive(shell.pid)).toBe(true)
+      })
+      await shell.exited
+    } finally {
+      shell.kill()
+    }
+  },
+)
 
-test.skipIf(process.platform !== "win32")("the launch hop fails when the target exits with an error during the settle window", async () => {
-  const run = (code: number) =>
-    new Promise<number | null>((resolve) =>
-      launchDetached("pwsh", ["-NoProfile", "-NonInteractive", "-Command", `exit ${code}`], { settleMs: 1500 }).once(
-        "exit",
-        resolve,
-      ),
-    )
-  expect(await run(3)).toBe(2)
-  // A clean exit passes: wt.exe and `cmd /c start` are stubs that hand off and exit 0 right away.
-  expect(await run(0)).toBe(0)
-})
+test.skipIf(process.platform !== "win32")(
+  "the launch hop fails when the target exits with an error during the settle window",
+  async () => {
+    const run = (code: number) =>
+      new Promise<number | null>((resolve) =>
+        launchDetached("pwsh", ["-NoProfile", "-NonInteractive", "-Command", `exit ${code}`], { settleMs: 1500 }).once(
+          "exit",
+          resolve,
+        ),
+      )
+    expect(await run(3)).toBe(2)
+    // A clean exit passes: wt.exe and `cmd /c start` are stubs that hand off and exit 0 right away.
+    expect(await run(0)).toBe(0)
+  },
+)
 
 const windowList = JSON.stringify([
   { window_id: 0, tab_id: 9, pane_id: 1, cwd: "file:///C:/Projects/crow" },
@@ -453,6 +459,9 @@ test("single revive builds and installs only native opencode", () => {
   ])
   expect(Revive.parseContext({ ...context, mode: "single", hosted: true }).hosted).toBe(true)
   expect(() => Revive.parseContext({ ...context, mode: "single", hosted: "yes" })).toThrow()
+  // ReviveResume id of the steps typed after the revive.
+  expect(Revive.parseContext({ ...context, resume: "ses_a-1" }).resume).toBe("ses_a-1")
+  expect(() => Revive.parseContext({ ...context, resume: "" })).toThrow()
 })
 
 test("single revive opens a new tab in the current terminal, or a new console", () => {
@@ -479,10 +488,15 @@ test("single revive waits for the terminal CLI and reports a rejected tab launch
     windowsVerbatimArguments: false,
   }
   await expect(ReviveHost.openReviveTab(command, os.tmpdir())).resolves.toBeUndefined()
-  await expect(ReviveHost.openReviveTab({
-    ...command,
-    env: { ...command.env, OC_REVIVE_TEST_EXIT: "7" },
-  }, os.tmpdir())).rejects.toThrow("exited with code 7")
+  await expect(
+    ReviveHost.openReviveTab(
+      {
+        ...command,
+        env: { ...command.env, OC_REVIVE_TEST_EXIT: "7" },
+      },
+      os.tmpdir(),
+    ),
+  ).rejects.toThrow("exited with code 7")
 })
 
 test("only known shells are treated as killable window owners", () => {

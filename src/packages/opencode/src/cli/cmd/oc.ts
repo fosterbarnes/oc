@@ -85,6 +85,11 @@ async function host(
   const handoff = Revive.parseContext(raw)
   if (stopped) {
     console.error(stopped.error)
+    // The pipeline never ran: the reopened TUI restores the steps typed after the revive.
+    if (handoff.resume) {
+      const { ReviveResume } = await import("@opencode-ai/core/util/reviveResume")
+      await ReviveResume.settle(handoff.resume, "failed")
+    }
     await waitForKey("Shutdown failed. Press any key to reopen oc without building.")
     await reopen(handoff)
     return

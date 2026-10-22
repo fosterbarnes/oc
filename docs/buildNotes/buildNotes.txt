@@ -1,6 +1,11 @@
-v0.2.285 depositMeebo [patch > subagent live rows picker]
+v0.2.286 boozledReviewing [feat. > revive between slash commands]
 
-layout:
-"Subagent live rows" in the oc palette (and /subagentRows) now opens a list where you pick off or 2 to 10 rows, with the current value highlighted. Before, each press cycled off/3/4/6. The setting key and the default of 4 are unchanged, so the live subagent card needs no change.
+revive:
+/revive, /revive-no-install, and /revive-single can now sit among other slash commands in one message, and oc runs it in order. "/revive /pass" revives, then sends /pass once oc reopens. "/pass /revive /agent-push" runs /pass, waits for that reply to finish, revives, then sends /agent-push. Free text anywhere in the message is one request every command step gets, and each step's agent is told which step it is so it does not run the later ones itself. A message can hold more than one revive.
 
-Under the hood: ocCommands.tsx swaps the cycle for a DialogSelect over the same kv value. FORK.md describes the picker. Checks: none ran (no palette test); the live check is pending. The push runs prePush.
+If a step fails, you press Esc, the revive build fails, or nobody opens the session within 15 minutes of the revive, the remaining commands are not sent: they go back into an empty prompt. /revive-no-install with a revive.path script cannot report failure, so its follow-up steps always send.
+
+slash menu:
+The revive commands now show in the slash menu after other commands, and picking one types it into the message instead of restarting right away. A lone /revive from Home still restarts without creating an empty chat.
+
+Under the hood: the TUI splits the message (prompt/slash.ts extractChain), runs the steps (reviveChain.tsx), and saves the remaining steps in a small file (core util/reviveResume.ts) that the revive pipeline marks ready or failed. The reopened TUI claims it with an exclusive-create lock, because Bun's rename on Windows lets two concurrent renames of one file both succeed. reviveCommands.tsx now exposes a reusable useRevive hook. Docs: wiki Launching page and FORK.md. Checks: tsgo for core, opencode, and tui; bun test core reviveResume (3/3), tui prompt slash and part (14/14), tui autocomplete and slash menu layout (3/3), opencode config revive (26/26). The /pass step of a live "/pass /revive /agent-push" chain arrived with its step note, the revive ran, and this push is its third step. The push runs prePush.

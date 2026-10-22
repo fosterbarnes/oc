@@ -23,7 +23,7 @@ import type { PromptInfo } from "../../prompt/history"
 import { useFrecency } from "../../prompt/frecency"
 import { useBindings, useCommandShortcut, useCommandSlashes, useOpencodeModeStack } from "../../keymap"
 import { displayCharAt, promptOffsetWidth, mentionTriggerIndex } from "../../prompt/display"
-import { slashTriggerIndex } from "../../prompt/slash"
+import { REVIVE_MODES, slashTriggerIndex } from "../../prompt/slash"
 import type { FileSystemEntry } from "@opencode-ai/sdk/v2"
 
 function removeLineRange(input: string) {
@@ -75,6 +75,8 @@ export type AutocompleteOption = {
   path?: string
   // Slash entry origin; colors the row so each kind reads at a glance.
   kind?: "tui" | "command" | "mcp" | "skill"
+  // A TUI action typed into the prompt instead of run on select (revive chain steps).
+  inserts?: boolean
   // @ mention type, shown right-aligned on the row.
   mention?: "agent" | "reference" | "resource"
 }
@@ -469,12 +471,40 @@ export function Autocomplete(props: {
       ),
   )
 
+  // Replaces the typed `/partial` with `/name ` so more text or commands can follow.
+  function insertSlash(name: string) {
+    const input = props.input()
+    const offset = input.cursorOffset
+    const index = slashTriggerIndex(input.plainText, offset)
+    if (index === undefined) return
+    const suffix = input.getTextRange(offset, promptOffsetWidth(input.plainText))
+    const end = offset + promptOffsetWidth(suffix.match(/^\S*/)?.[0] ?? "")
+    input.cursorOffset = index
+    const startCursor = input.logicalCursor
+    input.cursorOffset = end
+    const endCursor = input.logicalCursor
+    input.deleteRange(startCursor.row, startCursor.col, endCursor.row, endCursor.col)
+    input.insertText("/" + name + (displayCharAt(input.plainText, index) === " " ? "" : " "))
+    if (displayCharAt(input.plainText, input.cursorOffset) === " ") input.cursorOffset += 1
+    setStore("visible", false)
+  }
+
   const commands = createMemo((): AutocompleteOption[] => {
-    const results: AutocompleteOption[] = (store.index === 0 ? slashes() : []).map((slash) => ({
-      ...slash,
-      display: `${slash.display}:(oc)`,
-      kind: "tui" as const,
-    }))
+    // Revives are chain steps (`/pass /revive /agent-push`, prompt/slash.ts `extractChain`): offered
+    // anywhere and inserted as text, so submit runs the whole message in order.
+    const results: AutocompleteOption[] = slashes().flatMap((slash) => {
+      const name = slash.display.slice(1)
+      const revive = name in REVIVE_MODES
+      if (!revive && store.index !== 0) return []
+      return [
+        {
+          ...slash,
+          display: `${slash.display}:(oc)`,
+          kind: "tui" as const,
+          ...(revive && { inserts: true, onSelect: () => insertSlash(name) }),
+        },
+      ]
+    })
 
     for (const serverCommand of sync.data.command) {
       const label = serverCommand.source ? `:(${serverCommand.source})` : ""
@@ -483,22 +513,7 @@ export function Autocomplete(props: {
         display: "/" + serverCommand.name + label,
         description: serverCommand.description,
         kind: serverCommand.source,
-        onSelect: () => {
-          const input = props.input()
-          const offset = input.cursorOffset
-          const index = slashTriggerIndex(input.plainText, offset)
-          if (index === undefined) return
-          const suffix = input.getTextRange(offset, promptOffsetWidth(input.plainText))
-          const end = offset + promptOffsetWidth(suffix.match(/^\S*/)?.[0] ?? "")
-          input.cursorOffset = index
-          const startCursor = input.logicalCursor
-          input.cursorOffset = end
-          const endCursor = input.logicalCursor
-          input.deleteRange(startCursor.row, startCursor.col, endCursor.row, endCursor.col)
-          input.insertText("/" + serverCommand.name + (displayCharAt(input.plainText, index) === " " ? "" : " "))
-          if (displayCharAt(input.plainText, input.cursorOffset) === " ") input.cursorOffset += 1
-          setStore("visible", false)
-        },
+        onSelect: () => insertSlash(serverCommand.name),
       })
     }
 
@@ -604,7 +619,7 @@ export function Autocomplete(props: {
     const selected = options()[store.selected]
     if (!selected) return
     // Native actions consume their trigger; prompt commands and mentions replace it themselves.
-    if (selected.kind === "tui") hide()
+    if (selected.kind === "tui" && !selected.inserts) hide()
     else setStore("visible", false)
     selected.onSelect?.()
   }
