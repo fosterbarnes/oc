@@ -24,10 +24,10 @@ export function expandHome(value: string): string {
 //
 // The `accounts` provider option lists Claude config dirs in order, e.g.
 // `["~/.claude", "~/.claudeSecond"]`. Every chat uses the current account
-// until the CLI rejects a request for usage, then moves to the next account
-// whose limit has not been hit (turnStream.ts). An account's id is its
-// resolved config dir, or `default` for the CLI's own `~/.claude`, which
-// spawns with the inherited environment.
+// until the CLI rejects a request for usage, then moves to the usable account
+// with the least 5-hour use per the TUI's usage caches (turnStream.ts). An
+// account's id is its resolved config dir, or `default` for the CLI's own
+// `~/.claude`, which spawns with the inherited environment.
 // ---------------------------------------------------------------------------
 
 /** How long an account sits out when its rejection carried no reset time. */
@@ -165,32 +165,62 @@ function windowResetMs(value: unknown, now: number): number | undefined {
   return date.valueOf()
 }
 
-function seedFromCaches(ids: string[], now: number): void {
-  for (const id of ids) {
-    const file = seedCachePath(id)
-    if (!file) continue
-    let raw: unknown
-    try {
-      raw = JSON.parse(readFileSync(file, "utf8"))
-    } catch {
-      continue
-    }
-    const body = raw as { five_hour?: unknown; seven_day?: unknown }
-    const resets = [windowResetMs(body.five_hour, now), windowResetMs(body.seven_day, now)].filter(
-      (value): value is number => value !== undefined,
-    )
-    if (!resets.length) continue
-    markAccountLimited(id, Math.max(...resets), now)
+/** A window's used percent; a window whose reset has passed reads 0. Undefined without a number. */
+function windowUsedPercent(value: unknown, now: number): number | undefined {
+  const item = value as { utilization?: unknown; resets_at?: unknown } | null
+  if (typeof item?.utilization !== "number" || !Number.isFinite(item.utilization)) return undefined
+  const reset = typeof item.resets_at === "string" ? Date.parse(item.resets_at) : Number.NaN
+  return reset <= now ? 0 : Math.max(0, Math.min(100, item.utilization))
+}
+
+/** An account's cached usage: 5-hour percent used, and when a full window frees it. Undefined without a cache. */
+function readUsageCache(id: string, now: number): { fiveHourUsed?: number; fullUntil?: number } | undefined {
+  const file = seedCachePath(id)
+  if (!file) return undefined
+  let body: { five_hour?: unknown; seven_day?: unknown } | null
+  try {
+    body = JSON.parse(readFileSync(file, "utf8"))
+  } catch {
+    return undefined
+  }
+  const resets = [windowResetMs(body?.five_hour, now), windowResetMs(body?.seven_day, now)].filter(
+    (value): value is number => value !== undefined,
+  )
+  return {
+    fiveHourUsed: windowUsedPercent(body?.five_hour, now),
+    ...(resets.length ? { fullUntil: Math.max(...resets) } : {}),
   }
 }
 
-/** The current account while usable, else the next usable one after it; undefined when all are limited. */
+function seedFromCaches(ids: string[], now: number): void {
+  for (const id of ids) {
+    const fullUntil = readUsageCache(id, now)?.fullUntil
+    if (fullUntil) markAccountLimited(id, fullUntil, now)
+  }
+}
+
+/**
+ * The usable account with the least 5-hour use, read from the usage caches now so limit marks are
+ * fresh too. Ties and accounts without a cache keep rotation order after `from`.
+ */
+function bestUsable(ids: string[], from: string, now: number): string | undefined {
+  const start = ids.indexOf(from) + 1
+  const ranked = [...ids.slice(start), ...ids.slice(0, start)].flatMap((id) => {
+    const cache = readUsageCache(id, now)
+    if (cache?.fullUntil) markAccountLimited(id, cache.fullUntil, now)
+    return (limitedUntil.get(id) ?? 0) <= now ? [{ id, used: cache?.fiveHourUsed ?? Infinity }] : []
+  })
+  // Two unknowns subtract to NaN; `|| 0` keeps them in rotation order.
+  return ranked.sort((a, b) => a.used - b.used || 0)[0]?.id
+}
+
+/** The current account while usable, else the usable one with the least 5-hour use; undefined when all are limited. */
 export function nextUsableAccount(ids: string[], now = Date.now()): string | undefined {
   ensureLoaded(ids, now)
   const usable = (id: string) => (limitedUntil.get(id) ?? 0) <= now
   if (currentAccount && ids.includes(currentAccount) && usable(currentAccount)) return currentAccount
-  const start = currentAccount ? ids.indexOf(currentAccount) + 1 : 0
-  const next = [...ids.slice(start), ...ids.slice(0, start)].find(usable)
+  // A fresh pool starts at the first usable account; only a move off a limited one is ranked.
+  const next = currentAccount && ids.includes(currentAccount) ? bestUsable(ids, currentAccount, now) : ids.find(usable)
   if (next && next !== currentAccount) {
     currentAccount = next
     persistPool(now)
@@ -256,8 +286,7 @@ export function turnAccount(
 export function failoverAccount(sessionID: string | undefined, ids: string[], now = Date.now()): string | undefined {
   const pin = sessionPin(sessionID, ids, now)
   if (!pin) return nextUsableAccount(ids, now)
-  const start = ids.indexOf(pin) + 1
-  const next = [...ids.slice(start), ...ids.slice(0, start)].find((id) => (limitedUntil.get(id) ?? 0) <= now)
+  const next = bestUsable(ids, pin, now)
   if (next && next !== pin) pinSessionAccount(sessionID!, next, ids, now)
   return next
 }

@@ -185,6 +185,27 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-21 (~20:35) - v0.2.284 rottenThiollier - Claude failover picks the account with the most 5-hour usage left - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation; completed, live check pending
+- Version: 0.2.284 rottenThiollier
+- Changed `accounts.ts` failover pick: `bestUsable(ids, from, now)` ranks usable accounts by cached `five_hour` utilization (lowest first); unknown last; ties keep rotation order after `from`. Used by `nextUsableAccount` (only when leaving a current account; fresh pool still starts at first usable) and `failoverAccount` pinned branch. Weekly ignored for ranking (user choice).
+- Added `readUsageCache` (shared with `seedFromCaches`) + `windowUsedPercent` (past `resets_at` -> 0). `bestUsable` re-reads caches at failover and marks full windows (5h or weekly) limited, so stale once-per-process seed marks refresh.
+- Kept: cache-only, sync reads; no live usage fetch (provider must not touch OAuth tokens). No ranking in `turnAccount`/`preferredAccount`/`setCurrentAccount`.
+- Added test "failover picks the usable account with the least 5-hour use" in `accountPool.test.ts` (lowest wins, expired window = 0, no cache ranks last, full weekly skipped + marked, pinned pin follows).
+- Docs: `FORK.md` account pool row; wiki `Claude-Code.md` (wiki push is the user's).
+- Plan: `~/.config/opencode/plans/claudeFailoverMostHeadroom.md`.
+- Risk: ranking uses the sidebar's last cached reading; unpolled accounts rank on old numbers.
+- Verification: `bun test test/provider/claude-code/accountPool.test.ts` (CLAUDE_CONFIG_DIR unset): 24 pass, 0 fail. Live limit switch not exercised.
+
+### User
+Claude accounts
+- When a Claude account hits its usage limit, oc now switches to the account with the most 5-hour usage left instead of the next one in your list.
+- Accounts the sidebar already shows as full for the 5-hour window or the week are skipped.
+
+---
+
 ## 2026-10-21 (~20:23) - v0.2.283 toastYurrrrr - WezTerm split tabs keep oc's tab title - Claude Opus 5.5, low effort; Implementation
 
 ### Agent

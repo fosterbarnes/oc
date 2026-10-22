@@ -324,6 +324,70 @@ test("nondefault accounts seed from the hashed cache; legacy basename files need
   }
 })
 
+test("failover picks the usable account with the least 5-hour use from the usage caches", () => {
+  const root = mkdtempSync(path.join(tmpdir(), "oc-account-pool-rank-"))
+  const cache = path.join(root, "cache")
+  mkdirSync(cache)
+  const [a, b, c] = ["a", "b", "c"].map((name) => path.resolve(root, `.claude-${name}`))
+  const ids = [a!, b!, c!]
+  const now = Date.now()
+  const at = (offset: number) => new Date(now + offset).toISOString()
+  const write = (id: string, fiveHour: number, fiveReset = at(60_000), weekly = 9) =>
+    writeFileSync(
+      path.join(cache, ClaudeUsageCache.cacheFileName(expandHome("~"), id)),
+      JSON.stringify({
+        five_hour: { utilization: fiveHour, resets_at: fiveReset },
+        seven_day: { utilization: weekly, resets_at: at(86_400_000) },
+      }),
+    )
+  /** Fresh pool on `a`, caches written, then `a` hits its limit. */
+  const limitA = () => {
+    _resetAccountPool()
+    _setUsageCacheDir(cache)
+    setCurrentAccount(a!, ids, now)
+    markAccountLimited(a!, now + 60_000, now)
+  }
+  const previousConfigDir = process.env.CLAUDE_CONFIG_DIR
+  delete process.env.CLAUDE_CONFIG_DIR
+  try {
+    write(b!, 80)
+    write(c!, 20)
+    limitA()
+    expect(failoverAccount(undefined, ids, now)).toBe(c)
+    expect(poolAccount(ids, now)).toBe(c)
+
+    // A window whose reset has passed counts as 0%.
+    write(b!, 90, at(-1000))
+    limitA()
+    expect(failoverAccount(undefined, ids, now)).toBe(b)
+
+    // An account without a cache ranks after any known one.
+    rmSync(path.join(cache, ClaudeUsageCache.cacheFileName(expandHome("~"), b!)))
+    write(c!, 95)
+    limitA()
+    expect(failoverAccount(undefined, ids, now)).toBe(c)
+
+    // A full week is skipped even with an empty 5-hour window, and marked limited.
+    write(b!, 0, at(60_000), 100)
+    write(c!, 50)
+    limitA()
+    expect(failoverAccount(undefined, ids, now)).toBe(c)
+    expect(poolState(ids, now).find((account) => account.id === b)?.limitedUntil).toBe(now + 86_400_000)
+
+    // A pinned chat's pin moves to the best account.
+    write(b!, 80)
+    write(c!, 20)
+    limitA()
+    pinSessionAccount("ses_1", a!, ids, now)
+    expect(failoverAccount("ses_1", ids, now)).toBe(c)
+    expect(sessionPin("ses_1", ids, now)).toBe(c)
+  } finally {
+    if (previousConfigDir === undefined) delete process.env.CLAUDE_CONFIG_DIR
+    else process.env.CLAUDE_CONFIG_DIR = previousConfigDir
+    rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 })
+  }
+})
+
 const init = { type: "system", subtype: "init", session_id: "fake-session", tools: ["Read"] }
 const text = (body: string) => ({
   type: "stream_event",

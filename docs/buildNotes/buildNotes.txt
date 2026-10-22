@@ -1,6 +1,6 @@
-v0.2.283 toastYurrrrr [docs > WezTerm split tabs keep oc's tab title]
+v0.2.284 rottenThiollier [patch > Claude failover picks emptiest login]
 
-wezterm docs:
-The WezTerm setup doc's tab title snippet now keeps oc's title and colored agent marker when a shell pane in the same split tab is focused, instead of showing pwsh. A top-level title_pane helper uses the focused pane when it is oc, otherwise the tab's pane flagged with oc_tui=1, otherwise the focused pane as before. The doc now says to put the helper at the top level of the config and merge the handler body.
+claude accounts:
+When a Claude account hits its usage limit, oc now continues the turn on the account with the most 5-hour usage left, as last read by the sidebar, instead of the next account in the accounts list. Accounts the sidebar already shows as full for the 5-hour window or the week are skipped. Ties and accounts with no usage reading keep the list order, a fresh pool still starts on the first account, and a chat never leaves an account that still has usage. Pinned chats follow the same pick.
 
-Under the hood: no oc code change. The live config change is in the separate wezFig repo. Checks: the wezFig config loads in wezterm show-keys; the tab title callback was not live-checked. The push runs prePush.
+Under the hood: accounts.ts gained a shared usage cache reader used by startup seeding and a new failover ranker, which re-reads the caches at switch time so limit marks are no longer only read once per process. No live usage fetch. FORK.md and the wiki describe the new pick. Checks: accountPool.test.ts passed (24 pass, 0 fail) with CLAUDE_CONFIG_DIR unset; a real limit switch was not live-checked. The push runs prePush.
