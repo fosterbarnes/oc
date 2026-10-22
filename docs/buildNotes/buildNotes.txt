@@ -1,8 +1,8 @@
-v0.2.290 organicThugs [feat. > custom sidebar buttons from palettes]
+v0.2.291 wrigglingIommi [docs > feature request issue form]
 
-sidebar:
-The buttons at the top of the session sidebar are now yours to pick. In the Command Palette (ctrl+p) or the oc Palette (ctrl+o), highlight any entry and press alt+p to add it as a sidebar button; press alt+p again to remove it. Entries already on the sidebar show a diamond marker in the palette. New buttons go at the end of the list.
+github issues:
+The feature request form on GitHub is now written for oc instead of upstream OpenCode. It asks for the problem you hit and the change you want as separate fields, plus an optional area of oc, any workaround you use today, and your oc version. A required checkbox asks you to search existing issues and check SCOPE.md (linked) for things already declined or planned. The emoji name and forced "[FEATURE]:" title prefix are gone.
 
-Right-clicking a sidebar button removes it, which also covers Command Palette and oc Palette since those two never appear in a palette list. "Reset sidebar buttons" in the oc palette (or /sidebarReset) brings back the defaults: Switch Session, Command Palette, oc Palette, and Subagents. The model and reasoning row stays where it is. To reorder buttons, edit sidebar_buttons in tui.jsonc.
+The FAQ link on the new issue page now opens the wiki FAQ; it pointed at a README section that no longer exists.
 
-Under the hood: new tui config key sidebar_buttons (command names in order; absent means defaults, reset deletes the key so future default changes still apply). sidebarButtons.ts holds the shared toggle and reset logic used by the palette, the sidebar right-click, and the reset entry. The palette gains a palette.toggle_sidebar modal command (keybind palette_toggle_sidebar), the sidebar renders buttons from registered keymap commands and skips names that are not registered yet instead of pruning them, and HeaderButton gains a right-click handler. The Subagents button now dispatches oc.session_subagents. docs/keybinds.md regenerated; FORK.md and the wiki Sidebar and Configuration pages updated. Checks: bun test config.test.tsx (19/19), tsgo typecheck in tui, keybindDocs.ts --check. No live TUI check yet. The push runs prePush.
+Under the hood: feature-request.yml follows bug-report.yml's style with stable field ids; its Area dropdown mirrors the FORK.md section names and needs updating if those are renamed. Checks: both templates parse as YAML (PyYAML). GitHub's rendering of the form was not checked, since it only validates server-side. The push runs prePush.

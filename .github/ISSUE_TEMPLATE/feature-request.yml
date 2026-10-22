@@ -1,19 +1,58 @@
-name: 🚀 Feature Request
-description: Suggest an idea, feature, or enhancement
-title: "[FEATURE]:"
-
+name: Feature request
+description: Suggest a new oc feature or a change to an existing one
 body:
   - type: checkboxes
-    id: verified
+    id: checked
     attributes:
-      label: Feature hasn't been suggested before.
+      label: Before you ask
       options:
-        - label: I have verified this feature I'm about to request hasn't been suggested before.
+        - label: I searched existing issues and checked [SCOPE.md](https://github.com/fosterbarnes/oc/blob/main/SCOPE.md) (Not planned / Planned for later)
           required: true
 
   - type: textarea
+    id: problem
     attributes:
-      label: Describe the enhancement you want to request
-      description: What do you want to change or add? What are the benefits of implementing this? Try to be detailed so we can understand your request better :)
+      label: Problem
+      description: What are you trying to do, and what gets in the way?
     validations:
       required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed change
+      description: What should oc do instead? Name the command, keybind, or screen it would change.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Models and providers
+        - Launching, tray, background server
+        - Sessions and model choices
+        - Workspace sidebar and files
+        - Agents and planning
+        - Conversation and terminal feel
+        - Windows build, install, logging
+        - Other
+    validations:
+      required: false
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Workarounds or alternatives
+      description: What you do today, or other approaches you considered
+    validations:
+      required: false
+
+  - type: input
+    id: oc-version
+    attributes:
+      label: oc version
+      description: Shown in the sidebar footer as `oc vX ∙ OG vY`
+    validations:
+      required: false

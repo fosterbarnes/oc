@@ -185,6 +185,25 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-21 (~22:09) - v0.2.291 wrigglingIommi - oc feature request issue form - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation (from /spit, no plan file); completed
+- Version: 0.2.291 wrigglingIommi
+- Changed `.github/ISSUE_TEMPLATE/feature-request.yml`: replaced upstream form (emoji name, `[FEATURE]:` title, one textarea) with oc form in `bug-report.yml` style: required SCOPE.md/issues checkbox, required Problem + Proposed change (per `CONTRIBUTING.md:15`), optional Area dropdown (FORK.md sections 1-6, 8 + Other), Workarounds, oc version.
+- Risk: Area dropdown mirrors FORK.md section names; update it when those sections are renamed.
+- Fixed `.github/ISSUE_TEMPLATE/config.yml` FAQ link: `README.md#faq` anchor did not exist; now wiki FAQ.
+- Kept CRLF (Write produced LF; converted with `unix2dos`).
+- /pass: linked SCOPE.md in the checkbox label; reworded Proposed change description.
+- Verification: both files parse with PyYAML (rechecked after /pass); body ids checked. GitHub form rendering not checked (server-side only).
+
+### User
+GitHub issues
+- The feature request form now asks for the problem, the proposed change, the area of oc, workarounds, and the oc version, and asks you to check SCOPE.md first.
+- The FAQ link on the new issue page now opens the wiki FAQ instead of a missing README section.
+
+---
+
 ## 2026-10-21 (~21:59) - v0.2.290 organicThugs - Custom sidebar buttons from either palette - Claude Opus 5.5, low effort; Implementation
 
 ### Agent
