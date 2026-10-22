@@ -2,6 +2,7 @@ import { createSignal, onMount } from "solid-js"
 import { useRoute } from "./context/route"
 import { useSDK } from "./context/sdk"
 import { useSync } from "./context/sync"
+import { persistOcConfig, readOcConfig } from "./ocSettings"
 import { useDialog } from "./ui/dialog"
 import { DialogSelect } from "./ui/dialog-select"
 import { useToast } from "./ui/toast"
@@ -15,6 +16,7 @@ export function createClaudeAccountCommands() {
   const dialog = useDialog()
   const toast = useToast()
   const [resumeEnabled, setResumeEnabled] = createSignal(false)
+  const [failoverMode, setFailoverMode] = createSignal(readOcConfig().claudeFailover)
 
   onMount(() => {
     void sdk.resume
@@ -106,6 +108,43 @@ export function createClaudeAccountCommands() {
     },
   }
 
+  const failover = {
+    name: "claude.failover",
+    title: "Claude account failover",
+    category: "oc",
+    group: "Third party harness management",
+    get desc() {
+      return failoverMode()
+    },
+    run: () => {
+      const choose = (mode: "auto" | "ask") => {
+        dialog.clear()
+        if (mode === failoverMode()) return
+        void persistOcConfig("claudeFailover", mode, toast).then((saved) => saved && setFailoverMode(mode))
+      }
+      dialog.replace(() => (
+        <DialogSelect
+          title="Claude account failover"
+          current={failoverMode()}
+          options={[
+            {
+              title: "Auto",
+              description: "switch to the account with the most 5-hour usage left",
+              value: "auto",
+              onSelect: () => choose("auto"),
+            },
+            {
+              title: "Ask",
+              description: "choose the account each time a turn hits a limit",
+              value: "ask",
+              onSelect: () => choose("ask"),
+            },
+          ]}
+        />
+      ))
+    },
+  }
+
   const autoResume = {
     name: "claude.autoResume",
     title: "Claude auto-resume",
@@ -158,6 +197,7 @@ export function createClaudeAccountCommands() {
     return [
       ...(multi ? [switchAccount] : []),
       ...(multi && route.data.type === "session" ? [switchSessionAccount] : []),
+      ...(multi ? [failover] : []),
       autoResume,
     ]
   }

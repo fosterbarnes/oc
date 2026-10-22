@@ -4,29 +4,29 @@ import { showToast } from "./runtimeStatus.js"
 import { CLAUDE_CODE_PROVIDER_ID, STEERED_METADATA_KEY } from "./shared.js"
 import { WAKE_PROMPT_TEXT } from "./sessionManager.js"
 
-/** Historical transcript marker. The account-failover feature that wrote it is gone. */
-const ACCOUNT_FAILOVER_TOOL_CALL_PREFIX = "account_failover_"
+/** Id prefix of the account-failover question (turnStream `askFailover`), and of the older failover form. */
+export const ACCOUNT_FAILOVER_TOOL_CALL_PREFIX = "account_failover_"
 
 type Prompt = Parameters<LanguageModelV3["doGenerate"]>[0]["prompt"]
 
-function isHistoricalFailoverPart(part: any): boolean {
+function isFailoverPart(part: any): boolean {
   if (!part || typeof part.toolCallId !== "string") return false
   if (part.type !== "tool-call" && part.type !== "tool-result") return false
   return part.toolCallId.startsWith(ACCOUNT_FAILOVER_TOOL_CALL_PREFIX)
 }
 
-/** Drop persisted failover dialog parts Claude never issued. */
-function stripHistoricalFailoverParts(prompt: Prompt): Prompt {
+/** Drop failover question parts Claude never issued. */
+function stripFailoverParts(prompt: Prompt): Prompt {
   let changed = false
   const out = [] as unknown as Prompt
   for (const message of prompt) {
     const content = (message as { content?: unknown }).content
-    if (!Array.isArray(content) || !content.some(isHistoricalFailoverPart)) {
+    if (!Array.isArray(content) || !content.some(isFailoverPart)) {
       out.push(message)
       continue
     }
     changed = true
-    const kept = content.filter((part: any) => !isHistoricalFailoverPart(part))
+    const kept = content.filter((part: any) => !isFailoverPart(part))
     if (kept.length === 0) continue
     out.push({ ...message, content: kept } as typeof message)
   }
@@ -245,11 +245,11 @@ export function getClaudeUserMessage(
   const cliToolCallIds = opts.cliToolCallIds
   const content: any[] = []
 
-  // The account-failover form is the plugin's own dialog: Claude never issued
+  // The account-failover question is oc's own dialog: Claude never issued
   // that call and never saw its answer. On the turn after a form the answer
   // reached Claude as a stray `<opencode_tool_result>` ("The user
   // dismissed this question"), measured 2026-09-23.
-  prompt = stripHistoricalFailoverParts(prompt)
+  prompt = stripFailoverParts(prompt)
 
   // Done once here, at the top, so everything below sees the cleaned text.
   if (opts.stripContextReminders) {

@@ -71,12 +71,13 @@ export type HostToolResult = {
   attachments?: SessionV1.FilePart[]
   denied?: unknown
 }
-export type HostToolExecutor = (
+// `tools` names the turn's bound tools, so the provider can tell whether it may run one it starts itself.
+export type HostToolExecutor = ((
   name: string,
   input: Record<string, unknown>,
   callID: string,
   signal?: AbortSignal,
-) => Promise<HostToolResult>
+) => Promise<HostToolResult>) & { tools?: ReadonlySet<string> }
 
 // oc session id -> its current turn's bound tools. Set by session/llm.ts per stream, so the provider
 // runs proxied calls in-stream with full oc tool context. One active turn per session, so overwrite is safe.

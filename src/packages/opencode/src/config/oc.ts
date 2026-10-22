@@ -10,6 +10,8 @@ export const keys = [
   "sessionModel",
   "sessionAgent",
   "serverStartOnWindowsUserStart",
+  // `ask`: a Claude turn that hits a usage limit asks which account to continue on. Unset = `auto`.
+  "claudeFailover",
 ] as const
 
 export type Key = (typeof keys)[number]
@@ -64,6 +66,9 @@ export async function update(key: Key, value: string, startup?: Parameters<typeo
       },
       startup,
     )
+  }
+  if (key === "claudeFailover" && parsed !== "auto" && parsed !== "ask") {
+    throw new Error("claudeFailover must be auto or ask")
   }
   const settings = await read()
   return write({ ...settings, [key]: parsed })

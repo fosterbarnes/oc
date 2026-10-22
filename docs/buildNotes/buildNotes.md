@@ -185,6 +185,33 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-21 (~21:43) - v0.2.289 homiesElection - Claude failover can ask which account to continue on - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation (/spit -> /think -> /imp); completed
+- Version: 0.2.289 homiesElection
+- Added oc.json key `claudeFailover` (`auto` default | `ask`) in `config/oc.ts` (`keys` + value guard in `update`). Kept out of `account-pool.json` (loaded once per process, whole-file rewrite = cross-process clobber) and opencode.jsonc (config update reloads instances).
+- Changed `accounts.ts`: `bestUsable` -> `rankUsable` (returns `FailoverCandidate { id, used? }[]`); removed `failoverAccount`; added pure `failoverCandidates(from, ids)` + `applyFailoverChoice(sessionID, id, ids)` (pin moves if pinned, else `setCurrentAccount`). Auto behavior change: unpinned chat takes best-ranked account even if another session moved the global pick.
+- Changed `turnStream.ts`: `switchTo` is now ranked candidates; `switchAccount(resume)` detaches, `pickAccount` (reads oc.json fresh; read error -> auto with warn), then retires/respawns. Ask mode runs oc `question` in-stream via `hostToolExecutors` (`askFailover`, id prefix `account_failover_`, own plain tool-result so a dismissal is not a denial). No pick (Stop/dismiss/abort/unmatched typed answer) -> `failoverDeclined` + `allLimited`, reattach listeners, `resume()` re-runs `onResult(msg)` / `onClose()`; Claude session and process kept for auto-resume.
+- Added `failoverQuestion.ts` (options best first, first `(Recommended)`, `5h used N%`/`usage unknown`, then `Stop`; `pick(label)` -> id).
+- Changed `HostToolExecutor` (`shared.ts`) with optional `tools` set; `session/llm.ts` attaches bound tool names. No `question` (subagents, denied agents) -> auto, no error row.
+- Changed `messageBuilder.ts`: exported `ACCOUNT_FAILOVER_TOOL_CALL_PREFIX`, renamed strip helpers (no longer historical-only).
+- Added TUI palette entry `claude.failover` "Claude account failover" (Auto/Ask, shown with 2+ accounts) in `claudeCommands.tsx`; `readOcConfig`/`persistOcConfig` in `ocSettings.ts` know `claudeFailover`.
+- Kept turn-start auto-move on a known-limited account (`nextUsableAccount`) per user decision: ask covers mid-turn rejections only.
+- Verification: `bun test test/provider/claude-code/accountPool.test.ts test/provider/claude-code/failoverQuestion.test.ts` 25 pass 0 fail (includes existing fake-CLI in-turn auto-switch tests); `tsgo --noEmit` clean in `packages/opencode` and `packages/tui`; prettier clean on changed lines. Ask flow (form in a live turn) not exercised by tests: needs user live check.
+- Plan: `~/.config/opencode/plans/claudeFailoverAsk.md`.
+- /pass: inlined single-use `bestUsable` into `nextUsableAccount`; `askFailover` passes the stream's `abortSignal` so an aborted turn closes its question; FORK.md Claude account pool row documents Ask mode. Re-ran the same tests (25/0) + opencode typecheck.
+- TODO: wiki page for the new setting (AGENTS.md: user-facing settings go in `..\oc.wiki`); not done this session.
+
+### User
+Claude Code accounts
+- New palette entry "Claude account failover" chooses what happens when a Claude turn hits an account's usage limit: Auto (default, as before) or Ask.
+- In Ask mode the running turn shows a question listing your other usable accounts, best first with their 5-hour usage, plus Stop; the turn continues on the account you pick.
+- Stop or dismissing the question ends the turn on the limit, and auto-resume picks the same conversation back up after the reset if it is on.
+- Subagents and agents that cannot ask questions keep switching automatically.
+
+---
+
 ## 2026-10-21 (~21:29) - v0.2.288 sendWallaby - Numbered subagent labels in prompt footer - Claude Opus 5.5, low effort; Implementation
 
 ### Agent

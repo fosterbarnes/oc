@@ -15,8 +15,9 @@ import {
   accountConfigEntry,
   DEFAULT_ACCOUNT,
   earliestLimitedUntil,
+  applyFailoverChoice,
   expandHome,
-  failoverAccount,
+  failoverCandidates,
   forgetSessionPin,
   markAccountLimited,
   nextUsableAccount,
@@ -36,6 +37,13 @@ import { ClaudeUsageCache } from "@opencode-ai/core/claude-usage-cache"
 
 beforeEach(() => _resetAccountPool())
 afterEach(() => _resetAccountPool())
+
+/** Automatic failover as turnStream runs it: the best candidate, applied to the chat. */
+function failover(sessionID: string | undefined, from: string, ids: string[], now: number) {
+  const next = failoverCandidates(from, ids, now)[0]?.id
+  if (next) applyFailoverChoice(sessionID, next, ids, now)
+  return next
+}
 
 /** Runs `fn` with `CLAUDE_CONFIG_DIR` set (or unset), so results never depend on the caller's shell. */
 function withConfigDir(value: string | undefined, fn: () => void) {
@@ -140,15 +148,22 @@ test("failover moves a pinned chat's pin to the next usable account without touc
   pinSessionAccount("ses_1", "b", ids, now)
   markAccountLimited("b", now + 60_000, now)
   markAccountLimited("c", now + 60_000, now)
-  expect(failoverAccount("ses_1", ids, now)).toBe("a")
+  // Listing candidates moves nothing; applying the pick moves the pin.
+  expect(failoverCandidates("b", ids, now)).toEqual([{ id: "a", used: undefined }])
+  expect(sessionPin("ses_1", ids, now)).toBe("b")
+  expect(failover("ses_1", "b", ids, now)).toBe("a")
   expect(sessionPin("ses_1", ids, now)).toBe("a")
   markAccountLimited("a", now + 60_000, now)
-  expect(failoverAccount("ses_1", ids, now)).toBeUndefined()
+  expect(failover("ses_1", "a", ids, now)).toBeUndefined()
   expect(sessionPin("ses_1", ids, now)).toBe("a")
-  // An unpinned chat moves the global pick as before.
+  // An unpinned chat moves the global pick.
+  setCurrentAccount("b", ids, now)
   setCurrentAccount("c", ids, now)
-  expect(failoverAccount("ses_2", ids, now)).toBe("c")
+  markAccountLimited("c", now + 60_000, now)
+  expect(failover("ses_2", "c", ids, now)).toBe("b")
+  expect(poolAccount(ids, now)).toBe("b")
   expect(sessionPin("ses_2", ids, now)).toBeUndefined()
+  expect(sessionPin("ses_1", ids, now)).toBe("a")
 })
 
 test("an agent's claudeAccount starts a fresh session there, pinned, and failover moves it off for good", () => {
@@ -165,7 +180,7 @@ test("an agent's claudeAccount starts a fresh session there, pinned, and failove
     expect(turnAccount("ses_2", spelled, ids, now)).toBe(claude4)
 
     markAccountLimited(claude4, now + 60_000, now)
-    expect(failoverAccount("ses_1", ids, now)).toBe(DEFAULT_ACCOUNT)
+    expect(failover("ses_1", claude4, ids, now)).toBe(DEFAULT_ACCOUNT)
     expect(turnAccount("ses_1", "~/.claude4", ids, now + 1)).toBe(DEFAULT_ACCOUNT)
     // After the limit resets the session stays where failover put it.
     expect(turnAccount("ses_1", "~/.claude4", ids, now + 120_000)).toBe(DEFAULT_ACCOUNT)
@@ -353,25 +368,30 @@ test("failover picks the usable account with the least 5-hour use from the usage
     write(b!, 80)
     write(c!, 20)
     limitA()
-    expect(failoverAccount(undefined, ids, now)).toBe(c)
+    expect(failover(undefined, a!, ids, now)).toBe(c)
     expect(poolAccount(ids, now)).toBe(c)
+    limitA()
+    expect(failoverCandidates(a!, ids, now)).toEqual([
+      { id: c!, used: 20 },
+      { id: b!, used: 80 },
+    ])
 
     // A window whose reset has passed counts as 0%.
     write(b!, 90, at(-1000))
     limitA()
-    expect(failoverAccount(undefined, ids, now)).toBe(b)
+    expect(failover(undefined, a!, ids, now)).toBe(b)
 
     // An account without a cache ranks after any known one.
     rmSync(path.join(cache, ClaudeUsageCache.cacheFileName(expandHome("~"), b!)))
     write(c!, 95)
     limitA()
-    expect(failoverAccount(undefined, ids, now)).toBe(c)
+    expect(failover(undefined, a!, ids, now)).toBe(c)
 
     // A full week is skipped even with an empty 5-hour window, and marked limited.
     write(b!, 0, at(60_000), 100)
     write(c!, 50)
     limitA()
-    expect(failoverAccount(undefined, ids, now)).toBe(c)
+    expect(failover(undefined, a!, ids, now)).toBe(c)
     expect(poolState(ids, now).find((account) => account.id === b)?.limitedUntil).toBe(now + 86_400_000)
 
     // A pinned chat's pin moves to the best account.
@@ -379,7 +399,7 @@ test("failover picks the usable account with the least 5-hour use from the usage
     write(c!, 20)
     limitA()
     pinSessionAccount("ses_1", a!, ids, now)
-    expect(failoverAccount("ses_1", ids, now)).toBe(c)
+    expect(failover("ses_1", a!, ids, now)).toBe(c)
     expect(sessionPin("ses_1", ids, now)).toBe(c)
   } finally {
     if (previousConfigDir === undefined) delete process.env.CLAUDE_CONFIG_DIR

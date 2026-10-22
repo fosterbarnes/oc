@@ -25,7 +25,8 @@ export function expandHome(value: string): string {
 // The `accounts` provider option lists Claude config dirs in order, e.g.
 // `["~/.claude", "~/.claudeSecond"]`. Every chat uses the current account
 // until the CLI rejects a request for usage, then moves to the usable account
-// with the least 5-hour use per the TUI's usage caches (turnStream.ts). An
+// with the least 5-hour use per the TUI's usage caches, or the one the operator
+// picks when oc.json `claudeFailover` is `ask` (turnStream.ts). An
 // account's id is its resolved config dir, or `default` for the CLI's own
 // `~/.claude`, which spawns with the inherited environment.
 // ---------------------------------------------------------------------------
@@ -199,19 +200,22 @@ function seedFromCaches(ids: string[], now: number): void {
   }
 }
 
+/** A usable pool account and its cached 5-hour use in percent (undefined without a cache). */
+export type FailoverCandidate = { id: string; used?: number }
+
 /**
- * The usable account with the least 5-hour use, read from the usage caches now so limit marks are
- * fresh too. Ties and accounts without a cache keep rotation order after `from`.
+ * Usable accounts, least 5-hour use first, read from the usage caches now so limit marks are fresh
+ * too. Ties and accounts without a cache keep rotation order after `from`.
  */
-function bestUsable(ids: string[], from: string, now: number): string | undefined {
+function rankUsable(ids: string[], from: string, now: number): FailoverCandidate[] {
   const start = ids.indexOf(from) + 1
   const ranked = [...ids.slice(start), ...ids.slice(0, start)].flatMap((id) => {
     const cache = readUsageCache(id, now)
     if (cache?.fullUntil) markAccountLimited(id, cache.fullUntil, now)
-    return (limitedUntil.get(id) ?? 0) <= now ? [{ id, used: cache?.fiveHourUsed ?? Infinity }] : []
+    return (limitedUntil.get(id) ?? 0) <= now ? [{ id, used: cache?.fiveHourUsed }] : []
   })
-  // Two unknowns subtract to NaN; `|| 0` keeps them in rotation order.
-  return ranked.sort((a, b) => a.used - b.used || 0)[0]?.id
+  // Unknown use ranks last; two unknowns subtract to NaN, and `|| 0` keeps them in rotation order.
+  return ranked.sort((a, b) => (a.used ?? Infinity) - (b.used ?? Infinity) || 0)
 }
 
 /** The current account while usable, else the usable one with the least 5-hour use; undefined when all are limited. */
@@ -220,7 +224,8 @@ export function nextUsableAccount(ids: string[], now = Date.now()): string | und
   const usable = (id: string) => (limitedUntil.get(id) ?? 0) <= now
   if (currentAccount && ids.includes(currentAccount) && usable(currentAccount)) return currentAccount
   // A fresh pool starts at the first usable account; only a move off a limited one is ranked.
-  const next = currentAccount && ids.includes(currentAccount) ? bestUsable(ids, currentAccount, now) : ids.find(usable)
+  const next =
+    currentAccount && ids.includes(currentAccount) ? rankUsable(ids, currentAccount, now)[0]?.id : ids.find(usable)
   if (next && next !== currentAccount) {
     currentAccount = next
     persistPool(now)
@@ -279,16 +284,16 @@ export function turnAccount(
   return preferred
 }
 
-/**
- * The account a usage-rejected turn moves to; undefined when none is usable. A pinned chat's pin
- * moves with it and the global current account is untouched.
- */
-export function failoverAccount(sessionID: string | undefined, ids: string[], now = Date.now()): string | undefined {
-  const pin = sessionPin(sessionID, ids, now)
-  if (!pin) return nextUsableAccount(ids, now)
-  const next = bestUsable(ids, pin, now)
-  if (next && next !== pin) pinSessionAccount(sessionID!, next, ids, now)
-  return next
+/** Accounts a usage-rejected turn on `from` can move to, best first. Changes no pin or current account. */
+export function failoverCandidates(from: string, ids: string[], now = Date.now()): FailoverCandidate[] {
+  ensureLoaded(ids, now)
+  return rankUsable(ids, from, now).filter((candidate) => candidate.id !== from)
+}
+
+/** Move a failed-over turn's chat to `id`: a pinned chat's pin moves, otherwise the global current account. */
+export function applyFailoverChoice(sessionID: string | undefined, id: string, ids: string[], now = Date.now()) {
+  if (sessionPin(sessionID, ids, now)) pinSessionAccount(sessionID!, id, ids, now)
+  else setCurrentAccount(id, ids, now)
 }
 
 /** Pin a session to a pool account, or clear its pin with `undefined`. The global current account is untouched. */

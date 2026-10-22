@@ -1,6 +1,8 @@
-v0.2.288 sendWallaby [patch > numbered subagent labels]
+v0.2.289 homiesElection [feat. > Claude failover can ask which account]
 
-prompt footer:
-When several running subagents share a name, the footer now numbers them, like "Subagent-1 2%, Subagent-2 3%, Subagent-3 4%", instead of repeating the same name. The oldest gets -1, the newest is still listed first, and entries are separated by commas instead of dots. Names that appear once stay as they are, and a lone subagent still gets the detailed line. Numbers count only the subagents running right now, so they can shift when one finishes.
+claude accounts:
+A new palette entry, "Claude account failover", chooses what happens when a Claude turn hits an account's usage limit. Auto, the default, works as before: the turn continues on the account with the most 5-hour usage left. Ask shows a question inside the running turn that lists your other usable accounts, best first with their 5-hour usage, plus Stop, and the turn continues on the account you pick. The entry shows when two or more accounts are configured.
 
-Under the hood: new numberDuplicateLabels helper in tui util/session.ts; subagentUsage in prompt/index.tsx sorts oldest first, drops entries without a context percent before numbering, then reverses. Checks: bun test tui contextUsage (7/7). The push runs prePush.
+Stop, dismissing the question, or pressing Esc ends the turn on the limit and keeps the conversation, so auto-resume picks it back up after the reset if it is on. Subagents and agents that cannot ask questions keep switching automatically. In Auto, a chat that is not pinned to an account now always moves to the best-ranked account, even when another chat already moved the global account elsewhere.
+
+Under the hood: the setting is oc.json claudeFailover (auto or ask), read fresh at each failover so it needs no config reload. accounts.ts splits failoverAccount into failoverCandidates (ranked, no side effects) and applyFailoverChoice; turnStream asks through oc's question tool in-stream (new failoverQuestion.ts) and keeps the form out of Claude's history via the account_failover_ id prefix. The host tool executor now carries its tool names. FORK.md documents Ask mode. Checks: bun test accountPool + failoverQuestion (25/25), tsgo typecheck in opencode and tui. The Ask flow in a live turn is not covered by tests yet. The push runs prePush.

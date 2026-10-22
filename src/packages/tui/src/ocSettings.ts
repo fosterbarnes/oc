@@ -32,6 +32,8 @@ export function readOcConfig(): {
   reviveSourceChosen: boolean
   // A saved source folder (`revive.build` object): /revive-single needs one.
   reviveBuild: boolean
+  // `ask`: a Claude usage limit mid-turn asks which account to continue on (opencode `turnStream`).
+  claudeFailover: "auto" | "ask"
 } {
   const fallbackDir = os.homedir()
   const fallbackSort = "name"
@@ -45,6 +47,7 @@ export function readOcConfig(): {
         homeDirSort?: unknown
         server?: { startOnWindowsUserStart?: unknown }
         revive?: { path?: unknown; build?: unknown }
+        claudeFailover?: unknown
       }
     }
     const parsed = parse(ocConfigPath())
@@ -60,6 +63,7 @@ export function readOcConfig(): {
     const revivePath = typeof merged.revive?.path === "string" ? merged.revive.path.trim() : ""
     const reviveSourceChosen = merged.revive?.build !== undefined
     const reviveBuild = typeof merged.revive?.build === "object" && merged.revive.build !== null
+    const claudeFailover = merged.claudeFailover === "ask" ? "ask" : "auto"
     return {
       executable,
       ocDir,
@@ -69,6 +73,7 @@ export function readOcConfig(): {
       revivePath,
       reviveSourceChosen,
       reviveBuild,
+      claudeFailover,
     }
   } catch {
     return {
@@ -80,12 +85,20 @@ export function readOcConfig(): {
       revivePath: "",
       reviveSourceChosen: false,
       reviveBuild: false,
+      claudeFailover: "auto",
     }
   }
 }
 
 export function persistOcConfig(
-  key: "ocDir" | "homeDir" | "homeDirSort" | "sessionModel" | "sessionAgent" | "serverStartOnWindowsUserStart",
+  key:
+    | "ocDir"
+    | "homeDir"
+    | "homeDirSort"
+    | "sessionModel"
+    | "sessionAgent"
+    | "serverStartOnWindowsUserStart"
+    | "claudeFailover",
   value: string,
   toast: ToastContext,
 ) {

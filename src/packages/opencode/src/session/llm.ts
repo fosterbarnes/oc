@@ -209,7 +209,10 @@ const live: Layer.Layer<
             ),
           }
         }
-        hostToolExecutors.set(input.sessionID, executeHostTool)
+        hostToolExecutors.set(
+          input.sessionID,
+          Object.assign(executeHostTool, { tools: new Set(Object.keys(prepared.tools)) }),
+        )
         yield* Effect.addFinalizer(() =>
           Effect.sync(() => {
             if (hostToolExecutors.get(input.sessionID) === executeHostTool) hostToolExecutors.delete(input.sessionID)

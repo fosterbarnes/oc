@@ -40,11 +40,13 @@ import {
   type AccountBlockKind,
 } from "./cliEvents.js"
 import {
+  applyFailoverChoice,
   BASE_PROVIDER_ID,
   canonicalAccountId,
   earliestLimitedUntil,
-  failoverAccount,
+  failoverCandidates,
   markAccountLimited,
+  type FailoverCandidate,
   poolAccountIds,
   poolAccountLabel,
   poolConfigDir,
@@ -76,6 +78,9 @@ import {
 import { appendExchangeText, currentExchangeHash } from "./sessionSync.js"
 import { reportUsageObservation } from "@/provider/usage-observations.js"
 import { ScheduledResume } from "@/session/scheduledResume.js"
+import { OcConfig } from "@/config/oc.js"
+import { failoverQuestion } from "./failoverQuestion.js"
+import { ACCOUNT_FAILOVER_TOOL_CALL_PREFIX } from "./messageBuilder.js"
 import { log } from "./logger.js"
 import { claudeSteerSinks, hostToolExecutors, type HostToolExecutor, type HostToolResult } from "./shared.js"
 import { PROXY_TOOL_PREFIX, proxyToolResult, type ProxyToolResult } from "./proxyMcp.js"
@@ -175,8 +180,10 @@ class ClaudeTurn {
   /** Envelope this turn sends; replaced by the catch-up after an account switch. */
   private userMsg: string
   private account: string
-  /** Next pool account, set by a usage rejection; the rejected turn's tail is dropped until its `result`. */
-  private switchTo: string | undefined
+  /** Failover accounts, best first, set by a usage rejection; the rejected tail is dropped until its `result`. */
+  private switchTo: FailoverCandidate[] | undefined
+  /** No account was picked after a rejection: this turn ends on the limit instead of switching. */
+  private failoverDeclined = false
   /** A usage rejection found no usable account; schedule a resume when the turn ends. Cleared by a later switch. */
   private allLimited = false
   /** Tools Claude called this turn, for the catch-up after an account switch. */
@@ -496,27 +503,26 @@ class ClaudeTurn {
   private queueAccountSwitch(resetsAtMs: number | undefined, rateLimitType: string | undefined): boolean {
     markAccountLimited(this.account, resetsAtMs)
     if (this.turn.compactionMode) return false
-    const ids = poolAccountIds(this.config.accounts)
-    // A pinned chat fails over too; its pin follows, and the global current account is not touched.
-    const next = failoverAccount(this.turn.affinity, ids)
-    if (!next || next === this.account) {
+    const choices = this.failoverDeclined ? [] : failoverCandidates(this.account, poolAccountIds(this.config.accounts))
+    if (!choices.length) {
       this.allLimited = true
       return false
     }
     log.notice("claude account hit its usage limit; switching accounts", {
       sessionKey: this.sk,
       from: this.account,
-      to: next,
+      to: choices[0]!.id,
       rateLimitType,
     })
-    this.switchTo = next
+    this.switchTo = choices
     this.allLimited = false
     return true
   }
 
-  private runPendingSwitch(): boolean {
+  /** `resume` finishes the rejected turn where it stopped when no account is picked. */
+  private runPendingSwitch(resume: () => void): boolean {
     if (!this.switchTo) return false
-    void this.switchAccount().catch((err) => {
+    void this.switchAccount(resume).catch((err) => {
       const message = err instanceof Error ? err.message : String(err)
       log.error("account switch failed", { sessionKey: this.sk, error: message })
       if (!this.closed) this.failTurn(`Switching Claude accounts failed: ${message}`)
@@ -525,24 +531,36 @@ class ClaudeTurn {
   }
 
   /**
-   * Retire the limited account's child and conversation, then send this
-   * turn again on the next account as a fresh conversation, with the
-   * existing catch-up plus what this turn already did (so tools that ran are
-   * not run again). Another rejection there switches again; every switch
-   * marks an account limited, so the chain ends once all of them are.
+   * Pick the next account (or let the operator pick), retire the limited
+   * account's child and conversation, then send this turn again on it as a
+   * fresh conversation, with the existing catch-up plus what this turn
+   * already did (so tools that ran are not run again). Another rejection
+   * there switches again; every switch marks an account limited, so the chain
+   * ends once all of them are. With no pick the child and conversation stay,
+   * so auto-resume continues them after the reset.
    */
-  private async switchAccount() {
-    const next = this.switchTo!
+  private async switchAccount(resume: () => void) {
+    const choices = this.switchTo!
     this.switchTo = undefined
-    this.allLimited = false
-    const progress = this.progressSummary()
-    // Unread steers die with the retired child; oc's loop sends them after this turn.
-    this.steering.clear()
     this.clearStartWatchdog()
+    this.clearResultFallback()
     // Detach first: the retired child's close is not this turn ending.
     this.lineEmitter.off("line", this.onLine)
     this.lineEmitter.off("close", this.onClose)
     this.proc.off("error", this.onProcError)
+    const next = await this.pickAccount(choices)
+    if (this.closed) return
+    if (!next || this.autoContinue.aborted) {
+      this.failoverDeclined = true
+      this.allLimited = true
+      if (this.activeProcess) this.attach(this.activeProcess)
+      return resume()
+    }
+    applyFailoverChoice(this.turn.affinity, next, poolAccountIds(this.config.accounts))
+    this.allLimited = false
+    const progress = this.progressSummary()
+    // Unread steers die with the retired child; oc's loop sends them after this turn.
+    this.steering.clear()
     await deleteActiveProcessAndWait(this.sk)
     deleteClaudeSessionId(this.sk)
     if (this.closed) return
@@ -582,6 +600,63 @@ class ClaudeTurn {
     const text = this.out.shown.trim()
     const tools = this.toolLog.length ? `Tool calls you made:\n${this.toolLog.join("\n")}` : ""
     return [text && `Your reply so far:\n${text}`, tools].filter(Boolean).join("\n\n")
+  }
+
+  /** The account to fail over to: the best-ranked one, or the operator's pick when `claudeFailover` is `ask`. */
+  private async pickAccount(choices: FailoverCandidate[]): Promise<string | undefined> {
+    const best = choices[0]!.id
+    const mode = await OcConfig.read().then(
+      (settings) => settings.claudeFailover,
+      (error) => {
+        log.warn("cannot read oc.json; Claude failover stays automatic", { error: String(error) })
+        return undefined
+      },
+    )
+    if (mode !== "ask") return best
+    // Subagents and agents without `question` cannot ask; they switch automatically.
+    const execute = hostToolExecutors.get(this.turn.affinity)
+    if (!execute?.tools?.has("question")) return best
+    return this.askFailover(execute, choices)
+  }
+
+  /**
+   * Ask the operator in-stream with oc's question tool, recorded as a provider-executed call. Its
+   * `account_failover_` id keeps it out of Claude's history (messageBuilder.ts). Stop, a dismissal,
+   * an abort, or a typed answer that names no account picks nothing.
+   */
+  private async askFailover(execute: HostToolExecutor, choices: FailoverCandidate[]) {
+    const toolCallId = `${ACCOUNT_FAILOVER_TOOL_CALL_PREFIX}${Date.now()}`
+    const question = failoverQuestion(poolAccountLabel(this.account), choices)
+    this.out.enqueue({ type: "tool-input-start", id: toolCallId, toolName: "question", providerExecuted: true })
+    this.out.enqueue({
+      type: "tool-call",
+      toolCallId,
+      toolName: "question",
+      input: JSON.stringify(question.input),
+      providerExecuted: true,
+    })
+    this.inStreamCalls++
+    const answer = await execute("question", question.input, toolCallId, this.options.abortSignal).then(
+      (result) =>
+        result.denied === undefined ? (result.metadata?.answers as string[][] | undefined)?.[0]?.[0] : undefined,
+      (error) => {
+        log.info("claude failover question ended without an answer", { sessionKey: this.sk, error: String(error) })
+        return undefined
+      },
+    )
+    this.inStreamCalls--
+    const next = answer === undefined ? undefined : question.pick(answer)
+    if (!this.closed) {
+      const output = next ? `Continuing on ${poolAccountLabel(next)}` : "Stopped: waiting for the reset"
+      this.out.enqueue({
+        type: "tool-result",
+        toolCallId,
+        toolName: "question",
+        result: { output, title: "Claude account limit", metadata: { answers: answer ? [[answer]] : [] } },
+        providerExecuted: true,
+      })
+    }
+    return next
   }
 
   /**
@@ -1139,7 +1214,7 @@ class ClaudeTurn {
     this.beginTextAccountSwitch(msg)
     // An aborted turn ends here; it must not restart on another account.
     if (this.switchTo && (this.autoContinue.aborted || this.cancelled)) this.switchTo = undefined
-    if (this.runPendingSwitch()) return
+    if (this.runPendingSwitch(() => this.onResult(msg))) return
     if (msg.session_id) setClaudeSessionId(this.sk, msg.session_id, this.account)
 
     // Some CLI failures carry their only readable text in `result.result`. Others (API errors,
@@ -1566,7 +1641,7 @@ class ClaudeTurn {
     // The proxy requests behind pending calls have no one to answer them now.
     this.rejectPendingProxyCalls("Claude CLI subprocess closed before pending tool calls were resolved")
     // The limited account's child may exit right after its limit reply, before any `result`.
-    if (this.switchTo && !this.autoContinue.aborted && this.runPendingSwitch()) return
+    if (this.switchTo && !this.autoContinue.aborted && this.runPendingSwitch(() => this.onClose())) return
     // An abort is not a crash: the CLI may exit before its interrupt result lands.
     const crashed = !this.turnCompleted && !this.autoContinue.aborted
     this.closed = true
