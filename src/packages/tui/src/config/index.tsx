@@ -84,6 +84,9 @@ export const Info = Schema.Struct({
   sidebar_button_style: Schema.optional(Schema.Literals(["minimal", "outlined"])).annotate({
     description: "Sidebar button style: minimal (default) or outlined",
   }),
+  sidebar_buttons: Schema.optional(Schema.Array(Schema.String)).annotate({
+    description: "Sidebar buttons: palette command names in display order; omit for the defaults",
+  }),
   keybind_preset: Schema.optional(Schema.Literals(TuiKeybindPreset.Names)).annotate({
     description: "Keybind layout: 'oc' (default) or 'opencode' (stock OpenCode keys)",
   }),
@@ -116,6 +119,13 @@ export const Info = Schema.Struct({
 })
 export type Info = Schema.Schema.Type<typeof Info>
 
+export const SIDEBAR_BUTTONS_DEFAULT: readonly string[] = [
+  "session.list",
+  "command.palette.show",
+  "oc.settings_palette",
+  "oc.session_subagents",
+]
+
 export type KeybindPreset = (typeof TuiKeybindPreset.Names)[number]
 export type SidebarButtonStyle = NonNullable<Info["sidebar_button_style"]>
 export type SubagentTabsSettings = { click: "inline" | "tab"; auto_open: boolean; return_to_parent: boolean }
@@ -125,6 +135,7 @@ export type Resolved = Omit<
   | "attention"
   | "keybind_preset"
   | "sidebar_button_style"
+  | "sidebar_buttons"
   | "subagent_tabs"
   | "palette_keys"
   | "keybinds"
@@ -137,6 +148,7 @@ export type Resolved = Omit<
 > & {
   keybind_preset: KeybindPreset
   sidebar_button_style: SidebarButtonStyle
+  sidebar_buttons: readonly string[]
   subagent_tabs: SubagentTabsSettings
   palette_keys: Record<string, string>
   smooth_streaming: boolean
@@ -144,6 +156,8 @@ export type Resolved = Omit<
   auto_confirm_updates: boolean
   setKeybindPreset: (preset: KeybindPreset) => void
   setSidebarButtonStyle: (style: SidebarButtonStyle) => void
+  // undefined restores SIDEBAR_BUTTONS_DEFAULT.
+  setSidebarButtons: (names: readonly string[] | undefined) => void
   setSmoothStreaming: (on: boolean) => void
   setDailyTheme: (on: boolean) => void
   setAutoConfirmUpdates: (on: boolean) => void
@@ -181,6 +195,7 @@ export function resolve(input: Info, options: ResolveOptions): Resolved {
   const [sidebarButtonStyle, setSidebarButtonStyle] = createSignal<SidebarButtonStyle>(
     input.sidebar_button_style ?? "minimal",
   )
+  const [sidebarButtons, setSidebarButtons] = createSignal<readonly string[] | undefined>(input.sidebar_buttons)
   const [subagentTabs, setSubagentTabs] = createSignal<SubagentTabsSettings>({
     click: input.subagent_tabs?.click ?? "inline",
     auto_open: input.subagent_tabs?.auto_open ?? false,
@@ -204,6 +219,10 @@ export function resolve(input: Info, options: ResolveOptions): Resolved {
       return sidebarButtonStyle()
     },
     setSidebarButtonStyle,
+    get sidebar_buttons() {
+      return sidebarButtons() ?? SIDEBAR_BUTTONS_DEFAULT
+    },
+    setSidebarButtons,
     get subagent_tabs() {
       return subagentTabs()
     },

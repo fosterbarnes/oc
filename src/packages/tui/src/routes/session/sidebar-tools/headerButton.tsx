@@ -8,6 +8,7 @@ export function HeaderButton(props: {
   color: ColorInput
   hoverColor: ColorInput
   onClick: () => void
+  onRightClick?: () => void
 }) {
   const [hovered, setHovered] = createSignal(false)
   const color = () => (hovered() ? props.hoverColor : props.color)
@@ -29,6 +30,7 @@ export function HeaderButton(props: {
       onMouseOut={() => setHovered(false)}
       onMouseUp={(event) => {
         if (event.button === 0) props.onClick()
+        if (event.button === 2) props.onRightClick?.()
       }}
     >
       <Show when={!props.outlined}>

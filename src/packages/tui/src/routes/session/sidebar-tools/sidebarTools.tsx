@@ -10,16 +10,16 @@ import { useSDK } from "../../../context/sdk"
 import { useKV } from "../../../context/kv"
 import { useTuiConfig } from "../../../config"
 import { HeaderButton } from "./headerButton"
-import { DialogSessionSubagents, sessionDisabled } from "../../../component/dialog-session-subagents"
+import { sessionDisabled } from "../../../component/dialog-session-subagents"
+import { toggleSidebarButton } from "../../../sidebarButtons"
 import { SidebarToggle } from "../../../feature-plugins/sidebar/toggle"
 import { useTheme } from "../../../context/theme"
 import { useTuiPaths } from "../../../context/runtime"
 import { useLocal } from "../../../context/local"
 import { usePromptRef } from "../../../context/prompt"
-import { useDialog } from "../../../ui/dialog"
 import { useToast } from "../../../ui/toast"
 import { usePluginRuntime } from "../../../plugin/runtime"
-import { useOpencodeKeymap } from "../../../keymap"
+import { useKeymapSelector, useOpencodeKeymap } from "../../../keymap"
 import { InstallationDisplayVersion, InstallationVersion } from "@opencode-ai/core/installation/version"
 import {
   defaultScriptSettings,
@@ -183,7 +183,6 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
   const tuiConfig = useTuiConfig()
   const local = useLocal()
   const promptRef = usePromptRef()
-  const dialog = useDialog()
   const toast = useToast()
   const keymap = useOpencodeKeymap()
   const pluginRuntime = usePluginRuntime()
@@ -715,38 +714,49 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
     if (off.includes("*")) return "Subagents: all off"
     return off.length > 0 ? `Subagents: ${off.length} off` : "Subagents"
   }
+  // Pinned names whose command is not registered yet (e.g. a late plugin) render nothing but stay saved.
+  const buttonCommands = useKeymapSelector(
+    (keymap) =>
+      new Map(
+        keymap.getCommandEntries({ visibility: "registered" }).map((entry) => [entry.command.name, entry.command]),
+      ),
+  )
+  const buttonLabel = (name: string, title: unknown) => {
+    switch (name) {
+      case "session.list":
+        return "Switch Session"
+      case "command.palette.show":
+        return "Command Palette"
+      case "oc.settings_palette":
+        return "oc Palette"
+      case "oc.session_subagents":
+        return subagentsLabel()
+    }
+    return typeof title === "string" ? title : name
+  }
 
   return (
     <>
       <box flexDirection="column" gap={0}>
-        <HeaderButton
-          value="Switch Session"
-          outlined={outlinedButtons()}
-          color={headerButtonColor}
-          hoverColor={hoverColor}
-          onClick={() => keymap.dispatchCommand("session.list")}
-        />
-        <HeaderButton
-          value="Command Palette"
-          outlined={outlinedButtons()}
-          color={headerButtonColor}
-          hoverColor={hoverColor}
-          onClick={() => keymap.dispatchCommand("command.palette.show")}
-        />
-        <HeaderButton
-          value="oc Palette"
-          outlined={outlinedButtons()}
-          color={headerButtonColor}
-          hoverColor={hoverColor}
-          onClick={() => keymap.dispatchCommand("oc.settings_palette")}
-        />
-        <HeaderButton
-          value={subagentsLabel()}
-          outlined={outlinedButtons()}
-          color={headerButtonColor}
-          hoverColor={hoverColor}
-          onClick={() => dialog.replace(() => <DialogSessionSubagents sessionID={props.sessionID} />)}
-        />
+        <For each={tuiConfig.sidebar_buttons}>
+          {(name) => (
+            <Show when={buttonCommands().get(name)}>
+              {(command) => {
+                const label = () => buttonLabel(name, command().title)
+                return (
+                  <HeaderButton
+                    value={label()}
+                    outlined={outlinedButtons()}
+                    color={headerButtonColor}
+                    hoverColor={hoverColor}
+                    onClick={() => keymap.dispatchCommand(name)}
+                    onRightClick={() => toggleSidebarButton(tuiConfig, toast, name, label())}
+                  />
+                )
+              }}
+            </Show>
+          )}
+        </For>
         <box flexDirection={outlinedButtons() ? "column" : "row"} gap={outlinedButtons() ? 0 : 1}>
           <HeaderButton
             value={modelLabel()}

@@ -185,6 +185,33 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-21 (~21:59) - v0.2.290 organicThugs - Custom sidebar buttons from either palette - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation (plan `~/.config/opencode/plans/2026-10-21-custom-sidebar-buttons.md`); completed
+- Version: 0.2.290
+- Added tui config `sidebar_buttons?: string[]` + `SIDEBAR_BUTTONS_DEFAULT` (`config/index.tsx`); absent = defaults, `[]` honored, `setSidebarButtons(undefined)` resets. `persistTuiSetting` accepts `["sidebar_buttons"]`; `undefined` deletes the key.
+- Added `src/sidebarButtons.ts`: `toggleSidebarButton`, `resetSidebarButtons` (set + persist + toast); shared by palette, sidebar, reset entry.
+- Added palette modal command `palette.toggle_sidebar` (`alt+p`, keybind `palette_toggle_sidebar`) in `command-palette.tsx`; covers ctrl+p and ctrl+o (same dialog). Pinned entries get `◆` in footer.
+- Changed `sidebarTools.tsx` header buttons to `<For>` over `sidebar_buttons`; commands from `useKeymapSelector` map of registered commands; unregistered names skipped, not pruned. Built-in label table keeps "Switch Session"/"Subagents: N off". Subagents button now dispatches `oc.session_subagents`. Removed unused `useDialog`/`DialogSessionSubagents` imports.
+- Added `HeaderButton.onRightClick` (button 2 on mouse up); sidebar right-click removes the button. Needed because `command.palette.show`/`oc.settings_palette` are hidden from the palette.
+- Added oc palette entry `oc.sidebar_buttons_reset` "Reset sidebar buttons" (`/sidebarReset`, Layout).
+- Kept model/variant row fixed.
+- Docs: wiki `Sidebar.md`, `Configuration.md`; `FORK.md` sidebar row; regenerated `docs/keybinds.md` (`bun packages/tui/script/keybindDocs.ts`, new alt+p row; caught in /pass).
+- Verification: `bun test test/config.test.tsx` 19 pass (new sidebar_buttons case); `bun run typecheck` exit 0 in `packages/tui`; `keybindDocs.ts --check` exit 0. Live TUI check not run.
+- MISTAKE: fixed a typecheck error in `sidebarTools.tsx` with `sed -i` instead of Edit. Rule: project file edits go through file tools.
+- MISTAKE: missed `docs/keybinds.md` regen when adding a keybind Definition. Rule: any `keybind.ts` Definitions change runs `keybindDocs.ts`.
+
+### User
+Sidebar
+- You can add any Command Palette or oc Palette entry as a sidebar button: highlight it and press alt+p, and press alt+p again to remove it.
+- Entries already on the sidebar show a ◆ in the palette.
+- Right-clicking a sidebar button removes it.
+- "Reset sidebar buttons" in the oc palette (or /sidebarReset) brings back Switch Session, Command Palette, oc Palette, and Subagents.
+- The button order is saved as `sidebar_buttons` in tui.jsonc and can be edited by hand.
+
+---
+
 ## 2026-10-21 (~21:43) - v0.2.289 homiesElection - Claude failover can ask which account to continue on - Claude Opus 5.5, low effort; Implementation
 
 ### Agent

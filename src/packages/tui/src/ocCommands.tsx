@@ -29,6 +29,7 @@ import { bootstrapSession, listHomeDirs } from "./ocNewSession"
 import { IMAGE_PASTE_PREVIEW_KEY, PASTE_SUMMARY_KEY, PROMPT_TAB_KEY, type PromptTabAction } from "./prompt/part"
 import { dailyTheme, dayNumber } from "./theme/daily"
 import { persistAgentModel, persistOcConfig, persistTuiSetting, readOcConfig, resolveOcDirectory } from "./ocSettings"
+import { resetSidebarButtons } from "./sidebarButtons"
 import { useDialog } from "./ui/dialog"
 import { DialogAlert } from "./ui/dialog-alert"
 import { DialogPrompt } from "./ui/dialog-prompt"
@@ -567,6 +568,18 @@ export function createOcCommands(input: {
               }}
             />
           ))
+        },
+      },
+      {
+        name: "oc.sidebar_buttons_reset",
+        title: "Reset sidebar buttons",
+        category: "oc",
+        group: "Layout",
+        desc: "Restore Switch Session, Command Palette, oc Palette, Subagents",
+        slashName: "sidebarReset",
+        run: () => {
+          dialog.clear()
+          resetSidebarButtons(tuiConfig, toast)
         },
       },
       {

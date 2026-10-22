@@ -8,6 +8,7 @@ import {
   LeaderTimeoutDefault,
   PluginSpec,
   resolve,
+  SIDEBAR_BUTTONS_DEFAULT,
   TuiConfigProvider,
   type Info as TuiConfigInfo,
   useTuiConfig,
@@ -32,6 +33,19 @@ test("switches sidebar button style live without mutating input", () => {
   expect(config.sidebar_button_style).toBe("minimal")
   expect(input.sidebar_button_style).toBe("outlined")
   expect(resolve({}, { terminalSuspend: true }).sidebar_button_style).toBe("minimal")
+})
+
+test("sidebar buttons default when absent and switch live without mutating input", () => {
+  expect(resolve({}, { terminalSuspend: true }).sidebar_buttons).toEqual(SIDEBAR_BUTTONS_DEFAULT)
+  expect(() => decodeInfo({ sidebar_buttons: "session.list" })).toThrow()
+  const input = decodeInfo({ sidebar_buttons: ["session.list"] })
+  const config = resolve(input, { terminalSuspend: true })
+  expect(config.sidebar_buttons).toEqual(["session.list"])
+  config.setSidebarButtons([])
+  expect(config.sidebar_buttons).toEqual([])
+  expect(input.sidebar_buttons).toEqual(["session.list"])
+  config.setSidebarButtons(undefined)
+  expect(config.sidebar_buttons).toEqual(SIDEBAR_BUTTONS_DEFAULT)
 })
 
 test("resolves subagent tab defaults and switches them live without mutating input", () => {

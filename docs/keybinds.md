@@ -64,6 +64,7 @@ Bold marks keys where the oc layout differs from opencode. `-` means unbound.
 | Action | oc | opencode |
 |---|---|---|
 | Set hotkey for the selected palette command | `ctrl+k` | `ctrl+k` |
+| Add or remove the selected palette command from the sidebar | `alt+p` | `alt+p` |
 
 ### Oc
 

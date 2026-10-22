@@ -12,6 +12,8 @@ import {
 import { useTuiConfig } from "../config"
 import { useSync } from "../context/sync"
 import { DialogHotkey } from "./dialogHotkey"
+import { toggleSidebarButton } from "../sidebarButtons"
+import { useToast } from "../ui/toast"
 
 type PaletteCommandEntry = ReturnType<OpenTuiKeymap["getCommandEntries"]>[number]
 
@@ -67,6 +69,7 @@ export function CommandPaletteDialog(props: { category?: string } = {}) {
   const config = useTuiConfig()
   const sync = useSync()
   const dialog = useDialog()
+  const toast = useToast()
   const keymap = useOpencodeKeymap()
   const entries = useKeymapSelector((keymap: OpenTuiKeymap) => {
     const query = {
@@ -87,12 +90,16 @@ export function CommandPaletteDialog(props: { category?: string } = {}) {
       bindings: registeredBindings.get(entry.command.name) ?? entry.bindings,
     }))
   })
-  const options = createMemo(() =>
-    entries().map((entry) => ({
+  const options = createMemo(() => {
+    const pinned = new Set(config.sidebar_buttons)
+    return entries().map((entry) => ({
       title: typeof entry.command.title === "string" ? entry.command.title : entry.command.name,
       description: typeof entry.command.desc === "string" ? entry.command.desc : undefined,
       category: paletteHeading(entry.command, props.category),
-      footer: formatKeyBindings(entry.bindings, config),
+      // ◆ marks commands pinned to the sidebar.
+      footer: [pinned.has(entry.command.name) ? "◆" : "", formatKeyBindings(entry.bindings, config)]
+        .filter(Boolean)
+        .join(" "),
       value: entry.command.name,
       suggested: isSuggestedPaletteCommand(entry),
       onSelect: (dialog: DialogContext) => {
@@ -100,8 +107,8 @@ export function CommandPaletteDialog(props: { category?: string } = {}) {
         keymap.dispatchCommand(entry.command.name)
         if (dialog.stack.at(-1) === previous) dialog.clear()
       },
-    })),
-  )
+    }))
+  })
 
   let ref: DialogSelectRef<string>
   useBindings(() => ({
@@ -121,8 +128,18 @@ export function CommandPaletteDialog(props: { category?: string } = {}) {
           })
         },
       },
+      {
+        name: "palette.toggle_sidebar",
+        title: "Add or remove the selected command from the sidebar",
+        category: "Dialog",
+        run() {
+          const selected = ref?.selected
+          if (!selected?.value) return
+          toggleSidebarButton(config, toast, selected.value, selected.title)
+        },
+      },
     ],
-    bindings: config.keybinds.gather("palette", ["palette.set_hotkey"]),
+    bindings: config.keybinds.gather("palette", ["palette.set_hotkey", "palette.toggle_sidebar"]),
   }))
   const list = () => {
     if (ref?.filter) return options()

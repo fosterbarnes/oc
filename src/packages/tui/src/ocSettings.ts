@@ -164,8 +164,9 @@ export function persistTuiSetting(
   key:
     | ["keybind_preset" | "sidebar_button_style" | "smooth_streaming" | "daily_theme" | "auto_confirm_updates"]
     | ["subagent_tabs", "click" | "auto_open" | "return_to_parent"]
-    | ["palette_keys"],
-  value: string | boolean | Record<string, string> | undefined,
+    | ["palette_keys"]
+    | ["sidebar_buttons"],
+  value: string | boolean | Record<string, string> | readonly string[] | undefined,
 ) {
   persistTuiSettingQueue = persistTuiSettingQueue
     .then(() => {
