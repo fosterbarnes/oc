@@ -88,7 +88,7 @@
                                     <Grid HorizontalAlignment="Left">
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="Auto" SharedSizeGroup="TaggedLabel" />
-                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="Auto" SharedSizeGroup="TagBadge" />
                                         </Grid.ColumnDefinitions>
                                         <CheckBox Content="{Binding Label}" Focusable="False">
                                             <CheckBox.Style>
@@ -111,7 +111,8 @@
                                                 CornerRadius="{StaticResource SmallCornerRadius}"
                                                 ToolTip="{Binding TagToolTip}"
                                                 Visibility="{Binding HasTag, Converter={StaticResource BooleanToVisibility}}">
-                                            <TextBlock FontSize="11"
+                                            <TextBlock HorizontalAlignment="Center"
+                                                       FontSize="11"
                                                        Foreground="{StaticResource FocusBrush}"
                                                        Text="{Binding TagText}" />
                                         </Border>
@@ -171,11 +172,6 @@
         </Border>
 
         <DockPanel x:Name="BottomBar" Grid.Row="1" Margin="{StaticResource PageMargin}" LastChildFill="True">
-            <Button x:Name="CloseButton"
-                    DockPanel.Dock="Right"
-                    Style="{StaticResource NeutralButtonStyle}"
-                    Content="Close"
-                    Click="CloseButton_Click" />
             <Button x:Name="InstallButton"
                     DockPanel.Dock="Right"
                     Content="Install selected"

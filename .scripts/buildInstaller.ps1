@@ -7,8 +7,9 @@ if ($Help) {
     Write-Host @'
 Usage: buildInstaller.ps1 [-h]
 
-Builds the oc setup exe into .installer\Output from the dist binaries. ocSetup.exe is published
-self-contained (it bundles .NET), so the setup needs nothing preinstalled.
+Builds the oc setup exe into .installer\Output from the dist binaries and removes older setup
+exes there. ocSetup.exe is published self-contained (it bundles .NET), so the setup needs
+nothing preinstalled.
 Run .scripts\build.ps1 -Release first.
 '@
     return
@@ -71,5 +72,14 @@ runNativeCommand dotnet @(
 ) 'dotnet publish ocSetup'
 $isccArgs = @($isccDefines) + "/DOcSetupExe=$($publishFolder -replace '\\','/')/ocSetup.exe"
 runNativeCommand $isccPath (@($isccArgs) + "$installerFolder\oc.installer.iss") 'ISCC'
+
+# Only after a successful build: pushRelease.ps1 uploads every exe in Output.
+$setupName = "oc_v${appVersion}_windows-x64-setup.exe"
+foreach ($oldSetup in Get-ChildItem -LiteralPath $installerOutput -File -Filter 'oc_v*_windows-x64-setup.exe') {
+    if ($oldSetup.Name -eq $setupName) { continue }
+    Remove-Item -LiteralPath $oldSetup.FullName -Force
+    if (Test-Path -LiteralPath $oldSetup.FullName) { throw "Could not remove old setup $($oldSetup.FullName)" }
+    Write-Host "Removed old setup $($oldSetup.Name)"
+}
 
 closeOut 3

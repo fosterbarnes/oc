@@ -1,15 +1,9 @@
-v0.2.293 theorizedStrem [feat. > Windows setup and dependency window]
-
-installer:
-oc now has a Windows setup exe. It installs oc for your user in %LOCALAPPDATA%\Programs\oc, adds it to PATH, creates Start menu and optional desktop shortcuts, and closes running oc windows before upgrading or uninstalling. One self-contained setup: nothing needs to be installed first.
+v0.2.294 cawfeeeeRafter [fix > setup tag rendering; patch > tag width]
 
 dependencies window:
-After setup, the oc dependencies window (also in the Start menu) lists PowerShell 7, Git, Node.js, Everything + es.exe, WezTerm, the Codex, Claude Code, and Cursor CLIs, and the Codex, Claude, and Cursor desktop apps. It shows what is already installed, tags PowerShell as Required and Git, Node.js, Everything, WezTerm, Codex CLI, and Claude Code CLI as Default, and installs the checked ones with live progress. Machine-wide installers ask for admin approval one at a time. A completion screen lists what installed or failed and offers to open oc. Once WezTerm is installed, the oc shortcuts open oc inside it.
-
-look:
-oc.exe and opencode.exe now carry the oc icon instead of Bun's.
+The window now draws with software rendering. In a VMware VM the Codex CLI row's "Default" tag was drawn as a clipped "Missing"; the code cannot produce that text, so this was a GPU text-rendering glitch. The Required and Default tags are now the same width with centered text. The dependency list no longer has a Close button; the window's X closes it, and the completion screen keeps its Close button.
 
 scripts:
-The developer install script now installs to %LOCALAPPDATA%\Programs\oc instead of Apps\opencode. .scripts\buildInstaller.ps1 builds the setup (needs Inno Setup 6.7+), and pushRelease.ps1 uploads it with the release.
+.scripts\buildInstaller.ps1 now removes older setup exes from .installer\Output after a successful build, so only the new setup remains and pushRelease.ps1 no longer uploads stale ones.
 
-Under the hood: a hidden oc oc deps list/install command drives the window from one dependency table (tui dependencies.ts); the existing PowerShell and desktop app update scripts gained a fresh-install mode, and other vendor installers are pinned by sha256 and/or Authenticode signer. The window is a small WPF app (.installer\ocSetup) with temporary debug logging still in. Checks run: bun test for dependencies plus the four update-script test files (44 pass), tui and opencode typecheck, dotnet build of the window (0 warnings), build.ps1 and buildInstaller.ps1 builds, and several fresh-VM installs by the user.
+Under the hood: dotnet build of the dependencies window passed with 0 warnings and 0 errors; buildInstaller.ps1 passed a PowerShell parse check but was not run. The Codex tag fix still needs a VM retest.

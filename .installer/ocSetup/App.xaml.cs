@@ -1,4 +1,6 @@
 using System.Windows;
+using System.Windows.Interop;
+using System.Windows.Media;
 using OcSetup.Helpers;
 
 namespace OcSetup;
@@ -18,6 +20,9 @@ public partial class App : Application
     {
         DebugLog.Write("OnStartup");
         DispatcherUnhandledException += (_, args) => Crash("dispatcher", args.Exception);
+        // GPU text rendering garbled the tags in a VMware VM (a "Default" tag drew "Missing").
+        // This small static window gains nothing from hardware rendering.
+        RenderOptions.ProcessRenderMode = RenderMode.SoftwareOnly;
         base.OnStartup(e);
     }
 
