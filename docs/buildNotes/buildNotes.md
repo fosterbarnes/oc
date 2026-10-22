@@ -185,6 +185,24 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-21 (~21:29) - v0.2.288 sendWallaby - Numbered subagent labels in prompt footer - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation (/imp after /spit); completed
+- Version: 0.2.288 sendWallaby
+- Added `numberDuplicateLabels` in `packages/tui/src/util/session.ts`: suffixes `-1`, `-2`... only to labels that repeat.
+- Changed `subagentUsage` in `packages/tui/src/component/prompt/index.tsx`: sort children oldest first, drop entries without percent, then number (so visible numbers run in order), reverse to newest first, separator `" . "` -> `", "`. Lone-subagent detailed line unchanged.
+- Risk: numbers are among currently running children; they can shift when one finishes.
+- Added helper test in `packages/tui/test/cli/tui/contextUsage.test.ts`.
+- Verification: `bun test test/cli/tui/contextUsage.test.ts` 7 pass, 0 fail. Live footer not checked.
+
+### User
+Prompt footer
+- When several subagents with the same name run at once, the footer now shows them as `Subagent-1 2%, Subagent-2 3%, Subagent-3 4%` instead of repeating the same name.
+- The oldest subagent gets -1, the newest is still listed first, and entries are separated by commas.
+
+---
+
 ## 2026-10-21 (~21:19) - v0.2.287 justinJellyfish - Quoted commands never run; chain progress shown - Claude Opus 5.5, low effort; Implementation
 
 ### Agent

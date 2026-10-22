@@ -1,9 +1,6 @@
-v0.2.287 justinJellyfish [fix > quoted commands; patch > chain progress]
+v0.2.288 sendWallaby [patch > numbered subagent labels]
 
-slash commands:
-A slash command inside quotes or a code fence is now plain text, for every command. Before, a command alone on a line inside a quoted multi-line example ('/pass, then /revive on its own line, then /push') ran, which restarted oc unexpectedly. Quotes count when they open after the start of the text, a space, or a bracket and close before the end, a space, or punctuation, so apostrophes like don't and it's never hide a command, and an unclosed quote hides nothing. Pasted text was already excluded.
+prompt footer:
+When several running subagents share a name, the footer now numbers them, like "Subagent-1 2%, Subagent-2 3%, Subagent-3 4%", instead of repeating the same name. The oldest gets -1, the newest is still listed first, and entries are separated by commas instead of dots. Names that appear once stay as they are, and a lone subagent still gets the detailed line. Numbers count only the subagents running right now, so they can shift when one finishes.
 
-revive chains:
-Each step of a chain such as /pass /revive /agent-push now shows a dim line under its message, like "step 1 of 3 . next /revive, /agent-push" or "step 3 of 3 . after /pass, /revive", and the revive divider names what is sent after it ("next /agent-push"). Before, each step showed only its own command, so the later steps looked dropped. Chains sent by older builds show no line.
-
-Under the hood: prompt/slash.ts finds quoted ranges once and both extractSlashCommands and extractChain skip commands inside them (extractChain now walks matches instead of split). The chain note carries step, total, done, and later in its metadata, and the revive mark carries next; util/revive.ts formats both. Docs: wiki Launching page and FORK.md. Checks: tui tsgo; bun test tui prompt slash, prompt part, and the new reviveChainLine test (17/17). This push is the third step of a live "/pass /revive /agent-push" chain. The push runs prePush.
+Under the hood: new numberDuplicateLabels helper in tui util/session.ts; subagentUsage in prompt/index.tsx sorts oldest first, drops entries without a context percent before numbering, then reverses. Checks: bun test tui contextUsage (7/7). The push runs prePush.

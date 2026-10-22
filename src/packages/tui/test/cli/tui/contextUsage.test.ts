@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test"
 import type { AssistantMessage, Message, Provider } from "@opencode-ai/sdk/v2"
 import { contextUsage } from "../../../src/util/contextUsage"
-import { formatSubagentUsage, subagentLabel } from "../../../src/util/session"
+import { formatSubagentUsage, numberDuplicateLabels, subagentLabel } from "../../../src/util/session"
 
 const assistant = (output: number, modelID = "sonnet", variant?: string): AssistantMessage => ({
   id: `msg_${output}`,
@@ -60,6 +60,16 @@ test("ignores replies at or after the revert boundary", () => {
 test("labels a child session from the task tool title", () => {
   expect(subagentLabel("Find callers (@explore subagent)")).toBe("Explore")
   expect(subagentLabel("Child session - 2026-10-18T00:00:00.000Z")).toBe("Subagent")
+})
+
+test("numbers only repeated subagent labels, in order", () => {
+  expect(numberDuplicateLabels(["Subagent", "Subagent", "Subagent"])).toEqual([
+    "Subagent-1",
+    "Subagent-2",
+    "Subagent-3",
+  ])
+  expect(numberDuplicateLabels(["Subagent", "Explore", "Subagent"])).toEqual(["Subagent-1", "Explore", "Subagent-2"])
+  expect(numberDuplicateLabels(["Explore", "General"])).toEqual(["Explore", "General"])
 })
 
 test("formats a lone subagent's usage line", () => {

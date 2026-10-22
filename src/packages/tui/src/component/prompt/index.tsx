@@ -55,7 +55,7 @@ import { useRenderer, useTerminalDimensions, type JSX } from "@opentui/solid"
 import type { AssistantMessage, FilePart, UserMessage } from "@opencode-ai/sdk/v2"
 import { Locale } from "../../util/locale"
 import { contextUsage } from "../../util/contextUsage"
-import { formatSubagentUsage, sessionCost, subagentLabel } from "../../util/session"
+import { formatSubagentUsage, numberDuplicateLabels, sessionCost, subagentLabel } from "../../util/session"
 import { errorMessage } from "../../util/error"
 import { formatDuration } from "../../util/format"
 import { createColors, createFrames } from "../../ui/spinner"
@@ -353,22 +353,24 @@ export function Prompt(props: PromptProps) {
     }
   })
 
-  // Running direct children (busy or retrying) with loaded messages, newest first.
-  // One child gets the detailed line; several keep the compact `Label N%` list.
+  // Running direct children (busy or retrying) with loaded messages, oldest first.
+  // One child gets the detailed line; several get a compact `Label-N N%` list, newest first.
   const subagentUsage = createMemo(() => {
     const sessionID = props.sessionID
     if (!sessionID || !kv.get("subagent_usage_enabled", true)) return
     const entries = sync.data.session
       .filter((item) => item.parentID === sessionID && (sync.data.session_status?.[item.id]?.type ?? "idle") !== "idle")
-      .toSorted((a, b) => b.time.created - a.time.created)
+      .toSorted((a, b) => a.time.created - b.time.created)
       .flatMap((item) => {
         const usage = contextUsage(sync.data.message[item.id] ?? [], sync.data.provider, item.revert?.messageID)
         return usage ? [{ ...usage, label: subagentLabel(item.title) }] : []
       })
     if (entries.length === 1) return formatSubagentUsage(entries[0])
-    const compact = entries.flatMap((item) => (item.percent === undefined ? [] : [`${item.label} ${item.percent}%`]))
-    if (compact.length === 0) return
-    const shown = compact.slice(0, 3).join(" . ")
+    const visible = entries.filter((item) => item.percent !== undefined)
+    if (visible.length === 0) return
+    const labels = numberDuplicateLabels(visible.map((item) => item.label))
+    const compact = visible.map((item, index) => `${labels[index]} ${item.percent}%`).toReversed()
+    const shown = compact.slice(0, 3).join(", ")
     return compact.length > 3 ? `${shown} +${compact.length - 3}` : shown
   })
 

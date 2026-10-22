@@ -6,6 +6,19 @@ export function subagentLabel(title: string) {
   return match ? Locale.titlecase(match[1]) : "Subagent"
 }
 
+// Numbers repeated labels in order (`Subagent-1`, `Subagent-2`); unique labels stay as they are.
+export function numberDuplicateLabels(labels: readonly string[]) {
+  const totals = new Map<string, number>()
+  labels.forEach((label) => totals.set(label, (totals.get(label) ?? 0) + 1))
+  const seen = new Map<string, number>()
+  return labels.map((label) => {
+    if (totals.get(label) === 1) return label
+    const index = (seen.get(label) ?? 0) + 1
+    seen.set(label, index)
+    return `${label}-${index}`
+  })
+}
+
 // Every session below `sessionID`, depth first. Guards against parent cycles.
 export function sessionDescendants<T extends { id: string; parentID?: string }>(
   sessions: readonly T[],
