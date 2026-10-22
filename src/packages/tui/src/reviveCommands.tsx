@@ -107,7 +107,8 @@ export function useRevive(toast: ToastContext) {
   // Saved before launch, while this server still runs. A no-reply message costs no tokens until
   // the next prompt; synthetic text then reaches the model, and the session view draws a divider.
   // Carries the current agent/model because the reopened prompt seeds them from the last user message.
-  const mark = async (sessionID: string | undefined) => {
+  // `next`: chain steps that run after the revive, shown on the divider.
+  const mark = async (sessionID: string | undefined, next: string[] = []) => {
     if (!sessionID) return
     const at = Date.now()
     const versions = reviveVersions()
@@ -123,7 +124,7 @@ export function useRevive(toast: ToastContext) {
           type: "text",
           text: reviveText(at, versions),
           synthetic: true,
-          metadata: { kind: "revive", versions, at },
+          metadata: { kind: "revive", versions, at, ...(next.length && { next }) },
         },
       ],
     })
@@ -186,9 +187,9 @@ export function useRevive(toast: ToastContext) {
   }
   const revive = async (
     mode: "install" | "no-install" | "update",
-    options: { sessionID?: string; source?: Source | { release: string }; resume?: string } = {},
+    options: { sessionID?: string; source?: Source | { release: string }; resume?: string; next?: string[] } = {},
   ) => {
-    await mark(options.sessionID)
+    await mark(options.sessionID, options.next)
     const context = {
       ...baseContext(mode, options.sessionID, options.resume),
       ...(Global.native ? { native: true, tuiPid: process.pid } : {}),
@@ -261,23 +262,23 @@ export function useRevive(toast: ToastContext) {
     })
   }
   // False when nothing started (dialog cancelled, no saved source), so a chain can stop there.
-  const start = async (mode: ReviveResume.Mode, sessionID: string | undefined, resume?: string) => {
+  const start = async (mode: ReviveResume.Mode, sessionID: string | undefined, resume?: string, next?: string[]) => {
     // Read fresh: the first /revive saves the source choice to oc.json (revive.build).
     const config = readOcConfig()
     if (mode === "no-install") {
-      if (!config.revivePath) return revive("no-install", { sessionID, resume }).then(() => true)
-      await mark(sessionID)
+      if (!config.revivePath) return revive("no-install", { sessionID, resume, next }).then(() => true)
+      await mark(sessionID, next)
       // A custom script reports nothing back: the reopened TUI sends the follow-up steps either way.
       if (resume) await ReviveResume.settle(resume, "ready")
       launchDetached(config.revivePath)
       return true
     }
     if (mode === "install") {
-      if (config.reviveSourceChosen) return revive("install", { sessionID, resume }).then(() => true)
+      if (config.reviveSourceChosen) return revive("install", { sessionID, resume, next }).then(() => true)
       const source = await chooseSource()
       if (!source) return false
       dialog.clear()
-      return revive("install", { sessionID, resume, source }).then(() => true)
+      return revive("install", { sessionID, resume, source, next }).then(() => true)
     }
     if (!config.reviveBuild) {
       toast.show({ message: "No oc source saved; run /revive once to choose one", variant: "error" })

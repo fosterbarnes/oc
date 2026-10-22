@@ -36,8 +36,17 @@ export const REVIVE_MODES = {
 // With slash commands, all free text is one request every command step gets (the user types it
 // stream-of-consciousness around the commands). Without any, each text segment is its own prompt.
 export function extractChain(text: string, available: readonly { name: string }[]) {
-  const pieces = text.split(/(?<=^|\s)\/(revive|revive-no-install|revive-single)(?=\s|$)/)
-  if (pieces.length === 1) return
+  const ranges = quotedRanges(text)
+  const revives = [...text.matchAll(/(?<=^|\s)\/(revive|revive-no-install|revive-single)(?=\s|$)/g)].filter(
+    (match) => !quoted(ranges, match.index),
+  )
+  if (!revives.length) return
+  // Same shape `split` with a capture group gives: segment, mode name, segment, ...
+  const ends = revives.map((match) => match.index + match[0].length)
+  const pieces = [
+    ...revives.flatMap((match, index) => [text.slice(ends[index - 1] ?? 0, match.index), match[1]]),
+    text.slice(ends.at(-1)),
+  ]
   const segments = pieces.map((piece, index) =>
     index % 2 ? { mode: REVIVE_MODES[piece as keyof typeof REVIVE_MODES] } : extractSlashCommands(piece, available),
   )
@@ -55,13 +64,28 @@ export function extractChain(text: string, available: readonly { name: string }[
 
 export function extractSlashCommands(text: string, available: readonly { name: string }[]) {
   const known = new Set(available.map((command) => command.name))
+  const ranges = quotedRanges(text)
   const names = new Set<string>()
   const argumentsText = text
-    .replace(/(^|\s)\/(\S+)(?=\s|$)/g, (match, lead: string, name: string) => {
-      if (!known.has(name)) return match
+    .replace(/(^|\s)\/(\S+)(?=\s|$)/g, (match, lead: string, name: string, offset: number) => {
+      if (!known.has(name) || quoted(ranges, offset + lead.length)) return match
       names.add(name)
       return lead
     })
     .trim()
   return { names: [...names], arguments: argumentsText }
+}
+
+// Quoted examples and code fences cite commands; they never run them. A quote opens only after the
+// start, whitespace, or a bracket and closes only before the end, whitespace, or punctuation, so
+// apostrophes (don't, it's) never pair up. An unclosed quote hides nothing.
+const QUOTED =
+  /```[\s\S]*?```|(?<=^|[\s([{])(?:'[\s\S]*?'|"[\s\S]*?"|`[\s\S]*?`|‘[\s\S]*?’|“[\s\S]*?”)(?=$|[\s.,;:!?)\]}])/g
+
+function quotedRanges(text: string) {
+  return [...text.matchAll(QUOTED)].map((match) => [match.index, match.index + match[0].length] as const)
+}
+
+function quoted(ranges: ReturnType<typeof quotedRanges>, index: number) {
+  return ranges.some(([start, end]) => index >= start && index < end)
 }

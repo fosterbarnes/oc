@@ -40,7 +40,7 @@ export function useReviveChain() {
         const resume = rest.length
           ? await ReviveResume.write({ ...body, request: chain.request, ...target })
           : undefined
-        if (await revive.start(step.mode, sessionID, resume)) {
+        if (await revive.start(step.mode, sessionID, resume, rest.map(label))) {
           if (resume) watchOwn(sessionID, resume)
           return
         }
@@ -71,7 +71,7 @@ export function useReviveChain() {
     target: Target,
     extra?: Extra,
   ) => {
-    const note = { type: "text" as const, text: chainNote(chain), synthetic: true, metadata: { kind: "chain" } }
+    const note = chainNote(chain)
     const editor = extra?.editor ?? []
     const attachments = extra?.attachments ?? []
     const request = step.names.length
@@ -159,16 +159,21 @@ function chainText(steps: ReviveResume.Step[], request: string) {
 }
 
 // Read by each step's agent: without it, /pass reading "...then revive then push" may push itself.
+// The metadata draws the step line under the message (`chainLine` in util/revive.ts).
 function chainNote(chain: Chain & { position: number }) {
-  const total = chain.done.length + chain.steps.length - chain.position
-  const current = chain.steps[chain.position]
-  const later = chain.steps.slice(chain.position + 1).map(label)
-  return [
-    `[oc chain, step ${chain.done.length + 1} of ${total}: ${label(current)}.`,
-    chain.done.length ? `Already done: ${chain.done.join(", ")}.` : "",
-    later.length ? `oc runs these itself after your turn ends: ${later.join(", ")}.` : "",
+  const progress = {
+    step: chain.done.length + 1,
+    total: chain.done.length + chain.steps.length - chain.position,
+    done: chain.done,
+    later: chain.steps.slice(chain.position + 1).map(label),
+  }
+  const text = [
+    `[oc chain, step ${progress.step} of ${progress.total}: ${label(chain.steps[chain.position])}.`,
+    progress.done.length ? `Already done: ${progress.done.join(", ")}.` : "",
+    progress.later.length ? `oc runs these itself after your turn ends: ${progress.later.join(", ")}.` : "",
     "Do only this step. If you need the user's approval, ask with the question tool.]",
   ]
     .filter(Boolean)
     .join(" ")
+  return { type: "text" as const, text, synthetic: true, metadata: { kind: "chain", ...progress } }
 }

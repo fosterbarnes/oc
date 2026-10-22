@@ -1,11 +1,9 @@
-v0.2.286 boozledReviewing [feat. > revive between slash commands]
+v0.2.287 justinJellyfish [fix > quoted commands; patch > chain progress]
 
-revive:
-/revive, /revive-no-install, and /revive-single can now sit among other slash commands in one message, and oc runs it in order. "/revive /pass" revives, then sends /pass once oc reopens. "/pass /revive /agent-push" runs /pass, waits for that reply to finish, revives, then sends /agent-push. Free text anywhere in the message is one request every command step gets, and each step's agent is told which step it is so it does not run the later ones itself. A message can hold more than one revive.
+slash commands:
+A slash command inside quotes or a code fence is now plain text, for every command. Before, a command alone on a line inside a quoted multi-line example ('/pass, then /revive on its own line, then /push') ran, which restarted oc unexpectedly. Quotes count when they open after the start of the text, a space, or a bracket and close before the end, a space, or punctuation, so apostrophes like don't and it's never hide a command, and an unclosed quote hides nothing. Pasted text was already excluded.
 
-If a step fails, you press Esc, the revive build fails, or nobody opens the session within 15 minutes of the revive, the remaining commands are not sent: they go back into an empty prompt. /revive-no-install with a revive.path script cannot report failure, so its follow-up steps always send.
+revive chains:
+Each step of a chain such as /pass /revive /agent-push now shows a dim line under its message, like "step 1 of 3 . next /revive, /agent-push" or "step 3 of 3 . after /pass, /revive", and the revive divider names what is sent after it ("next /agent-push"). Before, each step showed only its own command, so the later steps looked dropped. Chains sent by older builds show no line.
 
-slash menu:
-The revive commands now show in the slash menu after other commands, and picking one types it into the message instead of restarting right away. A lone /revive from Home still restarts without creating an empty chat.
-
-Under the hood: the TUI splits the message (prompt/slash.ts extractChain), runs the steps (reviveChain.tsx), and saves the remaining steps in a small file (core util/reviveResume.ts) that the revive pipeline marks ready or failed. The reopened TUI claims it with an exclusive-create lock, because Bun's rename on Windows lets two concurrent renames of one file both succeed. reviveCommands.tsx now exposes a reusable useRevive hook. Docs: wiki Launching page and FORK.md. Checks: tsgo for core, opencode, and tui; bun test core reviveResume (3/3), tui prompt slash and part (14/14), tui autocomplete and slash menu layout (3/3), opencode config revive (26/26). The /pass step of a live "/pass /revive /agent-push" chain arrived with its step note, the revive ran, and this push is its third step. The push runs prePush.
+Under the hood: prompt/slash.ts finds quoted ranges once and both extractSlashCommands and extractChain skip commands inside them (extractChain now walks matches instead of split). The chain note carries step, total, done, and later in its metadata, and the revive mark carries next; util/revive.ts formats both. Docs: wiki Launching page and FORK.md. Checks: tui tsgo; bun test tui prompt slash, prompt part, and the new reviveChainLine test (17/17). This push is the third step of a live "/pass /revive /agent-push" chain. The push runs prePush.

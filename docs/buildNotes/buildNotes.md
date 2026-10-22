@@ -185,6 +185,23 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-21 (~21:19) - v0.2.287 justinJellyfish - Quoted commands never run; chain progress shown - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation (/imp of plan `~/.config/opencode/plans/2026-10-21-chainProgressQuotes.md`); completed
+- Version: 0.2.287 justinJellyfish
+- Fixed `tui/src/prompt/slash.ts`: a command alone on a line inside a multi-line quoted example (`'/pass\n/revive\n/push'`) ran (unexpected revive). `quotedRanges` (`QUOTED`: ```` ``` ```` fences and `'` `"` `` ` `` `‘’` `“”` pairs opening after start/space/bracket, closing before end/space/punctuation) now hides commands in `extractSlashCommands` (replace offset) and `extractChain` (now `matchAll` + slicing instead of `split`). Apostrophes do not pair; unclosed quotes hide nothing.
+- Added chain progress: `reviveChain.tsx` `chainNote` returns the note part with metadata `{ kind: "chain", step, total, done, later }`; `routes/session/index.tsx` shows `chainLine` under each step's message. Revive mark stores `next` (`useRevive().start(..., next)` -> `mark(sessionID, next)`); divider via `reviveDivider`. Both formatters in `util/revive.ts`.
+- Docs: wiki `Launching.md` (quotes rule, step line), `FORK.md` revive row.
+- Verification: tui tsgo clean; `bun test test/prompt/slash.test.ts test/prompt/part.test.ts test/reviveChainLine.test.ts` 17/17.
+
+### User
+Revive
+- A slash command inside quotes or a code fence is now treated as text, so quoting `'/revive'` while describing it no longer restarts oc.
+- Each step of a revive chain shows a line like "step 1 of 3 . next /revive, /agent-push" under its message, and the revive divider says what will be sent next.
+
+---
+
 ## 2026-10-21 (~21:16) - v0.2.286 boozledReviewing - Pass: lone /revive from Home - Claude Opus 5.5, low effort; Pass
 
 ### Agent

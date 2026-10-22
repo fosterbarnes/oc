@@ -64,6 +64,33 @@ test("revive chains split typed commands into ordered steps around each revive",
   expect(extractChain("/revive", available)).toEqual({ steps: [{ type: "revive", mode: "install" }], request: "" })
 })
 
+test("commands inside quotes or code fences never run", () => {
+  const available = [{ name: "pass" }, { name: "agent-push" }]
+  const example = "see '/pass\n/revive\n/agent-push' here"
+  expect(extractChain(example, available)).toBeUndefined()
+  expect(extractSlashCommands(example, available)).toEqual({ names: [], arguments: example })
+  for (const text of ["'/pass /revive'", '"/revive"', "`/revive`", "‘/revive’", "“/revive”", "```\n/revive\n```"])
+    expect(extractChain(text, available)).toBeUndefined()
+  // Apostrophes do not pair up, and an unclosed quote hides nothing.
+  expect(extractChain("don't /revive it's fine", available)?.steps).toEqual([
+    { type: "send", names: [], text: "don't" },
+    { type: "revive", mode: "install" },
+    { type: "send", names: [], text: "it's fine" },
+  ])
+  expect(extractChain("/pass 'unclosed /revive", available)?.steps).toEqual([
+    { type: "send", names: ["pass"] },
+    { type: "revive", mode: "install" },
+  ])
+  expect(extractChain("/pass compare 'a' and 'b' /revive /agent-push", available)).toEqual({
+    steps: [
+      { type: "send", names: ["pass"] },
+      { type: "revive", mode: "install" },
+      { type: "send", names: ["agent-push"] },
+    ],
+    request: "compare 'a' and 'b'",
+  })
+})
+
 test("command messages restore the typed commands instead of their templates", () => {
   const sent = (metadata?: Record<string, unknown>) => ({ text: "[/spit is active: ...]\n\nTemplate", metadata })
   expect(commandUse(sent({ ocCommands: ["spit", "imp"], ocCommandArguments: " fix it\n" }))).toEqual({

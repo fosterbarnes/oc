@@ -105,7 +105,7 @@ import {
   useOpencodeModeStack,
 } from "../../keymap"
 import { usePathFormatter } from "../../context/path-format"
-import { reviveText, reviveVersions } from "../../util/revive"
+import { chainLine, reviveDivider, reviveText, reviveVersions } from "../../util/revive"
 import { LocationProvider } from "../../context/location"
 import { openSessionTab, unavailable as tabUnavailable } from "../../util/sessionTab"
 import { detectTerminal } from "@opencode-ai/core/util/terminal"
@@ -1732,8 +1732,12 @@ function UserMessage(props: {
   const revive = createMemo(() => {
     const part = props.parts.find((x) => x.type === "text" && x.synthetic && x.metadata?.kind === "revive")
     if (part?.type !== "text") return
-    const time = Locale.time(Number(part.metadata?.at))
-    return ` Revived . ${time} . ${part.metadata?.versions} `
+    return reviveDivider(part.metadata)
+  })
+  // Revive chain step: which step this is and what runs before or after it (reviveChain.tsx).
+  const chain = createMemo(() => {
+    const part = props.parts.find((x) => x.type === "text" && x.synthetic && x.metadata?.kind === "chain")
+    return part?.type === "text" ? chainLine(part.metadata) : undefined
   })
 
   return (
@@ -1796,6 +1800,13 @@ function UserMessage(props: {
                   </Show>
                 </>
               )}
+            </Show>
+            <Show when={chain()}>
+              <box paddingTop={1}>
+                <text selectable={false} fg={theme.textMuted}>
+                  {chain()}
+                </text>
+              </box>
             </Show>
             <Show when={files().length}>
               <box flexDirection="row" paddingBottom={metadataVisible() ? 1 : 0} paddingTop={1} gap={1} flexWrap="wrap">
