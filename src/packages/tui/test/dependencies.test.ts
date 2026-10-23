@@ -10,13 +10,13 @@ import {
   lineEvent,
   parseRegPath,
   psString,
-  removeRunDir,
   runInstalls,
   scriptErrorRecord,
   versionOf,
   type Dependency,
   type InstallEvent,
 } from "../src/dependencies"
+import { removeRunDir } from "../src/desktopUpdate"
 
 test("parseRegPath reads REG_EXPAND_SZ and REG_SZ values from reg query output", () => {
   const machine =

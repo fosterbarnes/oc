@@ -6,9 +6,8 @@ import {
   runDesktopCheck,
   runDesktopInstall,
   scriptModeLines,
-  UPDATE_DIR_HELPERS,
 } from "./desktopUpdate"
-import type { DesktopCheckResult, DesktopInstallResult, ScriptPrepare } from "./desktopUpdate"
+import type { DesktopCheckResult, DesktopInstallResult, ScriptWork } from "./desktopUpdate"
 
 // Fixed script for the OpenAI Store package: highest OpenAI.Codex package with the
 // exact OpenAI.Codex_2p2nqsd0c76g0 family, latest = the version of the floating
@@ -17,8 +16,8 @@ import type { DesktopCheckResult, DesktopInstallResult, ScriptPrepare } from "./
 // buildVersion can be ahead of this file, which made a fresh install read "outdated"), skip
 // when current, downloaded manifest version must equal that latest, manifest Name plus
 // publisher pin via the ZipFile approach, Authenticode Valid required, elevated provisioning
-// then per-user registration (Install-MsixElevated), temp dir removed in finally (unless
-// $PrepareDir). Errors go to an OCERR line and exit 1 (trap). No user input is interpolated;
+// then per-user registration (Install-MsixElevated), all in the caller's $WorkDir. Errors go
+// to an OCERR line and exit 1 (trap). No user input is interpolated;
 // the mode is selected by the scriptModeLines prefix only.
 const CHATGPT_DESKTOP_SCRIPT = String.raw`
 $ErrorActionPreference = "Stop"
@@ -40,7 +39,6 @@ function Get-InstalledChatgptVersion {
 
 ${GET_MSIX_IDENTITY}
 ${DOWNLOAD_HELPERS}
-${UPDATE_DIR_HELPERS}
 ${INSTALL_MSIX_ELEVATED}
 
 $installed = Get-InstalledChatgptVersion
@@ -69,36 +67,26 @@ if ($CheckOnly) {
   exit 0
 }
 
-$tmp = New-UpdateDir "chatgpt-desktop-update-"
-try {
-  $file = Join-Path $tmp $fileName
-  if (-not $PrepareDir -or $PrepareOnly) { Save-Download -Uri $url -OutFile $file }
-  Write-OcStep "verifying"
-  $identity = Get-MsixIdentity -Path $file
-  $sig = Get-AuthenticodeSignature -FilePath $file
-  if ($sig.Status -ne "Valid") { throw "Signature check failed: $($sig.Status) ($($sig.StatusMessage))" }
-  if ($identity.Name -ne $PackageName) { throw "Package name '$($identity.Name)' is not ChatGPT Desktop's expected package" }
-  if ($identity.Publisher -ne $ExpectedPublisher) { throw "Package publisher '$($identity.Publisher)' is not ChatGPT Desktop's expected publisher" }
-  # A new upload between the HEAD request and the download changes the version.
-  if ([version]$identity.Version -ne $latest) { throw "Latest version changed ($($identity.Version), expected $latest); confirm again" }
-  if ($PrepareOnly) { Write-Output "PREPARED $latest"; exit 0 }
-  # A per-user Add-AppxPackage fails with 0x80073D28 (seen on a fresh VM), as Claude's did.
-  Install-MsixElevated -File $file -FamilyName $PackageFamilyName -WorkDir $tmp
-  $after = Get-InstalledChatgptVersion
-  if (-not $after) { throw "Install finished but ChatGPT Desktop was not found" }
-  Write-Output "Updated ChatGPT Desktop $installed -> $after"
-} finally {
-  Remove-UpdateDir $tmp
-}
+$file = Join-Path $WorkDir $fileName
+if (-not $Prepared) { Save-Download -Uri $url -OutFile $file }
+Write-OcStep "verifying"
+$identity = Get-MsixIdentity -Path $file
+$sig = Get-AuthenticodeSignature -FilePath $file
+if ($sig.Status -ne "Valid") { throw "Signature check failed: $($sig.Status) ($($sig.StatusMessage))" }
+if ($identity.Name -ne $PackageName) { throw "Package name '$($identity.Name)' is not ChatGPT Desktop's expected package" }
+if ($identity.Publisher -ne $ExpectedPublisher) { throw "Package publisher '$($identity.Publisher)' is not ChatGPT Desktop's expected publisher" }
+# A new upload between the HEAD request and the download changes the version.
+if ([version]$identity.Version -ne $latest) { throw "Latest version changed ($($identity.Version), expected $latest); confirm again" }
+if ($PrepareOnly) { Write-Output "PREPARED $latest"; exit 0 }
+# A per-user Add-AppxPackage fails with 0x80073D28 (seen on a fresh VM), as Claude's did.
+Install-MsixElevated -File $file -FamilyName $PackageFamilyName -WorkDir $WorkDir
+$after = Get-InstalledChatgptVersion
+if (-not $after) { throw "Install finished but ChatGPT Desktop was not found" }
+Write-Output "Updated ChatGPT Desktop $installed -> $after"
 `
 
-function chatgptDesktopScript(
-  checkOnly: boolean,
-  expectedVersion?: string,
-  allowFresh = false,
-  prepare?: ScriptPrepare,
-) {
-  return `${scriptModeLines(checkOnly, expectedVersion, allowFresh, prepare)}\n${CHATGPT_DESKTOP_SCRIPT}`
+function chatgptDesktopScript(checkOnly: boolean, expectedVersion?: string, allowFresh = false, work?: ScriptWork) {
+  return `${scriptModeLines(checkOnly, expectedVersion, allowFresh, work)}\n${CHATGPT_DESKTOP_SCRIPT}`
 }
 
 const CHATGPT_KEY = "chatgpt-desktop"
@@ -117,7 +105,7 @@ export async function installChatgptDesktop(
   return runDesktopInstall({
     key: CHATGPT_KEY,
     label: "ChatGPT Desktop",
-    script: chatgptDesktopScript(false, expectedVersion),
+    script: (dir) => chatgptDesktopScript(false, expectedVersion, false, { dir }),
     onLine,
   })
 }
@@ -127,7 +115,7 @@ export function prepareChatgptDesktop(dir: string, onLine?: (line: string) => vo
   return prepareDesktopInstall({
     key: CHATGPT_KEY,
     label: "ChatGPT Desktop",
-    script: (expectedVersion, prepare) => chatgptDesktopScript(false, expectedVersion, true, prepare),
+    script: (expectedVersion, work) => chatgptDesktopScript(false, expectedVersion, true, work),
     dir,
     onLine,
   })

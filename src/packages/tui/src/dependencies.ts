@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process"
 import { existsSync, mkdirSync } from "node:fs"
-import { mkdtemp, readdir, rm } from "node:fs/promises"
+import { mkdtemp } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import { which } from "@opencode-ai/core/util/which"
@@ -14,6 +14,7 @@ import {
   prepareClaudeDesktop,
   PROGRESS_PREFIX,
   psString,
+  removeRunDir,
   scriptError,
   STEP_PREFIX,
   windowsPowershellEnv,
@@ -26,9 +27,9 @@ export { psString }
 
 // Dependency setup behind `oc oc deps` (the installer's ocSetup window is its only caller): detect
 // what oc's features need and install the missing ones in table order. Apps that already have a
-// harness update script reuse it with $AllowFresh and $PrepareDir; the rest download a vendor
-// installer through INSTALL_SCRIPT, pinned by sha256 and/or Authenticode signer. Every download
-// runs ahead of its install turn (`prepare`). Installs that share a Lock run one at a time.
+// harness update script reuse it with $AllowFresh and a prepared $WorkDir; the rest download a
+// vendor installer through INSTALL_SCRIPT, pinned by sha256 and/or Authenticode signer. Every
+// download runs ahead of its install turn (`prepare`). Installs that share a Lock run one at a time.
 
 export type DependencyStatus = "found" | "missing" | "outdated" | "error"
 // `path` is the resolved executable for CLI rows (ocSetup points the oc shortcuts at WezTerm with it).
@@ -441,64 +442,6 @@ export async function runInstalls(
     await removeRunDir(dir)
   }
 }
-
-// On a VM something outside oc holds the ChatGPT MSIX for 30+ s after its install, and `rm` of it
-// hangs instead of failing. So the run waits CLEANUP_LIMIT_MS at most; a folder that is not gone by
-// then (or failed to delete) goes to a hidden PowerShell that retries after the engine has exited.
-const CLEANUP_LIMIT_MS = 2_000
-
-type Remove = (target: string) => Promise<void>
-const removeTree: Remove = (target) => rm(target, { recursive: true, force: true })
-
-export async function removeRunDir(dir: string, remove = removeTree, handOff = removeDirLater) {
-  const limit = new AbortController()
-  const removal = (async () => {
-    // Row by row, so one held file still lets the other rows' installers go.
-    for (const entry of await readdir(dir)) await remove(path.join(dir, entry))
-    await remove(dir)
-    return true
-  })().catch(() => false)
-  const done = await Promise.race([
-    removal,
-    sleep(CLEANUP_LIMIT_MS, false, { signal: limit.signal }).catch(() => false),
-  ])
-  limit.abort()
-  if (!done) await handOff(dir)
-}
-
-// Retries every 5 s for 5 minutes in a hidden PowerShell that outlives the engine (VM run 7: the
-// held ChatGPT folder went at its first try, 3 s after the handoff). Bun's `detached` spawn starts
-// powershell.exe without a console and it exits at once without running, so a short launcher
-// starts the retry with Start-Process instead (no inherited handles, so it cannot hold ocSetup's
-// pipes). The script goes through the environment; the launch waits LAUNCH_LIMIT_MS at most.
-const LAUNCH_LIMIT_MS = 5_000
-
-async function removeDirLater(dir: string) {
-  const script = `$Dir = ${psString(dir)}\n${REMOVE_DIR_LATER_SCRIPT}`
-  const launch =
-    "Start-Process powershell.exe -WindowStyle Hidden -ArgumentList " +
-    `'-NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "Invoke-Expression $env:OC_CLEANUP_SCRIPT"'`
-  const launcher = spawn("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", launch], {
-    stdio: "ignore",
-    windowsHide: true,
-    env: { ...windowsPowershellEnv(), OC_CLEANUP_SCRIPT: script },
-  })
-  const limit = new AbortController()
-  await Promise.race([
-    new Promise((resolve) => launcher.once("exit", resolve).once("error", resolve)),
-    sleep(LAUNCH_LIMIT_MS, undefined, { signal: limit.signal }).catch(() => undefined),
-  ])
-  limit.abort()
-}
-
-const REMOVE_DIR_LATER_SCRIPT = String.raw`
-for ($try = 1; $try -le 60; $try++) {
-  if (-not (Test-Path -LiteralPath $Dir)) { exit 0 }
-  try { Remove-Item -LiteralPath $Dir -Recurse -Force -ErrorAction Stop; exit 0 }
-  catch { Start-Sleep -Seconds 5 }
-}
-exit 1
-`
 
 // Runs every selected `prepare` in table order, PREFETCH_LIMIT at a time. `get` resolves to the
 // install step, or undefined after a failure (reported at once as `failed`).

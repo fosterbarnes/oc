@@ -1,3 +1,8 @@
+import { spawn } from "node:child_process"
+import { mkdtemp, readdir, rm } from "node:fs/promises"
+import os from "node:os"
+import path from "node:path"
+import { setTimeout as sleep } from "node:timers/promises"
 import { runCliCommand, type CliCommandResult } from "./cliUpdate"
 
 const inflight = new Set<string>()
@@ -256,18 +261,25 @@ export async function runDesktopCheck(input: {
   }
 }
 
+// The script works in `dir` when the caller owns one (`oc oc deps`), else in a new temp folder that
+// removeRunDir clears in the background: deleting a just-provisioned MSIX can block for minutes
+// (Claude 85 s, ChatGPT 195 s inside the script on 2026-10-22), so the result must not wait on it.
 export async function runDesktopInstall(input: {
   key: string
   label: string
-  script: string
+  script: (dir: string) => string
+  dir?: string
   onLine?: (line: string) => void
 }): Promise<DesktopInstallResult> {
   if (inflight.has(input.key)) {
     return { ok: false, alreadyRunning: true, message: `${input.label} update already running` }
   }
   inflight.add(input.key)
+  let ownDir: string | undefined
   try {
-    const result = await runPowershell(input.script, input.onLine)
+    if (!input.dir) ownDir = await mkdtemp(path.join(os.tmpdir(), `oc-${input.key}-update-`))
+    const dir = input.dir ?? ownDir!
+    const result = await runPowershell(input.script(dir), input.onLine)
     if (!result.ok && !scriptError(result.output)) {
       return {
         ok: false,
@@ -282,6 +294,7 @@ export async function runDesktopInstall(input: {
     return { ok: true, alreadyRunning: false, message: parsed.message }
   } finally {
     inflight.delete(input.key)
+    if (ownDir) void removeRunDir(ownDir)
   }
 }
 
@@ -317,25 +330,23 @@ export function psString(value: string) {
   return `'${value.replace(/['‘’‚‛]/g, "$&$&")}'`
 }
 
-// `oc oc deps` downloads ahead of the install turn: $PrepareOnly downloads and verifies into
-// $PrepareDir and prints "PREPARED <version>"; a later run with the same $PrepareDir and
-// $PrepareOnly off re-verifies that file and installs it. The caller owns the folder.
-export type ScriptPrepare = { dir: string; only: boolean }
+// An install script downloads into $WorkDir, which the caller creates and removes; scripts never
+// delete it. `oc oc deps` downloads ahead of the install turn: $PrepareOnly downloads and verifies
+// and prints "PREPARED <version>"; a later run in the same folder with $Prepared re-verifies that
+// file and installs it.
+export type ScriptWork = { dir: string; prepareOnly?: boolean; prepared?: boolean }
 
 // Prefix lines that pick an update script's mode. $AllowFresh lets the install run when the app is
-// missing (`oc oc deps install`); the harness update menu never sets it or $PrepareDir.
-export function scriptModeLines(
-  checkOnly: boolean,
-  expectedVersion?: string,
-  allowFresh = false,
-  prepare?: ScriptPrepare,
-) {
+// missing (`oc oc deps install`); the harness update menu never sets it, $PrepareOnly, or
+// $Prepared.
+export function scriptModeLines(checkOnly: boolean, expectedVersion?: string, allowFresh = false, work?: ScriptWork) {
   return [
     `$CheckOnly = $${checkOnly}`,
     expectedVersionAssignment(expectedVersion),
     `$AllowFresh = $${allowFresh}`,
-    `$PrepareDir = ${psString(prepare?.dir ?? "")}`,
-    `$PrepareOnly = $${prepare?.only ?? false}`,
+    `$WorkDir = ${psString(work?.dir ?? "")}`,
+    `$PrepareOnly = $${work?.prepareOnly ?? false}`,
+    `$Prepared = $${work?.prepared ?? false}`,
   ].join("\n")
 }
 
@@ -348,18 +359,20 @@ export function scriptModeLines(
 export async function prepareDesktopInstall(input: {
   key: string
   label: string
-  script: (expectedVersion: string | undefined, prepare: ScriptPrepare) => string
+  script: (expectedVersion: string | undefined, work: ScriptWork) => string
   dir: string
   onLine?: (line: string) => void
 }): Promise<(onLine?: (line: string) => void) => Promise<DesktopInstallResult>> {
-  const result = await runPowershell(input.script(undefined, { dir: input.dir, only: true }), input.onLine)
+  const prepare = input.script(undefined, { dir: input.dir, prepareOnly: true })
+  const result = await runPowershell(prepare, input.onLine)
   const version = /^PREPARED (\S+)\s*$/m.exec(result.output)?.[1]
   if (result.ok && version) {
     return (onLine) =>
       runDesktopInstall({
         key: input.key,
         label: input.label,
-        script: input.script(version, { dir: input.dir, only: false }),
+        script: (dir) => input.script(version, { dir, prepared: true }),
+        dir: input.dir,
         onLine,
       })
   }
@@ -368,21 +381,63 @@ export async function prepareDesktopInstall(input: {
   throw new Error(scriptError(result.output) ?? failureDetail(result))
 }
 
-// The temp folder of an update script: $PrepareDir when `oc oc deps` owns it, else a new folder
-// that Remove-UpdateDir deletes.
-export const UPDATE_DIR_HELPERS = String.raw`
-function New-UpdateDir {
-  param([string]$Prefix)
-  if ($PrepareDir) { return $PrepareDir }
-  $dir = Join-Path ([System.IO.Path]::GetTempPath()) ($Prefix + [System.Guid]::NewGuid().ToString("N"))
-  New-Item -ItemType Directory -Path $dir | Out-Null
-  return $dir
+// Something outside oc holds a just-installed MSIX for 30 s to minutes, and `rm` of it hangs
+// instead of failing (VM ChatGPT install; on 2026-10-22 the same in-script delete blocked Claude
+// 85 s and ChatGPT 195 s). So removal waits CLEANUP_LIMIT_MS at most; a folder that is not gone by
+// then (or failed to delete) goes to a hidden PowerShell that retries after the caller moved on.
+const CLEANUP_LIMIT_MS = 2_000
+
+type Remove = (target: string) => Promise<void>
+const removeTree: Remove = (target) => rm(target, { recursive: true, force: true })
+
+export async function removeRunDir(dir: string, remove = removeTree, handOff = removeDirLater) {
+  const limit = new AbortController()
+  const removal = (async () => {
+    // Row by row, so one held file still lets the other rows' installers go.
+    for (const entry of await readdir(dir)) await remove(path.join(dir, entry))
+    await remove(dir)
+    return true
+  })().catch(() => false)
+  const done = await Promise.race([
+    removal,
+    sleep(CLEANUP_LIMIT_MS, false, { signal: limit.signal }).catch(() => false),
+  ])
+  limit.abort()
+  if (!done) await handOff(dir)
 }
 
-function Remove-UpdateDir {
-  param([string]$Dir)
-  if (-not $PrepareDir) { Remove-Item -LiteralPath $Dir -Recurse -Force -ErrorAction SilentlyContinue }
+// Retries every 5 s for 5 minutes in a hidden PowerShell that outlives oc (VM run 7: the
+// held ChatGPT folder went at its first try, 3 s after the handoff). Bun's `detached` spawn starts
+// powershell.exe without a console and it exits at once without running, so a short launcher
+// starts the retry with Start-Process instead (no inherited handles, so it cannot hold ocSetup's
+// pipes). The script goes through the environment; the launch waits LAUNCH_LIMIT_MS at most.
+const LAUNCH_LIMIT_MS = 5_000
+
+async function removeDirLater(dir: string) {
+  const script = `$Dir = ${psString(dir)}\n${REMOVE_DIR_LATER_SCRIPT}`
+  const launch =
+    "Start-Process powershell.exe -WindowStyle Hidden -ArgumentList " +
+    `'-NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "Invoke-Expression $env:OC_CLEANUP_SCRIPT"'`
+  const launcher = spawn("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", launch], {
+    stdio: "ignore",
+    windowsHide: true,
+    env: { ...windowsPowershellEnv(), OC_CLEANUP_SCRIPT: script },
+  })
+  const limit = new AbortController()
+  await Promise.race([
+    new Promise((resolve) => launcher.once("exit", resolve).once("error", resolve)),
+    sleep(LAUNCH_LIMIT_MS, undefined, { signal: limit.signal }).catch(() => undefined),
+  ])
+  limit.abort()
 }
+
+const REMOVE_DIR_LATER_SCRIPT = String.raw`
+for ($try = 1; $try -le 60; $try++) {
+  if (-not (Test-Path -LiteralPath $Dir)) { exit 0 }
+  try { Remove-Item -LiteralPath $Dir -Recurse -Force -ErrorAction Stop; exit 0 }
+  catch { Start-Sleep -Seconds 5 }
+}
+exit 1
 `
 
 // Install-MsixElevated: packages that carry a service (Claude's Cowork, ChatGPT's) fail a per-user
@@ -399,6 +454,7 @@ function Install-MsixElevated {
   $encoded = [Convert]::ToBase64String([System.Text.Encoding]::Unicode.GetBytes($command))
   try { $proc = Start-Process -FilePath "powershell.exe" -ArgumentList "-NoProfile", "-NonInteractive", "-EncodedCommand", $encoded -Verb RunAs -WindowStyle Hidden -PassThru }
   catch { throw "Cancelled at the admin prompt" }
+  Write-OcStep "installing"
   if (-not $proc.WaitForExit(600000)) { throw "Install still running after 10 minutes" }
   if ($proc.ExitCode -ne 0) {
     $detail = if (Test-Path -LiteralPath $errorFile) { (Get-Content -LiteralPath $errorFile -Raw).Trim() } else { "exit code $($proc.ExitCode)" }
@@ -413,7 +469,7 @@ function Install-MsixElevated {
 // package, official latest-release redirect pinned to downloads.claude.ai, skip when current,
 // Authenticode Valid with the signer subject equal to the manifest publisher, plus publisher
 // family-hash pin, elevated machine-wide provisioning then per-user registration with
-// -ForceApplicationShutdown, temp dir removed in finally. Errors go to an OCERR line and
+// -ForceApplicationShutdown, all in the caller's $WorkDir. Errors go to an OCERR line and
 // exit 1 (trap). No user input is interpolated; the check/install mode is selected by the
 // $CheckOnly prefix line only.
 const DESKTOP_SCRIPT = String.raw`
@@ -446,7 +502,6 @@ function Get-MsixPublisherId {
 
 ${GET_MSIX_IDENTITY}
 ${DOWNLOAD_HELPERS}
-${UPDATE_DIR_HELPERS}
 ${INSTALL_MSIX_ELEVATED}
 
 $installed = Get-InstalledClaudeVersion
@@ -480,34 +535,29 @@ if ($CheckOnly) {
   exit 0
 }
 
-$tmp = New-UpdateDir "claude-desktop-update-"
-try {
-  $file = Join-Path $tmp "Claude.msix"
-  if (-not $PrepareDir -or $PrepareOnly) { Save-Download -Uri $location -OutFile $file }
-  Write-OcStep "verifying"
-  $sig = Get-AuthenticodeSignature -FilePath $file
-  if ($sig.Status -ne "Valid") { throw "Signature check failed: $($sig.Status) ($($sig.StatusMessage))" }
-  $identity = Get-MsixIdentity -Path $file
-  if ($sig.SignerCertificate.Subject -ne $identity.Publisher) {
-    throw "Signer '$($sig.SignerCertificate.Subject)' does not match package publisher '$($identity.Publisher)'"
-  }
-  if ((Get-MsixPublisherId -Publisher $identity.Publisher) -ne $PublisherId) {
-    throw "Package publisher '$($identity.Publisher)' is not Claude's expected publisher"
-  }
-  if ($identity.Version -le $installed) { throw "Downloaded package is not newer ($($identity.Version))" }
-  if ($PrepareOnly) { Write-Output "PREPARED $latest"; exit 0 }
-  # The package carries the Cowork service, which a per-user Add-AppxPackage cannot register.
-  Install-MsixElevated -File $file -FamilyName $PackageFamilyName -WorkDir $tmp
-  $after = Get-InstalledClaudeVersion
-  if (-not $after) { throw "Install finished but Claude Desktop was not found" }
-  Write-Output "Updated Claude Desktop $installed -> $after"
-} finally {
-  Remove-UpdateDir $tmp
+$file = Join-Path $WorkDir "Claude.msix"
+if (-not $Prepared) { Save-Download -Uri $location -OutFile $file }
+Write-OcStep "verifying"
+$sig = Get-AuthenticodeSignature -FilePath $file
+if ($sig.Status -ne "Valid") { throw "Signature check failed: $($sig.Status) ($($sig.StatusMessage))" }
+$identity = Get-MsixIdentity -Path $file
+if ($sig.SignerCertificate.Subject -ne $identity.Publisher) {
+  throw "Signer '$($sig.SignerCertificate.Subject)' does not match package publisher '$($identity.Publisher)'"
 }
+if ((Get-MsixPublisherId -Publisher $identity.Publisher) -ne $PublisherId) {
+  throw "Package publisher '$($identity.Publisher)' is not Claude's expected publisher"
+}
+if ($identity.Version -le $installed) { throw "Downloaded package is not newer ($($identity.Version))" }
+if ($PrepareOnly) { Write-Output "PREPARED $latest"; exit 0 }
+# The package carries the Cowork service, which a per-user Add-AppxPackage cannot register.
+Install-MsixElevated -File $file -FamilyName $PackageFamilyName -WorkDir $WorkDir
+$after = Get-InstalledClaudeVersion
+if (-not $after) { throw "Install finished but Claude Desktop was not found" }
+Write-Output "Updated Claude Desktop $installed -> $after"
 `
 
-function desktopScript(checkOnly: boolean, expectedVersion?: string, allowFresh = false, prepare?: ScriptPrepare) {
-  return `${scriptModeLines(checkOnly, expectedVersion, allowFresh, prepare)}\n${DESKTOP_SCRIPT}`
+function desktopScript(checkOnly: boolean, expectedVersion?: string, allowFresh = false, work?: ScriptWork) {
+  return `${scriptModeLines(checkOnly, expectedVersion, allowFresh, work)}\n${DESKTOP_SCRIPT}`
 }
 
 const CLAUDE_KEY = "claude-desktop"
@@ -526,7 +576,7 @@ export async function installClaudeDesktop(
   return runDesktopInstall({
     key: CLAUDE_KEY,
     label: "Claude Desktop",
-    script: desktopScript(false, expectedVersion),
+    script: (dir) => desktopScript(false, expectedVersion, false, { dir }),
     onLine,
   })
 }
@@ -536,7 +586,7 @@ export function prepareClaudeDesktop(dir: string, onLine?: (line: string) => voi
   return prepareDesktopInstall({
     key: CLAUDE_KEY,
     label: "Claude Desktop",
-    script: (expectedVersion, prepare) => desktopScript(false, expectedVersion, true, prepare),
+    script: (expectedVersion, work) => desktopScript(false, expectedVersion, true, work),
     dir,
     onLine,
   })

@@ -1,4 +1,5 @@
 import { afterAll, describe, expect, test } from "bun:test"
+import { existsSync } from "node:fs"
 import { mkdtemp, rm } from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
@@ -9,8 +10,8 @@ import {
   parseDesktopCheckOutput,
   parseDesktopInstallOutput,
   prepareDesktopInstall,
+  runDesktopInstall,
   scriptModeLines,
-  UPDATE_DIR_HELPERS,
   windowsPowershellEnv,
 } from "../src/desktopUpdate"
 
@@ -21,17 +22,13 @@ describe.skipIf(process.platform !== "win32")("prepareDesktopInstall", () => {
   const fakeScript = String.raw`
 $ErrorActionPreference = "Stop"
 trap { Write-Output "OCERR: $($_.Exception.Message)"; exit 1 }
-${UPDATE_DIR_HELPERS}
 $latest = "1.2.3"
 if ($ExpectedVersion -and $ExpectedVersion -ne $latest) { throw "Latest version changed" }
-$tmp = New-UpdateDir "fake-update-"
-try {
-  $file = Join-Path $tmp "Fake.bin"
-  if (-not $PrepareDir -or $PrepareOnly) { Set-Content -LiteralPath $file -Value "payload" }
-  if (-not (Test-Path -LiteralPath $file)) { throw "prepared file missing" }
-  if ($PrepareOnly) { Write-Output "PREPARED $latest"; exit 0 }
-  Write-Output "Updated Fake 0.0 -> $ExpectedVersion"
-} finally { Remove-UpdateDir $tmp }
+$file = Join-Path $WorkDir "Fake.bin"
+if (-not $Prepared) { Set-Content -LiteralPath $file -Value "payload" }
+if (-not (Test-Path -LiteralPath $file)) { throw "prepared file missing" }
+if ($PrepareOnly) { Write-Output "PREPARED $latest"; exit 0 }
+Write-Output "Updated Fake 0.0 -> $ExpectedVersion"
 `
   test("prepares into the folder, then installs that file", async () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), "oc-prepare-"))
@@ -48,6 +45,24 @@ try {
     } finally {
       await rm(dir, { recursive: true, force: true })
     }
+  }, 60_000)
+
+  // The update menu path: the install gets a fresh folder and removes it itself, after the result.
+  test("installs in its own temp folder and removes it", async () => {
+    let workDir = ""
+    const result = await runDesktopInstall({
+      key: "fake",
+      label: "Fake",
+      script: (dir) => {
+        workDir = dir
+        return `${scriptModeLines(false, "1.2.3", false, { dir })}\n${fakeScript}`
+      },
+    })
+    expect(result).toEqual({ ok: true, alreadyRunning: false, message: "Updated Fake 0.0 -> 1.2.3" })
+    expect(workDir.startsWith(path.join(os.tmpdir(), "oc-fake-update-"))).toBe(true)
+    // Removal runs in the background; an unheld folder goes at once.
+    for (let i = 0; i < 40 && existsSync(workDir); i++) await Bun.sleep(50)
+    expect(existsSync(workDir)).toBe(false)
   }, 60_000)
 })
 

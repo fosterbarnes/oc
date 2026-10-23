@@ -4,21 +4,21 @@ import {
   runDesktopCheck,
   runDesktopInstall,
   scriptModeLines,
-  UPDATE_DIR_HELPERS,
 } from "./desktopUpdate"
-import type { DesktopCheckResult, DesktopInstallResult, ScriptPrepare } from "./desktopUpdate"
+import type { DesktopCheckResult, DesktopInstallResult, ScriptWork } from "./desktopUpdate"
 
 // Fixed script for the machine-wide PowerShell 7 MSI install: installed version from the MSI's
 // PowerShellCore\InstalledVersions entry for Program Files\PowerShell\7, latest stable from
 // Microsoft's buildinfo feed, MSI from the GitHub release with the final download host
 // allowlisted, Authenticode Valid plus exact Microsoft signer CN pin, then an elevated silent
 // msiexec (UAC prompt). The MSI restores its saved install options (PATH, context menus,
-// remoting, Microsoft Update) on upgrade, so none are passed. MSIRESTARTMANAGERCONTROL=
-// DisableShutdown stops Windows Installer from closing running pwsh processes, oc's own parent
-// shell included; files they hold are replaced at the next reboot (exit 3010). Microsoft ships
-// no MSI from 7.7, so the check refuses those versions. Errors go to an OCERR line and exit 1
-// (trap). No user input is interpolated; the check/install mode is selected by the $CheckOnly
-// prefix line only.
+// remoting, Microsoft Update) on upgrade, so none are passed. MSIRESTARTMANAGERCONTROL=Disable
+// keeps Restart Manager away from running pwsh processes: its shutdown attempt sends Ctrl+C to
+// the console of oc's parent shell and killed the oc TUI (2026-10-22). DisableShutdown does not
+// prevent that for this RM-authored package. Files in use are replaced at the next reboot (exit
+// 3010). Microsoft ships no MSI from 7.7, so the check refuses those versions. Errors go to an
+// OCERR line and exit 1 (trap). No user input is interpolated; the check/install mode is selected
+// by the $CheckOnly prefix line only.
 const PWSH_SCRIPT = String.raw`
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
@@ -33,7 +33,6 @@ function Test-GithubHost {
 }
 
 ${DOWNLOAD_HELPERS}
-${UPDATE_DIR_HELPERS}
 
 function Get-InstalledPwshVersion {
   $entries = Get-ChildItem -LiteralPath "HKLM:\SOFTWARE\Microsoft\PowerShellCore\InstalledVersions" -ErrorAction SilentlyContinue | ForEach-Object { Get-ItemProperty -LiteralPath $_.PSPath }
@@ -67,35 +66,31 @@ if ($CheckOnly) {
 
 $arch = if ($env:PROCESSOR_ARCHITECTURE -eq "ARM64") { "arm64" } else { "x64" }
 $url = "https://github.com/PowerShell/PowerShell/releases/download/v$latest/PowerShell-$latest-win-$arch.msi"
-$tmp = New-UpdateDir "pwsh-update-"
-try {
-  $file = Join-Path $tmp "PowerShell.msi"
-  if (-not $PrepareDir -or $PrepareOnly) { Save-Download -Uri $url -OutFile $file -AllowHost { param($h) Test-GithubHost $h } }
-  Write-OcStep "verifying"
-  $sig = Get-AuthenticodeSignature -FilePath $file
-  if ($sig.Status -ne "Valid") { throw "Signature check failed: $($sig.Status) ($($sig.StatusMessage))" }
-  $signer = $sig.SignerCertificate.GetNameInfo([System.Security.Cryptography.X509Certificates.X509NameType]::SimpleName, $false)
-  if ($signer -ne "Microsoft Corporation") { throw "Signature signer '$signer' is not Microsoft" }
-  if ($PrepareOnly) { Write-Output "PREPARED $latest"; exit 0 }
-  Write-OcStep "installing needs admin approval"
-  try { $proc = Start-Process -FilePath "msiexec.exe" -ArgumentList "/i", ('"{0}"' -f $file), "/qn", "/norestart", "MSIRESTARTMANAGERCONTROL=DisableShutdown" -Verb RunAs -PassThru }
-  catch { throw "Cancelled at the admin prompt" }
-  if (-not $proc.WaitForExit(600000)) { throw "Install still running after 10 minutes" }
-  $code = $proc.ExitCode
-  if ($code -eq 1602) { throw "Install cancelled" }
-  if ($code -eq 1618) { throw "Another installer is running; try again when it finishes" }
-  if ($code -ne 0 -and $code -ne 3010) { throw "Install failed: msiexec exit code $code" }
-  $after = Get-InstalledPwshVersion
-  if ($after -ne $latest) { throw "Install finished but PowerShell reports $after" }
-  $note = if ($code -eq 3010) { " (restart Windows to finish)" } else { "" }
-  Write-Output "Updated PowerShell $installed -> $after$note"
-} finally {
-  Remove-UpdateDir $tmp
-}
+$file = Join-Path $WorkDir "PowerShell.msi"
+if (-not $Prepared) { Save-Download -Uri $url -OutFile $file -AllowHost { param($h) Test-GithubHost $h } }
+Write-OcStep "verifying"
+$sig = Get-AuthenticodeSignature -FilePath $file
+if ($sig.Status -ne "Valid") { throw "Signature check failed: $($sig.Status) ($($sig.StatusMessage))" }
+$signer = $sig.SignerCertificate.GetNameInfo([System.Security.Cryptography.X509Certificates.X509NameType]::SimpleName, $false)
+if ($signer -ne "Microsoft Corporation") { throw "Signature signer '$signer' is not Microsoft" }
+if ($PrepareOnly) { Write-Output "PREPARED $latest"; exit 0 }
+Write-OcStep "installing needs admin approval"
+try { $proc = Start-Process -FilePath "msiexec.exe" -ArgumentList "/i", ('"{0}"' -f $file), "/qn", "/norestart", "MSIRESTARTMANAGERCONTROL=Disable" -Verb RunAs -PassThru }
+catch { throw "Cancelled at the admin prompt" }
+Write-OcStep "installing"
+if (-not $proc.WaitForExit(600000)) { throw "Install still running after 10 minutes" }
+$code = $proc.ExitCode
+if ($code -eq 1602) { throw "Install cancelled" }
+if ($code -eq 1618) { throw "Another installer is running; try again when it finishes" }
+if ($code -ne 0 -and $code -ne 3010) { throw "Install failed: msiexec exit code $code" }
+$after = Get-InstalledPwshVersion
+if ($after -ne $latest) { throw "Install finished but PowerShell reports $after" }
+$note = if ($code -eq 3010) { " (restart Windows to finish)" } else { "" }
+Write-Output "Updated PowerShell $installed -> $after$note"
 `
 
-function pwshScript(checkOnly: boolean, expectedVersion?: string, allowFresh = false, prepare?: ScriptPrepare) {
-  return `${scriptModeLines(checkOnly, expectedVersion, allowFresh, prepare)}\n${PWSH_SCRIPT}`
+function pwshScript(checkOnly: boolean, expectedVersion?: string, allowFresh = false, work?: ScriptWork) {
+  return `${scriptModeLines(checkOnly, expectedVersion, allowFresh, work)}\n${PWSH_SCRIPT}`
 }
 
 const PWSH_KEY = "powershell"
@@ -111,7 +106,12 @@ export async function installPowershell(
   if (!/^\d+(\.\d+){1,3}$/.test(expectedVersion)) {
     return { ok: false, alreadyRunning: false, message: "Confirmed version is invalid" }
   }
-  return runDesktopInstall({ key: PWSH_KEY, label: "PowerShell", script: pwshScript(false, expectedVersion), onLine })
+  return runDesktopInstall({
+    key: PWSH_KEY,
+    label: "PowerShell",
+    script: (dir) => pwshScript(false, expectedVersion, false, { dir }),
+    onLine,
+  })
 }
 
 /** Downloads the latest release into `dir` and returns its install step (`oc oc deps install`). */
@@ -119,7 +119,7 @@ export function preparePowershell(dir: string, onLine?: (line: string) => void) 
   return prepareDesktopInstall({
     key: PWSH_KEY,
     label: "PowerShell",
-    script: (expectedVersion, prepare) => pwshScript(false, expectedVersion, true, prepare),
+    script: (expectedVersion, work) => pwshScript(false, expectedVersion, true, work),
     dir,
     onLine,
   })

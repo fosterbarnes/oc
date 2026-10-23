@@ -196,6 +196,31 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-22 (~19:54) - v0.2.299 deactivatedZippo - Update all: no wait after Appx installs; PowerShell MSI no longer kills oc - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation (plan `~/.config/opencode/plans/updateAllPwshAndDelay.md`); completed; live checks pending (user)
+- Version: 0.2.299 deactivatedZippo
+- Found (event logs, 2026-10-22 run): `Windows PowerShell` 400/403 show Claude's script ran 85 s and ChatGPT's 195 s after "Updated", process exit/close instant; the only code there was `Remove-UpdateDir` (same held-MSIX delete hang as `dependencies.ts` removeRunDir comment). RM 10006 on pid 7236 (`pwsh -NoExit -Command oc`) at 19:35:11, oc log `global event disconnected` 19:35:13: RM shutdown attempt (Ctrl+C to the console) killed the TUI; `DisableShutdown` does not apply to RM-authored MSIs.
+- Changed `runDesktopInstall` (`desktopUpdate.ts`): `script: (dir) => string`, optional `dir`; without one it makes `%TEMP%\oc-<key>-update-*` and `void removeRunDir` after the result (2 s cap, then hidden retry handoff).
+- Moved `removeRunDir`/`removeDirLater`/`REMOVE_DIR_LATER_SCRIPT`/limits from `dependencies.ts` to `desktopUpdate.ts`; dependencies imports it.
+- Replaced `ScriptPrepare`/`$PrepareDir`/`UPDATE_DIR_HELPERS` with `ScriptWork` -> `$WorkDir`, `$PrepareOnly`, `$Prepared`; 4 scripts (Claude, ChatGPT, Cursor, pwsh) dropped New/Remove-UpdateDir and try/finally; download guard `if (-not $Prepared)`.
+- Changed pwsh msiexec `MSIRESTARTMANAGERCONTROL=DisableShutdown` -> `Disable` (`pwshUpdate.ts`), header comment says why.
+- Added `Write-OcStep "installing"` after the UAC prompt returns (pwsh, `Install-MsixElevated`).
+- Fixed `updateAllHarnesses`: confirmed items show `waiting` instead of `awaiting confirm` until their turn.
+- Added test `installs in its own temp folder and removes it` (`desktopUpdate.test.ts`); fake script uses `$WorkDir`/`$Prepared`; removeRunDir test imports from desktopUpdate.
+- Updated oc-companion skill (WorkDir contract).
+- Verification: tui `bun run typecheck` exit 0; `bun test test/desktopUpdate.test.ts test/dependencies.test.ts test/updateProgress.test.ts` 46 pass; real read-only checks of all 4 scripts report up to date. Not run: a real Appx/pwsh install (nothing to update); `Disable` reaching the RemoveExistingProducts session unverified (VM test in plan).
+- Leftover from the killed run: `%TEMP%\pwsh-update-51ca6f428dd84a33b4b3bed20b7f8c2b` (117 MB), not deleted.
+
+### User
+Third party harness updates
+- Claude and ChatGPT desktop updates finish right after "Updated" instead of waiting 1-3 minutes on temp file cleanup, which now happens in the background.
+- Updating PowerShell no longer closes oc when oc runs inside a PowerShell window; open PowerShell windows may need a Windows restart to finish the update.
+- After you confirm Update all, items not yet started say "waiting", and the status switches from "needs admin approval" to "installing" once you approve.
+
+---
+
 ## 2026-10-22 (~05:57) - v0.2.298 mortadellaBoners - VM runs 6-7 confirmed; temp debug logging removed - Claude Opus 5.5, low effort; Implementation
 
 ### Agent

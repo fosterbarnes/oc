@@ -4,9 +4,8 @@ import {
   runDesktopCheck,
   runDesktopInstall,
   scriptModeLines,
-  UPDATE_DIR_HELPERS,
 } from "./desktopUpdate"
-import type { DesktopCheckResult, DesktopInstallResult, ScriptPrepare } from "./desktopUpdate"
+import type { DesktopCheckResult, DesktopInstallResult, ScriptWork } from "./desktopUpdate"
 
 // Fixed script for the per-user Inno Setup install: registry DisplayVersion of the
 // _is1 key (no process spawn, works when Cursor is closed), system-wide installs
@@ -14,7 +13,7 @@ import type { DesktopCheckResult, DesktopInstallResult, ScriptPrepare } from "./
 // from Cursor's download API, download host and final redirect host both allowlisted,
 // Authenticode Valid plus exact Anysphere signer CN pin, silent install with
 // /MERGETASKS=!runcode so Cursor does not relaunch, installer killed after 10 minutes,
-// temp dir removed in finally. Errors go to an OCERR line and exit 1 (trap). No user
+// download in the caller's $WorkDir. Errors go to an OCERR line and exit 1 (trap). No user
 // input is interpolated; the check/install mode is selected by the $CheckOnly prefix
 // line only.
 const CURSOR_DESKTOP_SCRIPT = String.raw`
@@ -31,7 +30,6 @@ function Test-CursorHost {
 }
 
 ${DOWNLOAD_HELPERS}
-${UPDATE_DIR_HELPERS}
 
 function Get-CursorInstall {
   $key = Get-Item -LiteralPath $UninstallKey -ErrorAction SilentlyContinue
@@ -77,38 +75,28 @@ if ($CheckOnly) {
   exit 0
 }
 
-$tmp = New-UpdateDir "cursor-desktop-update-"
-try {
-  $file = Join-Path $tmp "CursorSetup.exe"
-  if (-not $PrepareDir -or $PrepareOnly) { Save-Download -Uri $downloadUrl -OutFile $file -AllowHost { param($h) Test-CursorHost $h } }
-  Write-OcStep "verifying"
-  $sig = Get-AuthenticodeSignature -FilePath $file
-  if ($sig.Status -ne "Valid") { throw "Signature check failed: $($sig.Status) ($($sig.StatusMessage))" }
-  $signer = $sig.SignerCertificate.GetNameInfo([System.Security.Cryptography.X509Certificates.X509NameType]::SimpleName, $false)
-  if ($signer -ne "Anysphere, Inc.") { throw "Signature signer '$signer' is not Cursor's expected signer" }
-  if ($PrepareOnly) { Write-Output "PREPARED $latest"; exit 0 }
-  Write-OcStep "installing"
-  $proc = Start-Process -FilePath $file -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CLOSEAPPLICATIONS", "/MERGETASKS=!runcode" -PassThru
-  if (-not $proc.WaitForExit(600000)) {
-    $proc.Kill()
-    throw "Install timed out after 10 minutes"
-  }
-  if ($proc.ExitCode -ne 0) { throw "Install failed: exit code $($proc.ExitCode) (is Cursor still running?)" }
-  $after = Get-CursorInstall
-  if (-not $after) { throw "Install finished but Cursor Desktop was not found" }
-  Write-Output "Updated Cursor Desktop $installed -> $($after.Version)"
-} finally {
-  Remove-UpdateDir $tmp
+$file = Join-Path $WorkDir "CursorSetup.exe"
+if (-not $Prepared) { Save-Download -Uri $downloadUrl -OutFile $file -AllowHost { param($h) Test-CursorHost $h } }
+Write-OcStep "verifying"
+$sig = Get-AuthenticodeSignature -FilePath $file
+if ($sig.Status -ne "Valid") { throw "Signature check failed: $($sig.Status) ($($sig.StatusMessage))" }
+$signer = $sig.SignerCertificate.GetNameInfo([System.Security.Cryptography.X509Certificates.X509NameType]::SimpleName, $false)
+if ($signer -ne "Anysphere, Inc.") { throw "Signature signer '$signer' is not Cursor's expected signer" }
+if ($PrepareOnly) { Write-Output "PREPARED $latest"; exit 0 }
+Write-OcStep "installing"
+$proc = Start-Process -FilePath $file -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CLOSEAPPLICATIONS", "/MERGETASKS=!runcode" -PassThru
+if (-not $proc.WaitForExit(600000)) {
+  $proc.Kill()
+  throw "Install timed out after 10 minutes"
 }
+if ($proc.ExitCode -ne 0) { throw "Install failed: exit code $($proc.ExitCode) (is Cursor still running?)" }
+$after = Get-CursorInstall
+if (-not $after) { throw "Install finished but Cursor Desktop was not found" }
+Write-Output "Updated Cursor Desktop $installed -> $($after.Version)"
 `
 
-function cursorDesktopScript(
-  checkOnly: boolean,
-  expectedVersion?: string,
-  allowFresh = false,
-  prepare?: ScriptPrepare,
-) {
-  return `${scriptModeLines(checkOnly, expectedVersion, allowFresh, prepare)}\n${CURSOR_DESKTOP_SCRIPT}`
+function cursorDesktopScript(checkOnly: boolean, expectedVersion?: string, allowFresh = false, work?: ScriptWork) {
+  return `${scriptModeLines(checkOnly, expectedVersion, allowFresh, work)}\n${CURSOR_DESKTOP_SCRIPT}`
 }
 
 const CURSOR_KEY = "cursor-desktop"
@@ -132,7 +120,7 @@ export async function installCursorDesktop(
   return runDesktopInstall({
     key: CURSOR_KEY,
     label: "Cursor Desktop",
-    script: cursorDesktopScript(false, expectedVersion),
+    script: (dir) => cursorDesktopScript(false, expectedVersion, false, { dir }),
     onLine,
   })
 }
@@ -142,7 +130,7 @@ export function prepareCursorDesktop(dir: string, onLine?: (line: string) => voi
   return prepareDesktopInstall({
     key: CURSOR_KEY,
     label: "Cursor Desktop",
-    script: (expectedVersion, prepare) => cursorDesktopScript(false, expectedVersion, true, prepare),
+    script: (expectedVersion, work) => cursorDesktopScript(false, expectedVersion, true, work),
     dir,
     onLine,
   })

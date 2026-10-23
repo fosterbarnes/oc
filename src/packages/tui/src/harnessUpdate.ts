@@ -229,6 +229,7 @@ export async function updateAllHarnesses(
       const list = pending.map((item) => `${item.harness.label} ${versions(item)} (${item.harness.closes})`).join("; ")
       const confirmed =
         autoConfirm || (await DialogConfirm.show(dialog, "Confirm updates", `Updating: ${list}. Continue?`)) === true
+      if (confirmed) for (const item of pending) progress.set(item.harness.label, "waiting", versions(item))
       for (const item of pending) {
         if (!confirmed) {
           record(harnessResult(item.harness.label, "declined", "skipped"))
