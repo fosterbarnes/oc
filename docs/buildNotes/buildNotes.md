@@ -196,6 +196,25 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-22 (~21:50) - v0.2.302 krankenwagenAppointment - ocSetup Select all for installs and shortcuts - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation (after /spit plan); completed, not built
+- Version: 0.2.302 krankenwagenAppointment
+- Added `SelectAllBox` under the header icons in `.installer/ocSetup/windows/MainWindow.xaml`; header icons and it are wrapped in `ListHeader` (was `HeaderIcons`), shown in `ReadRowsAsync`. Label sits on the row label column via a 56 margin.
+- Added `SelectAllBox_Click` in `MainWindow.xaml.cs`: sets `IsChecked` on `CanCheck` rows first, then `WantsShortcut` on `CanShortcut` rows (a missing row's shortcut box opens only once ticked). Uses Click, not Checked/Unchecked, so programmatic sync does not loop.
+- Added `RefreshSelectAll` (called from `RefreshButtons`): true when every tickable box is ticked, false when none, null between; disabled while loading/running or with nothing tickable. Locked required rows are not `CanCheck`, so clearing leaves them ticked.
+- Added a dash mark + `IsChecked={x:Null}` trigger to the shared CheckBox template for the partial state.
+- Verification: `.scripts\buildCompanion.ps1` builds (0 warnings, 0 errors) after one fix. Not run; dev run `.scripts\.runCompanion.ps1 -Fake` pending.
+- MISTAKE: put the Dash Path beside Mark directly in the template's Border (MC3089, Border takes one child); wrapped both in a Grid. Rule: build XAML template edits before handoff.
+
+### User
+ocSetup
+- The dependency list has a "Select all" box that ticks every install and every desktop shortcut it can, and clicking it again clears them.
+- The box shows a dash when only some are ticked, and required rows stay ticked when it is cleared.
+
+---
+
 ## 2026-10-22 (~20:44) - v0.2.301 lasersFtw - Esc stops the main turn first, then its subagents - Claude Opus 5.5, low effort; Implementation
 
 ### Agent

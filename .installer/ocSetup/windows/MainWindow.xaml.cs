@@ -215,7 +215,7 @@ public partial class MainWindow : Window
             {
                 _rows = CreateRows(JsonSerializer.Deserialize<DependencyItem[]>(line, _jsonOptions) ?? []);
                 RowsList.ItemsSource = _rows;
-                HeaderIcons.Visibility = Visibility.Visible;
+                ListHeader.Visibility = Visibility.Visible;
                 hasTable = true;
             }
             else if (hasTable && line.StartsWith('{'))
@@ -270,6 +270,30 @@ public partial class MainWindow : Window
         var installs = _rows.Any(row => row.IsChecked);
         InstallButton.Content = installs ? "Install selected" : "Create shortcuts";
         InstallButton.IsEnabled = !_isRunning && !_isLoading && (installs || _rows.Any(row => row.WantsShortcut));
+        RefreshSelectAll();
+    }
+
+    // Checked when every tickable box is ticked, unchecked when none is, partly checked between.
+    // Locked (required) rows are not tickable, so they never make it partly checked.
+    private void RefreshSelectAll()
+    {
+        var installs = _rows.Where(row => row.CanCheck).ToList();
+        var shortcuts = _rows.Where(row => row.CanShortcut).ToList();
+        var total = installs.Count + shortcuts.Count;
+        SelectAllBox.IsEnabled = !_isRunning && !_isLoading && total > 0;
+        if (!SelectAllBox.IsEnabled) return;
+
+        var ticked = installs.Count(row => row.IsChecked) + shortcuts.Count(row => row.WantsShortcut);
+        SelectAllBox.IsChecked = ticked == 0 ? false : ticked == total ? true : null;
+    }
+
+    // A partly checked box clicks to checked (IsThreeState is off).
+    private void SelectAllBox_Click(object sender, RoutedEventArgs e)
+    {
+        var select = SelectAllBox.IsChecked == true;
+        foreach (var row in _rows.Where(row => row.CanCheck)) row.IsChecked = select;
+        // After the installs: a missing row's shortcut box opens only once it is ticked.
+        foreach (var row in _rows.Where(row => row.CanShortcut)) row.WantsShortcut = select;
     }
 
     // Runs the engine (`oc.exe oc deps` or the dev command) and returns its exit code and stderr.

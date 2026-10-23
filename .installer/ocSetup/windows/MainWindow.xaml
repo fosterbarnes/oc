@@ -36,11 +36,19 @@
                                     BorderBrush="{StaticResource BorderStrongBrush}"
                                     BorderThickness="1"
                                     CornerRadius="{StaticResource SmallCornerRadius}">
-                                <Path x:Name="Mark"
-                                      Data="M 3,8 L 6.5,11.5 L 13,4.5"
-                                      Stroke="{StaticResource PrimaryTextBrush}"
-                                      StrokeThickness="2"
-                                      Visibility="Collapsed" />
+                                <Grid>
+                                    <Path x:Name="Mark"
+                                          Data="M 3,8 L 6.5,11.5 L 13,4.5"
+                                          Stroke="{StaticResource PrimaryTextBrush}"
+                                          StrokeThickness="2"
+                                          Visibility="Collapsed" />
+                                    <!-- Partly checked: only Select all is set to null. -->
+                                    <Path x:Name="Dash"
+                                          Data="M 4,8 L 12,8"
+                                          Stroke="{StaticResource PrimaryTextBrush}"
+                                          StrokeThickness="2"
+                                          Visibility="Collapsed" />
+                                </Grid>
                             </Border>
                             <ContentPresenter x:Name="Content" Margin="8,0,0,0" VerticalAlignment="Center" />
                         </StackPanel>
@@ -50,6 +58,11 @@
                             </Trigger>
                             <Trigger Property="IsChecked" Value="True">
                                 <Setter TargetName="Mark" Property="Visibility" Value="Visible" />
+                                <Setter TargetName="Box" Property="Background" Value="{StaticResource AccentBrush}" />
+                                <Setter TargetName="Box" Property="BorderBrush" Value="{StaticResource AccentBorderBrush}" />
+                            </Trigger>
+                            <Trigger Property="IsChecked" Value="{x:Null}">
+                                <Setter TargetName="Dash" Property="Visibility" Value="Visible" />
                                 <Setter TargetName="Box" Property="Background" Value="{StaticResource AccentBrush}" />
                                 <Setter TargetName="Box" Property="BorderBrush" Value="{StaticResource AccentBorderBrush}" />
                             </Trigger>
@@ -116,7 +129,8 @@
                      sits over its column without shared sizing. -->
                 <StackPanel>
                 <!-- Shown with the rows once the list loads (ReadRowsAsync). -->
-                <StackPanel x:Name="HeaderIcons" Margin="0,0,0,6" Orientation="Horizontal" Visibility="Collapsed">
+                <StackPanel x:Name="ListHeader" Visibility="Collapsed">
+                <StackPanel Margin="0,0,0,6" Orientation="Horizontal">
                     <!-- Transparent borders make the whole 16x16 cell hoverable, not just the glyph. -->
                     <StackPanel.Resources>
                         <Style TargetType="{x:Type Border}">
@@ -155,6 +169,16 @@
                             <Path Data="{StaticResource TagIconGeometry}" />
                         </Viewbox>
                     </Border>
+                </StackPanel>
+                <!-- Ticks every install and shortcut box that can be ticked. The 56 margin puts the
+                     text on the row label column (two more 16-wide cells and their margins). -->
+                <CheckBox x:Name="SelectAllBox"
+                          Margin="0,0,0,10"
+                          HorizontalAlignment="Left"
+                          AutomationProperties.Name="Select all installs and shortcuts"
+                          Click="SelectAllBox_Click">
+                    <TextBlock Margin="56,0,0,0" Text="Select all" />
+                </CheckBox>
                 </StackPanel>
                 <ItemsControl x:Name="RowsList">
                     <ItemsControl.ItemTemplate>

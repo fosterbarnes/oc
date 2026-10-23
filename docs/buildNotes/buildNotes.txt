@@ -1,11 +1,6 @@
-v0.2.301 lasersFtw [feat. > stop subagents with task_cancel and Esc]
+v0.2.302 krankenwagenAppointment [feat. > ocSetup Select all]
 
-subagents:
-Agents can now stop a background subagent they started with the new task_cancel tool. Claude agents get it next to task and are told to use it, since Claude's own TaskStop cannot see oc subagents. It only stops subagents of the same chat, says so when a task already finished, and does not wake the main agent.
+ocSetup:
+The dependency list has a "Select all" box under the column icons. It ticks every row that can be installed and every desktop shortcut box that can be ticked, and clicking it again clears them. It shows a dash when only some boxes are ticked, required rows stay ticked when it is cleared, and it is greyed out while the list is checking or an install runs.
 
-In a subagent's own view (or its own tab), Esc twice or the new Stop button in the footer stops just that subagent. The sidebar shows a stopped subagent as "stopped" instead of "done".
-
-esc in the main chat:
-While the main agent is working, Esc twice now stops only the main turn; background subagents keep running and still report back when they finish. Esc twice again, or any time the main chat is idle while subagents work, stops those subagents, and the footer shows "esc stop subagents". A subagent the main turn was waiting on directly still stops with it. Before, Esc did nothing when the main chat was idle, and when it worked it stopped everything at once.
-
-Under the hood: the session abort route takes an optional keepBackground query flag (SDK v2 regenerated); SessionPrompt.cancel and SessionRunState.cancel skip the child cascade and leave background task jobs running when it is set, and every other caller keeps the full cascade. Removed a "stopped by the user" message path that could never run, because stopping a subagent cancels its job first. Pane tests no longer pass a host TYPESAFE_API_KEY to oc. Checks: task tool tests (45 pass), session HTTP API tests (22 pass), Claude proxy tests (123 pass), permission tests (82 pass), sidebar subagent tests (5 pass), opencode and tui typecheck, and the new TUI pane test for staged Esc. A live run with Grok, DeepSeek free, Luna and Haiku subagents showed the two separate stops in the server log. Known: two pane tests outside this change fail on rerun (API error shown once, warm-up schedule dialog); not checked against the previous version.
+Under the hood: the header icons and the new box share one ListHeader panel. Installs are ticked before shortcuts because a missing row's shortcut box only opens once its install box is ticked. The box syncs through RefreshButtons and uses Click, so syncing it does not re-trigger selection. The shared checkbox template gained a dash mark for the partly checked state. Checks: buildCompanion.ps1 builds with no warnings or errors. Not run in the window yet.
