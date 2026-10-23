@@ -4,6 +4,7 @@ namespace OcSetup.Models;
 public sealed record DependencyItem(
     string Id,
     string Label,
+    string Section,
     bool Required,
     bool DefaultSelected,
     string[] Needs,

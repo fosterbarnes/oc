@@ -196,6 +196,121 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-22 (~23:26) - v0.2.303 basementMapper - ocSetup finishing screen, centered scroll bar, .NET 8/10 Desktop Runtime rows - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation (plan `~/.config/opencode/plans/ocSetupFinishing.md`); completed
+- Version: 0.2.303 basementMapper (unchanged: not committed since the bump)
+- Added `ShowFinishing`/`SetFinishing`/`DoneLines` (`MainWindow.xaml.cs`): installs + shortcuts path shows the Done panel as "Finishing setup" (FinishingDots, "Creating desktop shortcuts") before the post-install reload; Back/Open oc disabled until `ShowDone`. `MainWindow.xaml`: heading + `FinishingDots` StackPanel, `BackButton` named
+- Changed `FlatScrollBarStyle` Width 12 -> 8, thumb Margin `0,2`, bar Margin `12,0,0,0`: thumb centered 12/12 between panel and window edge (`theme/controls.xaml`)
+- Added rows `dotnetRuntime8`/`dotnetRuntime10` (".NET N Desktop Runtime", DEV, admin, signer `.NET`) via `dotnetDesktopRuntime(major)`; `dotnetSdk10` -> `dotnetInstaller(channel, "sdk" | "desktopRuntime")` (desktop runtime = latest-release's `windowsdesktop` `windowsdesktop-runtime-win-x64.exe`); detection shares `dotnetVersions` (`--list-sdks` / `--list-runtimes` WindowsDesktop.App); `DOTNET_INSTALL_ARGS`
+- Tests: lock table + no-shortcut list include the two runtime rows
+- Docs: wiki Install.md dev list; oc-companion skill order + no-shortcut list
+- Verification: `bun test test/dependencies.test.ts` 19 pass; tui typecheck exit 0; `buildCompanion.ps1` 0/0; dev and built `oc deps list`: dotnetRuntime8 found 8.0.32, dotnetRuntime10 found 10.0.13; `build.ps1 -Release` binaries + 2 basic checks OK; `buildInstaller.ps1` OK; overwrote `ocInstallerTest\oc_v0.2.303_windows-x64-setup.exe` (SHA256 5E88ED03...1414, hash match); TESTING.md updated. `dotnetInstaller` download URL resolution not exercised (no install run here); finishing screen not seen on screen
+- ERROR: `build.ps1 -Release` zip step failed again (known, `zip` missing); my wrapper treated its throw as fatal, so the installer step was rerun separately
+
+### User
+ocSetup
+- After installing with desktop shortcut boxes ticked, the window now switches straight to a "Finishing setup" summary while it re-checks apps and makes shortcuts, instead of sitting on the list.
+- The scroll bar now sits evenly between the list panel and the window edge.
+- New optional dev rows: .NET 8 Desktop Runtime and .NET 10 Desktop Runtime.
+
+---
+
+## 2026-10-22 (~23:06) - v0.2.303 basementMapper - ocSetup flat scroll bar outside the list panel - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation (spit -> imp, plan in chat); completed
+- Version: 0.2.303 basementMapper (unchanged: not committed since the bump)
+- Added `ScrollPageButtonStyle`, `FlatScrollBarStyle` (12 wide, 8-wide rounded thumb, BorderSubtle -> BorderStrong on hover/drag, no arrows, track click pages) and `PanelScrollViewerStyle` (ContentPanelStyle border with Padding 0 + `PART_ScrollContentPresenter` in col 0, `PART_VerticalScrollBar` in an Auto col 1 bound to `ComputedVerticalScrollBarVisibility`) in `theme/controls.xaml`
+- Changed `MainWindow.xaml` `ListPanel` from Border + ScrollViewer to one `ScrollViewer` with `PanelScrollViewerStyle`; panel padding moved to the inner StackPanel margin so rows scroll under the border; `ListPanel` name kept for `SetDoneVisible`
+- Kept: base `theme/controls.xaml` not updated (same plain ScrollViewer there); port separately if wanted
+- Verification: `buildCompanion.ps1` 0 warnings/0 errors; `buildInstaller.ps1` OK; overwrote `ocInstallerTest\oc_v0.2.303_windows-x64-setup.exe` (SHA256 EFF1F7D7...C37E, hash match), removed the `-c` copy; TESTING.md updated. Window not opened here (XAML resource errors would only show at load)
+
+### User
+ocSetup
+- When the dependency list is taller than the window, a thin flat scroll bar appears to the right of the panel instead of the old Windows-style bar inside it.
+- The panel narrows slightly only while the bar is shown, and the status text no longer touches the bar.
+
+---
+
+## 2026-10-22 (~22:34) - v0.2.303 basementMapper - ocSetup sections all open by default - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation; completed
+- Version: 0.2.303 basementMapper (unchanged: not committed since the bump)
+- Changed `DependencySection` to start expanded (ctor `isExpanded` param removed); `ShowSections` no longer derives open state from required/default rows
+- Removed the "required/default rows only in the first section" assertion from the section test (rule existed only for collapsed sections); contiguity check kept
+- Docs: wiki Install.md, oc-companion skill
+- Verification: `bun test test/dependencies.test.ts` 19 pass; `buildInstaller.ps1` OK; share copy of `oc_v0.2.303_windows-x64-setup.exe` locked (5 retries), staged as `-c` (SHA256 768956F2...30A6, hash match); TESTING.md updated
+- ERROR: VM held `oc_v0.2.303_windows-x64-setup.exe` open again; `-c` copy staged
+
+### User
+ocSetup
+- Every section of the dependency list now starts expanded; you can still collapse any of them.
+
+---
+
+## 2026-10-22 (~22:28) - v0.2.303 basementMapper - ocSetup taller default window - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation; completed
+- Version: 0.2.303 basementMapper (unchanged: not committed since the bump)
+- Changed `MainWindow.xaml` Height 600 -> 840 (runtime + dev sections open); ctor clamps to `SystemParameters.WorkArea.Height` so small screens do not open off-screen
+- Verification: `buildInstaller.ps1` OK; overwrote `ocInstallerTest\oc_v0.2.303_windows-x64-setup.exe` (SHA256 37E300B3...D5CD, hash match), TESTING.md updated; removed the earlier `-b` copy at the user's request
+
+### User
+ocSetup
+- The dependency window opens taller, up to the height of the screen.
+
+---
+
+## 2026-10-22 (~22:24) - v0.2.303 basementMapper - ocSetup row text color fix + rename to oc Dependency Installer - Claude Opus 5.5, low effort; Debug
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Debug (user VM screenshot); completed
+- Version: 0.2.303 basementMapper (unchanged: not committed since the bump)
+- Fixed black row labels: the system Expander style sets Foreground to ControlTextBrush and rows inherit it; `SectionExpanderStyle` now sets `PrimaryTextBrush` (`MainWindow.xaml`)
+- Renamed window title, crash MessageBox caption (`App.xaml.cs`), and Start menu shortcut (`oc.installer.iss`) to "oc Dependency Installer"; `[InstallDelete]` removes the old `oc dependencies.lnk` on upgrade; README, FORK.md, wiki Install.md, oc-companion skill updated
+- Fixed `[UninstallDelete]` missing `scc.exe` (placed next to oc.exe by the new scc row)
+- Verification: `buildInstaller.ps1` OK (companion publish + ISCC); staged `ocInstallerTest\oc_v0.2.303_windows-x64-setup-b.exe` (SHA256 A62D7C5D...AAC2, hash match) + TESTING.md; fix not seen on screen here
+- MISTAKE: new Expander template did not set Foreground although the CheckBox and ToggleButton comments already named the system-color problem. Rule: any WPF control whose default style is kept needs an explicit Foreground in this window
+- ERROR: VM share copy of `oc_v0.2.303_windows-x64-setup.exe` was locked; staged as `-b`
+
+### User
+ocSetup
+- Row names in the dependency list are white again instead of black.
+- The window and its Start menu shortcut are now called "oc Dependency Installer"; upgrading replaces the old "oc dependencies" shortcut.
+- Uninstalling oc also removes scc.exe if the window installed it.
+
+---
+
+## 2026-10-22 (~22:15) - v0.2.303 basementMapper - ocSetup collapsible sections + dev and coding tool rows - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation (/imp from plan `~/.config/opencode/plans/ocSetupSections.md`); completed, VM run pending
+- Version: 0.2.303 basementMapper
+- Added `section` to `Dependency`/`DependencyInfo`/`rowInfo` (`src/packages/tui/src/dependencies.ts`) and `DependencyItem.Section` (C#); label consts `RUNTIME`/`DEV`/`CODING`; existing 11 rows `RUNTIME`
+- Added rows: DEV bun (bun.sh install.ps1, userPath), dotnetSdk (releases.json 10.0 latest-sdk win-x64 exe, signer `.NET`, `/install /quiet /norestart`, admin; detect `dotnet --list-sdks`, <10 = outdated), innoSetup (`githubAsset` tag `is-6_7_3` + digest + signer `Pyrsys B.V.`, `/ALLUSERS`; detect = buildInstaller.ps1 rule via `reg query` DisplayVersion >= 6.7, else ISCC on PATH), ghCli (MSI + digest + `GitHub, Inc.`), scc (zip -> `ocInstallDir`, no lock); CODING notepadPlusPlus (NSIS `/S`, signer `NOTEPAD++`, shortcut), githubDesktop (central.github.com -> desktop.githubusercontent.com, `--silent`, `GitHub, Inc.`, userPath, no shortcut box), vscode (update API url + sha256, `Microsoft Corporation`, `/MERGETASKS=!runcode`, userPath, shortcut via `vscodeExe`)
+- Added `githubAsset(..., releasePath)` for pinned tags; `ocInstallDir(tool)` shared by es.exe and scc; INSTALL_SCRIPT exe branch accepts 3010
+- Added `viewModels/DependencySection.cs` (IsExpanded, Rows, tri-state AllChecked, Refresh, SelectAll); `MainWindow.ShowSections` keeps sections across reloads, new section opens only if it holds a required/default row; removed `SelectAllBox` and `RefreshSelectAll` body; `SectionSelectAll_Click`
+- Moved row DataTemplate to `RowTemplate` resource; added `SectionExpanderStyle` (CheckBox + `HeaderSite` ToggleButton siblings, chevron rotates, name at x=80); `ChevronIconGeometry` in `theme/icons.xaml`
+- Tests: lock table + no-shortcut list extended; new test: sections contiguous in order and required/default rows only in the first section
+- Docs: wiki `Install.md` step 3 (sections); oc-companion skill (contract `section`, order, signers, open items)
+- Verification: signer CNs checked on downloaded installers in a temp dir (all Valid; VS Code sha256 matched API); `bun test test/dependencies.test.ts` 19 pass; tui typecheck exit 0; `buildCompanion.ps1` 0 warnings/0 errors; built `oc.exe oc deps list` detects all 19 rows with sections; `buildInstaller.ps1` OK; staged `ocInstallerTest\oc_v0.2.303_windows-x64-setup.exe` (SHA256 1DEAADB0...2A97) + TESTING.md. Window not opened here; UI checks are in TESTING.md
+- MISTAKE: `sed -i` on dependencies.ts in Git Bash converted CRLF to LF and missed its pattern; restored with `git checkout` (own change only). Use Edit for repo files
+- ERROR: `build.ps1 -Release` still fails at the release zip step (`bun: command not found: zip`) after both binaries pass; installer unaffected
+- Risk: GitHub Desktop `--silent` behavior (auto-launch, own shortcut, PATH) unverified until the VM run
+
+### User
+ocSetup
+- The "oc dependencies" list is now split into three sections you can open and close: oc Runtime Dependencies (open), oc Dev. Work Dependencies and Basic Coding Tools (closed).
+- Each section has its own Select all box; the single Select all at the top is gone.
+- New optional rows: Bun, .NET 10 SDK, Inno Setup 6, GitHub CLI and scc for building oc, and Notepad++, GitHub Desktop and VS Code.
+- Notepad++ and VS Code can get a desktop shortcut from the shortcut column; GitHub Desktop makes its own.
+
+---
+
 ## 2026-10-22 (~21:50) - v0.2.302 krankenwagenAppointment - ocSetup Select all for installs and shortcuts - Claude Opus 5.5, low effort; Implementation
 
 ### Agent

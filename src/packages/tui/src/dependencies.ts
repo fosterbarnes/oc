@@ -10,6 +10,7 @@ import { resolveCodexCli, resolveCursorCli, runCliCommand } from "./cliUpdate"
 import { checkCursorDesktop, prepareCursorDesktop } from "./cursorDesktopUpdate"
 import {
   checkClaudeDesktop,
+  compareDesktopVersions,
   DOWNLOAD_HELPERS,
   prepareClaudeDesktop,
   PROGRESS_PREFIX,
@@ -44,6 +45,7 @@ export type DependencyInfo = Omit<Detection, "status"> & {
   status: DependencyStatus | "checking"
   id: string
   label: string
+  section: string
   required: boolean
   defaultSelected: boolean
   needs: string[]
@@ -75,6 +77,8 @@ export type Lock = "admin" | "userPath" | "npm"
 export type Dependency = {
   id: string
   label: string
+  // Section heading in ocSetup; rows of one section stay together in the table.
+  section: string
   required?: boolean
   defaultSelected: boolean
   needs: string[]
@@ -94,11 +98,27 @@ const PREFETCH_LIMIT = 4
 const INSTALL_TIMEOUT_MS = 20 * 60 * 1000
 const GITHUB_HOSTS = ["github.com", "objects.githubusercontent.com", "release-assets.githubusercontent.com"]
 const SILENT_INNO_ARGS = ["/VERYSILENT", "/NORESTART", "/NOCANCEL", "/SP-", "/SUPPRESSMSGBOXES"]
+const DOTNET_INSTALL_ARGS = ["/install", "/quiet", "/norestart"]
 // voidtools has no "latest" API; bump both together from https://www.voidtools.com/downloads/.
 const EVERYTHING_VERSION = "1.4.1.1032"
 const EVERYTHING_SHA256 = "c42efad041d4c0bb4d4ac97ae7cbe89f153ec1fe078772392e749c7f5d5282d3"
+// oc.installer.iss needs Inno Setup 6.7+, and buildInstaller.ps1 looks for the Inno Setup 6 install,
+// so this stays on the 6 line; bump from https://github.com/jrsoftware/issrc/releases.
+const INNO_VERSION = "6.7.3"
+const INNO_KEY = String.raw`HKLM\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\Inno Setup 6_is1`
 const PWSH_EXE = path.join(process.env.ProgramFiles ?? "", "PowerShell", "7", "pwsh.exe")
 const CURSOR_EXE = path.join(process.env.LOCALAPPDATA ?? "", "Programs", "cursor", "Cursor.exe")
+const NOTEPAD_PLUS_PLUS_EXE = path.join(process.env.ProgramFiles ?? "", "Notepad++", "notepad++.exe")
+const GITHUB_DESKTOP_EXE = path.join(process.env.LOCALAPPDATA ?? "", "GitHubDesktop", "GitHubDesktop.exe")
+const VSCODE_EXES = [
+  path.join(process.env.LOCALAPPDATA ?? "", "Programs", "Microsoft VS Code", "Code.exe"),
+  path.join(process.env.ProgramFiles ?? "", "Microsoft VS Code", "Code.exe"),
+]
+
+// ocSetup section headings, in table order.
+const RUNTIME = "oc Runtime Dependencies"
+const DEV = "oc Dev. Work Dependencies"
+const CODING = "Basic Coding Tools"
 
 // Windows creates %LOCALAPPDATA%\Packages\<family> when it registers an Appx for the user, so a
 // missing folder means not installed; an existing one still goes through the real check.
@@ -110,6 +130,7 @@ export const DEPENDENCIES: Dependency[] = [
   {
     id: "pwsh",
     label: "PowerShell 7",
+    section: RUNTIME,
     required: true,
     defaultSelected: true,
     needs: [],
@@ -130,6 +151,7 @@ export const DEPENDENCIES: Dependency[] = [
   {
     id: "git",
     label: "Git for Windows",
+    section: RUNTIME,
     defaultSelected: true,
     needs: [],
     locks: ["admin"],
@@ -147,6 +169,7 @@ export const DEPENDENCIES: Dependency[] = [
   {
     id: "node",
     label: "Node.js LTS",
+    section: RUNTIME,
     defaultSelected: true,
     needs: [],
     // The MSI also adds %APPDATA%\npm to the user PATH.
@@ -163,6 +186,7 @@ export const DEPENDENCIES: Dependency[] = [
   {
     id: "everything",
     label: "Everything + es.exe",
+    section: RUNTIME,
     defaultSelected: true,
     needs: [],
     locks: ["admin"],
@@ -179,6 +203,7 @@ export const DEPENDENCIES: Dependency[] = [
   {
     id: "wezterm",
     label: "WezTerm",
+    section: RUNTIME,
     defaultSelected: true,
     needs: [],
     locks: ["admin"],
@@ -198,6 +223,7 @@ export const DEPENDENCIES: Dependency[] = [
   {
     id: "codexCli",
     label: "Codex CLI",
+    section: RUNTIME,
     defaultSelected: true,
     needs: ["node"],
     // npm writes only %APPDATA%\npm, which the Node.js installer already put on PATH.
@@ -209,6 +235,7 @@ export const DEPENDENCIES: Dependency[] = [
   {
     id: "claudeCli",
     label: "Claude Code CLI",
+    section: RUNTIME,
     defaultSelected: true,
     needs: ["node"],
     // npm instead of claude.ai/install.ps1: the same native binary (per-platform optional
@@ -222,6 +249,7 @@ export const DEPENDENCIES: Dependency[] = [
   {
     id: "cursorCli",
     label: "Cursor CLI",
+    section: RUNTIME,
     defaultSelected: false,
     needs: [],
     // The vendor script adds its folder to the user PATH.
@@ -242,6 +270,7 @@ export const DEPENDENCIES: Dependency[] = [
   {
     id: "codexDesktop",
     label: "Codex (ChatGPT) desktop",
+    section: RUNTIME,
     defaultSelected: false,
     needs: [],
     locks: ["admin"],
@@ -254,6 +283,7 @@ export const DEPENDENCIES: Dependency[] = [
   {
     id: "claudeDesktop",
     label: "Claude desktop",
+    section: RUNTIME,
     defaultSelected: false,
     needs: [],
     locks: ["admin"],
@@ -265,6 +295,7 @@ export const DEPENDENCIES: Dependency[] = [
   {
     id: "cursorDesktop",
     label: "Cursor desktop",
+    section: RUNTIME,
     defaultSelected: false,
     needs: [],
     // Per-user installer (no UAC) whose default tasks add Cursor's bin folder to the user PATH.
@@ -278,6 +309,161 @@ export const DEPENDENCIES: Dependency[] = [
     // Cursor's per-user installer location.
     shortcut: { name: "Cursor", find: () => exeAt(CURSOR_EXE) },
     prepare: harnessPrepared(prepareCursorDesktop),
+  },
+  // Tools for working on and building oc itself (.scripts).
+  {
+    id: "bun",
+    label: "Bun",
+    section: DEV,
+    defaultSelected: false,
+    needs: [],
+    // The vendor script adds %USERPROFILE%\.bun\bin to the user PATH.
+    locks: ["userPath"],
+    detect: (env) => detectCli(which("bun", env), env),
+    prepare: prepared(async () => ({
+      label: "Bun",
+      url: "https://bun.sh/install.ps1",
+      fileName: "install.ps1",
+      hosts: ["bun.sh"],
+      kind: "ps1",
+    })),
+  },
+  {
+    id: "dotnetSdk",
+    label: ".NET 10 SDK",
+    section: DEV,
+    defaultSelected: false,
+    needs: [],
+    locks: ["admin"],
+    detect: detectDotnetSdk,
+    prepare: prepared(async () => ({
+      label: ".NET 10 SDK",
+      ...(await dotnetInstaller("10.0", "sdk")),
+      // .NET installers are signed by ".NET", not "Microsoft Corporation".
+      signer: ".NET",
+      kind: "exe",
+      args: DOTNET_INSTALL_ARGS,
+      elevate: true,
+    })),
+  },
+  dotnetDesktopRuntime(8),
+  dotnetDesktopRuntime(10),
+  {
+    id: "innoSetup",
+    label: "Inno Setup 6",
+    section: DEV,
+    defaultSelected: false,
+    needs: [],
+    locks: ["admin"],
+    detect: detectInnoSetup,
+    prepare: prepared(async () => ({
+      label: "Inno Setup",
+      ...(await githubAsset(
+        "jrsoftware/issrc",
+        /^innosetup-6\.[\d.]+\.exe$/,
+        `tags/is-${INNO_VERSION.replaceAll(".", "_")}`,
+      )),
+      signer: "Pyrsys B.V.",
+      kind: "exe",
+      args: [...SILENT_INNO_ARGS, "/ALLUSERS"],
+      elevate: true,
+    })),
+  },
+  {
+    id: "ghCli",
+    label: "GitHub CLI",
+    section: DEV,
+    defaultSelected: false,
+    needs: [],
+    // MSI that adds its folder to the machine PATH.
+    locks: ["admin"],
+    detect: (env) => detectCli(which("gh", env), env),
+    prepare: prepared(async () => ({
+      label: "GitHub CLI",
+      ...(await githubAsset("cli/cli", /^gh_[\d.]+_windows_amd64\.msi$/)),
+      signer: "GitHub, Inc.",
+      kind: "msi",
+      elevate: true,
+    })),
+  },
+  {
+    id: "scc",
+    label: "scc",
+    section: DEV,
+    defaultSelected: false,
+    needs: [],
+    // scc.exe goes next to oc.exe like es.exe: that folder is already on the user PATH.
+    locks: [],
+    detect: (env) => detectCli(which("scc", env), env),
+    prepare: prepared(async () => ({
+      label: "scc",
+      ...(await githubAsset("boyter/scc", /^scc_Windows_x86_64\.zip$/)),
+      kind: "zip",
+      zipEntry: "scc.exe",
+      zipDest: ocInstallDir("scc"),
+    })),
+  },
+  {
+    id: "notepadPlusPlus",
+    label: "Notepad++",
+    section: CODING,
+    defaultSelected: false,
+    needs: [],
+    locks: ["admin"],
+    detect: async () => (existsSync(NOTEPAD_PLUS_PLUS_EXE) ? { status: "found" } : { status: "missing" }),
+    shortcut: { name: "Notepad++", find: () => exeAt(NOTEPAD_PLUS_PLUS_EXE) },
+    prepare: prepared(async () => ({
+      label: "Notepad++",
+      ...(await githubAsset("notepad-plus-plus/notepad-plus-plus", /^npp\.[\d.]+\.Installer\.x64\.exe$/)),
+      // The installer's CN; the installed notepad++.exe says "Notepad++".
+      signer: "NOTEPAD++",
+      kind: "exe",
+      args: ["/S"],
+      elevate: true,
+    })),
+  },
+  {
+    id: "githubDesktop",
+    label: "GitHub Desktop",
+    section: CODING,
+    defaultSelected: false,
+    needs: [],
+    // Per-user Squirrel installer (no UAC) that adds its bin folder to the user PATH and makes its
+    // own desktop shortcut, so the row has no shortcut box.
+    locks: ["userPath"],
+    detect: async () => (existsSync(GITHUB_DESKTOP_EXE) ? { status: "found" } : { status: "missing" }),
+    prepare: prepared(async () => ({
+      label: "GitHub Desktop",
+      url: "https://central.github.com/deployments/desktop/desktop/latest/win32",
+      fileName: "GitHubDesktopSetup-x64.exe",
+      hosts: ["central.github.com", "desktop.githubusercontent.com"],
+      signer: "GitHub, Inc.",
+      kind: "exe",
+      args: ["--silent"],
+    })),
+  },
+  {
+    id: "vscode",
+    label: "VS Code",
+    section: CODING,
+    defaultSelected: false,
+    needs: [],
+    // Per-user installer whose default tasks add its bin folder to the user PATH.
+    locks: ["userPath"],
+    detect: async (env) => {
+      const code = which("code", env)
+      if (code) return detectCli(code, env)
+      return VSCODE_EXES.some(existsSync) ? { status: "found" } : { status: "missing" }
+    },
+    shortcut: { name: "Visual Studio Code", find: (env) => exeAt(vscodeExe(env)) },
+    prepare: prepared(async () => ({
+      label: "VS Code",
+      ...(await vscodeLatest()),
+      signer: "Microsoft Corporation",
+      kind: "exe",
+      // runcode would open VS Code from the hidden installer; the desktop icon is our shortcut box.
+      args: [...SILENT_INNO_ARGS, "/MERGETASKS=!runcode"],
+    })),
   },
 ]
 
@@ -321,6 +507,7 @@ function rowInfo(
   return {
     id: dep.id,
     label: dep.label,
+    section: dep.section,
     required: dep.required ?? false,
     defaultSelected: dep.defaultSelected,
     needs: dep.needs,
@@ -570,6 +757,89 @@ function everythingExe(env: Env) {
   )
 }
 
+// The installed oc.exe's folder: the oc installer put it on the user PATH and removes the tools
+// placed there (es.exe, scc.exe) on uninstall.
+function ocInstallDir(tool: string) {
+  if (!/^(oc|occ|opencode)\.exe$/i.test(path.basename(process.execPath))) {
+    throw new Error(`${tool} install needs the installed oc.exe`)
+  }
+  return path.dirname(process.execPath)
+}
+
+// Versions from `dotnet <listArg>` lines that start with `prefix` (`10.0.402 [...]` for --list-sdks,
+// `Microsoft.WindowsDesktop.App 8.0.32 [...]` for --list-runtimes), oldest first. A Detection
+// instead when dotnet is missing or fails.
+async function dotnetVersions(env: Env, listArg: string, prefix: string): Promise<string[] | Detection> {
+  const dotnet = which("dotnet", env)
+  if (!dotnet) return { status: "missing" }
+  const result = await runCliCommand(dotnet, [listArg], VERSION_TIMEOUT_MS, env)
+  if (!result.ok) return { status: "error", message: result.lastLine || result.error || `exit code ${result.code}` }
+  return [...result.output.matchAll(new RegExp(`^${prefix}(\\d+\\.\\d+\\.\\d+)`, "gm"))]
+    .map((match) => match[1]!)
+    .sort(compareDesktopVersions)
+}
+
+// ocSetup builds with net10.0-windows, so only a 10.x SDK counts as found.
+async function detectDotnetSdk(env: Env): Promise<Detection> {
+  const versions = await dotnetVersions(env, "--list-sdks", "")
+  if (!Array.isArray(versions)) return versions
+  const newest = versions.at(-1)
+  if (!newest) return { status: "missing" }
+  return newest.startsWith("10.")
+    ? { status: "found", version: newest }
+    : { status: "outdated", version: newest, latest: "10.0" }
+}
+
+// .NET versions install side by side, so another major is missing, not outdated.
+function detectDesktopRuntime(major: number) {
+  return async (env: Env): Promise<Detection> => {
+    const versions = await dotnetVersions(env, "--list-runtimes", String.raw`Microsoft\.WindowsDesktop\.App `)
+    if (!Array.isArray(versions)) return versions
+    const version = versions.filter((item) => item.startsWith(`${major}.`)).at(-1)
+    return version ? { status: "found", version } : { status: "missing" }
+  }
+}
+
+// The Desktop Runtime includes the base .NET runtime, so it runs console and WPF/WinForms apps.
+function dotnetDesktopRuntime(major: number): Dependency {
+  const label = `.NET ${major} Desktop Runtime`
+  return {
+    id: `dotnetRuntime${major}`,
+    label,
+    section: DEV,
+    defaultSelected: false,
+    needs: [],
+    locks: ["admin"],
+    detect: detectDesktopRuntime(major),
+    prepare: prepared(async () => ({
+      label,
+      ...(await dotnetInstaller(`${major}.0`, "desktopRuntime")),
+      signer: ".NET",
+      kind: "exe",
+      args: DOTNET_INSTALL_ARGS,
+      elevate: true,
+    })),
+  }
+}
+
+// Same rule as .scripts\buildInstaller.ps1: the Inno Setup 6 uninstall key must say 6.7+; without
+// the key, an ISCC.exe on PATH counts as found.
+async function detectInnoSetup(env: Env): Promise<Detection> {
+  const result = await runCliCommand("reg.exe", ["query", INNO_KEY, "/v", "DisplayVersion"], VERSION_TIMEOUT_MS)
+  const version = result.ok ? /DisplayVersion\s+REG_SZ\s+(\S+)/i.exec(result.output)?.[1] : undefined
+  if (!version) return which("ISCC", env) ? { status: "found" } : { status: "missing" }
+  return compareDesktopVersions(version, "6.7") < 0
+    ? { status: "outdated", version, latest: INNO_VERSION }
+    : { status: "found", version }
+}
+
+// Code.exe of the `code` on PATH (`<root>\bin\code.cmd`), else the user or system install.
+function vscodeExe(env: Env) {
+  const code = which("code", env)
+  const fromPath = code && path.join(path.dirname(path.dirname(code)), "Code.exe")
+  return [fromPath, ...VSCODE_EXES].find((file): file is string => !!file && existsSync(file))
+}
+
 // Two conditional parts, both downloaded ahead: the Everything app when it is missing, and es.exe
 // when it is not on PATH. es.exe goes next to oc.exe: the oc installer already put that folder on
 // the user PATH and removes es.exe on uninstall.
@@ -590,15 +860,12 @@ async function prepareEverything(dir: string, onLine: OnLine): Promise<Install> 
       }
   let es: InstallerSpec | undefined
   if (!which("es", process.env)) {
-    if (!/^(oc|occ|opencode)\.exe$/i.test(path.basename(process.execPath))) {
-      throw new Error("es.exe install needs the installed oc.exe")
-    }
     es = {
       label: "Everything + es.exe",
       ...(await githubAsset("voidtools/es", /^ES-[\d.]+\.x64\.zip$/)),
       kind: "zip",
       zipEntry: "es.exe",
-      zipDest: path.dirname(process.execPath),
+      zipDest: ocInstallDir("es.exe"),
     }
   }
   const parts = [app, es].filter((spec): spec is InstallerSpec => !!spec)
@@ -637,8 +904,9 @@ type InstallerSpec = Download & {
   zipDest?: string
 }
 
-async function githubAsset(repo: string, pattern: RegExp): Promise<Download> {
-  const response = await fetch(`https://api.github.com/repos/${repo}/releases/latest`, {
+// `releasePath`: "latest" or "tags/<tag>" for a pinned release.
+async function githubAsset(repo: string, pattern: RegExp, releasePath = "latest"): Promise<Download> {
+  const response = await fetch(`https://api.github.com/repos/${repo}/releases/${releasePath}`, {
     headers: { accept: "application/vnd.github+json" },
     signal: AbortSignal.timeout(15_000),
   })
@@ -647,7 +915,8 @@ async function githubAsset(repo: string, pattern: RegExp): Promise<Download> {
     assets?: { name?: string; browser_download_url?: string; digest?: string }[]
   }
   const asset = release.assets?.find((item) => typeof item.name === "string" && pattern.test(item.name))
-  if (!asset?.name || !asset.browser_download_url) throw new Error(`No matching asset in the latest ${repo} release`)
+  if (!asset?.name || !asset.browser_download_url)
+    throw new Error(`No matching asset in the ${releasePath} ${repo} release`)
   const sha256 = /^sha256:([0-9a-f]{64})$/.exec(asset.digest ?? "")?.[1]
   return { url: asset.browser_download_url, fileName: asset.name, hosts: GITHUB_HOSTS, ...(sha256 ? { sha256 } : {}) }
 }
@@ -670,6 +939,44 @@ async function nodeLts(): Promise<Download> {
   if (!release?.version) throw new Error("No Node.js LTS release with a Windows x64 MSI")
   const fileName = `node-${release.version}-x64.msi`
   return { url: `https://nodejs.org/dist/${release.version}/${fileName}`, fileName, hosts: ["nodejs.org"] }
+}
+
+// The newest Windows x64 installer of a .NET channel ("10.0"): the latest SDK, or the latest
+// release's Desktop Runtime. releases.json lists only sha512, so the rows pin the signer.
+async function dotnetInstaller(channel: string, kind: "sdk" | "desktopRuntime"): Promise<Download> {
+  const response = await fetch(`https://builds.dotnet.microsoft.com/dotnet/release-metadata/${channel}/releases.json`, {
+    signal: AbortSignal.timeout(15_000),
+  })
+  if (!response.ok) throw new Error(`.NET release lookup failed: HTTP ${response.status}`)
+  type Files = { files?: { name?: string; url?: string }[] }
+  const index = (await response.json()) as {
+    "latest-release"?: string
+    "latest-sdk"?: string
+    releases?: { "release-version"?: string; sdks?: (Files & { version?: string })[]; windowsdesktop?: Files }[]
+  }
+  const version = kind === "sdk" ? index["latest-sdk"] : index["latest-release"]
+  const fileName = kind === "sdk" ? "dotnet-sdk-win-x64.exe" : "windowsdesktop-runtime-win-x64.exe"
+  const files =
+    kind === "sdk"
+      ? index.releases?.flatMap((release) => release.sdks ?? []).find((sdk) => sdk.version === version)
+      : index.releases?.find((release) => release["release-version"] === version)?.windowsdesktop
+  const url = files?.files?.find((file) => file.name === fileName)?.url
+  if (!url) throw new Error(`No ${fileName} for .NET ${version ?? channel}`)
+  return { url, fileName: path.basename(new URL(url).pathname), hosts: ["builds.dotnet.microsoft.com"] }
+}
+
+// VS Code's update service names the newest user installer and its sha256.
+async function vscodeLatest(): Promise<Download> {
+  const response = await fetch("https://update.code.visualstudio.com/api/update/win32-x64-user/stable/latest", {
+    signal: AbortSignal.timeout(15_000),
+  })
+  if (!response.ok) throw new Error(`VS Code release lookup failed: HTTP ${response.status}`)
+  const release = (await response.json()) as { url?: string; sha256hash?: string }
+  const fileName = release.url ? path.basename(new URL(release.url).pathname) : ""
+  if (!/^VSCodeUserSetup-x64-[\d.]+\.exe$/.test(fileName) || !/^[0-9a-f]{64}$/.test(release.sha256hash ?? "")) {
+    throw new Error("VS Code release lookup returned no user installer")
+  }
+  return { url: release.url!, fileName, hosts: ["vscode.download.prss.microsoft.com"], sha256: release.sha256hash }
 }
 
 async function npmGlobalInstall(label: string, pkg: string, env: Env, onLine: OnLine): Promise<InstallResult> {
@@ -843,8 +1150,9 @@ switch ($Kind) {
     if ($code -ne 0 -and $code -ne 3010) { throw "Install failed: msiexec exit code $code" }
   }
   default {
+    # 3010: installed, reboot required (the .NET SDK's bundle returns it, like msiexec).
     $code = Invoke-Installer $File $InstallArgs
-    if ($code -ne 0) { throw "Install failed: exit code $code" }
+    if ($code -ne 0 -and $code -ne 3010) { throw "Install failed: exit code $code" }
   }
 }
 Write-Output "Installed $Label"

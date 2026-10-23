@@ -75,11 +75,37 @@ test("each row installs one way and holds the locks for what its installer touch
     codexDesktop: ["admin"],
     claudeDesktop: ["admin"],
     cursorDesktop: ["userPath"],
+    bun: ["userPath"],
+    dotnetSdk: ["admin"],
+    dotnetRuntime8: ["admin"],
+    dotnetRuntime10: ["admin"],
+    innoSetup: ["admin"],
+    ghCli: ["admin"],
+    scc: [],
+    notepadPlusPlus: ["admin"],
+    githubDesktop: ["userPath"],
+    vscode: ["userPath"],
   })
 })
 
-test("every row but Node.js offers a desktop shortcut; Appx rows use their pinned app ids", () => {
-  expect(DEPENDENCIES.filter((dep) => !dep.shortcut).map((dep) => dep.id)).toEqual(["node"])
+test("sections stay together in table order", () => {
+  // ocSetup groups rows by section, so a split section would show rows out of install order.
+  const sections = DEPENDENCIES.map((dep) => dep.section).filter((section, index, all) => all[index - 1] !== section)
+  expect(sections).toEqual(["oc Runtime Dependencies", "oc Dev. Work Dependencies", "Basic Coding Tools"])
+})
+
+test("rows with no app, or whose installer makes its own, have no shortcut; Appx rows pin app ids", () => {
+  expect(DEPENDENCIES.filter((dep) => !dep.shortcut).map((dep) => dep.id)).toEqual([
+    "node",
+    "bun",
+    "dotnetSdk",
+    "dotnetRuntime8",
+    "dotnetRuntime10",
+    "innoSetup",
+    "ghCli",
+    "scc",
+    "githubDesktop",
+  ])
   const appId = (id: string) => DEPENDENCIES.find((dep) => dep.id === id)!.shortcut!.find({}, { status: "found" }).appId
   expect(appId("codexDesktop")).toBe("OpenAI.Codex_2p2nqsd0c76g0!App")
   expect(appId("claudeDesktop")).toBe("Claude_pzs8sxrjxfjjc!Claude")
@@ -131,6 +157,7 @@ function fakeDep(
   return {
     id,
     label: id.toUpperCase(),
+    section: "test",
     defaultSelected: true,
     needs,
     locks: ["admin"],

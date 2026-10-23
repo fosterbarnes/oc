@@ -76,15 +76,21 @@ Source: "{#LicenseFile}"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 Name: "{autoprograms}\oc"; Filename: "{app}\oc.exe"; Tasks: startmenuicon
-Name: "{autoprograms}\oc dependencies"; Filename: "{app}\ocSetup.exe"; Tasks: startmenuicon
+Name: "{autoprograms}\oc Dependency Installer"; Filename: "{app}\ocSetup.exe"; Tasks: startmenuicon
 Name: "{autodesktop}\oc"; Filename: "{app}\oc.exe"; Tasks: desktopicon
 
 [Run]
 Filename: "{app}\ocSetup.exe"; Description: "Set up dependencies"; Flags: postinstall nowait skipifsilent
 
+; The Start menu shortcut's name before v0.2.303; upgrades would otherwise keep it beside the new one.
+[InstallDelete]
+Type: files; Name: "{autoprograms}\oc dependencies.lnk"
+
+; Tools ocSetup puts next to oc.exe (dependencies.ts ocInstallDir).
 [UninstallDelete]
 Type: files; Name: "{app}\occ.exe"
 Type: files; Name: "{app}\es.exe"
+Type: files; Name: "{app}\scc.exe"
 
 [Code]
 const

@@ -1,9 +1,11 @@
+using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
 using System.Text;
 using System.Text.Json;
 using System.Windows;
+using System.Windows.Controls;
 using OcSetup.Helpers;
 using OcSetup.Models;
 using OcSetup.ViewModels;
@@ -33,6 +35,7 @@ public partial class MainWindow : Window
     private readonly List<string> _runInstalled = [];
     private string? _weztermGui;
     private IReadOnlyList<DependencyRow> _rows = [];
+    private readonly ObservableCollection<DependencySection> _sections = [];
     private bool _isRunning;
     // The current list load: Install stays disabled while it runs and Open oc awaits it.
     private Task _loadTask = Task.CompletedTask;
@@ -42,6 +45,9 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
         SourceInitialized += (_, _) => WindowsTitleBarTheme.ApplyImmersiveDarkMode(this);
+        RowsList.ItemsSource = _sections;
+        // Tall enough for the runtime and dev sections open; never taller than the screen.
+        Height = Math.Min(Height, SystemParameters.WorkArea.Height);
 
         if (_isDev) Title += " (dev)";
 
@@ -90,9 +96,11 @@ public partial class MainWindow : Window
             return;
         }
 
-        // Rows installed just now only get their shortcut target from the reloaded list.
+        // Rows installed just now only get their shortcut target from the reloaded list, whose slow
+        // checks can take a while: the summary shows "Finishing setup" meanwhile.
         if (ids.Length > 0)
         {
+            ShowFinishing();
             _loadTask = LoadRowsAsync();
             await _loadTask;
         }
@@ -137,13 +145,37 @@ public partial class MainWindow : Window
     private void ShowDone(bool ok, bool ranInstall, IEnumerable<string> shortcutLines)
     {
         DoneHeading.Text = ok ? "Setup complete" : "Setup finished with errors";
+        DoneDetails.Text = DoneLines(ranInstall, shortcutLines);
+        SetFinishing(false);
+        SetDoneVisible(true);
+    }
+
+    // The summary while the post-install list reloads before the shortcuts are created. Back and
+    // Open oc wait: going back would be covered by the summary again, and opening oc closes the
+    // window before the shortcuts exist.
+    private void ShowFinishing()
+    {
+        DoneHeading.Text = "Finishing setup";
+        DoneDetails.Text = DoneLines(true, ["Creating desktop shortcuts"]);
+        SetFinishing(true);
+        SetDoneVisible(true);
+    }
+
+    private void SetFinishing(bool finishing)
+    {
+        FinishingDots.Visibility = finishing ? Visibility.Visible : Visibility.Collapsed;
+        BackButton.IsEnabled = !finishing;
+        OpenOcButton.IsEnabled = !finishing;
+    }
+
+    private string DoneLines(bool ranInstall, IEnumerable<string> shortcutLines)
+    {
         var lines = new List<string>();
         if (_runInstalled.Count > 0) lines.Add($"Installed: {string.Join(", ", _runInstalled)}");
         lines.AddRange(_runFailures.Select(failure => $"{Label(failure.Key)}: {failure.Value}"));
         lines.AddRange(shortcutLines);
         if (ranInstall) lines.Add("Terminals that were already open need a restart to see the new PATH.");
-        DoneDetails.Text = string.Join(Environment.NewLine, lines);
-        SetDoneVisible(true);
+        return string.Join(Environment.NewLine, lines);
     }
 
     private void SetDoneVisible(bool done)
@@ -214,7 +246,7 @@ public partial class MainWindow : Window
             if (line.StartsWith('['))
             {
                 _rows = CreateRows(JsonSerializer.Deserialize<DependencyItem[]>(line, _jsonOptions) ?? []);
-                RowsList.ItemsSource = _rows;
+                ShowSections();
                 ListHeader.Visibility = Visibility.Visible;
                 hasTable = true;
             }
@@ -245,6 +277,21 @@ public partial class MainWindow : Window
         return rows;
     }
 
+    // Sections keep their open state across reloads.
+    private void ShowSections()
+    {
+        foreach (var group in _rows.GroupBy(row => row.Item.Section))
+        {
+            var section = _sections.FirstOrDefault(candidate => candidate.Label == group.Key);
+            if (section is null)
+            {
+                section = new DependencySection(group.Key);
+                _sections.Add(section);
+            }
+            section.Rows = group.ToList();
+        }
+    }
+
     // Each event is one NDJSON line; non-JSON lines are skipped.
     private void HandleInstallLine(string line)
     {
@@ -270,30 +317,15 @@ public partial class MainWindow : Window
         var installs = _rows.Any(row => row.IsChecked);
         InstallButton.Content = installs ? "Install selected" : "Create shortcuts";
         InstallButton.IsEnabled = !_isRunning && !_isLoading && (installs || _rows.Any(row => row.WantsShortcut));
-        RefreshSelectAll();
+        foreach (var section in _sections) section.Refresh(!_isRunning && !_isLoading);
     }
 
-    // Checked when every tickable box is ticked, unchecked when none is, partly checked between.
-    // Locked (required) rows are not tickable, so they never make it partly checked.
-    private void RefreshSelectAll()
+    // A partly checked box clicks to checked (IsThreeState is off). The click sets IsChecked as a
+    // current value, so the box's AllChecked binding stays.
+    private void SectionSelectAll_Click(object sender, RoutedEventArgs e)
     {
-        var installs = _rows.Where(row => row.CanCheck).ToList();
-        var shortcuts = _rows.Where(row => row.CanShortcut).ToList();
-        var total = installs.Count + shortcuts.Count;
-        SelectAllBox.IsEnabled = !_isRunning && !_isLoading && total > 0;
-        if (!SelectAllBox.IsEnabled) return;
-
-        var ticked = installs.Count(row => row.IsChecked) + shortcuts.Count(row => row.WantsShortcut);
-        SelectAllBox.IsChecked = ticked == 0 ? false : ticked == total ? true : null;
-    }
-
-    // A partly checked box clicks to checked (IsThreeState is off).
-    private void SelectAllBox_Click(object sender, RoutedEventArgs e)
-    {
-        var select = SelectAllBox.IsChecked == true;
-        foreach (var row in _rows.Where(row => row.CanCheck)) row.IsChecked = select;
-        // After the installs: a missing row's shortcut box opens only once it is ticked.
-        foreach (var row in _rows.Where(row => row.CanShortcut)) row.WantsShortcut = select;
+        var box = (CheckBox)sender;
+        ((DependencySection)box.DataContext).SelectAll(box.IsChecked == true);
     }
 
     // Runs the engine (`oc.exe oc deps` or the dev command) and returns its exit code and stderr.

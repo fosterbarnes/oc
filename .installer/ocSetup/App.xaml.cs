@@ -38,7 +38,7 @@ public partial class App : Application
     private static void Crash(string source, Exception? exception)
     {
         ErrorLog.Write($"CRASH ({source}): {exception}");
-        MessageBox.Show($"ocSetup crashed ({source}):\n\n{exception?.Message}\n\nLog: {ErrorLog.FilePath}", "oc dependencies",
+        MessageBox.Show($"ocSetup crashed ({source}):\n\n{exception?.Message}\n\nLog: {ErrorLog.FilePath}", "oc Dependency Installer",
             MessageBoxButton.OK, MessageBoxImage.Error);
     }
 }
