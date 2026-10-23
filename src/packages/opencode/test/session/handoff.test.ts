@@ -65,7 +65,8 @@ describe("session handoff", () => {
     Effect.gen(function* () {
       const session = yield* SessionNs.Service
       const handoff = yield* SessionHandoff.Service
-      const origin = yield* session.create({ title: "root work", agent: "build" })
+      const origin = yield* session.create({ title: "Handoff: root work", agent: "build" })
+      yield* session.setSessionInProgress({ sessionID: origin.id, sessionInProgress: true })
       const lastUser = {
         id: MessageID.ascending(),
         role: "user" as const,
@@ -81,9 +82,12 @@ describe("session handoff", () => {
         origin,
       })
       expect(child).toBeTruthy()
-      expect(child!.parentID).toBe(origin.id)
+      expect(child!.parentID).toBeUndefined()
+      expect(child!.title).toBe("Handoff: root work")
       expect(child!.metadata?.[SessionHandoff.HANDOFF_FROM]).toBe(origin.id)
       expect(child!.agent).toBe("build")
+      expect((yield* session.get(origin.id)).sessionInProgress).toBe(false)
+      expect((yield* session.get(child!.id)).sessionInProgress).toBe(true)
       const messages = yield* session.messages({ sessionID: child!.id })
       expect(messages[0]!.info.role).toBe("user")
       expect(JSON.stringify(messages[0]!.parts)).toContain("Goal: ship it")

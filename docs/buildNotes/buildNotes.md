@@ -196,6 +196,27 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-22 (~20:08) - v0.2.300 barnesTexture - Context-limit handoff opens a top-level session, not a subagent - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation; completed. Plan: `~/.config/opencode/plans/handoffTopLevel.md`
+- Version: 0.2.300 barnesTexture
+- Cause: `SessionHandoff.finish` created the child with `parentID: fromID`; TUI keys subagent behavior on parentID (`routes/session/index.tsx:289` hides prompt input, `dialog-session-list.tsx` hides it, subagent footer/notifications, `setIdle` skips it). Seen on nds session `ses_e9d1bb69bffefZKDLKhTgFThpz` (claude-code limit action is `handoff`).
+- Fixed `session/handoff.ts` `finish`: no parentID (link stays in `ocHandoffFrom` metadata); moves in-progress mark origin -> child via `setSessionInProgress`.
+- Fixed `handoffTitle`: strips an existing `Handoff: ` prefix so chained handoffs do not stack it.
+- Simplified `canAutoHandoff` guard (pass): non-handoff sessions return `!parentID`; same behavior, subagents still blocked, handoff sessions (legacy parented ones too) identified by metadata.
+- Updated `test/session/handoff.test.ts`: asserts no parentID, de-duplicated title, in-progress moved.
+- Kept existing parented handoff session as-is (no migration); optional manual DB repair in the plan.
+- Verification: `bun test test/session/handoff.test.ts` 4 pass, 0 fail; `bun run typecheck` (opencode) clean. Live handoff not run.
+
+### User
+Context limit
+- When a session hands off at the context limit, the new session is a normal session: you can type in it and it appears in the session list.
+- The old session stops showing as in progress and the new one shows as in progress.
+- A second handoff no longer titles the session "Handoff: Handoff: ...".
+
+---
+
 ## 2026-10-22 (~19:54) - v0.2.299 deactivatedZippo - Update all: no wait after Appx installs; PowerShell MSI no longer kills oc - Claude Opus 5.5, low effort; Implementation
 
 ### Agent

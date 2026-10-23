@@ -1,10 +1,8 @@
-v0.2.299 deactivatedZippo [fix > Update all wait, PowerShell install]
+v0.2.300 barnesTexture [fix > handoff opens a normal session]
 
-Third party harness updates:
-Claude and ChatGPT desktop updates now finish right after "Updated" instead of waiting 1-3 minutes. The update script was blocked deleting its temp folder, which still held the just-installed package; oc now owns that folder and removes it in the background, the same way the dependency window already did.
+context limit:
+When a session reaches the context limit with the Handoff action, the follow-up session is now a normal session. Before, it opened as a subagent: no prompt input, missing from the session list, and subagent notifications.
 
-Updating PowerShell no longer closes oc when oc runs inside a PowerShell window. The installer's Restart Manager tried to shut down the PowerShell window hosting oc, which killed oc; the install now turns Restart Manager off, so open PowerShell windows may need a Windows restart to finish the update.
+The in-progress mark moves from the old session to the new one, and a second handoff no longer titles the session "Handoff: Handoff: ...".
 
-After you confirm Update all, items not yet started say "waiting", and the status switches from "needs admin approval" to "installing" once you approve.
-
-Under the hood: the four update scripts (Claude, ChatGPT, Cursor, PowerShell) get their work folder from the caller as $WorkDir and never delete it; removeRunDir moved from dependencies.ts to desktopUpdate.ts and is shared by both paths. msiexec uses MSIRESTARTMANAGERCONTROL=Disable because DisableShutdown has no effect on a Restart Manager aware package. Checks: tui typecheck, desktopUpdate, dependencies, and updateProgress tests (46 pass, including a new test that an install removes its own temp folder), and real read-only update checks for all four scripts. Not run: a real Appx or PowerShell upgrade (nothing to update yet); whether Disable also covers the old version's uninstall step needs a VM test.
+Under the hood: SessionHandoff.finish no longer sets parentID; the link back stays in the ocHandoffFrom metadata. canAutoHandoff collapsed to one guard with the same behavior. Earlier handoff sessions keep their parent link. Checks: handoff tests (4 pass) and opencode typecheck. Not run: a live handoff.

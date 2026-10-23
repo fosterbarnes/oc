@@ -38,11 +38,11 @@ export function assistantText(message: SessionV1.WithParts) {
 }
 
 export function canAutoHandoff(input: { session: Session.Info; messages: SessionV1.WithParts[] }) {
-  if (input.session.parentID && !input.session.metadata?.[HANDOFF_FROM]) return false
-  if (!input.session.metadata?.[HANDOFF_FROM]) return true
-  // Handoff child: require real progress beyond the kickoff exchange, so a summary
+  // Subagents never hand off; ordinary sessions always may.
+  if (!input.session.metadata?.[HANDOFF_FROM]) return !input.session.parentID
+  // Handoff session: require real progress beyond the kickoff exchange, so a summary
   // alone near the limit cannot loop. Exclude synthetic/handoff prompts and summary
-  // assistants; autonomous chains (no human follow-up) qualify once the child has
+  // assistants; autonomous chains (no human follow-up) qualify once the session has
   // done real work: at least two non-summary assistant turns past the kickoff.
   const assistants = input.messages.filter(
     (message) =>
@@ -113,8 +113,9 @@ const layer = Layer.effect(
     }) {
       const text = input.summary.trim()
       if (!text) return
+      // Top-level, not a child: a parentID would make the TUI treat it as a subagent (no prompt
+      // input, hidden from the session list). The link back lives in HANDOFF_FROM metadata.
       const child = yield* session.create({
-        parentID: input.fromID,
         title: handoffTitle(input.origin.title),
         agent: input.lastUser.agent,
         model: {
@@ -125,6 +126,9 @@ const layer = Layer.effect(
         permission: input.origin.permission,
         metadata: { [HANDOFF_FROM]: input.fromID },
       })
+      // The in-progress mark moves with the work.
+      yield* session.setSessionInProgress({ sessionID: input.fromID, sessionInProgress: false })
+      yield* session.setSessionInProgress({ sessionID: child.id, sessionInProgress: true })
       const body = `${text}\n\nResume the next step from this handoff.`
       // Preserve the original command-turn permission for the child kickoff. The
       // summary turn itself runs deny-all, so lastUser here carries deny-all, not
@@ -163,7 +167,8 @@ const layer = Layer.effect(
 
 function handoffTitle(title: string) {
   const prefix = "Handoff: "
-  const body = title.length > 80 ? `${title.slice(0, 77)}...` : title
+  const base = title.startsWith(prefix) ? title.slice(prefix.length) : title
+  const body = base.length > 80 ? `${base.slice(0, 77)}...` : base
   return prefix + body
 }
 
