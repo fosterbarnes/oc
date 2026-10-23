@@ -4701,13 +4701,14 @@ export class Session2 extends HeyApiClient {
   /**
    * Abort session
    *
-   * Abort an active session and stop any ongoing AI processing or command execution.
+   * Abort an active session and stop any ongoing AI processing or command execution. Subagents stop too, unless keepBackground is true: then background subagents keep running.
    */
   public abort<ThrowOnError extends boolean = false>(
     parameters: {
       sessionID: string
       directory?: string
       workspace?: string
+      keepBackground?: "true" | "false"
     },
     options?: Options<never, ThrowOnError>,
   ) {
@@ -4719,6 +4720,7 @@ export class Session2 extends HeyApiClient {
             { in: "path", key: "sessionID" },
             { in: "query", key: "directory" },
             { in: "query", key: "workspace" },
+            { in: "query", key: "keepBackground" },
           ],
         },
       ],

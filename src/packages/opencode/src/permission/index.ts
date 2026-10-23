@@ -286,7 +286,14 @@ export function disabled(
   const reads = ["list_mcp_resources", "list_mcp_resource_templates", "read_mcp_resource"]
   return new Set(
     tools.filter((tool) => {
-      const permission = edits.includes(tool) ? "edit" : reads.includes(tool) ? "read" : tool
+      // task_cancel only stops tasks this chat started, so it follows the task permission.
+      const permission = edits.includes(tool)
+        ? "edit"
+        : reads.includes(tool)
+          ? "read"
+          : tool === "task_cancel"
+            ? "task"
+            : tool
       if (permission === "session_complete" || permission === "session_failed") {
         // Only a rule naming the tool counts; a `*` allow in either ruleset must not unhide it.
         const rule = [...ruleset, ...(turnRuleset ?? [])].findLast((rule) => rule.permission === permission)

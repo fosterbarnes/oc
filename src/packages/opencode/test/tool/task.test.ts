@@ -19,6 +19,7 @@ import { SessionStatus } from "@/session/status"
 import { Skill } from "@/skill"
 
 import { TaskTool, type TaskPromptOps } from "../../src/tool/task"
+import { TaskCancelTool } from "../../src/tool/taskCancel"
 import { Truncate } from "@/tool/truncate"
 import { ToolRegistry } from "@/tool/registry"
 import { RuntimeFlags } from "@/effect/runtime-flags"
@@ -1789,6 +1790,121 @@ describe("tool.task", () => {
 
       expect((yield* jobs.get(child.id))?.status).toBe("cancelled")
       expect((yield* jobs.get(grandchild.id))?.status).toBe("cancelled")
+    }),
+  )
+
+  it.instance("keepBackground stops the turn's foreground task but leaves background tasks running", () =>
+    Effect.gen(function* () {
+      const jobs = yield* BackgroundJob.Service
+      const runState = yield* SessionRunState.Service
+      const sessions = yield* Session.Service
+      const { chat } = yield* seed()
+      const kept = yield* sessions.create({ parentID: chat.id, title: "background" })
+      const keptChild = yield* sessions.create({ parentID: kept.id, title: "background child" })
+      const foreground = yield* sessions.create({ parentID: chat.id, title: "foreground" })
+      const start = (id: string, parentSessionId: string, background: boolean) =>
+        jobs.start({
+          id,
+          type: "task",
+          metadata: { parentSessionId, sessionId: id, ...(background ? { background: true } : {}) },
+          run: Effect.never,
+        })
+      yield* start(kept.id, chat.id, true)
+      yield* start(keptChild.id, kept.id, true)
+      yield* start(foreground.id, chat.id, false)
+
+      yield* runState.cancel(chat.id, { keepBackground: true })
+
+      expect((yield* jobs.get(foreground.id))?.status).toBe("cancelled")
+      expect((yield* jobs.get(kept.id))?.status).toBe("running")
+      expect((yield* jobs.get(keptChild.id))?.status).toBe("running")
+
+      yield* runState.cancel(chat.id)
+
+      expect((yield* jobs.get(kept.id))?.status).toBe("cancelled")
+      expect((yield* jobs.get(keptChild.id))?.status).toBe("cancelled")
+    }),
+  )
+
+  it.instance("task_cancel stops this chat's running background task without a parent notice", () =>
+    Effect.gen(function* () {
+      const jobs = yield* BackgroundJob.Service
+      const { chat, assistant } = yield* seed()
+      const task = yield* (yield* TaskTool).init()
+      const cancel = yield* (yield* TaskCancelTool).init()
+      const cancelled: string[] = []
+      const parentPrompts: string[] = []
+      const promptOps: TaskPromptOps = {
+        ...stubOps(),
+        cancel: (sessionID) => Effect.sync(() => void cancelled.push(sessionID)),
+        prompt: (input) => {
+          if (input.sessionID === chat.id) {
+            parentPrompts.push(input.sessionID)
+            return Effect.succeed(reply(input, "notice"))
+          }
+          return Effect.never
+        },
+      }
+      const context = {
+        sessionID: chat.id,
+        messageID: assistant.id,
+        agent: "build",
+        abort: new AbortController().signal,
+        extra: { promptOps },
+        messages: [],
+        metadata: () => Effect.void,
+        ask: () => Effect.void,
+      }
+
+      const started = yield* task.execute(
+        { description: "slow scan", prompt: "scan everything", subagent_type: "general", background: true },
+        context,
+      )
+      expect(started.output).toContain("task_cancel")
+      const id = started.metadata.sessionId
+      const result = yield* cancel.execute({ task_id: id }, context)
+
+      expect(result.output).toStartWith(`Stopped task ${id}.`)
+      expect((yield* jobs.get(id))?.status).toBe("cancelled")
+      expect(cancelled).toEqual([id])
+      expect((yield* cancel.execute({ task_id: id }, context)).output).toBe(`Task ${id} already cancelled.`)
+      expect(parentPrompts).toEqual([])
+    }),
+  )
+
+  it.instance("task_cancel refuses tasks it does not own and ids that are not running", () =>
+    Effect.gen(function* () {
+      const jobs = yield* BackgroundJob.Service
+      const sessions = yield* Session.Service
+      const { chat, assistant } = yield* seed()
+      const other = yield* sessions.create({ title: "other chat" })
+      const foreign = yield* sessions.create({ parentID: other.id, title: "foreign" })
+      const idle = yield* sessions.create({ parentID: chat.id, title: "idle" })
+      yield* jobs.start({
+        id: foreign.id,
+        type: "task",
+        metadata: { parentSessionId: other.id, sessionId: foreign.id },
+        run: Effect.never,
+      })
+      const cancel = yield* (yield* TaskCancelTool).init()
+      const context = {
+        sessionID: chat.id,
+        messageID: assistant.id,
+        agent: "build",
+        abort: new AbortController().signal,
+        messages: [],
+        metadata: () => Effect.void,
+        ask: () => Effect.void,
+      }
+
+      expect((yield* cancel.execute({ task_id: foreign.id }, context)).output).toBe(
+        `Task ${foreign.id} is not a subagent of this chat.`,
+      )
+      expect((yield* jobs.get(foreign.id))?.status).toBe("running")
+      expect((yield* cancel.execute({ task_id: idle.id }, context)).output).toBe(
+        `Task ${idle.id} is not running in the background.`,
+      )
+      expect((yield* cancel.execute({ task_id: "ses_missing" }, context)).output).toBe("No task ses_missing.")
     }),
   )
 })

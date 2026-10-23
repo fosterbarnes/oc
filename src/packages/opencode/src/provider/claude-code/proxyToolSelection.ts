@@ -52,6 +52,7 @@ export function disallowedToolFlags(tools: readonly Pick<ProxyToolDef, "name">[]
 const PROXY_DEF_OPENCODE_TOOL: Record<string, string> = {
   task: "task",
   [TASK_BATCH_TOOL_NAME]: "task",
+  task_cancel: "task_cancel",
   question: "question",
   session_tail: "session_tail",
   run_after_turn: "run_after_turn",

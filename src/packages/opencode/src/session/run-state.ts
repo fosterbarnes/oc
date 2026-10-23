@@ -10,15 +10,21 @@ import { SessionStatus } from "./status"
 import { Flock } from "@opencode-ai/core/util/flock"
 import { SessionWork } from "@opencode-ai/core/session/work"
 
+/** keepBackground stops only the session's own turn: its background tasks keep running. */
+export type CancelOptions = { readonly keepBackground?: boolean }
+
 export interface Interface {
   readonly completion: (sessionID: SessionID) => Effect.Effect<Effect.Effect<boolean>>
-  readonly maintenance: <A, E, R>(sessionID: SessionID, effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E | Session.BusyError, R>
+  readonly maintenance: <A, E, R>(
+    sessionID: SessionID,
+    effect: Effect.Effect<A, E, R>,
+  ) => Effect.Effect<A, E | Session.BusyError, R>
   readonly assertAvailable: (sessionID: SessionID) => Effect.Effect<void, Session.BusyError>
   readonly cancellation: (sessionID: SessionID) => Effect.Effect<number>
   readonly assertNotBusy: (sessionID: SessionID) => Effect.Effect<void, Session.BusyError>
   /** Waits out maintenance holding the session; a running turn is not waited on here (new turns coalesce). */
   readonly available: (sessionID: SessionID) => Effect.Effect<void>
-  readonly cancel: (sessionID: SessionID) => Effect.Effect<void>
+  readonly cancel: (sessionID: SessionID, options?: CancelOptions) => Effect.Effect<void>
   readonly ensureRunning: (
     sessionID: SessionID,
     onInterrupt: Effect.Effect<SessionV1.WithParts>,
@@ -35,9 +41,13 @@ export interface Interface {
 export class Service extends Context.Service<Service, Interface>()("@opencode/SessionRunState") {}
 
 export function successfulTurn(result: SessionV1.WithParts) {
-  return result.info.role === "assistant" && !result.info.error &&
-    typeof result.info.finish === "string" && result.info.finish.length > 0 &&
+  return (
+    result.info.role === "assistant" &&
+    !result.info.error &&
+    typeof result.info.finish === "string" &&
+    result.info.finish.length > 0 &&
     !["tool-calls", "unknown", "error", "content-filter"].includes(result.info.finish)
+  )
 }
 
 const layer = Layer.effect(
@@ -49,7 +59,8 @@ const layer = Layer.effect(
     // Maintenance gate per session; completes when maintenance releases the session.
     const held = new Map<SessionID, Deferred.Deferred<void>>()
     const cancellations = new Map<SessionID, number>()
-    const assertAvailable = (sessionID: SessionID) => held.has(sessionID) ? Effect.fail(busyError(sessionID)) : Effect.void
+    const assertAvailable = (sessionID: SessionID) =>
+      held.has(sessionID) ? Effect.fail(busyError(sessionID)) : Effect.void
     const available = (sessionID: SessionID): Effect.Effect<void> =>
       Effect.suspend(() => {
         const gate = held.get(sessionID)
@@ -101,9 +112,9 @@ const layer = Layer.effect(
       if (existing?.busy) yield* busyError(sessionID)
     })
 
-    const cancel = Effect.fn("SessionRunState.cancel")(function* (sessionID: SessionID) {
+    const cancel = Effect.fn("SessionRunState.cancel")(function* (sessionID: SessionID, options?: CancelOptions) {
       cancellations.set(sessionID, (cancellations.get(sessionID) ?? 0) + 1)
-      yield* cancelBackgroundJobs(background, sessionID)
+      yield* cancelBackgroundJobs(background, sessionID, options?.keepBackground === true)
       const data = yield* InstanceState.get(state)
       const existing = data.runners.get(sessionID)
       if (!existing) {
@@ -144,30 +155,45 @@ const layer = Layer.effect(
       const data = yield* InstanceState.get(state)
       const current = data.runners.get(sessionID)?.state
       if (!current || current._tag === "Idle") return Effect.succeed(true)
-      if (current._tag === "Running") return Fiber.await(current.run.fiber).pipe(
-        Effect.map((exit) => Exit.isSuccess(exit) && successfulTurn(exit.value)),
-      )
-      if (current._tag === "ShellThenRun") return Deferred.await(current.run.done).pipe(
-        Effect.map(successfulTurn),
-        Effect.catchCause(() => Effect.succeed(false)),
-      )
+      if (current._tag === "Running")
+        return Fiber.await(current.run.fiber).pipe(
+          Effect.map((exit) => Exit.isSuccess(exit) && successfulTurn(exit.value)),
+        )
+      if (current._tag === "ShellThenRun")
+        return Deferred.await(current.run.done).pipe(
+          Effect.map(successfulTurn),
+          Effect.catchCause(() => Effect.succeed(false)),
+        )
       return Effect.gen(function* () {
         const exit = yield* Fiber.await(current.shell.fiber)
         return Exit.isSuccess(exit) && !(yield* Deferred.isDone(current.shell.cancelled))
       })
     })
-    const maintenance: Interface["maintenance"] = (sessionID, effect) => Effect.gen(function* () {
-      yield* assertNotBusy(sessionID)
-      return yield* Effect.acquireUseRelease(
-        Effect.suspend(() => {
-          if (held.has(sessionID)) return Effect.fail(busyError(sessionID))
-          return Deferred.make<void>().pipe(Effect.tap((gate) => Effect.sync(() => held.set(sessionID, gate))))
-        }),
-        () => effect,
-        (gate) => Effect.sync(() => held.delete(sessionID)).pipe(Effect.andThen(Deferred.succeed(gate, undefined)), Effect.asVoid),
-      )
-    })
-    return Service.of({ assertNotBusy, assertAvailable, available, completion, maintenance, cancel, ensureRunning, startShell,
+    const maintenance: Interface["maintenance"] = (sessionID, effect) =>
+      Effect.gen(function* () {
+        yield* assertNotBusy(sessionID)
+        return yield* Effect.acquireUseRelease(
+          Effect.suspend(() => {
+            if (held.has(sessionID)) return Effect.fail(busyError(sessionID))
+            return Deferred.make<void>().pipe(Effect.tap((gate) => Effect.sync(() => held.set(sessionID, gate))))
+          }),
+          () => effect,
+          (gate) =>
+            Effect.sync(() => held.delete(sessionID)).pipe(
+              Effect.andThen(Deferred.succeed(gate, undefined)),
+              Effect.asVoid,
+            ),
+        )
+      })
+    return Service.of({
+      assertNotBusy,
+      assertAvailable,
+      available,
+      completion,
+      maintenance,
+      cancel,
+      ensureRunning,
+      startShell,
       cancellation: (sessionID) => Effect.sync(() => cancellations.get(sessionID) ?? 0),
     })
   }),
@@ -176,6 +202,7 @@ const layer = Layer.effect(
 const cancelBackgroundJobs = Effect.fn("SessionRunState.cancelBackgroundJobs")(function* (
   background: BackgroundJob.Interface,
   sessionID: SessionID,
+  keepBackground: boolean,
 ) {
   const jobs = yield* background.list()
   const pending = new Set<string>([sessionID])
@@ -183,6 +210,8 @@ const cancelBackgroundJobs = Effect.fn("SessionRunState.cancelBackgroundJobs")(f
   const matches = (job: BackgroundJob.Info) => {
     if (job.status !== "running") return false
     if (cancelled.has(job.id)) return false
+    // Foreground task jobs belong to the turn being stopped; background ones (incl. promoted) outlive it.
+    if (keepBackground && job.metadata?.background === true) return false
     if (pending.has(job.id)) return true
     if (typeof job.metadata?.sessionId === "string" && pending.has(job.metadata.sessionId)) return true
     return typeof job.metadata?.parentSessionId === "string" && pending.has(job.metadata.parentSessionId)
@@ -218,9 +247,10 @@ function owned<A>(sessionID: SessionID, work: Effect.Effect<A>) {
   return Effect.acquireRelease(
     Effect.tryPromise({
       try: (signal) => Flock.acquire(`session:${sessionID}`, { timeoutMs: 0, staleMs: 15_000, signal }),
-      catch: (cause) => cause instanceof Flock.ContentionError
-        ? new HeldElsewhereError("Session is running in another oc process", { cause })
-        : cause,
+      catch: (cause) =>
+        cause instanceof Flock.ContentionError
+          ? new HeldElsewhereError("Session is running in another oc process", { cause })
+          : cause,
     }).pipe(Effect.orDie),
     (lock) => Effect.promise(() => lock.release().catch(() => undefined)),
   ).pipe(Effect.andThen(work), Effect.scoped)

@@ -320,6 +320,7 @@ test("proxy defs follow the tools opencode offered the agent", () => {
     [
       "task",
       TASK_BATCH_TOOL_NAME,
+      "task_cancel",
       "question",
       "session_tail",
       "run_after_turn",

@@ -1056,9 +1056,9 @@ test("parallel proxy calls preserve success and error correlation", async () => 
   }
 })
 
-test("proxyTools Task brings task_batch along, once", () => {
+test("proxyTools Task brings task_batch and task_cancel along, once", () => {
   const names = (list: string[]) => (resolvedProxyTools({ proxyTools: list } as any) ?? []).map((t) => t.name)
-  assert.deepEqual(names(["Task"]), ["task", "task_batch"])
-  assert.deepEqual(names(["Task", "task_batch", "TASK"]), ["task", "task_batch"])
+  assert.deepEqual(names(["Task"]), ["task", "task_batch", "task_cancel"])
+  assert.deepEqual(names(["Task", "task_batch", "TASK"]), ["task", "task_batch", "task_cancel"])
   assert.deepEqual(names(["Question"]), ["question"], "only task carries the companion")
 })

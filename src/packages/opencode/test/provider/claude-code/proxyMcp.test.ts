@@ -51,7 +51,16 @@ test("default proxy tools are oc-only and leave Claude Code's native tools on", 
   const defaults = resolvedProxyTools({ proxyTools: DEFAULT_PROXY_TOOL_NAMES })!
   assert.deepEqual(
     defaults.map((tool) => tool.name),
-    ["task", TASK_BATCH_TOOL_NAME, "run_after_turn", "time", "schedule_prompt", "schedule_list", "schedule_cancel"],
+    [
+      "task",
+      TASK_BATCH_TOOL_NAME,
+      "task_cancel",
+      "run_after_turn",
+      "time",
+      "schedule_prompt",
+      "schedule_list",
+      "schedule_cancel",
+    ],
   )
   assert.deepEqual(disallowedToolFlags(defaults), ["Agent", "Task", "TaskOutput", "Workflow"])
   assert.deepEqual(
@@ -208,8 +217,17 @@ test("tools/call with non-object arguments returns isError without reaching the 
   await withServer(async (srv) => {
     let calls = 0
     srv.calls.on("call", () => calls++)
-    for (const [id, args] of [["a", [1, 2]], ["b", "echo hi"], ["c", 5]] as const) {
-      const res = await authedPost(srv, { jsonrpc: "2.0", id, method: "tools/call", params: { name: "bash", arguments: args } })
+    for (const [id, args] of [
+      ["a", [1, 2]],
+      ["b", "echo hi"],
+      ["c", 5],
+    ] as const) {
+      const res = await authedPost(srv, {
+        jsonrpc: "2.0",
+        id,
+        method: "tools/call",
+        params: { name: "bash", arguments: args },
+      })
       assert.equal(res.json.id, id)
       assert.equal(res.json.error, undefined)
       assert.equal(res.json.result.isError, true)

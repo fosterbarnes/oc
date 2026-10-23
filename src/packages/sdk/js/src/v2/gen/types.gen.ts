@@ -11403,6 +11403,7 @@ export type SessionAbortData = {
   query?: {
     directory?: string
     workspace?: string
+    keepBackground?: "true" | "false"
   }
   url: "/session/{sessionID}/abort"
 }

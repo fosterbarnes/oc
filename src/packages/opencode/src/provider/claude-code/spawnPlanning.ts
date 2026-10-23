@@ -160,9 +160,12 @@ export function resolvedProxyTools(config: ClaudeCodeConfig): ProxyToolDef[] | n
     // `task_batch` rides along with `task`: it is the same dispatch path for
     // two or more subagents at once (TASK_BATCH_PROXY_NOTE), and a
     // `proxyTools` list that names `Task` should not have to know it exists.
+    // `task_cancel` rides along too: it stops the background tasks `task` starts.
     if (def.name === "task") {
-      const batch = defsByName.get(TASK_BATCH_TOOL_NAME)
-      if (batch) pick(batch)
+      for (const name of [TASK_BATCH_TOOL_NAME, "task_cancel"]) {
+        const extra = defsByName.get(name)
+        if (extra) pick(extra)
+      }
     }
   }
   // A typo used to vanish here. Silence is the wrong response: unknown

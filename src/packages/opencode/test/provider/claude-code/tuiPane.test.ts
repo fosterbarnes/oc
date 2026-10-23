@@ -161,6 +161,50 @@ describe.skipIf(!process.env.OC_TUI_PANE || !cliPath || !muxPath)("oc TUI in a W
     180_000,
   )
   cliIt.live(
+    "Esc stops a busy main turn alone, then its background subagent",
+    (fixture) =>
+      Effect.gen(function* () {
+        const pane = yield* openPane(fixture)
+        // Main turns are Claude (/v1/messages); the subagent runs on the test provider, so each side
+        // gets its own scripted replies.
+        const main = (hit: { url: URL }) => hit.url.pathname === "/v1/messages"
+        const child = (hit: { body: Record<string, unknown> }) => hit.body.model === "test-model"
+        yield* fixture.llm.toolMatch(main, "mcp__opencode_proxy__task", {
+          description: "esc stage target",
+          prompt: "hold",
+          subagent_type: "general",
+          model: "test/test-model",
+          background: true,
+        })
+        yield* fixture.llm.pushMatch(main, reply().text("MAIN-STILL-BUSY").hang())
+        yield* fixture.llm.pushMatch(child, reply().text("CHILD-STILL-BUSY").hang())
+        yield* pane.waitFor("Ask anything")
+        yield* pane.type("ESC-STAGE-START\r")
+        yield* pane.waitFor("MAIN-STILL-BUSY", (shown) => sidebarColumn(shown).includes(". working"))
+
+        yield* pane.type("\x1b")
+        yield* pane.waitFor("again to interrupt")
+        yield* pane.type("\x1b")
+        // Stage 1: the main turn stopped, the subagent did not.
+        const afterMain = yield* pane.waitFor("esc stop subagents", (shown) => !/esc\s+interrupt/.test(shown))
+        expect(sidebarColumn(afterMain)).toContain(". working")
+
+        yield* pane.type("\x1b")
+        yield* pane.waitFor("again to stop subagents")
+        yield* pane.type("\x1b")
+        // Stage 2: the subagent stopped, and nothing is left for Esc.
+        yield* pane.waitFor(
+          "stopped",
+          (shown) => sidebarColumn(shown).includes(". stopped") && !shown.includes("stop subagents"),
+        )
+
+        // A stop sends the main chat no notice, so Claude gets no further request.
+        yield* Effect.sleep("2 seconds")
+        expect((yield* fixture.llm.hits).filter(main)).toHaveLength(2)
+      }),
+    180_000,
+  )
+  cliIt.live(
     "a prompt typed into the TUI shows the fake model's reply",
     (fixture) =>
       Effect.gen(function* () {
@@ -523,6 +567,8 @@ const openPane = Effect.fnUntraced(function* (
     // The test preload's in-memory database is per process; the pane is a separate process.
     OPENCODE_DB: db,
     OC_AUTO_RENAME: options.autoRename ? "1" : "",
+    // A host key would send subagent briefs to TypeSafe for a skill hint (tool/task.ts).
+    TYPESAFE_API_KEY: "",
     ...(options.quotaUsage && { OC_TEST_USAGE_RELEASE: quotaReleasePath(root) }),
   }
   // On Windows WezTerm builds each pane's env from its own env overlaid with the registry's

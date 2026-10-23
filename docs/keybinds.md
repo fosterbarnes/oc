@@ -137,6 +137,7 @@ Bold marks keys where the oc layout differs from opencode. `-` means unbound.
 | Go to next child session | `right` | `right` |
 | Go to previous child session | `left` | `left` |
 | Go to parent session | `up` | `up` |
+| Stop the subagent you are viewing | `escape` | `escape` |
 | Pin or unpin session in the session list | `ctrl+f` | `ctrl+f` |
 | Switch to session in quick slot 1 | `ctrl+x 1` | `ctrl+x 1` |
 | Switch to session in quick slot 2 | `ctrl+x 2` | `ctrl+x 2` |

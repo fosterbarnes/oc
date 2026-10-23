@@ -35,7 +35,8 @@ Subagent dispatch in this environment goes through exactly two tools: \`mcp__ope
 - Two or more independent subagents in one response: make ONE \`mcp__opencode_proxy__task_batch\` call with a \`tasks\` array (each item is a normal task input). Claude Code runs MCP calls one at a time, so several \`mcp__opencode_proxy__task\` calls in the same response run serially; \`task_batch\` runs them concurrently in opencode and returns every result together, labelled in order.
 - When the user mentions \`@<agent>\` or an instruction says "call the task tool with subagent: <name>", call \`mcp__opencode_proxy__task\` with \`subagent_type: "<name>"\`.
 - Todo management does not dispatch subagents; only the proxy calls above do. Never report a subagent as dispatched unless \`mcp__opencode_proxy__task\` returned its result.
-- Do not verify a subagent's existence by searching config files - the tool's description lists the available agent types, and invalid types fail fast with a clear error.`
+- Do not verify a subagent's existence by searching config files - the tool's description lists the available agent types, and invalid types fail fast with a clear error.
+- Stop a background subagent with \`mcp__opencode_proxy__task_cancel\` and its task id. Claude Code's TaskStop does not see opencode subagents.`
 
 /**
  * Section of the tool environment note, emitted when the `question` proxy

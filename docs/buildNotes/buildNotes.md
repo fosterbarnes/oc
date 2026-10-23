@@ -196,6 +196,54 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-22 (~20:44) - v0.2.301 lasersFtw - Esc stops the main turn first, then its subagents - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation; completed. Plan: `~/.config/opencode/plans/escStopsSubagents.md`
+- Version: 0.2.301 lasersFtw (bumped earlier this session, uncommitted; no second bump)
+- Cause: prompt `session.interrupt` enabled only while the root was busy (Esc dead with idle root + working background subagent); when it ran, `SessionPrompt.cancel` cascaded to all children and `cancelBackgroundJobs` killed every descendant job, so the main turn could not stop alone.
+- Added `SessionRunState.CancelOptions { keepBackground }`; `SessionRunState.cancel` / `SessionPrompt.cancel` take it. keepBackground skips the child cascade and skips jobs with `metadata.background === true` (incl. promoted); the turn's foreground task jobs still cancel (and cascade via task onInterrupt). Default unchanged for `/undo`, `/stopSub`, child Stop, ACP, workspace warp, TaskPromptOps.
+- Added abort query `keepBackground` (`AbortQuery`, `QueryBoolean`) in `httpapi/groups/session.ts`; handler passes it. Regenerated SDK v2 via `sdk/js/script/build.ts` (diff: description + `keepBackground?: "true" | "false"` only). Note: `packages/client` generate does not cover the TUI SDK; `sdk/js` build does.
+- Changed `tui/src/component/prompt/index.tsx`: `busyChildren` memo; Esc enabled when root busy or a direct child busy; second press aborts root with `keepBackground: "true"` if busy, else full-aborts each busy child (error toast on failures). New footer hint `esc stop subagents` / `esc again to stop subagents` for idle root + busy children.
+- Removed dead v0.2.301 `MessageAbortedError` -> "Subagent stopped by the user" wording in `task.ts` and its test: aborting a child always cancels its own job first (`cancelBackgroundJobs` matches job id = session id), so runTask never reached it and no parent notice is sent.
+- Verification: `test/tool/task.test.ts` 45 pass (new keepBackground job test); `test/server/httpapi-session.test.ts` 22 pass (abort `?keepBackground=true` 200, `=yes` 400); `bun run typecheck` opencode + tui clean.
+- Added pane test `tuiPane.test.ts` "Esc stops a busy main turn alone, then its background subagent" (fake Claude main + background subagent on `test/test-model`): asserts sidebar stays `. working` with `esc stop subagents` after stage 1, `. stopped` after stage 2, no third Claude request. Passes (18.8 s). `openPane` now sets `TYPESAFE_API_KEY: ""` so a host key cannot send subagent briefs to TypeSafe.
+- User live run (grok, deepseek free, luna, haiku subagents): log shows `cancel keepBackground=true` on the root then a separate child cancel in all four; no extra parent turn.
+- ERROR (baseline, not caused here): full `OC_TUI_PANE=1` run 13/15; "an API error the CLI reports twice shows once" (fake 400 never rendered, CLI moved on to the next queued reply) and "claude warm-up palette opens the schedule dialog" (dialog closes after Down Down Enter, `Times` never shows) fail on rerun too. Neither touches the Esc/subagent paths; baseline at v0.2.300 not run.
+- MISTAKE: v0.2.301 entry and report claimed the parent gets a "stopped by the user" notice; never verified the job-cancel order. Rule: trace cancel paths through `cancelBackgroundJobs` before promising notice behavior.
+
+### User
+Subagents
+- In the main chat, Esc Esc while the agent is working stops only the main turn; background subagents keep running.
+- Esc Esc again, or any time the main chat is idle while subagents work, stops those subagents; the footer shows "esc stop subagents".
+- Subagents the main turn was waiting on directly still stop together with it.
+- Stopping a subagent no longer claims the main agent is told about it; the main agent gets no notice and is not woken.
+
+---
+
+## 2026-10-22 (~20:26) - v0.2.301 lasersFtw - Stop one subagent: task_cancel tool and Esc/Stop in the child view - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation; completed. Plan: `~/.config/opencode/plans/subagentCancel.md`
+- Version: 0.2.301 lasersFtw
+- Cause: nds Opus parent could not stop its background Haiku task: no oc tool reached `BackgroundJob.cancel`; Claude `TaskStop` only sees Claude jobs; child view mounts no Prompt so Esc (`session.interrupt`) did nothing there.
+- Added `tool/taskCancel.ts` `task_cancel(task_id)`: owner check (`parentID === ctx.sessionID`), reads job status first (cancel() returns a finished job's old snapshot), then `background.cancel`; job `onInterrupt` cancels the child. No parent notice (cancelled jobs are not injected). Registered in `tool/registry.ts`.
+- Added `Permission.disabled` mapping `task_cancel` -> `task` permission.
+- Added Claude proxy def `task_cancel` (`proxyToolDefs.ts`), map entry (`proxyToolSelection.ts`), rides along with `task` (`spawnPlanning.ts`), read-only deny (`permissionPresets.ts`), dispatch hint bullet (`prompts.ts`). Kept Claude `TaskStop` enabled (kills Claude's background Bash).
+- Changed `task.ts`: background started/updated text names task_cancel; child `MessageAbortedError` now fails as `Subagent stopped by the user (task_id)` instead of `Subagent failed`.
+- Added TUI `session.child.stop` (keybind `session_child_stop`, default escape, double press within 5 s, armed state keyed by session) and Stop button in `routes/session/subagent-footer.tsx` (busy only; click stops at once). Sidebar `stopped` label (muted, idle) for aborted children; sessionFailed still wins.
+- Regenerated `docs/keybinds.md` via `script/keybindDocs.ts`.
+- Verification: `test/tool/task.test.ts` 45 pass (3 new); claude-code `proxyTask`, `proxyMcp`, `permissionPresets`, `subagentHint` 123 pass; `test/permission/next.test.ts` 82 pass; tui `test/sidebarSubagents.test.ts` 5 pass; `bun run typecheck` opencode + tui clean. Live TUI/Claude check not run.
+- Risk: Esc in child view assumes no other session-route escape binding; dialogs guarded via `dialog.stack`.
+
+### User
+Subagents
+- Agents can now stop a background subagent they started, including Claude agents, which are told to use it instead of TaskStop.
+- In a subagent's own view (or its tab), press Esc twice or click Stop in the footer to stop just that subagent; the parent and other subagents keep running.
+- A subagent you stopped shows as "stopped" in the sidebar, and the parent agent is told it was stopped by you rather than that it failed.
+
+---
+
 ## 2026-10-22 (~20:08) - v0.2.300 barnesTexture - Context-limit handoff opens a top-level session, not a subagent - Claude Opus 5.5, low effort; Implementation
 
 ### Agent

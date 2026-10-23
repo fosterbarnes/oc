@@ -190,6 +190,15 @@ export function Prompt(props: PromptProps) {
   const toast = useToast()
   const reviveChain = useReviveChain()
   const status = createMemo(() => sync.data.session_status?.[props.sessionID ?? ""] ?? { type: "idle" })
+  // Esc stops the nearest running thing: this session's turn while it is busy, otherwise its busy subagents.
+  const busyChildren = createMemo(() =>
+    props.sessionID
+      ? sync.data.session.filter(
+          (item) =>
+            item.parentID === props.sessionID && (sync.data.session_status?.[item.id]?.type ?? "idle") !== "idle",
+        )
+      : [],
+  )
   const [resumes, setResumes] = createSignal<{ sessionID: string; fireAt: number }[]>([])
   const resumeAt = createMemo(() => resumes().find((entry) => entry.sessionID === props.sessionID)?.fireAt)
   const refreshResumes = () => {
@@ -571,7 +580,7 @@ export function Prompt(props: PromptProps) {
         name: "session.interrupt",
         category: "Session",
         hidden: true,
-        enabled: status().type !== "idle",
+        enabled: status().type !== "idle" || busyChildren().length > 0,
         run: () => {
           if (auto()?.visible) return
           if (!input.focused) return
@@ -594,13 +603,25 @@ export function Prompt(props: PromptProps) {
               return
             }
             abortRequestPending = true
-            void sdk.client.session
-              .abort({
-                sessionID: props.sessionID,
-              })
-              .finally(() => {
-                abortRequestPending = false
-              })
+            // A busy turn stops alone and its background subagents keep running; the next double press,
+            // with the turn idle, stops the subagents (full aborts, so their jobs end without a notice).
+            const children = busyChildren()
+            const request =
+              status().type !== "idle"
+                ? sdk.client.session.abort({ sessionID: props.sessionID, keepBackground: "true" })
+                : Promise.all(children.map((child) => sdk.client.session.abort({ sessionID: child.id }))).then(
+                    (results) => {
+                      const failed = results.filter((result) => result.error).length
+                      if (failed)
+                        toast.show({
+                          message: `Could not stop ${failed} of ${children.length} subagents`,
+                          variant: "error",
+                        })
+                    },
+                  )
+            void request.finally(() => {
+              abortRequestPending = false
+            })
             setStore("interrupt", 0)
           }
           dialog.clear()
@@ -2143,6 +2164,16 @@ export function Prompt(props: PromptProps) {
                   esc{" "}
                   <span style={{ fg: store.interrupt > 0 ? theme.primary : theme.textMuted }}>
                     {store.interrupt > 0 ? "again to interrupt" : "interrupt"}
+                  </span>
+                </text>
+              </box>
+            </Match>
+            <Match when={busyChildren().length > 0}>
+              <box paddingLeft={3} flexGrow={1}>
+                <text fg={store.interrupt > 0 ? theme.primary : theme.text}>
+                  esc{" "}
+                  <span style={{ fg: store.interrupt > 0 ? theme.primary : theme.textMuted }}>
+                    {store.interrupt > 0 ? "again to stop subagents" : "stop subagents"}
                   </span>
                 </text>
               </box>

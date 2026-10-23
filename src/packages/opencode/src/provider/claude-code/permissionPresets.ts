@@ -81,7 +81,7 @@ export const READ_ONLY_DISALLOWED_CLI_TOOLS = [
  * limitation rather than pretended away.
  */
 // `schedule` queues prompts that later run with the agent's full permissions.
-export const READ_ONLY_DENIED_PROXY_TOOLS = new Set(["task", "task_batch", "run_after_turn", "schedule"])
+export const READ_ONLY_DENIED_PROXY_TOOLS = new Set(["task", "task_batch", "task_cancel", "run_after_turn", "schedule"])
 
 /** The options a preset decides, resolved. */
 export interface ResolvedPermissionPreset {

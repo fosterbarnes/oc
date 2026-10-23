@@ -173,7 +173,7 @@ const writeImage = Effect.fn("SessionPrompt.writeImage")(function* (
 })
 
 export interface Interface {
-  readonly cancel: (sessionID: SessionID) => Effect.Effect<void>
+  readonly cancel: (sessionID: SessionID, options?: SessionRunState.CancelOptions) => Effect.Effect<void>
   readonly prompt: (input: TurnInput) => Effect.Effect<SessionV1.WithParts, Image.Error | Session.BusyError>
   readonly loop: (input: LoopInput) => Effect.Effect<SessionV1.WithParts, Session.BusyError>
   readonly shell: (input: ShellInput) => Effect.Effect<SessionV1.WithParts, Session.BusyError>
@@ -283,14 +283,20 @@ const layer = Layer.effect(
     })
 
     // Annotated because the child cascade makes the inferred type recursive.
-    const cancel: Interface["cancel"] = Effect.fn("SessionPrompt.cancel")(function* (sessionID: SessionID) {
-      yield* Effect.logInfo("cancel", { "session.id": sessionID })
-      const kids = yield* sessions.children(sessionID)
-      yield* Effect.forEach(kids, (kid) => cancel(kid.id), { concurrency: "unbounded", discard: true })
+    const cancel: Interface["cancel"] = Effect.fn("SessionPrompt.cancel")(function* (
+      sessionID: SessionID,
+      options?: SessionRunState.CancelOptions,
+    ) {
+      yield* Effect.logInfo("cancel", { "session.id": sessionID, keepBackground: options?.keepBackground === true })
+      // keepBackground skips the child cascade: foreground children still stop through their task jobs (state.cancel).
+      if (!options?.keepBackground) {
+        const kids = yield* sessions.children(sessionID)
+        yield* Effect.forEach(kids, (kid) => cancel(kid.id), { concurrency: "unbounded", discard: true })
+      }
       ScheduledResume.cancelSession(sessionID)
       // Pause first so the drain cannot start the next queued prompt in the gap before the run stops.
       yield* queue.pause(sessionID, "interrupted")
-      yield* state.cancel(sessionID)
+      yield* state.cancel(sessionID, options)
       yield* question.cancel(sessionID)
     })
 

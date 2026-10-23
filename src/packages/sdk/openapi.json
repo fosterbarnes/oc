@@ -8003,6 +8003,15 @@
               "type": "string"
             },
             "required": false
+          },
+          {
+            "name": "keepBackground",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": ["true", "false"]
+            },
+            "required": false
           }
         ],
         "responses": {
@@ -8035,7 +8044,7 @@
             }
           }
         },
-        "description": "Abort an active session and stop any ongoing AI processing or command execution.",
+        "description": "Abort an active session and stop any ongoing AI processing or command execution. Subagents stop too, unless keepBackground is true: then background subagents keep running.",
         "summary": "Abort session",
         "x-codeSamples": [
           {

@@ -5,6 +5,8 @@ import type { BuiltinTuiPlugin } from "../builtins"
 import { createMemo, createSignal, For, onCleanup, Show } from "solid-js"
 import { Locale } from "../../util/locale"
 
+const isIdle = (label: string) => label === "done" || label === "failed" || label === "stopped"
+
 export function visibleSubagents(
   state: { session: Pick<TuiState["session"], "get" | "messages" | "children" | "status" | "permission" | "question"> },
   sessionID: string,
@@ -27,11 +29,15 @@ export function visibleSubagents(
             ? "retrying"
             : status === "busy"
               ? "working"
-              : child.sessionFailed || (latest?.error && latest.error.name !== "MessageAbortedError")
+              : child.sessionFailed
                 ? "failed"
-                : "done"
+                : latest?.error?.name === "MessageAbortedError"
+                  ? "stopped"
+                  : latest?.error
+                    ? "failed"
+                    : "done"
       const finished = latest?.time.completed ?? child.time.updated
-      if ((label === "done" || label === "failed") && (now - finished >= 120_000 || turn > finished)) return []
+      if (isIdle(label) && (now - finished >= 120_000 || turn > finished)) return []
       return [{ child, label }]
     })
     .toSorted((a, b) => a.child.time.created - b.child.time.created)
@@ -41,11 +47,10 @@ const _FILTERS = ["all", "running", "idle"] as const
 export type SubagentFilter = (typeof _FILTERS)[number]
 const _FILTER_KEY = "sidebar_subagents_filter"
 
-/** running = working, retrying, or waiting on the user; idle = done or failed. */
+/** running = working, retrying, or waiting on the user; idle = done, failed, or stopped. */
 export function filterSubagents<T extends { label: string }>(list: T[], filter: SubagentFilter) {
   if (filter === "all") return list
-  const idle = (item: T) => item.label === "done" || item.label === "failed"
-  return list.filter((item) => idle(item) === (filter === "idle"))
+  return list.filter((item) => isIdle(item.label) === (filter === "idle"))
 }
 
 function View(props: { api: TuiPluginApi; session_id: string }) {
@@ -94,11 +99,13 @@ function View(props: { api: TuiPluginApi; session_id: string }) {
                   fg={
                     item.label === "failed"
                       ? theme().error
-                      : item.label === "done"
-                        ? theme().success
-                        : item.label === "working"
-                          ? theme().warning
-                          : theme().accent
+                      : item.label === "stopped"
+                        ? theme().textMuted
+                        : item.label === "done"
+                          ? theme().success
+                          : item.label === "working"
+                            ? theme().warning
+                            : theme().accent
                   }
                 >
                   {props.api.state.session.agentLabel(item.child.agent ?? "subagent")} . {item.label}

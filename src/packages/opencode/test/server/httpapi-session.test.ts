@@ -47,8 +47,14 @@ const noopBootstrapLayer = Layer.succeed(
 )
 const appLayer = AppNodeBuilder.build(
   LayerNode.group([
-    InstanceStore.node, Project.node, Session.node, SessionRunState.node,
-    EventV2Bridge.node, Workspace.node, Database.node, Ripgrep.node,
+    InstanceStore.node,
+    Project.node,
+    Session.node,
+    SessionRunState.node,
+    EventV2Bridge.node,
+    Workspace.node,
+    Database.node,
+    Ripgrep.node,
   ]),
   [[InstanceStore.bootstrapNode, noopBootstrapLayer]],
 )
@@ -240,35 +246,53 @@ afterEach(async () => {
 })
 
 describe("session HttpApi", () => {
-  it.instance("returns 409 for prompts and commands during session maintenance", () =>
-    Effect.gen(function* () {
-      const test = yield* TestInstance
-      const session = yield* createSession({ title: "maintenance" })
-      const state = yield* SessionRunState.Service
-      const headers = { "x-opencode-directory": test.directory, "content-type": "application/json" }
-      yield* state.maintenance(session.id, Effect.gen(function* () {
-        for (const [route, payload] of [
-          [SessionPaths.prompt, { model: { providerID: "test", modelID: "test-model" }, parts: [{ type: "text", text: "hello" }] }],
-          [SessionPaths.command, { command: "blocked", arguments: "", model: "test/test-model" }],
-        ] as const) {
-          const response = yield* request(pathFor(route, { sessionID: session.id }), {
-            method: "POST", headers, body: JSON.stringify(payload),
-          })
-          expect(response.status).toBe(409)
-          expect(yield* responseJson(response)).toMatchObject({
-            _tag: "SessionBusyError", sessionID: session.id, message: `Session is busy: ${session.id}`,
-          })
-        }
-        expect(yield* Session.use.messages({ sessionID: session.id })).toEqual([])
-      }))
-      const invalid = yield* request(pathFor(SessionPaths.prompt, { sessionID: session.id }), {
-        method: "POST", headers, body: JSON.stringify({ parts: "invalid" }),
-      })
-      expect(invalid.status).toBe(400)
-    }),
-    { git: true, config: {
-      ...testProviderConfig("http://127.0.0.1:1"), command: { blocked: { template: "hello" } },
-    } },
+  it.instance(
+    "returns 409 for prompts and commands during session maintenance",
+    () =>
+      Effect.gen(function* () {
+        const test = yield* TestInstance
+        const session = yield* createSession({ title: "maintenance" })
+        const state = yield* SessionRunState.Service
+        const headers = { "x-opencode-directory": test.directory, "content-type": "application/json" }
+        yield* state.maintenance(
+          session.id,
+          Effect.gen(function* () {
+            for (const [route, payload] of [
+              [
+                SessionPaths.prompt,
+                { model: { providerID: "test", modelID: "test-model" }, parts: [{ type: "text", text: "hello" }] },
+              ],
+              [SessionPaths.command, { command: "blocked", arguments: "", model: "test/test-model" }],
+            ] as const) {
+              const response = yield* request(pathFor(route, { sessionID: session.id }), {
+                method: "POST",
+                headers,
+                body: JSON.stringify(payload),
+              })
+              expect(response.status).toBe(409)
+              expect(yield* responseJson(response)).toMatchObject({
+                _tag: "SessionBusyError",
+                sessionID: session.id,
+                message: `Session is busy: ${session.id}`,
+              })
+            }
+            expect(yield* Session.use.messages({ sessionID: session.id })).toEqual([])
+          }),
+        )
+        const invalid = yield* request(pathFor(SessionPaths.prompt, { sessionID: session.id }), {
+          method: "POST",
+          headers,
+          body: JSON.stringify({ parts: "invalid" }),
+        })
+        expect(invalid.status).toBe(400)
+      }),
+    {
+      git: true,
+      config: {
+        ...testProviderConfig("http://127.0.0.1:1"),
+        command: { blocked: { template: "hello" } },
+      },
+    },
   )
 
   it.effect("maps busy sessions to public session busy errors", () =>
@@ -377,6 +401,11 @@ describe("session HttpApi", () => {
         })
         expect(abort.status).toBe(200)
         expect(yield* responseJson(abort)).toBe(true)
+        const abortPath = pathFor(SessionPaths.abort, { sessionID: missingSession })
+        const keep = yield* request(`${abortPath}?keepBackground=true`, { headers, method: "POST" })
+        expect(keep.status).toBe(200)
+        const badKeep = yield* request(`${abortPath}?keepBackground=yes`, { headers, method: "POST" })
+        expect(badKeep.status).toBe(400)
 
         const session = yield* createSession({ title: "missing message" })
         const missingMessage = MessageID.ascending()
@@ -700,7 +729,12 @@ describe("session HttpApi", () => {
           headers,
           body: JSON.stringify({ title: "updated", time: { archived: 1 }, sessionComplete: true }),
         })
-        expect(updated).toMatchObject({ id: created.id, title: "updated", sessionComplete: true, time: { archived: 1 } })
+        expect(updated).toMatchObject({
+          id: created.id,
+          title: "updated",
+          sessionComplete: true,
+          time: { archived: 1 },
+        })
 
         const failed = yield* requestJson<Session.Info>(pathFor(SessionPaths.update, { sessionID: created.id }), {
           method: "PATCH",
@@ -794,7 +828,10 @@ describe("session HttpApi", () => {
           { payload: { sessionInProgress: false }, active: "sessionFailed" },
           { payload: { sessionFailed: false }, active: undefined },
           { payload: { sessionComplete: true, sessionFailed: true }, active: "sessionFailed" },
-          { payload: { sessionComplete: false, sessionFailed: true, sessionInProgress: false }, active: "sessionFailed" },
+          {
+            payload: { sessionComplete: false, sessionFailed: true, sessionInProgress: false },
+            active: "sessionFailed",
+          },
           {
             payload: { sessionComplete: true, sessionFailed: true, sessionInProgress: true },
             active: "sessionInProgress",

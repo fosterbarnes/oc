@@ -482,6 +482,13 @@ test("disabled - disables edit/write/apply_patch when edit denied", () => {
   expect(result.has("bash")).toBe(false)
 })
 
+test("disabled - task_cancel follows the task permission", () => {
+  const allow = { permission: "*", pattern: "*", action: "allow" } as const
+  const denyTask = { permission: "task", pattern: "*", action: "deny" } as const
+  expect(Permission.disabled(["task", "task_cancel"], [allow, denyTask])).toEqual(new Set(["task", "task_cancel"]))
+  expect(Permission.disabled(["task_cancel"], [allow]).size).toBe(0)
+})
+
 test("disabled - does not disable when partially denied", () => {
   const result = Permission.disabled(
     ["bash"],

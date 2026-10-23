@@ -15,7 +15,14 @@ const child: Session = {
 }
 
 function state(
-  input: { status?: SessionStatus; turn?: number; failed?: boolean; waiting?: boolean; completed?: number } = {},
+  input: {
+    status?: SessionStatus
+    turn?: number
+    failed?: boolean
+    waiting?: boolean
+    completed?: number
+    error?: "MessageAbortedError" | "UnknownError"
+  } = {},
 ) {
   return {
     session: {
@@ -51,6 +58,7 @@ function state(
             cost: 0,
             tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
             time: { created: 100, completed: input.completed },
+            ...(input.error ? { error: { name: input.error, data: { message: "x" } } } : {}),
           },
         ]
       },
@@ -78,14 +86,22 @@ test("finished children expire at two minutes or the next root turn", () => {
   expect(visibleSubagents(state({ failed: true }), "child", 2_000)[0]?.label).toBe("failed")
 })
 
+test("an aborted child reads stopped, other errors and sessionFailed read failed", () => {
+  const label = (input: Parameters<typeof state>[0]) => visibleSubagents(state(input), "child", 2_000)[0]?.label
+  expect(label({ completed: 1_500, error: "MessageAbortedError" })).toBe("stopped")
+  expect(label({ completed: 1_500, error: "UnknownError" })).toBe("failed")
+  expect(label({ completed: 1_500, error: "MessageAbortedError", failed: true })).toBe("failed")
+  expect(visibleSubagents(state({ completed: 1_500, error: "MessageAbortedError" }), "child", 121_500)).toEqual([])
+})
+
 test("completion time wins over later metadata updates", () => {
   expect(visibleSubagents(state({ completed: 500 }), "child", 120_500)).toEqual([])
   expect(visibleSubagents(state({ completed: 500, turn: 501 }), "child", 1_000)).toEqual([])
 })
 
 test("running/idle filter splits by label", () => {
-  const list = ["working", "waiting", "retrying", "done", "failed"].map((label) => ({ label }))
+  const list = ["working", "waiting", "retrying", "done", "failed", "stopped"].map((label) => ({ label }))
   expect(filterSubagents(list, "all")).toBe(list)
   expect(filterSubagents(list, "running").map((item) => item.label)).toEqual(["working", "waiting", "retrying"])
-  expect(filterSubagents(list, "idle").map((item) => item.label)).toEqual(["done", "failed"])
+  expect(filterSubagents(list, "idle").map((item) => item.label)).toEqual(["done", "failed", "stopped"])
 })

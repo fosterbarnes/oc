@@ -308,6 +308,17 @@ export const DEFAULT_PROXY_TOOLS: ProxyToolDef[] = [
     },
   },
   {
+    name: "task_cancel",
+    description:
+      "Stop a background opencode subagent task this chat started, by its task_id." +
+      " Claude Code's own TaskStop does not see opencode subagents.",
+    inputSchema: {
+      type: "object",
+      properties: { task_id: { type: "string", description: "task_id of a background task this chat started" } },
+      required: ["task_id"],
+    },
+  },
+  {
     name: "question",
     description:
       "Ask the operator questions and receive their answers back. Use this" +
