@@ -196,6 +196,27 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-24 (~23:37) - v0.2.304 scrubyYogi - Shared TUI pane fixture for verify probes; probe and known-failure rules - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation (/imp of plan `~/.config/opencode/plans/2026-10-24-verify-command.md` phases 1-3); completed
+- Version: 0.2.304
+- Moved `openPane`, `stopPaneChild`, `powershell`, `cimProcess` from `test/provider/claude-code/tuiPane.test.ts` to new `paneFixture.ts` (same folder); exported `openPane`, `paneReady`, `powershell`, `stopPaneChild`. Pure move: block diffed identical to the original (only `export` added)
+- Changed `tuiPane.test.ts`: imports fixture, `describe.skipIf(!paneReady)`, keeps `sidebarColumn`
+- Changed `AGENTS.md` `## Testing`: replaced "only run checks you edit or introduce" with pointer to principles + `verify` skill (no CI); added probe rule (`src/packages/<pkg>/test/tmp/verify/`, gitignored by `tmp`, delete after, `Test-Path`)
+- Added known failures in `AGENTS.md`: tuiPane "an API error the CLI reports twice shows once" and "claude warm-up palette opens the schedule dialog" (3/3 runs); flaky "rewinding Claude shows the provider notice" (1/3)
+- Note: user-level rule changes (principles Verification, `verify` skill, `/verify`, `/test-instructions`, `/agentTest`, `/imp`, `/pass`, `refinement`) logged in `C:\Users\Foster\buildNotes.md`
+- TODO: plan phase 4, audit fork-added tests for change detectors; start with the two tuiPane failures
+- Verification: `bun run typecheck` (opencode) exit 0. `OC_TUI_PANE=1 bun test test/provider/claude-code/tuiPane.test.ts` runs: 12/15, 13/15, filtered 1/3; failures above, all outside the moved code path. Probe `test/tmp/verify/paneSmoke.test.ts` 1 pass, screen capture had "Ask anything"; folder deleted, `Test-Path` False. Evidence `%TEMP%\verify\20261024-2328\`
+- ERROR: tuiPane API-error case: CLI shows the next reply instead of `FAKE-BAD-REQUEST-81`; warm-up case: `Times` row never appears. Not investigated
+
+### User
+Testing
+- The TUI test helpers now live in a shared file, so agents can write a short throwaway check that drives oc's real TUI instead of asking you to look.
+- Agent rules now prefer throwaway checks over new permanent tests; no app change.
+
+---
+
 ## 2026-10-22 (~23:26) - v0.2.303 basementMapper - ocSetup finishing screen, centered scroll bar, .NET 8/10 Desktop Runtime rows - Claude Opus 5.5, low effort; Implementation
 
 ### Agent
