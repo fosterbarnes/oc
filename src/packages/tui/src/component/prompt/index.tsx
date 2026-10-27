@@ -1315,12 +1315,13 @@ export function Prompt(props: PromptProps) {
     }
     const trimmed = store.prompt.input.trim()
     const { inputText, nonTextParts, editorParts, commands } = outgoingParts()
-    // Revives restart oc from this TUI, and TUI commands (`/btw`) act now; only server commands wait.
-    if (commands.chain) {
-      toast.show({ message: "Revive chains cannot be queued", variant: "warning" })
+    // TUI commands (`/btw`) act now; server commands and revive chains wait. A queued chain is handed to
+    // a TUI at the front of the queue (`reviveChain.watchQueued`), so it cannot go to a fork or later.
+    if (commands.chain && schedule) {
+      toast.show({ message: "Revive chains cannot be scheduled", variant: "warning" })
       return false
     }
-    if (trimmed.startsWith("/") && !commands.names.length) {
+    if (trimmed.startsWith("/") && !commands.names.length && !commands.chain) {
       toast.show({ message: "Only server commands can be queued", variant: "warning" })
       return false
     }
@@ -1328,14 +1329,18 @@ export function Prompt(props: PromptProps) {
     const agent = local.agent.current()
     const selectedModel = local.model.current()
     if (!agent || !selectedModel) return false
-    // Split like submit: a command entry holds its request text, editor context, and files only.
-    const parts = commands.names.length
-      ? [
-          ...editorParts,
-          ...(commands.arguments ? [{ type: "text" as const, text: commands.arguments }] : []),
-          ...nonTextParts.filter((part) => part.type === "file"),
-        ]
-      : [...editorParts, { type: "text" as const, text: inputText }, ...nonTextParts]
+    // Split like submit: a command entry holds its request text, editor context, and files only. A chain
+    // keeps every attachment, as its plain prompt steps send them.
+    const chain = commands.chain
+    const parts = chain
+      ? [...editorParts, ...(chain.request ? [{ type: "text" as const, text: chain.request }] : []), ...nonTextParts]
+      : commands.names.length
+        ? [
+            ...editorParts,
+            ...(commands.arguments ? [{ type: "text" as const, text: commands.arguments }] : []),
+            ...nonTextParts.filter((part) => part.type === "file"),
+          ]
+        : [...editorParts, { type: "text" as const, text: inputText }, ...nonTextParts]
 
     const queued = await sdk.client.session.queue
       .update(
@@ -1347,7 +1352,7 @@ export function Prompt(props: PromptProps) {
             model: { providerID: selectedModel.providerID, modelID: selectedModel.modelID },
             variant: local.model.variant.current(),
             parts,
-            ...(commands.names.length && { commands: commands.names }),
+            ...(chain ? { chain: chain.steps } : commands.names.length && { commands: commands.names }),
             ...schedule,
           },
         },
@@ -1365,6 +1370,7 @@ export function Prompt(props: PromptProps) {
         },
       )
     if (!queued) return false
+    if (chain) void reviveChain.watchQueued(props.sessionID).catch((error: unknown) => toast.error(error))
     if (schedule)
       toast.show({ message: `Scheduled for ${Locale.todayTimeOrDateTime(schedule.runAt)}`, variant: "success" })
 

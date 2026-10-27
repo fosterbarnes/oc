@@ -5,6 +5,7 @@ import { useSync } from "../context/sync"
 import { useTheme } from "../context/theme"
 import { useCommandShortcut } from "../keymap"
 import { extractChain, extractSlashCommands } from "../prompt/slash"
+import { useReviveChain } from "../reviveChain"
 import { useDialog } from "../ui/dialog"
 import { DialogPrompt } from "../ui/dialog-prompt"
 import { DialogSelect } from "../ui/dialog-select"
@@ -21,6 +22,7 @@ const PAUSE_LABEL = {
   restart: "Paused after restart",
   error: "Paused after an error",
   interrupted: "Paused after you stopped the turn",
+  chain: "Paused by a revive chain",
 } as const
 
 // Polls the session's queue while the caller is mounted. A failed poll keeps the last snapshot.
@@ -71,6 +73,7 @@ export function DialogQueue(props: { sessionID: string }) {
   const sync = useSync()
   const { theme } = useTheme()
   const queue = createQueueSnapshot(() => props.sessionID)
+  const reviveChain = useReviveChain()
   const cancelHint = useCommandShortcut("queue.cancel")
   const [toCancel, setToCancel] = createSignal<string>()
 
@@ -124,14 +127,20 @@ export function DialogQueue(props: { sessionID: string }) {
           value={entry.text}
           multiline
           onConfirm={(text) => {
-            // Parsed like a typed draft, so an edit can add or drop slash commands.
-            if (extractChain(text, sync.data.command)) {
-              toast.show({ message: "Revive chains cannot be queued", variant: "warning" })
+            // Parsed like a typed draft, so an edit can add or drop slash commands and revive chains.
+            const chain = extractChain(text, sync.data.command)
+            if (chain) {
+              // A plain prompt edited into a chain has no TUI waiting for it yet.
+              const body = { type: "edit" as const, id, text: chain.request, commands: [], chain: chain.steps }
+              void update(body).then((done) => {
+                back()
+                if (done) void reviveChain.watchQueued(props.sessionID).catch((error: unknown) => toast.error(error))
+              })
               return
             }
             const typed = extractSlashCommands(text, sync.data.command)
             if (!typed.arguments && !typed.names.length) return
-            void update({ type: "edit", id, text: typed.arguments, commands: typed.names }).then(back)
+            void update({ type: "edit", id, text: typed.arguments, commands: typed.names, chain: [] }).then(back)
           }}
         />
       ),

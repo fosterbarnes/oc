@@ -8,6 +8,8 @@ import { Global } from "../global"
 export type Mode = "install" | "no-install" | "single"
 // `text` only for a chain without slash commands, where each text segment is its own prompt.
 export type Step = { type: "send"; names: string[]; text?: string } | { type: "revive"; mode: Mode }
+// A step as the session queue stores it (`Payload.chain`), with readonly arrays.
+export type ReadonlyStep = { type: "send"; names: readonly string[]; text?: string } | { type: "revive"; mode: Mode }
 export type Body = {
   sessionID: string
   writerPid: number
@@ -19,8 +21,29 @@ export type Body = {
   agent: string
   model: { providerID: string; modelID: string }
   variant?: string
+  // Taken from the session queue: the queue resumes once the chain finishes.
+  queued?: boolean
 }
 type State = "pending" | "ready" | "failed"
+
+export const REVIVE_NAMES: Record<Mode, string> = {
+  install: "revive",
+  "no-install": "revive-no-install",
+  single: "revive-single",
+}
+
+export function label(step: ReadonlyStep) {
+  if (step.type === "revive") return `/${REVIVE_NAMES[step.mode]}`
+  return step.names.length ? step.names.map((name) => `/${name}`).join(" ") : "a plain prompt"
+}
+
+/** What the user would type to run these steps again. */
+export function chainText(steps: readonly ReadonlyStep[], request: string, separator = "\n") {
+  const typed = steps
+    .map((step) => (step.type === "send" && !step.names.length ? (step.text ?? "") : label(step)))
+    .join(" ")
+  return [typed, request].filter(Boolean).join(separator)
+}
 
 // A ready chain nobody opened in time is restored to the prompt instead of firing later by surprise.
 export const READY_TTL_MS = 15 * 60_000

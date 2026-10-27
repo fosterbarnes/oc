@@ -210,6 +210,30 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-27 (~01:05) - v0.2.313 pepsimanInflated - Queue revive chains with Alt+Enter - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation (/spit -> /think -> /imp, plan `~/.config/opencode/plans/queueReviveChains.md`); completed
+- Version: 0.2.313 pepsimanInflated
+- Added queue `Payload.chain` (`ChainStep` schema), `Entry.chain`, pause reason `"chain"` in `session/queue.ts`; core `sql.ts` payload type gains `chain`; `add` keeps a `"chain"` pause; `edit` takes `chain` like `commands` (absent keeps, `[]` clears)
+- Added drain hand-off in `session/prompt.ts`: `dispatchHead` passes a claimed chain row to `handOff`; first live `takeChain` waiter gets the payload, queue pauses `"chain"`, row receipted; no waiter -> `settle` back to pending (barrier). `takeChain` long-polls (returns at once with no chain queued, 5 min timeout settles the same Deferred so a racing hand-off is not lost); cancel/edit and a hand-off release waiters when no chain is left
+- Added `POST /session/:id/queue/take` (`session.queue.take`), chain validation on add (needs agent+model, no `runAt`) and edit; SDK regenerated; httpapi-exercise scenario added
+- Moved `label`/`chainText`/`REVIVE_NAMES` from `tui/reviveChain.tsx` to core `util/reviveResume.ts` (+ `ReadonlyStep`, `Body.queued`); server uses `chainText` for entry text
+- Added `reviveChain.watchQueued` (module-level dedupe; loops take -> `run` with `queued`); `run` returns true when a revive started and calls queue `resume` after the last step of a queued chain; a queued chain always writes a ReviveResume file so the post-revive TUI resumes the queue
+- Changed TUI: `queueInner` queues chains (schedule refused: "Revive chains cannot be scheduled"), session open starts `watchQueued`, queue dialog edits into/out of chains, pause label "Paused by a revive chain"
+- Added keeper test `queue.test.ts` "a queued revive chain holds the queue until one waiting TUI takes it and resumes"
+- Fixed (pass): queue edit refused when it turns a scheduled entry into a chain (`sessionOc.ts`); before, a scheduled fork/new entry edited into a chain would send as a plain prompt. Typecheck + `httpapi-exercise --mode effect --include session.queue` 3 pass after the fix
+- Verification: typecheck core/opencode/tui pass; `test/session/queue.test.ts` 20 pass; tui `slash`/`part`/`reviveChainLine` 17 pass; `httpapi-exercise --include session.queue` coverage + effect 3 pass (3 pre-existing missing `/agent/sub` scenarios); prettier clean. NOT RUN: real TUI flow with a revive (needs user)
+- Risk: no TUI on the session -> chain waits at the head and holds the queue; a TUI closing right as it receives a chain loses it and leaves "Paused by a revive chain" (Resume queue fixes)
+
+### User
+Queued prompts
+- Alt+Enter now queues revive chains such as `/verify /revive /pass /agent-push`; the chain waits its turn, runs from your oc window, and prompts queued behind it run after it finishes, even across the revive.
+- Queued chains show in Queued prompts and can be edited or cancelled; while one runs the queue reads "Paused by a revive chain".
+- Scheduling a revive chain (alt+s) is refused with "Revive chains cannot be scheduled".
+
+---
+
 ## 2026-10-27 (~00:45) - v0.2.312 sauronPermarolling - Verify and pass: new session picker in the real TUI - Claude Opus 5.5, low effort; Verify
 
 ### Agent

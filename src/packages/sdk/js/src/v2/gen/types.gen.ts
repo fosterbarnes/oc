@@ -12192,7 +12192,7 @@ export type SessionQueueGetResponses = {
    * Queued prompts and pause state
    */
   200: {
-    pause: "none" | "restart" | "error" | "interrupted"
+    pause: "none" | "restart" | "error" | "interrupted" | "chain"
     entries: Array<{
       id: string
       state: "pending" | "dispatching"
@@ -12200,6 +12200,7 @@ export type SessionQueueGetResponses = {
       attachments: number
       runAt?: number
       target: "current" | "fork" | "new"
+      chain: boolean
     }>
   }
 }
@@ -12219,6 +12220,17 @@ export type SessionQueueUpdateData = {
         variant?: string
         parts: Array<TextPartInput | FilePartInput | AgentPartInput>
         commands?: Array<string>
+        chain?: Array<
+          | {
+              type: "send"
+              names: Array<string>
+              text?: string
+            }
+          | {
+              type: "revive"
+              mode: "install" | "no-install" | "single"
+            }
+        >
         runAt?: number
         target?: "current" | "fork" | "new"
       }
@@ -12227,6 +12239,17 @@ export type SessionQueueUpdateData = {
         id: string
         text: string
         commands?: Array<string>
+        chain?: Array<
+          | {
+              type: "send"
+              names: Array<string>
+              text?: string
+            }
+          | {
+              type: "revive"
+              mode: "install" | "no-install" | "single"
+            }
+        >
       }
     | {
         type: "cancel"
@@ -12267,7 +12290,7 @@ export type SessionQueueUpdateResponses = {
    * Queue after the change
    */
   200: {
-    pause: "none" | "restart" | "error" | "interrupted"
+    pause: "none" | "restart" | "error" | "interrupted" | "chain"
     entries: Array<{
       id: string
       state: "pending" | "dispatching"
@@ -12275,11 +12298,68 @@ export type SessionQueueUpdateResponses = {
       attachments: number
       runAt?: number
       target: "current" | "fork" | "new"
+      chain: boolean
     }>
   }
 }
 
 export type SessionQueueUpdateResponse = SessionQueueUpdateResponses[keyof SessionQueueUpdateResponses]
+
+export type SessionQueueTakeData = {
+  body?: never
+  path: {
+    sessionID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/session/{sessionID}/queue/take"
+}
+
+export type SessionQueueTakeErrors = {
+  /**
+   * BadRequest | InvalidRequestError
+   */
+  400: EffectHttpApiErrorBadRequest | InvalidRequestError
+  /**
+   * NotFoundError
+   */
+  404: NotFoundError
+}
+
+export type SessionQueueTakeError = SessionQueueTakeErrors[keyof SessionQueueTakeErrors]
+
+export type SessionQueueTakeResponses = {
+  /**
+   * The taken revive chain, or nothing
+   */
+  200: {
+    payload?: {
+      agent?: string
+      model?: {
+        providerID: string
+        modelID: string
+      }
+      variant?: string
+      parts: Array<TextPartInput | FilePartInput | AgentPartInput>
+      commands?: Array<string>
+      chain?: Array<
+        | {
+            type: "send"
+            names: Array<string>
+            text?: string
+          }
+        | {
+            type: "revive"
+            mode: "install" | "no-install" | "single"
+          }
+      >
+    }
+  }
+}
+
+export type SessionQueueTakeResponse = SessionQueueTakeResponses[keyof SessionQueueTakeResponses]
 
 export type SessionClaudeAccountStateData = {
   body?: never

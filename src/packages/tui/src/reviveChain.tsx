@@ -1,5 +1,6 @@
 import fs from "node:fs"
 import { ReviveResume } from "@opencode-ai/core/util/reviveResume"
+import type { SessionQueueTakeResponse } from "@opencode-ai/sdk/v2"
 import { createEffect, createRoot } from "solid-js"
 import { usePromptRef } from "./context/prompt"
 import { useSDK } from "./context/sdk"
@@ -8,17 +9,18 @@ import type { PromptInfo } from "./prompt/history"
 import { useRevive } from "./reviveCommands"
 import { useToast } from "./ui/toast"
 
-type Chain = { steps: ReviveResume.Step[]; done: string[]; request: string }
+const { label, chainText } = ReviveResume
+
+// `queued`: taken from the session queue, which resumes once the chain finishes.
+type Chain = { steps: readonly ReviveResume.Step[]; done: string[]; request: string; queued?: boolean }
 type Target = Pick<ReviveResume.Body, "agent" | "model" | "variant">
 // Sent with the first step only, as the prompt submit sends them today.
 type Part = PromptInfo["parts"][number]
 type Extra = { editor: Extract<Part, { type: "text" }>[]; attachments: Part[] }
+type Queued = NonNullable<SessionQueueTakeResponse["payload"]>
 
-const REVIVE_NAMES: Record<ReviveResume.Mode, string> = {
-  install: "revive",
-  "no-install": "revive-no-install",
-  single: "revive-single",
-}
+// Sessions whose queued chains this TUI is waiting for, across every hook instance.
+const watching = new Set<string>()
 
 // Revive chains: `/pass /revive /agent-push` (slash.ts `extractChain`). Steps run in order from this TUI;
 // a revive saves the rest (ReviveResume) for the TUI that opens the session after the restart.
@@ -29,6 +31,7 @@ export function useReviveChain() {
   const promptRef = usePromptRef()
   const revive = useRevive(toast)
 
+  // True when a revive started: the rest of the chain continues in the TUI that opens the session next.
   const run = async (sessionID: string, chain: Chain, target: Target, extra?: Extra) => {
     const done = [...chain.done]
     for (const [index, step] of chain.steps.entries()) {
@@ -37,20 +40,30 @@ export function useReviveChain() {
         // A revive never cuts a running turn short, even when it is the first step.
         await idle(sessionID)
         const body = { sessionID, writerPid: process.pid, at: Date.now(), steps: rest, done: [...done, label(step)] }
-        const resume = rest.length
-          ? await ReviveResume.write({ ...body, request: chain.request, ...target })
-          : undefined
+        // A queued chain always hands on, so the TUI after the restart resumes the queue.
+        const resume =
+          rest.length || chain.queued
+            ? await ReviveResume.write({ ...body, request: chain.request, queued: chain.queued, ...target })
+            : undefined
         if (await revive.start(step.mode, sessionID, resume, rest.map(label))) {
           if (resume) watchOwn(sessionID, resume)
-          return
+          return true
         }
         if (resume) await ReviveResume.discard(resume)
-        return stop("Revive did not start", chain.steps.slice(index), chain.request)
+        stop("Revive did not start", chain.steps.slice(index), chain.request)
+        return false
       }
       const error = await send(sessionID, step, { ...chain, done, position: index }, target, index ? undefined : extra)
-      if (error) return stop(error, rest, chain.request)
+      if (error) {
+        stop(error, rest, chain.request)
+        return false
+      }
       done.push(label(step))
     }
+    if (chain.queued) {
+      await sdk.client.session.queue.update({ sessionID, body: { type: "resume" } }, { throwOnError: true })
+    }
+    return false
   }
 
   // Called when a session opens: continues a chain settled by a revive, or restores one that failed.
@@ -59,9 +72,56 @@ export function useReviveChain() {
     if (!claimed) return
     const body = claimed.body
     if (!claimed.send) return stop("Revive failed", body.steps, body.request)
-    toast.show({ message: `Continuing after revive: ${chainText(body.steps, "")}`, variant: "info" })
+    if (body.steps.length) {
+      toast.show({ message: `Continuing after revive: ${chainText(body.steps, "")}`, variant: "info" })
+    }
     await idle(sessionID)
     await run(sessionID, body, body)
+  }
+
+  // Runs this session's queued chains here as each reaches the front of the queue. The server hands a
+  // chain to one waiting TUI (`session.queue.take`), so two TUIs on one session never both run it.
+  const watchQueued = async (sessionID: string) => {
+    if (watching.has(sessionID)) return
+    watching.add(sessionID)
+    try {
+      while (await hasQueuedChain(sessionID)) {
+        const taken = await sdk.client.session.queue.take({ sessionID }, { throwOnError: true })
+        const payload = taken.data.payload
+        if (!payload) continue
+        // After a revive the server is going down; the TUI that opens the session next watches again.
+        if (await runQueued(sessionID, payload)) return
+      }
+    } finally {
+      watching.delete(sessionID)
+    }
+  }
+
+  const hasQueuedChain = (sessionID: string) =>
+    sdk.client.session.queue
+      .get({ sessionID }, { throwOnError: true })
+      .then((result) => result.data.entries.some((entry) => entry.chain))
+
+  // The request is the typed text, as in a queued command; synthetic text is editor context.
+  const runQueued = (sessionID: string, payload: Queued) => {
+    const { agent, model, variant, parts } = payload
+    // The queue add refuses a chain without them.
+    if (!agent || !model) throw new Error("Queued revive chain has no agent or model")
+    const text = parts.filter((part) => part.type === "text")
+    return run(
+      sessionID,
+      {
+        steps: payload.chain ?? [],
+        done: [],
+        request: text
+          .filter((part) => !part.synthetic)
+          .map((part) => part.text)
+          .join("\n"),
+        queued: true,
+      },
+      { agent, model, variant },
+      { editor: text.filter((part) => part.synthetic), attachments: parts.filter((part) => part.type !== "text") },
+    )
   }
 
   const send = async (
@@ -110,7 +170,7 @@ export function useReviveChain() {
   }
 
   // The rest of a stopped chain goes back to an empty prompt, so it can be sent again by hand.
-  const stop = (reason: string, steps: ReviveResume.Step[], request: string) => {
+  const stop = (reason: string, steps: readonly ReviveResume.Step[], request: string) => {
     if (!steps.length) return
     const text = chainText(steps, request)
     toast.show({ message: `${reason}: not sent: ${chainText(steps, "")}`, variant: "warning", duration: 8000 })
@@ -142,20 +202,7 @@ export function useReviveChain() {
       ),
     )
 
-  return { run, resume, revive: revive.start }
-}
-
-function label(step: ReviveResume.Step) {
-  if (step.type === "revive") return `/${REVIVE_NAMES[step.mode]}`
-  return step.names.length ? step.names.map((name) => `/${name}`).join(" ") : "a plain prompt"
-}
-
-// What the user would type to run these steps again.
-function chainText(steps: ReviveResume.Step[], request: string) {
-  const typed = steps
-    .map((step) => (step.type === "send" && !step.names.length ? (step.text ?? "") : label(step)))
-    .join(" ")
-  return [typed, request].filter(Boolean).join("\n")
+  return { run, resume, watchQueued, revive: revive.start }
 }
 
 // Read by each step's agent: without it, /pass reading "...then revive then push" may push itself.

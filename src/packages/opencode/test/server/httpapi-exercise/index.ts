@@ -1796,6 +1796,14 @@ const scenarios: Scenario[] = [
     }))
     .status(400),
   http.protected
+    .post("/session/{sessionID}/queue/take", "session.queue.take")
+    .seeded((ctx) => ctx.session({ title: "Queue take session" }))
+    .at((ctx) => ({
+      path: route("/session/{sessionID}/queue/take", { sessionID: ctx.state.id }),
+      headers: ctx.headers(),
+    }))
+    .json(200, object, "status"),
+  http.protected
     .post("/session/{sessionID}/generate", "session.generate")
     .seeded((ctx) => ctx.session({ title: "Generate session" }))
     .at((ctx) => ({

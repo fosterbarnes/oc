@@ -245,6 +245,8 @@ import type {
   SessionPromptResponses,
   SessionQueueGetErrors,
   SessionQueueGetResponses,
+  SessionQueueTakeErrors,
+  SessionQueueTakeResponses,
   SessionQueueUpdateErrors,
   SessionQueueUpdateResponses,
   SessionRenameErrors,
@@ -4019,6 +4021,17 @@ export class Queue extends HeyApiClient {
             variant?: string
             parts: Array<TextPartInput | FilePartInput | AgentPartInput>
             commands?: Array<string>
+            chain?: Array<
+              | {
+                  type: "send"
+                  names: Array<string>
+                  text?: string
+                }
+              | {
+                  type: "revive"
+                  mode: "install" | "no-install" | "single"
+                }
+            >
             runAt?: number
             target?: "current" | "fork" | "new"
           }
@@ -4027,6 +4040,17 @@ export class Queue extends HeyApiClient {
             id: string
             text: string
             commands?: Array<string>
+            chain?: Array<
+              | {
+                  type: "send"
+                  names: Array<string>
+                  text?: string
+                }
+              | {
+                  type: "revive"
+                  mode: "install" | "no-install" | "single"
+                }
+            >
           }
         | {
             type: "cancel"
@@ -4060,6 +4084,38 @@ export class Queue extends HeyApiClient {
         ...options?.headers,
         ...params.headers,
       },
+    })
+  }
+
+  /**
+   * Take a queued revive chain
+   *
+   * Wait until the session's next queued revive chain reaches the front of the queue while the session is idle, then take it: the queue pauses until the caller resumes it after the chain's steps. Returns nothing after 5 minutes or once no chain is queued.
+   */
+  public take<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "sessionID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<SessionQueueTakeResponses, SessionQueueTakeErrors, ThrowOnError>({
+      url: "/session/{sessionID}/queue/take",
+      ...options,
+      ...params,
     })
   }
 }

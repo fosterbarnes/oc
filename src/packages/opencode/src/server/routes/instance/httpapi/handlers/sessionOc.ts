@@ -84,11 +84,20 @@ export const makeOcSessionHandlers = Effect.fnUntraced(function* ({
           change.parts.some(
             (part) => part.type === "text" && part.synthetic && part.metadata?.kind !== "editor_context",
           ) ||
-          (!change.commands?.length && !change.parts.some((part) => part.type !== "text" || !part.synthetic))
+          (!change.commands?.length &&
+            !change.chain?.length &&
+            !change.parts.some((part) => part.type !== "text" || !part.synthetic))
         ) {
           return yield* new InvalidRequestError({
             message: "A queued prompt needs a command or a part of its own; synthetic text is only editor context",
             field: "parts",
+          })
+        }
+        // A TUI runs the chain once it reaches the front, with the agent and model it was queued with.
+        if (change.chain?.length && (change.runAt !== undefined || !change.agent || !change.model)) {
+          return yield* new InvalidRequestError({
+            message: "A revive chain needs an agent and model and cannot be scheduled",
+            field: "chain",
           })
         }
         if (change.target && change.target !== "current" && change.runAt === undefined) {
@@ -106,16 +115,28 @@ export const makeOcSessionHandlers = Effect.fnUntraced(function* ({
             variant: change.variant,
             parts: change.parts,
             ...(change.commands?.length && { commands: change.commands }),
+            ...(change.chain?.length && { chain: change.chain }),
           },
           runAt: change.runAt,
           target: change.target,
         })
       case "edit":
         // Empty text is a bare command (`/agent-push`), so the edit must name its commands.
-        if (!change.text.trim() && !change.commands?.length) {
+        if (!change.text.trim() && !change.commands?.length && !change.chain?.length) {
           return yield* new InvalidRequestError({ message: "Queued text cannot be empty", field: "text" })
         }
-        return yield* promptSvc.queue.edit({ sessionID, id: change.id, text: change.text, commands: change.commands })
+        // Same rule as add: only a TUI runs a chain, at the front of this session's queue.
+        const edited = (yield* promptSvc.queue.snapshot(sessionID)).entries.find((entry) => entry.id === change.id)
+        if (change.chain?.length && edited?.runAt !== undefined) {
+          return yield* new InvalidRequestError({ message: "A revive chain cannot be scheduled", field: "chain" })
+        }
+        return yield* promptSvc.queue.edit({
+          sessionID,
+          id: change.id,
+          text: change.text,
+          commands: change.commands,
+          chain: change.chain,
+        })
       case "cancel":
         return yield* promptSvc.queue.cancel({ sessionID, id: change.id })
       case "resume":
@@ -140,6 +161,11 @@ export const makeOcSessionHandlers = Effect.fnUntraced(function* ({
           ),
       }),
     )
+  })
+
+  const queueTake = Effect.fn("SessionHttpApi.queueTake")(function* (ctx: { params: { sessionID: SessionID } }) {
+    yield* requireSession(ctx.params.sessionID)
+    return { payload: yield* promptSvc.queue.takeChain(ctx.params.sessionID) }
   })
 
   const claudePool = Effect.fnUntraced(function* () {
@@ -187,5 +213,14 @@ export const makeOcSessionHandlers = Effect.fnUntraced(function* ({
     yield* ScheduledDelivery.queueWake.wait(version, yield* promptSvc.queue.deadline())
   }).pipe(Effect.forever, Effect.forkScoped, Effect.provideService(Scope.Scope, scope))
 
-  return { resumeState, resumeSet, resumeCancel, queueSnapshot, queueUpdate, claudeAccountState, claudeAccountSet }
+  return {
+    resumeState,
+    resumeSet,
+    resumeCancel,
+    queueSnapshot,
+    queueUpdate,
+    queueTake,
+    claudeAccountState,
+    claudeAccountSet,
+  }
 })

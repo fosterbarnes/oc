@@ -10199,7 +10199,7 @@
                   "properties": {
                     "pause": {
                       "type": "string",
-                      "enum": ["none", "restart", "error", "interrupted"]
+                      "enum": ["none", "restart", "error", "interrupted", "chain"]
                     },
                     "entries": {
                       "type": "array",
@@ -10226,9 +10226,12 @@
                           "target": {
                             "type": "string",
                             "enum": ["current", "fork", "new"]
+                          },
+                          "chain": {
+                            "type": "boolean"
                           }
                         },
-                        "required": ["id", "state", "text", "attachments", "target"],
+                        "required": ["id", "state", "text", "attachments", "target", "chain"],
                         "additionalProperties": false
                       }
                     }
@@ -10317,7 +10320,7 @@
                   "properties": {
                     "pause": {
                       "type": "string",
-                      "enum": ["none", "restart", "error", "interrupted"]
+                      "enum": ["none", "restart", "error", "interrupted", "chain"]
                     },
                     "entries": {
                       "type": "array",
@@ -10344,9 +10347,12 @@
                           "target": {
                             "type": "string",
                             "enum": ["current", "fork", "new"]
+                          },
+                          "chain": {
+                            "type": "boolean"
                           }
                         },
-                        "required": ["id", "state", "text", "attachments", "target"],
+                        "required": ["id", "state", "text", "attachments", "target", "chain"],
                         "additionalProperties": false
                       }
                     }
@@ -10458,6 +10464,48 @@
                           "type": "string"
                         }
                       },
+                      "chain": {
+                        "type": "array",
+                        "items": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "type": {
+                                  "type": "string",
+                                  "enum": ["send"]
+                                },
+                                "names": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string"
+                                  }
+                                },
+                                "text": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": ["type", "names"],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "type": {
+                                  "type": "string",
+                                  "enum": ["revive"]
+                                },
+                                "mode": {
+                                  "type": "string",
+                                  "enum": ["install", "no-install", "single"]
+                                }
+                              },
+                              "required": ["type", "mode"],
+                              "additionalProperties": false
+                            }
+                          ]
+                        }
+                      },
                       "runAt": {
                         "type": "integer"
                       },
@@ -10487,6 +10535,48 @@
                         "type": "array",
                         "items": {
                           "type": "string"
+                        }
+                      },
+                      "chain": {
+                        "type": "array",
+                        "items": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "type": {
+                                  "type": "string",
+                                  "enum": ["send"]
+                                },
+                                "names": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string"
+                                  }
+                                },
+                                "text": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": ["type", "names"],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "type": {
+                                  "type": "string",
+                                  "enum": ["revive"]
+                                },
+                                "mode": {
+                                  "type": "string",
+                                  "enum": ["install", "no-install", "single"]
+                                }
+                              },
+                              "required": ["type", "mode"],
+                              "additionalProperties": false
+                            }
+                          ]
                         }
                       }
                     },
@@ -10528,6 +10618,180 @@
           {
             "lang": "js",
             "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.session.queue.update({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/session/{sessionID}/queue/take": {
+      "post": {
+        "tags": ["session"],
+        "operationId": "session.queue.take",
+        "parameters": [
+          {
+            "name": "sessionID",
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "pattern": "^ses"
+            },
+            "required": true
+          },
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The taken revive chain, or nothing",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "payload": {
+                      "type": "object",
+                      "properties": {
+                        "agent": {
+                          "type": "string"
+                        },
+                        "model": {
+                          "type": "object",
+                          "properties": {
+                            "providerID": {
+                              "type": "string"
+                            },
+                            "modelID": {
+                              "type": "string"
+                            }
+                          },
+                          "required": ["providerID", "modelID"],
+                          "additionalProperties": false
+                        },
+                        "variant": {
+                          "type": "string"
+                        },
+                        "parts": {
+                          "type": "array",
+                          "items": {
+                            "anyOf": [
+                              {
+                                "$ref": "#/components/schemas/TextPartInput"
+                              },
+                              {
+                                "$ref": "#/components/schemas/FilePartInput"
+                              },
+                              {
+                                "$ref": "#/components/schemas/AgentPartInput"
+                              }
+                            ]
+                          }
+                        },
+                        "commands": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "chain": {
+                          "type": "array",
+                          "items": {
+                            "anyOf": [
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "type": {
+                                    "type": "string",
+                                    "enum": ["send"]
+                                  },
+                                  "names": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "text": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": ["type", "names"],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "type": {
+                                    "type": "string",
+                                    "enum": ["revive"]
+                                  },
+                                  "mode": {
+                                    "type": "string",
+                                    "enum": ["install", "no-install", "single"]
+                                  }
+                                },
+                                "required": ["type", "mode"],
+                                "additionalProperties": false
+                              }
+                            ]
+                          }
+                        }
+                      },
+                      "required": ["parts"],
+                      "additionalProperties": false
+                    }
+                  },
+                  "additionalProperties": false,
+                  "description": "The taken revive chain, or nothing"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "BadRequest | InvalidRequestError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/effect_HttpApiError_BadRequest"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidRequestError"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NotFoundError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotFoundError"
+                }
+              }
+            }
+          }
+        },
+        "description": "Wait until the session's next queued revive chain reaches the front of the queue while the session is idle, then take it: the queue pauses until the caller resumes it after the chain's steps. Returns nothing after 5 minutes or once no chain is queued.",
+        "summary": "Take a queued revive chain",
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.session.queue.take({\n  ...\n})"
           }
         ]
       }

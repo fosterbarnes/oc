@@ -1,13 +1,11 @@
-v0.2.312 sauronPermarolling [feat. > new session spinner and preselect]
+v0.2.313 pepsimanInflated [feat. > queue revive chains]
 
-new session:
-After you pick a folder in the Ctrl+N New oc session list, the title shows a spinner with "Creating session in <folder>" until the session opens, and the list ignores keys meanwhile, so the dialog no longer looks frozen.
+queued prompts:
+Alt+Enter now queues revive chains such as /verify /revive /pass /agent-push instead of refusing them. The chain waits its turn in the queue, then runs from the oc window that has the session open. Prompts queued behind it wait for the whole chain, including across its revive, and run once it finishes.
 
-Opening Ctrl+N from a session now starts the list on that session's home folder, including when the session sits in a subfolder. Typing still jumps to the best match.
-
-Creating a session in a folder oc has not opened since it started still takes about 2 seconds: that is the server loading the project, not the picker.
+Queued chains show in Queued prompts and can be edited or cancelled, and an entry can be edited into or out of a chain. While a chain runs, the queue reads "Paused by a revive chain". Scheduling a chain with alt+s is refused with "Revive chains cannot be scheduled". If no oc window has the session open, the chain and everything behind it wait.
 
 docs:
-The wiki Keybinds page notes that ctrl+n starts on the current session's folder. Build notes rotated to buildNotes.archive15.md.
+The wiki Sessions page explains queued revive chains.
 
-Under the hood: the picker reuses the DialogSelect titleView spinner and locked pattern from the Move session dialog, and finds the current folder with FSUtil.contains, which ignores letter case and slash style on Windows. The planned title lookup filter was dropped after a probe showed the session list call takes about 12 ms. Checks: tui typecheck clean; ocNewSession tests 2 pass; a throwaway path probe matched backslash, forward slash, other case and subfolders; a throwaway oc TUI pane probe showed no marked row from Home, the spinner while creating, and the current folder marked from a session. Not run: the filter-then-Enter and Esc pane cases (the run was cut short).
+Under the hood: the server queue stores the chain but never sends it. When the drain reaches it, it hands the chain to one TUI waiting on the new session.queue.take endpoint and pauses the queue with a new "chain" reason; the TUI runs the steps with the existing chain code and resumes the queue at the end. A queue edit that would turn a scheduled entry into a chain is refused. The chain text helpers moved to core reviveResume.ts so the server shows entries as typed. Checks: core, opencode and tui typecheck clean; session queue tests 20 pass, including a new test that a queued chain holds the queue and goes to exactly one waiting TUI; tui slash, part and chain line tests 17 pass; the HTTP API exercise passes for the three queue routes (the 3 /agent/sub scenarios it lists as missing were already missing). Not run: a real queued chain through an actual revive.

@@ -16,6 +16,7 @@ import { AgentV2 } from "../agent"
 import type { Revert } from "@opencode-ai/schema/revert"
 import type { ModelV2 } from "../model"
 import type { ProviderV2 } from "../provider"
+import type { ReviveResume } from "../util/reviveResume"
 
 type SessionMessageData = Omit<(typeof SessionMessage.Message)["Encoded"], "type" | "id">
 type V1MessageData = Omit<SessionV1.Info, "id" | "sessionID">
@@ -194,6 +195,7 @@ export const SessionQueueTable = sqliteTable(
       variant?: string
       parts: readonly (SessionV1.TextPartInput | SessionV1.FilePartInput | SessionV1.AgentPartInput)[]
       commands?: readonly string[]
+      chain?: readonly ReviveResume.ReadonlyStep[]
     }>(),
     run_at: integer(),
     target: text().$type<"current" | "fork" | "new">().notNull().default("current"),

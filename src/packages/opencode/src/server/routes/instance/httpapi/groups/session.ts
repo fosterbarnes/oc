@@ -142,6 +142,7 @@ export const QueuePayload = Schema.Union([
     id: MessageID,
     text: Schema.String,
     commands: Schema.optional(Schema.Array(Schema.String)),
+    chain: SessionQueue.Payload.fields.chain,
   }),
   Schema.Struct({ type: Schema.Literal("cancel"), id: MessageID }),
   Schema.Struct({ type: Schema.Literal("resume") }),
@@ -198,6 +199,7 @@ export const SessionPaths = {
   resumeState: `${root}/resume/state`,
   resumeCancel: `${root}/resume/cancel`,
   queue: `${root}/:sessionID/queue`,
+  queueTake: `${root}/:sessionID/queue/take`,
   // Two segments, like the resume routes: a one-segment path is swallowed by `get` (`/session/:sessionID`).
   claudeAccount: `${root}/claude/account`,
 } as const
@@ -650,6 +652,22 @@ export const SessionApi = HttpApi.make("session")
             summary: "Change queued prompts",
             description:
               "Add, edit, or cancel a queued prompt, or resume a paused queue. Only pending prompts can be edited or cancelled; a prompt being sent returns a conflict.",
+          }),
+        ),
+        HttpApiEndpoint.post("queueTake", SessionPaths.queueTake, {
+          params: { sessionID: SessionID },
+          query: WorkspaceRoutingQuery,
+          success: described(
+            Schema.Struct({ payload: Schema.optional(SessionQueue.Payload) }),
+            "The taken revive chain, or nothing",
+          ),
+          error: [HttpApiError.BadRequest, ApiNotFoundError],
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "session.queue.take",
+            summary: "Take a queued revive chain",
+            description:
+              "Wait until the session's next queued revive chain reaches the front of the queue while the session is idle, then take it: the queue pauses until the caller resumes it after the chain's steps. Returns nothing after 5 minutes or once no chain is queued.",
           }),
         ),
         HttpApiEndpoint.get("claudeAccountState", SessionPaths.claudeAccount, {

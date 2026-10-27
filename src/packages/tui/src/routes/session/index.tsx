@@ -620,7 +620,8 @@ export function Session() {
     current.submit()
   })
 
-  // Steps typed after a revive (`/revive /agent-push`) continue here once the session is ready.
+  // Steps typed after a revive (`/revive /agent-push`) continue here once the session is ready, and chains
+  // still in the session queue (queued before a restart) run here when they reach the front.
   const reviveChain = useReviveChain()
   const resumeChecked = new Set<string>()
   createEffect(() => {
@@ -628,6 +629,7 @@ export function Session() {
     if (resumeChecked.has(sessionID) || !prompt() || !synced() || !local.model.ready || !local.agent.ready) return
     resumeChecked.add(sessionID)
     void reviveChain.resume(sessionID).catch((error: unknown) => toast.error(error))
+    void reviveChain.watchQueued(sessionID).catch((error: unknown) => toast.error(error))
   })
 
   function enterChild(sessionID: string) {

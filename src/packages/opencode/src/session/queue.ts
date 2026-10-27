@@ -7,15 +7,28 @@ import { ModelV2 } from "@opencode-ai/core/model"
 import { ProviderV2 } from "@opencode-ai/core/provider"
 import { and, asc, eq, lte, ne, sql } from "drizzle-orm"
 import { Context, Effect, Layer, Schema, Semaphore } from "effect"
+import { ReviveResume } from "@opencode-ai/core/util/reviveResume"
 import { MessageID, SessionID } from "./schema"
 import { ScheduledDelivery } from "./scheduledDelivery"
 
 // Why a session's queue is not sending. Absent (with entries waiting) means paused after a restart.
-export const PauseReason = Schema.Literals(["restart", "error", "interrupted"])
+// "chain": a TUI took a revive chain and sends its steps itself; the queue waits until it resumes.
+export const PauseReason = Schema.Literals(["restart", "error", "interrupted", "chain"])
 export type PauseReason = Schema.Schema.Type<typeof PauseReason>
+
+// A revive chain step (`ReviveResume.Step`).
+const ChainStep = Schema.Union([
+  Schema.Struct({
+    type: Schema.Literal("send"),
+    names: Schema.Array(Schema.String),
+    text: Schema.optional(Schema.String),
+  }),
+  Schema.Struct({ type: Schema.Literal("revive"), mode: Schema.Literals(["install", "no-install", "single"]) }),
+]).annotate({ discriminator: "type" })
 
 // The prompt as the user sent it: model, agent, and variant snapshot plus the expanded parts. With
 // `commands` it sends like a typed slash command: the plain text parts are the command's request.
+// With `chain` the server never sends it: a TUI takes it at the front of the queue and runs the steps.
 export const Payload = Schema.Struct({
   agent: Schema.optional(Schema.String),
   model: Schema.optional(Schema.Struct({ providerID: ProviderV2.ID, modelID: ModelV2.ID })),
@@ -26,8 +39,10 @@ export const Payload = Schema.Struct({
     }),
   ),
   commands: Schema.optional(Schema.Array(Schema.String)),
+  chain: Schema.optional(Schema.Array(ChainStep)),
 })
 export type Payload = Schema.Schema.Type<typeof Payload>
+export type ChainStep = Schema.Schema.Type<typeof ChainStep>
 type Part = Payload["parts"][number]
 
 // What the user typed, as opposed to synthetic context such as an editor selection.
@@ -52,11 +67,12 @@ export const Entry = Schema.Struct({
   attachments: Schema.Int,
   runAt: Schema.optional(Schema.Int),
   target: Target,
+  chain: Schema.Boolean,
 })
 export type Entry = Schema.Schema.Type<typeof Entry>
 
 export const Snapshot = Schema.Struct({
-  pause: Schema.Literals(["none", "restart", "error", "interrupted"]),
+  pause: Schema.Literals(["none", "restart", "error", "interrupted", "chain"]),
   entries: Schema.Array(Entry),
 })
 export type Snapshot = Schema.Schema.Type<typeof Snapshot>
@@ -85,6 +101,8 @@ export interface EditInput {
   text: string
   /** Replaces the entry's commands; `[]` makes it a plain prompt. Absent keeps them. */
   commands?: readonly string[]
+  /** Replaces the entry's revive chain the same way. */
+  chain?: readonly ChainStep[]
 }
 
 export interface Queued {
@@ -212,12 +230,15 @@ export const layer = Layer.effect(
       id: row.id,
       state: row.state === "dispatching" ? "dispatching" : "pending",
       // As typed, in the same order as the TUI's `typedText`: `/spit /think request`.
-      text: [...(row.payload.commands ?? []).map((name) => `/${name}`), requestText(row.payload)]
-        .filter(Boolean)
-        .join(" "),
+      text: row.payload.chain
+        ? ReviveResume.chainText(row.payload.chain, requestText(row.payload), " ")
+        : [...(row.payload.commands ?? []).map((name) => `/${name}`), requestText(row.payload)]
+            .filter(Boolean)
+            .join(" "),
       attachments: row.payload.parts.filter((part) => part.type !== "text").length,
       ...(row.run_at !== null && { runAt: row.run_at }),
       target: row.target,
+      chain: row.payload.chain !== undefined,
     })
 
     const snapshotOf = (sessionID: SessionID) =>
@@ -340,8 +361,11 @@ export const layer = Layer.effect(
           const id = input.id ?? MessageID.ascending()
           if ((yield* findRow(id))?.state === "completed") return yield* snapshotOf(input.sessionID)
           if (yield* isSent(id)) return yield* snapshotOf(input.sessionID)
-          // With nothing unscheduled waiting the queue is not paused: a new entry clears any earlier pause.
-          if (!hasUnscheduled(yield* readRows(input.sessionID))) flags.set(input.sessionID, "running")
+          // With nothing unscheduled waiting the queue is not paused: a new entry clears any earlier pause,
+          // except a running revive chain's, so the entry waits for the chain.
+          if (!hasUnscheduled(yield* readRows(input.sessionID)) && flags.get(input.sessionID) !== "chain") {
+            flags.set(input.sessionID, "running")
+          }
           yield* db
             .insert(SessionQueueTable)
             .values({
@@ -368,7 +392,13 @@ export const layer = Layer.effect(
           const kept = row.payload.parts.filter((part) => !isTyped(part))
           const parts = [...(input.text.trim() ? [{ type: "text" as const, text: input.text }] : []), ...kept]
           const commands = input.commands ?? row.payload.commands
-          const payload = { ...row.payload, parts, commands: commands?.length ? commands : undefined }
+          const chain = input.chain ?? row.payload.chain
+          const payload = {
+            ...row.payload,
+            parts,
+            commands: commands?.length ? commands : undefined,
+            chain: chain?.length ? chain : undefined,
+          }
           const edited = yield* db
             .update(SessionQueueTable)
             .set({ payload })

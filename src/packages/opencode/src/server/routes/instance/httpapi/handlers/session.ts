@@ -593,6 +593,7 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       .handle("resumeCancel", oc.resumeCancel)
       .handle("queue", oc.queueSnapshot)
       .handle("queueUpdate", oc.queueUpdate)
+      .handle("queueTake", oc.queueTake)
       .handle("claudeAccountState", oc.claudeAccountState)
       .handle("claudeAccountSet", oc.claudeAccountSet)
   }),

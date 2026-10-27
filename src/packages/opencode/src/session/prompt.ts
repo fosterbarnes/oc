@@ -52,7 +52,7 @@ import { imageDir } from "@opencode-ai/core/util/imageDir"
 import { Truncate } from "@/tool/truncate"
 import { Image } from "@/image/image"
 import { decodeDataUrl } from "@/util/data-url"
-import { Cause, Effect, Exit, Latch, Layer, Option, Scope, Context, Schema, Semaphore, Types } from "effect"
+import { Cause, Deferred, Effect, Exit, Latch, Layer, Option, Scope, Context, Schema, Semaphore, Types } from "effect"
 import { InstanceState } from "@/effect/instance-state"
 import { SESSION_NOTICE_KEY, TaskTool, type TaskPromptOps } from "@/tool/task"
 import { agentPushTitle, PUSH_SESSION_KEY } from "@/tool/sessionComplete"
@@ -191,6 +191,8 @@ export interface Interface {
       id: MessageID
     }) => Effect.Effect<SessionQueue.Snapshot, SessionQueue.NotFoundError | SessionQueue.BusyError>
     readonly resume: (sessionID: SessionID) => Effect.Effect<SessionQueue.Snapshot>
+    /** Waits for the session's next queued revive chain and takes it; undefined after 5 minutes or with none left. */
+    readonly takeChain: (sessionID: SessionID) => Effect.Effect<SessionQueue.Payload | undefined>
     /** Sends scheduled prompts that are due. `inSession` runs an effect in that session's project. */
     readonly fireDue: (
       inSession: (sessionID: SessionID, effect: Effect.Effect<void>) => Effect.Effect<void>,
@@ -2032,6 +2034,60 @@ const layer = Layer.effect(
       )
     }
 
+    // TUIs waiting in `takeChain`, oldest first. Only a TUI can run a revive chain (its revives restart oc),
+    // so the drain hands a chain at the front of the queue to the first waiter and pauses the queue until
+    // that TUI resumes it. With nobody waiting the chain goes back to pending and holds the entries behind it.
+    const chainTakers = new Map<SessionID, Deferred.Deferred<SessionQueue.Payload | undefined>[]>()
+
+    const handOff = Effect.fn("SessionPrompt.handOffChain")(function* (
+      sessionID: SessionID,
+      entry: SessionQueue.Queued,
+    ) {
+      // A taker that already timed out or disconnected is settled, so `succeed` skips it.
+      for (const taker of chainTakers.get(sessionID) ?? []) {
+        if (!(yield* Deferred.succeed(taker, entry.payload))) continue
+        yield* queue.pause(sessionID, "chain")
+        yield* queue.complete(entry.id)
+        // Other TUIs waiting on this session stop unless another chain is queued.
+        return yield* releaseWithoutChain(sessionID)(yield* queue.snapshot(sessionID))
+      }
+      yield* queue.settle(entry.id, entry.claim)
+    })
+
+    const releaseTakers = (sessionID: SessionID) =>
+      Effect.forEach(chainTakers.get(sessionID) ?? [], (taker) => Deferred.succeed(taker, undefined), {
+        discard: true,
+      })
+
+    // Waits up to 5 minutes for this session's next queued chain. The timeout settles the taker through
+    // the same Deferred as a hand-off, so a chain handed off at that moment is still returned.
+    const takeChain = (sessionID: SessionID) =>
+      Effect.gen(function* () {
+        if (!(yield* queue.snapshot(sessionID)).entries.some((entry) => entry.chain)) return undefined
+        const taker = yield* Deferred.make<SessionQueue.Payload | undefined>()
+        chainTakers.set(sessionID, [...(chainTakers.get(sessionID) ?? []), taker])
+        yield* kick(sessionID)
+        const timeout = Effect.sleep("5 minutes").pipe(
+          Effect.andThen(Deferred.succeed(taker, undefined)),
+          Effect.andThen(Deferred.await(taker)),
+        )
+        return yield* Deferred.await(taker).pipe(
+          Effect.raceFirst(timeout),
+          Effect.ensuring(
+            Effect.gen(function* () {
+              yield* Deferred.succeed(taker, undefined)
+              const rest = (chainTakers.get(sessionID) ?? []).filter((item) => item !== taker)
+              if (rest.length) chainTakers.set(sessionID, rest)
+              else chainTakers.delete(sessionID)
+            }),
+          ),
+        )
+      })
+
+    // Takers stop waiting once the session has no queued chain left (cancelled or edited away).
+    const releaseWithoutChain = (sessionID: SessionID) => (snapshot: SessionQueue.Snapshot) =>
+      snapshot.entries.some((entry) => entry.chain) ? Effect.void : releaseTakers(sessionID)
+
     const isIdle = (sessionID: SessionID) =>
       Effect.exit(state.assertNotBusy(sessionID)).pipe(Effect.map(Exit.isSuccess))
     const dispatchHead: (sessionID: SessionID) => Effect.Effect<boolean> = Effect.fn("SessionPrompt.dispatchQueued")(
@@ -2058,6 +2114,10 @@ const layer = Layer.effect(
               Effect.flatMap((ok) => (ok ? drainQueue(sessionID) : queue.pause(sessionID, "error"))),
             )
           }).pipe(Effect.forkIn(scope))
+          return false
+        }
+        if (queued.payload.chain) {
+          yield* handOff(sessionID, queued)
           return false
         }
         // Refused during this project's reload: the queue pauses like any failed turn and resumes on demand.
@@ -2107,9 +2167,14 @@ const layer = Layer.effect(
       deadline: queue.deadline,
       snapshot: queue.snapshot,
       add: (input) => queue.add(input).pipe(Effect.tap(() => kick(input.sessionID))),
-      edit: queue.edit,
-      cancel: (input) => queue.cancel(input).pipe(Effect.tap(() => kick(input.sessionID))),
+      edit: (input) => queue.edit(input).pipe(Effect.tap(releaseWithoutChain(input.sessionID))),
+      cancel: (input) =>
+        queue.cancel(input).pipe(
+          Effect.tap(releaseWithoutChain(input.sessionID)),
+          Effect.tap(() => kick(input.sessionID)),
+        ),
       resume: (sessionID) => queue.resume(sessionID).pipe(Effect.tap(() => kick(sessionID))),
+      takeChain,
       // Busy sessions are skipped: a later call finds the entry still due once the turn ends.
       fireDue: (inSession) =>
         Effect.gen(function* () {

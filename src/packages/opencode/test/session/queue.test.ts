@@ -245,6 +245,55 @@ it.instance("a confirmed interrupt pauses the queue before the running turn stop
   }),
 )
 
+it.instance("a queued revive chain holds the queue until one waiting TUI takes it and resumes", () =>
+  Effect.gen(function* () {
+    const fixture = yield* setup()
+    const session = yield* fixture.sessions.create({ title: "chain" })
+    yield* fixture.llm.text("behind reply")
+    yield* fixture.llm.text("late reply")
+    // Shape the TUI queues for Alt+Enter on `/verify /revive request` (`queueInner`).
+    const chain = [
+      { type: "send" as const, names: ["verify"] },
+      { type: "revive" as const, mode: "install" as const },
+    ]
+    const added = yield* fixture.prompt.queue.add({
+      sessionID: session.id,
+      payload: { agent: "build", model: ref, parts: [text("request")], chain },
+    })
+    expect(added.entries.map((entry) => [entry.text, entry.chain])).toEqual([["/verify /revive request", true]])
+    yield* add(fixture, session.id, "behind")
+
+    // Nobody waiting: the server never sends the chain, and the prompt behind it waits.
+    yield* Effect.sleep("500 millis")
+    expect(yield* fixture.llm.calls).toBe(0)
+    expect((yield* fixture.queue.snapshot(session.id)).entries.map((entry) => entry.state)).toEqual([
+      "pending",
+      "pending",
+    ])
+
+    // Two TUIs wait; one gets the chain, the other is released once no chain is left.
+    const takers = yield* Effect.all(
+      [fixture.prompt.queue.takeChain(session.id), fixture.prompt.queue.takeChain(session.id)],
+      {
+        concurrency: "unbounded",
+      },
+    )
+    expect(takers.filter(Boolean)).toEqual([expect.objectContaining({ chain, parts: [text("request")] })])
+
+    // The chain's steps run from the TUI; queued prompts wait for it, including ones added meanwhile.
+    yield* add(fixture, session.id, "late")
+    yield* Effect.sleep("500 millis")
+    const held = yield* fixture.queue.snapshot(session.id)
+    expect(held.pause).toBe("chain")
+    expect(held.entries.map((entry) => entry.text)).toEqual(["behind", "late"])
+    expect(yield* fixture.llm.calls).toBe(0)
+
+    yield* fixture.prompt.queue.resume(session.id)
+    yield* drained(fixture, session.id, 2)
+    expect(yield* userTexts(fixture, session.id)).toEqual(["behind", "late"])
+  }),
+)
+
 it.instance("deleting the session removes its queued prompts", () =>
   Effect.gen(function* () {
     const fixture = yield* setup()
