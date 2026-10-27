@@ -98,15 +98,8 @@ export function DialogMessage(props: {
             const msg = message()
             if (!msg) return
 
-            const parts = sync.data.part[msg.id]
-            const text = parts.reduce((agg, part) => {
-              if (part.type === "text" && !part.synthetic) {
-                agg += part.text
-              }
-              return agg
-            }, "")
-
-            await clipboard.write?.(text)
+            // Command messages copy as typed (`/spit fix it`), not their expanded templates.
+            await clipboard.write?.(promptInfo(msg.id).input)
             dialog.clear()
           },
         },

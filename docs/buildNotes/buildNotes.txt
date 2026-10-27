@@ -1,18 +1,9 @@
-v0.2.309 momentumPotatoe [fix > release builds; patch > sidebar state]
+v0.2.310 liquidJeff [fix > copy slash-command messages as typed]
 
-releases and updates:
-Building a release no longer fails at the zip step, so oc releases can be published again. A freshly installed release no longer offers itself as an update on every start. /update now unpacks downloads on PCs where Git's tar comes first on PATH and on profiles with non-English folder names. Release pages carry the commit messages since the previous release as notes, shown once after /update. The release scripts refuse to package a build that is not a release build, and build.ps1 refuses -Release together with -Oc or -Native so a stale zip of the other variant can't be published.
-
-launcher:
-When oc refuses to start, for example because another oc install's background server is running, it prints only the reason, without an "Error: Unexpected error" line above it.
-
-shutdown:
-oc --shutdown-all now closes oc's WezTerm tabs and stops the background server when run from a shell outside WezTerm, which is how the setup exe runs it before upgrades and uninstalls. Before, it failed with "wezterm cli kill-pane ... failed" and left everything running. Tabs opened by an older build still need --shutdown-all from inside WezTerm, or closing by hand. The background server also no longer fails to start with "Failed to determine the current Windows user SID" when Git's Unix tools come first on PATH.
-
-sidebar:
-Opening a project in oc no longer creates .config/openSidebar.json in it. Pins, favorites, and file roots are saved in oc's own state folder, and existing ones carry over on the first save. A hand-written .config/openSidebar.json is still read but never changed by oc, so saves no longer erase its scripts.
+session messages:
+Copying a message you sent with a slash command, from its Copy action, now copies the command you typed, like /spit fix it, instead of the expanded command text. /copy-all and /export show the typed command for those messages too.
 
 docs:
-The README and wiki make clear that commands like /spit and /think are ones you write yourself, and the wiki Sidebar page gives the new state location.
+The wiki Sessions page describes how slash-command messages copy.
 
-Under the hood: build.ts zips with System32 tar.exe by path and no longer uploads to GitHub itself; pushRelease.ps1 publishes exact asset names with --notes-file built from the commits since the last GitHub release; release builds set OPENCODE_DISPLAY_VERSION to the plain version; revive.ts unpacks with System32 tar from the download folder; requireReleaseBuild in scriptHelper.ps1 checks both dist exes' --version. Launcher refusals throw CliError. The TUI ledger records WEZTERM_UNIX_SOCKET so shutdownAll reaches the right mux, and serverSecret calls System32 whoami.exe by path. writeSidebar is gone, and sidebar state lives in <state>/sidebar/<hash>.json. Checks: core, opencode and tui typechecks clean; tui openSidebar and ocNewSession tests 77 pass 2 skip; opencode launcherSafety, sessionBootstrap, config/oc and cli/error tests 51 pass on two reruns after one known flaky run made while three typechecks ran in parallel; tuiLedger tests pass and config/oc 30/30 with Git's usr/bin first on PATH; core ocRelease 5 pass. Probes confirmed the zip and /update unpack round trip in a non-ASCII temp path with Git's tar first on PATH, a session with the sidebar open leaves a project with a clean git status, pushRelease.ps1 -DryRun refuses a dev build, --shutdown-all against a test-owned WezTerm mux closes only its pane and stops the TUI, and a second oc install started while the first one's server runs prints only the refusal line and exits 1 with the server untouched. Not yet run: build.ps1 -Release, a real release publish, and /update on a VM.
+Under the hood: the message Copy action reuses promptFromParts, the same path as Edit, Revert and Fork, and no longer throws when a message's parts are not loaded. formatPart in util/transcript.ts writes typedText for text parts, which leaves assistant parts unchanged. Added a transcript test for command messages. Checks: tui prompt/part, prompt/slash and util/transcript tests 35 pass 0 fail; tui typecheck clean. Not yet run: a live clipboard check in a built oc.

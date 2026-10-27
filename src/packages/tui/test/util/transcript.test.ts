@@ -121,6 +121,18 @@ describe("transcript", () => {
       expect(result).toBe("Hello world\n\n")
     })
 
+    test("writes the typed command for command messages", () => {
+      const part: Part = {
+        id: "part_1",
+        sessionID: "ses_123",
+        messageID: "msg_123",
+        type: "text",
+        text: "[/spit is active: ...]\n\nTemplate\n\nfix it",
+        metadata: { ocCommands: ["spit"], ocCommandArguments: "fix it" },
+      }
+      expect(formatPart(part, options)).toBe("/spit fix it\n\n")
+    })
+
     test("skips synthetic text parts", () => {
       const part: Part = {
         id: "part_1",

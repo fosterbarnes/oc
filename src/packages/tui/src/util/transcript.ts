@@ -1,4 +1,5 @@
 import type { AssistantMessage, Part, Provider, UserMessage } from "@opencode-ai/sdk/v2"
+import { typedText } from "../prompt/slash"
 import { Locale } from "./locale"
 import * as Model from "./model"
 
@@ -85,7 +86,7 @@ export function formatAssistantHeader(
 
 export function formatPart(part: Part, options: TranscriptOptions): string {
   if (part.type === "text" && !part.synthetic) {
-    return `${part.text}\n\n`
+    return `${typedText(part)}\n\n`
   }
 
   if (part.type === "reasoning") {

@@ -196,6 +196,23 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-26 (~23:59) - v0.2.310 liquidJeff - Copying a slash-command message copies the typed command - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation (imp from plan `~/.config/opencode/plans/2026-10-26-copy-slash-command-message.md`); completed
+- Version: 0.2.310 liquidJeff
+- Fixed Message Actions > Copy (`tui/src/routes/session/dialog-message.tsx`): uses `promptInfo(msg.id).input` (`promptFromParts` -> `typedText`) instead of a raw `part.text` reduce; also guards missing parts (`?? []`).
+- Changed `formatPart` (`tui/src/util/transcript.ts`) to write `typedText(part)`: `/copy-all` and `/export` show `/spit fix it` for command messages, not the template. Assistant parts never carry `ocCommands`, so unchanged.
+- Added `formatPart` test "writes the typed command for command messages" (`tui/test/util/transcript.test.ts`).
+- Verification: `bun test test/prompt/part.test.ts test/prompt/slash.test.ts test/util/transcript.test.ts` 35 pass 0 fail; `bun run typecheck` (tui) clean. Live clipboard check not run (needs a build).
+
+### User
+Session messages
+- Copying a message you sent with a slash command now copies the command you typed, like `/spit fix it`, instead of the expanded command text.
+- `/copy-all` and `/export` also show the typed command for those messages.
+
+---
+
 ## 2026-10-26 (~23:41) - v0.2.309 momentumPotatoe - --shutdown-all closes WezTerm panes from outside WezTerm - Claude Opus 5.5, low effort; Debug
 
 ### Agent
