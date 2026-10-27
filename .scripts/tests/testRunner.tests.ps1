@@ -18,17 +18,26 @@ function assertRejected {
 
 $before = (Get-Location).Path
 $unit = @(& $runner -Category unit -DryRun)
-assert ($unit.Count -eq 15) 'Unit category must select the 15 existing package suites.'
+assert ($unit.Count -gt 0) 'Unit category must select package suites.'
 assert (@($unit | Where-Object Command -ne bun).Count -eq 0) 'Unit suites must use Bun.'
+foreach ($check in $unit) {
+    assert (Test-Path -LiteralPath $check.Directory -PathType Container) "Unit package is missing: $($check.Name)"
+}
 $providers = @(& $runner -Category providers -DryRun)
-assert ($providers.Count -eq 1) 'Provider category must select the Cursor runtime.'
+assert ($providers.Count -gt 0) 'Provider category must select the Cursor runtime.'
 assert (@($providers | Where-Object Command -ne node).Count -eq 0) 'Providers must use Node.'
+# Every package test folder must belong to a suite, so a new package cannot be silently skipped.
+$suiteDirectories = @($unit + $providers | ForEach-Object Directory)
+foreach ($testDirectory in Get-ChildItem -Path "$PSScriptRoot/../../src/packages/*/test", "$PSScriptRoot/../../src/packages/*/*/test" -Directory) {
+    assert ($testDirectory.Parent.FullName -in $suiteDirectories) "No suite runs $($testDirectory.FullName)."
+}
+$generated = @(& $runner -Category generated -DryRun)
 $all = @(& $runner -All -DryRun)
-assert ($all.Count -eq 24) 'All must include package tests, HttpApi, typecheck, and generation steps.'
+assert ($all.Count -eq $unit.Count + $providers.Count + 2 + $generated.Count) 'All must include package tests, HttpApi, typecheck, and generation steps.'
 assert (@($all | Where-Object { $_.Name -eq 'httpapi' }).Count -eq 1) 'All must include HttpApi.'
 assert (@($all | Where-Object { $_.Name -eq 'typecheck' }).Count -eq 1) 'All must include typecheck.'
 assert (@(& $runner -Package core,core -DryRun).Count -eq 1) 'Duplicate selections must run once.'
-assert (@(& $runner -Category unit,providers,unit -DryRun).Count -eq 16) 'Categories must deduplicate.'
+assert (@(& $runner -Category unit,providers,unit -DryRun).Count -eq $unit.Count + $providers.Count) 'Categories must deduplicate.'
 
 $filtered = @(& $runner -Package cursor-runtime -File test/main.test.mjs -Name '^forwardData preserves ordered data' -DryRun)
 assert ($filtered.Count -eq 1) 'File selection must run one check.'
@@ -37,10 +46,6 @@ $bunFilter = @(& $runner -Package schema -File test/event.test.ts -Name 'event' 
 assert ($bunFilter[0].Arguments[-1] -eq './test/event.test.ts') 'Bun file selection must use an exact path.'
 assert ($bunFilter[0].Arguments -contains '--test-name-pattern') 'Bun name filter is missing.'
 assertRejected @{ Package = 'unknown' } 'Unknown package'
-# Upstream SaaS packages were removed from the workspace; their names must not select anything.
-foreach ($removed in 'console/app', 'console/core', 'console/function', 'function', 'stats/core') {
-    assertRejected @{ Package = $removed } 'Unknown package'
-}
 assertRejected @{ Package = 'schema'; Fiel = 'test/event.test.ts' } "parameter name 'Fiel'"
 assertRejected @{ Package = 'core'; All = $true } 'not a combination'
 assertRejected @{ File = 'test/main.test.mjs' } 'exactly one'

@@ -57,6 +57,19 @@ function locationData(validate: (value: any) => void) {
   }
 }
 
+// The writable subagent file resolves under the isolated XDG config root (environment.ts).
+function seedSubagents() {
+  return Effect.promise(async () => {
+    const { SubagentFile } = await import("@/agent/subagentFile")
+    const file = SubagentFile.defaultFile()
+    // Never overwrite the user's real subagent file.
+    if (!path.resolve(file).startsWith(path.resolve(exerciseGlobalRoot) + path.sep))
+      throw new Error(`subagent file is outside the exercise root: ${file}`)
+    await Bun.write(file, '---\nagents:\n  httpapi-seeded:\n    model: "test/test-model"\n---\n')
+    return { file, names: () => SubagentFile.names(file) }
+  })
+}
+
 const scenarios: Scenario[] = [
   http.protected
     .get("/global/health", "global.health")
@@ -143,6 +156,47 @@ const scenarios: Scenario[] = [
     .status(400, undefined, "status"),
   http.protected.get("/command", "command.list").json(200, array, "status"),
   http.protected.get("/agent", "app.agents").json(200, array, "status"),
+  http.protected
+    .get("/agent/sub", "app.agent.sub.list")
+    .seeded(seedSubagents)
+    .at((ctx) => ({ path: "/agent/sub", headers: ctx.headers() }))
+    .jsonEffect(200, (body, ctx) =>
+      Effect.gen(function* () {
+        check(Array.isArray(body) && body.includes("httpapi-seeded"), "subagent list should name the seeded entry")
+        yield* Effect.promise(() => Bun.file(ctx.state.file).delete())
+      }),
+    ),
+  http.protected
+    .post("/agent/sub", "app.agent.sub.add")
+    .mutating()
+    .seeded(seedSubagents)
+    .at((ctx) => ({
+      path: "/agent/sub",
+      headers: { ...ctx.headers(), "content-type": "application/json" },
+      body: { name: "httpapi-added", model: "test/test-model" },
+    }))
+    .jsonEffect(200, (body, ctx) =>
+      Effect.gen(function* () {
+        check(body === true, "subagent add should return true")
+        const names = yield* Effect.promise(() => ctx.state.names())
+        check(names.includes("httpapi-added"), "subagent add should write the entry")
+        check(names.includes("httpapi-seeded"), "subagent add should keep existing entries")
+        yield* Effect.promise(() => Bun.file(ctx.state.file).delete())
+      }),
+    ),
+  http.protected
+    .delete("/agent/sub/{name}", "app.agent.sub.remove")
+    .mutating()
+    .seeded(seedSubagents)
+    .at((ctx) => ({ path: route("/agent/sub/{name}", { name: "httpapi-seeded" }), headers: ctx.headers() }))
+    .jsonEffect(200, (body, ctx) =>
+      Effect.gen(function* () {
+        check(body === true, "subagent remove should return true")
+        const names = yield* Effect.promise(() => ctx.state.names())
+        check(!names.includes("httpapi-seeded"), "subagent remove should delete the entry")
+        yield* Effect.promise(() => Bun.file(ctx.state.file).delete())
+      }),
+    ),
   http.protected.get("/skill", "app.skills").json(200, array, "status"),
   http.protected.get("/lsp", "lsp.status").json(200, array),
   http.protected.get("/formatter", "formatter.status").json(200, array),

@@ -376,7 +376,7 @@ export function resolveMcpProxyToolDefs(options: {
   }
 
   if (collided.length > 0) {
-    // WARN, not NOTICE: only warn and error are alwaysStderr in src/logger.ts,
+    // WARN, not NOTICE: src/logger.ts mirrors warn and error to opencode.log,
     // and a shadowed MCP tool silently stops being routed through opencode,
     // which is exactly the class of surprise this lane exists to end.
     log.warn(

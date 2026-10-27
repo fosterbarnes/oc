@@ -86,8 +86,8 @@ means rewriting onto oc's v1 session loop, never reintroducing the V2 engine.
 ## Verification
 
 Agents run only newly added tests, selecting those cases in existing files.
-Existing tests, type checks, and other automated checks run on GitHub when the
-user pushes. Do not run them locally or ask to run them unless explicitly requested.
+There is no CI: broader suites are user-driven through `.scripts\test.ps1`, and
+`prePush.ps1` typechecks before every push. Do not run them unless explicitly requested.
 Recheck both checkout statuses, inspect the final diff, and confirm the isolated
 checkout remains clean. Insert a newest-first session entry in `docs/buildNotes/buildNotes.md` after
 permitted verification (immediately under `# Historical entries (newest first)`).

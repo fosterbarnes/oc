@@ -44,7 +44,6 @@ import { SessionRunState } from "../../src/session/run-state"
 import { SessionQueue } from "../../src/session/queue"
 import { SessionHandoff } from "../../src/session/handoff"
 import { SessionReminders } from "../../src/session/reminders"
-import { Flock } from "@opencode-ai/core/util/flock"
 import { MessageID, PartID, SessionID } from "../../src/session/schema"
 import { SessionStatus } from "../../src/session/status"
 import { SessionV2 } from "@opencode-ai/core/session"
@@ -552,7 +551,13 @@ for (const failure of ["kickoff", "model"] as const) {
         if (failure === "model") yield* llm.error(400, { error: { message: "child model failed" } })
         yield* prompt.loop({ sessionID: chat.id })
         const child = yield* pollWithTimeout(
-          sessions.children(chat.id).pipe(Effect.map((children) => children.find((child) => child.sessionFailed))),
+          sessions
+            .list({ roots: true })
+            .pipe(
+              Effect.map((items) =>
+                items.find((item) => item.metadata?.[SessionHandoff.HANDOFF_FROM] === chat.id && item.sessionFailed),
+              ),
+            ),
           "handoff child was not marked failed",
           "10 seconds",
         )
@@ -561,6 +566,7 @@ for (const failure of ["kickoff", "model"] as const) {
           "child error was not published",
         )
         expect(child.sessionFailed).toBe(true)
+        expect(child.parentID).toBeUndefined()
         expect(child.sessionInProgress).toBe(false)
         expect(errors.some((error) => error.includes(child.id) && error.includes(`child ${failure} failed`))).toBe(true)
       }),
@@ -569,47 +575,49 @@ for (const failure of ["kickoff", "model"] as const) {
 }
 
 it.instance(
-  "queue contention bounds reclaims and drains once after the lock releases",
+  "queue contention keeps a live durable claim and drains once after release",
   () =>
     Effect.gen(function* () {
       const { llm } = yield* useServerConfig(providerCfg)
       const { prompt, chat, sessions } = yield* boot()
       const queue = yield* SessionQueue.Service
-      const id = MessageID.ascending()
-      const attempted = yield* Deferred.make<void>()
-      const times: number[] = []
-      const original = queue.claim
-      const claim = spyOn(queue, "claim").mockImplementation((sessionID, idle) =>
-        Effect.gen(function* () {
-          times.push(Date.now())
-          yield* Deferred.succeed(attempted, undefined)
-          return yield* original(sessionID, idle)
-        }),
+      const database = yield* Database.Service
+      const owner = yield* SessionQueue.Service.pipe(
+        Effect.provide(Layer.fresh(SessionQueue.layer)),
+        Effect.provideService(Database.Service, database),
       )
-      yield* Effect.addFinalizer(() => Effect.sync(() => claim.mockRestore()))
+      const id = MessageID.ascending()
       yield* llm.text("drained")
-      yield* Effect.gen(function* () {
-        yield* Effect.acquireRelease(
-          Effect.promise(() => Flock.acquire(`session-queue:${id}`, { timeoutMs: 0, staleMs: 15_000 })),
-          (lease) => Effect.promise(() => lease.release()),
-        )
-        yield* prompt.queue.add({
-          sessionID: chat.id,
-          id,
-          payload: {
-            agent: "build",
-            model: ref,
-            parts: [{ type: "text", text: "queued" }],
+      yield* owner.add({
+        sessionID: chat.id,
+        id,
+        payload: {
+          agent: "build",
+          model: ref,
+          parts: [{ type: "text", text: "queued" }],
+        },
+      })
+      const held = yield* owner.claim(chat.id, Effect.succeed(true))
+      if (!held) throw new Error("queue owner did not acquire the durable claim")
+      yield* queue.resume(chat.id)
+      // Reconciliation and competing claimers must leave a live owner's durable claim alone.
+      yield* queue.due(Date.now())
+      expect(
+        yield* Effect.all(
+          Array.from({ length: 3 }, () => queue.claim(chat.id, Effect.succeed(true))),
+          {
+            concurrency: "unbounded",
           },
-        })
-        yield* awaitWithTimeout(Deferred.await(attempted), "queue never tried to claim")
-        // Hold the actual cross-process lease past the bounded retry window.
-        yield* Effect.sleep(200)
-        // Three quick claims, then one retry a second later: nothing more while the lock is held.
-        expect(times.length).toBe(3)
-        expect(times[1] - times[0]).toBeGreaterThanOrEqual(20)
-        expect(times[2] - times[1]).toBeGreaterThanOrEqual(20)
-      }).pipe(Effect.scoped)
+        ),
+      ).toEqual([undefined, undefined, undefined])
+      expect(yield* owner.delivery(id, held.claim).check).toBe(true)
+      expect((yield* queue.snapshot(chat.id)).entries).toMatchObject([{ id, state: "dispatching" }])
+      expect(yield* llm.calls).toBe(0)
+      expect(yield* sessions.messages({ sessionID: chat.id })).toHaveLength(0)
+
+      yield* owner.settle(id, held.claim)
+      expect(yield* owner.delivery(id, held.claim).check).toBe(false)
+      yield* Effect.all([prompt.queue.resume(chat.id), prompt.queue.resume(chat.id)], { concurrency: "unbounded" })
       yield* pollWithTimeout(
         sessions
           .messages({ sessionID: chat.id })
@@ -622,6 +630,9 @@ it.instance(
         "10 seconds",
       )
       expect(yield* llm.calls).toBe(1)
+      const messages = yield* sessions.messages({ sessionID: chat.id })
+      expect(messages.filter((message) => message.info.role === "user")).toHaveLength(1)
+      expect(messages.filter((message) => message.info.role === "assistant")).toHaveLength(1)
       expect((yield* queue.snapshot(chat.id)).entries).toHaveLength(0)
     }),
   20_000,

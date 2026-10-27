@@ -26,11 +26,7 @@ import {
   type ChildTracker,
 } from "@/provider/claude-code/warmup/cli"
 import { materializePoolIds } from "@/provider/claude-code/warmup/identity"
-import {
-  _resetInventoryForTests,
-  _setInventoryProbe,
-  listConnected,
-} from "@/provider/claude-code/warmup/inventory"
+import { _resetInventoryForTests, _setInventoryProbe, listConnected } from "@/provider/claude-code/warmup/inventory"
 import {
   isScheduleEmpty,
   nextOccurrence,
@@ -71,7 +67,10 @@ afterEach(() => {
 })
 
 const daily = (times: string[]): { mode: "daily"; times: string[] } => ({ mode: "daily", times })
-const weekly = (days: Record<string, string[]>): { mode: "weekly"; days: Record<string, string[]> } => ({ mode: "weekly", days })
+const weekly = (days: Record<string, string[]>): { mode: "weekly"; days: Record<string, string[]> } => ({
+  mode: "weekly",
+  days,
+})
 
 // A minute-start occurrence with a tight window around it. A non-positive
 // offset stays inside the firing allowance (queued under 60s by
@@ -132,7 +131,9 @@ test("schedule validation: daily and weekly modes, blank weekends, bad shapes", 
   })
   expect("error" in week).toBe(false)
   expect("error" in normalizeSchedule({ mode: "daily", times: ["x"] })).toBe(true)
-  expect("error" in normalizeSchedule({ mode: "daily", times: ["00:00", "01:00", "02:00", "03:00", "04:00"] })).toBe(true)
+  expect("error" in normalizeSchedule({ mode: "daily", times: ["00:00", "01:00", "02:00", "03:00", "04:00"] })).toBe(
+    true,
+  )
   expect("error" in normalizeSchedule({ mode: "weekly", days: { mon: ["25:00"] } })).toBe(true)
   expect("error" in normalizeSchedule({ mode: "cron", times: [] })).toBe(true)
   expect("error" in normalizeSchedule(null)).toBe(true)
@@ -179,7 +180,9 @@ test("save: concurrent account updates preserve each other", async () => {
 })
 
 test("save: malformed clock values and unknown shapes are rejected before any write", async () => {
-  await expect(setAccountSchedule({ file: storeFile, accountID: "a", enabled: true, schedule: daily(["nope"]) })).rejects.toThrow()
+  await expect(
+    setAccountSchedule({ file: storeFile, accountID: "a", enabled: true, schedule: daily(["nope"]) }),
+  ).rejects.toThrow()
   expect(readStore(storeFile).status).toBe("missing")
 })
 
@@ -190,7 +193,9 @@ test("store: survives a fresh read and rejects malformed state instead of resett
   writeFileSync(storeFile, JSON.stringify({ accounts: { a: { enabled: "yes" } } }), "utf8")
   const bad = readStore(storeFile)
   expect(bad.status).toBe("malformed")
-  await expect(setAccountSchedule({ file: storeFile, accountID: "a", enabled: true, schedule: daily(["08:00"]) })).rejects.toThrow()
+  await expect(
+    setAccountSchedule({ file: storeFile, accountID: "a", enabled: true, schedule: daily(["08:00"]) }),
+  ).rejects.toThrow()
   expect(JSON.parse(await Bun.file(storeFile).text()).accounts.a.enabled).toBe("yes")
 })
 
@@ -198,8 +203,8 @@ test("claims: a normal tick fires once and a repeated poll cannot resubmit", asy
   await setAccountSchedule({ file: storeFile, accountID: "a", enabled: true, schedule: daily(["07:00"]) })
   const at = occurrenceMs(2026, 9, 13, "07:00")!
   const occurrences: DueOccurrence[] = [{ key: "2026-10-13|07:00", at, time: "07:00" }]
-  expect(await claimDueOccurrences({ file: storeFile, accountID: "a", occurrences })).toHaveLength(1)
-  expect(await claimDueOccurrences({ file: storeFile, accountID: "a", occurrences })).toHaveLength(0)
+  expect(await claimDueOccurrences({ file: storeFile, accountID: "a", occurrences, now: at })).toHaveLength(1)
+  expect(await claimDueOccurrences({ file: storeFile, accountID: "a", occurrences, now: at })).toHaveLength(0)
 })
 
 test("claims: two clients contending for one occurrence, one wins", async () => {
@@ -207,8 +212,8 @@ test("claims: two clients contending for one occurrence, one wins", async () => 
   const at = occurrenceMs(2026, 9, 13, "07:00")!
   const occurrences: DueOccurrence[] = [{ key: "2026-10-13|07:00", at, time: "07:00" }]
   const [first, second] = await Promise.all([
-    claimDueOccurrences({ file: storeFile, accountID: "a", occurrences }),
-    claimDueOccurrences({ file: storeFile, accountID: "a", occurrences }),
+    claimDueOccurrences({ file: storeFile, accountID: "a", occurrences, now: at }),
+    claimDueOccurrences({ file: storeFile, accountID: "a", occurrences, now: at }),
   ])
   expect(first.length + second.length).toBe(1)
 })
@@ -216,11 +221,19 @@ test("claims: two clients contending for one occurrence, one wins", async () => 
 test("claims: pausing before the send boundary cancels unstarted work", async () => {
   await setAccountSchedule({ file: storeFile, accountID: "a", enabled: true, schedule: daily(["07:00"]) })
   const at = occurrenceMs(2026, 9, 13, "07:00")!
-  await claimDueOccurrences({ file: storeFile, accountID: "a", occurrences: [{ key: "2026-10-13|07:00", at, time: "07:00" }] })
+  await claimDueOccurrences({
+    file: storeFile,
+    accountID: "a",
+    occurrences: [{ key: "2026-10-13|07:00", at, time: "07:00" }],
+  })
   await setAccountSchedule({ file: storeFile, accountID: "a", enabled: false, schedule: daily(["07:00"]) })
-  expect(isStillSendable({ store: readStore(storeFile), accountID: "a", poolIds: ["a"], connectedIds: ["a"] })).toBe(false)
+  expect(isStillSendable({ store: readStore(storeFile), accountID: "a", poolIds: ["a"], connectedIds: ["a"] })).toBe(
+    false,
+  )
   expect(isStillSendable({ store: readStore(storeFile), accountID: "a", poolIds: ["a"], connectedIds: [] })).toBe(false)
-  expect(isStillSendable({ store: readStore(storeFile), accountID: "zz", poolIds: ["a"], connectedIds: ["a"] })).toBe(false)
+  expect(isStillSendable({ store: readStore(storeFile), accountID: "zz", poolIds: ["a"], connectedIds: ["a"] })).toBe(
+    false,
+  )
 })
 
 test("claims: never switch the pool current account or session pins", async () => {
@@ -229,25 +242,49 @@ test("claims: never switch the pool current account or session pins", async () =
   const before = poolState(ids, Date.now())
   await setAccountSchedule({ file: storeFile, accountID: "b", enabled: true, schedule: daily(["07:00"]) })
   const at = occurrenceMs(2026, 9, 13, "07:00")!
-  await claimDueOccurrences({ file: storeFile, accountID: "b", occurrences: [{ key: "2026-10-13|07:00", at, time: "07:00" }] })
-  await recordAttempt({ file: storeFile, accountID: "b", attempt: { scheduledAt: at, attemptedAt: at + 1, outcome: "sent" } })
+  await claimDueOccurrences({
+    file: storeFile,
+    accountID: "b",
+    occurrences: [{ key: "2026-10-13|07:00", at, time: "07:00" }],
+  })
+  await recordAttempt({
+    file: storeFile,
+    accountID: "b",
+    attempt: { scheduledAt: at, attemptedAt: at + 1, outcome: "sent" },
+  })
   expect(poolState(ids, Date.now())).toEqual(before)
 })
 
 test("outcomes: failure and timeout record without retry or failover", async () => {
   await setAccountSchedule({ file: storeFile, accountID: "a", enabled: true, schedule: daily(["07:00"]) })
   const at = Date.now()
-  expect(await recordAttempt({ file: storeFile, accountID: "a", attempt: { scheduledAt: at, attemptedAt: at + 5, outcome: "failed" } })).toBe(true)
+  expect(
+    await recordAttempt({
+      file: storeFile,
+      accountID: "a",
+      attempt: { scheduledAt: at, attemptedAt: at + 5, outcome: "failed" },
+    }),
+  ).toBe(true)
   const read = readStore(storeFile)
   expect(read.status === "ok" && read.state.accounts["a"]?.lastAttempt?.outcome).toBe("failed")
   // A newer attempt wins; an older duplicate never overwrites it.
   expect(
-    await recordAttempt({ file: storeFile, accountID: "a", attempt: { scheduledAt: at, attemptedAt: at + 2, outcome: "sent" } }),
+    await recordAttempt({
+      file: storeFile,
+      accountID: "a",
+      attempt: { scheduledAt: at, attemptedAt: at + 2, outcome: "sent" },
+    }),
   ).toBe(true)
   const reread = readStore(storeFile)
   expect(reread.status === "ok" && reread.state.accounts["a"]?.lastAttempt?.outcome).toBe("failed")
   // Recording for a removed account writes nothing and never resurrects it.
-  expect(await recordAttempt({ file: storeFile, accountID: "gone", attempt: { scheduledAt: at, attemptedAt: at + 9, outcome: "sent" } })).toBe(false)
+  expect(
+    await recordAttempt({
+      file: storeFile,
+      accountID: "gone",
+      attempt: { scheduledAt: at, attemptedAt: at + 9, outcome: "sent" },
+    }),
+  ).toBe(false)
   const final = readStore(storeFile)
   expect(final.status === "ok" && "gone" in final.state.accounts).toBe(false)
 })
@@ -258,11 +295,19 @@ test("outcomes: a slow older occurrence never overwrites a newer scheduled attem
   const late = Date.now() - 3600_000
   // Newer scheduled occurrence completes first.
   expect(
-    await recordAttempt({ file: storeFile, accountID: "a", attempt: { scheduledAt: late, attemptedAt: late + 1, outcome: "sent" } }),
+    await recordAttempt({
+      file: storeFile,
+      accountID: "a",
+      attempt: { scheduledAt: late, attemptedAt: late + 1, outcome: "sent" },
+    }),
   ).toBe(true)
   // Older scheduled occurrence completes later: outcome stays with the newer schedule.
   expect(
-    await recordAttempt({ file: storeFile, accountID: "a", attempt: { scheduledAt: early, attemptedAt: late + 2, outcome: "failed" } }),
+    await recordAttempt({
+      file: storeFile,
+      accountID: "a",
+      attempt: { scheduledAt: early, attemptedAt: late + 2, outcome: "failed" },
+    }),
   ).toBe(true)
   const read = readStore(storeFile)
   expect(read.status === "ok" && read.state.accounts["a"]?.lastAttempt).toEqual({
@@ -282,10 +327,22 @@ test("tick: restart, sleep, and stall gaps skip overdue work without spawning", 
   await setAccountSchedule({ file: storeFile, accountID: "a", enabled: true, schedule: daily(["07:00"]) })
   const now = Date.now()
   // A gap larger than the firing allowance is a suspend or stall: skip all crossed slots.
-  const stalled = await tickOnce({ file: storeFile, prevMs: now - 3600_000, nowMs: now, poolIds: ["a"], cliPath: "claude" })
+  const stalled = await tickOnce({
+    file: storeFile,
+    prevMs: now - 3600_000,
+    nowMs: now,
+    poolIds: ["a"],
+    cliPath: "claude",
+  })
   expect(stalled).toEqual({ fired: 0, missed: 0, skipped: 0 })
   // A backward clock move re-establishes the watermark.
-  const backward = await tickOnce({ file: storeFile, prevMs: now + 1000, nowMs: now, poolIds: ["a"], cliPath: "claude" })
+  const backward = await tickOnce({
+    file: storeFile,
+    prevMs: now + 1000,
+    nowMs: now,
+    poolIds: ["a"],
+    cliPath: "claude",
+  })
   expect(backward).toEqual({ fired: 0, missed: 0, skipped: 0 })
   expect(spawns).toBe(0)
 })
@@ -301,7 +358,13 @@ test("tick: a stalled queue past the firing allowance records missed, never send
   await setAccountSchedule({ file: storeFile, accountID: "a", enabled: true, schedule: daily([slot.time]) })
   // A window two minutes in the past: the occurrence is claimed, but by send
   // time it is already outside the firing allowance, so it is missed.
-  const result = await tickOnce({ file: storeFile, prevMs: slot.prevMs, nowMs: slot.nowMs, poolIds: ["a"], cliPath: "claude" })
+  const result = await tickOnce({
+    file: storeFile,
+    prevMs: slot.prevMs,
+    nowMs: slot.nowMs,
+    poolIds: ["a"],
+    cliPath: "claude",
+  })
   expect(result.missed).toBe(1)
   expect(spawns).toBe(0)
   const read = readStore(storeFile)
@@ -330,13 +393,25 @@ test("tick: a failing send records its outcome once, with no retry", async () =>
   })
   const slot = minuteSlot(0)
   await setAccountSchedule({ file: storeFile, accountID: "a", enabled: true, schedule: daily([slot.time]) })
-  const result = await tickOnce({ file: storeFile, prevMs: slot.prevMs, nowMs: slot.nowMs, poolIds: ["a"], cliPath: "claude" })
+  const result = await tickOnce({
+    file: storeFile,
+    prevMs: slot.prevMs,
+    nowMs: slot.nowMs,
+    poolIds: ["a"],
+    cliPath: "claude",
+  })
   expect(result.fired).toBe(1)
   expect(seen).toHaveLength(1)
   const read = readStore(storeFile)
   expect(read.status === "ok" && read.state.accounts["a"]?.lastAttempt?.outcome).toBe("failed")
   // The claimed occurrence never resubmits on the next tick.
-  const second = await tickOnce({ file: storeFile, prevMs: slot.nowMs, nowMs: Date.now(), poolIds: ["a"], cliPath: "claude" })
+  const second = await tickOnce({
+    file: storeFile,
+    prevMs: slot.nowMs,
+    nowMs: Date.now(),
+    poolIds: ["a"],
+    cliPath: "claude",
+  })
   expect(second.fired).toBe(0)
   expect(seen).toHaveLength(1)
 })
@@ -348,7 +423,12 @@ test("sender outcomes: timeout, rejection, and unsupported flags map without ret
   _setCliRunner(async () => ({ code: 1, stdout: "", stderr: "Error 429 rate limited", timedOut: false }))
   const rejected = await sendWarmup({ cliPath: "claude", accountID: "a", scheduledAt: Date.now() })
   expect(rejected.outcome).toBe("rejected")
-  _setCliRunner(async () => ({ code: 0, stdout: JSON.stringify({ type: "result", is_error: true }), stderr: "", timedOut: false }))
+  _setCliRunner(async () => ({
+    code: 0,
+    stdout: JSON.stringify({ type: "result", is_error: true }),
+    stderr: "",
+    timedOut: false,
+  }))
   const errorResult = await sendWarmup({ cliPath: "claude", accountID: "a", scheduledAt: Date.now() })
   expect(errorResult.outcome).toBe("rejected")
   _setCliRunner(async () => ({ code: 2, stdout: "", stderr: "error: unknown option", timedOut: false }))
@@ -592,7 +672,13 @@ test("schedule validation: each array entry is its own exact HH:mm", () => {
   expect("error" in normalizeSchedule({ mode: "daily", times: ["07:00,12:00"] })).toBe(true)
   expect("error" in normalizeSchedule({ mode: "daily", times: [""] })).toBe(true)
   expect("error" in normalizeSchedule({ mode: "daily", times: ["07:00", "nope"] })).toBe(true)
-  expect("error" in normalizeSchedule({ mode: "weekly", days: { mon: ["07:00"], tue: [], wed: [], thu: [], fri: [], sat: [], sun: ["25:00"] } })).toBe(true)
+  expect(
+    "error" in
+      normalizeSchedule({
+        mode: "weekly",
+        days: { mon: ["07:00"], tue: [], wed: [], thu: [], fri: [], sat: [], sun: ["25:00"] },
+      }),
+  ).toBe(true)
 })
 
 test("sender cwd: an owned data-dir folder, never a shared root or repo", () => {
@@ -606,7 +692,13 @@ test("sender recheck: fresh per-account probe gates each send", async () => {
   })
   const slot = minuteSlot(0)
   await setAccountSchedule({ file: storeFile, accountID: "a", enabled: true, schedule: daily([slot.time]) })
-  const result = await tickOnce({ file: storeFile, prevMs: slot.prevMs, nowMs: slot.nowMs, poolIds: ["a"], cliPath: "claude" })
+  const result = await tickOnce({
+    file: storeFile,
+    prevMs: slot.prevMs,
+    nowMs: slot.nowMs,
+    poolIds: ["a"],
+    cliPath: "claude",
+  })
   expect(result).toEqual({ fired: 0, missed: 0, skipped: 0 })
   const read = readStore(storeFile)
   expect(read.status === "ok" && read.state.accounts["a"]?.claims).toEqual({})
@@ -651,7 +743,11 @@ test("inventory: changed candidates or cliPath start fresh, never stale or share
 
 test("inventory: merge keeps per-account truth across mixed results", async () => {
   _setInventoryProbe(async (cliPath, id) => ({ id, status: "connected" as const }))
-  expect((await listConnected({ cliPath: "claude", candidates: ["a", "b", "c"] })).connectedIds).toEqual(["a", "b", "c"])
+  expect((await listConnected({ cliPath: "claude", candidates: ["a", "b", "c"] })).connectedIds).toEqual([
+    "a",
+    "b",
+    "c",
+  ])
   // a stays connected, b conclusively signed out is removed, c unknown keeps
   // its own prior connected status; the error is still surfaced.
   _setInventoryProbe(async (cliPath, id) => ({
@@ -688,7 +784,10 @@ test("inventory: brief cache, shared in-flight probes, unknown preserves last kn
   expect(calls).toBe(2)
   // After the TTL one probe fails transiently: the last known account stays,
   // and the error is surfaced instead of equating unknown with signed out.
-  _setInventoryProbe(async (cliPath, id) => ({ id, status: id === "a" ? ("connected" as const) : ("unknown" as const) }))
+  _setInventoryProbe(async (cliPath, id) => ({
+    id,
+    status: id === "a" ? ("connected" as const) : ("unknown" as const),
+  }))
   const cached = await listConnected({ cliPath: "claude", candidates: ["a", "b"], now: Date.now() + 61_000 })
   expect(cached.connectedIds).toEqual(["a", "b"])
   expect(cached.error).toMatch(/last known/)
@@ -696,7 +795,14 @@ test("inventory: brief cache, shared in-flight probes, unknown preserves last kn
 
 test("sender env: subscription pinning strips keys, routing, remaps, and bare mode", () => {
   const previous: Record<string, string | undefined> = {}
-  for (const key of ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_BASE_URL", "ANTHROPIC_DEFAULT_HAIKU_MODEL", "CLAUDE_CODE_SIMPLE"]) {
+  for (const key of [
+    "ANTHROPIC_API_KEY",
+    "ANTHROPIC_AUTH_TOKEN",
+    "CLAUDE_CODE_OAUTH_TOKEN",
+    "ANTHROPIC_BASE_URL",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+    "CLAUDE_CODE_SIMPLE",
+  ]) {
     previous[key] = process.env[key]
     process.env[key] = "trap"
   }
@@ -794,7 +900,13 @@ test("tick: queued send-time auth pin skips model when the account signed out af
   })
   const slot = minuteSlot(0)
   await setAccountSchedule({ file: storeFile, accountID: "a", enabled: true, schedule: daily([slot.time]) })
-  const result = await tickOnce({ file: storeFile, prevMs: slot.prevMs, nowMs: slot.nowMs, poolIds: ["a"], cliPath: "claude" })
+  const result = await tickOnce({
+    file: storeFile,
+    prevMs: slot.prevMs,
+    nowMs: slot.nowMs,
+    poolIds: ["a"],
+    cliPath: "claude",
+  })
   expect(result).toEqual({ fired: 0, missed: 0, skipped: 1 })
   expect(modelSpawns).toBe(0)
   const read = readStore(storeFile)

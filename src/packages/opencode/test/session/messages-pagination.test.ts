@@ -95,7 +95,7 @@ const addAssistant = Effect.fn("Test.addAssistant")(function* (
     id,
     sessionID,
     role: "assistant",
-    time: { created: Date.now() },
+    time: { created: Date.now(), completed: opts?.finish ? Date.now() : undefined },
     parentID,
     modelID: ModelV2.ID.make("test"),
     providerID: ProviderV2.ID.make("test"),

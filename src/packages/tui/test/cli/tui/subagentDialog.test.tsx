@@ -51,6 +51,7 @@ async function mount(root: string, variants: Record<string, object>) {
     },
   }
   const configPatches: unknown[] = []
+  const removed: string[] = []
   // Set by tests once the server has reloaded agents after a config write
   const server = { reloaded: false }
   const calls = createFetch((url) => {
@@ -72,6 +73,10 @@ async function mount(root: string, variants: Record<string, object>) {
     if (url.pathname === "/global/config") return json({})
   })
   const fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (input instanceof Request && input.method === "DELETE") {
+      removed.push(decodeURIComponent(new URL(input.url).pathname.split("/").at(-1)!))
+      return json(true)
+    }
     if (input instanceof Request && new URL(input.url).pathname === "/global/config")
       configPatches.push(await input.clone().json())
     return calls.fetch(input, init)
@@ -133,7 +138,7 @@ async function mount(root: string, variants: Record<string, object>) {
   dialog.replace(() => <DialogSubagents />)
   await wait(() => app.renderer.currentFocusedEditor instanceof InputRenderable)
   await app.waitForVisualIdle()
-  return { app, dialog, configPatches, events, server }
+  return { app, dialog, configPatches, events, server, removed }
 }
 
 test.each([false, true])(
@@ -153,17 +158,9 @@ test.each([false, true])(
       if (includeDefault) {
         app.mockInput.pressEnter()
         await app.waitForVisualIdle()
-        // The options update after toggling; select the confirmation by filtering.
-        const filter = app.renderer.currentFocusedEditor
-        if (!(filter instanceof InputRenderable)) throw new Error("expected effort picker")
-        filter.value = "Add 2"
-        await app.waitForVisualIdle()
-        app.mockInput.pressEnter()
       }
-      if (!includeDefault) {
-        app.mockInput.pressArrow("down")
-        app.mockInput.pressEnter()
-      }
+      app.mockInput.pressArrow("down")
+      app.mockInput.pressEnter()
       await wait(() => app.renderer.currentFocusedEditor instanceof TextareaRenderable)
       await app.waitForVisualIdle()
       expect(dialog.stack.length).toBe(1)
@@ -247,7 +244,8 @@ test("a native agent model with efforts asks for reasoning before saving", async
 
 test("Ctrl+D only opens confirmation for names in the writable file", async () => {
   await using tmp = await tmpdir()
-  const { app } = await mount(tmp.path, {})
+  const mounted = await mount(tmp.path, {})
+  const app = mounted.app
   try {
     const editor = app.renderer.currentFocusedEditor
     if (!(editor instanceof InputRenderable)) throw new Error("expected picker")
@@ -255,12 +253,19 @@ test("Ctrl+D only opens confirmation for names in the writable file", async () =
     await app.waitForVisualIdle()
     app.mockInput.pressKey("d", { ctrl: true })
     await app.waitForVisualIdle()
+    app.mockInput.pressKey("d", { ctrl: true })
+    await app.waitForVisualIdle()
     expect(app.renderer.currentFocusedEditor).toBe(editor)
+    expect(mounted.removed).toEqual([])
     editor.value = "editable"
     await app.waitForVisualIdle()
     app.mockInput.pressKey("d", { ctrl: true })
     await app.waitForVisualIdle()
-    expect(app.renderer.currentFocusedEditor).not.toBe(editor)
+    expect(app.renderer.currentFocusedEditor).toBe(editor)
+    expect(mounted.removed).toEqual([])
+    app.mockInput.pressKey("d", { ctrl: true })
+    await wait(() => mounted.removed.length > 0)
+    expect(mounted.removed).toEqual(["editable"])
   } finally {
     app.renderer.destroy()
   }

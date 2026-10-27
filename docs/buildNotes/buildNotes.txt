@@ -1,6 +1,9 @@
-v0.2.318 landsSchwangin [fix > Claude shell output blocks]
+v0.2.319 chipmunkChop [fix > queue dialog crash; cleanup > tests green]
 
-Claude:
-Shell commands that Claude models run (Bash or PowerShell) now show their output in the chat with Expand and Full output, the same block other models get, instead of a single "$ command" line. A Claude command that exits with an error code now shows its output and records the exit code instead of turning into a red error line. Permission denials and interrupted commands still show as errors. While a Claude command is still running its row stays one line, because Claude Code only sends the output when the command finishes.
+Queue:
+Opening the queue list (Alt+Q list or clicking the queue strip) no longer crashes. Since v0.2.313 the prompt-reference context was set up inside the dialog layer, but dialogs render outside it, so the queue dialog failed when it reached the prompt. The context now sits above the dialog layer in tui/src/app.tsx.
 
-Under the hood: the Claude Code provider now attaches the command output to each shell result through a new cliResultMeta helper, and treats Claude's "Exit code N" results as finished runs with that exit code, matching oc's own shell tool. Checks: a throwaway fake-Claude probe covered success, an exit-code failure, a denial, a PowerShell failure, and a non-shell tool; opencode typecheck clean; the 19 Claude Code test files that touch tool results pass apart from 4 known failures listed in AGENTS.md; checked by hand in a live TUI with echo hi and exit 3.
+Tests:
+Every automated suite passes again. 29 tests that had fallen behind deliberate code changes were updated (handoffs as linked sessions, Claude warnings in opencode.log, model output limits, lazy tool schemas in the newer Claude CLI), the queue-contention test was rewritten for durable queue claims, and test:httpapi gained the three /agent/sub scenarios, which refuse to write outside the test folder. Removed tests that only checked wording, counts, or source text, the 16 tool-schema snapshots, a duplicate filesystem test file, and reviveCleanup.tests.ps1. Re-enabled 8 skipped tests that work again. The five copies of the tui polling wait helper now share one in test/fixture/fixture.ts with a 10 second bound. UPSTREAM-SYNC.md no longer says checks run on GitHub, and the AGENTS.md known-failures list is down to the pane entries.
+
+Checks: opencode 5087 pass / 0 fail, tui 792 / 0, schema 15 / 0, every other package suite, .scripts/tests 5 / 5, test:httpapi 227 pass in all three modes, typecheck 16 / 16. Not run: the OC_TUI_PANE=1 pane suite (its known failures stay listed as known) and the queue dialog in a rebuilt oc.

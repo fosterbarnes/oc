@@ -11,3 +11,12 @@ export async function tmpdir() {
     },
   }
 }
+
+// Polls a condition; the bound only matters on failure, so it leaves room for a loaded full-suite run.
+export async function wait(fn: () => boolean, timeout = 10_000) {
+  const start = Date.now()
+  while (!fn()) {
+    if (Date.now() - start > timeout) throw new Error("timed out waiting for condition")
+    await Bun.sleep(10)
+  }
+}

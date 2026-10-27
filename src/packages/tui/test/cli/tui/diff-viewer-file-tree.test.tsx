@@ -27,7 +27,7 @@ const theme = {
 }
 
 describe("DiffViewerFileTree", () => {
-  test.skip("renders sorted hierarchical file rows", async () => {
+  test("renders sorted hierarchical file rows", async () => {
     const app = await testRender(
       () =>
         withTheme(() => (

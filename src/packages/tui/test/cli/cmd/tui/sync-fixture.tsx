@@ -11,15 +11,9 @@ import { ExitProvider } from "../../../../src/context/exit"
 import { RouteProvider, useRoute, type Route } from "../../../../src/context/route"
 import { createEventSource, createFetch, type FetchHandler, directory } from "../../../fixture/tui-sdk"
 import { TestTuiContexts } from "../../../fixture/tui-environment"
+import { wait } from "../../../fixture/fixture"
 export { createEventSource, createFetch, directory, eventSource, json, worktree } from "../../../fixture/tui-sdk"
-
-export async function wait(fn: () => boolean, timeout = 2000) {
-  const start = Date.now()
-  while (!fn()) {
-    if (Date.now() - start > timeout) throw new Error("timed out waiting for condition")
-    await Bun.sleep(10)
-  }
-}
+export { wait }
 
 type Ctx = {
   kv: ReturnType<typeof useKV>

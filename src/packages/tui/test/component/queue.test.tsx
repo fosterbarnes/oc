@@ -14,6 +14,8 @@ import { ArgsProvider } from "../../src/context/args"
 import { ExitProvider } from "../../src/context/exit"
 import { SDKProvider } from "../../src/context/sdk"
 import { KVProvider } from "../../src/context/kv"
+import { LocalProvider } from "../../src/context/local"
+import { PromptRefProvider } from "../../src/context/prompt"
 import { PermissionProvider } from "../../src/context/permission"
 import { ProjectProvider } from "../../src/context/project"
 import { RouteProvider } from "../../src/context/route"
@@ -78,9 +80,13 @@ async function mountQueue(input: {
                           <SyncProvider>
                             <ThemeProvider mode="dark">
                               <ToastProvider>
-                                <DialogProvider>
-                                  <Open />
-                                </DialogProvider>
+                                <LocalProvider>
+                                  <PromptRefProvider>
+                                    <DialogProvider>
+                                      <Open />
+                                    </DialogProvider>
+                                  </PromptRefProvider>
+                                </LocalProvider>
                               </ToastProvider>
                             </ThemeProvider>
                           </SyncProvider>

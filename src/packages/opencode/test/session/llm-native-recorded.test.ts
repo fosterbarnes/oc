@@ -89,6 +89,13 @@ function decodeRecordOpenAIOAuth() {
   }
 }
 
+// These cassettes were recorded while output was capped at 32k. Output now follows the model's
+// limit, so replay pins that limit to keep the recorded request body.
+const recordedOutputCap = (model: ModelsDev.Provider["models"][string]) => ({
+  ...model,
+  limit: { ...model.limit, output: 32_000 },
+})
+
 const providerConfig = (input: {
   readonly providerID: ProviderV2.ID
   readonly name: string
@@ -174,7 +181,7 @@ const RECORDED_SCENARIOS = [
         env: ["OPENCODE_CONSOLE_TOKEN"],
         npm: "@ai-sdk/openai-compatible",
         api: zenURL(process.env.OPENCODE_RECORD_ZEN_CONNECTION ?? "fixture"),
-        model,
+        model: recordedOutputCap(model),
         options: {
           apiKey: process.env.OPENCODE_RECORD_CONSOLE_TOKEN ?? "fixture-console-token",
           headers: { "x-org-id": process.env.OPENCODE_RECORD_ZEN_ORG_ID ?? "fixture-org" },
@@ -197,7 +204,7 @@ const RECORDED_SCENARIOS = [
         env: ["ANTHROPIC_API_KEY"],
         npm: "@ai-sdk/anthropic",
         api: "https://api.anthropic.com/v1",
-        model,
+        model: recordedOutputCap(model),
         options: {
           apiKey: envValue("OPENCODE_RECORD_ANTHROPIC_API_KEY", "ANTHROPIC_API_KEY") ?? "fixture-anthropic-key",
           baseURL: "https://api.anthropic.com/v1",

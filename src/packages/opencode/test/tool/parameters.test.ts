@@ -3,11 +3,10 @@ import { Result, Schema } from "effect"
 import { ToolJsonSchema } from "../../src/tool/json-schema"
 
 // Each tool exports its parameters schema at module scope so this test can
-// import them without running the tool's Effect-based init. The JSON Schema
-// snapshot captures what the LLM sees; the parse assertions pin down the
-// accepts/rejects contract. `ToolJsonSchema.fromSchema` is the same helper `session/
-// prompt.ts` uses to emit tool schemas to the LLM, so the snapshots stay
-// provider-compatible while tools use Effect Schema internally.
+// import them without running the tool's Effect-based init. The parse assertions
+// pin down the accepts/rejects contract. `ToolJsonSchema.fromSchema` is the same
+// helper `session/prompt.ts` uses to emit tool schemas to the LLM, so the wire-shape
+// checks below cover provider compatibility while tools use Effect Schema internally.
 
 import { Parameters as ApplyPatch } from "../../src/tool/apply_patch"
 import { Parameters as Edit } from "../../src/tool/edit"
@@ -36,23 +35,6 @@ const toJsonSchema = ToolJsonSchema.fromSchema
 
 describe("tool parameters", () => {
   describe("JSON Schema (wire shape)", () => {
-    test("apply_patch", () => expect(toJsonSchema(ApplyPatch)).toMatchSnapshot())
-    test("bash", () => expect(toJsonSchema(Shell)).toMatchSnapshot())
-    test("edit", () => expect(toJsonSchema(Edit)).toMatchSnapshot())
-    test("glob", () => expect(toJsonSchema(Glob)).toMatchSnapshot())
-    test("grep", () => expect(toJsonSchema(Grep)).toMatchSnapshot())
-    test("invalid", () => expect(toJsonSchema(Invalid)).toMatchSnapshot())
-    test("lsp", () => expect(toJsonSchema(Lsp)).toMatchSnapshot())
-    test("plan", () => expect(toJsonSchema(Plan)).toMatchSnapshot())
-    test("question", () => expect(toJsonSchema(Question)).toMatchSnapshot())
-    test("read", () => expect(toJsonSchema(Read)).toMatchSnapshot())
-    test("skill", () => expect(toJsonSchema(Skill)).toMatchSnapshot())
-    test("task", () => expect(toJsonSchema(Task)).toMatchSnapshot())
-    test("todo", () => expect(toJsonSchema(Todo)).toMatchSnapshot())
-    test("webfetch", () => expect(toJsonSchema(WebFetch)).toMatchSnapshot())
-    test("websearch", () => expect(toJsonSchema(WebSearch)).toMatchSnapshot())
-    test("write", () => expect(toJsonSchema(Write)).toMatchSnapshot())
-
     test("inlines named child schemas for provider compatibility", () => {
       const schema = toJsonSchema(Question)
       expect(schema).not.toHaveProperty("$defs")

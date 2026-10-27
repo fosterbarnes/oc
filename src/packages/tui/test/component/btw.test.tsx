@@ -5,7 +5,7 @@ import { expect, test } from "bun:test"
 import { mkdir } from "node:fs/promises"
 import path from "node:path"
 import { onCleanup } from "solid-js"
-import { tmpdir } from "../fixture/fixture"
+import { tmpdir, wait } from "../fixture/fixture"
 import { createTuiResolvedConfig } from "../fixture/tui-runtime"
 import { TestTuiContexts } from "../fixture/tui-environment"
 import { eventSource, json } from "../fixture/tui-sdk"
@@ -23,14 +23,6 @@ const target: BtwTarget = {
   model: { providerID: "test", modelID: "test-model" },
   agent: "build",
   variant: undefined,
-}
-
-async function wait(fn: () => boolean, timeout = 2000) {
-  const start = Date.now()
-  while (!fn()) {
-    if (Date.now() - start > timeout) throw new Error("timed out waiting for condition")
-    await Bun.sleep(10)
-  }
 }
 
 // The generate endpoint is the only route the dialog calls. `respond` decides how it answers, and

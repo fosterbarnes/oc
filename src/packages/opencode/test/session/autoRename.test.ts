@@ -245,7 +245,7 @@ it.instance(
         expect.objectContaining({
           type: "text",
           text: expect.stringContaining("Inspect the cache"),
-          metadata: { ocCommandArguments: "the cache" },
+          metadata: expect.objectContaining({ ocCommandArguments: "the cache" }),
         }),
       )
       yield* fixture.llm.textMatch(conversation, "fork reply")

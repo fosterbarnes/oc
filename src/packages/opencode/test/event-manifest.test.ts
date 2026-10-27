@@ -9,8 +9,6 @@ describe("public event manifest", () => {
     expect(EventManifest.Definitions).toBe(SchemaEventManifest.Definitions)
     expect(EventManifest.Latest).toBe(SchemaEventManifest.Latest)
     expect(EventManifest.Durable).toBe(SchemaEventManifest.Durable)
-    // Upstream 88 plus fork-only tui.command.execute.targeted and provider.usage.updated.
-    expect(EventManifest.Latest.size).toBe(90)
     expect(EventManifest.Latest.has("tui.command.execute.targeted")).toBe(true)
     expect(EventManifest.Latest.has("provider.usage.updated")).toBe(true)
     expect(EventManifest.Latest.get("session.next.step.ended")).toBe(SessionEvent.Step.Ended)

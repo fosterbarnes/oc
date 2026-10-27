@@ -8,16 +8,9 @@ import { SDKProvider } from "../../../src/context/sdk"
 import { useEvent } from "../../../src/context/event"
 import { createEventSource, createFetch, directory } from "../../fixture/tui-sdk"
 import { TestTuiContexts } from "../../fixture/tui-environment"
+import { wait } from "../../fixture/fixture"
 
 const projectID = "proj_test"
-
-async function wait(fn: () => boolean, timeout = 2000) {
-  const start = Date.now()
-  while (!fn()) {
-    if (Date.now() - start > timeout) throw new Error("timed out waiting for condition")
-    await Bun.sleep(10)
-  }
-}
 
 function event(payload: Event, input: { directory: string; project?: string; workspace?: string }): GlobalEvent {
   return {

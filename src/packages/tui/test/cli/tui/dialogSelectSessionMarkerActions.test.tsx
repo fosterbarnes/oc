@@ -8,16 +8,8 @@ import path from "node:path"
 import { onCleanup, onMount } from "solid-js"
 import type { DialogSelectOption } from "../../../src/ui/dialog-select"
 import { createTuiResolvedConfig } from "../../fixture/tui-runtime"
-import { tmpdir } from "../../fixture/fixture"
+import { tmpdir, wait } from "../../fixture/fixture"
 import { TestTuiContexts } from "../../fixture/tui-environment"
-
-async function wait(fn: () => boolean, timeout = 2000) {
-  const start = Date.now()
-  while (!fn()) {
-    if (Date.now() - start > timeout) throw new Error("timed out waiting for condition")
-    await Bun.sleep(10)
-  }
-}
 
 type SessionValue = { id: string; sessionComplete: boolean; sessionFailed: boolean }
 

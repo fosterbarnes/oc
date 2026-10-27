@@ -389,10 +389,12 @@ export const run = Effect.fn("Tui.run")(function* (input: TuiInput) {
                                                     <ThemeProvider mode={mode}>
                                                       <LocalProvider>
                                                         <PromptStashProvider>
-                                                          <DialogProvider>
-                                                            <FrecencyProvider>
-                                                              <PromptHistoryProvider>
-                                                                <PromptRefProvider>
+                                                          {/* Above DialogProvider: dialog content renders under it and
+                                                              DialogQueue reaches the prompt through useReviveChain. */}
+                                                          <PromptRefProvider>
+                                                            <DialogProvider>
+                                                              <FrecencyProvider>
+                                                                <PromptHistoryProvider>
                                                                   <EditorContextProvider>
                                                                     <LocationProvider>
                                                                       <App
@@ -402,10 +404,10 @@ export const run = Effect.fn("Tui.run")(function* (input: TuiInput) {
                                                                       />
                                                                     </LocationProvider>
                                                                   </EditorContextProvider>
-                                                                </PromptRefProvider>
-                                                              </PromptHistoryProvider>
-                                                            </FrecencyProvider>
-                                                          </DialogProvider>
+                                                                </PromptHistoryProvider>
+                                                              </FrecencyProvider>
+                                                            </DialogProvider>
+                                                          </PromptRefProvider>
                                                         </PromptStashProvider>
                                                       </LocalProvider>
                                                     </ThemeProvider>

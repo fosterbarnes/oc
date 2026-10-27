@@ -18,6 +18,7 @@ describe.skipIf(!cliPath)("Claude command-turn permission enforcement", () => {
         const server = yield* fixture.opencode.serve({
           env: {
             ...claudeEnv(fixture.home, fixture.llm.url),
+            ENABLE_TOOL_SEARCH: "false",
             OPENCODE_DB: path.join(fixture.home, "opencode.db"),
             OPENCODE_CONFIG_CONTENT: JSON.stringify({
               ...chatConfig(fixture.llm.url),

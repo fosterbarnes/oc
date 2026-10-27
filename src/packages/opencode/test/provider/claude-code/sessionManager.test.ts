@@ -5,7 +5,11 @@ import { EventEmitter, once } from "node:events"
 import { setTimeout as delay } from "node:timers/promises"
 import { test } from "node:test"
 import { spawn, type ChildProcess } from "node:child_process"
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { buildCliArgs } from "@/provider/claude-code/cliArgs.js"
+import { _resetLoggerForTests, configureLogger } from "@/provider/claude-code/logger.js"
 import {
   DEFAULT_IDLE_PROCESS_TIMEOUT_MS,
   deleteActiveProcess,
@@ -420,16 +424,21 @@ test("interruptTurn reports false when the CLI never answers", async () => {
   assert.equal(isTurnInFlight(ap), true, "still in flight; the next turn's guard will retry")
 })
 
-function captureStderr(): { lines: string[]; restore: () => void } {
-  const lines: string[] = []
-  const original = console.error
-  console.error = (line: unknown) => {
-    lines.push(String(line))
-  }
+/**
+ * Start capturing the WARN lines written to plugin.log. Warnings never reach
+ * stderr (it would paint over the TUI frame), so the log file is the surface.
+ * `finish` returns the lines and removes the temp log dir.
+ */
+function captureWarnings(): { finish: () => string[] } {
+  const dir = mkdtempSync(join(tmpdir(), "sessionManager-"))
+  configureLogger({ file: true, dir, mode: "silent", level: "info" })
   return {
-    lines,
-    restore: () => {
-      console.error = original
+    finish: () => {
+      const file = join(dir, "plugin.log")
+      const text = existsSync(file) ? readFileSync(file, "utf8") : ""
+      _resetLoggerForTests()
+      rmSync(dir, { recursive: true, force: true })
+      return text.split("\n").filter((line) => line.includes(" WARN: "))
     },
   }
 }
@@ -442,7 +451,7 @@ function captureStderr(): { lines: string[]; restore: () => void } {
 // contract under test is that something is listening for it.
 test("an error on a dead child's stdin is logged, not thrown", async () => {
   const key = `stdin-error-${Date.now()}`
-  const captured = captureStderr()
+  const captured = captureWarnings()
   const ap = spawnClaudeProcess(
     process.execPath,
     ["-e", "process.stdin.destroy(); setInterval(() => {}, 1000)"],
@@ -450,6 +459,7 @@ test("an error on a dead child's stdin is logged, not thrown", async () => {
     key,
   )
   const stdin = ap.proc.stdin!
+  let lines: string[] = []
   try {
     await delay(100)
     noteTurnStarted(ap)
@@ -457,16 +467,16 @@ test("an error on a dead child's stdin is logged, not thrown", async () => {
     stdin.write(JSON.stringify({ type: "user", pad: "x".repeat(100_000) }) + "\n")
     stdin.emit("error", Object.assign(new Error("write EPIPE"), { code: "EPIPE" }))
   } finally {
-    captured.restore()
+    lines = captured.finish()
     deleteActiveProcess(key)
     deleteClaudeSessionId(key)
   }
   assert.ok(
-    captured.lines.some((line) => line.includes("claude process stdin error")),
-    `expected a logged stdin error, got: ${captured.lines.join(" | ")}`,
+    lines.some((line) => line.includes("claude process stdin error")),
+    `expected a logged stdin error, got: ${lines.join(" | ")}`,
   )
   assert.ok(
-    captured.lines.some((line) => line.includes('"code":"EPIPE"')),
+    lines.some((line) => line.includes('"code":"EPIPE"')),
     "the logged error should name the errno the write failed with",
   )
   assert.equal(isTurnInFlight(ap), false, "a write that never reached the CLI leaves no turn to wait for")
@@ -512,20 +522,21 @@ test("LRU eviction picks the oldest idle process, not the oldest process", () =>
 test("LRU eviction kills nothing while every process is mid-turn", () => {
   const killed: string[] = []
   const { keys, processes } = fillActiveProcesses(`lru-busy-${Date.now()}`, killed)
-  const captured = captureStderr()
+  const captured = captureWarnings()
   let killedDuringEviction: string[] = []
+  let lines: string[] = []
   try {
     for (const ap of processes) noteTurnStarted(ap)
     evictIfNeeded()
     killedDuringEviction = [...killed]
   } finally {
-    captured.restore()
+    lines = captured.finish()
     for (const key of keys) deleteActiveProcess(key)
   }
   assert.deepEqual(killedDuringEviction, [])
   assert.ok(
-    captured.lines.some((line) => line.includes("every claude process is mid-turn")),
-    `expected a warning about the skipped eviction, got: ${captured.lines.join(" | ")}`,
+    lines.some((line) => line.includes("every claude process is mid-turn")),
+    `expected a warning about the skipped eviction, got: ${lines.join(" | ")}`,
   )
 })
 

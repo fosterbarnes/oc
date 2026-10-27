@@ -11,10 +11,10 @@ import type { ClaudeStreamMessage } from "./types.js"
  * guessed, but they are still parsed defensively: a future CLI may rename a
  * field, and a diagnostic that throws is worse than one that stays quiet.
  *
- * Levels follow the rule the rest of this codebase uses. `src/logger.ts` routes
- * only WARN and ERROR to stderr unconditionally, so anything the user has to
- * see without turning on debug logging is either a WARN or a `▌` line written
- * into the transcript. Everything else is INFO or NOTICE for the file log.
+ * Levels follow the rule the rest of this codebase uses. `src/logger.ts` sends
+ * WARN and ERROR to opencode.log (`channel=claude-code`), never to stderr, so
+ * anything the user has to see is a `▌` line written into the transcript or a
+ * toast at its call site. Everything else is INFO or NOTICE for the file log.
  */
 
 function str(value: unknown): string | undefined {

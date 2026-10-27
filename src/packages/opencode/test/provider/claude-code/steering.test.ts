@@ -449,6 +449,11 @@ describe.skipIf(!cliPath)("Claude mid-turn steering", () => {
         const release = Promise.withResolvers<void>()
         yield* Effect.addFinalizer(() => Effect.sync(() => release.resolve()))
         const sent = (body: Record<string, unknown>, text: string) => JSON.stringify(body.messages).includes(text)
+        const forbidden = path.join(chat.project, "forbidden.txt")
+        yield* fixture.llm.toolMatch((hit) => sent(hit.body, "RESTRICTED-TURN"), "Write", {
+          file_path: forbidden,
+          content: "native bypass",
+        })
         yield* fixture.llm.pushMatch((hit) => sent(hit.body, "RESTRICTED-TURN"), reply().text("FOLLOWUP-DONE").stop())
         // The continuation after the tool result must never answer: the turn ends at that boundary.
         yield* fixture.llm.pushMatch((hit) => sent(hit.body, "tool_result"), reply().text("INITIAL-NEVER").hang())
@@ -477,16 +482,14 @@ describe.skipIf(!cliPath)("Claude mid-turn steering", () => {
         expect(log).toContain("preempting claude turn for a queued message")
         const inputs = yield* fixture.llm.inputs
         const followups = inputs.filter((input) => sent(input, "RESTRICTED-TURN"))
-        expect(followups).toHaveLength(1)
-        expect(inputs.at(-1)).toBe(followups[0])
+        expect(followups).toHaveLength(2)
+        expect(inputs.at(-1)).toBe(followups[1])
         // Claude's transcript kept the tool result the turn ended on.
         expect(JSON.stringify(followups[0].messages)).toContain("tool_result")
-        const names = [inputs[0], followups[0]].map((input) =>
-          (input.tools as { name: string }[]).map((tool) => tool.name),
-        )
-        expect(names[1]).not.toContain("Write")
-        expect(names[1]).not.toContain("mcp__opencode_proxy__write")
-        expect(names[0]).toContain("Write")
+        // Tool search preserves old schemas across resume; execution must still obey this turn's rules.
+        expect(yield* Effect.promise(() => Bun.file(forbidden).exists())).toBe(false)
+        const rejected = (followups[1].messages as { content: { type: string; is_error?: boolean }[] }[]).at(-1)!
+        expect(rejected.content.some((part) => part.type === "tool_result" && part.is_error)).toBe(true)
         const all = yield* messages(chat)
         expect(all.filter((msg) => msg.info.role === "assistant")).toHaveLength(2)
         expect(JSON.stringify(all)).not.toContain("INITIAL-NEVER")

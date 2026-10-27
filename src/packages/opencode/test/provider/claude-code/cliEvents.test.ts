@@ -12,6 +12,9 @@
  * Usage: bun test test/provider/claude-code/cliEvents.test.ts
  */
 import assert from "node:assert/strict"
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { test } from "node:test"
 import {
   API_KEY_SOURCES,
@@ -38,17 +41,21 @@ import {
 import { _resetLoggerForTests, configureLogger } from "@/provider/claude-code/logger.js"
 import type { ClaudeStreamMessage } from "@/provider/claude-code/types.js"
 
-/** Capture what reaches the TUI: only warn/error are unconditionally on stderr. */
-function captureStderr<T>(run: () => T): { value: T; lines: string[] } {
-  const lines: string[] = []
-  const original = console.error
-  console.error = (line: unknown) => {
-    lines.push(String(line))
-  }
+/**
+ * Capture the WARN lines written to plugin.log. Warnings go to the log file and
+ * never to stderr, which would paint over the TUI frame.
+ */
+function captureWarnings<T>(run: () => T): { value: T; lines: string[] } {
+  const dir = mkdtempSync(join(tmpdir(), "cliEvents-"))
   try {
-    return { value: run(), lines }
+    configureLogger({ file: true, dir, mode: "silent", level: "info" })
+    const value = run()
+    const file = join(dir, "plugin.log")
+    const text = existsSync(file) ? readFileSync(file, "utf8") : ""
+    return { value, lines: text.split("\n").filter((line) => line.includes(" WARN: ")) }
   } finally {
-    console.error = original
+    _resetLoggerForTests()
+    rmSync(dir, { recursive: true, force: true })
   }
 }
 
@@ -130,17 +137,16 @@ test("a warning state is a notice with nothing in the transcript", () => {
 test("rate limits warn once per identity per process", () => {
   _resetLoggerForTests()
   _resetRateLimitReports()
-  configureLogger({ file: false, mode: "silent", level: "info" })
 
-  const first = captureStderr(() => reportRateLimitEvent(rejected))
+  const first = captureWarnings(() => reportRateLimitEvent(rejected))
   assert.ok(first.value?.includes(RATE_LIMIT_MARKER), "the first rejection is surfaced")
-  assert.equal(first.lines.length, 1, "and warns in the TUI")
+  assert.equal(first.lines.length, 1, "and warns in plugin.log")
 
-  const second = captureStderr(() => reportRateLimitEvent(rejected))
+  const second = captureWarnings(() => reportRateLimitEvent(rejected))
   assert.equal(second.value, null, "the same rejection is not repeated")
   assert.equal(second.lines.length, 0)
 
-  const other = captureStderr(() =>
+  const other = captureWarnings(() =>
     reportRateLimitEvent({
       type: "rate_limit_event",
       rate_limit_info: { status: "rejected", rateLimitType: "seven_day" },
@@ -206,9 +212,8 @@ test("apiKeySourceWarning fires for a key and stays quiet for the subscription",
 test("init warns once per failed MCP server and once per api key source", () => {
   _resetLoggerForTests()
   _resetSystemInitReports()
-  configureLogger({ file: false, mode: "silent", level: "info" })
 
-  const first = captureStderr(() => reportSystemInit(init, {}))
+  const first = captureWarnings(() => reportSystemInit(init, {}))
   assert.equal(first.lines.length, 4, "two outside-proxy notices, the failed MCP server, and the API key")
   assert.ok(first.lines.some((line) => line.includes('"slack" is failed')))
   assert.ok(first.lines.some((line) => line.includes("apiKeySource: ANTHROPIC_API_KEY")))
@@ -218,7 +223,7 @@ test("init warns once per failed MCP server and once per api key source", () => 
     "a connected server is not a warning",
   )
 
-  const second = captureStderr(() => reportSystemInit(init, {}))
+  const second = captureWarnings(() => reportSystemInit(init, {}))
   assert.equal(second.lines.length, 0, "a respawn must not repeat either warning")
   _resetLoggerForTests()
 })

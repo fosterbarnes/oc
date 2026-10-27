@@ -3,14 +3,14 @@
 // CLI writes goes to a temp CLAUDE_CONFIG_DIR. Skipped when no `claude` CLI is installed.
 import { describe, expect, test } from "bun:test"
 import path from "node:path"
-import { createOpencodeClient } from "@opencode-ai/sdk/v2"
+import { createOpencodeClient, type AssistantMessage } from "@opencode-ai/sdk/v2"
 import { Cause, Effect, Exit, Fiber } from "effect"
 import { tmpdir } from "../../fixture/fixture"
 import { cliIt } from "../../lib/cli-process"
 import { pollWithTimeout } from "../../lib/effect"
 import { reply, TestLLMServer } from "../../lib/llm-server"
 import { chatConfig, claudeEnv, expectIsolated, initRepo, openChat, outsideProfile } from "./chatFixture"
-import { runQuotaStreamIntegration } from "./quotaFixture"
+import { openGlobalEventStream, readGlobalEvent, runQuotaStreamIntegration } from "./quotaFixture"
 import { flowReport, stepRunner } from "./flowReport"
 
 const cliPath = process.env.CLAUDE_CLI_PATH ?? Bun.which("claude")
@@ -184,7 +184,8 @@ describe.skipIf(!cliPath)("Claude Code CLI against TestLLMServer", () => {
         const messages = (yield* Effect.promise(() => chat.sdk.session.messages({ sessionID: chat.sessionID }))).data!
         const users = messages.filter((message) => message.info.role === "user").map((message) => message.info)
         expect(users.map((user) => user.role === "user" && user.noReply)).toEqual([undefined, true, undefined])
-        const answered = messages.filter((message) => message.info.role === "assistant")
+        const answered = messages
+          .filter((message) => message.info.role === "assistant")
           .map((message) => message.info.role === "assistant" && message.info.parentID)
         expect(answered).toEqual([users[0].id, users[2].id])
         expectIsolated(inputs)
@@ -884,13 +885,13 @@ describe.skipIf(!cliPath)("Claude Code CLI against TestLLMServer", () => {
         )
         expect(started.data).toBe(true)
         const child = yield* pollWithTimeout(
-          Effect.promise(() => chat.sdk.session.children({ sessionID: chat.sessionID })).pipe(
-            Effect.map((result) => result.data?.[0]),
+          Effect.promise(() => chat.sdk.session.list({ roots: true }, { throwOnError: true })).pipe(
+            Effect.map((result) => result.data.find((item) => item.metadata?.ocHandoffFrom === chat.sessionID)),
           ),
           "handoff child missing",
           "30 seconds",
         )
-        expect(child.parentID).toBe(chat.sessionID)
+        expect(child.parentID).toBeUndefined()
         const messages = yield* pollWithTimeout(
           Effect.promise(() => chat.sdk.session.messages({ sessionID: child.id })).pipe(
             Effect.map((result) => {
@@ -952,11 +953,13 @@ describe.skipIf(!cliPath)("Claude Code CLI against TestLLMServer", () => {
           ),
         )
         const child = yield* pollWithTimeout(
-          Effect.promise(() => sdk.session.children({ sessionID })).pipe(Effect.map((result) => result.data?.[0])),
+          Effect.promise(() => sdk.session.list({ roots: true }, { throwOnError: true })).pipe(
+            Effect.map((result) => result.data.find((item) => item.metadata?.ocHandoffFrom === sessionID)),
+          ),
           "auto handoff child missing",
           "30 seconds",
         )
-        expect(child.parentID).toBe(sessionID)
+        expect(child.parentID).toBeUndefined()
         const messages = yield* pollWithTimeout(
           Effect.promise(() => sdk.session.messages({ sessionID: child.id })).pipe(
             Effect.map((result) => {
@@ -1023,9 +1026,17 @@ describe.skipIf(!cliPath)("Claude Code CLI against TestLLMServer", () => {
       Effect.gen(function* () {
         const llm = fixture.llm
         const chat = yield* openChat(fixture)
+        const events = yield* openGlobalEventStream(chat.sdk)
+        yield* readGlobalEvent(
+          events,
+          30_000,
+          (event) => event.type === "server.connected",
+          "event stream never connected",
+        )
         const file = path.join(chat.project, "a.txt")
         yield* Effect.promise(() => Bun.write(file, "file a"))
         const release = Promise.withResolvers<void>()
+        yield* Effect.addFinalizer(() => Effect.sync(() => release.resolve()))
         yield* llm.push(
           reply().tool("Read", { file_path: file }).usage({ input: 4, output: 30, cacheRead: 900, cacheWrite: 100 }),
         )
@@ -1039,16 +1050,23 @@ describe.skipIf(!cliPath)("Claude Code CLI against TestLLMServer", () => {
 
         const turn = yield* chat.prompt("Read a.txt.").pipe(Effect.forkScoped)
         yield* llm.wait(2)
-        const live = yield* pollWithTimeout(
-          Effect.promise(() => chat.sdk.session.messages({ sessionID: chat.sessionID })).pipe(
-            Effect.map((result) => {
-              const info = result.data?.at(-1)?.info
-              return info?.role === "assistant" && !info.time.completed && info.tokens.output > 0 ? info : undefined
-            }),
-          ),
+        // Interim usage is event-only; the final counts are persisted when the step finishes.
+        const updated = yield* readGlobalEvent(
+          events,
+          30_000,
+          (event) => {
+            if (event.type !== "message.updated") return false
+            const info = (event.properties as { info: AssistantMessage }).info
+            return (
+              info.sessionID === chat.sessionID &&
+              info.role === "assistant" &&
+              !info.time.completed &&
+              info.tokens.output === 30
+            )
+          },
           "no live tokens while the turn was running",
-          "30 seconds",
         )
+        const live = (updated.properties as { info: AssistantMessage }).info
         expect(live.tokens).toMatchObject({ input: 4, output: 30, cache: { read: 900, write: 100 } })
         expect(live.cost).toBe(0)
 
@@ -1070,7 +1088,8 @@ describe.skipIf(!cliPath)("Claude Code CLI against TestLLMServer", () => {
     (fixture) =>
       Effect.gen(function* () {
         const llm = fixture.llm
-        const chat = yield* openChat(fixture)
+        // A tool-search 400 triggers the CLI's schema fallback and retries the request.
+        const chat = yield* openChat(fixture, { env: { ENABLE_TOOL_SEARCH: "false" } })
         yield* llm.error(400, {
           type: "error",
           error: { type: "invalid_request_error", message: "FAKE-BAD-REQUEST-81" },
@@ -1095,12 +1114,23 @@ describe.skipIf(!cliPath)("Claude Code CLI against TestLLMServer", () => {
       Effect.gen(function* () {
         yield* fixture.llm.tool("mcp__opencode_proxy__schedule_prompt", { prompt: "LATER-81", delaySeconds: 3600 })
         yield* fixture.llm.text("SCHEDULED")
-        const chat = yield* openChat(fixture, { config: proxyToolsConfig(fixture.llm.url, ["Task", "schedule"]) })
+        const chat = yield* openChat(fixture, {
+          config: proxyToolsConfig(fixture.llm.url, ["Task", "schedule"]),
+          env: { ENABLE_TOOL_SEARCH: "false" },
+        })
         yield* chat.prompt("Schedule it.")
         const inputs = yield* fixture.llm.inputs
         const tools = (inputs[0].tools as { name: string }[]).map((tool) => tool.name)
         expect(tools).toContain("mcp__opencode_proxy__schedule_prompt")
-        const hosted = ["EnterWorktree", "ExitWorktree", "Workflow", "CronCreate", "CronDelete", "CronList", "ScheduleWakeup"]
+        const hosted = [
+          "EnterWorktree",
+          "ExitWorktree",
+          "Workflow",
+          "CronCreate",
+          "CronDelete",
+          "CronList",
+          "ScheduleWakeup",
+        ]
         expect(tools.filter((name) => hosted.includes(name))).toEqual([])
         const queue = (yield* Effect.promise(() => chat.sdk.session.queue.get({ sessionID: chat.sessionID }))).data!
         expect(queue.entries.map((entry) => entry.text)).toEqual(["LATER-81"])
@@ -1111,8 +1141,7 @@ describe.skipIf(!cliPath)("Claude Code CLI against TestLLMServer", () => {
     120_000,
   )
 
-  // The CLI turns tool search off for a non-Anthropic ANTHROPIC_BASE_URL unless ENABLE_TOOL_SEARCH
-  // is set, so every other scenario sends proxy tools with full schemas.
+  // Tool search defers proxy schemas; scenarios that inspect full schemas disable it explicitly.
   cliIt.live(
     "deferred proxy tools load through ToolSearch when tool search is on",
     (fixture) =>
@@ -1136,7 +1165,9 @@ describe.skipIf(!cliPath)("Claude Code CLI against TestLLMServer", () => {
           (tool) => tool.name === "mcp__opencode_proxy__time",
         )
         expect(loaded?.defer_loading).toBe(true)
-        expect(JSON.stringify(inputs.at(-1)!.messages)).toMatch(/\d{4}-\d{2}-\d{2} (Sun|Mon|Tue|Wed|Thu|Fri|Sat) \d{2}:\d{2}/)
+        expect(JSON.stringify(inputs.at(-1)!.messages)).toMatch(
+          /\d{4}-\d{2}-\d{2} (Sun|Mon|Tue|Wed|Thu|Fri|Sat) \d{2}:\d{2}/,
+        )
         expect(JSON.stringify(yield* chat.parts)).toContain("TIME-LOADED")
         expectIsolated(inputs)
       }),
