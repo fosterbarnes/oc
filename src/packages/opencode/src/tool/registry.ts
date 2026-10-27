@@ -41,6 +41,18 @@ import { Provider } from "@/provider/provider"
 import { WebSearchTool } from "./websearch"
 import { JEV_TOOL_IDS, JevAskTool, JevCheckTool, JevClassifyTool, JevRankTool, JevScoreTool } from "./jev"
 import { apiKey } from "./jevClient"
+import {
+  CUA_TOOL_IDS,
+  CuaActTool,
+  CuaCloseTool,
+  CuaLaunchTool,
+  CuaObserveTool,
+  CuaRawTool,
+  CuaTakeoverTool,
+  CuaVerifyTool,
+  CuaWindowsTool,
+} from "./cua"
+import { CuaDriver } from "./cuaDriver"
 import { LspTool } from "./lsp"
 import * as Truncate from "./truncate"
 import { ApplyPatchTool } from "./apply_patch"
@@ -145,6 +157,14 @@ const layer = Layer.effect(
     const jevScore = yield* JevScoreTool
     const jevRank = yield* JevRankTool
     const jevAsk = yield* JevAskTool
+    const cuaWindows = yield* CuaWindowsTool
+    const cuaLaunch = yield* CuaLaunchTool
+    const cuaObserve = yield* CuaObserveTool
+    const cuaAct = yield* CuaActTool
+    const cuaVerify = yield* CuaVerifyTool
+    const cuaClose = yield* CuaCloseTool
+    const cuaTakeover = yield* CuaTakeoverTool
+    const cuaRaw = yield* CuaRawTool
     const shell = yield* ShellTool
     const bgStatus = yield* BgStatusTool
     const bgKill = yield* BgKillTool
@@ -267,6 +287,14 @@ const layer = Layer.effect(
           jevScore: Tool.init(jevScore),
           jevRank: Tool.init(jevRank),
           jevAsk: Tool.init(jevAsk),
+          cuaWindows: Tool.init(cuaWindows),
+          cuaLaunch: Tool.init(cuaLaunch),
+          cuaObserve: Tool.init(cuaObserve),
+          cuaAct: Tool.init(cuaAct),
+          cuaVerify: Tool.init(cuaVerify),
+          cuaClose: Tool.init(cuaClose),
+          cuaTakeover: Tool.init(cuaTakeover),
+          cuaRaw: Tool.init(cuaRaw),
           skill: Tool.init(skilltool),
           patch: Tool.init(patchtool),
           question: Tool.init(question),
@@ -318,6 +346,14 @@ const layer = Layer.effect(
             tool.jevScore,
             tool.jevRank,
             tool.jevAsk,
+            tool.cuaWindows,
+            tool.cuaLaunch,
+            tool.cuaObserve,
+            tool.cuaAct,
+            tool.cuaVerify,
+            tool.cuaClose,
+            tool.cuaTakeover,
+            tool.cuaRaw,
             tool.skill,
             tool.patch,
             ...(tool.execute ? [tool.execute] : []),
@@ -382,6 +418,8 @@ const layer = Layer.effect(
 
         // Without a key every jev call would fail, so the tools stay hidden.
         if (JEV_TOOL_IDS.has(tool.id)) return apiKey() !== undefined
+        // Same for cua: hidden until cua-driver is installed (resolved once per process).
+        if (CUA_TOOL_IDS.has(tool.id)) return CuaDriver.driverPath() !== undefined
 
         const usePatch = Patch.usesApplyPatch(input.modelID)
         if (tool.id === ApplyPatchTool.id) return usePatch

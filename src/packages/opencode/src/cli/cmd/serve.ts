@@ -4,6 +4,7 @@ import { withNetworkOptions, resolveNetworkOptions } from "../network"
 import { Flag } from "@opencode-ai/core/flag/flag"
 import { ServerLifecycle } from "@/server/lifecycle"
 import { stopCursorProxy } from "@/provider/cursor/runtime"
+import { CuaDriver } from "@/tool/cuaDriver"
 import fs from "node:fs/promises"
 import path from "node:path"
 import { Global } from "@opencode-ai/core/global"
@@ -79,6 +80,7 @@ export function stopAndExit(
   return prepare
     .then(() => server.stop(true))
     .then(() => stopCursorProxy())
+    .then(() => CuaDriver.stopCuaDriver())
     .then(() => (resident && shouldClearResidentState(restart) ? clearResidentStateForRestart() : undefined))
     .then(() => (restart ? restartProcess() : undefined))
     .then(() => exit(0))

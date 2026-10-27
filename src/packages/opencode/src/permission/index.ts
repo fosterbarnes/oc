@@ -287,13 +287,14 @@ export function disabled(
   return new Set(
     tools.filter((tool) => {
       // task_cancel only stops tasks this chat started, so it follows the task permission.
+      // cua_* and jev_* each ask under one shared key (tool/cua.ts, tool/jev.ts), so they follow it.
       const permission = edits.includes(tool)
         ? "edit"
         : reads.includes(tool)
           ? "read"
           : tool === "task_cancel"
             ? "task"
-            : tool
+            : (/^(cua|jev)_/.exec(tool)?.[1] ?? tool)
       if (permission === "session_complete" || permission === "session_failed") {
         // Only a rule naming the tool counts; a `*` allow in either ruleset must not unhide it.
         const rule = [...ruleset, ...(turnRuleset ?? [])].findLast((rule) => rule.permission === permission)

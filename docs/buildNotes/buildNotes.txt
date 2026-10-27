@@ -1,24 +1,12 @@
-v0.2.307 pemdasPhenomenom [fix > compaction loop; patch > own oc.db]
+v0.2.308 samuelUranus [feat. > native cua-driver tools]
 
-compaction:
-After a manual /compact in a Claude Code chat, Claude no longer keeps posting "what we did so far" recaps on its own until you press stop. With other providers, a manual /compact that keeps recent messages no longer re-answers your last prompt once.
+GUI app automation:
+Agents can drive Windows apps with oc's own cua tools (cua_windows, cua_launch, cua_observe, cua_act, cua_verify, cua_close, cua_takeover, cua_raw) whenever cua-driver is installed, with no cua-driver MCP server entry. oc starts one cua-driver process for all chats instead of one per project and stops it after 10 idle minutes. The tools take about 8,000 characters of descriptions instead of about 144,000 for the old 61 MCP tools, so non-Claude models send much smaller requests. Each chat and subagent drives with its own cua session and cursor badge, so they no longer disturb each other's reads.
 
-sessions:
-oc now keeps its sessions in its own oc.db file (oc-local.db for source runs), so stock OpenCode can no longer change them and builds from different git branches see the same sessions. A newer or different build changing the database now shows "This database was changed by a newer or different OpenCode build" with what to do. Your one-time step after installing this build: rename opencode.db (and its -wal and -shm files) to oc.db, then remove the user OPENCODE_DB variable. Removing it first opens an empty oc.db.
-
-dev and stable installs:
-Starting one oc install while another install's background server is running now stops with a message naming that install and the exact command to close it, instead of quietly using the wrong build.
-
-opening files:
-Fixed a security bug: clicking a file path whose name contained & could run a command, and paths with spaces reached the editor split in two. Clicking a path now opens it in Notepad on Windows when no editor is set, instead of showing an error. Editor commands with spaces can be written in double quotes, for example "C:\Program Files\Notepad++\notepad++.exe".
-
-keys:
-alt+q queues a prompt in a busy session and, on Home, sends it and keeps you on Home, since Windows terminals use alt+return for fullscreen. If your terminal sends some oc keys as other keys (for example ctrl+m as Enter), oc shows a one-time notice with the fix for that terminal.
-
-themes:
-Four new built-in themes, drac-neutral, drac-violet, drac-darker and drac-lighter, keep drac's colors with neutral gray or violet-tinted backgrounds instead of blue-tinted ones. drac itself is unchanged. The daily theme rotation now has 38 themes, so its sequence reshuffles.
+permissions:
+A new cua permission lets background input run and asks before an agent takes the foreground, closes an app oc did not launch, uploads or downloads files, reads the clipboard, or captures the whole screen; config, install, and recording commands are blocked. cua_takeover asks once to allow foreground input for a set number of minutes, for when you step away. The permission prompt for these tools says what is being approved. A rule that denies everything except cua (like the /agentTest tester's) now shows the cua tools, and denying cua hides them.
 
 docs:
-Added a VM acceptance checklist (docs/dev/vmAcceptance.md). README, FORK.md, the keybinds and WezTerm docs, and the wiki cover the new keys, the editor fallback, the oc.db move, and running dev and stable on one PC.
+FORK.md and the wiki describe the built-in cua tools and the CUA_DRIVER_PATH setting.
 
-Under the hood: the compaction loop came from picking the pending user message by array position, while a compaction that keeps a tail puts the compaction message before the kept messages; the loop now picks by message time (new MessageV2.chronological), and a new test that timed out before the fix now passes. The editor launch no longer uses a shell: .exe editors start directly, .cmd and .bat editors go through cmd with every argument quoted, and paths containing % are refused. Checks: prompt, message-v2, compaction and messages-pagination tests 216 pass with 4 known failures (queue contention, two handoff child tests, fork tail remap; the last three also fail without this change); core database tests 21 pass; config and launcher safety tests 43 pass; editor and prompt dialog tests 17 pass; theme tests 12 pass; keybind docs check clean; core, opencode and tui typechecks clean. Throwaway probes confirmed the new database path, the other-install refusal, the editor injection fix, the keyboard notice, and Alt+Q queueing in a real TUI pane. The new themes were not viewed in a real terminal.
+Under the hood: tool/cuaDriver.ts owns the cua-driver child over MCP stdio (version floor 0.35.2, per-session labels revived when the driver ends them, 120 s call timeout that restarts a stuck driver), tool/cua.ts holds the eight tools and a pure policy function, and Permission.disabled now maps cua_* and jev_* tools to their shared permission key. Checks: new cua policy test and the new permission test pass (cua and permission tests 88 pass); registry, agent, tool-define and permission preset tests 97 pass; opencode and tui typechecks clean. Read-only probes against the installed driver confirmed tool output, diff reads, screenshots, zoom, every permission gate, takeover, session revive and two-session isolation. Live on the installed build: Calculator 6 x 7 = 42 and keyboard 9*9 = 81 through subagents and /agentTest, with the foreground and takeover prompts asking once, no prompt when closing an app oc launched, and one driver process shared by two sessions.

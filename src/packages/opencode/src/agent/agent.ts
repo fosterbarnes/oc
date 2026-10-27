@@ -155,6 +155,8 @@ const layer = Layer.effect(
           question: "deny",
           plan_enter: "deny",
           plan_exit: "deny",
+          // cua_* tools (tool/cua.ts): background input runs; anything that can take over the PC asks.
+          cua: { "*": "allow", foreground: "ask", takeover: "ask", kill: "ask", sensitive: "ask" },
           // mirrors github.com/github/gitignore Node.gitignore pattern for .env files
           read: {
             "*": "allow",

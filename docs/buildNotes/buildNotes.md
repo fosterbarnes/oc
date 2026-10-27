@@ -196,6 +196,74 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-26 (~23:00) - v0.2.308 samuelUranus - Pass on the native cua tools - Claude Opus 5.5, low effort; Pass
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Pass (/pass over this session's cua work); completed
+- Version: 0.2.308 samuelUranus
+- Live `/agentTest` on installed 0.2.308 (agentTester, takeover 5 min): Calculator launch, 6 x 7 = 42, Clear = 0, background keyboard 9*9 = 81 (no foreground needed), `cua_verify` value "81 " satisfied, `cua_close` without prompt; log: 1 takeover ask, 13 background allows. Evidence `%TEMP%\agentTest\20261026-2255`
+- Fixed `cua_act` description example: Windows Calculator buttons are named "6", not "Six" (the example led a test prompt astray); expect now checks `Result` `value_contains`
+- Removed unused exports in `tool/cua.ts` (parameter schemas, `Policy` type)
+- FORK.md "Native cua-driver tools" row: added the `Permission.disabled` mapping and the live results
+- Verification: `cua.test.ts` + `permission/next.test.ts` 88 pass 0 fail; opencode `tsgo --noEmit` exit 0
+- Kept: both new tests meet the keep bar (`policy()` safety contract; `disabled` guards the hidden-tools bug)
+
+### User
+GUI app automation
+- No visible change; the cua tools' built-in example now uses the real Calculator button names.
+
+---
+
+## 2026-10-26 (~22:50) - v0.2.308 samuelUranus - cua tools follow the cua permission for visibility; user config switched to native cua - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation (/imp of `~/.config/opencode/plans/2026-10-26-nativeCuaDriver.md` section 6, after the live check passed); completed
+- Version: 0.2.308 samuelUranus (not bumped again: already changed since the last commit)
+- Live check (installed 0.2.308, two `general-gpt-6.1-sol-low` subagents): Calculator 6 x 7 read back as `Text "Result" [value="42 "]`; log showed `cua` background allowed silently, `foreground` and `takeover` asked once each, the foreground step during takeover evaluated as `background`, closing the launched pid asked nothing; one native child (pid 27876) served both sessions; `list_sessions` showed 2. `cua_windows` also answered from this Claude chat
+- Fixed `Permission.disabled` (`permission/index.ts`): `cua_*` and `jev_*` tool ids now resolve to their shared permission key (`/^(cua|jev)_/`). Before, visibility was looked up by tool id, so `agentTester`'s `"*": deny` hid every cua tool even with a `cua` allow, and `cua: "deny"` did not hide them
+- Added test "disabled - cua_* tools follow the shared cua permission" in `test/permission/next.test.ts`
+- User config: removed `mcp.cua-driver`, added the 8 `cua_*` ids to `claude-code.options.proxyOpencodeTools` (`opencode.jsonc`); `agentTester.md` permission `cua: {*: allow, foreground: ask, takeover: deny, kill: ask, sensitive: deny}` and prompt renamed to `cua_*` tools (evidence via `cua_observe screenshot:"file"`, cleanup via `cua_raw end_session`); `agentTest.md` and `verify.md` permission `cua` object equal to the defaults; `agentTest.md` takeover now `cua_takeover {minutes}` before dispatch and `{minutes: 0}` after, primary copies reported screenshots into the evidence folder; note in `plans/cuaDriverGuidance.md`
+- Verification: probe parsed `opencode.jsonc` (0 jsonc errors; mcp keys context7, avalonia-docs, grep, everything-search; 8 cua ids) and the three frontmatters through `Permission.fromConfig`: agentTester background allow, foreground ask, takeover deny, kill ask, sensitive deny, cua tools visible; agentTest and verify match defaults. `next.test.ts` 83 pass 0 fail; opencode `tsgo --noEmit` exit 0. Probe deleted
+- Risk: the installed 0.2.308 lacks the `disabled` fix, so `agentTester` sees no cua tools until a rebuild
+- Note: cua_* already reached Claude before they were in `proxyOpencodeTools`; the forwarding path was not traced. jev_* is listed the same way with no reported toast
+
+### User
+GUI app automation
+- The cua-driver MCP server entry is gone from your config; agents use oc's built-in cua tools instead.
+- The /agentTest tester and /verify use the new tools, and a takeover is now started with one permission prompt before the tester runs.
+- A rule that denies everything except cua tools (like the tester's) now shows those tools, and denying `cua` hides them.
+
+---
+
+## 2026-10-26 (~22:34) - v0.2.308 samuelUranus - Native cua-driver tools replace the cua-driver MCP server - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation (/imp of `~/.config/opencode/plans/2026-10-26-nativeCuaDriver.md` sections 1-5 and 7); completed. Section 6 (user config, agentTester, agentTest, verify) waits for a rebuilt oc
+- Version: 0.2.308 samuelUranus
+- Added `tool/cuaDriver.ts`: one lazily started `cua-driver mcp` child per oc process over MCP stdio (SDK `Client` + `StdioClientTransport`, cwd home, full env, stderr drained to a 4 KB tail for start errors). `driverPath()` = `CUA_DRIVER_PATH` > `Bun.which` > `%LOCALAPPDATA%\Programs\Cua\cua-driver\bin\cua-driver.exe`, resolved once. Version floor 0.35.2 (`Bun.semver.order`). Cached `tools/list`. `call()` injects `session: oc-<sessionID tail 8>` only when the tool's schema has `session` (`list_sessions` rejects it), revives on `structuredContent.refusal.code === "session_ended"` via `start_session` and retries once. 120 s timeout with progress reset; a real timeout stops the child (abort also surfaces as `RequestTimeout` in the SDK, so `signal.aborted` is checked first). Idle stop 10 min (unref'd timer), `stopCuaDriver()` exported
+- Added `tool/cua.ts`: `cua_windows`, `cua_launch`, `cua_observe` (`get_window_state`, `since:"latest"` unless `full`, `include_screenshot:false` unless `screenshot`; `file` writes `TRUNCATION_DIR/tool_*.png` so Truncate prunes it after 7 days; `region` calls `zoom`), `cua_act` (`run_steps`), `cua_verify`, `cua_close` (`kill_app`), `cua_takeover` (oc state, asks `takeover`), `cua_raw` (list, `help`, or call any non-denied tool). Total 7,959 chars of descriptions + schemas (was ~144k for 61 MCP tools)
+- Added pure `policy(tool, args, launched)`: `deny` (set_config, install_*, recording, replay, escalate_session) > `kill` (pid not from `cua_launch`) > `sensitive` (browser_set_input_files, browser_download, clipboard_read, get_desktop_state) > `foreground` (bring_to_front, run_script, or a recursive `delivery_mode:"foreground"` / `foreground_fallback:true` / `scope:"desktop"` / `target.kind:"desktop"`) > `plain`. Gate asks permission `cua` with that pattern; during an approved takeover a foreground call asks under `background`. Driver `isError` results become tool errors with the driver text
+- Added agent default `cua: { "*": allow, foreground: ask, takeover: ask, kill: ask, sensitive: ask }` in `agent/agent.ts`; registry wiring and `CUA_TOOL_IDS` hidden while `driverPath()` is undefined (`tool/registry.ts`); `CuaDriver.stopCuaDriver()` after `stopCursorProxy()` in `cli/cmd/serve.ts`
+- Added `cua` branch in `tui/src/routes/session/permission.tsx`: prompt title/detail from request metadata (the generic branch only said "Call tool cua")
+- Added `test/tool/cua.test.ts` (5 tests, `policy()` safety contract)
+- Docs: FORK.md row "Native cua-driver tools"; wiki `Agents-and-Skills.md` Tools bullet (wiki push is the user's)
+- Verification: `cua.test.ts` 5/5; registry, agent, cua, tool-define, permissionPresets 97 pass 0 fail; opencode and tui `tsgo --noEmit` exit 0. Read-only probes against installed driver 0.35.2 through the real registry tool defs (fake ctx; every ask that could act rejected): build defaults evaluate as planned, windows/raw list/help, diff reads, screenshot file (1 MB PNG) and view, zoom, driver error text, gates (foreground with metadata, deny without ask, kill, sensitive), takeover then foreground under `background`, end then `foreground` again; session revive after `end_session` and two labels visible in `list_sessions`. No probe processes left; probes deleted. Live input (Calculator) and Claude proxy not checked: need a rebuilt oc
+- Risk: "Allow always" on a foreground prompt lasts until restart for the project (existing permission semantics). `launched` is pid-based. `cua_raw` calls to tools behind typed tools skip nothing (same gate)
+- TODO (user config, after rebuild): remove `mcp.cua-driver` from `opencode.jsonc`, add the 8 ids to `claude-code.options.proxyOpencodeTools`, rename `cua-driver_*` permissions and tool names in `agents/sub/agentTester.md`, `~/.opencode/commands/agentTest.md`, `verify.md` (plan section 6)
+- Note: `mcp/index.ts:360` pipes MCP stderr and never reads it; a chatty server could block once the pipe fills (not changed)
+
+### User
+GUI app automation
+- Agents can drive Windows apps through built-in cua tools when cua-driver is installed, without the cua-driver MCP server entry.
+- oc runs one cua-driver process for all chats instead of one per project, and stops it after 10 idle minutes.
+- The cua tools take about 8,000 characters of tool descriptions instead of about 144,000, so non-Claude models get much smaller requests.
+- Each chat and subagent drives with its own cua session and cursor badge, so they no longer interfere with each other's reads.
+- oc asks before an agent takes the foreground, closes an app oc did not launch, uploads or downloads files, reads the clipboard, or captures the whole screen; config, install, and recording commands are blocked.
+- cua_takeover asks once to allow foreground input for a set number of minutes, for when you step away from the PC.
+- The permission prompt for these tools now says what is being approved.
+
+---
+
 ## 2026-10-26 (~21:34) - v0.2.307 pemdasPhenomenom - Fix endless reply loop after manual compaction - Claude Opus 5.5, low effort; Implementation
 
 ### Agent

@@ -388,6 +388,20 @@ function PermissionRequestPrompt(props: { request: PermissionRequest; directory?
               }
             }
 
+            // cua_* tools put their own title and detail in metadata (opencode tool/cua.ts).
+            if (permission === "cua") {
+              const meta = props.request.metadata ?? {}
+              return {
+                icon: "⚙",
+                title: typeof meta.title === "string" ? meta.title : "Drive a GUI app",
+                body: (
+                  <box paddingLeft={1}>
+                    <text fg={theme.textMuted}>{typeof meta.detail === "string" ? meta.detail : ""}</text>
+                  </box>
+                ),
+              }
+            }
+
             if (permission === "doom_loop") {
               return {
                 icon: "⟳",

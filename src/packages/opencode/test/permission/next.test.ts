@@ -489,6 +489,21 @@ test("disabled - task_cancel follows the task permission", () => {
   expect(Permission.disabled(["task_cancel"], [allow]).size).toBe(0)
 })
 
+test("disabled - cua_* tools follow the shared cua permission", () => {
+  // agentTester shape: deny everything, then allow cua with asks for risky patterns.
+  const tester = [
+    { permission: "*", pattern: "*", action: "deny" },
+    { permission: "cua", pattern: "*", action: "allow" },
+    { permission: "cua", pattern: "foreground", action: "ask" },
+  ] as const
+  expect(Permission.disabled(["cua_act", "cua_observe", "bash"], [...tester])).toEqual(new Set(["bash"]))
+  const denyCua = [
+    { permission: "*", pattern: "*", action: "allow" },
+    { permission: "cua", pattern: "*", action: "deny" },
+  ] as const
+  expect(Permission.disabled(["cua_act", "bash"], [...denyCua])).toEqual(new Set(["cua_act"]))
+})
+
 test("disabled - does not disable when partially denied", () => {
   const result = Permission.disabled(
     ["bash"],
