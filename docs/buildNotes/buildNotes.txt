@@ -1,11 +1,14 @@
-v0.2.313 pepsimanInflated [feat. > queue revive chains]
+v0.2.314 bustingRamps [fix > revive chain loop; feat. > queue strip]
 
 queued prompts:
-Alt+Enter now queues revive chains such as /verify /revive /pass /agent-push instead of refusing them. The chain waits its turn in the queue, then runs from the oc window that has the session open. Prompts queued behind it wait for the whole chain, including across its revive, and run once it finishes.
+Prompts and commands you queue with alt+q in a session now show above the prompt box, one row each with a QUEUED badge and the text as you typed it, up to three rows and then "+N more". Rows stay until the prompt is sent, and clicking them opens Queued prompts. Before this, queueing during a busy turn showed nothing at all, because the footer's queue count only appears when the session is idle.
 
-Queued chains show in Queued prompts and can be edited or cancelled, and an entry can be edited into or out of a chain. While a chain runs, the queue reads "Paused by a revive chain". Scheduling a chain with alt+s is refused with "Revive chains cannot be scheduled". If no oc window has the session open, the chain and everything behind it wait.
+The prompt border also flashes the accent color briefly when a prompt is queued, so you can tell the key worked. The flash is skipped when animations are off. Scheduled prompts (alt+s) stay out of the list and keep showing in the footer and Queued prompts.
+
+revive chains:
+A chain with two revives, such as /imp /revive /pass /revive /agent-push, no longer repeats the step after the first revive forever. After a revive, the chain resumed with the old saved steps written over the new ones, so every later revive started over at the same step.
 
 docs:
-The wiki Sessions page explains queued revive chains.
+The wiki Sessions page describes the queued prompt rows.
 
-Under the hood: the server queue stores the chain but never sends it. When the drain reaches it, it hands the chain to one TUI waiting on the new session.queue.take endpoint and pauses the queue with a new "chain" reason; the TUI runs the steps with the existing chain code and resumes the queue at the end. A queue edit that would turn a scheduled entry into a chain is refused. The chain text helpers moved to core reviveResume.ts so the server shows entries as typed. Checks: core, opencode and tui typecheck clean; session queue tests 20 pass, including a new test that a queued chain holds the queue and goes to exactly one waiting TUI; tui slash, part and chain line tests 17 pass; the HTTP API exercise passes for the three queue routes (the 3 /agent/sub scenarios it lists as missing were already missing). Not run: a real queued chain through an actual revive.
+Under the hood: the new QueueStrip component reads the queue snapshot the prompt already polls, so it adds no requests; the queue now also refreshes on every busy or idle change so a row leaves as its turn starts. The revive chain resume now passes only agent, model and variant to the chain runner. Checks: tui typecheck clean; throwaway render probes of the queue rows (filtering, row cap, truncation, rows updating and clearing); the loop fix was seen working live, as this chain moved on to its push after the fixed build took over. Known failure: test/component/queue.test.tsx fails at v0.2.313 because its harness lacks providers the Queued prompts dialog now needs (not from this change). Not run: the border flash and a live busy-to-idle queue run, which need a look in the real TUI.

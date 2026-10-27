@@ -76,7 +76,8 @@ export function useReviveChain() {
       toast.show({ message: `Continuing after revive: ${chainText(body.steps, "")}`, variant: "info" })
     }
     await idle(sessionID)
-    await run(sessionID, body, body)
+    // Only agent and model: the whole body would overwrite the next revive's steps and loop the chain.
+    await run(sessionID, body, { agent: body.agent, model: body.model, variant: body.variant })
   }
 
   // Runs this session's queued chains here as each reaches the front of the queue. The server hands a

@@ -210,6 +210,32 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-27 (~01:12) - v0.2.314 bustingRamps - Show queued prompts above the prompt - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation (/spit -> /think -> /imp, plan `~/.config/opencode/plans/2026-10-27-queue-strip-indicator.md`, mockup `plans/mockups/queueIndicator.html`); completed
+- Version: 0.2.314 bustingRamps
+- Fixed: alt+q during a busy turn showed nothing; `queueLabel` sits behind the footer's `status !== "idle"` Match, so it only rendered when idle
+- Added `component/prompt/queueStrip.tsx` `QueueStrip`: pending entries without `runAt` (dispatching and scheduled hidden), ` QUEUED ` badge in `highlight()` color, width-truncated title, max 3 rows + `+N more`, left click opens `DialogQueue`. Rendered in `Prompt` before the anchor box so autocomplete stays above the input
+- Added `dialogQueue.tsx` `QueueEntry` type and `queueEntryTitle` (shared with `DialogQueue`)
+- Changed `prompt/index.tsx`: queue refreshes on every `status().type` change (was idle only) so a row leaves when its turn starts; 600 ms `theme.accent` border flash after a non-scheduled queue add (`flashQueued`, skipped when animations are off)
+- Updated wiki `Sessions.md` Queued prompts
+- Fixed revive chain loop in `reviveChain.tsx` `resume`: it called `run(sessionID, body, body)`, and the revive step's `ReviveResume.write({ ...body, request, queued, ...target })` spread the old claimed body last, so its `steps`/`done`/`at`/`writerPid` replaced the new ones. Any chain with a second revive re-sent the step after the first revive forever (seen live: `/imp /revive /pass /agentTest /revive /agent-push` delivered step 3 four times). Now passes only `{ agent, model, variant }`. Predates v0.2.313
+- Changed (/pass) `QueueStrip` rows from `For` to `Index`: each 2 s poll returns new entry objects, so `For` rebuilt every row per poll
+- Verification: `tsgo --noEmit` (tui) passed; throwaway `testRender` probes of `QueueStrip` (removed) showed rows, filtering of dispatching/scheduled, `(attachments only)`, `+2 more`, truncation at width 40, and rows updating then clearing as entries change. Border flash and the real busy-to-idle flow not observed: /agentTest does not drive oc's own TUI (input can land in the agent's terminal), so a manual look is needed. Chain loop fix: typecheck passed, and observed live: after the fixed build (oc.exe 01:22:32) took over, the same chain sent step 3 once more (the old build's bad resume file), then its revive advanced to step 5 `/agent-push`. TODO: test guarding the resume body (no `reviveChain` tests exist)
+- ERROR: `test/component/queue.test.tsx` fails both tests at HEAD (v0.2.313): `DialogQueue` now calls `useReviveChain`, which needs `PromptRef` and `Local` providers the harness lacks. Not caused by this change; harness needs those providers (TODO)
+
+### User
+Queued prompts
+- Prompts you queue with alt+q now show above the prompt box with a QUEUED badge until they are sent.
+- The prompt border flashes briefly when a prompt is queued, so you can tell the key worked.
+- Clicking the queued rows opens Queued prompts.
+
+Revive chains
+- A chain with two revives (for example `/imp /revive /pass /revive /agent-push`) no longer repeats the step after the first revive forever.
+
+---
+
 ## 2026-10-27 (~01:05) - v0.2.313 pepsimanInflated - Queue revive chains with Alt+Enter - Claude Opus 5.5, low effort; Implementation
 
 ### Agent

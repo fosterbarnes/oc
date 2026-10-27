@@ -14,6 +14,7 @@ import { errorMessage } from "../util/error"
 import { Locale } from "../util/locale"
 
 type QueueSnapshot = SessionQueueGetResponse
+export type QueueEntry = QueueSnapshot["entries"][number]
 
 const POLL_MS = 2000
 const EMPTY: QueueSnapshot = { pause: "none", entries: [] }
@@ -59,9 +60,13 @@ export function queuePauseLabel(snapshot: QueueSnapshot) {
   return snapshot.pause === "none" ? undefined : PAUSE_LABEL[snapshot.pause]
 }
 
+export function queueEntryTitle(entry: QueueEntry) {
+  return entry.text.split("\n")[0]?.trim() || "(attachments only)"
+}
+
 const TARGET_LABEL = { current: "", fork: " · fork", new: " · new session" } as const
 
-function scheduleLabel(entry: QueueSnapshot["entries"][number]) {
+function scheduleLabel(entry: QueueEntry) {
   if (entry.runAt === undefined) return "Waiting"
   return `At ${Locale.format(entry.runAt, { dateStyle: "short", timeStyle: "medium" })}${TARGET_LABEL[entry.target]}`
 }
@@ -98,9 +103,7 @@ export function DialogQueue(props: { sessionID: string }) {
     const entries = snapshot.entries.map((entry) => {
       const confirming = toCancel() === entry.id
       return {
-        title: confirming
-          ? `Press ${cancelHint()} again to cancel`
-          : Locale.truncate(entry.text.split("\n")[0]?.trim() || "(attachments only)", 60),
+        title: confirming ? `Press ${cancelHint()} again to cancel` : Locale.truncate(queueEntryTitle(entry), 60),
         value: entry.id,
         bg: confirming ? theme.error : undefined,
         description: entry.state === "dispatching" ? "Sending" : scheduleLabel(entry),

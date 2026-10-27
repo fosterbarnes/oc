@@ -73,6 +73,7 @@ import { OPENCODE_BASE_MODE, useBindings, useCommandShortcut, useLeaderActive, u
 import { useTuiConfig } from "../../config"
 import { usePromptWorkspace } from "./workspace"
 import { usePromptMove } from "./move"
+import { QueueStrip } from "./queueStrip"
 import { readLocalAttachment } from "./local-attachment"
 import { useLocation } from "../../context/location"
 import { usePromptRef } from "../../context/prompt"
@@ -224,13 +225,9 @@ export function Prompt(props: PromptProps) {
   )
   createEffect(on(() => props.sessionID, refreshResumes, { defer: true }))
   const queue = createQueueSnapshot(() => props.sessionID)
-  createEffect(
-    on(
-      () => status().type,
-      (type) => type === "idle" && queue.refresh(),
-      { defer: true },
-    ),
-  )
+  // Idle is when a queued prompt gets claimed and busy is when it starts, so the strip and footer
+  // follow the turn instead of waiting for the poll.
+  createEffect(on(() => status().type, queue.refresh, { defer: true }))
   const queueLabel = createMemo(() => {
     const snapshot = queue.snapshot()
     if (snapshot.entries.length === 0) return undefined
@@ -1381,8 +1378,20 @@ export function Prompt(props: PromptProps) {
     setStore("extmarkToPartIndex", new Map())
     if (!input.isDestroyed) input.clear()
     queue.refresh()
+    if (!schedule) flashQueued()
     return true
   }
+
+  // A short accent flash on the prompt border confirms the queue took the draft.
+  const [queuedFlash, setQueuedFlash] = createSignal(false)
+  let queuedFlashTimer: ReturnType<typeof setTimeout> | undefined
+  function flashQueued() {
+    if (!animationsEnabled()) return
+    clearTimeout(queuedFlashTimer)
+    setQueuedFlash(true)
+    queuedFlashTimer = setTimeout(() => setQueuedFlash(false), 600)
+  }
+  onCleanup(() => clearTimeout(queuedFlashTimer))
 
   // Clipboard and file reads make pastes async. A submit that starts while one is still reading
   // waits for it; otherwise the draft goes out without the attachment, which lands in the next draft.
@@ -1830,7 +1839,9 @@ export function Prompt(props: PromptProps) {
   createEffect(() => {
     if (local.agent.current()) revealedPromptMetadata.add(local)
   })
-  const borderHighlight = createMemo(() => tint(theme.border, highlight(), agentMetaAlpha()))
+  const borderHighlight = createMemo(() =>
+    queuedFlash() ? theme.accent : tint(theme.border, highlight(), agentMetaAlpha()),
+  )
 
   const narrow = createMemo(() => dimensions().width < 44)
   const [locationWidth, setLocationWidth] = createSignal(dimensions().width)
@@ -1919,6 +1930,17 @@ export function Prompt(props: PromptProps) {
         agentStyleId={agentStyleId}
         promptPartTypeId={() => promptPartTypeId}
       />
+      {/* Outside the anchor box, so the autocomplete still opens right above the input. */}
+      <Show when={props.visible !== false && props.sessionID}>
+        {(sessionID) => (
+          <QueueStrip
+            entries={queue.snapshot().entries}
+            color={highlight()}
+            indent={narrow() ? 2 : 3}
+            onOpen={() => dialog.replace(() => <DialogQueue sessionID={sessionID()} />)}
+          />
+        )}
+      </Show>
       <box ref={(r: BoxRenderable) => (anchor = r)} visible={props.visible !== false} width="100%">
         <box
           width="100%"
