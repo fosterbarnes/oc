@@ -196,6 +196,70 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-26 (~23:41) - v0.2.309 momentumPotatoe - --shutdown-all closes WezTerm panes from outside WezTerm - Claude Opus 5.5, low effort; Debug
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Debug (user Step 0 of `~/.config/opencode/plans/2026-10-26-releaseReadiness.md`, then diagnosis and fix); completed
+- Version: 0.2.309 momentumPotatoe (no bump: version already changed since the last commit)
+- Fixed `--shutdown-all` from a shell outside WezTerm: `Resident.shutdownAll` called `killPane(record.paneID)` with the caller's env. Without `WEZTERM_UNIX_SOCKET`, Windows `wezterm cli` falls back to `~\.local\share\wezterm\sock` (no `default-org.wezfurlong.wezterm` symlink on Windows), a stale mux socket, so kill-pane threw before the TUI force-kill and server stop: exit 1, everything left running
+- Added `weztermSocket` to the TUI ledger (`tui/src/app.tsx` `Ledger`, written from `WEZTERM_UNIX_SOCKET` at TUI start; `config/tuiLedger.ts` `Record` and `read` validation). `shutdownAll` passes it to `killPane`. Records from older builds have no socket and behave as before
+- Risk: the setup exe runs `--shutdown-all` before upgrade and uninstall (FORK.md installer row), always from outside WezTerm, so before this fix any open oc tab made it fail. The first upgrade from a build without the socket can still hit it while old tabs are open
+- Verification: throwaway probe (deleted) with a test-owned `wezterm-mux-server` and a real child stand-in TUI, caller socket pointed at a dead path: a record without the socket reproduced the exact user error and stopped nothing; a record with it closed only the target pane, stopped the TUI, removed its ledger file, leftovers 0. opencode and tui `tsgo --noEmit` exit 0. `test/config/tuiLedger.test.ts` and `test/config/oc.test.ts` pass (30/30 for oc.test.ts with System32 first on PATH)
+- Fixed resident secret setup (`resident.ts` `serverSecret`) when Git's `usr\bin` precedes System32 on PATH: bare `whoami.exe /user` resolved to Git's coreutils `whoami` ("extra operand"), so the server failed with "Failed to determine the current Windows user SID". Now calls `%SystemRoot%\System32\whoami.exe` by path, like the R4 `tar` fix. `icacls.exe` stays bare (Git ships none)
+- Verification (whoami): `oc.test.ts` "a port held by an unrelated program..." failed under Git Bash PATH before the fix; after, `oc.test.ts` 30/30 with `/usr/bin/whoami.exe` still first on PATH. opencode `tsgo --noEmit` exit 0
+- ERROR: user Step 0 found pwsh 7.6.9 `[Environment]::SetEnvironmentVariable(name, $null, 'User')` left empty `REG_SZ` values in `HKCU\Environment` instead of deleting them; `Remove-ItemProperty` plus a `WM_SETTINGCHANGE` broadcast removed them. The plan's Step 0 snippet has the same problem
+
+### User
+Shutdown
+- `oc --shutdown-all` now closes oc's WezTerm tabs and stops the background server when run from a shell outside WezTerm, instead of failing with "wezterm cli kill-pane ... failed" and leaving everything running.
+- oc tabs opened by an older build still need `--shutdown-all` run from inside WezTerm, or the tabs closed by hand first.
+- The background server no longer fails to start with "Failed to determine the current Windows user SID" when Git's Unix tools come first on PATH.
+
+---
+
+## 2026-10-26 (~23:14) - v0.2.309 momentumPotatoe - Release pipeline, clean launcher refusals, sidebar state out of projects - Claude Opus 5.5, medium effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; medium effort; Implementation (/imp of `~/.config/opencode/plans/2026-10-26-releaseReadiness.md` Sessions A and B); completed
+- Version: 0.2.309 momentumPotatoe
+- Fixed release build `zip` step (ERROR since v0.2.298): `opencode/script/build.ts` zips each Windows `bin` with `%SystemRoot%\System32\tar.exe -a -cf`, entries from `readdirSync` (no glob). Removed upstream `gh release upload` (preview tag, unset `GH_REPO`); `pushRelease.ps1` publishes
+- Fixed /update self-offer loop: release builds (`Script.release`) define `OPENCODE_DISPLAY_VERSION` as the plain maintenance version. Before, `0.2.N-main-<stamp>` ranked below release `0.2.N` (`OcRelease.isNewer`), so every start offered the installed version
+- Added `requireReleaseBuild` (`.scripts/scriptHelper.ps1`): both dist exes' `--version` must equal `requireVersion`; called by `buildInstaller.ps1` and `pushRelease.ps1`. `build.ps1` refuses `-Release` with `-Oc`/`-Native` (stale other-variant zip)
+- Fixed /update unpack (`config/revive.ts` `downloadRelease`): System32 tar by path, `cwd: folder`, archive `..\<asset>` (Git's GNU tar first on PATH cannot read zips; bsdtar ANSI args mangle non-ASCII profiles). Same pattern as `core/src/ripgrep/binary.ts`
+- Changed `pushRelease.ps1`: assets are exactly `opencode-windows-x64.zip` and `opencode-native-windows-x64.zip` at the dist root; installer is exactly `oc_v<version>_windows-x64-setup.exe`; `--notes-file` from `git log --format=%B <latest GitHub release tag>..HEAD` (`HEAD^!` for the first release). Previous tag comes from `gh release list` because local `v*` tags include upstream `v0.2.x` and `vscode-v*`. DryRun prints the notes range and line count
+- Fixed "Error: Unexpected error" banner above launcher refusals: `config/resident.ts` `residentRefusal`/`otherBuildRefusal` and `cli/cmd/oc.ts` input errors throw `CliError` (FormatError prints the message only)
+- Removed `writeSidebar` (`core/util/ocSession.ts`, `OcConfig` re-export, callers in `cli/cmd/oc.ts`, `cli/cmd/session.ts` bootstrap, `tui/ocNewSession.ts`): it only wrote `projectDirectory` = the folder holding the file, which the sidebar already falls back to
+- Moved sidebar per-project state (`scriptPins`, `favoriteFileRoots`, `recentFileRoots`, `fileRoots`) to `<state>/sidebar/<sha1(rootPathKey)[0..16]>.json` (`settings.ts` `sidebarStatePath`; `loadSidebarSettings` merges user, project file, then state). `sidebarTools.tsx` `saveProjectState` writes only there; opening writes only when legacy kv state migrates. Project `.config/openSidebar.json` is now a read-only override, which also fixes saves erasing hand-written project `scripts`. Removed dead `saveSidebarSettings`
+- Kept existing project files as the project layer; the first save copies their state into the state file. Nothing deleted from user repos
+- Docs: README feature line says commands you write; wiki `Agents-and-Skills.md` "Your own commands" bullet; wiki `Sidebar.md` state location
+- Tests: replaced `openSidebar.test.ts` "writes complete sidebar settings" (dead function) with a state-layer test (state pins win, project scripts survive, state path outside the project). `ocNewSession.test.ts` and `sessionBootstrap.test.ts` now assert the project folder stays empty (they were change detectors of the removed write)
+- Verification: tsgo core, opencode, tui clean. tui `openSidebar` + `ocNewSession` 77 pass 2 skip; opencode `launcherSafety`, `sessionBootstrap`, `config/oc`, `cli/error` 51 pass (two runs); core `ocRelease` 5 pass. Probes (deleted): Bun `$` zip + revive-shape unpack in a `用户` temp path with Git `usr\bin` first on PATH roundtrips, old bare `tar` exits 128; pane probe (`OC_TUI_PANE`) session with sidebar open leaves the project with only `.git` and a clean `git status`; `pushRelease.ps1 -DryRun` on the current dev dist refuses ("oc.exe reports 0.2.308-main-202610270301, not 0.2.308"); notes logic `HEAD^!` 12 lines, `HEAD~2..HEAD` 37 lines
+- Not verified: `build.ps1 -Release` (build is the user's), real `gh release create`, /update download on a VM, refusal text in a real terminal (GUI case 6)
+- ERROR: first opencode test run, made while 3 typechecks ran in parallel, had 1 fail + 1 error; test name not captured; two reruns 51/51 pass
+- TODO: `opencode/src/lsp/server.ts:663,1045` bare `tar -xf` for LSP zips has the same Git-tar risk (upstream code)
+- Risk: a dev build at a released version (`0.2.N-main-…` vs `0.2.N`) still gets one update offer per release; Skip silences it
+
+### User
+Releases and updates
+- Building a release no longer fails at the zip step, so oc releases can be published.
+- A freshly installed oc release no longer offers itself as an update on every start.
+- `/update` now unpacks downloads on PCs where Git's tar comes first on PATH and on profiles with non-English folder names.
+- Release pages carry notes from the commit messages since the previous release, shown once after `/update`.
+- The release scripts refuse to package a build that is not a release build.
+
+Launcher
+- When oc refuses to start, for example because another oc install's background server is running, it shows only the reason, without an "Unexpected error" line.
+
+Sidebar
+- Opening a project in oc no longer creates `.config/openSidebar.json` in it.
+- Pins, favorites, and file roots are saved in oc's own state folder, and existing ones carry over automatically.
+- A hand-written `.config/openSidebar.json` in a project is still read but never changed by oc.
+
+Docs
+- The README and wiki make clear that commands like `/spit` and `/think` are ones you write yourself.
+
+---
+
 ## 2026-10-26 (~23:00) - v0.2.308 samuelUranus - Pass on the native cua tools - Claude Opus 5.5, low effort; Pass
 
 ### Agent

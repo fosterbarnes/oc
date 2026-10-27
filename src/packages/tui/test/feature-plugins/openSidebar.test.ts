@@ -17,11 +17,12 @@ import {
   promptProjectDirectory,
   resolveScriptTerminal,
   scriptTerminals,
-  saveSidebarSettings,
   saveUserScriptSettings,
   saveUserUsageProviders,
   sessionProjectDirectory,
   sidebarConfigPaths,
+  sidebarStatePath,
+  writeJsonObject,
 } from "../../src/routes/session/sidebar-tools/settings.ts"
 import {
   readCursorSessionToken,
@@ -1139,19 +1140,20 @@ test("migrates legacy file root pins to favorite file roots", () => {
   }
 })
 
-test("writes complete sidebar settings as JSON", () => {
-  const root = mkdtempSync(path.join(os.tmpdir(), "sidebar-config-"))
+test("per-project state lives outside the project and keeps its hand-written override", () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "sidebar-state-"))
   try {
-    const filePath = path.join(root, ".config", "openSidebar.json")
-    const settings = defaultScriptSettings()
-    const sidebar = normalizeSidebarSettings({
-      scripts: settings,
-      scriptPins: ["build"],
-      visibility: { showMcp: false, showLsp: false },
-    })
-    saveSidebarSettings(filePath, sidebar)
-    assert.deepEqual(loadSidebarSettings(root, root, path.join(root, "missing-user.json"), filePath), sidebar)
-    assert.deepEqual(JSON.parse(readFileSync(filePath, "utf8")).visibility, { showMcp: false, showLsp: false })
+    const project = path.join(root, "project")
+    const state = path.join(root, "state")
+    const paths = sidebarConfigPaths(project, root)
+    mkdirSync(path.dirname(paths.project), { recursive: true })
+    writeFileSync(paths.project, JSON.stringify({ scripts: { terminal: "wezterm-tab" }, scriptPins: ["old"] }))
+    const statePath = sidebarStatePath(state, project)
+    assert.equal(path.relative(state, statePath).startsWith(".."), false)
+    writeJsonObject(statePath, { scriptPins: ["build"], favoriteFileRoots: [], recentFileRoots: [], fileRoots: {} })
+    const settings = loadSidebarSettings(project, root, paths.user, paths.project, undefined, statePath)
+    assert.deepEqual(settings.scriptPins, ["build"])
+    assert.equal(settings.scripts.terminal, "wezterm-tab")
   } finally {
     rmSync(root, { recursive: true, force: true })
   }

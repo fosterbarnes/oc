@@ -31,8 +31,7 @@ test("listHomeDirs sorts folders by name or by modified time", () => {
 
 test("bootstrapSession numbers the title and routes create and prompt to the project", async () => {
   const directory = path.join(tempHome(), "crow")
-  fs.mkdirSync(path.join(directory, ".config"), { recursive: true })
-  fs.writeFileSync(path.join(directory, ".config", "openSidebar.json"), JSON.stringify({ keep: true }))
+  fs.mkdirSync(directory)
   const calls: Array<{ name: string; input: unknown }> = []
   const client = {
     experimental: {
@@ -72,8 +71,6 @@ test("bootstrapSession numbers the title and routes create and prompt to the pro
       },
     },
   ])
-  expect(JSON.parse(fs.readFileSync(path.join(directory, ".config", "openSidebar.json"), "utf8"))).toEqual({
-    keep: true,
-    projectDirectory: directory,
-  })
+  // oc never writes into the user's project.
+  expect(fs.readdirSync(directory)).toEqual([])
 })

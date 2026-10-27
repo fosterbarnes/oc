@@ -28,10 +28,11 @@ import {
   hasConfiguredScripts,
   loadSidebarSettings,
   normalizeScriptSettings,
-  saveSidebarSettings,
   saveUserScriptSettings,
   sessionProjectDirectory,
   sidebarConfigPaths,
+  sidebarStatePath,
+  writeJsonObject,
   type ScriptSettings,
   type SidebarSettings,
 } from "./settings.js"
@@ -48,8 +49,7 @@ import {
 import { createRootPicker } from "./rootPicker"
 import { createScriptSettingsMenu } from "./scriptSettingsMenu"
 import { createSidebarUsage } from "./sidebarUsage"
-import type { UsageSubscription } from "./usage/calendar"
-import { usageProviderForModel, type UsageProviderId } from "./usage/providers"
+import { usageProviderForModel } from "./usage/providers"
 import {
   copyToClipboard,
   fileClipboardText,
@@ -215,6 +215,7 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
     configPaths.user,
     configPaths.project,
     pluginDefaults,
+    sidebarStatePath(paths.state, configRoot),
   )
   let projectConfigRoot = configRoot
   project = sidebarSettings.projectDirectory || configRoot
@@ -254,14 +255,14 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
   let refreshCommands = () => {}
   let visibilityRunning = false
 
-  const saveProjectSettings = () => {
-    const paths = sidebarConfigPaths(projectConfigRoot, os.homedir())
-    const projectSettings = { ...sidebarSettings }
-    delete (projectSettings as { scripts?: ScriptSettings }).scripts
-    delete (projectSettings as { usageProviders?: UsageProviderId[] }).usageProviders
-    delete (projectSettings as { usageSpacing?: boolean }).usageSpacing
-    delete (projectSettings as { usageSubscriptions?: UsageSubscription[] }).usageSubscriptions
-    saveSidebarSettings(paths.project, projectSettings)
+  const saveProjectState = () => {
+    const { scriptPins, favoriteFileRoots, recentFileRoots, fileRoots } = sidebarSettings
+    writeJsonObject(sidebarStatePath(paths.state, projectConfigRoot), {
+      scriptPins,
+      favoriteFileRoots,
+      recentFileRoots,
+      fileRoots,
+    })
   }
 
   const loadProjectOwnedState = () => {
@@ -300,14 +301,14 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
       if (legacyScripts !== undefined)
         sidebarSettings.scripts = normalizeScriptSettings(legacyScripts, sidebarSettings.scripts)
     }
+    // Opening a project writes nothing unless old kv state was carried over.
     if (
-      !hasProjectScripts ||
       legacyRootState.customRoots.length > 0 ||
       legacyRootState.activeRoot ||
       legacyPins.size > 0 ||
       legacyRootPins.size > 0
     )
-      saveProjectSettings()
+      saveProjectState()
   }
 
   const syncSidebarVisibility = async () => {
@@ -339,8 +340,15 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
     )
     configRoot = sessionDirectory === os.homedir() ? promptDirectory || sessionDirectory : sessionDirectory
     projectConfigRoot = configRoot
-    const paths = sidebarConfigPaths(projectConfigRoot, os.homedir())
-    sidebarSettings = loadSidebarSettings(projectConfigRoot, os.homedir(), paths.user, paths.project, pluginDefaults)
+    const config = sidebarConfigPaths(projectConfigRoot, os.homedir())
+    sidebarSettings = loadSidebarSettings(
+      projectConfigRoot,
+      os.homedir(),
+      config.user,
+      config.project,
+      pluginDefaults,
+      sidebarStatePath(paths.state, projectConfigRoot),
+    )
     project = sidebarSettings.projectDirectory || projectConfigRoot
     loadProjectOwnedState()
     scriptSettings = sidebarSettings.scripts
@@ -430,7 +438,7 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
       ).recentRoots
     }
     syncStoredRootState()
-    saveProjectSettings()
+    saveProjectState()
     setExpanded(new Set(["."]))
     setScripts((prev) => reconcileScripts(prev, readScripts(project, root, scriptSettings)))
     setTree((prev) => reconcileTree(prev, readTree(root, expanded())))
@@ -438,7 +446,7 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
   }
   const savePins = (next: ReadonlySet<string>) => {
     sidebarSettings.scriptPins = [...next].sort()
-    saveProjectSettings()
+    saveProjectState()
   }
   // Pins and favorites are replaced, not mutated, so the signal change re-renders the list and palette.
   const togglePin = (name: string) => {
@@ -460,7 +468,7 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
     sidebarSettings.favoriteFileRoots = [...next].sort()
     sidebarSettings.recentFileRoots = rootSections(sidebarSettings.recentFileRoots, [...next]).recentRoots
     syncStoredRootState()
-    saveProjectSettings()
+    saveProjectState()
     refreshCommands()
     toast.show({
       variant: "success",

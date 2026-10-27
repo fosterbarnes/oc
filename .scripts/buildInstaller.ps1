@@ -40,6 +40,7 @@ $nativeBin = "$distFolder\opencode-native-windows-x64\bin"
 foreach ($required in @("$ocBin\oc.exe", "$ocBin\cursor-runtime", "$nativeBin\opencode.exe")) {
     if (-not (Test-Path -LiteralPath $required)) { throw "Missing $required. Run .scripts\build.ps1 -Release first." }
 }
+requireReleaseBuild
 
 # Wizard images are generated from the committed icon once and kept in the gitignored images folder.
 $imagesFolder = "$installerFolder\images"

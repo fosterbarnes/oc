@@ -209,6 +209,7 @@ type Ledger = {
   executable: string
   startedAt: number
   paneID?: string
+  weztermSocket?: string
   sessionID?: string
   directory?: string
 }
@@ -259,7 +260,10 @@ export const run = Effect.fn("Tui.run")(function* (input: TuiInput) {
         instance: Global.Path.app,
         executable: Global.resolveExecutablePath(process.execPath),
         startedAt: Date.now() - process.uptime() * 1000,
-        ...(terminal.kind === "wezterm" && terminal.paneID ? { paneID: terminal.paneID } : {}),
+        // Outside WezTerm, `wezterm cli` can't find this GUI's socket; shutdownAll closes the pane via it.
+        ...(terminal.kind === "wezterm" && terminal.paneID
+          ? { paneID: terminal.paneID, weztermSocket: process.env.WEZTERM_UNIX_SOCKET }
+          : {}),
       }
       yield* Effect.acquireRelease(
         Effect.sync(() => writeLedger(ledger)),

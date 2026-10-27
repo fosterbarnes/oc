@@ -11,6 +11,8 @@ export type Record = {
   startedAt: number
   created?: string
   paneID?: string
+  // The mux socket that owns `paneID` (WEZTERM_UNIX_SOCKET at TUI start).
+  weztermSocket?: string
   // The session this TUI shows and its working directory, rewritten on route change; revive reopens the tab from them.
   sessionID?: string
   directory?: string
@@ -189,6 +191,7 @@ export async function read(directory: string, processes: Process[]) {
           "startedAt" in record &&
           typeof record.startedAt === "number" &&
           (!("paneID" in record) || (typeof record.paneID === "string" && /^\d+$/.test(record.paneID))) &&
+          (!("weztermSocket" in record) || (typeof record.weztermSocket === "string" && record.weztermSocket !== "")) &&
           (!("sessionID" in record) || (typeof record.sessionID === "string" && record.sessionID !== "")) &&
           (!("directory" in record) || (typeof record.directory === "string" && record.directory !== "")) &&
           identity?.pid === record.pid &&

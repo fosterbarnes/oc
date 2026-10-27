@@ -80,22 +80,25 @@ const SessionBootstrapCommand = effectCmd({
     })
     if (!exists) return yield* fail(`Directory not found: ${directory}`)
 
-    yield* Effect.tryPromise({
-      try: () => OcConfig.writeSidebar(directory),
-      catch: (error) => new CliError({ message: `Failed to write sidebar config: ${String(error)}` }),
-    })
-
-    const title = args.title !== undefined
-      ? String(args.title)
-      : yield* Session.Service.use((service) =>
-          service
-            .listGlobal({ roots: true, limit: 500 })
-            .pipe(Effect.map((sessions) => OcConfig.nextProjectTitle(sessions.map((item) => item.title), directory))),
-        )
-    const session = yield* Session.Service.use((service) => service.create({
-      title,
-      ...(args.title === undefined && { metadata: { ocAutoRename: { state: "pending", title } } }),
-    }))
+    const title =
+      args.title !== undefined
+        ? String(args.title)
+        : yield* Session.Service.use((service) =>
+            service.listGlobal({ roots: true, limit: 500 }).pipe(
+              Effect.map((sessions) =>
+                OcConfig.nextProjectTitle(
+                  sessions.map((item) => item.title),
+                  directory,
+                ),
+              ),
+            ),
+          )
+    const session = yield* Session.Service.use((service) =>
+      service.create({
+        title,
+        ...(args.title === undefined && { metadata: { ocAutoRename: { state: "pending", title } } }),
+      }),
+    )
     const prompt = yield* SessionPrompt.Service
     yield* prompt
       .prompt({
@@ -198,7 +201,8 @@ export const SessionPreviousCommand = effectCmd({
     }
     const sessions = yield* Session.Service.use((service) => service.listGlobal({ roots: true, limit: 50 }))
     const selected = sessions[depth - 1]
-    if (!selected) return yield* fail(`Previous session ${depth} is unavailable; only ${sessions.length} session(s) exist.`)
+    if (!selected)
+      return yield* fail(`Previous session ${depth} is unavailable; only ${sessions.length} session(s) exist.`)
     console.log(selected.id)
   }),
 })

@@ -99,6 +99,6 @@ export function executablePath(execPath = process.execPath) {
   return Global.resolveExecutablePath(execPath)
 }
 
-export { writeSidebar, nextProjectTitle } from "@opencode-ai/core/util/ocSession"
+export { nextProjectTitle } from "@opencode-ai/core/util/ocSession"
 
 export * as OcConfig from "./oc"

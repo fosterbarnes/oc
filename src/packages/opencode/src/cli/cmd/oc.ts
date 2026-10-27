@@ -4,6 +4,7 @@ import path from "path"
 import fs from "fs/promises"
 import { spawn } from "child_process"
 import { cmd } from "./cmd"
+import { CliError } from "../effect-cmd"
 import { OcConfig } from "@/config/oc"
 import { Resident } from "@/config/resident"
 import { ReviveHost } from "@/config/reviveHost"
@@ -117,8 +118,7 @@ async function host(
 // Same steps as `session bootstrap`, sent to the resident server instead of a second instance.
 async function bootstrapSession(server: { url: string; secret: string }, directory: string) {
   const stat = await fs.stat(directory).catch(() => undefined)
-  if (!stat?.isDirectory()) throw new Error(`Directory not found: ${directory}`)
-  await OcConfig.writeSidebar(directory)
+  if (!stat?.isDirectory()) throw new CliError({ message: `Directory not found: ${directory}` })
   const { createOpencodeClient } = await import("@opencode-ai/sdk/v2")
   const client = createOpencodeClient({
     baseUrl: server.url,
@@ -221,7 +221,7 @@ const LaunchCommand = cmd({
       }),
   handler: async (args) => {
     const palette = typeof args.palette === "string" ? args.palette.trim() : ""
-    if (palette && args.target) throw new Error("--palette cannot be used with a launch target")
+    if (palette && args.target) throw new CliError({ message: "--palette cannot be used with a launch target" })
     if (palette) OcConfig.resolvePaletteLaunch(palette)
 
     if (palette) {
@@ -268,7 +268,7 @@ const PreviousCommand = cmd({
   handler: async (args) => {
     const depth = Number(args.depth)
     if (!Number.isInteger(depth) || depth < 1 || depth > 50)
-      throw new Error(`Previous session depth must be between 1 and 50: ${depth}`)
+      throw new CliError({ message: `Previous session depth must be between 1 and 50: ${depth}` })
     const settings = await OcConfig.read()
     const stopIntro = startIntro(settings.intro?.background)
     try {
@@ -437,8 +437,8 @@ export const OcCommand = cmd({
           argv["revive-terminal"] !== undefined,
         ].filter(Boolean).length
         if (selected > 0 && argv._.length > 1)
-          throw new Error("Server controls and --revive cannot be used with a launch target")
-        if (selected > 1) throw new Error("Use only one server control or --revive")
+          throw new CliError({ message: "Server controls and --revive cannot be used with a launch target" })
+        if (selected > 1) throw new CliError({ message: "Use only one server control or --revive" })
         return true
       }),
   handler: async (args) => {

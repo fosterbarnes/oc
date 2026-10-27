@@ -1,15 +1,13 @@
-// openSidebar settings: types, defaults, normalization, and the user/project config files.
+// openSidebar settings: types, defaults, normalization, the user/project config files, and oc's
+// per-project state file.
 import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
+import { Hash } from "@opencode-ai/core/util/hash"
 import { detectTerminal, type TerminalInfo } from "@opencode-ai/core/util/terminal"
-import { dedupeRootPaths, isDirectory, normalizeRootPath } from "./roots"
+import { dedupeRootPaths, isDirectory, normalizeRootPath, rootPathKey } from "./roots"
 import { normalizeUsageSubscriptions, type UsageSubscription } from "./usage/calendar"
-import {
-  DEFAULT_USAGE_PROVIDERS,
-  normalizeUsageProviders,
-  type UsageProviderId,
-} from "./usage/providers"
+import { DEFAULT_USAGE_PROVIDERS, normalizeUsageProviders, type UsageProviderId } from "./usage/providers"
 
 export type ScriptLauncher = {
   executable: string
@@ -381,6 +379,12 @@ export function sidebarConfigPaths(
   }
 }
 
+// Pins, favorites, and file roots are machine state, so oc keeps them in its state folder and never
+// writes into the project; the project file above is a hand-written override oc only reads.
+export function sidebarStatePath(stateDirectory: string, projectRoot: string) {
+  return path.join(stateDirectory, "sidebar", `${Hash.fast(rootPathKey(projectRoot)).slice(0, 16)}.json`)
+}
+
 export function promptProjectDirectory(prompt: unknown, homeDirectory = os.homedir()): string | undefined {
   if (typeof prompt !== "string") return undefined
   for (const match of prompt.matchAll(/\bcd\s+(?:"([^"]+)"|'([^']+)'|(\S+))/gi)) {
@@ -432,19 +436,13 @@ export function loadSidebarSettings(
   userPath = sidebarConfigPaths(projectRoot, homeDirectory).user,
   projectPath = sidebarConfigPaths(projectRoot, homeDirectory).project,
   base = defaultSidebarSettings(),
+  statePath?: string,
 ): SidebarSettings {
   const user = readJsonFile(userPath)
   const project = readJsonFile(projectPath)
   const userSettings = normalizeSidebarSettings(user, base)
-  return normalizeSidebarSettings(project, userSettings)
-}
-
-export function saveSidebarSettings(filePath: string, settings: SidebarSettings): void {
-  const directory = path.dirname(filePath)
-  fs.mkdirSync(directory, { recursive: true })
-  const temporary = `${filePath}.tmp-${process.pid}`
-  fs.writeFileSync(temporary, `${JSON.stringify(settings, null, 2)}\n`, "utf8")
-  fs.renameSync(temporary, filePath)
+  const projectSettings = normalizeSidebarSettings(project, userSettings)
+  return statePath ? normalizeSidebarSettings(readJsonFile(statePath), projectSettings) : projectSettings
 }
 
 export function saveUserScriptSettings(homeDirectory: string, scripts: ScriptSettings): void {

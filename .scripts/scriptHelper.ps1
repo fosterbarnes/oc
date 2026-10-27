@@ -170,6 +170,19 @@ function requireVersion {
     $contents
 }
 
+# The setup and release zips ship dist as-is, so both binaries must report exactly the maintenance
+# version. Only build.ps1 -Release does; other builds add -<branch>-<stamp>, which /update ranks
+# below the published release and keeps offering as an update.
+function requireReleaseBuild {
+    $expected = requireVersion
+    foreach ($exe in "$distFolder\opencode-windows-x64\bin\oc.exe", "$distFolder\opencode-native-windows-x64\bin\opencode.exe") {
+        if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) { throw "Missing $exe. Run .scripts\build.ps1 -Release first." }
+        $reported = "$(& $exe --version)".Trim()
+        if ($LASTEXITCODE) { throw "$exe --version failed (exit $LASTEXITCODE)." }
+        if ($reported -ne $expected) { throw "$exe reports $reported, not $expected. Run .scripts\build.ps1 -Release." }
+    }
+}
+
 # Maintenance version is X.Y.Z. Upstream sync increments the patch.
 function incrementMaintenancePatch {
     $current = requireVersion

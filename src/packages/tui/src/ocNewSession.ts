@@ -1,7 +1,7 @@
 import fs from "node:fs"
 import path from "node:path"
 import type { OpencodeClient } from "@opencode-ai/sdk/v2"
-import { nextProjectTitle, writeSidebar } from "@opencode-ai/core/util/ocSession"
+import { nextProjectTitle } from "@opencode-ai/core/util/ocSession"
 
 // Folders under the oc home dir for the New session picker. Name sort skips per-folder stats.
 export function listHomeDirs(homeDir: string, sort: string) {
@@ -32,7 +32,6 @@ function mtime(fullPath: string) {
 // Same steps as `session bootstrap` and the launcher, over the TUI's existing server connection.
 // The client defaults to the Home directory, so create and prompt route to `directory` explicitly.
 export async function bootstrapSession(client: OpencodeClient, directory: string) {
-  await writeSidebar(directory)
   const sessions = await client.experimental.session.list({ roots: true, limit: 500 }, { throwOnError: true })
   const title = nextProjectTitle(
     sessions.data.map((item) => item.title),

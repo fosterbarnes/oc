@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 
 import { $ } from "bun"
+import { readdirSync } from "fs"
 import path from "path"
 import { fileURLToPath } from "url"
 import { createSolidTransformPlugin } from "@opentui/solid/bun-plugin"
@@ -26,9 +27,13 @@ if (!/^\d+\.\d+\.\d+$/.test(maintenanceVersion)) {
 }
 const versionTag = (await Bun.file(path.resolve(dir, "../../.version/versionTag")).text()).trim()
 if (!/^[A-Za-z]+$/.test(versionTag)) throw new Error(`Invalid version tag: ${versionTag}`)
-const displayVersion = Script.version.startsWith("0.0.0-")
-  ? maintenanceVersion + Script.version.slice("0.0.0".length)
-  : Script.version
+// Release builds show the plain version: /update ranks `0.2.307` above `0.2.307-main-<stamp>`, so a
+// suffixed release binary would keep offering itself as an update.
+const displayVersion = Script.release
+  ? maintenanceVersion
+  : Script.version.startsWith("0.0.0-")
+    ? maintenanceVersion + Script.version.slice("0.0.0".length)
+    : Script.version
 // Local previews report their incorporated upstream version to provider compatibility gates.
 const runtimeVersion = Script.version.startsWith("0.0.0-") ? pkg.version : Script.version
 
@@ -262,14 +267,18 @@ for (const variant of variants) {
 }
 
 if (Script.release) {
+  const systemTar = path.join(process.env.SystemRoot ?? "C:\\Windows", "System32", "tar.exe")
   for (const key of Object.keys(binaries)) {
     if (key.includes("linux")) {
       await $`tar -czf ../../${key}.tar.gz *`.cwd(`dist/${key}/bin`)
     } else {
-      await $`zip -r ../../${key}.zip *`.cwd(`dist/${key}/bin`)
+      // Windows' own bsdtar writes zips; Git's GNU tar can come first on PATH and cannot. Entries are
+      // listed explicitly so folders (cursor-runtime) never depend on shell glob expansion.
+      const bin = `dist/${key}/bin`
+      await $`${systemTar} -a -cf ../../${key}.zip ${readdirSync(bin)}`.cwd(bin)
     }
   }
-  await $`gh release upload v${Script.version} ./dist/*.zip ./dist/*.tar.gz --clobber --repo ${process.env.GH_REPO}`
+  // .scripts/pushRelease.ps1 publishes the zips.
 }
 
 export { binaries }

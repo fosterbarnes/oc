@@ -270,8 +270,13 @@ export async function downloadRelease(version: string) {
         throw new Error(`${asset.name} SHA-256 mismatch: expected ${asset.sha256}, got ${sha256}`)
       await fsp.mkdir(folder, { recursive: true })
       await Bun.write(archive, bytes)
-      // Windows 10+ ships bsdtar, which reads zip archives.
-      const unpack = Bun.spawnSync(["tar", "-xf", archive, "-C", folder], { stdout: "pipe", stderr: "pipe" })
+      // Windows 10+ ships bsdtar, which reads zips; Git's GNU tar can come first on PATH and cannot, so the
+      // System32 copy is called by path. bsdtar reads its arguments in the ANSI code page, so it runs inside
+      // the folder and only sees the ASCII archive name (a profile path like C:\Users\用户 would turn into ??).
+      const unpack = Bun.spawnSync(
+        [path.join(process.env.SystemRoot ?? "C:\\Windows", "System32", "tar.exe"), "-xf", path.join("..", asset.name)],
+        { cwd: folder, stdout: "pipe", stderr: "pipe" },
+      )
       if (unpack.exitCode !== 0) throw new Error(`Unpacking ${asset.name} failed: ${unpack.stderr.toString().trim()}`)
       return folder
     }),

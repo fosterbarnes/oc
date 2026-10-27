@@ -6,6 +6,7 @@ import net from "net"
 import { randomBytes } from "crypto"
 import { Global } from "@opencode-ai/core/global"
 import { launchDetached } from "@opencode-ai/core/util/launchDetached"
+import { CliError } from "@/cli/effect-cmd"
 import { TuiLedger } from "./tuiLedger"
 import { defaultServerPort, executablePath, filePath, read } from "./oc"
 import { killPane } from "./wezterm"
@@ -96,7 +97,14 @@ async function serverSecret() {
   const secret = randomBytes(32).toString("base64")
   await fs.writeFile(file, secret, "ascii")
   if (process.platform === "win32") {
-    const user = Bun.spawnSync(["whoami.exe", "/user"], { stdout: "pipe", stderr: "pipe" }).stdout.toString()
+    // Called by path: Git's coreutils whoami.exe can come first on PATH and rejects `/user`.
+    const user = Bun.spawnSync(
+      [path.join(process.env.SystemRoot ?? "C:\\Windows", "System32", "whoami.exe"), "/user"],
+      {
+        stdout: "pipe",
+        stderr: "pipe",
+      },
+    ).stdout.toString()
     const sid = user.match(/S-\d-\d+(?:-\d+)+/)?.[0]
     if (!sid) throw new Error("Failed to determine the current Windows user SID")
     const result = Bun.spawnSync(["icacls.exe", file, "/inheritance:r", "/grant:r", `*${sid}:F`], {
@@ -172,6 +180,7 @@ export function residentLaunchAction(observation: ResidentObservation): Resident
   return "clear-spawn"
 }
 
+// Refusals are CliErrors, so the CLI prints just the message, without the "Unexpected error" banner.
 function residentRefusal(
   hostname: string,
   port: number,
@@ -184,19 +193,19 @@ function residentRefusal(
     const detail = listener?.pid
       ? ` Listener pid ${listener.pid}${listener.executable ? ` (${listener.executable})` : ""}.`
       : " No unique matching listener was found."
-    return new Error(
-      `Resident port ${hostname}:${port} is occupied (health true) but no launcher state exists at ${serverStatePath()}.${detail} Not claiming ownership.`,
-    )
+    return new CliError({
+      message: `Resident port ${hostname}:${port} is occupied (health true) but no launcher state exists at ${serverStatePath()}.${detail} Not claiming ownership.`,
+    })
   }
-  return new Error(
-    `Resident port ${hostname}:${port} is occupied by a server not owned by this launcher (pid ${state.pid ?? "unknown"} ${alive ? "alive" : "dead"}, state ${matches ? "matches" : "mismatched"}). Health is true but PID is not a live owner. Remove ${serverStatePath()} or free the port.`,
-  )
+  return new CliError({
+    message: `Resident port ${hostname}:${port} is occupied by a server not owned by this launcher (pid ${state.pid ?? "unknown"} ${alive ? "alive" : "dead"}, state ${matches ? "matches" : "mismatched"}). Health is true but PID is not a live owner. Remove ${serverStatePath()} or free the port.`,
+  })
 }
 
 function otherBuildRefusal(executable: string | undefined) {
-  return new Error(
-    `The background server is running from another oc install (${executable}). Close it with "${executable}" --shutdown-all, then start this oc again.`,
-  )
+  return new CliError({
+    message: `The background server is running from another oc install (${executable}). Close it with "${executable}" --shutdown-all, then start this oc again.`,
+  })
 }
 
 async function readResidentState(): Promise<ResidentState | undefined> {
@@ -620,7 +629,7 @@ export async function shutdownAll(
   const owned = records.filter((record) => pids.includes(record.pid))
   for (const record of owned) {
     if (!record.paneID || opts.keepPanes?.includes(record.paneID)) continue
-    killPane(record.paneID)
+    killPane(record.paneID, record.weztermSocket)
   }
   // TUIs have nothing to save; killing them up front avoids the "Unable to connect" screen while servers stop.
   if (processes !== null) await forceKill(processes.filter((item) => pids.includes(item.pid)))
