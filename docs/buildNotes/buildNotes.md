@@ -210,6 +210,23 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-27 (~01:37) - v0.2.315 bustingDrs - Slash pick keeps the next command - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation (/spit -> /think -> /imp, plan `~/.config/opencode/plans/slashInsertKeepsNext.md`); completed
+- Version: 0.2.315 bustingDrs
+- Fixed: picking a command in `/x|/command` deleted `/command`; `insertSlash` (`component/prompt/autocomplete.tsx`) ended the replaced token with `^\S*`, which ran through the next `/command`
+- Added `slashTokenEnd` in `prompt/slash.ts` beside `slashTriggerIndex`: token end stops at whitespace or `/` (same `[^\s/]` rule as token start); `insertSlash` uses it. Result `/foo /command`, cursor before `/command`; mid-word `/com|mand` still replaced whole
+- Removed now-unused `promptOffsetWidth` import from `autocomplete.tsx`
+- Added test `slash pick replaces the edited word but keeps a following command` in `test/prompt/slash.test.ts` (guards this bug)
+- Verification: `bun test test/prompt/slash.test.ts` 6 pass 0 fail; `bunx tsc --noEmit -p .` in `packages/tui` exit 0. TUI behavior not driven (textarea has no unit harness); user check pending
+
+### User
+Prompt
+- Picking a slash command typed in front of another command now inserts it to the left with a space, instead of replacing the command to its right.
+
+---
+
 ## 2026-10-27 (~01:12) - v0.2.314 bustingRamps - Show queued prompts above the prompt - Claude Opus 5.5, low effort; Implementation
 
 ### Agent

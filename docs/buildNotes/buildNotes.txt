@@ -1,14 +1,6 @@
-v0.2.314 bustingRamps [fix > revive chain loop; feat. > queue strip]
+v0.2.315 bustingDrs [fix > slash pick keeps next command]
 
-queued prompts:
-Prompts and commands you queue with alt+q in a session now show above the prompt box, one row each with a QUEUED badge and the text as you typed it, up to three rows and then "+N more". Rows stay until the prompt is sent, and clicking them opens Queued prompts. Before this, queueing during a busy turn showed nothing at all, because the footer's queue count only appears when the session is idle.
+slash commands:
+Picking a slash command from the menu while the cursor sits right in front of another command, such as typing /x before /command, now inserts the picked command to the left with a space: /picked /command. Before this, the command to the right was deleted and replaced. Editing in the middle of a command word, such as /com|mand, still replaces the whole word.
 
-The prompt border also flashes the accent color briefly when a prompt is queued, so you can tell the key worked. The flash is skipped when animations are off. Scheduled prompts (alt+s) stay out of the list and keep showing in the footer and Queued prompts.
-
-revive chains:
-A chain with two revives, such as /imp /revive /pass /revive /agent-push, no longer repeats the step after the first revive forever. After a revive, the chain resumed with the old saved steps written over the new ones, so every later revive started over at the same step.
-
-docs:
-The wiki Sessions page describes the queued prompt rows.
-
-Under the hood: the new QueueStrip component reads the queue snapshot the prompt already polls, so it adds no requests; the queue now also refreshes on every busy or idle change so a row leaves as its turn starts. The revive chain resume now passes only agent, model and variant to the chain runner. Checks: tui typecheck clean; throwaway render probes of the queue rows (filtering, row cap, truncation, rows updating and clearing); the loop fix was seen working live, as this chain moved on to its push after the fixed build took over. Known failure: test/component/queue.test.tsx fails at v0.2.313 because its harness lacks providers the Queued prompts dialog now needs (not from this change). Not run: the border flash and a live busy-to-idle queue run, which need a look in the real TUI.
+Under the hood: the end of the replaced word now stops at the next "/" as well as at whitespace, the same rule the menu already used to find where the word starts; both rules now live in prompt/slash.ts. Checks: tui slash tests pass with a new case for this bug; tui typecheck clean. Not run: a live check in the real TUI prompt.

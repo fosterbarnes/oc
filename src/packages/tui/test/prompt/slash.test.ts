@@ -1,5 +1,12 @@
 import { expect, test } from "bun:test"
-import { commandUse, extractChain, extractSlashCommands, slashTriggerIndex, typedText } from "../../src/prompt/slash"
+import {
+  commandUse,
+  extractChain,
+  extractSlashCommands,
+  slashTokenEnd,
+  slashTriggerIndex,
+  typedText,
+} from "../../src/prompt/slash"
 import { promptOffsetWidth } from "../../src/prompt/display"
 
 test("slash composition locates the current trigger across Unicode, buffer replacement, and separators", () => {
@@ -8,6 +15,13 @@ test("slash composition locates the current trigger across Unicode, buffer repla
   expect(slashTriggerIndex("/action00 /action14 ", 20)).toBeUndefined()
   expect(slashTriggerIndex("/usr/bin", 8)).toBeUndefined()
   expect(slashTriggerIndex("https://example.com", 19)).toBeUndefined()
+})
+
+test("slash pick replaces the edited word but keeps a following command", () => {
+  expect(slashTokenEnd("/x/command", 2)).toBe(2)
+  expect(slashTokenEnd("/comm and", 4)).toBe(5)
+  expect(slashTokenEnd("/x", 2)).toBe(2)
+  expect(slashTokenEnd("界 /a/b", 5)).toBe(5)
 })
 
 test("slash composition extracts ordered unique names while preserving request text", () => {

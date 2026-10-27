@@ -22,8 +22,8 @@ import { Locale } from "../../util/locale"
 import type { PromptInfo } from "../../prompt/history"
 import { useFrecency } from "../../prompt/frecency"
 import { useBindings, useCommandShortcut, useCommandSlashes, useOpencodeModeStack } from "../../keymap"
-import { displayCharAt, promptOffsetWidth, mentionTriggerIndex } from "../../prompt/display"
-import { REVIVE_MODES, slashTriggerIndex } from "../../prompt/slash"
+import { displayCharAt, mentionTriggerIndex } from "../../prompt/display"
+import { REVIVE_MODES, slashTokenEnd, slashTriggerIndex } from "../../prompt/slash"
 import type { FileSystemEntry } from "@opencode-ai/sdk/v2"
 
 function removeLineRange(input: string) {
@@ -477,8 +477,7 @@ export function Autocomplete(props: {
     const offset = input.cursorOffset
     const index = slashTriggerIndex(input.plainText, offset)
     if (index === undefined) return
-    const suffix = input.getTextRange(offset, promptOffsetWidth(input.plainText))
-    const end = offset + promptOffsetWidth(suffix.match(/^\S*/)?.[0] ?? "")
+    const end = slashTokenEnd(input.plainText, offset)
     input.cursorOffset = index
     const startCursor = input.logicalCursor
     input.cursorOffset = end

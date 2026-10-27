@@ -8,6 +8,12 @@ export function slashTriggerIndex(value: string, offset: number) {
   return promptOffsetWidth(prefix.slice(0, prefix.length - match[0].length + match[1].length))
 }
 
+// End of the slash token being edited: runs through the rest of the word (`/com|mand`) but stops
+// at the next `/command`, so picking in `/x|/next` keeps `/next`.
+export function slashTokenEnd(value: string, offset: number) {
+  return offset + promptOffsetWidth(displaySlice(value, offset).match(/^[^\s/]*/)![0])
+}
+
 type CommandText = { text: string; metadata?: Record<string, unknown> }
 
 // Stamped on command template text by SessionPrompt.command (opencode session/prompt.ts).
