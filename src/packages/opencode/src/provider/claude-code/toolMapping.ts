@@ -127,6 +127,22 @@ export function singleQuoteForShell(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`
 }
 
+/**
+ * Result flags and metadata for a tool the CLI ran. Claude CLI reports a nonzero shell exit as
+ * an error result headed "Exit code N"; oc's own shell tool completes those with the exit code,
+ * so map them the same way. `metadata.output` is what the TUI's Shell block renders. Denials
+ * and interrupts stay errors.
+ */
+export function cliResultMeta(name: string, text: string, isError: boolean) {
+  if (name !== "bash") return { isError, metadata: isError ? { error: true } : {} }
+  const exit = isError ? /^Exit code (\d+)\r?\n?/.exec(text) : null
+  if (isError && !exit) return { isError, metadata: { error: true } }
+  return {
+    isError: false,
+    metadata: exit ? { output: text.slice(exit[0].length), exit: Number(exit[1]) } : { output: text },
+  }
+}
+
 export function mapTool(
   name: string,
   input?: any,

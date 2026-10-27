@@ -210,6 +210,24 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-27 (~17:01) - v0.2.318 landsSchwangin - Claude shell runs show output blocks - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation (/spit -> /think -> /imp, plan `~/.config/opencode/plans/claudeShellRows.md`); completed
+- Version: 0.2.318 landsSchwangin
+- Fixed Claude CLI-run `Bash`/`PowerShell` rows rendering as one-line `$ command`: `turnStream.ts` `readToolResults` sent `metadata: {}`, and TUI `Shell` (`index.tsx:2624`) draws the block only when `metadata.output` is a string.
+- Added `toolMapping.ts` `cliResultMeta(name, text, isError)`: for `bash` sets `metadata.output`; an `is_error` result headed `Exit code N` becomes a completed result with `{ output: <rest>, exit: N }` (native shell parity, Full output dialog shows `Exited · code N`); other errors (denials, interrupts) stay `{ error: true }`. Non-bash tools unchanged. `output` still carries the full CLI text.
+- Kept running Claude shell rows one-line: CLI sends no partial output, so no fake running block.
+- TODO: `backgroundable` (`tui/src/routes/session/index.tsx:3391`) treats any running `bash` part as movable, including CLI-run ones Ctrl+B cannot move.
+- Verification: throwaway fake-CLI probe (deleted) emitted Bash success `{output:"shell-ok"}`, `Exit code 2\ncore` -> `{output:"core",exit:2}` no isError, denial -> isError `{error:true}`, PowerShell `Exit code 1\r\nboom` -> `{output:"boom",exit:1}`, Read `{}`. `tsgo --noEmit` clean. 19 claude-code test files touching tool results: 316 pass / 4 fail, all 4 on the AGENTS.md known-failures list (sessionManager x2, warmup claims x2). No visual check.
+
+### User
+Claude
+- Shell commands run by Claude models now show their output in the chat, with Expand and Full output, like other models.
+- A Claude command that exits with an error code now shows its output and exit code instead of a red error line.
+
+---
+
 ## 2026-10-27 (~16:15) - v0.2.317 espionageCapella - Claude models from the models.dev catalog - Claude Opus 5.5, low effort; Implementation
 
 ### Agent

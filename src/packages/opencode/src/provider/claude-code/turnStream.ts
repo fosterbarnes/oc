@@ -16,7 +16,7 @@ import type { ClaudeCodeConfig, ClaudeStreamMessage } from "./types.js"
 import type { TurnContext } from "./turnContext.js"
 import type { RuntimeMcpStatus } from "./mcpBridge.js"
 import type { CliVersion } from "./cliVersion.js"
-import { mapTool, isWebSearchTool, isWebSearchHandledByCli } from "./toolMapping.js"
+import { mapTool, isWebSearchTool, isWebSearchHandledByCli, cliResultMeta } from "./toolMapping.js"
 import { StreamWriter } from "./streamWriter.js"
 import { isTodoMirror, TodoMirror } from "./todoMirror.js"
 import { Steering } from "./steering.js"
@@ -1184,13 +1184,14 @@ class ClaudeTurn {
       if (!name) continue
       this.toolCallNames.delete(id)
       // `isError` makes the AI SDK emit a `tool-error`, which is what renders
-      // the row as failed rather than a success whose output is an error.
-      const isError = block.is_error === true
+      // the row as failed rather than a success whose output is an error. A shell
+      // command's nonzero exit is not a failure (see cliResultMeta).
+      const { isError, metadata } = cliResultMeta(name, resultText, block.is_error === true)
       this.out.enqueue({
         type: "tool-result",
         toolCallId: id,
         toolName: name,
-        result: { output: resultText, title: name, metadata: isError ? { error: true } : {} },
+        result: { output: resultText, title: name, metadata },
         ...(isError ? { isError: true } : {}),
         providerExecuted: true,
       })
