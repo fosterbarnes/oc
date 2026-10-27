@@ -1,13 +1,13 @@
-v0.2.311 dmrJinglers [feat. > queue slash commands]
+v0.2.312 sauronPermarolling [feat. > new session spinner and preselect]
 
-queue:
-Slash commands can now be queued with Alt+Q or Alt+Enter and scheduled with Alt+S. A queued /spit fix it waits its turn and then runs as that command, including scheduled sends to a fork or a new session. The queue manager shows the entry as you typed it, and editing it can add or remove commands.
+new session:
+After you pick a folder in the Ctrl+N New oc session list, the title shows a spinner with "Creating session in <folder>" until the session opens, and the list ignores keys meanwhile, so the dialog no longer looks frozen.
 
-Revive chains like /revive /pass and TUI commands like /btw still cannot be queued, and the warning now says which one you hit.
+Opening Ctrl+N from a session now starts the list on that session's home folder, including when the session sits in a subfolder. Typing still jumps to the best match.
 
-Queueing a prompt while an editor selection is attached no longer fails, and editing a queued entry keeps the selection.
+Creating a session in a folder oc has not opened since it started still takes about 2 seconds: that is the server loading the project, not the picker.
 
 docs:
-FORK.md and the wiki Sessions page describe queued slash commands.
+The wiki Keybinds page notes that ctrl+n starts on the current session's folder. Build notes rotated to buildNotes.archive15.md.
 
-Under the hood: queue entries carry an optional commands list next to their parts, set by the TUI from the same paste-aware parse that Enter uses, so the server never parses typed text. One sendQueued helper serves the normal and scheduled queue paths and sends command entries through SessionPrompt.command, which now passes the queue's delivery and persisted hooks on to prompt. The queue add check allows synthetic text only as editor context, and edits keep synthetic and attachment parts. Regenerated the JS SDK. Checks: opencode and tui typecheck clean; opencode httpapiQueue and session queue tests 20 pass with new cases for editor context, bare commands, and a queued command sent through its command; tui queue, slash and part tests pass; prompt.test.ts 68 pass with 3 known failures (queue contention, 2 handoff child). Not yet run: a live check in a built oc.
+Under the hood: the picker reuses the DialogSelect titleView spinner and locked pattern from the Move session dialog, and finds the current folder with FSUtil.contains, which ignores letter case and slash style on Windows. The planned title lookup filter was dropped after a probe showed the session list call takes about 12 ms. Checks: tui typecheck clean; ocNewSession tests 2 pass; a throwaway path probe matched backslash, forward slash, other case and subfolders; a throwaway oc TUI pane probe showed no marked row from Home, the spinner while creating, and the current folder marked from a session. Not run: the filter-then-Enter and Esc pane cases (the run was cut short).

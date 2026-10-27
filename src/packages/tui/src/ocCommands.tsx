@@ -1,6 +1,8 @@
 /// <reference path="./script.d.ts" />
 import fs from "node:fs"
 import path from "node:path"
+import { TextAttributes } from "@opentui/core"
+import { FSUtil } from "@opencode-ai/core/fs-util"
 import { Global } from "@opencode-ai/core/global"
 import { SYSTEM_TIME_ZONE } from "@opencode-ai/core/util/timeZone"
 import { DialogAbout } from "./component/dialog-about"
@@ -9,11 +11,13 @@ import { DialogModel } from "./component/dialog-model"
 import { DialogSessionCleanup } from "./component/dialog-session-cleanup"
 import { DialogSessionSubagents } from "./component/dialog-session-subagents"
 import { DialogSubagents } from "./component/dialog-subagents"
+import { Spinner } from "./component/spinner"
 import { useTuiConfig } from "./config"
 import { useKV } from "./context/kv"
 import { useRoute } from "./context/route"
 import { useSDK } from "./context/sdk"
 import { useSync } from "./context/sync"
+import { useTheme } from "./context/theme"
 import {
   CHATGPT_DESKTOP,
   CLAUDE_DESKTOP,
@@ -48,6 +52,7 @@ import {
 import { detectTerminal } from "@opencode-ai/core/util/terminal"
 import { launchDetached } from "@opencode-ai/core/util/launchDetached"
 import { useRenderer } from "@opentui/solid"
+import { createSignal, Show } from "solid-js"
 import { DialogConfirm } from "./ui/dialog-confirm"
 import killallScript from "./killall.ps1" with { type: "text" }
 
@@ -71,6 +76,7 @@ export function createOcCommands(input: {
   const toast = useToast()
   const sync = useSync()
   const renderer = useRenderer()
+  const { theme } = useTheme()
   const { claudeCliPath, controlServer } = input
   return {
     newSession: {
@@ -85,14 +91,29 @@ export function createOcCommands(input: {
           toast.show({ message: `No folders found in ${homeDir}`, variant: "error" })
           return
         }
-        // Bootstrapping takes seconds; ignore repeat selections until it settles.
-        let creating = false
+        // From a session, start on the home folder that holds it.
+        const sessionDirectory =
+          route.data.type === "session" ? sync.session.get(route.data.sessionID)?.directory : undefined
+        const current = sessionDirectory
+          ? dirs.find((dir) => FSUtil.contains(dir.fullPath, sessionDirectory))?.fullPath
+          : undefined
+        // Booting a cold project takes seconds; the folder name drives the spinner and locks the list.
+        const [creating, setCreating] = createSignal<string>()
         dialog.replace(() => (
           <DialogSelect
             title="New oc session"
+            titleView={
+              <box flexDirection="row" gap={1}>
+                <text fg={theme.text} attributes={TextAttributes.BOLD}>
+                  New oc session
+                </text>
+                <Show when={creating()}>{(name) => <Spinner>Creating session in {name()}</Spinner>}</Show>
+              </box>
+            }
+            locked={creating() !== undefined}
+            current={current}
             options={dirs.map((dir) => ({ value: dir.fullPath, title: dir.name }))}
             onSelect={async (option) => {
-              if (creating) return
               const directory = path.normalize(option.value)
               let isDir = false
               try {
@@ -104,13 +125,13 @@ export function createOcCommands(input: {
                 toast.show({ message: `Directory not found: ${directory}`, variant: "error" })
                 return
               }
-              creating = true
+              setCreating(option.title)
               try {
                 const sessionID = await bootstrapSession(sdk.client, directory)
                 dialog.clear()
                 route.navigate({ type: "session", sessionID })
               } catch (error) {
-                creating = false
+                setCreating(undefined)
                 toast.show({
                   message: `Failed to create oc session: ${error instanceof Error ? error.message : String(error)}`,
                   variant: "error",
