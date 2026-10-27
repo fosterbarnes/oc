@@ -119,8 +119,11 @@ export function formatClaudeUsageRows(
     // Unknown percent -> null ("reset unavailable"); hourly 0% with no reset ->
     // shows `-` (no 5-hour window running yet); other known percents without a reset leave a blank slot.
     const resetAt = window.resetAt ?? (window.usedPercent === null ? null : idle)
-    return { usedPercent: window.usedPercent, resetAt,
-      suffix: suffix + (nowMs !== undefined && usageWindowStale(window, snapshot, nowMs) ? "*" : "") }
+    return {
+      usedPercent: window.usedPercent,
+      resetAt,
+      suffix: suffix + (nowMs !== undefined && usageWindowStale(window, snapshot, nowMs) ? "*" : ""),
+    }
   }
   return known.flatMap(({ id, name, usage: account }, index) => {
     const base = index === 0 ? "Claude" : `Claude${index + 1}`
@@ -133,7 +136,7 @@ export function formatClaudeUsageRows(
       clocks,
       days,
       windows: [cell(account.fiveHour, "h", account), cell(account.weekly, "w", account)],
-    }).map((row, rowIndex) => ({ ...row, label, snapshot: account, spaced: index > 0 && rowIndex === 0 }))
+    }).map((row, rowIndex) => ({ ...row, label, account: id, snapshot: account, spaced: index > 0 && rowIndex === 0 }))
   })
 }
 

@@ -177,6 +177,8 @@ export type AuthOAuthResult = { url: string; instructions: string } & (
                 accountId?: string
                 enterpriseUrl?: string
                 apiEndpoint?: string
+                subscriptionStart?: number
+                subscriptionUntil?: number
               }
             | { key: string; metadata?: Record<string, string> }
           ))
@@ -199,6 +201,8 @@ export type AuthOAuthResult = { url: string; instructions: string } & (
                 accountId?: string
                 enterpriseUrl?: string
                 apiEndpoint?: string
+                subscriptionStart?: number
+                subscriptionUntil?: number
               }
             | { key: string; metadata?: Record<string, string> }
           ))

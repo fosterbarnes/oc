@@ -4,7 +4,6 @@ import { Global } from "@opencode-ai/core/global"
 import { ClaudeUsageCache } from "@opencode-ai/core/claude-usage-cache"
 import { log } from "./logger.js"
 
-export const BASE_PROVIDER_ID = "claude-code"
 export const DEFAULT_ACCOUNT = "default"
 
 export function expandHome(value: string): string {

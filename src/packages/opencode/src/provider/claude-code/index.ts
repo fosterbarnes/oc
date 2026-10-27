@@ -2,17 +2,11 @@ import type { LanguageModelV3 } from "@ai-sdk/provider"
 import type { Plugin } from "@opencode-ai/plugin"
 import { isRecord } from "@/util/record"
 import { ClaudeCodeLanguageModel } from "./claudeCodeLanguageModel.js"
-import { defaultModels, passthroughModel, toConfigModel } from "./models.js"
-import type {
-  OpenCodeConfig,
-  OpenCodeEvent,
-  OpenCodeModel,
-  OpenCodePlugin,
-  OpenCodeProvider,
-} from "./opencodeTypes.js"
+import { toConfigModel } from "./models.js"
+import type { OpenCodeConfig, OpenCodeEvent, OpenCodeModel, OpenCodePlugin } from "./opencodeTypes.js"
 import { DEFAULT_PROXY_TOOL_NAMES } from "./types.js"
 import type { ClaudeCodeProviderSettings } from "./types.js"
-import { BASE_PROVIDER_ID } from "./accounts.js"
+import { CLAUDE_CODE_PROVIDER_ID } from "./shared.js"
 import {
   type AgentRecord,
   agentDirectories,
@@ -189,7 +183,7 @@ export function createClaudeCode(settings: ClaudeCodeProviderSettings = {}): Cla
 // OpenCode plugin interface
 // ---------------------------------------------------------------------------
 
-const PROVIDER_ID = BASE_PROVIDER_ID
+const PROVIDER_ID = CLAUDE_CODE_PROVIDER_ID
 export const CLAUDE_CODE_PROVIDER_NPM = "@opencode-ai/claude-code"
 
 function cleanProviderOptions(options: Record<string, unknown> = {}): Record<string, unknown> {
@@ -199,117 +193,30 @@ function cleanProviderOptions(options: Record<string, unknown> = {}): Record<str
   return result
 }
 
-function defaultModelsForProvider(providerModels: OpenCodeProvider["models"], providerID = PROVIDER_ID) {
-  const models: Record<string, OpenCodeModel> = Object.fromEntries(
-    Object.keys(defaultModels).map((id) => {
-      const model = registeredModel(id, providerModels, providerID)
-      return [model.id, model]
-    }),
-  )
-  for (const [id, model] of Object.entries(providerModels)) {
-    if (!(id in models)) models[id] = { ...model, providerID }
+/**
+ * The operator's own `provider.claude-code.models` entries, in the flat config
+ * schema. Built-in models are not emitted here: provider state seeds this
+ * provider from the models.dev catalog (`claudeCodeModels`), and opencode's
+ * config loader overlays each entry field by field on that seed, so a partial
+ * entry (a name, a variant, a limit) keeps the catalog's prices and an unknown
+ * id is completed from `passthroughModel`. Only a full runtime-shaped entry
+ * (`capabilities`, nested `cost.cache`) is converted, because the loader reads
+ * the flat shape.
+ */
+export function configModelsForProvider(providerModels: Record<string, unknown>): Record<string, unknown> {
+  const models: Record<string, unknown> = {}
+  for (const [id, entry] of Object.entries(providerModels)) {
+    const runtimeShaped =
+      isRecord(entry) &&
+      isRecord(entry.capabilities) &&
+      isRecord(entry.capabilities.input) &&
+      isRecord(entry.capabilities.output) &&
+      isRecord(entry.cost) &&
+      isRecord(entry.cost.cache) &&
+      isRecord(entry.api)
+    models[id] = runtimeShaped ? toConfigModel(entry as unknown as OpenCodeModel) : entry
   }
   return models
-}
-
-/**
- * One built-in model as this provider registers it. Keeps the npm package and
- * URL of an entry the operator already declared under the same id.
- */
-function registeredModel(
-  id: string,
-  providerModels: OpenCodeProvider["models"],
-  providerID: string,
-  modelSuffix?: string,
-): OpenCodeModel {
-  const model = defaultModels[id]
-  const modelId = modelSuffix ? `${id}@${modelSuffix}` : id
-  const existing = providerModels[id] ?? providerModels[modelId]
-  return {
-    ...model,
-    id: modelId,
-    providerID,
-    api: {
-      ...model.api,
-      id: modelId,
-      npm: existing?.api?.npm ?? model.api.npm,
-      url: existing?.api?.url ?? model.api.url,
-    },
-  }
-}
-
-/**
- * Build models in OpenCode's config schema format (flat properties like
- * `temperature`, `reasoning`, `cost.cache_read`, `modalities`, etc.)
- * so the config-path provider loader parses them correctly.
- */
-export function configModelsForProvider(
-  providerModels: OpenCodeProvider["models"],
-  providerID: string,
-  modelSuffix?: string,
-): Record<string, Record<string, unknown>> {
-  const models: Record<string, Record<string, unknown>> = {}
-  for (const id of Object.keys(defaultModels)) {
-    const model = registeredModel(id, providerModels, providerID, modelSuffix)
-    const existing = providerModels[id] ?? providerModels[model.id]
-    const existingVariants = (existing as { variants?: unknown } | undefined)?.variants
-    models[model.id] = toConfigModel({
-      ...model,
-      variants: {
-        ...(model.variants ?? {}),
-        ...(isRecord(existingVariants) ? (existingVariants as OpenCodeModel["variants"]) : {}),
-      },
-    })
-  }
-
-  for (const [id, model] of Object.entries(providerModels)) {
-    if (!(id in models)) {
-      models[id] = completeUserModel(id, model, providerID)
-    }
-  }
-
-  return models
-}
-
-/**
- * A user model id this plugin does not register, in the flat config schema.
- *
- * A full runtime-shaped entry (`capabilities`, nested `cost.cache`) converts as
- * before. Anything else is what opencode's config schema actually allows, a
- * partial entry in the flat shape, and it is overlaid on `passthroughModel`'s
- * complete template rather than converted, because converting a partial entry
- * threw `undefined is not an object (evaluating 'model.capabilities.input')`
- * inside the config hook and took the whole provider registration with it
- * (found 2026-09-27 while probing the fallback chain). Nested `cost`, `limit`
- * and `variants` merge key by key so a partial `limit: { context }` keeps the
- * template's `output`.
- */
-function completeUserModel(id: string, entry: unknown, providerID: string): Record<string, unknown> {
-  const record = isRecord(entry) ? entry : {}
-  const runtimeShaped =
-    isRecord(record.capabilities) &&
-    isRecord(record.capabilities.input) &&
-    isRecord(record.capabilities.output) &&
-    isRecord(record.cost) &&
-    isRecord(record.cost.cache) &&
-    isRecord(record.api)
-  if (runtimeShaped) {
-    return toConfigModel({ ...(record as unknown as OpenCodeModel), providerID })
-  }
-  const base = toConfigModel({ ...passthroughModel(id), providerID })
-  log.warn("provider model entry is partial; completing it from the pass-through template", {
-    providerID,
-    model: id,
-    declared: Object.keys(record),
-  })
-  const merged: Record<string, unknown> = { ...base, ...record, id }
-  for (const key of ["cost", "limit", "variants"] as const) {
-    merged[key] = {
-      ...(isRecord(base[key]) ? base[key] : {}),
-      ...(isRecord(record[key]) ? record[key] : {}),
-    }
-  }
-  return merged
 }
 
 async function providerConfig(
@@ -342,9 +249,8 @@ async function providerConfig(
       ...mergedOptions,
       cliPath,
     },
-    // models is intentionally omitted: both callers overwrite it with
-    // configModelsForProvider(), which emits the flat config schema
-    // opencode's config-path loader parses (and merges user variants).
+    // models is intentionally omitted: the config hook sets it from
+    // configModelsForProvider() (the operator's own entries only).
   }
 }
 
@@ -450,7 +356,7 @@ export const claudeCodeServer: OpenCodePlugin = async (input) => {
       config.provider[PROVIDER_ID] = {
         ...existing,
         ...(await providerConfig(existing)),
-        models: configModelsForProvider((existing?.models ?? {}) as OpenCodeProvider["models"], PROVIDER_ID),
+        models: configModelsForProvider(existing?.models ?? {}),
       }
       logStartupDiagnostics(claudeCodeProviders(config.provider), opencodeVersion)
     },
@@ -469,10 +375,6 @@ export const claudeCodeServer: OpenCodePlugin = async (input) => {
       if (released.length > 0) {
         log.info("released claude state for deleted session", { sessionID, released })
       }
-    },
-    provider: {
-      id: PROVIDER_ID,
-      models: async (provider) => defaultModelsForProvider(provider.models),
     },
   }
 }

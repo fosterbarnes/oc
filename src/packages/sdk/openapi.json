@@ -18053,6 +18053,14 @@
           },
           "apiEndpoint": {
             "type": "string"
+          },
+          "subscriptionStart": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "subscriptionUntil": {
+            "type": "integer",
+            "minimum": 0
           }
         },
         "required": ["type", "refresh", "access", "expires"],

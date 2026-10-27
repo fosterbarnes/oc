@@ -3,13 +3,19 @@ import type { CursorUsage } from "./cursor"
 import { orderUsageWindows, windowName } from "./format"
 import { Locale } from "../../../../util/locale"
 import type { OpenAIUsage, OpenCodeGoUsage } from "./probes"
-import type { UsageProviderId } from "./providers"
+import { USAGE_PLAN_PROVIDERS, type UsagePlanProvider, type UsageProviderId } from "./providers"
 import { usageWindowStale, type UsageSnapshot, type UsageWindow } from "./snapshot"
 
 const DAY_MS = 86_400_000
 
-/** A subscription date no usage API reports: renews monthly on `renewDay`, or ends on `endsOn` (`YYYY-MM-DD`). */
-export type UsageSubscription = { label: string } & ({ renewDay: number } | { endsOn: string })
+/**
+ * A subscription date no usage API reports: renews monthly on `renewDay`, or ends on `endsOn` (`YYYY-MM-DD`).
+ * `provider` (and `account`, a Claude config dir id) makes it the override for that provider's sidebar plan line.
+ */
+export type UsageSubscription = { label: string; provider?: UsagePlanProvider; account?: string } & (
+  | { renewDay: number }
+  | { endsOn: string }
+)
 
 export type UsageCalendarEvent = {
   atMs: number
@@ -32,14 +38,29 @@ export function normalizeUsageSubscriptions(value: unknown): UsageSubscription[]
   if (!Array.isArray(value)) return []
   return value.flatMap((item): UsageSubscription[] => {
     if (!item || typeof item !== "object") return []
-    const entry = item as { label?: unknown; renewDay?: unknown; endsOn?: unknown }
+    const entry = item as {
+      label?: unknown
+      renewDay?: unknown
+      endsOn?: unknown
+      provider?: unknown
+      account?: unknown
+    }
     if (typeof entry.label !== "string" || !entry.label.trim()) return []
     const label = entry.label.trim()
-    if (typeof entry.renewDay === "number" && Number.isInteger(entry.renewDay) && entry.renewDay >= 1 &&
-      entry.renewDay <= 31)
-      return [{ label, renewDay: entry.renewDay }]
+    const provider = USAGE_PLAN_PROVIDERS.find((id) => id === entry.provider)
+    const tag = {
+      ...(provider ? { provider } : {}),
+      ...(provider && typeof entry.account === "string" && entry.account ? { account: entry.account } : {}),
+    }
+    if (
+      typeof entry.renewDay === "number" &&
+      Number.isInteger(entry.renewDay) &&
+      entry.renewDay >= 1 &&
+      entry.renewDay <= 31
+    )
+      return [{ label, ...tag, renewDay: entry.renewDay }]
     if (typeof entry.endsOn === "string" && parseUsageDate(entry.endsOn) !== undefined)
-      return [{ label, endsOn: entry.endsOn.trim() }]
+      return [{ label, ...tag, endsOn: entry.endsOn.trim() }]
     return []
   })
 }
@@ -66,20 +87,30 @@ export function usageCalendarEvents(
     go: UsageSnapshot<OpenCodeGoUsage>
     claude: UsageSnapshot<ClaudeCodeUsage>
     subscriptions: UsageSubscription[]
+    /** Automatic plan renewals (`usagePlanEvents`); manual ones already come from `subscriptions`. */
+    planEvents?: UsageCalendarEvent[]
   },
   nowMs: number,
 ): UsageCalendarEvent[] {
   const reset = (title: string, window: UsageWindow | null, snapshot: UsageSnapshot<{ ok: boolean }>) =>
     window && window.resetMs !== null && window.resetMs > nowMs
-      ? [{ atMs: window.resetMs, title, usedPercent: window.usedPercent,
-          stale: usageWindowStale(window, snapshot, nowMs), allDay: false }]
+      ? [
+          {
+            atMs: window.resetMs,
+            title,
+            usedPercent: window.usedPercent,
+            stale: usageWindowStale(window, snapshot, nowMs),
+            allDay: false,
+          },
+        ]
       : []
   const providerEvents = (id: UsageProviderId): UsageCalendarEvent[] => {
     if (id === "openai") {
       const snapshot = input.openai
       if (!snapshot.ok) return []
       return orderUsageWindows([snapshot.primary, snapshot.secondary]).flatMap((window) =>
-        reset(`Codex ${windowName(window.minutes).toLowerCase() || "usage"} reset`, window, snapshot))
+        reset(`Codex ${windowName(window.minutes).toLowerCase() || "usage"} reset`, window, snapshot),
+      )
     }
     if (id === "cursor") {
       const snapshot = input.cursor
@@ -89,14 +120,16 @@ export function usageCalendarEvents(
       const snapshot = input.go
       if (!snapshot.ok) return []
       return [snapshot.weekly, snapshot.monthly].flatMap((window) =>
-        window ? reset(`OpenCode Go ${windowName(window.minutes).toLowerCase()} reset`, window, snapshot) : [])
+        window ? reset(`OpenCode Go ${windowName(window.minutes).toLowerCase()} reset`, window, snapshot) : [],
+      )
     }
     if (id !== "claude-code") return []
     const snapshot = input.claude.ok ? projectClaudeUsage(input.claude, nowMs) : input.claude
     if (!snapshot.ok) return []
     const accounts = snapshot.accounts
       ? snapshot.accounts.flatMap((account) =>
-          account.usage.ok ? [{ title: `Claude (${account.name})`, usage: account.usage }] : [])
+          account.usage.ok ? [{ title: `Claude (${account.name})`, usage: account.usage }] : [],
+        )
       : [{ title: "Claude", usage: snapshot }]
     return accounts.flatMap((account) => [
       ...reset(`${account.title} 5-hour reset`, account.usage.fiveHour, account.usage),
@@ -112,10 +145,12 @@ export function usageCalendarEvents(
     if (atMs + 8 * DAY_MS <= nowMs) return []
     return [{ ...event, atMs, title: `${subscription.label} ${atMs + DAY_MS <= nowMs ? "ended" : "ends"}` }]
   }
-  return [...input.providers.flatMap(providerEvents), ...input.subscriptions.flatMap(subscriptionEvents)]
-    .sort((first, second) => first.atMs - second.atMs || first.title.localeCompare(second.title))
+  return [
+    ...input.providers.flatMap(providerEvents),
+    ...input.subscriptions.flatMap(subscriptionEvents),
+    ...(input.planEvents ?? []),
+  ].sort((first, second) => first.atMs - second.atMs || first.title.localeCompare(second.title))
 }
-
 
 /** Agenda group for an event: `Ended`, `Today`, `Tomorrow`, or a short date such as `Fri, Oct 17`. */
 export function usageCalendarDay(atMs: number, nowMs: number): string {
@@ -144,7 +179,7 @@ export function usageCalendarStrip(events: UsageCalendarEvent[], nowMs: number) 
   })
 }
 
-function startOfDay(ms: number): number {
+export function startOfDay(ms: number): number {
   const date = new Date(ms)
   return new Date(date.getFullYear(), date.getMonth(), date.getDate()).valueOf()
 }

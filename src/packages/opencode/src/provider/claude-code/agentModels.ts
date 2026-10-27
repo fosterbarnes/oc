@@ -36,7 +36,7 @@
 import { readFile, readdir } from "node:fs/promises"
 import path from "node:path"
 import { log } from "./logger.js"
-import { defaultModels } from "./models.js"
+import { knownModel } from "./models.js"
 import { showToast } from "./runtimeStatus.js"
 
 /** Directory names opencode reads agent markdown from, current form first. */
@@ -106,7 +106,7 @@ function withoutAccountMarker(modelId: string): string {
  */
 export function qualifyModelName(wanted: string, referenceModelId: string): string | null {
   const base = withoutAccountMarker(wanted.trim())
-  if (!base || !Object.hasOwn(defaultModels, base)) return null
+  if (!base || !knownModel(base)) return null
   return `${base}${accountMarker(referenceModelId)}`
 }
 

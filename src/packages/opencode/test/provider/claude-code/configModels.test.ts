@@ -3,320 +3,76 @@
 import assert from "node:assert/strict"
 import { test } from "node:test"
 import { configModelsForProvider, createClaudeCode } from "@/provider/claude-code/index.js"
-import { defaultModels } from "@/provider/claude-code/models.js"
-import type { OpenCodeProvider } from "@/provider/claude-code/opencodeTypes.js"
+import { claudeCodeModels, knownModel, passthroughModel, toConfigModel } from "@/provider/claude-code/models.js"
+import { anthropicCatalog } from "./catalogFixture"
 
-// Regression guard for PR #7: opencode runs the `provider.models` hook before
-// extending the provider DB from config. For plugin-only providers like
-// claude-code (absent from the models-dev catalog) that hook bails, so the
-// config-path output produced here must carry the real metadata - otherwise
-// the context-usage indicator renders 0 / no cost / no model name.
+// Built-in claude-code models come from the models.dev anthropic entry. These pin the CLI-side
+// differences claudeCodeModels applies on top of the catalog, not the catalog's own numbers.
 
-test("configModelsForProvider emits real metadata, not schema defaults", () => {
-  const models = configModelsForProvider({}, "claude-code")
-
-  const opus = models["claude-opus-4-8"] as Record<string, unknown>
-  assert.ok(opus, "claude-opus-4-8 should be present")
-
-  const limit = opus.limit as { context: number; output: number }
-  assert.ok(limit.context > 0, "limit.context must be populated")
-  assert.ok(limit.output > 0, "limit.output must be populated")
-
-  const cost = opus.cost as { input: number; output: number }
-  assert.ok(cost.input > 0, "cost.input must be populated")
-  assert.ok(cost.output > 0, "cost.output must be populated")
-
-  assert.equal(opus.family, "opus")
-  assert.equal(opus.name, "Claude Opus 4.8 (5×)")
-  assert.ok(typeof opus.release_date === "string" && opus.release_date.length > 0)
-  assert.equal(opus.reasoning, true)
-
-  const variants = opus.variants as Record<string, unknown>
-  assert.ok(variants && typeof variants === "object", "variants must be present")
-  assert.ok("max" in variants, "default reasoning variants must be carried")
-})
-
-test("configModelsForProvider registers claude-fable-5 with real metadata", () => {
-  const models = configModelsForProvider({}, "claude-code")
-
-  const fable = models["claude-fable-5"] as Record<string, unknown>
-  assert.ok(fable, "claude-fable-5 should be present")
-
-  assert.equal(fable.family, "fable")
-  assert.equal(fable.name, "Claude Fable 5 (10×)")
-  assert.equal(fable.reasoning, true)
-
-  const limit = fable.limit as { context: number; output: number }
-  assert.ok(limit.context > 0, "limit.context must be populated")
-  assert.ok(limit.output > 0, "limit.output must be populated")
-
-  const cost = fable.cost as { input: number; output: number }
-  assert.ok(cost.input > 0, "cost.input must be populated")
-  assert.ok(cost.output > 0, "cost.output must be populated")
-
-  const variants = fable.variants as Record<string, unknown>
-  assert.ok(variants && "max" in variants, "reasoning variants must be carried")
-})
-
-test("configModelsForProvider registers claude-mythos-5 with real metadata", () => {
-  const models = configModelsForProvider({}, "claude-code")
-
-  const mythos = models["claude-mythos-5"] as Record<string, unknown>
-  assert.ok(mythos, "claude-mythos-5 should be present")
-
-  assert.equal(mythos.family, "mythos")
-  assert.equal(mythos.name, "Claude Mythos 5 (10×)")
-  assert.equal(mythos.reasoning, true)
-
-  const limit = mythos.limit as { context: number; output: number }
-  assert.ok(limit.context > 0, "limit.context must be populated")
-  assert.ok(limit.output > 0, "limit.output must be populated")
-
-  const cost = mythos.cost as { input: number; output: number }
-  assert.ok(cost.input > 0, "cost.input must be populated")
-  assert.ok(cost.output > 0, "cost.output must be populated")
-
-  const variants = mythos.variants as Record<string, unknown>
-  assert.ok(variants && "max" in variants, "reasoning variants must be carried")
-})
-
-test("configModelsForProvider registers Fable and Mythos 5.1 metadata", () => {
-  const models = configModelsForProvider({}, "claude-code")
-
-  for (const [id, name, family] of [
-    ["claude-fable-5-1", "Claude Fable 5.1 (10×)", "fable"],
-    ["claude-mythos-5-1", "Claude Mythos 5.1 (10×)", "mythos"],
-  ] as const) {
-    const model = models[id] as Record<string, unknown>
-    assert.ok(model, `${id} should be present`)
-    assert.equal(model.name, name)
-    assert.equal(model.family, family)
-    assert.equal(model.release_date, "2026-09-01")
-    assert.equal(model.reasoning, true)
-    assert.deepEqual(model.limit, { context: 1_000_000, output: 128_000 })
-    assert.deepEqual(model.cost, { input: 10, output: 50, cache_read: 0.25, cache_write: 12.5 }, id)
-    assert.ok("max" in (model.variants as Record<string, unknown>), `${id} must carry the reasoning variants`)
-  }
-})
-
-test("configModelsForProvider registers Sonnet 5 and Opus 5 metadata", () => {
-  const models = configModelsForProvider({}, "claude-code")
-
-  const sonnet = models["claude-sonnet-5"] as Record<string, unknown>
-  assert.equal(sonnet.name, "Claude Sonnet 5 (2×)")
-  assert.equal(sonnet.family, "sonnet")
-  assert.equal(sonnet.release_date, "2026-06-30")
-  assert.equal(sonnet.reasoning, true)
-  assert.deepEqual(sonnet.limit, { context: 1_000_000, output: 128_000 })
-  // Dollars per million tokens, the unit opencode/models.dev expect.
-  assert.deepEqual(sonnet.cost, {
-    input: 2,
-    output: 10,
-    cache_read: 0.2,
-    cache_write: 2.5,
-  })
-
-  const opus = models["claude-opus-5"] as Record<string, unknown>
-  assert.equal(opus.name, "Claude Opus 5 (5×)")
-  assert.equal(opus.family, "opus")
-  assert.equal(opus.release_date, "2026-07-24")
-  assert.equal(opus.reasoning, true)
-  assert.deepEqual(opus.limit, { context: 1_000_000, output: 128_000 })
-  assert.deepEqual(opus.cost, {
-    input: 5,
-    output: 25,
-    cache_read: 0.5,
-    cache_write: 6.25,
-  })
-
-  assert.ok("max" in (sonnet.variants as Record<string, unknown>))
-  assert.ok("max" in (opus.variants as Record<string, unknown>))
-})
-
-test("configModelsForProvider registers Sonnet 5.5 metadata", () => {
-  const model = configModelsForProvider({}, "claude-code")["claude-sonnet-5-5"] as Record<string, unknown>
-  assert.ok(model, "claude-sonnet-5-5 should be present")
-  assert.equal(model.name, "Claude Sonnet 5.5 (2\u00d7)")
-  assert.equal(model.family, "sonnet")
-  assert.equal(model.release_date, "2026-09-28")
-  assert.equal(model.reasoning, true)
-  assert.deepEqual(model.limit, { context: 1_000_000, output: 128_000 })
-  assert.deepEqual(model.cost, { input: 2, output: 10, cache_read: 0.1, cache_write: 2.5 })
-  assert.ok("max" in (model.variants as Record<string, unknown>))
-})
-
-// Base (<=100K prompt) card only; see `haiku55Cost`.
-test("configModelsForProvider registers Haiku 5.5 metadata", () => {
-  const model = configModelsForProvider({}, "claude-code")["claude-haiku-5-5"] as Record<string, unknown>
-  assert.ok(model, "claude-haiku-5-5 should be present")
-  assert.equal(model.name, "Claude Haiku 5.5 (0.1×)")
-  assert.equal(model.family, "haiku")
-  assert.equal(model.release_date, "2026-10-07")
-  assert.equal(model.reasoning, true)
-  assert.deepEqual(model.cost, { input: 0.1, output: 0.5, cache_read: 0.01, cache_write: 0.125 })
-  assert.ok("max" in (model.variants as Record<string, unknown>))
-})
-
-// Fast mode is only registered for the two models the CLI actually gates it
-// on, and it is priced at the Mythos-class rate ($10/$50 per MTok), which is
-// the exact table the CLI applies for `speed: "fast"`. A fast entry priced at
-// standard Opus rates would under-report every fast turn by half.
-test("configModelsForProvider registers the fast Opus entries at fast pricing", () => {
-  const models = configModelsForProvider({}, "claude-code")
-
-  for (const [id, name, releaseDate] of [
-    ["claude-opus-4-8-fast", "Claude Opus 4.8 Fast (10×)", "2026-05-28"],
-    ["claude-opus-5-fast", "Claude Opus 5 Fast (10×)", "2026-07-24"],
-  ] as const) {
-    const model = models[id] as Record<string, unknown>
-    assert.ok(model, `${id} should be present`)
-    assert.equal(model.name, name)
-    assert.equal(model.family, "opus")
-    assert.equal(model.release_date, releaseDate)
-    assert.equal(model.reasoning, true)
-    assert.deepEqual(model.limit, { context: 1_000_000, output: 128_000 })
-    assert.deepEqual(model.cost, { input: 10, output: 50, cache_read: 1, cache_write: 12.5 }, id)
-    assert.ok("max" in (model.variants as Record<string, unknown>), `${id} must carry the reasoning variants`)
-  }
-})
-
-// Opus 5.5 is the first Opus priced below the $5/$25 line: $4/M in, $20/M out,
-// cache reads $0.20/M (0.05x input, not the usual 0.1x) and cache writes $5/M.
-// Its fast mode is exactly double across the board. Both tables are the ones
-// Claude Code 2.1.280 bakes in for the model (`tier_4_20_cache_read_0_20` and
-// the fast-mode `{8, 40, 10, 0.4}` entry), so neither is an inference.
-test("configModelsForProvider registers Opus 5.5 and its fast entry at published pricing", () => {
-  const models = configModelsForProvider({}, "claude-code")
-
-  const opus = models["claude-opus-5-5"] as Record<string, unknown>
-  assert.ok(opus, "claude-opus-5-5 should be present")
+test("claudeCodeModels takes prices and limits from the catalog and adds the CLI's fast twin", () => {
+  const models = claudeCodeModels(anthropicCatalog, "claude-code")
+  const opus = models["claude-opus-5-5"]
   assert.equal(opus.name, "Claude Opus 5.5 (4×)")
-  assert.equal(opus.family, "opus")
-  assert.equal(opus.release_date, "2026-09-22")
-  assert.equal(opus.reasoning, true)
+  assert.equal(opus.api.npm, "@opencode-ai/claude-code")
+  assert.deepEqual(opus.cost, { input: 4, output: 20, cache: { read: 0.2, write: 5 } })
   assert.deepEqual(opus.limit, { context: 1_000_000, output: 128_000 })
-  assert.deepEqual(opus.cost, { input: 4, output: 20, cache_read: 0.2, cache_write: 5 })
-  assert.ok("max" in (opus.variants as Record<string, unknown>))
+  assert.deepEqual(Object.keys(opus.variants), ["low", "medium", "high", "xhigh", "max"])
+  // The CLI path takes no temperature and no PDF attachments.
+  assert.equal(opus.capabilities.temperature, false)
+  assert.equal(opus.capabilities.input.pdf, false)
 
-  const fast = models["claude-opus-5-5-fast"] as Record<string, unknown>
-  assert.ok(fast, "claude-opus-5-5-fast should be present")
+  // A fast-mode twin bills at the catalog's fast price, and only exists where the catalog has one.
+  const fast = models["claude-opus-5-5-fast"]
   assert.equal(fast.name, "Claude Opus 5.5 Fast (8×)")
-  assert.equal(fast.family, "opus")
-  assert.equal(fast.release_date, "2026-09-22")
-  assert.equal(fast.reasoning, true)
-  assert.deepEqual(fast.limit, { context: 1_000_000, output: 128_000 })
-  assert.deepEqual(fast.cost, { input: 8, output: 40, cache_read: 0.4, cache_write: 10 })
-  assert.ok("max" in (fast.variants as Record<string, unknown>))
+  assert.deepEqual(fast.cost, { input: 8, output: 40, cache: { read: 0.4, write: 10 } })
+  assert.equal(models["claude-sonnet-5-fast"], undefined)
 })
 
-test("configModelsForProvider registers fast entries only for fast-capable models", () => {
-  const models = configModelsForProvider({}, "claude-code")
-  const fastIds = Object.keys(models).filter((id) => id.endsWith("-fast"))
-
-  // The CLI gates fast mode on the model name containing `opus-4-8` or
-  // `opus-5` (which `claude-opus-5-5` satisfies too; 2.1.280's catalog also
-  // lists `fast_mode` for it outright). Anything else would render a fast
-  // price tag on a model that silently runs at standard speed.
-  assert.deepEqual(fastIds.sort(), ["claude-opus-4-8-fast", "claude-opus-5-5-fast", "claude-opus-5-fast"])
+test("claudeCodeModels skips dated aliases and gives budget-only models no effort variants", () => {
+  const models = claudeCodeModels(anthropicCatalog, "claude-code")
+  assert.equal(
+    Object.keys(models).some((id) => /-\d{8}$/.test(id)),
+    false,
+  )
+  const haiku = models["claude-haiku-4-5"]
+  assert.equal(haiku.name, "Claude Haiku 4.5 (1×)", "the catalog's (latest) tag is dropped")
+  assert.equal(haiku.capabilities.reasoning, false)
+  assert.equal(haiku.variants, undefined)
 })
 
-test("fast model ids survive the per-account suffix expansion", () => {
-  const models = configModelsForProvider({}, "claude-code-work", "work")
+test("claudeCodeModels builds Mythos from its Fable twin and lets the catalog override it", () => {
+  const models = claudeCodeModels(anthropicCatalog, "claude-code")
+  const mythos = models["claude-mythos-5-1"]
+  assert.equal(mythos.name, "Claude Mythos 5.1 (10×)")
+  assert.equal(mythos.family, "claude-mythos")
+  assert.deepEqual(mythos.cost, models["claude-fable-5-1"].cost)
 
-  const model = models["claude-opus-5-fast@work"] as Record<string, unknown>
-  assert.ok(model, "account-suffixed fast id must be emitted")
-  assert.equal(model.id, "claude-opus-5-fast@work")
-  assert.deepEqual(model.cost, {
-    input: 10,
-    output: 50,
-    cache_read: 1,
-    cache_write: 12.5,
+  const own = { ...anthropicCatalog.models["claude-fable-5"], id: "claude-mythos-5", name: "Catalog Mythos" }
+  const catalog = { ...anthropicCatalog, models: { ...anthropicCatalog.models, "claude-mythos-5": own } }
+  assert.equal(claudeCodeModels(catalog, "claude-code")["claude-mythos-5"].name, "Catalog Mythos (10×)")
+})
+
+test("claudeCodeModels registers exactly the ids knownModel accepts", () => {
+  const models = claudeCodeModels(anthropicCatalog, "claude-code")
+  assert.ok(models["claude-opus-5-fast"])
+  assert.equal(knownModel("claude-opus-5-fast"), true)
+  assert.equal(models["claude-3-opus-20240229"], undefined)
+  assert.equal(knownModel("claude-3-opus-20240229"), false)
+})
+
+test("configModelsForProvider passes partial entries through and flattens runtime-shaped ones", () => {
+  const runtime = { ...passthroughModel("my-custom-model"), name: "Mine" }
+  const models = configModelsForProvider({
+    "claude-opus-5-5": { name: "Renamed", variants: { custom: { reasoningEffort: "low" } } },
+    "some-model": null,
+    "my-custom-model": runtime,
   })
-})
-
-// Context and max-output values are published per model and had drifted: the
-// 4.5-generation entries claimed a 1M context they never had, and every
-// pre-Sonnet-5 entry carried a placeholder 16,384 output cap. Pin the real
-// numbers so a future edit can't quietly reintroduce either.
-test("configModelsForProvider reports the published context and output limits", () => {
-  const models = configModelsForProvider({}, "claude-code")
-  const limitOf = (id: string) => (models[id] as Record<string, unknown>).limit
-
-  // 4.5 generation: 200k context, 64k output. Not 1M.
-  assert.deepEqual(limitOf("claude-haiku-4-5"), { context: 200_000, output: 64_000 })
-  assert.deepEqual(limitOf("claude-sonnet-4-5"), { context: 200_000, output: 64_000 })
-  assert.deepEqual(limitOf("claude-opus-4-5"), { context: 200_000, output: 64_000 })
-
-  // 4.6 and later: full 1M context, 128k output.
-  for (const id of [
-    "claude-haiku-5-5",
-    "claude-sonnet-4-6",
-    "claude-sonnet-5",
-    "claude-sonnet-5-5",
-    "claude-opus-4-6",
-    "claude-opus-4-7",
-    "claude-opus-4-8",
-    "claude-opus-5",
-    "claude-opus-5-5",
-    "claude-fable-5",
-    "claude-fable-5-1",
-    "claude-mythos-5",
-    "claude-mythos-5-1",
-  ]) {
-    assert.deepEqual(limitOf(id), { context: 1_000_000, output: 128_000 }, id)
-  }
-})
-
-test("configModelsForProvider preserves user-defined variants for default models", () => {
-  const userConfig = {
-    "claude-opus-4-8": { variants: { custom: { reasoningEffort: "low" } } },
-  } as unknown as OpenCodeProvider["models"]
-
-  const models = configModelsForProvider(userConfig, "claude-code")
-  const variants = (models["claude-opus-4-8"] as Record<string, unknown>).variants as Record<string, unknown>
-
-  // user variant survives the merge...
-  assert.ok("custom" in variants, "user-defined variant must be preserved")
-  // ...alongside the plugin defaults.
-  assert.ok("max" in variants, "default variants must still be present")
-})
-
-test("configModelsForProvider passes through user models not in defaults", () => {
-  const userConfig = {
-    "my-custom-model": { ...defaultModels["claude-opus-4-8"], id: "my-custom-model" },
-  } as unknown as OpenCodeProvider["models"]
-
-  const models = configModelsForProvider(userConfig, "claude-code")
-  assert.ok(models["my-custom-model"], "user-only model must be emitted")
-})
-
-test("configModelsForProvider completes a partial user model instead of throwing", () => {
-  // opencode's config schema makes every model field optional, so this is the
-  // shape a real opencode.json entry has. It used to throw on
-  // `model.capabilities.input` inside the config hook, which silently
-  // unregistered the whole provider.
-  const userConfig = {
-    "claude-3-opus-20240229": { name: "Opus 3 (retired)", limit: { context: 100_000 } },
-  } as unknown as OpenCodeProvider["models"]
-
-  const models = configModelsForProvider(userConfig, "claude-code")
-  const entry = models["claude-3-opus-20240229"] as Record<string, unknown>
-  assert.ok(entry, "partial user model must be emitted")
-  assert.equal(entry.id, "claude-3-opus-20240229")
-  assert.equal(entry.name, "Opus 3 (retired)")
-  assert.deepEqual(entry.limit, { context: 100_000, output: 64_000 }, "partial limit merges with the template")
-  assert.deepEqual(entry.cost, { input: 0, output: 0, cache_read: 0, cache_write: 0 })
-  assert.deepEqual(entry.modalities, { input: ["text", "image"], output: ["text"] })
-  assert.equal(entry.tool_call, true)
-  assert.ok("max" in (entry.variants as Record<string, unknown>), "template variants apply")
-  // The default models are untouched by the completion path.
-  assert.equal((models["claude-opus-4-8"] as Record<string, unknown>).name, "Claude Opus 4.8 (5×)")
-})
-
-test("configModelsForProvider tolerates a non-object user model entry", () => {
-  const userConfig = { "some-model": null } as unknown as OpenCodeProvider["models"]
-  const models = configModelsForProvider(userConfig, "claude-code")
-  assert.equal((models["some-model"] as Record<string, unknown>).id, "some-model")
+  assert.deepEqual(models["claude-opus-5-5"], {
+    name: "Renamed",
+    variants: { custom: { reasoningEffort: "low" } },
+  })
+  assert.equal(models["some-model"], null)
+  assert.deepEqual(models["my-custom-model"], toConfigModel(runtime))
 })
 
 test("createClaudeCode passes idle process timeout to language models", () => {

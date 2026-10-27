@@ -909,7 +909,21 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
   const contextLimitCommands = createContextLimitCommands()
   const claudeWarmup = createClaudeWarmupCommands()
   const claudeAccountCommands = createClaudeAccountCommands()
-  const ocCommands = createOcCommands({ claudeCliPath, controlServer })
+  // Rebuilds config, agents, providers, and models from the latest models.dev catalog. The server
+  // refuses while session work is running in this project.
+  const reloadInstance = async (success: string) => {
+    const result = await sdk.client.instance.reload({ workspace: project.workspace.current() })
+    if (result.error) {
+      const detail =
+        cliErrorMessage(result.error) ??
+        ("message" in result.error ? result.error.message : JSON.stringify(result.error))
+      return toast.error(new Error(`Reload failed: ${detail}`))
+    }
+    const refreshed = await sync.bootstrap({ fatal: false })
+    if (!refreshed) return toast.error(new Error("Reloaded, but the TUI failed to refresh its state"))
+    toast.show({ message: success, variant: "success" })
+  }
+  const ocCommands = createOcCommands({ claudeCliPath, controlServer, reloadInstance })
   const currentWorktreeWorkspace = createMemo(() => {
     const workspaceID = project.workspace.current()
     if (!workspaceID) return
@@ -945,18 +959,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
         title: "Reload oc config",
         category: "System",
         slashName: "reload",
-        run: async () => {
-          const result = await sdk.client.instance.reload({ workspace: project.workspace.current() })
-          if (result.error) {
-            const detail =
-              cliErrorMessage(result.error) ??
-              ("message" in result.error ? result.error.message : JSON.stringify(result.error))
-            return toast.error(new Error(`Reload failed: ${detail}`))
-          }
-          const refreshed = await sync.bootstrap({ fatal: false })
-          if (!refreshed) return toast.error(new Error("Config reloaded, but the TUI failed to refresh its state"))
-          toast.show({ message: "Reloaded oc config", variant: "success" })
-        },
+        run: () => reloadInstance("Reloaded oc config"),
       },
       {
         name: "session.list",

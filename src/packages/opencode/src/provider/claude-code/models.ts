@@ -1,6 +1,7 @@
+import type { ModelsDev } from "@opencode-ai/core/models-dev"
 import type { OpenCodeModel } from "./opencodeTypes.js"
+import { CLAUDE_CODE_PROVIDER_ID } from "./shared.js"
 
-const PROVIDER_ID = "claude-code"
 const NPM = "@opencode-ai/claude-code"
 
 const reasoningVariants: Record<string, Record<string, unknown>> = {
@@ -20,59 +21,19 @@ const baseCapabilities = {
   interleaved: false as const,
 }
 
-function defineModel(opts: {
-  id: string
-  name: string
-  family: string
-  reasoning: boolean
-  context: number
-  output: number
-  cost: { input: number; output: number; cacheRead: number; cacheWrite: number }
-  releaseDate: string
-  // List-price multiplier relative to Haiku 4.5. Derived exactly from published
-  // per-token pricing: input AND output ratios both come out to haiku 1 (haiku
-  // 5.5: 0.1), sonnet 3 (sonnet 5/5.5: 2), opus 5 (opus 5.5: 4), fable/mythos 10. Rendered
-  // as an `(N×)` suffix so it surfaces in opencode's model picker, which has no
-  // dedicated multiplier field.
-  // Display-only: model resolution keys off `id`.
-  multiplier: number
-  status?: OpenCodeModel["status"]
-}): OpenCodeModel {
-  return {
-    id: opts.id,
-    providerID: PROVIDER_ID,
-    api: { id: opts.id, url: "", npm: NPM },
-    name: `${opts.name} (${opts.multiplier}×)`,
-    family: opts.family,
-    capabilities: { ...baseCapabilities, reasoning: opts.reasoning },
-    cost: {
-      input: opts.cost.input,
-      output: opts.cost.output,
-      cache: { read: opts.cost.cacheRead, write: opts.cost.cacheWrite },
-    },
-    limit: { context: opts.context, output: opts.output },
-    status: opts.status ?? "active",
-    options: {},
-    headers: {},
-    release_date: opts.releaseDate,
-    variants: opts.reasoning ? reasoningVariants : undefined,
-  }
-}
-
 /**
  * The complete model a user-declared id that this plugin does not know is
  * built on. opencode's config schema makes every model field optional, so a
  * `provider.claude-code.models` entry is usually partial (a name, a limit, a
- * variant), and `toConfigModel` on a partial entry used to throw inside the
- * config hook, which silently unregistered the whole provider. Costs are zero
+ * variant); provider state overlays it on this template. Costs are zero
  * because they are unknown, the name is the id, and the window is the 4.5
- * generation's, the conservative choice; the entry's own fields overlay all of
- * it. The id still passes straight through to `claude --model`.
+ * generation's, the conservative choice. The id still passes straight
+ * through to `claude --model`.
  */
-export function passthroughModel(id: string): OpenCodeModel {
+export function passthroughModel(id: string, providerID = CLAUDE_CODE_PROVIDER_ID): OpenCodeModel {
   return {
     id,
-    providerID: PROVIDER_ID,
+    providerID,
     api: { id, url: "", npm: NPM },
     name: id,
     family: "",
@@ -86,63 +47,6 @@ export function passthroughModel(id: string): OpenCodeModel {
     variants: reasoningVariants,
   }
 }
-
-// Costs in US dollars per MILLION tokens, matching Anthropic's published
-// pricing verbatim. This is the unit opencode and models.dev use: opencode
-// divides by 1e6 itself when it multiplies a cost by a token count, so writing
-// per-token values here under-reports session cost by exactly 1,000,000x.
-// Compare models.dev's own entry for the same model:
-// `anthropic/claude-haiku-4-5 -> {"input": 1, "output": 5, "cache_read": 0.1,
-// "cache_write": 1.25}`.
-//
-// There is no long-context premium to model. Anthropic's pricing page states
-// that Claude 4.6 and later ship the full 1M-token context window at standard
-// pricing ("a 900k-token request is billed at the same per-token rate as a
-// 9k-token request"), and caching/batch discounts apply unchanged across it.
-// opencode 1.18.5 added optional `cost.tiers` / `cost.experimentalOver200K`
-// fields for above-200K pricing; they stay unset here deliberately, because a
-// tier would misreport the real price. Re-check only if Anthropic introduces
-// one. Verified against the pricing docs 2026-07-26.
-const haikuCost = { input: 1, output: 5, cacheRead: 0.1, cacheWrite: 1.25 }
-// Haiku 5.5 bills $0.10/$0.50 (cache read 0.01, write 0.125) for prompts up to
-// 100K tokens and 5x that above. Only the base card is registered: opencode's
-// config-path loader drops `cost.tiers`, so prompts over 100K under-report 5x.
-// Launch pricing, 2026-10-07.
-const haiku55Cost = { input: 0.1, output: 0.5, cacheRead: 0.01, cacheWrite: 0.125 }
-const sonnetCost = { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 }
-// Sonnet 5 is the CLI's `tier_2_10` (verified against Claude Code 2.1.288).
-// Sonnet 5.5 keeps that card, but its cache reads were halved to $0.10/M at
-// the Haiku 5.5 launch, 2026-10-07.
-const sonnet5Cost = { input: 2, output: 10, cacheRead: 0.2, cacheWrite: 2.5 }
-const sonnet55Cost = { input: 2, output: 10, cacheRead: 0.1, cacheWrite: 2.5 }
-// Opus 4.5+ standard pricing is $5/M in, $25/M out (the price cut at 4.5; held
-// through 4.6/4.7/4.8/5). Cache read 0.1x input, cache write 1.25x input.
-const opusCost = { input: 5, output: 25, cacheRead: 0.5, cacheWrite: 6.25 }
-// Fable 5 and Mythos 5 are the Mythos-class tier above Opus and share pricing
-// ($10/M in, $50/M out). Cache read/write follow Anthropic's standard 0.1x / 1.25x
-// input ratios (not separately published).
-const fableCost = { input: 10, output: 50, cacheRead: 1, cacheWrite: 12.5 }
-// Fable 5.1 and Mythos 5.1 keep the same input/output and cache-write rates,
-// but Anthropic cut cache reads to $0.25/M (one quarter of the 5.0 price).
-const fable51Cost = { input: 10, output: 50, cacheRead: 0.25, cacheWrite: 12.5 }
-// Fast mode bills the same per-token rates as the Mythos-class tier: $10/M in,
-// $50/M out, cache read 1, cache write 12.5. Not an inference; this is the
-// exact table the CLI itself applies for `speed: "fast"` on Opus 4.8 / Opus 5
-// (`{inputTokens: 10, outputTokens: 50, promptCacheWriteTokens: 12.5,
-// promptCacheReadTokens: 1}`). Kept as its own binding rather than reusing
-// `fableCost` so a future divergence in either tier stays a one-line change.
-// Verified against Claude Code 2.1.245, 2026-08-30.
-const opusFastCost = { input: 10, output: 50, cacheRead: 1, cacheWrite: 12.5 }
-// Opus 5.5 is the first Opus priced below the $5/$25 line: $4/M in, $20/M
-// out. Cache writes keep the 1.25x input ratio ($5/M) but cache reads are
-// $0.20/M, 0.05x input rather than the usual 0.1x, so this cannot be derived
-// from `opusCost` by scaling. Fast mode is exactly double across the board
-// ($8/M in, $40/M out, cache read 0.4, cache write 10). Both tables are the
-// ones Claude Code bakes in for the model (`tier_4_20_cache_read_0_20` and
-// its dedicated fast-mode entry), matching the 2026-09-22 announcement.
-// Verified against Claude Code 2.1.280, 2026-09-22.
-const opus55Cost = { input: 4, output: 20, cacheRead: 0.2, cacheWrite: 5 }
-const opus55FastCost = { input: 8, output: 40, cacheRead: 0.4, cacheWrite: 10 }
 
 /**
  * Convert an OpenCodeModel to the flat config schema that OpenCode's
@@ -186,240 +90,100 @@ export function toConfigModel(model: OpenCodeModel): Record<string, unknown> {
   }
 }
 
-export const defaultModels: Record<string, OpenCodeModel> = {
-  "claude-haiku-4-5": defineModel({
-    id: "claude-haiku-4-5",
-    name: "Claude Haiku 4.5",
-    family: "haiku",
-    reasoning: false,
-    context: 200_000,
-    output: 64_000,
-    cost: haikuCost,
-    multiplier: 1,
-    releaseDate: "2025-10-01",
-  }),
-  "claude-haiku-5-5": defineModel({
-    id: "claude-haiku-5-5",
-    name: "Claude Haiku 5.5",
-    family: "haiku",
-    reasoning: true,
-    context: 1_000_000,
-    output: 128_000,
-    cost: haiku55Cost,
-    multiplier: 0.1,
-    releaseDate: "2026-10-07",
-  }),
-  "claude-sonnet-4-5": defineModel({
-    id: "claude-sonnet-4-5",
-    name: "Claude Sonnet 4.5",
-    family: "sonnet",
-    reasoning: true,
-    context: 200_000,
-    output: 64_000,
-    cost: sonnetCost,
-    multiplier: 3,
-    releaseDate: "2025-09-29",
-  }),
-  "claude-sonnet-4-6": defineModel({
-    id: "claude-sonnet-4-6",
-    name: "Claude Sonnet 4.6",
-    family: "sonnet",
-    reasoning: true,
-    context: 1_000_000,
-    output: 128_000,
-    cost: sonnetCost,
-    multiplier: 3,
-    releaseDate: "2025-06-19",
-  }),
-  "claude-sonnet-5": defineModel({
-    id: "claude-sonnet-5",
-    name: "Claude Sonnet 5",
-    family: "sonnet",
-    reasoning: true,
-    context: 1_000_000,
-    output: 128_000,
-    cost: sonnet5Cost,
-    multiplier: 2,
-    releaseDate: "2026-06-30",
-  }),
-  "claude-sonnet-5-5": defineModel({
-    id: "claude-sonnet-5-5",
-    name: "Claude Sonnet 5.5",
-    family: "sonnet",
-    reasoning: true,
-    context: 1_000_000,
-    output: 128_000,
-    cost: sonnet55Cost,
-    multiplier: 2,
-    releaseDate: "2026-09-28",
-  }),
-  "claude-opus-4-5": defineModel({
-    id: "claude-opus-4-5",
-    name: "Claude Opus 4.5",
-    family: "opus",
-    reasoning: true,
-    context: 200_000,
-    output: 64_000,
-    cost: opusCost,
-    multiplier: 5,
-    releaseDate: "2025-11-01",
-  }),
-  "claude-opus-4-6": defineModel({
-    id: "claude-opus-4-6",
-    name: "Claude Opus 4.6",
-    family: "opus",
-    reasoning: true,
-    context: 1_000_000,
-    output: 128_000,
-    cost: opusCost,
-    multiplier: 5,
-    releaseDate: "2025-06-19",
-  }),
-  "claude-opus-4-7": defineModel({
-    id: "claude-opus-4-7",
-    name: "Claude Opus 4.7",
-    family: "opus",
-    reasoning: true,
-    context: 1_000_000,
-    output: 128_000,
-    cost: opusCost,
-    multiplier: 5,
-    releaseDate: "2025-07-16",
-  }),
-  "claude-opus-4-8": defineModel({
-    id: "claude-opus-4-8",
-    name: "Claude Opus 4.8",
-    family: "opus",
-    reasoning: true,
-    context: 1_000_000,
-    output: 128_000,
-    cost: opusCost,
-    multiplier: 5,
-    releaseDate: "2026-05-28",
-  }),
-  // Fast mode. The `-fast` suffix is OUR marker, not a model name Anthropic
-  // serves: `parseModelId` strips it before `--model` and turns it into
-  // `--settings {"fastMode":true}` on the spawn. Retired `-fast` model strings
-  // (`claude-opus-4-6-fast`) are a different thing and are not registered here.
-  //
-  // Only Opus 4.8, Opus 5 and Opus 5.5 qualify: the CLI gates fast mode on
-  // the resolved model name containing `opus-4-8` or `opus-5` (which
-  // `claude-opus-5-5` satisfies too, and 2.1.280's model catalog lists
-  // `fast_mode` for it outright), so registering a fast entry for any other
-  // model would produce a picker option that silently runs at standard speed
-  // while displaying the fast price.
-  "claude-opus-4-8-fast": defineModel({
-    id: "claude-opus-4-8-fast",
-    name: "Claude Opus 4.8 Fast",
-    family: "opus",
-    reasoning: true,
-    context: 1_000_000,
-    output: 128_000,
-    cost: opusFastCost,
-    multiplier: 10,
-    releaseDate: "2026-05-28",
-  }),
-  "claude-opus-5": defineModel({
-    id: "claude-opus-5",
-    name: "Claude Opus 5",
-    family: "opus",
-    reasoning: true,
-    context: 1_000_000,
-    output: 128_000,
-    cost: opusCost,
-    multiplier: 5,
-    releaseDate: "2026-07-24",
-  }),
-  "claude-opus-5-fast": defineModel({
-    id: "claude-opus-5-fast",
-    name: "Claude Opus 5 Fast",
-    family: "opus",
-    reasoning: true,
-    context: 1_000_000,
-    output: 128_000,
-    cost: opusFastCost,
-    multiplier: 10,
-    releaseDate: "2026-07-24",
-  }),
-  // Opus 5.5 needs Claude Code 2.1.280+: the API rejects it from an older CLI
-  // with a 400 naming that floor, which the plugin surfaces as a turn error.
-  // Thinking cannot be switched off for it (the CLI's catalog marks it
-  // `rejects_disabled_thinking`); the plugin never asks for that, so nothing
-  // here has to special-case it.
-  "claude-opus-5-5": defineModel({
-    id: "claude-opus-5-5",
-    name: "Claude Opus 5.5",
-    family: "opus",
-    reasoning: true,
-    context: 1_000_000,
-    output: 128_000,
-    cost: opus55Cost,
-    multiplier: 4,
-    releaseDate: "2026-09-22",
-  }),
-  "claude-opus-5-5-fast": defineModel({
-    id: "claude-opus-5-5-fast",
-    name: "Claude Opus 5.5 Fast",
-    family: "opus",
-    reasoning: true,
-    context: 1_000_000,
-    output: 128_000,
-    cost: opus55FastCost,
-    multiplier: 8,
-    releaseDate: "2026-09-22",
-  }),
-  "claude-fable-5": defineModel({
-    id: "claude-fable-5",
-    name: "Claude Fable 5",
-    family: "fable",
-    reasoning: true,
-    context: 1_000_000,
-    output: 128_000,
-    cost: fableCost,
-    multiplier: 10,
-    releaseDate: "2026-06-09",
-  }),
-  "claude-fable-5-1": defineModel({
-    id: "claude-fable-5-1",
-    name: "Claude Fable 5.1",
-    family: "fable",
-    reasoning: true,
-    context: 1_000_000,
-    output: 128_000,
-    cost: fable51Cost,
-    multiplier: 10,
-    releaseDate: "2026-09-01",
-  }),
-  // Mythos 5 and 5.1 share the corresponding Fable models' capabilities and
-  // pricing without the safety classifiers; limited availability via Project
-  // Glasswing. `claude --model` simply errors for accounts without access, so
-  // they are safe to register unconditionally.
-  "claude-mythos-5": defineModel({
-    id: "claude-mythos-5",
-    name: "Claude Mythos 5",
-    family: "mythos",
-    reasoning: true,
-    context: 1_000_000,
-    output: 128_000,
-    cost: fableCost,
-    multiplier: 10,
-    releaseDate: "2026-06-09",
-  }),
-  "claude-mythos-5-1": defineModel({
-    id: "claude-mythos-5-1",
-    name: "Claude Mythos 5.1",
-    family: "mythos",
-    reasoning: true,
-    context: 1_000_000,
-    output: 128_000,
-    cost: fable51Cost,
-    multiplier: 10,
-    releaseDate: "2026-09-01",
-  }),
+/** Marker this plugin appends to build a fast-mode model id. See `parseModelId`. */
+const FAST_SUFFIX = "-fast"
+
+// Dated snapshot ids (`claude-opus-4-5-20251101`) duplicate their undated alias.
+const DATED_ID = /-\d{8}$/
+
+// Mythos is the Fable tier without the safety classifiers (limited access via
+// Project Glasswing) and is not in models.dev, so it is built from its Fable
+// twin. A catalog entry for the same id wins. `claude --model` errors for
+// accounts without access, so registering it unconditionally is safe.
+const CATALOG_TWINS: Record<string, string> = {
+  "claude-mythos-5": "claude-fable-5",
+  "claude-mythos-5-1": "claude-fable-5-1",
 }
 
-/** Marker this plugin appends to build a fast-mode model id. See below. */
-const FAST_SUFFIX = "-fast"
+/** Ids the current catalog registers; see `claudeCodeModels`. */
+let known = new Set<string>()
+
+/** Whether `id` (no `@account` marker) is a model this provider registers. */
+export function knownModel(id: string): boolean {
+  return known.has(id)
+}
+
+/**
+ * Every built-in claude-code model, from the models.dev `anthropic` entry oc
+ * already loads and refreshes. Prices, limits and dates are the catalog's; the CLI-side
+ * differences are applied here: no temperature or PDF input, effort-only
+ * reasoning (`reasoning_options` of type `effort`, so budget-only Haiku 4.5
+ * gets no variants), and the `-fast` twin of every model the catalog prices a
+ * fast mode for (`parseModelId` turns that suffix into `fastMode`). The
+ * `(N×)` name suffix is the input price relative to Haiku 4.5's $1/M.
+ *
+ * Also replaces the set `knownModel` reads, so model validation and the
+ * picker always agree.
+ */
+export function claudeCodeModels(
+  anthropic: ModelsDev.Provider | undefined,
+  providerID: string,
+): Record<string, OpenCodeModel> {
+  const catalog: Record<string, ModelsDev.Model> = { ...anthropic?.models }
+  for (const [id, twin] of Object.entries(CATALOG_TWINS)) {
+    const source = catalog[twin]
+    if (catalog[id] || !source) continue
+    catalog[id] = { ...source, id, name: source.name.replace("Fable", "Mythos"), family: "claude-mythos" }
+  }
+
+  const models: Record<string, OpenCodeModel> = {}
+  for (const [id, entry] of Object.entries(catalog)) {
+    if (DATED_ID.test(id) || entry.status === "deprecated") continue
+    models[id] = fromCatalog(id, entry, providerID)
+    const fast = entry.experimental?.modes?.fast?.cost
+    if (!fast) continue
+    const fastId = `${id}${FAST_SUFFIX}`
+    models[fastId] = fromCatalog(fastId, { ...entry, cost: fast }, providerID, " Fast")
+  }
+  known = new Set(Object.keys(models))
+  return models
+}
+
+function fromCatalog(id: string, entry: ModelsDev.Model, providerID: string, suffix = ""): OpenCodeModel {
+  const option = entry.reasoning_options?.find((item) => item.type === "effort")
+  // A null effort value means "reasoning off", which the CLI has no flag for.
+  const efforts = option?.type === "effort" ? option.values.filter((value) => value !== null) : []
+  const variants =
+    entry.reasoning && efforts.length > 0
+      ? Object.fromEntries(efforts.map((value) => [value, { reasoningEffort: value }]))
+      : undefined
+  const cost = entry.cost ?? { input: 0, output: 0 }
+  const name = entry.name.replace(/\s*\(latest\)$/, "")
+  return {
+    id,
+    providerID,
+    api: { id, url: "", npm: NPM },
+    name: `${name}${suffix} (${cost.input}×)`,
+    family: entry.family ?? "",
+    capabilities: {
+      ...baseCapabilities,
+      attachment: entry.attachment,
+      reasoning: variants !== undefined,
+      input: { ...baseCapabilities.input, image: entry.modalities?.input.includes("image") ?? false },
+    },
+    cost: {
+      input: cost.input,
+      output: cost.output,
+      cache: { read: cost.cache_read ?? 0, write: cost.cache_write ?? 0 },
+    },
+    limit: { context: entry.limit.context, output: entry.limit.output },
+    status: entry.status ?? "active",
+    options: {},
+    headers: {},
+    release_date: entry.release_date,
+    variants,
+  }
+}
 
 /**
  * Split an opencode model id into the name the Claude CLI actually accepts
@@ -432,13 +196,13 @@ const FAST_SUFFIX = "-fast"
  *     CLI model    ours  accounts.ts's
  *
  * `@work` must survive: it used to steer the per-account wrapper script at
- * spawn time, and now nothing produces these ids (modelSuffix is never
- * passed), so one only arrives hand-written in config. `-fast` must not: the CLI has no such
- * model (`claude-opus-4-6-fast` is retired and `claude-opus-4-7-fast` errors
+ * spawn time, and now nothing produces these ids, so one only arrives
+ * hand-written in config. `-fast` must not: the CLI has no such model
+ * (`claude-opus-4-6-fast` is retired and `claude-opus-4-7-fast` errors
  * outright), so it becomes `--settings {"fastMode":true}` instead.
  *
- * The `defaultModels` lookup is the guard against a false positive. Only ids
- * we registered are treated as fast markers, so a user-defined model that
+ * `knownModel` is the guard against a false positive. Only ids registered
+ * from the catalog are treated as fast markers, so a user-defined model that
  * happens to end in `-fast` is passed through untouched rather than being
  * silently rewritten into a model name that does not exist.
  */
@@ -448,7 +212,7 @@ export function parseModelId(modelId: string): { model: string; fast: boolean } 
   const account = at === -1 ? "" : modelId.slice(at)
 
   if (!base.endsWith(FAST_SUFFIX)) return { model: modelId, fast: false }
-  if (!Object.hasOwn(defaultModels, base)) return { model: modelId, fast: false }
+  if (!knownModel(base)) return { model: modelId, fast: false }
 
   return { model: base.slice(0, -FAST_SUFFIX.length) + account, fast: true }
 }

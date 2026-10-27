@@ -210,6 +210,56 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-27 (~16:15) - v0.2.317 espionageCapella - Claude models from the models.dev catalog - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation (/spit -> /think -> /imp, plan `~/.config/opencode/plans/claudeCodeModelsFromCatalog.md`); completed
+- Version: 0.2.317 espionageCapella
+- Replaced the hard-coded `defaultModels` table in `provider/claude-code/models.ts` with `claudeCodeModels(anthropic, providerID, declared)`: builds claude-code models from models.dev `anthropic` (prices, limits, dates, family), skips `-YYYYMMDD` aliases and deprecated, adds `-fast` twins from `experimental.modes.fast.cost`, Mythos 5/5.1 from their Fable twins (catalog entry wins), effort variants from `reasoning_options` type `effort` (none -> `reasoning: false`), keeps temperature/PDF off, name suffix `(N×)` = `cost.input`. Also adds `passthroughModel` for declared unknown ids and sets the `knownModel` set.
+- `parseModelId` and `agentModels.qualifyModelName` use `knownModel` instead of `defaultModels`.
+- `provider.ts` config-provider loop: for `claude-code`, `parsed.models` is seeded from `claudeCodeModels(modelsDev.anthropic, ...)`; config entries overlay field by field as for any catalog provider.
+- `claude-code/index.ts`: `configModelsForProvider(models)` now passes the operator's entries through (flattens only runtime-shaped ones); removed `defaultModelsForProvider`, `registeredModel`, `completeUserModel`, the unused `modelSuffix` path, and the `provider.models` hook (never ran: `provider.ts` skips providers missing from `database`).
+- Behavior diffs vs old table (real catalog): Sonnet 4.5 is budget-only in models.dev so it loses effort variants (old ones were no-ops: CLI ignores `CLAUDE_CODE_EFFORT_LEVEL` there); Opus 4.5 gets low/medium/high, Opus/Sonnet 4.6 no xhigh; families are `claude-opus` etc.; release dates follow the catalog. Prices, limits, fast set unchanged.
+- Tests: added `test/provider/claude-code/catalogFixture.ts` (seeds from the preload fixture); rewrote `configModels.test.ts` (old table pins were change detectors); seeded `agentModels`, `cliArgs`, `taskModelOverride`; `cliArgs` unregistered-fast case now `claude-sonnet-5-fast` (fixture still has stale 4-6/4-7 fast modes); `indexHooks` expects no provider hook; `bridge` uses `passthroughModel`; new provider-state test in `provider.test.ts` (catalog seed + partial overlay + unknown id). Added Opus 5, Opus 5.5, Sonnet 5.5, Haiku 5.5, Fable 5.1 to `test/tool/fixtures/models-api.json` anthropic (copied from the live catalog).
+- Verification: `tsgo --noEmit` clean; probe on `~/.cache/opencode/models.json` reproduced the old ids/prices/limits/fast set; `bun test test/provider test/tool/models.test.ts test/agent` 1654 pass / 14 fail; the same 14 fail on a HEAD copy (recorded in AGENTS.md known failures; probe copy deleted).
+- Risk: with `OPENCODE_DISABLE_MODELS_FETCH` and no cache or snapshot, claude-code has no built-in models. Catalog price errors now show in oc.
+- Updated AGENTS.md known failures with the 14 pre-existing claude-code test failures.
+- Cleanup (/pass): one provider id constant, `shared.ts` `CLAUDE_CODE_PROVIDER_ID`. Removed `accounts.ts` `BASE_PROVIDER_ID` and the new `models.ts` `PROVIDER_ID`; `index.ts`, `turnStream.ts`, `models.ts`, `provider.ts` import it from `shared.ts` (type-only imports, so no heavy dependency chain). `tsgo` clean; configModels/cliArgs/agentModels/accountPool/indexHooks 86 pass; provider seed test pass.
+- Fixed alias to an unknown id (`"my-alias": { id: "claude-x" }`) also registering `claude-x`: `claudeCodeModels` no longer takes `declared`; `provider.ts` overlay lookup falls back to `claudeCodeTemplate(id)` (`passthroughModel`) for claude-code, so templates are lookup-only and never registered. Provider seed test covers the alias. `tsgo` clean; provider.test 106 pass; configModels/agentModels/cliArgs 59 pass.
+- Added palette entry `oc.update_models` "Update model list" (`/updateModels`, oc > Third party updates, `tui/src/ocCommands.tsx`): runs `instance.reload` (rebuilds provider state from the in-memory models.dev catalog, which the server refetches every 5 min; server refuses with 409 while session work runs). Extracted `reloadInstance(success)` in `app.tsx`, shared with `/reload`. User asked for manual only; no automatic rebuild on catalog refresh. Verification: tui `tsgo` clean; palette not exercised (no pane probe).
+
+### User
+Claude models
+- Claude models in the picker now come from the same public model list oc uses for other providers, so new Claude models appear without an oc update.
+- Prices, context sizes, fast versions, and Mythos are unchanged; a few older models show only the effort levels they actually support.
+- New "Update model list" command (`/updateModels`) in the oc palette's updates group reloads the model list from the latest catalog; it refuses while a session is running.
+
+---
+
+## 2026-10-27 (~02:53) - v0.2.316 tpainThething - Usage plan renewal lines - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation (/spit -> /think -> /imp, plan `~/.config/opencode/plans/usagePlanRows.md`, mockup `plans/mockups/usagePlanRows.html` option A); completed
+- Version: 0.2.316 tpainThething
+- Added `Auth.Oauth.subscriptionStart`/`subscriptionUntil` (epoch ms, `opencode/src/auth/index.ts`); required because `Auth.all()` decodes through the schema and would drop unknown keys on the next write. Plugin OAuth success types (`plugin/src/index.ts`) and regenerated `sdk/js/src/v2/gen/types.gen.ts` (`build.ts --generate-only`) carry them.
+- Added `extractSubscription` (`plugin/openai/codex.ts`): reads undocumented id_token claims `chatgpt_subscription_active_start/_until` (ISO) under `https://api.openai.com/auth`; saved on both login paths and on refresh, where a refresh id_token without them keeps the stored dates. oc's `openai.access` token lacks these claims (checked locally); `~/.codex/auth.json` is a separate, stale login and is not read.
+- Added `tui/.../usage/plans.ts`: `readUsagePlanFacts` (oc auth.json openai dates + `chatgpt_plan_type` from the access JWT; per Claude account `.claude.json` `oauthAccount.subscriptionCreatedAt`/`organizationType`), pure `resolveUsagePlans` (Codex exact `until`, else projected monthly/yearly from start; Claude signup day `~`; Cursor `monthly.resetMs`; tagged `UsageSubscription` overrides), `usagePlanLine`, `usagePlanLabel`, `usagePlanEvents`.
+- Claude profile file mirrors Claude Code: `~/.claude.json` for the default `~/.claude` account when `CLAUDE_CONFIG_DIR` is unset (oc spawns it with inherited env, `poolAccountIds`), else `<dir>/.claude.json`. No fallback between the two.
+- Added `UsageSubscription.provider`/`account` (`usage/calendar.ts`), `planEvents` input on `usageCalendarEvents` (automatic Codex/Claude only; manual tags already come from subscriptions, Cursor from its window), exported `startOfDay`. `USAGE_PLAN_PROVIDERS`, names, and billing URLs in `usage/providers.ts`.
+- Sidebar (`sidebarUsage.tsx`): `planFacts` reloads at the start of `refreshUsage` for openai/claude-code (no new timers); `usagePlans` memo; `planLine` stops `over` propagation so the Usage box hover does not replace it, and stops `mouseUp` so the menu does not open. Pooled Claude rows carry `account` (`format.ts`) and `aligned` adds the line after each account's last row. Usage menu: `Plan:` row per provider/account (joins pooled account groups by category) -> submenu Open billing page / Set or Change renewal date / Clear renewal date; `promptSubscriptionDate(label, plan)` replaces that plan's tagged entry.
+- Updated wiki `oc.wiki/Sidebar.md` (Plan renewal lines section, calendar, `usageSubscriptions` key) and `FORK.md` Usage row.
+- Verification: `tsc --noEmit` clean in tui and opencode; `test/plugin/codex.test.ts` 52 pass (kept 2 new `extractSubscription` tests: persisted auth contract); existing tui usage tests 49 pass; probes (deleted): plans resolution/line/file pick (5 pass), read-only run on real files (Claude `Pro renews ~11/14`, `~11/10` for claude2; Codex unknown until next refresh), Codex refresh keeps/replaces dates, Auth schema keeps fields, `OC_TUI_PANE=1` pane probe (sidebar `Max renews ~10/29 (2d)` and `Renewal date unknown`, menu `Plan:` rows with source detail, submenu). Not verified: billing URLs land on the right pages (ChatGPT `#settings/Subscription` and Cursor `?tab=billing` deep links unconfirmed), and that a refresh-grant id_token carries the subscription claims.
+- Pane fixture pins `OPENCODE_AUTH_CONTENT={}` (`isolatedEnv`), so pane tests cannot show Codex auth-file data.
+
+### User
+Sidebar usage
+- Codex, each Claude account, and Cursor show a plan line such as `Pro renews ~11/14 (18d)` under their usage rows, yellow at 3 days or less.
+- Clicking a plan line opens that provider's billing page.
+- Claude dates are estimated from your signup day (`~`), Codex dates come from your ChatGPT login after the next sign-in or refresh, and Cursor uses its billing cycle.
+- The Usage menu has a Plan row per provider to open billing, set your own renewal or end date, or clear it, and the usage calendar lists Codex and Claude renewals.
+
+---
+
 ## 2026-10-27 (~01:37) - v0.2.315 bustingDrs - Slash pick keeps the next command - Claude Opus 5.5, low effort; Implementation
 
 ### Agent

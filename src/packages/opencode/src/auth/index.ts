@@ -19,6 +19,9 @@ export class Oauth extends Schema.Class<Oauth>("OAuth")({
   accountId: Schema.optional(Schema.String),
   enterpriseUrl: Schema.optional(Schema.String),
   apiEndpoint: Schema.optional(Schema.String),
+  // ChatGPT plan period from the OpenAI id_token, epoch ms; read by the sidebar plan line.
+  subscriptionStart: Schema.optional(NonNegativeInt),
+  subscriptionUntil: Schema.optional(NonNegativeInt),
 }) {}
 
 export class Api extends Schema.Class<Api>("ApiAuth")({

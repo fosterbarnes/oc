@@ -48,6 +48,8 @@ export interface IdTokenClaims {
   "https://api.openai.com/auth"?: {
     chatgpt_account_id?: string
     chatgpt_compute_residency?: string
+    chatgpt_subscription_active_start?: string
+    chatgpt_subscription_active_until?: string
   }
 }
 
@@ -80,6 +82,15 @@ export function extractAccountId(tokens: TokenResponse): string | undefined {
     return claims ? extractAccountIdFromClaims(claims) : undefined
   }
   return undefined
+}
+
+/** ChatGPT plan period (epoch ms) from the id_token's undocumented subscription claims; empty when absent. */
+export function extractSubscription(tokens: TokenResponse): { subscriptionStart?: number; subscriptionUntil?: number } {
+  const auth = tokens.id_token ? parseJwtClaims(tokens.id_token)?.["https://api.openai.com/auth"] : undefined
+  const start = Date.parse(auth?.chatgpt_subscription_active_start ?? "")
+  const until = Date.parse(auth?.chatgpt_subscription_active_until ?? "")
+  if (!(until > 0)) return {}
+  return { ...(start > 0 && { subscriptionStart: start }), subscriptionUntil: until }
 }
 
 export function extractResidency(token: string): string | undefined {
@@ -397,6 +408,7 @@ export async function CodexAuthPlugin(input: PluginInput, options: CodexAuthPlug
                 refreshPromise = refreshAccessToken(currentAuth.refresh, issuer)
                   .then(async (tokens) => {
                     const accountId = extractAccountId(tokens) || authWithAccount.accountId
+                    const subscription = extractSubscription(tokens)
                     await input.client.auth.set({
                       path: { id: "openai" },
                       body: {
@@ -405,6 +417,13 @@ export async function CodexAuthPlugin(input: PluginInput, options: CodexAuthPlug
                         access: tokens.access_token,
                         expires: Date.now() + (tokens.expires_in ?? 3600) * 1000,
                         ...(accountId && { accountId }),
+                        // A refresh id_token without the plan claims keeps the dates already known.
+                        ...(subscription.subscriptionUntil
+                          ? subscription
+                          : {
+                              subscriptionStart: currentAuth.subscriptionStart,
+                              subscriptionUntil: currentAuth.subscriptionUntil,
+                            }),
                       },
                     })
                     return {
@@ -502,6 +521,7 @@ export async function CodexAuthPlugin(input: PluginInput, options: CodexAuthPlug
                   access: tokens.access_token,
                   expires: Date.now() + (tokens.expires_in ?? 3600) * 1000,
                   accountId,
+                  ...extractSubscription(tokens),
                 }
               },
             }
@@ -577,6 +597,7 @@ export async function CodexAuthPlugin(input: PluginInput, options: CodexAuthPlug
                       access: tokens.access_token,
                       expires: Date.now() + (tokens.expires_in ?? 3600) * 1000,
                       accountId: extractAccountId(tokens),
+                      ...extractSubscription(tokens),
                     }
                   }
 

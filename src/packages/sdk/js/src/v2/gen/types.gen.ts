@@ -117,6 +117,8 @@ export type OAuth = {
   accountId?: string
   enterpriseUrl?: string
   apiEndpoint?: string
+  subscriptionStart?: number
+  subscriptionUntil?: number
 }
 
 export type ApiAuth = {

@@ -67,6 +67,7 @@ const _TAB_OPTIONS: { value: PromptTabAction; title: string; description: string
 export function createOcCommands(input: {
   claudeCliPath: () => string
   controlServer: (action: "shutdown" | "restart") => Promise<void>
+  reloadInstance: (success: string) => Promise<void>
 }) {
   const tuiConfig = useTuiConfig()
   const route = useRoute()
@@ -77,7 +78,7 @@ export function createOcCommands(input: {
   const sync = useSync()
   const renderer = useRenderer()
   const { theme } = useTheme()
-  const { claudeCliPath, controlServer } = input
+  const { claudeCliPath, controlServer, reloadInstance } = input
   return {
     newSession: {
       name: "oc.new_session",
@@ -1061,6 +1062,13 @@ export function createOcCommands(input: {
         },
         { name: "oc.update_cursor_cli", title: "Update Cursor CLI", run: () => updateCursorCli(toast) },
         { name: "oc.update_codex_cli", title: "Update Codex CLI", run: () => updateCodexCli(toast) },
+        {
+          name: "oc.update_models",
+          title: "Update model list",
+          desc: "From the models.dev catalog; not while a session is running",
+          slashName: "updateModels",
+          run: () => void reloadInstance("Model list updated"),
+        },
         ...(process.platform === "win32"
           ? [
               {

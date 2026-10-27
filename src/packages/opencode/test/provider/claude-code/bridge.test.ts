@@ -17,7 +17,7 @@ import * as path from "node:path"
 import * as os from "node:os"
 
 import { mergeOpencodeMcp, __test } from "@/provider/claude-code/mcpBridge.js"
-import { defaultModels, toConfigModel } from "@/provider/claude-code/models.js"
+import { passthroughModel, toConfigModel } from "@/provider/claude-code/models.js"
 
 const { deepMerge, mergeMcp, detectWorktree } = __test
 
@@ -61,7 +61,7 @@ test("deepMerge replaces primitives, deep-merges objects, replaces arrays", () =
 })
 
 test("toConfigModel omits unsupported interleaved field", () => {
-  const configModel = toConfigModel(defaultModels["claude-haiku-4-5"])
+  const configModel = toConfigModel(passthroughModel("claude-haiku-4-5"))
 
   assert.equal(Object.hasOwn(configModel, "interleaved"), false)
 })

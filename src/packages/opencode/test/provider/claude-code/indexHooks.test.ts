@@ -75,7 +75,8 @@ test("server() exposes the hooks opencode 1.x looks for", async () => {
   const hooks = await buildHooks()
   assert.equal(typeof hooks.config, "function")
   assert.equal(typeof hooks.event, "function")
-  assert.equal(hooks.provider?.id, "claude-code")
+  // Models come from provider state's catalog seed, not a provider hook.
+  assert.equal(hooks.provider, undefined)
   // Session and agent come from session/llm/request.ts now, not a plugin hook.
   assert.equal(hooks["chat.params"], undefined)
 })

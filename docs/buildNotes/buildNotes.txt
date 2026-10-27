@@ -1,6 +1,12 @@
-v0.2.315 bustingDrs [fix > slash pick keeps next command]
+v0.2.317 espionageCapella [feat. > plan lines; patch > Claude catalog]
 
-slash commands:
-Picking a slash command from the menu while the cursor sits right in front of another command, such as typing /x before /command, now inserts the picked command to the left with a space: /picked /command. Before this, the command to the right was deleted and replaced. Editing in the middle of a command word, such as /com|mand, still replaces the whole word.
+sidebar usage:
+Codex, each Claude account, and Cursor now show a plan line such as "Pro renews ~11/14 (18d)" under their usage rows, turning yellow at 3 days or less. Clicking the line opens that provider's billing page. Claude dates are estimated from your signup day (marked with ~), Codex dates come from your ChatGPT login after the next sign-in or token refresh, and Cursor uses its billing cycle. The Usage menu has a Plan row per provider to open billing, set your own renewal or end date, or clear it, and the usage calendar lists Codex and Claude renewals.
 
-Under the hood: the end of the replaced word now stops at the next "/" as well as at whitespace, the same rule the menu already used to find where the word starts; both rules now live in prompt/slash.ts. Checks: tui slash tests pass with a new case for this bug; tui typecheck clean. Not run: a live check in the real TUI prompt.
+Claude models:
+The Claude models in the picker now come from the models.dev catalog, the same public model list oc uses for every other provider, so new Claude models show up with correct prices without an oc update. Prices, context sizes, the Fast versions, and Mythos are unchanged. A few older models now offer only the effort levels they really support: Sonnet 4.5 has none, Opus 4.5 offers low, medium, and high, and the 4.6 models no longer offer xhigh. A model you add yourself under the claude-code provider in config still works, including aliases, and no longer adds a stray extra entry.
+
+oc palette:
+A new "Update model list" command (/updateModels) in the oc palette's update group reloads the model list from the latest catalog. It refuses while a session is running. /reload now shares the same reload code.
+
+Under the hood: the Claude Code provider builds its models from the catalog's Anthropic entry, adds fast twins from the catalog's fast-mode prices and Mythos from its Fable twin, and drops the hand-written table, the dead provider hook, and two duplicate "claude-code" constants. Auth records keep the Codex subscription start and end dates. Checks: opencode and tui typecheck clean; codex plugin tests 52 pass; tui usage tests 49 pass; opencode provider, tool models, and agent tests 1654 pass with 14 known failures that also fail on the previous commit (now listed in AGENTS.md); a probe against the real catalog reproduced the old Claude model list. Not run: the new palette command and the plan-line billing links in a live TUI.

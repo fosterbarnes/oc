@@ -32,6 +32,8 @@ import { ModelStatus } from "./model-status"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { ProviderError } from "./error"
 import { LocalDiscovery } from "./localDiscovery"
+import * as ClaudeCodeModels from "./claude-code/models"
+import { CLAUDE_CODE_PROVIDER_ID } from "./claude-code/shared"
 import { HttpClient } from "effect/unstable/http"
 import * as Sse from "effect/unstable/encoding/Sse"
 import { httpClient } from "@opencode-ai/core/effect/app-node-platform"
@@ -1673,9 +1675,20 @@ const layer = Layer.effect(
             source: "config",
             models: existing?.models ?? {},
           }
+          // oc: claude-code runs Anthropic's models through the Claude CLI, so its built-in
+          // models come from the anthropic catalog; config entries overlay them below. An entry
+          // for an id the catalog lacks overlays a pass-through template that is never registered
+          // itself, so an alias to an unknown id adds only the alias.
+          const claudeCodeTemplate =
+            providerID === CLAUDE_CODE_PROVIDER_ID
+              ? (id: string) => ClaudeCodeModels.passthroughModel(id, providerID) as Model
+              : undefined
+          if (claudeCodeTemplate) {
+            parsed.models = ClaudeCodeModels.claudeCodeModels(modelsDev.anthropic, providerID) as Info["models"]
+          }
 
           for (const [modelID, model] of Object.entries(provider.models ?? {})) {
-            const existingModel = parsed.models[model.id ?? modelID]
+            const existingModel = parsed.models[model.id ?? modelID] ?? claudeCodeTemplate?.(model.id ?? modelID)
             const apiID = model.id ?? existingModel?.api.id ?? modelID
             const apiNpm =
               model.provider?.npm ??

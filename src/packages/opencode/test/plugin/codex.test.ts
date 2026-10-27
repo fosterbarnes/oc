@@ -8,6 +8,7 @@ import {
   extractAccountIdFromClaims,
   extractAccountId,
   extractResidency,
+  extractSubscription,
   renderOAuthError,
   type IdTokenClaims,
 } from "../../src/plugin/openai/codex"
@@ -132,6 +133,29 @@ describe("plugin.codex", () => {
           refresh_token: "rt",
         }),
       ).toBe("acc-123")
+    })
+  })
+
+  describe("extractSubscription", () => {
+    test("reads the ChatGPT plan period from id_token claims as epoch ms", () => {
+      const idToken = createTestJwt({
+        "https://api.openai.com/auth": {
+          chatgpt_subscription_active_start: "2026-07-25T13:23:30+00:00",
+          chatgpt_subscription_active_until: "2026-08-25T13:23:30+00:00",
+        },
+      })
+      expect(extractSubscription({ id_token: idToken, access_token: "", refresh_token: "rt" })).toEqual({
+        subscriptionStart: Date.UTC(2026, 6, 25, 13, 23, 30),
+        subscriptionUntil: Date.UTC(2026, 7, 25, 13, 23, 30),
+      })
+    })
+
+    test("returns nothing without an until date", () => {
+      const idToken = createTestJwt({
+        "https://api.openai.com/auth": { chatgpt_subscription_active_start: "2026-07-25T13:23:30+00:00" },
+      })
+      expect(extractSubscription({ id_token: idToken, access_token: "", refresh_token: "rt" })).toEqual({})
+      expect(extractSubscription({ id_token: "", access_token: "", refresh_token: "rt" })).toEqual({})
     })
   })
 

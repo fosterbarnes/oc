@@ -17,6 +17,9 @@ import {
   setAgentRegistry,
   setDefaultSubagentModel,
 } from "@/provider/claude-code/agentModels.js"
+import { seedClaudeCodeModels } from "./catalogFixture"
+
+seedClaudeCodeModels()
 
 const records: Record<string, AgentRecord> = {
   implementor: { mode: "subagent" },

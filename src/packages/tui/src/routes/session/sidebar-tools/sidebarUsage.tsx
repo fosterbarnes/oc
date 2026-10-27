@@ -1,4 +1,4 @@
-import { For, Show, createEffect, createSignal, onCleanup } from "solid-js"
+import { For, Show, createEffect, createMemo, createSignal, onCleanup } from "solid-js"
 import type { BoxRenderable } from "@opentui/core"
 import os from "node:os"
 import path from "node:path"
@@ -15,6 +15,7 @@ import { DialogSelect, type DialogSelectOption, type DialogSelectProps } from ".
 import { useDialog } from "../../../ui/dialog"
 import { useToast } from "../../../ui/toast"
 import { Locale } from "../../../util/locale"
+import { openLink } from "../../../util/browser"
 import {
   saveUserUsageProviders,
   saveUserUsageSpacing,
@@ -63,14 +64,32 @@ import {
   type OpenCodeGoUsage,
   type OpenRouterUsage,
 } from "./usage/probes"
-import { usageProviderForModel, USAGE_PROVIDER_OPTIONS, type UsageProviderId } from "./usage/providers"
-import { createUsageRefresh } from "./usage/refresh"
 import {
-  updateUsageSnapshot,
-  usageWindowStale,
-  type UsageWindow,
-  type UsageSnapshot,
-} from "./usage/snapshot"
+  readUsagePlanFacts,
+  resolveUsagePlans,
+  usagePlanEvents,
+  usagePlanLabel,
+  usagePlanLine,
+  type UsagePlan,
+  type UsagePlanFacts,
+} from "./usage/plans"
+import {
+  usageProviderForModel,
+  USAGE_PROVIDER_OPTIONS,
+  type UsagePlanProvider,
+  type UsageProviderId,
+} from "./usage/providers"
+import { createUsageRefresh } from "./usage/refresh"
+import { updateUsageSnapshot, usageWindowStale, type UsageWindow, type UsageSnapshot } from "./usage/snapshot"
+
+// Usage menu detail for where a plan date came from.
+const PLAN_SOURCE: Record<NonNullable<UsagePlan["source"]> | "unknown", string> = {
+  login: "From your ChatGPT login",
+  estimate: "Estimated from the subscription start date",
+  meter: "End of the Cursor billing cycle",
+  manual: "Set by you",
+  unknown: "Select to open the billing page or set a date",
+}
 
 // Sidebar usage section: provider readings, refresh scheduling, the rows view, and the Usage menu,
 // settings, and calendar dialogs. Call inside SidebarTools; timers and listeners end with it.
@@ -114,13 +133,15 @@ export function createSidebarUsage(input: {
   const usageObservations = new Map<string, ProviderUsage.Info>()
   const [usageNow, setUsageNow] = createSignal(Date.now())
   const usageAbort = new AbortController()
+  const [planFacts, setPlanFacts] = createSignal<UsagePlanFacts>({ claude: {} })
   let usageScheduler: ReturnType<typeof createUsageRefresh>
 
   const claudeDirectories = () => {
     const accounts = sync.data.config.provider?.["claude-code"]?.options?.accounts
     const dirs = Array.isArray(accounts) ? accounts.filter((dir): dir is string => typeof dir === "string") : []
-    return (dirs.length ? dirs : [process.env.CLAUDE_CONFIG_DIR ?? path.join(os.homedir(), ".claude")])
-      .map((dir) => claudeConfigDirId(dir.replace(/^~(?=$|[\\/])/, os.homedir())))
+    return (dirs.length ? dirs : [process.env.CLAUDE_CONFIG_DIR ?? path.join(os.homedir(), ".claude")]).map((dir) =>
+      claudeConfigDirId(dir.replace(/^~(?=$|[\\/])/, os.homedir())),
+    )
   }
   const claudeSeed = (): UsageSnapshot<ClaudeCodeUsage> => {
     const dirs = claudeDirectories()
@@ -132,11 +153,15 @@ export function createSidebarUsage(input: {
       source: "cache",
       fiveHour: unknown(),
       weekly: unknown(),
-      ...(dirs.length > 1 ? { accounts: dirs.map((id) => ({
-        id,
-        name: path.basename(id).replace(/^\./, ""),
-        usage: { ok: false as const },
-      })) } : {}),
+      ...(dirs.length > 1
+        ? {
+            accounts: dirs.map((id) => ({
+              id,
+              name: path.basename(id).replace(/^\./, ""),
+              usage: { ok: false as const },
+            })),
+          }
+        : {}),
     }
   }
   const refreshActiveClaudeAccount = async () => {
@@ -144,8 +169,15 @@ export function createSidebarUsage(input: {
     const pool = await sdk.claudeAccount.state(selectedSession).catch(() => undefined)
     if (usageAbort.signal.aborted || selectedSession !== input.sessionID()) return
     const current = pool?.find((account) => account.current)
-    setActiveClaudeAccount(current ? claudeConfigDirId(current.id === "default"
-      ? process.env.CLAUDE_CONFIG_DIR ?? path.join(os.homedir(), ".claude") : current.id) : undefined)
+    setActiveClaudeAccount(
+      current
+        ? claudeConfigDirId(
+            current.id === "default"
+              ? (process.env.CLAUDE_CONFIG_DIR ?? path.join(os.homedir(), ".claude"))
+              : current.id,
+          )
+        : undefined,
+    )
   }
   const observeUsage = (observation: ProviderUsage.Info, fromSnapshot = false) => {
     const key = `${observation.providerID}:${observation.accountID}`
@@ -165,18 +197,24 @@ export function createSidebarUsage(input: {
     if (usageAbort.signal.aborted || !observations) return
     observations.forEach((observation) => observeUsage(observation, true))
   }
+  // Plan dates come from local files; reread them whenever the Codex or Claude meter refreshes.
+  const refreshPlanFacts = async () => {
+    const facts = await readUsagePlanFacts(claudeDirectories())
+    if (!usageAbort.signal.aborted) setPlanFacts(facts)
+  }
   const refreshUsage = async (provider: UsageProviderId) => {
     if (usageAbort.signal.aborted) return { ok: true, metadata: undefined }
+    if (provider === "openai" || provider === "claude-code") void refreshPlanFacts()
     const startedAt = Date.now()
     const options = { signal: usageAbort.signal }
     if (provider === "openai") {
       const next = await probeOpenAIUsage(options)
-      if (!usageAbort.signal.aborted) setUsage((previous) => {
-        const merged = mergeOpenAIProbe(previous, next, startedAt, Date.now())
-        const observation = next.accountID
-          ? usageObservations.get(`openai:${next.accountID}`) : undefined
-        return observation ? applyOpenAIObservation(merged, observation) : merged
-      })
+      if (!usageAbort.signal.aborted)
+        setUsage((previous) => {
+          const merged = mergeOpenAIProbe(previous, next, startedAt, Date.now())
+          const observation = next.accountID ? usageObservations.get(`openai:${next.accountID}`) : undefined
+          return observation ? applyOpenAIObservation(merged, observation) : merged
+        })
       return next
     }
     if (provider === "opencode-go") {
@@ -193,9 +231,12 @@ export function createSidebarUsage(input: {
       const dirs = claudeDirectories()
       const selectedSession = input.sessionID()
       const [next, pool] = await Promise.all([
-        dirs.length > 1 ? probeClaudeCodePool(dirs, options) : probeClaudeCodeUsage({
-          ...options, claudeCredentialsPath: path.join(dirs[0], ".credentials.json"),
-        }),
+        dirs.length > 1
+          ? probeClaudeCodePool(dirs, options)
+          : probeClaudeCodeUsage({
+              ...options,
+              claudeCredentialsPath: path.join(dirs[0], ".credentials.json"),
+            }),
         dirs.length > 1 ? sdk.claudeAccount.state(selectedSession).catch(() => undefined) : undefined,
       ])
       if (!usageAbort.signal.aborted && JSON.stringify(dirs) === JSON.stringify(claudeDirectories())) {
@@ -208,15 +249,21 @@ export function createSidebarUsage(input: {
         })
         if (input.sessionID() === selectedSession) {
           const current = pool?.find((account) => account.current)
-          setActiveClaudeAccount(current ? claudeConfigDirId(current.id === "default"
-            ? process.env.CLAUDE_CONFIG_DIR ?? path.join(os.homedir(), ".claude") : current.id) : undefined)
+          setActiveClaudeAccount(
+            current
+              ? claudeConfigDirId(
+                  current.id === "default"
+                    ? (process.env.CLAUDE_CONFIG_DIR ?? path.join(os.homedir(), ".claude"))
+                    : current.id,
+                )
+              : undefined,
+          )
         }
       }
       return { ok: next.ok && next.source === "live" && !next.metadata?.status, metadata: next.metadata }
     }
     const next = await probeCursorUsage({ ...options, cursorSessionToken })
-    if (!usageAbort.signal.aborted)
-      setCursorUsage((previous) => updateUsageSnapshot(previous, next, Date.now()))
+    if (!usageAbort.signal.aborted) setCursorUsage((previous) => updateUsageSnapshot(previous, next, Date.now()))
     return next
   }
   const refreshOldUsage = () => {
@@ -227,20 +274,31 @@ export function createSidebarUsage(input: {
       cursor: cursorUsage(),
       "claude-code": claudeCodeUsage(),
     }
-    usageScheduler.request(usageProviders().filter((provider) => Date.now() - (snapshots[provider].fetchedAt ?? 0) > 60_000))
+    usageScheduler.request(
+      usageProviders().filter((provider) => Date.now() - (snapshots[provider].fetchedAt ?? 0) > 60_000),
+    )
   }
   // Account rows use their own snapshot; cached siblings are marked per window.
   const usageColor = (snapshot: UsageSnapshot<{ ok: boolean }>) =>
     snapshot.stale || snapshot.source === "cache" || usageNow() - (snapshot.fetchedAt ?? 0) > 300_000
-      ? theme.textMuted : theme.text
+      ? theme.textMuted
+      : theme.text
   usageScheduler = createUsageRefresh({
     providers: usageProviders,
-    active: (provider) => Object.entries(sync.data.session_status).some(([id, status]) => {
-      if (status.type === "idle") return false
-      const model = sync.data.message[id]?.findLast((message) => message.role === "assistant")
-      return usageProviderForModel(model?.role === "assistant" ? model.providerID :
-        id === input.routeSessionID() ? local.model.current()?.providerID ?? "" : "") === provider
-    }),
+    active: (provider) =>
+      Object.entries(sync.data.session_status).some(([id, status]) => {
+        if (status.type === "idle") return false
+        const model = sync.data.message[id]?.findLast((message) => message.role === "assistant")
+        return (
+          usageProviderForModel(
+            model?.role === "assistant"
+              ? model.providerID
+              : id === input.routeSessionID()
+                ? (local.model.current()?.providerID ?? "")
+                : "",
+          ) === provider
+        )
+      }),
     refresh: async (provider) => {
       const result = await refreshUsage(provider)
       return { ok: result.ok, retryAt: result.metadata?.retryAt }
@@ -248,10 +306,12 @@ export function createSidebarUsage(input: {
   })
   usageScheduler.request()
   void readObservedUsage()
-  onCleanup(sdk.onReconnect(() => {
-    void readObservedUsage()
-    usageScheduler.request()
-  }))
+  onCleanup(
+    sdk.onReconnect(() => {
+      void readObservedUsage()
+      usageScheduler.request()
+    }),
+  )
   createEffect(() => {
     usageProviders()
     Object.values(sync.data.session_status).forEach((status) => status.type)
@@ -260,7 +320,7 @@ export function createSidebarUsage(input: {
   createEffect(() => {
     const dirs = claudeDirectories()
     setClaudeCodeUsage((previous) => {
-      const ids = previous.ok ? previous.accounts?.map((account) => account.id) ?? [previous.accountID] : []
+      const ids = previous.ok ? (previous.accounts?.map((account) => account.id) ?? [previous.accountID]) : []
       if (JSON.stringify(ids) === JSON.stringify(dirs)) return previous
       return [...usageObservations.values()].reduce(applyClaudeObservation, claudeSeed())
     })
@@ -303,6 +363,45 @@ export function createSidebarUsage(input: {
         onCancel={() => dialog.clear()}
       />
     ))
+  const usagePlans = createMemo(() =>
+    resolveUsagePlans(
+      {
+        providers: usageProviders(),
+        claudeAccounts: claudeDirectories(),
+        facts: planFacts(),
+        cursor: cursorUsage(),
+        subscriptions: usageSubscriptions(),
+      },
+      usageNow(),
+    ),
+  )
+  const openBilling = (plan: UsagePlan) => void openLink(kv, plan.url).catch(toast.error)
+  // Muted renewal line under a provider's meters; left click opens the provider's billing page.
+  const planLine = (provider: UsagePlanProvider, account?: string) => {
+    const plan = usagePlans().find(
+      (item) => item.provider === provider && (account === undefined || item.account === account),
+    )
+    if (!plan) return undefined
+    const line = usagePlanLine(plan, usageNow())
+    const key = `plan:${provider}:${account ?? ""}`
+    return (
+      <text
+        fg={hovered() === key ? hoverColor : line.urgent ? theme.warning : theme.textMuted}
+        wrapMode="none"
+        onMouseOver={(event) => {
+          // Keeps the Usage box's own hover from replacing this line's.
+          event.stopPropagation()
+          setHovered(key)
+        }}
+        onMouseUp={(event) => {
+          event.stopPropagation()
+          if (event.button === 0) openBilling(plan)
+        }}
+      >
+        {line.text}
+      </text>
+    )
+  }
   const usageRows = () => {
     const codex = codexWindows()
     const codexHasData = Boolean(codex.weekly || codex.monthly)
@@ -310,8 +409,10 @@ export function createSidebarUsage(input: {
     const goOk = goSnapshot.ok ? goSnapshot : undefined
     const orSnapshot = openRouterUsage()
     const orOk = orSnapshot.ok ? orSnapshot : undefined
-    const orValue = orOk ? formatUsagePercent(orOk.usedPercent, showRemaining()) +
-      (orSnapshot.stale || usageNow() - (orSnapshot.fetchedAt ?? 0) > 300_000 ? "*" : "") : "unavailable"
+    const orValue = orOk
+      ? formatUsagePercent(orOk.usedPercent, showRemaining()) +
+        (orSnapshot.stale || usageNow() - (orSnapshot.fetchedAt ?? 0) > 300_000 ? "*" : "")
+      : "unavailable"
     const cursorSnapshot = cursorUsage()
     const cursorOk = cursorSnapshot.ok ? cursorSnapshot.monthly : undefined
     const cursorNeedsToken =
@@ -320,7 +421,12 @@ export function createSidebarUsage(input: {
     // Expire known windows against the local minute clock; no new request, no timestamp refresh.
     const claudeProjected = claudeSnapshot.ok ? projectClaudeUsage(claudeSnapshot, usageNow()) : claudeSnapshot
     const claudeOk = claudeProjected.ok ? claudeProjected : undefined
-    const cell = (window: UsageWindow, snapshot: UsageSnapshot<{ ok: boolean }>, suffix = windowLabel(window.minutes)) => ({
+    const claudePooled = claudeDirectories().length > 1
+    const cell = (
+      window: UsageWindow,
+      snapshot: UsageSnapshot<{ ok: boolean }>,
+      suffix = windowLabel(window.minutes),
+    ) => ({
       usedPercent: window.usedPercent,
       resetAt: window.resetAt,
       suffix: suffix + (usageWindowStale(window, snapshot, usageNow()) ? "*" : ""),
@@ -357,8 +463,8 @@ export function createSidebarUsage(input: {
                 shared?.starts,
                 shared?.clocks,
                 shared?.days,
-                 activeClaudeAccount(),
-                 usageNow(),
+                activeClaudeAccount(),
+                usageNow(),
               )
             : [],
         cursor: rows(providers.includes("cursor") && cursorOk, {
@@ -366,14 +472,19 @@ export function createSidebarUsage(input: {
           windows: cursorOk
             ? [
                 cell(cursorOk, cursorSnapshot, "m"),
-                { usedPercent: cursorOk.apiUsedPercent, resetAt: "", suffix: " api" +
-                  (usageWindowStale(cursorOk, cursorSnapshot, usageNow()) ? "*" : "") },
+                {
+                  usedPercent: cursorOk.apiUsedPercent,
+                  resetAt: "",
+                  suffix: " api" + (usageWindowStale(cursorOk, cursorSnapshot, usageNow()) ? "*" : ""),
+                },
               ]
             : [],
         }),
         go: rows(providers.includes("opencode-go") && goOk, {
           label: "OpenCode Go:",
-          windows: goOk ? [goOk.weekly, goOk.monthly].flatMap((window) => (window ? [cell(window, goSnapshot)] : [])) : [],
+          windows: goOk
+            ? [goOk.weekly, goOk.monthly].flatMap((window) => (window ? [cell(window, goSnapshot)] : []))
+            : [],
         }),
       }
     }
@@ -382,21 +493,31 @@ export function createSidebarUsage(input: {
       label: string,
       snapshot: UsageSnapshot<{ ok: boolean }>,
       rows: (ReturnType<typeof formatUsageRows>[number] & {
-        label?: string; spaced?: boolean; snapshot?: UsageSnapshot<{ ok: boolean }>
+        label?: string
+        spaced?: boolean
+        snapshot?: UsageSnapshot<{ ok: boolean }>
+        account?: string
       })[],
+      // Pooled Claude: the plan line follows each account's last row.
+      accountPlans = false,
     ) => (
       <For each={rows}>
-        {(row) => {
+        {(row, index) => {
           const rowLabel = row.label ?? label
           return (
             <box flexDirection="column" marginTop={"spaced" in row && row.spaced && usageSpacing() ? 1 : 0}>
               <text fg={theme.textMuted} wrapMode="none">
-                <span style={{ fg: usageColor(row.snapshot ?? snapshot) }}>{row.usage.startsWith(rowLabel) ? rowLabel : ""}</span>
+                <span style={{ fg: usageColor(row.snapshot ?? snapshot) }}>
+                  {row.usage.startsWith(rowLabel) ? rowLabel : ""}
+                </span>
                 {row.usage.startsWith(rowLabel) ? row.usage.slice(rowLabel.length) : row.usage}
               </text>
               <text fg={theme.textMuted} wrapMode="none">
                 {row.reset}
               </text>
+              <Show when={accountPlans && row.account && rows[index() + 1]?.account !== row.account}>
+                {planLine("claude-code", row.account)}
+              </Show>
             </box>
           )
         }}
@@ -454,6 +575,7 @@ export function createSidebarUsage(input: {
                 >
                   {aligned("Codex :", usage(), rows.codex)}
                 </Show>
+                {planLine("openai")}
               </box>
             </Show>
             <Show when={usageProviders().includes("claude-code")}>
@@ -472,8 +594,9 @@ export function createSidebarUsage(input: {
                     </>
                   }
                 >
-                  {aligned("Claude:", claudeProjected, rows.claude)}
+                  {aligned("Claude:", claudeProjected, rows.claude, claudePooled)}
                 </Show>
+                {claudePooled ? undefined : planLine("claude-code")}
               </box>
             </Show>
             <Show when={usageProviders().includes("cursor")}>
@@ -501,6 +624,7 @@ export function createSidebarUsage(input: {
                     <text fg={theme.textMuted}>open Usage to paste a new cookie</text>
                   </box>
                 </Show>
+                {planLine("cursor")}
               </box>
             </Show>
             <Show when={usageProviders().includes("opencode-go")}>
@@ -578,12 +702,29 @@ export function createSidebarUsage(input: {
     const row = (category: string, name: string, used: number | null, details: string[]) => ({
       category,
       inert: true,
-      title: used === null ? `${name}: Unavailable` :
-        `${name}: ${formatUsagePercent(used)} used, ${formatUsagePercent(used, true)} remaining`,
+      title:
+        used === null
+          ? `${name}: Unavailable`
+          : `${name}: ${formatUsagePercent(used)} used, ${formatUsagePercent(used, true)} remaining`,
       details,
     })
     const unavailable = (category: string) => ({ category, title: "Unavailable", inert: true })
     const signIn = (category: string, detail: string) => ({ category, title: "Sign in required", details: [detail] })
+    // Pooled Claude plan rows join their account's group (same category as the account's usage rows).
+    const planRows = (id: UsageProviderId, category: string) =>
+      usagePlans()
+        .filter((plan) => plan.provider === id)
+        .map((plan) => ({
+          category: plan.name ? `${category} (${plan.name})` : category,
+          title: `Plan: ${usagePlanLine(plan, nowMs).text}`,
+          details: [
+            ...(plan.atMs === undefined
+              ? []
+              : [Locale.format(plan.atMs, { weekday: "long", month: "long", day: "numeric", year: "numeric" })]),
+            PLAN_SOURCE[plan.source ?? "unknown"],
+          ],
+          onSelect: () => setTimeout(() => selectPlanMenu(plan), 100),
+        }))
     const providerRows = (id: UsageProviderId, category: string): Omit<DialogSelectOption<string>, "value">[] => {
       if (id === "openai") {
         const codex = codexWindows()
@@ -591,8 +732,10 @@ export function createSidebarUsage(input: {
         const windows = [codex.weekly, codex.monthly].filter((window) => window !== undefined)
         if (!windows.length) return [unavailable(category)]
         return windows.map((window) =>
-          row(category, windowName(window.minutes) || "Usage", window.usedPercent,
-            [reset(window.resetMs), ...usageReadingDetails(window, usage(), nowMs)]),
+          row(category, windowName(window.minutes) || "Usage", window.usedPercent, [
+            reset(window.resetMs),
+            ...usageReadingDetails(window, usage(), nowMs),
+          ]),
         )
       }
       if (id === "opencode-go") {
@@ -600,17 +743,24 @@ export function createSidebarUsage(input: {
         if (!snapshot.ok) return [unavailable(category)]
         return [snapshot.weekly, snapshot.monthly]
           .filter((window) => window !== null)
-          .map((window) => row(category, windowName(window.minutes), window.usedPercent,
-            [reset(window.resetMs), ...usageReadingDetails(window, snapshot, nowMs)]))
+          .map((window) =>
+            row(category, windowName(window.minutes), window.usedPercent, [
+              reset(window.resetMs),
+              ...usageReadingDetails(window, snapshot, nowMs),
+            ]),
+          )
       }
       if (id === "openrouter") {
         const snapshot = openRouterUsage()
         if (!snapshot.ok) return [unavailable(category)]
         return [
           row(category, "Credit", snapshot.usedPercent, [
-             `$${snapshot.usedUsd.toFixed(2)} of $${snapshot.limitUsd.toFixed(2)} used`,
-             ...usageReadingDetails({ usedPercent: snapshot.usedPercent, resetAt: null, resetMs: null, minutes: null },
-               snapshot, nowMs),
+            `$${snapshot.usedUsd.toFixed(2)} of $${snapshot.limitUsd.toFixed(2)} used`,
+            ...usageReadingDetails(
+              { usedPercent: snapshot.usedPercent, resetAt: null, resetMs: null, minutes: null },
+              snapshot,
+              nowMs,
+            ),
           ]),
         ]
       }
@@ -625,13 +775,23 @@ export function createSidebarUsage(input: {
         }
         const monthly = snapshot.monthly
         const source = snapshot.metadata?.accountSource
-        const login = source === "desktop" ? ["Meter login: Cursor desktop app"] :
-          source === "cookie" ? ["Meter login: separately connected cookie"] : []
+        const login =
+          source === "desktop"
+            ? ["Meter login: Cursor desktop app"]
+            : source === "cookie"
+              ? ["Meter login: separately connected cookie"]
+              : []
         return [
-          row(category, "Monthly", monthly.usedPercent,
-            [reset(monthly.resetMs), ...usageReadingDetails(monthly, snapshot, nowMs), ...login]),
-          row(category, "API", monthly.apiUsedPercent,
-            [reset(monthly.resetMs), ...usageReadingDetails(monthly, snapshot, nowMs), ...login]),
+          row(category, "Monthly", monthly.usedPercent, [
+            reset(monthly.resetMs),
+            ...usageReadingDetails(monthly, snapshot, nowMs),
+            ...login,
+          ]),
+          row(category, "API", monthly.apiUsedPercent, [
+            reset(monthly.resetMs),
+            ...usageReadingDetails(monthly, snapshot, nowMs),
+            ...login,
+          ]),
         ]
       }
       const claudeDetail = (window: UsageWindow, snapshot: ClaudeCodeUsage): string[] => {
@@ -693,7 +853,10 @@ export function createSidebarUsage(input: {
         },
       },
       { category: "Settings", title: "Configure usage providers", onSelect: () => openUsageSettings() },
-      ...providers.flatMap((provider) => providerRows(provider.id, provider.title)),
+      ...providers.flatMap((provider) => [
+        ...planRows(provider.id, provider.title),
+        ...providerRows(provider.id, provider.title),
+      ]),
     ]
     // Values must be unique per row: identical titles such as "Weekly: 0% used" appear under several providers.
     return rows.map((option) => ({ ...option, value: `${option.category}: ${option.title}` }))
@@ -704,88 +867,154 @@ export function createSidebarUsage(input: {
   }
   const openUsageMenu = () => setTimeout(selectUsageMenu, 100)
 
-  const saveUsageSubscriptions = (next: UsageSubscription[]) => {
+  const saveUsageSubscriptions = (next: UsageSubscription[], then = selectUsageCalendar) => {
     input.settings().usageSubscriptions = next
     saveUserUsageSubscriptions(os.homedir(), next)
     setUsageSubscriptions(next)
-    selectUsageCalendar()
+    then()
+  }
+  // Everything but this plan's manual date, which a new one replaces.
+  const otherSubscriptions = (plan: UsagePlan) =>
+    usageSubscriptions().filter((item) => item.provider !== plan.provider || item.account !== plan.account)
+  const selectPlanMenu = (plan: UsagePlan) => {
+    const manual = plan.source === "manual"
+    const options = [
+      {
+        title: "Open billing page",
+        value: "open",
+        onSelect: () => {
+          dialog.clear()
+          openBilling(plan)
+        },
+      },
+      {
+        title: manual ? "Change renewal date" : "Set renewal date",
+        value: "set",
+        onSelect: () => setTimeout(() => promptSubscriptionDate(usagePlanLabel(plan), plan), 100),
+      },
+      ...(manual
+        ? [
+            {
+              title: "Clear renewal date",
+              value: "clear",
+              onSelect: () => saveUsageSubscriptions(otherSubscriptions(plan), selectUsageMenu),
+            },
+          ]
+        : []),
+    ]
+    dialog.replace(() => <DialogSelect title={usagePlanLabel(plan)} options={options} />, undefined, {
+      back: selectUsageMenu,
+    })
   }
   const promptSubscriptionLabel = () =>
-    dialog.replace(() => (
-      <DialogPrompt
-        title="Add subscription date"
-        description={() => <text>Name the subscription, such as Claude Max (work).</text>}
-        placeholder="Claude Max"
-        onConfirm={(value) => {
-          const label = value.trim()
-          if (!label) {
-            toast.show({ variant: "error", message: "Enter a subscription name." })
-            return
-          }
-          setTimeout(() => promptSubscriptionDate(label), 100)
-        }}
-      />
-    ), undefined, { back: selectUsageCalendar })
-  const promptSubscriptionDate = (label: string) =>
-    dialog.replace(() => (
-      <DialogPrompt
-        title={`${label}: date`}
-        description={() => (
-          <text>Enter a day of the month (1-31) for a monthly renewal, or an end date as YYYY-MM-DD.</text>
-        )}
-        placeholder="12 or 2026-11-12"
-        onConfirm={(value) => {
-          const text = value.trim()
-          const day = /^\d{1,2}$/.test(text) ? Number(text) : 0
-          if (day >= 1 && day <= 31) {
-            saveUsageSubscriptions([...usageSubscriptions(), { label, renewDay: day }])
-            return
-          }
-          if (parseUsageDate(text) !== undefined) {
-            saveUsageSubscriptions([...usageSubscriptions(), { label, endsOn: text }])
-            return
-          }
-          toast.show({ variant: "error", message: "Enter a day from 1 to 31, or a date as YYYY-MM-DD." })
-        }}
-      />
-    ), undefined, { back: promptSubscriptionLabel })
+    dialog.replace(
+      () => (
+        <DialogPrompt
+          title="Add subscription date"
+          description={() => <text>Name the subscription, such as Claude Max (work).</text>}
+          placeholder="Claude Max"
+          onConfirm={(value) => {
+            const label = value.trim()
+            if (!label) {
+              toast.show({ variant: "error", message: "Enter a subscription name." })
+              return
+            }
+            setTimeout(() => promptSubscriptionDate(label), 100)
+          }}
+        />
+      ),
+      undefined,
+      { back: selectUsageCalendar },
+    )
+  // With a plan, the date becomes that plan's override and replaces any earlier one.
+  const promptSubscriptionDate = (label: string, plan?: UsagePlan) =>
+    dialog.replace(
+      () => (
+        <DialogPrompt
+          title={`${label}: date`}
+          description={() => (
+            <text>Enter a day of the month (1-31) for a monthly renewal, or an end date as YYYY-MM-DD.</text>
+          )}
+          placeholder="12 or 2026-11-12"
+          onConfirm={(value) => {
+            const text = value.trim()
+            const day = /^\d{1,2}$/.test(text) ? Number(text) : 0
+            const date =
+              day >= 1 && day <= 31
+                ? { renewDay: day }
+                : parseUsageDate(text) !== undefined
+                  ? { endsOn: text }
+                  : undefined
+            if (!date) {
+              toast.show({ variant: "error", message: "Enter a day from 1 to 31, or a date as YYYY-MM-DD." })
+              return
+            }
+            if (!plan) {
+              saveUsageSubscriptions([...usageSubscriptions(), { label, ...date }])
+              return
+            }
+            saveUsageSubscriptions(
+              [
+                ...otherSubscriptions(plan),
+                { label, provider: plan.provider, ...(plan.account ? { account: plan.account } : {}), ...date },
+              ],
+              selectUsageMenu,
+            )
+          }}
+        />
+      ),
+      undefined,
+      { back: plan ? () => selectPlanMenu(plan) : promptSubscriptionLabel },
+    )
 
-  const usageCalendarItems = () => usageCalendarEvents({
-    providers: usageProviders(),
-    openai: usage(),
-    cursor: cursorUsage(),
-    go: goUsage(),
-    claude: claudeCodeUsage(),
-    subscriptions: usageSubscriptions(),
-  }, usageNow())
+  const usageCalendarItems = () =>
+    usageCalendarEvents(
+      {
+        providers: usageProviders(),
+        openai: usage(),
+        cursor: cursorUsage(),
+        go: goUsage(),
+        claude: claudeCodeUsage(),
+        subscriptions: usageSubscriptions(),
+        planEvents: usagePlanEvents(usagePlans(), usageNow()),
+      },
+      usageNow(),
+    )
   const usageCalendarOptions = () => {
     const nowMs = usageNow()
     const events = usageCalendarItems()
     const percent = (used: number | null, stale: boolean) =>
-      used === null ? "" :
-        `, ${formatUsagePercent(used, showRemaining())} ${showRemaining() ? "remaining" : "used"}${stale ? "*" : ""}`
+      used === null
+        ? ""
+        : `, ${formatUsagePercent(used, showRemaining())} ${showRemaining() ? "remaining" : "used"}${stale ? "*" : ""}`
     const agenda = events.map((event) => ({
       category: usageCalendarDay(event.atMs, nowMs),
       inert: true,
       // Window resets lead with their clock; subscription dates are whole days.
-      title: event.allDay ? event.title :
-        `${compactResetDate(new Date(event.atMs)).split(" ")[1].padEnd(8)} ${event.title}${percent(event.usedPercent, event.stale)}`,
-      details: [event.allDay
-        ? Locale.format(event.atMs, { weekday: "long", month: "long", day: "numeric", year: "numeric" })
-        : fullResetDate(event.atMs, nowMs)],
+      title: event.allDay
+        ? event.title
+        : `${compactResetDate(new Date(event.atMs)).split(" ")[1].padEnd(8)} ${event.title}${percent(event.usedPercent, event.stale)}`,
+      details: [
+        event.allDay
+          ? Locale.format(event.atMs, { weekday: "long", month: "long", day: "numeric", year: "numeric" })
+          : fullResetDate(event.atMs, nowMs),
+      ],
     }))
     const subscriptions = usageSubscriptions().map((subscription, index) => ({
       category: "Subscription dates",
-      title: "renewDay" in subscription
-        ? `${subscription.label}: renews monthly on day ${subscription.renewDay}`
-        : `${subscription.label}: ends ${subscription.endsOn}`,
+      title:
+        "renewDay" in subscription
+          ? `${subscription.label}: renews monthly on day ${subscription.renewDay}`
+          : `${subscription.label}: ends ${subscription.endsOn}`,
       details: ["Select to remove"],
       onSelect: () => saveUsageSubscriptions(usageSubscriptions().filter((_, item) => item !== index)),
     }))
     const rows = [
       { category: "Subscription dates", title: "Add subscription date...", onSelect: () => promptSubscriptionLabel() },
       ...subscriptions,
-      ...(agenda.length ? agenda : [{ category: "Today", title: "No upcoming resets or subscription dates", inert: true }]),
+      ...(agenda.length
+        ? agenda
+        : [{ category: "Today", title: "No upcoming resets or subscription dates", inert: true }]),
     ]
     // Index keeps values unique: two rows can share a day and a title.
     return rows.map((option, index) => ({ ...option, value: `${index}: ${option.category}: ${option.title}` }))
@@ -798,29 +1027,39 @@ export function createSidebarUsage(input: {
         <For each={usageCalendarStrip(usageCalendarItems(), usageNow())}>
           {(day, index) => (
             <box flexDirection="column" alignItems="center" width={6}>
-              <text fg={index() === 0 ? theme.primary : theme.textMuted} wrapMode="none">{day.label}</text>
-              <text fg={day.count ? theme.text : theme.textMuted} wrapMode="none">{day.count ? `${day.count}` : "-"}</text>
+              <text fg={index() === 0 ? theme.primary : theme.textMuted} wrapMode="none">
+                {day.label}
+              </text>
+              <text fg={day.count ? theme.text : theme.textMuted} wrapMode="none">
+                {day.count ? `${day.count}` : "-"}
+              </text>
             </box>
           )}
         </For>
       </box>
     )
-    dialog.replace(() => (
-      <DialogSelect
-        title="Usage calendar"
-        filterFooter={strip()}
-        options={usageCalendarOptions()}
-        preserveSelection
-      />
-    ), undefined, { back: selectUsageMenu })
+    dialog.replace(
+      () => (
+        <DialogSelect
+          title="Usage calendar"
+          filterFooter={strip()}
+          options={usageCalendarOptions()}
+          preserveSelection
+        />
+      ),
+      undefined,
+      { back: selectUsageMenu },
+    )
   }
   const openUsageCalendar = () => setTimeout(selectUsageCalendar, 100)
 
-  onCleanup(sdk.claudeAccount.onChange(() => {
-    void readObservedUsage()
-    void refreshActiveClaudeAccount()
-    usageScheduler.request(["claude-code"])
-  }))
+  onCleanup(
+    sdk.claudeAccount.onChange(() => {
+      void readObservedUsage()
+      void refreshActiveClaudeAccount()
+      usageScheduler.request(["claude-code"])
+    }),
+  )
   onCleanup(event.on("provider.usage.updated", (evt) => observeUsage(evt.properties)))
   onCleanup(
     event.on("session.status", (evt) => {
@@ -845,8 +1084,14 @@ export function createSidebarUsage(input: {
       ["openai", codex.ok ? [codex.primary, codex.secondary] : []],
       ["opencode-go", go.ok ? [go.weekly, ...(go.monthly ? [go.monthly] : [])] : []],
       ["cursor", cursor.ok ? [cursor.monthly] : []],
-      ["claude-code", claude.ok ? (claude.accounts?.flatMap((account) => account.usage.ok
-        ? [account.usage.fiveHour, account.usage.weekly] : []) ?? [claude.fiveHour, claude.weekly]) : []],
+      [
+        "claude-code",
+        claude.ok
+          ? (claude.accounts?.flatMap((account) =>
+              account.usage.ok ? [account.usage.fiveHour, account.usage.weekly] : [],
+            ) ?? [claude.fiveHour, claude.weekly])
+          : [],
+      ],
     ]
     for (const [provider, readings] of windows) {
       for (const window of readings) {

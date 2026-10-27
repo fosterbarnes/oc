@@ -579,6 +579,43 @@ it.instance(
 )
 
 it.instance(
+  "claude-code models come from the anthropic catalog with config entries overlaid",
+  Effect.gen(function* () {
+    const providers = yield* list
+    const models = providers[ProviderV2.ID.make("claude-code")].models
+    // A partial entry keeps the catalog's price and limits and adds its variant.
+    expect(models["claude-opus-5-5"].name).toBe("Renamed Opus")
+    expect(models["claude-opus-5-5"].cost.input).toBe(4)
+    expect(models["claude-opus-5-5"].limit.context).toBe(1_000_000)
+    expect(Object.keys(models["claude-opus-5-5"].variants ?? {})).toContain("custom")
+    expect(Object.keys(models["claude-opus-5-5"].variants ?? {})).toContain("max")
+    // Built-ins the config never names, the fast twin, and an unknown declared id.
+    expect(models["claude-opus-5-5-fast"].cost.input).toBe(8)
+    expect(models["claude-mythos-5"].api.npm).toBe("@opencode-ai/claude-code")
+    expect(models["claude-3-opus-20240229"].name).toBe("Opus 3")
+    expect(models["claude-3-opus-20240229"].limit).toEqual({ context: 200_000, output: 64_000 })
+    expect(models["claude-3-opus-20240229"].capabilities.reasoning).toBe(true)
+    // An alias to an unknown id gets the template too, without registering that id.
+    expect(models["my-alias"].api.id).toBe("claude-x")
+    expect(models["my-alias"].limit.context).toBe(200_000)
+    expect(models["claude-x"]).toBeUndefined()
+  }),
+  {
+    config: {
+      provider: {
+        "claude-code": {
+          models: {
+            "claude-opus-5-5": { name: "Renamed Opus", variants: { custom: { reasoningEffort: "low" } } },
+            "claude-3-opus-20240229": { name: "Opus 3" },
+            "my-alias": { id: "claude-x", name: "My Alias" },
+          },
+        },
+      },
+    },
+  },
+)
+
+it.instance(
   "model config preserves explicitly empty models.dev variants",
   Effect.gen(function* () {
     yield* set("OPENAI_API_KEY", "test-api-key")

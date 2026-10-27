@@ -10,10 +10,13 @@ import {
   cliSupportsThinkingDisplay,
 } from "@/provider/claude-code/cliVersion.js"
 import { parseModelId } from "@/provider/claude-code/models.js"
+import { seedClaudeCodeModels } from "./catalogFixture"
 import { configureLogger, _resetLoggerForTests } from "@/provider/claude-code/logger.js"
 import { type ProxyToolDef } from "@/provider/claude-code/proxyToolDefs.js"
 import { disallowedToolFlags, resolveDisallowedTools } from "@/provider/claude-code/proxyToolSelection.js"
 import { CLAUDE_UNSUPPORTED_TOOLS } from "@/provider/claude-code/shared.js"
+
+seedClaudeCodeModels()
 
 const SUBAGENT = ["Agent", "Task", "TaskOutput", "Workflow"]
 const OFF = CLAUDE_UNSUPPORTED_TOOLS
@@ -237,10 +240,10 @@ test("parseModelId does not claim a -fast id it never registered", () => {
     model: "some-vendor-model-fast",
     fast: false,
   })
-  // Retired Anthropic fast ids are not registered either, so they are not
-  // silently rewritten into something that looks like it worked.
-  assert.deepEqual(parseModelId("claude-opus-4-6-fast"), {
-    model: "claude-opus-4-6-fast",
+  // A real model the catalog prices no fast mode for is not rewritten either,
+  // so it does not look like it worked.
+  assert.deepEqual(parseModelId("claude-sonnet-5-fast"), {
+    model: "claude-sonnet-5-fast",
     fast: false,
   })
 })

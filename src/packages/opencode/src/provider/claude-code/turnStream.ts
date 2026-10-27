@@ -41,7 +41,6 @@ import {
 } from "./cliEvents.js"
 import {
   applyFailoverChoice,
-  BASE_PROVIDER_ID,
   canonicalAccountId,
   earliestLimitedUntil,
   failoverCandidates,
@@ -82,7 +81,13 @@ import { OcConfig } from "@/config/oc.js"
 import { failoverQuestion } from "./failoverQuestion.js"
 import { ACCOUNT_FAILOVER_TOOL_CALL_PREFIX } from "./messageBuilder.js"
 import { log } from "./logger.js"
-import { claudeSteerSinks, hostToolExecutors, type HostToolExecutor, type HostToolResult } from "./shared.js"
+import {
+  CLAUDE_CODE_PROVIDER_ID,
+  claudeSteerSinks,
+  hostToolExecutors,
+  type HostToolExecutor,
+  type HostToolResult,
+} from "./shared.js"
 import { PROXY_TOOL_PREFIX, proxyToolResult, type ProxyToolResult } from "./proxyMcp.js"
 import {
   TASK_BATCH_TOOL_NAME,
@@ -797,7 +802,7 @@ class ClaudeTurn {
       const windows = toQuotaWindows(parseRateLimitEvent(msg))
       if (windows.length)
         reportUsageObservation({
-          providerID: BASE_PROVIDER_ID,
+          providerID: CLAUDE_CODE_PROVIDER_ID,
           accountID: canonicalAccountId(this.account),
           observedAt: Date.now(),
           windows,

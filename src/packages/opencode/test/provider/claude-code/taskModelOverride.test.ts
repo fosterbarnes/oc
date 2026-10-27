@@ -13,6 +13,9 @@ import {
 } from "../../../src/provider/claude-code/agentModels"
 import { resolveTurnContext } from "../../../src/provider/claude-code/turnContext"
 import type { ClaudeCodeConfig } from "../../../src/provider/claude-code/types"
+import { seedClaudeCodeModels } from "./catalogFixture"
+
+seedClaudeCodeModels()
 
 const cliPath = process.env.CLAUDE_CLI_PATH ?? Bun.which("claude")
 
