@@ -1,9 +1,24 @@
-v0.2.304 scrubyYogi [cleanup > shared TUI pane fixture]
+v0.2.307 pemdasPhenomenom [fix > compaction loop; patch > own oc.db]
 
-tests:
-The helpers that drive oc's real TUI in a headless WezTerm pane (open the pane, type, paste, click, wait for text, read the screen) moved out of the TUI pane test into a shared paneFixture.ts next to the other Claude test fixtures. Agents can now write a short throwaway check that opens oc's TUI and reads what it shows, instead of asking you to look. No app change.
+compaction:
+After a manual /compact in a Claude Code chat, Claude no longer keeps posting "what we did so far" recaps on its own until you press stop. With other providers, a manual /compact that keeps recent messages no longer re-answers your last prompt once.
 
-agent rules:
-AGENTS.md now points verification at the shared rules and the verify skill: prove a change with a throwaway check of the real behavior, run existing tests that cover changed files, and commit a new test only when it guards a real bug or safety contract. Throwaway checks go in test/tmp/verify/ under a package (already ignored by git) and are deleted afterward. The note that there is no CI replaces the old "only run checks you edit or introduce" line.
+sessions:
+oc now keeps its sessions in its own oc.db file (oc-local.db for source runs), so stock OpenCode can no longer change them and builds from different git branches see the same sessions. A newer or different build changing the database now shows "This database was changed by a newer or different OpenCode build" with what to do. Your one-time step after installing this build: rename opencode.db (and its -wal and -shm files) to oc.db, then remove the user OPENCODE_DB variable. Removing it first opens an empty oc.db.
 
-Under the hood: the moved block is identical to the original apart from the added exports. Two TUI pane cases fail on every run ("an API error the CLI reports twice shows once" and "claude warm-up palette opens the schedule dialog") and one is flaky ("rewinding Claude shows the provider notice"); they are now on the known-failures list in AGENTS.md and were not investigated. Checks: opencode typecheck clean; TUI pane suite 12/15 and 13/15 with only those known failures; a throwaway pane check opened oc and captured the home prompt, then its folder was deleted.
+dev and stable installs:
+Starting one oc install while another install's background server is running now stops with a message naming that install and the exact command to close it, instead of quietly using the wrong build.
+
+opening files:
+Fixed a security bug: clicking a file path whose name contained & could run a command, and paths with spaces reached the editor split in two. Clicking a path now opens it in Notepad on Windows when no editor is set, instead of showing an error. Editor commands with spaces can be written in double quotes, for example "C:\Program Files\Notepad++\notepad++.exe".
+
+keys:
+alt+q queues a prompt in a busy session and, on Home, sends it and keeps you on Home, since Windows terminals use alt+return for fullscreen. If your terminal sends some oc keys as other keys (for example ctrl+m as Enter), oc shows a one-time notice with the fix for that terminal.
+
+themes:
+Four new built-in themes, drac-neutral, drac-violet, drac-darker and drac-lighter, keep drac's colors with neutral gray or violet-tinted backgrounds instead of blue-tinted ones. drac itself is unchanged. The daily theme rotation now has 38 themes, so its sequence reshuffles.
+
+docs:
+Added a VM acceptance checklist (docs/dev/vmAcceptance.md). README, FORK.md, the keybinds and WezTerm docs, and the wiki cover the new keys, the editor fallback, the oc.db move, and running dev and stable on one PC.
+
+Under the hood: the compaction loop came from picking the pending user message by array position, while a compaction that keeps a tail puts the compaction message before the kept messages; the loop now picks by message time (new MessageV2.chronological), and a new test that timed out before the fix now passes. The editor launch no longer uses a shell: .exe editors start directly, .cmd and .bat editors go through cmd with every argument quoted, and paths containing % are refused. Checks: prompt, message-v2, compaction and messages-pagination tests 216 pass with 4 known failures (queue contention, two handoff child tests, fork tail remap; the last three also fail without this change); core database tests 21 pass; config and launcher safety tests 43 pass; editor and prompt dialog tests 17 pass; theme tests 12 pass; keybind docs check clean; core, opencode and tui typechecks clean. Throwaway probes confirmed the new database path, the other-install refusal, the editor injection fix, the keyboard notice, and Alt+Q queueing in a real TUI pane. The new themes were not viewed in a real terminal.

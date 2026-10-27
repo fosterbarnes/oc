@@ -806,6 +806,60 @@ noLLMServer.instance(
   { config: cfg },
 )
 
+// filterCompacted puts a retained tail after the summary; the loop must still see the summary as the
+// newest reply instead of re-answering the tail (an endless reply loop with Claude Code).
+noLLMServer.instance(
+  "loop exits after a manual compaction that keeps a tail",
+  () =>
+    Effect.gen(function* () {
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const chat = yield* sessions.create({ title: "Pinned" })
+      const assistant = (id: MessageID, parentID: MessageID, created: number) => ({
+        id,
+        role: "assistant" as const,
+        parentID,
+        sessionID: chat.id,
+        mode: "build",
+        agent: "build",
+        cost: 0,
+        path: { cwd: "/tmp", root: "/tmp" },
+        tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+        modelID: ref.modelID,
+        providerID: ref.providerID,
+        time: { created, completed: created + 1 },
+        finish: "stop",
+      })
+      const user = (id: MessageID, created: number) =>
+        sessions.updateMessage({ id, role: "user", sessionID: chat.id, agent: "build", model: ref, time: { created } })
+      const tailUser = MessageID.ascending()
+      const tailReply = MessageID.ascending()
+      const compactUser = MessageID.ascending()
+      const summaryID = MessageID.ascending()
+      yield* user(tailUser, 100)
+      yield* sessions.updateMessage(assistant(tailReply, tailUser, 110))
+      yield* user(compactUser, 200)
+      yield* sessions.updatePart({
+        id: PartID.ascending(),
+        messageID: compactUser,
+        sessionID: chat.id,
+        type: "compaction",
+        auto: false,
+        tail_start_id: tailUser,
+      })
+      yield* sessions.updateMessage({ ...assistant(summaryID, compactUser, 210), mode: "compaction", summary: true })
+
+      const result = yield* prompt.loop({ sessionID: chat.id })
+
+      expect(result.info.id).toBe(summaryID)
+      const assistants = (yield* sessions.messages({ sessionID: chat.id })).filter(
+        (message) => message.info.role === "assistant",
+      )
+      expect(assistants.map((message) => message.info.id)).toEqual([tailReply, summaryID])
+    }),
+  { config: cfg },
+)
+
 it.instance("loop exits without an LLM request for interrupted orphan tool calls", () =>
   Effect.gen(function* () {
     const { llm } = yield* useServerConfig(providerCfg)

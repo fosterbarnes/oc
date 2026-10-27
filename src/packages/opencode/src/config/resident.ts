@@ -136,9 +136,17 @@ export type ResidentObservation = {
   matches: boolean
   alive: boolean
   restartingFresh: boolean
+  otherBuild?: boolean
 }
 
-export type ResidentLaunchAction = "reuse" | "wait" | "wait-unowned" | "spawn" | "clear-spawn" | "refuse-foreign"
+export type ResidentLaunchAction =
+  | "reuse"
+  | "wait"
+  | "wait-unowned"
+  | "spawn"
+  | "clear-spawn"
+  | "refuse-foreign"
+  | "refuse-other-build"
 
 const residentReadyAttempts = 100
 const unownedReadyAttempts = 10
@@ -152,6 +160,9 @@ export function residentRestartFresh(restarting: string | undefined, now = Date.
 
 export function residentLaunchAction(observation: ResidentObservation): ResidentLaunchAction {
   if (observation.restartingFresh) return "wait"
+  // Dev and stable installs share the state file and port; never attach one to the other's server.
+  if (observation.healthy && observation.matches && observation.alive && observation.otherBuild)
+    return "refuse-other-build"
   if (observation.healthy && observation.matches && observation.alive) return "reuse"
   if (observation.healthy && observation.hasState && (!observation.matches || !observation.alive))
     return "refuse-foreign"
@@ -182,6 +193,12 @@ function residentRefusal(
   )
 }
 
+function otherBuildRefusal(executable: string | undefined) {
+  return new Error(
+    `The background server is running from another oc install (${executable}). Close it with "${executable}" --shutdown-all, then start this oc again.`,
+  )
+}
+
 async function readResidentState(): Promise<ResidentState | undefined> {
   try {
     return JSON.parse(await fs.readFile(serverStatePath(), "utf8")) as ResidentState
@@ -203,6 +220,7 @@ async function observeResident(url: string, secret: string, hostname: string, po
     matches,
     alive,
     restartingFresh: residentRestartFresh(state?.restarting),
+    otherBuild: !!state?.executable && !TuiLedger.sameExecutable(state.executable, executablePath()),
   })
   return { state, healthy, matches, alive, action }
 }
@@ -226,6 +244,7 @@ async function startServerUnlocked(replacement = false) {
   for (let attempt = 0; !replacement && attempt < residentReadyAttempts; attempt++) {
     const observed = await observeResident(url, secret, hostname, port)
     if (observed.action === "reuse") return { url, secret }
+    if (observed.action === "refuse-other-build") throw otherBuildRefusal(observed.state?.executable)
     if (observed.action === "refuse-foreign") {
       throw residentRefusal(hostname, port, observed.state, observed.alive, observed.matches)
     }
@@ -251,6 +270,7 @@ async function startServerUnlocked(replacement = false) {
   if (!ready && !replacement) {
     const observed = await observeResident(url, secret, hostname, port)
     if (observed.action === "reuse") return { url, secret }
+    if (observed.action === "refuse-other-build") throw otherBuildRefusal(observed.state?.executable)
     if (observed.action === "wait") throw new Error(`Resident OpenCode server is still starting or restarting: ${url}`)
     if (observed.healthy) {
       const adopted = await adoptResidentServer(hostname, port)

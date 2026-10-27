@@ -2,6 +2,25 @@
 
 oc is used daily in WezTerm. Put config in `~/.wezterm.lua` or `~/.config/wezterm/wezterm.lua`, then reload WezTerm.
 
+## Kitty keyboard protocol
+
+Stock WezTerm does not send full key combos. Turn them on:
+
+```lua
+config.enable_kitty_keyboard = true
+```
+
+Restart WezTerm afterwards. Without it some oc keys arrive as other keys:
+
+| You press | oc receives | Effect |
+|---|---|---|
+| `ctrl+m` (models) | `return` | Sends the prompt |
+| `ctrl+shift+h` (Home) | `backspace` | Deletes a character |
+| `ctrl+shift+b` (background) | `ctrl+b` | Opens the first subagent |
+| `shift+return` (newline) | `return` | Sends the prompt |
+
+oc shows a one-time notice when the terminal does not answer the protocol query. Either way, `ctrl+x m` opens models and `ctrl+j` inserts a newline. `alt+q` queues a prompt in a busy session and sends-and-stays on Home in every terminal; `alt+return` is fullscreen in WezTerm.
+
 ## Tab color square
 
 When the terminal helper reports WezTerm, oc sets the user variable `oc_agent_color` (`OSC 1337 SetUserVar`) to the active agent's hex color. The tab title still starts with a plain `■ ` (or `⦿ ` in a native `opencode` window). A `format-tab-title` handler strips that prefix and redraws the marker in `oc_agent_color`. Without this snippet the square stays uncolored.

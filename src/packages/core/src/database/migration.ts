@@ -22,7 +22,7 @@ export function apply(db: Database) {
         sql`SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'`,
       )
       if (tables.some((table) => table.name === "session")) {
-        // Stock OpenCode shares this database path; its newer migrations rewrite tables oc still uses.
+        // Unknown ids mean a newer oc build (or a shared file) rewrote tables this build still uses.
         const unknown = tables.some((table) => table.name === "migration")
           ? (yield* db.all<{ id: string }>(sql`SELECT id FROM ${sql.identifier("migration")}`))
               .map((row) => row.id)
@@ -31,7 +31,7 @@ export function apply(db: Database) {
         if (unknown.length > 0)
           return yield* Effect.die(
             new Error(
-              `Database was migrated by a different OpenCode build (${unknown.join(", ")}). Restore a backup of opencode.db and run that build with its own data directory.`,
+              `This database was changed by a newer or different OpenCode build (${unknown.join(", ")}). Update oc, or run the build that changed it.`,
             ),
           )
         return yield* applyOnly(db, migrations)

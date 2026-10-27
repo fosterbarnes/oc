@@ -616,6 +616,12 @@ export function latest(msgs: WithParts[]) {
   return { user, assistant, finished, tasks }
 }
 
+// Oldest-first in the same order as `latest`. Picks meaning "newest" or "first after" must search this,
+// not filterCompacted's model order.
+export function chronological(msgs: WithParts[]) {
+  return msgs.toSorted((a, b) => (isAfter(a.info, b.info) ? 1 : isAfter(b.info, a.info) ? -1 : 0))
+}
+
 function isAfter(info: Info, other?: Info) {
   if (!other) return true
   if (info.time.created !== other.time.created) return info.time.created > other.time.created

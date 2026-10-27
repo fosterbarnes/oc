@@ -138,6 +138,19 @@ describe("resident launch policy", () => {
     )
   })
 
+  test("refuses a healthy server started by another oc install", () => {
+    expect(
+      Resident.residentLaunchAction({
+        ...idle,
+        healthy: true,
+        hasState: true,
+        matches: true,
+        alive: true,
+        otherBuild: true,
+      }),
+    ).toBe("refuse-other-build")
+  })
+
   test("waits only while a restart mark is fresh", () => {
     const restarting = { restartingFresh: true }
     expect(

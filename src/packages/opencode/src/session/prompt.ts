@@ -1308,6 +1308,7 @@ const layer = Layer.effect(
         const pendingBeforeExit = (lastUserID: MessageID) =>
           MessageV2.filterCompactedEffect(sessionID).pipe(
             Effect.provideService(Database.Service, database),
+            Effect.map(MessageV2.chronological),
             Effect.map((messages) => {
               const answered = new Set(
                 messages.flatMap((message) => (message.info.role === "assistant" ? [message.info.parentID] : [])),
@@ -1335,12 +1336,14 @@ const layer = Layer.effect(
 
           const latest = MessageV2.latest(msgs)
           const { assistant: lastAssistant, finished: lastFinished, tasks } = latest
+          // A retained compaction tail sits after the summary in `msgs`, so user picks search by time.
+          const timeline = MessageV2.chronological(msgs)
           // Settings-incompatible Claude prompts must run separately under their own permissions.
           // Only after a Claude step: with none yet, `find` would pick the session's first (synthetic) message.
           // No-reply marks (revive) are never answered on their own; the next prompt carries them.
           const pendingUser =
             lastAssistant && isClaudeCodeProvider(lastAssistant.providerID)
-              ? msgs.find(
+              ? timeline.find(
                   (msg) =>
                     msg.info.role === "user" &&
                     !msg.info.noReply &&
@@ -1348,7 +1351,7 @@ const layer = Layer.effect(
                     !msg.parts.some((part) => part.type === "text" && part.metadata?.[STEERED_METADATA_KEY]),
                 )
               : undefined
-          const unanswered = msgs.findLast(
+          const unanswered = timeline.findLast(
             (msg) =>
               msg.info.role === "user" &&
               !msg.info.noReply &&

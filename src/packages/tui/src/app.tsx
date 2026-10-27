@@ -730,6 +730,21 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
   const terminalTabState = { progress: 0, color: "" }
   // Lets the WezTerm config forward Ctrl+V to oc, which reads file-drop and image clipboards itself.
   if (terminal.kind === "wezterm") writeTerminalEscape(renderer, "\x1b]1337;SetUserVar=oc_tui=MQ==\x07")
+  // Without the kitty keyboard protocol some oc chords arrive as other keys; say so once per
+  // terminal kind. kitty_keyboard starts false and OpenTUI reads terminal replies for 5 s.
+  const keyboardNotice = setTimeout(() => {
+    const key = `keyboard_notice_${terminal.kind}`
+    if (renderer.isDestroyed || !kv.ready || kv.get(key) || renderer.capabilities?.kitty_keyboard !== false) return
+    kv.set(key, true)
+    const keys = "sending some oc keys as other keys: Ctrl+M as Enter, Ctrl+Shift+H as Backspace, Shift+Enter as Enter."
+    const message = {
+      wezterm: `WezTerm is ${keys} Add config.enable_kitty_keyboard = true to wezterm.lua and restart WezTerm.`,
+      "windows-terminal": `Windows Terminal is ${keys} Update Windows Terminal to 1.25 or newer.`,
+      generic: `This terminal is ${keys} WezTerm (with enable_kitty_keyboard) or Windows Terminal 1.25+ send them.`,
+    }[terminal.kind]
+    toast.show({ title: "Keyboard", message, variant: "warning", duration: 20_000 })
+  }, 6_000)
+  onCleanup(() => clearTimeout(keyboardNotice))
   // Font overrides are per WezTerm window, so the font stays after exit; an empty value
   // goes out only on Reset, never at startup, so other oc tabs in the window keep theirs.
   let sentFont = ""

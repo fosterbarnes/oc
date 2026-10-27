@@ -1,10 +1,10 @@
 import { afterEach, expect, test } from "bun:test"
-import { mkdir, mkdtemp, writeFile } from "node:fs/promises"
+import { existsSync } from "node:fs"
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 import {
   discoverEditorConnection,
-  editorLaunchSpec,
   normalizePromptContent,
   openEditor,
   openFileAtLocation,
@@ -49,14 +49,20 @@ test("resolves relative file paths from the working directory", () => {
   expect(resolveFilePath("C:\\other\\app.ts", "C:\\workspace")).toBe("C:\\other\\app.ts")
 })
 
-test("splits editor commands and enables a Windows shell for file opens", () => {
-  const launch = editorLaunchSpec("code -g", "C:\\workspace\\src\\app.ts")
-  expect(launch.command).toBe("code")
-  expect(launch.args).toEqual(["-g", "C:\\workspace\\src\\app.ts"])
-  expect(launch.options.shell).toBe(process.platform === "win32")
-  expect(launch.options.detached).toBe(true)
-  expect(launch.options.stdio).toBe("ignore")
-})
+test("a Windows batch editor gets a path with spaces and & as one argument", async () => {
+  if (process.platform !== "win32") return
+  const dir = await mkdtemp(path.join(os.tmpdir(), "opencode-editor-"))
+  const shim = path.join(dir, "editor.cmd")
+  const target = path.join(dir, "a b&mkdir injected.md")
+  await writeFile(shim, '@echo %*> "%~dp0args.txt"\r\n')
+  await writeFile(target, "")
+  await openFileAtLocation({ filePath: target, cwd: dir, editor: shim })
+  const record = path.join(dir, "args.txt")
+  const deadline = Date.now() + 5_000
+  while (!existsSync(record) && Date.now() < deadline) await Bun.sleep(50)
+  expect((await readFile(record, "utf8")).trim()).toBe(`"${target}"`)
+  expect(existsSync(path.join(dir, "injected.md"))).toBe(false)
+}, 10_000)
 
 test("picks the editor by file extension before default and env", () => {
   const env = { EDITOR: "env-editor" }
@@ -69,15 +75,17 @@ test("picks the editor by file extension before default and env", () => {
   expect(resolveEditorForFile("app.ts", "string-editor", env)).toBe("string-editor")
 })
 
-test("falls back to VISUAL then EDITOR then undefined", () => {
+test("falls back to VISUAL then EDITOR then Notepad on Windows only", () => {
   const setting = { ".md": "md-editor" }
-  expect(resolveEditorForFile("app.ts", setting, { VISUAL: "visual-editor", EDITOR: "env-editor" })).toBe(
+  expect(resolveEditorForFile("app.ts", setting, { VISUAL: "visual-editor", EDITOR: "env-editor" }, "linux")).toBe(
     "visual-editor",
   )
-  expect(resolveEditorForFile("app.ts", setting, { EDITOR: "env-editor" })).toBe("env-editor")
-  expect(resolveEditorForFile("app.ts", "", { EDITOR: "env-editor" })).toBe("env-editor")
-  expect(resolveEditorForFile("app.ts", setting, {})).toBeUndefined()
-  expect(resolveEditorForFile("app.ts", undefined, {})).toBeUndefined()
+  expect(resolveEditorForFile("app.ts", setting, { EDITOR: "env-editor" }, "linux")).toBe("env-editor")
+  expect(resolveEditorForFile("app.ts", "", { EDITOR: "env-editor" }, "linux")).toBe("env-editor")
+  expect(resolveEditorForFile("app.ts", setting, {}, "linux")).toBeUndefined()
+  expect(resolveEditorForFile("app.ts", undefined, {}, "linux")).toBeUndefined()
+  expect(resolveEditorForFile("app.ts", setting, {}, "win32")).toBe("notepad")
+  expect(resolveEditorForFile("app.ts", undefined, {}, "win32")).toBe("notepad")
 })
 
 test("skips dead IDE lock files and prefers a live port", async () => {

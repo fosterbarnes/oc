@@ -196,6 +196,111 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-26 (~21:34) - v0.2.307 pemdasPhenomenom - Fix endless reply loop after manual compaction - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation (/imp of `~/.config/opencode/plans/2026-10-26-compactionLoopFix.md`); completed
+- Version: 0.2.307 pemdasPhenomenom
+- Root cause: `filterCompacted` returns model order `[compaction user, summary, ...kept tail, ...]` when compaction keeps a tail (upstream #25851). Fork picks in `session/prompt.ts` `runLoop` used array position: `unanswered` (`findLast`) chose the kept tail user over the newer compaction user, so the exit check failed; the Claude-only `pendingUser` (`find`) then chose the compaction user ("What did we do so far?"). Alternated forever (seen in `ses_e859bfbb7ffenJEv2f1UX3yzZe`). Non-Claude providers re-answered the last kept prompt once
+- Added `MessageV2.chronological(msgs)` in `session/message-v2.ts`: oldest-first sort using the same `isAfter` order as `latest()` (upstream #27545 precedent)
+- Changed `prompt.ts` `runLoop`: `pendingUser` and `unanswered` search `timeline = MessageV2.chronological(msgs)`; `pendingBeforeExit` maps loaded messages through `chronological` before slicing. `msgs` stays in model order for model input
+- Kept: `bypassAgentCheck` `findLast` (`prompt.ts` ~1608) and handoff `original` pick; after the fix they only run with the newest user last in `msgs`
+- Added test "loop exits after a manual compaction that keeps a tail" in `test/session/prompt.test.ts` (noLLMServer; tail user + reply, compaction user with `tail_start_id`, summary; expects loop returns summary, no new assistant)
+- Added AGENTS.md known failures: 2 handoff child tests in `prompt.test.ts` and "fork remaps compaction tail_start_id" in `messages-pagination.test.ts`, confirmed failing with this change stashed
+- Verification: new test timed out (30 s) before the fix, passes after; `bun test` prompt, message-v2, compaction, messages-pagination: 216 pass, 4 fail (queue contention known, 3 above failed at baseline too); opencode `tsc --noEmit` exit 0
+- Risk: `pendingUser` and `readMidTurn` still compare ids; imported sessions with nonmonotonic ids are a separate older edge case
+
+### User
+Claude Code chats
+- After a manual /compact, Claude no longer keeps posting "what we did so far" recaps on its own until you press stop.
+
+Other providers
+- A manual /compact that keeps recent messages no longer re-answers your last prompt once.
+
+---
+
+## 2026-10-26 (~20:44) - v0.2.306 accidentlySexist - Own session DB oc.db; dev/stable server refusal; VM checklist - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation (/imp of `~/.config/opencode/plans/2026-10-26-parityFixes.md` steps 3-5); completed
+- Version: 0.2.306 accidentlySexist
+- Changed `core/src/database/database.ts` `path()`: `OPENCODE_DB` override kept; else `oc-local.db` when `InstallationLocal`, else `oc.db`. Removed channel branch (`opencode.db` for latest/beta/prod, `opencode-<channel>.db` otherwise) and `OPENCODE_DISABLE_CHANNEL_DB`
+- Changed `core/src/database/migration.ts` guard text: "This database was changed by a newer or different OpenCode build (<ids>). Update oc, or run the build that changed it." No `opencode.db` in text
+- Changed `core/test/database-migration.test.ts` guard test (intended change): asserts id `29990101000000_foreign` only
+- Added `opencode/src/config/resident.ts`: `ResidentObservation.otherBuild?`, action `"refuse-other-build"` before `"reuse"` (healthy+matches+alive+otherBuild); `observeResident` sets it via `TuiLedger.sameExecutable(state.executable, executablePath())`; `otherBuildRefusal` thrown in the attempt loop and the post-loop check. Post-spawn readiness loop unchanged (own spawn matches)
+- Added test "refuses a healthy server started by another oc install" in `test/config/oc.test.ts`
+- Added `docs/dev/vmAcceptance.md` (sections 1-8, rows tagged with parity inventory IDs, plus Alt+Q, keyboard notice, Notepad click E3, `debug paths db` I1, stock `opencode.db` untouched)
+- Docs: AGENTS.md line 8 (DB names) and Testing pane line (`OPENCODE_DB` may be set; source runs default to `oc-local.db`); FORK.md Resident background server and Native binary rows; wiki clone Install ("Running next to stock OpenCode" rewritten, new "Dev and stable on one PC") and Troubleshooting (refusal + new DB message). Wiki not pushed
+- Kept: user's HKCU `OPENCODE_DB` and data untouched; one-time rename is the user's (plan step 3 "Your one-time move")
+- Kept: `drizzle.config.ts` (upstream dev tool); test fixtures that set `OPENCODE_DB` to `<home>/opencode.db` (isolated temp files, name irrelevant)
+- Verification: probe `bun run src/index.ts debug paths db` (opencode, `OPENCODE_DB` removed, XDG_* temp) printed `...\ocDbProbe-...\data\opencode\oc-local.db`; core `bun test test/database-migration.test.ts test/database.test.ts` 21 pass 2 skip; core typecheck exit 0; opencode `bun test test/config/oc.test.ts test/cli/launcherSafety.test.ts` 43 pass; opencode typecheck exit 0. Probe (opencode `test/tmp/verify/`): fake healthy server + state record owned by live `PING.EXE` -> `startServer` threw "...another oc install (C:\Windows\System32\PING.EXE). Close it with "C:\Windows\System32\PING.EXE" --shutdown-all..."; record owned by own bun pid -> reused. Probe folder deleted, `Test-Path` False
+- Risk: two source checkouts both run as `bun.exe`, so they still share a server (same executable)
+- TODO (user): after installing this build, rename `opencode.db` (+ `-wal`, `-shm`) to `oc.db`, then remove HKCU `OPENCODE_DB` (plan step 3). Removing it first opens an empty `oc.db`
+
+### User
+Sessions
+- oc now keeps its sessions in its own `oc.db` file, so stock OpenCode can no longer change them and builds from different git branches see the same sessions.
+- A newer build changing the database now shows "This database was changed by a newer or different OpenCode build" with what to do.
+
+Dev and stable installs
+- Starting one oc install while another install's background server runs now stops with a message naming that install and the exact command to close it, instead of quietly using the wrong build.
+
+Docs
+- Added a VM acceptance checklist (`docs/dev/vmAcceptance.md`) and wiki notes on running next to stock OpenCode and keeping dev and stable on one PC.
+
+---
+
+## 2026-10-26 (~20:13) - v0.2.305 conventionEvolution - Safe editor launch with Notepad fallback; Alt+Q and keyboard notice - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation (/imp of `~/.config/opencode/plans/2026-10-26-parityFixes.md` steps 1-2); completed
+- Version: 0.2.305 conventionEvolution (unchanged: drac-variants session bumped it and nothing is committed since)
+- Fixed command injection in `tui/src/editor.ts`: Windows `shell: true` joined args unquoted into `cmd /c`, so a clicked path with `&` ran a command and a path with a space split in two. Old code verified: `.cmd` editor + `a b&mkdir injected.md` created `injected.md` and got `...\a b` only
+- Added `editorProcess(editor, filePath, platform)`: non-Windows unchanged; Windows resolves via `Bun.which`; `.exe`/unresolved spawn direct; `.cmd`/`.bat` run `ComSpec /d /v:off /s /c ""shim" "arg" ... ""` with `windowsVerbatimArguments`; `%` in target path throws (cmd expands % inside quotes)
+- Removed `editorLaunchSpec`; `openFileAtLocation` and `openEditor` both use `editorProcess`, no `shell`
+- Changed `parseEditorCommand`: leading double-quoted command is one token
+- Changed `resolveEditorForFile(..., platform)`: after VISUAL/EDITOR returns `"notepad"` on win32. `openEditor` keeps no fallback (Win11 Notepad returns at once)
+- Tests `test/editor.test.ts`: deleted change detector "splits editor commands and enables a Windows shell" (pinned `shell: true`); intended change "falls back to VISUAL then EDITOR then Notepad on Windows only" with explicit platform; added Windows-only `.cmd` + `a b&mkdir injected.md` test (one quoted arg, no folder)
+- Changed `config/keybindPreset.ts` (oc layout only): `prompt_queue: "alt+q,alt+return"`, `prompt_submit_background: "ctrl+return,alt+q"`. Alt+Enter is fullscreen in every Windows terminal
+- Added keyboard notice in `app.tsx` after `detectTerminal()`: 6 s timer, if `renderer.capabilities.kitty_keyboard === false` and kv `keyboard_notice_<kind>` unset, one warning toast per terminal kind
+- Note: deviated from plan's "initial capabilities, else CAPABILITIES event": OpenTUI sets `_capabilities` at `setupTerminal` with kitty_keyboard false before any reply and reads replies for 5 s (`capabilityTimeoutId`), so the initial value would always fire the notice
+- Docs: regenerated `docs/keybinds.md`; `docs/wezterm.md` new first section; README.md Sessions line + Terminal table row; FORK.md rows (Send and stay, Queue prompts, Click a path, Keybind layouts, Keys and command palette); wiki clone Configuration, Keybinds (new "Terminals that send the wrong key"), Troubleshooting, Sessions. Wiki not pushed
+- Kept: drac-variants session's `theme/index.ts`, `dracVariants.ts`, and its notes entry untouched
+- Verification: `bun test test/editor.test.ts test/cli/tui/promptBackground.test.tsx test/cli/tui/dialog-prompt.test.tsx` 17 pass; tui `bun run typecheck` exit 0; `keybindDocs.ts --check` exit 0. Probe (tui `test/tmp/verify/`): old editor.ts created `injected.md`; `bun.exe` editor got `x y&echo INJECTED ^!(z).md` as one argv; quoted `.cmd` in `Program Files` folder got `"-n" "<path>"`; `%` refused; `notepad` -> `C:\Windows\notepad.exe`, `code` -> `code.cmd` via cmd. Pane probes (opencode `test/tmp/verify/`, fixture copy with optional `enable_kitty_keyboard = true`): stock pane showed notice once, not on second launch with same home; kitty pane none (gate passed); Alt+Q on Home showed "Started new session" and stayed on Home (1 session); Alt+Q in busy session cleared prompt, not sent until turn ended, then delivered as 3rd request. Both probe folders deleted, `Test-Path` False. Evidence `%TEMP%\verify\20261026-2003\`
+- Note: "N queued" label is hidden while busy (busy Match wins in prompt footer), so probe checked delivery instead of the count
+- TODO: plan steps 3-5 (session DB `oc.db`, dev/stable server refusal, vmAcceptance doc) in a later session
+
+### User
+Opening files
+- Clicking a file path now opens it in Notepad on Windows when no editor is set, instead of showing an error.
+- Fixed a security bug: a file whose name contained `&` could run a command when you clicked its path, and paths with spaces reached the editor split in two.
+- Editor commands with spaces can now be written in double quotes, for example `"C:\Program Files\Notepad++\notepad++.exe"`.
+
+Keys
+- `alt+q` queues a prompt in a busy session and, on Home, sends it and keeps you on Home; Windows terminals use `alt+return` for fullscreen.
+- If your terminal sends some oc keys as other keys (for example `ctrl+m` as Enter), oc shows a one-time notice with the fix for that terminal.
+
+---
+
+## 2026-10-26 (~20:00) - v0.2.305 conventionEvolution - Four drac surface variant themes - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation (/imp of `~/.config/opencode/plans/dracVariantsAndTuiMockupSkill.md` Part A); completed
+- Version: 0.2.305
+- Added `src/packages/tui/src/theme/dracVariants.ts`: `DRAC_VARIANTS` = drac with own `background`/`backgroundPanel`/`backgroundElement` and defs `fosterSurface0/1/2` + `fosterMantle` (drac's only users: border roles, `diffContextBg`). Keys `drac-neutral`, `drac-violet`, `drac-darker`, `drac-lighter`; values picked by user in an HTML mockup playground. Built from drac so later drac accent/syntax tweaks carry over
+- Changed `theme/index.ts`: spread `DRAC_VARIANTS` after `drac` in `DEFAULT_THEMES` (2-line diff to upstream file)
+- Note: `daily_theme` rotation grows 34 -> 38 names, so the daily sequence reshuffles; home tips theme count +4
+- Note: the `oc:tui-mockup` skill and `/spit` `/spitS` mockup permission from the same plan logged in `C:\Users\Foster\buildNotes.md`
+- Kept: `src/packages/tui/src/editor.ts` and `test/editor.test.ts` were already modified by another session; untouched
+- Verification: probe `bun -e` resolveTheme(dark) for drac + 4 variants printed every surface hex matching the plan table; drac still `#1A1D29`; 38 themes. `bun test test/theme.test.ts test/dailyTheme.test.ts` 12 pass 0 fail; `bun run typecheck` (tui) exit 0. Not checked in a real terminal (needs build)
+
+### User
+Themes
+- Four new built-in themes, `drac-neutral`, `drac-violet`, `drac-darker` and `drac-lighter`, keep drac's colors but swap its blue-tinted backgrounds for neutral gray or violet-tinted ones.
+- Pick them in the Themes dialog; `drac` itself is unchanged.
+
+---
+
 ## 2026-10-24 (~23:37) - v0.2.304 scrubyYogi - Shared TUI pane fixture for verify probes; probe and known-failure rules - Claude Opus 5.5, low effort; Implementation
 
 ### Agent

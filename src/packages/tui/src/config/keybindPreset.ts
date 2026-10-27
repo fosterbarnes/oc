@@ -14,6 +14,10 @@ export const oc: TuiKeybind.KeybindOverrides = {
   session_list: "ctrl+s,<leader>l",
   session_child_first: "ctrl+b,<leader>down",
   session_background: "ctrl+shift+b",
+  // Every Windows terminal takes Alt+Enter for fullscreen. Alt+Q means "send it, I'm staying here":
+  // queue in a session, send and stay on Home (their prompt layers never overlap).
+  prompt_queue: "alt+q,alt+return",
+  prompt_submit_background: "ctrl+return,alt+q",
   // ctrl+d: variant cycle in the prompt, delete in the session list (dialog layer wins).
   variant_cycle: "ctrl+d,ctrl+t",
   stash_delete: "none",

@@ -24,25 +24,37 @@ export function normalizePromptContent(content: string) {
   return content
 }
 
+// A leading double-quoted command is one token ("C:\Program Files\x\x.exe" -n).
 export function parseEditorCommand(editor: string) {
-  const parts = editor.split(" ").filter((part) => part.length > 0)
+  const quoted = editor.match(/^\s*"([^"]+)"(.*)$/)
+  const parts = (quoted ? quoted[2]! : editor).split(" ").filter((part) => part.length > 0)
+  if (quoted) return { command: quoted[1]!, args: parts }
   return { command: parts[0]!, args: parts.slice(1) }
 }
 
-export function editorLaunchSpec(editor: string, filePath: string) {
+// Never a shell: Windows .exe editors get CreateProcess quoting; batch shims run through cmd with
+// every argument quoted, so a path containing & or a space stays one argument.
+export function editorProcess(editor: string, filePath: string, platform = process.platform) {
   const parsed = parseEditorCommand(editor)
+  const args = [...parsed.args, filePath]
+  if (platform !== "win32") return { command: parsed.command, args, windowsVerbatimArguments: false }
+  const command = Bun.which(parsed.command) ?? parsed.command
+  if (!/\.(cmd|bat)$/i.test(command)) return { command, args, windowsVerbatimArguments: false }
+  // Inside quotes cmd takes & | < > ^ ( ) literally and /v:off keeps ! literal. % still expands
+  // inside quotes and has no escape there, so a batch editor cannot be handed a path with one.
+  if (filePath.includes("%"))
+    throw new Error(
+      `${parsed.command} is a batch script, which cannot open a path containing %. Set openEditedWith to the editor's .exe.`,
+    )
   return {
-    command: parsed.command,
-    args: [...parsed.args, filePath],
-    options: {
-      detached: true as const,
-      stdio: "ignore" as const,
-      shell: process.platform === "win32",
-    },
+    command: process.env.ComSpec || "cmd.exe",
+    args: ["/d", "/v:off", "/s", "/c", `""${[command, ...args].join('" "')}""`],
+    windowsVerbatimArguments: true,
   }
 }
 
 export async function openEditor(input: { value: string; renderer: CliRenderer; cwd?: string; stdin?: EditorStdio }) {
+  // No Notepad fallback: Windows 11 Notepad hands the file to a running window and exits at once.
   const editor = process.env.VISUAL || process.env.EDITOR
   if (!editor) return
   const file = path.join(os.tmpdir(), `${Date.now()}.md`)
@@ -51,11 +63,11 @@ export async function openEditor(input: { value: string; renderer: CliRenderer; 
   input.renderer.currentRenderBuffer.clear()
   try {
     await new Promise<void>((resolve, reject) => {
-      const parsed = parseEditorCommand(editor)
-      const child = spawn(parsed.command, [...parsed.args, file], {
+      const launch = editorProcess(editor, file)
+      const child = spawn(launch.command, launch.args, {
         cwd: input.cwd && existsSync(input.cwd) ? input.cwd : process.cwd(),
         stdio: [input.stdin ?? "inherit", "inherit", "inherit"],
-        shell: process.platform === "win32",
+        windowsVerbatimArguments: launch.windowsVerbatimArguments,
       })
       child.on("error", reject)
       child.on("exit", (code, signal) => {
@@ -79,9 +91,16 @@ export function resolveFilePath(filePath: string, cwd = process.cwd()) {
 export type OpenEditedWith = string | Record<string, string>
 
 // openEditedWith is one editor, or a map of lowercase ".ext" to editor with an optional "default".
-export function resolveEditorForFile(filePath: string, setting?: OpenEditedWith, env = process.env) {
-  if (typeof setting === "string") return setting || env.VISUAL || env.EDITOR
-  return setting?.[path.extname(filePath).toLowerCase()] || setting?.default || env.VISUAL || env.EDITOR
+// Then VISUAL, EDITOR, and on Windows Notepad, which every install has.
+export function resolveEditorForFile(
+  filePath: string,
+  setting?: OpenEditedWith,
+  env = process.env,
+  platform = process.platform,
+) {
+  const fallback = env.VISUAL || env.EDITOR || (platform === "win32" ? "notepad" : undefined)
+  if (typeof setting === "string") return setting || fallback
+  return setting?.[path.extname(filePath).toLowerCase()] || setting?.default || fallback
 }
 
 export async function openFileAtLocation(input: { filePath: string; cwd?: string; editor?: OpenEditedWith }) {
@@ -90,14 +109,14 @@ export async function openFileAtLocation(input: { filePath: string; cwd?: string
 
   const editor = resolveEditorForFile(filePath, input.editor)
   if (!editor) throw new Error("No editor configured. Set openEditedWith, VISUAL, or EDITOR.")
+  const launch = editorProcess(editor, filePath)
 
   await new Promise<void>((resolve, reject) => {
-    const launch = editorLaunchSpec(editor, filePath)
     const child = spawn(launch.command, launch.args, {
       cwd: input.cwd && existsSync(input.cwd) ? input.cwd : process.cwd(),
-      detached: launch.options.detached,
-      stdio: launch.options.stdio,
-      shell: launch.options.shell,
+      detached: true,
+      stdio: "ignore",
+      windowsVerbatimArguments: launch.windowsVerbatimArguments,
     })
     child.once("error", reject)
     child.once("spawn", () => {

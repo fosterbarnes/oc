@@ -33,6 +33,7 @@ import tokyonight from "./assets/tokyonight.json" with { type: "json" }
 import vercel from "./assets/vercel.json" with { type: "json" }
 import vesper from "./assets/vesper.json" with { type: "json" }
 import zenburn from "./assets/zenburn.json" with { type: "json" }
+import { DRAC_VARIANTS } from "./dracVariants"
 
 export type Theme = {
   readonly primary: RGBA
@@ -139,6 +140,7 @@ export const DEFAULT_THEMES: Record<string, ThemeJson> = {
   cobalt2,
   cursor,
   drac,
+  ...DRAC_VARIANTS,
   dracula,
   everforest,
   flexoki,

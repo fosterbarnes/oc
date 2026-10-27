@@ -219,8 +219,8 @@ Bold marks keys where the oc layout differs from opencode. `-` means unbound.
 
 | Action | oc | opencode |
 |---|---|---|
-| Send prompt and stay on Home | `ctrl+return` | `ctrl+return` |
-| Queue prompt while the session is busy | `alt+return` | `alt+return` |
+| Send prompt and stay on Home | **`ctrl+return`, `alt+q`** | `ctrl+return` |
+| Queue prompt while the session is busy | **`alt+q`, `alt+return`** | `alt+return` |
 | Schedule prompt | `alt+s` | `alt+s` |
 | Move to previous autocomplete item | `up`, `ctrl+p` | `up`, `ctrl+p` |
 | Move to next autocomplete item | `down`, `ctrl+n` | `down`, `ctrl+n` |

@@ -241,7 +241,7 @@ describe("DatabaseMigration", () => {
           yield* DatabaseMigration.apply(db)
         }),
       ),
-    ).rejects.toThrow("Database was migrated by a different OpenCode build (29990101000000_foreign)")
+    ).rejects.toThrow("29990101000000_foreign")
   })
 
   test("backfills existing Context Epoch rows to the build agent", async () => {
