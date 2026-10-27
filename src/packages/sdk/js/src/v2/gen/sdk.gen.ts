@@ -4018,6 +4018,7 @@ export class Queue extends HeyApiClient {
             }
             variant?: string
             parts: Array<TextPartInput | FilePartInput | AgentPartInput>
+            commands?: Array<string>
             runAt?: number
             target?: "current" | "fork" | "new"
           }
@@ -4025,6 +4026,7 @@ export class Queue extends HeyApiClient {
             type: "edit"
             id: string
             text: string
+            commands?: Array<string>
           }
         | {
             type: "cancel"

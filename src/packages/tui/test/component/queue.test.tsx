@@ -8,10 +8,16 @@ import { onCleanup } from "solid-js"
 import { tmpdir } from "../fixture/fixture"
 import { createTuiResolvedConfig } from "../fixture/tui-runtime"
 import { TestTuiContexts } from "../fixture/tui-environment"
-import { eventSource, json } from "../fixture/tui-sdk"
+import { createFetch, directory, eventSource, json } from "../fixture/tui-sdk"
 import { DialogQueue } from "../../src/component/dialogQueue"
+import { ArgsProvider } from "../../src/context/args"
+import { ExitProvider } from "../../src/context/exit"
 import { SDKProvider } from "../../src/context/sdk"
 import { KVProvider } from "../../src/context/kv"
+import { PermissionProvider } from "../../src/context/permission"
+import { ProjectProvider } from "../../src/context/project"
+import { RouteProvider } from "../../src/context/route"
+import { SyncProvider } from "../../src/context/sync"
 import { ThemeProvider } from "../../src/context/theme"
 import { TuiConfigProvider } from "../../src/config"
 import { DialogProvider, useDialog } from "../../src/ui/dialog"
@@ -29,10 +35,12 @@ async function mountQueue(input: {
   const state = path.join(input.root, "state")
   await mkdir(state, { recursive: true })
   await Bun.write(path.join(state, "kv.json"), "{}")
+  // The dialog parses edits against the synced command list, so sync's startup requests are served too.
+  const startup = createFetch()
   const fetch = Object.assign(
     async (url: Request | string | URL, init?: RequestInit) => {
       const request = new Request(url, init)
-      if (new URL(request.url).pathname !== `/session/${sessionID}/queue`) return json({}, { status: 404 })
+      if (new URL(request.url).pathname !== `/session/${sessionID}/queue`) return startup.fetch(request)
       if (request.method === "POST") input.calls.push(await request.clone().json())
       return json(input.snapshot)
     },
@@ -54,21 +62,37 @@ async function mountQueue(input: {
 
     return (
       <TestTuiContexts directory={input.root} paths={{ home: input.root, state, worktree: input.root }}>
-        <OpencodeKeymapProvider keymap={keymap}>
-          <TuiConfigProvider config={resolvedConfig}>
-            <KVProvider>
-              <ThemeProvider mode="dark">
-                <ToastProvider>
-                  <SDKProvider url="http://queue.test" fetch={fetch} events={eventSource()}>
-                    <DialogProvider>
-                      <Open />
-                    </DialogProvider>
-                  </SDKProvider>
-                </ToastProvider>
-              </ThemeProvider>
-            </KVProvider>
-          </TuiConfigProvider>
-        </OpencodeKeymapProvider>
+        <ArgsProvider>
+          <OpencodeKeymapProvider keymap={keymap}>
+            <TuiConfigProvider config={resolvedConfig}>
+              <KVProvider>
+                <SDKProvider url="http://queue.test" directory={directory} fetch={fetch} events={eventSource()}>
+                  <PermissionProvider>
+                    <ProjectProvider>
+                      <ExitProvider
+                        exit={(error) => {
+                          throw error
+                        }}
+                      >
+                        <RouteProvider initialRoute={{ type: "home" }}>
+                          <SyncProvider>
+                            <ThemeProvider mode="dark">
+                              <ToastProvider>
+                                <DialogProvider>
+                                  <Open />
+                                </DialogProvider>
+                              </ToastProvider>
+                            </ThemeProvider>
+                          </SyncProvider>
+                        </RouteProvider>
+                      </ExitProvider>
+                    </ProjectProvider>
+                  </PermissionProvider>
+                </SDKProvider>
+              </KVProvider>
+            </TuiConfigProvider>
+          </OpencodeKeymapProvider>
+        </ArgsProvider>
       </TestTuiContexts>
     )
   }

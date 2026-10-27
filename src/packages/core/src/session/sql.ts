@@ -193,6 +193,7 @@ export const SessionQueueTable = sqliteTable(
       model?: { providerID: ProviderV2.ID; modelID: ModelV2.ID }
       variant?: string
       parts: readonly (SessionV1.TextPartInput | SessionV1.FilePartInput | SessionV1.AgentPartInput)[]
+      commands?: readonly string[]
     }>(),
     run_at: integer(),
     target: text().$type<"current" | "fork" | "new">().notNull().default("current"),

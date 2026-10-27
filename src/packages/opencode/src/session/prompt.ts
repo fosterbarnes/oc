@@ -185,11 +185,7 @@ export interface Interface {
     readonly deadline: SessionQueue.Interface["deadline"]
     readonly snapshot: (sessionID: SessionID) => Effect.Effect<SessionQueue.Snapshot>
     readonly add: (input: SessionQueue.AddInput) => Effect.Effect<SessionQueue.Snapshot>
-    readonly edit: (input: {
-      sessionID: SessionID
-      id: MessageID
-      text: string
-    }) => Effect.Effect<SessionQueue.Snapshot, SessionQueue.NotFoundError | SessionQueue.BusyError>
+    readonly edit: SessionQueue.Interface["edit"]
     readonly cancel: (input: {
       sessionID: SessionID
       id: MessageID
@@ -1765,7 +1761,9 @@ const layer = Layer.effect(
       return yield* state.startShell(input.sessionID, lastAssistant(input.sessionID), shellImpl(input, ready), ready)
     })
 
-    const command = Effect.fn("SessionPrompt.command")(function* (input: CommandInput) {
+    const command = Effect.fn("SessionPrompt.command")(function* (
+      input: CommandInput & Pick<TurnInput, "delivery" | "persisted">,
+    ) {
       yield* Effect.logInfo("command", {
         "session.id": input.sessionID,
         command: input.command,
@@ -1988,6 +1986,8 @@ const layer = Layer.effect(
         variant: input.variant,
         turnPermission,
         toolHost,
+        delivery: input.delivery,
+        persisted: input.persisted,
       })
       // One per composed command: listeners such as `/init` detection (`project.ts`) match by name.
       yield* Effect.forEach(names, (name) =>
@@ -2005,6 +2005,33 @@ const layer = Layer.effect(
     // claim can slip in between a prompt being saved and its run starting. A drain keeps going while each
     // turn ends successfully; a second caller returns because the active drain picks up the next entry.
     const draining = new Set<SessionID>()
+
+    // Sends a claimed entry the way Enter would have: through its slash commands, or as a prompt.
+    const sendQueued = (sessionID: SessionID, entry: SessionQueue.Queued, messageID: MessageID) => {
+      const { commands: names = [], ...payload } = entry.payload
+      const hooks = {
+        sessionID,
+        messageID,
+        delivery: queue.delivery(entry.id, entry.claim),
+        persisted: queue.complete(entry.id),
+      }
+      if (!names.length) return gated(prompt({ ...payload, ...hooks }))
+      return gated(
+        command({
+          ...hooks,
+          command: names[0],
+          additionalCommands: names.slice(1),
+          arguments: SessionQueue.requestText(entry.payload),
+          agent: payload.agent,
+          model: payload.model && `${payload.model.providerID}/${payload.model.modelID}`,
+          variant: payload.variant,
+          parts: payload.parts.filter(
+            (part) => part.type === "file" || (part.type === "text" && !SessionQueue.isTyped(part)),
+          ),
+        }),
+      )
+    }
+
     const isIdle = (sessionID: SessionID) =>
       Effect.exit(state.assertNotBusy(sessionID)).pipe(Effect.map(Exit.isSuccess))
     const dispatchHead: (sessionID: SessionID) => Effect.Effect<boolean> = Effect.fn("SessionPrompt.dispatchQueued")(
@@ -2035,16 +2062,7 @@ const layer = Layer.effect(
         }
         // Refused during this project's reload: the queue pauses like any failed turn and resumes on demand.
         const exit = yield* Effect.gen(function* () {
-          const messageID = yield* queue.prepare(queued.id)
-          return yield* gated(
-            prompt({
-              ...queued.payload,
-              sessionID,
-              messageID,
-              delivery: queue.delivery(queued.id, queued.claim),
-              persisted: queue.complete(queued.id),
-            }),
-          )
+          return yield* sendQueued(sessionID, queued, yield* queue.prepare(queued.id))
         }).pipe(Effect.exit)
         if (Exit.isSuccess(exit) && SessionRunState.successfulTurn(exit.value)) return true
         yield* queue.settle(queued.id, queued.claim)
@@ -2077,16 +2095,7 @@ const layer = Layer.effect(
           entry.target === "fork"
             ? yield* sessions.fork({ sessionID: entry.sessionID })
             : yield* sessions.create({ workspaceID: (yield* sessions.get(entry.sessionID)).workspaceID })
-        const messageID = yield* queue.prepare(entry.id)
-        yield* gated(
-          prompt({
-            ...entry.payload,
-            sessionID: target.id,
-            messageID,
-            delivery: queue.delivery(entry.id, entry.claim),
-            persisted: queue.complete(entry.id),
-          }),
-        )
+        yield* sendQueued(target.id, entry, yield* queue.prepare(entry.id))
       }).pipe(Effect.exit)
       if (Exit.isSuccess(exit)) return
       yield* Effect.logWarning("scheduled prompt failed", { sessionID: entry.sessionID, cause: exit.cause })

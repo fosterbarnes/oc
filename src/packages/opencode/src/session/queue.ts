@@ -14,7 +14,8 @@ import { ScheduledDelivery } from "./scheduledDelivery"
 export const PauseReason = Schema.Literals(["restart", "error", "interrupted"])
 export type PauseReason = Schema.Schema.Type<typeof PauseReason>
 
-// The prompt as the user sent it: model, agent, and variant snapshot plus the expanded parts.
+// The prompt as the user sent it: model, agent, and variant snapshot plus the expanded parts. With
+// `commands` it sends like a typed slash command: the plain text parts are the command's request.
 export const Payload = Schema.Struct({
   agent: Schema.optional(Schema.String),
   model: Schema.optional(Schema.Struct({ providerID: ProviderV2.ID, modelID: ModelV2.ID })),
@@ -24,8 +25,20 @@ export const Payload = Schema.Struct({
       discriminator: "type",
     }),
   ),
+  commands: Schema.optional(Schema.Array(Schema.String)),
 })
 export type Payload = Schema.Schema.Type<typeof Payload>
+type Part = Payload["parts"][number]
+
+// What the user typed, as opposed to synthetic context such as an editor selection.
+export const isTyped = (part: Part): part is Extract<Part, { type: "text" }> => part.type === "text" && !part.synthetic
+
+/** The request text of a payload: its typed text parts. */
+export const requestText = (payload: Payload) =>
+  payload.parts
+    .filter(isTyped)
+    .map((part) => part.text)
+    .join("\n")
 
 // Where a scheduled prompt goes: this session, a fork of it, or a new session. Fork and new sessions
 // are created when the prompt fires.
@@ -66,6 +79,14 @@ export interface AddInput {
   target?: Target
 }
 
+export interface EditInput {
+  sessionID: SessionID
+  id: MessageID
+  text: string
+  /** Replaces the entry's commands; `[]` makes it a plain prompt. Absent keeps them. */
+  commands?: readonly string[]
+}
+
 export interface Queued {
   id: MessageID
   payload: Payload
@@ -81,11 +102,7 @@ export interface Detached extends Queued {
 export interface Interface {
   readonly snapshot: (sessionID: SessionID) => Effect.Effect<Snapshot>
   readonly add: (input: AddInput) => Effect.Effect<Snapshot>
-  readonly edit: (input: {
-    sessionID: SessionID
-    id: MessageID
-    text: string
-  }) => Effect.Effect<Snapshot, NotFoundError | BusyError>
+  readonly edit: (input: EditInput) => Effect.Effect<Snapshot, NotFoundError | BusyError>
   readonly cancel: (input: {
     sessionID: SessionID
     id: MessageID
@@ -194,7 +211,10 @@ export const layer = Layer.effect(
     const toEntry = (row: typeof SessionQueueTable.$inferSelect): Entry => ({
       id: row.id,
       state: row.state === "dispatching" ? "dispatching" : "pending",
-      text: row.payload.parts.flatMap((part) => (part.type === "text" ? [part.text] : [])).join("\n"),
+      // As typed, in the same order as the TUI's `typedText`: `/spit /think request`.
+      text: [...(row.payload.commands ?? []).map((name) => `/${name}`), requestText(row.payload)]
+        .filter(Boolean)
+        .join(" "),
       attachments: row.payload.parts.filter((part) => part.type !== "text").length,
       ...(row.run_at !== null && { runAt: row.run_at }),
       target: row.target,
@@ -344,11 +364,14 @@ export const layer = Layer.effect(
       lock.withPermit(
         Effect.gen(function* () {
           const row = yield* ownRow(input)
-          const attachments = row.payload.parts.filter((part) => part.type !== "text")
-          const parts = [{ type: "text" as const, text: input.text }, ...attachments]
+          // Editor context and attachments stay; only the typed text and the commands change.
+          const kept = row.payload.parts.filter((part) => !isTyped(part))
+          const parts = [...(input.text.trim() ? [{ type: "text" as const, text: input.text }] : []), ...kept]
+          const commands = input.commands ?? row.payload.commands
+          const payload = { ...row.payload, parts, commands: commands?.length ? commands : undefined }
           const edited = yield* db
             .update(SessionQueueTable)
-            .set({ payload: { ...row.payload, parts } })
+            .set({ payload })
             .where(and(eq(SessionQueueTable.id, input.id), eq(SessionQueueTable.state, "pending")))
             .returning({ id: SessionQueueTable.id })
             .get()

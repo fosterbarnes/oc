@@ -116,8 +116,28 @@ describe("session queue HttpApi", () => {
             })
             expect(synthetic.status).toBe(400)
 
+            // The TUI sends a pending editor selection as synthetic `editor_context` text.
+            const editor = {
+              type: "text",
+              text: "Selected lines",
+              synthetic: true,
+              metadata: { kind: "editor_context" },
+            }
+            const withEditor = yield* post({ type: "add", parts: [editor, { type: "text", text: "explain" }] }).pipe(
+              Effect.flatMap(json<{ entries: { text: string }[] }>),
+            )
+            expect(withEditor.entries.map((entry) => entry.text)).toEqual(["changed", "explain"])
+            expect((yield* post({ type: "add", parts: [editor] })).status).toBe(400)
+
+            const command = yield* post({ type: "add", parts: [], commands: ["agent-push"] }).pipe(
+              Effect.flatMap(json<{ entries: { id: string; text: string }[] }>),
+            )
+            expect(command.entries.at(-1)?.text).toBe("/agent-push")
+            const bare = yield* post({ type: "edit", id: command.entries.at(-1)!.id, text: "", commands: [] })
+            expect(bare.status).toBe(400)
+
             const cancelled = yield* post({ type: "cancel", id }).pipe(Effect.flatMap(json<{ entries: unknown[] }>))
-            expect(cancelled.entries).toEqual([])
+            expect(cancelled.entries).toHaveLength(2)
 
             const resumed = yield* post({ type: "resume" }).pipe(Effect.flatMap(json<{ pause: string }>))
             expect(resumed.pause).toBe("none")

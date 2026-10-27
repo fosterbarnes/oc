@@ -1,9 +1,13 @@
-v0.2.310 liquidJeff [fix > copy slash-command messages as typed]
+v0.2.311 dmrJinglers [feat. > queue slash commands]
 
-session messages:
-Copying a message you sent with a slash command, from its Copy action, now copies the command you typed, like /spit fix it, instead of the expanded command text. /copy-all and /export show the typed command for those messages too.
+queue:
+Slash commands can now be queued with Alt+Q or Alt+Enter and scheduled with Alt+S. A queued /spit fix it waits its turn and then runs as that command, including scheduled sends to a fork or a new session. The queue manager shows the entry as you typed it, and editing it can add or remove commands.
+
+Revive chains like /revive /pass and TUI commands like /btw still cannot be queued, and the warning now says which one you hit.
+
+Queueing a prompt while an editor selection is attached no longer fails, and editing a queued entry keeps the selection.
 
 docs:
-The wiki Sessions page describes how slash-command messages copy.
+FORK.md and the wiki Sessions page describe queued slash commands.
 
-Under the hood: the message Copy action reuses promptFromParts, the same path as Edit, Revert and Fork, and no longer throws when a message's parts are not loaded. formatPart in util/transcript.ts writes typedText for text parts, which leaves assistant parts unchanged. Added a transcript test for command messages. Checks: tui prompt/part, prompt/slash and util/transcript tests 35 pass 0 fail; tui typecheck clean. Not yet run: a live clipboard check in a built oc.
+Under the hood: queue entries carry an optional commands list next to their parts, set by the TUI from the same paste-aware parse that Enter uses, so the server never parses typed text. One sendQueued helper serves the normal and scheduled queue paths and sends command entries through SessionPrompt.command, which now passes the queue's delivery and persisted hooks on to prompt. The queue add check allows synthetic text only as editor context, and edits keep synthetic and attachment parts. Regenerated the JS SDK. Checks: opencode and tui typecheck clean; opencode httpapiQueue and session queue tests 20 pass with new cases for editor context, bare commands, and a queued command sent through its command; tui queue, slash and part tests pass; prompt.test.ts 68 pass with 3 known failures (queue contention, 2 handoff child). Not yet run: a live check in a built oc.

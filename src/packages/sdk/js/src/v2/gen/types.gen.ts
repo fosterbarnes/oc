@@ -12218,6 +12218,7 @@ export type SessionQueueUpdateData = {
         }
         variant?: string
         parts: Array<TextPartInput | FilePartInput | AgentPartInput>
+        commands?: Array<string>
         runAt?: number
         target?: "current" | "fork" | "new"
       }
@@ -12225,6 +12226,7 @@ export type SessionQueueUpdateData = {
         type: "edit"
         id: string
         text: string
+        commands?: Array<string>
       }
     | {
         type: "cancel"

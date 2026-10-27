@@ -79,9 +79,15 @@ export const makeOcSessionHandlers = Effect.fnUntraced(function* ({
   ) {
     switch (change.type) {
       case "add":
-        if (change.parts.length === 0 || change.parts.some((part) => part.type === "text" && part.synthetic)) {
+        // Synthetic text is allowed only as editor context, and never on its own.
+        if (
+          change.parts.some(
+            (part) => part.type === "text" && part.synthetic && part.metadata?.kind !== "editor_context",
+          ) ||
+          (!change.commands?.length && !change.parts.some((part) => part.type !== "text" || !part.synthetic))
+        ) {
           return yield* new InvalidRequestError({
-            message: "A queued prompt needs at least one part, and synthetic text cannot be queued",
+            message: "A queued prompt needs a command or a part of its own; synthetic text is only editor context",
             field: "parts",
           })
         }
@@ -94,15 +100,22 @@ export const makeOcSessionHandlers = Effect.fnUntraced(function* ({
         return yield* promptSvc.queue.add({
           sessionID,
           id: change.id,
-          payload: { agent: change.agent, model: change.model, variant: change.variant, parts: change.parts },
+          payload: {
+            agent: change.agent,
+            model: change.model,
+            variant: change.variant,
+            parts: change.parts,
+            ...(change.commands?.length && { commands: change.commands }),
+          },
           runAt: change.runAt,
           target: change.target,
         })
       case "edit":
-        if (!change.text.trim()) {
+        // Empty text is a bare command (`/agent-push`), so the edit must name its commands.
+        if (!change.text.trim() && !change.commands?.length) {
           return yield* new InvalidRequestError({ message: "Queued text cannot be empty", field: "text" })
         }
-        return yield* promptSvc.queue.edit({ sessionID, id: change.id, text: change.text })
+        return yield* promptSvc.queue.edit({ sessionID, id: change.id, text: change.text, commands: change.commands })
       case "cancel":
         return yield* promptSvc.queue.cancel({ sessionID, id: change.id })
       case "resume":

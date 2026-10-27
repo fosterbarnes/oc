@@ -43,7 +43,7 @@ const it = testEffect(
   ),
 )
 
-const setup = Effect.fnUntraced(function* () {
+const setup = Effect.fnUntraced(function* (config: Record<string, unknown> = {}) {
   const instance = yield* TestInstance
   const llm = yield* TestLLMServer
   yield* Effect.promise(() =>
@@ -54,6 +54,7 @@ const setup = Effect.fnUntraced(function* () {
         enabled_providers: ["test"],
         model: "test/test-model",
         snapshot: false,
+        ...config,
       }),
     ),
   )
@@ -114,6 +115,47 @@ it.instance("sends queued prompts one at a time, in the order they were added", 
     yield* drained(fixture, session.id, 2)
     expect(yield* userTexts(fixture, session.id)).toEqual(["first", "second"])
     expect(yield* fixture.llm.calls).toBe(2)
+  }),
+)
+
+it.instance("a queued slash command keeps its editor context through an edit and sends as the command", () =>
+  Effect.gen(function* () {
+    const fixture = yield* setup({ command: { plain: { template: "Plain body" } } })
+    const session = yield* fixture.sessions.create({ title: "queued command" })
+    yield* fixture.llm.text("done")
+    // Shape the TUI queues for `/plain old` with a pending editor selection (`queueInner`).
+    const selection = {
+      type: "text" as const,
+      text: "Selected lines 3-4 of src/a.ts",
+      synthetic: true,
+      metadata: { kind: "editor_context", source: "editor", filePath: "src/a.ts" },
+    }
+    yield* fixture.state.maintenance(
+      session.id,
+      Effect.gen(function* () {
+        const added = yield* fixture.prompt.queue.add({
+          sessionID: session.id,
+          payload: { model: ref, parts: [selection, text("old")], commands: ["plain"] },
+        })
+        expect(added.entries.map((entry) => entry.text)).toEqual(["/plain old"])
+        const id = added.entries[0]!.id
+        const edited = yield* fixture.prompt.queue.edit({
+          sessionID: session.id,
+          id,
+          text: "request",
+          commands: ["plain"],
+        })
+        expect(edited.entries.map((entry) => entry.text)).toEqual(["/plain request"])
+      }),
+    )
+    yield* drained(fixture, session.id, 1)
+    const user = (yield* fixture.sessions.messages({ sessionID: session.id })).find(
+      (message) => message.info.role === "user",
+    )
+    expect(user?.parts.filter((part) => part.type === "text")).toMatchObject([
+      { text: expect.stringContaining("Plain body\n\nrequest"), metadata: { ocCommands: ["plain"] } },
+      selection,
+    ])
   }),
 )
 

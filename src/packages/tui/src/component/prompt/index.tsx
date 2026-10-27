@@ -1315,15 +1315,27 @@ export function Prompt(props: PromptProps) {
     }
     const trimmed = store.prompt.input.trim()
     const { inputText, nonTextParts, editorParts, commands } = outgoingParts()
-    // Submit runs a command found anywhere in the typed text, so queueing must refuse the same drafts.
-    if (trimmed.startsWith("/") || commands.names.length) {
-      toast.show({ message: "Slash commands cannot be queued", variant: "warning" })
+    // Revives restart oc from this TUI, and TUI commands (`/btw`) act now; only server commands wait.
+    if (commands.chain) {
+      toast.show({ message: "Revive chains cannot be queued", variant: "warning" })
+      return false
+    }
+    if (trimmed.startsWith("/") && !commands.names.length) {
+      toast.show({ message: "Only server commands can be queued", variant: "warning" })
       return false
     }
     if (!trimmed && store.prompt.parts.length === 0) return false
     const agent = local.agent.current()
     const selectedModel = local.model.current()
     if (!agent || !selectedModel) return false
+    // Split like submit: a command entry holds its request text, editor context, and files only.
+    const parts = commands.names.length
+      ? [
+          ...editorParts,
+          ...(commands.arguments ? [{ type: "text" as const, text: commands.arguments }] : []),
+          ...nonTextParts.filter((part) => part.type === "file"),
+        ]
+      : [...editorParts, { type: "text" as const, text: inputText }, ...nonTextParts]
 
     const queued = await sdk.client.session.queue
       .update(
@@ -1334,7 +1346,8 @@ export function Prompt(props: PromptProps) {
             agent: agent.name,
             model: { providerID: selectedModel.providerID, modelID: selectedModel.modelID },
             variant: local.model.variant.current(),
-            parts: [...editorParts, { type: "text", text: inputText }, ...nonTextParts],
+            parts,
+            ...(commands.names.length && { commands: commands.names }),
             ...schedule,
           },
         },

@@ -196,6 +196,33 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-27 (~00:17) - v0.2.311 dmrJinglers - Slash commands can be queued and scheduled - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation (/imp from plan `~/.config/opencode/plans/queueSlashCommands.md`); completed
+- Version: 0.2.311 dmrJinglers
+- Added queue payload `commands?: string[]` (`session/queue.ts` `Payload`, core `SessionQueueTable` type): typed text parts are the command request; TUI parses (paste-aware `typedSlashCommands`), server never parses
+- Added `SessionQueue.isTyped`/`requestText`; `toEntry` text = `/a /b request` (same order as TUI `typedText`), excludes synthetic text
+- Changed `queue.edit` input `EditInput { text, commands? }`: keeps synthetic + non-text parts (was dropping editor context), omits empty text part; absent `commands` keeps, `[]` clears
+- Added `sendQueued` in `session/prompt.ts`: one send path for `dispatchHead` + `dispatchDetached`; commands go through `command()`, which now forwards `delivery`/`persisted` to `prompt()` (internal type only, HTTP `CommandInput` unchanged)
+- Fixed queue add 400 with an editor selection (`handlers/sessionOc.ts`): synthetic text allowed only as `metadata.kind === "editor_context"`; needs a command or a non-synthetic part. Edit with empty text needs `commands`
+- Changed TUI `queueInner`: revive chain -> "Revive chains cannot be queued"; `/` with no server command -> "Only server commands can be queued"; command drafts send `commands` + request/editor/file parts (mirrors submit)
+- Changed `dialogQueue.tsx` edit: re-parses with `extractChain`/`extractSlashCommands` against `sync.data.command`; dialog now needs SyncProvider (`tui/test/component/queue.test.tsx` harness updated, intended change)
+- Regenerated `packages/client` (no content diff) and legacy JS SDK (`commands` on add/edit)
+- Docs: FORK.md Queue prompts row; wiki `Sessions.md` Queued prompts paragraph. Wiki not pushed
+- Verification: opencode + tui `tsgo --noEmit` exit 0; `test/server/httpapiQueue.test.ts` + `test/session/queue.test.ts` 20 pass (new: editor-context add + 400 cases, bare command add/edit; queued command keeps editor context through edit and sends as command); tui `queue.test.tsx`, `slash.test.ts`, `part.test.ts` pass; `prompt.test.ts` 68 pass, 3 fail = known (F5 queue contention, 2 handoff child)
+- Note: rotation not due (979 lines before insert); next insert rotates to `buildNotes.archive15.md`
+- Risk: crash-retried claim reruns `command()` pre-prompt side effects (template shell substitutions, `command.execute.before`); same as a manual resend
+
+### User
+Queue
+- Alt+Q / Alt+Enter and Alt+S now accept slash commands such as `/spit fix it`; they wait in the queue and run as that command.
+- The queue manager shows a queued command as you typed it, and editing it can add or remove commands.
+- Revive chains and TUI commands like `/btw` still cannot be queued, and the warning now says which.
+- Queueing a prompt while an editor selection is attached no longer fails.
+
+---
+
 ## 2026-10-26 (~23:59) - v0.2.310 liquidJeff - Copying a slash-command message copies the typed command - Claude Opus 5.5, low effort; Implementation
 
 ### Agent

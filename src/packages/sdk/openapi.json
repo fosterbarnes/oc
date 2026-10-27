@@ -10452,6 +10452,12 @@
                           ]
                         }
                       },
+                      "commands": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
                       "runAt": {
                         "type": "integer"
                       },
@@ -10476,6 +10482,12 @@
                       },
                       "text": {
                         "type": "string"
+                      },
+                      "commands": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
                       }
                     },
                     "required": ["type", "id", "text"],

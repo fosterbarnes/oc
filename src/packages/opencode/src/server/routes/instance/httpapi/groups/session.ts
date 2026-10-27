@@ -137,7 +137,12 @@ export const QueuePayload = Schema.Union([
     runAt: Schema.optional(Schema.Int),
     target: Schema.optional(SessionQueue.Target),
   }),
-  Schema.Struct({ type: Schema.Literal("edit"), id: MessageID, text: Schema.String }),
+  Schema.Struct({
+    type: Schema.Literal("edit"),
+    id: MessageID,
+    text: Schema.String,
+    commands: Schema.optional(Schema.Array(Schema.String)),
+  }),
   Schema.Struct({ type: Schema.Literal("cancel"), id: MessageID }),
   Schema.Struct({ type: Schema.Literal("resume") }),
 ]).annotate({ discriminator: "type" })

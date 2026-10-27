@@ -1,8 +1,10 @@
 import type { SessionQueueGetResponse, SessionQueueUpdateData } from "@opencode-ai/sdk/v2"
 import { createEffect, createMemo, createSignal, on, onCleanup, onMount } from "solid-js"
 import { useSDK } from "../context/sdk"
+import { useSync } from "../context/sync"
 import { useTheme } from "../context/theme"
 import { useCommandShortcut } from "../keymap"
+import { extractChain, extractSlashCommands } from "../prompt/slash"
 import { useDialog } from "../ui/dialog"
 import { DialogPrompt } from "../ui/dialog-prompt"
 import { DialogSelect } from "../ui/dialog-select"
@@ -66,6 +68,7 @@ export function DialogQueue(props: { sessionID: string }) {
   const dialog = useDialog()
   const sdk = useSDK()
   const toast = useToast()
+  const sync = useSync()
   const { theme } = useTheme()
   const queue = createQueueSnapshot(() => props.sessionID)
   const cancelHint = useCommandShortcut("queue.cancel")
@@ -121,8 +124,14 @@ export function DialogQueue(props: { sessionID: string }) {
           value={entry.text}
           multiline
           onConfirm={(text) => {
-            if (!text.trim()) return
-            void update({ type: "edit", id, text }).then(back)
+            // Parsed like a typed draft, so an edit can add or drop slash commands.
+            if (extractChain(text, sync.data.command)) {
+              toast.show({ message: "Revive chains cannot be queued", variant: "warning" })
+              return
+            }
+            const typed = extractSlashCommands(text, sync.data.command)
+            if (!typed.arguments && !typed.names.length) return
+            void update({ type: "edit", id, text: typed.arguments, commands: typed.names }).then(back)
           }}
         />
       ),
