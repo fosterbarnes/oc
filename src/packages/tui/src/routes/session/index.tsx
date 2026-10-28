@@ -891,6 +891,9 @@ export function Session() {
       })(),
       value: "session.toggle.thinking",
       category: "Session",
+      slash: {
+        name: "toggleThinking",
+      },
       run: () => {
         thinking.set(nextThinkingMode(thinkingMode()))
         dialog.clear()

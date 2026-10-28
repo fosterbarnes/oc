@@ -1,9 +1,12 @@
-v0.2.319 chipmunkChop [fix > queue dialog crash; cleanup > tests green]
+v0.2.320 yeetTuning [fix > TUI reload storm; feat. > palette descs]
+
+Performance:
+The TUI no longer lags all the time. Every config reload rewrote tui.json (an effect in tui/src/app.tsx saved palette keys on each reload), and the file watcher then reloaded every open TUI again, forever. Palette keys now save only where the user changes them, persistTuiSetting skips writes that change nothing, and the queue snapshot no longer notifies readers when its 2 s poll finds no change. The watcher in tui/src/config/live.ts now fires only when a file's mtime or size moves, because on this machine merely reading a long-idle file fired a change event. Typing / no longer fetches every command's full body: GET /command now leaves out template, which shipped every SKILL.md (about 1.1 MB here) and ran every MCP prompt on each slash-menu open. Windows already open keep lagging until oc restarts on the rebuilt build.
 
 Queue:
-Opening the queue list (Alt+Q list or clicking the queue strip) no longer crashes. Since v0.2.313 the prompt-reference context was set up inside the dialog layer, but dialogs render outside it, so the queue dialog failed when it reached the prompt. The context now sits above the dialog layer in tui/src/app.tsx.
+Pressing Alt+Q several times in a row now queues each draft as its own entry, in order. The press used to drop while the previous add was in flight. The draft clears at the press; if the server rejects the entry, the text comes back with an error.
 
-Tests:
-Every automated suite passes again. 29 tests that had fallen behind deliberate code changes were updated (handoffs as linked sessions, Claude warnings in opencode.log, model output limits, lazy tool schemas in the newer Claude CLI), the queue-contention test was rewritten for durable queue claims, and test:httpapi gained the three /agent/sub scenarios, which refuse to write outside the test folder. Removed tests that only checked wording, counts, or source text, the 16 tool-schema snapshots, a duplicate filesystem test file, and reviveCleanup.tests.ps1. Re-enabled 8 skipped tests that work again. The five copies of the tui polling wait helper now share one in test/fixture/fixture.ts with a 10 second bound. UPSTREAM-SYNC.md no longer says checks run on GitHub, and the AGENTS.md known-failures list is down to the pane entries.
+Command palette:
+Every command in the oc section now shows a short description or its current value (Home folder, oc folder, Subagent tabs), and Subagent model/agent show "not set" instead of nothing. Added /toggleThinking, which runs the same entry as "Collapse thinking" / "Expand thinking".
 
-Checks: opencode 5087 pass / 0 fail, tui 792 / 0, schema 15 / 0, every other package suite, .scripts/tests 5 / 5, test:httpapi 227 pass in all three modes, typecheck 16 / 16. Not run: the OC_TUI_PANE=1 pane suite (its known failures stay listed as known) and the queue dialog in a rebuilt oc.
+Checks: tui typecheck and opencode typecheck pass; tui suite 793 pass / 0 fail; configLive.test.ts 3 pass; claudeWarmup.test.ts and usagePalette.test.ts 24 pass. New pane tests "a tui.json save reloads without the TUI rewriting the file" and "queues three Alt+Q presses sent back to back, in order" pass, and each failed on the old code. Not run: a visual check of the palette, a manual /toggleThinking run, and the lag on the real profile.

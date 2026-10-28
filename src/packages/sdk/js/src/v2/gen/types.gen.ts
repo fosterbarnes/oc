@@ -2539,7 +2539,7 @@ export type Command = {
   agent?: string
   model?: string
   source?: "command" | "mcp" | "skill"
-  template: string
+  template?: string
   subtask?: boolean
   hints: Array<string>
 }

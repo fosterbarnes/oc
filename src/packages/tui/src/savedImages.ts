@@ -16,6 +16,7 @@ export function createClearSavedImagesCommand() {
   return {
     name: "oc.clear_saved_images",
     title: "Clear saved images",
+    desc: "Delete pasted images saved to the image folder",
     category: "oc",
     async run() {
       const dir = imageDir(sync.data.config.attachment?.image?.save_dir)

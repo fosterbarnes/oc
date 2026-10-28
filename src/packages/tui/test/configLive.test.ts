@@ -46,3 +46,24 @@ test("watcher fires once per save burst for watched names only", async () => {
     await fs.rm(dir, { recursive: true, force: true })
   }
 })
+
+// Windows reports a read's last-access update (NTFS, at most hourly) as a change event.
+test("reading a watched file does not fire", async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "oc-tui-live-"))
+  const file = path.join(dir, "tui.json")
+  await fs.writeFile(file, "{}")
+  await fs.utimes(file, new Date(Date.now() - 2 * 60 * 60_000), (await fs.stat(file)).mtime)
+  let calls = 0
+  const stop = watchConfigFiles([file], () => calls++, 50)
+  try {
+    await fs.readFile(file)
+    await new Promise((resolve) => setTimeout(resolve, 300))
+    expect(calls).toBe(0)
+    await fs.writeFile(file, '{ "theme": "x" }')
+    await new Promise((resolve) => setTimeout(resolve, 300))
+    expect(calls).toBe(1)
+  } finally {
+    stop()
+    await fs.rm(dir, { recursive: true, force: true })
+  }
+})

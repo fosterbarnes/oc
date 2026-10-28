@@ -83,6 +83,7 @@ export function createOcCommands(input: {
     newSession: {
       name: "oc.new_session",
       title: "New session",
+      desc: "Start a session in a folder under the home folder",
       category: "oc",
       slashName: "newOcSession",
       run: () => {
@@ -147,6 +148,7 @@ export function createOcCommands(input: {
       {
         name: "model.default",
         title: "Model",
+        desc: "Model oc starts with",
         category: "oc",
         group: "Defaults",
         slashName: "sessionModel",
@@ -164,6 +166,7 @@ export function createOcCommands(input: {
       {
         name: "agent.session",
         title: "Agent",
+        desc: "Agent oc starts with",
         category: "oc",
         group: "Defaults",
         slashName: "sessionAgent",
@@ -180,6 +183,7 @@ export function createOcCommands(input: {
       {
         name: "oc.view_subagents",
         title: "Subagents",
+        desc: "Add, remove, or change the model of delegated agents",
         category: "oc",
         slashName: "viewSub",
         run: () => {
@@ -235,6 +239,7 @@ export function createOcCommands(input: {
       {
         name: "oc.notices",
         title: "Notices",
+        desc: "Toasts and alerts shown since oc started",
         category: "oc",
         slashName: "notices",
         run: () => {
@@ -281,7 +286,9 @@ export function createOcCommands(input: {
         category: "oc",
         group: "Defaults",
         get desc() {
-          return sync.data.agent.find((item) => item.name === sync.data.config.default_subagent)?.model?.modelID
+          return (
+            sync.data.agent.find((item) => item.name === sync.data.config.default_subagent)?.model?.modelID ?? "not set"
+          )
         },
         slashName: "defaultSubagentModel",
         run: () => {
@@ -308,7 +315,7 @@ export function createOcCommands(input: {
         category: "oc",
         group: "Defaults",
         get desc() {
-          return sync.data.config.default_subagent
+          return sync.data.config.default_subagent ?? "not set"
         },
         slashName: "defaultSubagent",
         run: () => {
@@ -349,6 +356,7 @@ export function createOcCommands(input: {
       {
         name: "oc.session_cleanup",
         title: "Clean up completed sessions",
+        desc: "Archive or delete finished sessions that are not open",
         category: "oc",
         run: () => {
           dialog.replace(() => <DialogSessionCleanup />)
@@ -357,6 +365,7 @@ export function createOcCommands(input: {
       {
         name: "oc.about",
         title: "About",
+        desc: "Version, build, runtime, and repo links",
         category: "oc",
         slashName: "about",
         run: () => {
@@ -368,6 +377,9 @@ export function createOcCommands(input: {
         title: "Home folder",
         category: "oc",
         group: "Folders",
+        get desc() {
+          return readOcConfig().homeDir
+        },
         slashName: "homeDir",
         run: () => {
           const current = readOcConfig().homeDir
@@ -420,6 +432,9 @@ export function createOcCommands(input: {
         title: "oc folder",
         category: "oc",
         group: "Folders",
+        get desc() {
+          return readOcConfig().ocDir
+        },
         slashName: "ocDir",
         run: () => {
           const current = readOcConfig().ocDir
@@ -679,6 +694,9 @@ export function createOcCommands(input: {
         title: "Subagent tabs",
         category: "oc",
         group: "Layout",
+        get desc() {
+          return tuiConfig.subagent_tabs.click === "tab" ? "opens in tab" : "opens inline"
+        },
         slashName: "subagentTabs",
         run: () => {
           // Each pick flips one setting, then reopens on the same row so both can change in one visit.
@@ -1053,15 +1071,27 @@ export function createOcCommands(input: {
         {
           name: "oc.update_all_harnesses",
           title: "Update all",
+          desc: "Claude Code, Cursor CLI, Codex CLI, and the desktop apps",
           run: () => void updateAllHarnesses(claudeCliPath(), toast, dialog, tuiConfig.auto_confirm_updates),
         },
         {
           name: "oc.update_claude_code",
           title: "Update Claude Code",
+          desc: "Update the Claude Code CLI oc runs",
           run: () => updateClaudeCode(claudeCliPath(), toast),
         },
-        { name: "oc.update_cursor_cli", title: "Update Cursor CLI", run: () => updateCursorCli(toast) },
-        { name: "oc.update_codex_cli", title: "Update Codex CLI", run: () => updateCodexCli(toast) },
+        {
+          name: "oc.update_cursor_cli",
+          title: "Update Cursor CLI",
+          desc: "Update the Cursor agent CLI",
+          run: () => updateCursorCli(toast),
+        },
+        {
+          name: "oc.update_codex_cli",
+          title: "Update Codex CLI",
+          desc: "Update the Codex CLI",
+          run: () => updateCodexCli(toast),
+        },
         {
           name: "oc.update_models",
           title: "Update model list",
@@ -1074,21 +1104,25 @@ export function createOcCommands(input: {
               {
                 name: "oc.update_claude_desktop",
                 title: "Update Claude Desktop",
+                desc: "Install the latest Claude Desktop app",
                 run: () => updateDesktopHarness(CLAUDE_DESKTOP, toast, dialog, tuiConfig.auto_confirm_updates),
               },
               {
                 name: "oc.update_cursor_desktop",
                 title: "Update Cursor Desktop",
+                desc: "Install the latest Cursor app",
                 run: () => updateDesktopHarness(CURSOR_DESKTOP, toast, dialog, tuiConfig.auto_confirm_updates),
               },
               {
                 name: "oc.update_chatgpt_desktop",
                 title: "Update ChatGPT Desktop",
+                desc: "Install the latest ChatGPT app",
                 run: () => updateDesktopHarness(CHATGPT_DESKTOP, toast, dialog, tuiConfig.auto_confirm_updates),
               },
               {
                 name: "oc.update_powershell",
                 title: "Update PowerShell",
+                desc: "Install the latest PowerShell 7",
                 run: () => updateDesktopHarness(POWERSHELL, toast, dialog, tuiConfig.auto_confirm_updates),
               },
             ]
@@ -1135,6 +1169,7 @@ export function createOcCommands(input: {
       {
         name: "server.shutdown",
         title: "Shut down",
+        desc: "Stop the oc server; this window disconnects",
         category: "oc",
         group: "Server",
         hidden: Global.native,
@@ -1143,6 +1178,7 @@ export function createOcCommands(input: {
       {
         name: "server.restart",
         title: "Restart",
+        desc: "Restart the oc server; this window reconnects",
         category: "oc",
         group: "Server",
         hidden: Global.native,

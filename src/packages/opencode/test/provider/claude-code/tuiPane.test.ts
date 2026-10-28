@@ -1,6 +1,8 @@
 // oc's real TUI in a WezTerm pane, driven through `openPane` (paneFixture.ts). Opt-in
 // (OC_TUI_PANE=1): needs wezterm on PATH and the `claude` CLI.
 import { describe, expect } from "bun:test"
+import { Database } from "bun:sqlite"
+import fs from "node:fs"
 import path from "node:path"
 import { Effect } from "effect"
 import { cliIt } from "../../lib/cli-process"
@@ -106,6 +108,44 @@ describe.skipIf(!paneReady)("oc TUI in a WezTerm pane", () => {
         expect(shown).toContain("work - first task")
         expect((yield* fixture.llm.hits).filter((hit) => hit.body.model === "test-model")).toHaveLength(1)
         expectIsolated(yield* fixture.llm.inputs)
+      }),
+    180_000,
+  )
+  // Before v0.2.320 a second Alt+Q while the first add was in flight was dropped, and the first add's clear
+  // then wiped the newer draft. One burst sends every press before any add can return.
+  cliIt.live(
+    "queues three Alt+Q presses sent back to back, in order",
+    (fixture) =>
+      Effect.gen(function* () {
+        const pane = yield* openPane(fixture)
+        const release = Promise.withResolvers<void>()
+        yield* Effect.addFinalizer(() => Effect.sync(() => release.resolve()))
+        yield* fixture.llm.push(reply().wait(release.promise).text("QUEUE-HOLD-DONE").stop())
+        yield* pane.waitFor("Ask anything")
+        yield* pane.type("QUEUE-HOLD\r")
+        yield* pane.waitFor("QUEUE-HOLD", (shown) => /esc\s+interrupt/.test(shown))
+        yield* pane.type("/init\x1bq/review\x1bqQUEUE-THIRD\x1bq")
+        const pending = () => {
+          const database = new Database(path.join(fixture.home, "opencode.db"), { readonly: true })
+          const rows = database
+            .query("select payload from session_queue where state = 'pending' order by id")
+            .all() as { payload: string }[]
+          database.close()
+          return rows.map((row) => JSON.parse(row.payload) as { commands?: string[]; parts: { text?: string }[] })
+        }
+        const queued = yield* pollWithTimeout(
+          Effect.sync(() => {
+            const rows = pending()
+            return rows.length >= 3 ? rows : undefined
+          }),
+          "three queued entries never appeared",
+          "30 seconds",
+        ).pipe(Effect.catchCause(() => Effect.succeed(pending())))
+        expect(queued.map((row) => row.commands?.[0] ?? row.parts.find((part) => part.text)?.text)).toEqual([
+          "init",
+          "review",
+          "QUEUE-THIRD",
+        ])
       }),
     180_000,
   )
@@ -478,6 +518,23 @@ describe.skipIf(!paneReady)("oc TUI in a WezTerm pane", () => {
         expectIsolated(yield* fixture.llm.inputs)
       }),
     180_000,
+  )
+  cliIt.live(
+    "a tui.json save reloads without the TUI rewriting the file",
+    (fixture) =>
+      Effect.gen(function* () {
+        const file = path.join(fixture.home, ".config", "opencode", "tui.json")
+        const text = '{\n  "palette_keys": {}\n}\n'
+        yield* Effect.promise(() => Bun.write(file, text))
+        const pane = yield* openPane(fixture)
+        yield* pane.waitFor("Ask anything")
+        // Each reload used to save palette_keys again, so one save reloaded every TUI forever.
+        yield* Effect.promise(() => Bun.write(file, text))
+        const saved = fs.statSync(file).mtimeMs
+        yield* Effect.sleep("3 seconds")
+        expect(fs.statSync(file).mtimeMs).toBe(saved)
+      }),
+    120_000,
   )
 })
 

@@ -29,11 +29,15 @@ const PAUSE_LABEL = {
 // Polls the session's queue while the caller is mounted. A failed poll keeps the last snapshot.
 export function createQueueSnapshot(sessionID: () => string | undefined) {
   const sdk = useSDK()
-  const [snapshot, setSnapshot] = createSignal<QueueSnapshot>(EMPTY)
-  const refresh = () => {
+  // Polls return fresh objects; an unchanged queue must not notify readers (prompt commands re-register).
+  const [snapshot, setSnapshot] = createSignal<QueueSnapshot>(EMPTY, {
+    equals: (a, b) => JSON.stringify(a) === JSON.stringify(b),
+  })
+  // Resolves once the snapshot is updated, for callers that read it right after a change.
+  const refresh = async () => {
     const id = sessionID()
     if (!id) return
-    sdk.client.session.queue
+    await sdk.client.session.queue
       .get({ sessionID: id }, { throwOnError: true })
       .then((result) => {
         if (sessionID() === id) setSnapshot(result.data)

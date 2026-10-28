@@ -64,6 +64,7 @@ const DIRECTORY_INDICATOR_COLORS = ["#DCCF99", "#D5C184", "#CEB56F", "#C7A95A", 
 export const USAGE_MENU_COMMAND = {
   name: "sidebar.usage",
   title: "Show usage",
+  desc: "Plan usage and limits for each provider",
   category: "oc",
   group: "Third party harness management",
   namespace: "palette",

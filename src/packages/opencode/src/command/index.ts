@@ -42,8 +42,8 @@ export const Info = Schema.Struct({
   agent: Schema.optional(Schema.String),
   model: Schema.optional(Schema.String),
   source: Schema.optional(Schema.Literals(["command", "mcp", "skill"])),
-  // Some command templates are lazy promises from MCP prompt resolution.
-  template: Schema.Unknown,
+  // Server-side only (lazy MCP prompt promises, full skill bodies); `GET /command` leaves it out.
+  template: Schema.optional(Schema.Unknown),
   subtask: Schema.optional(Schema.Boolean),
   hints: Schema.Array(Schema.String),
 }).annotate({ identifier: "Command" })

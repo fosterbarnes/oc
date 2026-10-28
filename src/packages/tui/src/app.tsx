@@ -509,15 +509,6 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
       ...(sessionID ? { sessionID } : {}),
     })
   })
-  let initialPaletteKeys = true
-  createEffect(() => {
-    const paletteKeys = tuiConfig.palette_keys
-    if (initialPaletteKeys) {
-      initialPaletteKeys = false
-      return
-    }
-    void persistTuiSetting(["palette_keys"], paletteKeys).catch(() => {})
-  })
   createEffect(() => {
     sync.restart.recoveryEpoch
     if (!sync.restart.pending) promptRef.requestFocus()
@@ -593,6 +584,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
       tuiConfig.setPaletteKey(command, undefined)
     }
     if (dropped.length) {
+      void persistTuiSetting(["palette_keys"], tuiConfig.palette_keys)
       toast.show({
         message: `Ignored invalid palette hotkeys: ${dropped.join("; ")}`,
         variant: "error",

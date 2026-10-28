@@ -210,6 +210,87 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-28 (~00:00) - v0.2.320 yeetTuning - Every oc palette command shows a description - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation (/think -> /imp, plan `docs/dev/commandDescriptionsPlan.md`); completed
+- Version: 0.2.320 (uncommitted; no second bump, same as the previous entry)
+- Added static `desc` to 22 blank oc-category action entries: `ocCommands.tsx` (New session, Model, Agent, Subagents, Notices, Clean up completed sessions, About, all 8 update rows, Shut down, Restart), `claudeCommands.tsx` (both account switchers), `savedImages.ts`, `claudeWarmup.tsx` `warmupCommands` (every per-account row), `sidebarTools.tsx` `USAGE_MENU_COMMAND`
+- Added value `get desc()` to settings Home folder (`readOcConfig().homeDir`), oc folder (`ocDir`), Subagent tabs (`subagent_tabs.click` -> "opens in tab"/"opens inline")
+- Fixed Subagent model / Subagent agent getters returning undefined when unset: `?? "not set"`
+- Kept: `Model`/`Agent` use a sentence, not the value: `readOcConfig()` does not expose `sessionModel`/`sessionAgent` (they feed `--model`/`--agent` in `opencode/src/cli/cmd/oc.ts:50-51`). TODO if wanted: add both to `readOcConfig` and switch to value getters
+- Verification: tui `tsgo --noEmit` clean; `claudeWarmup.test.ts` + `usagePalette.test.ts` 24 pass / 0 fail. Throwaway awk scan for oc-category entries without `desc`: 13 hits on HEAD `ocCommands.tsx`, 0 across all 8 files now (update rows checked by hand since their category comes from `.map`). No visual check of the palette
+
+### User
+Command palette
+- Every command in the oc section of the palette now shows a short description or its current value.
+- Slash commands like `/about` and `/notices` now show a real description instead of repeating their title.
+- Home folder, oc folder, and Subagent tabs show their current setting, and Subagent model/agent show "not set" instead of nothing.
+
+---
+
+## 2026-10-27 (~23:43) - v0.2.320 yeetTuning - Alt+Q keeps every press; slash menu stops fetching command bodies - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation (/think -> /imp, plan `~/.config/opencode/plans/2026-10-27-alt-q-queue-presses.md`); completed
+- Version: 0.2.320 (uncommitted; no second bump)
+- Fixed Alt+Q dropping presses (real bug): `tui/src/component/prompt/index.tsx` `queuePrompt` returned early on a `queueing` flag while the previous `session.queue.update` was in flight, and that add's late clear also wiped the newer draft. Now `takeQueued` validates and clears the draft synchronously at the press and returns a send thunk; sends run in order on a `queueSends` promise chain. A failed add shows the toast and restores the draft (`ref.set`) only if the prompt is still empty and on the same session
+- Added `syncDraft()` (shared with `submitInner`, replaces its inline IME sync): reads `input.plainText` before a take, since `onContentChange` is async. The old queue path read a stale `store.prompt.input`
+- Changed `queuePrompt` to await `pasting` only while a paste is reading (`pastesReading` counter in `trackPaste`), so the take stays synchronous and keys typed right after a press cannot join that draft
+- Changed `dialogQueue.tsx` `createQueueSnapshot.refresh` to return its promise; `unqueueLast` awaits `queueSends` and the send awaits `queue.refresh()`, so "Edit last queued prompt" right after a press sees the new entry
+- Fixed `GET /command` sending every command's `template` (real cost): encoding `Command.Info` read each getter, so every slash-menu open (`autocomplete.tsx` `show("/")` -> `sync.refreshCommands`) shipped every SKILL.md body (~1.1 MB here, 108 files) and fired one `mcp.getPrompt` per MCP prompt (log: 27 "failed to getPrompt" for `avalonia-docs/recreate-ui`). `handlers/instance.ts` `getCommand` now picks fields by name (no spread: that reads the getter); `command/index.ts` `Info.template` is `Schema.optional`. Legacy SDK regenerated (`types.gen.ts` `template?: string`). `packages/client` generate produced only line-ending churn (its command type is the V2 endpoint); restored
+- Added keeper pane test `tuiPane.test.ts` "queues three Alt+Q presses sent back to back, in order" (one burst `/init`, Alt+Q, `/review`, Alt+Q, text, Alt+Q during a held turn; reads `session_queue` pending rows in id order)
+- Verification: tui + opencode typecheck pass; tui suite 793 pass / 0 fail. New pane test passed twice with the fix; failed on HEAD `prompt/index.tsx` (temporary log showed 0 entries queued). Pane test "a tui.json save reloads..." still passes. Probe (deleted): `GET /command` in a minimal fixture 27,536 -> 944 bytes, no `template`, other fields unchanged (`agent`/`model`/`subtask` were already `null`). Stall probe (deleted): 50 ms event-loop watchdog in the prompt during the pane test logged no stall over 150 ms; the fixture has few skills, so the slash-menu cost was not reproduced there
+- Risk: queueing is optimistic: the prompt clears before the server accepts; a failure restores the draft and it stays in history
+- TODO: submit's command error path (`submitInner`, `const draft = unwrap(store.prompt)`) may restore an empty draft, since the later `setStore("prompt", {...})` merges into that same raw object. Unverified; the queue path uses a copy
+- TODO: user-reported lag not re-measured on the real profile; `Command.list` still globs and stats every skill file per call (server worker)
+
+### User
+Queue
+- Pressing Alt+Q several times in a row now queues each draft as its own entry, in order: `/pass`, then `/agent-push`, then `/revive` run one after another.
+- The prompt clears as soon as you press Alt+Q; if the server rejects the entry, your text comes back with an error.
+- Typing `/` no longer downloads every skill's full text, which made the slash menu and queueing slower.
+- `/pass /push` in a single message still runs as one combined turn; queue them separately for separate turns.
+
+---
+
+## 2026-10-27 (~22:28) - v0.2.320 yeetTuning - Reading tui.json no longer reloads every TUI - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation (/think -> /imp after revive, plan `~/.config/opencode/plans/2026-10-27-tui-config-watch-reads.md`); completed
+- Version: 0.2.320 (already bumped this session, not yet committed; no second bump)
+- Found the reload storm's first trigger: on this machine a read of a file whose last-access time is over about an hour old fires Bun's `fs.watch` `change` (NTFS last-access update), even though `fsutil behavior query disablelastaccess` says `2 (System Managed, Disabled)`. Probe: read `base/LICENSE` fired `change LICENSE`; a second read 1 s later fired nothing. A new TUI's startup read of a long-idle `tui.json` reloaded every open TUI; on v0.2.319 that reload started the endless rewrite loop
+- Changed `tui/src/config/live.ts` `watchConfigFiles`: stamps each file (`mtimeMs:size`, `undefined` when missing) at start and, when the 150 ms debounce fires, calls `onChange` only if a stamp moved. Name filter and debounce kept
+- Added keeper test `tui/test/configLive.test.ts` "reading a watched file does not fire" (access time set 2 h back before watching, read -> 0 calls, write -> 1)
+- Verification: new test failed on the old `live.ts` (Expected 0, Received 1), passes after; `configLive.test.ts` 3 pass; tui typecheck pass. Probe: rename-over save and delete each fired once (probe deleted). Pane test "a tui.json save reloads without the TUI rewriting the file" passed again
+
+### User
+Performance
+- Opening a new oc window, or anything reading the TUI settings file, no longer makes every open window reload its settings.
+
+---
+
+## 2026-10-27 (~22:03) - v0.2.320 yeetTuning - Stop the TUI config reload storm that lagged every window - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation (/spit -> /think -> /imp, plan `~/.config/opencode/plans/2026-10-27-tui-config-reload-storm.md`); completed
+- Version: 0.2.320
+- Fixed reload storm (real bug): the `app.tsx` effect saved `palette_keys` whenever `tuiConfig.palette_keys` changed. Each `liveConfig.replace` produced a new `{}`, so every reload rewrote `tui.json`, the watcher (`config/live.ts` `watchConfigFiles`) reloaded every TUI again, forever. Logs showed ~2,100 "tui config" lines/min while idle and the global `tui.json` mtime advancing several times a second. Each reload rebuilt keybinds and re-registered every keymap layer; `useCommandSlashes` rebuilt the slash autocomplete each time, which is why alt+q with `/pass /push` lagged most
+- Removed the effect; palette keys now save at their user call sites: `dialogHotkey.tsx` (set and clear) and the startup invalid-hotkey cleanup in `app.tsx` (only when a key was dropped, the same behavior as before)
+- Changed `ocSettings.ts` `persistTuiSetting`: skips the write when the edited text equals the file
+- Changed `dialogQueue.tsx` `createQueueSnapshot`: signal uses JSON equality, so the 2 s poll no longer notifies readers when nothing changed. `prompt/index.tsx` `hasPending` memo feeds the "Edit last queued prompt" `enabled`, so `promptCommands` re-registers only when it flips
+- Added keeper pane test `tuiPane.test.ts` "a tui.json save reloads without the TUI rewriting the file" (writes the fixture's global `tui.json`, asserts the mtime holds for 3 s)
+- Verification: tui typecheck pass; tui `queue.test.tsx` + `configLive.test.ts` 4 pass. Probe: watcher + `persistTuiSetting` reacting to its own reload ran 1 reload in 2 s; unconditional rewrite ran 13 (old loop). New pane test passed with the fix, failed with the old effect and unconditional write temporarily restored (mtime moved), passed again after restoring the fix. Probes deleted
+- TODO: the first write that starts a storm on TUI launch is unidentified; after this fix it costs one reload
+- Risk: running TUIs from older builds keep storming until oc restarts on a rebuilt build
+
+### User
+Performance
+- The TUI no longer lags all the time: a settings file was being rewritten and reloaded many times a second in every open window, which made typing, alt+q queueing, and slash commands slow.
+- Needs a rebuild; windows already open keep lagging until oc restarts.
+
+---
+
 ## 2026-10-27 (~18:41) - v0.2.319 chipmunkChop - Test suites green, dead tests trimmed, queue dialog crash fixed - Claude Opus 5.5, low effort; Implementation
 
 ### Agent

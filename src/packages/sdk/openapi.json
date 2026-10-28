@@ -25497,7 +25497,7 @@
             }
           }
         },
-        "required": ["name", "template", "hints"],
+        "required": ["name", "hints"],
         "additionalProperties": false
       },
       "Agent": {

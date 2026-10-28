@@ -31,6 +31,7 @@ export function createClaudeAccountCommands() {
   const switchAccount = {
     name: "claude.account",
     title: "Switch Claude account",
+    desc: "Account used by every Claude session",
     slashName: "claude-account",
     category: "oc",
     group: "Third party harness management",
@@ -65,6 +66,7 @@ export function createClaudeAccountCommands() {
   const switchSessionAccount = {
     name: "claude.sessionAccount",
     title: "Switch Claude account (this session)",
+    desc: "Pin a Claude account to this session only",
     slashName: "claude-session-account",
     category: "oc",
     group: "Third party harness management",

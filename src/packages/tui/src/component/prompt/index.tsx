@@ -234,6 +234,7 @@ export function Prompt(props: PromptProps) {
     const paused = queuePauseLabel(snapshot)
     return `${snapshot.entries.length} queued${paused ? ` · ${paused}` : ""}`
   })
+  const hasPending = createMemo(() => queue.snapshot().entries.some((entry) => entry.state === "pending"))
   const history = usePromptHistory()
   const stash = usePromptStash()
   const keymap = useOpencodeKeymap()
@@ -528,8 +529,7 @@ export function Prompt(props: PromptProps) {
         title: "Edit last queued prompt",
         name: "session.queued_prompt.undo",
         category: "Session",
-        enabled:
-          !!props.sessionID && !props.disabled && queue.snapshot().entries.some((entry) => entry.state === "pending"),
+        enabled: !!props.sessionID && !props.disabled && hasPending(),
         run: () => {
           dialog.clear()
           void unqueueLast()
@@ -1260,16 +1260,16 @@ export function Prompt(props: PromptProps) {
 
   // Alt+Enter in a session: the draft joins the session queue instead of steering the running turn.
   // With a schedule it waits for its time instead, and may go to a fork or a new session.
-  let queueing = false
+  // The draft is taken and cleared at the key press; adds go out one at a time so presses made while
+  // an earlier add is in flight are kept, in press order. Awaiting only during a paste keeps the take
+  // synchronous, so keys typed right after the press cannot join this draft.
+  let queueSends: Promise<unknown> = Promise.resolve()
   async function queuePrompt(schedule?: Schedule) {
-    if (queueing) return false
-    queueing = true
-    try {
-      await pasting
-      return await queueInner(schedule)
-    } finally {
-      queueing = false
-    }
+    if (pastesReading) await pasting
+    const send = takeQueued(schedule)
+    if (!send) return false
+    queueSends = queueSends.then(send)
+    return true
   }
 
   // Cancels the newest pending queued prompt and appends its text to the input. Queue entries only
@@ -1277,6 +1277,8 @@ export function Prompt(props: PromptProps) {
   async function unqueueLast() {
     const sessionID = props.sessionID
     if (!sessionID || props.disabled) return
+    // An add still in flight is the entry the user means.
+    await queueSends
     const entry = queue.snapshot().entries.findLast((item) => item.state === "pending")
     if (!entry) return toast.show({ message: "No queued prompt to edit", variant: "warning" })
     if (entry.attachments > 0) {
@@ -1304,11 +1306,22 @@ export function Prompt(props: PromptProps) {
     input.focus()
   }
 
-  async function queueInner(schedule?: Schedule) {
-    if (!props.sessionID || props.disabled) return false
+  // onContentChange is async: an IME's last composed character (e.g. Korean hangul) or keys typed just
+  // before a send may not be in the store yet, so read plainText directly before any downstream reads.
+  function syncDraft() {
+    if (!input || input.isDestroyed || input.plainText === store.prompt.input) return
+    setStore("prompt", "input", input.plainText)
+    syncExtmarksWithPromptParts()
+  }
+
+  // Validates and clears the draft synchronously; returns the add to send, or undefined.
+  function takeQueued(schedule?: Schedule) {
+    const sessionID = props.sessionID
+    if (!sessionID || props.disabled) return
+    syncDraft()
     if (store.mode === "shell") {
       toast.show({ message: "Shell commands cannot be queued", variant: "warning" })
-      return false
+      return
     }
     const trimmed = store.prompt.input.trim()
     const { inputText, nonTextParts, editorParts, commands } = outgoingParts()
@@ -1316,16 +1329,16 @@ export function Prompt(props: PromptProps) {
     // a TUI at the front of the queue (`reviveChain.watchQueued`), so it cannot go to a fork or later.
     if (commands.chain && schedule) {
       toast.show({ message: "Revive chains cannot be scheduled", variant: "warning" })
-      return false
+      return
     }
     if (trimmed.startsWith("/") && !commands.names.length && !commands.chain) {
       toast.show({ message: "Only server commands can be queued", variant: "warning" })
-      return false
+      return
     }
-    if (!trimmed && store.prompt.parts.length === 0) return false
+    if (!trimmed && store.prompt.parts.length === 0) return
     const agent = local.agent.current()
     const selectedModel = local.model.current()
-    if (!agent || !selectedModel) return false
+    if (!agent || !selectedModel) return
     // Split like submit: a command entry holds its request text, editor context, and files only. A chain
     // keeps every attachment, as its plain prompt steps send them.
     const chain = commands.chain
@@ -1338,24 +1351,28 @@ export function Prompt(props: PromptProps) {
             ...nonTextParts.filter((part) => part.type === "file"),
           ]
         : [...editorParts, { type: "text" as const, text: inputText }, ...nonTextParts]
+    const body = {
+      type: "add" as const,
+      agent: agent.name,
+      model: { providerID: selectedModel.providerID, modelID: selectedModel.modelID },
+      variant: local.model.variant.current(),
+      parts,
+      ...(chain ? { chain: chain.steps } : commands.names.length && { commands: commands.names }),
+      ...schedule,
+    }
+    // A copy: clearing the store below merges into the object `unwrap` returns.
+    const draft = { ...unwrap(store.prompt) }
 
-    const queued = await sdk.client.session.queue
-      .update(
-        {
-          sessionID: props.sessionID,
-          body: {
-            type: "add",
-            agent: agent.name,
-            model: { providerID: selectedModel.providerID, modelID: selectedModel.modelID },
-            variant: local.model.variant.current(),
-            parts,
-            ...(chain ? { chain: chain.steps } : commands.names.length && { commands: commands.names }),
-            ...schedule,
-          },
-        },
-        { throwOnError: true },
-      )
-      .then(
+    if (editorParts.length > 0) editor.markSelectionSent()
+    history.append({ ...store.prompt, mode: store.mode })
+    input.extmarks.clear()
+    setStore("prompt", { input: "", parts: [] })
+    setStore("extmarkToPartIndex", new Map())
+    if (!input.isDestroyed) input.clear()
+    if (!schedule) flashQueued()
+
+    return async () => {
+      const queued = await sdk.client.session.queue.update({ sessionID, body }, { throwOnError: true }).then(
         () => true,
         (error) => {
           toast.show({
@@ -1366,20 +1383,16 @@ export function Prompt(props: PromptProps) {
           return false
         },
       )
-    if (!queued) return false
-    if (chain) void reviveChain.watchQueued(props.sessionID).catch((error: unknown) => toast.error(error))
-    if (schedule)
-      toast.show({ message: `Scheduled for ${Locale.todayTimeOrDateTime(schedule.runAt)}`, variant: "success" })
-
-    if (editorParts.length > 0) editor.markSelectionSent()
-    history.append({ ...store.prompt, mode: store.mode })
-    input.extmarks.clear()
-    setStore("prompt", { input: "", parts: [] })
-    setStore("extmarkToPartIndex", new Map())
-    if (!input.isDestroyed) input.clear()
-    queue.refresh()
-    if (!schedule) flashQueued()
-    return true
+      await queue.refresh()
+      if (!queued) {
+        // Newer typing wins; the failed draft is still in history.
+        if (props.sessionID === sessionID && !input.isDestroyed && !store.prompt.input) ref.set(draft)
+        return
+      }
+      if (chain) void reviveChain.watchQueued(sessionID).catch((error: unknown) => toast.error(error))
+      if (schedule)
+        toast.show({ message: `Scheduled for ${Locale.todayTimeOrDateTime(schedule.runAt)}`, variant: "success" })
+    }
   }
 
   // A short accent flash on the prompt border confirms the queue took the draft.
@@ -1396,9 +1409,12 @@ export function Prompt(props: PromptProps) {
   // Clipboard and file reads make pastes async. A submit that starts while one is still reading
   // waits for it; otherwise the draft goes out without the attachment, which lands in the next draft.
   let pasting = Promise.resolve()
+  let pastesReading = 0
   function trackPaste(task: () => Promise<void>) {
     const run = task()
+    pastesReading++
     pasting = Promise.allSettled([pasting, run]).then(() => {})
+    void run.finally(() => pastesReading--).catch(() => {})
     return run
   }
 
@@ -1422,14 +1438,7 @@ export function Prompt(props: PromptProps) {
 
   async function submitInner(stayHome = false) {
     workspace.clearNotice()
-
-    // IME: double-defer may fire before onContentChange flushes the last
-    // composed character (e.g. Korean hangul) to the store, so read
-    // plainText directly and sync before any downstream reads.
-    if (input && !input.isDestroyed && input.plainText !== store.prompt.input) {
-      setStore("prompt", "input", input.plainText)
-      syncExtmarksWithPromptParts()
-    }
+    syncDraft()
     if (props.disabled) return false
     if (workspace.creating() || move.creating()) return false
     if (auto()?.visible) return false

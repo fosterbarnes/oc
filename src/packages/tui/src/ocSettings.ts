@@ -176,7 +176,9 @@ export function persistTuiSetting(
           .find((item) => fs.existsSync(item)) ?? path.join(Global.Path.config, "tui.json")
       const text = fs.existsSync(file) ? fs.readFileSync(file, "utf8") : "{}"
       const edits = modify(text, key, value, { formattingOptions: { tabSize: 2, insertSpaces: true } })
-      fs.writeFileSync(file, applyEdits(text, edits))
+      const next = applyEdits(text, edits)
+      // An unchanged file must not be rewritten: every TUI's config watcher reloads on the write.
+      if (next !== text) fs.writeFileSync(file, next)
     })
     .catch(() => {})
   return persistTuiSettingQueue

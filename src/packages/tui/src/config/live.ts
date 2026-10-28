@@ -1,7 +1,7 @@
 // Live TUI config: tui.json saves swap the resolved config in place (upstream 014908a8d7).
 // Readers keep one stable object; property reads go through a signal, so reactive readers
 // (keybind layers, sidebar settings) pick up the new values without a restart.
-import { watch, type FSWatcher } from "fs"
+import { statSync, watch, type FSWatcher } from "fs"
 import path from "path"
 import { createSignal } from "solid-js"
 
@@ -24,17 +24,29 @@ export function createLiveConfig<T extends object>(initial: T) {
   return { config, replace: (next: T) => setCurrent(() => next) }
 }
 
-/** Watches each file's directory (editors often replace the file) and debounces bursts of events. */
+/**
+ * Watches each file's directory (editors often replace the file), debounces bursts of events, and
+ * fires only when a file's modified time or size moved, or it appeared or disappeared.
+ */
 export function watchConfigFiles(files: string[], onChange: () => void, delay = 150) {
   const byDir = Map.groupBy(files, (file) => path.dirname(file))
   let timer: ReturnType<typeof setTimeout> | undefined
+  let stamps = files.map(stamp)
+  // Windows also reports a read's last-access update as a change (NTFS, at most hourly), so a new
+  // TUI's startup read used to reload every open TUI. Compare after the burst settles.
+  const reloadIfChanged = () => {
+    const next = files.map(stamp)
+    if (next.every((value, index) => value === stamps[index])) return
+    stamps = next
+    onChange()
+  }
   const watchers = [...byDir].flatMap(([dir, list]): FSWatcher[] => {
     const names = new Set(list.map((file) => path.basename(file)))
     try {
       const watcher = watch(dir, (_, name) => {
         if (name && !names.has(name.toString())) return
         clearTimeout(timer)
-        timer = setTimeout(onChange, delay)
+        timer = setTimeout(reloadIfChanged, delay)
       })
       // A removed directory ends its watch instead of throwing an unhandled error event
       watcher.on("error", () => watcher.close())
@@ -48,4 +60,9 @@ export function watchConfigFiles(files: string[], onChange: () => void, delay = 
     clearTimeout(timer)
     for (const watcher of watchers) watcher.close()
   }
+}
+
+function stamp(file: string) {
+  const stat = statSync(file, { throwIfNoEntry: false })
+  return stat && `${stat.mtimeMs}:${stat.size}`
 }
