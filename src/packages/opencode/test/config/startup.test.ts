@@ -16,6 +16,7 @@ function context(state: string) {
     data: "C:\\custom data\\opencode",
     cache: "C:\\custom cache\\opencode",
     cwd: "C:\\Users\\O'Brien",
+    home: "C:\\Users\\O'Brien",
     env: {
       OPENCODE_CONFIG: "C:\\custom config\\chosen.jsonc",
       OPENCODE_DB: "custom.db",
@@ -38,6 +39,21 @@ test("startup preserves exact debug/config context, quotes literals and excludes
   expect(Startup.plan({ ...input, config: "C:\\another\\opencode" }).name).not.toBe(next.name)
   const bun = Startup.plan({ ...input, executable: "C:\\bun.exe", entrypoint: "C:\\repo space\\index.ts" })
   expect(bun.script).toContain("& 'C:\\bun.exe' 'C:\\repo space\\index.ts' 'oc' 'server' 'start'")
+})
+
+test("startup sets only the XDG dirs moved off their defaults", () => {
+  const input = context("C:\\state\\opencode")
+  expect(Startup.plan(input).script).toContain("$env:XDG_CONFIG_HOME = 'C:\\custom config'")
+  // Default dirs stay unset: the server's children (gh among them) would otherwise inherit them.
+  const home = "C:\\Users\\O'Brien"
+  const defaults = Startup.plan({
+    ...input,
+    config: `${home}\\.config\\opencode`,
+    state: `${home}\\.local\\state\\opencode`,
+    data: `${home}\\.local\\share\\opencode`,
+    cache: `${home}\\.cache\\opencode`,
+  })
+  expect(defaults.script).not.toContain("XDG_")
 })
 
 test("startup rejects unsupported platforms, inline config and oversized Run commands", () => {

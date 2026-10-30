@@ -243,6 +243,34 @@ test("keeps the current option selected when options reorder", async () => {
   }
 })
 
+// Palette Suggested rows repeat a command's value under another heading.
+test("a hovered repeated value stays on its own row when options rebuild", async () => {
+  await using tmp = await tmpdir()
+  const ran: string[] = []
+  const row = (title: string, value: string, category: string) => ({
+    title,
+    value,
+    category,
+    onSelect: () => ran.push(`${value}@${category}`),
+  })
+  const options = [row("Alpha", "alpha", "Suggested"), row("Beta", "beta", "Session"), row("Alpha", "alpha", "Session")]
+  const select = await mountSelect(tmp.path, options, { preserveSelection: true })
+
+  try {
+    const lines = select.app.captureCharFrame().split("\n")
+    const y = lines.findLastIndex((line) => line.includes("Alpha"))
+    await select.app.mockMouse.moveTo(lines[y].indexOf("Alpha") + 1, y)
+    select.replaceOptions(options.map((option) => ({ ...option })))
+    await select.app.waitForFrame((frame) => frame.includes("Alpha"))
+    select.app.mockInput.pressEnter()
+    await select.app.waitFor(() => ran.length === 1)
+
+    expect(ran).toEqual(["alpha@Session"])
+  } finally {
+    select.app.renderer.destroy()
+  }
+})
+
 test("shows no-match and still closes after a flat filter goes empty", async () => {
   await using tmp = await tmpdir()
   const select = await mountSelect(

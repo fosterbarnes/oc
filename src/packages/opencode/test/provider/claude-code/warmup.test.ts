@@ -949,5 +949,5 @@ test("view: unconfigured accounts are off with no next run, zone is always prese
   expect(view.timeZone.length).toBeGreaterThan(0)
   expect(view.utcOffset).toMatch(/^UTC[+-]\d{2}:\d{2}$/)
   expect(view.available).toBe(true)
-  expect(accountView({ accountID: "default", now: Date.now() }).label).toBe(".claude")
+  expect(accountView({ accountID: "default", now: Date.now() }).label).toBe("claude1")
 })

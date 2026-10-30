@@ -6,6 +6,7 @@ import path from "path"
 import { containsPath, type InstanceContext } from "../project/instance-context"
 import { InstanceState } from "@/effect/instance-state"
 import { lazy } from "@/util/lazy"
+import { AgentEnv } from "@/util/agent-env"
 import { Language, type Node } from "web-tree-sitter"
 
 import { FSUtil } from "@opencode-ai/core/fs-util"
@@ -484,7 +485,7 @@ export const ShellTool = Tool.define(
       )
       // Agent markers let scripts and CLIs detect they run under an agent; plugin env may still override them.
       return {
-        ...process.env,
+        ...AgentEnv.inherited(),
         AGENT: "1",
         OPENCODE: "1",
         AI_AGENT: envValue("AI_AGENT") || "opencode",

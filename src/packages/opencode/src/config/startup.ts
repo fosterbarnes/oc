@@ -23,6 +23,7 @@ export function context() {
     data: Global.Path.data,
     cache: Global.Path.cache,
     cwd: os.homedir(),
+    home: os.homedir(),
     env: process.env,
   }
 }
@@ -34,10 +35,7 @@ export function plan(input: ReturnType<typeof context>) {
   if (input.env.OPENCODE_CONFIG_CONTENT)
     throw new Error("Save inline OPENCODE_CONFIG_CONTENT to a file and use OPENCODE_CONFIG before enabling startup.")
   const env = {
-    XDG_CONFIG_HOME: path.dirname(input.config),
-    XDG_STATE_HOME: path.dirname(input.state),
-    XDG_DATA_HOME: path.dirname(input.data),
-    XDG_CACHE_HOME: path.dirname(input.cache),
+    ...movedXdgDirs(input),
     ...Object.fromEntries(
       ["OPENCODE_CONFIG", "OPENCODE_CONFIG_DIR"].flatMap((key) =>
         input.env[key] ? [[key, path.resolve(input.env[key]!)]] : [],
@@ -66,6 +64,21 @@ export function plan(input: ReturnType<typeof context>) {
       "Windows Run commands cannot exceed 260 characters. Move the instance's XDG_STATE_HOME to a shorter path.",
     )
   return { name, file, command, script }
+}
+
+// Only XDG dirs moved off xdg-basedir's defaults: every process the server starts inherits them,
+// and Windows tools such as gh then read ~/.config instead of %APPDATA% (gh "not logged in").
+function movedXdgDirs(input: ReturnType<typeof context>) {
+  return Object.fromEntries(
+    Object.entries({
+      XDG_CONFIG_HOME: [path.dirname(input.config), ".config"],
+      XDG_STATE_HOME: [path.dirname(input.state), ".local/state"],
+      XDG_DATA_HOME: [path.dirname(input.data), ".local/share"],
+      XDG_CACHE_HOME: [path.dirname(input.cache), ".cache"],
+    }).flatMap(([key, [dir, fallback]]) =>
+      path.resolve(dir).toLowerCase() === path.resolve(input.home, fallback).toLowerCase() ? [] : [[key, dir]],
+    ),
+  )
 }
 
 function literal(value: string) {

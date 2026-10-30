@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 import { nextRenewal, parseUsageDate, startOfDay, type UsageCalendarEvent, type UsageSubscription } from "./calendar"
-import { claudeConfigDirId } from "./claude"
+import { claudeAccountName, claudeConfigDirId } from "./claude"
 import type { CursorUsage } from "./cursor"
 import { readAuthContent, type UsageOptions } from "./fetch"
 import { USAGE_BILLING_URLS, USAGE_PLAN_NAMES, type UsagePlanProvider, type UsageProviderId } from "./providers"
@@ -47,6 +47,8 @@ export function resolveUsagePlans(
   input: {
     providers: UsageProviderId[]
     claudeAccounts: string[]
+    /** oc.json `claudeAccountNames`. */
+    claudeNames?: Record<string, string>
     facts: UsagePlanFacts
     cursor: UsageSnapshot<CursorUsage>
     subscriptions: UsageSubscription[]
@@ -83,7 +85,7 @@ export function resolveUsagePlans(
             {
               account,
               plan: facts?.plan,
-              ...(input.claudeAccounts.length > 1 ? { name: path.basename(account).replace(/^\./, "") } : {}),
+              ...(input.claudeAccounts.length > 1 ? { name: claudeAccountName(account, input.claudeNames) } : {}),
             },
           )
         })

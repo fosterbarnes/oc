@@ -8,6 +8,7 @@ import { DialogSelect, type DialogSelectOption } from "./ui/dialog-select"
 import { useToast } from "./ui/toast"
 import { Locale } from "./util/locale"
 import path from "path"
+import { isDeepEqual } from "remeda"
 import { Flock } from "@opencode-ai/core/util/flock"
 import { useTuiPaths } from "./context/runtime"
 import { DialogConfirm } from "./ui/dialog-confirm"
@@ -525,7 +526,8 @@ export function createClaudeWarmupCommands() {
   const dialog = useDialog()
   const toast = useToast()
   const paths = useTuiPaths()
-  const [state, setState] = createSignal(emptyWarmupState())
+  // A refresh with unchanged data must not rebuild the app commands (palette open refreshes).
+  const [state, setState] = createSignal(emptyWarmupState(), { equals: isDeepEqual })
   const discovery = createWarmupDiscovery({
     previous: state,
     load: () => sdk.client.global.claudeWarmup().then((result) => readWarmupState(result, state())),

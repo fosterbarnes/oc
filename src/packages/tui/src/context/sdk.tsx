@@ -34,6 +34,35 @@ export interface ClaudeAccountOption {
   limitedUntil?: number
 }
 
+/** A pool account in the `Claude accounts` manager (`/global/claude/accounts`). */
+export interface ClaudeManagedAccount {
+  id: string
+  /** The `accounts` entry as written in opencode.jsonc. */
+  entry: string
+  label: string
+  name?: string
+  /** Absent when the CLI could not be asked. */
+  loggedIn?: boolean
+  email?: string
+  plan?: string
+  current: boolean
+  limitedUntil?: number
+  /** CLAUDE_CONFIG_DIR for this account's CLI; absent means unset. */
+  configDir?: string
+}
+
+export interface ClaudeManagedAccounts {
+  accounts: ClaudeManagedAccount[]
+  added?: string
+  /** `claude auth login` as the server resolves the CLI. */
+  login: { command: string; args: string[]; shell: boolean }
+}
+
+export type ClaudeAccountAction =
+  | { action: "add"; name?: string }
+  | { action: "rename"; id: string; name: string }
+  | { action: "remove" | "signedIn" | "signOut"; id: string }
+
 export const { use: useSDK, provider: SDKProvider } = createSimpleContext({
   name: "SDK",
   init: (props: {
@@ -305,6 +334,22 @@ export const { use: useSDK, provider: SDKProvider } = createSimpleContext({
           if (result.error) throw result.error
           for (const handler of claudeAccountHandlers) handler()
           return (result.data as { accounts: ClaudeAccountOption[] }).accounts
+        },
+        /** Pool accounts with sign-in status, for the account manager. Probes every account's CLI auth. */
+        manage: async (): Promise<ClaudeManagedAccounts> => {
+          const result = await transport().get({ url: "/global/claude/accounts" })
+          if (result.error) throw result.error
+          return result.data as ClaudeManagedAccounts
+        },
+        change: async (input: ClaudeAccountAction): Promise<ClaudeManagedAccounts> => {
+          const result = await transport().post({
+            url: "/global/claude/accounts",
+            body: input,
+            headers: { "Content-Type": "application/json" },
+          })
+          if (result.error) throw result.error
+          for (const handler of claudeAccountHandlers) handler()
+          return result.data as ClaudeManagedAccounts
         },
       },
       resume: {

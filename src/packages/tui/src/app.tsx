@@ -1168,7 +1168,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
       {
         name: "opencode.debug",
         title: "View debug info",
-        slashName: "debug",
+        slashName: "debugInfo",
         run: () => {
           dialog.replace(() => <DialogDebug />)
         },

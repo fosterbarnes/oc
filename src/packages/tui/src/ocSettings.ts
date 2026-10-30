@@ -34,6 +34,8 @@ export function readOcConfig(): {
   reviveBuild: boolean
   // `ask`: a Claude usage limit mid-turn asks which account to continue on (opencode `turnStream`).
   claudeFailover: "auto" | "ask"
+  // Claude account names keyed by the `accounts` entry as written (opencode accounts.ts).
+  claudeAccountNames: Record<string, string>
 } {
   const fallbackDir = os.homedir()
   const fallbackSort = "name"
@@ -48,6 +50,7 @@ export function readOcConfig(): {
         server?: { startOnWindowsUserStart?: unknown }
         revive?: { path?: unknown; build?: unknown }
         claudeFailover?: unknown
+        claudeAccountNames?: unknown
       }
     }
     const parsed = parse(ocConfigPath())
@@ -64,6 +67,13 @@ export function readOcConfig(): {
     const reviveSourceChosen = merged.revive?.build !== undefined
     const reviveBuild = typeof merged.revive?.build === "object" && merged.revive.build !== null
     const claudeFailover = merged.claudeFailover === "ask" ? "ask" : "auto"
+    const names = merged.claudeAccountNames
+    const claudeAccountNames =
+      names && typeof names === "object"
+        ? Object.fromEntries(
+            Object.entries(names).filter((entry): entry is [string, string] => typeof entry[1] === "string"),
+          )
+        : {}
     return {
       executable,
       ocDir,
@@ -74,6 +84,7 @@ export function readOcConfig(): {
       reviveSourceChosen,
       reviveBuild,
       claudeFailover,
+      claudeAccountNames,
     }
   } catch {
     return {
@@ -86,6 +97,7 @@ export function readOcConfig(): {
       reviveSourceChosen: false,
       reviveBuild: false,
       claudeFailover: "auto",
+      claudeAccountNames: {},
     }
   }
 }

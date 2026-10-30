@@ -1813,6 +1813,13 @@ const scenarios: Scenario[] = [
     .probe({ path: "/global/claude/warmup", body: { accountID: 1 } })
     .at(() => ({ path: "/global/claude/warmup", body: { accountID: 1 } }))
     .status(400),
+  http.protected.get("/global/claude/accounts", "global.claudeAccounts").global().json(200, object, "status"),
+  http.protected
+    .post("/global/claude/accounts", "global.claudeAccountAction")
+    .global()
+    .probe({ path: "/global/claude/accounts", body: { action: "rename", id: 1 } })
+    .at(() => ({ path: "/global/claude/accounts", body: { action: "rename", id: 1 } }))
+    .status(400),
   http.protected.get("/plugin", "plugin.status").json(200, array, "status"),
   http.protected.get("/provider/usage", "provider.usage.state").json(200, array, "status"),
   http.protected

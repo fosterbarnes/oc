@@ -1,7 +1,8 @@
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import path from "node:path"
 import { Global } from "@opencode-ai/core/global"
 import { ClaudeUsageCache } from "@opencode-ai/core/claude-usage-cache"
+import { OcConfig } from "@/config/oc.js"
 import { log } from "./logger.js"
 
 export const DEFAULT_ACCOUNT = "default"
@@ -378,8 +379,98 @@ export function earliestLimitedUntil(ids?: string[], now = Date.now()): number |
   return earliest
 }
 
+// ---------------------------------------------------------------------------
+// Display names
+//
+// oc.json `claudeAccountNames` maps an `accounts` entry as written
+// (`"~/.claude2": "Pro"`) to a label. Names are labels only: every pool key
+// stays the config dir, so a rename moves no limit, pin, or usage cache.
+// ---------------------------------------------------------------------------
+
+const namesFile: string | null = IN_TEST ? null : OcConfig.filePath()
+let accountNames: Map<string, string> | undefined
+
+function nameKey(id: string): string {
+  const canonical = canonicalAccountId(id)
+  return process.platform === "win32" ? canonical.toLowerCase() : canonical
+}
+
+function readNames(): Record<string, string> {
+  if (!namesFile) return {}
+  try {
+    const raw = JSON.parse(readFileSync(namesFile, "utf8").replace(/^\s*\/\/.*$/gm, "")) as {
+      claudeAccountNames?: unknown
+    }
+    const names = raw.claudeAccountNames
+    if (!names || typeof names !== "object") return {}
+    return Object.fromEntries(
+      Object.entries(names as Record<string, unknown>).filter(
+        (entry): entry is [string, string] => typeof entry[1] === "string" && entry[1].trim() !== "",
+      ),
+    )
+  } catch {
+    // Missing or invalid oc.json: no names.
+    return {}
+  }
+}
+
+/** Re-read names from oc.json; the account manager calls this so hand edits show up. */
+export function reloadAccountNames(): void {
+  accountNames = new Map(
+    Object.entries(readNames()).map(([entry, name]) => [nameKey(poolAccountIds([entry])[0]!), name.trim()]),
+  )
+}
+
+/** The configured name for a pool account, if any. */
+export function accountName(id: string): string | undefined {
+  if (!accountNames) reloadAccountNames()
+  return accountNames!.get(nameKey(id))
+}
+
+/** Set or clear (`undefined`/blank) the name of an `accounts` entry in oc.json. */
+export async function setAccountName(entry: string, name: string | undefined): Promise<void> {
+  if (!namesFile) return
+  const settings = await OcConfig.read()
+  const key = nameKey(poolAccountIds([entry])[0]!)
+  // Drop any other spelling of the same dir, so one account never has two names.
+  const names = Object.fromEntries(
+    Object.entries(readNames()).filter(([other]) => nameKey(poolAccountIds([other])[0]!) !== key),
+  )
+  const trimmed = name?.trim()
+  if (trimmed) names[entry] = trimmed
+  await OcConfig.write({ ...settings, claudeAccountNames: Object.keys(names).length ? names : undefined })
+  reloadAccountNames()
+}
+
+/** The account's name, else its shell launcher name: `~/.claude` is `claude1`, `~/.claudeN` is `claudeN`. */
 export function poolAccountLabel(id: string): string {
-  return id === DEFAULT_ACCOUNT ? ".claude" : path.basename(id)
+  const name = accountName(id)
+  if (name) return name
+  const base = id === DEFAULT_ACCOUNT ? ".claude" : path.basename(id)
+  return base === ".claude" ? "claude1" : base.replace(/^\./, "")
+}
+
+/**
+ * Drop everything the pool remembers about an account: its limit mark, session pins, the current
+ * pick, and its usage cache. Used after a sign-in (it may be a different person now) and on removal.
+ */
+export function forgetAccount(id: string, now = Date.now()): void {
+  ensureLoaded(undefined, now)
+  limitedUntil.delete(id)
+  for (const [session, pinned] of sessionAccounts) if (pinned === id) sessionAccounts.delete(session)
+  if (currentAccount === id) currentAccount = undefined
+  persistPool(now)
+  // seedCachePath finds the hashed file first, then a legacy one proven to be this account's.
+  for (let pass = 0; pass < 2; pass++) {
+    const file = seedCachePath(id)
+    if (!file) return
+    try {
+      rmSync(file, { force: true })
+    } catch (error) {
+      log.warn("cannot delete claude usage cache", { file, error: String(error) })
+      return
+    }
+  }
 }
 
 /** Test-only. Disables disk so tests cannot clobber the live pool file. */

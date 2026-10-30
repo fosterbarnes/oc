@@ -272,7 +272,11 @@ export function DialogSubagents(props: { highlight?: string }) {
     account?: ClaudeAccountOption,
   ) {
     const displayName = modelInfo({ providerID, modelID }).name
-    const accountName = account?.label.replace(/^\./, "").toLowerCase()
+    // Account names may hold spaces or punctuation; agent names keep to one slug.
+    const accountName = account?.label
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-|-$/g, "")
     const short = [shortModelName(modelID), accountName].filter(Boolean).join("-")
     const effort = selectedEfforts.length === 1 ? selectedEfforts[0] : undefined
     const defaultName = effort ? `general-${short}-${effort}` : `general-${short}`

@@ -86,6 +86,10 @@ import type {
   FindTextResponses,
   FormatterStatusErrors,
   FormatterStatusResponses,
+  GlobalClaudeAccountActionErrors,
+  GlobalClaudeAccountActionResponses,
+  GlobalClaudeAccountsErrors,
+  GlobalClaudeAccountsResponses,
   GlobalClaudeWarmupErrors,
   GlobalClaudeWarmupResponses,
   GlobalConfigGetErrors,
@@ -1663,6 +1667,68 @@ export class Global extends HeyApiClient {
       ThrowOnError
     >({
       url: "/global/claude/warmup",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Get managed Claude accounts
+   *
+   * Every Claude Code pool account with its name, signed-in email, plan, and usage limit.
+   */
+  public claudeAccounts<ThrowOnError extends boolean = false>(options?: Options<never, ThrowOnError>) {
+    return (options?.client ?? this.client).get<
+      GlobalClaudeAccountsResponses,
+      GlobalClaudeAccountsErrors,
+      ThrowOnError
+    >({ url: "/global/claude/accounts", ...options })
+  }
+
+  /**
+   * Change Claude accounts
+   *
+   * Add (folder, shared links, pool entry), rename, remove from the pool, sign out, or record a finished sign-in. Add and remove save opencode.jsonc and reload instances like a config update.
+   */
+  public claudeAccountAction<ThrowOnError extends boolean = false>(
+    parameters?: {
+      body?:
+        | {
+            action: "add"
+            name?: string
+          }
+        | {
+            action: "rename"
+            id: string
+            name: string
+          }
+        | {
+            action: "remove"
+            id: string
+          }
+        | {
+            action: "signedIn"
+            id: string
+          }
+        | {
+            action: "signOut"
+            id: string
+          }
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ key: "body", map: "body" }] }])
+    return (options?.client ?? this.client).post<
+      GlobalClaudeAccountActionResponses,
+      GlobalClaudeAccountActionErrors,
+      ThrowOnError
+    >({
+      url: "/global/claude/accounts",
       ...options,
       ...params,
       headers: {

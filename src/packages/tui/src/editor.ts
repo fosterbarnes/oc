@@ -59,25 +59,52 @@ export async function openEditor(input: { value: string; renderer: CliRenderer; 
   if (!editor) return
   const file = path.join(os.tmpdir(), `${Date.now()}.md`)
   await writeFile(file, input.value)
-  input.renderer.suspend()
-  input.renderer.currentRenderBuffer.clear()
   try {
-    await new Promise<void>((resolve, reject) => {
-      const launch = editorProcess(editor, file)
-      const child = spawn(launch.command, launch.args, {
-        cwd: input.cwd && existsSync(input.cwd) ? input.cwd : process.cwd(),
-        stdio: [input.stdin ?? "inherit", "inherit", "inherit"],
-        windowsVerbatimArguments: launch.windowsVerbatimArguments,
-      })
-      child.on("error", reject)
-      child.on("exit", (code, signal) => {
-        if (code === 0) return resolve()
-        reject(new Error(`Editor exited with ${signal ? `signal ${signal}` : `code ${code}`}`))
-      })
+    const launch = editorProcess(editor, file)
+    await runSuspended({
+      renderer: input.renderer,
+      ...launch,
+      name: "Editor",
+      cwd: input.cwd && existsSync(input.cwd) ? input.cwd : process.cwd(),
+      stdin: input.stdin,
     })
     return (await readFile(file, "utf8")) || undefined
   } finally {
     await rm(file, { force: true }).catch(() => {})
+  }
+}
+
+/** Hand the terminal to a child process (editor, `claude auth login`) and take it back when it exits. */
+export async function runSuspended(input: {
+  renderer: CliRenderer
+  command: string
+  args: string[]
+  /** Names the child in the non-zero exit error. */
+  name: string
+  cwd?: string
+  env?: NodeJS.ProcessEnv
+  shell?: boolean
+  windowsVerbatimArguments?: boolean
+  stdin?: EditorStdio
+}) {
+  input.renderer.suspend()
+  input.renderer.currentRenderBuffer.clear()
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const child = spawn(input.command, input.args, {
+        cwd: input.cwd ?? process.cwd(),
+        env: input.env,
+        shell: input.shell,
+        stdio: [input.stdin ?? "inherit", "inherit", "inherit"],
+        windowsVerbatimArguments: input.windowsVerbatimArguments,
+      })
+      child.on("error", reject)
+      child.on("exit", (code, signal) => {
+        if (code === 0) return resolve()
+        reject(new Error(`${input.name} exited with ${signal ? `signal ${signal}` : `code ${code}`}`))
+      })
+    })
+  } finally {
     input.renderer.currentRenderBuffer.clear()
     input.renderer.resume()
     input.renderer.requestRender()

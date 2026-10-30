@@ -33,10 +33,16 @@ export function updateClaudeSnapshot(
   next: UsageSnapshot<ClaudeCodeUsage>,
   nowMs: number,
 ): UsageSnapshot<ClaudeCodeUsage> {
-  if (!next.ok && previous.ok) return { ...previous, stale: true, ...(next.metadata ? { metadata: next.metadata } : {}) }
+  if (!next.ok && previous.ok)
+    return { ...previous, stale: true, ...(next.metadata ? { metadata: next.metadata } : {}) }
   if (!next.ok) return next
   if (!previous.ok || previous.accountID !== next.accountID)
-    return { ...next, fetchedAt: next.fetchedAt ?? nowMs, source: next.source ?? "live", stale: next.source === "cache" }
+    return {
+      ...next,
+      fetchedAt: next.fetchedAt ?? nowMs,
+      source: next.source ?? "live",
+      stale: next.source === "cache",
+    }
   return {
     ...withClaudeFallback(next, previous, nowMs),
     fetchedAt: next.fetchedAt ?? nowMs,
@@ -50,20 +56,36 @@ export function claudeConfigDirId(resolvedDir: string): string {
   return ClaudeUsageCache.configDirId(resolvedDir)
 }
 
+/**
+ * Display name for a pooled Claude config dir, the same rule as the server's `poolAccountLabel`: its
+ * oc.json `claudeAccountNames` entry, else `claude1` for `~/.claude` and `claudeN` for `~/.claudeN`.
+ */
+export function claudeAccountName(dir: string, names: Record<string, string> = {}, homeDir = os.homedir()) {
+  const key = (value: string) => {
+    const id = claudeConfigDirId(value.replace(/^~(?=$|[\\/])/, homeDir))
+    return process.platform === "win32" ? id.toLowerCase() : id
+  }
+  const name = Object.entries(names)
+    .find(([entry]) => key(entry) === key(dir))?.[1]
+    .trim()
+  if (name) return name
+  const base = path.basename(dir)
+  return base === ".claude" ? "claude1" : base.replace(/^\./, "")
+}
+
 function claudeUsageCacheWritePath(homeDir: string, resolvedDir: string): string {
   return path.join(homeDir, ".cache", "opencode", ClaudeUsageCache.cacheFileName(homeDir, resolvedDir))
 }
 
 function claudeUsageCacheLegacyPath(homeDir: string, resolvedDir: string): string {
-  return path.join(
-    homeDir,
-    ".cache",
-    "opencode",
-    ClaudeUsageCache.cacheLegacyFileName(resolvedDir),
-  )
+  return path.join(homeDir, ".cache", "opencode", ClaudeUsageCache.cacheLegacyFileName(resolvedDir))
 }
 
-async function resolveClaudeUsageCacheReadPath(homeDir: string, resolvedDir: string, writePath: string): Promise<string> {
+async function resolveClaudeUsageCacheReadPath(
+  homeDir: string,
+  resolvedDir: string,
+  writePath: string,
+): Promise<string> {
   if (writePath !== claudeUsageCacheWritePath(homeDir, resolvedDir)) return writePath
   try {
     await stat(writePath)
@@ -88,13 +110,16 @@ async function resolveClaudeUsageCacheReadPath(homeDir: string, resolvedDir: str
 export async function probeClaudeCodeUsage(options: UsageOptions = {}): Promise<ClaudeCodeUsage> {
   const homeDir = options.homeDir ?? os.homedir()
   const nowMs = options.nowMs ?? Date.now()
-  const credentialsPath = options.claudeCredentialsPath ?? path.join(
-    options.env?.CLAUDE_CONFIG_DIR ?? (options.homeDir ? undefined : process.env.CLAUDE_CONFIG_DIR) ??
-      path.join(homeDir, ".claude"), ".credentials.json",
-  )
+  const credentialsPath =
+    options.claudeCredentialsPath ??
+    path.join(
+      options.env?.CLAUDE_CONFIG_DIR ??
+        (options.homeDir ? undefined : process.env.CLAUDE_CONFIG_DIR) ??
+        path.join(homeDir, ".claude"),
+      ".credentials.json",
+    )
   const configDir = path.resolve(path.dirname(credentialsPath))
-  const cacheWritePath =
-    options.claudeUsageCachePath ?? claudeUsageCacheWritePath(homeDir, configDir)
+  const cacheWritePath = options.claudeUsageCachePath ?? claudeUsageCacheWritePath(homeDir, configDir)
   const cacheReadPath = await resolveClaudeUsageCacheReadPath(homeDir, configDir, cacheWritePath)
   const oauth = await readFile(credentialsPath, "utf8")
     .then(
@@ -173,10 +198,12 @@ export async function probeClaudeCodePool(configDirs: string[], options: UsageOp
     ),
   )
   const known = results.filter((result) => result.ok)
-  const metadata = results.map((result) => result.metadata).find((item) => item?.status === 429) ??
+  const metadata =
+    results.map((result) => result.metadata).find((item) => item?.status === 429) ??
     results.find((result) => result.metadata)?.metadata
   const retryAt = Math.max(0, ...results.map((result) => result.metadata?.retryAt ?? 0))
-  if (!known.length) return { ok: false, ...(metadata ? { metadata: { ...metadata, ...(retryAt ? { retryAt } : {}) } } : {}) }
+  if (!known.length)
+    return { ok: false, ...(metadata ? { metadata: { ...metadata, ...(retryAt ? { retryAt } : {}) } } : {}) }
   return {
     ok: true,
     // The pool reads as fresh while any account is live; an idle account's cached usage does not dim it.
@@ -186,7 +213,7 @@ export async function probeClaudeCodePool(configDirs: string[], options: UsageOp
     fiveHour: averageClaudeWindows(known.map((result) => result.fiveHour)),
     weekly: averageClaudeWindows(known.map((result) => result.weekly)),
     accounts: dirs.map((dir, index) => ({
-      name: path.basename(dir).replace(/^\./, ""),
+      name: claudeAccountName(dir, options.claudeNames, homeDir),
       id: claudeConfigDirId(dir),
       usage: results[index],
     })),
@@ -202,10 +229,7 @@ function parseClaudeUsage(value: unknown, nowMs: number, receiptMs?: number): Cl
   // Windows read independently: a valid weekly survives a missing hourly and vice versa.
   // A malformed window stays unknown (null), never zero, unless its known reset proves expiry.
   if (fiveHour.usedPercent === null && weekly.usedPercent === null) return { ok: false }
-  const fetchedAt = Math.max(
-    fiveHour.fetchedAt ?? readMs,
-    weekly.fetchedAt ?? readMs,
-  )
+  const fetchedAt = Math.max(fiveHour.fetchedAt ?? readMs, weekly.fetchedAt ?? readMs)
   return { ok: true, fiveHour, weekly, fetchedAt, source: "live" }
 }
 

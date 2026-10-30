@@ -210,6 +210,97 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-29 (~23:32) - v0.2.324 twigWhistlin - Command palette keeps a stable order and cursor - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation (imp from plan `~/.config/opencode/plans/paletteStableOrder.md`, debug notes `2026-10-29-debug-palette-reorder.md`); completed
+- Version: v0.2.324 twigWhistlin
+- Fixed `tui/src/component/command-palette.tsx` `orderPaletteEntries`: one stateless sort (`PALETTE_CATEGORY_ORDER` rank, unlisted categories A-Z, ungrouped then groups, `command_palette.order`, title, name). Root cause: palette order was keymap layer order (newest first), so any re-registration reshuffled rows. Layer order untouched (it is key-dispatch priority). Palette now passes `preserveSelection`.
+- Fixed `tui/src/ui/dialog-select.tsx`: `findSelection` matches value + category + subcategory before value only; `active`, hover and mousedown resolve by row object, so Suggested copies (and model dialog Favorites/Recent) no longer highlight or jump to the first copy. `current` stays value based.
+- Fixed `tui/src/claudeWarmup.tsx`: warm-up signal uses `equals: isDeepEqual`, so the refresh on every palette open no longer rebuilds `appCommands`.
+- Fixed `tui/src/routes/session/sidebar-tools/sidebarTools.tsx`: removed the `refreshCommands()` call from `refresh()` (fired on every `message.updated` and file watcher event); layer now registered via `useBindings`; `refreshCommands` is a version-signal bump read in `sidebarCommands`. Removes the dispose-then-register gap that dropped rows for a frame.
+- Blocked plan step 5 (ellipsis): OpenTUI `truncate` ellipsizes the middle of the row and hid the title; reverted.
+- Updated tests: `commandPalette.test.ts` rewritten (input order irrelevant, category rank, groups after ungrouped, configured-first) - intended change; `dialog-select.test.tsx` adds repeated-value hover + reorder test.
+- Updated wiki `oc.wiki/Configuration.md` `command_palette.order` row (not pushed).
+- Removed all DEBUG-TEMP instrumentation, `util/debugPalette.ts`, probes and `%TEMP%\debug\20261029-palette\`.
+- Verification: real-app log before/after (6 opens incl. busy turn): order changes 27 -> 0, wrong-command selections 8 -> 0. Tests: commandPalette, dialog-select, claudeWarmupRendered, todos, claudeWarmup, dialogSelectSessionMarkerActions 55 pass 0 fail. tui typecheck passed.
+- Kept slash autocomplete as is: `useCommandSlashes` reads layer order, but `prompt/autocomplete.tsx:519` sorts results A-Z, so re-registration cannot reshuffle it.
+
+### User
+Command palette
+- Ctrl+P and Ctrl+O list commands in the same order every time, and rows no longer reshuffle while a reply streams.
+- Categories always appear in a fixed order (Session, Prompt, Agent, Provider, Workspace, VCS, oc, System), with commands sorted A-Z inside each.
+- The highlighted command stays the one you picked when the list updates, so Enter runs what you see.
+- Hovering a Suggested copy highlights only that row.
+
+---
+
+## 2026-10-29 (~21:09) - v0.2.323 reubenPregante - Claude accounts manager in the TUI - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation (imp from plan `~/.config/opencode/plans/2026-10-29-claude-account-manager.md`); completed, manual TUI sign-in not run
+- Version: 0.2.323 reubenPregante
+- Added `provider/claude-code/accountManage.ts`: `nextAccountEntry` (lowest free `~/.claude`, `~/.claude2`, ...; reuses an unpooled folder), `createAccountDir` (junctions for dirs, file symlinks for `CLAUDE.md`/`settings.json` to `~/.claude`; EPERM names Developer Mode), `authStatus` (`claude auth status --json` -> loggedIn/email/plan; default account keeps inherited env, never `CLAUDE_CONFIG_DIR=~/.claude`), `signOut`.
+- Added `accounts.ts` names: oc.json `claudeAccountNames` keyed by `accounts` entry as written, resolved by canonical dir (case-insensitive on Windows). `setAccountName` writes via `OcConfig`, drops other spellings of the same dir. `poolAccountLabel` = name, else `claude1` (`~/.claude`) / `claudeN`. `forgetAccount` clears limit mark, pins, current pick, usage cache (hashed + proven legacy).
+- Added `GET`/`POST /global/claude/accounts` (`groups/global.ts`, `handlers/global.ts`): list with auth status, `configDir`, resolved `login` command (`cliCommand`); actions add/rename/remove/signedIn/signOut. Add/remove write `provider.claude-code.options.accounts` via `Config.updateGlobal` + `disposeAllInstancesAndEmitGlobalDisposed` (same as config PATCH). Remove refuses the last account; keeps folder and login. `warmup/inventory.ts` `forgetInventory`.
+- Added TUI palette `claude.accounts` / `/claude-accounts` (`claudeCommands.tsx`), always visible. Sign-in runs the server-resolved `claude auth login` via new `editor.ts` `runSuspended` (extracted from `openEditor`), env without API/OAuth keys, `CLAUDE_CONFIG_DIR` set or deleted.
+- Changed sidebar names: `usage/claude.ts` `claudeAccountName` (same rule as server), used by `probeClaudeCodePool`, `claudeSeed`, `resolveUsagePlans`; names signal rereads on `claudeAccount.onChange`. `dialog-subagents.tsx` slugs account labels in agent names.
+- Regenerated `sdk/js/src/v2/gen` (only the two new routes). `sdk/openapi.json` left to prePush.
+- Updated tests for intended label change `.claude`/`.claudeN` -> `claude1`/`claudeN`: `failoverQuestion.test.ts`, `warmup.test.ts`, `cliEvents.test.ts`. Added httpapi-exercise entries for both routes.
+- Docs: `FORK.md` Claude account pool row, wiki `Claude-Code.md` "Several Claude accounts".
+- Verification: `tsgo` clean in opencode and tui. `test/provider/claude-code` + warmup listener: 692 pass, 2 fail -> cliEvents label (fixed, 14/14 pass) and `steering.test.ts` "cancel retires written unread input" (known flaky, unrelated). TUI usage/editor/sidebar/subagent tests 178 pass. `httpapi-exercise --mode coverage` 229 pass, 0 missing. Probes (temp HOME/XDG): dir picking, 5 links + idempotent re-run, labels, names round-trip, `forgetAccount`; real `auth status` for all 4 local accounts.
+- Risk: add/remove dispose every instance like an agent model change; not probed whether that interrupts a running turn. `claude auth login` under `runSuspended` not run (opens a browser).
+
+### User
+Claude accounts
+- New palette entry **Claude accounts** (`/claude-accounts`) lists every Claude login with its email, plan, and usage limit.
+- You can add an account (it makes the next `~/.claudeN` folder, links your shared Claude files, and signs it in), rename it, sign it in again, sign it out, or remove it from the pool.
+- Accounts without a name now show as `claude1`, `claude2`, ... everywhere instead of `.claude`, `.claude2`.
+- Adding or removing an account reloads oc's config, the same as changing an agent's model.
+
+---
+
+## 2026-10-28 (~21:24) - v0.2.322 selvesChapo - /debugInfo rename, /debug runs through /revive - Claude Opus 5.5, default effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; default effort; Implementation (imp from plan `~/.config/opencode/plans/2026-10-28-debug-command-revive.md`); completed
+- Version: 0.2.322 selvesChapo
+- Changed `tui/src/app.tsx` `opencode.debug` slashName `debug` -> `debugInfo`. Command id and `debug_view` keybind kept. No `debug` alias (would collide with the user command again).
+- Changed global `~/.opencode/commands/debug.md`: runtime defers to the project's `AGENTS.md` debug-run rule (no rule = old build-and-run-dev, never install); step 3 runs agent-runnable evidence first and ends the turn with the exact command when the run needs the user; new step 4 "Resume" checks the version marker before measuring; report states when the installed build still has `DEBUG-TEMP` code.
+- Added `AGENTS.md` "Debug runs" bullet: instrument, typecheck the package, user runs `/revive` (or `/debug <topic> /revive /debug measure`), check revive mark version vs `src/.version/version`, `/revive-single` only on request, cleanup `/revive` after `/imp`, prefer fake-model/pane/perf probes.
+- Replaced `FORK.md` "Debug and Luna routing" TODO about removed `Debug`/`Debug-a` agents with the `/debug` + `/revive` description.
+- Kept other sessions' uncommitted work (v0.2.321 changes) untouched.
+- Verification: `bun run typecheck` in `packages/tui` exit 0; grep shows `slashName: "debugInfo"` and `"debug-logging"`, no tests reference `/debug`. Optional pane probe skipped (rename follows ~30 existing camelCase slash names). Live check pending the user's next `/revive`.
+
+### User
+Slash commands
+- The built-in "View debug info" dialog is now `/debugInfo`, so `/debug` always starts the debug command.
+- `/debug` in oc now adds temporary logging, then asks you to run `/revive` and measures in the rebuilt app; `/revive-single` is used only when you ask.
+- Until `/imp` removes that logging and you `/revive` again, your installed oc contains the temporary logging.
+
+---
+
+## 2026-10-28 (~16:26) - v0.2.321 freddieWinklevoss - Agent shells keep gh login, no server password - Claude Opus 5.5, default effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; default effort; Implementation (started from an FTB session: gh "not logged in" in agent shells); completed, not built
+- Version: 0.2.321 freddieWinklevoss
+- ERROR: in agent shells `gh auth status` said "not logged in" though the user is logged in. Cause: the sign-in launcher (`config/startup.ts` `plan`) always set `XDG_CONFIG_HOME/STATE/DATA/CACHE`; every process the resident server starts inherits them, and gh prefers `XDG_CONFIG_HOME` over `%APPDATA%`, so it read the missing `~\.config\gh\hosts.yml`. With `GH_CONFIG_DIR=%APPDATA%\GitHub CLI` it reported "Logged in ... (keyring)". git push still worked (Credential Manager). The FTB v0.0.21/v0.0.22 release failures blamed on gh login were this.
+- Fixed `startup.ts`: new `movedXdgDirs` writes an XDG var only when its dir differs (case-insensitive) from xdg-basedir's default under `home` (new `context().home`). A default instance's launcher sets none.
+- Fixed credential leak: agent shells and the `claude` child inherited the resident's `OPENCODE_SERVER_PASSWORD`, `OPENCODE_SERVER_USERNAME`, `OC_RESIDENT`. New `util/agent-env.ts` `AgentEnv.inherited()` drops them; used by `tool/shell.ts` `shellEnv` and `provider/claude-code/spawnEnv.ts` `claudeSpawnEnv`. Checked readers first: only the server (`server/auth.ts`, `packages/server/src/auth.ts`, `serve.ts`) and the TUI launcher path (`cli/cmd/oc.ts`, `tui/util/sessionTab.ts`) read them; proxy MCP uses its own bearer token. Kept `OPENCODE_DB` (not secret; `oc` CLI calls from shells should hit the same DB).
+- Not covered: MCP local servers (`mcp/index.ts:365`) and LSP spawns still get the full env; same credential exposure to third-party processes. TODO if wanted.
+- Risk: the user's registered launcher (`~\.local\state\opencode\startup\oc-opencode-46cabf423e5654c2-2e54aab633a1688e.ps1`, 2026-10-12) is stale: sets `OPENCODE_INSTANCE`, all four XDG vars, and `OPENCODE_DB=...\opencode.db` (AGENTS.md says oc uses `oc.db`). It only regenerates when `serverStartOnWindowsUserStart` is saved again, and `plan` forwards the saving shell's `OPENCODE_DB`.
+- Added tests: `test/config/startup.test.ts` "startup sets only the XDG dirs moved off their defaults" (guards the gh bug); `test/util/agent-env.test.ts` (guards the credential strip).
+- Verification: `bun test` on agent-env, startup, oc, spawnEnv, cliArgs, shell tests: all pass except shell.test.ts flakes under combined load (run 1: 3 fails incl. "parses PowerShell conditionals" pattern split; run 2: "basic [bash]" 5 s timeout); `test/tool/shell.test.ts` alone 96/96 twice. `tsgo --noEmit` exit 0. Probe (plain `bun run`, removed): real context -> launcher sets only `OPENCODE_DB`; XDG unset -> same; `XDG_CACHE_HOME` moved -> only that one set. MISTAKE: first probe ran under the test preload (temp XDG dirs) and showed 4 XDG lines; probes of `Global.Path` must run outside `bun test`.
+
+### User
+Agent shells
+- Tools like the GitHub CLI work in agent shells again: oc no longer points them at the wrong config folder, so `gh` sees your login.
+- Agent commands can no longer read oc's resident server password from their environment.
+- To pick this up after installing, turn "start on Windows sign-in" off and on again (or save it again), then restart the resident server.
+
+---
+
 ## 2026-10-28 (~00:00) - v0.2.320 yeetTuning - Every oc palette command shows a description - Claude Opus 5.5, low effort; Implementation
 
 ### Agent

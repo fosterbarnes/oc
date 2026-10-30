@@ -329,9 +329,8 @@ test("account blocks come from the CLI error kind and name the login command", a
   assert.ok(note.includes(ACCOUNT_BLOCK_MARKER))
   assert.match(note, /claude auth login/)
   assert.doesNotMatch(note, /pick another account/)
-  // Pool display labels reach the note verbatim: the default label ".claude"
-  // must not be re-normalized into "claude".
-  assert.ok(formatAccountBlockNote({ kind: "authentication_failed" }).includes('the Claude account ".claude"'))
+  // Pool display labels reach the note verbatim: the default account's label is "claude1".
+  assert.ok(formatAccountBlockNote({ kind: "authentication_failed" }).includes('the Claude account "claude1"'))
   assert.equal(isAccountLimitError({ resultText: "You've hit your individual spend limit." }), true)
   assert.equal(isAccountLimitError({ resultText: "You've hit your session limit . resets 11:20pm" }), true)
   assert.equal(isAccountLimitError({ resultText: "You've hit your usage limit" }), true)

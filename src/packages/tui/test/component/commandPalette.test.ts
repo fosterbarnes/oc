@@ -2,29 +2,33 @@ import { describe, expect, test } from "bun:test"
 import { orderPaletteEntries } from "../../src/component/command-palette"
 
 describe("command palette ordering", () => {
-  test("keeps source slots when unset and places configured commands first within a category", () => {
-    const entries = [
-      { command: { name: "oc.default-agent", category: "oc" } },
-      { command: { name: "session.new", category: "Session" } },
-      { command: { name: "oc.model", category: "oc" } },
-      { command: { name: "oc.new", category: "oc" } },
-      { command: { name: "oc.agent", category: "oc" } },
-      { command: { name: "oc.model-copy", category: "oc" } },
-    ]
+  const entries = [
+    { command: { name: "system.help", title: "Help", category: "System" } },
+    { command: { name: "oc.model", title: "Model", category: "oc" } },
+    { command: { name: "plugin.run", title: "Run", category: "Plugin" } },
+    { command: { name: "oc.default", title: "Agent", category: "oc", group: "Defaults" } },
+    { command: { name: "session.share", title: "Share session", category: "Session" } },
+    { command: { name: "oc.new", title: "New session", category: "oc" } },
+    { command: { name: "session.list", title: "Switch session", category: "Session" } },
+  ]
+  const names = (list: readonly { command: { name: string } }[]) => list.map((entry) => entry.command.name)
 
-    expect(orderPaletteEntries(entries).map((entry) => entry.command.name)).toEqual([
-      "oc.default-agent",
-      "session.new",
-      "oc.model",
+  // Keymap entries arrive newest layer first, so re-registration must not change the result.
+  test("orders by category rank, group, then title regardless of input order", () => {
+    const expected = ["session.share", "session.list", "oc.model", "oc.new", "oc.default", "system.help", "plugin.run"]
+    expect(names(orderPaletteEntries(entries))).toEqual(expected)
+    expect(names(orderPaletteEntries(entries.toReversed()))).toEqual(expected)
+  })
+
+  test("places configured commands first within their category", () => {
+    expect(names(orderPaletteEntries(entries, { "session.list": 1, "oc.new": 2 }))).toEqual([
+      "session.list",
+      "session.share",
       "oc.new",
-      "oc.agent",
-      "oc.model-copy",
+      "oc.model",
+      "oc.default",
+      "system.help",
+      "plugin.run",
     ])
-
-    expect(
-      orderPaletteEntries(entries, { "oc.new": 1, "oc.model": 3, "oc.model-copy": 3 }).map(
-        (entry) => entry.command.name,
-      ),
-    ).toEqual(["oc.new", "session.new", "oc.model", "oc.model-copy", "oc.default-agent", "oc.agent"])
   })
 })

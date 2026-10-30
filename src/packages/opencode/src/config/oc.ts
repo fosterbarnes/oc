@@ -23,6 +23,8 @@ export type Settings = Partial<Record<Key, Value>> & {
   // `build`: source build behind /revive (Revive.parseBuild); `false` = never build; unset = ask on first /revive.
   revive?: { path?: string; launcher?: unknown; build?: unknown }
   intro?: { background?: "terminal" | "black" }
+  // Claude account labels keyed by the `accounts` entry as written (`"~/.claude2": "Pro"`); accounts.ts.
+  claudeAccountNames?: Record<string, string>
 }
 
 export function defaultServerPort() {

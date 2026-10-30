@@ -1,20 +1,25 @@
+import { useRenderer } from "@opentui/solid"
 import { createSignal, onMount } from "solid-js"
 import { useRoute } from "./context/route"
-import { useSDK } from "./context/sdk"
+import { useSDK, type ClaudeAccountAction, type ClaudeManagedAccount, type ClaudeManagedAccounts } from "./context/sdk"
 import { useSync } from "./context/sync"
+import { runSuspended } from "./editor"
 import { persistOcConfig, readOcConfig } from "./ocSettings"
 import { useDialog } from "./ui/dialog"
+import { DialogConfirm } from "./ui/dialog-confirm"
+import { DialogPrompt } from "./ui/dialog-prompt"
 import { DialogSelect } from "./ui/dialog-select"
 import { useToast } from "./ui/toast"
 import { Locale } from "./util/locale"
 
-// Claude account switching and auto-resume palette entries, spread after the warm-up entries.
+// Claude account manager, switching, and auto-resume palette entries, spread after the warm-up entries.
 export function createClaudeAccountCommands() {
   const sdk = useSDK()
   const sync = useSync()
   const route = useRoute()
   const dialog = useDialog()
   const toast = useToast()
+  const renderer = useRenderer()
   const [resumeEnabled, setResumeEnabled] = createSignal(false)
   const [failoverMode, setFailoverMode] = createSignal(readOcConfig().claudeFailover)
 
@@ -110,6 +115,153 @@ export function createClaudeAccountCommands() {
     },
   }
 
+  const change = (input: ClaudeAccountAction, message: string) =>
+    sdk.claudeAccount
+      .change(input)
+      .then((next) => {
+        toast.show({ message, variant: "info" })
+        return next
+      })
+      .catch((error) => {
+        toast.error(error)
+        return undefined
+      })
+
+  const accountStatus = (account: ClaudeManagedAccount) => {
+    if (account.loggedIn === false) return "signed out"
+    if (account.loggedIn === undefined) return "sign-in status unknown"
+    return [
+      account.email,
+      account.plan && account.plan[0]!.toUpperCase() + account.plan.slice(1),
+      account.limitedUntil && `limited until ${Locale.datetime(account.limitedUntil)}`,
+    ]
+      .filter(Boolean)
+      .join(" · ")
+  }
+
+  // `claude auth login` in this terminal, with the account's config dir and no credential overrides.
+  const signIn = async (login: ClaudeManagedAccounts["login"], account: ClaudeManagedAccount) => {
+    dialog.clear()
+    const env = { ...process.env }
+    for (const key of ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN", "CLAUDE_CONFIG_DIR"])
+      delete env[key]
+    if (account.configDir) env.CLAUDE_CONFIG_DIR = account.configDir
+    const signedIn = await runSuspended({ renderer, ...login, name: "claude auth login", env }).then(
+      () => true,
+      (error) => {
+        toast.error(error)
+        return false
+      },
+    )
+    if (signedIn) await change({ action: "signedIn", id: account.id }, `Signed in: ${account.label}`)
+    await showAccounts()
+  }
+
+  const addAccount = async () => {
+    const name = await DialogPrompt.show(dialog, "New Claude account name (blank: claudeN)")
+    if (name === null) return showAccounts()
+    const next = await change({ action: "add", name: name.trim() || undefined }, "Claude account added")
+    const added = next?.accounts.find((account) => account.id === next.added)
+    if (!next || !added) return showAccounts()
+    await signIn(next.login, added)
+  }
+
+  const renameAccount = async (account: ClaudeManagedAccount) => {
+    const name = await DialogPrompt.show(dialog, `Rename ${account.label} (blank: default name)`, {
+      value: account.name ?? "",
+    })
+    if (name !== null)
+      await change({ action: "rename", id: account.id, name }, name.trim() ? `Renamed: ${name.trim()}` : "Name cleared")
+    await showAccounts()
+  }
+
+  const confirmAccount = async (title: string, message: string, input: ClaudeAccountAction, done: string) => {
+    if (await DialogConfirm.show(dialog, title, message)) await change(input, done)
+    await showAccounts()
+  }
+
+  const showAccount = (state: ClaudeManagedAccounts, account: ClaudeManagedAccount) => {
+    dialog.replace(() => (
+      <DialogSelect
+        title={`${account.label}: ${accountStatus(account)}`}
+        options={[
+          {
+            title: account.loggedIn ? "Sign in again" : "Sign in",
+            description: "runs claude auth login in this terminal",
+            value: "signIn",
+            onSelect: () => void signIn(state.login, account),
+          },
+          { title: "Rename", value: "rename", onSelect: () => void renameAccount(account) },
+          ...(account.loggedIn
+            ? [
+                {
+                  title: "Sign out",
+                  value: "signOut",
+                  onSelect: () =>
+                    void confirmAccount(
+                      `Sign out ${account.label}?`,
+                      "Runs claude auth logout for this account.",
+                      { action: "signOut", id: account.id },
+                      `Signed out: ${account.label}`,
+                    ),
+                },
+              ]
+            : []),
+          ...(state.accounts.length > 1
+            ? [
+                {
+                  title: "Remove from pool",
+                  description: "keeps the folder and its login",
+                  value: "remove",
+                  onSelect: () =>
+                    void confirmAccount(
+                      `Remove ${account.label}?`,
+                      "Removes it from accounts in opencode.jsonc and reloads oc's config. Subagents that prefer it use the pool instead.",
+                      { action: "remove", id: account.id },
+                      `Removed: ${account.label}`,
+                    ),
+                },
+              ]
+            : []),
+        ]}
+      />
+    ))
+  }
+
+  // Probes every account's CLI auth, so it takes a moment; reopened after every change.
+  const showAccounts = async () => {
+    const state = await sdk.claudeAccount.manage().catch((error) => {
+      toast.error(error)
+      return undefined
+    })
+    if (!state) return
+    dialog.replace(() => (
+      <DialogSelect
+        title="Claude accounts"
+        current={state.accounts.find((account) => account.current)?.id}
+        options={[
+          ...state.accounts.map((account) => ({
+            title: account.label,
+            description: accountStatus(account),
+            value: account.id,
+            onSelect: () => showAccount(state, account),
+          })),
+          { title: "Add account", value: "add", onSelect: () => void addAccount() },
+        ]}
+      />
+    ))
+  }
+
+  const manageAccounts = {
+    name: "claude.accounts",
+    title: "Claude accounts",
+    desc: "Add, rename, sign in, sign out, or remove Claude accounts",
+    slashName: "claude-accounts",
+    category: "oc",
+    group: "Third party harness management",
+    run: () => void showAccounts(),
+  }
+
   const failover = {
     name: "claude.failover",
     title: "Claude account failover",
@@ -197,6 +349,7 @@ export function createClaudeAccountCommands() {
     const multi =
       ((sync.data.config.provider?.["claude-code"]?.options?.accounts as unknown[] | undefined)?.length ?? 0) > 1
     return [
+      manageAccounts,
       ...(multi ? [switchAccount] : []),
       ...(multi && route.data.type === "session" ? [switchSessionAccount] : []),
       ...(multi ? [failover] : []),

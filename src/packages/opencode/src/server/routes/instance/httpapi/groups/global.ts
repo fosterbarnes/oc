@@ -8,7 +8,7 @@ import { Schema } from "effect"
 import { HttpApi, HttpApiEndpoint, HttpApiError, HttpApiGroup, OpenApi } from "effect/unstable/httpapi"
 import semver from "semver"
 import { described } from "./metadata"
-import { ApiNotFoundError } from "../errors"
+import { ApiNotFoundError, InvalidRequestError } from "../errors"
 
 const GlobalHealth = Schema.Struct({
   healthy: Schema.Literal(true),
@@ -87,7 +87,43 @@ export const GlobalPaths = {
   shutdown: "/global/shutdown",
   restart: "/global/restart",
   warmup: "/global/claude/warmup",
+  claudeAccounts: "/global/claude/accounts",
 } as const
+
+const ClaudeManagedAccount = Schema.Struct({
+  id: Schema.String,
+  /** The `accounts` entry as written in opencode.jsonc (`~/.claude2`). */
+  entry: Schema.String,
+  label: Schema.String,
+  name: Schema.optional(Schema.String),
+  /** Absent when the CLI could not be asked. */
+  loggedIn: Schema.optional(Schema.Boolean),
+  email: Schema.optional(Schema.String),
+  plan: Schema.optional(Schema.String),
+  current: Schema.Boolean,
+  limitedUntil: Schema.optional(Schema.Number),
+  /** CLAUDE_CONFIG_DIR for this account's CLI; absent means unset (the default account). */
+  configDir: Schema.optional(Schema.String),
+})
+
+const ClaudeManagedAccounts = Schema.Struct({
+  accounts: Schema.Array(ClaudeManagedAccount),
+  /** The account `add` created. */
+  added: Schema.optional(Schema.String),
+  /** `claude auth login` as the server resolves the CLI; the TUI runs it in its own terminal. */
+  login: Schema.Struct({ command: Schema.String, args: Schema.Array(Schema.String), shell: Schema.Boolean }),
+})
+
+// `signedIn`: the TUI finished `claude auth login` for `id`; old limits and usage caches are dropped.
+const ClaudeAccountAction = Schema.Union([
+  Schema.Struct({ action: Schema.Literal("add"), name: Schema.optional(Schema.String) }),
+  Schema.Struct({ action: Schema.Literal("rename"), id: Schema.String, name: Schema.String }),
+  Schema.Struct({ action: Schema.Literal("remove"), id: Schema.String }),
+  Schema.Struct({ action: Schema.Literal("signedIn"), id: Schema.String }),
+  Schema.Struct({ action: Schema.Literal("signOut"), id: Schema.String }),
+])
+
+export type ClaudeAccountActionType = typeof ClaudeAccountAction.Type
 
 const WarmupTimeList = Schema.mutable(Schema.Array(Schema.String))
 
@@ -266,6 +302,27 @@ export const GlobalApi = HttpApi.make("global").add(
           identifier: "global.setClaudeWarmup",
           summary: "Set Claude warm-up schedule",
           description: "Save or pause one account's warm-up schedule. Saving an empty schedule disables it.",
+        }),
+      ),
+      HttpApiEndpoint.get("claudeAccounts", GlobalPaths.claudeAccounts, {
+        success: described(ClaudeManagedAccounts, "Claude Code pool accounts with sign-in status"),
+      }).annotateMerge(
+        OpenApi.annotations({
+          identifier: "global.claudeAccounts",
+          summary: "Get managed Claude accounts",
+          description: "Every Claude Code pool account with its name, signed-in email, plan, and usage limit.",
+        }),
+      ),
+      HttpApiEndpoint.post("claudeAccountAction", GlobalPaths.claudeAccounts, {
+        payload: ClaudeAccountAction,
+        success: described(ClaudeManagedAccounts, "Claude Code pool accounts after the change"),
+        error: [InvalidRequestError, ApiNotFoundError],
+      }).annotateMerge(
+        OpenApi.annotations({
+          identifier: "global.claudeAccountAction",
+          summary: "Change Claude accounts",
+          description:
+            "Add (folder, shared links, pool entry), rename, remove from the pool, sign out, or record a finished sign-in. Add and remove save opencode.jsonc and reload instances like a config update.",
         }),
       ),
     )

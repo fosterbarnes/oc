@@ -16,6 +16,7 @@ import { useDialog } from "../../../ui/dialog"
 import { useToast } from "../../../ui/toast"
 import { Locale } from "../../../util/locale"
 import { openLink } from "../../../util/browser"
+import { readOcConfig } from "../../../ocSettings"
 import {
   saveUserUsageProviders,
   saveUserUsageSpacing,
@@ -31,6 +32,7 @@ import {
   type UsageSubscription,
 } from "./usage/calendar"
 import {
+  claudeAccountName,
   claudeConfigDirId,
   probeClaudeCodePool,
   probeClaudeCodeUsage,
@@ -119,6 +121,8 @@ export function createSidebarUsage(input: {
   const [claudeCodeUsage, setClaudeCodeUsage] = createSignal<UsageSnapshot<ClaudeCodeUsage>>({ ok: false })
   // Pool account this session runs on (config dir name), marked with `*` in the Claude rows.
   const [activeClaudeAccount, setActiveClaudeAccount] = createSignal<string>()
+  // oc.json `claudeAccountNames`; reread when an account changes (the account manager renames through it).
+  const [claudeNames, setClaudeNames] = createSignal(readOcConfig().claudeAccountNames)
   // Sidebar usage shows used or remaining percent for every provider; toggled from the Usage menu.
   const [showRemaining, setShowRemaining] = createSignal(false)
   const [usageWidth, setUsageWidth] = createSignal(0)
@@ -157,7 +161,7 @@ export function createSidebarUsage(input: {
         ? {
             accounts: dirs.map((id) => ({
               id,
-              name: path.basename(id).replace(/^\./, ""),
+              name: claudeAccountName(id, claudeNames()),
               usage: { ok: false as const },
             })),
           }
@@ -232,7 +236,7 @@ export function createSidebarUsage(input: {
       const selectedSession = input.sessionID()
       const [next, pool] = await Promise.all([
         dirs.length > 1
-          ? probeClaudeCodePool(dirs, options)
+          ? probeClaudeCodePool(dirs, { ...options, claudeNames: claudeNames() })
           : probeClaudeCodeUsage({
               ...options,
               claudeCredentialsPath: path.join(dirs[0], ".credentials.json"),
@@ -368,6 +372,7 @@ export function createSidebarUsage(input: {
       {
         providers: usageProviders(),
         claudeAccounts: claudeDirectories(),
+        claudeNames: claudeNames(),
         facts: planFacts(),
         cursor: cursorUsage(),
         subscriptions: usageSubscriptions(),
@@ -1055,6 +1060,7 @@ export function createSidebarUsage(input: {
 
   onCleanup(
     sdk.claudeAccount.onChange(() => {
+      setClaudeNames(readOcConfig().claudeAccountNames)
       void readObservedUsage()
       void refreshActiveClaudeAccount()
       usageScheduler.request(["claude-code"])

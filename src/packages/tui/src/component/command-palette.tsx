@@ -17,7 +17,12 @@ import { useToast } from "../ui/toast"
 
 type PaletteCommandEntry = ReturnType<OpenTuiKeymap["getCommandEntries"]>[number]
 
-type PaletteCommand = { name: string; category?: string }
+type PaletteCommand = { name: string; category?: unknown; group?: unknown; title?: unknown }
+
+// Keymap entries come newest layer first, so any re-registration would reshuffle the list.
+// The palette sorts on its own: these categories first, then unlisted ones A-Z.
+const PALETTE_CATEGORY_ORDER = ["Session", "Prompt", "Agent", "Provider", "Workspace", "VCS", "oc", "System"]
+const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" })
 
 function compareConfiguredFirst(left: string, right: string, order: Record<string, number>) {
   const leftOrder = order[left]
@@ -27,29 +32,39 @@ function compareConfiguredFirst(left: string, right: string, order: Record<strin
   return leftOrder - rightOrder
 }
 
+function text(value: unknown) {
+  return typeof value === "string" ? value : undefined
+}
+
+function categoryRank(category: string | undefined) {
+  if (category === undefined) return PALETTE_CATEGORY_ORDER.length + 1
+  const rank = PALETTE_CATEGORY_ORDER.indexOf(category)
+  return rank < 0 ? PALETTE_CATEGORY_ORDER.length : rank
+}
+
+function compareOptional(left: string | undefined, right: string | undefined) {
+  if (left === right) return 0
+  if (left === undefined) return -1
+  if (right === undefined) return 1
+  return collator.compare(left, right)
+}
+
 export function orderPaletteEntries<T extends { command: PaletteCommand }>(
   entries: readonly T[],
   order: Record<string, number> = {},
 ) {
-  if (Object.keys(order).length === 0) return entries.slice()
-
-  const result = entries.slice()
-  const slotsByCategory = new Map<string | undefined, number[]>()
-  entries.forEach((entry, index) => {
-    const slots = slotsByCategory.get(entry.command.category)
-    if (slots) slots.push(index)
-    else slotsByCategory.set(entry.command.category, [index])
+  return entries.toSorted(({ command: left }, { command: right }) => {
+    const leftCategory = text(left.category)
+    const rightCategory = text(right.category)
+    return (
+      categoryRank(leftCategory) - categoryRank(rightCategory) ||
+      compareOptional(leftCategory, rightCategory) ||
+      compareOptional(text(left.group), text(right.group)) ||
+      compareConfiguredFirst(left.name, right.name, order) ||
+      collator.compare(text(left.title) ?? left.name, text(right.title) ?? right.name) ||
+      collator.compare(left.name, right.name)
+    )
   })
-
-  for (const slots of slotsByCategory.values()) {
-    const sorted = slots
-      .map((index) => entries[index])
-      .toSorted((left, right) => compareConfiguredFirst(left.command.name, right.command.name, order))
-    slots.forEach((slot, index) => {
-      result[slot] = sorted[index]
-    })
-  }
-  return result
 }
 
 function isVisiblePaletteCommand(command: PaletteCommandEntry["command"]) {
@@ -154,7 +169,7 @@ export function CommandPaletteDialog(props: { category?: string } = {}) {
     ]
   }
 
-  return <DialogSelect ref={(value) => (ref = value)} title="Commands" options={list()} />
+  return <DialogSelect ref={(value) => (ref = value)} title="Commands" options={list()} preserveSelection />
 }
 
 function paletteHeading(command: PaletteCommandEntry["command"], shown: string | undefined) {

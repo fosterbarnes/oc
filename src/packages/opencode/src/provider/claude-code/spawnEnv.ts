@@ -2,6 +2,7 @@
  * The environment a `claude` child is spawned with: effort, auth source,
  * thinking summaries, and the hygiene variables that pin the CLI version.
  */
+import { AgentEnv } from "@/util/agent-env"
 import { cliHygieneEnv } from "./cliVersion.js"
 import type { ReasoningEffort } from "./types.js"
 
@@ -36,7 +37,7 @@ export function claudeSpawnEnv(opts?: {
   configDir?: string
 }): Record<string, string | undefined> {
   const env: Record<string, string | undefined> = {
-    ...process.env,
+    ...AgentEnv.inherited(),
     TERM: "xterm-256color",
     // Pin the child to the binary whose version we detected, and keep it off
     // non-essential network calls. Fills gaps only, so an explicit shell value

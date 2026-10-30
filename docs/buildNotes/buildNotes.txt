@@ -1,12 +1,15 @@
-v0.2.320 yeetTuning [fix > TUI reload storm; feat. > palette descs]
-
-Performance:
-The TUI no longer lags all the time. Every config reload rewrote tui.json (an effect in tui/src/app.tsx saved palette keys on each reload), and the file watcher then reloaded every open TUI again, forever. Palette keys now save only where the user changes them, persistTuiSetting skips writes that change nothing, and the queue snapshot no longer notifies readers when its 2 s poll finds no change. The watcher in tui/src/config/live.ts now fires only when a file's mtime or size moves, because on this machine merely reading a long-idle file fired a change event. Typing / no longer fetches every command's full body: GET /command now leaves out template, which shipped every SKILL.md (about 1.1 MB here) and ran every MCP prompt on each slash-menu open. Windows already open keep lagging until oc restarts on the rebuilt build.
-
-Queue:
-Pressing Alt+Q several times in a row now queues each draft as its own entry, in order. The press used to drop while the previous add was in flight. The draft clears at the press; if the server rejects the entry, the text comes back with an error.
+v0.2.324 twigWhistlin [fix > palette order, gh; feat. > Claude accounts]
 
 Command palette:
-Every command in the oc section now shows a short description or its current value (Home folder, oc folder, Subagent tabs), and Subagent model/agent show "not set" instead of nothing. Added /toggleThinking, which runs the same entry as "Collapse thinking" / "Expand thinking".
+Ctrl+P and Ctrl+O now list commands in the same order every time, and rows no longer reshuffle while a reply streams. The palette used the keymap's layer order (newest first), so every re-registration moved whole groups to the top; it now sorts on its own: categories in a fixed order (Session, Prompt, Agent, Provider, Workspace, VCS, oc, System, then others A-Z), commands A-Z inside each, with command_palette.order still pinning commands first. The highlighted command stays the one you picked when the list updates, so Enter runs what you see, and hovering a Suggested copy highlights only that row (also fixes Favorites/Recent copies in the model dialog). Opening the palette no longer rebuilds the app commands when the Claude warm-up status is unchanged, and the session sidebar no longer re-registers its commands on every message update.
 
-Checks: tui typecheck and opencode typecheck pass; tui suite 793 pass / 0 fail; configLive.test.ts 3 pass; claudeWarmup.test.ts and usagePalette.test.ts 24 pass. New pane tests "a tui.json save reloads without the TUI rewriting the file" and "queues three Alt+Q presses sent back to back, in order" pass, and each failed on the old code. Not run: a visual check of the palette, a manual /toggleThinking run, and the lag on the real profile.
+Claude accounts:
+New palette entry Claude accounts (/claude-accounts) lists every Claude login with email, plan, and usage limit. You can add an account (makes the next ~/.claudeN folder, links the shared Claude files, signs it in), rename, sign in again, sign out, or remove it from the pool. Unnamed accounts now show as claude1, claude2, ... instead of .claude, .claude2. Adding or removing an account reloads oc's config, like changing an agent's model.
+
+Agent shells:
+gh works in agent shells again: the Windows sign-in launcher always set the XDG dirs, so gh read a missing config and said "not logged in". It now sets only XDG dirs moved off their defaults. Agent shells and the claude child no longer inherit the resident server password. Turn "start on Windows sign-in" off and on again to regenerate the launcher.
+
+Slash commands:
+The built-in debug info dialog is now /debugInfo, so /debug always runs the debug command, which now goes through /revive.
+
+Checks: palette - real-app log over 6 opens shows order changes 27 -> 0 and wrong-command selections 8 -> 0; tui tests commandPalette, dialog-select, claudeWarmupRendered, todos, claudeWarmup, dialogSelectSessionMarkerActions 55 pass; tui typecheck pass. Accounts - tsgo clean in opencode and tui; claude-code provider tests 692 pass with steering.test.ts "cancel retires written unread input" a known flake; TUI usage/editor/sidebar/subagent tests 178 pass; httpapi-exercise coverage 229 pass. Agent shells - agent-env, startup, oc, spawnEnv, cliArgs tests pass; shell.test.ts 96/96 alone (known flakes under combined load); tsgo pass. /debugInfo - tui typecheck pass. Not run: claude auth login from the accounts dialog (opens a browser).

@@ -8541,6 +8541,120 @@ export type GlobalSetClaudeWarmupResponses = {
 
 export type GlobalSetClaudeWarmupResponse = GlobalSetClaudeWarmupResponses[keyof GlobalSetClaudeWarmupResponses]
 
+export type GlobalClaudeAccountsData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/global/claude/accounts"
+}
+
+export type GlobalClaudeAccountsErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type GlobalClaudeAccountsError = GlobalClaudeAccountsErrors[keyof GlobalClaudeAccountsErrors]
+
+export type GlobalClaudeAccountsResponses = {
+  /**
+   * Claude Code pool accounts with sign-in status
+   */
+  200: {
+    accounts: Array<{
+      id: string
+      entry: string
+      label: string
+      name?: string
+      loggedIn?: boolean
+      email?: string
+      plan?: string
+      current: boolean
+      limitedUntil?: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+      configDir?: string
+    }>
+    added?: string
+    login: {
+      command: string
+      args: Array<string>
+      shell: boolean
+    }
+  }
+}
+
+export type GlobalClaudeAccountsResponse = GlobalClaudeAccountsResponses[keyof GlobalClaudeAccountsResponses]
+
+export type GlobalClaudeAccountActionData = {
+  body?:
+    | {
+        action: "add"
+        name?: string
+      }
+    | {
+        action: "rename"
+        id: string
+        name: string
+      }
+    | {
+        action: "remove"
+        id: string
+      }
+    | {
+        action: "signedIn"
+        id: string
+      }
+    | {
+        action: "signOut"
+        id: string
+      }
+  path?: never
+  query?: never
+  url: "/global/claude/accounts"
+}
+
+export type GlobalClaudeAccountActionErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * NotFoundError
+   */
+  404: NotFoundError
+}
+
+export type GlobalClaudeAccountActionError = GlobalClaudeAccountActionErrors[keyof GlobalClaudeAccountActionErrors]
+
+export type GlobalClaudeAccountActionResponses = {
+  /**
+   * Claude Code pool accounts after the change
+   */
+  200: {
+    accounts: Array<{
+      id: string
+      entry: string
+      label: string
+      name?: string
+      loggedIn?: boolean
+      email?: string
+      plan?: string
+      current: boolean
+      limitedUntil?: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+      configDir?: string
+    }>
+    added?: string
+    login: {
+      command: string
+      args: Array<string>
+      shell: boolean
+    }
+  }
+}
+
+export type GlobalClaudeAccountActionResponse =
+  GlobalClaudeAccountActionResponses[keyof GlobalClaudeAccountActionResponses]
+
 export type EventSubscribeData = {
   body?: never
   path?: never

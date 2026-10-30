@@ -12,6 +12,8 @@ export type UsageOptions = {
   cursorDbPath?: string
   claudeCredentialsPath?: string
   claudeUsageCachePath?: string
+  /** oc.json `claudeAccountNames`, for pooled account names. */
+  claudeNames?: Record<string, string>
   env?: NodeJS.ProcessEnv
   homeDir?: string
   fetchImpl?: (input: URL | RequestInfo, init?: RequestInit) => Promise<Response>
@@ -84,7 +86,8 @@ export async function fetchUsageResponse(
       : AbortSignal.timeout(options.timeoutMs ?? REQUEST_TIMEOUT_MS),
   })
   const receiptMs = options.nowMs ?? Date.now()
-  if (!response.ok) throw new UsageRequestError(response.status, parseRetryAfter(response.headers.get("Retry-After"), receiptMs))
+  if (!response.ok)
+    throw new UsageRequestError(response.status, parseRetryAfter(response.headers.get("Retry-After"), receiptMs))
   return { body: await response.json(), receiptMs }
 }
 

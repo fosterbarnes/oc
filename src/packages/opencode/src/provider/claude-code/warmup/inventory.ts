@@ -89,6 +89,11 @@ const inflightInventory = new Map<string, Promise<InventorySnapshot>>()
 // conclusively signs them out; unknown never flips another account.
 const lastKnownPresence = new Map<string, boolean>()
 
+/** Drop cached inventories after a sign-in or sign-out, so warm-up sees the change at once. */
+export function forgetInventory(): void {
+  inventoryCache.clear()
+}
+
 export function _resetInventoryForTests(): void {
   inventoryCache.clear()
   inflightInventory.clear()

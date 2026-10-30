@@ -327,7 +327,7 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
           return
         }
         const previous = selection
-        const index = flat().findIndex((option) => isDeepEqual(option.value, previous.value))
+        const index = findSelection(previous)
         if (index >= 0) {
           const option = flat()[index]
           const moved =
@@ -368,6 +368,17 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
       scrollAfterLayout(true, current)
     }),
   )
+
+  // Rows can repeat a value under another heading (palette Suggested copies): prefer the same heading.
+  function findSelection(previous: { value: T; category?: string; subcategory?: string }) {
+    const same = flat().findIndex(
+      (option) =>
+        isDeepEqual(option.value, previous.value) &&
+        option.category === previous.category &&
+        option.subcategory === previous.subcategory,
+    )
+    return same >= 0 ? same : flat().findIndex((option) => isDeepEqual(option.value, previous.value))
+  }
 
   function move(direction: number) {
     if (props.locked) return
@@ -744,7 +755,7 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
                   </Show>
                   <For each={options}>
                     {(option, row) => {
-                      const active = createMemo(() => !props.locked && isDeepEqual(option.value, selected()?.value))
+                      const active = createMemo(() => !props.locked && option === selected())
                       const current = createMemo(() => isDeepEqual(option.value, props.current))
                       return (
                         <>
@@ -773,7 +784,7 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
                             onMouseMove={() => {
                               if (props.locked) return
                               setFocusedAction(undefined)
-                              const index = flat().findIndex((x) => isDeepEqual(x.value, option.value))
+                              const index = flat().indexOf(option)
                               if (index === -1 || index === store.selected) return
                               moveTo(index)
                             }}
@@ -784,7 +795,7 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
                             }}
                             onMouseDown={() => {
                               if (props.locked) return
-                              const index = flat().findIndex((x) => isDeepEqual(x.value, option.value))
+                              const index = flat().indexOf(option)
                               if (index === -1) return
                               moveTo(index)
                             }}

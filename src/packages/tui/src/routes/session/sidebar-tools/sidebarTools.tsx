@@ -19,7 +19,7 @@ import { useLocal } from "../../../context/local"
 import { usePromptRef } from "../../../context/prompt"
 import { useToast } from "../../../ui/toast"
 import { usePluginRuntime } from "../../../plugin/runtime"
-import { useKeymapSelector, useOpencodeKeymap } from "../../../keymap"
+import { useBindings, useKeymapSelector, useOpencodeKeymap } from "../../../keymap"
 import { InstallationDisplayVersion, InstallationVersion } from "@opencode-ai/core/installation/version"
 import {
   defaultScriptSettings,
@@ -253,7 +253,9 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
   const [tree, setTree] = createSignal(readTree(root, expanded()))
   const [pins, setPins] = createSignal<ReadonlySet<string>>(new Set(sidebarSettings.scriptPins))
   const [favorites, setFavorites] = createSignal<ReadonlySet<string>>(new Set(sidebarSettings.favoriteFileRoots))
-  let refreshCommands = () => {}
+  // Bumped after changes to non-reactive inputs (root lists, script settings) to rebuild commands.
+  const [commandsVersion, setCommandsVersion] = createSignal(0)
+  const refreshCommands = () => setCommandsVersion((version) => version + 1)
   let visibilityRunning = false
 
   const saveProjectState = () => {
@@ -415,7 +417,6 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
     syncSession(nextSessionID)
     setScripts((prev) => reconcileScripts(prev, readScripts(project, root, scriptSettings)))
     setTree((prev) => reconcileTree(prev, readTree(root, expanded())))
-    refreshCommands()
     void syncSidebarVisibility()
   }
   const syncStoredRootState = () => {
@@ -566,6 +567,7 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
   const openScriptSettings = () => setTimeout(selectScriptSettings, 100)
 
   const sidebarCommands = createMemo(() => {
+    commandsVersion()
     const rootCommands = rootSections(sidebarSettings.recentFileRoots, [...favorites()])
     const commands = [
       {
@@ -663,16 +665,7 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
     ]
     return commands
   })
-  let commandDisposer: (() => void) | undefined
-  createEffect(() => {
-    commandDisposer?.()
-    commandDisposer = keymap.registerLayer({ commands: sidebarCommands() })
-  })
-  refreshCommands = () => {
-    commandDisposer?.()
-    commandDisposer = keymap.registerLayer({ commands: sidebarCommands() })
-  }
-  onCleanup(() => commandDisposer?.())
+  useBindings(() => ({ commands: sidebarCommands() }))
   onCleanup(event.on("file.watcher.updated", refresh))
   onCleanup(
     event.on("tui.session.select", () =>
