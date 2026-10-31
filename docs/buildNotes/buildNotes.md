@@ -210,6 +210,26 @@ Example compact Agent notes:
 
 ---
 
+## 2026-10-30 (~15:44) - v0.2.325 aldritchGenitals - Queued prompts no longer rebuild the prompt box in a loop - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation (/debug -> /think -> /imp; debug notes `~/.config/opencode/plans/2026-10-30-debug-alt-q-queue-lag.md`, plan `~/.config/opencode/plans/2026-10-30-alt-q-prompt-remount.md`); completed
+- Version: 0.2.325 aldritchGenitals
+- Fixed Prompt remount loop (real bug since v0.2.314 `QueueStrip`): `Prompt` returned a fragment and sits as the fallback of `pluginRuntime.Slot mode="replace"` (session and Home routes). opentui 0.5.14 `Slot` resolves fallback children with `children()` inside its own memo, so the strip's `<Show>` toggling re-ran that memo and built a new `Prompt`; its fresh `createQueueSnapshot` started `EMPTY`, hid the strip, refetched, and the strip showing again remounted it. Looped once per queue GET while anything was queued (real app: ~30-45 GETs/s, 598 TUI stalls of 120-1284 ms; textarea, keymap layers and commands rebuilt each time)
+- Changed `tui/src/component/prompt/index.tsx` root fragment to one `<box width="100%" flexShrink={0}>` with a comment on why. Autocomplete absolute position stays consistent (computed against `anchor.parent`, now the same wrapper)
+- Added keeper `tui/test/promptQueueLoop.test.ts`: full app on a session, slots set up with no plugin, one pending queue entry; strip shows and queue GETs grow by at most 1 over 1 s
+- Measured (debug, instrumentation now removed): queue path itself was fast (press to server-accepted 41-76 ms, server handlers 1-3 ms, lock waits 0 ms); not the cause. Each Alt+Q while busy forks one `state.completion` waiter in `prompt.ts` `dispatchHead` (harmless, left)
+- Verification: keeper fails with the fragment (106 queue GETs in 10 s, strip never stable) and passes 3/3 with the box. Pane probe before/after: 637 remounts in ~8 s after one Alt+Q -> 0; refreshes back to the 2 s poll. tui typecheck exit 0; promptQueueLoop, slashMenuLayout, queue, promptBackground, slots, keymap, app-lifecycle 20 pass 0 fail; `OC_TUI_PANE=1` tuiPane "queues three Alt+Q presses" pass. No visual check of the absolute `@`/`/` menu in the real app
+- Removed all DEBUG-TEMP instrumentation (`core/util/debugQueue.ts`, logging in queue.ts, prompt.ts, sessionOc.ts, dialogQueue.tsx, prompt/index.tsx) and both probe tests; `git grep` clean. `src/bun.lock` and `opencode/package.json` show modified with no content diff; not from this session, left alone
+- Risk: any other replace-slot fallback given a fragment root with toggling parts will remount the same way (opentui behavior); worth an upstream opentui issue
+
+### User
+Queued prompts
+- Queueing prompts with Alt+Q while an agent works no longer makes oc lag or stop accepting input: the prompt box was being rebuilt about 30 times a second while anything was queued.
+- The QUEUED strip above the prompt now stays steady instead of flickering.
+
+---
+
 ## 2026-10-29 (~23:32) - v0.2.324 twigWhistlin - Command palette keeps a stable order and cursor - Claude Opus 5.5, low effort; Implementation
 
 ### Agent

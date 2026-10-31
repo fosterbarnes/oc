@@ -1913,8 +1913,10 @@ export function Prompt(props: PromptProps) {
   const maxHeight = createMemo(() => tuiConfig.prompt?.max_height ?? Math.max(6, Math.floor(dimensions().height / 3)))
   const moveLabelWidth = createMemo(() => Math.max(12, Math.min(44, dimensions().width - 48)))
 
+  // One root element, not a fragment: a replace-mode plugin slot resolves its fallback inside its own
+  // memo, so a top-level child toggling (the queue strip) would re-create the whole Prompt.
   return (
-    <>
+    <box width="100%" flexShrink={0}>
       <Autocomplete
         sessionID={props.sessionID}
         inlineSlashMenu={Boolean(props.sessionID)}
@@ -2378,6 +2380,6 @@ export function Prompt(props: PromptProps) {
           </Show>
         </box>
       </box>
-    </>
+    </box>
   )
 }
