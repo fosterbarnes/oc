@@ -48,7 +48,9 @@ function invokeRunCli($run, [string[]]$CliArgs) {
 if ($Screen) {
     $run = readRun
     if (-not $run -or -not (testRunAlive $run)) { throw 'No native test is running.' }
-    invokeRunCli $run @('get-text', '--pane-id', "$($run.paneId)")
+    # Trailing padding is most of a raw grid read; drop it so readers get only the content.
+    $lines = @(invokeRunCli $run @('get-text', '--pane-id', "$($run.paneId)") | ForEach-Object { $_.TrimEnd() })
+    ($lines -join "`n") -replace '\n+$', ''
     return
 }
 

@@ -210,6 +210,30 @@ Example compact Agent notes:
 
 ---
 
+## 2026-11-02 (~18:00) - v0.2.327 penguinSoulmate - ocTui drives oc TUI tests through the pty; tester bake-off picks Terra fast low - Claude Opus 5.5, effort not recorded; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; effort not recorded; Implementation (/imp of plan `~/.config/opencode/plans/agentTestBakeoff.md`); completed
+- Version: 0.2.327 penguinSoulmate
+- Added user-level tool `~/.config/opencode/tool/ocTui.ts` (outside repo; see `C:\Users\Foster\buildNotes.md`): JSON steps sent to the `nativeTest.ps1` run's pane via `wezterm cli send-text --no-paste` on its own socket; returns the trimmed screen. Legacy VT only: one win32-input-mode sequence through ConPTY left bare Esc unable to close dialogs until restart; win32 and kitty `ctrl+m` never opened the model list.
+- Changed `.scripts\nativeTest.ps1` `-Screen`: TrimEnd per line, trailing blank lines dropped.
+- Changed AGENTS.md `## Agent test`: input/reads through `ocTui` (no takeover), legacy-VT rule, rejected chords, shared-state rules for cases, server restart needed for a new tool (Reload oc config reloads only the tab's launch folder).
+- Bake-off (8 fixed cases incl. 2 traps, shared PC level, fresh window per run): terra-fast low 8/8 twice (68 s, 71 s, 13 turns); luna-fast low 8/8 twice (55 s, 53 s); haiku-5.5 low 8/8 (69 s, 13 `ocTui` calls). 0 false PASS, 0 failed tool calls, shared state hashes before = after. Baseline before the tool: terra high, 5 cases, 75 turns, 4.5 min. Coding task: all three 5/7 (hidden 2 and 4 grade beyond the brief).
+- Decided (user): tester default `openai/gpt-6.1-terra-fast` low; Claude models get `ocTui` via `proxyOpencodeTools` like `cua_*`.
+- Verification: Phase 1 gate (8 cases x 3 rounds + 1 fresh window, identical results); UI runs above; tool loads from the user-level path after a server restart.
+- MISTAKE: one manual win32 key probe left an `m` entry in the shared `prompt-history.jsonl`; no session created. Rule: probes that may type into the prompt use legacy VT through `ocTui` only.
+- ERROR: first Terra and Haiku dispatches BLOCKED (tool missing): the repo-level tool was not in the oc repo instance until a server restart, and Claude sessions only get tools in `proxyOpencodeTools`.
+- TODO: "Reload oc config" reloads the TUI launch directory instance, not the open chat's (`app.tsx:908` -> `handlers/instance.ts:44`).
+
+### User
+Agent testing
+- `/agentTest` on oc's own TUI no longer needs you to leave the PC: the tester types and clicks straight into the test window, so it runs while you keep working.
+- A test run that took 4.5 minutes now takes about a minute, and the default tester is now the faster, cheaper GPT-6.1 Terra fast at low effort.
+- Claude models can run these tests too.
+- `nativeTest.ps1 -Screen` output no longer carries trailing blank padding.
+
+---
+
 ## 2026-11-02 (~02:59) - v0.2.326 turboCannabis - Palette search ranks titles first; nativeTest cleans up its project - Claude Opus 5.5, high effort; Implementation
 
 ### Agent

@@ -1,21 +1,12 @@
-v0.2.326 turboCannabis [feat. > Claude Agent; fix > compaction divider]
-
-Claude Agent:
-New Claude Agent provider, OpenCode's official way to use Claude through your Claude Code login with oc's tools, permissions, and history. /connect lists it, waits until claude auth login is done, then shows Claude's models with effort levels. You can switch between Claude Agent and other models in one chat and Claude catches up on what it missed. The existing Claude Code provider, its accounts, usage, and warm-up work as before.
-
-compaction:
-While a chat compacts, the divider now says "Compacting" with the model and a running timer instead of claiming it is already compacted. A compaction you stop or that fails now says so. Claude Code's "context compacted" notice is no longer saved inside the compaction summary.
-
-command palette:
-Searching the palette, and every other list dialog, now lists title matches first, so typing "Switch theme" and pressing Enter opens Switch theme instead of Switch Claude account. Searches no longer pull in unrelated rows just because a group name happens to contain the letters, while searching by a group name such as "harness" still works.
-
-sidebar:
-New oc palette entries "Sidebar visibility" (auto, or always docked even on narrow terminals) and "Sidebar width" (a - 42 + control from 30 to 80 columns, cut back on narrow terminals so the chat keeps at least 60 columns).
-
-themes:
-The native opencode window now keeps its own dark/light lock and daily-theme setting, separate from oc, like its theme pick already was. All other settings stay shared.
+v0.2.327 penguinSoulmate [scripts > agentTest without takeover]
 
 agent testing:
-/agentTest can now test oc's own TUI: .scripts\nativeTest.ps1 builds the native opencode.exe without installing it, opens it in its own WezTerm window on your real profile, lets the tester read the exact screen text, and closes it again (deleting the throwaway project it made). A built but not installed oc.exe cannot be used for this because it refuses to start beside the installed background server.
+/agentTest on oc's own TUI no longer needs you to leave the PC. A new user-level ocTui tool types keys, text, and mouse clicks straight into the native test window's terminal and returns the screen text, so tests run in the background while you keep working. Keys use the plain terminal encoding only; chords that need the kitty keyboard protocol (ctrl+m, ctrl+enter, shift+enter, ctrl+shift+key) are refused with a pointer to the palette title or the ctrl+x leader form. A test run that took 4.5 minutes now takes about a minute.
 
-Under the hood: Claude Agent is the upstream OpenCode 2 provider ported near-verbatim with a small adapter (catalog, storage, runtime) and session-loop changes gated on claude-agent; upstream tests 61/61 and 4 fake-model scenarios pass, opencode typecheck clean; real login and the compiled build were not run. Compaction: the divider follows the summary reply's completion; pane probe saw the timer, Compacted, and Compaction stopped; fundamentalTools, cliEventsStream, cliEvents 42/42. Palette: DialogSelect ranks title-only matches, then category matches above a 0.5 fuzzysort threshold (the old summed title+category score let a scattered category hit outrank an exact title); new dialog-select test fails on the old filter and passes now, 24 pass; live /agentTest in a native window passed 5/5. Sidebar: tui typecheck and 99 sidebar/config tests pass, stepper probed through the real keymap. Themes: per-binary kv keys and a daily_theme_native tui key; theme tests 5 pass and a native-flavor probe wrote only the _native keys. tui typecheck exit 0. Known: fundamentalTools.test.ts already fails prettier --check at HEAD.
+tester model:
+A bake-off on 8 fixed cases, 2 of them traps, picked GPT-6.1 Terra fast at low effort as the default tester. Luna fast low and Haiku 5.5 low also got 8/8 with no wrong PASS. Claude models can run these tests too.
+
+nativeTest.ps1:
+-Screen no longer prints trailing blank padding, so a home-screen read drops from about 11 KB to about 1 KB. AGENTS.md's Agent test section now describes the ocTui route, the key limits, which shared settings cases must leave alone, and that a new tool reaches running chats only after an oc server restart.
+
+Under the hood: the tool, its permission, and the tester and /agentTest changes live in the user config, outside this repo. Checks that ran: the Phase 1 gate (8 cases x 3 rounds plus a fresh window, identical verdicts, shared settings unchanged) and the bake-off UI runs (Terra and Luna twice each, Haiku once, every input through ocTui, no failed calls). No repo tests cover these files. Known: "Reload oc config" reloads the tab's launch folder, not the open chat's folder.
