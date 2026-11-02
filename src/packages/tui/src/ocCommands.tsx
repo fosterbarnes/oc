@@ -12,7 +12,7 @@ import { DialogSessionCleanup } from "./component/dialog-session-cleanup"
 import { DialogSessionSubagents } from "./component/dialog-session-subagents"
 import { DialogSubagents } from "./component/dialog-subagents"
 import { Spinner } from "./component/spinner"
-import { useTuiConfig } from "./config"
+import { DAILY_THEME_KEY, useTuiConfig } from "./config"
 import { useKV } from "./context/kv"
 import { useRoute } from "./context/route"
 import { useSDK } from "./context/sdk"
@@ -34,10 +34,18 @@ import { IMAGE_PASTE_PREVIEW_KEY, PASTE_SUMMARY_KEY, PROMPT_TAB_KEY, type Prompt
 import { dailyTheme, dayNumber } from "./theme/daily"
 import { persistAgentModel, persistOcConfig, persistTuiSetting, readOcConfig, resolveOcDirectory } from "./ocSettings"
 import { resetSidebarButtons } from "./sidebarButtons"
+import {
+  clampSidebarWidth,
+  SIDEBAR_WIDTH_DEFAULT,
+  SIDEBAR_WIDTH_KEY,
+  SIDEBAR_WIDTH_MAX,
+  SIDEBAR_WIDTH_MIN,
+} from "./sidebarWidth"
 import { useDialog } from "./ui/dialog"
 import { DialogAlert } from "./ui/dialog-alert"
 import { DialogPrompt } from "./ui/dialog-prompt"
 import { DialogSelect } from "./ui/dialog-select"
+import { DialogStepper } from "./ui/dialog-stepper"
 import { useToast } from "./ui/toast"
 import { LINK_BROWSER_KEY, LINK_CLICK_KEY, scanBrowsers } from "./util/browser"
 import { Locale } from "./util/locale"
@@ -507,6 +515,55 @@ export function createOcCommands(input: {
                 kv.set("sidebar_position", option.value)
                 dialog.clear()
               }}
+            />
+          ))
+        },
+      },
+      {
+        name: "oc.sidebar_mode",
+        title: "Sidebar visibility",
+        category: "oc",
+        group: "Layout",
+        get desc() {
+          return kv.get("sidebar_mode", "auto")
+        },
+        slashName: "sidebarVisibility",
+        run: () => {
+          dialog.replace(() => (
+            <DialogSelect
+              title="Sidebar visibility"
+              current={kv.get("sidebar_mode", "auto")}
+              options={[
+                { value: "auto", title: "auto", description: "Docked above 120 columns, overlay below" },
+                { value: "always", title: "always", description: "Docked at any terminal width" },
+              ]}
+              onSelect={(option) => {
+                kv.set("sidebar_mode", option.value)
+                dialog.clear()
+              }}
+            />
+          ))
+        },
+      },
+      {
+        name: "oc.sidebar_width",
+        title: "Sidebar width",
+        category: "oc",
+        group: "Layout",
+        get desc() {
+          const position = kv.get("sidebar_position", "right")
+          const width = String(clampSidebarWidth(kv.get(SIDEBAR_WIDTH_KEY, SIDEBAR_WIDTH_DEFAULT)))
+          return position === "top" || position === "bottom" ? `${width} (unused at ${position})` : width
+        },
+        slashName: "sidebarWidth",
+        run: () => {
+          dialog.replace(() => (
+            <DialogStepper
+              title="Sidebar width"
+              value={clampSidebarWidth(kv.get(SIDEBAR_WIDTH_KEY, SIDEBAR_WIDTH_DEFAULT))}
+              min={SIDEBAR_WIDTH_MIN}
+              max={SIDEBAR_WIDTH_MAX}
+              onChange={(value) => kv.set(SIDEBAR_WIDTH_KEY, value)}
             />
           ))
         },
@@ -1057,7 +1114,7 @@ export function createOcCommands(input: {
               onSelect={(option) => {
                 dialog.clear()
                 tuiConfig.setDailyTheme(option.value)
-                void persistTuiSetting(["daily_theme"], option.value)
+                void persistTuiSetting([DAILY_THEME_KEY], option.value)
                 toast.show({
                   message: option.value ? `Daily theme on: ${dailyTheme(dayNumber(new Date()))}` : "Daily theme off",
                   variant: "success",

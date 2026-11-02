@@ -4,6 +4,7 @@ import { Cause, Clock, Duration, Effect, Schedule } from "effect"
 import { MessageV2 } from "./message-v2"
 import { iife } from "@/util/iife"
 import { isRecord } from "@/util/record"
+import { CLAUDE_AGENT_PROVIDER_ID } from "@/provider/claude-agent/id"
 
 export type Err = ReturnType<NamedError["toObject"]>
 
@@ -83,6 +84,8 @@ function exponential(attempt: number, random: number) {
 export function retryable(error: Err, provider: string) {
   // context overflow errors should not be retried
   if (SessionV1.ContextOverflowError.isInstance(error)) return undefined
+  // Claude Code already retried; replaying the turn would also repeat permanent errors such as billing.
+  if (provider === CLAUDE_AGENT_PROVIDER_ID) return undefined
   if (SessionV1.APIError.isInstance(error)) {
     const status = error.data.statusCode
     // 5xx errors are transient server failures and should always be retried,
@@ -196,13 +199,17 @@ export function policy(opts: {
         yield* opts.set({
           attempt: meta.attempt,
           message: retry.message,
-          action: retry.action ?? (hint !== undefined && hint > RETRY_MAX_DELAY ? {
-            reason: "account_rate_limit",
-            provider: opts.provider,
-            title: "Usage limit reached",
-            message: retry.message,
-            label: "retry later",
-          } : undefined),
+          action:
+            retry.action ??
+            (hint !== undefined && hint > RETRY_MAX_DELAY
+              ? {
+                  reason: "account_rate_limit",
+                  provider: opts.provider,
+                  title: "Usage limit reached",
+                  message: retry.message,
+                  label: "retry later",
+                }
+              : undefined),
           next: now + (hint !== undefined && hint > RETRY_MAX_DELAY ? hint : wait),
         })
         if (hint !== undefined && hint > RETRY_MAX_DELAY) return yield* Cause.done(meta.attempt)

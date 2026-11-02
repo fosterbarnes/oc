@@ -18,7 +18,7 @@ import { iife } from "@/util/iife"
 import { Global } from "@opencode-ai/core/global"
 import path from "path"
 import { pathToFileURL } from "url"
-import { Effect, Layer, Context, Option, Schema, Types } from "effect"
+import { Effect, Layer, Context, Option, Schema, Scope, Types } from "effect"
 import { EffectBridge } from "@/effect/bridge"
 import { InstanceState } from "@/effect/instance-state"
 import { EffectPromise } from "@/effect/promise"
@@ -34,6 +34,9 @@ import { ProviderError } from "./error"
 import { LocalDiscovery } from "./localDiscovery"
 import * as ClaudeCodeModels from "./claude-code/models"
 import { CLAUDE_CODE_PROVIDER_ID } from "./claude-code/shared"
+import { ClaudeAgentCatalog } from "./claude-agent/catalog"
+import { CLAUDE_AGENT_PROVIDER_ID } from "./claude-agent/id"
+import { ClaudeAgentRuntime } from "./claude-agent/runtime"
 import { HttpClient } from "effect/unstable/http"
 import * as Sse from "effect/unstable/encoding/Sse"
 import { httpClient } from "@opencode-ai/core/effect/app-node-platform"
@@ -263,6 +266,12 @@ const BUNDLED_PROVIDERS: Record<string, () => Promise<(opts: any) => BundledSDK>
   "@opencode-ai/claude-code": () => import("./claude-code").then((m) => m.createClaudeCode),
   // Pre-fold configs pinned the plugin package as the provider npm.
   "@khalilgharbaoui/opencode-claude-code-plugin": () => import("./claude-code").then((m) => m.createClaudeCode),
+  // Claude Agent models need the instance's runtime, so the `claude-agent` loader's getModel builds them.
+  [ClaudeAgentCatalog.NPM]: async () => () => ({
+    languageModel: () => {
+      throw new Error("Claude Agent models load through the claude-agent provider loader")
+    },
+  }),
   "@ai-sdk/amazon-bedrock": () => import("@ai-sdk/amazon-bedrock").then((m) => m.createAmazonBedrock),
   "@ai-sdk/amazon-bedrock/mantle": () => import("@ai-sdk/amazon-bedrock/mantle").then((m) => m.createBedrockMantle),
   "@ai-sdk/anthropic": () => import("@ai-sdk/anthropic").then((m) => m.createAnthropic),
@@ -294,13 +303,18 @@ const BUNDLED_PROVIDERS: Record<string, () => Promise<(opts: any) => BundledSDK>
 type CustomModelLoader = (sdk: any, modelID: string, options?: Record<string, any>, model?: Model) => Promise<any>
 type CustomVarsLoader = (options: Record<string, any>) => Record<string, string>
 type CustomDiscoverModels = () => Promise<Record<string, Model>>
-type CustomLoader = (provider: Info) => Effect.Effect<{
-  autoload: boolean
-  getModel?: CustomModelLoader
-  vars?: CustomVarsLoader
-  options?: Record<string, any>
-  discoverModels?: CustomDiscoverModels
-}>
+// Loaders run while provider state builds; the scope is that state's instance lifetime.
+type CustomLoader = (provider: Info) => Effect.Effect<
+  {
+    autoload: boolean
+    getModel?: CustomModelLoader
+    vars?: CustomVarsLoader
+    options?: Record<string, any>
+    discoverModels?: CustomDiscoverModels
+  },
+  never,
+  Scope.Scope
+>
 
 type CustomDep = {
   auth: (id: string) => Effect.Effect<Auth.Info | undefined>
@@ -355,6 +369,25 @@ function custom(dep: CustomDep): Record<string, CustomLoader> {
       return {
         autoload: Object.keys(input.models).length > 0,
         options: ok ? {} : { apiKey: "public" },
+      }
+    }),
+    // oc: upstream OpenCode 2's Claude Agent provider. `/connect` records the login; a config entry also enables it.
+    [CLAUDE_AGENT_PROVIDER_ID]: Effect.fnUntraced(function* (input: Info) {
+      const connected = Boolean(yield* dep.auth(input.id))
+      if (!connected && !(yield* dep.config()).provider?.[input.id]) return { autoload: false }
+      const runtime = yield* ClaudeAgentRuntime.attach({
+        directory: yield* InstanceState.directory,
+        options: input.options,
+        connected,
+      })
+      return {
+        autoload: true,
+        async getModel(_sdk: unknown, modelID: string, options?: Record<string, any>, model?: Model) {
+          return ClaudeAgentRuntime.model(runtime, modelID, {
+            ...options,
+            headers: { ...options?.headers, ...model?.headers },
+          })
+        },
       }
     }),
     openai: () =>
@@ -1589,6 +1622,8 @@ const layer = Layer.effect(
         const cfg = yield* config.get()
         const modelsDev = yield* modelsDevSvc.get()
         const catalog = mapValues(modelsDev, fromModelsDevProvider)
+        // oc: Claude Agent is not on models.dev; its models come from the signed-in `claude`, saved between starts.
+        catalog[CLAUDE_AGENT_PROVIDER_ID] = ClaudeAgentCatalog.info(yield* ClaudeAgentCatalog.read(), catalog)
         const database = mapValues(catalog, toPublicInfo)
 
         const providers: Record<ProviderV2.ID, Info> = {} as Record<ProviderV2.ID, Info>
@@ -1698,6 +1733,7 @@ const layer = Layer.effect(
               // native passthrough npm here before falling back to the catalog default.
               cloudflareGatewayNpm(providerID, apiID) ??
               modelsDev[providerID]?.npm ??
+              (providerID === CLAUDE_AGENT_PROVIDER_ID ? ClaudeAgentCatalog.NPM : undefined) ??
               "@ai-sdk/openai-compatible"
             const name = iife(() => {
               if (model.name) return model.name

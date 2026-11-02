@@ -4,6 +4,7 @@ import { SidebarToggle } from "./toggle"
 import type { BuiltinTuiPlugin } from "../builtins"
 import { createMemo, createSignal, For, onCleanup, Show } from "solid-js"
 import { Locale } from "../../util/locale"
+import { clampSidebarWidth, SIDEBAR_WIDTH_DEFAULT, SIDEBAR_WIDTH_KEY } from "../../sidebarWidth"
 
 const isIdle = (label: string) => label === "done" || label === "failed" || label === "stopped"
 
@@ -65,6 +66,8 @@ function View(props: { api: TuiPluginApi; session_id: string }) {
     return _FILTERS.find((item) => item === value) ?? "all"
   }
   const list = createMemo(() => filterSubagents(all(), filter()))
+  // Sidebar width minus its padding and scrollbar gutter
+  const titleWidth = () => clampSidebarWidth(props.api.kv.get<number>(SIDEBAR_WIDTH_KEY, SIDEBAR_WIDTH_DEFAULT)) - 6
   const cycleFilter = () => props.api.kv.set(_FILTER_KEY, _FILTERS[(_FILTERS.indexOf(filter()) + 1) % _FILTERS.length])
 
   return (
@@ -110,7 +113,7 @@ function View(props: { api: TuiPluginApi; session_id: string }) {
                 >
                   {props.api.state.session.agentLabel(item.child.agent ?? "subagent")} . {item.label}
                 </text>
-                <text fg={theme().textMuted}>{Locale.truncate(item.child.title, 36)}</text>
+                <text fg={theme().textMuted}>{Locale.truncate(item.child.title, titleWidth())}</text>
               </box>
             )}
           </For>

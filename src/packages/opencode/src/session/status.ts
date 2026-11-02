@@ -4,6 +4,7 @@ import { SessionID } from "./schema"
 import { Effect, Layer, Context } from "effect"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { SessionStatusEvent } from "@opencode-ai/schema/session-status-event"
+import { ClaudeAgentRuntime } from "@/provider/claude-agent/runtime"
 
 export const Info = SessionStatusEvent.Info
 export type Info = SessionStatusEvent.Info
@@ -42,6 +43,8 @@ const layer = Layer.effect(
       if (status.type === "idle") {
         yield* events.publish(Event.Idle, { sessionID })
         data.delete(sessionID)
+        // A Claude Agent turn parked on tool results will not get them now; start its process idle timer.
+        yield* ClaudeAgentRuntime.idle(yield* InstanceState.directory, sessionID)
         return
       }
       data.set(sessionID, status)

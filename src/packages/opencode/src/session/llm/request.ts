@@ -28,6 +28,9 @@ import {
   type CommandToolPlan,
 } from "@/provider/claude-code/shared"
 import { Wildcard } from "@opencode-ai/core/util/wildcard"
+import { CLAUDE_AGENT_PROVIDER_ID } from "@/provider/claude-agent/id"
+import { RequestKind } from "@/provider/claude-agent/upstream/language-model/request-kind.js"
+import { ClaudeSystemPrompt } from "@/provider/claude-agent/upstream/language-model/system-prompt.js"
 
 const USER_AGENT = `opencode/${InstallationVersion}`
 
@@ -48,6 +51,8 @@ type PrepareInput = {
   readonly flags: RuntimeFlags.Info
   readonly isWorkflow: boolean
   readonly compactionBoundary?: string
+  readonly generate?: boolean
+  readonly forkSourceID?: string
 }
 
 export type Prepared = {
@@ -134,6 +139,19 @@ export const prepare = Effect.fn("LLMRequestPrep.prepare")(function* (input: Pre
     if (harnessDenied.length > 0) options[CLAUDE_CODE_HARNESS_DENIED_OPTION] = harnessDenied.join(",")
     if (input.user.model.explicit) options[CLAUDE_CODE_EXPLICIT_MODEL_OPTION] = "true"
   }
+  // Claude Agent: Claude Code's prompt replaces oc's, so the agent's own prompt and the instructions travel apart
+  // (upstream `instructions.ts`). prompt.ts already left out oc's environment and base prompt.
+  const claudeAgent = claudeAgentKind(input)
+  if (claudeAgent) {
+    options[ClaudeSystemPrompt.AGENT_OPTION] = input.agent.prompt ?? ""
+    options[ClaudeSystemPrompt.INSTRUCTIONS_OPTION] = [
+      ...input.system,
+      ...(input.user.system ? [input.user.system] : []),
+      ...system.slice(1),
+    ]
+      .filter((x) => x)
+      .join("\n\n")
+  }
   if (
     input.model.api.npm === "@ai-sdk/azure" &&
     (input.provider.options.useCompletionUrls || input.model.options.useCompletionUrls || options.useCompletionUrls)
@@ -175,11 +193,13 @@ export const prepare = Effect.fn("LLMRequestPrep.prepare")(function* (input: Pre
       maxOutputTokens:
         input.model.providerID === "openai"
           ? undefined
-          : ProviderTransform.maxOutputTokens(
-              input.model,
-              input.flags.outputTokenMax,
-              estimatePromptTokens(messages, input.tools),
-            ),
+          : claudeAgent && claudeAgent !== "compaction"
+            ? claudeAgentMaxOutput(input)
+            : ProviderTransform.maxOutputTokens(
+                input.model,
+                input.flags.outputTokenMax,
+                estimatePromptTokens(messages, input.tools),
+              ),
       options,
     },
   )
@@ -254,11 +274,30 @@ export const prepare = Effect.fn("LLMRequestPrep.prepare")(function* (input: Pre
             "User-Agent": USER_AGENT,
           }),
       ...(input.parentSessionID ? { "x-parent-session-id": input.parentSessionID } : {}),
+      ...(claudeAgent ? { [RequestKind.HEADER]: claudeAgent } : {}),
+      ...(claudeAgent === "primary" && input.forkSourceID ? { [RequestKind.FORK_HEADER]: input.forkSourceID } : {}),
       ...input.model.headers,
       ...headers,
     },
   }
 })
+
+// Upstream's request kinds: chats keep one Claude process, compaction and `/btw` branch from it, and anything
+// else (titles, names) runs as a standalone utility call.
+function claudeAgentKind(input: PrepareInput) {
+  if (input.model.providerID !== CLAUDE_AGENT_PROVIDER_ID) return
+  if (input.small) return "title"
+  if (input.agent.name === "compaction") return "compaction"
+  if (input.generate) return "generate"
+  return "primary"
+}
+
+// Claude picks its own output budget unless the model config sets one. The value is fixed per model because a
+// change restarts the chat's Claude process.
+function claudeAgentMaxOutput(input: PrepareInput) {
+  if (input.model.limit.output <= 0) return
+  return Math.min(input.model.limit.output, input.flags.outputTokenMax ?? ProviderTransform.OUTPUT_TOKEN_MAX)
+}
 
 // Media counts as a flat allowance: its base64 text says nothing about its token cost.
 const MEDIA_TOKENS = 1_600

@@ -21,6 +21,10 @@ import { getScrollAcceleration } from "../util/scroll"
 import { useTuiConfig } from "../config"
 import { formatKeyBindings, useBindings, useKeymapSelector } from "../keymap"
 
+// fuzzysort scores 0-1. Real category searches ("harness", "beta", "system") score 0.77-1; letters
+// scattered across a long category score ~0.26.
+const _CATEGORY_MATCH_THRESHOLD = 0.5
+
 export interface DialogSelectProps<T> {
   title: string
   titleView?: JSX.Element
@@ -193,16 +197,17 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
     )
     if (!needle) return options
 
-    // prioritize title matches (weight: 2) over category matches (weight: 1).
-    // users typically search by the item name, and not its category.
-    const result = fuzzysort
-      .go(needle, options, {
-        keys: ["title", "category"],
-        scoreFn: (r) => r[0].score * 2 + r[1].score,
-      })
-      .map((x) => x.obj)
-
-    return result
+    // Title matches first, ranked by title alone (every query word must match the title). Then rows
+    // whose title missed but whose category matches strongly. A summed multi-key score let "theme"
+    // scattered across "Third party harness management" outrank the exact title "Switch theme".
+    const titles = fuzzysort.go(needle, options, { key: "title" })
+    const hit = new Set(titles.map((x) => x.obj))
+    const categories = fuzzysort.go(
+      needle,
+      options.filter((x) => !hit.has(x)),
+      { key: "category", threshold: _CATEGORY_MATCH_THRESHOLD },
+    )
+    return [...titles, ...categories].map((x) => x.obj)
   })
 
   createEffect(() => {

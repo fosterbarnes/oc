@@ -1,6 +1,7 @@
 export * as TuiConfig from "."
 
 import { createBindingLookup } from "@opentui/keymap/extras"
+import { Global } from "@opencode-ai/core/global"
 import { Schema } from "effect"
 import { createContext, createSignal, type JSX, useContext } from "solid-js"
 import { TuiKeybind } from "./keybind"
@@ -112,12 +113,18 @@ export const Info = Schema.Struct({
     description:
       "Beta: use a new built-in theme each local day, the same for every oc user; overrides theme while on (default: false)",
   }),
+  daily_theme_native: Schema.optional(Schema.Boolean).annotate({
+    description: "daily_theme for the native opencode binary, which keeps its own theming (default: false)",
+  }),
   auto_confirm_updates: Schema.optional(Schema.Boolean).annotate({
     description:
       "Third party updates install without the confirm dialog; this can close Claude Desktop, Cursor, and ChatGPT (default: false)",
   }),
 })
 export type Info = Schema.Schema.Type<typeof Info>
+
+// Theming is per binary (see context/theme.tsx); `daily_theme` is the resolved flag for this one.
+export const DAILY_THEME_KEY = Global.native ? "daily_theme_native" : "daily_theme"
 
 export const SIDEBAR_BUTTONS_DEFAULT: readonly string[] = [
   "session.list",
@@ -144,6 +151,7 @@ export type Resolved = Omit<
   | "cursor"
   | "smooth_streaming"
   | "daily_theme"
+  | "daily_theme_native"
   | "auto_confirm_updates"
 > & {
   keybind_preset: KeybindPreset
@@ -203,7 +211,7 @@ export function resolve(input: Info, options: ResolveOptions): Resolved {
   })
   const [paletteKeys, setPaletteKeys] = createSignal<Record<string, string>>(input.palette_keys ?? {})
   const [smoothStreaming, setSmoothStreaming] = createSignal(input.smooth_streaming ?? false)
-  const [dailyTheme, setDailyTheme] = createSignal(input.daily_theme ?? false)
+  const [dailyTheme, setDailyTheme] = createSignal(input[DAILY_THEME_KEY] ?? false)
   const [autoConfirmUpdates, setAutoConfirmUpdates] = createSignal(input.auto_confirm_updates ?? false)
 
   return {

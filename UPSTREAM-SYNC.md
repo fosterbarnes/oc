@@ -82,6 +82,9 @@ OpenCode 2) as port, later, or not planned. Record later and not planned items i
 `SCOPE.md` with a one-line reason, so the same feature is not evaluated twice.
 OpenCode 2 code uses a different layout and session engine; borrowing from it
 means rewriting onto oc's v1 session loop, never reintroducing the V2 engine.
+Exception by decision (2026-10-30): the Claude Agent provider tracks OpenCode 2
+directly. Re-sync it with the steps in
+`src/packages/opencode/src/provider/claude-agent/README.md`.
 
 ## Verification
 

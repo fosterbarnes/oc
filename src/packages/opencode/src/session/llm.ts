@@ -55,6 +55,10 @@ export type StreamInput = {
   toolChoice?: "auto" | "required" | "none"
   /** Summary message id the history starts from; providers reset their own conversation when it changes. */
   compactionBoundary?: string
+  /** A side call that branches from the conversation (`/btw`). */
+  generate?: boolean
+  /** The session this one was forked from. */
+  forkSourceID?: string
 }
 
 export type StreamRequest = StreamInput & {

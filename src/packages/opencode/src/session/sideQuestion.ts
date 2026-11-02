@@ -7,6 +7,7 @@ import { LLMEvent } from "@opencode-ai/llm"
 import { Effect, Schema } from "effect"
 import * as Stream from "effect/Stream"
 import { isClaudeCodeProvider } from "@/provider/claude-code/shared"
+import { CLAUDE_AGENT_PROVIDER_ID } from "@/provider/claude-agent/id"
 import { CURSOR_PROVIDER_ID } from "@/provider/cursor/shared"
 import { Provider } from "@/provider/provider"
 import { Agent } from "../agent/agent"
@@ -25,7 +26,15 @@ const SIDE_QUESTION_INSTRUCTION = [
   "This answer is not added to the conversation.",
 ].join(" ")
 
-export function makeSideQuestion({ sessions, agents, provider, instruction, sys, llm, currentModel }: {
+export function makeSideQuestion({
+  sessions,
+  agents,
+  provider,
+  instruction,
+  sys,
+  llm,
+  currentModel,
+}: {
   sessions: Session.Interface
   agents: Agent.Interface
   provider: Provider.Interface
@@ -69,10 +78,12 @@ export function makeSideQuestion({ sessions, agents, provider, instruction, sys,
     )
 
     const modelKey = `${resolved.providerID}/${resolved.id}`
+    // Claude Agent uses Claude Code's own prompt and environment (see prompt.ts).
+    const claudeAgent = resolved.providerID === CLAUDE_AGENT_PROVIDER_ID
     const [env, instructions, base] = yield* Effect.all([
-      sys.environment(resolved),
+      claudeAgent ? Effect.succeed([]) : sys.environment(resolved),
       instruction.system(modelKey).pipe(Effect.orDie),
-      agent.prompt ? Effect.succeed(undefined) : instruction.base(modelKey).pipe(Effect.orDie),
+      agent.prompt || claudeAgent ? Effect.succeed(undefined) : instruction.base(modelKey).pipe(Effect.orDie),
     ])
     const user: SessionV1.User = {
       id: MessageID.ascending(),
@@ -93,6 +104,7 @@ export function makeSideQuestion({ sessions, agents, provider, instruction, sys,
         messages: [...messages, { role: "user", content: input.prompt }],
         tools: {},
         toolChoice: "none",
+        generate: true,
       })
       .pipe(
         Stream.runCollect,

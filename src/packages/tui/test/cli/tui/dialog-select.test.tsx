@@ -381,6 +381,39 @@ test.each([false, 0, "", null, "current", undefined])(
   },
 )
 
+// Palette shapes: categories are "<category> <group>". A summed title+category score once made
+// "switch theme" + Enter open "Switch Claude account" ("theme" scattered across its category).
+test("filter ranks title matches first and ignores scattered category matches", async () => {
+  await using tmp = await tmpdir()
+  const { app, selected } = await mountSelect(tmp.path, [
+    { title: "Switch Claude account", value: "account", category: "oc Third party harness management" },
+    { title: "Daily theme", value: "daily", category: "oc Beta" },
+    { title: "Switch theme", value: "theme", category: "System" },
+  ])
+  let typed = ""
+  const retype = async (text: string) => {
+    for (let i = 0; i < typed.length; i++) app.mockInput.pressBackspace()
+    await app.mockInput.typeText(text)
+    typed = text
+  }
+
+  try {
+    await retype("switch theme")
+    await app.waitForFrame((frame) => frame.includes("Switch theme") && !frame.includes("Switch Claude account"))
+    app.mockInput.pressEnter()
+    expect(selected).toEqual(["theme"])
+
+    await retype("theme")
+    await app.waitForFrame((frame) => frame.includes("Daily theme") && !frame.includes("Switch Claude account"))
+
+    // Searching by category still works when no title matches.
+    await retype("harness")
+    await app.waitForFrame((frame) => frame.includes("Switch Claude account") && !frame.includes("Switch theme"))
+  } finally {
+    app.renderer.destroy()
+  }
+})
+
 test("search replaces the fuzzy filter and lists results flat in its order", async () => {
   await using tmp = await tmpdir()
   const queries: string[] = []

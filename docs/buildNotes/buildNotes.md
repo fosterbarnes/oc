@@ -210,6 +210,125 @@ Example compact Agent notes:
 
 ---
 
+## 2026-11-02 (~02:59) - v0.2.326 turboCannabis - Palette search ranks titles first; nativeTest cleans up its project - Claude Opus 5.5, high effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; high effort; Implementation (/think plan then /imp); completed
+- Version: 0.2.326 (already bumped since last commit; not bumped again)
+- Fixed `tui/src/ui/dialog-select.tsx` `filtered`: was `fuzzysort.go(keys: [title, category], scoreFn: title*2 + category)`; multi-word queries split words across keys, so "switch theme" scored "Switch Claude account" 2.024 (title "switch" 0.870 + "theme" scattered in category "oc Third party harness management" 0.283) over exact "Switch theme" 2.000, and Enter opened the wrong command (/agentTest case 4). Now: title-only pass (all words must match the title), then category-only pass for the remaining rows with `threshold: _CATEGORY_MATCH_THRESHOLD` (0.5; real category hits measured 0.77-1, scattered 0.26). Fixes every non-`search` DialogSelect.
+- Added test `test/cli/tui/dialog-select.test.tsx` "filter ranks title matches first and ignores scattered category matches": `switch theme` + Enter selects Switch theme; `theme` hides Switch Claude account; `harness` still finds it by category.
+- Changed `.scripts\nativeTest.ps1`: `current.json` records `ownsProject`; `-Stop` deletes a project `-Start` created (Remove-Item + Test-Path), keeps `-Project` folders; `-Start` over a dead earlier run also deletes that run's owned project (pass fix; probed with a fake dead record). AGENTS.md `## Agent test`: same, plus brief tips (exact palette titles; ctrl+o/ctrl+p; `/agentTest ... model=` swap).
+- Verified live: `/agentTest takeover` (tester `openai/gpt-6.1-terra-fast` high) on a fresh native build: `switch theme` + Enter opens Themes, `theme` shows no Claude rows, `harness` finds them, `switch` and oc-palette `Daily theme` regressions all PASS (evidence `%TEMP%\agentTest\20261102-0302`).
+- Outside repo (also in `C:\Users\Foster\buildNotes.md`): `agentTester.md` interim default `openai/gpt-6.1-terra-fast`/`high`; `agentTest.md` `model=` per-run override. Agent `.md` frontmatter beats `opencode.jsonc` `agent.<name>.model` (`config.ts:496-563`), so the per-call `task` `model` is the swap point (verified: tester session ran gpt-6.1-terra-fast high).
+- Verification: `dialog-select.test.tsx` 24 pass; new test fails on HEAD's filter ("Timed out waiting for frame predicate") and passes on the fix; tui `bun run typecheck` exit 0. `nativeTest.ps1` probes: `-Start`/`-Stop` deleted the owned project; `-Project C:\ocTestTmp\keepProbe` kept; no processes left; probe folders removed.
+- Not run: tester model bake-off (plan `paletteSearchRanking.md`, needs user takeover).
+- Kept: `dialog-model.tsx:170` and `prompt/autocomplete.tsx:556` own fuzzysort calls unchanged (no reported symptom).
+
+### User
+Command palette
+- Searching the palette (and every other list dialog) now lists title matches first, so typing "Switch theme" and pressing Enter opens Switch theme instead of Switch Claude account.
+- Searches no longer pull in unrelated rows just because their group name happens to contain the letters, while searching by a group name like "harness" still works.
+
+Agent testing
+- `nativeTest.ps1 -Stop` now deletes the throwaway project folder it made; folders you pass with `-Project` stay.
+
+---
+
+## 2026-11-02 (~02:41) - v0.2.326 turboCannabis - Agents test oc TUI changes on native opencode.exe; theming fully per binary - Claude Opus 5.5, high effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; high effort; Implementation (/spit then /imp); completed
+- Version: 0.2.326 (already bumped since last commit; not bumped again)
+- Probed: dist `oc.exe` on the real profile exits 1 "background server is running from another oc install" (`config/resident.ts` refuse-other-build), so it cannot be the test vehicle. Dist native `opencode.exe` runs beside the installed oc in its own `wezterm-gui start --always-new-process` (own pid, wezFig config, `gui-sock-<pid>`); `wezterm cli get-text` on that socket returns exact screen text; cua sees the window (UIA tree has title bar only) and screenshots it.
+- Added `.scripts\nativeTest.ps1`: `-Start [-Build] [-Project] [-Exe]` (build `--single --native-only`, throwaway git project in `C:\ocTestTmp\agentTest\<stamp>`, strips agent-shell `OPENCODE*`/`OC_*`/`CLAUDE*`/`WEZTERM_*`/`AGENT` env, records `current.json` before waiting), `-Screen`, `-Stop` (CIM identity tree stop, leaves first, removes stale socket file).
+- Fixed in-session: pane id 0 read as "no pane" (`$null -eq` check).
+- Changed theming to fully per binary: `binaryKey` in `tui/src/context/theme.tsx` suffixes `theme_mode`/`theme_mode_lock` with `_native` in native (theme already was); `DAILY_THEME_KEY` in `tui/src/config/index.tsx` + new `daily_theme_native` tui key, used by `ocCommands.tsx` and `dialog-theme-list.tsx`; `persistTuiSetting` key union extended. `system_theme_palette` and `tui.json` `theme` stay shared.
+- Docs: AGENTS.md settings rule (line 9) + new `## Agent test`; FORK.md native row. Outside repo: `agents/sub/agentTester.md` (oc TUI briefs, bash allowed only for exact `nativeTest.ps1 -Screen`), `~/.opencode/commands/agentTest.md` (ban replaced, always `-Stop`), plans `agentTestOcTui.md`, `claudeCodeCompactionStatus.md`, `cuaDriverGuidance.md`.
+- Verification: tui `bun run typecheck` passed; `test/context/themeKv.test.tsx` + `test/dailyTheme.test.ts` 5 pass. Throwaway probe (deleted) with `OC_FLAVOR=native`: ignored oc `theme`/`theme_mode_lock`/`daily_theme`, wrote only `_native` keys; as oc, unchanged. `nativeTest.ps1` live: `-Start -Build` built 0.2.326 native, `-Start`/`-Screen` (both slash forms)/`-Stop` worked, no processes left, probe projects removed.
+- Not run: a full `/agentTest takeover` session driven by `agentTester`, and the side-by-side oc vs native parity pass.
+- ERROR: first `-Start -Build` threw "never listed a pane" (pane id 0 bug above); `-Stop` cleaned it up.
+- Risk: real-profile runs write sessions to `oc.db` and spend real model usage. A running test locks the dist exe, so stop it before rebuilding.
+
+### User
+Agent testing
+- `/agentTest` can now test oc's own TUI: it builds the native `opencode.exe`, opens it in a separate WezTerm window, and the tester types into it and reads the screen.
+- `.scripts\nativeTest.ps1 -Start -Build` lets you run your latest changes the same way, without installing anything, and `-Stop` closes it.
+
+Themes
+- The native `opencode` window now keeps its own dark/light lock and daily-theme setting, separate from oc, like its theme pick already was. All other settings stay shared.
+
+---
+
+## 2026-11-02 (~02:07) - v0.2.326 vicesConfused - Live compaction divider, clean Claude Code summary - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation (/imp of `~/.config/opencode/plans/claudeCodeCompactionStatus.md`); completed
+- Version: 0.2.326 (already bumped in the working tree by an earlier session; not bumped again)
+- Found: Claude Code CLI 2.1.309 `/compact` emits no `stream_event` text; only `system/status compacting` (re-sent ~30 s), `compact_boundary`, then the whole summary as one user message. `oc.db`: 16/16 claude-code compactions write first text at ~98% of a 27-78 s run. Other providers stream. Real streaming would need oc-run summary + reseeded CLI session; rejected.
+- Fixed `tui/src/routes/session/index.tsx` `UserMessage` compaction divider: summary reply is published before the model runs (`compaction.ts:435`), so the old title read `Compacted . model` for the whole run and also for aborted runs. Now `reply`/`busy`/`compacting` memos + `compactionTitle`: ` Compacting . model . Ns ` (1 s interval only while pending; timer hidden under 1 s), ` Compacted . model ` on `time.completed`, ` Compaction stopped ` for `MessageAbortedError` or unfinished reply on an idle session, ` Compaction failed ` for other errors.
+- Fixed `claude-code/turnStream.ts` compact_boundary: in compaction mode the boundary note is no longer written as text (it was stored as part of the summary via `summaryText()`); `reportCompactBoundary` still logs and `compactedTokens` still feeds usage. Mid-turn auto-compaction keeps the note.
+- Added assertion in `fundamentalTools.test.ts` compaction test: compaction text has no `context compacted` note (guards summary content).
+- Verification: tui + opencode typecheck clean; `fundamentalTools`, `cliEventsStream`, `cliEvents` 42/42; pane probe (OC_TUI_PANE, fake LLM held reply) saw `Compacting . claude-sonnet-4-5`, then `... 3.0s`, then `Compacted . claude-sonnet-4-5`, then Esc on a hung compaction -> `Compaction stopped`; probe deleted; existing pane test `/compact shows the Compacted divider` passes. Not run: real-model compaction.
+- ERROR: `fundamentalTools.test.ts` already fails `prettier --check` at HEAD (8 lines); left as is.
+
+### User
+Compaction
+- While a chat compacts, the divider now says "Compacting" with the model and a running timer instead of claiming it is already compacted.
+- A compaction you stop or that fails now says so instead of "Compacted".
+- Claude Code's "context compacted" notice no longer gets saved inside the compaction summary.
+
+---
+
+## 2026-10-30 (~22:39) - v0.2.326 vicesConfused - Port upstream Claude Agent provider - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation (/imp of docs/dev/claudeAgentPortPlan.md); completed
+- Version: 0.2.326 (already bumped in the working tree by the sidebar session; not bumped again)
+- Added `provider/claude-agent/upstream/`: upstream OpenCode 2 `packages/core/src/plugin/provider/claude-agent` at `173f6c6`, near-verbatim; `// oc` edits only in `claude/io.ts` (Bun.which + cliCommand), `claude/probe.ts` (`Schema.TaggedErrorClass`), `claude/session.ts` (AsyncIterable cast), `Provider` imports -> `id.ts`. README.md lists edits, V2-hook mapping, and re-sync steps.
+- Added adapter: `id.ts`, `storage.ts` (JSON files under `<data>/claude-agent/`: `models`, `sessions/<id>`, `forks/<id>`), `catalog.ts` (saved model list -> v1 `Provider.Info`, price source, effort variants), `runtime.ts` (process-wide `ClaudeSessions.registry()`, per-directory attach, model factory, idle, `/connect` probe with retry).
+- Added `plugin/claude-agent.ts`: auto OAuth method that waits for `claude auth login`, saves models, stores dummy oauth auth (Azure pattern). Registered in `plugin/index.ts`.
+- Changed `provider/provider.ts`: catalog injection, `claude-agent` custom loader (active on auth or config entry; attaches runtime; getModel builds the model), bundled stub for `@opencode-ai/claude-agent`, `CustomLoader` now has `Scope` in R, config-model npm fallback for `claude-agent`.
+- Changed `handlers/provider.ts`: Claude Agent listed in `/provider` and `/provider/summary` before login; `default` skips providers without models (empty catalog 500'd `defaultModelIDs`).
+- Changed session loop, all gated on `claude-agent`: `prompt.ts`/`sideQuestion.ts` drop oc environment and base prompt, pass fork source; `llm/request.ts` request-kind and fork headers, agent prompt + instructions options, output limit undefined unless configured (compaction keeps oc budget); `llm.ts` StreamInput `generate`/`forkSourceID`; `message-v2.ts` marks stopped tool results `toolAborted`; `retry.ts` never retries; `status.ts` idle -> `ClaudeAgentRuntime.idle`; `session.ts` fork records lineage via `ClaudeAgentStorage.recordFork`.
+- Added deps `@anthropic-ai/claude-agent-sdk@0.3.301`, `@modelcontextprotocol/server@2.3.1`; package.json import `#claude-agent-sdk`.
+- Added tests: upstream's 12 test files + fixtures in `test/plugin/provider/claude-agent/` (imports rewritten during copy, `plugin.test.ts` left out); `test/provider/claude-agent/fakeModel.test.ts` (connect, tool round trip, model-switch checkpoint, fork lineage).
+- Docs: FORK.md row, UPSTREAM-SYNC.md exception, plan status, wiki `Claude-Agent.md` + `_Sidebar.md` (not pushed).
+- Verification: opencode typecheck clean; upstream tests 61/61; Claude Agent scenarios 4/4 (real claude 2.1.309 vs TestLLMServer); claude-code fakeModel 27/27; message-v2, retry, llm, provider, prompt, httpapi-provider, session, autoRename, session-actions suites pass. Not run: real login, compiled build/installer bundling of the SDK.
+- MISTAKE: first put fork lineage in session metadata; broke 3 fork-metadata tests (metadata is public API). Rule: never add internal keys to user metadata; keep provider state in provider storage.
+- ERROR: Claude Code 2.1.309 sends a tool-less session-naming Haiku request on a chat's first turn (Claude Code behavior, not disabled upstream); scenarios match turn requests by tools.
+- Risk: a model list change after connect applies on next provider load, not live (upstream reloads live).
+
+### User
+Models
+- New **Claude Agent** provider: OpenCode's official way to use Claude through your Claude Code login, with oc's tools, permissions and history.
+- `/connect` lists **Claude Agent**; it waits until `claude auth login` is done, then shows Claude's models with effort levels.
+- You can switch between Claude Agent and other models in one chat, and Claude catches up on what it missed.
+- The existing Claude Code provider and its accounts, usage and warm-up work as before.
+
+---
+
+## 2026-10-30 (~22:10) - v0.2.326 vicesConfused - Sidebar visibility and width settings in the oc palette - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation (/spit then /imp); completed
+- Version: 0.2.326 vicesConfused
+- Added `tui/src/sidebarWidth.ts`: kv key `sidebar_width` (default 42, clamp 30..80), `clampSidebarWidth`, `fitSidebarWidth` (caps docked width at terminal width - 60).
+- Added `tui/src/ui/dialog-stepper.tsx` `DialogStepper`: `- value +` parts, Left/Right move, Enter steps 1 on -/+, digits + Backspace edit the value part and Enter applies (clamped). Uses `useKeyboard` like `dialog-workspace-file-changes.tsx`; value is a live prop so the sidebar resizes behind the dialog.
+- Added palette entries `oc.sidebar_mode` (`/sidebarVisibility`, kv `sidebar_mode` auto|always) and `oc.sidebar_width` (`/sidebarWidth`) in `ocCommands.tsx` Layout group after `oc.sidebar_position`.
+- Changed `routes/session/index.tsx`: `wide()` replaced by `docked()` (width > 120 or mode always) for leading/visible/overlay switch; `contentWidth` and all `<Sidebar>` uses take `sidebarWidth()`. Hide/Show toggle still uses kv `sidebar` auto|hide, so it returns to the chosen mode.
+- Changed `routes/session/sidebar.tsx`: required `width` prop replaces hardcoded 42.
+- Changed `feature-plugins/sidebar/subagents.tsx`: title truncation follows stored width - 6 instead of fixed 36 (ignores the narrow-terminal cap; long titles may wrap there).
+- Verification: `bun run typecheck` in tui exit 0. Throwaway testRender probe (deleted) pressed keys through the real keymap/dialog stack: 42 -> minus x2 = 40, plus = 41, typed 55, backspace+7 Enter = 57, 999 -> 99 clamped to 80, 60x minus clamps at 30; fit/clamp helpers checked. `openSidebar.test.ts`, `config.test.tsx`, `sidebarSubagents.test.ts`: 99 pass, 2 skip, 0 fail. Not run in the real TUI.
+
+### User
+Sidebar
+- New oc palette entry "Sidebar visibility": "auto" keeps today's behavior, "always" keeps the sidebar docked even on terminals 120 columns or narrower.
+- New oc palette entry "Sidebar width" opens a `- 42 +` control: arrow to - or + and press Enter to shrink or grow by one column, or arrow to the number, type a width, and press Enter.
+- Width ranges from 30 to 80 columns and is cut back on narrow terminals so the chat keeps at least 60 columns.
+- Width has no effect when the sidebar is at the top or bottom; the palette entry says so.
+
+---
+
 ## 2026-10-30 (~15:44) - v0.2.325 aldritchGenitals - Queued prompts no longer rebuild the prompt box in a loop - Claude Opus 5.5, low effort; Implementation
 
 ### Agent

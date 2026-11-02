@@ -10,7 +10,7 @@ import { usePluginRuntime } from "../../plugin/runtime"
 import { getScrollAcceleration } from "../../util/scroll"
 import { SidebarTools, SidebarToolsFooter } from "./sidebar-tools/sidebarTools"
 
-export function Sidebar(props: { sessionID: string; horizontal?: boolean }) {
+export function Sidebar(props: { sessionID: string; horizontal?: boolean; width: number }) {
   const pluginRuntime = usePluginRuntime()
   const project = useProject()
   const sync = useSync()
@@ -30,7 +30,7 @@ export function Sidebar(props: { sessionID: string; horizontal?: boolean }) {
     <Show when={session()}>
       <box
         backgroundColor={theme.backgroundPanel}
-        width={props.horizontal ? "100%" : 42}
+        width={props.horizontal ? "100%" : props.width}
         height={props.horizontal ? undefined : "100%"}
         maxHeight={props.horizontal ? horizontalMaxHeight() : undefined}
         flexShrink={0}

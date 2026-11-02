@@ -57,7 +57,13 @@ test("Claude Code's native tools are never proxied or turned off by the defaults
   for (const native of ["read", "glob", "grep", "bash", "write", "edit", "webfetch", "compress"]) {
     expect(names).not.toContain(native)
   }
-  expect(disallowedToolFlags(DEFAULT_PROXY_TOOLS)).toEqual(["Agent", "Task", "TaskOutput", "Workflow", "AskUserQuestion"])
+  expect(disallowedToolFlags(DEFAULT_PROXY_TOOLS)).toEqual([
+    "Agent",
+    "Task",
+    "TaskOutput",
+    "Workflow",
+    "AskUserQuestion",
+  ])
 })
 test("catalog identity ignores object key order but tracks capabilities and policy", () => {
   const config = { provider: "claude-code", cliPath: "claude", proxyTools: ["Read"] }
@@ -682,6 +688,8 @@ test("a compaction turn runs /compact in the live conversation and never spawns 
     expect(getActiveProcess(key)).toBe(conversation)
     expect(text(compacted)).toContain("SUMMARY OF EARLIER WORK")
     expect(text(compacted)).not.toContain("<local-command-stdout>")
+    // The turn's text is the stored summary; the boundary note would leak into it.
+    expect(text(compacted)).not.toContain("context compacted")
     expect(compacted.some((event) => event.type === "tool-call")).toBe(false)
     const finish = compacted.find((event) => event.type === "finish")
     expect(finish?.type === "finish" ? finish.usage.outputTokens.total : undefined).toBe(10)

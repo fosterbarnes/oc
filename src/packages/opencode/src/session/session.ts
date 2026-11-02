@@ -36,6 +36,7 @@ import { WorkspaceV2 } from "@opencode-ai/core/workspace"
 import { SessionID, MessageID, PartID } from "./schema"
 
 import type { Provider } from "@/provider/provider"
+import { ClaudeAgentStorage } from "@/provider/claude-agent/storage"
 import { Global } from "@opencode-ai/core/global"
 import { Effect, Layer, Option, Context, Schema, Types } from "effect"
 import { NonNegativeInt, optional } from "@opencode-ai/core/schema"
@@ -755,6 +756,8 @@ const layer: Layer.Layer<
             )
           : undefined,
       })
+      // Claude Agent continues the fork from the source's Claude transcript instead of a full catch-up.
+      yield* ClaudeAgentStorage.recordFork(session.id, original.id)
       const msgs = yield* messages({ sessionID: input.sessionID })
       const idMap = new Map<string, MessageID>()
       const target = input.messageID ? msgs.findIndex((msg) => msg.info.id === input.messageID) : msgs.length

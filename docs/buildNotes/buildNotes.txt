@@ -1,6 +1,21 @@
-v0.2.325 aldritchGenitals [fix > Alt+Q queue lag]
+v0.2.326 turboCannabis [feat. > Claude Agent; fix > compaction divider]
 
-Queued prompts:
-Queueing prompts with Alt+Q while an agent works no longer makes oc lag or stop accepting input, and the QUEUED strip above the prompt stays steady instead of flickering. While anything was queued, the prompt box was destroyed and rebuilt about 30 times a second (text box, key bindings, and commands each time), which caused the stutter and the "can't send until it clears" behavior. This had been happening since the queue strip was added in v0.2.314.
+Claude Agent:
+New Claude Agent provider, OpenCode's official way to use Claude through your Claude Code login with oc's tools, permissions, and history. /connect lists it, waits until claude auth login is done, then shows Claude's models with effort levels. You can switch between Claude Agent and other models in one chat and Claude catches up on what it missed. The existing Claude Code provider, its accounts, usage, and warm-up work as before.
 
-Under the hood: the prompt box returned several top-level pieces (a fragment) and is rendered as the fallback of a replace-mode plugin slot. opentui's Slot resolves that fallback inside its own memo, so the queue strip appearing re-ran the memo and built a new Prompt, whose empty queue snapshot hid the strip and refetched, repeating once per round trip. The Prompt now has a single root box. Debug measurements before the fix: queue add itself was fast (41-76 ms press to accepted, server handlers 1-3 ms), but the TUI refetched the queue 30-45 times a second with 598 stalls of 120-1284 ms. New test promptQueueLoop.test.ts fails with the old fragment and passes with the fix (3 of 3). Pane probe: 637 remounts in about 8 s after one Alt+Q before, 0 after. tui typecheck pass; promptQueueLoop, slashMenuLayout, queue, promptBackground, slots, keymap, app-lifecycle 20 pass; tuiPane "queues three Alt+Q presses" pass. Confirmed in the real app after a revive with 11 queued prompts.
+compaction:
+While a chat compacts, the divider now says "Compacting" with the model and a running timer instead of claiming it is already compacted. A compaction you stop or that fails now says so. Claude Code's "context compacted" notice is no longer saved inside the compaction summary.
+
+command palette:
+Searching the palette, and every other list dialog, now lists title matches first, so typing "Switch theme" and pressing Enter opens Switch theme instead of Switch Claude account. Searches no longer pull in unrelated rows just because a group name happens to contain the letters, while searching by a group name such as "harness" still works.
+
+sidebar:
+New oc palette entries "Sidebar visibility" (auto, or always docked even on narrow terminals) and "Sidebar width" (a - 42 + control from 30 to 80 columns, cut back on narrow terminals so the chat keeps at least 60 columns).
+
+themes:
+The native opencode window now keeps its own dark/light lock and daily-theme setting, separate from oc, like its theme pick already was. All other settings stay shared.
+
+agent testing:
+/agentTest can now test oc's own TUI: .scripts\nativeTest.ps1 builds the native opencode.exe without installing it, opens it in its own WezTerm window on your real profile, lets the tester read the exact screen text, and closes it again (deleting the throwaway project it made). A built but not installed oc.exe cannot be used for this because it refuses to start beside the installed background server.
+
+Under the hood: Claude Agent is the upstream OpenCode 2 provider ported near-verbatim with a small adapter (catalog, storage, runtime) and session-loop changes gated on claude-agent; upstream tests 61/61 and 4 fake-model scenarios pass, opencode typecheck clean; real login and the compiled build were not run. Compaction: the divider follows the summary reply's completion; pane probe saw the timer, Compacted, and Compaction stopped; fundamentalTools, cliEventsStream, cliEvents 42/42. Palette: DialogSelect ranks title-only matches, then category matches above a 0.5 fuzzysort threshold (the old summed title+category score let a scattered category hit outrank an exact title); new dialog-select test fails on the old filter and passes now, 24 pass; live /agentTest in a native window passed 5/5. Sidebar: tui typecheck and 99 sidebar/config tests pass, stepper probed through the real keymap. Themes: per-binary kv keys and a daily_theme_native tui key; theme tests 5 pass and a native-flavor probe wrote only the _native keys. tui typecheck exit 0. Known: fundamentalTools.test.ts already fails prettier --check at HEAD.

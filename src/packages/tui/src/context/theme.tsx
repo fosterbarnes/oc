@@ -82,10 +82,14 @@ export {
 
 const THEME_REFRESH_DELAYS = [250, 1000] as const
 const SYSTEM_PALETTE_KEY = "system_theme_palette"
-// oc.exe and opencode.exe share kv.json but keep separate theme picks and defaults.
+// oc.exe and opencode.exe share kv.json and every other setting, but theming is per binary: native
+// keys carry a `_native` suffix. The cached terminal palette is not a preference and stays shared.
+const binaryKey = (key: string) => (Global.native ? `${key}_native` : key)
 const NATIVE_THEME_KEY = "theme_native"
 const NATIVE_DEFAULT_THEME = "opencode"
-const THEME_KEY = Global.native ? NATIVE_THEME_KEY : "theme"
+const THEME_KEY = binaryKey("theme")
+const MODE_KEY = binaryKey("theme_mode")
+const MODE_LOCK_KEY = binaryKey("theme_mode_lock")
 const DEFAULT_THEME = Global.native ? NATIVE_DEFAULT_THEME : "drac"
 
 type State = {
@@ -124,9 +128,9 @@ export const { use: useTheme, provider: ThemeProvider } = createSimpleContext({
 
     setStore(
       produce((draft) => {
-        const lock = pick(kv.get("theme_mode_lock"))
+        const lock = pick(kv.get(MODE_LOCK_KEY))
         const mode = lock ?? pick(renderer.themeMode) ?? props.mode
-        if (!lock && pick(kv.get("theme_mode")) !== undefined) kv.set("theme_mode", undefined)
+        if (!lock && pick(kv.get(MODE_KEY)) !== undefined) kv.set(MODE_KEY, undefined)
         draft.mode = mode
         draft.lock = lock
         const active = config.theme ?? kv.get(THEME_KEY, DEFAULT_THEME)
@@ -244,7 +248,7 @@ export const { use: useTheme, provider: ThemeProvider } = createSimpleContext({
     }
 
     function apply(mode: "dark" | "light") {
-      if (store.lock !== undefined) kv.set("theme_mode", mode)
+      if (store.lock !== undefined) kv.set(MODE_KEY, mode)
       if (store.mode === mode) return
       setStore("mode", mode)
       refreshSystemTheme(mode)
@@ -252,14 +256,14 @@ export const { use: useTheme, provider: ThemeProvider } = createSimpleContext({
 
     function pin(mode: "dark" | "light" = store.mode) {
       setStore("lock", mode)
-      kv.set("theme_mode_lock", mode)
+      kv.set(MODE_LOCK_KEY, mode)
       apply(mode)
     }
 
     function free() {
       setStore("lock", undefined)
-      kv.set("theme_mode_lock", undefined)
-      kv.set("theme_mode", undefined)
+      kv.set(MODE_LOCK_KEY, undefined)
+      kv.set(MODE_KEY, undefined)
       refreshSystemTheme(renderer.themeMode ?? store.mode)
     }
 

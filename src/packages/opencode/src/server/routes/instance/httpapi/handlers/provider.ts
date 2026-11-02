@@ -4,7 +4,7 @@ import { ModelsDev } from "@opencode-ai/core/models-dev"
 import { Provider } from "@/provider/provider"
 import { Auth } from "@/auth"
 
-import { mapValues } from "remeda"
+import { mapValues, pickBy } from "remeda"
 import { Effect, Schema } from "effect"
 import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
@@ -12,6 +12,15 @@ import { InstanceHttpApi } from "../api"
 import { ProviderAuthApiError } from "../groups/provider"
 import { ProviderV2 } from "@opencode-ai/core/provider"
 import { getUsageSnapshot } from "@/provider/usage-observations"
+import { ClaudeAgentCatalog } from "@/provider/claude-agent/catalog"
+import { CLAUDE_AGENT_PROVIDER_ID } from "@/provider/claude-agent/id"
+
+// Prices come from the models.dev provider the saved login bills through.
+const claudeAgentInfo = Effect.fnUntraced(function* (all: Record<string, ModelsDev.Provider>) {
+  const saved = yield* ClaudeAgentCatalog.read()
+  const source = saved.priceSource ? all[saved.priceSource] : undefined
+  return ClaudeAgentCatalog.info(saved, source ? { [source.id]: Provider.fromModelsDevProvider(source) } : {})
+})
 
 function mapProviderAuthError<A, R>(self: Effect.Effect<A, ProviderAuth.Error, R>) {
   return self.pipe(
@@ -53,26 +62,37 @@ export const providerHandlers = HttpApiBuilder.group(InstanceHttpApi, "provider"
       }
       const loaded = yield* provider.list()
       const credentials = yield* authStore.all().pipe(Effect.orDie)
-      const ids = [...new Set([...Object.keys(filtered), ...Object.keys(loaded)])]
-      return { filtered, loaded, connected: ids.filter((id) => id in loaded || credentials[id]) }
+      // oc: Claude Agent is not on models.dev; list it so /connect can offer its login.
+      const allowed =
+        (enabled ? enabled.has(CLAUDE_AGENT_PROVIDER_ID) : true) && !disabled.has(CLAUDE_AGENT_PROVIDER_ID)
+      const claudeAgent = allowed && !(CLAUDE_AGENT_PROVIDER_ID in loaded) ? yield* claudeAgentInfo(all) : undefined
+      const extra = claudeAgent ? { [claudeAgent.id]: claudeAgent } : {}
+      const ids = [...new Set([...Object.keys(filtered), ...Object.keys(extra), ...Object.keys(loaded)])]
+      return { filtered, extra, loaded, connected: ids.filter((id) => id in loaded || credentials[id]) }
     })
 
     const list = Effect.fn("ProviderHttpApi.list")(function* () {
       const selected = yield* selectProviders()
       const providers = Object.assign(
         mapValues(selected.filtered, (item) => Provider.fromModelsDevProvider(item)),
+        selected.extra,
         selected.loaded,
       )
       return {
         all: Object.values(providers).map(Provider.toPublicInfo),
-        default: Provider.defaultModelIDs(providers),
+        // Before its first login check Claude Agent has no models, so no default.
+        default: Provider.defaultModelIDs(pickBy(providers, (item) => Object.keys(item.models).length > 0)),
         connected: selected.connected,
       }
     })
 
     const summary = Effect.fn("ProviderHttpApi.summary")(function* () {
       const selected = yield* selectProviders()
-      const providers: Record<string, { id: string; name: string }> = { ...selected.filtered, ...selected.loaded }
+      const providers: Record<string, { id: string; name: string }> = {
+        ...selected.filtered,
+        ...selected.extra,
+        ...selected.loaded,
+      }
       return {
         all: Object.values(providers).map((item) => ({ id: item.id, name: item.name })),
         connected: selected.connected,

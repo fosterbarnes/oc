@@ -2,7 +2,7 @@ import { DialogSelect, type DialogSelectRef } from "../ui/dialog-select"
 import { useTheme } from "../context/theme"
 import { useDialog } from "../ui/dialog"
 import { useToast } from "../ui/toast"
-import { useTuiConfig } from "../config"
+import { DAILY_THEME_KEY, useTuiConfig } from "../config"
 import { persistTuiSetting } from "../ocSettings"
 import { onCleanup } from "solid-js"
 
@@ -46,7 +46,7 @@ export function DialogThemeList(props: { native?: boolean }) {
         dialog.clear()
         if (props.native || !config.daily_theme) return
         config.setDailyTheme(false)
-        void persistTuiSetting(["daily_theme"], false)
+        void persistTuiSetting([DAILY_THEME_KEY], false)
         toast.show({ message: "Daily theme off", variant: "info" })
       }}
       ref={(r) => {

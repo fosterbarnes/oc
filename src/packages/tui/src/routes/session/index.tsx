@@ -68,6 +68,7 @@ import { DialogTimeline } from "./dialog-timeline"
 import { DialogForkFromTimeline } from "./dialog-fork-from-timeline"
 import { DialogSessionRename } from "../../component/dialog-session-rename"
 import { Sidebar } from "./sidebar"
+import { fitSidebarWidth, SIDEBAR_WIDTH_DEFAULT, SIDEBAR_WIDTH_KEY } from "../../sidebarWidth"
 import { SubagentFooter } from "./subagent-footer.tsx"
 import { filetype } from "../../util/filetype"
 import parsers from "../../parsers-config"
@@ -303,8 +304,10 @@ export function Session() {
 
   const dimensions = useTerminalDimensions()
   const [sidebar, setSidebar] = kv.signal<"auto" | "hide">("sidebar", "auto")
-  // Set from the oc "Sidebar position" command in app.tsx
+  // Set from the oc "Sidebar position", "Sidebar visibility", and "Sidebar width" commands in ocCommands.tsx
   const [sidebarPosition] = kv.signal<"right" | "left" | "top" | "bottom">("sidebar_position", "right")
+  const [sidebarMode] = kv.signal<"auto" | "always">("sidebar_mode", "auto")
+  const [storedSidebarWidth] = kv.signal<number>(SIDEBAR_WIDTH_KEY, SIDEBAR_WIDTH_DEFAULT)
   const [sidebarOpen, setSidebarOpen] = createSignal(false)
   const [conceal, setConceal] = createSignal(true)
   const thinking = useThinkingMode()
@@ -322,18 +325,22 @@ export function Session() {
     return isTranscriptView(value) ? value : "full"
   })
 
-  const wide = createMemo(() => dimensions().width > 120)
+  // "always" docks the sidebar on narrow terminals too, instead of hiding it behind the overlay
+  const docked = createMemo(() => dimensions().width > 120 || sidebarMode() === "always")
+  const sidebarWidth = createMemo(() => fitSidebarWidth(storedSidebarWidth(), dimensions().width))
   const sidebarHorizontal = createMemo(() => sidebarPosition() === "top" || sidebarPosition() === "bottom")
-  // Rendered before the messages; narrow left falls through to the overlay after them
-  const sidebarLeading = createMemo(() => sidebarPosition() === "top" || (sidebarPosition() === "left" && wide()))
+  // Rendered before the messages; undocked left falls through to the overlay after them
+  const sidebarLeading = createMemo(() => sidebarPosition() === "top" || (sidebarPosition() === "left" && docked()))
   const sidebarVisible = createMemo(() => {
     if (session()?.parentID) return false
     if (sidebarOpen()) return true
     // A top/bottom bar takes no columns, so narrow terminals can still show it
-    return sidebar() === "auto" && (wide() || sidebarHorizontal())
+    return sidebar() === "auto" && (docked() || sidebarHorizontal())
   })
   const showTimestamps = createMemo(() => timestamps() === "show")
-  const contentWidth = createMemo(() => dimensions().width - (sidebarVisible() && !sidebarHorizontal() ? 42 : 0) - 4)
+  const contentWidth = createMemo(
+    () => dimensions().width - (sidebarVisible() && !sidebarHorizontal() ? sidebarWidth() : 0) - 4,
+  )
   const providers = createMemo(() => Model.index(sync.data.provider))
 
   const scrollAcceleration = createMemo(() => getScrollAcceleration(tuiConfig))
@@ -1428,7 +1435,7 @@ export function Session() {
       >
         <box flexDirection={sidebarHorizontal() ? "column" : "row"} flexGrow={1} minHeight={0}>
           <Show when={sidebarVisible() && sidebarLeading()}>
-            <Sidebar sessionID={route.sessionID} horizontal={sidebarHorizontal()} />
+            <Sidebar sessionID={route.sessionID} horizontal={sidebarHorizontal()} width={sidebarWidth()} />
           </Show>
           <box
             ref={(r: BoxRenderable) => (scrollFrame = r)}
@@ -1652,10 +1659,10 @@ export function Session() {
           </box>
           <Show when={sidebarVisible() && !sidebarLeading()}>
             <Switch>
-              <Match when={sidebarHorizontal() || wide()}>
-                <Sidebar sessionID={route.sessionID} horizontal={sidebarHorizontal()} />
+              <Match when={sidebarHorizontal() || docked()}>
+                <Sidebar sessionID={route.sessionID} horizontal={sidebarHorizontal()} width={sidebarWidth()} />
               </Match>
-              <Match when={!wide()}>
+              <Match when={!docked()}>
                 <box
                   position="absolute"
                   top={0}
@@ -1671,7 +1678,7 @@ export function Session() {
                     setSidebarOpen(false)
                   }}
                 >
-                  <Sidebar sessionID={route.sessionID} />
+                  <Sidebar sessionID={route.sessionID} width={sidebarWidth()} />
                 </box>
               </Match>
             </Switch>
@@ -1724,14 +1731,39 @@ function UserMessage(props: {
   const metadataVisible = createMemo(() => queued() || steered() || ctx.showTimestamps())
 
   const compaction = createMemo(() => props.parts.find((x) => x.type === "compaction"))
-  // The summary reply may come from a different model than the session (agent.compaction).
-  const summary = createMemo(() => {
+  // The summary reply exists before its model runs, and Claude Code's /compact sends its summary
+  // only at the end, so the divider shows live progress until the reply completes.
+  const reply = createMemo(() => {
     if (!compaction()) return
-    const reply = sync.data.message[props.message.sessionID]?.find(
+    const found = sync.data.message[props.message.sessionID]?.find(
       (m) => m.role === "assistant" && m.summary && m.parentID === props.message.id,
     )
-    if (reply?.role !== "assistant") return
-    return [reply.modelID, reply.variant].filter(Boolean).join(" ")
+    return found?.role === "assistant" ? found : undefined
+  })
+  const busy = createMemo(() => (sync.data.session_status[props.message.sessionID]?.type ?? "idle") !== "idle")
+  const compacting = createMemo(() => {
+    const summary = reply()
+    return !!summary && !summary.error && !summary.time.completed && busy()
+  })
+  const [now, setNow] = createSignal(Date.now())
+  createEffect(() => {
+    if (!compacting()) return
+    setNow(Date.now())
+    const timer = setInterval(() => setNow(Date.now()), 1000)
+    onCleanup(() => clearInterval(timer))
+  })
+  const compactionTitle = createMemo(() => {
+    const summary = reply()
+    if (!summary) return " Compaction "
+    if (summary.error)
+      return summary.error.name === "MessageAbortedError" ? " Compaction stopped " : " Compaction failed "
+    // The reply may come from a different model than the session (agent.compaction).
+    const model = [summary.modelID, summary.variant].filter(Boolean).join(" ")
+    if (summary.time.completed) return ` Compacted . ${model} `
+    // An unfinished reply on an idle session was cut off (server restart); never tick forever.
+    if (!compacting()) return " Compaction stopped "
+    const elapsed = Math.floor((now() - summary.time.created) / 1000) * 1000
+    return elapsed < 1000 ? ` Compacting . ${model} ` : ` Compacting . ${model} . ${Locale.duration(elapsed)} `
   })
   // Written by the revive commands before launch (reviveCommands mark() in app.tsx).
   const revive = createMemo(() => {
@@ -1869,7 +1901,7 @@ function UserMessage(props: {
         <box
           marginTop={1}
           border={["top"]}
-          title={summary() ? ` Compacted . ${summary()} ` : " Compaction "}
+          title={compactionTitle()}
           titleAlignment="center"
           borderColor={theme.borderActive}
         />

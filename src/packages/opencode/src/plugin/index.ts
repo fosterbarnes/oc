@@ -42,6 +42,7 @@ import { EventV2Bridge } from "@/event-v2-bridge"
 import { InstallationChannel } from "@opencode-ai/core/installation/version"
 import { CursorPlugin } from "./cursor"
 import { ClaudeCodePlugin } from "@/provider/claude-code"
+import { ClaudeAgentAuthPlugin } from "./claude-agent"
 
 // Load result for one plugin, shown in the TUI sidebar. `target` matches the TUI loader's target.
 export const Status = Schema.Struct({
@@ -114,6 +115,7 @@ function internalPlugins(flags: RuntimeFlags.Info): PluginInstance[] {
     CerebrasPlugin,
     CursorPlugin,
     ClaudeCodePlugin,
+    ClaudeAgentAuthPlugin,
   ]
 }
 
@@ -355,11 +357,11 @@ const layer = Layer.effect(
                 try: () => Promise.resolve(hook.dispose?.()),
                 catch: errorMessage,
               }).pipe(
-                 Effect.tapError((error) =>
-                   Effect.logError("plugin dispose hook failed", { error }).pipe(
-                     Effect.annotateLogs({ channel: "plugin" }),
-                   ),
-                 ),
+                Effect.tapError((error) =>
+                  Effect.logError("plugin dispose hook failed", { error }).pipe(
+                    Effect.annotateLogs({ channel: "plugin" }),
+                  ),
+                ),
                 Effect.ignore,
               ),
             { discard: true },
@@ -410,4 +412,3 @@ export const node = LayerNode.make({
 })
 
 export * as Plugin from "."
-

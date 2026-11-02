@@ -8,6 +8,8 @@ import { createHash } from "node:crypto"
 import { isDeepEqual } from "remeda"
 import { SessionID, MessageID, PartID } from "./schema"
 import { claudeSteerSinks, isClaudeCodeProvider, STEERED_METADATA_KEY } from "@/provider/claude-code/shared"
+import { CLAUDE_AGENT_PROVIDER_ID } from "@/provider/claude-agent/id"
+import { ClaudeAgentStorage } from "@/provider/claude-agent/storage"
 import { CURSOR_PROVIDER_ID } from "@/provider/cursor/shared"
 import { ProviderError } from "@/provider/error"
 import { EffectBridge } from "@/effect/bridge"
@@ -1653,13 +1655,16 @@ const layer = Layer.effect(
             const modelKey = `${model.providerID}/${model.id}`
             // Claude Code brings its own environment, instructions and skills and takes only the agent prompt.
             const claudeCode = isClaudeCodeProvider(model.providerID)
-            const [skills, env, instructions, base, mcpInstructions, modelMsgs] = yield* Effect.all([
+            // Claude Agent keeps oc's instructions and skills but uses Claude Code's prompt and environment.
+            const claudeAgent = model.providerID === CLAUDE_AGENT_PROVIDER_ID
+            const [skills, env, instructions, base, mcpInstructions, modelMsgs, forkSourceID] = yield* Effect.all([
               claudeCode ? Effect.succeed(undefined) : sys.skills(agent),
-              claudeCode ? Effect.succeed([]) : sys.environment(model),
+              claudeCode || claudeAgent ? Effect.succeed([]) : sys.environment(model),
               claudeCode ? Effect.succeed([]) : instruction.system(modelKey).pipe(Effect.orDie),
-              agent.prompt ? Effect.succeed(undefined) : instruction.base(modelKey).pipe(Effect.orDie),
+              agent.prompt || claudeAgent ? Effect.succeed(undefined) : instruction.base(modelKey).pipe(Effect.orDie),
               claudeCode ? Effect.succeed(undefined) : sys.mcp(agent, turnPermission),
               MessageV2.toModelMessagesEffect(msgs, model),
+              claudeAgent ? ClaudeAgentStorage.forkSource(sessionID) : Effect.succeed(undefined),
             ])
             const system = [
               ...env,
@@ -1685,6 +1690,7 @@ const layer = Layer.effect(
               model,
               toolChoice: format.type === "json_schema" ? "required" : undefined,
               compactionBoundary: msgs.find((m) => m.info.role === "assistant" && m.info.summary)?.info.id,
+              forkSourceID,
             })
 
             if (structured !== undefined) {

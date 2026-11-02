@@ -174,7 +174,14 @@ export async function persistAgentModel(
 let persistTuiSettingQueue = Promise.resolve()
 export function persistTuiSetting(
   key:
-    | ["keybind_preset" | "sidebar_button_style" | "smooth_streaming" | "daily_theme" | "auto_confirm_updates"]
+    | [
+        | "keybind_preset"
+        | "sidebar_button_style"
+        | "smooth_streaming"
+        | "daily_theme"
+        | "daily_theme_native"
+        | "auto_confirm_updates",
+      ]
     | ["subagent_tabs", "click" | "auto_open" | "return_to_parent"]
     | ["palette_keys"]
     | ["sidebar_buttons"],

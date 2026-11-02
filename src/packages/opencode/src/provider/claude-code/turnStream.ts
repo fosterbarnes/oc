@@ -908,10 +908,11 @@ class ClaudeTurn {
       return
     }
     // The CLI compacted its own context. Nothing else tells the operator that
-    // everything before this point is now a summary.
+    // everything before this point is now a summary. A /compact turn's text is
+    // the stored summary, so the note stays out of it.
     if (msg.subtype === "compact_boundary") {
       const note = reportCompactBoundary(msg)
-      if (note) this.out.note(note)
+      if (note && !this.turn.compactionMode) this.out.note(note)
       this.compactedTokens = parseCompactBoundary(msg)?.postTokens
     }
   }

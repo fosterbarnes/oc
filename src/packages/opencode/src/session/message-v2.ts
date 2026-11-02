@@ -35,6 +35,9 @@ import { isMedia } from "@/util/media"
 import type { SystemError } from "bun"
 import type { Provider } from "@/provider/provider"
 import { CLAUDE_CODE_PROVIDER_ID, STEERED_METADATA_KEY } from "@/provider/claude-code/shared"
+import { CLAUDE_AGENT_PROVIDER_ID } from "@/provider/claude-agent/id"
+import { PermissionV1 } from "@opencode-ai/core/v1/permission"
+import { Question } from "@/question"
 import { Effect, Schema } from "effect"
 
 /** Error shape thrown by Bun's fetch() when gzip/br decompression fails mid-stream */
@@ -136,6 +139,9 @@ export const toModelMessagesEffect = Effect.fnUntraced(function* (
 ) {
   const result: UIMessage[] = []
   const toolNames = new Set<string>()
+  // Tool calls oc stopped (interrupt or a rejection that ends the turn). Claude Agent starts a fresh Claude turn
+  // after these instead of continuing the one that is waiting for the result.
+  const stopped = new Set<string>()
   // Track media from tool results that need to be injected as user messages
   // for providers that don't support that media type in tool results.
   //
@@ -342,6 +348,8 @@ export const toModelMessagesEffect = Effect.fnUntraced(function* (
             })
           }
           if (part.state.status === "error") {
+            if (part.state.metadata?.interrupted === true || STOPPING_REJECTIONS.has(part.state.error))
+              stopped.add(part.callID)
             const output = part.state.metadata?.interrupted === true ? part.state.metadata.output : undefined
             if (typeof output === "string") {
               assistantMessage.parts.push({
@@ -367,7 +375,8 @@ export const toModelMessagesEffect = Effect.fnUntraced(function* (
           }
           // Handle pending/running tool calls to prevent dangling tool_use blocks
           // Anthropic/Claude APIs require every tool_use to have a corresponding tool_result
-          if (part.state.status === "pending" || part.state.status === "running")
+          if (part.state.status === "pending" || part.state.status === "running") {
+            stopped.add(part.callID)
             assistantMessage.parts.push({
               type: ("tool-" + part.tool) as `tool-${string}`,
               state: "output-error",
@@ -377,6 +386,7 @@ export const toModelMessagesEffect = Effect.fnUntraced(function* (
               ...(part.metadata?.providerExecuted ? { providerExecuted: true } : {}),
               ...(differentModel ? {} : { callProviderMetadata: providerMeta(part.metadata) }),
             })
+          }
         }
         if (part.type === "reasoning") {
           if (differentModel) {
@@ -422,7 +432,7 @@ export const toModelMessagesEffect = Effect.fnUntraced(function* (
 
   const tools = Object.fromEntries(Array.from(toolNames).map((toolName) => [toolName, { toModelOutput }]))
 
-  return yield* Effect.promise(() =>
+  const messages = yield* Effect.promise(() =>
     convertToModelMessages(
       result.filter((msg) => msg.parts.some((part) => part.type !== "step-start")),
       {
@@ -431,7 +441,29 @@ export const toModelMessagesEffect = Effect.fnUntraced(function* (
       },
     ),
   )
+  if (model.providerID !== CLAUDE_AGENT_PROVIDER_ID || stopped.size === 0) return messages
+  // Read by the Claude Agent provider's ToolResult.collect (upstream marks these through a session hook).
+  return messages.map((message): ModelMessage => {
+    if (message.role !== "tool") return message
+    return {
+      ...message,
+      content: message.content.map((part) =>
+        part.type === "tool-result" && stopped.has(part.toolCallId)
+          ? {
+              ...part,
+              providerOptions: {
+                ...part.providerOptions,
+                [CLAUDE_AGENT_PROVIDER_ID]: { toolError: true, toolAborted: true },
+              },
+            }
+          : part,
+      ),
+    }
+  })
 })
+
+// Rejections that end the turn (PermissionV1.RejectedError, and Question.RejectedError without feedback).
+const STOPPING_REJECTIONS = new Set([new PermissionV1.RejectedError().message, new Question.RejectedError().message])
 
 export function toModelMessages(
   input: WithParts[],
