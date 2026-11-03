@@ -1,22 +1,8 @@
-v0.2.330 gggggWings [fix > Claude account handoff; perf. > model list]
+v0.2.331 teresaCold [feat. > /prompt handoff command]
 
-claude accounts:
-A /revive or restart no longer switches your Claude account on its own. Only a real usage-limit rejection or your own pick changes it; before, a stale usage cache could mark the current login limited at startup and move every chat to another account.
+handoff prompt:
+/prompt is now a built-in command. It writes a prompt you can paste into a new, empty session so another agent can carry on this session's work: the goal, the files involved, decisions made, what is done and what is left, how to check the result, and open questions. /prompt <focus> limits it to one part of the session. The turn can read files to check the paths it cites but cannot edit anything.
 
-When your Claude logins share one projects folder, a chat that moves to another login keeps its Claude Code conversation and full memory, also when it moves back later, and a mid-turn usage switch continues with a one-line "continue" instead of a catch-up summary. The new .scripts\shareClaudeProjects.ps1 moves existing logins to the shared folder (dry run first, -Apply to move), and new accounts made in Claude accounts link the shared folders automatically.
+When the reply finishes, oc copies just the prompt, without the code fence around it, and shows "Prompt copied to clipboard". The copy happens as the run ends while the tab shows that session, also with the terminal in the background, or the first time you open the session after. Code blocks inside the prompt no longer cut it short. A reply with no prompt block shows a toast pointing to /copy. A user command file named prompt.md still replaces the built-in.
 
-oc, native opencode, and test windows now see each other's Claude account picks and conversation records instead of overwriting them, so a revive no longer brings back an account another window replaced.
-
-claude chats:
-A turn Claude starts by itself after a background task, for example a build finishing during /agentTest, now keeps the slash command's tool permissions, so tools the command allows no longer fail with "Unknown tool".
-
-model list:
-Typing in the model list keeps up with your keys: each key took about twice as long as in the command palette because every keystroke rebuilt every provider's model rows.
-
-dialogs and sidebar:
-A list dialog with a long title, such as "Switch Claude account (this session)", no longer paints over its esc hint. Hiding and showing the sidebar keeps the usage numbers on screen instead of flashing "unavailable" until the next fetch.
-
-agent testing:
-nativeTest.ps1 now saves the shared settings a test window can change (model pick, kv settings, current agent, palette history, tui.json, Claude account pool) when it starts and puts back any that changed when it stops, listing what it restored. /agentTest saved screens show the state each case judged. The /agentTest tester, with new reply and pick steps and a recipe file kept in the user config, now does every basic oc action right on the first try: 3 of 3 rounds per action group, no wrong PASS.
-
-Under the hood: wake turns inherit the previous user message's rules in session/prompt.ts; the account pool and Claude session files reload when another process changed them. Checks that ran: test/provider/claude-code 696 pass 0 fail and test/session/prompt.test.ts 72 pass (from PowerShell), accountPool 26 pass, failoverQuestion/silentTurn/warmup 54 pass, opencode and tui typecheck clean, tui model-options/dialog-select/dialogSelectSessionMarkerActions/claudeWarmupRendered/openSidebar/usageFreshness 142 pass, shareClaudeProjects.ps1 dry run on the real profile and -Apply on a temp copy, and the three TUI fixes checked on a rebuilt native window (model list 165 to 85 ms per key). Known: steering.test.ts "cancel retires written unread input after visible content" fails when run from Git Bash on any code; it passes from PowerShell.
+Under the hood: the command and its template live in opencode/src/command (edit denied for its turn); the TUI finds the turn by the ocCommands metadata on its user message and reads the block with CommonMark fence rules (routes/session/handoffCopy.ts, with a new test). Marking a session as viewed now waits until its messages have loaded. Checks that ran: handoffCopy.test.ts 6 pass, opencode and tui typecheck clean, a fake-model probe of the command (template, arguments, metadata, edit tools left out of the request), and a native test window on Big Pickle: /prompt listed in the slash menu, the reply's prompt copied with no fence lines (1792 characters read back from the clipboard), and "Copy last assistant message" still copies.

@@ -210,6 +210,28 @@ Example compact Agent notes:
 
 ---
 
+## 2026-11-02 (~21:37) - v0.2.331 teresaCold - built-in /prompt handoff command with auto-copy - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation (after /spit plan `~/.config/opencode/plans/2026-11-02-native-prompt-command.md`); completed
+- Version: 0.2.331 teresaCold
+- Added built-in `/prompt` (`Command.Default.PROMPT` in `opencode/src/command/index.ts`, template `command/template/prompt.txt`): self-contained handoff prompt in one four-backtick `text` block, `$ARGUMENTS` focus, turn `permission: { edit: "deny" }` (covers edit/write/apply_patch)
+- Added `tui/src/routes/session/handoffCopy.ts`: `handoffTurn` (newest finished turn whose user text part has `ocCommands` incl. `prompt`, joins all assistant steps with that parentID; skips aborted/error/`tool-calls`/unfinished) and `handoffText` (CommonMark fence scan, last top-level `text` block else last block, unclosed = nothing)
+- Changed session route (`routes/session/index.tsx`): `copyHandoff` deduped by assistant id; called on `session.status` idle after busy/retry for the shown session (blurred too) and from the unread-acknowledge effect. Ack effect now also waits for `synced()` so first-view copy has messages
+- Added `tui/test/routes/handoffCopy.test.ts` (guards nested-fence extraction and turn matching)
+- Removed user's `~/.opencode/commands/prompt.md` (user-approved; it shadowed the built-in, seen in the probe)
+- Docs: wiki `Agents-and-Skills.md` `/prompt` bullet (dropped "oc ships no workflow commands"); `FORK.md` row
+- Verification: `bun test test/routes/handoffCopy.test.ts` 6 pass; `bun run typecheck` in tui and opencode exit 0; scratch fake-model probe (copy of `test/session/prompt.test.ts` harness): `Command.get("prompt")` has `$ARGUMENTS` hint and edit deny, `SessionPrompt.command` stamps `ocCommands:["prompt"]` + arguments, edit/write tools absent from the request, assistant `finish:"stop"` with parentID = user message. Probe deleted. Live TUI copy not run (pane test would write the real clipboard)
+- Risk: unrelated `src/bun.lock` and `packages/opencode/package.json` changes were already in the tree; left untouched
+
+### User
+Commands
+- New built-in `/prompt` writes a prompt you can paste into a new session to continue this session's work, and `/prompt <focus>` limits it to one part.
+- When it finishes, oc copies just the prompt to the clipboard and shows "Prompt copied to clipboard", either right away if the tab shows that session or the first time you open it.
+- Code blocks inside the prompt no longer cut it short, and the `/prompt` turn cannot edit files.
+
+---
+
 ## 2026-11-02 (~20:31) - v0.2.330 gggggWings - nativeTest restores shared state; model list, dialog title, sidebar usage fixes; agentTester basics locked - Claude Opus 5.5, high effort; Implementation
 
 ### Agent

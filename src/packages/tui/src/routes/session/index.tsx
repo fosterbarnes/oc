@@ -54,6 +54,7 @@ import { TodoItem } from "../../component/todo-item"
 import { DialogMessage } from "./dialog-message"
 import { promptFromParts } from "../../prompt/part"
 import { commandUse } from "../../prompt/slash"
+import { handoffText, handoffTurn } from "./handoffCopy"
 import { DialogConfirm } from "../../ui/dialog-confirm"
 import { DialogShellOutput } from "../../component/dialog-shell-output"
 import {
@@ -493,14 +494,44 @@ export function Session() {
     renderer.off("focus", onFocus)
     renderer.off("blur", onBlur)
   })
+  // `/prompt` copies its finished prompt once: as the run ends while this tab shows the session (also with
+  // the terminal blurred, so it is ready to paste elsewhere), or on the first focused view of it after that.
+  const copiedHandoffs = new Set<string>()
+  const runningHere = new Set<string>()
+  const copyHandoff = () => {
+    const turn = handoffTurn(messagesBeforeRevert(), (messageID) => sync.data.part[messageID] ?? [])
+    if (!turn || copiedHandoffs.has(turn.id)) return
+    copiedHandoffs.add(turn.id)
+    const text = handoffText(turn.text)
+    if (!text?.trim()) {
+      toast.show({ variant: "warning", message: "No prompt block found: use /copy" })
+      return
+    }
+    clipboard
+      .write?.(text)
+      .then(() => toast.show({ variant: "success", message: "Prompt copied to clipboard" }))
+      .catch(() => toast.show({ variant: "error", message: "Failed to copy prompt to clipboard" }))
+  }
+  event.on("session.status", (evt) => {
+    const sessionID = evt.properties.sessionID
+    if (evt.properties.status.type !== "idle") {
+      runningHere.add(sessionID)
+      return
+    }
+    if (!runningHere.delete(sessionID) || sessionID !== route.sessionID) return
+    copyHandoff()
+  })
+
   const acknowledged = new Map<string, number>()
   createEffect(() => {
     const current = session()
-    if (!focused() || !current || !sessionUnread(current)) return
+    // Waits for the messages to load: the run is seen once shown, and `/prompt` copies from them.
+    if (!focused() || !synced() || !current || !sessionUnread(current)) return
     const sessionID = current.id
     const idle = current.time.idle!
     if (acknowledged.get(sessionID) === idle) return
     acknowledged.set(sessionID, idle)
+    untrack(copyHandoff)
     // A failed acknowledgement is retried on the next session update or focus change.
     const forget = () => acknowledged.delete(sessionID)
     sdk.client.session.update({ sessionID, time: { viewed: idle } }).then((result) => {

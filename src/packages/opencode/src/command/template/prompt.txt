@@ -1,0 +1,17 @@
+Write a prompt the user will paste into a new, empty session so another agent can carry out this session's goals without seeing this conversation.
+
+User focus (empty means the whole session):
+$ARGUMENTS
+
+The receiving agent knows nothing about this session. Make the prompt self-contained:
+- Goal: what to achieve and why, in one or two sentences.
+- Context: the project directory, the relevant files and symbols (exact paths, and line numbers only when you verified them), and how the pieces fit together.
+- Decisions and constraints agreed with the user, including options that were rejected and why.
+- State: what is already done, what is not, and any uncommitted or in-progress work.
+- Steps: the remaining work as an ordered list. If a plan file exists, give its path and tell the agent to read it first instead of copying it.
+- Verification: how to prove the work is done.
+- Open questions or risks the receiving agent must raise with the user.
+
+Restate facts instead of pointing at them: never refer to "this session", "above", "earlier", or "the plan we discussed". Leave out finished side topics, dead ends, and raw tool output. You may read files to check paths you cite, but do not start the work and do not change any files.
+
+Reply with one short line, then the whole prompt in a single fenced block that opens with ````text and closes with ```` (four backticks each), so code blocks inside the prompt cannot end it. Write nothing after the block.

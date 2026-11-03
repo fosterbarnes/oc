@@ -15,6 +15,7 @@ import { MCP } from "../mcp"
 import { Skill } from "../skill"
 import PROMPT_INITIALIZE from "./template/initialize.txt"
 import PROMPT_REVIEW from "./template/review.txt"
+import PROMPT_HANDOFF from "./template/prompt.txt"
 import { LegacyEvent } from "@opencode-ai/schema/legacy-event"
 
 type State = {
@@ -68,6 +69,8 @@ export function hints(template: string) {
 export const Default = {
   INIT: "init",
   REVIEW: "review",
+  // The TUI copies this command's finished reply block (`tui/src/routes/session/handoffCopy.ts`).
+  PROMPT: "prompt",
 } as const
 
 export interface Interface {
@@ -128,6 +131,15 @@ const layer = Layer.effect(
         },
         subtask: true,
         hints: hints(PROMPT_REVIEW),
+      }
+      commands[Default.PROMPT] = {
+        name: Default.PROMPT,
+        description: "write a handoff prompt for a new session, copied when done",
+        source: "command",
+        template: PROMPT_HANDOFF,
+        // Writing the prompt never changes files; reads stay allowed so cited paths can be checked.
+        permission: { edit: "deny" },
+        hints: hints(PROMPT_HANDOFF),
       }
 
       for (const [name, command] of Object.entries(loaded.commands)) {
