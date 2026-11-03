@@ -58,6 +58,7 @@ import {
   getClaudeSessionId,
   deleteClaudeSessionId,
   markClaudeSessionLost,
+  moveClaudeSessionAccount,
   recordSessionAnchor,
   clearSessionAnchors,
   deleteActiveProcess,
@@ -116,6 +117,20 @@ import { formatAskUserQuestion, isAskUserQuestionTool } from "./askUserQuestion.
 import { handleControlRequest } from "./controlRequest.js"
 import { effectiveMcpConfig, planSpawn, type LiveToolInfo } from "./spawnPlanning.js"
 import { claudePromptTokens, contextUsage, toFinishReason, toUsage } from "./usage.js"
+
+// Sent into the resumed conversation after a usage failover; the transcript already holds the turn.
+const CONTINUE_AFTER_SWITCH_MESSAGE = JSON.stringify({
+  type: "user",
+  message: {
+    role: "user",
+    content: [
+      {
+        type: "text",
+        text: "Your last request hit a usage limit, so this conversation moved to another Claude account. Continue where you left off.",
+      },
+    ],
+  },
+})
 
 export interface TurnInput {
   config: ClaudeCodeConfig
@@ -536,10 +551,11 @@ class ClaudeTurn {
   }
 
   /**
-   * Pick the next account (or let the operator pick), retire the limited
-   * account's child and conversation, then send this turn again on it as a
-   * fresh conversation, with the existing catch-up plus what this turn
-   * already did (so tools that ran are not run again). Another rejection
+   * Pick the next account (or let the operator pick) and retire the limited
+   * account's child. When both accounts share transcripts the same Claude
+   * conversation resumes there and is told to continue; otherwise this turn is
+   * sent again as a fresh conversation, with the existing catch-up plus what
+   * this turn already did (so tools that ran are not run again). Another rejection
    * there switches again; every switch marks an account limited, so the chain
    * ends once all of them are. With no pick the child and conversation stay,
    * so auto-resume continues them after the reset.
@@ -567,13 +583,16 @@ class ClaudeTurn {
     // Unread steers die with the retired child; oc's loop sends them after this turn.
     this.steering.clear()
     await deleteActiveProcessAndWait(this.sk)
-    deleteClaudeSessionId(this.sk)
+    // With shared transcripts the next spawn resumes this conversation, which already holds the
+    // turn so far; otherwise it starts fresh with the catch-up.
+    const followed = moveClaudeSessionAccount(this.sk, next)
+    if (!followed) deleteClaudeSessionId(this.sk)
     if (this.closed) return
     if (this.autoContinue.aborted) return this.finish()
     const previous = this.account
     this.account = next
     this.out.note(
-      `\n> **Claude account switched:** ${poolAccountLabel(previous)} hit its usage limit; continuing on ${poolAccountLabel(next)}.\n`,
+      `\n> **Claude account switched:** ${poolAccountLabel(previous)} hit its usage limit; continuing ${followed ? "the same Claude conversation " : ""}on ${poolAccountLabel(next)}.\n`,
     )
     const plan = await planSpawn({
       config: this.config,
@@ -594,10 +613,10 @@ class ClaudeTurn {
     this.attach(ap)
     if (!this.turn.compactionMode) ap.opencodeSessionID = this.turn.affinity
     this.respawnAttempted = false
-    this.userMsg = this.input.catchUpMessage(progress)
+    this.userMsg = followed ? CONTINUE_AFTER_SWITCH_MESSAGE : this.input.catchUpMessage(progress)
     noteTurnStarted(ap)
     this.proc.stdin?.write(this.userMsg + "\n")
-    log.debug("sent catch-up after account switch", { textLength: this.userMsg.length })
+    log.debug("sent message after account switch", { followed, textLength: this.userMsg.length })
     this.armStartWatchdog()
   }
 

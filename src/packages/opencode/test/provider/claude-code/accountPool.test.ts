@@ -5,7 +5,16 @@
  */
 import type { LanguageModelV3StreamPart } from "@ai-sdk/provider"
 import { afterEach, beforeEach, expect, test } from "bun:test"
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  utimesSync,
+  writeFileSync,
+} from "node:fs"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import {
@@ -32,8 +41,16 @@ import {
 } from "@/provider/claude-code/accounts.js"
 import { _resetRateLimitReports } from "@/provider/claude-code/cliEvents.js"
 import { createClaudeCode } from "@/provider/claude-code/index.js"
-import { deleteActiveProcessAndWait, sessionKey } from "@/provider/claude-code/sessionManager.js"
+import {
+  deleteActiveProcessAndWait,
+  deleteClaudeSessionId,
+  getClaudeSessionId,
+  retireOtherAccount,
+  sessionKey,
+  setClaudeSessionId,
+} from "@/provider/claude-code/sessionManager.js"
 import { ClaudeUsageCache } from "@opencode-ai/core/claude-usage-cache"
+import { Global } from "@opencode-ai/core/global"
 
 beforeEach(() => _resetAccountPool())
 afterEach(() => _resetAccountPool())
@@ -266,45 +283,38 @@ test("pool pointer round-trips through the persist file and ignores expired limi
   }
 })
 
-test("a 100% usage cache with a future reset skips that account; 99.9% and missing files do not", () => {
+test("a restart keeps the current account when its usage cache reads 100%; only a rejection moves it", () => {
   const root = mkdtempSync(path.join(tmpdir(), "oc-account-pool-cache-"))
   const cache = path.join(root, "cache")
   mkdirSync(cache)
-  const second = path.join(root, ".claudeSecond")
+  const file = path.join(root, "account-pool.json")
+  const [a, b] = ["a", "b"].map((name) => path.resolve(root, `.claude-${name}`))
+  const ids = [a!, b!]
   const now = Date.now()
-  const future = new Date(now + 60_000).toISOString()
-  const usage = (utilization: number, resetsAt: string | null) =>
+  const at = (offset: number) => new Date(now + offset).toISOString()
+  writeFileSync(
+    path.join(cache, ClaudeUsageCache.cacheFileName(expandHome("~"), a!)),
     JSON.stringify({
-      five_hour: { utilization, resets_at: resetsAt },
-      seven_day: { utilization: 9, resets_at: new Date(now + 86_400_000).toISOString() },
-    })
-  // Pin the default identity: an inherited CLAUDE_CONFIG_DIR elsewhere would
-  // hash the default account to a different cache file.
-  const previousConfigDir = process.env.CLAUDE_CONFIG_DIR
-  delete process.env.CLAUDE_CONFIG_DIR
+      five_hour: { utilization: 63, resets_at: at(60_000) },
+      seven_day: { utilization: 100, resets_at: at(86_400_000) },
+    }),
+  )
   try {
-    writeFileSync(path.join(cache, "claude-usage.json"), usage(100, future))
-    writeFileSync(path.join(cache, "claude-usage-claudeSecond.json"), usage(0, null))
-    _setUsageCacheDir(cache)
-    expect(poolAccount([DEFAULT_ACCOUNT, second], now)).toBe(second)
-
+    _setAccountPoolFile(file)
+    setCurrentAccount(a!, ids, now)
     _resetAccountPool()
-    writeFileSync(path.join(cache, "claude-usage.json"), usage(99.9, future))
+    _setAccountPoolFile(file)
     _setUsageCacheDir(cache)
-    expect(poolAccount([DEFAULT_ACCOUNT, second], now)).toBe(DEFAULT_ACCOUNT)
-
-    _resetAccountPool()
-    rmSync(path.join(cache, "claude-usage.json"))
-    _setUsageCacheDir(cache)
-    expect(poolAccount([DEFAULT_ACCOUNT, second], now)).toBe(DEFAULT_ACCOUNT)
+    expect(poolAccount(ids, now)).toBe(a)
+    expect(JSON.parse(readFileSync(file, "utf8")).currentAccount).toBe(a)
+    markAccountLimited(a!, now + 60_000, now)
+    expect(poolAccount(ids, now)).toBe(b)
   } finally {
-    if (previousConfigDir === undefined) delete process.env.CLAUDE_CONFIG_DIR
-    else process.env.CLAUDE_CONFIG_DIR = previousConfigDir
     rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 })
   }
 })
 
-test("nondefault accounts seed from the hashed cache; legacy basename files need _configDir proof", () => {
+test("failover reads nondefault accounts from the hashed cache; legacy basename files need _configDir proof", () => {
   const root = mkdtempSync(path.join(tmpdir(), "oc-account-pool-hash-"))
   const cache = path.join(root, "cache")
   mkdirSync(cache)
@@ -323,21 +333,23 @@ test("nondefault accounts seed from the hashed cache; legacy basename files need
     })
   const previousConfigDir = process.env.CLAUDE_CONFIG_DIR
   delete process.env.CLAUDE_CONFIG_DIR
+  // A full `second` is no failover target; an unproven cache is not read, so it stays one.
+  const targets = () => failoverCandidates("a", ["a", resolvedSecond], now).map((candidate) => candidate.id)
   try {
     writeFileSync(hashed, usage({}))
     _setUsageCacheDir(cache)
-    expect(earliestLimitedUntil([second], now)).toBeGreaterThan(now)
+    expect(targets()).toEqual([])
 
     _resetAccountPool()
     rmSync(hashed)
     writeFileSync(legacy, usage({}))
     _setUsageCacheDir(cache)
-    expect(earliestLimitedUntil([second], now)).toBeUndefined()
+    expect(targets()).toEqual([resolvedSecond])
 
     _resetAccountPool()
     writeFileSync(legacy, usage({ _configDir: ClaudeUsageCache.configDirId(resolvedSecond) }))
     _setUsageCacheDir(cache)
-    expect(earliestLimitedUntil([second], now)).toBeGreaterThan(now)
+    expect(targets()).toEqual([])
   } finally {
     if (previousConfigDir === undefined) delete process.env.CLAUDE_CONFIG_DIR
     else process.env.CLAUDE_CONFIG_DIR = previousConfigDir
@@ -461,13 +473,23 @@ const ECHO = "@echo"
 const EXIT = "@exit"
 const served = [init, ECHO, endTurn, result(false)]
 
-/** Runs one turn on a two-account pool; `lines` maps each account dir's name to what it emits. */
-async function poolTurn(lines: Record<string, unknown[]>) {
+/**
+ * Runs one turn on a two-account pool; `lines` maps each account dir's name to what it emits.
+ * `shareProjects` gives every account a `projects` junction to one folder, as `shareClaudeProjects.ps1` does.
+ */
+async function poolTurn(lines: Record<string, unknown[]>, shareProjects = false) {
   _resetRateLimitReports()
   const root = mkdtempSync(path.join(tmpdir(), "oc-account-pool-"))
   const cwd = path.join(root, "project")
   mkdirSync(cwd)
   const dirs = Object.keys(lines).map((name) => path.join(root, name))
+  if (shareProjects) {
+    mkdirSync(path.join(root, "shared"))
+    for (const dir of dirs) {
+      mkdirSync(dir)
+      symlinkSync(path.join(root, "shared"), path.join(dir, "projects"), "junction")
+    }
+  }
   const cliPath = path.join(root, "fake-claude.cjs")
   writeFileSync(
     cliPath,
@@ -482,7 +504,9 @@ let answered = false
 require("node:readline").createInterface({ input: process.stdin }).on("line", (input) => {
   if (answered) return
   answered = true
-  const echo = "resumed=" + input.includes("session_resume") + " tools=" + input.includes("Tool calls you made:\\\\nRead")
+  const resumeAt = process.argv.indexOf("--resume")
+  const echo = "resumed=" + input.includes("session_resume") + " tools=" + input.includes("Tool calls you made:\\\\nRead") +
+    " resume=" + (resumeAt < 0 ? "none" : process.argv[resumeAt + 1]) + " continue=" + input.includes("Continue where you left off")
   for (const line of LINES) {
     if (line === ${JSON.stringify(EXIT)}) process.exit(0)
     const out = line === ${JSON.stringify(ECHO)}
@@ -519,6 +543,16 @@ test("a usage rejection moves the turn to the next account with the catch-up, hi
   const turn = await poolTurn({ first: limited, second: served })
   expect(turn.body).toContain("**Claude account switched:** first hit its usage limit; continuing on second.")
   expect(turn.body).toContain("resumed=false tools=false")
+  expect(turn.body).not.toContain("You've hit your limit")
+  expect(turn.parts.at(-1)).toMatchObject({ type: "finish", finishReason: { unified: "stop" } })
+})
+
+test("with a shared projects folder a usage rejection resumes the same Claude conversation on the next account", async () => {
+  const turn = await poolTurn({ first: limited, second: served }, true)
+  expect(turn.body).toContain(
+    "**Claude account switched:** first hit its usage limit; continuing the same Claude conversation on second.",
+  )
+  expect(turn.body).toContain("resumed=false tools=false resume=fake-session continue=true")
   expect(turn.body).not.toContain("You've hit your limit")
   expect(turn.parts.at(-1)).toMatchObject({ type: "finish", finishReason: { unified: "stop" } })
 })
@@ -612,6 +646,71 @@ test("a child that exits after its limit rejection without a result still switch
   const turn = await poolTurn({ first: [init, rejected, text("You've hit your limit"), EXIT], second: served })
   expect(turn.body).toContain("**Claude account switched:** first hit its usage limit; continuing on second.")
   expect(turn.parts.at(-1)).toMatchObject({ type: "finish", finishReason: { unified: "stop" } })
+})
+
+test("a chat's Claude conversation follows it to another account and back when projects are shared", async () => {
+  const root = mkdtempSync(path.join(tmpdir(), "oc-account-pool-follow-"))
+  const [a, b, own] = ["a", "b", "own"].map((name) => path.join(root, name))
+  mkdirSync(path.join(root, "shared"))
+  for (const dir of [a!, b!]) {
+    mkdirSync(dir)
+    symlinkSync(path.join(root, "shared"), path.join(dir, "projects"), "junction")
+  }
+  mkdirSync(path.join(own!, "projects"), { recursive: true })
+  const key = sessionKey(path.join(root, "project"), `tools::ses_follow::context=["claude-code"]`)
+  try {
+    setClaudeSessionId(key, "claude-sid", a)
+    expect(await retireOtherAccount(key, b!)).toBe(false)
+    expect(getClaudeSessionId(key)).toBe("claude-sid")
+    expect(await retireOtherAccount(key, a!)).toBe(false)
+    expect(getClaudeSessionId(key)).toBe("claude-sid")
+    // An account with its own projects folder cannot read the transcript, so it starts fresh.
+    expect(await retireOtherAccount(key, own!)).toBe(true)
+    expect(getClaudeSessionId(key)).toBeUndefined()
+  } finally {
+    deleteClaudeSessionId(key)
+    rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 })
+  }
+})
+
+test("a pool change written by another process is read before this one writes, so neither is lost", () => {
+  const root = mkdtempSync(path.join(tmpdir(), "oc-account-pool-shared-"))
+  const file = path.join(root, "account-pool.json")
+  const ids = ["a", "b"]
+  try {
+    _setAccountPoolFile(file)
+    expect(poolAccount(ids)).toBe("a")
+    // Another process (native opencode, a test window) picks b, a moment later.
+    writeFileSync(file, JSON.stringify({ currentAccount: "b", limitedUntil: {} }))
+    utimesSync(file, new Date(), new Date(Date.now() + 1000))
+    expect(poolAccount(ids)).toBe("b")
+    pinSessionAccount("ses_1", "a", ids)
+    const saved = JSON.parse(readFileSync(file, "utf8"))
+    expect(saved.currentAccount).toBe("b")
+    expect(saved.sessionAccounts).toEqual({ ses_1: "a" })
+  } finally {
+    rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 })
+  }
+})
+
+test("a Claude session id another process saved survives this process's next save", () => {
+  const file = path.join(Global.Path.data, "claude-code", "sessions.json")
+  const mine = sessionKey(path.join(tmpdir(), "oc-mine"), `tools::ses_mine::context=["claude-code"]`)
+  const theirs = sessionKey(path.join(tmpdir(), "oc-theirs"), `tools::ses_theirs::context=["claude-code"]`)
+  try {
+    setClaudeSessionId(mine, "sid-mine")
+    const saved = JSON.parse(readFileSync(file, "utf8"))
+    writeFileSync(file, JSON.stringify({ ...saved, [theirs]: { sessionId: "sid-theirs", anchors: [] } }))
+    utimesSync(file, new Date(), new Date(Date.now() + 1000))
+    expect(getClaudeSessionId(theirs)).toBe("sid-theirs")
+    setClaudeSessionId(mine, "sid-mine-2")
+    const after = JSON.parse(readFileSync(file, "utf8"))
+    expect(after[theirs]?.sessionId).toBe("sid-theirs")
+    expect(after[mine]?.sessionId).toBe("sid-mine-2")
+  } finally {
+    deleteClaudeSessionId(mine)
+    deleteClaudeSessionId(theirs)
+  }
 })
 
 test("deleting a session drops its pin from memory and the pool file", () => {

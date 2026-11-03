@@ -941,6 +941,38 @@ it.instance("prompt without turn permissions saves a user message that passes th
   }),
 )
 
+it.instance("an oc-posted synthetic prompt runs under the command rules of the turn it continues", () =>
+  Effect.gen(function* () {
+    yield* useServerConfig(providerCfg)
+    const prompt = yield* SessionPrompt.Service
+    const sessions = yield* Session.Service
+    const chat = yield* sessions.create({ title: "Pinned" })
+    const rules = [{ permission: "ocTui", action: "allow" as const, pattern: "*" }]
+    const send = (text: string, synthetic: boolean, turnPermission?: typeof rules) =>
+      prompt.prompt({
+        sessionID: chat.id,
+        agent: "build",
+        noReply: true,
+        turnPermission,
+        parts: [{ type: "text", text, synthetic }],
+      })
+    // The rules the loop runs a user message under, from the saved session as the loop reads it.
+    const effective = (message: SessionV1.WithParts) =>
+      Effect.gen(function* () {
+        const timeline = MessageV2.chronological(yield* sessions.messages({ sessionID: chat.id }))
+        if (message.info.role !== "user") return "not a user message"
+        return SessionPrompt.continuedTurnRules(message.info, timeline).permission
+      })
+    expect(yield* effective(yield* send("/agentTest", false, rules))).toEqual(rules)
+    // A Claude wake turn after a background task: same rules, also when chained.
+    expect(yield* effective(yield* send("[Claude Code continued on its own]", true))).toEqual(rules)
+    expect(yield* effective(yield* send("[Claude Code continued on its own]", true))).toEqual(rules)
+    // The next typed message ends the command's rules.
+    expect(yield* effective(yield* send("plain", false))).toBeUndefined()
+    expect(yield* effective(yield* send("[notice]", true))).toBeUndefined()
+  }),
+)
+
 it.instance(
   "prompt reopens a complete session as in progress; noReply leaves status alone",
   () =>

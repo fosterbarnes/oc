@@ -6,8 +6,11 @@ import { buildWarmupEnv, cliRunner, warmupCwd } from "./warmup/cli"
 // Account manager behind the TUI's `Claude accounts` dialog: account folders, their shared links, and
 // CLI auth. Pool membership itself is the claude-code `accounts` provider option.
 
-/** Items every account shares with `~/.claude`; same list as `$_CLAUDE_SHARED` in the PowerShell profile. */
-const SHARED = ["CLAUDE.md", "settings.json", "commands", "skills", "plans"]
+/**
+ * Items every account shares with `~/.claude`; same list as `$_CLAUDE_SHARED` in the PowerShell profile.
+ * Shared `projects` and `tasks` let a chat's Claude conversation and task list follow it across accounts.
+ */
+const SHARED = ["CLAUDE.md", "settings.json", "commands", "skills", "plans", "projects", "tasks"]
 const AUTH_TIMEOUT_MS = 15_000
 
 const sameDir = (id: string) => {

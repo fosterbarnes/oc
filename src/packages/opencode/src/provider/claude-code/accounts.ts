@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs"
 import path from "node:path"
 import { Global } from "@opencode-ai/core/global"
 import { ClaudeUsageCache } from "@opencode-ai/core/claude-usage-cache"
@@ -26,7 +26,9 @@ export function expandHome(value: string): string {
 // `["~/.claude", "~/.claudeSecond"]`. Every chat uses the current account
 // until the CLI rejects a request for usage, then moves to the usable account
 // with the least 5-hour use per the TUI's usage caches, or the one the operator
-// picks when oc.json `claudeFailover` is `ask` (turnStream.ts). An
+// picks when oc.json `claudeFailover` is `ask` (turnStream.ts). Only a real
+// rejection (or a manual pick) moves the current account: a cache reading of
+// 100% does not, since the CLI may still serve the account. An
 // account's id is its resolved config dir, or `default` for the CLI's own
 // `~/.claude`, which spawns with the inherited environment.
 // ---------------------------------------------------------------------------
@@ -46,8 +48,8 @@ const unknownPreferred = new Set<string>()
 let currentAccount: string | undefined
 let poolFile: string | null = IN_TEST ? null : DEFAULT_POOL_FILE
 let cacheDir: string | null = IN_TEST ? null : DEFAULT_USAGE_CACHE_DIR
-let loaded = false
-let seeded = false
+/** `fileStamp` of the pool file as this process last read or wrote it. */
+let poolStamp: string | undefined
 
 export function poolAccountIds(accounts: string[] | undefined): string[] {
   // The default account spawns with the inherited environment, so its dir is the
@@ -71,19 +73,30 @@ export function accountConfigEntry(id: string, accounts: string[] | undefined): 
   return accounts?.find((dir) => poolAccountIds([dir])[0] === id)
 }
 
-function ensureLoaded(ids?: string[], now = Date.now()): void {
-  if (!loaded) {
-    loaded = true
-    readPersist(now)
-  }
-  if (ids && cacheDir && !seeded) {
-    seeded = true
-    seedFromCaches(ids, now)
-  }
+/**
+ * Size and mtime of a file, or "" when it is missing. Resident oc, native opencode, and test windows
+ * share the pool and session files, so a changed stamp means another process wrote it. Limit: two
+ * same-size writes inside one file-time tick (about 16 ms on Windows) look alike, and the later reader keeps its copy.
+ */
+export function fileStamp(file: string): string {
+  const stat = statSync(file, { throwIfNoEntry: false })
+  return stat ? `${stat.mtimeMs}:${stat.size}` : ""
+}
+
+/** The file is the source of truth: reload it whenever another process changed it since this one last saw it. */
+function ensureLoaded(now = Date.now()): void {
+  if (!poolFile) return
+  const stamp = fileStamp(poolFile)
+  if (stamp === poolStamp) return
+  poolStamp = stamp
+  readPersist(now)
 }
 
 function readPersist(now: number): void {
   if (!poolFile) return
+  limitedUntil.clear()
+  sessionAccounts.clear()
+  currentAccount = undefined
   try {
     const raw = JSON.parse(readFileSync(poolFile, "utf8")) as {
       currentAccount?: unknown
@@ -123,18 +136,19 @@ function persistPool(now = Date.now()): void {
       }),
       { encoding: "utf8", mode: 0o600 },
     )
+    poolStamp = fileStamp(poolFile)
   } catch (error) {
     log.warn("cannot write claude account pool file", { file: poolFile, error: String(error) })
   }
 }
 
 /**
- * Seed file for an account: the hashed write path when present, else a
+ * Usage cache file for an account: the hashed write path when present, else a
  * basename legacy file whose `_configDir` proves it belongs to this account.
- * Unproven legacy files never seed, so one account cannot inherit another's
+ * Unproven legacy files are never read, so one account cannot inherit another's
  * limits through a shared basename.
  */
-function seedCachePath(id: string): string | undefined {
+function usageCachePath(id: string): string | undefined {
   if (!cacheDir) return undefined
   const home = expandHome("~")
   const resolved = id === DEFAULT_ACCOUNT ? path.resolve(expandHome(process.env.CLAUDE_CONFIG_DIR ?? "~/.claude")) : id
@@ -176,7 +190,7 @@ function windowUsedPercent(value: unknown, now: number): number | undefined {
 
 /** An account's cached usage: 5-hour percent used, and when a full window frees it. Undefined without a cache. */
 function readUsageCache(id: string, now: number): { fiveHourUsed?: number; fullUntil?: number } | undefined {
-  const file = seedCachePath(id)
+  const file = usageCachePath(id)
   if (!file) return undefined
   let body: { five_hour?: unknown; seven_day?: unknown } | null
   try {
@@ -190,13 +204,6 @@ function readUsageCache(id: string, now: number): { fiveHourUsed?: number; fullU
   return {
     fiveHourUsed: windowUsedPercent(body?.five_hour, now),
     ...(resets.length ? { fullUntil: Math.max(...resets) } : {}),
-  }
-}
-
-function seedFromCaches(ids: string[], now: number): void {
-  for (const id of ids) {
-    const fullUntil = readUsageCache(id, now)?.fullUntil
-    if (fullUntil) markAccountLimited(id, fullUntil, now)
   }
 }
 
@@ -220,7 +227,7 @@ function rankUsable(ids: string[], from: string, now: number): FailoverCandidate
 
 /** The current account while usable, else the usable one with the least 5-hour use; undefined when all are limited. */
 export function nextUsableAccount(ids: string[], now = Date.now()): string | undefined {
-  ensureLoaded(ids, now)
+  ensureLoaded(now)
   const usable = (id: string) => (limitedUntil.get(id) ?? 0) <= now
   if (currentAccount && ids.includes(currentAccount) && usable(currentAccount)) return currentAccount
   // A fresh pool starts at the first usable account; only a move off a limited one is ranked.
@@ -241,14 +248,14 @@ export function poolAccount(ids: string[], now = Date.now()): string {
 /** The account a session is pinned to, when it is still in the pool. Outside oc the session is "default": never pinned. */
 export function sessionPin(sessionID: string | undefined, ids: string[], now = Date.now()): string | undefined {
   if (!sessionID || sessionID === "default") return undefined
-  ensureLoaded(ids, now)
+  ensureLoaded(now)
   const id = sessionAccounts.get(sessionID)
   return id && ids.includes(id) ? id : undefined
 }
 
 /** The pool id for a config dir as written in `accounts` (`~/.claude4`), while it is usable. */
 export function preferredAccount(dir: string, ids: string[], now = Date.now()): string | undefined {
-  ensureLoaded(ids, now)
+  ensureLoaded(now)
   const wanted = canonicalAccountId(path.resolve(expandHome(dir)))
   const same = (id: string) =>
     process.platform === "win32"
@@ -286,7 +293,7 @@ export function turnAccount(
 
 /** Accounts a usage-rejected turn on `from` can move to, best first. Changes no pin or current account. */
 export function failoverCandidates(from: string, ids: string[], now = Date.now()): FailoverCandidate[] {
-  ensureLoaded(ids, now)
+  ensureLoaded(now)
   return rankUsable(ids, from, now).filter((candidate) => candidate.id !== from)
 }
 
@@ -299,7 +306,7 @@ export function applyFailoverChoice(sessionID: string | undefined, id: string, i
 /** Pin a session to a pool account, or clear its pin with `undefined`. The global current account is untouched. */
 export function pinSessionAccount(sessionID: string, id: string | undefined, ids: string[], now = Date.now()): boolean {
   if (id !== undefined && !ids.includes(id)) return false
-  ensureLoaded(ids, now)
+  ensureLoaded(now)
   if (id === undefined) sessionAccounts.delete(sessionID)
   else sessionAccounts.set(sessionID, id)
   persistPool(now)
@@ -308,7 +315,7 @@ export function pinSessionAccount(sessionID: string, id: string | undefined, ids
 
 /** Drop a deleted session's pin so `sessionAccounts` does not grow for the life of the pool file. */
 export function forgetSessionPin(sessionID: string, now = Date.now()): void {
-  ensureLoaded(undefined, now)
+  ensureLoaded(now)
   if (sessionAccounts.delete(sessionID)) persistPool(now)
 }
 
@@ -338,7 +345,7 @@ export function poolState(ids: string[], now = Date.now(), sessionID?: string, r
  */
 export function setCurrentAccount(id: string, ids: string[], now = Date.now()): boolean {
   if (!ids.includes(id)) return false
-  ensureLoaded(ids, now)
+  ensureLoaded(now)
   limitedUntil.delete(id)
   currentAccount = id
   persistPool(now)
@@ -346,7 +353,7 @@ export function setCurrentAccount(id: string, ids: string[], now = Date.now()): 
 }
 
 export function markAccountLimited(id: string, resetsAtMs: number | undefined, now = Date.now()): void {
-  ensureLoaded(undefined, now)
+  ensureLoaded(now)
   const until = resetsAtMs !== undefined && resetsAtMs > now ? resetsAtMs : now + UNKNOWN_RESET_MS
   if (until <= (limitedUntil.get(id) ?? 0)) return
   limitedUntil.set(id, until)
@@ -356,6 +363,25 @@ export function markAccountLimited(id: string, resetsAtMs: number | undefined, n
 /** `CLAUDE_CONFIG_DIR` for a pool account; undefined keeps the inherited environment. */
 export function poolConfigDir(id: string): string | undefined {
   return id === DEFAULT_ACCOUNT ? undefined : id
+}
+
+/**
+ * True when two pool accounts read one `projects` folder (a junction to `~/.claude/projects`), so a
+ * Claude conversation started on one resumes on the other under the same session id.
+ */
+export function sharesTranscripts(a: string, b: string): boolean {
+  if (a === b) return true
+  const projects = (id: string) => {
+    const dir = path.join(
+      id === DEFAULT_ACCOUNT ? expandHome(process.env.CLAUDE_CONFIG_DIR || "~/.claude") : id,
+      "projects",
+    )
+    if (!existsSync(dir)) return undefined
+    const real = realpathSync.native(dir)
+    return process.platform === "win32" ? real.toLowerCase() : real
+  }
+  const first = projects(a)
+  return first !== undefined && first === projects(b)
 }
 
 /**
@@ -369,7 +395,7 @@ export function canonicalAccountId(id: string): string {
 
 /** Earliest future `limitedUntil` over the given pool ids (all known ids when omitted). */
 export function earliestLimitedUntil(ids?: string[], now = Date.now()): number | undefined {
-  ensureLoaded(ids, now)
+  ensureLoaded(now)
   let earliest: number | undefined
   for (const [id, until] of limitedUntil) {
     if (until <= now) continue
@@ -455,14 +481,14 @@ export function poolAccountLabel(id: string): string {
  * pick, and its usage cache. Used after a sign-in (it may be a different person now) and on removal.
  */
 export function forgetAccount(id: string, now = Date.now()): void {
-  ensureLoaded(undefined, now)
+  ensureLoaded(now)
   limitedUntil.delete(id)
   for (const [session, pinned] of sessionAccounts) if (pinned === id) sessionAccounts.delete(session)
   if (currentAccount === id) currentAccount = undefined
   persistPool(now)
-  // seedCachePath finds the hashed file first, then a legacy one proven to be this account's.
+  // usageCachePath finds the hashed file first, then a legacy one proven to be this account's.
   for (let pass = 0; pass < 2; pass++) {
-    const file = seedCachePath(id)
+    const file = usageCachePath(id)
     if (!file) return
     try {
       rmSync(file, { force: true })
@@ -478,8 +504,7 @@ export function _resetAccountPool(): void {
   limitedUntil.clear()
   sessionAccounts.clear()
   currentAccount = undefined
-  loaded = false
-  seeded = false
+  poolStamp = undefined
   poolFile = null
   cacheDir = null
 }
@@ -487,12 +512,10 @@ export function _resetAccountPool(): void {
 /** Test-only. */
 export function _setAccountPoolFile(file: string | null): void {
   poolFile = file
-  loaded = false
-  seeded = false
+  poolStamp = undefined
 }
 
 /** Test-only. */
 export function _setUsageCacheDir(dir: string | null): void {
   cacheDir = dir
-  seeded = false
 }

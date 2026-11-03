@@ -22,6 +22,18 @@ if (@($Start, $Screen, $Stop).Where({ $_ }).Count -ne 1) { throw 'Use exactly on
 $runRoot = 'C:\ocTestTmp\agentTest'
 $currentFile = "$runRoot\current.json"
 $socketDir = "$env:USERPROFILE\.local\share\wezterm"
+# Shared state the window can change: -Start copies it, -Stop puts back each changed file. A whole-file
+# restore also reverts what the user's own oc wrote meanwhile. Not covered: prompt-history.jsonl and
+# claude-code\sessions.json, which the user's oc appends to all the time.
+$stateDir = "$runRoot\state"
+$stateFiles = @(
+    "$env:USERPROFILE\.local\state\opencode\model.json"
+    "$env:USERPROFILE\.local\state\opencode\kv.json"
+    "$env:USERPROFILE\.local\state\opencode\agent.json"
+    "$env:USERPROFILE\.local\state\opencode\frecency.jsonl"
+    "$env:USERPROFILE\.config\opencode\tui.json"
+    "$env:USERPROFILE\.local\share\opencode\claude-code\account-pool.json"
+)
 
 function getProcess([int]$ProcessId) { Get-CimInstance Win32_Process -Filter "ProcessId=$ProcessId" }
 
@@ -78,6 +90,14 @@ if ($Stop) {
     }
     # WezTerm leaves its socket file behind when killed.
     Remove-Item -LiteralPath $run.socket -Force -ErrorAction SilentlyContinue
+    $restored = foreach ($item in $run.state) {
+        if ((Test-Path -LiteralPath $item.file) -and (Get-FileHash -LiteralPath $item.file).Hash -eq $item.hash) { continue }
+        Copy-Item -LiteralPath "$stateDir\$(Split-Path $item.file -Leaf)" -Destination $item.file -Force
+        if ((Get-FileHash -LiteralPath $item.file).Hash -ne $item.hash) { throw "Could not restore $($item.file)." }
+        Split-Path $item.file -Leaf
+    }
+    if ($restored) { Write-Host "Restored $($restored -join ', ')." }
+    Remove-Item -LiteralPath $stateDir -Recurse -Force -ErrorAction SilentlyContinue
     # Only a throwaway project -Start created; a -Project folder is the user's.
     if ($run.ownsProject) {
         Remove-Item -LiteralPath $run.project -Recurse -Force
@@ -91,8 +111,10 @@ if ($Stop) {
 $run = readRun
 if ($run -and (testRunAlive $run)) { throw "A native test is already running (wezterm-gui $($run.guiPid)). Run -Stop first." }
 if ($run) {
-    # A dead earlier run: drop its record and the throwaway project it made.
+    # A dead earlier run: drop its record and the throwaway project it made. Its state copies are too
+    # old to restore safely, so they go too.
     if ($run.ownsProject) { Remove-Item -LiteralPath $run.project -Recurse -Force -ErrorAction SilentlyContinue }
+    Remove-Item -LiteralPath $stateDir -Recurse -Force -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $currentFile -Force
 }
 
@@ -113,6 +135,12 @@ if ($ownsProject) {
 }
 if (-not (Test-Path -LiteralPath $Project -PathType Container)) { throw "Missing project folder $Project." }
 
+New-Item -ItemType Directory -Force -Path $stateDir | Out-Null
+$state = @($stateFiles | Where-Object { Test-Path -LiteralPath $_ } | ForEach-Object {
+    Copy-Item -LiteralPath $_ -Destination $stateDir -Force
+    [pscustomobject]@{ file = $_; hash = (Get-FileHash -LiteralPath $_).Hash }
+})
+
 # Start like a fresh WezTerm window: drop what this agent shell carries (oc, Claude Code, and the
 # parent pane's WezTerm variables). WezTerm still overlays the user's registry environment.
 Get-ChildItem Env: | Where-Object Name -match '^(OPENCODE|OC_|CLAUDE|WEZTERM_)|^(AGENT)$' |
@@ -132,10 +160,11 @@ $run = [pscustomobject]@{
     project     = $Project
     ownsProject = $ownsProject
     started     = (Get-Date).ToString('o')
+    state       = $state
 }
 # Recorded before the wait, so -Stop can clean up a window that never listed a pane.
 New-Item -ItemType Directory -Force -Path $runRoot | Out-Null
-$run | ConvertTo-Json | Set-Content -LiteralPath $currentFile
+$run | ConvertTo-Json -Depth 3 | Set-Content -LiteralPath $currentFile
 $deadline = (Get-Date).AddSeconds(30)
 # Pane ids start at 0, so test for null.
 while ($null -eq $run.paneId) {
@@ -147,5 +176,5 @@ while ($null -eq $run.paneId) {
     $list = & wezterm cli --no-auto-start list --format json 2>$null
     if (-not $LASTEXITCODE -and $list) { $run.paneId = @(($list -join "`n") | ConvertFrom-Json)[0].pane_id }
 }
-$run | ConvertTo-Json | Set-Content -LiteralPath $currentFile
-$run | ConvertTo-Json
+$run | ConvertTo-Json -Depth 3 | Set-Content -LiteralPath $currentFile
+$run | Select-Object -ExcludeProperty state | ConvertTo-Json

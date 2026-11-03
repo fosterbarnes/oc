@@ -144,6 +144,26 @@ function readMidTurn(msgs: SessionV1.WithParts[], userID: string, assistant: Ses
   )
 }
 
+/**
+ * An oc-posted synthetic prompt (Claude wake turn, background notice) continues the turn before it, so it runs
+ * under that turn's command rules (`permission`, `toolHost`), also through a chain of them. A typed message never
+ * inherits: a command's rules end at the next one. Derived at loop time from loaded messages; nothing is stored.
+ */
+export function continuedTurnRules(user: SessionV1.User, timeline: SessionV1.WithParts[]): SessionV1.User {
+  if (user.permission || user.toolHost) return user
+  const index = timeline.findIndex((msg) => msg.info.id === user.id)
+  const parts = timeline[index]?.parts ?? []
+  if (!parts.length || !parts.every((part) => part.type === "text" && part.synthetic)) return user
+  const previous = timeline.slice(0, index).findLast((msg) => msg.info.role === "user")?.info
+  if (previous?.role !== "user") return user
+  const rules = continuedTurnRules(previous, timeline)
+  return {
+    ...user,
+    ...(rules.permission ? { permission: rules.permission } : {}),
+    ...(rules.toolHost ? { toolHost: rules.toolHost } : {}),
+  }
+}
+
 const IMAGE_EXTENSIONS: Record<string, string> = {
   "image/jpeg": "jpg",
   "image/png": "png",
@@ -1357,14 +1377,15 @@ const layer = Layer.effect(
               !msg.info.noReply &&
               !msg.parts.some((part) => part.type === "text" && part.metadata?.[STEERED_METADATA_KEY]),
           )?.info
-          const lastUser =
+          const pickedUser =
             pendingUser?.info.role === "user"
               ? pendingUser.info
               : unanswered?.role === "user"
                 ? unanswered
                 : latest.user
 
-          if (!lastUser) throw new Error("No user message found in stream. This should never happen.")
+          if (!pickedUser) throw new Error("No user message found in stream. This should never happen.")
+          const lastUser = continuedTurnRules(pickedUser, timeline)
           if (pendingUser) msgs = msgs.filter((msg) => msg.info.role !== "user" || msg.info.id <= lastUser.id)
           if (pendingUser && lastAssistant && lastUser.id < lastAssistant.id) {
             // Saved during the previous step, but not executed there: send it after that reply.

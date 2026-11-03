@@ -668,13 +668,14 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
   return (
     <box gap={1} paddingBottom={1} flexGrow={1}>
       <box paddingLeft={4} paddingRight={4}>
-        <box flexDirection="row" justifyContent="space-between">
+        <box flexDirection="row" justifyContent="space-between" gap={2}>
           {props.titleView ?? (
             <text fg={theme.text} attributes={TextAttributes.BOLD}>
               {props.title}
             </text>
           )}
-          <text fg={theme.textMuted} onMouseUp={() => dialog.escape()}>
+          {/* A long title wraps; without this it squeezes the hint and paints over its first letter. */}
+          <text fg={theme.textMuted} flexShrink={0} onMouseUp={() => dialog.escape()}>
             esc
           </text>
         </box>

@@ -38,16 +38,55 @@ export function DialogModel(props: {
 
   const showExtra = createMemo(() => connected() && !props.providerID && !props.hiddenOnly)
 
+  const isHidden = (model: { providerID: string; modelID: string }) =>
+    local.model.hidden().some((item) => item.providerID === model.providerID && item.modelID === model.modelID)
+  const favorites = createMemo(() => (connected() ? local.model.favorite().filter((item) => !isHidden(item)) : []))
+
+  // Every provider's rows, built once per data change, not per keystroke: reading each model from the
+  // sync store cost ~90 ms a key (2026-11-02), and stable rows let the list keep its row views.
+  const providerRows = createMemo(() =>
+    pipe(
+      sync.data.provider,
+      sortBy(
+        (provider) => provider.id !== "opencode",
+        (provider) => provider.name,
+      ),
+      flatMap((provider) =>
+        pipe(
+          provider.models,
+          entries(),
+          filter(([_, info]) => info.status !== "deprecated"),
+          filter(([_, info]) => (props.providerID ? info.providerID === props.providerID : true)),
+          filter(([model]) => isHidden({ providerID: provider.id, modelID: model }) === !!props.hiddenOnly),
+          map(([model, info]) => {
+            const favorite = favorites().some((item) => item.providerID === provider.id && item.modelID === model)
+            return {
+              value: { providerID: provider.id, modelID: model },
+              title: info.name ?? model,
+              releaseDate: info.release_date,
+              favorite,
+              description: favorite ? "(Favorite)" : undefined,
+              category: connected() ? provider.name : undefined,
+              disabled: provider.id === "opencode" && model.includes("-nano"),
+              footer: info.cost?.input === 0 && provider.id === "opencode" ? "Free" : undefined,
+              onSelect() {
+                onSelect(provider.id, model)
+              },
+            }
+          }),
+          (options) => sortModelOptions(options, props.providerID !== undefined),
+        ),
+      ),
+    ),
+  )
+
   const options = createMemo(() => {
     const needle = query().trim()
     const showSections = showExtra() && needle.length === 0
     const hidden = local.model.hidden()
-    const isHidden = (model: { providerID: string; modelID: string }) =>
-      hidden.some((item) => item.providerID === model.providerID && item.modelID === model.modelID)
-    const favorites = connected() ? local.model.favorite().filter((item) => !isHidden(item)) : []
     const recents = local.model.recent().filter((item) => !isHidden(item))
 
-    function toOptions(items: typeof favorites, category: string) {
+    function toOptions(items: ReturnType<typeof favorites>, category: string) {
       if (!showSections) return []
       return items.flatMap((item) => {
         const provider = sync.data.provider.find((provider) => provider.id === item.providerID)
@@ -76,67 +115,26 @@ export function DialogModel(props: {
 
     const favoriteOptions = toOptions(
       [
-        ...favorites.filter((item) => !item.category),
-        ...local.model.favoriteCategories().flatMap((name) => favorites.filter((item) => item.category === name)),
+        ...favorites().filter((item) => !item.category),
+        ...local.model.favoriteCategories().flatMap((name) => favorites().filter((item) => item.category === name)),
       ],
       "Favorites",
     )
     const recentOptions = toOptions(
       recents.filter(
-        (item) => !favorites.some((fav) => fav.providerID === item.providerID && fav.modelID === item.modelID),
+        (item) => !favorites().some((fav) => fav.providerID === item.providerID && fav.modelID === item.modelID),
       ),
       "Recent",
     )
 
-    const providerOptions = pipe(
-      sync.data.provider,
-      sortBy(
-        (provider) => provider.id !== "opencode",
-        (provider) => provider.name,
-      ),
-      flatMap((provider) =>
-        pipe(
-          provider.models,
-          entries(),
-          filter(([_, info]) => info.status !== "deprecated"),
-          filter(([_, info]) => (props.providerID ? info.providerID === props.providerID : true)),
-          filter(([model]) => isHidden({ providerID: provider.id, modelID: model }) === !!props.hiddenOnly),
-          map(([model, info]) => {
-            const favorite = favorites.some((item) => item.providerID === provider.id && item.modelID === model)
-            return {
-              value: { providerID: provider.id, modelID: model },
-              title: info.name ?? model,
-              releaseDate: info.release_date,
-              favorite,
-              description: favorite ? "(Favorite)" : undefined,
-              category: connected() ? provider.name : undefined,
-              disabled: provider.id === "opencode" && model.includes("-nano"),
-              footer: info.cost?.input === 0 && provider.id === "opencode" ? "Free" : undefined,
-              onSelect() {
-                onSelect(provider.id, model)
-              },
-            }
-          }),
-          filter((option) => {
-            if (!showSections) return true
-            if (
-              favorites.some(
-                (item) => item.providerID === option.value.providerID && item.modelID === option.value.modelID,
-              )
-            )
-              return false
-            if (
-              recents.some(
-                (item) => item.providerID === option.value.providerID && item.modelID === option.value.modelID,
-              )
-            )
-              return false
-            return true
-          }),
-          (options) => sortModelOptions(options, props.providerID !== undefined),
-        ),
-      ),
-    )
+    // Sections list favorites and recents once, so their provider rows drop out.
+    const sameModel = (a: { providerID: string; modelID: string }) => (b: { providerID: string; modelID: string }) =>
+      a.providerID === b.providerID && a.modelID === b.modelID
+    const providerOptions = showSections
+      ? providerRows().filter(
+          (option) => !favorites().some(sameModel(option.value)) && !recents.some(sameModel(option.value)),
+        )
+      : providerRows()
 
     const hiddenCount = hidden.filter(
       (item) => sync.data.provider.find((provider) => provider.id === item.providerID)?.models[item.modelID],

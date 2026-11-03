@@ -93,6 +93,16 @@ const PLAN_SOURCE: Record<NonNullable<UsagePlan["source"]> | "unknown", string> 
   unknown: "Select to open the billing page or set a date",
 }
 
+// Last reading per provider, kept across sidebar instances: hiding and showing the sidebar remounts
+// this section, and a fresh `{ ok: false }` read "unavailable" until the next fetch landed.
+const keptUsage = new Map<string, unknown>()
+
+function keptUsageSignal<T extends UsageSnapshot<{ ok: boolean }>>(key: string) {
+  const [get, set] = createSignal<T>((keptUsage.get(key) as T | undefined) ?? ({ ok: false } as T))
+  createEffect(() => keptUsage.set(key, get()))
+  return [get, set] as const
+}
+
 // Sidebar usage section: provider readings, refresh scheduling, the rows view, and the Usage menu,
 // settings, and calendar dialogs. Call inside SidebarTools; timers and listeners end with it.
 export function createSidebarUsage(input: {
@@ -114,11 +124,11 @@ export function createSidebarUsage(input: {
   const dialog = useDialog()
   const toast = useToast()
   const { hovered, setHovered, hoverColor } = input
-  const [usage, setUsage] = createSignal<UsageSnapshot<OpenAIUsage>>({ ok: false })
-  const [goUsage, setGoUsage] = createSignal<UsageSnapshot<OpenCodeGoUsage>>({ ok: false })
-  const [openRouterUsage, setOpenRouterUsage] = createSignal<UsageSnapshot<OpenRouterUsage>>({ ok: false })
-  const [cursorUsage, setCursorUsage] = createSignal<UsageSnapshot<CursorUsage>>({ ok: false })
-  const [claudeCodeUsage, setClaudeCodeUsage] = createSignal<UsageSnapshot<ClaudeCodeUsage>>({ ok: false })
+  const [usage, setUsage] = keptUsageSignal<UsageSnapshot<OpenAIUsage>>("openai")
+  const [goUsage, setGoUsage] = keptUsageSignal<UsageSnapshot<OpenCodeGoUsage>>("opencode-go")
+  const [openRouterUsage, setOpenRouterUsage] = keptUsageSignal<UsageSnapshot<OpenRouterUsage>>("openrouter")
+  const [cursorUsage, setCursorUsage] = keptUsageSignal<UsageSnapshot<CursorUsage>>("cursor")
+  const [claudeCodeUsage, setClaudeCodeUsage] = keptUsageSignal<UsageSnapshot<ClaudeCodeUsage>>("claude-code")
   // Pool account this session runs on (config dir name), marked with `*` in the Claude rows.
   const [activeClaudeAccount, setActiveClaudeAccount] = createSignal<string>()
   // oc.json `claudeAccountNames`; reread when an account changes (the account manager renames through it).

@@ -210,6 +210,88 @@ Example compact Agent notes:
 
 ---
 
+## 2026-11-02 (~20:31) - v0.2.330 gggggWings - nativeTest restores shared state; model list, dialog title, sidebar usage fixes; agentTester basics locked - Claude Opus 5.5, high effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; high effort; Implementation (handoff `~/.config/opencode/plans/agentTestBasics.md`); completed
+- Version: 0.2.330 gggggWings
+- Added `.scripts\nativeTest.ps1` state snapshot: `-Start` copies `model.json`, `kv.json`, `agent.json`, `frecency.jsonl`, `tui.json`, `claude-code\account-pool.json` + hashes into `C:\ocTestTmp\agentTest\state` (run record `state`, JSON depth 3); `-Stop` restores changed files, verifies hash, lists them; dead-run cleanup drops stale copies. Not covered: `prompt-history.jsonl`, `claude-code\sessions.json`.
+- Changed AGENTS.md `## Agent test`: state restore, no native "Reload oc config", "Allow always" persists per project, new `ocTui` steps `pick`/`reply`, no colors in screen text, recipe file path.
+- Outside repo (see `C:\Users\Foster\buildNotes.md`): `ocTui.ts` fixes + `pick`/`reply`/` ... ` wildcard, recipes `~/.config/opencode/agentTest/ocTuiRecipes.md`, `agentTester.md`, `agentTest.md`.
+- Result: Terra fast low passes every basic action 3/3 first try (groups A-E + regression), 0 false PASS. Action 7 untestable (`plan` disabled). Full log in the plan.
+- Fixed `tui/src/ui/dialog-select.tsx` header: `esc` hint `flexShrink={0}`, row `gap={2}`. A wrapping title ("Switch Claude account (this session)") squeezed the hint and painted over its `e` (`...applies after itssc`).
+- Fixed `tui/src/component/dialog-model.tsx`: new `providerRows` memo (query-independent) + `favorites` memo; `options` only filters/sections them. Cause: every keystroke rebuilt every provider's rows from the sync store (~165 ms/key vs palette ~80). Rows keep identity, so the list also keeps its row views.
+- Fixed `tui/src/routes/session/sidebar-tools/sidebarUsage.tsx`: `keptUsageSignal` keeps the last snapshot per provider in a module `Map`. Cause: hiding the sidebar unmounts the section; a remount started every provider at `{ ok: false }` = "unavailable" until the next fetch (Claude rows hid it via cached observations).
+- Verification: `-Start`/`-Stop` ran 8 times; each `-Stop` restored and hash-checked the changed files. tui `bun run typecheck` clean; tui tests `model-options`, `dialog-select`, `dialogSelectSessionMarkerActions`, `claudeWarmupRendered`, `openSidebar`, `usageFreshness`: 142 pass, 2 skip, 0 fail. Rebuilt native (`nativeTest.ps1 -Start -Build`): model list per key 165 -> 85 ms (palette 81, the polling floor); account dialog title wraps with `esc` intact; sidebar re-show shows Codex values at once; favorites tag + sections unchanged.
+
+### User
+Agent testing
+- `nativeTest.ps1 -Stop` now puts back your model pick, theme and kv settings, current agent, and Claude account pool if a test window changed them, and lists what it restored.
+- `/agentTest` testers now handle every basic oc action (new chat, sending and judging replies, interrupting, queueing, switching model and variant, dialogs, question forms, permission prompts, sidebar, scrolling, toasts, Claude account per chat) right on the first try.
+
+Model list
+- Typing in the model list keeps up with your keys (about twice as fast per key as before).
+
+Dialogs and sidebar
+- A list dialog with a long title, such as "Switch Claude account (this session)", no longer garbles its `esc` hint.
+- Hiding and showing the sidebar keeps the usage numbers on screen instead of flashing "unavailable".
+
+---
+
+## 2026-11-02 (~19:06) - v0.2.329 textrCards - wake turns keep command rules; shared Claude state files reload across processes - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation (plan `~/.config/opencode/plans/ocCloseOutAccountHandoff.md`); completed
+- Version: 0.2.329 textrCards
+- Fixed `session/prompt.ts`: added exported `continuedTurnRules(user, timeline)`; the loop's `lastUser` is now that. A user message whose parts are all synthetic text and that has no `permission`/`toolHost` runs under the previous user message's rules (recursive through chained wakes). Cause: `/agentTest` (`ocTui: allow`) -> background build -> Claude wake prompt (`requestWakeTurn`, `prompt_async`, no rules) -> `prepared.tools` built from global `ocTui: deny` -> `llm.ts:187` "Unknown tool: ocTui". Seen in DB: command msg `msg_19e954574...` had `permission`, wake msg `msg_19e969229...` none.
+- Deviation from plan: plan copied rules at `createUserMessage` with a `findMessage` read; changed to loop-time derivation from already-loaded `timeline` (pure, no DB read, nothing stored, every `lastUser` consumer covered incl. command tool plan `user: lastUser`).
+- Fixed `accounts.ts` + `sessionManager.ts` last-writer-wins: exported `fileStamp(file)` (`mtimeMs:size`); `ensureLoaded`/`loadedSessions` reload (clear + refill) when the stamp changed, `persistPool`/`persistSessions` record the stamp after writing. Removed `loaded`/`claudeSessionsLoaded`. Risk: two same-size writes inside one file-time tick (~16 ms) look alike.
+- Changed `~/.opencode/commands/agentTest.md` step 3 and `agents/sub/agentTester.md` evidence line: end each case on the judged state, save before closing dialogs (v0.2.328 evidence screens lacked the marker).
+- Changed `~/Documents/PowerShell/profile.ps1`: `$_CLAUDE_SHARED` + `projects`, `tasks`; comment updated. Parse-checked (0 errors).
+- Docs: FORK.md Claude Code row (wake rule), pool row (shared-file reload replaces the last-writer-wins risk); AGENTS.md known failures: steering "cancel retires written unread input after visible content" is shell-dependent.
+- Tests: `prompt.test.ts` "an oc-posted synthetic prompt runs under the command rules of the turn it continues" (chained wakes inherit, typed message ends rules); `accountPool.test.ts` cross-process pool and sessions file tests (`utimesSync` models a later write).
+- Verification (all from PowerShell): `test/provider/claude-code` 696 pass 0 fail (716 tests, 62 files); `test/session/prompt.test.ts` 72 pass; `bun run typecheck` clean.
+- MISTAKE: bisected the steering failure with Bash-run "mine" vs PowerShell-run "baseline"; the shell, not the code, decided (v0.2.327 code also fails 3/3 from Bash). Rule: run both sides of a bisect from the same shell. Spent two needless rewrites of the inheritance before finding it.
+- ERROR: `steering.test.ts` "cancel retires written unread input after visible content" fails from the Claude Code Bash tool on any code; recorded in AGENTS.md.
+
+### User
+Claude chats
+- A turn Claude starts by itself after a background task (for example a build finishing during `/agentTest`) now keeps the slash command's tool permissions, so tools the command allows no longer fail with "Unknown tool".
+- oc, native opencode, and test windows now see each other's Claude account picks and conversation records instead of overwriting them, so a revive no longer brings back an account another window replaced.
+
+Agent testing
+- `/agentTest` saved screens now show the state each case judged.
+
+Shell
+- `newClaudeAccount` in the PowerShell profile links the shared `projects` and `tasks` folders like the other shared items.
+
+---
+
+## 2026-11-02 (~18:24) - v0.2.328 cuffsShake - Claude account pick survives revive; conversations follow a chat across accounts - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation (from /spit plan `~/.config/opencode/plans/ocClaudeAccountHandoff.md`); completed
+- Version: 0.2.328 cuffsShake
+- Fixed `accounts.ts`: removed startup `seedFromCaches` (+ `seeded`, `ensureLoaded(ids)` arg). Cause (2026-11-02 22:56Z revive, chat `ses_e64b23961ffeG5cfW5kaQYvkS0`): `.claude3` usage cache read `seven_day` 100%, seed marked it limited, `nextUsableAccount` moved + persisted `currentAccount` to `default` with no CLI rejection logged; `.claude3` had answered at 22:54Z. Now only `markAccountLimited` (rejection) or `setCurrentAccount` moves it; `rankUsable` still reads caches live at failover. Renamed `seedCachePath` -> `usageCachePath`.
+- Added `accounts.ts` `sharesTranscripts(a, b)`: `realpathSync.native` of both `<configDir>/projects` equal (default = `CLAUDE_CONFIG_DIR || ~/.claude`).
+- Added `sessionManager.ts` `moveClaudeSessionAccount(key, account)`: mutates the record's `account` in place (keeps `forked`/`movedTo`/anchors), persists. `retireOtherAccount` uses it before `deleteClaudeSessionId`; `cliArgs.ts` then adds `--resume <same id>`. Fixes A -> B -> A starting fresh on A.
+- Changed `turnStream.ts` `switchAccount`: shared transcripts keep the session id and send `CONTINUE_AFTER_SWITCH_MESSAGE` instead of `catchUpMessage(progress)`; note reads "continuing the same Claude conversation on X". Unshared pool: unchanged.
+- Changed `accountManage.ts` `SHARED`: + `projects`, `tasks` (new accounts link them when they exist in `~/.claude`).
+- Added `.scripts/shareClaudeProjects.ps1`: dry run default, `-Apply` merges each `~/.claudeN\projects|tasks` into `~/.claude` (no overwrite; an item with collisions is skipped and listed), removes the emptied folder, creates a junction, checks `LinkType`; creates `~/.claude\tasks` if missing; refuses `-Apply` while a `claude` process runs.
+- Docs: FORK.md pool row, wiki `Claude-Code.md` "Several Claude accounts".
+- Verification: `bun test test/provider/claude-code/accountPool.test.ts` 26 pass (rewrote the two seed tests as intended changes: restart keeps a 100%-cache current account, rejection moves it; hashed/legacy cache identity now via `failoverCandidates`; added shared-projects failover scenario asserting `--resume fake-session` + continue message, and A -> B -> A / unshared retire test). `failoverQuestion`, `silentTurn`, `warmup` tests 54 pass. `bun run typecheck` in `packages/opencode` clean. Script: real dry run on the user's profile (3 accounts, 689 files, 0 collisions); `-Apply` probed on a temp home copy (moves, junctions, collision skip, idempotent rerun), temp removed.
+- Risk: cross-login `--resume` unproven live (thinking-block signatures, CLI limit-error entry in transcript); on failure the existing "Claude session lost" question takes over. Needs one real usage switch.
+- TODO: user profile `~/Documents/PowerShell/profile.ps1` `$_CLAUDE_SHARED` still lacks `projects`, `tasks` (user file, not edited). Live `account-pool.json` still has `currentAccount: default` and the seeded `.claude3` mark until 01:00Z; a palette pick clears it.
+
+### User
+Claude accounts
+- A `/revive` or restart no longer switches your Claude account on its own; only an actual usage-limit rejection or your own pick changes it.
+- When your Claude logins share one `projects` folder, a chat that moves to another login keeps its Claude Code conversation and full memory, including when it moves back later.
+- A mid-turn usage switch then continues the same conversation with a one-line "continue" instead of a catch-up summary.
+- New `.scripts\shareClaudeProjects.ps1` moves existing logins to the shared folder (dry run first, `-Apply` to move); new accounts made in Claude accounts get the shared folders automatically.
+
+---
+
 ## 2026-11-02 (~18:00) - v0.2.327 penguinSoulmate - ocTui drives oc TUI tests through the pty; tester bake-off picks Terra fast low - Claude Opus 5.5, effort not recorded; Implementation
 
 ### Agent

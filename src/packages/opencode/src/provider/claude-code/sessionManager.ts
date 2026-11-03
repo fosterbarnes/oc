@@ -14,7 +14,7 @@ import { getPendingProxyCalls, rejectAllPendingProxyCallsForSession } from "./pr
 import type { ReasoningEffort } from "./types.js"
 import { claudeSpawnEnv } from "./spawnEnv.js"
 import { cliCommand } from "./cliExecutable.js"
-import { DEFAULT_ACCOUNT, forgetSessionPin, poolConfigDir } from "./accounts.js"
+import { DEFAULT_ACCOUNT, fileStamp, forgetSessionPin, poolConfigDir, sharesTranscripts } from "./accounts.js"
 
 export interface ActiveProcess {
   proc: ChildProcess
@@ -41,9 +41,9 @@ export interface ActiveProcess {
   /**
    * The binary this child was spawned with. Account failover compares it
    * against the path the current turn resolves to: a difference means the
-   * conversation has moved to another account, and the process plus its
-   * Claude session id have to go because a transcript cannot resume across
-   * accounts. Absent on the interactive shim, which never fails over.
+   * conversation has moved to another account, so the process has to go; its
+   * Claude session id follows only when the accounts share transcripts
+   * (`moveClaudeSessionAccount`). Absent on the interactive shim, which never fails over.
    */
   cliPath?: string
   cliArgs?: string[]
@@ -250,10 +250,11 @@ interface ClaudeSessionRecord {
 const activeProcesses = new Map<string, ActiveProcess>()
 // Spawns still planning or starting for a key; see `singleFlightSpawn`.
 const spawnsInFlight = new Map<string, Promise<ActiveProcess>>()
-// Loaded from `SESSIONS_FILE` on first use so a restarted opencode resumes
-// the same Claude conversations instead of silently starting new ones.
+// Loaded from `SESSIONS_FILE` (and reloaded after another process writes it) so a restarted opencode
+// resumes the same Claude conversations instead of silently starting new ones.
 const claudeSessions = new Map<string, ClaudeSessionRecord>()
-let claudeSessionsLoaded = false
+/** `fileStamp` of `SESSIONS_FILE` as this process last read or wrote it. */
+let sessionsStamp: string | undefined
 const SESSIONS_FILE = path.join(Global.Path.data, "claude-code", "sessions.json")
 const MAX_SESSION_ANCHORS = 20
 /** Why a session key lost its Claude conversation; read by the next turn's confirm. */
@@ -729,16 +730,18 @@ export function getClaudeSessionId(key: string): string | undefined {
   return record?.movedTo ? undefined : record?.sessionId
 }
 
+/** The file is the source of truth: reload it whenever another process changed it since this one last saw it. */
 function loadedSessions(): Map<string, ClaudeSessionRecord> {
-  if (claudeSessionsLoaded) return claudeSessions
-  claudeSessionsLoaded = true
+  const stamp = fileStamp(SESSIONS_FILE)
+  if (stamp === sessionsStamp) return claudeSessions
+  sessionsStamp = stamp
   const text = readSessionsFile()
-  if (!text) return claudeSessions
-  const parsed = parseSessionsFile(text)
+  const parsed = text ? parseSessionsFile(text) : []
   if (!parsed) {
     log.warn("ignoring unreadable claude sessions file", { file: SESSIONS_FILE })
     return claudeSessions
   }
+  claudeSessions.clear()
   for (const [key, record] of parsed) claudeSessions.set(key, record)
   return claudeSessions
 }
@@ -782,6 +785,7 @@ function persistSessions(): void {
       encoding: "utf8",
       mode: 0o600,
     })
+    sessionsStamp = fileStamp(SESSIONS_FILE)
   } catch (error) {
     log.warn("cannot write claude sessions file", { file: SESSIONS_FILE, error: String(error) })
   }
@@ -867,16 +871,30 @@ function processWorkingAccount(ap: ActiveProcess | undefined): string | undefine
 }
 
 /**
- * Retire the key's process and conversation when they belong to a pool
- * account other than `account`: a transcript cannot resume across accounts.
- * True when a conversation was dropped, which the caller replaces with the
- * catch-up envelope instead of asking (sessionSync.ts).
+ * Hand the key's conversation to `account` when both logins share one `projects` folder, so the
+ * next spawn resumes the same transcript there. False when it cannot follow (no record, or the
+ * accounts keep separate transcripts). Call after the old account's child has exited.
+ */
+export function moveClaudeSessionAccount(key: string, account: string): boolean {
+  const record = loadedSessions().get(key)
+  if (!record || !sharesTranscripts(record.account ?? DEFAULT_ACCOUNT, account)) return false
+  record.account = account
+  persistSessions()
+  return true
+}
+
+/**
+ * Retire the key's process when it runs on a pool account other than `account`. Its
+ * conversation follows when the accounts share transcripts (`moveClaudeSessionAccount`);
+ * otherwise it is dropped. True when a conversation was dropped, which the caller replaces
+ * with the catch-up envelope instead of asking (sessionSync.ts).
  */
 export async function retireOtherAccount(key: string, account: string): Promise<boolean> {
   const ap = activeProcesses.get(key)
   if (ap && (ap.account ?? DEFAULT_ACCOUNT) !== account) await deleteActiveProcessAndWait(key)
   const record = loadedSessions().get(key)
   if (!record || (record.account ?? DEFAULT_ACCOUNT) === account) return false
+  if (moveClaudeSessionAccount(key, account)) return false
   deleteClaudeSessionId(key)
   lostSessions.delete(key)
   return true

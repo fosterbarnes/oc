@@ -1,12 +1,22 @@
-v0.2.327 penguinSoulmate [scripts > agentTest without takeover]
+v0.2.330 gggggWings [fix > Claude account handoff; perf. > model list]
+
+claude accounts:
+A /revive or restart no longer switches your Claude account on its own. Only a real usage-limit rejection or your own pick changes it; before, a stale usage cache could mark the current login limited at startup and move every chat to another account.
+
+When your Claude logins share one projects folder, a chat that moves to another login keeps its Claude Code conversation and full memory, also when it moves back later, and a mid-turn usage switch continues with a one-line "continue" instead of a catch-up summary. The new .scripts\shareClaudeProjects.ps1 moves existing logins to the shared folder (dry run first, -Apply to move), and new accounts made in Claude accounts link the shared folders automatically.
+
+oc, native opencode, and test windows now see each other's Claude account picks and conversation records instead of overwriting them, so a revive no longer brings back an account another window replaced.
+
+claude chats:
+A turn Claude starts by itself after a background task, for example a build finishing during /agentTest, now keeps the slash command's tool permissions, so tools the command allows no longer fail with "Unknown tool".
+
+model list:
+Typing in the model list keeps up with your keys: each key took about twice as long as in the command palette because every keystroke rebuilt every provider's model rows.
+
+dialogs and sidebar:
+A list dialog with a long title, such as "Switch Claude account (this session)", no longer paints over its esc hint. Hiding and showing the sidebar keeps the usage numbers on screen instead of flashing "unavailable" until the next fetch.
 
 agent testing:
-/agentTest on oc's own TUI no longer needs you to leave the PC. A new user-level ocTui tool types keys, text, and mouse clicks straight into the native test window's terminal and returns the screen text, so tests run in the background while you keep working. Keys use the plain terminal encoding only; chords that need the kitty keyboard protocol (ctrl+m, ctrl+enter, shift+enter, ctrl+shift+key) are refused with a pointer to the palette title or the ctrl+x leader form. A test run that took 4.5 minutes now takes about a minute.
+nativeTest.ps1 now saves the shared settings a test window can change (model pick, kv settings, current agent, palette history, tui.json, Claude account pool) when it starts and puts back any that changed when it stops, listing what it restored. /agentTest saved screens show the state each case judged. The /agentTest tester, with new reply and pick steps and a recipe file kept in the user config, now does every basic oc action right on the first try: 3 of 3 rounds per action group, no wrong PASS.
 
-tester model:
-A bake-off on 8 fixed cases, 2 of them traps, picked GPT-6.1 Terra fast at low effort as the default tester. Luna fast low and Haiku 5.5 low also got 8/8 with no wrong PASS. Claude models can run these tests too.
-
-nativeTest.ps1:
--Screen no longer prints trailing blank padding, so a home-screen read drops from about 11 KB to about 1 KB. AGENTS.md's Agent test section now describes the ocTui route, the key limits, which shared settings cases must leave alone, and that a new tool reaches running chats only after an oc server restart.
-
-Under the hood: the tool, its permission, and the tester and /agentTest changes live in the user config, outside this repo. Checks that ran: the Phase 1 gate (8 cases x 3 rounds plus a fresh window, identical verdicts, shared settings unchanged) and the bake-off UI runs (Terra and Luna twice each, Haiku once, every input through ocTui, no failed calls). No repo tests cover these files. Known: "Reload oc config" reloads the tab's launch folder, not the open chat's folder.
+Under the hood: wake turns inherit the previous user message's rules in session/prompt.ts; the account pool and Claude session files reload when another process changed them. Checks that ran: test/provider/claude-code 696 pass 0 fail and test/session/prompt.test.ts 72 pass (from PowerShell), accountPool 26 pass, failoverQuestion/silentTurn/warmup 54 pass, opencode and tui typecheck clean, tui model-options/dialog-select/dialogSelectSessionMarkerActions/claudeWarmupRendered/openSidebar/usageFreshness 142 pass, shareClaudeProjects.ps1 dry run on the real profile and -Apply on a temp copy, and the three TUI fixes checked on a rebuilt native window (model list 165 to 85 ms per key). Known: steering.test.ts "cancel retires written unread input after visible content" fails when run from Git Bash on any code; it passes from PowerShell.
