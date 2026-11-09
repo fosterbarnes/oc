@@ -7,8 +7,9 @@ helpers with a `win32` and a `darwin` branch; callers stay platform-neutral. Pla
 ## Dev loop (Windows VM + Mac host)
 
 - Mac: `ssh foster@macbook.sawfish-boga.ts.net` (PowerShell profile `sshMac`; key `~/.ssh/macbook_ed25519`).
-  Use the PowerShell tool for ssh: Git Bash's ssh does not read that key. Non-interactive ssh needs
-  `export PATH="$HOME/.bun/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"`.
+  Use the PowerShell tool for ssh: Git Bash's ssh does not read that key. Non-interactive ssh reads only
+  `~/.zshenv`, whose non-interactive block puts `~/.bun/bin`, `~/.local/bin`, Homebrew, and `/usr/local/bin`
+  (pwsh) on PATH. Build toolchain: Bun 1.4.2 (`src/package.json` pin), pwsh 7, git, tar.
 - Windows `C:` is SMB-mounted on the Mac at `/Volumes/C`. Never `bun install` there: `node_modules` holds
   per-OS native packages. The Mac keeps a mirror with its own `node_modules`:
   `/usr/bin/rsync -a --exclude node_modules --exclude dist --exclude UPSTREAM --exclude .git --exclude .turbo --exclude "*.db" /Volumes/C/Users/Foster/Documents/GitHub/oc/ ~/dev/oc/`

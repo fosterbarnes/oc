@@ -1,17 +1,6 @@
-v0.2.332 elantraHomiez [feat. > macOS support; patch > killall in oc]
+v0.2.332 earthquakeScience [docs > Mac build toolchain]
 
-macOS:
-oc now builds and runs on Apple Silicon Macs from the same source as Windows. The launcher, resident server, revive, /revive-single, background jobs, scheduled prompts, and --shutdown-all all work there. On a Mac, revive, subagent tabs, and sidebar scripts open WezTerm or a new Terminal.app window. The build and install scripts run under PowerShell 7 on a Mac and install to ~/.local/bin. It has been built, installed, and smoke-tested on a Mac: the server starts, a second launch reuses it, and the TUI opens to Home.
+macOS dev setup:
+The Mac build machine already had the pinned Bun 1.4.2 and the other build tools (PowerShell 7, git, tar), and they are now on PATH for one-off ssh commands too, so the Mac dev notes no longer ask for a manual PATH export. The PATH addition lives in the Mac's ~/.zshenv and only applies to bare non-interactive shells, so terminal shells and scripts started from them keep their own PATH.
 
-Desktop app and PowerShell updates and Everything Search stay Windows-only; SCOPE.md lists them, along with a Mac installer and menu bar app planned for later.
-
-sign-in startup:
-"Start server at sign-in" works on Windows and macOS (a LaunchAgent on the Mac). The setting is now server.startAtLogin (oc config set serverStartAtLogin); the old Windows-only name is still read and replaced on the next save.
-
-links and editors:
-The link browser picker lists browsers installed in /Applications on a Mac, and clicking a path with no editor set opens the Mac's default text editor.
-
-killall:
-Kill all AI processes and the process report are now built into oc as oc oc killall (with --report and --dry-run) on Windows and macOS, so the PowerShell script is gone. The PowerShell profile's killai function still points at the old script and needs updating.
-
-Under the hood: process identity on macOS reads libproc through bun:ffi, so pid reuse is still caught before any stop; the port owner comes from lsof, and the server secret is owner-only. Shell scripts are checked out with LF line endings. Docs: docs/dev/macos.md (Mac dev loop and known Mac test failures), FORK.md, SCOPE.md, and the wiki. Checks: typecheck clean in core, opencode, and tui; covering tests pass on Windows and the Mac; full core and opencode suites on the Mac show no new failures against the last commit (known Mac failures listed in docs/dev/macos.md); Mac probes for process identity, tree stops, lsof, AppleScript compile, and browser scan; killall dry runs on both machines; Mac build, install, codesign, and server and TUI smoke tests.
+Under the hood: docs/dev/macos.md lists the Mac build toolchain. Checks: a plain ssh command on the Mac resolves bun, pwsh, git, node, brew, wezterm, rsync, and tar; a login shell and a script started from it resolve the same tools as before; bun install in the Mac mirror reported no changes. No build ran.

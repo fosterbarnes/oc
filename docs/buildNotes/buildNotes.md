@@ -210,6 +210,24 @@ Example compact Agent notes:
 
 ---
 
+## 2026-11-08 (~20:40) - v0.2.332 earthquakeScience - Mac build toolchain and ssh PATH - Claude Opus 5.5, low effort; Agent
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Agent; completed
+- Version: 0.2.332 earthquakeScience (docs-only in repo, no bump; tag rerolled at push)
+- Kept: Mac already had Bun 1.4.2+744846f84 (arm64, matches `src/package.json` pin), pwsh 7.6.5, git 2.55, node 26 (brew), Xcode, rsync, tar, wezterm. No installs needed.
+- Synced `~/dev/oc` mirror (rsync, no `--delete`); `bun install --frozen-lockfile` there: no changes.
+- Added block to Mac `~/.zshenv` (backup `~/.zshenv.bak-ocpath`), gated on non-interactive and `~/.bun/bin` missing from PATH: prepends `~/.bun/bin`, `~/.local/bin`, `/opt/homebrew/{bin,sbin}`, `/usr/local/bin`. Plain `ssh mac cmd` previously had only cargo + system paths.
+- Fixed in pass: first version gated only on non-interactive, so zsh scripts started from a terminal re-prepended Homebrew and swapped nvm node 22 for brew node 26. Inherited PATHs are now untouched.
+- Updated `docs/dev/macos.md` dev-loop bullet: manual PATH export no longer needed; listed build toolchain.
+- Verification: plain ssh `command -v` resolves bun/pwsh/git/node/brew/wezterm/rsync/tar; pwsh sees bun; `zsh -lic` still resolves the same bun/pwsh/git. No build run.
+
+### User
+macOS dev setup
+- The Mac has the pinned Bun 1.4.2 and the other build tools, and they are now on PATH for one-off ssh commands too, so no manual PATH export is needed; no UI change.
+
+---
+
 ## 2026-11-08 (~20:28) - v0.2.332 elantraHomiez - pass on macOS support: non-blocking Mac browser scan - Claude Opus 5.5, low effort; Pass
 
 ### Agent
