@@ -1,9 +1,12 @@
-v0.2.340 valveProstate [fix > Mac revive window; patch > no-access note]
+v0.2.342 willAragorns [perf. > Mac paste; feat. > Mac queue key]
 
-revive:
-On the Mac in WezTerm, /revive now reopens the window in front of other apps, at the position and size it had before. Before, it opened behind the active app at WezTerm's default spot. A full-screen window comes back full screen when your wezterm.lua gui-startup handles OC_REVIVE_FULLSCREEN; the wiki's Launching page has the snippet.
+mac paste:
+Pasting with Cmd+V on the Mac is faster: an image pastes in a few milliseconds instead of almost a second, and text no longer waits on an image check first. A clipboard that holds both a picture and text (for example cells copied from Numbers) now pastes as text.
 
-Claude Code:
-When your Claude account can't use the chosen model (for example Claude Mythos 5.1, which is invite-only), the chat now names the account and tells you to pick Claude Fable 5.1. The turn shows as failed instead of as a normal reply.
+claude chats:
+After the first message in a chat, oc sends each message to Claude Code right away instead of first looking up tools and skills it did not use.
 
-Under the hood: new core/util/weztermWindow.ts records the window before the TUI exits (bounds from the macOS window list by the GUI pid, cols/rows from wezterm cli list) and treats unreadable output as no placement. reopenCommand on macOS uses open -n -b com.github.wez.wezterm with --config initial_cols/rows before start and --position in pixels, and awaitLaunch now waits for open to exit. The model-access note comes from the CLI's model_not_found error (isModelNotFound, formatModelAccessNote, catalogTwin). Checks: a probe ran the real reopen command and the window landed at the exact spot, frontmost, and full screen when asked; a live /revive came back at the measured place; revive.test.ts 17 pass; weztermWindow tests 2 pass; cliEvents and configModels 22 pass; the new fake-model scenario passes; typecheck clean in core, opencode, and tui. Known: 3 macOS fakeModel failures that also fail on clean main.
+keys:
+On a Mac, Cmd+Option+Q queues a prompt while the session is busy, and on Home it sends the prompt and stays there. Option+Q still works; plain Cmd+Q still quits the terminal.
+
+Under the hood: the macOS clipboard read now uses OpenTUI's native reader first, with osascript as the fallback (measured 0.81 s down to about 2 ms for a 749 KB PNG). A reused Claude process keeps its own spawn args instead of planning a spawn every turn that was never used (reused-turn pre-send time in fake-model runs: median 5 ms before, 0 after); a probe showed a live CLI does not reload plugin skills, so the per-turn skill refresh was dropped. The mac keybind preset adds super+alt+q to prompt_queue and prompt_submit_background. Checks: tui clipboard.test.ts 10 pass, config.test.tsx 20 pass, tui and opencode typecheck clean; opencode test/provider/claude-code 691 pass, 10 known Mac failures (3 in fakeModel, 6 in steering, 1 in commandPermissions; the last 7 newly recorded in AGENTS.md after failing on unchanged code too).

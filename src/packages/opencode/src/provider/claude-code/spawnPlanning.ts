@@ -299,9 +299,9 @@ export async function ensureProxyServer(
 }
 
 /**
- * Everything one spawn of `claude` needs. Computed every turn, even when a
- * live process is reused, because the start watchdog respawns with `cliArgs`.
- * A reused process keeps its system prompt, so no prompt file is written then.
+ * Everything one spawn of `claude` needs. Only a new process is planned: a
+ * reused one keeps its args, system prompt, proxy server and skills folder,
+ * and the start watchdog respawns it with its own args.
  */
 export async function planSpawn(input: {
   config: ClaudeCodeConfig
@@ -309,8 +309,6 @@ export async function planSpawn(input: {
   options: LanguageModelV3CallOptions
   /** Pool account id this spawn runs as; decides whose skills folder dedupes oc skills. */
   account: string
-  reusing: boolean
-  proxyServer: ProxyMcpServer | null
   proxyTools: ProxyToolDef[] | null
   runtimeStatus: RuntimeMcpStatus | undefined
   cliVersion: CliVersion | null
@@ -321,13 +319,11 @@ export async function planSpawn(input: {
   const commandPermission = commandToolPlan(input.options.providerOptions, config.provider) !== undefined
   const spawnModel = parseModelId(turn.effectiveModelId)
   const systemPrompt = (toolEnvironment?: string) =>
-    input.reusing
-      ? undefined
-      : buildAppendedSystemPrompt({
-          agentPrompt: turn.agentPrompt,
-          multiStepHint: config.multiStepContinuation !== false,
-          toolEnvironment,
-        })
+    buildAppendedSystemPrompt({
+      agentPrompt: turn.agentPrompt,
+      multiStepHint: config.multiStepContinuation !== false,
+      toolEnvironment,
+    })
 
   // Text-only requests have no execution authority, including inherited MCP
   // tools. A compaction turn resumes the conversation only to run `/compact`.
@@ -354,8 +350,7 @@ export async function planSpawn(input: {
 
   const [tools, skills] = await Promise.all([assembleProxyTools(input), fetchOpencodeSkills(turn.cwd)])
   const proxyServer =
-    input.proxyServer ??
-    (tools.combined.length > 0 ? await ensureProxyServer(config, tools.combined, turn.sessionKey) : null)
+    tools.combined.length > 0 ? await ensureProxyServer(config, tools.combined, turn.sessionKey) : null
   const mcp = effectiveMcpConfig(config, turn.cwd, proxyServer?.configPath(), input.runtimeStatus)
   const systemPromptFile = systemPrompt(
     buildToolEnvironmentNote(

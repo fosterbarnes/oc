@@ -93,3 +93,34 @@ test("skips the PowerShell read when the native Windows clipboard has content", 
   expect(result).toEqual({ data: "clipboard text", mime: "text/plain" })
   expect(ran).toBe(false)
 })
+
+test("skips osascript when the native macOS clipboard has content", async () => {
+  let ran = false
+  const result = await read({
+    os: "darwin",
+    host: async () => ({ data: "clipboard text", mime: "text/plain" }),
+    command: async () => {
+      ran = true
+      return Buffer.alloc(0)
+    },
+  })
+
+  expect(result).toEqual({ data: "clipboard text", mime: "text/plain" })
+  expect(ran).toBe(false)
+})
+
+test("falls back to osascript when the native macOS clipboard is empty", async () => {
+  const result = await read({
+    os: "darwin",
+    host: async () => undefined,
+    command: async (command, args) => {
+      expect(command).toBe("osascript")
+      const file = /POSIX file "([^"]+)"/.exec(args?.join("\n") ?? "")?.[1]
+      if (!file) throw new Error("no output path in the osascript args")
+      await writeFile(file, pngBytes)
+      return Buffer.alloc(0)
+    },
+  })
+
+  expect(result).toEqual({ data: pngBytes.toString("base64"), mime: "image/png" })
+})

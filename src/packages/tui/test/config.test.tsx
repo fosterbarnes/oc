@@ -129,6 +129,8 @@ test("macOS keys move oc app shortcuts to cmd and keep terminal keys on ctrl", (
   expect(mac.keybinds.get("dialog.select.prev")).toMatchObject([{ key: "up,ctrl+p" }])
   expect(mac.keybinds.get("input.line.end")).toMatchObject([{ key: "ctrl+e" }])
   expect(mac.keybinds.get("terminal.suspend")).toMatchObject([{ key: "ctrl+z" }])
+  expect(mac.keybinds.get("prompt.queue")).toMatchObject([{ key: "super+alt+q,alt+q,alt+return" }])
+  expect(mac.keybinds.get("prompt.submit.background")).toMatchObject([{ key: "super+return,super+alt+q,alt+q" }])
   expect(
     resolve({ keybinds: { model_list: "ctrl+k" } }, { terminalSuspend: true, macKeys: true }).keybinds.get(
       "model.list",

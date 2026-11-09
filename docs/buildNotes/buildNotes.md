@@ -210,6 +210,48 @@ Example compact Agent notes:
 
 ---
 
+## 2026-11-09 (~00:03) - v0.2.342 willAragorns - Mac Cmd+Option+Q queues prompts - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation (/spit then /imp); completed
+- Version: 0.2.342 willAragorns
+- Added `super+alt+q` to `prompt_queue` and `prompt_submit_background` in the `mac` preset (`tui/src/config/keybindPreset.ts`); the preset is now the ctrl->super map spread plus those two overrides. Bare Cmd+Q is left alone because WezTerm owns it (QuitApplication). Option+Q stays.
+- WezTerm needs no change: Cmd+Option+Q is unbound there and reaches oc as kitty `\x1b[113;11u` with `enable_kitty_keyboard`; left Option is Alt by default (right Option composes).
+- Added two assertions to the macOS preset test in `tui/test/config.test.tsx`. Wiki: `Keybinds.md` macOS section and `Sessions.md` queued prompts mention `cmd+alt+q`. `keybindDocs.ts` only renders the oc preset, so `docs/keybinds.md` is unchanged.
+- Verification: probe in `tui/test/tmp/verify` fed raw `\x1b[113;11u` into a kitty test renderer with the mac preset and it fired `prompt.queue`; Option+Q also fired, bare Cmd+Q did not (1 pass, probe deleted). `bun test test/config.test.tsx` 20 pass; tui `bun run typecheck` clean. Not run on a real Mac WezTerm window.
+
+### User
+Keys
+- On a Mac, Cmd+Option+Q queues a prompt while the session is busy, and on Home it sends the prompt and stays there.
+- Option+Q still works; plain Cmd+Q still quits the terminal.
+
+---
+
+## 2026-11-08 (~23:51) - v0.2.341 pesciManaging - faster Mac paste and Claude turn start - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation (/imp of plan `docs/dev/macPerfPlan.md`); completed, no live check (needs `/revive`)
+- Version: 0.2.341 pesciManaging
+- Changed `tui/src/clipboard.ts` `read()`: darwin now runs the OpenTUI native read (`readHost`) first, like win32. `osascript` (`as "PNGf"`) is only the fallback (TIFF-only clipboards) and goes through `run`, so tests can see it. Removed the unused `execFile`/`promisify` imports.
+- Measured on the Mac, 749,354-byte PNG on the clipboard: `osascript` script 0.80-0.84 s; real `read()` after the change 37 ms cold (dynamic import), then 1.6-3.4 ms, same bytes. A text paste no longer pays the failing `osascript` (40 ms floor) first.
+- Note: a clipboard holding TIFF plus text (cells copied from Numbers or Excel) now pastes as text instead of an image converted by `osascript`.
+- Changed `provider/claude-code/turnStream.ts` `setup()`: a reused process takes its own `cliArgs`, with no `planSpawn` call. Before, every reused turn planned a spawn before sending the message (`GET /experimental/tool`, `GET /skill`, MCP config reads, `ensureSkillPlugin`) and threw the result away: `respawnActiveProcess` uses `old.cliArgs ?? cliArgs`, and `spawnClaudeProcess` always sets `cliArgs`.
+- `spawnPlanning.ts` `planSpawn`: removed the `reusing` and `proxyServer` inputs; it always plans a new process. `planSpawnFor()` has no parameter and now serves `spawnFresh` and `switchAccount`.
+- Probe: a live `claude` 2.1.319 with `--plugin-dir` did not list a skill added to that plugin between turns (second `init` showed the turn-1 list). So the per-turn `ensureSkillPlugin` refresh had no effect on live processes and was dropped, not moved to the background.
+- Measured (fake-model `fakeModel.test.ts`, provider debug log, time from `doStream starting` to `sent user message` on reused turns): before 0-6 ms, median 5; after 0-1 ms, median 0. Real setups with many MCP tools and skills spend more on the registry fetch, which is not measured.
+- Plan step 3 (start the MCP status call earlier) skipped: the pre-send path is already about 0 ms.
+- Deviation: no new test asserting that `/experimental/tool` is not called on reuse. The fake-model run cannot see server routes without a mock; the timing above covers it.
+- Tests: `tui` `clipboard.test.ts` 10 pass (2 new darwin cases: native content skips `osascript`; empty native read falls back to `osascript`). opencode `test/provider/claude-code/` 691 pass, 10 fail: the 3 known Mac `fakeModel.test.ts` failures plus 6 in `steering.test.ts` and 1 in `commandPermissions.test.ts`. Those 7 fail the same way on the unchanged provider files; added to AGENTS.md known failures. Typecheck clean in tui and opencode.
+
+### User
+Mac paste
+- Pasting with Cmd+V on the Mac is faster: an image pastes in a few milliseconds instead of almost a second, and text no longer waits on an image check first. A clipboard that holds both a picture and text (for example cells copied from Numbers) now pastes as text.
+
+Claude chats
+- After the first message in a chat, oc sends each message to Claude Code right away instead of first looking up tools and skills it did not use.
+
+---
+
 ## 2026-11-08 (~23:35) - v0.2.340 valveProstate - Mac revive reopens the window in place and in front - Claude Opus 5.5, low effort; Implementation
 
 ### Agent

@@ -348,13 +348,9 @@ class ClaudeTurn {
       )
     }
 
-    if (this.activeProcess) {
-      log.debug("reusing active process", { sk: this.sk })
-      this.cliArgs = (await this.planSpawnFor(this.activeProcess)).cliArgs
-    } else {
-      this.activeProcess = await singleFlightSpawn(this.sk, () => this.spawnFresh())
-      this.cliArgs = this.activeProcess.cliArgs ?? []
-    }
+    if (this.activeProcess) log.debug("reusing active process", { sk: this.sk })
+    this.activeProcess ??= await singleFlightSpawn(this.sk, () => this.spawnFresh())
+    this.cliArgs = this.activeProcess.cliArgs ?? []
     this.proc = this.activeProcess.proc
     this.lineEmitter = this.activeProcess.lineEmitter
     if (!this.turn.compactionMode && this.turn.affinity !== "default") {
@@ -437,14 +433,12 @@ class ClaudeTurn {
     this.armStartWatchdog()
   }
 
-  private planSpawnFor(reused: ActiveProcess | undefined) {
+  private planSpawnFor() {
     return planSpawn({
       config: this.config,
       turn: this.turn,
       options: this.options,
       account: this.account,
-      reusing: !!reused,
-      proxyServer: reused?.proxyServer ?? null,
       proxyTools: this.input.proxyTools,
       runtimeStatus: this.input.runtimeStatus,
       cliVersion: this.input.cliVersion,
@@ -458,7 +452,7 @@ class ClaudeTurn {
    * meanwhile is reused instead, and this plan's proxy server and prompt file go.
    */
   private async spawnFresh(): Promise<ActiveProcess> {
-    const plan = await this.planSpawnFor(undefined)
+    const plan = await this.planSpawnFor()
     const live = getActiveProcess(this.sk)
     if (live) {
       if (plan.proxyServer && plan.proxyServer !== live.proxyServer) void plan.proxyServer.close()
@@ -599,18 +593,7 @@ class ClaudeTurn {
     this.out.note(
       `\n> **Claude account switched:** ${poolAccountLabel(previous)} hit its usage limit; continuing ${followed ? "the same Claude conversation " : ""}on ${poolAccountLabel(next)}.\n`,
     )
-    const plan = await planSpawn({
-      config: this.config,
-      turn: this.turn,
-      options: this.options,
-      account: this.account,
-      reusing: false,
-      proxyServer: null,
-      proxyTools: this.input.proxyTools,
-      runtimeStatus: this.input.runtimeStatus,
-      cliVersion: this.input.cliVersion,
-      loadLiveToolInfo: this.input.loadLiveToolInfo,
-    })
+    const plan = await this.planSpawnFor()
     if (this.closed) return
     if (this.autoContinue.aborted) return this.finish()
     this.cliArgs = plan.cliArgs

@@ -1,11 +1,8 @@
-import { execFile, spawn } from "node:child_process"
+import { spawn } from "node:child_process"
 import { readFile, rm } from "node:fs/promises"
 import { platform, release, tmpdir } from "node:os"
 import path from "node:path"
-import { promisify } from "node:util"
 import type { HostClipboardService } from "@opentui/core"
-
-const exec = promisify(execFile)
 
 type Command = (command: string, args?: string[], input?: string) => Promise<Buffer>
 type ClipboardContent = { data: string; mime: string; filepath?: string }
@@ -41,10 +38,18 @@ export async function read(options: ReadOptions = {}): Promise<ClipboardContent 
   const os = options.os ?? platform()
   const run = options.command ?? command
 
+  // Native read first: it is near-instant, while osascript costs ~800 ms for an image and the PowerShell
+  // file-drop read ~300 ms.
+  if (os === "win32" || os === "darwin") {
+    const content = await (options.host ?? readHost)()
+    if (content) return content
+  }
+
+  // Fallback for what the native read skips, such as a TIFF-only clipboard (`as "PNGf"` converts it).
   if (os === "darwin") {
     const file = path.join(tmpdir(), "opencode-clipboard.png")
     try {
-      await exec("osascript", [
+      await run("osascript", [
         "-e",
         'set imageData to the clipboard as "PNGf"',
         "-e",
@@ -62,12 +67,6 @@ export async function read(options: ReadOptions = {}): Promise<ClipboardContent 
     } finally {
       await rm(file, { force: true }).catch(() => {})
     }
-  }
-
-  // Native read first: it is near-instant, while the PowerShell file-drop read costs ~300 ms.
-  if (os === "win32") {
-    const content = await (options.host ?? readHost)()
-    if (content) return content
   }
 
   if (os === "win32" || release().includes("WSL")) {

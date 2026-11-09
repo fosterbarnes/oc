@@ -1,6 +1,6 @@
 # macOS and Claude Code speed: easy wins plan
 
-Status: planned 2026-11-08 (v0.2.339 code). Two confirmed wins and one small optional one. Every number below
+Status: steps 1 and 2 implemented in v0.2.341 (2026-11-08); step 3 skipped (after step 2 the reused-turn pre-send time is 0-1 ms). Planned on v0.2.339 code. Two confirmed wins and one small optional one. Every number below
 was measured on the dev Mac (Apple Silicon, Claude Code 2.1.319) on 2026-11-08 unless marked as an estimate.
 Package paths are relative to `src/`.
 
@@ -114,8 +114,8 @@ respawn. Find out whether Claude Code does that before deciding:
 
 - `packages/opencode`: `bun run typecheck`; `bun test test/provider/claude-code/` (from PowerShell on Windows, or on the
   Mac compare against the known Mac failures in `docs/dev/macos.md` and the AGENTS.md list).
-- Watchdog path still covered: find the existing start-watchdog respawn test (`grep -rn "start watchdog"` in
-  `test/provider/claude-code`) and confirm it passes; it now proves the respawn uses the process's own args.
+- Watchdog path still covered: `test/provider/claude-code/respawn.test.ts` must pass; it now proves the respawn uses
+  the process's own args.
 - Add one assertion where a two-turn reuse is already exercised (for example `fakeModel.test.ts`): the second turn
   makes no `/experimental/tool` request. If the scenario cannot see server routes, assert through the provider log
   line instead of adding a mock.

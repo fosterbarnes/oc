@@ -47,11 +47,16 @@ const macKeepsCtrl = new Set([
   "prompt.autocomplete.prev",
   "prompt.autocomplete.next",
 ])
-export const mac: TuiKeybind.KeybindOverrides = Object.fromEntries(
-  Object.entries(TuiKeybind.Definitions).flatMap(([name, item]) => {
-    if (macKeepsCtrl.has(name) || /^(input|messages|which_key)_/.test(name)) return []
-    const value = oc[name as keyof typeof oc] ?? item.default
-    if (typeof value !== "string" || !value.includes("ctrl+")) return []
-    return [[name, value.replaceAll("ctrl+", "super+")]]
-  }),
-)
+export const mac: TuiKeybind.KeybindOverrides = {
+  ...Object.fromEntries(
+    Object.entries(TuiKeybind.Definitions).flatMap(([name, item]) => {
+      if (macKeepsCtrl.has(name) || /^(input|messages|which_key)_/.test(name)) return []
+      const value = oc[name as keyof typeof oc] ?? item.default
+      if (typeof value !== "string" || !value.includes("ctrl+")) return []
+      return [[name, value.replaceAll("ctrl+", "super+")]]
+    }),
+  ),
+  // Cmd+Q quits the terminal, so the Alt+Q queue/send-and-stay key gets Cmd+Option+Q; Option+Q stays.
+  prompt_queue: "super+alt+q,alt+q,alt+return",
+  prompt_submit_background: "super+return,super+alt+q,alt+q",
+}
