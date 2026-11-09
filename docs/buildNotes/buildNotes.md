@@ -210,6 +210,64 @@ Example compact Agent notes:
 
 ---
 
+## 2026-11-09 (~14:42) - v0.2.343 outgoingStallion - /revive builds with the window open and compiles once - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation (/imp of `docs/dev/reviveFasterPlan.md`, Chunks 0-6 in one tree); completed, no live /revive check yet
+- Version: 0.2.343 outgoingStallion (not bumped: already changed since the last commit; same tree as the previous entry)
+- Added `ReviveHost.prepare` + `oc oc --revive-prepare` (`Revive.PrepareRequest`, `decodePrepare`): source choice, skip-build check, `bun install` + build into `<cache>/oc-revive-build/<stamp>` under `oc-revive/build.lock`, or release download; writes `{ output }` to a result file in `oc-revive/`
+- Changed `ReviveContext`: removed `update` mode, `release`, `source`, `sourceDir`; added `output` (required for `install`, absolute, inside `Global.Path.cache`); pipeline only swaps (no build steps)
+- Changed TUI `useRevive` (`reviveCommands.tsx`): `prepare` spawns the helper with output to `log/revive-build.log`, toast while building, error toast with log tail; `swap` (was `revive`) waits for this session's reply to finish; `/update` = prepare(release) + swap; `idle` moved here from `reviveChain.tsx`
+- Changed `build.ts`: one compile per target, native = `copyFile(..., COPYFILE_FICLONE)` of `oc`; `--outdir`; phase timings; `--version` check on the compiled file only; removed `OPENCODE_FLAVOR` define
+- Changed `Global.native` (`core/src/global.ts`): from the executable name (`opencode` native, `oc`/`occ` oc, anything else reads `OC_FLAVOR`)
+- Changed `Revive.buildSteps(build, { variant?, outdir? })`: adds `--skip-install`
+- Changed `generate.ts`: non-release builds read `~/.cache/opencode/models.json` when present; fetch has a 30 s timeout
+- Added `warmLaunch` (`reviveHost.ts`): macOS runs `occ`/`opencode --version` after install, alongside the server start
+- Changed `wezterm.ts` `oldPanes`: a vanished socket returns no panes; the restarter logs `No old panes left to close` instead of failing
+- Added `src/bun.lock text eol=lf` to `.gitattributes`: `bun install` rewrites the lockfile with LF on every OS
+- Note: macOS scans each new executable path on first launch (~1.6 s; per path: moves, clones, and hard links are all rescanned). This is most of the 2.3 s server start; plain `oc serve` answers in 0.26 s. Findings in the plan file
+- Risk: the native file must be named `opencode`; a renamed copy runs as oc (FORK.md documents it)
+- Verification: typecheck passes in core, opencode, tui. `bun test test/config/revive.test.ts`: 19 pass / 11 skip / 0 fail. Real build to a temp outdir: compile 3.5 s, clone 0 ms, `cmp` identical, oc vs native behavior confirmed. `--revive-prepare` run from source end to end: 5.6 s, result file correct; bad requests exit 1. `git status` stays clean for `bun.lock`/`package.json` after `bun install`
+- ERROR: `test/config/tui.test.ts` "resolves keybind lookup from canonical keybinds" fails (`session.new` keybind). Unrelated (no keybind/config change; `Global.native` unchanged under bun); not in the macos.md known list
+- TODO: Windows-only `revive.test.ts` cases not run; user live checks in the plan (Chunk 3 checks 1-7, Chunk 4 Mac and Windows checks)
+
+### User
+Revive
+- `/revive` now builds oc in the background while you keep working, and the window closes only for the few-second swap.
+- A failed build shows the last lines of the build log in an error notice, and your window stays open.
+- If you start a reply while the build runs, the restart waits for that reply to finish.
+- `/update` downloads the new release while you keep working, the same way.
+- The build compiles oc once and copies it for `opencode`, so a `/revive` build takes about half as long.
+- Builds use oc's saved copy of the model list, so `/revive` works offline.
+- After a revive, the reopened window and the first native `opencode` window open about 1.5 seconds faster on macOS.
+- `bun.lock` and `package.json` no longer show as modified in git after a revive.
+
+---
+
+## 2026-11-09 (~14:11) - v0.2.343 contactOz - /revive skips the build when the source is unchanged - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation (/think plans, then /imp of `docs/dev/reviveSkipBuildPlan.md`); completed, no live /revive check yet
+- Version: 0.2.343 contactOz (already bumped before this session; the uncommitted `sidebarUsage.tsx` change in the tree is not from this session)
+- Added `core/src/util/sourceTree.ts` `sourceTree(dir)`: git tree hash of the working tree (tracked + untracked, .gitignore respected) through a temporary `GIT_INDEX_FILE` seeded from the real index; returns "" on any failure. 83 ms on this repo.
+- `opencode/script/build.ts` bakes it as `OPENCODE_SOURCE_TREE`; `core/src/installation/version.ts` exports `InstallationSourceTree` ("" in dev and in older builds).
+- `opencode/src/config/reviveHost.ts` `revivePipeline`: when mode is install and the baked hash equals `sourceTree(revive.build.source)`, `build` becomes undefined, so the existing no-install path runs (stop, start server, reopen tabs, settle chain) and the log says "Source unchanged ... skipping build". The pipeline always runs as a fresh process of the installed oc (`cli/cmd/oc.ts` `runNative`, or the TUI helper), so the constant always describes the installed file; no stamp file.
+- Removed `revive.path`: `tui/src/ocSettings.ts` field, the custom-script branch in `reviveCommands.tsx` `start()`, `.scripts/revive.ps1`, `.scripts/reviveAndInstall.ps1`, `.scripts/setReviveConsolePosition.ps1`, `startOcWindow` and `$occShortcut` in `scriptHelper.ps1`; comments in `reviveResume.ts` and `reviveChain.tsx`; SCRIPTS.md rows, FORK.md, publicReadiness.md, v0.3.0.md notes. A leftover `revive.path` key is ignored and `/revive-no-install` runs the built-in restart.
+- Removed the legacy `shell` revive tab kind (not produced since v0.2.174): `Revive.Tab` is only the oc shape (the `kind` field stays so an old binary's restart context still decodes), `tab()` rejects shell, `revive-tabs` and `spawnTab` in `cli/cmd/oc.ts` lost the shell branches, `ownedPanes` and `keepPanes` lost their kind checks.
+- Docs: README `/revive` line, AGENTS.md debug bullet, FORK.md revive row.
+- Deviation: the plan said staging a change alters the fingerprint; it does not (content-only tree hash, which is right). The test asserts that.
+- Verification: `core` `test/util/sourceTree.test.ts` 4 pass (stable, subfolder = root, edits/untracked change it, ignored and revert do not, real index and status untouched, non-repo ""); `opencode` `test/config/revive.test.ts` 17 pass, 11 skip (Windows-only); typecheck clean in core, opencode, tui. Real `build.ts --single` (dist only, not installed): both `dist/.../bin/oc` and `.../opencode` contain tree `3dc2319f`, the probe value from before the build and a valid tree object in the repo. The live skip needs the user's /revive.
+- MISTAKE: the first Python edits wrote `version.ts`, `build.ts`, `reviveHost.ts` and the two new files with LF; this repo's working copy is CRLF (`eol=crlf`). Fixed before verification. Prevention: open files with `newline=''` and keep their existing line endings.
+
+### User
+Revive
+- `/revive` now rebuilds oc only when the source folder changed since the installed build; otherwise it just restarts and reopens your tabs, much faster.
+- The first `/revive` after this update still builds once, because the oc running now has no fingerprint.
+- `/revive-no-install` is unchanged.
+- The old `revive.path` custom script setting and the `.scripts` revive scripts are gone; the built-in restart does the same job.
+
+---
+
 ## 2026-11-09 (~00:03) - v0.2.342 willAragorns - Mac Cmd+Option+Q queues prompts - Claude Opus 5.5, low effort; Implementation
 
 ### Agent

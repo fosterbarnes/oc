@@ -8,6 +8,7 @@ import { OcRelease } from "@opencode-ai/core/util/ocRelease"
 import { ReviveResume } from "@opencode-ai/core/util/reviveResume"
 import { detectTerminal } from "@opencode-ai/core/util/terminal"
 import { WeztermWindow } from "@opencode-ai/core/util/weztermWindow"
+import { createEffect, createRoot } from "solid-js"
 import { useExit } from "./context/exit"
 import { useKV } from "./context/kv"
 import { useLocal } from "./context/local"
@@ -22,7 +23,7 @@ import { DialogSelect } from "./ui/dialog-select"
 import type { ToastContext } from "./ui/toast"
 import { reviveText, reviveVersions } from "./util/revive"
 
-// Built-in revive restarts oc and its terminal (ReviveHost.revive); `revive.path` still overrides /revive-no-install.
+// Built-in revive restarts oc and its terminal (ReviveHost.revive).
 export function reviveCommands(toast: ToastContext) {
   const route = useRoute()
   const dialog = useDialog()
@@ -87,15 +88,21 @@ export function reviveCommands(toast: ToastContext) {
         )
         dialog.clear()
         if (choice === "skip") kv.set(SKIPPED_VERSION, release.version)
-        if (choice === "update")
-          return revive.revive("update", { sessionID: sessionID(), source: { release: release.version } })
+        if (choice !== "update") return
+        // Downloads and verifies while this window stays open; only the swap closes it.
+        const output = await revive.prepare({ release: release.version })
+        if (output?.length) return revive.swap("install", { sessionID: sessionID(), output })
       },
     },
   ]
 }
 
-// Context shape: Revive.ReviveContext in packages/opencode/src/config/revive.ts.
+// Shapes: Revive.PrepareRequest and Revive.ReviveContext in packages/opencode/src/config/revive.ts.
 type Source = { source: "existing" | "download"; sourceDir: string } | { source: "none" }
+type Prepare = Source | { release: string } | {}
+
+// One build or download at a time per TUI; a second /revive or /update waits for the first.
+let preparing = false
 
 // Shared by the revive slash commands and revive chains (`reviveChain.tsx`). Chains pass the session
 // explicitly (the route may still be Home) and the ReviveResume id of the steps typed after the revive.
@@ -186,10 +193,75 @@ export function useRevive(toast: ToastContext) {
       ...(resume ? { resume } : {}),
     }
   }
-  const revive = async (
-    mode: "install" | "no-install" | "update",
-    options: { sessionID?: string; source?: Source | { release: string }; resume?: string; next?: string[] } = {},
+  // Resolves once the session has no running reply.
+  const idle = (sessionID: string) =>
+    new Promise<void>((resolve) =>
+      createRoot((dispose) =>
+        createEffect(() => {
+          if ((sync.data.session_status[sessionID]?.type ?? "idle") !== "idle") return
+          queueMicrotask(dispose)
+          resolve()
+        }),
+      ),
+    )
+  // `oc oc --revive-prepare` in a hidden helper: the source choice, build, or release download, while
+  // this window stays open. Paths to install, [] for a plain restart, undefined when it failed (toasted).
+  const prepare = async (request: Prepare) => {
+    if (preparing) {
+      toast.show({ message: "A revive is already building", variant: "info" })
+      return
+    }
+    preparing = true
+    const dir = path.join(Global.Path.state, "oc-revive")
+    const result = path.join(dir, `prepare-${process.pid}-${Date.now()}.json`)
+    const logFile = path.join(Global.Path.log, "revive-build.log")
+    toast.show({ message: "Building oc... (log: revive-build.log)", variant: "info", duration: 15 * 60_000 })
+    try {
+      await fs.promises.mkdir(dir, { recursive: true })
+      const log = fs.openSync(logFile, "w")
+      const code = await new Promise<number>((resolve) => {
+        const child = spawn(helperPath(), helperArgs("--revive-prepare", { ...request, result }), {
+          windowsHide: true,
+          stdio: ["ignore", log, log],
+          env: { ...process.env, OC_FLAVOR: "oc" },
+        })
+        child.once("error", (error) => {
+          fs.appendFileSync(logFile, `${error.message}\n`)
+          resolve(1)
+        })
+        child.once("exit", (exitCode) => resolve(exitCode ?? 1))
+      }).finally(() => fs.closeSync(log))
+      toast.dismiss()
+      if (code !== 0) {
+        const tail = fs
+          .readFileSync(logFile, "utf8")
+          .split(/\r?\n/)
+          .filter((line) => line.trim())
+          .slice(-5)
+        toast.show({ message: [...tail, `Log: ${logFile}`].join("\n"), variant: "error", duration: 20_000 })
+        return
+      }
+      const output = (JSON.parse(await fs.promises.readFile(result, "utf8")) as { output: string[] }).output
+      return output
+    } catch (error) {
+      toast.dismiss()
+      toast.error(error instanceof Error ? error : new Error(String(error)))
+      return
+    } finally {
+      preparing = false
+      await fs.promises.rm(result, { force: true })
+    }
+  }
+  // The swap: stops oc, installs `output` (if any), and reopens. Only this part closes the window.
+  const swap = async (
+    mode: "install" | "no-install",
+    options: { sessionID?: string; output?: string[]; resume?: string; next?: string[] } = {},
   ) => {
+    // A reply started during the build finishes first.
+    if (options.sessionID && (sync.data.session_status[options.sessionID]?.type ?? "idle") !== "idle") {
+      toast.show({ message: "Build ready; restarting after this reply", variant: "info" })
+      await idle(options.sessionID)
+    }
     await mark(options.sessionID, options.next)
     const base = baseContext(mode, options.sessionID, options.resume)
     // Read now: on macOS the window closes with this TUI, before the restarter reopens it.
@@ -198,7 +270,7 @@ export function useRevive(toast: ToastContext) {
       ...base,
       ...(window ? { window } : {}),
       ...(Global.native ? { native: true, tuiPid: process.pid } : {}),
-      ...options.source,
+      ...(options.output ? { output: options.output } : {}),
     }
     // Hosted by an `oc`/`occ` launcher: hand off and exit, so it shows revive progress in this window
     // (Revive.handoffPath). Otherwise a hidden helper runs the same pipeline.
@@ -226,19 +298,21 @@ export function useRevive(toast: ToastContext) {
     })
   }
   // The revive pipeline lives in oc: a native window hands off to the oc executable beside it.
+  const bun = /^bun(?:\.exe)?$/i.test(path.basename(process.execPath))
+  const helperPath = () =>
+    Global.native && !bun
+      ? path.join(path.dirname(process.execPath), `oc${path.extname(process.execPath)}`)
+      : process.execPath
+  const helperArgs = (flag: string, value: unknown) => [
+    ...(bun ? [process.argv[1]] : []),
+    "oc",
+    flag,
+    Buffer.from(JSON.stringify(value)).toString("base64url"),
+  ]
   // A helper that fails settles its chain failed, so this still-running TUI puts the steps back.
   const launchHelper = (context: { resume?: string }, wait = false) => {
-    const bun = /^bun(?:\.exe)?$/i.test(path.basename(process.execPath))
-    const helper =
-      Global.native && !bun
-        ? path.join(path.dirname(process.execPath), `oc${path.extname(process.execPath)}`)
-        : process.execPath
-    const args = [
-      ...(bun ? [process.argv[1]] : []),
-      "oc",
-      "--revive",
-      Buffer.from(JSON.stringify(context)).toString("base64url"),
-    ]
+    const helper = helperPath()
+    const args = helperArgs("--revive", context)
     const failed = () => {
       if (context.resume) void ReviveResume.settle(context.resume, "failed")
     }
@@ -270,20 +344,16 @@ export function useRevive(toast: ToastContext) {
   const start = async (mode: ReviveResume.Mode, sessionID: string | undefined, resume?: string, next?: string[]) => {
     // Read fresh: the first /revive saves the source choice to oc.json (revive.build).
     const config = readOcConfig()
-    if (mode === "no-install") {
-      if (!config.revivePath) return revive("no-install", { sessionID, resume, next }).then(() => true)
-      await mark(sessionID, next)
-      // A custom script reports nothing back: the reopened TUI sends the follow-up steps either way.
-      if (resume) await ReviveResume.settle(resume, "ready")
-      launchDetached(config.revivePath)
-      return true
-    }
+    if (mode === "no-install") return swap("no-install", { sessionID, resume, next }).then(() => true)
     if (mode === "install") {
-      if (config.reviveSourceChosen) return revive("install", { sessionID, resume, next }).then(() => true)
-      const source = await chooseSource()
+      const source = config.reviveSourceChosen ? {} : await chooseSource()
       if (!source) return false
-      dialog.clear()
-      return revive("install", { sessionID, resume, source, next }).then(() => true)
+      if (!config.reviveSourceChosen) dialog.clear()
+      // Builds while this window stays open; a failed build leaves it open (and a chain's steps restored).
+      const output = await prepare(source)
+      if (!output) return false
+      const options = { sessionID, resume, next }
+      return (output.length ? swap("install", { ...options, output }) : swap("no-install", options)).then(() => true)
     }
     if (!config.reviveBuild) {
       toast.show({ message: "No oc source saved; run /revive once to choose one", variant: "error" })
@@ -310,7 +380,7 @@ export function useRevive(toast: ToastContext) {
     launchHelper(baseContext("single", sessionID, resume), true)
     return true
   }
-  return { start, revive }
+  return { start, prepare, swap, idle }
 }
 
 // Release version the user chose to skip; the startup notice stays quiet until a newer one ships.

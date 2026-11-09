@@ -35,7 +35,6 @@ function resolveInstallDir([string]$PathValue = $env:PATH) {
     Join-Path $HOME '.local' 'bin'
 }
 $installDir = resolveInstallDir
-$occShortcut = Join-Path ([Environment]::GetFolderPath('Desktop')) 'occ.lnk'
 $versionFolder = Join-Path $srcRoot '.version'
 $version = Join-Path $versionFolder 'version'
 $versionTag = Join-Path $versionFolder 'versionTag'
@@ -289,23 +288,6 @@ function writeClearedLine {
 }
 
 $weztermExe = (Get-Command "wezterm$exeSuffix" -ErrorAction SilentlyContinue)?.Source
-
-# Starts the resident server, then opens occ in a new terminal: the Desktop occ.lnk on Windows,
-# a new WezTerm process on macOS (Terminal.app without WezTerm).
-function startOcWindow {
-    $ocExe = Join-Path $installDir "oc$exeSuffix"
-    if ($IsWindows) {
-        # occ waits on the same startServer lock instead of spawning its own.
-        Start-Process -FilePath $ocExe -ArgumentList 'oc', 'server', 'start' -WindowStyle Hidden
-        Invoke-Item -LiteralPath $occShortcut
-        return
-    }
-    # `oc server start` spawns the resident detached and exits once it is ready.
-    runNativeCommand $ocExe @('oc', 'server', 'start') 'oc server start' | Out-Null
-    $occ = Join-Path $installDir 'occ'
-    if ($weztermExe) { runNativeCommand open @('-na', 'WezTerm', '--args', 'start', '--', $occ) 'open WezTerm' }
-    else { runNativeCommand open @('-a', 'Terminal', $occ) 'open Terminal' }
-}
 
 # Ends a script started with `pwsh -File`; a no-op for nested `& other.ps1` calls and an open
 # prompt. SCRIPT_OWN_PANE is set by the oc sidebar for panes it made for one script

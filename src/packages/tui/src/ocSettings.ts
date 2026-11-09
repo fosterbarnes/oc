@@ -26,7 +26,6 @@ export function readOcConfig(): {
   homeDir: string
   homeDirSort: string
   serverStartAtLogin: boolean
-  revivePath: string
   // False until the first /revive saves the source choice (`revive.build` object or `false`).
   // Without it, /revive asks first (`chooseSource` in `reviveCommands`).
   reviveSourceChosen: boolean
@@ -48,7 +47,7 @@ export function readOcConfig(): {
         homeDir?: unknown
         homeDirSort?: unknown
         server?: { startAtLogin?: unknown; startOnWindowsUserStart?: unknown }
-        revive?: { path?: unknown; build?: unknown }
+        revive?: { build?: unknown }
         claudeFailover?: unknown
         claudeAccountNames?: unknown
       }
@@ -64,7 +63,6 @@ export function readOcConfig(): {
     const homeDirSort = sortRaw === "modified" ? "modified" : "name"
     // `startOnWindowsUserStart` is the old key; opencode OcConfig.update drops it on the next save.
     const serverStartAtLogin = (merged.server?.startAtLogin ?? merged.server?.startOnWindowsUserStart) === true
-    const revivePath = typeof merged.revive?.path === "string" ? merged.revive.path.trim() : ""
     const reviveSourceChosen = merged.revive?.build !== undefined
     const reviveBuild = typeof merged.revive?.build === "object" && merged.revive.build !== null
     const claudeFailover = merged.claudeFailover === "ask" ? "ask" : "auto"
@@ -81,7 +79,6 @@ export function readOcConfig(): {
       homeDir,
       homeDirSort,
       serverStartAtLogin,
-      revivePath,
       reviveSourceChosen,
       reviveBuild,
       claudeFailover,
@@ -94,7 +91,6 @@ export function readOcConfig(): {
       homeDir: fallbackDir,
       homeDirSort: fallbackSort,
       serverStartAtLogin: false,
-      revivePath: "",
       reviveSourceChosen: false,
       reviveBuild: false,
       claudeFailover: "auto",

@@ -321,11 +321,6 @@ export function createSidebarUsage(input: {
       probedProviders().filter((provider) => Date.now() - (snapshots[provider].fetchedAt ?? 0) > 60_000),
     )
   }
-  // Account rows use their own snapshot; cached siblings are marked per window.
-  const usageColor = (snapshot: UsageSnapshot<{ ok: boolean }>) =>
-    snapshot.stale || snapshot.source === "cache" || usageNow() - (snapshot.fetchedAt ?? 0) > 300_000
-      ? theme.textMuted
-      : theme.text
   usageScheduler = createUsageRefresh({
     providers: probedProviders,
     active: (provider) =>
@@ -536,7 +531,7 @@ export function createSidebarUsage(input: {
     const rows = layout(usageColumns(Object.values(layout()).flat()))
     const fallbackRow = (label: string, snapshot: UsageSnapshot<{ ok: boolean }>, text: string) => (
       <box flexDirection="row" gap={1}>
-        <text fg={usageColor(snapshot)}>{label}</text>
+        <text fg={theme.text}>{label}</text>
         <text fg={theme.textMuted}>{text}</text>
       </box>
     )
@@ -558,9 +553,7 @@ export function createSidebarUsage(input: {
           return (
             <box flexDirection="column" marginTop={"spaced" in row && row.spaced && usageSpacing() ? 1 : 0}>
               <text fg={theme.textMuted} wrapMode="none">
-                <span style={{ fg: usageColor(row.snapshot ?? snapshot) }}>
-                  {row.usage.startsWith(rowLabel) ? rowLabel : ""}
-                </span>
+                <span style={{ fg: theme.text }}>{row.usage.startsWith(rowLabel) ? rowLabel : ""}</span>
                 {row.usage.startsWith(rowLabel) ? row.usage.slice(rowLabel.length) : row.usage}
               </text>
               <text fg={theme.textMuted} wrapMode="none">
@@ -612,17 +605,6 @@ export function createSidebarUsage(input: {
                 {savedProviders() ? "No usage providers selected" : "No usage providers connected"}
               </text>
             </Show>
-            <Show when={usageProviders().includes("openai")}>
-              <box flexDirection="column">
-                <Show
-                  when={codexHasData}
-                  fallback={fallbackRow("Codex :", usage(), codex.reauthenticate ? "run /connect" : "unavailable")}
-                >
-                  {aligned("Codex :", usage(), rows.codex)}
-                </Show>
-                {planLine("openai", undefined, codexHasData)}
-              </box>
-            </Show>
             <Show when={usageProviders().includes("claude-code")}>
               <box flexDirection="column">
                 <Show
@@ -640,6 +622,17 @@ export function createSidebarUsage(input: {
                   {aligned("Claude:", claudeProjected, rows.claude, claudePooled)}
                 </Show>
                 {claudePooled ? undefined : planLine("claude-code", undefined, Boolean(claudeOk))}
+              </box>
+            </Show>
+            <Show when={usageProviders().includes("openai")}>
+              <box flexDirection="column">
+                <Show
+                  when={codexHasData}
+                  fallback={fallbackRow("Codex :", usage(), codex.reauthenticate ? "run /connect" : "unavailable")}
+                >
+                  {aligned("Codex :", usage(), rows.codex)}
+                </Show>
+                {planLine("openai", undefined, codexHasData)}
               </box>
             </Show>
             <Show when={usageProviders().includes("cursor")}>
@@ -673,7 +666,7 @@ export function createSidebarUsage(input: {
             <Show when={usageProviders().includes("openrouter")}>
               <box flexDirection="column">
                 <box flexDirection="row" gap={1}>
-                  <text fg={usageColor(orSnapshot)}>OpenRouter:</text>
+                  <text fg={theme.text}>OpenRouter:</text>
                   <text fg={theme.textMuted}>{orValue}</text>
                 </box>
                 <Show when={orOk}>

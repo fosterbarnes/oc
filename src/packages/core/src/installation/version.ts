@@ -3,6 +3,7 @@ declare global {
   const OPENCODE_DISPLAY_VERSION: string
   const OPENCODE_VERSION_TAG: string
   const OPENCODE_CHANNEL: string
+  const OPENCODE_SOURCE_TREE: string
 }
 
 export const InstallationVersion = typeof OPENCODE_VERSION === "string" ? OPENCODE_VERSION : "local"
@@ -13,3 +14,5 @@ export const InstallationDisplayVersion =
 export const InstallationVersionTag = typeof OPENCODE_VERSION_TAG === "string" ? OPENCODE_VERSION_TAG : ""
 export const InstallationChannel = typeof OPENCODE_CHANNEL === "string" ? OPENCODE_CHANNEL : "local"
 export const InstallationLocal = InstallationChannel === "local"
+// Git tree hash of the source folder this binary was built from (`util/sourceTree`); "" when unknown.
+export const InstallationSourceTree = typeof OPENCODE_SOURCE_TREE === "string" ? OPENCODE_SOURCE_TREE : ""

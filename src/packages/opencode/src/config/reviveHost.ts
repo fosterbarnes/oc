@@ -2,8 +2,10 @@ import fs from "fs/promises"
 import os from "os"
 import path from "path"
 import { Global } from "@opencode-ai/core/global"
+import { InstallationSourceTree } from "@opencode-ai/core/installation/version"
 import { launchDetached } from "@opencode-ai/core/util/launchDetached"
 import { ReviveResume } from "@opencode-ai/core/util/reviveResume"
+import { sourceTree } from "@opencode-ai/core/util/sourceTree"
 import { TuiLedger } from "./tuiLedger"
 import { Revive } from "./revive"
 import { executablePath, read, write } from "./oc"
@@ -33,7 +35,7 @@ export async function revive(context: Revive.ReviveContext) {
     await log.write(`Revive failed: ${error instanceof Error ? error.message : String(error)}`)
     // Before any reopen, so the reopened TUI restores the follow-up steps instead of sending them.
     if (context.resume) await ReviveResume.settle(context.resume, "failed")
-    // Hosted revives recover in place. A native window has already exited, even on build failure.
+    // Hosted revives recover in place. A native window has already exited.
     if (context.native && (!context.tuiPid || !isPidAlive(context.tuiPid))) {
       await log.step("Reopening native after failure", () =>
         restartTerminal({
@@ -58,28 +60,20 @@ async function revivePipeline(context: Revive.ReviveContext) {
   if (context.native && context.tuiPid) {
     const tuiPid = context.tuiPid
     await log.step("Waiting for native window shutdown", async () => {
-      if (!(await waitForExit(tuiPid, 30_000))) throw new Error("Native window did not shut down; build cancelled")
+      if (!(await waitForExit(tuiPid, 30_000))) throw new Error("Native window did not shut down; revive cancelled")
       const stopped = await Bun.file(Revive.shutdownPath(tuiPid))
         .text()
         .catch(() => "")
       await fs.rm(Revive.shutdownPath(tuiPid), { force: true })
       await fs.rm(Revive.handoffPath(tuiPid), { force: true })
-      if (stopped !== "stopped\n") throw new Error("Native window cleanup failed; build cancelled")
+      if (stopped !== "stopped\n") throw new Error("Native window cleanup failed; revive cancelled")
     })
   }
-  // First /revive source choice; parseContext guarantees `sourceDir` for "existing" and "download".
-  const sourceDir = context.sourceDir
-  if (context.source === "download" && sourceDir)
-    await log.step(`Downloading oc source to ${sourceDir}`, () => downloadSource(sourceDir))
-  if (context.source === "existing" && sourceDir)
-    await log.step(`Using oc source at ${sourceDir}`, () => saveReviveBuild({ source: sourceDir }))
-  if (context.source === "none") await log.step("Saving revive without a source build", () => saveReviveBuild(false))
   const settings = await read()
   const bun = /^bun(?:\.exe)?$/i.test(path.basename(process.execPath))
-  const build = context.mode === "install" ? Revive.parseBuild(settings.revive?.build) : undefined
-  // An update installs a downloaded oc release through the same steps as a source build.
-  const release = context.mode === "update" ? context.release : undefined
-  const installs = !!build || !!release
+  // Built or downloaded by `prepare` while the TUI stayed open; this pipeline only swaps it in.
+  const output = context.mode === "install" ? context.output : undefined
+  const installs = !!output
   if (installs && bun) throw new Error("Install revive needs an installed oc executable, not Bun")
   const executable = Revive.resolveLauncher(executablePath())
   const installDir = path.dirname(executablePath())
@@ -97,14 +91,8 @@ async function revivePipeline(context: Revive.ReviveContext) {
     ...(context.native ? { native: true, directory: context.directory, sessionID: context.sessionID } : {}),
     ...(context.window ? { window: context.window } : {}),
   }
-  const steps = build ? Revive.buildSteps(build) : undefined
-  // One install at a time per installation: the build output, file swap and server start are shared.
+  // One install at a time per installation: the file swap and server start are shared.
   const { tabs, failure } = await withInstallLock(installs ? installDir : undefined, async () => {
-    for (const command of steps?.commands ?? [])
-      await log.step(command.join(" "), () => runVisible(command, steps?.cwd))
-    const output = release
-      ? await log.step(`Downloading and verifying oc v${release}`, () => Revive.downloadRelease(release))
-      : steps?.output
     const sources = output ? await log.step("Checking build output", () => Revive.installSources(output)) : undefined
     // Ctrl+C from here would leave oc stopped or half installed.
     const ignore = () => {}
@@ -113,14 +101,15 @@ async function revivePipeline(context: Revive.ReviveContext) {
       context.paneID && restart.terminal === "wezterm" && !context.native
         ? await windowTabsSnapshot(context.paneID, context)
         : undefined
-    const keepPanes = tabs?.flatMap((tab) => (tab.kind === "oc" && tab.paneID ? [tab.paneID] : []))
+    const keepPanes = tabs?.flatMap((tab) => (tab.paneID ? [tab.paneID] : []))
     const failure = await (async () => {
       // A native TUI/worker already shut down before handoff; installs rename running files aside.
       if (!context.native) await log.step("Stopping oc", () => shutdownAll({ keepPanes }))
       const rollback = sources
         ? await log.step(`Installing into ${installDir}`, () => Revive.install(sources, installDir))
         : undefined
-      if (context.native) return
+      const warmed = rollback ? warmLaunch(installDir) : Promise.resolve()
+      if (context.native) return warmed
       // The install stays undoable until the new server is ready; a failed start restores the old files.
       await log
         .step("Starting server", () => startServer())
@@ -131,6 +120,7 @@ async function revivePipeline(context: Revive.ReviveContext) {
           await log.step("Restoring the previous install", () => rollback(error))
           throw error
         })
+      await warmed
     })().then(
       () => undefined,
       (error: unknown) => ({ error }),
@@ -155,6 +145,56 @@ async function revivePipeline(context: Revive.ReviveContext) {
     ),
   )
   if (failure) throw failure.error
+}
+
+/**
+ * `oc oc --revive-prepare` (worker 0): the slow, failure-prone part of /revive and /update, run by a
+ * hidden helper while the TUI stays open. Saves the first source choice, then builds the source into a
+ * staging folder or downloads a release. Returns the paths to install; [] means nothing to install
+ * (no source build, or the source is unchanged since the installed build), so the TUI just restarts.
+ */
+export async function prepare(request: Revive.PrepareRequest): Promise<string[]> {
+  const log = reviveLog()
+  if (request.release) {
+    const release = request.release
+    return log.step(`Downloading and verifying oc v${release}`, () => Revive.downloadRelease(release))
+  }
+  // First /revive source choice; decodePrepare guarantees `sourceDir` for "existing" and "download".
+  const sourceDir = request.sourceDir
+  if (request.source === "download" && sourceDir)
+    await log.step(`Downloading oc source to ${sourceDir}`, () => downloadSource(sourceDir))
+  if (request.source === "existing" && sourceDir)
+    await log.step(`Using oc source at ${sourceDir}`, () => saveReviveBuild({ source: sourceDir }))
+  if (request.source === "none") await log.step("Saving revive without a source build", () => saveReviveBuild(false))
+  const build = Revive.parseBuild((await read()).revive?.build)
+  if (!build) return []
+  // This oc was built from exactly this source: restart without rebuilding, like /revive-no-install.
+  if (InstallationSourceTree !== "" && InstallationSourceTree === (await sourceTree(build.source))) {
+    await log.write(
+      `Source unchanged since the installed build (${InstallationSourceTree.slice(0, 7)}); skipping build`,
+    )
+    return []
+  }
+  // Two builds in one source folder at once would clobber each other's `bun install` and output.
+  return withResidentLock(
+    async () => {
+      // Stages are installed within seconds of their build; anything older is a leftover.
+      const stages = await fs.readdir(Revive.PREPARE_ROOT).catch(() => [])
+      for (const name of stages) {
+        const stage = path.join(Revive.PREPARE_ROOT, name)
+        const stat = await fs.stat(stage).catch(() => undefined)
+        if (stat && Date.now() - stat.mtimeMs > 60 * 60_000) await fs.rm(stage, { recursive: true, force: true })
+      }
+      const steps = Revive.buildSteps(build, { outdir: path.join(Revive.PREPARE_ROOT, String(Date.now())) })
+      for (const command of steps.commands) await log.step(command.join(" "), () => runVisible(command, steps.cwd))
+      return steps.output
+    },
+    {
+      lock: path.join(Global.Path.state, "oc-revive", "build.lock"),
+      attempts: 20,
+      busy: "Another revive is already building oc",
+    },
+  )
 }
 
 // /revive-single: the TUI's hidden helper opens a new tab running this pipeline again (`hosted`), which
@@ -186,7 +226,7 @@ async function reviveSingle(context: Revive.ReviveContext) {
   const native = await (async () => {
     const build = Revive.parseBuild((await read()).revive?.build)
     if (!build) throw new Error("No oc source saved in revive.build; run /revive once first")
-    const steps = Revive.buildSteps(build, "native")
+    const steps = Revive.buildSteps(build, { variant: "native" })
     await withInstallLock(installDir, async () => {
       for (const command of steps.commands) await log.step(command.join(" "), () => runVisible(command, steps.cwd))
       const sources = await log.step("Checking build output", () => Revive.installSources(steps.output))
@@ -210,6 +250,20 @@ async function reviveSingle(context: Revive.ReviveContext) {
   ])
   if (settled && old) await log.step("Closing the original pane", () => closeOwnedPanes(old)).catch(() => undefined)
   process.exit(await child.exited)
+}
+
+// macOS scans each new executable path on its first launch (~1.6 s per name, measured 2026-11-09), and
+// every install makes new files. The server start pays it for `oc`; this pays it for `occ` (the
+// reopened window) and native `opencode` at the same time, instead of after the window reopens.
+async function warmLaunch(installDir: string) {
+  if (process.platform !== "darwin") return
+  const names = ["occ", "opencode"].map((name) => path.join(installDir, name))
+  await Promise.all(
+    names.map(async (file) => {
+      if (!(await Bun.file(file).exists())) return
+      await Bun.spawn([file, "--version"], { stdio: ["ignore", "ignore", "ignore"] }).exited.catch(() => undefined)
+    }),
+  )
 }
 
 // Terminal CLIs report whether they opened the tab. Only cmd's new-console path needs a detached hop.
@@ -255,7 +309,7 @@ function reviveTerminal(terminal: Revive.ReviveContext["terminal"]) {
   return cli && !Bun.which(cli) ? "generic" : terminal
 }
 
-// First /revive only: clone into `directory` (or update an earlier clone there once) and point
+// First /revive only (from `prepare`): clone into `directory` (or update an earlier clone there once) and point
 // `revive.build` at it. Later revives build the folder as the user left it.
 async function downloadSource(directory: string) {
   const cloned = await fs.stat(path.join(directory, ".git")).then(
@@ -313,9 +367,11 @@ export async function restartTerminal(
     !restart.native && wezterm
       ? await log.step("Recording the old panes", () => oldPanes(restart)).catch(() => undefined)
       : undefined
+  if (old && !old.panes.length) await log.write("No old panes left to close")
   const command = Revive.reopenCommand(restart)
   await log.step(`Opening ${restart.terminal} with ${restart.launcher}`, () => launch(command))
-  if (old) await log.step("Closing this instance's old panes", () => closeOwnedPanes(old)).catch(() => undefined)
+  if (old?.panes.length)
+    await log.step("Closing this instance's old panes", () => closeOwnedPanes(old)).catch(() => undefined)
   if (!restart.native && !wezterm)
     await log.step("Closing the old window", () => closeWindow(restart)).catch(() => undefined)
   if (!restart.installDir) return
@@ -333,7 +389,7 @@ export async function restartTerminal(
 // Acknowledgement is "the terminal process started and did not fail within this window", not a usable TUI.
 const REPLACEMENT_SETTLE_MS = 1500
 
-// Held from build through server readiness; a second revive fails fast instead of waiting minutes.
+// Held from install through server readiness; a second revive fails fast instead of waiting minutes.
 function withInstallLock<T>(installDir: string | undefined, action: () => Promise<T>) {
   if (!installDir) return action()
   return withResidentLock(action, {

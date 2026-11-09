@@ -4,7 +4,7 @@ Custom fork of opencode that focuses on building on existing features simply and
 
 Not ready for widespread use until 0.3.0, especially on Linux and macOS. As of current date, testing and feature work is being done on Windows 10 LTSC IoT (i know lol). Linux and macOS feature parity is planned for v0.3.0.
 
-Current version: [v0.2.342](https://github.com/fosterbarnes/oc/commits/main)
+Current version: [v0.2.343](https://github.com/fosterbarnes/oc/commits/main)
 
 ## Standout features
 
@@ -33,7 +33,7 @@ Current version: [v0.2.342](https://github.com/fosterbarnes/oc/commits/main)
 - `ctrl+n` picks a folder and starts a session there
 - Startup animation with no blank gap before the app appears
 - Faster startup for every command
-- `/revive` restarts or rebuilds oc in place
+- `/revive` rebuilds oc while you keep working, then restarts it in place (no rebuild when the source is unchanged)
 - `/update` installs a new oc release and reopens where you were
 - `opencode` runs every oc feature in one window with no background server, like stock OpenCode (beta)
 
@@ -144,7 +144,7 @@ How everything works is in the [wiki](https://github.com/fosterbarnes/oc/wiki):
 
 ## Progress
 
-[419,896](scc.txt) lines of code and counting...
+[420,155](scc.txt) lines of code and counting...
 
 <!-- code-count:start -->
 
@@ -154,12 +154,12 @@ How everything works is in the [wiki](https://github.com/fosterbarnes/oc/wiki):
 | HTML | 1 | 1,161 | 79 | 0 | 1,082 |
 | JavaScript | 9 | 1,454 | 129 | 53 | 1,272 |
 | Nix | 3 | 258 | 23 | 26 | 209 |
-| Powershell | 32 | 2,110 | 133 | 162 | 1,815 |
+| Powershell | 29 | 2,050 | 132 | 154 | 1,764 |
 | Qt Translation Source | 1 | 262 | 15 | 0 | 247 |
 | SQL | 2 | 5 | 0 | 0 | 5 |
 | Shell | 1 | 120 | 17 | 17 | 86 |
-| TypeScript | 2,333 | 471,037 | 39,066 | 17,648 | 414,323 |
-| **Total** | **2,387** | **477,324** | **39,517** | **17,911** | **419,896** |
+| TypeScript | 2,335 | 471,416 | 39,090 | 17,693 | 414,633 |
+| **Total** | **2,386** | **477,643** | **39,540** | **17,948** | **420,155** |
 
 <!-- code-count:end -->
 

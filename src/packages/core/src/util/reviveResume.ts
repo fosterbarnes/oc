@@ -81,7 +81,7 @@ export async function status(id: string, dir = directory()) {
 
 /**
  * Takes the settled chain for `sessionID`, if any. Two TUIs on one session cannot both send it. A ready chain is skipped by the TUI that wrote it (it is still alive for
- * `revive.path` and /revive-single); a failed one is for anyone, the writer included.
+ * /revive-single); a failed one is for anyone, the writer included.
  */
 export async function claim(sessionID: string, pid: number, now = Date.now(), dir = directory()) {
   const names = await fs.readdir(dir).catch((error: NodeJS.ErrnoException) => {

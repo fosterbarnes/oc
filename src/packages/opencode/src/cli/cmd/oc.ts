@@ -298,27 +298,18 @@ const ReviveTabsCommand = cmd({
       )
     }
     const [first] = tabs
-    if (first.kind === "oc") {
-      await launchProject(first.directory, { session: first.sessionID })
-      return
-    }
-    const shell = process.platform === "win32" ? ["pwsh", "-NoLogo"] : [process.env.SHELL || "/bin/zsh", "-l"]
-    const code = await Bun.spawn(shell, { cwd: first.cwd, stdio: ["inherit", "inherit", "inherit"] }).exited
-    if (code !== 0) throw new Error(`${shell[0]} exited with code ${code}`)
+    await launchProject(first.directory, { session: first.sessionID })
   },
 })
 
 async function spawnTab(pane: string, tab: Revive.Tab) {
-  const args =
-    tab.kind === "oc"
-      ? [
-          "--cwd",
-          tab.directory,
-          "--",
-          OcConfig.executablePath(),
-          ...runtimeArgs(["oc", "launch", tab.directory, ...(tab.sessionID ? ["--session", tab.sessionID] : [])]),
-        ]
-      : ["--cwd", tab.cwd]
+  const args = [
+    "--cwd",
+    tab.directory,
+    "--",
+    OcConfig.executablePath(),
+    ...runtimeArgs(["oc", "launch", tab.directory, ...(tab.sessionID ? ["--session", tab.sessionID] : [])]),
+  ]
   const child = Bun.spawn(["wezterm", "cli", "spawn", "--pane-id", pane, ...args], { stdout: "ignore", stderr: "pipe" })
   const [code, stderr] = await Promise.all([child.exited, new Response(child.stderr).text()])
   if (code !== 0) {
@@ -429,6 +420,11 @@ export const OcCommand = cmd({
         hidden: true,
         describe: "Run the revive pipeline for an encoded context",
       })
+      .option("revive-prepare", {
+        type: "string",
+        hidden: true,
+        describe: "Build or download what an encoded /revive request installs, before oc stops",
+      })
       .option("revive-terminal", {
         type: "string",
         hidden: true,
@@ -455,6 +451,7 @@ export const OcCommand = cmd({
           kill,
           Boolean(argv["shutdown-all"]),
           argv.revive !== undefined,
+          argv["revive-prepare"] !== undefined,
           argv["revive-terminal"] !== undefined,
         ].filter(Boolean).length
         if (selected > 0 && argv._.length > 1)
@@ -466,6 +463,18 @@ export const OcCommand = cmd({
     if (args.revive !== undefined) {
       const { Revive } = await import("@/config/revive")
       await ReviveHost.revive(Revive.decodeContext(args.revive))
+      return
+    }
+    if (args["revive-prepare"] !== undefined) {
+      const { Revive } = await import("@/config/revive")
+      const request = Revive.decodePrepare(args["revive-prepare"])
+      const output = await ReviveHost.prepare(request).catch((error: unknown) => {
+        // The TUI shows the tail of this output (revive-build.log) in its error toast.
+        console.error(`Revive build failed: ${error instanceof Error ? error.message : String(error)}`)
+        process.exit(1)
+      })
+      await fs.mkdir(path.dirname(request.result), { recursive: true })
+      await fs.writeFile(request.result, JSON.stringify({ output }))
       return
     }
     if (args["revive-terminal"] !== undefined) {

@@ -7,21 +7,20 @@ import { Flock } from "./util/flock"
 import { Flag } from "./flag/flag"
 import { makeGlobalNode } from "./effect/app-node"
 
-declare global {
-  const OPENCODE_FLAVOR: string
-}
-
-// Build flavor: `oc` (launcher, resident server, revive host) or `native` (opencode.exe: in-process
-// TUI + worker like upstream). Compiled builds bake it in; `bun dev` reads OC_FLAVOR.
-// Gate on this only where a feature needs the resident server; everything else is shared.
-export const native =
-  typeof OPENCODE_FLAVOR === "string" ? OPENCODE_FLAVOR === "native" : process.env.OC_FLAVOR === "native"
-
 function executableBasename(execPath: string) {
   const file = execPath.split(/[\\/]/).pop() ?? execPath
   const ext = path.extname(file)
   return file.slice(0, file.length - ext.length).toLowerCase()
 }
+
+// Flavor: `oc` (launcher, resident server, revive host) or `native` (opencode.exe: in-process TUI +
+// worker like upstream). One compiled binary serves both and follows its file name: `opencode` is
+// native, `oc`/`occ` are oc. Anything else (`bun dev`, node) reads OC_FLAVOR.
+// Gate on this only where a feature needs the resident server; everything else is shared.
+const executableName = executableBasename(process.execPath)
+export const native =
+  executableName === "opencode" ||
+  (executableName !== "oc" && executableName !== "occ" && process.env.OC_FLAVOR === "native")
 
 // `occ.exe` is a hard link to `oc.exe`; process lookups and ledgers use the real name.
 export function resolveExecutablePath(execPath = process.execPath) {

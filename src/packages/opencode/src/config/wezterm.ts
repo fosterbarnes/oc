@@ -1,14 +1,27 @@
+import fs from "node:fs"
 import { Revive } from "./revive"
 
 // The restarter inherits the old pane's mux socket; pinning it keeps list/kill off the new window's mux.
 export function oldPanes(restart: Pick<Revive.RestartContext, "paneID" | "tabs">) {
   const socket = process.env.WEZTERM_UNIX_SOCKET
   if (!socket) return undefined
-  const list = weztermList(socket)
+  // A single-tab window's GUI exits with its launcher and takes its socket along: nothing left to close.
+  const gone = { socket, panes: [] as Array<{ id: string; window: number | undefined }> }
+  if (!fs.existsSync(socket)) return gone
+  const list = (() => {
+    try {
+      return weztermList(socket)
+    } catch (error) {
+      if (/failed to connect|EOF while reading/i.test(error instanceof Error ? error.message : String(error))) return
+      throw error
+    }
+  })()
+  if (list === undefined) return gone
   return { socket, panes: Revive.ownedPanes(list, restart).map((id) => ({ id, window: windowOf(list, id) })) }
 }
 
 export function closeOwnedPanes(old: NonNullable<ReturnType<typeof oldPanes>>) {
+  if (!old.panes.length) return
   const list = weztermList(old.socket)
   for (const pane of old.panes.filter((pane) => windowOf(list, pane.id) === pane.window)) killPane(pane.id, old.socket)
 }

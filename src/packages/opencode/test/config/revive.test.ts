@@ -182,33 +182,23 @@ windowsTest("revive and restart contexts round-trip and reject bad input before 
     paneID: "3",
     supervisorPid: 40,
     shellPid: 30,
-    source: "existing",
-    sourceDir: "C:\\src\\oc",
+    output: [path.join(Revive.PREPARE_ROOT, "1", "bin")] as string[],
     native: true,
     tuiPid: 50,
   } as const
   expect(Revive.decodeContext(Revive.encode(full))).toEqual(full)
-  const update = { ...context, mode: "update", release: "0.3.1" } as const
-  expect(Revive.decodeContext(Revive.encode(update))).toEqual(update)
   for (const input of [
     null,
     [],
     {},
     { ...context, mode: "other" },
-    { ...context, mode: "update" },
-    { ...context, mode: "update", release: "latest" },
-    { ...context, mode: "update", release: "0.3.1; calc" },
-    { ...context, release: "0.3.1" },
+    { ...context, mode: "update", release: "0.3.1" },
     { ...context, terminal: "other" },
     { ...context, directory: "" },
     { ...context, directory: "bad\0path" },
     { ...context, sessionID: 5 },
     { ...context, supervisorPid: 0 },
     { ...context, shellPid: 1.5 },
-    { ...context, source: "maybe" },
-    { ...context, source: "download" },
-    { ...context, source: "existing", sourceDir: "relative" },
-    { ...context, source: "none", sourceDir: "C:\\src\\oc" },
     { ...context, native: "yes" },
     { ...context, tuiPid: 0 },
   ]) {
@@ -234,6 +224,64 @@ windowsTest("revive and restart contexts round-trip and reject bad input before 
     { ...worker, sessionID: 1 },
   ])
     expect(() => Revive.decodeRestart(Buffer.from(JSON.stringify(input)).toString("base64url"))).toThrow()
+})
+
+test("install contexts carry outputs from oc's cache; prepare requests are validated", () => {
+  const output = [path.join(Revive.PREPARE_ROOT, "1", "bin"), path.join(Global.Path.cache, "oc-update", "0.3.1", "oc")]
+  const install = { ...context, mode: "install", output } as const
+  expect(Revive.parseContext(install)).toEqual(install)
+  for (const input of [
+    { ...context, mode: "install" },
+    { ...install, output: [] },
+    { ...install, output: ["relative"] },
+    { ...install, output: [Global.Path.cache] },
+    { ...install, output: [path.join(Global.Path.cache, "..", "elsewhere")] },
+    { ...install, output: [path.join(os.tmpdir(), "bin")] },
+    { ...context, output },
+    { ...context, mode: "single", output },
+  ])
+    expect(() => Revive.parseContext(input)).toThrow()
+
+  const result = path.join(Global.Path.state, "oc-revive", "prepare-1.json")
+  const sourceDir = path.join(os.tmpdir(), "oc")
+  for (const request of [
+    { result },
+    { result, release: "0.3.1" },
+    { result, source: "none" },
+    { result, source: "existing", sourceDir },
+    { result, source: "download", sourceDir },
+  ])
+    expect(Revive.decodePrepare(Revive.encode(request))).toEqual(request as Revive.PrepareRequest)
+  for (const request of [
+    {},
+    { result: "relative.json" },
+    { result: path.join(os.tmpdir(), "prepare.json") },
+    { result, release: "latest" },
+    { result, release: "0.3.1; calc" },
+    { result, release: "0.3.1", source: "none" },
+    { result, source: "maybe" },
+    { result, source: "download" },
+    { result, source: "existing", sourceDir: "relative" },
+    { result, source: "none", sourceDir },
+  ])
+    expect(() => Revive.decodePrepare(Revive.encode(request))).toThrow()
+})
+
+test("build steps skip the cross-platform installs and build into the staging folder", () => {
+  const source = path.join(os.tmpdir(), "oc")
+  const outdir = path.join(Revive.PREPARE_ROOT, "7")
+  const steps = Revive.buildSteps({ source }, { outdir })
+  expect(steps.cwd).toBe(path.join(source, "src"))
+  expect(steps.commands).toEqual([
+    ["bun", "install"],
+    ["bun", "run", "packages/opencode/script/build.ts", "--single", "--skip-install", "--outdir", outdir],
+  ])
+  const platform = process.platform === "win32" ? "windows" : process.platform
+  const exe = process.platform === "win32" ? ".exe" : ""
+  expect(steps.output).toEqual([
+    path.join(outdir, `opencode-${platform}-${process.arch}`, "bin"),
+    path.join(outdir, `opencode-native-${platform}-${process.arch}`, "bin", `opencode${exe}`),
+  ])
 })
 
 windowsTest(
@@ -380,13 +428,13 @@ test("ownedPanes closes only the trigger and moved panes that still exist", () =
   const later = JSON.stringify(JSON.parse(windowList).filter((pane: { pane_id: number }) => pane.pane_id !== 5))
   expect(Revive.ownedPanes(later, { paneID: "1", tabs })).toEqual(["1", "4"])
   expect(Revive.ownedPanes(windowList, { paneID: "1" })).toEqual(["1"])
-  expect(Revive.ownedPanes(windowList, { paneID: "1", tabs: [{ kind: "shell", cwd: "C:\\Work" }] })).toEqual(["1"])
+  expect(Revive.ownedPanes(windowList, { paneID: "1", tabs: [{ kind: "oc", directory: "C:\\Work" }] })).toEqual(["1"])
 })
 
 test("restart tabs round-trip, and a bad tab rejects the restart context", () => {
   const tabs: Revive.Tab[] = [
     { kind: "oc", directory: context.directory, sessionID: context.sessionID },
-    { kind: "shell", cwd: "C:\\Work" },
+    { kind: "oc", directory: "C:\\Work" },
   ]
   const worker = { ...restart, paneID: "3", tabs }
   expect(Revive.decodeRestart(Revive.encode(worker))).toEqual(worker)
@@ -394,7 +442,7 @@ test("restart tabs round-trip, and a bad tab rejects the restart context", () =>
   expect(() => Revive.decodeTabs(Revive.encode([]))).toThrow()
   for (const tab of [
     { kind: "oc" },
-    { kind: "shell", cwd: "" },
+    { kind: "shell", cwd: "C:\\Work" },
     { kind: "other", cwd: "C:\\Work" },
     null,
     "C:\\Work",
@@ -436,7 +484,7 @@ test("macOS WezTerm reopens through LaunchServices at the captured place, or ful
   expect(full.args).not.toContain("--config")
   expect(full.env.OC_REVIVE_FULLSCREEN).toBe("1")
   expect(Revive.reopenCommand(native, "darwin").env.OC_REVIVE_FULLSCREEN).toBe("0")
-  const context = { mode: "install", terminal: "wezterm", directory: "/w" }
+  const context = { mode: "no-install", terminal: "wezterm", directory: "/w" }
   expect(Revive.parseContext({ ...context, window: { x: -3, y: 76, cols: 214, rows: 77 } }).window).toEqual({
     x: -3,
     y: 76,
@@ -453,7 +501,7 @@ test("macOS WezTerm reopens through LaunchServices at the captured place, or ful
 test("wezterm restores several tabs through revive-tabs; no snapshot and other terminals keep previous", () => {
   const tabs: Revive.Tab[] = [
     { kind: "oc", directory: context.directory, sessionID: context.sessionID },
-    { kind: "shell", cwd: "C:\\Work" },
+    { kind: "oc", directory: "C:\\Work" },
   ]
   const command = Revive.reopenCommand({ ...restart, terminal: "wezterm", tabs }, "win32")
   expect(command.file).toBe("wezterm-gui")
@@ -511,15 +559,22 @@ windowsTest("build steps run build.ts in the source folder", () => {
   expect(release.cwd).toBe("C:\\src\\oc\\src")
   expect(release.commands).toEqual([
     ["bun", "install"],
-    ["bun", "run", "packages/opencode/script/build.ts", "--single"],
+    ["bun", "run", "packages/opencode/script/build.ts", "--single", "--skip-install"],
   ])
   const native = `${dist}\\opencode-native-windows-${process.arch}\\bin\\opencode.exe`
   expect(release.output).toEqual([`${dist}\\opencode-windows-${process.arch}\\bin`, native])
 })
 
 windowsTest("single revive builds and installs only native opencode", () => {
-  const steps = Revive.buildSteps({ source: "C:\\src\\oc" }, "native")
-  expect(steps.commands[1]).toEqual(["bun", "run", "packages/opencode/script/build.ts", "--single", "--native-only"])
+  const steps = Revive.buildSteps({ source: "C:\\src\\oc" }, { variant: "native" })
+  expect(steps.commands[1]).toEqual([
+    "bun",
+    "run",
+    "packages/opencode/script/build.ts",
+    "--single",
+    "--skip-install",
+    "--native-only",
+  ])
   expect(steps.output).toEqual([
     `C:\\src\\oc\\src\\packages\\opencode\\dist\\opencode-native-windows-${process.arch}\\bin\\opencode.exe`,
   ])
@@ -565,7 +620,7 @@ test.skipIf(process.platform !== "darwin")("macOS reopens and single tabs in a T
   const tab = Revive.openTabCommand([exe, "oc", "--revive", "ctx"], { terminal: "terminal-app", directory: "/tmp/x" })
   expect(tab.file).toBe("osascript")
   expect(tab.args[1]).toContain(`cd '/tmp/x' && exec env 'OC_FLAVOR=oc' '${exe}' 'oc' '--revive' 'ctx'`)
-  expect(Revive.buildSteps({ source: "/src/oc" }, "native").output).toEqual([
+  expect(Revive.buildSteps({ source: "/src/oc" }, { variant: "native" }).output).toEqual([
     `/src/oc/src/packages/opencode/dist/opencode-native-darwin-${process.arch}/bin/opencode`,
   ])
   expect(Revive.isShell("zsh")).toBe(true)

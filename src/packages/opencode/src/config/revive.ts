@@ -25,10 +25,11 @@ export type Launcher = (typeof LAUNCHERS)[number]
 
 /** Written by the TUI (handoff file or detached helper argument), read by the revive pipeline. */
 export type ReviveContext = {
-  // "update" installs the oc GitHub release `release` instead of building from source.
+  // "install" installs `output`, which `oc --revive-prepare` built or downloaded while the TUI stayed open.
   // "single" builds and installs only native opencode, then runs it in a new tab; nothing else stops.
-  mode: "install" | "no-install" | "update" | "single"
-  release?: string
+  mode: "install" | "no-install" | "single"
+  // Install only: the build or release folders/files to install, all under PREPARE_ROOT or the update cache.
+  output?: string[]
   // Single only: set once the pipeline runs inside its new tab (the first helper just opens it).
   hosted?: boolean
   terminal: Terminal
@@ -42,10 +43,6 @@ export type ReviveContext = {
   shellIdentity?: TuiLedger.Process
   // Native (opencode) TUI: the helper waits for its graceful shutdown before building.
   tuiPid?: number
-  // First /revive answer when oc.json has no `revive.build`: build from an existing source folder,
-  // download the source into `sourceDir`, or never build.
-  source?: "existing" | "download" | "none"
-  sourceDir?: string
   // Revived from a native window: reopen native and leave the resident server alone.
   native?: boolean
   // ReviveResume id of the steps typed after this revive; the pipeline settles it ready or failed.
@@ -54,12 +51,20 @@ export type ReviveContext = {
   window?: WeztermWindow.Placement
 }
 
-/** One tab of the revived WezTerm window: an oc session, or a plain shell in its working directory. */
-// `paneID` is the old-window pane the tab moves out of. Shell tabs are no longer produced; they stay
-// decodable for contexts written by an older build.
-export type Tab =
-  | { kind: "oc"; directory: string; sessionID?: string; paneID?: string }
-  | { kind: "shell"; cwd: string }
+/** Written by the TUI for `oc oc --revive-prepare`: the slow, failure-prone work before oc stops. */
+export type PrepareRequest = {
+  // First /revive answer when oc.json has no `revive.build`: build from an existing source folder,
+  // download the source into `sourceDir`, or never build.
+  source?: "existing" | "download" | "none"
+  sourceDir?: string
+  // /update: download and verify this oc release instead of building.
+  release?: string
+  // Where the helper writes `{ "output": [...] }` (empty: nothing to install); under Global.Path.state.
+  result: string
+}
+
+/** One oc tab of the revived WezTerm window. `paneID` is the old-window pane the tab moves out of. */
+export type Tab = { kind: "oc"; directory: string; sessionID?: string; paneID?: string }
 
 /** Handed from the revive pipeline to the detached terminal restarter (worker 2). */
 export type RestartContext = {
@@ -81,6 +86,9 @@ export type RestartContext = {
   tabs?: Tab[]
   window?: WeztermWindow.Placement
 }
+
+// Staging folders `oc --revive-prepare` builds into; the swap installs from them.
+export const PREPARE_ROOT = path.join(Global.Path.cache, "oc-revive-build")
 
 // `source` is the user's oc source folder (chosen or downloaded on the first /revive); revive never pulls it.
 export type BuildConfig = { source: string }
@@ -111,8 +119,9 @@ export function decodeContext(encoded: string) {
 export function parseContext(input: unknown): ReviveContext {
   const value = record(input)
   if (
-    (value.mode !== "install" && value.mode !== "no-install" && value.mode !== "update" && value.mode !== "single") ||
-    (value.mode === "update") !== (typeof value.release === "string" && RELEASE.test(value.release)) ||
+    (value.mode !== "install" && value.mode !== "no-install" && value.mode !== "single") ||
+    (value.mode === "install") !== (value.output !== undefined) ||
+    !optional(value.output, (item) => Array.isArray(item) && item.length > 0 && item.every(insideCache)) ||
     !TERMINALS.includes(value.terminal as string) ||
     !text(value.directory) ||
     !optional(value.sessionID, text) ||
@@ -125,14 +134,26 @@ export function parseContext(input: unknown): ReviveContext {
     !optional(value.resume, text) ||
     !optional(value.window, placement) ||
     !optional(value.shellIdentity, processIdentity) ||
-    (value.shellIdentity !== undefined && (value.shellIdentity as TuiLedger.Process).pid !== value.shellPid) ||
-    !optional(value.source, (item) => item === "existing" || item === "download" || item === "none") ||
-    (value.source === "existing" || value.source === "download") !==
-      (text(value.sourceDir) && path.isAbsolute(value.sourceDir as string))
+    (value.shellIdentity !== undefined && (value.shellIdentity as TuiLedger.Process).pid !== value.shellPid)
   ) {
     throw new Error("Invalid revive context")
   }
   return value as ReviveContext
+}
+
+export function decodePrepare(encoded: string): PrepareRequest {
+  const value = record(JSON.parse(Buffer.from(encoded, "base64url").toString("utf8")))
+  if (
+    !optional(value.release, (item) => typeof item === "string" && RELEASE.test(item)) ||
+    !optional(value.source, (item) => item === "existing" || item === "download" || item === "none") ||
+    (value.source === "existing" || value.source === "download") !==
+      (text(value.sourceDir) && path.isAbsolute(value.sourceDir as string)) ||
+    (value.release !== undefined && value.source !== undefined) ||
+    !inside(Global.Path.state, value.result)
+  ) {
+    throw new Error("Invalid revive prepare request")
+  }
+  return value as PrepareRequest
 }
 
 export function decodeRestart(encoded: string): RestartContext {
@@ -199,7 +220,7 @@ export function windowTabs(
 /** Old-window panes the restarter may close: owned tabs plus the trigger, only while they still exist. */
 export function ownedPanes(listJson: string, restart: Pick<RestartContext, "paneID" | "tabs">) {
   const live = new Set((JSON.parse(listJson) as Array<{ pane_id: number }>).map((pane) => String(pane.pane_id)))
-  const owned = [restart.paneID, ...(restart.tabs ?? []).map((tab) => (tab.kind === "oc" ? tab.paneID : undefined))]
+  const owned = [restart.paneID, ...(restart.tabs ?? []).map((tab) => tab.paneID)]
   return [...new Set(owned.filter((id): id is string => id !== undefined && live.has(id)))]
 }
 
@@ -222,18 +243,23 @@ export function parseBuild(input: unknown): BuildConfig | undefined {
   return { source: value.source as string }
 }
 
-/** Commands run in the source's workspace and the outputs they produce, from packages/opencode/script/build.ts --single. */
-export function buildSteps(build: BuildConfig, variant?: "native") {
+/**
+ * Commands run in the source's workspace and the outputs they produce, from packages/opencode/script/build.ts --single.
+ * `outdir` (absolute) replaces the build's `dist` folder. `--skip-install`: the cross-platform package
+ * installs are for all-targets release builds only.
+ */
+export function buildSteps(build: BuildConfig, options: { variant?: "native"; outdir?: string } = {}) {
   const platform = process.platform === "win32" ? "windows" : process.platform
   const cwd = path.join(build.source, WORKSPACE)
-  const dist = path.join(cwd, "packages", "opencode", "dist")
+  const dist = options.outdir ?? path.join(cwd, "packages", "opencode", "dist")
+  const outdir = options.outdir ? ["--outdir", options.outdir] : []
   const native = path.join(dist, `opencode-native-${platform}-${process.arch}`, "bin", `opencode${EXE}`)
-  if (variant === "native")
+  if (options.variant === "native")
     return {
       cwd,
       commands: [
         ["bun", "install"],
-        ["bun", "run", BUILD_SCRIPT, "--single", "--native-only"],
+        ["bun", "run", BUILD_SCRIPT, "--single", "--skip-install", "--native-only", ...outdir],
       ],
       output: [native],
     }
@@ -241,7 +267,7 @@ export function buildSteps(build: BuildConfig, variant?: "native") {
     cwd,
     commands: [
       ["bun", "install"],
-      ["bun", "run", BUILD_SCRIPT, "--single"],
+      ["bun", "run", BUILD_SCRIPT, "--single", "--skip-install", ...outdir],
     ],
     // The native build ships only its executable; it shares the oc build's support files.
     output: [path.join(dist, `opencode-${platform}-${process.arch}`, "bin"), native],
@@ -599,8 +625,7 @@ function tabList(value: unknown): value is Tab[] {
 function tab(value: unknown) {
   if (typeof value !== "object" || value === null) return false
   const item = value as Record<string, unknown>
-  if (item.kind === "oc") return text(item.directory) && optional(item.sessionID, text) && optional(item.paneID, text)
-  return item.kind === "shell" && text(item.cwd)
+  return item.kind === "oc" && text(item.directory) && optional(item.sessionID, text) && optional(item.paneID, text)
 }
 
 function placement(value: unknown) {
@@ -610,6 +635,18 @@ function placement(value: unknown) {
   return (
     Number.isInteger(item.x) && Number.isInteger(item.y) && pid(item.cols) && pid(item.rows) && !("fullScreen" in item)
   )
+}
+
+// An absolute path strictly inside `root`.
+function inside(root: string, value: unknown) {
+  if (!text(value) || !path.isAbsolute(value as string)) return false
+  const relative = path.relative(root, value as string)
+  return relative !== "" && !relative.startsWith("..") && !path.isAbsolute(relative)
+}
+
+// Install outputs come only from oc's own cache: build staging or the release download.
+function insideCache(value: unknown) {
+  return inside(Global.Path.cache, value)
 }
 
 function optional(value: unknown, check: (value: unknown) => boolean) {

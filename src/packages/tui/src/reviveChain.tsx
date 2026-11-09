@@ -1,10 +1,8 @@
 import fs from "node:fs"
 import { ReviveResume } from "@opencode-ai/core/util/reviveResume"
 import type { SessionQueueTakeResponse } from "@opencode-ai/sdk/v2"
-import { createEffect, createRoot } from "solid-js"
 import { usePromptRef } from "./context/prompt"
 import { useSDK } from "./context/sdk"
-import { useSync } from "./context/sync"
 import type { PromptInfo } from "./prompt/history"
 import { useRevive } from "./reviveCommands"
 import { useToast } from "./ui/toast"
@@ -26,7 +24,6 @@ const watching = new Set<string>()
 // a revive saves the rest (ReviveResume) for the TUI that opens the session after the restart.
 export function useReviveChain() {
   const sdk = useSDK()
-  const sync = useSync()
   const toast = useToast()
   const promptRef = usePromptRef()
   const revive = useRevive(toast)
@@ -38,7 +35,7 @@ export function useReviveChain() {
       const rest = chain.steps.slice(index + 1)
       if (step.type === "revive") {
         // A revive never cuts a running turn short, even when it is the first step.
-        await idle(sessionID)
+        await revive.idle(sessionID)
         const body = { sessionID, writerPid: process.pid, at: Date.now(), steps: rest, done: [...done, label(step)] }
         // A queued chain always hands on, so the TUI after the restart resumes the queue.
         const resume =
@@ -75,7 +72,7 @@ export function useReviveChain() {
     if (body.steps.length) {
       toast.show({ message: `Continuing after revive: ${chainText(body.steps, "")}`, variant: "info" })
     }
-    await idle(sessionID)
+    await revive.idle(sessionID)
     // Only agent and model: the whole body would overwrite the next revive's steps and loop the chain.
     await run(sessionID, body, { agent: body.agent, model: body.model, variant: body.variant })
   }
@@ -188,20 +185,9 @@ export function useReviveChain() {
         if (state === "failed") void resume(sessionID)
       })
     const watcher = fs.watch(ReviveResume.directory(), check)
-    // `revive.path` settles before this watcher exists.
+    // A fast settle can land before this watcher exists.
     check()
   }
-
-  const idle = (sessionID: string) =>
-    new Promise<void>((resolve) =>
-      createRoot((dispose) =>
-        createEffect(() => {
-          if ((sync.data.session_status[sessionID]?.type ?? "idle") !== "idle") return
-          queueMicrotask(dispose)
-          resolve()
-        }),
-      ),
-    )
 
   return { run, resume, watchQueued, revive: revive.start }
 }

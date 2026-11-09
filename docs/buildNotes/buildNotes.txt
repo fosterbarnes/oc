@@ -1,12 +1,16 @@
-v0.2.342 willAragorns [perf. > Mac paste; feat. > Mac queue key]
+v0.2.343 outgoingStallion [patch > /revive builds in the background]
 
-mac paste:
-Pasting with Cmd+V on the Mac is faster: an image pastes in a few milliseconds instead of almost a second, and text no longer waits on an image check first. A clipboard that holds both a picture and text (for example cells copied from Numbers) now pastes as text.
+revive:
+/revive now builds oc in the background while you keep working. The window closes only for the swap at the end: a few seconds after a build, and well under a second when nothing changed. A failed build shows the last lines of its log in an error notice, and your window stays open (a revive chain gets its steps back). If you start a reply while the build runs, the restart waits for it. /update downloads the new release the same way.
 
-claude chats:
-After the first message in a chat, oc sends each message to Claude Code right away instead of first looking up tools and skills it did not use.
+When the source folder has not changed since the installed build, /revive skips the build entirely and just restarts and reopens your tabs.
 
-keys:
-On a Mac, Cmd+Option+Q queues a prompt while the session is busy, and on Home it sends the prompt and stays there. Option+Q still works; plain Cmd+Q still quits the terminal.
+builds:
+A /revive build takes about half as long: oc is compiled once and copied for opencode, the cross-platform package installs are skipped, and the model list comes from oc's own cached copy, so /revive also works offline. On macOS, the reopened window and the first native opencode window no longer wait about 1.5 seconds each after a revive. bun.lock and package.json no longer show as modified in git after a revive.
 
-Under the hood: the macOS clipboard read now uses OpenTUI's native reader first, with osascript as the fallback (measured 0.81 s down to about 2 ms for a 749 KB PNG). A reused Claude process keeps its own spawn args instead of planning a spawn every turn that was never used (reused-turn pre-send time in fake-model runs: median 5 ms before, 0 after); a probe showed a live CLI does not reload plugin skills, so the per-turn skill refresh was dropped. The mac keybind preset adds super+alt+q to prompt_queue and prompt_submit_background. Checks: tui clipboard.test.ts 10 pass, config.test.tsx 20 pass, tui and opencode typecheck clean; opencode test/provider/claude-code 691 pass, 10 known Mac failures (3 in fakeModel, 6 in steering, 1 in commandPermissions; the last 7 newly recorded in AGENTS.md after failing on unchanged code too).
+removed:
+The revive.path custom script setting and the .scripts revive scripts are gone; the built-in restart does the same job. A leftover revive.path key is ignored.
+
+Under the hood: revive is split into prepare (oc oc --revive-prepare, ReviveHost.prepare: source choice, skip check, bun install and build into a staging folder in oc's cache under a build lock, or the release download) and swap (the existing pipeline, which now only installs ReviveContext.output, restricted to paths inside oc's cache; the update mode and source fields are gone). The installed oc carries a baked git tree hash of its source (core/util/sourceTree.ts, OPENCODE_SOURCE_TREE) for the skip check. Global.native now follows the executable name (opencode is native, oc/occ are oc, anything else reads OC_FLAVOR), which replaces the OPENCODE_FLAVOR build constant; build.ts clones the compiled binary for native, takes --outdir, and prints phase timings. Measured on the Mac: whole prepare 5.6 s (was about 11 s with the window closed), compile 3.5 s, clone 0 ms. Most of the old 2.3 s server start was the macOS first-launch scan of each new executable path (about 1.6 s per name; plain oc serve answers in 0.26 s), so the swap now warms occ and opencode while the server starts. The legacy shell revive tab kind is removed, and the restarter no longer logs a failure when a single-tab window's WezTerm socket is already gone. src/bun.lock is marked eol=lf because Bun writes LF on every OS.
+
+Checks: typecheck clean in core, opencode, tui; core sourceTree.test.ts 4 pass; opencode revive.test.ts 19 pass, 11 skip (Windows-only, not run); opencode test/config 321 pass with 1 failure unrelated to this change (tui.test.ts "resolves keybind lookup from canonical keybinds"); a real build to a temp folder (identical oc and opencode, oc vs native behavior confirmed); --revive-prepare run from source end to end; live /revive on the Mac: the build with the old binary took 5.5 s, then two unchanged-source revives skipped the build with a 0.4 s server start.
