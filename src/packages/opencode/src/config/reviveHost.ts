@@ -44,6 +44,7 @@ export async function revive(context: Revive.ReviveContext) {
           native: true,
           directory: context.directory,
           sessionID: context.sessionID,
+          ...(context.window ? { window: context.window } : {}),
         }),
       )
     }
@@ -94,6 +95,7 @@ async function revivePipeline(context: Revive.ReviveContext) {
     ...(context.supervisorPid ? { waitPid: context.supervisorPid } : {}),
     ...(installs ? { installDir } : {}),
     ...(context.native ? { native: true, directory: context.directory, sessionID: context.sessionID } : {}),
+    ...(context.window ? { window: context.window } : {}),
   }
   const steps = build ? Revive.buildSteps(build) : undefined
   // One install at a time per installation: the build output, file swap and server start are shared.
@@ -293,6 +295,8 @@ export async function restartTerminal(
         windowsVerbatimArguments: command.windowsVerbatimArguments,
         settleMs: REPLACEMENT_SETTLE_MS,
       }),
+      // `open` exits once LaunchServices started the app; a nonzero exit means nothing opened.
+      { exit: command.file === "open" },
     ),
 ) {
   const log = reviveLog()

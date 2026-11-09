@@ -7,6 +7,7 @@ import { launchDetached } from "@opencode-ai/core/util/launchDetached"
 import { OcRelease } from "@opencode-ai/core/util/ocRelease"
 import { ReviveResume } from "@opencode-ai/core/util/reviveResume"
 import { detectTerminal } from "@opencode-ai/core/util/terminal"
+import { WeztermWindow } from "@opencode-ai/core/util/weztermWindow"
 import { useExit } from "./context/exit"
 import { useKV } from "./context/kv"
 import { useLocal } from "./context/local"
@@ -190,8 +191,12 @@ export function useRevive(toast: ToastContext) {
     options: { sessionID?: string; source?: Source | { release: string }; resume?: string; next?: string[] } = {},
   ) => {
     await mark(options.sessionID, options.next)
+    const base = baseContext(mode, options.sessionID, options.resume)
+    // Read now: on macOS the window closes with this TUI, before the restarter reopens it.
+    const window = base.paneID ? WeztermWindow.capture(base.paneID) : undefined
     const context = {
-      ...baseContext(mode, options.sessionID, options.resume),
+      ...base,
+      ...(window ? { window } : {}),
       ...(Global.native ? { native: true, tuiPid: process.pid } : {}),
       ...options.source,
     }

@@ -210,6 +210,48 @@ Example compact Agent notes:
 
 ---
 
+## 2026-11-08 (~23:35) - v0.2.340 valveProstate - Mac revive reopens the window in place and in front - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation (/imp of plan `~/.config/opencode/plans/macReviveWindow.md`); completed, live `/revive` checked
+- Version: 0.2.340 valveProstate
+- New `core/src/util/weztermWindow.ts`. `capture(paneID)` finds the GUI pid by walking parents to `wezterm-gui`, falling back to the `gui-sock-<pid>` name. It reads that pid's frontmost window bounds and the screens through JXA `CGWindowListCopyWindowInfo` (no permission prompt), and reads cols/rows from `wezterm cli list` (`tabSize`, with splits). `placement` converts points to the containing screen's pixels, and treats a window that covers its whole display as `{ fullScreen: true }`.
+- `tui/src/reviveCommands.tsx`: `revive()` captures the window before exiting, because on macOS the window closes with the TUI. That is why `revive.log` always showed "Recording the old panes: failed".
+- `config/revive.ts`: `window` on `ReviveContext`/`RestartContext`, validated by `placement`. `reopenCommand(restart, platform)`: on darwin, WezTerm opens with `open -n -b com.github.wez.wezterm --args [--config initial_cols/rows] start --always-new-process [--position x,y] --cwd ~ -- ...`, plus env `OC_REVIVE_FULLSCREEN` set to `1` or `0`. `reviveHost.ts` passes `window` along on both reopen paths. `resident.ts` `awaitLaunch` gets an `{ exit }` option, so a failed `open` is reported.
+- Probe findings: `open` passes the caller's env on, and LaunchServices brings the window to the front. `--config` after `start` makes `open` exit 0 with no window. `--position` is in pixels (100,200 landed at 50,100 points at 2x).
+- wezFig `gui-startup` toggles full screen when `OC_REVIVE_FULLSCREEN=1` (separate repo, own note). Wiki `Launching.md` documents the snippet for other configs. `FORK.md` revive row and `docs/dev/macos.md` updated.
+- Tests: `revive.test.ts` adds a darwin reopen/parse case and pins the existing WezTerm cases to `"win32"`. New `core/test/util/weztermWindow.test.ts` covers placement and tabSize.
+- Verification: a probe in `test/tmp/verify` ran the real `reopenCommand` + `awaitLaunch` with `sleep` in place of oc. The window opened at exactly 120,90 and was frontmost. With full screen, the bounds equaled the display and `placement` read them back as full screen. `capture()` on the live window gave `{x:0,y:76,cols:214,rows:77}`; reopening with that came back 3 px shorter (cell rounding). Probe folder deleted. `revive.test.ts` 17 pass, core test 2 pass; typecheck clean in core, opencode, and tui.
+- Live: after the install revive, a second real `/revive` reopened the window at 0,38 1728x1076, the size `capture()` measured (3 px short of the old window), and `open` returned in 0.1 s (`revive.log`).
+- /pass: `capture` and `tabSize` now treat unreadable JSON as "no placement" instead of throwing, so `/revive` can't fail on it.
+- Not done: Windows and Terminal.app windows still open at their default spot. `buildNotes.md` archive rotation is still due.
+
+### User
+Revive
+- On the Mac in WezTerm, `/revive` reopens the window in front of other apps, at the same position and size it had. A full-screen window comes back full screen when your WezTerm config has the small `gui-startup` snippet from the wiki (your wezFig config already does).
+
+---
+
+## 2026-11-08 (~23:18) - v0.2.339 pagedRepublished - clear note when a Claude account cannot use a model (Mythos) - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation (/imp of plan `docs/dev/mythosAccessPlan.md`); completed
+- Version: 0.2.339 pagedRepublished
+- Added `isModelNotFound` and `formatModelAccessNote` in `provider/claude-code/cliEvents.ts`. The CLI tags its 404 reply ("There's an issue with the selected model ... Run --model") with `error: "model_not_found"`. The note reuses `ACCOUNT_BLOCK_MARKER`, names the pool account and model, and points at the Fable twin when there is one.
+- Added `catalogTwin` (Mythos to Fable, keeps `-fast`, `Object.hasOwn` guard) and `modelName` (registered display names without `(N×)`, filled in `claudeCodeModels`) to `models.ts`.
+- `turnStream.ts`: `modelNotFound` is set in `handleMessage` next to `accountBlock`. In `onResult` it writes the note and sets `resultFailure = "model_not_found"`, so the turn finishes as an error instead of `stop`. The note is not gated on `is_error`: the flag only comes from that CLI error.
+- Tests: unit cases in `cliEvents.test.ts` and `configModels.test.ts`, plus a fake-model scenario "a model the account cannot use fails the turn with a note naming its twin" in `fakeModel.test.ts`. CLI 2.1.319 retries a streaming 404 once without streaming, so the scenario queues the 404 twice.
+- Wiki `Troubleshooting.md`: new error entry. AGENTS.md: recorded 3 macOS fakeModel failures that also fail on clean `main`.
+- Verification: `cliEvents` + `configModels` 22/22 pass; the new scenario passes; full `fakeModel.test.ts` + both unit files 47 pass / 3 fail, and those same 3 fail on stashed clean `main`; `bun run typecheck` in `packages/opencode` is clean.
+- ERROR: fakeModel "claudeTestFlow steps 1-2" (`/var` vs `/private/var` working dir), "step 4" (4 requests instead of 3), and "an API error the CLI reports twice shows once" fail on macOS without this change.
+- Not done: `buildNotes.md` is past 1000 lines (1141); archive rotation is due.
+
+### User
+Claude Code
+- When your Claude account can't use the chosen model (for example Claude Mythos 5.1, which is invite-only), the chat now names the account and tells you to pick Claude Fable 5.1, and the turn shows as failed instead of as a normal reply.
+
+---
+
 ## 2026-11-08 (~23:05) - v0.2.338 dalkErdtree - PowerShell updates on macOS - Claude Opus 5.5, low effort; Implementation
 
 ### Agent

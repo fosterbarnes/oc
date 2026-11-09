@@ -342,11 +342,11 @@ export function spawnResident(
 }
 
 // Resolves once the launched program exists; on Windows the Start-Process hop exits 0 after starting it.
-export function awaitLaunch(child: ReturnType<typeof launchDetached>) {
+export function awaitLaunch(child: ReturnType<typeof launchDetached>, options: { exit?: boolean } = {}) {
   child.ref()
   return new Promise<void>((resolve, reject) => {
     child.once("error", reject)
-    if (process.platform !== "win32") {
+    if (process.platform !== "win32" && !options.exit) {
       child.once("spawn", resolve)
       return
     }

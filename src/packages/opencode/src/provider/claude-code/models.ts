@@ -108,6 +108,22 @@ const CATALOG_TWINS: Record<string, string> = {
 /** Ids the current catalog registers; see `claudeCodeModels`. */
 let known = new Set<string>()
 
+/** Display names of the registered ids, without the `(N×)` price suffix. */
+let names = new Map<string, string>()
+
+/** The picker name of a registered id, else the id itself. */
+export function modelName(id: string): string {
+  return names.get(id) ?? id
+}
+
+/** The generally available twin of a limited-access model (Mythos to Fable), keeping `-fast`. */
+export function catalogTwin(id: string): string | undefined {
+  const parsed = parseModelId(id)
+  if (!Object.hasOwn(CATALOG_TWINS, parsed.model)) return undefined
+  const twin = CATALOG_TWINS[parsed.model]
+  return parsed.fast ? `${twin}${FAST_SUFFIX}` : twin
+}
+
 /** Whether `id` (no `@account` marker) is a model this provider registers. */
 export function knownModel(id: string): boolean {
   return known.has(id)
@@ -146,6 +162,7 @@ export function claudeCodeModels(
     models[fastId] = fromCatalog(fastId, { ...entry, cost: fast }, providerID, " Fast")
   }
   known = new Set(Object.keys(models))
+  names = new Map(Object.entries(models).map(([id, model]) => [id, model.name.replace(/ \([^()]*×\)$/, "")]))
   return models
 }
 

@@ -2,10 +2,12 @@ export * as Revive from "./revive"
 
 import fs from "node:fs"
 import fsp from "node:fs/promises"
+import os from "node:os"
 import path from "node:path"
 import { Global } from "@opencode-ai/core/global"
 import { OcRelease } from "@opencode-ai/core/util/ocRelease"
 import { terminalAppScript, type TerminalInfo } from "@opencode-ai/core/util/terminal"
+import type { WeztermWindow } from "@opencode-ai/core/util/weztermWindow"
 import { TuiLedger } from "./tuiLedger"
 
 type Terminal = TerminalInfo["kind"]
@@ -48,6 +50,8 @@ export type ReviveContext = {
   native?: boolean
   // ReviveResume id of the steps typed after this revive; the pipeline settles it ready or failed.
   resume?: string
+  // macOS WezTerm: where the window sat, so the reopened one lands in the same place.
+  window?: WeztermWindow.Placement
 }
 
 /** One tab of the revived WezTerm window: an oc session, or a plain shell in its working directory. */
@@ -75,6 +79,7 @@ export type RestartContext = {
   sessionID?: string
   // Every tab of the window, in order (WezTerm only). More than one entry restores them all.
   tabs?: Tab[]
+  window?: WeztermWindow.Placement
 }
 
 // `source` is the user's oc source folder (chosen or downloaded on the first /revive); revive never pulls it.
@@ -118,6 +123,7 @@ export function parseContext(input: unknown): ReviveContext {
     !optional(value.hosted, flag) ||
     !optional(value.tuiPid, pid) ||
     !optional(value.resume, text) ||
+    !optional(value.window, placement) ||
     !optional(value.shellIdentity, processIdentity) ||
     (value.shellIdentity !== undefined && (value.shellIdentity as TuiLedger.Process).pid !== value.shellPid) ||
     !optional(value.source, (item) => item === "existing" || item === "download" || item === "none") ||
@@ -146,6 +152,7 @@ export function decodeRestart(encoded: string): RestartContext {
     !optional(value.directory, text) ||
     !optional(value.sessionID, text) ||
     !optional(value.tabs, tabList) ||
+    !optional(value.window, placement) ||
     (value.native === true && !text(value.directory))
   ) {
     throw new Error("Invalid revive restart context")
@@ -310,7 +317,7 @@ export function nativeExecutable(executable: string) {
 }
 
 /** Opens a fresh terminal running the configured launcher, so the next revive is hosted in place again. */
-export function reopenCommand(restart: RestartContext) {
+export function reopenCommand(restart: RestartContext, platform = process.platform) {
   // A WezTerm snapshot restarts from tab 0, which spawns the rest into this window (`oc revive-tabs`).
   // One snapshotted tab goes through it only for `occ`, which reopens that pane's own session rather than
   // whatever `previous` finds; `oc` keeps opening Home.
@@ -336,6 +343,34 @@ export function reopenCommand(restart: RestartContext) {
       ]
   // Compiled builds bake the flavor in; a Bun dev run needs it in the environment.
   const flavor: Record<string, string> = { OC_FLAVOR: restart.native ? "native" : "oc" }
+  if (restart.terminal === "wezterm" && platform === "darwin") {
+    // Through LaunchServices, which brings the new window to the front; a GUI spawned by this detached
+    // helper would open behind the active app. `open` passes this environment on. `--config` is a
+    // global option and must come before `start`. OC_REVIVE_FULLSCREEN is always set, so a value
+    // inherited from an earlier revived window never leaks into this one; wezterm.lua's gui-startup
+    // reads it.
+    const window = restart.window
+    const place = window && !("fullScreen" in window) ? window : undefined
+    return {
+      file: "open",
+      args: [
+        "-n",
+        "-b",
+        "com.github.wez.wezterm",
+        "--args",
+        ...(place ? ["--config", `initial_cols=${place.cols}`, "--config", `initial_rows=${place.rows}`] : []),
+        "start",
+        "--always-new-process",
+        ...(place ? ["--position", `${place.x},${place.y}`] : []),
+        "--cwd",
+        os.homedir(),
+        "--",
+        ...command,
+      ],
+      env: { ...flavor, OC_REVIVE_FULLSCREEN: window && "fullScreen" in window ? "1" : "0" },
+      windowsVerbatimArguments: false,
+    }
+  }
   if (restart.terminal === "wezterm") {
     // A fresh GUI process reloads wezterm.lua and inherits this environment instead of an unrelated mux server's.
     // wezterm-gui, not the console-subsystem wezterm CLI: that one would show its own console window
@@ -566,6 +601,15 @@ function tab(value: unknown) {
   const item = value as Record<string, unknown>
   if (item.kind === "oc") return text(item.directory) && optional(item.sessionID, text) && optional(item.paneID, text)
   return item.kind === "shell" && text(item.cwd)
+}
+
+function placement(value: unknown) {
+  if (typeof value !== "object" || value === null) return false
+  const item = value as Record<string, unknown>
+  if (item.fullScreen === true) return true
+  return (
+    Number.isInteger(item.x) && Number.isInteger(item.y) && pid(item.cols) && pid(item.rows) && !("fullScreen" in item)
+  )
 }
 
 function optional(value: unknown, check: (value: unknown) => boolean) {

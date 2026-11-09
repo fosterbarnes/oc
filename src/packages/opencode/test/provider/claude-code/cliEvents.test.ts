@@ -279,6 +279,22 @@ test("a failing result subtype is named, a successful one is not", () => {
   assert.ok(formatResultFailureNote(known!).startsWith(`\n${RESULT_ERROR_MARKER} `))
 })
 
+test("a model the account cannot use names the account and a reachable fix", async () => {
+  const { ACCOUNT_BLOCK_MARKER, formatModelAccessNote, isModelNotFound } = await import(
+    "@/provider/claude-code/cliEvents.js"
+  )
+  assert.equal(isModelNotFound({ type: "assistant", error: "model_not_found" }), true)
+  assert.equal(isModelNotFound({ type: "assistant", error: "invalid_request" }), false)
+  assert.equal(isModelNotFound({ type: "result", error: "model_not_found" }), false)
+  const twin = formatModelAccessNote({ account: "Claude2", model: "Claude Mythos 5.1", twin: "Claude Fable 5.1" })
+  assert.ok(twin.includes(ACCOUNT_BLOCK_MARKER))
+  assert.ok(twin.includes('the Claude account "Claude2" cannot use Claude Mythos 5.1 (access is invite-only)'))
+  assert.ok(twin.includes("Pick Claude Fable 5.1"))
+  const plain = formatModelAccessNote({ account: "", model: "claude-nope-1" })
+  assert.ok(plain.includes('the Claude account "claude1" cannot use claude-nope-1. Pick another model'))
+  assert.doesNotMatch(plain, /--model|invite-only/)
+})
+
 test("account blocks come from the CLI error kind and name the login command", async () => {
   const { ACCOUNT_BLOCK_MARKER, accountBlockKind, formatAccountBlockNote, isAccountLimitError, loginCommandFor } =
     await import("@/provider/claude-code/cliEvents.js")

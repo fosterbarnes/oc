@@ -3,7 +3,14 @@
 import assert from "node:assert/strict"
 import { test } from "node:test"
 import { configModelsForProvider, createClaudeCode } from "@/provider/claude-code/index.js"
-import { claudeCodeModels, knownModel, passthroughModel, toConfigModel } from "@/provider/claude-code/models.js"
+import {
+  catalogTwin,
+  claudeCodeModels,
+  knownModel,
+  modelName,
+  passthroughModel,
+  toConfigModel,
+} from "@/provider/claude-code/models.js"
 import { anthropicCatalog } from "./catalogFixture"
 
 // Built-in claude-code models come from the models.dev anthropic entry. These pin the CLI-side
@@ -50,6 +57,19 @@ test("claudeCodeModels builds Mythos from its Fable twin and lets the catalog ov
   const own = { ...anthropicCatalog.models["claude-fable-5"], id: "claude-mythos-5", name: "Catalog Mythos" }
   const catalog = { ...anthropicCatalog, models: { ...anthropicCatalog.models, "claude-mythos-5": own } }
   assert.equal(claudeCodeModels(catalog, "claude-code")["claude-mythos-5"].name, "Catalog Mythos (10×)")
+})
+
+test("a Mythos model names its Fable twin for the no-access note", () => {
+  const models = claudeCodeModels(anthropicCatalog, "claude-code")
+  assert.equal(catalogTwin("claude-mythos-5-1"), "claude-fable-5-1")
+  assert.equal(catalogTwin("claude-fable-5-1"), undefined)
+  assert.equal(catalogTwin("constructor"), undefined)
+  assert.equal(modelName("claude-mythos-5-1"), "Claude Mythos 5.1")
+  assert.equal(modelName("unregistered-model"), "unregistered-model")
+  if (models["claude-mythos-5-1-fast"]) {
+    assert.equal(catalogTwin("claude-mythos-5-1-fast"), "claude-fable-5-1-fast")
+    assert.equal(modelName("claude-fable-5-1-fast"), "Claude Fable 5.1 Fast")
+  }
 })
 
 test("claudeCodeModels registers exactly the ids knownModel accepts", () => {

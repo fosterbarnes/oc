@@ -30,12 +30,15 @@ test("prefers sibling occ, then oc, then the current production executable", () 
 
 test("Bun development uses the current interpreter and its entrypoint", () => {
   expect(Revive.resolveLauncher("C:\\Tools\\bun.exe", () => true)).toBe("C:\\Tools\\bun.exe")
-  const command = Revive.reopenCommand({
-    ...restart,
-    terminal: "wezterm",
-    executable: "C:\\Tools\\bun.exe",
-    entrypoint: "C:\\Source Code\\src\\index.ts",
-  })
+  const command = Revive.reopenCommand(
+    {
+      ...restart,
+      terminal: "wezterm",
+      executable: "C:\\Tools\\bun.exe",
+      entrypoint: "C:\\Source Code\\src\\index.ts",
+    },
+    "win32",
+  )
   expect(command.args).toEqual([
     "start",
     "--always-new-process",
@@ -50,8 +53,8 @@ test("Bun development uses the current interpreter and its entrypoint", () => {
 })
 
 test("the configured launcher picks the previous session (occ) or the home screen (oc)", () => {
-  expect(Revive.reopenCommand({ ...restart, terminal: "wezterm" }).file).toBe("wezterm-gui")
-  expect(Revive.reopenCommand({ ...restart, terminal: "wezterm" }).args).toEqual([
+  expect(Revive.reopenCommand({ ...restart, terminal: "wezterm" }, "win32").file).toBe("wezterm-gui")
+  expect(Revive.reopenCommand({ ...restart, terminal: "wezterm" }, "win32").args).toEqual([
     "start",
     "--always-new-process",
     "--",
@@ -61,7 +64,7 @@ test("the configured launcher picks the previous session (occ) or the home scree
     "--depth",
     "1",
   ])
-  expect(Revive.reopenCommand({ ...restart, terminal: "wezterm", launcher: "oc" }).args).toEqual([
+  expect(Revive.reopenCommand({ ...restart, terminal: "wezterm", launcher: "oc" }, "win32").args).toEqual([
     "start",
     "--always-new-process",
     "--",
@@ -70,24 +73,27 @@ test("the configured launcher picks the previous session (occ) or the home scree
     "launch",
   ])
   expect(
-    Revive.reopenCommand({
-      ...restart,
-      terminal: "wezterm",
-      native: true,
-      directory: context.directory,
-      sessionID: context.sessionID,
-    }).args,
+    Revive.reopenCommand(
+      {
+        ...restart,
+        terminal: "wezterm",
+        native: true,
+        directory: context.directory,
+        sessionID: context.sessionID,
+      },
+      "win32",
+    ).args,
   ).toEqual(["start", "--always-new-process", "--", nativeExe, context.directory, "--session", context.sessionID])
   // One snapshotted tab: occ reopens that pane's session, oc still opens Home.
   const one = [{ kind: "oc", directory: "C:\\Split", sessionID: "ses_split", paneID: "4" }] satisfies Revive.Tab[]
-  expect(Revive.reopenCommand({ ...restart, terminal: "wezterm", tabs: one }).args.slice(3, 6)).toEqual([
+  expect(Revive.reopenCommand({ ...restart, terminal: "wezterm", tabs: one }, "win32").args.slice(3, 6)).toEqual([
     executable,
     "oc",
     "revive-tabs",
   ])
-  expect(Revive.reopenCommand({ ...restart, terminal: "wezterm", launcher: "oc", tabs: one }).args.at(-1)).toBe(
-    "launch",
-  )
+  expect(
+    Revive.reopenCommand({ ...restart, terminal: "wezterm", launcher: "oc", tabs: one }, "win32").args.at(-1),
+  ).toBe("launch")
   expect(Revive.parseLauncher(undefined)).toBe("occ")
   expect(Revive.parseLauncher("oc")).toBe("oc")
   expect(() => Revive.parseLauncher("opencode")).toThrow()
@@ -398,12 +404,58 @@ test("restart tabs round-trip, and a bad tab rejects the restart context", () =>
   expect(() => Revive.decodeRestart(Revive.encode({ ...restart, tabs: "C:\\Work" }))).toThrow()
 })
 
+test("macOS WezTerm reopens through LaunchServices at the captured place, or full screen", () => {
+  const native = { ...restart, terminal: "wezterm", native: true, directory: "/w", sessionID: "ses_1" } as const
+  const placed = Revive.reopenCommand({ ...native, window: { x: 240, y: 180, cols: 90, rows: 22 } }, "darwin")
+  expect(placed.file).toBe("open")
+  // `--config` is a global WezTerm option: after `start` the GUI never starts.
+  expect(placed.args).toEqual([
+    "-n",
+    "-b",
+    "com.github.wez.wezterm",
+    "--args",
+    "--config",
+    "initial_cols=90",
+    "--config",
+    "initial_rows=22",
+    "start",
+    "--always-new-process",
+    "--position",
+    "240,180",
+    "--cwd",
+    os.homedir(),
+    "--",
+    nativeExe,
+    "/w",
+    "--session",
+    "ses_1",
+  ])
+  expect(placed.env).toEqual({ OC_FLAVOR: "native", OC_REVIVE_FULLSCREEN: "0" })
+  const full = Revive.reopenCommand({ ...native, window: { fullScreen: true } }, "darwin")
+  expect(full.args).not.toContain("--position")
+  expect(full.args).not.toContain("--config")
+  expect(full.env.OC_REVIVE_FULLSCREEN).toBe("1")
+  expect(Revive.reopenCommand(native, "darwin").env.OC_REVIVE_FULLSCREEN).toBe("0")
+  const context = { mode: "install", terminal: "wezterm", directory: "/w" }
+  expect(Revive.parseContext({ ...context, window: { x: -3, y: 76, cols: 214, rows: 77 } }).window).toEqual({
+    x: -3,
+    y: 76,
+    cols: 214,
+    rows: 77,
+  })
+  for (const window of [{ x: 1.5, y: 0, cols: 1, rows: 1 }, { x: 0, y: 0, cols: 0, rows: 1 }, { fullScreen: false }])
+    expect(() => Revive.parseContext({ ...context, window })).toThrow()
+  expect(Revive.decodeRestart(Revive.encode({ ...restart, window: { fullScreen: true } })).window).toEqual({
+    fullScreen: true,
+  })
+})
+
 test("wezterm restores several tabs through revive-tabs; no snapshot and other terminals keep previous", () => {
   const tabs: Revive.Tab[] = [
     { kind: "oc", directory: context.directory, sessionID: context.sessionID },
     { kind: "shell", cwd: "C:\\Work" },
   ]
-  const command = Revive.reopenCommand({ ...restart, terminal: "wezterm", tabs })
+  const command = Revive.reopenCommand({ ...restart, terminal: "wezterm", tabs }, "win32")
   expect(command.file).toBe("wezterm-gui")
   expect(command.args).toEqual([
     "start",
@@ -414,10 +466,19 @@ test("wezterm restores several tabs through revive-tabs; no snapshot and other t
     "revive-tabs",
     Revive.encode(tabs),
   ])
-  expect(Revive.reopenCommand({ ...restart, terminal: "wezterm", entrypoint: "C:\\src\\index.ts", tabs }).args).toEqual(
-    ["start", "--always-new-process", "--", executable, "C:\\src\\index.ts", "oc", "revive-tabs", Revive.encode(tabs)],
-  )
-  expect(Revive.reopenCommand({ ...restart, terminal: "wezterm", tabs: [tabs[0]] }).args).toEqual([
+  expect(
+    Revive.reopenCommand({ ...restart, terminal: "wezterm", entrypoint: "C:\\src\\index.ts", tabs }, "win32").args,
+  ).toEqual([
+    "start",
+    "--always-new-process",
+    "--",
+    executable,
+    "C:\\src\\index.ts",
+    "oc",
+    "revive-tabs",
+    Revive.encode(tabs),
+  ])
+  expect(Revive.reopenCommand({ ...restart, terminal: "wezterm", tabs: [tabs[0]] }, "win32").args).toEqual([
     "start",
     "--always-new-process",
     "--",
@@ -426,7 +487,7 @@ test("wezterm restores several tabs through revive-tabs; no snapshot and other t
     "revive-tabs",
     Revive.encode([tabs[0]]),
   ])
-  expect(Revive.reopenCommand({ ...restart, terminal: "wezterm", tabs: [] }).args).toContain("previous")
+  expect(Revive.reopenCommand({ ...restart, terminal: "wezterm", tabs: [] }, "win32").args).toContain("previous")
   expect(Revive.reopenCommand({ ...restart, terminal: "windows-terminal", tabs }).args).toContain("previous")
 })
 

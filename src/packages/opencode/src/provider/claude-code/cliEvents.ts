@@ -616,6 +616,23 @@ export function formatAccountBlockNote(input: {
   return `\n${ACCOUNT_BLOCK_MARKER} the Claude account "${account}" ${block.what}. ${fix}\n`
 }
 
+/** The CLI's reply to an API 404 for the requested model: the id is wrong or the account has no access. */
+export function isModelNotFound(msg: { type?: string; error?: unknown }): boolean {
+  return msg.type === "assistant" && msg.error === "model_not_found"
+}
+
+/**
+ * The CLI's own text says "Run --model", which oc users never type. `model` and `twin` are display
+ * names; `twin` is set for limited-access models (Mythos) that have a generally available twin.
+ */
+export function formatModelAccessNote(input: { account: string; model: string; twin?: string }): string {
+  const account = input.account || poolAccountLabel(DEFAULT_ACCOUNT)
+  const fix = input.twin
+    ? `cannot use ${input.model} (access is invite-only). Pick ${input.twin}, the same model with Anthropic's standard safety checks, and resend your message.`
+    : `cannot use ${input.model}. Pick another model and resend your message.`
+  return `\n${ACCOUNT_BLOCK_MARKER} the Claude account "${account}" ${fix}\n`
+}
+
 export function isAccountLimitError(input: { rateLimit?: RateLimitInfo | null; resultText?: string | null }): boolean {
   if (input.rateLimit && isRateLimitRejected(input.rateLimit)) return true
   const text = input.resultText

@@ -1108,6 +1108,32 @@ describe.skipIf(!cliPath)("Claude Code CLI against TestLLMServer", () => {
     120_000,
   )
 
+  // An account without Mythos access: the CLI's 404 reply says "Run --model"; oc names the account and Fable.
+  cliIt.live(
+    "a model the account cannot use fails the turn with a note naming its twin",
+    (fixture) =>
+      Effect.gen(function* () {
+        const llm = fixture.llm
+        const chat = yield* openChat(fixture, { modelID: "claude-mythos-5-1", env: { ENABLE_TOOL_SEARCH: "false" } })
+        // The CLI retries a streaming 404 once without streaming; both must miss.
+        const notFound = { type: "error", error: { type: "not_found_error", message: "model: claude-mythos-5-1" } }
+        yield* llm.error(404, notFound)
+        yield* llm.error(404, notFound)
+
+        yield* chat.prompt("Codeword?")
+
+        const last = (yield* Effect.promise(() => chat.sdk.session.messages({ sessionID: chat.sessionID }))).data!.at(
+          -1,
+        )!
+        const shown = last.parts.flatMap((part) => (part.type === "text" ? [part.text] : [])).join("\n")
+        expect(shown.split("cannot use Claude Mythos 5.1 (access is invite-only)")).toHaveLength(2)
+        expect(shown).toContain("Pick Claude Fable 5.1")
+        expect(last.info.role === "assistant" && last.info.finish).not.toBe("stop")
+        expectIsolated(yield* llm.inputs)
+      }),
+    120_000,
+  )
+
   cliIt.live(
     "oc turns off Claude tools it cannot host and schedules through its own queue",
     (fixture) =>

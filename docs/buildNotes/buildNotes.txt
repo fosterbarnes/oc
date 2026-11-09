@@ -1,12 +1,9 @@
-v0.2.338 dalkErdtree [feat. > Mac PowerShell update; fix > dialog paste]
+v0.2.340 valveProstate [fix > Mac revive window; patch > no-access note]
 
-third party updates:
-On macOS, "Update all" now also updates PowerShell 7, and a new "Update PowerShell" palette entry does it alone. oc updates PowerShell the way it was installed: Microsoft's installer (after the Mac password prompt, with the package's Microsoft signature and notarization checked first), Homebrew (brew upgrade powershell), or the .NET tool (dotnet tool update). A tar.gz archive or an unknown install is checked but not touched and shows under "Update by hand" in the summary.
+revive:
+On the Mac in WezTerm, /revive now reopens the window in front of other apps, at the position and size it had before. Before, it opened behind the active app at WezTerm's default spot. A full-screen window comes back full screen when your wezterm.lua gui-startup handles OC_REVIVE_FULLSCREEN; the wiki's Launching page has the snippet.
 
-paste:
-Ctrl+V (Cmd+V on Mac) now pastes text into the command palette search, dialog text boxes, and question and permission replies. Before, only the main prompt accepted it.
+Claude Code:
+When your Claude account can't use the chosen model (for example Claude Mythos 5.1, which is invite-only), the chat now names the account and tells you to pick Claude Fable 5.1. The turn shows as failed instead of as a normal reply.
 
-jev:
-New oc palette entry "Jev key" (also /jevKey) saves, replaces, or clears your TypeSafe key, and the jev tools turn on without restarting oc. A missing Jev key no longer shows a warning toast when Claude Code lists jev tools.
-
-Under the hood: new pwshUpdateMac.ts with per-method detection (real path of pwsh plus the com.microsoft.powershell package receipt) and an "update by hand" result; editorPaste.ts adds a low-priority global paste layer for focused text editors; jevClient reads the key from auth.json when TYPESAFE_API_KEY is unset. Checks: tui typecheck clean; pwshUpdateMac, pwshUpdate, and updateProgress tests 20 pass, with a live check on this Mac reporting 7.6.5 -> 7.6.9 (the install itself was not run); full tui suite 801 pass, 3 fail in files this change does not touch, one of them (Git Bash path) failing before it too; tui cli/keymap/component tests 231 pass; jevClient, skillHint, and proxyOpencodeTools tests 9 pass; opencode typecheck clean.
+Under the hood: new core/util/weztermWindow.ts records the window before the TUI exits (bounds from the macOS window list by the GUI pid, cols/rows from wezterm cli list) and treats unreadable output as no placement. reopenCommand on macOS uses open -n -b com.github.wez.wezterm with --config initial_cols/rows before start and --position in pixels, and awaitLaunch now waits for open to exit. The model-access note comes from the CLI's model_not_found error (isModelNotFound, formatModelAccessNote, catalogTwin). Checks: a probe ran the real reopen command and the window landed at the exact spot, frontmost, and full screen when asked; a live /revive came back at the measured place; revive.test.ts 17 pass; weztermWindow tests 2 pass; cliEvents and configModels 22 pass; the new fake-model scenario passes; typecheck clean in core, opencode, and tui. Known: 3 macOS fakeModel failures that also fail on clean main.

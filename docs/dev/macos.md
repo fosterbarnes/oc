@@ -36,6 +36,10 @@ helpers with a `win32` and a `darwin` branch; callers stay platform-neutral. Pla
 - Terminals: `core/src/util/terminal.ts` kind `terminal-app` (`TERM_PROGRAM=Apple_Terminal`);
   `terminalAppScript` builds `osascript` args for a new Terminal.app window (the command line is typed into
   the new shell: no secrets; `sessionTab.ts` passes attach credentials through a self-deleting script).
+- Revive in WezTerm: a GUI spawned by the detached restarter opens behind the active app, so `reopenCommand`
+  uses `open -n -b com.github.wez.wezterm` (LaunchServices activates it; the caller's env is passed on).
+  `--config` is a global WezTerm option and must come before `start`, or the GUI never starts and `open`
+  still exits 0. `--position` is in pixels (points x backing scale); window list bounds are points.
 
 ## Known Mac test failures (record once; report only new ones)
 

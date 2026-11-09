@@ -20,6 +20,7 @@ import { mapTool, isWebSearchTool, isWebSearchHandledByCli, cliResultMeta } from
 import { StreamWriter } from "./streamWriter.js"
 import { isTodoMirror, TodoMirror } from "./todoMirror.js"
 import { Steering } from "./steering.js"
+import { catalogTwin, modelName } from "./models.js"
 import {
   accountBlockKind,
   describeResultFailure,
@@ -27,7 +28,9 @@ import {
   formatResultFailureNote,
   formatSilentTurnNote,
   formatStreamTimeoutNote,
+  formatModelAccessNote,
   isAccountLimitError,
+  isModelNotFound,
   isRateLimitRejected,
   parseCompactBoundary,
   parseRateLimitEvent,
@@ -264,6 +267,8 @@ class ClaudeTurn {
   private resultIsError = false
   /** The account itself cannot serve (expired login, billing), from the CLI's failure reply. */
   private accountBlock: AccountBlockKind | null = null
+  /** The account cannot use the requested model (CLI `model_not_found`, e.g. Mythos without access). */
+  private modelNotFound = false
   /** Newest main-chain assistant message; the rewind point this exchange records. */
   private lastAssistantUuid: string | undefined
   private exchangeFlushed = false
@@ -843,6 +848,7 @@ class ClaudeTurn {
     if (msg.type === "conversation_reset") return this.onConversationReset(msg)
     // Not returned from: the reply's own text still renders below.
     this.accountBlock = accountBlockKind(msg) ?? this.accountBlock
+    this.modelNotFound ||= isModelNotFound(msg)
 
     switch (msg.type) {
       case "system":
@@ -1264,6 +1270,22 @@ class ClaudeTurn {
       this.resultFailure ??= this.accountBlock
       this.out.note(formatAccountBlockNote({ kind: this.accountBlock, account, configDir }))
       log.warn(`Claude account "${account}" cannot serve requests`, { sessionKey: this.sk, kind: this.accountBlock })
+    }
+
+    // The CLI's text names neither the account nor a fix oc users can reach ("Run --model").
+    if (this.modelNotFound) {
+      const account = poolAccountLabel(this.account)
+      const model = this.turn.effectiveModelId
+      const twin = catalogTwin(model)
+      this.resultFailure ??= "model_not_found"
+      this.out.note(
+        formatModelAccessNote({
+          account,
+          model: modelName(model),
+          twin: twin === undefined ? undefined : modelName(twin),
+        }),
+      )
+      log.warn(`Claude account "${account}" cannot use model`, { sessionKey: this.sk, model })
     }
 
     // A non-`success` subtype is a failed turn: name it and finish as an error.
