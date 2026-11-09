@@ -210,6 +210,63 @@ Example compact Agent notes:
 
 ---
 
+## 2026-11-08 (~23:05) - v0.2.338 dalkErdtree - PowerShell updates on macOS - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation (/imp of plan `~/.config/opencode/plans/pwshUpdateMac.md`); completed
+- Version: 0.2.338 (not bumped: the concurrent 22:57 session already bumped it since the last commit)
+- Added `tui/src/pwshUpdateMac.ts`: detects how the first `pwsh` on PATH was installed (real path + `pkgutil --pkg-info com.microsoft.powershell`) and updates it that way. pkg = GitHub `.pkg` download (final host allowlist, OCSTEP/OCPROGRESS lines), `pkgutil --check-signature` must show Developer ID + notarized + exact signer `Developer ID Installer: Microsoft Corporation (UBF8T346G9)`, then `osascript ... installer -pkg ... with administrator privileges` (-128 = cancelled). brew formula = `brew update` + `brew outdated --json=v2` check, `brew upgrade powershell`. dotnet tool = NuGet flat-container latest stable, `dotnet tool update --global PowerShell`. tar.gz archive / unknown path = check only, new `manual` result.
+- Note: Homebrew cask `powershell` no longer exists (formula only, no sudo); old cask installs carry the pkg receipt, so they take the pkg path.
+- Changed `desktopUpdate.ts` `DesktopCheckResult`: optional `note` (confirm text per check) and `manual` failure flag.
+- Changed `harnessUpdate.ts`: `POWERSHELL_MAC` harness, Update all includes it on darwin, `manual` status ("Update by hand" summary group, info toast), confirm uses `pending.closes` (check note or harness text). `updateProgress.ts`: phase "update by hand".
+- Changed `ocCommands.tsx`: darwin-only "Update PowerShell" entry; Update all desc says "and PowerShell" on Mac.
+- Deviation from plan: Mac module has its own inflight set (did not export desktopUpdate's); install re-detects the method instead of carrying it from the check (expected-version guard still applies).
+- Verification: `bun run typecheck` (tui) clean; `test/pwshUpdateMac.test.ts` (real captured `pkgutil --check-signature` of the 7.6.9 pkg, brew JSON) plus pwshUpdate/updateProgress: 20 pass; live probe `checkPowershellMac()` on this Mac returned pkg install, 7.6.5 -> 7.6.9 (probe deleted). Full tui suite: 801 pass, 3 fail (dependencies "finds Git Bash from git's cmd folder only" also fails without this change; watcher burst and sessionTab launcher tests do not touch these files). Download/signature/install path not run end to end: needs the user's password prompt.
+- MISTAKE: used `git stash` / `stash pop` to confirm a pre-existing failure while another session had uncommitted work in the tree; it popped back cleanly, but AGENTS.md forbids re-proving with stash. Rule: never stash in this repo; judge failures by whether the failing test touches changed files.
+
+### User
+Third party updates
+- On macOS, "Update all" now also updates PowerShell 7, and a new "Update PowerShell" palette entry does it alone.
+- oc updates PowerShell the same way it was installed: Microsoft's installer (asks for your Mac password), Homebrew, or the .NET tool.
+- PowerShell installed from a tar.gz archive or an unknown place is checked but not touched; the summary lists it under "Update by hand".
+
+---
+
+## 2026-11-08 (~22:57) - v0.2.338 dalkErdtree - paste into dialogs and the palette - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation (spitball plan then /imp); completed
+- Version: 0.2.338 dalkErdtree (bumped earlier this session, not again)
+- Fixed: ctrl+v (and Cmd+V on macOS, which wezFig sends to oc panes as ctrl+v) pasted nothing in the palette filter, `DialogPrompt`, and question/permission text boxes. `input_paste` was bound only on the main prompt's input target (`component/prompt/index.tsx` `prompt.paste`), so other editors got a bare control byte. Likely the same on Windows WezTerm.
+- Added `tui/src/editorPaste.ts` `useEditorPaste()`, called from `app.tsx`: a global layer on the `prompt.paste` keys, enabled while `renderer.currentFocusedEditor` is a `TextareaRenderable`, reads `useClipboard().read()` and `insertText`s `text/plain` (InputRenderable strips newlines; DialogSelect `onInput` fires so the list filters). `priority: -1`: a probe showed that at equal priority the global layer beat the prompt's targeted layer (image paste would break).
+- Added a ctrl+v case to `test/cli/tui/dialog-prompt.test.tsx` (fake `ClipboardProvider`); confirmed it fails without the hook.
+- Verification: probes (since deleted) for the DialogSelect filter (filters to the pasted text) and targeted-layer precedence passed; tui `bun run typecheck` clean; `bun test test/cli/tui test/keymap* test/component`: 231 pass, 2 skip. Not run live.
+
+### User
+Paste
+- Ctrl+V (Cmd+V on Mac) now pastes text into the command palette search, dialog text boxes, and question and permission replies.
+
+---
+
+## 2026-11-08 (~22:52) - v0.2.338 dalkErdtree - Jev key palette entry, no missing-key toast - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation (spitball plan then /imp); completed
+- Version: 0.2.338 dalkErdtree
+- Added auth.json fallback to `apiKey()` in `opencode/src/tool/jevClient.ts`: `TYPESAFE_API_KEY` wins, else `typesafe` api entry from `Global.Path.data/auth.json`, read sync and cached by mtime (registry filter calls it per tool listing, so a saved key applies without restart). Missing-key error text points at the palette entry.
+- Replaced the "Jev key missing" toast in `provider/claude-code/proxyToolSelection.ts` with `log.info` (same as cua driverless).
+- Added oc palette entry `oc.jev_key` ("Jev key", group "Tools", `/jevKey`) in `tui/src/ocCommands.tsx`: desc set/not set via `storedJevKey()` (reads auth.json, never shows the key); saves with `sdk.client.auth.set({ providerID: "typesafe" })`, Replace/Clear via `auth.remove`. No `instance.dispose()` (not needed since the key is read live). `typesafe` in auth.json is ignored by the provider loader (`mergeProvider` returns when models.dev has no such id).
+- Added `opencode/test/tool/jevClient.test.ts` (env precedence, fallback, mtime refresh, malformed file); updated `proxyOpencodeTools.test.ts` to expect no Jev toast.
+- Updated wiki `Agents-and-Skills.md` and `FORK.md` Jev rows.
+- Verification: `bun test` jevClient, skillHint, proxyOpencodeTools: 9 pass. `bun run typecheck` in opencode and tui: clean. Palette entry not checked live (needs a build).
+
+### User
+Jev
+- New oc palette entry "Jev key" (also `/jevKey`) saves, replaces, or clears your TypeSafe key, and the jev tools turn on without restarting oc.
+- A missing Jev key no longer shows a warning toast when Claude Code lists jev tools.
+
+---
+
 ## 2026-11-08 (~22:04) - v0.2.337 blechNeeed - usage sidebar on macOS - Claude Opus 5.5, low effort; Implementation
 
 ### Agent

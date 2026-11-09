@@ -94,6 +94,7 @@ import {
 } from "./keymap"
 
 import type { EventSource } from "./context/sdk"
+import { useEditorPaste } from "./editorPaste"
 import { DialogVariant } from "./component/dialog-variant"
 import { createTuiAttention } from "./attention"
 import * as TuiAudio from "./audio"
@@ -1396,6 +1397,8 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
   useBindings(() => ({
     commands: appCommands(),
   }))
+
+  useEditorPaste()
 
   useBindings(() => ({
     mode: OPENCODE_BASE_MODE,

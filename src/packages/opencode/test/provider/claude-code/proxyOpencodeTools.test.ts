@@ -11,7 +11,7 @@ afterEach(() => {
   else process.env.TYPESAFE_API_KEY = originalKey
 })
 
-test("jev tools missing for lack of a key get their own toast, other unknown names the generic one", () => {
+test("jev tools missing for lack of a key are skipped without a toast, other unknown names get the generic one", () => {
   delete process.env.TYPESAFE_API_KEY
   const toasts: { title?: string; message: string }[] = []
   setOpencodeClient({ tui: { showToast: async ({ body }: { body: (typeof toasts)[number] }) => toasts.push(body) } })
@@ -19,9 +19,8 @@ test("jev tools missing for lack of a key get their own toast, other unknown nam
   const items = [{ id: "time", description: "Local time", parameters: { type: "object", properties: {} } }]
   const defs = resolveProxyOpencodeToolDefs({ requested: ["time", "jev_check", "nopeTool"], items })
   expect(defs.map((def) => def.name)).toEqual(["time"])
-  expect(toasts.map((toast) => toast.title)).toEqual(["Jev key missing", "Config entry ignored"])
-  expect(toasts[0].message).toContain("TYPESAFE_API_KEY: jev_check")
-  expect(toasts[1].message).toContain(": nopeTool.")
+  expect(toasts.map((toast) => toast.title)).toEqual(["Config entry ignored"])
+  expect(toasts[0].message).toContain(": nopeTool.")
 })
 
 // Only meaningful where cua-driver is not installed (the registry then hides cua_*).

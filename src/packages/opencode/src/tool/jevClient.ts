@@ -2,6 +2,10 @@
 // (github.com/FrancoisChastel/jev-code @ 051b492, MIT) so oc calls the API in-process
 // instead of spawning one jev MCP server per instance.
 
+import fs from "node:fs"
+import path from "node:path"
+import { Global } from "@opencode-ai/core/global"
+
 type Env = Record<string, string | undefined>
 type JsonObject = { [key: string]: unknown }
 
@@ -32,8 +36,34 @@ const MAX_RETRIES = 2
 const MAX_RETRY_AFTER_MS = 30_000
 const RETRYABLE = new Set([408, 425, 429, 500, 502, 503, 504, 529])
 
+/** `TYPESAFE_API_KEY` wins; otherwise the key saved from the oc palette ("Jev key", auth.json `typesafe`). */
 export function apiKey(env: Env = process.env) {
-  return env.TYPESAFE_API_KEY?.trim() || undefined
+  return env.TYPESAFE_API_KEY?.trim() || storedKey()
+}
+
+// Read live so a key saved from the palette applies without a restart; cached by mtime because
+// the tool registry asks on every listing.
+let stored: { mtimeMs: number; key: string | undefined } | undefined
+function storedKey() {
+  const file = path.join(Global.Path.data, "auth.json")
+  const mtimeMs = fs.statSync(file, { throwIfNoEntry: false })?.mtimeMs
+  if (mtimeMs === undefined) return undefined
+  if (stored?.mtimeMs === mtimeMs) return stored.key
+  const entry = readEntry(file)
+  stored = {
+    mtimeMs,
+    key: entry?.type === "api" && typeof entry.key === "string" ? entry.key.trim() || undefined : undefined,
+  }
+  return stored.key
+}
+
+function readEntry(file: string) {
+  try {
+    const data: unknown = JSON.parse(fs.readFileSync(file, "utf8"))
+    return isRecord(data) && isRecord(data.typesafe) ? data.typesafe : undefined
+  } catch {
+    return undefined
+  }
 }
 
 /** `POST /v1/systemone`, retrying rate limits, timeouts, and transient server errors. */
@@ -43,7 +73,10 @@ export async function systemOne(
   env: Env = process.env,
 ): Promise<SystemOneReply> {
   const key = apiKey(env)
-  if (!key) throw new Error("TYPESAFE_API_KEY is not set. Create a key at https://console.typesafe.ai/keys.")
+  if (!key)
+    throw new Error(
+      "No Jev key: set it with the oc palette entry Jev key (or TYPESAFE_API_KEY). Create one at https://console.typesafe.ai/keys.",
+    )
   const url = `${(env.TYPESAFE_BASE_URL?.trim() || DEFAULT_BASE_URL).replace(/\/+$/, "")}/v1/systemone`
   const body = JSON.stringify({ model: env.TYPESAFE_DEFAULT_MODEL?.trim() || DEFAULT_MODEL, ...request })
   for (let attempt = 0; ; attempt++) {

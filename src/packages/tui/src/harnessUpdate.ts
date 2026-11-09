@@ -9,6 +9,7 @@ import {
   type DesktopInstallResult,
 } from "./desktopUpdate"
 import { checkPowershell, installPowershell } from "./pwshUpdate"
+import { checkPowershellMac, installPowershellMac, POWERSHELL_MAC_NOTE } from "./pwshUpdateMac"
 import type { DialogContext } from "./ui/dialog"
 import { DialogConfirm } from "./ui/dialog-confirm"
 import type { ToastContext } from "./ui/toast"
@@ -16,7 +17,7 @@ import { createUpdateProgress, type UpdatePhase, type UpdateProgress } from "./u
 
 // Every harness updater resolves to one of these so "Update all" can run them in sequence and
 // summarize; the single-harness palette entries show the same result as one toast.
-type HarnessUpdateStatus = "ok" | "notInstalled" | "busy" | "declined" | "failed"
+type HarnessUpdateStatus = "ok" | "notInstalled" | "busy" | "declined" | "manual" | "failed"
 type HarnessUpdateResult = { label: string; status: HarnessUpdateStatus; message: string }
 type OnLine = (line: string) => void
 
@@ -25,6 +26,7 @@ const _STATUS_PHASE: Record<HarnessUpdateStatus, UpdatePhase> = {
   notInstalled: "not installed",
   busy: "already running",
   declined: "skipped",
+  manual: "update by hand",
   failed: "failed",
 }
 
@@ -36,6 +38,7 @@ function showHarnessResult(toast: ToastContext, result: HarnessUpdateResult) {
   if (result.status === "declined") return
   if (result.status === "ok") return toast.show({ message: result.message, variant: "success" })
   if (result.status === "busy") return toast.show({ message: result.message, variant: "info" })
+  if (result.status === "manual") return toast.show({ message: result.message, variant: "info", duration: 15_000 })
   toast.show({ message: result.message, variant: "error", duration: 15_000 })
 }
 
@@ -137,17 +140,30 @@ export const POWERSHELL: DesktopHarness = {
   install: installPowershell,
   closes: "asks for admin approval and leaves open PowerShell windows on the old version until reopened",
 }
+// Updates the way PowerShell was installed (pkg, Homebrew, .NET tool); the check's `note` names it.
+export const POWERSHELL_MAC: DesktopHarness = {
+  label: "PowerShell",
+  check: checkPowershellMac,
+  install: installPowershellMac,
+  closes: POWERSHELL_MAC_NOTE,
+}
 
-type PendingDesktopUpdate = { harness: DesktopHarness; oldVersion: string; newVersion: string }
+type PendingDesktopUpdate = { harness: DesktopHarness; oldVersion: string; newVersion: string; closes: string }
 
 async function checkDesktopHarness(harness: DesktopHarness): Promise<HarnessUpdateResult | PendingDesktopUpdate> {
   const checked = await harness.check()
   if (checked.alreadyRunning) return harnessResult(harness.label, "busy", checked.message)
   if (!checked.ok) {
-    return harnessResult(harness.label, checked.notInstalled ? "notInstalled" : "failed", checked.message)
+    const status = checked.notInstalled ? "notInstalled" : checked.manual ? "manual" : "failed"
+    return harnessResult(harness.label, status, checked.message)
   }
   if (checked.upToDate) return harnessResult(harness.label, "ok", checked.message)
-  return { harness, oldVersion: checked.oldVersion, newVersion: checked.newVersion }
+  return {
+    harness,
+    oldVersion: checked.oldVersion,
+    newVersion: checked.newVersion,
+    closes: checked.note ?? harness.closes,
+  }
 }
 
 async function installDesktopHarness(pending: PendingDesktopUpdate, onLine?: OnLine): Promise<HarnessUpdateResult> {
@@ -174,7 +190,7 @@ export function updateDesktopHarness(
       const confirmed = await DialogConfirm.show(
         dialog,
         `Update ${label}`,
-        `Updating ${harness.closes}. Update ${versions}?`,
+        `Updating ${checked.closes}. Update ${versions}?`,
       )
       if (confirmed !== true) return harnessResult(label, "declined", "skipped")
     }
@@ -200,7 +216,12 @@ export async function updateAllHarnesses(
     ["Cursor CLI", (onLine) => runVersionedHarnessUpdate("Cursor CLI", resolveCursorCli, onLine)],
     ["Codex CLI", (onLine) => runVersionedHarnessUpdate("Codex CLI", resolveCodexCli, onLine)],
   ]
-  const desktops = process.platform === "win32" ? [CLAUDE_DESKTOP, CURSOR_DESKTOP, CHATGPT_DESKTOP, POWERSHELL] : []
+  const desktops =
+    process.platform === "win32"
+      ? [CLAUDE_DESKTOP, CURSOR_DESKTOP, CHATGPT_DESKTOP, POWERSHELL]
+      : process.platform === "darwin"
+        ? [POWERSHELL_MAC]
+        : []
   const progress = createUpdateProgress(toast, autoConfirm ? "Update all (auto confirm)" : "Update all", [
     ...clis.map(([label]) => label),
     ...desktops.map((harness) => harness.label),
@@ -226,7 +247,7 @@ export async function updateAllHarnesses(
     if (pending.length > 0) {
       for (const item of pending)
         progress.set(item.harness.label, autoConfirm ? "waiting" : "awaiting confirm", versions(item))
-      const list = pending.map((item) => `${item.harness.label} ${versions(item)} (${item.harness.closes})`).join("; ")
+      const list = pending.map((item) => `${item.harness.label} ${versions(item)} (${item.closes})`).join("; ")
       const confirmed =
         autoConfirm || (await DialogConfirm.show(dialog, "Confirm updates", `Updating: ${list}. Continue?`)) === true
       if (confirmed) for (const item of pending) progress.set(item.harness.label, "waiting", versions(item))
@@ -253,12 +274,15 @@ function showUpdateAllSummary(toast: ToastContext, results: HarnessUpdateResult[
     ["notInstalled", "Not installed"],
     ["declined", "Skipped"],
     ["busy", "Already running"],
+    ["manual", "Update by hand"],
     ["failed", "Failed"],
   ]
   const lines = groups.flatMap(([status, title]) => {
     const matched = results.filter((result) => result.status === status)
     if (matched.length === 0) return []
-    const names = matched.map((result) => (status === "failed" ? `${result.label} (${result.message})` : result.label))
+    const names = matched.map((result) =>
+      status === "failed" || status === "manual" ? `${result.label} (${result.message})` : result.label,
+    )
     return [`${title}: ${names.join(", ")}`]
   })
   const failed = results.some((result) => result.status === "failed")

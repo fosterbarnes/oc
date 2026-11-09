@@ -14,8 +14,18 @@ export type DesktopCheckParse =
 
 export type DesktopCheckResult =
   | { ok: true; alreadyRunning: false; upToDate: true; version: string; message: string }
-  | { ok: true; alreadyRunning: false; upToDate: false; oldVersion: string; newVersion: string; message: string }
-  | { ok: false; alreadyRunning: boolean; message: string; notInstalled?: true }
+  | {
+      ok: true
+      alreadyRunning: false
+      upToDate: false
+      oldVersion: string
+      newVersion: string
+      message: string
+      // Replaces the harness's static `closes` text in the confirm prompt (macOS PowerShell varies by install method).
+      note?: string
+    }
+  // `manual`: an update exists but oc cannot install it (macOS PowerShell from a tar.gz or unknown path).
+  | { ok: false; alreadyRunning: boolean; message: string; notInstalled?: true; manual?: true }
 
 export type DesktopInstallResult = {
   ok: boolean

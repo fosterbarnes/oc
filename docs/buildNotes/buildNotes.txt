@@ -1,12 +1,12 @@
-v0.2.337 blechNeeed [fix > Mac Claude usage; patch > usage providers]
+v0.2.338 dalkErdtree [feat. > Mac PowerShell update; fix > dialog paste]
 
-usage sidebar:
-On a Mac, Claude usage now shows up. Claude Code keeps its login in the macOS Keychain rather than a .credentials.json file, so oc now reads it from there (and still falls back to the file). It never refreshes or writes the token.
+third party updates:
+On macOS, "Update all" now also updates PowerShell 7, and a new "Update PowerShell" palette entry does it alone. oc updates PowerShell the way it was installed: Microsoft's installer (after the Mac password prompt, with the package's Microsoft signature and notarization checked first), Homebrew (brew upgrade powershell), or the .NET tool (dotnet tool update). A tar.gz archive or an unknown install is checked but not touched and shows under "Update by hand" in the summary.
 
-Until you pick providers, the Usage section shows only the ones you are signed in to, so a fresh install no longer lists Cursor, OpenCode Go, or OpenRouter as "unavailable" when they were never set up. Picking any provider in Configure usage providers saves your own list as before; the new Show connected providers entry goes back to the automatic list. Saved lists are unchanged.
+paste:
+Ctrl+V (Cmd+V on Mac) now pastes text into the command palette search, dialog text boxes, and question and permission replies. Before, only the main prompt accepted it.
 
-A provider with no data now takes one line ("not connected", "run /connect", "run claude auth login", "sign in") instead of repeating "unavailable", and "Renewal date unknown" no longer shows under a provider that has no usage data. An expired Cursor desktop login reads as signed out without sending a request that can only fail.
+jev:
+New oc palette entry "Jev key" (also /jevKey) saves, replaces, or clears your TypeSafe key, and the jev tools turn on without restarting oc. A missing Jev key no longer shows a warning toast when Claude Code lists jev tools.
 
-Under the hood: the Keychain service is "Claude Code-credentials" for the default account and gets a suffix of the first 8 hex of sha256 of CLAUDE_CONFIG_DIR otherwise. Probes return reason "no-credentials" before any request; usageProviders is optional in the sidebar settings (unset means automatic). The auth.json lookup now uses the xdg data folder oc really uses on every platform. tui typecheck passed; openSidebar tests (79) and test/cli/tui (166) passed, with new cases for Keychain service names, Keychain before file, expired Cursor desktop login, and the automatic default. Live probes on the Mac returned Claude usage from the Keychain. Plan in docs/dev/usageSidebarMac.md.
-
-Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Under the hood: new pwshUpdateMac.ts with per-method detection (real path of pwsh plus the com.microsoft.powershell package receipt) and an "update by hand" result; editorPaste.ts adds a low-priority global paste layer for focused text editors; jevClient reads the key from auth.json when TYPESAFE_API_KEY is unset. Checks: tui typecheck clean; pwshUpdateMac, pwshUpdate, and updateProgress tests 20 pass, with a live check on this Mac reporting 7.6.5 -> 7.6.9 (the install itself was not run); full tui suite 801 pass, 3 fail in files this change does not touch, one of them (Git Bash path) failing before it too; tui cli/keymap/component tests 231 pass; jevClient, skillHint, and proxyOpencodeTools tests 9 pass; opencode typecheck clean.

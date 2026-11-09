@@ -259,14 +259,10 @@ export function resolveProxyOpencodeToolDefs(options: {
     })
   }
 
-  // The registry hides the jev_* tools while no key is set (`tool/registry.ts`), so say that instead.
+  // The registry hides the jev_* tools while no key is set (`tool/registry.ts`). The key is optional
+  // (oc palette "Jev key"), so a missing one is logged, not toasted.
   const keyless = apiKey() ? [] : unknown.filter((name) => name.toLowerCase().startsWith("jev_"))
-  if (keyless.length > 0)
-    showToast(
-      `Jev tools need TYPESAFE_API_KEY: ${keyless.join(", ")} stay off until it is set and oc restarts.`,
-      "warning",
-      "Jev key missing",
-    )
+  if (keyless.length > 0) log.info("proxyOpencodeTools jev entries skipped: no Jev key", { keyless })
   // cua_* stay hidden until cua-driver is installed. The config is shared across machines, so a
   // machine without the driver (macOS, a fresh PC) skips them quietly instead of warning every session.
   const driverless = CuaDriver.driverPath() ? [] : unknown.filter((name) => name.toLowerCase().startsWith("cua_"))

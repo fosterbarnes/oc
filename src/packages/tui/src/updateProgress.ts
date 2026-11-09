@@ -16,6 +16,7 @@ export type UpdatePhase =
   | "not installed"
   | "already running"
   | "skipped"
+  | "update by hand"
   | "failed"
 
 export type UpdateRow = {

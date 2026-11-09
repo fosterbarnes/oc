@@ -18,6 +18,7 @@ async function mountPrompt(input: {
   actions?: { command: string; title: string; onTrigger: () => void }[]
   value?: string
   numeric?: { min: number; max: number; step: number }
+  clipboard?: string
 }) {
   const state = path.join(input.root, "state")
   await mkdir(state, { recursive: true })
@@ -31,6 +32,8 @@ async function mountPrompt(input: {
     { TuiConfigProvider },
     { ToastProvider },
     { OpencodeKeymapProvider, registerOpencodeKeymap },
+    { ClipboardProvider },
+    { useEditorPaste },
   ] = await Promise.all([
     import("../../../src/ui/dialog"),
     import("../../../src/ui/dialog-prompt"),
@@ -39,6 +42,8 @@ async function mountPrompt(input: {
     import("../../../src/config"),
     import("../../../src/ui/toast"),
     import("../../../src/keymap"),
+    import("../../../src/context/clipboard"),
+    import("../../../src/editorPaste"),
   ])
 
   let dialog: ReturnType<typeof useDialog> | undefined
@@ -55,6 +60,12 @@ async function mountPrompt(input: {
         onConfirm={input.onConfirm}
       />
     ))
+    return null
+  }
+
+  // App mounts the shared paste layer (`useEditorPaste` in app.tsx); mount it the same way here.
+  function Paste() {
+    useEditorPaste()
     return null
   }
 
@@ -82,9 +93,17 @@ async function mountPrompt(input: {
             <KVProvider>
               <ThemeProvider mode="dark">
                 <ToastProvider>
-                  <DialogProvider>
-                    <Opener />
-                  </DialogProvider>
+                  <ClipboardProvider
+                    value={{
+                      read: async () =>
+                        input.clipboard === undefined ? undefined : { data: input.clipboard, mime: "text/plain" },
+                    }}
+                  >
+                    <DialogProvider>
+                      <Paste />
+                      <Opener />
+                    </DialogProvider>
+                  </ClipboardProvider>
                 </ToastProvider>
               </ThemeProvider>
             </KVProvider>
@@ -270,6 +289,30 @@ test("dialog.close override restores ctrl+c close", async () => {
     prompt.app.mockInput.pressKey("c", { ctrl: true })
 
     expect(prompt.stackSize()).toBe(0)
+  } finally {
+    await prompt.cleanup()
+  }
+})
+
+test("ctrl+v pastes clipboard text into a dialog prompt, newlines flattened by the single-row field", async () => {
+  await using tmp = await tmpdir()
+  const prompt = await mountPrompt({
+    root: tmp.path,
+    keybinds: {},
+    value: "key: ",
+    clipboard: "ts_abc\r\n",
+    onConfirm: () => {},
+  })
+
+  try {
+    await wait(() => prompt.app.renderer.currentFocusedEditor instanceof TextareaRenderable)
+    const textarea = prompt.app.renderer.currentFocusedEditor
+    if (!(textarea instanceof TextareaRenderable)) throw new Error("expected focused dialog textarea")
+
+    prompt.app.mockInput.pressKey("v", { ctrl: true })
+    await wait(() => textarea.plainText !== "key: ")
+
+    expect(textarea.plainText.replace(/\n/g, "")).toBe("key: ts_abc")
   } finally {
     await prompt.cleanup()
   }

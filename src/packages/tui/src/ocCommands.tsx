@@ -22,6 +22,7 @@ import {
   CLAUDE_DESKTOP,
   CURSOR_DESKTOP,
   POWERSHELL,
+  POWERSHELL_MAC,
   updateAllHarnesses,
   updateClaudeCode,
   updateCodexCli,
@@ -1131,7 +1132,10 @@ export function createOcCommands(input: {
         {
           name: "oc.update_all_harnesses",
           title: "Update all",
-          desc: "Claude Code, Cursor CLI, Codex CLI, and the desktop apps",
+          desc:
+            process.platform === "darwin"
+              ? "Claude Code, Cursor CLI, Codex CLI, and PowerShell"
+              : "Claude Code, Cursor CLI, Codex CLI, and the desktop apps",
           run: () => void updateAllHarnesses(claudeCliPath(), toast, dialog, tuiConfig.auto_confirm_updates),
         },
         {
@@ -1187,6 +1191,16 @@ export function createOcCommands(input: {
               },
             ]
           : []),
+        ...(process.platform === "darwin"
+          ? [
+              {
+                name: "oc.update_powershell",
+                title: "Update PowerShell",
+                desc: "Update PowerShell 7 the way it was installed",
+                run: () => updateDesktopHarness(POWERSHELL_MAC, toast, dialog, tuiConfig.auto_confirm_updates),
+              },
+            ]
+          : []),
       ].map((command) => ({ ...command, category: "oc", group: "Third party updates" })),
       {
         name: "oc.auto_confirm_updates",
@@ -1221,6 +1235,60 @@ export function createOcCommands(input: {
                   return
                 }
                 toast.show({ message: `Auto confirm updates ${option.title}`, variant: "success" })
+              }}
+            />
+          ))
+        },
+      },
+      {
+        name: "oc.jev_key",
+        title: "Jev key",
+        category: "oc",
+        group: "Tools",
+        get desc() {
+          return storedJevKey() ? "set" : "not set"
+        },
+        slashName: "jevKey",
+        run: () => {
+          const saveKey = () =>
+            dialog.replace(() => (
+              <DialogPrompt
+                title="Jev key"
+                placeholder="TypeSafe API key (console.typesafe.ai/keys)"
+                onConfirm={async (value) => {
+                  const key = value.trim()
+                  if (!key) return
+                  const result = await sdk.client.auth.set({ providerID: "typesafe", auth: { type: "api", key } })
+                  if (result.error) {
+                    toast.show({ message: `Failed to save Jev key: ${String(result.error)}`, variant: "error" })
+                    return
+                  }
+                  dialog.clear()
+                  toast.show({ message: "Saved Jev key; jev_* tools are on", variant: "success" })
+                }}
+              />
+            ))
+          if (!storedJevKey()) return saveKey()
+          dialog.replace(() => (
+            <DialogSelect
+              title="Jev key"
+              options={[
+                { value: "set", title: "Replace key" },
+                {
+                  value: "clear",
+                  title: "Clear key",
+                  description: "TYPESAFE_API_KEY, if set where oc runs, still applies",
+                },
+              ]}
+              onSelect={async (option) => {
+                if (option.value === "set") return saveKey()
+                const result = await sdk.client.auth.remove({ providerID: "typesafe" })
+                if (result.error) {
+                  toast.show({ message: `Failed to clear Jev key: ${String(result.error)}`, variant: "error" })
+                  return
+                }
+                dialog.clear()
+                toast.show({ message: "Cleared Jev key", variant: "success" })
               }}
             />
           ))
@@ -1302,6 +1370,16 @@ function launchKillall(args: string[]) {
       ...command,
     ])
   return launchDetached("osascript", terminalAppScript([exe, ...command], { env }))
+}
+
+// Whether a Jev key is saved in auth.json (`typesafe`, read by opencode `tool/jevClient.ts`). The key itself is never shown.
+function storedJevKey() {
+  try {
+    const entry = JSON.parse(fs.readFileSync(path.join(Global.Path.data, "auth.json"), "utf8"))?.typesafe
+    return entry?.type === "api" && typeof entry.key === "string" && entry.key.trim() !== ""
+  } catch {
+    return false
+  }
 }
 
 // `UTC-05:00` for a zone at the given moment; `longOffset` names UTC itself plain `GMT`.
