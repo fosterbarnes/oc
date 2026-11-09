@@ -7,7 +7,7 @@ import { Hash } from "@opencode-ai/core/util/hash"
 import { detectTerminal, type TerminalInfo } from "@opencode-ai/core/util/terminal"
 import { dedupeRootPaths, isDirectory, normalizeRootPath, rootPathKey } from "./roots"
 import { normalizeUsageSubscriptions, type UsageSubscription } from "./usage/calendar"
-import { DEFAULT_USAGE_PROVIDERS, normalizeUsageProviders, type UsageProviderId } from "./usage/providers"
+import { normalizeUsageProviders, type UsageProviderId } from "./usage/providers"
 
 export type ScriptLauncher = {
   executable: string
@@ -48,7 +48,8 @@ export type SidebarSettings = {
   favoriteFileRoots: string[]
   recentFileRoots: string[]
   fileRoots: Record<string, { customRoots: string[]; activeRoot?: string }>
-  usageProviders: UsageProviderId[]
+  /** Undefined until the user picks: the sidebar then shows every provider with a login. */
+  usageProviders?: UsageProviderId[]
   usageSpacing: boolean
   usageSubscriptions: UsageSubscription[]
 }
@@ -228,7 +229,7 @@ export function defaultSidebarSettings(): SidebarSettings {
     favoriteFileRoots: [],
     recentFileRoots: [],
     fileRoots: {},
-    usageProviders: [...DEFAULT_USAGE_PROVIDERS],
+    usageProviders: undefined,
     usageSpacing: false,
     usageSubscriptions: [],
   }
@@ -280,7 +281,7 @@ export function normalizeSidebarSettings(value: unknown, base = defaultSidebarSe
       favoriteFileRoots: [...base.favoriteFileRoots],
       recentFileRoots: [...base.recentFileRoots],
       fileRoots: structuredClone(base.fileRoots),
-      usageProviders: [...base.usageProviders],
+      usageProviders: base.usageProviders && [...base.usageProviders],
       usageSpacing: base.usageSpacing,
       usageSubscriptions: [...base.usageSubscriptions],
     }
@@ -358,10 +359,9 @@ export function normalizeSidebarSettings(value: unknown, base = defaultSidebarSe
     favoriteFileRoots: normalizedFavorites,
     recentFileRoots,
     fileRoots,
-    usageProviders:
-      "usageProviders" in input
-        ? normalizeUsageProviders(input.usageProviders, base.usageProviders)
-        : [...base.usageProviders],
+    usageProviders: Array.isArray(input.usageProviders)
+      ? normalizeUsageProviders(input.usageProviders)
+      : base.usageProviders && [...base.usageProviders],
     usageSpacing: typeof input.usageSpacing === "boolean" ? input.usageSpacing : base.usageSpacing,
     usageSubscriptions:
       "usageSubscriptions" in input
@@ -453,11 +453,12 @@ export function saveUserScriptSettings(homeDirectory: string, scripts: ScriptSet
   writeJsonObject(filePath, { ...base, scripts })
 }
 
-export function saveUserUsageProviders(homeDirectory: string, usageProviders: UsageProviderId[]): void {
+/** Undefined removes the saved list, which returns the sidebar to showing every provider with a login. */
+export function saveUserUsageProviders(homeDirectory: string, usageProviders: UsageProviderId[] | undefined): void {
   const filePath = path.join(homeDirectory, ".config", "openSidebar", "config.json")
   const existing = readJsonFile(filePath)
   const base = existing && typeof existing === "object" ? (existing as Record<string, unknown>) : {}
-  writeJsonObject(filePath, { ...base, usageProviders: [...usageProviders] })
+  writeJsonObject(filePath, { ...base, usageProviders: usageProviders && [...usageProviders] })
 }
 
 export function saveUserUsageSpacing(homeDirectory: string, usageSpacing: boolean): void {

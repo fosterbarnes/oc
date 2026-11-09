@@ -25,7 +25,8 @@ export type OpenAIUsage =
   | {
       ok: false
       accountID?: string
-      reason?: "reauthenticate"
+      /** `no-credentials`: no OpenAI login in auth.json, decided before any request. */
+      reason?: "reauthenticate" | "no-credentials"
       metadata?: UsageProbeMetadata
     }
 
@@ -39,6 +40,7 @@ export type OpenCodeGoUsage =
     }
   | {
       ok: false
+      reason?: "no-credentials"
       metadata?: UsageProbeMetadata
     }
 
@@ -54,6 +56,7 @@ export type OpenRouterUsage =
     }
   | {
       ok: false
+      reason?: "no-credentials"
       metadata?: UsageProbeMetadata
     }
 
@@ -138,13 +141,14 @@ export async function probeOpenAIUsage(options: UsageOptions = {}): Promise<Open
     if (typeof openai?.expires === "number" && Number.isFinite(openai.expires) && openai.expires <= nowMs) {
       return { ok: false, reason: "reauthenticate", ...(accountID ? { accountID } : {}) }
     }
-    if (typeof openai?.access !== "string" || openai.access.trim() === "") return errorResult()
+    if (typeof openai?.access !== "string" || openai.access.trim() === "")
+      return { ok: false, reason: "no-credentials" }
     credentials = {
       access: openai.access,
       accountId: typeof openai.accountId === "string" ? openai.accountId : undefined,
     }
   } catch {
-    return errorResult()
+    return { ok: false, reason: "no-credentials" }
   }
 
   try {
@@ -154,11 +158,18 @@ export async function probeOpenAIUsage(options: UsageOptions = {}): Promise<Open
   } catch (error) {
     const metadata = usageFailureMetadata(error)
     if (error instanceof UsageRequestError && error.status === 401) {
-      return { ok: false, reason: "reauthenticate", ...(metadata ? { metadata } : {}),
-        ...(credentials.accountId ? { accountID: credentials.accountId } : {}) }
+      return {
+        ok: false,
+        reason: "reauthenticate",
+        ...(metadata ? { metadata } : {}),
+        ...(credentials.accountId ? { accountID: credentials.accountId } : {}),
+      }
     }
-    return { ok: false, ...(metadata ? { metadata } : {}),
-      ...(credentials.accountId ? { accountID: credentials.accountId } : {}) }
+    return {
+      ok: false,
+      ...(metadata ? { metadata } : {}),
+      ...(credentials.accountId ? { accountID: credentials.accountId } : {}),
+    }
   }
 }
 
@@ -197,10 +208,11 @@ export async function probeOpenCodeGoUsage(options: UsageOptions = {}): Promise<
   try {
     const raw = await readAuthContent(options)
     const credential = (JSON.parse(raw) as { "opencode-go"?: { key?: unknown } })["opencode-go"]
-    if (typeof credential?.key !== "string" || credential.key.trim() === "") return goErrorResult()
+    if (typeof credential?.key !== "string" || credential.key.trim() === "")
+      return { ok: false, reason: "no-credentials" }
     key = credential.key
   } catch {
-    return goErrorResult()
+    return { ok: false, reason: "no-credentials" }
   }
 
   try {
@@ -248,7 +260,7 @@ export async function probeOpenRouterUsage(options: UsageOptions = {}): Promise<
       key = undefined
     }
   }
-  if (!key) return openRouterErrorResult()
+  if (!key) return { ok: false, reason: "no-credentials" }
 
   try {
     const fetched = await fetchUsageResponse(options, OPENROUTER_URL, {

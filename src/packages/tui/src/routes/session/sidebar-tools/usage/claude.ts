@@ -121,11 +121,7 @@ export async function probeClaudeCodeUsage(options: UsageOptions = {}): Promise<
   const configDir = path.resolve(path.dirname(credentialsPath))
   const cacheWritePath = options.claudeUsageCachePath ?? claudeUsageCacheWritePath(homeDir, configDir)
   const cacheReadPath = await resolveClaudeUsageCacheReadPath(homeDir, configDir, cacheWritePath)
-  const oauth = await readFile(credentialsPath, "utf8")
-    .then(
-      (raw) => (JSON.parse(raw) as { claudeAiOauth?: { accessToken?: unknown; expiresAt?: unknown } }).claudeAiOauth,
-    )
-    .catch(() => undefined)
+  const oauth = await readClaudeOauth(configDir, credentialsPath, homeDir, options)
   if (typeof oauth?.accessToken !== "string" || !oauth.accessToken) return { ok: false, reason: "signed-out" }
   const expired = typeof oauth.expiresAt === "number" && oauth.expiresAt <= nowMs
   let liveFailure: UsageProbeMetadata | undefined
@@ -177,6 +173,57 @@ export async function probeClaudeCodeUsage(options: UsageOptions = {}): Promise<
   }
 }
 
+// macOS Claude Code keeps the login in the Keychain and falls back to `.credentials.json`; elsewhere only the file.
+async function readClaudeOauth(configDir: string, credentialsPath: string, homeDir: string, options: UsageOptions) {
+  const parse = (raw: string | undefined) => {
+    if (!raw) return undefined
+    try {
+      return (JSON.parse(raw) as { claudeAiOauth?: { accessToken?: unknown; expiresAt?: unknown } }).claudeAiOauth
+    } catch {
+      return undefined
+    }
+  }
+  const keychain =
+    (options.platform ?? process.platform) === "darwin"
+      ? parse(await (options.claudeKeychain ?? readKeychain)(claudeKeychainService(configDir, homeDir, options.env)))
+      : undefined
+  if (typeof keychain?.accessToken === "string" && keychain.accessToken) return keychain
+  return parse(await readFile(credentialsPath, "utf8").catch(() => undefined))
+}
+
+/**
+ * Claude Code's Keychain service: bare for the default dir (spawned without CLAUDE_CONFIG_DIR), else suffixed
+ * with the first 8 hex digits of sha256 of the CLAUDE_CONFIG_DIR value, which oc passes resolved.
+ */
+export function claudeKeychainService(configDir: string, homeDir = os.homedir(), env = process.env) {
+  if (isDefaultClaudeDir(configDir, homeDir, env)) return "Claude Code-credentials"
+  const dir =
+    env.CLAUDE_CONFIG_DIR && claudeConfigDirId(path.resolve(env.CLAUDE_CONFIG_DIR)) === claudeConfigDirId(configDir)
+      ? env.CLAUDE_CONFIG_DIR
+      : configDir
+  return `Claude Code-credentials-${new Bun.CryptoHasher("sha256").update(dir.normalize("NFC")).digest("hex").slice(0, 8)}`
+}
+
+/** True for the account oc spawns with the inherited environment: `~/.claude` when CLAUDE_CONFIG_DIR is unset. */
+export function isDefaultClaudeDir(dir: string, homeDir = os.homedir(), env = process.env) {
+  const defaultDir = claudeConfigDirId(path.join(homeDir, ".claude"))
+  const id = claudeConfigDirId(dir)
+  return (
+    !env.CLAUDE_CONFIG_DIR &&
+    (process.platform === "win32" ? id.toLowerCase() === defaultDir.toLowerCase() : id === defaultDir)
+  )
+}
+
+async function readKeychain(service: string) {
+  const child = Bun.spawn(["security", "find-generic-password", "-a", os.userInfo().username, "-s", service, "-w"], {
+    stdout: "pipe",
+    stderr: "ignore",
+    signal: AbortSignal.timeout(5_000),
+  })
+  const text = await new Response(child.stdout).text()
+  return (await child.exited) === 0 ? text.trim() : undefined
+}
+
 /**
  * Usage of the pooled Claude accounts (the claude-code provider's `accounts`
  * option, a list of config dirs) as one meter: the used percentages are
@@ -202,6 +249,8 @@ export async function probeClaudeCodePool(configDirs: string[], options: UsageOp
     results.map((result) => result.metadata).find((item) => item?.status === 429) ??
     results.find((result) => result.metadata)?.metadata
   const retryAt = Math.max(0, ...results.map((result) => result.metadata?.retryAt ?? 0))
+  if (!known.length && results.every((result) => !result.ok && result.reason === "signed-out"))
+    return { ok: false, reason: "signed-out" }
   if (!known.length)
     return { ok: false, ...(metadata ? { metadata: { ...metadata, ...(retryAt ? { retryAt } : {}) } } : {}) }
   return {

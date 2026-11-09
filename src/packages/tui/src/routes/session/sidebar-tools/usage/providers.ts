@@ -7,8 +7,6 @@ export function usageProviderForModel(providerID: string): UsageProviderId | und
   return USAGE_PROVIDER_IDS.find((id) => id === providerID)
 }
 
-export const DEFAULT_USAGE_PROVIDERS: UsageProviderId[] = ["openai", "cursor", "opencode-go", "openrouter"]
-
 export const USAGE_PROVIDER_OPTIONS: { id: UsageProviderId; title: string }[] = [
   { id: "openai", title: "Codex / OpenAI" },
   { id: "cursor", title: "Cursor" },
@@ -35,8 +33,7 @@ export function isUsageProviderId(value: string): value is UsageProviderId {
   return (USAGE_PROVIDER_IDS as readonly string[]).includes(value)
 }
 
-export function normalizeUsageProviders(value: unknown, fallback = DEFAULT_USAGE_PROVIDERS): UsageProviderId[] {
-  if (!Array.isArray(value)) return [...fallback]
+export function normalizeUsageProviders(value: unknown[]): UsageProviderId[] {
   const providers: UsageProviderId[] = []
   for (const item of value) {
     if (typeof item !== "string" || !isUsageProviderId(item) || providers.includes(item)) continue

@@ -210,6 +210,27 @@ Example compact Agent notes:
 
 ---
 
+## 2026-11-08 (~22:04) - v0.2.337 blechNeeed - usage sidebar on macOS - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation (plan `docs/dev/usageSidebarMac.md`); completed
+- Version: 0.2.337 blechNeeed
+- Fixed Claude usage on macOS (`usage/claude.ts`): `readClaudeOauth` reads the login Keychain via `security find-generic-password -a <user> -s <service> -w` first, then `.credentials.json`. `claudeKeychainService`: bare `Claude Code-credentials` for the default dir (no `CLAUDE_CONFIG_DIR`), else `-<sha256(dir).hex[:8]>` (matches the stored `~/.claude2` item `4de14e5d`). Moved the default-dir rule to `isDefaultClaudeDir` (shared with `plans.ts` `claudeProfilePath`). Pool reports `signed-out` when every account is. Test seams `platform`/`claudeKeychain` on `UsageOptions`.
+- Added `reason: "no-credentials"` to OpenAI, OpenCode Go, OpenRouter, and Cursor probes, decided before any request. Cursor: an expired desktop `cursorAuth/accessToken` JWT counts as no credentials (on this Mac the desktop token and its refresh token expired 2026-10-15; `oauth/token` answered `shouldLogout`).
+- Changed `SidebarSettings.usageProviders` to optional: unset means auto (every provider probed; shown when its last probe found a login, `logins` kept in `keptUsage`). Removed `DEFAULT_USAGE_PROVIDERS`; `saveUserUsageProviders(home, undefined)` drops the key. Provider dialog gained **Show connected providers**.
+- Collapsed two-line `unavailable` fallbacks to one line (`fallbackRow`), with `not connected` / `run /connect` / `run claude auth login` / `sign in` wording; plan line hidden when the provider has no data and no date.
+- `resolveAuthPath` now always uses xdg data (`~/.local/share/opencode/auth.json`, as `Global.Path.data`); dropped the wrong win32/darwin branches and the fallback list.
+- Verification: `bun run typecheck` in `packages/tui` clean; `bun test test/feature-plugins/openSidebar.test.ts` 79 pass, `bun test test/cli/tui` 166 pass (new: Keychain service names, Keychain-before-file on darwin, expired Cursor desktop JWT, auto default). Live probes on this Mac: openai ok, go/openrouter/cursor `no-credentials`, claude2 ok live from Keychain. Not seen in a running TUI yet (needs `/revive`).
+
+### User
+Usage sidebar
+- On macOS, Claude usage now works: oc reads the Claude login from the Keychain, where Claude Code keeps it.
+- Until you pick providers, the sidebar shows only the ones you are signed in to; picking any saves your own list, and **Show connected providers** in the provider picker goes back.
+- A provider without a login now takes one line (`not connected`, `run /connect`, `sign in`) instead of repeating `unavailable`.
+- An expired Cursor desktop login shows as signed out without a wasted request.
+
+---
+
 ## 2026-11-08 (~21:30) - v0.2.336 girlcockCloseted - macOS oc keys on cmd - Claude Opus 5.5, low effort; Implementation
 
 ### Agent

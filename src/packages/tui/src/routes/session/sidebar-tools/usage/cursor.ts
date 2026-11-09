@@ -22,7 +22,8 @@ export type CursorUsage =
     }
   | {
       ok: false
-      reason?: "need-token" | "reauthenticate"
+      /** `no-credentials`: no opencode login, pasted cookie, or unexpired desktop login; decided before any request. */
+      reason?: "need-token" | "reauthenticate" | "no-credentials"
       metadata?: UsageProbeMetadata
     }
 
@@ -125,8 +126,11 @@ function parseCursorUsageResponse(
         Number.isFinite(window.limit) &&
         window.limit > 0
           ? clampUsagePercent((window.used / window.limit) * 100)
-          : parseCursorPercent(typeof window.totalPercentUsed === "number" && window.totalPercentUsed <= 1
-            ? window.totalPercentUsed * 100 : window.totalPercentUsed)))
+          : parseCursorPercent(
+              typeof window.totalPercentUsed === "number" && window.totalPercentUsed <= 1
+                ? window.totalPercentUsed * 100
+                : window.totalPercentUsed,
+            )))
   if (usedPercent === null && body.isUnlimited !== true) return { ok: false }
   return {
     ok: true,
@@ -150,11 +154,7 @@ async function readCursorOpenCodeCredential(
     const raw = await readAuthContent(options)
     const cursor = (JSON.parse(raw) as { cursor?: Record<string, unknown> }).cursor
     if (!cursor || typeof cursor !== "object") return undefined
-    if (
-      cursor.type === "oauth" &&
-      typeof cursor.access === "string" &&
-      cursor.access.trim() !== ""
-    ) {
+    if (cursor.type === "oauth" && typeof cursor.access === "string" && cursor.access.trim() !== "") {
       return { token: cursor.access.trim() }
     }
     if (cursor.type === "api" && typeof cursor.key === "string" && cursor.key.trim() !== "") {
@@ -176,9 +176,12 @@ export async function probeCursorUsage(options: UsageOptions = {}): Promise<Curs
 
   const openCodeToken = openCode?.token
   const pastedToken = options.cursorSessionToken?.trim()
-  const desktopToken = openCodeToken || pastedToken
-    ? undefined
-    : await readCursorAccessToken(options.cursorDbPath ?? cursorDbPath({ env: options.env, homeDir: options.homeDir }))
+  const desktopToken =
+    openCodeToken || pastedToken
+      ? undefined
+      : await readCursorAccessToken(
+          options.cursorDbPath ?? cursorDbPath({ env: options.env, homeDir: options.homeDir }),
+        )
 
   const token = openCodeToken ?? pastedToken ?? desktopToken
   const accountSource: UsageProbeMetadata["accountSource"] | undefined = openCodeToken
@@ -189,7 +192,11 @@ export async function probeCursorUsage(options: UsageOptions = {}): Promise<Curs
         ? "desktop"
         : undefined
 
-  if (!token) return { ok: false, reason: "need-token" }
+  if (!token) return { ok: false, reason: "no-credentials" }
+  // The desktop app refreshes its own token while it runs; an expired one means the app is signed out (its
+  // refresh token expires with it), so a request would only return 401.
+  if (accountSource === "desktop" && expiredJwt(token, options.nowMs ?? Date.now()))
+    return { ok: false, reason: "no-credentials" }
   const cookie = cursorSessionCookie(token)
   if (!cookie) return { ok: false, reason: "need-token" }
 
@@ -205,5 +212,15 @@ export async function probeCursorUsage(options: UsageOptions = {}): Promise<Curs
       return { ok: false, reason: "reauthenticate", metadata: { ...metadata, accountSource } }
     }
     return { ok: false, metadata: { ...metadata, accountSource } }
+  }
+}
+
+function expiredJwt(token: string, nowMs: number) {
+  try {
+    const exp = (JSON.parse(Buffer.from(token.split(".")[1] ?? "", "base64url").toString("utf8")) as { exp?: unknown })
+      .exp
+    return typeof exp === "number" && exp * 1000 <= nowMs
+  } catch {
+    return false
   }
 }

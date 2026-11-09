@@ -77,12 +77,19 @@ import {
 } from "./usage/plans"
 import {
   usageProviderForModel,
+  USAGE_PROVIDER_IDS,
   USAGE_PROVIDER_OPTIONS,
   type UsagePlanProvider,
   type UsageProviderId,
 } from "./usage/providers"
 import { createUsageRefresh } from "./usage/refresh"
-import { updateUsageSnapshot, usageWindowStale, type UsageWindow, type UsageSnapshot } from "./usage/snapshot"
+import {
+  updateUsageSnapshot,
+  usageWindowStale,
+  type UsageProbeMetadata,
+  type UsageWindow,
+  type UsageSnapshot,
+} from "./usage/snapshot"
 
 // Usage menu detail for where a plan date came from.
 const PLAN_SOURCE: Record<NonNullable<UsagePlan["source"]> | "unknown", string> = {
@@ -137,7 +144,15 @@ export function createSidebarUsage(input: {
   const [showRemaining, setShowRemaining] = createSignal(false)
   const [usageWidth, setUsageWidth] = createSignal(0)
   let usageBox: BoxRenderable | undefined
-  const [usageProviders, setUsageProviders] = createSignal<UsageProviderId[]>([...input.settings().usageProviders])
+  // The user's saved provider list; undefined shows every provider whose last probe found a login.
+  const [savedProviders, setSavedProviders] = createSignal(input.settings().usageProviders?.slice())
+  const [logins, setLogins] = createSignal(
+    (keptUsage.get("logins") as Partial<Record<UsageProviderId, boolean>> | undefined) ?? {},
+  )
+  createEffect(() => keptUsage.set("logins", logins()))
+  const usageProviders = createMemo(() => savedProviders() ?? USAGE_PROVIDER_IDS.filter((id) => logins()[id]))
+  // Without a saved list every provider is probed; probes with no login return before any request.
+  const probedProviders = () => savedProviders() ?? [...USAGE_PROVIDER_IDS]
   const [usageSpacing, setUsageSpacing] = createSignal(input.settings().usageSpacing)
   const [usageSubscriptions, setUsageSubscriptions] = createSignal([...input.settings().usageSubscriptions])
   // Same kv key as the sidebar section state in feature-plugins/sidebar/open.ts.
@@ -217,6 +232,16 @@ export function createSidebarUsage(input: {
     if (!usageAbort.signal.aborted) setPlanFacts(facts)
   }
   const refreshUsage = async (provider: UsageProviderId) => {
+    const result = await probeUsage(provider)
+    if (!usageAbort.signal.aborted) {
+      const login = result.ok || (result.reason !== "no-credentials" && result.reason !== "signed-out")
+      if (logins()[provider] !== login) setLogins((previous) => ({ ...previous, [provider]: login }))
+    }
+    return result
+  }
+  const probeUsage = async (
+    provider: UsageProviderId,
+  ): Promise<{ ok: boolean; reason?: string; metadata?: UsageProbeMetadata }> => {
     if (usageAbort.signal.aborted) return { ok: true, metadata: undefined }
     if (provider === "openai" || provider === "claude-code") void refreshPlanFacts()
     const startedAt = Date.now()
@@ -274,7 +299,11 @@ export function createSidebarUsage(input: {
           )
         }
       }
-      return { ok: next.ok && next.source === "live" && !next.metadata?.status, metadata: next.metadata }
+      return {
+        ok: next.ok && next.source === "live" && !next.metadata?.status,
+        reason: next.ok ? undefined : next.reason,
+        metadata: next.metadata,
+      }
     }
     const next = await probeCursorUsage({ ...options, cursorSessionToken })
     if (!usageAbort.signal.aborted) setCursorUsage((previous) => updateUsageSnapshot(previous, next, Date.now()))
@@ -289,7 +318,7 @@ export function createSidebarUsage(input: {
       "claude-code": claudeCodeUsage(),
     }
     usageScheduler.request(
-      usageProviders().filter((provider) => Date.now() - (snapshots[provider].fetchedAt ?? 0) > 60_000),
+      probedProviders().filter((provider) => Date.now() - (snapshots[provider].fetchedAt ?? 0) > 60_000),
     )
   }
   // Account rows use their own snapshot; cached siblings are marked per window.
@@ -298,7 +327,7 @@ export function createSidebarUsage(input: {
       ? theme.textMuted
       : theme.text
   usageScheduler = createUsageRefresh({
-    providers: usageProviders,
+    providers: probedProviders,
     active: (provider) =>
       Object.entries(sync.data.session_status).some(([id, status]) => {
         if (status.type === "idle") return false
@@ -327,7 +356,7 @@ export function createSidebarUsage(input: {
     }),
   )
   createEffect(() => {
-    usageProviders()
+    probedProviders()
     Object.values(sync.data.session_status).forEach((status) => status.type)
     usageScheduler.reconcile()
   })
@@ -338,14 +367,13 @@ export function createSidebarUsage(input: {
       if (JSON.stringify(ids) === JSON.stringify(dirs)) return previous
       return [...usageObservations.values()].reduce(applyClaudeObservation, claudeSeed())
     })
-    if (usageProviders().includes("claude-code")) usageScheduler.request(["claude-code"])
+    if (probedProviders().includes("claude-code")) usageScheduler.request(["claude-code"])
     void refreshActiveClaudeAccount()
   })
 
   const codexWindows = (): { weekly?: UsageWindow; monthly?: UsageWindow; reauthenticate: boolean } => {
     const snapshot = usage()
-    if (!snapshot.ok)
-      return { weekly: undefined, monthly: undefined, reauthenticate: snapshot.reason === "reauthenticate" }
+    if (!snapshot.ok) return { weekly: undefined, monthly: undefined, reauthenticate: snapshot.reason !== undefined }
     const [shortest, longest] = orderUsageWindows([snapshot.primary, snapshot.secondary])
     return { weekly: shortest, monthly: longest, reauthenticate: false }
   }
@@ -392,11 +420,12 @@ export function createSidebarUsage(input: {
   )
   const openBilling = (plan: UsagePlan) => void openLink(kv, plan.url).catch(toast.error)
   // Muted renewal line under a provider's meters; left click opens the provider's billing page.
-  const planLine = (provider: UsagePlanProvider, account?: string) => {
+  // Without a meter reading, an unknown renewal date says nothing; with one, it invites a manual date.
+  const planLine = (provider: UsagePlanProvider, account?: string, hasData = true) => {
     const plan = usagePlans().find(
       (item) => item.provider === provider && (account === undefined || item.account === account),
     )
-    if (!plan) return undefined
+    if (!plan || (!hasData && plan.atMs === undefined)) return undefined
     const line = usagePlanLine(plan, usageNow())
     const key = `plan:${provider}:${account ?? ""}`
     return (
@@ -427,11 +456,12 @@ export function createSidebarUsage(input: {
     const orValue = orOk
       ? formatUsagePercent(orOk.usedPercent, showRemaining()) +
         (orSnapshot.stale || usageNow() - (orSnapshot.fetchedAt ?? 0) > 300_000 ? "*" : "")
-      : "unavailable"
+      : !orSnapshot.ok && orSnapshot.reason === "no-credentials"
+        ? "not connected"
+        : "unavailable"
     const cursorSnapshot = cursorUsage()
     const cursorOk = cursorSnapshot.ok ? cursorSnapshot.monthly : undefined
-    const cursorNeedsToken =
-      !cursorSnapshot.ok && (cursorSnapshot.reason === "need-token" || cursorSnapshot.reason === "reauthenticate")
+    const cursorNeedsToken = !cursorSnapshot.ok && cursorSnapshot.reason !== undefined
     const claudeSnapshot = claudeCodeUsage()
     // Expire known windows against the local minute clock; no new request, no timestamp refresh.
     const claudeProjected = claudeSnapshot.ok ? projectClaudeUsage(claudeSnapshot, usageNow()) : claudeSnapshot
@@ -504,6 +534,12 @@ export function createSidebarUsage(input: {
       }
     }
     const rows = layout(usageColumns(Object.values(layout()).flat()))
+    const fallbackRow = (label: string, snapshot: UsageSnapshot<{ ok: boolean }>, text: string) => (
+      <box flexDirection="row" gap={1}>
+        <text fg={usageColor(snapshot)}>{label}</text>
+        <text fg={theme.textMuted}>{text}</text>
+      </box>
+    )
     const aligned = (
       label: string,
       snapshot: UsageSnapshot<{ ok: boolean }>,
@@ -565,98 +601,70 @@ export function createSidebarUsage(input: {
         <Show when={usageOpen()}>
           {/* Each visible provider is one flex child, so gap spaces only providers that render. */}
           <box flexDirection="column" gap={usageSpacing() ? 1 : 0}>
-            <Show when={usageProviders().length === 0}>
-              <box flexDirection="row" gap={1}>
-                <text fg={theme.textMuted}>No usage providers selected</text>
-              </box>
+            {/* Auto mode waits for every probe before saying nothing is connected. */}
+            <Show
+              when={
+                usageProviders().length === 0 &&
+                (savedProviders() || USAGE_PROVIDER_IDS.every((id) => logins()[id] !== undefined))
+              }
+            >
+              <text fg={theme.textMuted}>
+                {savedProviders() ? "No usage providers selected" : "No usage providers connected"}
+              </text>
             </Show>
             <Show when={usageProviders().includes("openai")}>
               <box flexDirection="column">
                 <Show
                   when={codexHasData}
-                  fallback={
-                    <>
-                      <box flexDirection="row" gap={1}>
-                        <text fg={usageColor(usage())}>Codex :</text>
-                        <text fg={theme.textMuted}>{codex.reauthenticate ? "run /connect" : "unavailable"}</text>
-                      </box>
-                      <box flexDirection="row" gap={1}>
-                        <text fg={theme.textMuted}>
-                          {codex.reauthenticate ? "OpenAI auth required" : "unavailable"}
-                        </text>
-                      </box>
-                    </>
-                  }
+                  fallback={fallbackRow("Codex :", usage(), codex.reauthenticate ? "run /connect" : "unavailable")}
                 >
                   {aligned("Codex :", usage(), rows.codex)}
                 </Show>
-                {planLine("openai")}
+                {planLine("openai", undefined, codexHasData)}
               </box>
             </Show>
             <Show when={usageProviders().includes("claude-code")}>
               <box flexDirection="column">
                 <Show
                   when={claudeOk}
-                  fallback={
-                    <>
-                      <box flexDirection="row" gap={1}>
-                        <text fg={usageColor(claudeSnapshot)}>Claude:</text>
-                        <text fg={theme.textMuted}>unavailable</text>
-                      </box>
-                      <box flexDirection="row" gap={1}>
-                        <text fg={theme.textMuted}>unavailable</text>
-                      </box>
-                    </>
-                  }
+                  fallback={fallbackRow(
+                    "Claude:",
+                    claudeSnapshot,
+                    !claudeSnapshot.ok && claudeSnapshot.reason === "signed-out"
+                      ? "run claude auth login"
+                      : !claudeSnapshot.ok && claudeSnapshot.reason === "expired"
+                        ? "login expired"
+                        : "unavailable",
+                  )}
                 >
                   {aligned("Claude:", claudeProjected, rows.claude, claudePooled)}
                 </Show>
-                {claudePooled ? undefined : planLine("claude-code")}
+                {claudePooled ? undefined : planLine("claude-code", undefined, Boolean(claudeOk))}
               </box>
             </Show>
             <Show when={usageProviders().includes("cursor")}>
               <box flexDirection="column">
                 <Show
                   when={cursorOk}
-                  fallback={
-                    <>
-                      <box flexDirection="row" gap={1}>
-                        <text fg={usageColor(cursorSnapshot)}>Cursor:</text>
-                        <text fg={theme.textMuted}>{cursorNeedsToken ? "sign in" : "unavailable"}</text>
-                      </box>
-                      <box flexDirection="row" gap={1}>
-                        <text fg={theme.textMuted}>
-                          {cursorOk?.resetAt || (cursorNeedsToken ? "Cursor auth required" : "unavailable")}
-                        </text>
-                      </box>
-                    </>
-                  }
+                  fallback={fallbackRow("Cursor:", cursorSnapshot, cursorNeedsToken ? "sign in" : "unavailable")}
                 >
                   {aligned("Cursor:", cursorSnapshot, rows.cursor)}
                 </Show>
-                <Show when={!cursorSnapshot.ok && cursorSnapshot.reason === "reauthenticate"}>
-                  <box flexDirection="row" gap={1}>
-                    <text fg={theme.textMuted}>open Usage to paste a new cookie</text>
-                  </box>
+                <Show when={!cursorOk && cursorNeedsToken}>
+                  <text fg={theme.textMuted}>open Usage to paste a cookie</text>
                 </Show>
-                {planLine("cursor")}
+                {planLine("cursor", undefined, Boolean(cursorOk))}
               </box>
             </Show>
             <Show when={usageProviders().includes("opencode-go")}>
               <box flexDirection="column">
                 <Show
                   when={goOk}
-                  fallback={
-                    <>
-                      <box flexDirection="row" gap={1}>
-                        <text fg={usageColor(goSnapshot)}>OpenCode Go:</text>
-                        <text fg={theme.textMuted}>unavailable</text>
-                      </box>
-                      <box flexDirection="row" gap={1}>
-                        <text fg={theme.textMuted}>unavailable</text>
-                      </box>
-                    </>
-                  }
+                  fallback={fallbackRow(
+                    "OpenCode Go:",
+                    goSnapshot,
+                    !goSnapshot.ok && goSnapshot.reason === "no-credentials" ? "not connected" : "unavailable",
+                  )}
                 >
                   {aligned("OpenCode Go:", goSnapshot, rows.go)}
                 </Show>
@@ -683,29 +691,38 @@ export function createSidebarUsage(input: {
 
   const selectUsageSettings = () => {
     const selected = new Set(usageProviders())
+    const auto = !savedProviders()
     const dialogProps = {
       title: "Usage providers",
-      options: USAGE_PROVIDER_OPTIONS.map((provider) => ({
-        title: provider.title,
-        value: provider.id,
-        footer: selected.has(provider.id) ? "visible" : "hidden",
-        gutter: selected.has(provider.id) ? () => <text fg={theme.success}>:white_check_mark:</text> : undefined,
-      })),
-      onSelect: (option: { value: UsageProviderId }) => {
-        const next = selected.has(option.value)
-          ? usageProviders().filter((id) => id !== option.value)
-          : [
-              ...USAGE_PROVIDER_OPTIONS.map((provider) => provider.id).filter(
-                (id) => selected.has(id) || id === option.value,
-              ),
-            ]
+      options: [
+        // Picking any provider saves an explicit list; this entry drops it again.
+        {
+          title: "Show connected providers",
+          value: "auto",
+          footer: auto ? "on" : "off",
+          gutter: auto ? () => <text fg={theme.success}>:white_check_mark:</text> : undefined,
+        },
+        ...USAGE_PROVIDER_OPTIONS.map((provider) => ({
+          title: provider.title,
+          value: provider.id,
+          footer: selected.has(provider.id) ? "visible" : "hidden",
+          gutter: selected.has(provider.id) ? () => <text fg={theme.success}>:white_check_mark:</text> : undefined,
+        })),
+      ],
+      onSelect: (option: { value: UsageProviderId | "auto" }) => {
+        const next =
+          option.value === "auto"
+            ? undefined
+            : selected.has(option.value)
+              ? usageProviders().filter((id) => id !== option.value)
+              : USAGE_PROVIDER_IDS.filter((id) => selected.has(id) || id === option.value)
         input.settings().usageProviders = next
         saveUserUsageProviders(os.homedir(), next)
-        setUsageProviders(next)
+        setSavedProviders(next)
         usageScheduler.request()
         selectUsageSettings()
       },
-    } as unknown as DialogSelectProps<UsageProviderId>
+    } as unknown as DialogSelectProps<UsageProviderId | "auto">
     dialog.replace(() => <DialogSelect {...dialogProps} />)
   }
   const openUsageSettings = () => setTimeout(selectUsageSettings, 100)
@@ -723,7 +740,11 @@ export function createSidebarUsage(input: {
           : `${name}: ${formatUsagePercent(used)} used, ${formatUsagePercent(used, true)} remaining`,
       details,
     })
-    const unavailable = (category: string) => ({ category, title: "Unavailable", inert: true })
+    const unavailable = (category: string, snapshot?: { ok: boolean; reason?: string }) => ({
+      category,
+      title: snapshot && !snapshot.ok && snapshot.reason === "no-credentials" ? "Not connected" : "Unavailable",
+      inert: true,
+    })
     const signIn = (category: string, detail: string) => ({ category, title: "Sign in required", details: [detail] })
     // Pooled Claude plan rows join their account's group (same category as the account's usage rows).
     const planRows = (id: UsageProviderId, category: string) =>
@@ -755,7 +776,7 @@ export function createSidebarUsage(input: {
       }
       if (id === "opencode-go") {
         const snapshot = goUsage()
-        if (!snapshot.ok) return [unavailable(category)]
+        if (!snapshot.ok) return [unavailable(category, snapshot)]
         return [snapshot.weekly, snapshot.monthly]
           .filter((window) => window !== null)
           .map((window) =>
@@ -767,7 +788,7 @@ export function createSidebarUsage(input: {
       }
       if (id === "openrouter") {
         const snapshot = openRouterUsage()
-        if (!snapshot.ok) return [unavailable(category)]
+        if (!snapshot.ok) return [unavailable(category, snapshot)]
         return [
           row(category, "Credit", snapshot.usedPercent, [
             `$${snapshot.usedUsd.toFixed(2)} of $${snapshot.limitUsd.toFixed(2)} used`,
@@ -782,8 +803,7 @@ export function createSidebarUsage(input: {
       if (id === "cursor") {
         const snapshot = cursorUsage()
         if (!snapshot.ok) {
-          const needsToken = snapshot.reason === "need-token" || snapshot.reason === "reauthenticate"
-          if (!needsToken) return [unavailable(category)]
+          if (snapshot.reason === undefined) return [unavailable(category)]
           return [
             { ...signIn(category, "Select to paste a Cursor session cookie"), onSelect: () => promptCursorToken() },
           ]
@@ -1134,7 +1154,7 @@ export function createSidebarUsage(input: {
     refreshActiveClaudeAccount,
     request: (providers?: UsageProviderId[]) => usageScheduler.request(providers),
     loadSettings: (settings: SidebarSettings) => {
-      setUsageProviders([...settings.usageProviders])
+      setSavedProviders(settings.usageProviders?.slice())
       setUsageSpacing(settings.usageSpacing)
       setUsageSubscriptions([...settings.usageSubscriptions])
     },

@@ -1,25 +1,12 @@
-v0.2.336 girlcockCloseted [patch > Mac cmd keys; fix > oc settings save]
+v0.2.337 blechNeeed [fix > Mac Claude usage; patch > usage providers]
 
-macOS keys:
-On a Mac the oc layout now uses Cmd instead of Ctrl for its shortcuts: Cmd+O oc commands, Cmd+P all commands, Cmd+M models, Cmd+S sessions, Cmd+N new session, and the same for list and dialog keys. Typing and terminal keys stay on Ctrl (the Ctrl+X leader, Ctrl+C, Ctrl+Z, prompt editing, Ctrl+P/Ctrl+N in lists, message scrolling). Key hints show "cmd", and the one-time Keyboard notice names the Cmd keys. Your own keybinds still win, and the stock opencode layout is unchanged.
+usage sidebar:
+On a Mac, Claude usage now shows up. Claude Code keeps its login in the macOS Keychain rather than a .credentials.json file, so oc now reads it from there (and still falls back to the file). It never refreshes or writes the token.
 
-WezTerm needs the kitty keyboard protocol and has to forward the Cmd keys it owns (Cmd+M/N/T/R/H/K/F) to oc panes. docs/wezterm.md has a "macOS cmd keys" snippet; it sends the kitty sequence directly because WezTerm 20240203 SendKey drops Cmd.
+Until you pick providers, the Usage section shows only the ones you are signed in to, so a fresh install no longer lists Cursor, OpenCode Go, or OpenRouter as "unavailable" when they were never set up. Picking any provider in Configure usage providers saves your own list as before; the new Show connected providers entry goes back to the automatic list. Saved lists are unchanged.
 
-oc settings:
-Changing oc settings from the palette (home dir, sort, user folder, session model and agent, start at login, Claude failover) works again instead of showing "OpenCode executable is not configured". The "oc folder" setting is now called "User folder".
+A provider with no data now takes one line ("not connected", "run /connect", "run claude auth login", "sign in") instead of repeating "unavailable", and "Renewal date unknown" no longer shows under a provider that has no usage data. An expired Cursor desktop login reads as signed out without sending a request that can only fail.
 
-revive:
-/revive on macOS no longer fails with "TUI ledger identity unavailable or changed".
-
-Claude sessions:
-No more "Config entry ignored" notice about cua tools on machines without cua-driver.
-
-push scripts:
-Pushing from a Mac works: the pre-push line-ending pass keeps hooks and shebang scripts on LF, as .gitattributes asks, instead of turning them to CRLF, which broke the husky hook on macOS (set: -\r: invalid option). It also repairs LF-pinned files that sit with CRLF on disk.
-
-macOS dev setup:
-The Mac builds from ~/Documents/GitHub/oc; docs/dev/macos.md covers the rsync flags and the pwsh PATH. Test PDFs are stored as binary, so checkouts no longer convert their line endings.
-
-Under the hood: TuiKeybindPreset.mac is derived from the keybind definitions, applied through a new macKeys resolve option; the TUI ledger registers identity files on darwin; persistOcConfig falls back to the running or sibling oc binary. tui and opencode typecheck passed; tui config, keymap, and hotkeyValidate tests passed with a new macOS layout case; keybindDocs check passed; proxyOpencodeTools and proxyMcp tests passed. Cmd forwarding was confirmed in a raw key capture tab in WezTerm. New .scripts/tests/lineEndings.tests.ps1 passed on macOS.
+Under the hood: the Keychain service is "Claude Code-credentials" for the default account and gets a suffix of the first 8 hex of sha256 of CLAUDE_CONFIG_DIR otherwise. Probes return reason "no-credentials" before any request; usageProviders is optional in the sidebar settings (unset means automatic). The auth.json lookup now uses the xdg data folder oc really uses on every platform. tui typecheck passed; openSidebar tests (79) and test/cli/tui (166) passed, with new cases for Keychain service names, Keychain before file, expired Cursor desktop login, and the automatic default. Live probes on the Mac returned Claude usage from the Keychain. Plan in docs/dev/usageSidebarMac.md.
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>

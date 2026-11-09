@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 import { nextRenewal, parseUsageDate, startOfDay, type UsageCalendarEvent, type UsageSubscription } from "./calendar"
-import { claudeAccountName, claudeConfigDirId } from "./claude"
+import { claudeAccountName, isDefaultClaudeDir } from "./claude"
 import type { CursorUsage } from "./cursor"
 import { readAuthContent, type UsageOptions } from "./fetch"
 import { USAGE_BILLING_URLS, USAGE_PLAN_NAMES, type UsagePlanProvider, type UsageProviderId } from "./providers"
@@ -161,11 +161,7 @@ function codexFacts(entry: unknown): UsagePlanFacts["codex"] {
 // Claude Code keeps the account profile in `$CLAUDE_CONFIG_DIR/.claude.json`, or `~/.claude.json` when the variable
 // is unset. oc spawns the default account (`~/.claude` unless CLAUDE_CONFIG_DIR is inherited) without it.
 function claudeProfilePath(dir: string, homeDir: string, env: NodeJS.ProcessEnv) {
-  const defaultDir = claudeConfigDirId(path.join(homeDir, ".claude"))
-  const isDefault =
-    !env.CLAUDE_CONFIG_DIR &&
-    (process.platform === "win32" ? dir.toLowerCase() === defaultDir.toLowerCase() : dir === defaultDir)
-  return isDefault ? path.join(homeDir, ".claude.json") : path.join(dir, ".claude.json")
+  return isDefaultClaudeDir(dir, homeDir, env) ? path.join(homeDir, ".claude.json") : path.join(dir, ".claude.json")
 }
 
 async function claudeFacts(file: string): Promise<UsagePlanFacts["claude"][string]> {

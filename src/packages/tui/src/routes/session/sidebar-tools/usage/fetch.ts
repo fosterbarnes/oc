@@ -16,6 +16,9 @@ export type UsageOptions = {
   claudeNames?: Record<string, string>
   env?: NodeJS.ProcessEnv
   homeDir?: string
+  platform?: NodeJS.Platform
+  /** Reads a macOS Keychain generic password by service name; defaults to `/usr/bin/security`. */
+  claudeKeychain?: (service: string) => Promise<string | undefined>
   fetchImpl?: (input: URL | RequestInfo, init?: RequestInit) => Promise<Response>
   nowMs?: number
   timeoutMs?: number
@@ -33,19 +36,15 @@ export class UsageRequestError extends Error {
   }
 }
 
+// oc keeps auth.json under xdg-basedir's data dir on every platform (`Global.Path.data`), not the OS app-data dir.
 export function resolveAuthPath({
-  platform = process.platform,
   env = process.env,
   homeDir = os.homedir(),
 }: {
-  platform?: NodeJS.Platform
   env?: NodeJS.ProcessEnv
   homeDir?: string
 } = {}): string {
   if (env.OPENCODE_AUTH_PATH) return env.OPENCODE_AUTH_PATH
-  if (platform === "win32")
-    return path.join(env.LOCALAPPDATA ?? path.join(homeDir, "AppData", "Local"), "opencode", "auth.json")
-  if (platform === "darwin") return path.join(homeDir, "Library", "Application Support", "opencode", "auth.json")
   return path.join(env.XDG_DATA_HOME ?? path.join(homeDir, ".local", "share"), "opencode", "auth.json")
 }
 
@@ -94,18 +93,5 @@ export async function fetchUsageResponse(
 export async function readAuthContent(options: UsageOptions): Promise<string> {
   if (options.env?.OPENCODE_AUTH_CONTENT) return options.env.OPENCODE_AUTH_CONTENT
   if (!options.authPath && !options.env && process.env.OPENCODE_AUTH_CONTENT) return process.env.OPENCODE_AUTH_CONTENT
-  const authPaths = options.authPath
-    ? [options.authPath]
-    : [
-        resolveAuthPath({ env: options.env, homeDir: options.homeDir }),
-        path.join(options.homeDir ?? os.homedir(), ".local", "share", "opencode", "auth.json"),
-      ]
-  for (const authPath of [...new Set(authPaths)]) {
-    try {
-      return await readFile(authPath, "utf8")
-    } catch {
-      continue
-    }
-  }
-  throw new Error("auth file not found")
+  return readFile(options.authPath ?? resolveAuthPath({ env: options.env, homeDir: options.homeDir }), "utf8")
 }

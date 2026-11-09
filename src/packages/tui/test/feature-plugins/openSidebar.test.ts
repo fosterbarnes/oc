@@ -43,7 +43,11 @@ import {
   sameRootPath,
 } from "../../src/routes/session/sidebar-tools/roots.ts"
 import { readScripts, readTree } from "../../src/routes/session/sidebar-tools/scripts.ts"
-import { probeClaudeCodePool, probeClaudeCodeUsage } from "../../src/routes/session/sidebar-tools/usage/claude.ts"
+import {
+  claudeKeychainService,
+  probeClaudeCodePool,
+  probeClaudeCodeUsage,
+} from "../../src/routes/session/sidebar-tools/usage/claude.ts"
 import {
   cursorSessionCookie,
   cursorDbPath,
@@ -56,11 +60,7 @@ import {
   probeOpenCodeGoUsage,
   probeOpenRouterUsage,
 } from "../../src/routes/session/sidebar-tools/usage/probes.ts"
-import {
-  DEFAULT_USAGE_PROVIDERS,
-  normalizeUsageProviders,
-  USAGE_PROVIDER_IDS,
-} from "../../src/routes/session/sidebar-tools/usage/providers.ts"
+import { normalizeUsageProviders, USAGE_PROVIDER_IDS } from "../../src/routes/session/sidebar-tools/usage/providers.ts"
 import {
   commandArgs,
   fileClipboardText,
@@ -142,11 +142,11 @@ test("builds persistent PowerShell arguments for native script runners", () => {
 
 test("resolves OpenCode auth paths and parses subscription windows", async () => {
   assert.equal(
-    resolveAuthPath({ platform: "win32", env: {}, homeDir: "C:\\Users\\test" }),
-    path.join("C:\\Users\\test", "AppData", "Local", "opencode", "auth.json"),
+    resolveAuthPath({ env: {}, homeDir: "/home/test" }),
+    path.join("/home/test", ".local", "share", "opencode", "auth.json"),
   )
   assert.equal(
-    resolveAuthPath({ platform: "linux", env: { XDG_DATA_HOME: "/tmp/data" }, homeDir: "/home/test" }),
+    resolveAuthPath({ env: { XDG_DATA_HOME: "/tmp/data" }, homeDir: "/home/test" }),
     path.join("/tmp/data", "opencode", "auth.json"),
   )
 
@@ -255,7 +255,7 @@ test("accepts accounts with no secondary usage window", async () => {
 
 test("returns a neutral state when OpenCode is not connected to OpenAI", async () => {
   const result = await probeOpenAIUsage({ authPath: path.join(os.tmpdir(), "missing-openai-auth.json") })
-  assert.deepEqual(result, { ok: false })
+  assert.deepEqual(result, { ok: false, reason: "no-credentials" })
 })
 
 test("requires reauthentication for an expired OpenAI OAuth credential", async () => {
@@ -1152,17 +1152,19 @@ test("saveUserScriptSettings persists a global default applied when the project 
   }
 })
 
-test("weekly usage defaults exclude opt-in providers", () => {
-  const settings = normalizeSidebarSettings({})
-  assert.deepEqual(settings.usageProviders, ["openai", "cursor", "opencode-go", "openrouter"])
-  assert.deepEqual(DEFAULT_USAGE_PROVIDERS, ["openai", "cursor", "opencode-go", "openrouter"])
+test("usage providers default to connected providers until a list is saved", () => {
+  assert.equal(normalizeSidebarSettings({}).usageProviders, undefined)
+  assert.equal(normalizeSidebarSettings({ usageProviders: "openai" }).usageProviders, undefined)
+  assert.deepEqual(
+    normalizeSidebarSettings({ usageProviders: ["cursor"] }, normalizeSidebarSettings({})).usageProviders,
+    ["cursor"],
+  )
   assert.deepEqual([...USAGE_PROVIDER_IDS], ["openai", "cursor", "opencode-go", "openrouter", "claude-code"])
 })
 
 test("normalizes usage providers by filtering, deduplicating, and preserving an empty list", () => {
   assert.deepEqual(normalizeUsageProviders(["cursor", "openai", "cursor", "unknown", 4]), ["cursor", "openai"])
   assert.deepEqual(normalizeUsageProviders([]), [])
-  assert.deepEqual(normalizeUsageProviders("openai"), [...DEFAULT_USAGE_PROVIDERS])
   assert.deepEqual(normalizeSidebarSettings({ usageProviders: [] }).usageProviders, [])
   assert.deepEqual(normalizeSidebarSettings({ usageProviders: ["openrouter", "openrouter", "nope"] }).usageProviders, [
     "openrouter",
@@ -1611,7 +1613,7 @@ test("resolves the Cursor state database path per platform", () => {
   )
 })
 
-test("requests a Cursor session token when none is available", async () => {
+test("reports no Cursor credentials when none is available", async () => {
   const root = mkdtempSync(path.join(os.tmpdir(), "sidebar-cursor-missing-"))
   try {
     const result = await probeCursorUsage({
@@ -1621,9 +1623,38 @@ test("requests a Cursor session token when none is available", async () => {
         throw new Error("should not be called")
       },
     })
-    assert.deepEqual(result, { ok: false, reason: "need-token" })
+    assert.deepEqual(result, { ok: false, reason: "no-credentials" })
   } finally {
     rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test("treats an expired Cursor desktop login as no credentials without a request", async (t) => {
+  if (process.platform === "win32") {
+    t.skip("Bun keeps node:sqlite database handles open on Windows during cleanup")
+    return
+  }
+  const root = mkdtempSync(path.join(os.tmpdir(), "sidebar-cursor-expired-"))
+  try {
+    const sqlite = await import("node:sqlite")
+    const dbPath = path.join(root, "state.vscdb")
+    const encode = (value: object) => Buffer.from(JSON.stringify(value)).toString("base64url")
+    const jwt = `${encode({ alg: "none" })}.${encode({ sub: "auth0|user_old", exp: 1_000 })}.signature`
+    const db = new sqlite.DatabaseSync(dbPath)
+    db.exec("CREATE TABLE ItemTable (key TEXT PRIMARY KEY, value TEXT)")
+    db.prepare("INSERT INTO ItemTable (key, value) VALUES (?, ?)").run("cursorAuth/accessToken", jwt)
+    db.close()
+    const result = await probeCursorUsage({
+      env: emptyAuthEnv,
+      cursorDbPath: dbPath,
+      nowMs: 2_000_000,
+      fetchImpl: async () => {
+        throw new Error("should not be called")
+      },
+    })
+    assert.deepEqual(result, { ok: false, reason: "no-credentials" })
+  } finally {
+    rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 })
   }
 })
 
@@ -1752,4 +1783,51 @@ test("enables the host session scrollbar only when the key was never set", () =>
   ensureSessionScrollbarVisible(kv)
   assert.deepEqual(writes, [])
   assert.equal(kv.store.get(OPENCODE_SESSION_SCROLLBAR_KEY), false)
+})
+
+test("names Claude Code's macOS Keychain service per config dir", () => {
+  // Claude Code's rule: bare for the default dir, else sha256(CLAUDE_CONFIG_DIR) hex prefix.
+  assert.equal(claudeKeychainService("/Users/test/.claude", "/Users/test", {}), "Claude Code-credentials")
+  assert.equal(claudeKeychainService("/Users/foster/.claude2", "/Users/foster", {}), "Claude Code-credentials-4de14e5d")
+  assert.equal(
+    claudeKeychainService("/Users/test/.claude", "/Users/test", { CLAUDE_CONFIG_DIR: "/Users/test/.claude" }),
+    `Claude Code-credentials-${new Bun.CryptoHasher("sha256").update("/Users/test/.claude").digest("hex").slice(0, 8)}`,
+  )
+})
+
+test("reads the Claude login from the macOS Keychain before the credentials file", async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "sidebar-claude-keychain-"))
+  try {
+    const nowMs = 1_800_000_000_000
+    const services: string[] = []
+    const tokens: string[] = []
+    const options = {
+      claudeCredentialsPath: path.join(root, ".claude2", ".credentials.json"),
+      claudeUsageCachePath: path.join(root, "cache.json"),
+      homeDir: root,
+      env: {},
+      nowMs,
+      claudeKeychain: async (service: string) => {
+        services.push(service)
+        return JSON.stringify({ claudeAiOauth: { accessToken: "keychain-token", expiresAt: nowMs + 60_000 } })
+      },
+      fetchImpl: async (_input: URL | RequestInfo, init?: RequestInit) => {
+        tokens.push(String(new Headers(init?.headers).get("authorization")))
+        return Response.json({
+          five_hour: { utilization: 5, resets_at: null },
+          seven_day: { utilization: 9, resets_at: null },
+        })
+      },
+    }
+    const mac = await probeClaudeCodeUsage({ ...options, platform: "darwin" })
+    assert.equal(mac.ok, true)
+    assert.deepEqual(tokens, ["Bearer keychain-token"])
+    assert.equal(services.length, 1)
+    assert.match(services[0], /^Claude Code-credentials-[0-9a-f]{8}$/)
+    const windows = await probeClaudeCodeUsage({ ...options, platform: "win32" })
+    assert.deepEqual(windows, { ok: false, reason: "signed-out" })
+    assert.equal(services.length, 1)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
 })
