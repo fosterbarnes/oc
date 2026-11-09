@@ -3,6 +3,7 @@
  * and how opencode's MCP and registry tools become proxy defs.
  */
 import { apiKey } from "@/tool/jevClient"
+import { CuaDriver } from "@/tool/cuaDriver"
 import { log } from "./logger.js"
 import { showToast } from "./runtimeStatus.js"
 import { toolNameForHost, type HostToolDialect } from "./hostTools.js"
@@ -266,7 +267,12 @@ export function resolveProxyOpencodeToolDefs(options: {
       "warning",
       "Jev key missing",
     )
-  const missing = unknown.filter((name) => !keyless.includes(name))
+  // cua_* stay hidden until cua-driver is installed. The config is shared across machines, so a
+  // machine without the driver (macOS, a fresh PC) skips them quietly instead of warning every session.
+  const driverless = CuaDriver.driverPath() ? [] : unknown.filter((name) => name.toLowerCase().startsWith("cua_"))
+  if (driverless.length > 0)
+    log.info("proxyOpencodeTools cua entries skipped: cua-driver not installed", { driverless })
+  const missing = unknown.filter((name) => !keyless.includes(name) && !driverless.includes(name))
   // Same reasoning as the `proxyTools` typo warning: an unrecognised name is
   // simply not forwarded, and silence looks from the outside like the option
   // was ignored.

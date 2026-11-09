@@ -120,6 +120,27 @@ test("keeps the full and oc command palettes on separate shortcuts", () => {
   expect(config.keybinds.get("oc.settings_palette")).toMatchObject([{ key: "ctrl+o" }])
 })
 
+test("macOS keys move oc app shortcuts to cmd and keep terminal keys on ctrl", () => {
+  const mac = resolve({}, { terminalSuspend: true, macKeys: true })
+
+  expect(mac.keybinds.get("command.palette.show")).toMatchObject([{ key: "super+p" }])
+  expect(mac.keybinds.get("oc.settings_palette")).toMatchObject([{ key: "super+o" }])
+  expect(mac.keybinds.get("model.list")).toMatchObject([{ key: "super+m,<leader>m" }])
+  expect(mac.keybinds.get("dialog.select.prev")).toMatchObject([{ key: "up,ctrl+p" }])
+  expect(mac.keybinds.get("input.line.end")).toMatchObject([{ key: "ctrl+e" }])
+  expect(mac.keybinds.get("terminal.suspend")).toMatchObject([{ key: "ctrl+z" }])
+  expect(
+    resolve({ keybinds: { model_list: "ctrl+k" } }, { terminalSuspend: true, macKeys: true }).keybinds.get(
+      "model.list",
+    ),
+  ).toMatchObject([{ key: "ctrl+k" }])
+  expect(
+    resolve({ keybind_preset: "opencode" }, { terminalSuspend: true, macKeys: true }).keybinds.get(
+      "command.palette.show",
+    ),
+  ).toMatchObject([{ key: "ctrl+p" }])
+})
+
 test("resolves overrides without mutating input", () => {
   const input: TuiConfigInfo = {
     theme: "custom",

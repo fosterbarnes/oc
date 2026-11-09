@@ -1,4 +1,6 @@
 * text=auto eol=crlf
+# A small PDF has no NUL bytes, so text=auto would CRLF-convert it and break its byte offsets.
+*.pdf binary
 # Shebang scripts run on macOS and Linux, where a CRLF shebang line fails (`env: node\r`).
 *.sh text eol=lf
 .husky/* text eol=lf

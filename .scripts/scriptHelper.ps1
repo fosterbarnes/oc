@@ -70,13 +70,20 @@ function testBuildNotesChanged {
     }
 }
 
-# Converts bare LF to CRLF in modified and untracked files. Binary and non-UTF-8 files are left alone.
-function setCrlf {
-    $paths = git -C $repoRoot ls-files -m -o --exclude-standard
+# Converts bare LF to CRLF in modified and untracked files, and CRLF to LF in files `.gitattributes` pins to
+# LF (hooks, shebang scripts): with CRLF, macOS sh fails on them (`set: -\r: invalid option`). git calls a
+# tracked file unmodified when only its line endings differ, so `ls-files --eol` finds those. Binary and
+# non-UTF-8 files are left alone.
+function setLineEndings {
+    $paths = @(git -C $repoRoot ls-files -m -o --exclude-standard)
+    if ($LASTEXITCODE) { throw "git ls-files failed (exit $LASTEXITCODE)." }
+    $lfPaths = @(@($paths | git -C $repoRoot check-attr --stdin eol) -match ': eol: lf$' -replace ': eol: lf$', '')
+    if ($LASTEXITCODE) { throw "git check-attr failed (exit $LASTEXITCODE)." }
+    $lfPaths += @(@(git -C $repoRoot ls-files --eol) -match '\sw/crlf\s+attr/text eol=lf\s' | ForEach-Object { ($_ -split "`t", 2)[1] })
     if ($LASTEXITCODE) { throw "git ls-files failed (exit $LASTEXITCODE)." }
     $strictUtf8 = [Text.UTF8Encoding]::new($false, $true)
     $count = 0
-    foreach ($path in $paths) {
+    foreach ($path in @($paths + $lfPaths | Select-Object -Unique)) {
         $full = Join-Path $repoRoot $path
         if (-not (Test-Path -LiteralPath $full -PathType Leaf)) { continue }
         $bytes = [IO.File]::ReadAllBytes($full)
@@ -90,13 +97,13 @@ function setCrlf {
         } catch {
             continue
         }
-        $fixed = [regex]::Replace($text, '(?<!\r)\n', "`r`n")
+        $fixed = $lfPaths -contains $path ? $text.Replace("`r`n", "`n") : [regex]::Replace($text, '(?<!\r)\n', "`r`n")
         if ($fixed -ceq $text) { continue }
         $body = [Text.UTF8Encoding]::new($false).GetBytes($fixed)
         [IO.File]::WriteAllBytes($full, [byte[]]($bom + $body))
         $count++
     }
-    if ($count) { Write-Host "Converted $count file(s) to CRLF." }
+    if ($count) { Write-Host "Fixed line endings in $count file(s)." }
 }
 
 function getBunVersion {

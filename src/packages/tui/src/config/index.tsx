@@ -190,6 +190,8 @@ export type Resolved = Omit<
 
 export const ResolveOptions = Schema.Struct({
   terminalSuspend: Schema.Boolean,
+  // macOS: the oc layout puts app shortcuts on cmd instead of ctrl (`TuiKeybindPreset.mac`).
+  macKeys: Schema.optional(Schema.Boolean),
 })
 export type ResolveOptions = Schema.Schema.Type<typeof ResolveOptions>
 
@@ -299,6 +301,7 @@ export function resolve(input: Info, options: ResolveOptions): Resolved {
 function resolveKeybinds(input: Info, options: ResolveOptions, preset: KeybindPreset) {
   const keybinds: TuiKeybind.KeybindOverrides = {
     ...(preset === "opencode" ? {} : TuiKeybindPreset.oc),
+    ...(preset === "oc" && options.macKeys ? TuiKeybindPreset.mac : {}),
     ...input.keybinds,
   }
   if (!options.terminalSuspend) {

@@ -734,7 +734,10 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
     const key = `keyboard_notice_${terminal.kind}`
     if (renderer.isDestroyed || !kv.ready || kv.get(key) || renderer.capabilities?.kitty_keyboard !== false) return
     kv.set(key, true)
-    const keys = "sending some oc keys as other keys: Ctrl+M as Enter, Ctrl+Shift+H as Backspace, Shift+Enter as Enter."
+    const keys =
+      process.platform === "darwin"
+        ? "not sending Cmd keys to oc, so oc's Cmd shortcuts (Cmd+O, Cmd+P, Cmd+M) do not work."
+        : "sending some oc keys as other keys: Ctrl+M as Enter, Ctrl+Shift+H as Backspace, Shift+Enter as Enter."
     const message = {
       wezterm: `WezTerm is ${keys} Add config.enable_kitty_keyboard = true to wezterm.lua and restart WezTerm.`,
       "windows-terminal": `Windows Terminal is ${keys} Update Windows Terminal to 1.25 or newer.`,

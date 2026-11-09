@@ -1,6 +1,25 @@
-v0.2.332 earthquakeScience [docs > Mac build toolchain]
+v0.2.336 girlcockCloseted [patch > Mac cmd keys; fix > oc settings save]
+
+macOS keys:
+On a Mac the oc layout now uses Cmd instead of Ctrl for its shortcuts: Cmd+O oc commands, Cmd+P all commands, Cmd+M models, Cmd+S sessions, Cmd+N new session, and the same for list and dialog keys. Typing and terminal keys stay on Ctrl (the Ctrl+X leader, Ctrl+C, Ctrl+Z, prompt editing, Ctrl+P/Ctrl+N in lists, message scrolling). Key hints show "cmd", and the one-time Keyboard notice names the Cmd keys. Your own keybinds still win, and the stock opencode layout is unchanged.
+
+WezTerm needs the kitty keyboard protocol and has to forward the Cmd keys it owns (Cmd+M/N/T/R/H/K/F) to oc panes. docs/wezterm.md has a "macOS cmd keys" snippet; it sends the kitty sequence directly because WezTerm 20240203 SendKey drops Cmd.
+
+oc settings:
+Changing oc settings from the palette (home dir, sort, user folder, session model and agent, start at login, Claude failover) works again instead of showing "OpenCode executable is not configured". The "oc folder" setting is now called "User folder".
+
+revive:
+/revive on macOS no longer fails with "TUI ledger identity unavailable or changed".
+
+Claude sessions:
+No more "Config entry ignored" notice about cua tools on machines without cua-driver.
+
+push scripts:
+Pushing from a Mac works: the pre-push line-ending pass keeps hooks and shebang scripts on LF, as .gitattributes asks, instead of turning them to CRLF, which broke the husky hook on macOS (set: -\r: invalid option). It also repairs LF-pinned files that sit with CRLF on disk.
 
 macOS dev setup:
-The Mac build machine already had the pinned Bun 1.4.2 and the other build tools (PowerShell 7, git, tar), and they are now on PATH for one-off ssh commands too, so the Mac dev notes no longer ask for a manual PATH export. The PATH addition lives in the Mac's ~/.zshenv and only applies to bare non-interactive shells, so terminal shells and scripts started from them keep their own PATH.
+The Mac builds from ~/Documents/GitHub/oc; docs/dev/macos.md covers the rsync flags and the pwsh PATH. Test PDFs are stored as binary, so checkouts no longer convert their line endings.
 
-Under the hood: docs/dev/macos.md lists the Mac build toolchain. Checks: a plain ssh command on the Mac resolves bun, pwsh, git, node, brew, wezterm, rsync, and tar; a login shell and a script started from it resolve the same tools as before; bun install in the Mac mirror reported no changes. No build ran.
+Under the hood: TuiKeybindPreset.mac is derived from the keybind definitions, applied through a new macKeys resolve option; the TUI ledger registers identity files on darwin; persistOcConfig falls back to the running or sibling oc binary. tui and opencode typecheck passed; tui config, keymap, and hotkeyValidate tests passed with a new macOS layout case; keybindDocs check passed; proxyOpencodeTools and proxyMcp tests passed. Cmd forwarding was confirmed in a raw key capture tab in WezTerm. New .scripts/tests/lineEndings.tests.ps1 passed on macOS.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>

@@ -108,16 +108,20 @@ export function persistOcConfig(
   value: string,
   toast: ToastContext,
 ) {
-  const config = readOcConfig()
-  if (!config.executable) {
-    toast.show({ message: "OpenCode executable is not configured", variant: "error" })
-    return Promise.resolve(false)
-  }
+  // `executable` in oc.json is an optional override; nothing writes it, so default to the running binary.
+  // Native opencode refuses `oc` commands, so it uses the `oc` binary installed beside it.
+  // Under `bun dev` bun reruns the entry script (as `runtimeArgs` in opencode cli/cmd/oc.ts) with the oc flavor.
+  const bunDev = /^bun(?:\.exe)?$/i.test(path.basename(process.execPath)) && process.argv[1]
+  const executable =
+    readOcConfig().executable ||
+    (bunDev || !Global.native
+      ? Global.resolveExecutablePath()
+      : path.join(path.dirname(process.execPath), `oc${path.extname(process.execPath)}`))
   const args = ["oc", "config", "set", key, value]
-  const child = spawn(config.executable, args, {
+  const child = spawn(executable, bunDev && executable === process.execPath ? [process.argv[1], ...args] : args, {
     stdio: ["ignore", "ignore", "pipe"],
     cwd: os.homedir(),
-    env: process.env,
+    env: { ...process.env, OC_FLAVOR: "oc" },
   })
   let error = ""
   return new Promise<boolean>((resolve) => {

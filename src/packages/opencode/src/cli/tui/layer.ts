@@ -6,7 +6,8 @@ import { TuiLedger } from "@/config/tuiLedger"
 
 export function run(input: TuiInput) {
   return Effect.gen(function* () {
-    if (!Global.native && process.platform === "win32") {
+    // Revive and resident stop trust a ledger record only with this identity file (`TuiLedger.read`).
+    if (!Global.native && (process.platform === "win32" || process.platform === "darwin")) {
       yield* Effect.promise(() => TuiLedger.register(Global.Path.state))
       yield* Effect.addFinalizer(() => Effect.promise(() => TuiLedger.remove(Global.Path.state, process.pid)))
     }

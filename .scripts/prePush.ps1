@@ -26,6 +26,6 @@ if ($changed) {
     }
     finally { Pop-Location }
 }
-setCrlf
+setLineEndings
 Write-Host 'Pre-push checks passed. No commit or push was performed.'
 closeOut 3

@@ -1,6 +1,6 @@
 export * as TuiKeybindPreset from "./keybindPreset"
 
-import type { TuiKeybind } from "./keybind"
+import { TuiKeybind } from "./keybind"
 
 export const Names = ["oc", "opencode"] as const
 
@@ -32,3 +32,26 @@ export const oc: TuiKeybind.KeybindOverrides = {
   input_move_up: "up,ctrl+shift+up",
   input_move_down: "down,ctrl+shift+down",
 }
+
+// macOS on top of the oc layout: app shortcuts move from ctrl to cmd (super; the terminal must send it,
+// e.g. WezTerm with enable_kitty_keyboard). Terminal and readline keys stay on ctrl: the leader,
+// ctrl+c and ctrl+z, prompt editing, list navigation (ctrl+p/ctrl+n), and transcript scrolling.
+const macKeepsCtrl = new Set([
+  "leader",
+  "app_exit",
+  "terminal_suspend",
+  "dialog.close",
+  "dialog.session_rename.copy",
+  "dialog.select.prev",
+  "dialog.select.next",
+  "prompt.autocomplete.prev",
+  "prompt.autocomplete.next",
+])
+export const mac: TuiKeybind.KeybindOverrides = Object.fromEntries(
+  Object.entries(TuiKeybind.Definitions).flatMap(([name, item]) => {
+    if (macKeepsCtrl.has(name) || /^(input|messages|which_key)_/.test(name)) return []
+    const value = oc[name as keyof typeof oc] ?? item.default
+    if (typeof value !== "string" || !value.includes("ctrl+")) return []
+    return [[name, value.replaceAll("ctrl+", "super+")]]
+  }),
+)

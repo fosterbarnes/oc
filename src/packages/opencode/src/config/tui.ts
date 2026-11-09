@@ -215,6 +215,7 @@ const loadState = Effect.fn("TuiConfig.loadState")(function* (ctx: { directory: 
     },
     {
       terminalSuspend: process.platform !== "win32",
+      macKeys: process.platform === "darwin",
     },
   )
 

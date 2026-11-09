@@ -437,7 +437,7 @@ export function createOcCommands(input: {
       },
       {
         name: "oc.oc_dir",
-        title: "oc folder",
+        title: "User folder",
         category: "oc",
         group: "Folders",
         get desc() {
@@ -448,7 +448,7 @@ export function createOcCommands(input: {
           const current = readOcConfig().ocDir
           dialog.replace(() => (
             <DialogPrompt
-              title="oc directory"
+              title="User folder"
               placeholder={current}
               onConfirm={(value) => {
                 const trimmed = value.trim()
@@ -586,7 +586,10 @@ export function createOcCommands(input: {
                 {
                   value: "oc" as const,
                   title: "oc",
-                  description: "ctrl+m models, ctrl+s sessions, ctrl+c never quits",
+                  description:
+                    process.platform === "darwin"
+                      ? "cmd+m models, cmd+s sessions, ctrl+c never quits"
+                      : "ctrl+m models, ctrl+s sessions, ctrl+c never quits",
                 },
                 { value: "opencode" as const, title: "opencode", description: "Stock OpenCode keys" },
               ]}

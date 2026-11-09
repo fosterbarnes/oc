@@ -68,7 +68,7 @@ function emptySessionInfo(): SessionInfo {
 
 function defaultRunTuiConfig(): RunTuiConfig {
   return {
-    ...resolve({}, { terminalSuspend: process.platform !== "win32" }),
+    ...resolve({}, { terminalSuspend: process.platform !== "win32", macKeys: process.platform === "darwin" }),
     diff_style: "auto",
   }
 }

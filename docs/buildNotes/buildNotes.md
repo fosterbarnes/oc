@@ -210,6 +210,126 @@ Example compact Agent notes:
 
 ---
 
+## 2026-11-08 (~21:30) - v0.2.336 girlcockCloseted - macOS oc keys on cmd - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation; completed (live cmd-key check needs a Mac build)
+- Version: 0.2.336 girlcockCloseted
+- Added `TuiKeybindPreset.mac` (`tui/src/config/keybindPreset.ts`): on top of the oc preset, every binding containing `ctrl+` becomes `super+`, except `macKeepsCtrl` (leader, app_exit, terminal_suspend, dialog.close, rename copy, dialog/autocomplete prev/next) and names starting `input_`, `messages_`, `which_key_`. Derived from `Definitions`, so new app shortcuts default to cmd on Mac.
+- Added optional `macKeys` to `TuiConfig.ResolveOptions`; `resolveKeybinds` layers `mac` only for the `oc` preset. Callers pass `process.platform === "darwin"` (`opencode/src/config/tui.ts`, `cli/cmd/run/runtime.boot.ts`). Tests omit it, so existing ctrl expectations hold. User `keybinds` still win.
+- Hints show `cmd` on darwin (`modifierAliases.super` in `tui/src/keymap.tsx`); Keybind layout description and root picker favorite interceptor/footer (`rootPicker.tsx`) use cmd+ on darwin.
+- The one-time Keyboard notice (`app.tsx`, no kitty protocol) names the Cmd keys on darwin instead of Ctrl+M/Ctrl+Shift+H.
+- `super` reaches oc only through the kitty keyboard protocol. WezTerm 20240203 `SendKey` drops SUPER (captured: forwarded cmd+n arrived as plain `n`), so the forwarding snippet sends `\x1b[<code>;9u` with `SendString`; confirmed in a raw key capture tab (`ESC[114;9u` for cmd+r). WezTerm macOS defaults own cmd+m/n/t/r/h/k/f; `docs/wezterm.md` "macOS cmd keys" forwards them to panes with `oc_tui=1`.
+- Outside the repo: made the user's wezFig config (Windows `C:\Users\Foster\Documents\GitHub\wezFig`, uncommitted) cross-platform (`mac` via `wezterm.target_triple`, pwsh/node full paths, cmd+c/v and cmd forwarding, wezCord unix socket + pgrep watcher); Mac wezFig clone reset to origin/main (old state in branch `mac-old` + stash) with those files copied; Mac `~/.config/wezterm/wezterm.lua` and `~/.wezterm.lua` now dofile it (old files `*.mac-old`). Wiki `Keybinds.md` gained a macOS section (Windows clone, uncommitted).
+- Fixed: push from macOS failed in the husky pre-push hook (`set: -\r: invalid option`). `.gitattributes` pins `.husky/*` and shebang scripts to LF, but `setCrlf` (`scriptHelper.ps1`) converted every changed file to CRLF regardless, and 11 LF-pinned files sat with CRLF on disk in both checkouts (git calls them unmodified when only line endings differ; the Mac copy came from an rsync). Renamed it `setLineEndings`: modified and untracked files whose `check-attr eol` is `lf`, plus tracked `w/crlf attr/text eol=lf` files from `ls-files --eol`, go to LF; the rest to CRLF as before. New `.scripts/tests/lineEndings.tests.ps1` (throwaway repo; fails on the old function). Fixed the 11 files in the Windows checkout directly.
+- Installed `scc` on the Mac (Homebrew); `prePush.ps1` `countCode.ps1` needs it.
+- ERROR: first `agentPush.ps1` run on macOS: line 1 over 72 chars, then `scc is not on PATH`, then the husky CRLF failure above; the unpushed local commit 488dd2e453 was soft-reset and redone with the fix.
+- Verification: `pwsh .scripts/tests/lineEndings.tests.ps1` passes on macOS; tui `bun run typecheck` and opencode `bun run typecheck` pass; `test/config.test.tsx` (new macOS case), `hotkeyValidate`, `keymap` tests pass (40); `keybindDocs.ts --check` passes; `wezterm show-keys` loads the new config with the 9 SUPER callbacks; `node --check` on wezCord. Not run: real cmd keypresses into an oc build.
+
+### User
+macOS
+- On a Mac, oc shortcuts use Cmd instead of Ctrl: Cmd+O oc commands, Cmd+P all commands, Cmd+M models, Cmd+S sessions, and the same for list and dialog keys.
+- Typing and terminal keys stay on Ctrl (the Ctrl+X leader, Ctrl+C, prompt editing, Ctrl+P/Ctrl+N in lists), and key hints show "cmd".
+
+---
+
+## 2026-11-08 (~21:35) - v0.2.335 dmcInvested - no cua warning without cua-driver - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation; completed
+- Version: 0.2.335 dmcInvested
+- Fixed: every new Claude session on macOS toasted "Config entry ignored ... proxyOpencodeTools lists tools oc does not have: cua_windows, ...". The registry hides `cua_*` until cua-driver is installed (`CuaDriver.driverPath()`), and the shared `opencode.jsonc` lists them. `resolveProxyOpencodeToolDefs` (`provider/claude-code/proxyToolSelection.ts`) now skips `cua_*` entries with only an info log when no driver is found, like the jev keyless case.
+- Verification: `bun run typecheck` in `packages/opencode` passed; `proxyOpencodeTools.test.ts` (new case, skipped where cua-driver is installed) and `proxyMcp.test.ts` pass.
+
+### User
+Claude sessions
+- No more "Config entry ignored" notice about cua tools on machines without cua-driver (macOS).
+
+---
+
+## 2026-11-08 (~21:20) - v0.2.334 forgivingMoister - oc folder setting renamed User folder - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation; completed
+- Version: 0.2.334 forgivingMoister
+- Renamed the `oc.oc_dir` palette entry title "oc folder" and its prompt dialog title "oc directory" to "User folder" (`tui/src/ocCommands.tsx`). Command name, `/ocDir` slash name, and the `ocDir` config key are unchanged.
+- Verification: string-only change; no tests reference either title. Wiki clone (`../oc.wiki`) not present on this machine, so wiki not checked.
+
+### User
+oc settings
+- The "oc folder" setting in the oc palette is now called "User folder".
+
+---
+
+## 2026-11-08 (~21:10) - v0.2.333 bongarinoFroggy - oc settings save without executable key; macOS revive ledger - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation; completed
+- Version: 0.2.333 bongarinoFroggy
+- Fixed: `persistOcConfig` (`tui/src/ocSettings.ts`) toasted "OpenCode executable is not configured" and saved nothing whenever `oc.json` had no `executable`, which nothing in the repo or installer writes (fresh macOS install). Every oc palette setting (session model/agent, home dir, home dir sort, oc dir, start at login) and Claude failover were broken.
+- Now `executable` is an optional override; the fallback is `Global.resolveExecutablePath()` in the oc binary. In native `opencode` the fallback is the sibling `oc` binary, because native rejects `oc` commands (`opencode/src/index.ts:175`). Under `bun dev` it reruns `process.argv[1]`. The child gets `OC_FLAVOR=oc`, so a native `bun dev` run is not rejected; compiled builds ignore it.
+- Verification: `bun run typecheck` in `packages/tui` passed. With temp `XDG_*` and `OPENCODE_DB`: `oc config set` succeeded and wrote `oc.json` from installed `~/.local/bin/oc` and from `bun run src/index.ts` with `OC_FLAVOR=oc`. Installed `opencode oc config set` exits 1 with the native rejection, which is why native uses the sibling `oc`. The TUI path was not run live.
+- Fixed: macOS `/revive` failed with "TUI ledger identity unavailable or changed: <pid>.json". `cli/tui/layer.ts` wrote `<pid>.identity.json` (`TuiLedger.register`) only on win32, but since v0.2.332 `TuiLedger.read` (revive, resident stop) reads ledgers on darwin through `ProcessDarwin.list`. Now it registers on darwin too.
+- Wrote identity files once via `TuiLedger.register` for the user's two live oc tabs (pids 69157, 70443, old build), so the next `/revive` can pass. Checked in a bun probe: `sameIdentity` and `sameExecutable` hold for both (live exe is the `occ` hard link, which resolves to `oc`). `opencode` typecheck passed.
+- ERROR: `/revive` at v0.2.332 failed on macOS with the error above.
+
+### User
+oc settings
+- Changing oc settings from the palette (home dir, sort, oc dir, session model/agent, start at login, Claude failover) works again instead of showing "OpenCode executable is not configured".
+
+revive
+- `/revive` on macOS no longer fails with "TUI ledger identity unavailable or changed".
+
+---
+
+## 2026-11-08 (~20:58) - v0.2.332 earthquakeScience - PDFs stored as binary - Claude Opus 5.5, low effort; Agent
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Agent; completed
+- Version: 0.2.332 earthquakeScience (`.gitattributes` and docs only, no bump)
+- Fixed: `.gitattributes` `*.pdf binary`. `claude-agent/fixtures/marker.pdf` (1369 B, no NUL) was guessed text by `* text=auto eol=crlf`; fresh checkouts (Mac clone) CRLF-converted it, shifting its byte offsets, and every rsync from the PC (LF copy) showed it modified. Only tracked binary-type file `git ls-files --eol` reported as text.
+- Removed the `git checkout --` workaround note from `docs/dev/macos.md`.
+- Verification: PC and Mac `git ls-files --eol` show `attr/-text`; Mac worktree hash equals blob `a06d95a8`, 0 CR bytes, `%PDF-1.3\n` header; after `git add` refreshed the stale index stat, Mac status shows only the three edited files.
+
+### User
+Repository
+- Test PDFs no longer get their line endings converted on checkout, so the Mac copy stays clean after syncs; no UI change.
+
+---
+
+## 2026-11-08 (~20:53) - v0.2.332 earthquakeScience - Mac build copy moved to Documents - Claude Opus 5.5, low effort; Agent
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Agent; completed
+- Version: 0.2.332 earthquakeScience (docs-only in repo, no bump)
+- Moved: Mac build mirror is now `~/Documents/GitHub/oc` (GitHub clone, `bun install` done there). Rsynced from `/Volumes/C`; deleted `~/dev` (`oc` 5.4G, plus `ocAfter`, `ocBase`, `ocBaseline` test-run leftovers from the macOS-support session) and this session's `.bak-ocpath` backups.
+- Fixed: `docs/dev/macos.md` sync command uses `rsync -rlt`, not `-a`: the SMB share reports every file `rwx------`, so `-a` flagged 2972 mode changes (repaired from the git index). macOS openrsync has no `--chmod`.
+- Risk: every sync flips `src/packages/opencode/test/plugin/provider/claude-agent/fixtures/marker.pdf` (Windows working copy is eol-converted); noted in `macos.md` with the `git checkout --` fix. A `*.pdf binary` gitattributes rule would remove it; not done.
+- Updated `~/dev/oc` references: PC `principles.md`, `skills/foster/ssh/SKILL.md`, `plans/macosSupport.md`; Mac `principles.md`, `plans/macosSupport.md`, `opencode.jsonc` (revive script permission paths).
+- Verification: Mac clone `git status` after resync shows only the two docs files; no `dev/oc` refs left in Mac config; deleted paths confirmed gone.
+
+### User
+macOS dev setup
+- The Mac now builds oc from `~/Documents/GitHub/oc`, and the old `~/dev` copies are gone; no UI change.
+
+---
+
+## 2026-11-08 (~20:45) - v0.2.332 earthquakeScience - Mac pwsh PATH for builds - Claude Opus 5.5, low effort; Agent
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Agent; completed
+- Version: 0.2.332 earthquakeScience (docs-only in repo, no bump)
+- ERROR: `build.ps1` in Mac WezTerm failed "The term 'bun' is not recognized". WezTerm `default_prog` runs pwsh directly, so PATH is launchd's bare default; the `.zshenv` block from the previous entry never applies.
+- Fixed: Mac `~/.config/powershell/Microsoft.PowerShell_profile.ps1` line 337 (was `~/.local/bin` prepend) now prepends `~/.bun/bin`, `~/.local/bin`, `/opt/homebrew/{bin,sbin}`, `/usr/local/bin`, deduped. Backup `.bak-ocpath` beside it.
+- Updated `docs/dev/macos.md` dev-loop bullet with the pwsh profile.
+- Verification: pwsh started with `env -i` and the bare launchd PATH resolves bun 1.4.2+744846f84, git, node, brew, pwsh, tar. User has not rerun the build yet.
+
+### User
+macOS dev setup
+- PowerShell windows on the Mac now find Bun and the Homebrew tools, so the build script can start; no UI change.
+
+---
+
 ## 2026-11-08 (~20:40) - v0.2.332 earthquakeScience - Mac build toolchain and ssh PATH - Claude Opus 5.5, low effort; Agent
 
 ### Agent

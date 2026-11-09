@@ -212,6 +212,7 @@ function formatOptions(config: FormatConfig) {
     },
     modifierAliases: {
       meta: "alt",
+      ...(process.platform === "darwin" ? { super: "cmd" } : {}),
     },
   } as const
 }

@@ -139,7 +139,7 @@ export function createRootPicker(input: {
       title: "Favorite",
       value: FAVORITE_HELP,
       category: "Help",
-      footer: "ctrl+f",
+      footer: process.platform === "darwin" ? "cmd+f" : "ctrl+f",
       onSelect: () => {},
     })
     return options
@@ -200,7 +200,8 @@ export function createRootPicker(input: {
     const pickerID = ++rootPickerSearchGeneration
     const interceptor = keymap.intercept("key", (context) => {
       if (
-        context.event.ctrl &&
+        // cmd+f on macOS, matching the oc layout there (`TuiKeybindPreset.mac`).
+        (process.platform === "darwin" ? context.event.super : context.event.ctrl) &&
         context.event.name.toLowerCase() === "f" &&
         selectedRootPickerValue &&
         isDirectory(selectedRootPickerValue)
