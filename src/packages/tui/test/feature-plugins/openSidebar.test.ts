@@ -3,6 +3,7 @@ import test from "node:test"
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import os from "node:os"
 import path from "node:path"
+import { terminalAppScript } from "@opencode-ai/core/util/terminal"
 import { createBuiltinPlugins } from "../../src/feature-plugins/builtins.ts"
 import {
   defaultScriptSettings,
@@ -62,7 +63,6 @@ import {
 } from "../../src/routes/session/sidebar-tools/usage/providers.ts"
 import {
   commandArgs,
-  copyToClipboard,
   fileClipboardText,
   scriptClipboardText,
   scriptCommand,
@@ -448,32 +448,6 @@ test("formats script and file clipboard text", () => {
   assert.equal(fileClipboardText("C:\\work\\notes.txt"), "'C:\\work\\notes.txt'")
 })
 
-test("writes clipboard text through clip.exe", async () => {
-  // copyToClipboard is Windows-only and reports an error elsewhere.
-  if (process.platform !== "win32") return
-  let command = ""
-  let args: string[] = []
-  let input = ""
-  const result = await copyToClipboard("'C:\\work\\notes.txt'", (nextCommand, nextArgs) => {
-    command = nextCommand
-    args = nextArgs
-    return {
-      stdin: {
-        end(data: string) {
-          input = data
-        },
-      },
-      once(event: "error" | "close", listener: (value?: Error | number | null) => void) {
-        if (event === "close") listener(0)
-      },
-    }
-  })
-  assert.deepEqual(result, { target: "Clipboard" })
-  assert.equal(command, "clip.exe")
-  assert.deepEqual(args, [])
-  assert.equal(input, "'C:\\work\\notes.txt'")
-})
-
 test("maps WezTerm terminal choices to CLI placement arguments", () => {
   assert.deepEqual(weztermArgs("wezterm-tab", "C:\\work"), ["cli", "spawn", "--cwd", "C:\\work"])
   assert.deepEqual(weztermArgs("wezterm-window", "C:\\work"), ["cli", "spawn", "--new-window", "--cwd", "C:\\work"])
@@ -603,13 +577,11 @@ test("falls back to native when wt.exe is unavailable without changing the saved
     },
   })
   assert.deepEqual(probed, ["wt.exe", "pwsh"])
-  assert.deepEqual(launched, [
-    {
-      command: process.platform === "win32" ? "cmd.exe" : "pwsh",
-      args: process.platform === "win32" ? ["/d", "/c", "start", "", "pwsh", script.command] : [script.command],
-      cwd: "C:\\work",
-    },
-  ])
+  const native = {
+    win32: { command: "cmd.exe", args: ["/d", "/c", "start", "", "pwsh", script.command] },
+    darwin: { command: "osascript", args: terminalAppScript(["pwsh", script.command], { cwd: "C:\\work" }) },
+  }[process.platform as string] ?? { command: "pwsh", args: [script.command] }
+  assert.deepEqual(launched, [{ ...native, cwd: "C:\\work" }])
   assert.equal(result.error, undefined)
   assert.equal(script.terminal, "wezterm-tab")
 })

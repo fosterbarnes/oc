@@ -9,7 +9,7 @@ export const keys = [
   "homeDirSort",
   "sessionModel",
   "sessionAgent",
-  "serverStartOnWindowsUserStart",
+  "serverStartAtLogin",
   // `ask`: a Claude turn that hits a usage limit asks which account to continue on. Unset = `auto`.
   "claudeFailover",
 ] as const
@@ -18,7 +18,8 @@ export type Key = (typeof keys)[number]
 export type Value = string | boolean
 export type Settings = Partial<Record<Key, Value>> & {
   executable?: string
-  server?: { hostname?: string; port?: number; startOnWindowsUserStart?: boolean }
+  // `startOnWindowsUserStart`: old name of `startAtLogin`, read as a fallback and dropped on write.
+  server?: { hostname?: string; port?: number; startAtLogin?: boolean; startOnWindowsUserStart?: boolean }
   // `path`: exe or .ps1 that replaces built-in /revive-no-install. `launcher`: what the restarted terminal runs.
   // `build`: source build behind /revive (Revive.parseBuild); `false` = never build; unset = ask on first /revive.
   revive?: { path?: string; launcher?: unknown; build?: unknown }
@@ -58,13 +59,16 @@ export async function read() {
 
 export async function update(key: Key, value: string, startup?: Parameters<typeof Startup.update>[2]) {
   const parsed: Value = value === "true" ? true : value === "false" ? false : value
-  if (key === "serverStartOnWindowsUserStart") {
-    if (typeof parsed !== "boolean") throw new Error("serverStartOnWindowsUserStart must be true or false")
+  if (key === "serverStartAtLogin") {
+    if (typeof parsed !== "boolean") throw new Error("serverStartAtLogin must be true or false")
     return Startup.update(
       parsed,
       async () => {
         const settings = await read()
-        return write({ ...settings, server: { ...settings.server, startOnWindowsUserStart: parsed } })
+        return write({
+          ...settings,
+          server: { ...settings.server, startOnWindowsUserStart: undefined, startAtLogin: parsed },
+        })
       },
       startup,
     )

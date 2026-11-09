@@ -25,7 +25,7 @@ export function readOcConfig(): {
   ocDir: string
   homeDir: string
   homeDirSort: string
-  serverStartOnWindowsUserStart: boolean
+  serverStartAtLogin: boolean
   revivePath: string
   // False until the first /revive saves the source choice (`revive.build` object or `false`).
   // Without it, /revive asks first (`chooseSource` in `reviveCommands`).
@@ -47,7 +47,7 @@ export function readOcConfig(): {
         ocDir?: unknown
         homeDir?: unknown
         homeDirSort?: unknown
-        server?: { startOnWindowsUserStart?: unknown }
+        server?: { startAtLogin?: unknown; startOnWindowsUserStart?: unknown }
         revive?: { path?: unknown; build?: unknown }
         claudeFailover?: unknown
         claudeAccountNames?: unknown
@@ -62,7 +62,8 @@ export function readOcConfig(): {
     const homeDir = resolveOcDirectory(merged.homeDir, fallbackDir)
     const sortRaw = typeof merged.homeDirSort === "string" ? merged.homeDirSort.trim().toLowerCase() : fallbackSort
     const homeDirSort = sortRaw === "modified" ? "modified" : "name"
-    const serverStartOnWindowsUserStart = merged.server?.startOnWindowsUserStart === true
+    // `startOnWindowsUserStart` is the old key; opencode OcConfig.update drops it on the next save.
+    const serverStartAtLogin = (merged.server?.startAtLogin ?? merged.server?.startOnWindowsUserStart) === true
     const revivePath = typeof merged.revive?.path === "string" ? merged.revive.path.trim() : ""
     const reviveSourceChosen = merged.revive?.build !== undefined
     const reviveBuild = typeof merged.revive?.build === "object" && merged.revive.build !== null
@@ -79,7 +80,7 @@ export function readOcConfig(): {
       ocDir,
       homeDir,
       homeDirSort,
-      serverStartOnWindowsUserStart,
+      serverStartAtLogin,
       revivePath,
       reviveSourceChosen,
       reviveBuild,
@@ -92,7 +93,7 @@ export function readOcConfig(): {
       ocDir: fallbackDir,
       homeDir: fallbackDir,
       homeDirSort: fallbackSort,
-      serverStartOnWindowsUserStart: false,
+      serverStartAtLogin: false,
       revivePath: "",
       reviveSourceChosen: false,
       reviveBuild: false,
@@ -103,14 +104,7 @@ export function readOcConfig(): {
 }
 
 export function persistOcConfig(
-  key:
-    | "ocDir"
-    | "homeDir"
-    | "homeDirSort"
-    | "sessionModel"
-    | "sessionAgent"
-    | "serverStartOnWindowsUserStart"
-    | "claudeFailover",
+  key: "ocDir" | "homeDir" | "homeDirSort" | "sessionModel" | "sessionAgent" | "serverStartAtLogin" | "claudeFailover",
   value: string,
   toast: ToastContext,
 ) {

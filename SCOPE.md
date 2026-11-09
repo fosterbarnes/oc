@@ -39,12 +39,16 @@ loop; the OpenCode 2 execution engine itself is not brought back.
 | Option to turn off the background server | v0.2.174 | The resident server is part of oc. Native `opencode.exe` already runs without it. |
 | OpenCode 2 workspace, sandbox, and environment drivers | v0.2.174 | Part of the OpenCode 2 execution engine. |
 | `/goal` autonomous goal command | v0.2.174 | Upstream dropped it. |
+| Desktop app and PowerShell updates on macOS (Claude, Cursor, ChatGPT Desktop, PowerShell) | v0.2.332 | macOS apps update themselves; PowerShell comes from Homebrew. The palette hides these entries on macOS. CLI updates (Claude Code, Cursor, Codex) work on both. |
+| Everything Search on macOS | v0.2.332 | Windows-only tool. The sidebar root search returns nothing on macOS. |
 
 ## Planned for later
 
 | Item | Since | What it waits on |
 |---|---|---|
 | Upstream install channels (npm, brew, AUR, scoop, nix, winget) | v0.2.174 | oc's own release and update flow comes first. |
+| macOS installer (pkg or Homebrew tap) and dependency window | v0.2.332 | `.scripts/install.ps1` under pwsh installs to `~/.local/bin` for now. |
+| macOS menu bar app (tray equivalent) | v0.2.332 | Separate project, like the Windows `octray`, which is frozen for 0.2. |
 | In-TUI session tabs and terminal panes | v0.2.174 | Must fit oc's real terminal tabs. |
 | Remote pairing (pair, OpenTunnel, QR codes) | v0.2.174 | Local use comes first. |
 | Console-managed policies and Console sign-in | v0.2.174 | Hosted service; revisit if useful without it. |

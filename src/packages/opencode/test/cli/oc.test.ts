@@ -46,7 +46,7 @@ describe("OC launcher settings CLI", () => {
         ["homeDirSort", "modified"],
         ["sessionModel", "openai/gpt-5.6-luna"],
         ["sessionAgent", "build"],
-        // serverStartOnWindowsUserStart is left out: enabling it registers a real sign-in entry.
+        // serverStartAtLogin is left out: enabling it registers a real sign-in entry.
       ] as const
       for (const [key, value] of settings) {
         const result = yield* opencode.spawn(["oc", "config", "set", key, value])

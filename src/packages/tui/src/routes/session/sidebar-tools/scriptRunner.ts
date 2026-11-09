@@ -1,19 +1,13 @@
 import { spawn } from "node:child_process"
 import { existsSync } from "node:fs"
 import path from "node:path"
-import { detectTerminal, type TerminalInfo } from "@opencode-ai/core/util/terminal"
+import { detectTerminal, terminalAppScript, type TerminalInfo } from "@opencode-ai/core/util/terminal"
 import { resolveScriptTerminal } from "./settings.js"
 import type { ScriptLauncher, ScriptTerminal, WezTermSplitSize } from "./settings.js"
 import type { Script } from "./scripts.js"
+import { write } from "../../../clipboard"
 
 export type RunResult = { target: string; error?: string }
-export type ClipboardSpawn = (
-  command: string,
-  args: string[],
-) => {
-  stdin: { end(data: string): void }
-  once(event: "error" | "close", listener: (value?: Error | number | null) => void): void
-}
 
 function available(command: string): Promise<boolean> {
   if (path.isAbsolute(command)) return Promise.resolve(existsSync(command))
@@ -92,29 +86,14 @@ export function fileClipboardText(filePath: string): string {
   return quoteCommandArg(filePath)
 }
 
-export function copyToClipboard(
-  text: string,
-  spawnImpl: ClipboardSpawn = (command, args) => spawn(command, args, { windowsHide: true }),
-): Promise<RunResult> {
-  if (process.platform !== "win32")
-    return Promise.resolve({ target: "Clipboard", error: "Clipboard copying requires Windows." })
-  return new Promise((resolve) => {
-    const child = spawnImpl("clip.exe", [])
-    child.once("error", (error) =>
-      resolve({
-        target: "Clipboard",
-        error: error instanceof Error ? error.message : "Could not access the clipboard.",
-      }),
-    )
-    child.once("close", (code) =>
-      resolve(
-        code === 0
-          ? { target: "Clipboard" }
-          : { target: "Clipboard", error: `Clipboard exited with code ${code ?? "unknown"}.` },
-      ),
-    )
-    child.stdin.end(text)
-  })
+export function copyToClipboard(text: string): Promise<RunResult> {
+  return write(text).then(
+    () => ({ target: "Clipboard" }),
+    (error) => ({
+      target: "Clipboard",
+      error: error instanceof Error ? error.message : "Could not access the clipboard.",
+    }),
+  )
 }
 
 export function scriptCommand(script: Script): string {
@@ -243,6 +222,13 @@ export async function runScript(script: Script, cwd: string, options: RunnerOpti
     return { target: script.launcher.executable, error: `Executable not found: ${script.launcher.executable}` }
   }
   const args = launchArgs(script.launcher, target)
+  // macOS: a native launch gets its own Terminal.app window, like Windows' new console.
+  if (process.platform === "darwin")
+    return (options.spawnCommand ?? spawnCommand)(
+      "osascript",
+      terminalAppScript([script.launcher.executable, ...args], { cwd }),
+      cwd,
+    )
   const command = process.platform === "win32" ? "cmd.exe" : script.launcher.executable
   const commandArgs =
     process.platform === "win32" ? ["/d", "/c", "start", "", script.launcher.executable, ...args] : args

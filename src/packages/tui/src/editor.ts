@@ -118,14 +118,16 @@ export function resolveFilePath(filePath: string, cwd = process.cwd()) {
 export type OpenEditedWith = string | Record<string, string>
 
 // openEditedWith is one editor, or a map of lowercase ".ext" to editor with an optional "default".
-// Then VISUAL, EDITOR, and on Windows Notepad, which every install has.
+// Then VISUAL, EDITOR, and the OS text editor every install has: Notepad on Windows, `open -t`
+// (default text editor; editorProcess splits it on spaces) on macOS.
 export function resolveEditorForFile(
   filePath: string,
   setting?: OpenEditedWith,
   env = process.env,
   platform = process.platform,
 ) {
-  const fallback = env.VISUAL || env.EDITOR || (platform === "win32" ? "notepad" : undefined)
+  const fallback =
+    env.VISUAL || env.EDITOR || (platform === "win32" ? "notepad" : platform === "darwin" ? "open -t" : undefined)
   if (typeof setting === "string") return setting || fallback
   return setting?.[path.extname(filePath).toLowerCase()] || setting?.default || fallback
 }

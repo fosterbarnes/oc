@@ -3,6 +3,7 @@ export * as TuiLedger from "./tuiLedger"
 import fs from "node:fs/promises"
 import path from "node:path"
 import { Global } from "@opencode-ai/core/global"
+import { ProcessDarwin } from "@opencode-ai/core/util/processDarwin"
 
 export type Record = {
   pid: number
@@ -39,8 +40,10 @@ const _LIST_COMMAND = [
   "$ErrorActionPreference = 'Stop'; ConvertTo-Json -InputObject @(Get-CimInstance Win32_Process | Where-Object { $_.ProcessId -gt 0 -and $_.CreationDate } | ForEach-Object { @{ pid = [int]$_.ProcessId; parentPid = [int]$_.ParentProcessId; executable = [string]$_.ExecutablePath; startedAt = ([DateTimeOffset]$_.CreationDate).ToUnixTimeMilliseconds(); created = $_.CreationDate.ToFileTimeUtc().ToString() } }) -Compress",
 ]
 
-// Blocks the event loop for the whole pwsh run (~0.4s); use listProcessesAsync while anything animates.
+// Windows blocks the event loop for the whole pwsh run (~0.4s); use listProcessesAsync while anything
+// animates. macOS reads libproc in-process (a few ms). Other platforms have no identity source.
 export function listProcesses(): Process[] {
+  if (process.platform === "darwin") return ProcessDarwin.list()
   if (process.platform !== "win32") return []
   const result = Bun.spawnSync(_LIST_COMMAND, { stdout: "pipe", stderr: "pipe", windowsHide: true })
   if (result.exitCode !== 0) throw new Error(`Failed to list processes: ${result.stderr.toString()}`)
@@ -50,7 +53,7 @@ export function listProcesses(): Process[] {
 // Spawns in `spawnWorker` because even an async spawn blocks the main thread on the first pwsh
 // launch per process (~0.4s), freezing the launcher intro.
 export async function listProcessesAsync(): Promise<Process[]> {
-  if (process.platform !== "win32") return []
+  if (process.platform !== "win32") return listProcesses()
   const run = _spawnQueue.then(() => spawnOffThread(_LIST_COMMAND))
   _spawnQueue = run.then(
     () => undefined,

@@ -1,7 +1,10 @@
 import { spawn } from "node:child_process"
+import { ProcessDarwin } from "./processDarwin"
 
-// Process identity is the PID plus its creation time. Windows reuses PIDs, so a PID alone
-// never proves ownership: every stop compares creation time and executable path again.
+// Process identity is the PID plus its creation time. PIDs get reused, so a PID alone never proves
+// ownership: every stop compares creation time and executable path again. Windows reads them from CIM
+// (through pwsh), macOS from libproc; `created` is a FILETIME tick count on both.
+export const identitySupported = process.platform === "win32" || process.platform === "darwin"
 export type ProcessIdentity = {
   pid: number
   parentPid: number
@@ -89,7 +92,39 @@ export async function captureTree(rootPid: number) {
 /** Stops the given identities in order. Refuses to run unless every live identity is complete. */
 export async function stopTree(identities: ProcessIdentity[]) {
   if (identities.length === 0) return
+  if (process.platform === "darwin") return stopTreeDarwin(identities)
   await runPowerShell(STOP, JSON.stringify(identities))
+}
+
+// Same contract as STOP. A PID whose creation time changed belongs to a new process, so the original
+// already exited; a same-time process with another executable exec'd into it and is refused.
+async function stopTreeDarwin(identities: ProcessIdentity[]) {
+  for (const item of identities) {
+    const live = ProcessDarwin.read(item.pid)
+    if (!live) continue
+    if (!item.created || !item.executable) throw new Error(`Process identity unavailable: ${item.pid}`)
+    if (live.created !== item.created || live.executable !== item.executable)
+      throw new Error(`Process identity changed: ${item.pid}`)
+  }
+  const gone = async (item: ProcessIdentity, timeoutMs: number) => {
+    const deadline = Date.now() + timeoutMs
+    while (Date.now() < deadline) {
+      if (ProcessDarwin.read(item.pid)?.created !== item.created) return true
+      await Bun.sleep(25)
+    }
+    return ProcessDarwin.read(item.pid)?.created !== item.created
+  }
+  for (const item of identities) {
+    const live = ProcessDarwin.read(item.pid)
+    if (!live || live.created !== item.created) continue
+    if (live.executable !== item.executable) throw new Error(`Process identity changed before stop: ${item.pid}`)
+    try {
+      process.kill(item.pid, "SIGKILL")
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error
+    }
+    if (!(await gone(item, 5000))) throw new Error(`Process did not exit: ${item.pid}`)
+  }
 }
 
 /** A spawned process plus wall-clock bounds (ms since epoch) taken just before and after its spawn. */
@@ -118,18 +153,24 @@ export async function killTree(root: SpawnedRoot, held: () => boolean) {
 }
 
 /** Identity of one live process, or undefined when no process has that PID. */
-export async function processIdentity(pid: number) {
-  const processes = JSON.parse(await runPowerShell(snapshotScript(`-Filter 'ProcessId=${pid}'`), "")) as ProcessIdentity[]
+export async function processIdentity(pid: number): Promise<ProcessIdentity | undefined> {
+  if (process.platform === "darwin") return ProcessDarwin.read(pid)
+  const processes = JSON.parse(
+    await runPowerShell(snapshotScript(`-Filter 'ProcessId=${pid}'`), ""),
+  ) as ProcessIdentity[]
   return processes[0]
 }
 
-async function snapshot() {
+export async function snapshot(): Promise<ProcessIdentity[]> {
+  if (process.platform === "darwin") return ProcessDarwin.list()
   return JSON.parse(await runPowerShell(snapshotScript(""), "")) as ProcessIdentity[]
 }
 
 export function runPowerShell(script: string, input: string) {
   const wrapped =
-    "$ErrorActionPreference = 'Stop'; try {\n" + script + "\n} catch { [Console]::Error.WriteLine($_.Exception.Message); exit 1 }"
+    "$ErrorActionPreference = 'Stop'; try {\n" +
+    script +
+    "\n} catch { [Console]::Error.WriteLine($_.Exception.Message); exit 1 }"
   return new Promise<string>((resolve, reject) => {
     const child = spawn("pwsh", ["-NoProfile", "-NonInteractive", "-Command", wrapped], {
       windowsHide: true,

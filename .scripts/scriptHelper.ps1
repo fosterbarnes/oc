@@ -3,35 +3,45 @@ $ErrorActionPreference = 'Stop'
 
 $repoRoot = Split-Path -Path $PSScriptRoot -Parent
 # The Bun workspace lives in src; docs, agent files, and scripts stay at the repo root.
-$srcRoot = "$repoRoot\src"
+$srcRoot = Join-Path $repoRoot 'src'
 $projectName = 'opencode'
-$buildScript = "$srcRoot\packages\opencode\script\build.ts"
-$distFolder = "$srcRoot\packages\opencode\dist"
+$buildScript = Join-Path $srcRoot 'packages' 'opencode' 'script' 'build.ts'
+$distFolder = Join-Path $srcRoot 'packages' 'opencode' 'dist'
+# build.ts names dist folders after the host: opencode[-native]-windows-x64 or -darwin-<arm64|x64>.
+$exeSuffix = if ($IsWindows) { '.exe' } else { '' }
+$distPlatform = if ($IsWindows) { 'windows-x64' } else {
+    "darwin-$("$([Runtime.InteropServices.RuntimeInformation]::OSArchitecture)".ToLowerInvariant())"
+}
+$ocDistBinary = Join-Path $distFolder "opencode-$distPlatform" 'bin' "oc$exeSuffix"
+$nativeDistBinary = Join-Path $distFolder "opencode-native-$distPlatform" 'bin' "opencode$exeSuffix"
 $installerFolder = "$repoRoot\.installer"
 $installerOutput = "$installerFolder\Output"
 # ocSetup companion: buildCompanion.ps1 publishes it for the setup and builds the dev copy .runCompanion.ps1 starts.
 $companionProject = "$installerFolder\ocSetup\ocSetup.csproj"
 $companionPublish = "$installerFolder\publish"
 $companionDevExe = "$installerFolder\ocSetup\bin\dev\ocSetup.exe"
-# Install target for install.ps1 and the revive scripts: the PATH folder holding oc.exe + occ.exe (setup lets
-# users pick any folder; older installs used others), else the setup default (.installer\oc.installer.iss).
-# occ.exe rules out unrelated oc.exe tools such as the OpenShift CLI, and unlinked dist bin folders.
-function resolveInstallDir([string]$PathValue = $env:Path) {
-    foreach ($entry in $PathValue -split ';') {
-        $dir = $entry.Trim().Trim('"').TrimEnd('\')
-        if ($dir -and (Test-Path -LiteralPath "$dir\oc.exe" -PathType Leaf) -and
-            (Test-Path -LiteralPath "$dir\occ.exe" -PathType Leaf)) { return $dir }
+# Install target for install.ps1 and the revive scripts: the PATH folder holding oc + occ (setup lets
+# users pick any folder; older installs used others), else the default: the setup's on Windows
+# (.installer\oc.installer.iss), ~/.local/bin on macOS.
+# occ rules out unrelated oc tools such as the OpenShift CLI, and unlinked dist bin folders.
+# $env:PATH, not $env:Path: environment names are case-sensitive on macOS.
+function resolveInstallDir([string]$PathValue = $env:PATH) {
+    foreach ($entry in $PathValue -split [IO.Path]::PathSeparator) {
+        $dir = $entry.Trim().Trim('"').TrimEnd([IO.Path]::DirectorySeparatorChar)
+        if ($dir -and (Test-Path -LiteralPath (Join-Path $dir "oc$exeSuffix") -PathType Leaf) -and
+            (Test-Path -LiteralPath (Join-Path $dir "occ$exeSuffix") -PathType Leaf)) { return $dir }
     }
-    "$env:LOCALAPPDATA\Programs\oc"
+    if ($IsWindows) { return "$env:LOCALAPPDATA\Programs\oc" }
+    Join-Path $HOME '.local' 'bin'
 }
 $installDir = resolveInstallDir
 $occShortcut = Join-Path ([Environment]::GetFolderPath('Desktop')) 'occ.lnk'
-$versionFolder = "$srcRoot\.version"
-$version = "$versionFolder\version"
-$versionTag = "$versionFolder\versionTag"
-$yapWords = "$repoRoot\.res\yapBot.json"
-$readme = "$repoRoot\README.md"
-$buildNotes = "$repoRoot\docs\buildNotes\buildNotes.txt"
+$versionFolder = Join-Path $srcRoot '.version'
+$version = Join-Path $versionFolder 'version'
+$versionTag = Join-Path $versionFolder 'versionTag'
+$yapWords = Join-Path $repoRoot '.res' 'yapBot.json'
+$readme = Join-Path $repoRoot 'README.md'
+$buildNotes = Join-Path $repoRoot 'docs' 'buildNotes' 'buildNotes.txt'
 $ghRepo = 'fosterbarnes/oc'
 # Commit subject labels in decision order; AGENTS.md (buildNotes.txt section) defines each.
 $commitLabels = 'sync', 'fix', 'feat.', 'patch', 'perf.', 'deps.', 'scripts', 'cleanup', 'docs', 'misc.'
@@ -117,6 +127,8 @@ function testBunHasFfiFix {
 }
 
 function requireBunForCompile {
+    # The 1.4.0 FFI segfault is Windows-only, so other hosts compile with any bun.
+    if (-not $IsWindows) { return }
     # An empty BUN_INSTALL (e.g. a blank HKCU\Environment value reloaded by WezTerm) makes `bun install` spin forever
     if ((Test-Path Env:BUN_INSTALL) -and -not $env:BUN_INSTALL) {
         Write-Host 'Clearing empty BUN_INSTALL for this build.'
@@ -143,9 +155,9 @@ function assertExternalInstall {
     )
     $hostPid = 0
     if (-not [int]::TryParse($env:OPENCODE_PID, [ref]$hostPid)) { return }
-    $hostProcess = Get-CimInstance Win32_Process -Filter "ProcessId = $hostPid" -ErrorAction SilentlyContinue
+    $hostProcess = Get-Process -Id $hostPid -ErrorAction SilentlyContinue
     if (-not $hostProcess) { return }
-    $hostName = [IO.Path]::GetFileNameWithoutExtension([string]$hostProcess.Name).ToLowerInvariant()
+    $hostName = $hostProcess.ProcessName.ToLowerInvariant()
     if ($hostName -notin @('opencode', 'oc', 'occ')) { return }
     throw @"
 Refusing to install from an active OpenCode process. The installer stops OpenCode before replacing its binaries.
@@ -175,7 +187,7 @@ function requireVersion {
 # below the published release and keeps offering as an update.
 function requireReleaseBuild {
     $expected = requireVersion
-    foreach ($exe in "$distFolder\opencode-windows-x64\bin\oc.exe", "$distFolder\opencode-native-windows-x64\bin\opencode.exe") {
+    foreach ($exe in $ocDistBinary, $nativeDistBinary) {
         if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) { throw "Missing $exe. Run .scripts\build.ps1 -Release first." }
         $reported = "$(& $exe --version)".Trim()
         if ($LASTEXITCODE) { throw "$exe --version failed (exit $LASTEXITCODE)." }
@@ -269,7 +281,24 @@ function writeClearedLine {
     Write-Host "`r$Text$(' ' * [Math]::Max(0, $PadWidth - $Text.Length))" -NoNewline:$NoNewline
 }
 
-$weztermExe = (Get-Command wezterm.exe -ErrorAction SilentlyContinue)?.Source
+$weztermExe = (Get-Command "wezterm$exeSuffix" -ErrorAction SilentlyContinue)?.Source
+
+# Starts the resident server, then opens occ in a new terminal: the Desktop occ.lnk on Windows,
+# a new WezTerm process on macOS (Terminal.app without WezTerm).
+function startOcWindow {
+    $ocExe = Join-Path $installDir "oc$exeSuffix"
+    if ($IsWindows) {
+        # occ waits on the same startServer lock instead of spawning its own.
+        Start-Process -FilePath $ocExe -ArgumentList 'oc', 'server', 'start' -WindowStyle Hidden
+        Invoke-Item -LiteralPath $occShortcut
+        return
+    }
+    # `oc server start` spawns the resident detached and exits once it is ready.
+    runNativeCommand $ocExe @('oc', 'server', 'start') 'oc server start' | Out-Null
+    $occ = Join-Path $installDir 'occ'
+    if ($weztermExe) { runNativeCommand open @('-na', 'WezTerm', '--args', 'start', '--', $occ) 'open WezTerm' }
+    else { runNativeCommand open @('-a', 'Terminal', $occ) 'open Terminal' }
+}
 
 # Ends a script started with `pwsh -File`; a no-op for nested `& other.ps1` calls and an open
 # prompt. SCRIPT_OWN_PANE is set by the oc sidebar for panes it made for one script

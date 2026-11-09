@@ -117,12 +117,13 @@ export const WEZTERM_TERMINALS = [
   { id: "wezterm-vertical", title: "Vertical split (stacked)" },
 ] as const
 
+// Terminal.app has no scriptable tab or split targets; its scripts open in a new window (native launch).
 export function scriptTerminals(kind: TerminalInfo["kind"] = detectTerminal().kind) {
-  return kind === "generic" ? [] : WEZTERM_TERMINALS
+  return kind === "generic" || kind === "terminal-app" ? [] : WEZTERM_TERMINALS
 }
 
 export function resolveScriptTerminal(terminal: ScriptTerminal, kind: TerminalInfo["kind"] = detectTerminal().kind) {
-  return kind === "generic" ? "native" : terminal
+  return kind === "generic" || kind === "terminal-app" ? "native" : terminal
 }
 
 function cloneSettings(settings: ScriptSettings): ScriptSettings {

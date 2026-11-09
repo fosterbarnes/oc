@@ -5,13 +5,15 @@ import fsp from "node:fs/promises"
 import path from "node:path"
 import { Global } from "@opencode-ai/core/global"
 import { OcRelease } from "@opencode-ai/core/util/ocRelease"
-import type { TerminalInfo } from "@opencode-ai/core/util/terminal"
+import { terminalAppScript, type TerminalInfo } from "@opencode-ai/core/util/terminal"
 import { TuiLedger } from "./tuiLedger"
 
 type Terminal = TerminalInfo["kind"]
-const TERMINALS: readonly string[] = ["wezterm", "windows-terminal", "generic"]
+const TERMINALS: readonly string[] = ["wezterm", "windows-terminal", "terminal-app", "generic"]
 const LAUNCHERS = ["oc", "occ"] as const
-const SHELLS = new Set(["pwsh.exe", "powershell.exe", "cmd.exe", "bash.exe", "sh.exe", "zsh.exe", "fish.exe", "nu.exe"])
+// Matched without `.exe`, so macOS shell paths (/bin/zsh) match too.
+const SHELLS = new Set(["pwsh", "powershell", "cmd", "bash", "sh", "zsh", "fish", "nu"])
+const EXE = process.platform === "win32" ? ".exe" : ""
 const LEFTOVER = /\.old-\d+$/
 const RELEASE = /^\d+\.\d+\.\d+$/
 // Cloned by the first /revive when the user chooses to build from source.
@@ -218,12 +220,7 @@ export function buildSteps(build: BuildConfig, variant?: "native") {
   const platform = process.platform === "win32" ? "windows" : process.platform
   const cwd = path.join(build.source, WORKSPACE)
   const dist = path.join(cwd, "packages", "opencode", "dist")
-  const native = path.join(
-    dist,
-    `opencode-native-${platform}-${process.arch}`,
-    "bin",
-    process.platform === "win32" ? "opencode.exe" : "opencode",
-  )
+  const native = path.join(dist, `opencode-native-${platform}-${process.arch}`, "bin", `opencode${EXE}`)
   if (variant === "native")
     return {
       cwd,
@@ -270,29 +267,36 @@ export async function downloadRelease(version: string) {
         throw new Error(`${asset.name} SHA-256 mismatch: expected ${asset.sha256}, got ${sha256}`)
       await fsp.mkdir(folder, { recursive: true })
       await Bun.write(archive, bytes)
-      // Windows 10+ ships bsdtar, which reads zips; Git's GNU tar can come first on PATH and cannot, so the
-      // System32 copy is called by path. bsdtar reads its arguments in the ANSI code page, so it runs inside
-      // the folder and only sees the ASCII archive name (a profile path like C:\Users\用户 would turn into ??).
-      const unpack = Bun.spawnSync(
-        [path.join(process.env.SystemRoot ?? "C:\\Windows", "System32", "tar.exe"), "-xf", path.join("..", asset.name)],
-        { cwd: folder, stdout: "pipe", stderr: "pipe" },
-      )
+      // Windows 10+ and macOS ship bsdtar, which reads zips; Git's GNU tar can come first on PATH on
+      // Windows and cannot, so the system copy is called by path. bsdtar reads its arguments in the ANSI
+      // code page on Windows, so it runs inside the folder and only sees the ASCII archive name (a profile
+      // path like C:\Users\用户 would turn into ??).
+      const tar =
+        process.platform === "win32"
+          ? path.join(process.env.SystemRoot ?? "C:\\Windows", "System32", "tar.exe")
+          : "/usr/bin/tar"
+      const unpack = Bun.spawnSync([tar, "-xf", path.join("..", asset.name)], {
+        cwd: folder,
+        stdout: "pipe",
+        stderr: "pipe",
+      })
       if (unpack.exitCode !== 0) throw new Error(`Unpacking ${asset.name} failed: ${unpack.stderr.toString().trim()}`)
       return folder
     }),
   )
   // The native build ships only its executable; it shares the oc build's support files.
-  return [folders[0], path.join(folders[1], process.platform === "win32" ? "opencode.exe" : "opencode")]
+  return [folders[0], path.join(folders[1], `opencode${EXE}`)]
 }
 
 export function isShell(name: string) {
-  return SHELLS.has(name.toLowerCase())
+  return SHELLS.has(name.toLowerCase().replace(/\.exe$/, ""))
 }
 
 export function resolveLauncher(executable: string, exists: (file: string) => boolean = fs.existsSync) {
   const mod = executable.includes("\\") ? path.win32 : path.posix
   if (/^bun(?:\.exe)?$/i.test(mod.basename(executable))) return executable
-  const names = ["occ.exe", "oc.exe"]
+  const ext = mod.extname(executable)
+  const names = [`occ${ext}`, `oc${ext}`]
   const sibling = names.map((name) => mod.join(mod.dirname(executable), name)).find(exists)
   if (sibling) return sibling
   return executable
@@ -354,6 +358,19 @@ export function reopenCommand(restart: RestartContext) {
   return consoleStart(command, flavor)
 }
 
+// Windows: a new console. macOS (Terminal.app and unknown terminals): a new Terminal.app window, which
+// does not inherit this environment, so the flavor goes on the command line.
+function consoleStart(command: string[], flavor: Record<string, string>, cwd?: string) {
+  if (process.platform === "darwin")
+    return {
+      file: "osascript",
+      args: terminalAppScript(command, { cwd, env: flavor }),
+      env: flavor,
+      windowsVerbatimArguments: false,
+    }
+  return windowsConsoleStart(command, flavor)
+}
+
 /** Opens `command` in a new tab of the current WezTerm or Windows Terminal window, else a new console. */
 export function openTabCommand(command: string[], options: { terminal: Terminal; directory: string }) {
   const flavor: Record<string, string> = { OC_FLAVOR: "oc" }
@@ -371,11 +388,11 @@ export function openTabCommand(command: string[], options: { terminal: Terminal;
       env: flavor,
       windowsVerbatimArguments: false,
     }
-  return consoleStart(command, flavor)
+  return consoleStart(command, flavor, options.directory)
 }
 
 // Expand paths once through env vars, so percent signs and shell metacharacters stay literal.
-function consoleStart(command: string[], flavor: Record<string, string>) {
+function windowsConsoleStart(command: string[], flavor: Record<string, string>) {
   const env = { ...flavor, ...Object.fromEntries(command.map((arg, index) => [`OC_REVIVE_ARG_${index}`, arg])) }
   return {
     file: "cmd.exe",

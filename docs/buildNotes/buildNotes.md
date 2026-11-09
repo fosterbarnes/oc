@@ -210,6 +210,77 @@ Example compact Agent notes:
 
 ---
 
+## 2026-11-08 (~20:28) - v0.2.332 elantraHomiez - pass on macOS support: non-blocking Mac browser scan - Claude Opus 5.5, low effort; Pass
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Pass (/pass + /agent-push); completed
+- Version: 0.2.332 elantraHomiez
+- Fixed `tui/src/util/browser.ts` `scanMacBrowsers`: one `Bun.spawnSync` plutil per .app blocked the TUI thread ~0.6 s when the Link browser picker opened; now async `Bun.spawn` + `Promise.all`, dedupe by bundle id after (first sorted path wins).
+- Kept: stale-reference search clean (only intended `startOnWindowsUserStart` fallback remains); new tests `killall.test.ts` (safety contract) and darwin revive/startup tests meet the keep bar.
+- Risk: `sessionTab.ts` Terminal.app attach script (0600, per-user tmp, holds the server password) is left behind if osascript fails before the script runs.
+- Verification: tui typecheck exit 0; Mac probe `scanBrowsers()` 134 ms (was ~611 ms), same 4 browsers (Firefox, Hammerspoon, iTerm2, Safari). Spawning ~100 plutil processes still holds the event loop briefly.
+
+### User
+macOS
+- Opening the link browser picker on a Mac no longer freezes the TUI while it looks for installed browsers.
+
+---
+
+## 2026-11-08 (~20:01) - v0.2.332 elantraHomiez - first macOS build and install - Claude Opus 5.5, low effort; Agent
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Agent (user asked for build/install + light tests over ssh); completed
+- Version: 0.2.332 elantraHomiez
+- ERROR: `build.ps1` on the Mac mirror failed: `packages/script/src/index.ts` runs `git branch --show-current`; rsync mirror had no `.git`. Fixed by cloning `.git` from the share (`git clone --no-checkout`, move `.git`, `git reset`). Documented in `docs/dev/macos.md`.
+- Built `~/dev/oc` on Mac: `opencode-darwin-arm64/bin/oc` and native `opencode` pass `--version` (0.2.332-main-202611090059). Installed with `install.ps1 -NoBuild` to `~/.local/bin`: `occ` hard link (same inode), `codesign --verify` ok for both, `cursor-runtime` copied.
+- Verified on Mac: `oc` resolves from `/tmp` in zsh login and pwsh with profile (WezTerm `default_prog` = pwsh); `oc oc server start` healthy on 4096, state has libproc `created`, secret `-rw-------`, lsof shows the server pid; second start reuses pid; `oc oc killall --dry-run` targets only the server, keeps own shell chain; `oc --kill-server` stops it and clears state; `oc` in a `script` pty starts the server, attaches, renders Home (Ask anything, Build), no error text.
+- Note: Mac WezTerm config has no `enable_kitty_keyboard`; the keyboard notice will show once.
+- Not checked: interactive TUI use in WezTerm, `/revive`, subagent tabs, sign-in startup, Terminal.app windows.
+
+### User
+macOS
+- oc is built and installed on the Mac in `~/.local/bin`; typing `oc` in any WezTerm tab starts it.
+
+---
+
+## 2026-11-08 (~19:51) - v0.2.332 elantraHomiez - macOS (Apple Silicon) support alongside Windows - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation (after /spit plan `~/.config/opencode/plans/macosSupport.md`); 3 Opus subagents (.claude1/.claude3: scripts, feature rows, killall); completed, not built or installed
+- Version: 0.2.332 elantraHomiez
+- Added `core/src/util/processDarwin.ts`: libproc via `bun:ffi` (`proc_listallpids`, `proc_pidinfo` PROC_PIDTBSDINFO, `proc_pidpath`), lazy dlopen; `created` = FILETIME ticks so identity math matches CIM. `ps comm` is argv[0] (`zsh`), unusable for identity.
+- Changed `ProcessTree`: `identitySupported` (win32/darwin), exported `snapshot`, darwin `processIdentity`, TS `stopTreeDarwin` (verify all, then per item re-read, SIGKILL, wait 5 s; created changed = already exited; exe changed = refuse).
+- Changed callers from `platform === "win32"` to `identitySupported`: `tuiLedger.ts`, `resident.ts` (state identity, startup lock, `forceKill`), `oc.ts` shellIdentity, `shellJobs.ts`, `scheduledDelivery.ts`; `descendants.ts` darwin capture (name rule + `ps command` for `--revive`).
+- Added `resident.ts` `parseLsofListeners` + darwin `lsof` port owner; secret file `0600` on POSIX.
+- Added terminal kind `terminal-app` (`TERM_PROGRAM=Apple_Terminal`), `terminalAppScript`/`shellQuote` in `core/util/terminal.ts`. revive generic/terminal-app on darwin = osascript new window (flavor on command line); `closeWindow` reads shell tty, kills shell, closes single-tab Terminal window; `isShell` ignores `.exe`; `resolveLauncher` keeps the exe's extension; `/usr/bin/tar` for release unpack and `build.ts` release zips.
+- Added Terminal.app subagent tabs (`sessionTab.ts`; attach password goes through a self-deleting 0600 script, never the typed line); script runner native launch on darwin = Terminal.app window; `scriptTerminals`/`resolveScriptTerminal` treat terminal-app like generic.
+- Added subagent work: `.scripts` pwsh on Mac (`$exeSuffix`, darwin dist paths, `~/.local/bin`, codesign verify then ad-hoc sign, darwin zips optional in pushRelease); clipboard dedupe (`scriptRunner` uses `clipboard.ts`); editor fallback `open -t`; `/Applications` browser scan (needs http/https scheme + public.html); LaunchAgent startup (+ enabling shell PATH); setting rename `server.startAtLogin` / `serverStartAtLogin` (old key read, dropped on save); es.exe hint Windows-only.
+- Replaced `tui/src/killall.ps1` with hidden `oc oc killall [--report] [--dry-run] [--yes] [--pause]` (`opencode/src/cli/killall.ts`, test `test/cli/killall.test.ts`); removed `script.d.ts` (tui, opencode).
+- Added `.gitattributes` `eol=lf` for shebang scripts (husky, install, bin/opencode, release scripts, `*.sh`).
+- Docs: `docs/dev/macos.md` (dev loop, Mac test baseline), FORK.md (intro, sign-in, killall, new macOS row; counts 34 medium / 119), SCOPE.md (4 macOS rows), wiki Configuration/FAQ/Home/Launching/Troubleshooting.
+- Verification: typecheck core/opencode/tui exit 0. Windows covering tests pass (core 19, opencode 75, tui 86 + 2 skip, revive 26). Mac probes: identity, async ledger, tampered identity refused, tree stopped children first, `captureDescendants`, lsof parse, osascript output compiles (`osacompile`). Mac full suites: core 4 fail = pre-change baseline; opencode 24 fail on clean HEAD f822a27, none new after changes (list in `docs/dev/macos.md`). Killall dry-run on both OSes (agent). Not run: any build, install, LaunchAgent registration, real kill, Terminal.app/WezTerm window launch.
+- Test changes: `sessionTab.test.ts` (intended: terminal-app available, wording-free), `openSidebar.test.ts` (intended: darwin native launch = osascript; clip.exe test removed with code), `revive.test.ts`/`startup.test.ts` Windows-path tests now `skipIf(!win32)` (they failed on Mac at HEAD), new darwin revive test, `oc.test.ts`/`editor.test.ts` (intended).
+- MISTAKE: first subagent dispatch used Haiku/Sonnet; user wants Opus only and on Claude accounts other than the main agent's (.claude2). Rule: subagents = `general-opus.5.5-claude1-*` / `claude3-*` when the main agent runs on .claude2.
+- MISTAKE: first AppleScript for closing Terminal windows used `tell ... to` around a multi-line repeat; fixed to a tell block and compile-checked. Rule: compile every generated AppleScript with `osacompile` on the Mac.
+- ERROR: Git Bash ssh lacks the Mac key (`Permission denied (publickey)`); use the PowerShell tool for ssh.
+- Risk: PowerShell profile `killai` still runs the removed `killall.ps1`.
+- TODO: user builds/installs on Mac (`build.ps1`, `install.ps1 -NoBuild`) and live-checks launch, attach, `/revive` (WezTerm + Terminal.app), subagent tabs, killall dry run, sign-in startup; rebuild/install on Windows.
+
+### User
+macOS support
+- oc now builds and runs on Apple Silicon Macs from the same source as Windows; it has passed tests on a Mac but has not been built or installed there yet.
+- On a Mac, revive, `/revive-single`, subagent tabs, and sidebar scripts open WezTerm or a new Terminal.app window.
+- `.scripts/build.ps1` and `install.ps1` run under PowerShell 7 on a Mac and install to `~/.local/bin`.
+
+Settings
+- "Start server at sign-in" works on Windows and macOS (macOS uses a LaunchAgent); the setting is now `server.startAtLogin` and the old name still works until the next save.
+- The link browser picker lists browsers installed in `/Applications` on a Mac.
+
+Processes
+- Kill all AI processes and the process report are now built into oc (`oc oc killall`) on Windows and macOS, with a `--dry-run` option; the PowerShell script is gone.
+
+---
+
 ## 2026-11-02 (~21:37) - v0.2.331 teresaCold - built-in /prompt handoff command with auto-copy - Claude Opus 5.5, low effort; Implementation
 
 ### Agent

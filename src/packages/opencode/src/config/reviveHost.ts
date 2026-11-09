@@ -247,7 +247,9 @@ async function windowTabsSnapshot(paneID: string, self: Pick<Revive.ReviveContex
 
 function reviveTerminal(terminal: Revive.ReviveContext["terminal"]) {
   // Reuse the plain-console fallback for failed builds too.
-  const cli = { wezterm: "wezterm-gui", "windows-terminal": "wt.exe", generic: undefined }[terminal]
+  const cli = { wezterm: "wezterm-gui", "windows-terminal": "wt.exe", "terminal-app": "osascript", generic: undefined }[
+    terminal
+  ]
   return cli && !Bun.which(cli) ? "generic" : terminal
 }
 
@@ -346,8 +348,39 @@ async function closeWindow(restart: Revive.RestartContext) {
       !Revive.isShell(path.win32.basename(restart.shellIdentity.executable))
     )
       throw new Error(`Shell identity unavailable: ${restart.shellPid}`)
+    // Terminal.app keeps a window open after its shell dies, so its tty is read first and the
+    // window closed afterwards (a dead tab closes without a "terminate processes?" prompt).
+    const tty =
+      restart.terminal === "terminal-app"
+        ? Bun.spawnSync(["/bin/ps", "-o", "tty=", "-p", String(restart.shellPid)], { stdout: "pipe" })
+            .stdout.toString()
+            .trim()
+        : ""
     await forceKill([restart.shellIdentity])
+    if (/^ttys\d+$/.test(tty)) closeTerminalAppWindow(`/dev/${tty}`)
   }
+}
+
+// Closes only a single-tab window; other tabs in the same window keep running.
+function closeTerminalAppWindow(tty: string) {
+  const result = Bun.spawnSync(
+    [
+      "osascript",
+      "-e",
+      [
+        'tell application "Terminal"',
+        "  repeat with w in windows",
+        `    if (count of tabs of w) is 1 and tty of tab 1 of w is "${tty}" then`,
+        "      close w",
+        "      exit repeat",
+        "    end if",
+        "  end repeat",
+        "end tell",
+      ].join("\n"),
+    ],
+    { stdout: "pipe", stderr: "pipe" },
+  )
+  if (result.exitCode !== 0) throw new Error(`Closing the Terminal window failed: ${result.stderr.toString().trim()}`)
 }
 
 function reviveLog() {

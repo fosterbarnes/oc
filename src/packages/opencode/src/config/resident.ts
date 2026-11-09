@@ -6,6 +6,7 @@ import net from "net"
 import { randomBytes } from "crypto"
 import { Global } from "@opencode-ai/core/global"
 import { launchDetached } from "@opencode-ai/core/util/launchDetached"
+import { ProcessTree } from "@opencode-ai/core/util/processTree"
 import { CliError } from "@/cli/effect-cmd"
 import { TuiLedger } from "./tuiLedger"
 import { defaultServerPort, executablePath, filePath, read } from "./oc"
@@ -58,10 +59,10 @@ export async function writeResidentState(input: {
   await fs.mkdir(path.dirname(file), { recursive: true })
   const temporary = `${file}.tmp-${process.pid}-${Date.now()}`
   const identity =
-    !input.created && input.pid === process.pid && process.platform === "win32"
+    !input.created && input.pid === process.pid && ProcessTree.identitySupported
       ? TuiLedger.listProcesses().find((item) => item.pid === input.pid)
       : undefined
-  if (!input.created && input.pid === process.pid && process.platform === "win32" && !identity?.created)
+  if (!input.created && input.pid === process.pid && ProcessTree.identitySupported && !identity?.created)
     throw new Error(`Resident process identity unavailable: ${input.pid}`)
   const body = {
     pid: input.pid,
@@ -95,7 +96,9 @@ async function serverSecret() {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error
   }
   const secret = randomBytes(32).toString("base64")
-  await fs.writeFile(file, secret, "ascii")
+  // POSIX: owner-only from creation (umask can only remove bits); chmod also fixes an older file.
+  await fs.writeFile(file, secret, { encoding: "ascii", mode: 0o600 })
+  if (process.platform !== "win32") await fs.chmod(file, 0o600)
   if (process.platform === "win32") {
     // Called by path: Git's coreutils whoami.exe can come first on PATH and rejects `/user`.
     const user = Bun.spawnSync(
@@ -404,7 +407,27 @@ async function portInUse(hostname: string, port: number) {
   return results.some(Boolean)
 }
 
+// `lsof -F pn` prints a `p<pid>` line, then per socket an `f<fd>` and an `n<address>:<port>` line.
+export function parseLsofListeners(text: string) {
+  return text.split("\n").reduce(
+    (state, line) => {
+      if (line.startsWith("p")) return { ...state, pid: Number(line.slice(1)) }
+      const match = line.match(/^n\[?(.*?)\]?:(\d+)$/)
+      if (!match || !state.pid) return state
+      return { ...state, rows: [...state.rows, { address: match[1], port: Number(match[2]), pid: state.pid }] }
+    },
+    { pid: 0, rows: [] as Array<{ address: string; port: number; pid: number }> },
+  ).rows
+}
+
 function residentListenerPid(hostname: string, port: number) {
+  if (process.platform === "darwin") {
+    const result = Bun.spawnSync(["/usr/sbin/lsof", "-nP", `-iTCP:${port}`, "-sTCP:LISTEN", "-Fpn"], {
+      stdout: "pipe",
+      stderr: "pipe",
+    })
+    return uniqueListenerPid(hostname, port, parseLsofListeners(result.stdout.toString()))
+  }
   if (process.platform !== "win32") return undefined
   const result = Bun.spawnSync(
     [
@@ -527,7 +550,7 @@ async function ocProcessIds(processes: TuiLedger.Process[], directory = Global.P
 // No /T: a revive helper descends from the TUI it is replacing, so tree kills would take it down too.
 export async function forceKill(processes: TuiLedger.Process[]) {
   if (!processes.length) return
-  if (process.platform !== "win32") throw new Error("Forced stop requires Windows CIM process identity")
+  if (!ProcessTree.identitySupported) throw new Error("Forced stop requires process identity (Windows or macOS)")
   const { stopDescendants } = await import("../cli/tui/descendants")
   await stopDescendants(
     processes.map((item) => {
@@ -691,11 +714,10 @@ export async function withResidentLock<T>(
 ) {
   const lock = options.lock ?? `${serverStatePath()}.lock`
   await fs.mkdir(path.dirname(lock), { recursive: true })
-  const identity =
-    process.platform === "win32"
-      ? (await TuiLedger.listProcessesAsync()).find((item) => item.pid === process.pid)
-      : undefined
-  if (process.platform === "win32" && !identity?.created) throw new Error("Startup lock owner identity unavailable")
+  const identity = ProcessTree.identitySupported
+    ? (await TuiLedger.listProcessesAsync()).find((item) => item.pid === process.pid)
+    : undefined
+  if (ProcessTree.identitySupported && !identity?.created) throw new Error("Startup lock owner identity unavailable")
   let handle: fs.FileHandle | undefined
   for (let attempt = 0; attempt < (options.attempts ?? 300); attempt++) {
     try {
@@ -719,7 +741,7 @@ export async function withResidentLock<T>(
         const owner = parseLockOwner(contents)
         const expired = !owner
           ? startupLockExpired(undefined, [], ageMs)
-          : process.platform === "win32"
+          : ProcessTree.identitySupported
             ? startupLockExpired(owner, await TuiLedger.listProcessesAsync(), ageMs)
             : !isPidAlive(owner.pid)
         if (expired && (await fs.readFile(lock, "utf8")) === contents) await fs.rm(lock, { force: true })

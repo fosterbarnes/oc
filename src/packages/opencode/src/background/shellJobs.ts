@@ -134,7 +134,7 @@ function processAlive(pid: number) {
   }
 }
 
-// CIM creation time of a live process; undefined when it is gone or cannot be read.
+// Creation time of a live process; undefined when it is gone or cannot be read.
 function createdOf(pid: number) {
   return ProcessTree.processIdentity(pid).then(
     (live) => live?.created,
@@ -145,14 +145,15 @@ function createdOf(pid: number) {
 let selfCreated: Promise<string | undefined> | undefined
 
 function ownCreated() {
-  if (process.platform !== "win32") return Promise.resolve(undefined)
+  if (!ProcessTree.identitySupported) return Promise.resolve(undefined)
   return (selfCreated ??= createdOf(process.pid))
 }
 
-// Windows reuses PIDs, so a live owner PID counts only when its creation time also matches; an owner that
-// cannot be verified counts as gone. Other platforms keep the plain PID check. `owners` shares lookups.
+// PIDs get reused, so a live owner PID counts only when its creation time also matches; an owner that
+// cannot be verified counts as gone. Platforms without process identity keep the plain PID check.
+// `owners` shares lookups.
 async function ownerRunning(info: Info, owners = new Map<number, Promise<string | undefined>>()) {
-  if (process.platform !== "win32") return info.owner === process.pid || processAlive(info.owner)
+  if (!ProcessTree.identitySupported) return info.owner === process.pid || processAlive(info.owner)
   if (info.owner === process.pid) return (await ownCreated()) === info.ownerCreated
   if (!info.ownerCreated) return false
   if (!owners.has(info.owner)) owners.set(info.owner, createdOf(info.owner))

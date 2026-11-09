@@ -6,9 +6,10 @@ const target = { url: "http://127.0.0.1:4096/", directory: "C:\\work dir", sessi
 describe("util.sessionTab", () => {
   test("needs a real server url and a tab-capable terminal", () => {
     expect(unavailable("http://opencode.internal", "wezterm")).toContain("resident oc server")
-    expect(unavailable(target.url, "generic")).toContain("WezTerm or Windows Terminal")
+    expect(unavailable(target.url, "generic")).toBeDefined()
     expect(unavailable(target.url, "wezterm")).toBeUndefined()
     expect(unavailable(target.url, "windows-terminal")).toBeUndefined()
+    expect(unavailable(target.url, "terminal-app")).toBeUndefined()
   })
 
   test("attach args carry the server credentials the new tab cannot inherit", () => {

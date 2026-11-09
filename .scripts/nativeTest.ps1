@@ -19,23 +19,37 @@ if ($Help) {
 if (@($Start, $Screen, $Stop).Where({ $_ }).Count -ne 1) { throw 'Use exactly one of -Start, -Screen, -Stop.' }
 . "$PSScriptRoot\scriptHelper.ps1"
 
-$runRoot = 'C:\ocTestTmp\agentTest'
-$currentFile = "$runRoot\current.json"
-$socketDir = "$env:USERPROFILE\.local\share\wezterm"
+$runRoot = if ($IsWindows) { 'C:\ocTestTmp\agentTest' } else { Join-Path $HOME 'ocTestTmp' 'agentTest' }
+$currentFile = Join-Path $runRoot 'current.json'
+# $HOME is %USERPROFILE% on Windows; oc's XDG folders and WezTerm's sockets sit under it on both OSes.
+$socketDir = Join-Path $HOME '.local' 'share' 'wezterm'
 # Shared state the window can change: -Start copies it, -Stop puts back each changed file. A whole-file
 # restore also reverts what the user's own oc wrote meanwhile. Not covered: prompt-history.jsonl and
 # claude-code\sessions.json, which the user's oc appends to all the time.
-$stateDir = "$runRoot\state"
+$stateDir = Join-Path $runRoot 'state'
 $stateFiles = @(
-    "$env:USERPROFILE\.local\state\opencode\model.json"
-    "$env:USERPROFILE\.local\state\opencode\kv.json"
-    "$env:USERPROFILE\.local\state\opencode\agent.json"
-    "$env:USERPROFILE\.local\state\opencode\frecency.jsonl"
-    "$env:USERPROFILE\.config\opencode\tui.json"
-    "$env:USERPROFILE\.local\share\opencode\claude-code\account-pool.json"
+    Join-Path $HOME '.local' 'state' 'opencode' 'model.json'
+    Join-Path $HOME '.local' 'state' 'opencode' 'kv.json'
+    Join-Path $HOME '.local' 'state' 'opencode' 'agent.json'
+    Join-Path $HOME '.local' 'state' 'opencode' 'frecency.jsonl'
+    Join-Path $HOME '.config' 'opencode' 'tui.json'
+    Join-Path $HOME '.local' 'share' 'opencode' 'claude-code' 'account-pool.json'
 )
 
-function getProcess([int]$ProcessId) { Get-CimInstance Win32_Process -Filter "ProcessId=$ProcessId" }
+# Process identity rows (ProcessId, ParentProcessId, Name, CreationDate): CIM on Windows, Get-Process elsewhere.
+function getProcess([int]$ProcessId) {
+    if ($IsWindows) { return Get-CimInstance Win32_Process -Filter "ProcessId=$ProcessId" }
+    Get-Process -Id $ProcessId -ErrorAction SilentlyContinue | toProcessRow
+}
+
+function getAllProcesses {
+    if ($IsWindows) { return @(Get-CimInstance Win32_Process) }
+    @(Get-Process | toProcessRow)
+}
+
+filter toProcessRow {
+    [pscustomobject]@{ ProcessId = $_.Id; ParentProcessId = $_.Parent.Id; Name = $_.ProcessName; CreationDate = $_.StartTime }
+}
 
 function readRun {
     if (-not (Test-Path -LiteralPath $currentFile)) { return $null }
@@ -71,7 +85,7 @@ if ($Stop) {
     if (-not $run) { Write-Host 'No native test is running.'; return }
     if (testRunAlive $run) {
         # Leaves first; each process is rechecked against its creation time right before it stops.
-        $all = @(Get-CimInstance Win32_Process)
+        $all = getAllProcesses
         $tree = @($all | Where-Object ProcessId -eq $run.guiPid)
         for ($i = 0; $i -lt $tree.Count; $i++) {
             $parent = $tree[$i]
@@ -92,7 +106,7 @@ if ($Stop) {
     Remove-Item -LiteralPath $run.socket -Force -ErrorAction SilentlyContinue
     $restored = foreach ($item in $run.state) {
         if ((Test-Path -LiteralPath $item.file) -and (Get-FileHash -LiteralPath $item.file).Hash -eq $item.hash) { continue }
-        Copy-Item -LiteralPath "$stateDir\$(Split-Path $item.file -Leaf)" -Destination $item.file -Force
+        Copy-Item -LiteralPath (Join-Path $stateDir (Split-Path $item.file -Leaf)) -Destination $item.file -Force
         if ((Get-FileHash -LiteralPath $item.file).Hash -ne $item.hash) { throw "Could not restore $($item.file)." }
         Split-Path $item.file -Leaf
     }
@@ -120,16 +134,16 @@ if ($run) {
 
 if ($Build) {
     requireBunForCompile
-    Push-Location "$srcRoot\packages\opencode"
+    Push-Location (Join-Path $srcRoot 'packages' 'opencode')
     try { runNativeCommand bun @('run', $buildScript, '--single', '--native-only') 'Native build' }
     finally { Pop-Location }
 }
-if (-not $Exe) { $Exe = "$distFolder\opencode-native-windows-x64\bin\opencode.exe" }
+if (-not $Exe) { $Exe = $nativeDistBinary }
 if (-not (Test-Path -LiteralPath $Exe -PathType Leaf)) { throw "Missing $Exe. Build it with -Build." }
 
 $ownsProject = -not $Project
 if ($ownsProject) {
-    $Project = "$runRoot\$(Get-Date -Format 'yyyyMMdd-HHmmss')"
+    $Project = Join-Path $runRoot (Get-Date -Format 'yyyyMMdd-HHmmss')
     New-Item -ItemType Directory -Path $Project | Out-Null
     runNativeCommand git @('-C', $Project, 'init', '-q') 'git init'
 }
@@ -147,14 +161,14 @@ Get-ChildItem Env: | Where-Object Name -match '^(OPENCODE|OC_|CLAUDE|WEZTERM_)|^
     ForEach-Object { Remove-Item "Env:$($_.Name)" }
 
 $quote = { param($value) '"' + $value + '"' }
-$gui = Start-Process -FilePath 'wezterm-gui.exe' -PassThru -ArgumentList @(
+$gui = Start-Process -FilePath "wezterm-gui$exeSuffix" -PassThru -ArgumentList @(
     'start', '--always-new-process', '--cwd', (& $quote $Project), '--', (& $quote $Exe), (& $quote $Project)
 )
 $created = "$((getProcess $gui.Id).CreationDate.ToFileTimeUtc())"
 $run = [pscustomobject]@{
     guiPid      = $gui.Id
     created     = $created
-    socket      = "$socketDir\gui-sock-$($gui.Id)"
+    socket      = Join-Path $socketDir "gui-sock-$($gui.Id)"
     paneId      = $null
     exe         = $Exe
     project     = $Project

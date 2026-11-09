@@ -10,6 +10,7 @@ import { Resident } from "@/config/resident"
 import { ReviveHost } from "@/config/reviveHost"
 import type { Revive } from "@/config/revive"
 import { TuiLedger } from "@/config/tuiLedger"
+import { ProcessTree } from "@opencode-ai/core/util/processTree"
 import { startIntro, type IntroHandoff } from "../intro"
 
 function runtimeArgs(args: string[]) {
@@ -98,12 +99,11 @@ async function host(
   // This launcher shows pipeline output; failures reopen in place.
   const ignore = () => {}
   process.on("SIGINT", ignore)
-  const shellIdentity =
-    process.platform === "win32"
-      ? TuiLedger.listProcesses().find(
-          (item) => item.pid === process.ppid && item.created && Revive.isShell(path.win32.basename(item.executable)),
-        )
-      : undefined
+  const shellIdentity = ProcessTree.identitySupported
+    ? TuiLedger.listProcesses().find(
+        (item) => item.pid === process.ppid && item.created && Revive.isShell(path.win32.basename(item.executable)),
+      )
+    : undefined
   const context = Revive.encode({ ...handoff, supervisorPid: process.pid, shellPid: process.ppid, shellIdentity })
   const failed = await runNative(["oc", "--revive", context]).then(
     () => false,
@@ -302,9 +302,9 @@ const ReviveTabsCommand = cmd({
       await launchProject(first.directory, { session: first.sessionID })
       return
     }
-    const code = await Bun.spawn(["pwsh", "-NoLogo"], { cwd: first.cwd, stdio: ["inherit", "inherit", "inherit"] })
-      .exited
-    if (code !== 0) throw new Error(`pwsh exited with code ${code}`)
+    const shell = process.platform === "win32" ? ["pwsh", "-NoLogo"] : [process.env.SHELL || "/bin/zsh", "-l"]
+    const code = await Bun.spawn(shell, { cwd: first.cwd, stdio: ["inherit", "inherit", "inherit"] }).exited
+    if (code !== 0) throw new Error(`${shell[0]} exited with code ${code}`)
   },
 })
 
@@ -382,6 +382,26 @@ const DepsCommand = cmd({
   handler: async () => {},
 })
 
+// Hidden: the TUI's /killall and /procReport run this in its own window, since it stops the oc that launched it.
+const KillallCommand = cmd({
+  command: "killall",
+  describe: false,
+  builder: (yargs: Argv) =>
+    yargs
+      .option("report", { type: "boolean", default: false, describe: "write the report, stop nothing" })
+      .option("dry-run", {
+        type: "boolean",
+        default: false,
+        describe: "print the report and stop order, stop nothing, write no files",
+      })
+      .option("yes", { type: "boolean", default: false, describe: "stop without asking" })
+      .option("pause", { type: "boolean", default: false, describe: "wait for Enter before exiting" }),
+  handler: async (args) => {
+    const { Killall } = await import("../killall")
+    await Killall.run({ report: args.report, dryRun: args["dry-run"], yes: args.yes, pause: args.pause })
+  },
+})
+
 export const OcCommand = cmd({
   command: "oc",
   describe: "manage OpenCode launcher settings",
@@ -416,6 +436,7 @@ export const OcCommand = cmd({
       })
       .command(ConfigCommand)
       .command(DepsCommand)
+      .command(KillallCommand)
       .command({
         command: "server start",
         describe: "start or reuse the resident OpenCode server",

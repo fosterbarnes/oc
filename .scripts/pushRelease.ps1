@@ -14,12 +14,14 @@ $tagWord = requireVersionTag
 requireReleaseBuild
 $tag = "v$maintenanceVersion"
 $title = "$projectName $tag $tagWord"
-# Exactly the two archives /update downloads (core/src/util/ocRelease.ts `asset`).
-$assets = foreach ($name in 'opencode-windows-x64.zip', 'opencode-native-windows-x64.zip') {
+# The archives /update downloads (core/src/util/ocRelease.ts `asset`): both Windows zips are
+# required; macOS zips ship when a Mac release build left them in dist.
+$assets = @(foreach ($name in 'opencode-windows-x64.zip', 'opencode-native-windows-x64.zip') {
     $file = Join-Path $distFolder $name
     if (-not (Test-Path -LiteralPath $file -PathType Leaf)) { throw "Missing $file. Run build.ps1 -Release first." }
     Get-Item -LiteralPath $file
-}
+}) + @(Get-ChildItem -LiteralPath $distFolder -File |
+    Where-Object Name -match '^opencode(-native)?-darwin-(arm64|x64)\.zip$')
 $installer = Join-Path $installerOutput "oc_v${maintenanceVersion}_windows-x64-setup.exe"
 if (-not (Test-Path -LiteralPath $installer -PathType Leaf)) { throw "Missing $installer. Run buildInstaller.ps1 first." }
 # Release body (shown once after /update): commit messages since the previous oc release, or HEAD's

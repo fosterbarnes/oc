@@ -1,4 +1,3 @@
-/// <reference path="./script.d.ts" />
 import fs from "node:fs"
 import path from "node:path"
 import { TextAttributes } from "@opentui/core"
@@ -57,12 +56,13 @@ import {
   type FontFamily,
   type TerminalFont,
 } from "./util/terminalFont"
-import { detectTerminal } from "@opencode-ai/core/util/terminal"
+import { detectTerminal, terminalAppScript } from "@opencode-ai/core/util/terminal"
 import { launchDetached } from "@opencode-ai/core/util/launchDetached"
+import { ProcessTree } from "@opencode-ai/core/util/processTree"
 import { useRenderer } from "@opentui/solid"
 import { createSignal, Show } from "solid-js"
 import { DialogConfirm } from "./ui/dialog-confirm"
-import killallScript from "./killall.ps1" with { type: "text" }
+import { weztermExecutable } from "./routes/session/sidebar-tools/scriptRunner"
 
 const _TAB_OPTIONS: { value: PromptTabAction; title: string; description: string }[] = [
   { value: "text", title: "text", description: "Insert a tab" },
@@ -467,25 +467,25 @@ export function createOcCommands(input: {
       },
       {
         name: "oc.server_startup",
-        title: "Start at Windows sign-in",
+        title: "Start server at sign-in",
         category: "oc",
         group: "Server",
         get desc() {
-          return readOcConfig().serverStartOnWindowsUserStart ? "on" : "off"
+          return readOcConfig().serverStartAtLogin ? "on" : "off"
         },
-        slashName: "serverStartOnWindowsUserStart",
+        slashName: "serverStartAtLogin",
         run: () => {
-          const current = readOcConfig().serverStartOnWindowsUserStart
+          const current = readOcConfig().serverStartAtLogin
           dialog.replace(() => (
             <DialogSelect
-              title="Start server at Windows sign-in"
+              title="Start server at sign-in"
               current={current ? "true" : "false"}
               options={[
                 { value: "true", title: "on" },
                 { value: "false", title: "off" },
               ]}
               onSelect={async (option) => {
-                if (await persistOcConfig("serverStartOnWindowsUserStart", option.value, toast)) dialog.clear()
+                if (await persistOcConfig("serverStartAtLogin", option.value, toast)) dialog.clear()
               }}
             />
           ))
@@ -1241,12 +1241,14 @@ export function createOcCommands(input: {
         hidden: Global.native,
         run: () => void controlServer("restart"),
       },
-      ...(process.platform === "win32"
+      ...(ProcessTree.identitySupported
         ? [
             {
               name: "oc.killall",
               title: "Kill all AI processes",
-              desc: "oc, Claude, ChatGPT, Codex, Cursor, and everything they started; logs to %LOCALAPPDATA%\\oc\\killall",
+              desc:
+                "oc, Claude, ChatGPT, Codex, Cursor, and everything they started; logs to " +
+                (process.platform === "win32" ? "%LOCALAPPDATA%\\oc\\killall" : "~/.local/share/opencode/killall"),
               slashName: "killall",
               run: async () => {
                 const confirmed = await DialogConfirm.show(
@@ -1257,7 +1259,7 @@ export function createOcCommands(input: {
                 )
                 if (!confirmed) return
                 dialog.clear()
-                launchKillall(["-Yes", "-Pause"])
+                launchKillall(["--yes", "--pause"])
               },
             },
             {
@@ -1265,7 +1267,7 @@ export function createOcCommands(input: {
               title: "Log AI process report",
               desc: "Same log as Kill all AI processes, stops nothing",
               slashName: "procReport",
-              run: () => launchKillall(["-ReportOnly", "-Pause"]),
+              run: () => launchKillall(["--report", "--pause"]),
             },
           ].map((command) => ({ ...command, category: "oc", group: "Processes" }))
         : []),
@@ -1273,11 +1275,30 @@ export function createOcCommands(input: {
   }
 }
 
-// The script stops this oc too, so it runs from its own console window that outlives the TUI.
+// `oc oc killall` stops this oc too, so it runs in its own window that outlives the TUI: a console on
+// Windows, a new WezTerm window when this TUI runs in WezTerm on macOS, otherwise a Terminal.app window.
+// Only the oc executable has `oc` commands; a native window hands off to the oc beside it.
 function launchKillall(args: string[]) {
-  const file = path.join(Global.Path.data, "killall.ps1")
-  fs.writeFileSync(file, killallScript)
-  launchDetached(file, args)
+  const bun = /^bun(?:\.exe)?$/i.test(path.basename(process.execPath))
+  const exe =
+    Global.native && !bun
+      ? path.join(path.dirname(process.execPath), `oc${path.extname(process.execPath)}`)
+      : Global.resolveExecutablePath(process.execPath)
+  const command = [...(bun ? [process.argv[1]] : []), "oc", "killall", ...args]
+  const env = { OC_FLAVOR: "oc" }
+  if (process.platform === "win32") return launchDetached(exe, command, { windowStyle: "Normal", env })
+  if (detectTerminal().kind === "wezterm")
+    return launchDetached(weztermExecutable(), [
+      "cli",
+      "spawn",
+      "--new-window",
+      "--",
+      "/usr/bin/env",
+      "OC_FLAVOR=oc",
+      exe,
+      ...command,
+    ])
+  return launchDetached("osascript", terminalAppScript([exe, ...command], { env }))
 }
 
 // `UTC-05:00` for a zone at the given moment; `longOffset` names UTC itself plain `GMT`.

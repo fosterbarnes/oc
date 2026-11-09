@@ -267,12 +267,16 @@ for (const variant of variants) {
 }
 
 if (Script.release) {
-  const systemTar = path.join(process.env.SystemRoot ?? "C:\\Windows", "System32", "tar.exe")
+  const systemTar =
+    process.platform === "win32"
+      ? path.join(process.env.SystemRoot ?? "C:\\Windows", "System32", "tar.exe")
+      : "/usr/bin/tar"
   for (const key of Object.keys(binaries)) {
     if (key.includes("linux")) {
       await $`tar -czf ../../${key}.tar.gz *`.cwd(`dist/${key}/bin`)
     } else {
-      // Windows' own bsdtar writes zips; Git's GNU tar can come first on PATH and cannot. Entries are
+      // The system bsdtar (Windows and macOS) writes zips; Git's GNU tar can come first on PATH on
+      // Windows and cannot. Entries are
       // listed explicitly so folders (cursor-runtime) never depend on shell glob expansion.
       const bin = `dist/${key}/bin`
       await $`${systemTar} -a -cf ../../${key}.zip ${readdirSync(bin)}`.cwd(bin)

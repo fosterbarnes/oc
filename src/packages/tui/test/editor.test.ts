@@ -5,6 +5,7 @@ import os from "node:os"
 import path from "node:path"
 import {
   discoverEditorConnection,
+  editorProcess,
   normalizePromptContent,
   openEditor,
   openFileAtLocation,
@@ -75,7 +76,7 @@ test("picks the editor by file extension before default and env", () => {
   expect(resolveEditorForFile("app.ts", "string-editor", env)).toBe("string-editor")
 })
 
-test("falls back to VISUAL then EDITOR then Notepad on Windows only", () => {
+test("falls back to VISUAL then EDITOR then the OS text editor on Windows and macOS", () => {
   const setting = { ".md": "md-editor" }
   expect(resolveEditorForFile("app.ts", setting, { VISUAL: "visual-editor", EDITOR: "env-editor" }, "linux")).toBe(
     "visual-editor",
@@ -86,6 +87,12 @@ test("falls back to VISUAL then EDITOR then Notepad on Windows only", () => {
   expect(resolveEditorForFile("app.ts", undefined, {}, "linux")).toBeUndefined()
   expect(resolveEditorForFile("app.ts", setting, {}, "win32")).toBe("notepad")
   expect(resolveEditorForFile("app.ts", undefined, {}, "win32")).toBe("notepad")
+  const mac = resolveEditorForFile("app.ts", undefined, {}, "darwin")
+  expect(editorProcess(mac!, "/work/a b.ts", "darwin")).toEqual({
+    command: "open",
+    args: ["-t", "/work/a b.ts"],
+    windowsVerbatimArguments: false,
+  })
 })
 
 test("skips dead IDE lock files and prefers a live port", async () => {

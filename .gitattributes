@@ -1,3 +1,13 @@
 * text=auto eol=crlf
+# Shebang scripts run on macOS and Linux, where a CRLF shebang line fails (`env: node\r`).
+*.sh text eol=lf
+.husky/* text eol=lf
+src/install text eol=lf
+src/packages/opencode/bin/opencode text eol=lf
+src/packages/opencode/script/run-workspace-server text eol=lf
+src/script/hooks text eol=lf
+src/script/release text eol=lf
+src/github/script/* text eol=lf
+src/sdks/vscode/script/* text eol=lf
 src/packages/core/migration/**/snapshot.json linguist-generated
 src/packages/core/src/database/migration.gen.ts linguist-generated

@@ -430,7 +430,7 @@ describe("OC config", () => {
   }, 60_000)
 
   test("rejects nonboolean startup settings before registration or persistence", async () => {
-    await expect(OcConfig.update("serverStartOnWindowsUserStart", "yes")).rejects.toThrow("must be true or false")
+    await expect(OcConfig.update("serverStartAtLogin", "yes")).rejects.toThrow("must be true or false")
   })
 
   test("reads launcher settings only from the native config", async () => {
@@ -453,7 +453,7 @@ describe("OC config", () => {
     await OcConfig.update("homeDirSort", "modified")
     await fs.writeFile(
       path.join(directory, "oc.json"),
-      `${JSON.stringify({ homeDirSort: "modified", server: { hostname: "127.0.0.1", port: 4096 } }, null, 2)}\n`,
+      `${JSON.stringify({ homeDirSort: "modified", server: { hostname: "127.0.0.1", port: 4096, startOnWindowsUserStart: false } }, null, 2)}\n`,
     )
     let registration: string | undefined
     const startup = {
@@ -465,17 +465,18 @@ describe("OC config", () => {
         },
       },
     }
-    await OcConfig.update("serverStartOnWindowsUserStart", "true", startup)
+    await OcConfig.update("serverStartAtLogin", "true", startup)
     expect(registration).toContain("-WindowStyle Hidden")
     await OcConfig.update("ocDir", "C:/Users/example")
 
     expect(await OcConfig.read()).toEqual({
       ocDir: "C:/Users/example",
       homeDirSort: "modified",
-      server: { hostname: "127.0.0.1", port: 4096, startOnWindowsUserStart: true },
+      // The old key name is dropped on write.
+      server: { hostname: "127.0.0.1", port: 4096, startAtLogin: true },
     })
-    await OcConfig.update("serverStartOnWindowsUserStart", "false", startup)
+    await OcConfig.update("serverStartAtLogin", "false", startup)
     expect(registration).toBeUndefined()
-    expect((await OcConfig.read()).server?.startOnWindowsUserStart).toBe(false)
+    expect((await OcConfig.read()).server?.startAtLogin).toBe(false)
   })
 })

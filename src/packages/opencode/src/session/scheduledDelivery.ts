@@ -22,8 +22,8 @@ const decodeClaim = Schema.decodeUnknownOption(Claim)
 const self = Effect.runSync(
   Effect.cached(
     Effect.promise(async () => {
-      // Core's process inventory is Windows-only. Other platforms recover by the claim age bound.
-      if (process.platform !== "win32") return { pid: process.pid, created: String(performance.timeOrigin) }
+      // Without process identity (Linux), claims recover by the claim age bound.
+      if (!ProcessTree.identitySupported) return { pid: process.pid, created: String(performance.timeOrigin) }
       const identity = await ProcessTree.processIdentity(process.pid)
       if (!identity?.created) throw new Error("Scheduler process creation time unavailable")
       return { pid: identity.pid, created: identity.created }
@@ -43,7 +43,7 @@ export function claim(value: unknown) {
 export async function expired(value: Claim, now: number) {
   if (now - value.at >= CLAIM_MS) return true
   if (value.pid === process.pid && value.created === (await Effect.runPromise(self)).created) return false
-  if (process.platform !== "win32") return false
+  if (!ProcessTree.identitySupported) return false
   return (await ProcessTree.processIdentity(value.pid))?.created !== value.created
 }
 

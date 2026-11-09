@@ -738,6 +738,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
     const message = {
       wezterm: `WezTerm is ${keys} Add config.enable_kitty_keyboard = true to wezterm.lua and restart WezTerm.`,
       "windows-terminal": `Windows Terminal is ${keys} Update Windows Terminal to 1.25 or newer.`,
+      "terminal-app": `Terminal.app is ${keys} Use WezTerm with enable_kitty_keyboard for every oc key.`,
       generic: `This terminal is ${keys} WezTerm (with enable_kitty_keyboard) or Windows Terminal 1.25+ send them.`,
     }[terminal.kind]
     toast.show({ title: "Keyboard", message, variant: "warning", duration: 20_000 })

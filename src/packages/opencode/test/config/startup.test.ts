@@ -26,7 +26,10 @@ function context(state: string) {
   }
 }
 
-test("startup preserves exact debug/config context, quotes literals and excludes secrets", () => {
+// The Windows plan resolves its paths with the host `path` module, so Windows paths need a Windows host.
+const windowsTest = test.skipIf(process.platform !== "win32")
+
+windowsTest("startup preserves exact debug/config context, quotes literals and excludes secrets", () => {
   const input = context("C:\\state\\opencode")
   const next = Startup.plan(input)
   expect(next.name).toStartWith("oc-opencode-")
@@ -41,7 +44,7 @@ test("startup preserves exact debug/config context, quotes literals and excludes
   expect(bun.script).toContain("& 'C:\\bun.exe' 'C:\\repo space\\index.ts' 'oc' 'server' 'start'")
 })
 
-test("startup sets only the XDG dirs moved off their defaults", () => {
+windowsTest("startup sets only the XDG dirs moved off their defaults", () => {
   const input = context("C:\\state\\opencode")
   expect(Startup.plan(input).script).toContain("$env:XDG_CONFIG_HOME = 'C:\\custom config'")
   // Default dirs stay unset: the server's children (gh among them) would otherwise inherit them.
@@ -62,6 +65,39 @@ test("startup rejects unsupported platforms, inline config and oversized Run com
   expect(() => Startup.plan({ ...input, powershell: null })).toThrow("Install PowerShell 7")
   expect(() => Startup.plan({ ...input, env: { OPENCODE_CONFIG_CONTENT: "secret" } })).toThrow("Save inline")
   expect(() => Startup.plan({ ...input, state: "C:\\" + "x".repeat(240) })).toThrow("shorter path")
+})
+
+test("macOS startup plans a LaunchAgent with the same identity, args and env, without secrets", async () => {
+  const windows = context("/state/opencode")
+  const input = {
+    ...windows,
+    platform: "darwin" as const,
+    powershell: null,
+    executable: "/Apps/O'Brien & <x>/oc",
+    cwd: "/Users/obrien",
+    home: "/Users/obrien",
+    env: { OPENCODE_DB: "custom.db", OPENCODE_SERVER_PASSWORD: "SECRET", ANTHROPIC_API_KEY: "SECRET" },
+  }
+  const next = Startup.plan(input)
+  expect(next.name).toBe(Startup.plan(windows).name)
+  expect(next.file).toEndWith(".plist")
+  expect(next.command).toBe(next.script)
+  expect(next.script).toContain(`<key>Label</key>\n  <string>${next.name}</string>`)
+  expect(next.script).toContain(
+    "<array>\n    <string>/Apps/O'Brien &amp; &lt;x&gt;/oc</string>\n    <string>oc</string>\n    <string>server</string>\n    <string>start</string>\n  </array>",
+  )
+  expect(next.script).toContain("<key>OPENCODE_DB</key>\n    <string>custom.db</string>")
+  expect(next.script).toContain("<key>WorkingDirectory</key>\n  <string>/Users/obrien</string>")
+  expect(next.script).toContain("<key>RunAtLoad</key>\n  <true/>")
+  expect(next.script).toContain("<key>KeepAlive</key>\n  <false/>")
+  expect(next.script).not.toContain("SECRET")
+  if (process.platform !== "darwin") return
+  await using tmp = await tmpdir()
+  const file = path.join(tmp.path, "agent.plist")
+  await Bun.write(file, next.script)
+  const lint = Bun.spawnSync(["plutil", "-lint", file], { stdout: "pipe", stderr: "pipe" })
+  expect(lint.stderr.toString()).toBe("")
+  expect(lint.exitCode).toBe(0)
 })
 
 test("startup launcher parses in PowerShell without running it", async () => {

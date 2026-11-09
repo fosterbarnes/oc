@@ -14,9 +14,9 @@ assertExternalInstall -BuildCommand '.\.scripts\build.ps1' -InstallCommand '.\.s
 if ($Oc -and $Native) { throw 'Use -Oc or -Native, not both.' }
 $installOc = -not $Native
 $installNative = -not $Oc
-$ocBinary = "$distFolder\opencode-windows-x64\bin\oc.exe"
-$nativeBinary = "$distFolder\opencode-native-windows-x64\bin\opencode.exe"
-$cursorRuntime = "$distFolder\opencode-windows-x64\bin\cursor-runtime"
+$ocBinary = $ocDistBinary
+$nativeBinary = $nativeDistBinary
+$cursorRuntime = Join-Path (Split-Path -Parent $ocDistBinary) 'cursor-runtime'
 Write-Host "Installing to $installDir"
 $processNames = @('opencode', 'oc', 'occ')
 $running = @($processNames | ForEach-Object { Get-Process -Name $_ -ErrorAction SilentlyContinue })
@@ -50,17 +50,36 @@ if ($installOc -and !(Test-Path -LiteralPath $cursorRuntime -PathType Container)
 
 New-Item -ItemType Directory -Path $installDir -Force | Out-Null
 
-$ocDestination = Join-Path $installDir 'oc.exe'
-$occLink = Join-Path $installDir 'occ.exe'
-$nativeDestination = Join-Path $installDir 'opencode.exe'
+$ocDestination = Join-Path $installDir "oc$exeSuffix"
+$occLink = Join-Path $installDir "occ$exeSuffix"
+$nativeDestination = Join-Path $installDir "opencode$exeSuffix"
 $obsoleteAliases = @('ocbug.exe', 'oc-debug.exe')
 
 # Remove a name before writing it: copying onto a hard link also rewrites the file's other names
-# (installs before the native split linked oc.exe and occ.exe to opencode.exe).
+# (installs before the native split linked oc.exe and occ.exe to opencode.exe). On macOS the new
+# inode also keeps the kernel from killing a binary whose cached code signature no longer matches.
 function replaceFile([string]$Source, [string]$Destination) {
     if (Test-Path -LiteralPath $Destination) { Remove-Item -LiteralPath $Destination -Force }
     if (Test-Path -LiteralPath $Destination -PathType Leaf) { throw "Could not remove $Destination before install." }
     Copy-Item -LiteralPath $Source -Destination $Destination
+    if ($IsMacOS) { assertSigned $Destination }
+}
+
+# Apple Silicon refuses unsigned binaries. Bun signs compiled output ad hoc and a copy keeps that
+# signature, so this re-signs only when the check fails. Runs before occ links to the file.
+function assertSigned([string]$File) {
+    & codesign --verify $File 2>$null
+    if (-not $LASTEXITCODE) { return }
+    Write-Host "Signing $File ad hoc."
+    runNativeCommand codesign @('--force', '--sign', '-', $File) "codesign $File"
+    runNativeCommand codesign @('--verify', $File) "codesign --verify $File"
+}
+
+# macOS stat field for hard-link checks: %i inode, %l link count.
+function getStat([string]$Format, [string]$File) {
+    $value = "$(& stat -f $Format $File)".Trim()
+    if ($LASTEXITCODE) { throw "stat failed for $File (exit $LASTEXITCODE)." }
+    $value
 }
 
 # Timestamped rollback copy of the current install (U16). Only the newest 3 backups are kept.
@@ -89,16 +108,23 @@ try {
         replaceFile $ocBinary $ocDestination
         Copy-Item -LiteralPath $cursorRuntime -Destination $installDir -Recurse -Force
         New-Item -ItemType HardLink -Path $occLink -Target $ocDestination -Force | Out-Null
-        # Verify link identity with fsutil (hard-link count, not byte equality)
-        $linkList = & fsutil hardlink list "$occLink" 2>&1
-        if ($LASTEXITCODE -ne 0) { throw "fsutil hardlink list failed for $occLink`: $linkList" }
-        if (-not ($linkList -match '\\oc\.exe$')) { throw "Hard link verification failed: occ.exe not linked to $ocDestination" }
+        # Verify link identity (same file, not byte equality): fsutil on Windows, inode on macOS.
+        if ($IsWindows) {
+            $linkList = & fsutil hardlink list "$occLink" 2>&1
+            if ($LASTEXITCODE -ne 0) { throw "fsutil hardlink list failed for $occLink`: $linkList" }
+            if (-not ($linkList -match '\\oc\.exe$')) { throw "Hard link verification failed: occ.exe not linked to $ocDestination" }
+        } elseif ((getStat '%i' $occLink) -ne (getStat '%i' $ocDestination)) {
+            throw "Hard link verification failed: occ not linked to $ocDestination"
+        }
     }
     if ($installNative) { replaceFile $nativeBinary $nativeDestination }
-    if (Test-Path -LiteralPath $nativeDestination) {
+    if ($IsWindows -and (Test-Path -LiteralPath $nativeDestination)) {
         $nativeLinks = @(& fsutil hardlink list "$nativeDestination" 2>&1)
         if ($LASTEXITCODE -ne 0) { throw "fsutil hardlink list failed for $nativeDestination`: $nativeLinks" }
         if ($nativeLinks.Count -ne 1) { throw "opencode.exe still shares a file with: $($nativeLinks -join ', '). Run a full install." }
+    }
+    if ($IsMacOS -and (Test-Path -LiteralPath $nativeDestination) -and (getStat '%l' $nativeDestination) -ne '1') {
+        throw "opencode still shares a file with another name. Run a full install."
     }
 } catch {
     foreach ($target in $backedUp) {
@@ -114,6 +140,16 @@ try {
         exit 1
     }
     throw
+}
+
+# macOS has no persistent user PATH API; the shell profile owns PATH there.
+if (-not $IsWindows) {
+    if (($env:PATH -split [IO.Path]::PathSeparator) -notcontains $installDir) {
+        Write-Host "$installDir is not on PATH. Add it in your shell profile, e.g. ~/.zprofile:"
+        Write-Host "  export PATH=`"$installDir`:`$PATH`""
+        $env:PATH = "$installDir$([IO.Path]::PathSeparator)$env:PATH"
+    }
+    return
 }
 
 # Idempotent current-user PATH update

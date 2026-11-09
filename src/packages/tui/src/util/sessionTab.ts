@@ -1,7 +1,9 @@
 import { spawn } from "node:child_process"
+import { writeFileSync } from "node:fs"
+import os from "node:os"
 import path from "node:path"
 import { Global } from "@opencode-ai/core/global"
-import { detectTerminal, type TerminalInfo } from "@opencode-ai/core/util/terminal"
+import { detectTerminal, shellQuote, terminalAppScript, type TerminalInfo } from "@opencode-ai/core/util/terminal"
 import { weztermExecutable } from "../routes/session/sidebar-tools/scriptRunner"
 
 // The single-instance TUI talks to its worker over RPC under this URL; no other process can attach.
@@ -13,7 +15,7 @@ type Env = Record<string, string | undefined>
 /** Why a session cannot open in a new tab here, or undefined when it can. */
 export function unavailable(url: string, kind: TerminalInfo["kind"]): string | undefined {
   if (url === INTERNAL_URL) return "Subagent tabs need the resident oc server; this window has none to attach to"
-  if (kind === "generic") return "Subagent tabs need WezTerm or Windows Terminal"
+  if (kind === "generic") return "Subagent tabs need WezTerm, Windows Terminal, or Terminal.app"
 }
 
 /** Executable (plus the script under bun dev runs) that starts this oc build. */
@@ -44,6 +46,15 @@ export function spawnCommand(kind: TerminalInfo["kind"], cwd: string, command: s
       file: "wt.exe",
       args: ["-w", "0", "new-tab", "-d", cwd, ...command.map((arg) => arg.replaceAll(";", "\\;"))],
     }
+  }
+  // Terminal.app scripting opens windows, not tabs, and types the command line into the new shell. The
+  // attach arguments carry the server password, so they go in an owner-only script that deletes itself.
+  if (kind === "terminal-app") {
+    const file = path.join(os.tmpdir(), `oc-tab-${process.pid}-${Date.now()}.sh`)
+    writeFileSync(file, `rm -f -- "$0"\ncd ${shellQuote(cwd)} && exec ${command.map(shellQuote).join(" ")}\n`, {
+      mode: 0o600,
+    })
+    return { file: "osascript", args: terminalAppScript(["/bin/sh", file]) }
   }
 }
 

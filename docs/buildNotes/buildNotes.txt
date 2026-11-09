@@ -1,8 +1,17 @@
-v0.2.331 teresaCold [feat. > /prompt handoff command]
+v0.2.332 elantraHomiez [feat. > macOS support; patch > killall in oc]
 
-handoff prompt:
-/prompt is now a built-in command. It writes a prompt you can paste into a new, empty session so another agent can carry on this session's work: the goal, the files involved, decisions made, what is done and what is left, how to check the result, and open questions. /prompt <focus> limits it to one part of the session. The turn can read files to check the paths it cites but cannot edit anything.
+macOS:
+oc now builds and runs on Apple Silicon Macs from the same source as Windows. The launcher, resident server, revive, /revive-single, background jobs, scheduled prompts, and --shutdown-all all work there. On a Mac, revive, subagent tabs, and sidebar scripts open WezTerm or a new Terminal.app window. The build and install scripts run under PowerShell 7 on a Mac and install to ~/.local/bin. It has been built, installed, and smoke-tested on a Mac: the server starts, a second launch reuses it, and the TUI opens to Home.
 
-When the reply finishes, oc copies just the prompt, without the code fence around it, and shows "Prompt copied to clipboard". The copy happens as the run ends while the tab shows that session, also with the terminal in the background, or the first time you open the session after. Code blocks inside the prompt no longer cut it short. A reply with no prompt block shows a toast pointing to /copy. A user command file named prompt.md still replaces the built-in.
+Desktop app and PowerShell updates and Everything Search stay Windows-only; SCOPE.md lists them, along with a Mac installer and menu bar app planned for later.
 
-Under the hood: the command and its template live in opencode/src/command (edit denied for its turn); the TUI finds the turn by the ocCommands metadata on its user message and reads the block with CommonMark fence rules (routes/session/handoffCopy.ts, with a new test). Marking a session as viewed now waits until its messages have loaded. Checks that ran: handoffCopy.test.ts 6 pass, opencode and tui typecheck clean, a fake-model probe of the command (template, arguments, metadata, edit tools left out of the request), and a native test window on Big Pickle: /prompt listed in the slash menu, the reply's prompt copied with no fence lines (1792 characters read back from the clipboard), and "Copy last assistant message" still copies.
+sign-in startup:
+"Start server at sign-in" works on Windows and macOS (a LaunchAgent on the Mac). The setting is now server.startAtLogin (oc config set serverStartAtLogin); the old Windows-only name is still read and replaced on the next save.
+
+links and editors:
+The link browser picker lists browsers installed in /Applications on a Mac, and clicking a path with no editor set opens the Mac's default text editor.
+
+killall:
+Kill all AI processes and the process report are now built into oc as oc oc killall (with --report and --dry-run) on Windows and macOS, so the PowerShell script is gone. The PowerShell profile's killai function still points at the old script and needs updating.
+
+Under the hood: process identity on macOS reads libproc through bun:ffi, so pid reuse is still caught before any stop; the port owner comes from lsof, and the server secret is owner-only. Shell scripts are checked out with LF line endings. Docs: docs/dev/macos.md (Mac dev loop and known Mac test failures), FORK.md, SCOPE.md, and the wiki. Checks: typecheck clean in core, opencode, and tui; covering tests pass on Windows and the Mac; full core and opencode suites on the Mac show no new failures against the last commit (known Mac failures listed in docs/dev/macos.md); Mac probes for process identity, tree stops, lsof, AppleScript compile, and browser scan; killall dry runs on both machines; Mac build, install, codesign, and server and TUI smoke tests.

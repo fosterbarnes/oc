@@ -239,7 +239,8 @@ export function createRootPicker(input: {
             if (generation !== rootPickerSearchGeneration) return
             if (result.ok === false) {
               if (result.error === "aborted") return
-              if (!everythingSearchHintShown) {
+              // Everything (es.exe) is Windows-only; elsewhere the search stays empty without a hint.
+              if (!everythingSearchHintShown && process.platform === "win32") {
                 everythingSearchHintShown = true
                 if (result.error === "missing-es") {
                   toast.show({ variant: "info", message: "Install es.exe and add it to PATH for file search." })
