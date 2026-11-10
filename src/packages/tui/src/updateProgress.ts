@@ -12,8 +12,8 @@ export type UpdatePhase =
   | "downloading"
   | "verifying"
   | "installing"
-  | "done"
-  | "not installed"
+  | "updated"
+  | "up to date"
   | "already running"
   | "skipped"
   | "update by hand"
@@ -31,9 +31,8 @@ export type UpdateRow = {
 const _TIMED = new Set<UpdatePhase>(["checking", "updating", "downloading", "verifying", "installing"])
 // Phases the update scripts announce with Write-OcStep.
 const _STEPS = new Set<string>(["downloading", "verifying", "installing"])
-// Fits the 60-column toast without the toast wrapping it again.
-const _LINE_WIDTH = 52
-const _INDENT = "  "
+// Updater output can be long; the toast or prompt notice word-wraps whatever is left.
+const _DETAIL_WIDTH = 80
 const _MB = 1024 * 1024
 
 function megabytes(bytes: number) {
@@ -47,22 +46,16 @@ function rowStatus(row: UpdateRow, now: number) {
   }
   if (row.phase === "downloading" && row.received > 0) return `downloading ${megabytes(row.received)} MB`
   const base = _TIMED.has(row.phase) ? `${row.phase} ${Math.floor((now - row.since) / 1000)}s` : row.phase
-  return row.detail ? `${base}: ${row.detail}` : base
+  return row.detail ? `${base}: ${clip(row.detail, _DETAIL_WIDTH)}` : base
 }
 
 function clip(text: string, width: number) {
   return text.length > width ? `${text.slice(0, width - 3)}...` : text
 }
 
-// A row that overflows continues on one indented line below, broken at a space when there is one;
-// anything past that line is cut.
+// One line per row; the renderer wraps it to the toast or prompt notice width.
 export function formatUpdateRow(row: UpdateRow, now: number) {
-  const line = `${row.label}: ${rowStatus(row, now)}`
-  if (line.length <= _LINE_WIDTH) return line
-  const space = line.lastIndexOf(" ", _LINE_WIDTH)
-  const breakAt = space > 0 ? space : _LINE_WIDTH
-  const rest = line.slice(breakAt).trim()
-  return `${line.slice(0, breakAt).trimEnd()}\n${_INDENT}${clip(rest, _LINE_WIDTH - _INDENT.length)}`
+  return `${row.label}: ${rowStatus(row, now)}`
 }
 
 // OCSTEP starts a phase, OCPROGRESS updates the byte count, and any other output line (CLI
@@ -113,6 +106,12 @@ export function createUpdateProgress(toast: ToastContext, title: string, labels:
   return {
     set(label: string, phase: UpdatePhase, detail = "") {
       update(label, (row) => ({ ...row, phase, detail, since: Date.now(), received: 0, total: 0 }))
+    },
+    // A row whose check found the app gone (an uninstalled Appx leaves its folder behind).
+    remove(label: string) {
+      if (stopped) return
+      rows = rows.filter((row) => row.label !== label)
+      render()
     },
     onLine(label: string) {
       return (line: string) => update(label, (row) => applyUpdateLine(row, line, Date.now()))

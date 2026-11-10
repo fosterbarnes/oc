@@ -5,11 +5,12 @@ import { tmpdir } from "node:os"
 import path from "node:path"
 import { which } from "@opencode-ai/core/util/which"
 import { setTimeout as sleep } from "node:timers/promises"
-import { checkChatgptDesktop, prepareChatgptDesktop } from "./chatgptDesktopUpdate"
+import { chatgptDesktopPresent, checkChatgptDesktop, prepareChatgptDesktop } from "./chatgptDesktopUpdate"
 import { resolveCodexCli, resolveCursorCli, runCliCommand } from "./cliUpdate"
-import { checkCursorDesktop, prepareCursorDesktop } from "./cursorDesktopUpdate"
+import { checkCursorDesktop, CURSOR_EXE, cursorDesktopPresent, prepareCursorDesktop } from "./cursorDesktopUpdate"
 import {
   checkClaudeDesktop,
+  claudeDesktopPresent,
   compareDesktopVersions,
   DOWNLOAD_HELPERS,
   prepareClaudeDesktop,
@@ -22,7 +23,7 @@ import {
   type DesktopCheckResult,
   type DesktopInstallResult,
 } from "./desktopUpdate"
-import { checkPowershell, preparePowershell } from "./pwshUpdate"
+import { checkPowershell, powershellPresent, preparePowershell, PWSH_EXE } from "./pwshUpdate"
 
 export { psString }
 
@@ -106,8 +107,6 @@ const EVERYTHING_SHA256 = "c42efad041d4c0bb4d4ac97ae7cbe89f153ec1fe078772392e749
 // so this stays on the 6 line; bump from https://github.com/jrsoftware/issrc/releases.
 const INNO_VERSION = "6.7.3"
 const INNO_KEY = String.raw`HKLM\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\Inno Setup 6_is1`
-const PWSH_EXE = path.join(process.env.ProgramFiles ?? "", "PowerShell", "7", "pwsh.exe")
-const CURSOR_EXE = path.join(process.env.LOCALAPPDATA ?? "", "Programs", "cursor", "Cursor.exe")
 const NOTEPAD_PLUS_PLUS_EXE = path.join(process.env.ProgramFiles ?? "", "Notepad++", "notepad++.exe")
 const GITHUB_DESKTOP_EXE = path.join(process.env.LOCALAPPDATA ?? "", "GitHubDesktop", "GitHubDesktop.exe")
 const VSCODE_EXES = [
@@ -119,12 +118,6 @@ const VSCODE_EXES = [
 const RUNTIME = "oc Runtime Dependencies"
 const DEV = "oc Dev. Work Dependencies"
 const CODING = "Basic Coding Tools"
-
-// Windows creates %LOCALAPPDATA%\Packages\<family> when it registers an Appx for the user, so a
-// missing folder means not installed; an existing one still goes through the real check.
-function appxMissing(family: string) {
-  return !existsSync(path.join(process.env.LOCALAPPDATA ?? "", "Packages", family))
-}
 
 export const DEPENDENCIES: Dependency[] = [
   {
@@ -139,7 +132,7 @@ export const DEPENDENCIES: Dependency[] = [
     // PowerShell, seconds on a new PC), so it runs only when that pwsh.exe exists. A pwsh from MSIX
     // or a zip still counts as found.
     detect: async (env) => {
-      const checked = existsSync(PWSH_EXE) ? fromCheck(await checkPowershell()) : { status: "missing" as const }
+      const checked = powershellPresent() ? fromCheck(await checkPowershell()) : { status: "missing" as const }
       return checked.status === "missing" ? detectCli(which("pwsh", env), env) : checked
     },
     shortcut: {
@@ -274,8 +267,7 @@ export const DEPENDENCIES: Dependency[] = [
     defaultSelected: false,
     needs: [],
     locks: ["admin"],
-    detect: async () =>
-      appxMissing("OpenAI.Codex_2p2nqsd0c76g0") ? { status: "missing" } : fromCheck(await checkChatgptDesktop()),
+    detect: async () => (chatgptDesktopPresent() ? fromCheck(await checkChatgptDesktop()) : { status: "missing" }),
     // AUMIDs: the family names pinned in the update scripts plus the Application Id (Get-StartApps).
     shortcut: { name: "ChatGPT", find: () => ({ appId: "OpenAI.Codex_2p2nqsd0c76g0!App" }) },
     prepare: harnessPrepared(prepareChatgptDesktop),
@@ -287,8 +279,7 @@ export const DEPENDENCIES: Dependency[] = [
     defaultSelected: false,
     needs: [],
     locks: ["admin"],
-    detect: async () =>
-      appxMissing("Claude_pzs8sxrjxfjjc") ? { status: "missing" } : fromCheck(await checkClaudeDesktop()),
+    detect: async () => (claudeDesktopPresent() ? fromCheck(await checkClaudeDesktop()) : { status: "missing" }),
     shortcut: { name: "Claude", find: () => ({ appId: "Claude_pzs8sxrjxfjjc!Claude" }) },
     prepare: harnessPrepared(prepareClaudeDesktop),
   },
@@ -302,10 +293,7 @@ export const DEPENDENCIES: Dependency[] = [
     locks: ["userPath"],
     // No Cursor.exe in either usual folder = missing without starting PowerShell. A custom install
     // folder shows missing; ticking it updates that install (the script finds it by its uninstall key).
-    detect: async () =>
-      [CURSOR_EXE, path.join(process.env.ProgramFiles ?? "", "cursor", "Cursor.exe")].some(existsSync)
-        ? fromCheck(await checkCursorDesktop())
-        : { status: "missing" },
+    detect: async () => (cursorDesktopPresent() ? fromCheck(await checkCursorDesktop()) : { status: "missing" }),
     // Cursor's per-user installer location.
     shortcut: { name: "Cursor", find: () => exeAt(CURSOR_EXE) },
     prepare: harnessPrepared(prepareCursorDesktop),

@@ -33,25 +33,24 @@ test("progress without a total shows bytes received", () => {
   expect(formatUpdateRow(next, 0)).toBe("Claude Desktop: downloading 5.0 MB")
 })
 
-test("other output becomes detail and an overflowing row continues on one indented line", () => {
+test("other output becomes detail on the same line", () => {
   const next = applyUpdateLine(
     row({ label: "Claude Code" }),
     "Downloading Claude Code 2.1.40 from the release server now",
     0,
   )
   expect(formatUpdateRow(next, 3_000)).toBe(
-    "Claude Code: updating 3s: Downloading Claude Code\n  2.1.40 from the release server now",
+    "Claude Code: updating 3s: Downloading Claude Code 2.1.40 from the release server now",
   )
 })
 
-test("text past the second line is cut", () => {
-  const next = row({ label: "Codex CLI", detail: "x".repeat(80) })
-  const lines = formatUpdateRow(next, 0).split("\n")
-  expect(lines).toEqual(["Codex CLI: updating 0s:", `  ${"x".repeat(47)}...`])
+test("long detail is cut", () => {
+  const next = row({ label: "Codex CLI", detail: "x".repeat(100) })
+  expect(formatUpdateRow(next, 0)).toBe(`Codex CLI: updating 0s: ${"x".repeat(77)}...`)
 })
 
 test("finished phases show no elapsed time", () => {
-  expect(formatUpdateRow(row({ phase: "done" }), 99_000)).toBe("Claude Desktop: done")
+  expect(formatUpdateRow(row({ phase: "up to date" }), 99_000)).toBe("Claude Desktop: up to date")
   expect(formatUpdateRow(row({ phase: "awaiting confirm", detail: "1.0 -> 1.1" }), 99_000)).toBe(
     "Claude Desktop: awaiting confirm: 1.0 -> 1.1",
   )

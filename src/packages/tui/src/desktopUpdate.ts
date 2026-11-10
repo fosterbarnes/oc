@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process"
+import { existsSync } from "node:fs"
 import { mkdtemp, readdir, rm } from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
@@ -116,6 +117,22 @@ export function parseDesktopInstallOutput(output: string, label = "Claude Deskto
 
 function escapeRegExp(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+}
+
+// Hosts a GitHub release download may end on after redirects (Save-Download -AllowHost).
+export const TEST_GITHUB_HOST = String.raw`
+function Test-GithubHost {
+  param([string]$HostName)
+  $h = $HostName.ToLowerInvariant()
+  return $h -eq "github.com" -or $h -eq "objects.githubusercontent.com" -or $h -eq "release-assets.githubusercontent.com"
+}
+`
+
+// Windows creates %LOCALAPPDATA%\Packages\<family> when it registers an Appx for the user, so a
+// missing folder means not installed. The folder can outlive an uninstall, so an existing one still
+// goes through the real check.
+export function appxPresent(family: string) {
+  return existsSync(path.join(process.env.LOCALAPPDATA ?? "", "Packages", family))
 }
 
 export const GET_MSIX_IDENTITY = String.raw`
@@ -571,6 +588,10 @@ function desktopScript(checkOnly: boolean, expectedVersion?: string, allowFresh 
 }
 
 const CLAUDE_KEY = "claude-desktop"
+
+export function claudeDesktopPresent() {
+  return appxPresent("Claude_pzs8sxrjxfjjc")
+}
 
 export async function checkClaudeDesktop(): Promise<DesktopCheckResult> {
   return runDesktopCheck({ key: CLAUDE_KEY, label: "Claude Desktop", script: desktopScript(true) })

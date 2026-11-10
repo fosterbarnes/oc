@@ -939,6 +939,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
         hidden: true,
         run: () => {
           void claudeWarmup.refresh()
+          ocCommands.refreshUpdateTargets()
           dialog.replace(() => <CommandPaletteDialog />)
         },
       },
@@ -949,6 +950,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
         hidden: true,
         run: () => {
           void claudeWarmup.refresh()
+          ocCommands.refreshUpdateTargets()
           dialog.replace(() => <CommandPaletteDialog category="oc" />)
         },
       },

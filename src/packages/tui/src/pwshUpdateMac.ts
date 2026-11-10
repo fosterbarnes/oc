@@ -3,7 +3,7 @@ import { mkdtemp, realpath, rm } from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 import { which } from "@opencode-ai/core/util/which"
-import { runCliCommand } from "./cliUpdate"
+import { BREW_ENV, errorText, runCliCommand, runOrThrow as run } from "./cliUpdate"
 import {
   compareDesktopVersions,
   PROGRESS_PREFIX,
@@ -36,7 +36,6 @@ const NOTES = {
   brew: `runs brew upgrade powershell; ${REOPEN}`,
   dotnet: `runs dotnet tool update; ${REOPEN}`,
 }
-const BREW_ENV = { ...process.env, HOMEBREW_NO_AUTO_UPDATE: "1", HOMEBREW_NO_ENV_HINTS: "1" }
 const inflight = new Set<string>()
 
 export type PwshInstall =
@@ -290,13 +289,6 @@ function dotnetPath() {
   return found
 }
 
-async function run(executable: string, args: string[], onLine?: (line: string) => void, env?: NodeJS.ProcessEnv) {
-  const result = await runCliCommand(executable, args, undefined, env, onLine)
-  if (result.ok) return result.output
-  const detail = result.lastLine || result.error || `exit code ${result.code}`
-  throw new Error(`${path.basename(executable)} ${args[0]} failed: ${detail}`)
-}
-
 async function fetchJson(url: string) {
   const response = await fetch(url, { signal: AbortSignal.timeout(30_000) })
   if (!response.ok) throw new Error(`update check failed: HTTP ${response.status} from ${new URL(url).hostname}`)
@@ -311,8 +303,4 @@ function manualMessage(status: PwshStatus) {
 
 function appleString(value: string) {
   return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`
-}
-
-function errorText(cause: unknown) {
-  return cause instanceof Error ? cause.message : String(cause)
 }

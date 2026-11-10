@@ -1,3 +1,5 @@
+import { existsSync } from "node:fs"
+import path from "node:path"
 import {
   DOWNLOAD_HELPERS,
   prepareDesktopInstall,
@@ -100,6 +102,13 @@ function cursorDesktopScript(checkOnly: boolean, expectedVersion?: string, allow
 }
 
 const CURSOR_KEY = "cursor-desktop"
+// Cursor's per-user installer location.
+export const CURSOR_EXE = path.join(process.env.LOCALAPPDATA ?? "", "Programs", "cursor", "Cursor.exe")
+
+// Either usual folder, without starting PowerShell. A custom install folder reads as missing.
+export function cursorDesktopPresent() {
+  return [CURSOR_EXE, path.join(process.env.ProgramFiles ?? "", "cursor", "Cursor.exe")].some(existsSync)
+}
 
 export async function checkCursorDesktop(): Promise<DesktopCheckResult> {
   return runDesktopCheck({

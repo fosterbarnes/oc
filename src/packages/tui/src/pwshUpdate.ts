@@ -1,9 +1,12 @@
+import { existsSync } from "node:fs"
+import path from "node:path"
 import {
   DOWNLOAD_HELPERS,
   prepareDesktopInstall,
   runDesktopCheck,
   runDesktopInstall,
   scriptModeLines,
+  TEST_GITHUB_HOST,
 } from "./desktopUpdate"
 import type { DesktopCheckResult, DesktopInstallResult, ScriptWork } from "./desktopUpdate"
 
@@ -26,11 +29,7 @@ trap { Write-Output "OCERR: $($_.Exception.Message)"; exit 1 }
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 $InstallDir = Join-Path $env:ProgramFiles "PowerShell\7"
 
-function Test-GithubHost {
-  param([string]$HostName)
-  $h = $HostName.ToLowerInvariant()
-  return $h -eq "github.com" -or $h -eq "objects.githubusercontent.com" -or $h -eq "release-assets.githubusercontent.com"
-}
+${TEST_GITHUB_HOST}
 
 ${DOWNLOAD_HELPERS}
 
@@ -94,6 +93,12 @@ function pwshScript(checkOnly: boolean, expectedVersion?: string, allowFresh = f
 }
 
 const PWSH_KEY = "powershell"
+export const PWSH_EXE = path.join(process.env.ProgramFiles ?? "", "PowerShell", "7", "pwsh.exe")
+
+// The update check only knows the MSI install in Program Files\PowerShell\7.
+export function powershellPresent() {
+  return existsSync(PWSH_EXE)
+}
 
 export async function checkPowershell(): Promise<DesktopCheckResult> {
   return runDesktopCheck({ key: PWSH_KEY, label: "PowerShell", script: pwshScript(true) })

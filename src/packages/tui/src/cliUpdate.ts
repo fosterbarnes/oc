@@ -22,10 +22,6 @@ export type CliCommandResult = {
   error?: string
 }
 
-export type CliUpdateResult = CliCommandResult & {
-  alreadyRunning: boolean
-}
-
 function inflightKey(executable: string) {
   return path.normalize(executable)
 }
@@ -147,25 +143,24 @@ export function runCliCommand(
   })
 }
 
-export async function runCliUpdate(executable: string, onLine?: (line: string) => void): Promise<CliUpdateResult> {
-  const key = inflightKey(executable)
-  if (inflight.has(key)) {
-    return {
-      alreadyRunning: true,
-      ok: false,
-      code: null,
-      output: "",
-      lastLine: "",
-      error: "already running",
-    }
-  }
-  inflight.add(key)
-  try {
-    const result = await runCliCommand(executable, [UPDATE_ARG], undefined, undefined, onLine)
-    return { ...result, alreadyRunning: false }
-  } finally {
-    inflight.delete(key)
-  }
+// Homebrew calls from the macOS updaters: no implicit `brew update`, no hint lines in the output.
+export const BREW_ENV = { ...process.env, HOMEBREW_NO_AUTO_UPDATE: "1", HOMEBREW_NO_ENV_HINTS: "1" }
+
+/** Output of a command that must succeed; a failure throws "<tool> <first arg> failed: <detail>". */
+export async function runOrThrow(
+  executable: string,
+  args: string[],
+  onLine?: (line: string) => void,
+  env?: NodeJS.ProcessEnv,
+) {
+  const result = await runCliCommand(executable, args, undefined, env, onLine)
+  if (result.ok) return result.output
+  const detail = result.lastLine || result.error || `exit code ${result.code}`
+  throw new Error(`${path.basename(executable)} ${args[0]} failed: ${detail}`)
+}
+
+export function errorText(cause: unknown) {
+  return cause instanceof Error ? cause.message : String(cause)
 }
 
 function mentionsCursor(text: string) {
@@ -176,11 +171,12 @@ function launcherName(executable: string) {
   return path.parse(executable).name.toLowerCase()
 }
 
+// `codex-cli 0.149.0` -> `0.149.0`, `2.1.4 (Claude Code)` -> `2.1.4`: the first word with a digit.
 export async function probeCliVersion(executable: string) {
   const result = await runCliCommand(executable, ["--version"])
   if (!result.ok) return
-  const version = firstLineOf(result.output)
-  return version || undefined
+  const line = firstLineOf(result.output)
+  return line.match(/\S*\d\S*/)?.[0] ?? (line || undefined)
 }
 
 async function identifyCursorAgent(executable: string) {
@@ -207,7 +203,15 @@ export async function resolveCursorCli(
   return { executable: agent }
 }
 
-export async function runVersionedCliUpdate(label: string, executable: string, onLine?: (line: string) => void) {
+export type CliUpdateResult = { ok: boolean; alreadyRunning: boolean; message: string; versions?: string }
+
+// Runs the CLI's own `update` command. `versions` ("old -> new") is set only when `--version`
+// changed. A chat's live process keeps its old binary; the next process oc starts uses the update.
+export async function runVersionedCliUpdate(
+  label: string,
+  executable: string,
+  onLine?: (line: string) => void,
+): Promise<CliUpdateResult> {
   const key = inflightKey(executable)
   if (inflight.has(key)) {
     return { ok: false, alreadyRunning: true, message: `${label} update already running` }
@@ -225,18 +229,18 @@ export async function runVersionedCliUpdate(label: string, executable: string, o
     }
     // The updater exited 0, so a failed probe only means the version is unknown, not that the update failed.
     const after = await probeCliVersion(executable)
-    if (!after) return { ok: true, alreadyRunning: false, message: "Update completed; version could not be read" }
+    if (!after)
+      return { ok: true, alreadyRunning: false, message: `${label} update completed; version could not be read` }
     if (!before) {
       return {
         ok: true,
         alreadyRunning: false,
-        message: `Update completed; previous version could not be read (now ${after})`,
+        message: `${label} update completed; previous version could not be read (now ${after})`,
       }
     }
-    if (after !== before) {
-      return { ok: true, alreadyRunning: false, message: `Updated ${label} from ${before} to ${after}` }
-    }
-    return { ok: true, alreadyRunning: false, message: "Update completed; version unchanged" }
+    if (after === before) return { ok: true, alreadyRunning: false, message: `${label} is up to date (${after})` }
+    const versions = `${before} -> ${after}`
+    return { ok: true, alreadyRunning: false, message: `Updated ${label} ${versions}`, versions }
   } finally {
     inflight.delete(key)
   }

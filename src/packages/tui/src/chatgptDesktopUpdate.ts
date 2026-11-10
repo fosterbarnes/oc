@@ -1,4 +1,5 @@
 import {
+  appxPresent,
   DOWNLOAD_HELPERS,
   GET_MSIX_IDENTITY,
   INSTALL_MSIX_ELEVATED,
@@ -90,6 +91,10 @@ function chatgptDesktopScript(checkOnly: boolean, expectedVersion?: string, allo
 }
 
 const CHATGPT_KEY = "chatgpt-desktop"
+
+export function chatgptDesktopPresent() {
+  return appxPresent("OpenAI.Codex_2p2nqsd0c76g0")
+}
 
 export async function checkChatgptDesktop(): Promise<DesktopCheckResult> {
   return runDesktopCheck({ key: CHATGPT_KEY, label: "ChatGPT Desktop", script: chatgptDesktopScript(true) })

@@ -62,7 +62,7 @@ import { createColors, createFrames } from "../../ui/spinner"
 import { useDialog } from "../../ui/dialog"
 import { DialogProvider as DialogProviderConnect } from "../dialog-provider"
 import { DialogAlert } from "../../ui/dialog-alert"
-import { useToast } from "../../ui/toast"
+import { PromptNotice, TOAST_DISPLAY_KEY, useToast } from "../../ui/toast"
 import { useReviveChain } from "../../reviveChain"
 import { useKV } from "../../context/kv"
 import { createFadeIn } from "../../util/signal"
@@ -92,6 +92,8 @@ export type PromptProps = {
   hint?: JSX.Element
   right?: JSX.Element
   showPlaceholder?: boolean
+  // The main prompt (Home, session) shows toasts above itself; other prompts leave them alone.
+  notices?: boolean
   placeholders?: {
     normal?: string[]
     shell?: string[]
@@ -247,6 +249,17 @@ export function Prompt(props: PromptProps) {
   const dimensions = useTerminalDimensions()
   const { theme, syntax } = useTheme()
   const kv = useKV()
+  // A dialog's dimmed full-screen backdrop would cover the notice, so toasts float meanwhile.
+  const showsNotices = createMemo(
+    () =>
+      props.notices === true &&
+      props.visible !== false &&
+      kv.get(TOAST_DISPLAY_KEY, "prompt") !== "floating" &&
+      dialog.stack.length === 0,
+  )
+  createEffect(() => {
+    if (showsNotices()) onCleanup(toast.dock())
+  })
   const animationsEnabled = createMemo(() => kv.get("animations_enabled", true))
   const list = createMemo(() => props.placeholders?.normal ?? [])
   const shell = createMemo(() => props.placeholders?.shell ?? [])
@@ -1951,6 +1964,9 @@ export function Prompt(props: PromptProps) {
             onOpen={() => dialog.replace(() => <DialogQueue sessionID={sessionID()} />)}
           />
         )}
+      </Show>
+      <Show when={showsNotices()}>
+        <PromptNotice indent={narrow() ? 1 : 2} />
       </Show>
       <box ref={(r: BoxRenderable) => (anchor = r)} visible={props.visible !== false} width="100%">
         <box

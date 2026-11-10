@@ -60,10 +60,34 @@ test("lists edited tracked files and local commits, not untracked files", async 
   await fs.writeFile(path.join(local, "scratch.txt"), "untracked\n")
   const status = await OcSource.status(local, upstream)
   expect(status).toMatchObject({ dirty: ["a.txt"], ahead: 1, behind: 1 })
+})
 
+// /update once ran `reset --hard` over uncommitted work that had no other copy.
+test("reset refuses changed tracked files and local commits, and keeps them", async () => {
+  const { upstream, local } = await setup()
+  await commit(upstream, "b.txt", "upstream\n")
+  await fs.writeFile(path.join(local, "a.txt"), "edited\n")
+  const head = git(local, "rev-parse", "HEAD")
+  const dirty = await OcSource.status(local, upstream)
+  await expect(OcSource.reset(local, dirty.target)).rejects.toThrow("oc source is not clean")
+  expect(await fs.readFile(path.join(local, "a.txt"), "utf8")).toBe("edited\n")
+  expect(git(local, "rev-parse", "HEAD")).toBe(head)
+
+  git(local, "checkout", "-q", "--", "a.txt")
+  await commit(local, "c.txt", "local\n")
+  const ahead = await OcSource.status(local, upstream)
+  await expect(OcSource.reset(local, ahead.target)).rejects.toThrow("oc source is not clean")
+  expect(git(local, "log", "-1", "--format=%s")).toBe("c.txt")
+})
+
+test("a clean clone behind main updates and keeps untracked files", async () => {
+  const { upstream, local } = await setup()
+  await commit(upstream, "b.txt", "upstream\n")
+  await fs.writeFile(path.join(local, "scratch.txt"), "untracked\n")
+  const status = await OcSource.status(local, upstream)
+  expect(OcSource.unsafe(status)).toBeUndefined()
   await OcSource.reset(local, status.target)
   expect(git(local, "rev-parse", "HEAD")).toBe(git(upstream, "rev-parse", "HEAD"))
-  expect(await fs.readFile(path.join(local, "a.txt"), "utf8")).toBe("one\n")
   expect(await fs.readFile(path.join(local, "scratch.txt"), "utf8")).toBe("untracked\n")
   expect(await OcSource.status(local, upstream)).toMatchObject({ dirty: [], ahead: 0, behind: 0 })
 })

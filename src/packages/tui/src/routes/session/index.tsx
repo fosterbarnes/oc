@@ -1675,6 +1675,7 @@ export function Session() {
                   >
                     <Prompt
                       visible={visible()}
+                      notices
                       ref={bind}
                       disabled={disabled()}
                       onSubmit={() => {

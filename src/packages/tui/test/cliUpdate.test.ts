@@ -10,7 +10,6 @@ import {
   resolveCodexCli,
   resolveCursorCli,
   runCliCommand,
-  runCliUpdate,
   runVersionedCliUpdate,
   UPDATE_ARG,
 } from "../src/cliUpdate"
@@ -97,8 +96,7 @@ function testEnv(dir: string) {
 test("runs the fixed update argument and strips ANSI from both streams", async () => {
   const dir = await tempDir("oc-cli-update-")
   const executable = await writeLauncher(dir, "cursor-agent")
-  const result = await runCliUpdate(executable)
-  expect(result.alreadyRunning).toBe(false)
+  const result = await runCliCommand(executable, [UPDATE_ARG])
   expect(result.ok).toBe(true)
   expect(result.lastLine).toBe("stderr note")
   expect(result.output).toContain("updated")
@@ -169,7 +167,8 @@ test("reports a changed version after a successful Cursor update", async () => {
   expect(result).toEqual({
     ok: true,
     alreadyRunning: false,
-    message: "Updated Cursor CLI from 1.0.0 to 2.0.0",
+    message: "Updated Cursor CLI 1.0.0 -> 2.0.0",
+    versions: "1.0.0 -> 2.0.0",
   })
 })
 
@@ -181,7 +180,7 @@ test("reports when the Cursor version is unchanged", async () => {
   expect(result).toEqual({
     ok: true,
     alreadyRunning: false,
-    message: "Update completed; version unchanged",
+    message: "Cursor CLI is up to date (1.0.0)",
   })
 })
 
@@ -202,7 +201,7 @@ test("reports success when the post-update version probe fails", async () => {
   expect(result).toEqual({
     ok: true,
     alreadyRunning: false,
-    message: "Update completed; version could not be read",
+    message: "Cursor CLI update completed; version could not be read",
   })
 })
 
@@ -215,7 +214,7 @@ test("does not claim unchanged when the pre-update version probe failed", async 
   expect(result).toEqual({
     ok: true,
     alreadyRunning: false,
-    message: "Update completed; previous version could not be read (now 2.0.0)",
+    message: "Cursor CLI update completed; previous version could not be read (now 2.0.0)",
   })
 })
 
@@ -234,10 +233,10 @@ test("second activation of the same executable reports already running", async (
   const dir = await tempDir("oc-cli-dup-")
   const executable = await writeLauncher(dir, "cursor-agent")
   await writeFile(path.join(dir, "mode.txt"), "slow")
-  const first = runCliUpdate(executable)
-  const second = await runCliUpdate(executable)
+  const first = runVersionedCliUpdate("Cursor CLI", executable)
+  const second = await runVersionedCliUpdate("Cursor CLI", executable)
   expect(second.alreadyRunning).toBe(true)
-  expect(second.error).toBe("already running")
+  expect(second.message).toBe("Cursor CLI update already running")
   const done = await first
   expect(done.alreadyRunning).toBe(false)
   expect(done.ok).toBe(true)
@@ -299,7 +298,8 @@ test("reports a changed version after a successful Codex update", async () => {
   expect(result).toEqual({
     ok: true,
     alreadyRunning: false,
-    message: "Updated Codex CLI from codex-cli 0.149.0 to codex-cli 0.149.1",
+    message: "Updated Codex CLI 0.149.0 -> 0.149.1",
+    versions: "0.149.0 -> 0.149.1",
   })
 })
 
@@ -311,7 +311,7 @@ test("reports when the Codex version is unchanged", async () => {
   expect(result).toEqual({
     ok: true,
     alreadyRunning: false,
-    message: "Update completed; version unchanged",
+    message: "Codex CLI is up to date (0.149.1)",
   })
 })
 

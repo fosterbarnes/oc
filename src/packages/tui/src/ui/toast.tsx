@@ -26,6 +26,16 @@ export type ToastNotice = Omit<ToastOptions, "duration"> & { time: number }
 // Toasts vanish after a few seconds; the oc Notices palette entry lists these.
 const _NOTICE_LIMIT = 100
 export const TOAST_MAX_WIDTH = 60
+// Longer prompt notice messages are cut; Notices keeps the full text.
+const _NOTICE_MESSAGE_ROWS = 6
+// "floating" keeps the floating box; any other value (default "prompt") docks toasts above the prompt.
+export const TOAST_DISPLAY_KEY = "toast_display"
+
+type Theme = ReturnType<typeof useTheme>["theme"]
+
+function variantColor(theme: Theme, variant: ToastOptions["variant"]) {
+  return variant === "info" ? theme.warning : theme[variant]
+}
 
 export function Toast() {
   const toast = useToast()
@@ -33,7 +43,7 @@ export function Toast() {
   const dimensions = useTerminalDimensions()
 
   return (
-    <Show when={toast.currentToast}>
+    <Show when={!toast.docked && toast.currentToast}>
       {(current) => (
         <box
           position="absolute"
@@ -48,7 +58,7 @@ export function Toast() {
           paddingTop={1}
           paddingBottom={1}
           backgroundColor={theme.backgroundToast}
-          borderColor={current().variant === "info" ? theme.warning : theme[current().variant]}
+          borderColor={variantColor(theme, current().variant)}
           border={["left", "right"]}
           customBorderChars={SplitBorder.customBorderChars}
           onMouseOver={toast.pause}
@@ -81,10 +91,62 @@ export function Toast() {
   )
 }
 
+// The current toast as a rail right above the prompt box, where the user is already looking. The
+// prompt docks it with toast.dock(); click runs the action, hover pauses dismissal.
+export function PromptNotice(props: { indent: number }) {
+  const toast = useToast()
+  const { theme } = useTheme()
+
+  return (
+    <Show when={toast.currentToast}>
+      {(current) => (
+        <box
+          flexShrink={0}
+          paddingLeft={props.indent}
+          paddingRight={props.indent}
+          paddingTop={1}
+          paddingBottom={1}
+          backgroundColor={theme.backgroundPanel}
+          borderColor={variantColor(theme, current().variant)}
+          border={["left"]}
+          customBorderChars={SplitBorder.customBorderChars}
+          onMouseOver={toast.pause}
+          onMouseOut={toast.resume}
+          onMouseUp={toast.activate}
+        >
+          <Show when={current().title}>
+            <text attributes={TextAttributes.BOLD} fg={theme.text}>
+              {current().title}
+            </text>
+          </Show>
+          {/* Only the message is capped, so the title and action rows always show. */}
+          <box maxHeight={_NOTICE_MESSAGE_ROWS} overflow="hidden">
+            <text flexShrink={0} fg={current().title ? theme.textMuted : theme.text} wrapMode="word" width="100%">
+              {current().message}
+            </text>
+          </box>
+          <Show when={current().action || current().variant === "warning" || current().variant === "error"}>
+            <text>
+              <Show when={current().action}>
+                {(action) => <span style={{ fg: theme.secondary }}>&gt; {action().label} </span>}
+              </Show>
+              <Show when={current().variant === "warning" || current().variant === "error"}>
+                <span style={{ fg: theme.textMuted }}> /notices to read again</span>
+              </Show>
+            </text>
+          </Show>
+        </box>
+      )}
+    </Show>
+  )
+}
+
 function init() {
   const [store, setStore] = createStore({
     currentToast: null as ToastOptions | null,
     notices: [] as ToastNotice[],
+    // Mounted prompts showing the toast; a count because a keyed remount briefly overlaps two.
+    docks: 0,
   })
 
   let timeoutHandle: NodeJS.Timeout | null = null
@@ -147,6 +209,14 @@ function init() {
       const action = store.currentToast?.action
       toast.dismiss()
       action?.run()
+    },
+    /** Shows toasts in the caller instead of floating; call the returned function to undock. */
+    dock() {
+      setStore("docks", (count) => count + 1)
+      return () => setStore("docks", (count) => count - 1)
+    },
+    get docked() {
+      return store.docks > 0
     },
     get currentToast(): ToastOptions | null {
       return store.currentToast

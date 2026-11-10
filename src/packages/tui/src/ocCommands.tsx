@@ -17,23 +17,12 @@ import { useRoute } from "./context/route"
 import { useSDK } from "./context/sdk"
 import { useSync } from "./context/sync"
 import { useTheme } from "./context/theme"
-import {
-  CHATGPT_DESKTOP,
-  CLAUDE_DESKTOP,
-  CURSOR_DESKTOP,
-  POWERSHELL,
-  POWERSHELL_MAC,
-  updateAllHarnesses,
-  updateClaudeCode,
-  updateCodexCli,
-  updateCursorCli,
-  updateDesktopHarness,
-} from "./harnessUpdate"
 import { bootstrapSession, listHomeDirs } from "./ocNewSession"
 import { IMAGE_PASTE_PREVIEW_KEY, PASTE_SUMMARY_KEY, PROMPT_TAB_KEY, type PromptTabAction } from "./prompt/part"
 import { dailyTheme, dayNumber } from "./theme/daily"
 import { persistAgentModel, persistOcConfig, persistTuiSetting, readOcConfig, resolveOcDirectory } from "./ocSettings"
 import { resetSidebarButtons } from "./sidebarButtons"
+import { detectInstalled, isInstalled, updateAll, updateOne, updateTargets } from "./thirdPartyUpdates"
 import {
   clampSidebarWidth,
   SIDEBAR_WIDTH_DEFAULT,
@@ -46,7 +35,7 @@ import { DialogAlert } from "./ui/dialog-alert"
 import { DialogPrompt } from "./ui/dialog-prompt"
 import { DialogSelect } from "./ui/dialog-select"
 import { DialogStepper } from "./ui/dialog-stepper"
-import { useToast } from "./ui/toast"
+import { TOAST_DISPLAY_KEY, useToast } from "./ui/toast"
 import { LINK_BROWSER_KEY, LINK_CLICK_KEY, scanBrowsers } from "./util/browser"
 import { Locale } from "./util/locale"
 import { writeTerminalEscape } from "./util/renderer"
@@ -88,7 +77,12 @@ export function createOcCommands(input: {
   const renderer = useRenderer()
   const { theme } = useTheme()
   const { claudeCliPath, controlServer, reloadInstance } = input
+  // Third party updates: an entry shows only when its program is on this machine.
+  const targets = updateTargets(claudeCliPath)
+  const refreshUpdateTargets = () => void detectInstalled(targets)
+  refreshUpdateTargets()
   return {
+    refreshUpdateTargets,
     newSession: {
       name: "oc.new_session",
       title: "New session",
@@ -540,6 +534,33 @@ export function createOcCommands(input: {
               ]}
               onSelect={(option) => {
                 kv.set("sidebar_mode", option.value)
+                dialog.clear()
+              }}
+            />
+          ))
+        },
+      },
+      {
+        name: "oc.toast_display",
+        title: "Notice display",
+        category: "oc",
+        group: "Layout",
+        // Any value but "floating" (including an older "sidebar") means above the prompt.
+        get desc() {
+          return kv.get(TOAST_DISPLAY_KEY, "prompt") === "floating" ? "floating" : "prompt"
+        },
+        slashName: "noticeDisplay",
+        run: () => {
+          dialog.replace(() => (
+            <DialogSelect
+              title="Notice display"
+              current={kv.get(TOAST_DISPLAY_KEY, "prompt") === "floating" ? "floating" : "prompt"}
+              options={[
+                { value: "prompt", title: "prompt", description: "Right above the prompt box" },
+                { value: "floating", title: "floating", description: "Floating box at the top right" },
+              ]}
+              onSelect={(option) => {
+                kv.set(TOAST_DISPLAY_KEY, option.value)
                 dialog.clear()
               }}
             />
@@ -1128,80 +1149,37 @@ export function createOcCommands(input: {
           ))
         },
       },
-      ...[
-        {
-          name: "oc.update_all_harnesses",
-          title: "Update all",
-          desc:
-            process.platform === "darwin"
-              ? "Claude Code, Cursor CLI, Codex CLI, and PowerShell"
-              : "Claude Code, Cursor CLI, Codex CLI, and the desktop apps",
-          run: () => void updateAllHarnesses(claudeCliPath(), toast, dialog, tuiConfig.auto_confirm_updates),
+      {
+        name: "oc.update_all_harnesses",
+        title: "Update all",
+        get desc() {
+          const labels = targets.filter(isInstalled).map((target) => target.label)
+          return labels.length > 0 ? labels.join(", ") : "Nothing oc can update is installed"
         },
-        {
-          name: "oc.update_claude_code",
-          title: "Update Claude Code",
-          desc: "Update the Claude Code CLI oc runs",
-          run: () => updateClaudeCode(claudeCliPath(), toast),
+        category: "oc",
+        group: "Third party updates",
+        run: () => void updateAll(targets, toast, dialog, tuiConfig.auto_confirm_updates),
+      },
+      ...targets.map((target) => ({
+        name: `oc.update_${target.id}`,
+        title: `Update ${target.label}`,
+        desc: target.desc,
+        category: "oc",
+        group: "Third party updates",
+        get hidden() {
+          return !isInstalled(target)
         },
-        {
-          name: "oc.update_cursor_cli",
-          title: "Update Cursor CLI",
-          desc: "Update the Cursor agent CLI",
-          run: () => updateCursorCli(toast),
-        },
-        {
-          name: "oc.update_codex_cli",
-          title: "Update Codex CLI",
-          desc: "Update the Codex CLI",
-          run: () => updateCodexCli(toast),
-        },
-        {
-          name: "oc.update_models",
-          title: "Update model list",
-          desc: "From the models.dev catalog; not while a session is running",
-          slashName: "updateModels",
-          run: () => void reloadInstance("Model list updated"),
-        },
-        ...(process.platform === "win32"
-          ? [
-              {
-                name: "oc.update_claude_desktop",
-                title: "Update Claude Desktop",
-                desc: "Install the latest Claude Desktop app",
-                run: () => updateDesktopHarness(CLAUDE_DESKTOP, toast, dialog, tuiConfig.auto_confirm_updates),
-              },
-              {
-                name: "oc.update_cursor_desktop",
-                title: "Update Cursor Desktop",
-                desc: "Install the latest Cursor app",
-                run: () => updateDesktopHarness(CURSOR_DESKTOP, toast, dialog, tuiConfig.auto_confirm_updates),
-              },
-              {
-                name: "oc.update_chatgpt_desktop",
-                title: "Update ChatGPT Desktop",
-                desc: "Install the latest ChatGPT app",
-                run: () => updateDesktopHarness(CHATGPT_DESKTOP, toast, dialog, tuiConfig.auto_confirm_updates),
-              },
-              {
-                name: "oc.update_powershell",
-                title: "Update PowerShell",
-                desc: "Install the latest PowerShell 7",
-                run: () => updateDesktopHarness(POWERSHELL, toast, dialog, tuiConfig.auto_confirm_updates),
-              },
-            ]
-          : []),
-        ...(process.platform === "darwin"
-          ? [
-              {
-                name: "oc.update_powershell",
-                title: "Update PowerShell",
-                desc: "Update PowerShell 7 the way it was installed",
-                run: () => updateDesktopHarness(POWERSHELL_MAC, toast, dialog, tuiConfig.auto_confirm_updates),
-              },
-            ]
-          : []),
-      ].map((command) => ({ ...command, category: "oc", group: "Third party updates" })),
+        run: () => void updateOne(target, toast, dialog, tuiConfig.auto_confirm_updates),
+      })),
+      {
+        name: "oc.update_models",
+        title: "Update model list",
+        desc: "From the models.dev catalog; not while a session is running",
+        category: "oc",
+        group: "Third party updates",
+        slashName: "updateModels",
+        run: () => void reloadInstance("Model list updated"),
+      },
       {
         name: "oc.auto_confirm_updates",
         title: "Auto confirm updates",

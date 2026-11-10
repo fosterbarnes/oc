@@ -25,22 +25,40 @@ export async function status(dir: string, repo = REPO_URL): Promise<Status> {
   await git(dir, ["fetch", "--quiet", repo, BRANCH])
   const target = (await git(dir, ["rev-parse", "FETCH_HEAD"])).trim()
   const branch = (await git(dir, ["rev-parse", "--abbrev-ref", "HEAD"])).trim()
+  const { dirty, ahead } = await localWork(dir, target)
+  const behind = Number((await git(dir, ["rev-list", "--count", `HEAD..${target}`])).trim())
+  return { branch, target, dirty, ahead, behind }
+}
+
+/**
+ * Moves `dir` to `target`. Refuses any branch but main, changed tracked files, and local commits not in
+ * `target`: `reset --hard` would discard them, and uncommitted work has no other copy.
+ */
+export async function reset(dir: string, target: string) {
+  const branch = (await git(dir, ["rev-parse", "--abbrev-ref", "HEAD"])).trim()
+  if (branch !== BRANCH) throw new Error(`oc source is on ${branch}, not ${BRANCH}: ${dir}`)
+  const blocked = unsafe(await localWork(dir, target))
+  if (blocked) throw new Error(`${blocked}: ${dir}`)
+  await git(dir, ["reset", "--hard", "--quiet", target])
+}
+
+/** Why /update must not touch this tree, or undefined when it is clean and only behind. */
+export function unsafe(work: { dirty: string[]; ahead: number }) {
+  const files = work.dirty.length
+    ? `${work.dirty.length} changed file(s): ${work.dirty.slice(0, 5).join(", ")}${work.dirty.length > 5 ? ", ..." : ""}`
+    : ""
+  const commits = work.ahead ? `${work.ahead} commit(s) not on GitHub ${BRANCH}` : ""
+  const reasons = [files, commits].filter(Boolean)
+  if (reasons.length) return `oc source is not clean (${reasons.join("; ")}); commit and push, or stash, first`
+}
+
+async function localWork(dir: string, target: string) {
   const dirty = (await git(dir, ["status", "--porcelain", "--untracked-files=no"]))
     .split(/\r?\n/)
     .filter(Boolean)
     .map((line) => line.slice(3))
-  const [ahead, behind] = (await git(dir, ["rev-list", "--left-right", "--count", `HEAD...${target}`]))
-    .trim()
-    .split(/\s+/)
-    .map(Number)
-  return { branch, target, dirty, ahead, behind }
-}
-
-/** Overwrites tracked changes and local commits in `dir` with `target`. Refuses any branch but main. */
-export async function reset(dir: string, target: string) {
-  const branch = (await git(dir, ["rev-parse", "--abbrev-ref", "HEAD"])).trim()
-  if (branch !== BRANCH) throw new Error(`oc source is on ${branch}, not ${BRANCH}: ${dir}`)
-  await git(dir, ["reset", "--hard", "--quiet", target])
+  const ahead = Number((await git(dir, ["rev-list", "--count", `${target}..HEAD`])).trim())
+  return { dirty, ahead }
 }
 
 async function git(dir: string, args: string[]) {

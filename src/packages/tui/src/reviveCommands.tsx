@@ -87,16 +87,11 @@ export function reviveCommands(toast: ToastContext) {
           toast.show({ message: `oc is up to date (${status.target.slice(0, 7)})`, variant: "info" })
           return
         }
-        if (status.dirty.length || status.ahead) {
-          const listed = status.dirty.slice(0, 5).join(", ") + (status.dirty.length > 5 ? ", ..." : "")
-          const files = status.dirty.length ? `${status.dirty.length} changed file(s): ${listed}. ` : ""
-          const commits = status.ahead ? `${status.ahead} commit(s) not on GitHub ${OcSource.BRANCH}. ` : ""
-          const confirmed = await DialogConfirm.show(
-            dialog,
-            "Overwrite local oc changes?",
-            `${dir}: ${files}${commits}/update discards them.`,
-          )
-          if (!confirmed) return
+        // Refuse rather than confirm: the reset would discard uncommitted work, which has no other copy.
+        const blocked = OcSource.unsafe(status)
+        if (blocked) {
+          toast.show({ message: `/update stopped: ${blocked} (${dir})`, variant: "error" })
+          return
         }
         // Resets and builds while this window stays open; only the swap closes it.
         const output = await revive.prepare({ update: status.target })
