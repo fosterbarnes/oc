@@ -12,14 +12,11 @@ helpers with a `win32` and a `darwin` branch; callers stay platform-neutral. Pla
   (pwsh) on PATH. WezTerm starts pwsh directly (launchd's bare PATH, no zsh files), so the Mac pwsh
   profile (`~/.config/powershell/Microsoft.PowerShell_profile.ps1`) prepends the same folders. Build
   toolchain: Bun 1.4.2 (`src/package.json` pin), pwsh 7, git, tar.
-- Windows `C:` is SMB-mounted on the Mac at `/Volumes/C`. Never `bun install` there: `node_modules` holds
-  per-OS native packages. The Mac keeps a mirror with its own `node_modules` in `~/Documents/GitHub/oc`:
-  `/usr/bin/rsync -rlt --exclude node_modules --exclude dist --exclude UPSTREAM --exclude .git --exclude .turbo --exclude "*.db" /Volumes/C/Users/Foster/Documents/GitHub/oc/ ~/Documents/GitHub/oc/`
-  (add `--delete` only when no other agent is syncing). Not `-a`: the share reports every file as
-  `rwx------`, which marks the whole tree modified; without `-p` existing files keep their git modes
-  (macOS `openrsync` has no `--chmod`). The
-  mirror must be a git checkout (`build.ts` reads `git branch --show-current`); it is a clone of GitHub
-  `origin`, and the rsync excludes `.git`, so syncs keep it.
+- Windows and the Mac are both full dev machines: each has its own git clone of GitHub `origin`
+  (Mac: `~/Documents/GitHub/oc`) with its own `node_modules`. Changes move between them only through
+  git (commit, push, pull); `/update` resets a machine's revive source to `origin/main` and rebuilds.
+  The old rsync mirror from `/Volumes/C` is retired.
+  Never `bun install` or build on the SMB share (`node_modules` holds per-OS native packages).
 - Build and install on the Mac: `pwsh -NoProfile -File ./.scripts/build.ps1`, then
   `pwsh -NoProfile -File ./.scripts/install.ps1 -NoBuild` (installs to `~/.local/bin`).
 - macOS has no `timeout`; long ssh runs go in the background tool instead. A probe that leaves child

@@ -60,8 +60,7 @@ Replaces v0.3.0.md "Current state" (lines 16-56) and "Before tagging v0.3.0" (li
       colors it per agent; progress ring while busy where supported.
    7. `openEditedWith` map: a `.md` and a `.ts` path open in their mapped editors.
    8. `intro.background` `terminal` vs `black` (`config/oc.ts:25`).
-   9. Claude Code session, `/agent-revive-no-install`: permission prompt, then revive after the turn.
-   10. Windows Terminal: a script opens in a tab and in a split.
+   9. Windows Terminal: a script opens in a tab and in a split.
 3. Known failing tests (AGENTS.md "Known failures", the `tuiPane.test.ts` entries): fixed, or
    accepted for 0.3.0 by you.
 4. First release with the setup exe is published, then README.md:94-101 and Install.md:18-20
@@ -95,7 +94,7 @@ Sweep: 118 FORK rows = 109 shipped, 3 personal, 6 mixed. Full table with evidenc
 | FD1 | FORK:188 Debug and Luna routing | Delete (replaces F3). |
 | FD2 | FORK:199 Hide stock Plan agent | Delete (replaces F4). Agent `disable: true` is an upstream feature; no row needed. |
 | FD3 | FORK:92 Windows tray (octray) | Delete; octray goes on Companion-Tools.md as external, not bundled. Resolves the F12 **YOU**; F12's row-89 fix stays. |
-| FD4 | FORK:80 Run after turn and revive | Keep: terminal-aware restart/build/install revives, ordered revive chains, `run_after_turn` behind its permission. Drop the `/agent-revive*` names and allowlisted script paths (personal: `opencode.jsonc:35-38`). |
+| FD4 | FORK:80 Run after turn and revive | Keep: terminal-aware restart/build/install revives, ordered revive chains, `run_after_turn` behind its permission. Drop the allowlisted script paths (personal: `opencode.jsonc:35-38`). |
 | FD5 | FORK:155 Everything Search | Keep: sidebar search through Everything's `es.exe` with missing-service reporting (`roots.ts:56-120`). MCP daemon and sort-API claims move to mcp-everything-search on Companion-Tools.md. |
 | FD6 | FORK:183 Cheap vs hard delegated models | Keep: child agents run their own model and reasoning, with a per-task override (`task.ts:74-99`). Drop the cheap/hard policy; consider folding into row 184. |
 | FD7 | FORK:189 Plan-only command permissions | Keep: command frontmatter sets turn-scoped permissions and tool host, carried into sub-agents and compaction (`command/index.ts:51-55`). `/spit`, `/imp` only as user-defined examples. |

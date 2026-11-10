@@ -4,6 +4,7 @@ import path from "path"
 import { Global } from "@opencode-ai/core/global"
 import { InstallationSourceTree } from "@opencode-ai/core/installation/version"
 import { launchDetached } from "@opencode-ai/core/util/launchDetached"
+import { OcSource } from "@opencode-ai/core/util/ocSource"
 import { ReviveResume } from "@opencode-ai/core/util/reviveResume"
 import { sourceTree } from "@opencode-ai/core/util/sourceTree"
 import { TuiLedger } from "./tuiLedger"
@@ -167,6 +168,15 @@ export async function prepare(request: Revive.PrepareRequest): Promise<string[]>
     await log.step(`Using oc source at ${sourceDir}`, () => saveReviveBuild({ source: sourceDir }))
   if (request.source === "none") await log.step("Saving revive without a source build", () => saveReviveBuild(false))
   const build = Revive.parseBuild((await read()).revive?.build)
+  // /update (temporary): the user confirmed overwriting local changes with this main commit.
+  const update = request.update
+  if (update) {
+    if (!build) throw new Error("No oc source saved in revive.build; run /revive once first")
+    await withResidentLock(
+      () => log.step(`Updating oc source to main (${update.slice(0, 7)})`, () => OcSource.reset(build.source, update)),
+      buildLock(),
+    )
+  }
   if (!build) return []
   // This oc was built from exactly this source: restart without rebuilding, like /revive-no-install.
   if (InstallationSourceTree !== "" && InstallationSourceTree === (await sourceTree(build.source))) {
@@ -176,25 +186,27 @@ export async function prepare(request: Revive.PrepareRequest): Promise<string[]>
     return []
   }
   // Two builds in one source folder at once would clobber each other's `bun install` and output.
-  return withResidentLock(
-    async () => {
-      // Stages are installed within seconds of their build; anything older is a leftover.
-      const stages = await fs.readdir(Revive.PREPARE_ROOT).catch(() => [])
-      for (const name of stages) {
-        const stage = path.join(Revive.PREPARE_ROOT, name)
-        const stat = await fs.stat(stage).catch(() => undefined)
-        if (stat && Date.now() - stat.mtimeMs > 60 * 60_000) await fs.rm(stage, { recursive: true, force: true })
-      }
-      const steps = Revive.buildSteps(build, { outdir: path.join(Revive.PREPARE_ROOT, String(Date.now())) })
-      for (const command of steps.commands) await log.step(command.join(" "), () => runVisible(command, steps.cwd))
-      return steps.output
-    },
-    {
-      lock: path.join(Global.Path.state, "oc-revive", "build.lock"),
-      attempts: 20,
-      busy: "Another revive is already building oc",
-    },
-  )
+  return withResidentLock(async () => {
+    // Stages are installed within seconds of their build; anything older is a leftover.
+    const stages = await fs.readdir(Revive.PREPARE_ROOT).catch(() => [])
+    for (const name of stages) {
+      const stage = path.join(Revive.PREPARE_ROOT, name)
+      const stat = await fs.stat(stage).catch(() => undefined)
+      if (stat && Date.now() - stat.mtimeMs > 60 * 60_000) await fs.rm(stage, { recursive: true, force: true })
+    }
+    const steps = Revive.buildSteps(build, { outdir: path.join(Revive.PREPARE_ROOT, String(Date.now())) })
+    for (const command of steps.commands) await log.step(command.join(" "), () => runVisible(command, steps.cwd))
+    return steps.output
+  }, buildLock())
+}
+
+// One source folder, one writer: builds and /update's reset share this lock.
+function buildLock() {
+  return {
+    lock: path.join(Global.Path.state, "oc-revive", "build.lock"),
+    attempts: 20,
+    busy: "Another revive is already building oc",
+  }
 }
 
 // /revive-single: the TUI's hidden helper opens a new tab running this pipeline again (`hosted`), which

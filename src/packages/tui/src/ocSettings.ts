@@ -31,6 +31,8 @@ export function readOcConfig(): {
   reviveSourceChosen: boolean
   // A saved source folder (`revive.build` object): /revive-single needs one.
   reviveBuild: boolean
+  // That folder's path (`revive.build.source`): /update syncs it to GitHub main.
+  reviveSource: string | undefined
   // `ask`: a Claude usage limit mid-turn asks which account to continue on (opencode `turnStream`).
   claudeFailover: "auto" | "ask"
   // With claude-code `apiAccount` set and every account limited: use API credits (opencode `turnStream`).
@@ -68,6 +70,8 @@ export function readOcConfig(): {
     const serverStartAtLogin = (merged.server?.startAtLogin ?? merged.server?.startOnWindowsUserStart) === true
     const reviveSourceChosen = merged.revive?.build !== undefined
     const reviveBuild = typeof merged.revive?.build === "object" && merged.revive.build !== null
+    const source = reviveBuild ? (merged.revive?.build as { source?: unknown }).source : undefined
+    const reviveSource = typeof source === "string" && source.trim() ? source : undefined
     const claudeFailover = merged.claudeFailover === "ask" ? "ask" : "auto"
     const claudeApiRollover =
       merged.claudeApiRollover === "always" || merged.claudeApiRollover === "off" ? merged.claudeApiRollover : "ask"
@@ -86,6 +90,7 @@ export function readOcConfig(): {
       serverStartAtLogin,
       reviveSourceChosen,
       reviveBuild,
+      reviveSource,
       claudeFailover,
       claudeApiRollover,
       claudeAccountNames,
@@ -99,6 +104,7 @@ export function readOcConfig(): {
       serverStartAtLogin: false,
       reviveSourceChosen: false,
       reviveBuild: false,
+      reviveSource: undefined,
       claudeFailover: "auto",
       claudeApiRollover: "ask",
       claudeAccountNames: {},

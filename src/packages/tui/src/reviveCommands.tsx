@@ -2,15 +2,20 @@ import { spawn } from "node:child_process"
 import fs from "node:fs"
 import path from "node:path"
 import { Global } from "@opencode-ai/core/global"
-import { InstallationDisplayVersion, InstallationLocal } from "@opencode-ai/core/installation/version"
+import {
+  InstallationDisplayVersion,
+  InstallationLocal,
+  InstallationSourceTree,
+} from "@opencode-ai/core/installation/version"
 import { launchDetached } from "@opencode-ai/core/util/launchDetached"
 import { OcRelease } from "@opencode-ai/core/util/ocRelease"
+import { OcSource } from "@opencode-ai/core/util/ocSource"
 import { ReviveResume } from "@opencode-ai/core/util/reviveResume"
+import { sourceTree } from "@opencode-ai/core/util/sourceTree"
 import { detectTerminal } from "@opencode-ai/core/util/terminal"
 import { WeztermWindow } from "@opencode-ai/core/util/weztermWindow"
 import { createEffect, createRoot } from "solid-js"
 import { useExit } from "./context/exit"
-import { useKV } from "./context/kv"
 import { useLocal } from "./context/local"
 import { useRoute } from "./context/route"
 import { useSDK } from "./context/sdk"
@@ -27,7 +32,6 @@ import { reviveText, reviveVersions } from "./util/revive"
 export function reviveCommands(toast: ToastContext) {
   const route = useRoute()
   const dialog = useDialog()
-  const kv = useKV()
   const revive = useRevive(toast)
   const sessionID = () => (route.data.type === "session" ? route.data.sessionID : undefined)
   return [
@@ -54,44 +58,54 @@ export function reviveCommands(toast: ToastContext) {
     },
     {
       name: "oc.update",
-      title: "Check for oc updates",
+      title: "Update oc from GitHub main",
       category: "System",
       slashName: "update",
+      // TEMPORARY: no releases yet, so this syncs the /revive source to GitHub main and rebuilds
+      // (core/util/ocSource.ts). The release flow returns with releases; `updateNotice` stays for it.
       run: async () => {
-        if (InstallationLocal) {
-          toast.show({ message: "Running from source: update with git and /revive", variant: "info" })
+        const dir = readOcConfig().reviveSource
+        if (!dir) {
+          toast.show({ message: "No oc source saved; run /revive once to choose one", variant: "error" })
           return
         }
-        const release = await OcRelease.lookup().catch((error: unknown) => {
+        toast.show({ message: `Checking oc source against GitHub ${OcSource.BRANCH}...`, variant: "info" })
+        const status = await OcSource.status(dir).catch((error: unknown) => {
           toast.error(error instanceof Error ? error : new Error(String(error)))
         })
-        if (!release) return
-        if (!OcRelease.isNewer(release.version, InstallationDisplayVersion)) {
-          toast.show({ message: `oc v${InstallationDisplayVersion} is the latest release`, variant: "info" })
+        if (!status) return
+        toast.dismiss()
+        if (status.branch !== OcSource.BRANCH) {
+          toast.show({
+            message: `oc source is on ${status.branch}; /update only updates ${OcSource.BRANCH} (${dir})`,
+            variant: "error",
+          })
           return
         }
-        const choice = await new Promise<"update" | "skip" | undefined>((resolve) =>
-          dialog.replace(
-            () => (
-              <DialogSelect
-                title={`oc v${release.version} is available (installed: v${InstallationDisplayVersion})`}
-                renderFilter={false}
-                options={[
-                  { value: "update" as const, title: "Update and restart", description: "stops oc, installs, reopens" },
-                  { value: "skip" as const, title: "Skip this version", description: "no startup notice for it" },
-                ]}
-                onSelect={(option) => resolve(option.value)}
-              />
-            ),
-            () => resolve(undefined),
-          ),
-        )
-        dialog.clear()
-        if (choice === "skip") kv.set(SKIPPED_VERSION, release.version)
-        if (choice !== "update") return
-        // Downloads and verifies while this window stays open; only the swap closes it.
-        const output = await revive.prepare({ release: release.version })
-        if (output?.length) return revive.swap("install", { sessionID: sessionID(), output })
+        const current = !status.ahead && !status.behind && !status.dirty.length
+        if (current && InstallationSourceTree !== "" && InstallationSourceTree === (await sourceTree(dir))) {
+          toast.show({ message: `oc is up to date (${status.target.slice(0, 7)})`, variant: "info" })
+          return
+        }
+        if (status.dirty.length || status.ahead) {
+          const listed = status.dirty.slice(0, 5).join(", ") + (status.dirty.length > 5 ? ", ..." : "")
+          const files = status.dirty.length ? `${status.dirty.length} changed file(s): ${listed}. ` : ""
+          const commits = status.ahead ? `${status.ahead} commit(s) not on GitHub ${OcSource.BRANCH}. ` : ""
+          const confirmed = await DialogConfirm.show(
+            dialog,
+            "Overwrite local oc changes?",
+            `${dir}: ${files}${commits}/update discards them.`,
+          )
+          if (!confirmed) return
+        }
+        // Resets and builds while this window stays open; only the swap closes it.
+        const output = await revive.prepare({ update: status.target })
+        if (!output) return
+        if (!output.length) {
+          toast.show({ message: `oc is up to date (${status.target.slice(0, 7)})`, variant: "info" })
+          return
+        }
+        return revive.swap("install", { sessionID: sessionID(), output })
       },
     },
   ]
@@ -99,7 +113,7 @@ export function reviveCommands(toast: ToastContext) {
 
 // Shapes: Revive.PrepareRequest and Revive.ReviveContext in packages/opencode/src/config/revive.ts.
 type Source = { source: "existing" | "download"; sourceDir: string } | { source: "none" }
-type Prepare = Source | { release: string } | {}
+type Prepare = Source | { release: string } | { update: string } | {}
 
 // One build or download at a time per TUI; a second /revive or /update waits for the first.
 let preparing = false

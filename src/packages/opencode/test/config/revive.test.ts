@@ -247,6 +247,7 @@ test("install contexts carry outputs from oc's cache; prepare requests are valid
   for (const request of [
     { result },
     { result, release: "0.3.1" },
+    { result, update: "a".repeat(40) },
     { result, source: "none" },
     { result, source: "existing", sourceDir },
     { result, source: "download", sourceDir },
@@ -259,6 +260,9 @@ test("install contexts carry outputs from oc's cache; prepare requests are valid
     { result, release: "latest" },
     { result, release: "0.3.1; calc" },
     { result, release: "0.3.1", source: "none" },
+    { result, update: "abc1234" },
+    { result, update: "a".repeat(40), release: "0.3.1" },
+    { result, update: "a".repeat(40), source: "none" },
     { result, source: "maybe" },
     { result, source: "download" },
     { result, source: "existing", sourceDir: "relative" },

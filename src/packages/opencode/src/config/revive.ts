@@ -6,6 +6,7 @@ import os from "node:os"
 import path from "node:path"
 import { Global } from "@opencode-ai/core/global"
 import { OcRelease } from "@opencode-ai/core/util/ocRelease"
+import { OcSource } from "@opencode-ai/core/util/ocSource"
 import { terminalAppScript, type TerminalInfo } from "@opencode-ai/core/util/terminal"
 import type { WeztermWindow } from "@opencode-ai/core/util/weztermWindow"
 import { TuiLedger } from "./tuiLedger"
@@ -18,8 +19,9 @@ const SHELLS = new Set(["pwsh", "powershell", "cmd", "bash", "sh", "zsh", "fish"
 const EXE = process.platform === "win32" ? ".exe" : ""
 const LEFTOVER = /\.old-\d+$/
 const RELEASE = /^\d+\.\d+\.\d+$/
+const COMMIT = /^[0-9a-f]{40}$/
 // Cloned by the first /revive when the user chooses to build from source.
-export const SOURCE_REPO = "https://github.com/fosterbarnes/oc"
+export const SOURCE_REPO = OcSource.REPO_URL
 
 export type Launcher = (typeof LAUNCHERS)[number]
 
@@ -57,8 +59,10 @@ export type PrepareRequest = {
   // download the source into `sourceDir`, or never build.
   source?: "existing" | "download" | "none"
   sourceDir?: string
-  // /update: download and verify this oc release instead of building.
+  // Download and verify this oc release instead of building. Dormant: /update syncs source until releases ship.
   release?: string
+  // /update (temporary, see core/util/ocSource.ts): reset `revive.build.source` to this main commit first.
+  update?: string
   // Where the helper writes `{ "output": [...] }` (empty: nothing to install); under Global.Path.state.
   result: string
 }
@@ -145,10 +149,11 @@ export function decodePrepare(encoded: string): PrepareRequest {
   const value = record(JSON.parse(Buffer.from(encoded, "base64url").toString("utf8")))
   if (
     !optional(value.release, (item) => typeof item === "string" && RELEASE.test(item)) ||
+    !optional(value.update, (item) => typeof item === "string" && COMMIT.test(item)) ||
     !optional(value.source, (item) => item === "existing" || item === "download" || item === "none") ||
     (value.source === "existing" || value.source === "download") !==
       (text(value.sourceDir) && path.isAbsolute(value.sourceDir as string)) ||
-    (value.release !== undefined && value.source !== undefined) ||
+    [value.release, value.update, value.source].filter((item) => item !== undefined).length > 1 ||
     !inside(Global.Path.state, value.result)
   ) {
     throw new Error("Invalid revive prepare request")

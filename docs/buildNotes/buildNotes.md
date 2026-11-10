@@ -123,6 +123,29 @@ Budget (AGENTS.md "Build notes"): at most 80 lines and 12 KB. Current invariants
 
 ---
 
+## 2026-11-10 (~13:50) - v0.2.349 calculatedSchmeat - /update syncs the revive source to GitHub main (temporary) - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation (/imp of `~/.config/opencode/plans/oc/updateFromSource.md`); completed
+- Version: 0.2.349 calculatedSchmeat
+- Fixed `/update`: it only toasted "update with git and /revive" on source builds and looked up GitHub releases otherwise; no releases exist. TEMPORARY until releases ship.
+- Added `core/util/ocSource.ts`: `status(dir, repo)` fetches `main` by URL into FETCH_HEAD and returns branch, target sha, dirty tracked files, ahead/behind; `reset(dir, sha)` refuses non-main, then `git reset --hard`. `GIT_TERMINAL_PROMPT=0` so a hidden process never waits on auth. Raw stdout: porcelain lines start with a meaningful space.
+- Changed `tui/reviveCommands.tsx` `oc.update`: needs `reviveSource`; refuses another branch; "up to date" when clean, even, and `InstallationSourceTree` matches `sourceTree(dir)`; one `DialogConfirm` for dirty files (first 5) or unpushed commits; then `revive.prepare({ update: sha })` and swap. Title "Update oc from GitHub main". Removed the release dialog and the unused `kv`.
+- Added `PrepareRequest.update` (40-hex, exclusive with `release`/`source`) in `config/revive.ts`; `SOURCE_REPO` now `OcSource.REPO_URL`. `reviveHost.ts` `prepare` resets under the shared `buildLock()` before the existing build path.
+- Added `reviveSource` to `tui/ocSettings.ts` `readOcConfig`.
+- Kept dormant: `updateNotice`, `SKIPPED_VERSION`, `Revive.downloadRelease`, release notes on first start.
+- Docs: FORK.md row renamed "Update oc (temporary: source sync)"; wiki `Launching.md` "Updating oc" and `Install.md` dev/stable bullet; `docs/dev/macos.md` replaces the rsync mirror with two git clones synced through GitHub (user: both machines are dev machines now). Also updated user `~/.config/opencode/principles.md` (Mac) the same way; Windows `principles.md` not reachable (share unmounted).
+- Verification: `bun test test/util/ocSource.test.ts` (core) 3 pass, new: guards the warning contract before a destructive reset; `test/config/revive.test.ts` 19 pass with new decode cases; `tsgo --noEmit` clean in core, opencode, tui. Probe: `OcSource.status` on this clone against real GitHub returned branch main, ahead/behind 0, and exactly the 5 edited tracked files. Not run: live `/update` in the TUI.
+- Risk: an untracked file at a path main now tracks is overwritten by `reset --hard` without being listed. A release that ever ships still triggers the startup notice saying "Run /update", which now syncs source instead.
+
+### User
+Updating oc
+- `/update` now brings your oc source folder up to the latest GitHub `main`, then rebuilds and restarts like `/revive`.
+- If that folder has edits or commits not on GitHub, `/update` lists them and asks before discarding them.
+- If the folder is on another branch, `/update` stops and tells you; if everything already matches, it says oc is up to date.
+
+---
+
 ## 2026-11-10 (~04:36) - v0.2.348 choccieJiminy - Claude API credit rollover when every login is limited - Claude Opus 5.5, low effort; Implementation
 
 ### Agent
