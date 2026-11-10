@@ -197,9 +197,7 @@ test("Escape returns through warm-up screens to the menu that opened the editor"
       expect(ui.dialog.stack).toHaveLength(1)
       expect(await ui.frame()).toContain(parent === "usage" ? "Usage" : "Commands")
       if (parent !== "usage") {
-        expect(await ui.frame()).toContain(
-          parent === "oc" ? "Third party harness management" : "oc Third party harness management",
-        )
+        expect(await ui.frame()).toContain(parent === "oc" ? "Claude" : "oc Claude")
       }
       await ui.back()
       expect(ui.dialog.stack).toHaveLength(0)

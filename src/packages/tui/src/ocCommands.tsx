@@ -88,6 +88,7 @@ export function createOcCommands(input: {
       title: "New session",
       desc: "Start a session in a folder under the home folder",
       category: "oc",
+      group: "Session",
       slashName: "newOcSession",
       run: () => {
         const { homeDir, homeDirSort } = readOcConfig()
@@ -188,6 +189,7 @@ export function createOcCommands(input: {
         title: "Subagents",
         desc: "Add, remove, or change the model of delegated agents",
         category: "oc",
+        group: "Subagents",
         slashName: "viewSub",
         run: () => {
           dialog.replace(() => <DialogSubagents />)
@@ -198,6 +200,7 @@ export function createOcCommands(input: {
         title: "Session subagents",
         desc: "Switch subagents on or off for this session",
         category: "oc",
+        group: "Subagents",
         slashName: "sessionSub",
         enabled: () => route.data.type === "session",
         run: () => {
@@ -211,6 +214,7 @@ export function createOcCommands(input: {
         title: "Stop session subagents",
         desc: "Abort every child of this session; keeps the parent and its history",
         category: "oc",
+        group: "Subagents",
         slashName: "stopSub",
         enabled: () => route.data.type === "session",
         run: async () => {
@@ -244,6 +248,7 @@ export function createOcCommands(input: {
         title: "Notices",
         desc: "Toasts and alerts shown since oc started",
         category: "oc",
+        group: "Session",
         slashName: "notices",
         run: () => {
           if (toast.notices.length === 0) return void DialogAlert.show(dialog, "Notices", "No notices since oc started")
@@ -287,7 +292,7 @@ export function createOcCommands(input: {
         name: "agent.default_subagent_model",
         title: "Subagent model",
         category: "oc",
-        group: "Defaults",
+        group: "Subagents",
         get desc() {
           return (
             sync.data.agent.find((item) => item.name === sync.data.config.default_subagent)?.model?.modelID ?? "not set"
@@ -316,7 +321,7 @@ export function createOcCommands(input: {
         name: "agent.default_subagent",
         title: "Subagent agent",
         category: "oc",
-        group: "Defaults",
+        group: "Subagents",
         get desc() {
           return sync.data.config.default_subagent ?? "not set"
         },
@@ -361,6 +366,7 @@ export function createOcCommands(input: {
         title: "Clean up completed sessions",
         desc: "Archive or delete finished sessions that are not open",
         category: "oc",
+        group: "Session",
         run: () => {
           dialog.replace(() => <DialogSessionCleanup />)
         },
@@ -370,6 +376,7 @@ export function createOcCommands(input: {
         title: "About",
         desc: "Version, build, runtime, and repo links",
         category: "oc",
+        group: "About",
         slashName: "about",
         run: () => {
           dialog.replace(() => <DialogAbout />)
@@ -409,7 +416,7 @@ export function createOcCommands(input: {
         name: "oc.home_dir_sort",
         title: "Home sort order",
         category: "oc",
-        group: "Layout",
+        group: "Folders",
         get desc() {
           return readOcConfig().homeDirSort
         },
@@ -464,7 +471,7 @@ export function createOcCommands(input: {
         name: "oc.server_startup",
         title: "Start server at sign-in",
         category: "oc",
-        group: "Server",
+        group: "Server and processes",
         get desc() {
           return readOcConfig().serverStartAtLogin ? "on" : "off"
         },
@@ -490,7 +497,7 @@ export function createOcCommands(input: {
         name: "oc.sidebar_position",
         title: "Sidebar position",
         category: "oc",
-        group: "Layout",
+        group: "Sidebar",
         get desc() {
           return kv.get("sidebar_position", "right")
         },
@@ -518,7 +525,7 @@ export function createOcCommands(input: {
         name: "oc.sidebar_mode",
         title: "Sidebar visibility",
         category: "oc",
-        group: "Layout",
+        group: "Sidebar",
         get desc() {
           return kv.get("sidebar_mode", "auto")
         },
@@ -544,7 +551,7 @@ export function createOcCommands(input: {
         name: "oc.toast_display",
         title: "Notice display",
         category: "oc",
-        group: "Layout",
+        group: "Appearance",
         // Any value but "floating" (including an older "sidebar") means above the prompt.
         get desc() {
           return kv.get(TOAST_DISPLAY_KEY, "prompt") === "floating" ? "floating" : "prompt"
@@ -571,7 +578,7 @@ export function createOcCommands(input: {
         name: "oc.sidebar_width",
         title: "Sidebar width",
         category: "oc",
-        group: "Layout",
+        group: "Sidebar",
         get desc() {
           const position = kv.get("sidebar_position", "right")
           const width = String(clampSidebarWidth(kv.get(SIDEBAR_WIDTH_KEY, SIDEBAR_WIDTH_DEFAULT)))
@@ -594,7 +601,7 @@ export function createOcCommands(input: {
         name: "oc.keybind_preset",
         title: "Keybind layout",
         category: "oc",
-        group: "Layout",
+        group: "Prompt",
         get desc() {
           return tuiConfig.keybind_preset
         },
@@ -635,7 +642,7 @@ export function createOcCommands(input: {
         name: "oc.prompt_tab_action",
         title: "Tab key",
         category: "oc",
-        group: "Layout",
+        group: "Prompt",
         get desc() {
           const current = kv.get(PROMPT_TAB_KEY, "text")
           return _TAB_OPTIONS.find((option) => option.value === current)?.title ?? "text"
@@ -659,7 +666,7 @@ export function createOcCommands(input: {
         name: "oc.sidebar_button_style",
         title: "Sidebar buttons",
         category: "oc",
-        group: "Layout",
+        group: "Sidebar",
         get desc() {
           return tuiConfig.sidebar_button_style === "minimal" ? "Minimal" : "Outline"
         },
@@ -693,7 +700,7 @@ export function createOcCommands(input: {
         name: "oc.sidebar_buttons_reset",
         title: "Reset sidebar buttons",
         category: "oc",
-        group: "Layout",
+        group: "Sidebar",
         desc: "Restore Switch Session, Command Palette, oc Palette, Subagents",
         slashName: "sidebarReset",
         run: () => {
@@ -707,7 +714,7 @@ export function createOcCommands(input: {
           return kv.get("subagent_usage_enabled", true) ? "Hide subagent usage" : "Show subagent usage"
         },
         category: "oc",
-        group: "Layout",
+        group: "Subagents",
         desc: "Context % of each subagent in the prompt bar",
         slashName: "subagentUsage",
         run: () => {
@@ -722,7 +729,7 @@ export function createOcCommands(input: {
           return kv.get(PASTE_SUMMARY_KEY, false) ? "Disable paste summary" : "Enable paste summary"
         },
         category: "oc",
-        group: "Layout",
+        group: "Prompt",
         desc: "Collapse long pastes in the prompt to a [Pasted ~N lines] placeholder",
         slashName: "pasteSummary",
         run: () => {
@@ -736,7 +743,7 @@ export function createOcCommands(input: {
           return kv.get(IMAGE_PASTE_PREVIEW_KEY, false) ? "Disable image paste preview" : "Enable image paste preview"
         },
         category: "oc",
-        group: "Layout",
+        group: "Prompt",
         desc: "Open the image preview when an image is pasted. Clicking an [Image N] chip always previews it",
         slashName: "imagePreview",
         run: () => {
@@ -751,7 +758,7 @@ export function createOcCommands(input: {
           return `Subagent live rows: ${rows ? rows : "off"}`
         },
         category: "oc",
-        group: "Layout",
+        group: "Subagents",
         desc: "Rows of tool calls, thinking, and output shown for each running subagent",
         slashName: "subagentRows",
         run: () => {
@@ -775,7 +782,7 @@ export function createOcCommands(input: {
         name: "oc.subagent_tabs",
         title: "Subagent tabs",
         category: "oc",
-        group: "Layout",
+        group: "Subagents",
         get desc() {
           return tuiConfig.subagent_tabs.click === "tab" ? "opens in tab" : "opens inline"
         },
@@ -827,7 +834,7 @@ export function createOcCommands(input: {
         name: "oc.font",
         title: "Font",
         category: "oc",
-        group: "Layout",
+        group: "Appearance",
         get desc() {
           const font: TerminalFont | undefined = kv.get(TERMINAL_FONT_KEY)
           if (!font) return "Terminal default"
@@ -934,7 +941,7 @@ export function createOcCommands(input: {
         name: "oc.time",
         title: "Time",
         category: "oc",
-        group: "Layout",
+        group: "Appearance",
         get desc() {
           return `${Locale.clock()} · ${Locale.zone()}`
         },
@@ -1009,7 +1016,7 @@ export function createOcCommands(input: {
           return kv.get(LINK_CLICK_KEY, true) ? "Disable click to open links" : "Enable click to open links"
         },
         category: "oc",
-        group: "Links",
+        group: "Prompt",
         desc: "Left click a link in chat to open it",
         slashName: "linkClick",
         run: () => {
@@ -1021,7 +1028,7 @@ export function createOcCommands(input: {
         name: "oc.link_browser",
         title: "Link browser",
         category: "oc",
-        group: "Links",
+        group: "Prompt",
         get desc() {
           return kv.get(LINK_BROWSER_KEY) || "system default"
         },
@@ -1048,7 +1055,7 @@ export function createOcCommands(input: {
         name: "oc.bgrun",
         title: "bgRun",
         category: "oc",
-        group: "Tools (experimental)",
+        group: "Tools",
         get desc() {
           const permission = sync.data.config.permission
           return typeof permission !== "object" || permission.bgRun !== "deny" ? "on" : "off"
@@ -1088,7 +1095,7 @@ export function createOcCommands(input: {
         name: "oc.smooth_streaming",
         title: "Smooth streaming",
         category: "oc",
-        group: "Beta",
+        group: "Appearance",
         get desc() {
           return tuiConfig.smooth_streaming ? "on" : "off"
         },
@@ -1122,7 +1129,7 @@ export function createOcCommands(input: {
         name: "oc.daily_theme",
         title: "Daily theme",
         category: "oc",
-        group: "Beta",
+        group: "Appearance",
         get desc() {
           return tuiConfig.daily_theme ? `on: ${dailyTheme(dayNumber(new Date()))}` : "off"
         },
@@ -1157,7 +1164,7 @@ export function createOcCommands(input: {
           return labels.length > 0 ? labels.join(", ") : "Nothing oc can update is installed"
         },
         category: "oc",
-        group: "Third party updates",
+        group: "Updates",
         run: () => void updateAll(targets, toast, dialog, tuiConfig.auto_confirm_updates),
       },
       ...targets.map((target) => ({
@@ -1165,7 +1172,7 @@ export function createOcCommands(input: {
         title: `Update ${target.label}`,
         desc: target.desc,
         category: "oc",
-        group: "Third party updates",
+        group: "Updates",
         get hidden() {
           return !isInstalled(target)
         },
@@ -1176,7 +1183,7 @@ export function createOcCommands(input: {
         title: "Update model list",
         desc: "From the models.dev catalog; not while a session is running",
         category: "oc",
-        group: "Third party updates",
+        group: "Updates",
         slashName: "updateModels",
         run: () => void reloadInstance("Model list updated"),
       },
@@ -1184,7 +1191,7 @@ export function createOcCommands(input: {
         name: "oc.auto_confirm_updates",
         title: "Auto confirm updates",
         category: "oc",
-        group: "Third party updates",
+        group: "Updates",
         get desc() {
           return tuiConfig.auto_confirm_updates ? "on" : "off"
         },
@@ -1277,7 +1284,7 @@ export function createOcCommands(input: {
         title: "Shut down",
         desc: "Stop the oc server; this window disconnects",
         category: "oc",
-        group: "Server",
+        group: "Server and processes",
         hidden: Global.native,
         run: () => void controlServer("shutdown"),
       },
@@ -1286,7 +1293,7 @@ export function createOcCommands(input: {
         title: "Restart",
         desc: "Restart the oc server; this window reconnects",
         category: "oc",
-        group: "Server",
+        group: "Server and processes",
         hidden: Global.native,
         run: () => void controlServer("restart"),
       },
@@ -1318,7 +1325,7 @@ export function createOcCommands(input: {
               slashName: "procReport",
               run: () => launchKillall(["--report", "--pause"]),
             },
-          ].map((command) => ({ ...command, category: "oc", group: "Processes" }))
+          ].map((command) => ({ ...command, category: "oc", group: "Server and processes" }))
         : []),
     ],
   }

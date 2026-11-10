@@ -66,7 +66,7 @@ export function warmupCommands(accounts: ClaudeWarmupAccount[], run: (accountID:
     title: commandTitle(account.label),
     desc: "Send a tiny Haiku message at set times to start the 5-hour window",
     category: "oc",
-    group: "Third party harness management",
+    group: "Claude",
     run: () => run(account.accountID),
   }))
 }

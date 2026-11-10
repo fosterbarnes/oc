@@ -26,7 +26,7 @@ test("usage menu is reachable through the oc palette namespace and category", as
       })
       .find((entry) => entry.command.name === USAGE_MENU_COMMAND.name)
     expect(entry?.command.title).toBe("Show usage")
-    expect(entry?.command.group).toBe("Third party harness management")
+    expect(entry?.command.group).toBe("Claude")
     expect(keymap.dispatchCommand(entry!.command.name).ok).toBe(true)
     expect(opened).toBe(true)
   } finally {

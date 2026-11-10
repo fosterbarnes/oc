@@ -40,7 +40,7 @@ export function createClaudeAccountCommands() {
     desc: "Account used by every Claude session",
     slashName: "claude-account",
     category: "oc",
-    group: "Third party harness management",
+    group: "Claude",
     run: async () => {
       const accounts = await sdk.claudeAccount.state().catch((error) => {
         toast.error(error)
@@ -75,7 +75,7 @@ export function createClaudeAccountCommands() {
     desc: "Pin a Claude account to this session only",
     slashName: "claude-session-account",
     category: "oc",
-    group: "Third party harness management",
+    group: "Claude",
     run: async () => {
       if (route.data.type !== "session") return
       const sessionID = route.data.sessionID
@@ -259,7 +259,7 @@ export function createClaudeAccountCommands() {
     desc: "Add, rename, sign in, sign out, or remove Claude accounts",
     slashName: "claude-accounts",
     category: "oc",
-    group: "Third party harness management",
+    group: "Claude",
     run: () => void showAccounts(),
   }
 
@@ -267,7 +267,7 @@ export function createClaudeAccountCommands() {
     name: "claude.failover",
     title: "Claude account failover",
     category: "oc",
-    group: "Third party harness management",
+    group: "Claude",
     get desc() {
       return failoverMode()
     },
@@ -304,7 +304,7 @@ export function createClaudeAccountCommands() {
     name: "claude.apiRollover",
     title: "Claude API credit rollover",
     category: "oc",
-    group: "Third party harness management",
+    group: "Claude",
     get desc() {
       return rolloverMode()
     },
@@ -347,7 +347,7 @@ export function createClaudeAccountCommands() {
     name: "claude.autoResume",
     title: "Claude auto-resume",
     category: "oc",
-    group: "Third party harness management",
+    group: "Claude",
     get desc() {
       return resumeEnabled() ? "on" : "off"
     },

@@ -388,8 +388,7 @@ describe.skipIf(!paneReady)("oc TUI in a WezTerm pane", () => {
         yield* pane.type("\x0f")
         yield* pane.waitFor("Commands")
         yield* pane.type("Schedule Claude warm-up")
-        const listed = yield* pane.waitFor("Third party harness management")
-        expect(listed).toContain("Schedule Claude warm-up:")
+        yield* pane.waitFor("Schedule Claude warm-up:")
         yield* pane.type("\r")
         yield* pane.waitFor("Times: (none)")
         // Selection starts on "Time format", above the mode and Times rows.
@@ -487,7 +486,7 @@ describe.skipIf(!paneReady)("oc TUI in a WezTerm pane", () => {
         yield* pane.type("\x0f")
         yield* pane.waitFor("Commands")
         yield* pane.type("Home sort order")
-        const listed = yield* pane.waitFor("Layout")
+        const listed = yield* pane.waitFor("Folders")
         expect(listed).toContain("Home sort order")
         yield* pane.type("\x1b")
         expectIsolated(yield* fixture.llm.inputs)

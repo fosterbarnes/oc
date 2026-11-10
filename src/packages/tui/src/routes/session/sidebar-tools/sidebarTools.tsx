@@ -66,7 +66,7 @@ export const USAGE_MENU_COMMAND = {
   title: "Show usage",
   desc: "Plan usage and limits for each provider",
   category: "oc",
-  group: "Third party harness management",
+  group: "Claude",
   namespace: "palette",
 }
 

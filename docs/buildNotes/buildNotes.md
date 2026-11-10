@@ -123,6 +123,25 @@ Budget (AGENTS.md "Build notes"): at most 80 lines and 12 KB. Current invariants
 
 ---
 
+## 2026-11-10 (~16:45) - v0.2.353 chickpeasDiego - oc palette regrouped by job and ordered by use - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; /spit then /imp; completed
+- Version: 0.2.353 chickpeasDiego
+- Added `_GROUP_RANK`, `_COMMAND_RANK`, `compareGroups` in `tui/src/component/command-palette.tsx`: oc groups and commands sort by fixed rank, then A-Z; ungrouped still lead a category; user `command_palette.order` still beats the built-in rank. Unlisted names (per-account warm-ups, `oc.update_<id>`) go last in their group A-Z.
+- Changed oc `group` values: Session, Claude, Subagents, Defaults, Updates, Prompt, Appearance, Sidebar, Folders, Server and processes, Tools, About (`ocCommands.tsx`, `claudeCommands.tsx`, `claudeWarmup.tsx`, `sidebarTools.tsx`, `savedImages.ts`). Removed Beta, Layout, Links, Processes, Server, Third party harness management, Third party updates, Tools (experimental). No visible oc command is ungrouped now.
+- Updated tests for the renamed headings (intended change): `claudeWarmup.test.ts`, `claudeWarmupRendered.test.tsx`, `usagePalette.test.ts`, `tuiPane.test.ts` (warm-up pane test waits for the filtered row; Home sort order now under Folders).
+- Updated `FORK.md`, wiki `Claude-Code.md`/`Sidebar.md`, `.opencode/skills/oc-palette-entry/SKILL.md` (new entries pick a group and a `_COMMAND_RANK` slot). Plan: `~/.config/opencode/plans/ocPaletteOrder.md`, mockup `plans/mockups/ocPaletteOrder.html`.
+- Kept Auto confirm updates unranked, so it sits after Update model list (A-Z before the per-app updates), not last as the plan listed.
+- Verification: probe ran `orderPaletteEntries` on names/groups parsed from the real sources: group sequence and in-group order match the plan; user order still wins; probe deleted. `bun test` commandPalette, claudeWarmup, claudeWarmupRendered, usagePalette: 32 pass. `tsgo --noEmit` in tui clean. `tuiPane.test.ts` (OC_TUI_PANE live) not run.
+
+### User
+Command palette
+- The oc commands palette (cmd+o) is grouped by job: Session, Claude, Subagents, Defaults, Updates, Prompt, Appearance, Sidebar, Folders, Server and processes, Tools, About.
+- Groups and the commands inside them are ordered by how often they are used, not alphabetically.
+
+---
+
 ## 2026-11-10 (~16:07) - v0.2.352 whitneysNutz - /update refuses a source tree with uncommitted changes or unpushed commits - Claude Opus 5.5, low effort; Implementation
 
 ### Agent
