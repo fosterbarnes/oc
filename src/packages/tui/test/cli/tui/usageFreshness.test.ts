@@ -103,13 +103,13 @@ test("Claude pool labels each account with its own hourly and weekly resets", ()
   const rows = formatClaudeUsageRows(
     {
       ...claudeAccounts[0],
-      accounts: claudeAccounts.map((usage, index) => ({ name: String(index), usage })),
+      accounts: claudeAccounts.map((usage, index) => ({ name: `claude${index + 1}`, usage })),
     },
     false,
   )
   expect(rows).toMatchObject([
-    { label: "Claude:", spaced: false, usage: "Claude:   100%h,   81%w", reset: "10/11/26 ~2:30AM, ~1:05AM 1/2/26" },
-    { label: "Claude2:", spaced: true, usage: "Claude2:  96%h,    8%w", reset: "10/11/26 ~3:20AM, ~12:30PM 10/18/26" },
+    { label: "claude1:", spaced: false, usage: "claude1:  100%h,   81%w", reset: "10/11/26 ~2:30AM, ~1:05AM 1/2/26" },
+    { label: "claude2:", spaced: true, usage: "claude2:  96%h,    8%w", reset: "10/11/26 ~3:20AM, ~12:30PM 10/18/26" },
   ])
   for (const row of rows) {
     expect(row.usage.search(/\d+(?:\.\d+)?%/)).toBe(row.reset.indexOf("~") + 1)
@@ -132,8 +132,8 @@ test("Claude pool marks the active account's label with «", () => {
     undefined,
     "acct1",
   )
-  expect(rows.map((row) => row.label)).toEqual(["Claude:", "Claude2 «"])
-  expect(rows[1].usage.startsWith("Claude2 «")).toBe(true)
+  expect(rows.map((row) => row.label)).toEqual(["acct0:", "acct1 «"])
+  expect(rows[1].usage.startsWith("acct1 «")).toBe(true)
   expect(rows[1].usage.search(/\d+(?:\.\d+)?%/)).toBe(rows[1].reset.indexOf("~") + 1)
 })
 
@@ -152,7 +152,7 @@ test("one readable pooled account uses its own two windows without a slash", () 
       },
       false,
     ),
-  ).toEqual(single)
+  ).toMatchObject([{ usage: "readable: 96%h,    8%w", reset: single[0].reset }])
 })
 
 test("three Claude accounts split whole hourly and weekly pairs in remaining mode", () => {
@@ -160,31 +160,31 @@ test("three Claude accounts split whole hourly and weekly pairs in remaining mod
   const wide = formatClaudeUsageRows(
     {
       ...claudeAccounts[0],
-      accounts: accounts.map((usage, index) => ({ name: String(index), usage })),
+      accounts: accounts.map((usage, index) => ({ name: `claude${index + 1}`, usage })),
     },
     true,
   )
   expect(wide).toHaveLength(3)
   expect(wide.map((row) => row.usage.trim().split(/\s+/))).toEqual([
-    ["Claude:", "0%h,", "19%w"],
-    ["Claude2:", "4%h,", "92%w"],
-    ["Claude3:", "unavailable,", "unavailable"],
+    ["claude1:", "0%h,", "19%w"],
+    ["claude2:", "4%h,", "92%w"],
+    ["claude3:", "unavailable,", "unavailable"],
   ])
   const rows = formatClaudeUsageRows(
     {
       ...claudeAccounts[0],
-      accounts: accounts.map((usage, index) => ({ name: String(index), usage })),
+      accounts: accounts.map((usage, index) => ({ name: `claude${index + 1}`, usage })),
     },
     true,
     30,
   )
   expect(rows).toMatchObject([
-    { usage: "Claude:   0%h", reset: "10/11/26 ~2:30AM" },
-    { usage: "Claude: 19%w", reset: "       ~1:05AM 1/2/26" },
-    { usage: "Claude2:  4%h", reset: "10/11/26 ~3:20AM" },
-    { usage: "Claude2: 92%w", reset: "        ~12:30PM 10/18/26" },
-    { usage: "Claude3: unavailable", reset: "         reset unavailable" },
-    { usage: "Claude3: unavailable", reset: "         reset unavailable" },
+    { usage: "claude1:  0%h", reset: "10/11/26 ~2:30AM" },
+    { usage: "claude1: 19%w", reset: "        ~1:05AM 1/2/26" },
+    { usage: "claude2:  4%h", reset: "10/11/26 ~3:20AM" },
+    { usage: "claude2: 92%w", reset: "        ~12:30PM 10/18/26" },
+    { usage: "claude3: unavailable", reset: "         reset unavailable" },
+    { usage: "claude3: unavailable", reset: "         reset unavailable" },
   ])
   for (const row of rows) {
     expect(Math.max(row.usage.length, row.reset.length)).toBeLessThanOrEqual(30)
@@ -207,10 +207,10 @@ test("Claude pooled missing reset still preserves the weekly value and account s
   )
   // Unknown hourly stays unavailable; the known weekly keeps a blank reset slot.
   expect(rows).toMatchObject([
-    { usage: "Claude: unavailable", reset: "        reset unavailable" },
-    { usage: "Claude: 92%w", reset: "" },
-    { usage: "Claude2:  4%h", reset: "10/11/26 ~3:20AM" },
-    { usage: "Claude2: 92%w", reset: "        ~12:30PM 10/18/26" },
+    { usage: "first: unavailable", reset: "       reset unavailable" },
+    { usage: "first: 92%w", reset: "" },
+    { usage: "second:   4%h", reset: "10/11/26 ~3:20AM" },
+    { usage: "second: 92%w", reset: "       ~12:30PM 10/18/26" },
   ])
 })
 
@@ -745,20 +745,20 @@ test("Claude pooled hourly dash and mixed reset slots", () => {
     {
       ...claudeAccount(0, null, 81, "1/2/26 ~1:05AM"),
       accounts: [claudeAccount(0, null, 81, "1/2/26 ~1:05AM"), claudeAccount(0, null, 8, "10/18/26 ~12:30PM")].map(
-        (usage, index) => ({ name: String(index), usage }),
+        (usage, index) => ({ name: `claude${index + 1}`, usage }),
       ),
     },
     false,
   )
-  expect(bothIdle.map((row) => row.usage)).toEqual(["Claude: 0%h, 81%w", "Claude2: 0%h, 8%w"])
+  expect(bothIdle.map((row) => row.usage)).toEqual(["claude1: 0%h, 81%w", "claude2: 0%h, 8%w"])
   expect(bothIdle[0].reset.trim()).toBe("-,  ~1:05AM 1/2/26")
   expect(bothIdle[1].reset.trim()).toBe("-,  ~12:30PM 10/18/26")
 
   const mixedAccounts = [claudeAccounts[0], claudeAccount(0, null, 8, "10/18/26 ~12:30PM")].map((usage, index) => ({
-    name: String(index),
+    name: `claude${index + 1}`,
     usage,
   }))
-  const mixedRow = { usage: "Claude:   100%h,   81%w", reset: "10/11/26 ~2:30AM, ~1:05AM 1/2/26" }
+  const mixedRow = { usage: "claude1:  100%h,   81%w", reset: "10/11/26 ~2:30AM, ~1:05AM 1/2/26" }
   for (const width of [undefined, 40] as const) {
     const mixed = formatClaudeUsageRows({ ...claudeAccounts[0], accounts: mixedAccounts }, false, width)
     expect(mixed).toHaveLength(2)
@@ -872,24 +872,36 @@ test("fractional OAuth utilization stays percent and equal Claude basenames have
   const directory = await mkdtemp(path.join(os.tmpdir(), "oc-usage-identity-"))
   try {
     const dirs = [path.join(directory, "first", "account"), path.join(directory, "second", "account")]
-    await Promise.all(dirs.map((dir, index) => Bun.write(path.join(dir, ".credentials.json"), JSON.stringify({
-      claudeAiOauth: { accessToken: String(index), expiresAt: 10_000 },
-    }))))
+    await Promise.all(
+      dirs.map((dir, index) =>
+        Bun.write(
+          path.join(dir, ".credentials.json"),
+          JSON.stringify({
+            claudeAiOauth: { accessToken: String(index), expiresAt: 10_000 },
+          }),
+        ),
+      ),
+    )
     const first = await probeClaudeCodePool(dirs, {
-      homeDir: directory, nowMs: 100,
-      fetchImpl: async (_url, init) => Response.json({
-        five_hour: { utilization: new Headers(init?.headers).get("Authorization") === "Bearer 0" ? 0.5 : 0.25 },
-        seven_day: { utilization: 1 },
-      }),
+      homeDir: directory,
+      nowMs: 100,
+      fetchImpl: async (_url, init) =>
+        Response.json({
+          five_hour: { utilization: new Headers(init?.headers).get("Authorization") === "Bearer 0" ? 0.5 : 0.25 },
+          seven_day: { utilization: 1 },
+        }),
     })
-    expect(first.ok && first.accounts?.map((account) => account.usage.ok && account.usage.fiveHour.usedPercent))
-      .toEqual([0.5, 0.25])
+    expect(
+      first.ok && first.accounts?.map((account) => account.usage.ok && account.usage.fiveHour.usedPercent),
+    ).toEqual([0.5, 0.25])
     const cached = await probeClaudeCodePool(dirs, {
-      homeDir: directory, nowMs: 200,
+      homeDir: directory,
+      nowMs: 200,
       fetchImpl: async () => new Response("", { status: 429, headers: { "Retry-After": "60" } }),
     })
-    expect(cached.ok && cached.accounts?.map((account) => account.usage.ok && account.usage.fiveHour.usedPercent))
-      .toEqual([0.5, 0.25])
+    expect(
+      cached.ok && cached.accounts?.map((account) => account.usage.ok && account.usage.fiveHour.usedPercent),
+    ).toEqual([0.5, 0.25])
     expect(cached.metadata?.retryAt).toBe(60_200)
     if (cached.ok && first.ok) {
       expect(cached.accounts?.[0].id).not.toBe(cached.accounts?.[1].id)
@@ -901,13 +913,22 @@ test("fractional OAuth utilization stays percent and equal Claude basenames have
 })
 
 test("fractional Cursor percentages below one are not mistaken for fractions of a quota", async () => {
-  const jwt = [Buffer.from('{"alg":"none"}').toString("base64url"),
-    Buffer.from('{"sub":"usage-test"}').toString("base64url"), "signature"].join(".")
+  const jwt = [
+    Buffer.from('{"alg":"none"}').toString("base64url"),
+    Buffer.from('{"sub":"usage-test"}').toString("base64url"),
+    "signature",
+  ].join(".")
   const result = await probeCursorUsage({
-    env: { OPENCODE_AUTH_CONTENT: "{}" }, cursorSessionToken: jwt, nowMs: 100,
-    fetchImpl: async () => Response.json({ billingCycleEnd: "2026-11-01T00:00:00Z", individualUsage: {
-      plan: { autoPercentUsed: 0.5, apiPercentUsed: 0.25 },
-    } }),
+    env: { OPENCODE_AUTH_CONTENT: "{}" },
+    cursorSessionToken: jwt,
+    nowMs: 100,
+    fetchImpl: async () =>
+      Response.json({
+        billingCycleEnd: "2026-11-01T00:00:00Z",
+        individualUsage: {
+          plan: { autoPercentUsed: 0.5, apiPercentUsed: 0.25 },
+        },
+      }),
   })
   expect(result.ok && result.monthly.usedPercent).toBe(0.5)
   expect(result.ok && result.monthly.apiUsedPercent).toBe(0.25)
@@ -915,11 +936,14 @@ test("fractional Cursor percentages below one are not mistaken for fractions of 
 
 test("usage Retry-After accepts dates and rejects malformed values without inventing a deadline", async () => {
   const options = { env: { OPENCODE_AUTH_CONTENT: JSON.stringify({ openai: { access: "test" } }) }, nowMs: 100 }
-  const date = await probeOpenAIUsage({ ...options,
-    fetchImpl: async () => new Response("", { status: 429, headers: { "Retry-After": "Thu, 01 Jan 1970 00:01:00 GMT" } }),
+  const date = await probeOpenAIUsage({
+    ...options,
+    fetchImpl: async () =>
+      new Response("", { status: 429, headers: { "Retry-After": "Thu, 01 Jan 1970 00:01:00 GMT" } }),
   })
   expect(date.metadata?.retryAt).toBe(60_000)
-  const invalid = await probeOpenAIUsage({ ...options,
+  const invalid = await probeOpenAIUsage({
+    ...options,
     fetchImpl: async () => new Response("", { status: 429, headers: { "Retry-After": "unknown" } }),
   })
   expect(invalid.metadata).toEqual({ status: 429 })

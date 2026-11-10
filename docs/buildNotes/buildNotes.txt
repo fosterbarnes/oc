@@ -1,6 +1,8 @@
-v0.2.353 chickpeasDiego [patch > oc palette grouped by job]
+v0.2.354 darknessGibbons [patch > sidebar renewal and Claude names]
 
-oc palette:
-The ctrl+o (cmd+o on Mac) oc commands palette is regrouped by job: Session, Claude, Subagents, Defaults, Updates, Prompt, Appearance, Sidebar, Folders, Server and processes, Tools, About. Groups and the commands inside them are ordered by how often they are used instead of alphabetically, so New session, Notices, Claude account switching, and Show usage sit at the top. command_palette.order still reorders commands inside a group and wins over the built-in order.
+sidebar:
+Plan renewal lines no longer turn yellow when a renewal is close. A line only turns yellow once the plan has ended.
 
-Under the hood: command-palette.tsx ranks oc groups (_GROUP_RANK) and commands by name (_COMMAND_RANK); unlisted commands (per-account warm-ups, per-app updates, new entries) go last in their group A-Z. Retired groups: Beta, Layout, Links, Processes, Server, Third party harness management, Third party updates, Tools (experimental). Tests that named the old headings were updated; FORK.md, the wiki, and the oc-palette-entry skill name the new groups. Checks: a probe of the real sort matched the planned order and kept user order first; commandPalette, claudeWarmup, claudeWarmupRendered, and usagePalette tests 32 pass; tui typecheck clean. The live pane test (tuiPane.test.ts) was not run.
+Claude usage rows now show each account's name from the oc palette's Claude accounts menu instead of Claude, Claude2, Claude3. An unnamed account shows its default name (claude1, claude2, and so on), the same as the palette. With a single account the row still reads Claude.
+
+Under the hood: usagePlanLine only flags ended plans; formatClaudeUsageRows labels pooled rows with the account name from claudeAccountName. usageFreshness and usageLive tests now expect the named labels. The wiki Sidebar page describes both changes. Checks: usageFreshness and usageLive tests 39 pass; tui typecheck clean. Not checked live in the TUI.

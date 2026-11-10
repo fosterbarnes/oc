@@ -123,6 +123,25 @@ Budget (AGENTS.md "Build notes"): at most 80 lines and 12 KB. Current invariants
 
 ---
 
+## 2026-11-10 (~17:37) - v0.2.354 darknessGibbons - Sidebar plan lines stop warning early; Claude rows use account names - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation; completed
+- Version: 0.2.354 darknessGibbons
+- Changed `usagePlanLine` (`tui/.../usage/plans.ts`): `urgent` only when `verb === "ended"`; dropped the `days <= 3` warning.
+- Changed `formatClaudeUsageRows` (`tui/.../usage/format.ts`): pooled row label is the account `name` (`claudeAccountName`, same rule as server `poolAccountLabel`: palette name, else `claude1`/dir basename) instead of positional `Claude`/`ClaudeN`. Single unpooled snapshot keeps `Claude`.
+- Updated tests `usageFreshness.test.ts`, `usageLive.test.ts`: intended label change; fixtures now name accounts `claude1..3`.
+- Updated wiki `Sidebar.md`: renewal line yellow only once ended; Claude rows labeled with palette account name.
+- Verification: `bun test test/cli/tui/usageFreshness.test.ts test/cli/tui/usageLive.test.ts` 39 pass; tui `tsc --noEmit` clean. Not checked live in the TUI.
+- MISTAKE: edited a test file through a shell Bun script with broad `replaceAll`; it hit an unrelated non-pooled test, fixed after. Use Edit per hunk.
+
+### User
+Sidebar
+- Plan renewal lines no longer turn yellow when the renewal is near; they only turn yellow once a plan has ended.
+- Claude usage rows now show each account's name from the oc palette's Claude accounts menu instead of Claude, Claude2, Claude3.
+
+---
+
 ## 2026-11-10 (~16:45) - v0.2.353 chickpeasDiego - oc palette regrouped by job and ordered by use - Claude Opus 5.5, low effort; Implementation
 
 ### Agent

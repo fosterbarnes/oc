@@ -126,7 +126,8 @@ export function formatClaudeUsageRows(
     }
   }
   return known.flatMap(({ id, name, usage: account }, index) => {
-    const base = index === 0 ? "Claude" : `Claude${index + 1}`
+    // Pooled accounts use the name from the oc palette's Claude accounts menu (`claudeAccountName`).
+    const base = name ?? "Claude"
     const label = active && (id ?? name) === active ? `${base} «` : `${base}:`
     return formatUsageRows({
       label,
