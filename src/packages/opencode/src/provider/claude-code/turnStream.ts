@@ -28,6 +28,7 @@ import {
   formatResultFailureNote,
   formatSilentTurnNote,
   formatStreamTimeoutNote,
+  formatTasksStoppedNote,
   formatModelAccessNote,
   isAccountLimitError,
   isModelNotFound,
@@ -216,6 +217,8 @@ class ClaudeTurn {
   private cancelled = false
   /** Listeners may be attached; `abandon` has something to tear down. */
   private attached = false
+  /** This turn shows a turn the CLI started on its own, so that turn's `result` ends it. */
+  private attachedAutonomous = false
   /** No more parts may be written. */
   private closed = false
   private cleanedUp = false
@@ -366,6 +369,7 @@ class ClaudeTurn {
     // A wake prompt attaches to the turn the CLI started on its own; any
     // other turn takes over from it (interrupting it below if still running).
     const attachAutonomous = this.activeProcess.autonomousTurn === true && this.input.wake
+    this.attachedAutonomous = attachAutonomous
     this.activeProcess.autonomousTurn = false
 
     // The CLI serves one turn at a time. If the previous one is still running
@@ -684,9 +688,7 @@ class ClaudeTurn {
     // A wake attaches to the turn the CLI is already running; changed settings wait for the next turn.
     if (this.input.wake && ap.autonomousTurn) return
     if (ap.toolCatalogHash !== this.input.catalogHash) {
-      await deleteActiveProcessAndWait(this.sk)
-      this.activeProcess = undefined
-      return
+      return this.retire(ap, "its tools changed")
     }
     if (ap.settings !== this.turn.processSettings) {
       if (this.input.previousPendingProxyCalls.length > 0) {
@@ -698,9 +700,7 @@ class ClaudeTurn {
         previous: ap.settings,
         next: this.turn.processSettings,
       })
-      await deleteActiveProcessAndWait(this.sk)
-      this.activeProcess = undefined
-      return
+      return this.retire(ap, "the model, agent or effort changed")
     }
     if (this.config.hotReloadMcp === false) return
     const currentHash = effectiveMcpConfig(this.config, this.turn.cwd, undefined, this.input.runtimeStatus).mcpHash
@@ -716,6 +716,13 @@ class ClaudeTurn {
       return
     }
     log.info("opencode MCP config changed, respawning claude", { sk: this.sk, previousHash, currentHash })
+    await this.retire(ap, "oc's MCP servers changed")
+  }
+
+  /** Stop the process so the next spawn resumes its conversation; say which background tasks that ended. */
+  private async retire(ap: ActiveProcess, why: string) {
+    const stopped = [...(ap.backgroundTasks?.values() ?? [])].filter(Boolean).length
+    if (stopped > 0) this.notices.push(formatTasksStoppedNote(stopped, why))
     await deleteActiveProcessAndWait(this.sk)
     this.activeProcess = undefined
   }
@@ -872,8 +879,23 @@ class ClaudeTurn {
         if (outer.isReplay && !this.turn.compactionMode) return this.steering.onReplay(msg)
         return this.onUser(msg)
       case "result":
+        if (this.isNoticeResult(msg)) return
         return this.onResult(msg)
     }
+  }
+
+  /**
+   * The CLI runs a background task's notice as a turn of its own, ahead of the
+   * message this turn wrote: a resumed conversation reports each task the old
+   * process left unfinished that way, without calling the model. That turn's
+   * `result` is not the answer to this turn's message, which the CLI reads next.
+   */
+  private isNoticeResult(msg: ClaudeStreamMessage) {
+    if (this.attachedAutonomous || msg.origin?.kind !== "task-notification") return false
+    log.info("skipping the result of a background task notice", { sessionKey: this.sk, numTurns: msg.num_turns })
+    // `noteTurnLine` took it for the end of this turn, which is still to run.
+    if (this.activeProcess) noteTurnStarted(this.activeProcess)
+    return true
   }
 
   /**

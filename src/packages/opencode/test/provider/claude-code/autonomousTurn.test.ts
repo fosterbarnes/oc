@@ -29,14 +29,14 @@ if (process.argv.includes("--version")) {
   process.stdout.write("2.1.258\\n")
   process.exit(0)
 }
-const say = (text) => {
+const say = (text, origin) => {
   process.stdout.write(JSON.stringify({ type: "system", subtype: "init", session_id: "fake-session" }) + "\\n")
   process.stdout.write(JSON.stringify({
     type: "assistant",
     session_id: "fake-session",
     message: { role: "assistant", content: [{ type: "text", text }] },
   }) + "\\n")
-  process.stdout.write(JSON.stringify({ type: "result", subtype: "success", session_id: "fake-session" }) + "\\n")
+  process.stdout.write(JSON.stringify({ type: "result", subtype: "success", session_id: "fake-session", origin }) + "\\n")
 }
 let turn = 0
 readline.createInterface({ input: process.stdin }).on("line", (line) => {
@@ -45,7 +45,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   if (turn > 1) return say("UNEXPECTED: oc wrote to the CLI")
   say("Started.")
   // The background task finishes after the turn ended; Claude wakes on its own.
-  setTimeout(() => say("Woke."), 200)
+  setTimeout(() => say("Woke.", { kind: "task-notification" }), 200)
 })
 `,
   )

@@ -476,6 +476,8 @@ export interface ClaudeStreamMessage {
   parent_tool_use_id?: string | null
   /** A `user` line echoing a stdin message as Claude reads it (`--replay-user-messages`). */
   isReplay?: boolean
+  /** On a `result`: what started the turn when it was not a stdin message (`task-notification`). */
+  origin?: { kind?: string }
   total_cost_usd?: number
   duration_ms?: number
   duration_api_ms?: number

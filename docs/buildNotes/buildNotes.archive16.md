@@ -1,0 +1,1305 @@
+# RULES FOR AGENTS - WRITTEN BY HUMAN. NEVER MESS WITH THIS SECTION
+
+1. You may not delete previous sections that are not yours
+2. Insert new session notes immediately under `# Historical entries (newest first)`. Newest entries stay on top. Do not append at the end of this file.
+3. You should date and time the notes
+4. Reference previous notes and other relevant sections
+5. Make sure mistakes and errors are EXTRA highlighted, so we never make the same mistake twice
+6. NEVER, EVER, EVER, UNDER ANY CIRCUMSTANCES DELETE ANYTHING FROM THIS FILE
+
+# AGENT NOTES BEGIN HERE - THIS IS WHERE YOU WRITE
+
+File layout: rules and summaries above; historical session entries below, newest first. Agents add each new entry at the top of that historical section so the insert line and the start-reading line stay the same.
+
+## Entry format
+
+Use skills `base/build-notes` (insert) and `base/build-notes-archive` (rotation) for heading, Agent/User shape, and StrReplace method.
+
+## Archive Rotation
+
+See skill `base/build-notes-archive` for trigger (>1000 lines), verbatim rename to buildNotes.archiveN.md, and fresh-file shape.
+
+## Agent Note Language
+
+- Keep `### Agent` notes dense, factual, and written for the next agent.
+- Use short, agent-forward vocabulary: `Added`, `Fixed`, `Removed`, `Moved`, `Changed`, `Kept`, `Blocked`, `TODO`, `Risk`, `Note`, `MISTAKE`, and `ERROR`.
+- Omit articles and filler words when meaning stays clear: `Fixed null path crash; early return` is preferred over `Fixed the crash caused by a null path by returning early`.
+- Keep one idea per bullet.
+- Include file, type, method, cause, result, invariant, or risk only when useful for future work.
+- Do not shorten away information needed to continue safely.
+- Use `MISTAKE:` for an agent-caused mistake, process violation, or incorrect change. Make it explicit and explain the prevention rule.
+- Use `ERROR:` for an observed product, build, runtime, or tooling failure that is not necessarily caused by the agent.
+- Keep the `Meta` line compact: model, mode, phase, and status.
+- Follow `Meta` with a `Version` line holding the project's current version (`none` when the project has no version file). The heading carries the same value: `## <date> - v<version> - <title> - <model>...`.
+- Keep `### User` notes in normal plain English. Do not use grug shorthand.
+
+Example compact Agent notes:
+
+```md
+### Agent
+- Meta: GPT-5.6 Luna; build; completed
+- Fixed `Thing::run`: null path crash; early return
+- Added `Parser::read`: shared by A/B; removes dupes
+- Kept `LegacyMode`: external callers depend on it
+- MISTAKE: edited release notes; agents must paste release text in chat only
+```
+
+### MISTAKES - NEVER REPEAT
+- Agents have wiped buildNotes files in other repos. INSERT ONLY during normal work: add a new entry immediately under `# Historical entries (newest first)`. Never truncate, overwrite, rewrite, compact, or append at EOF. Never use the Write tool on an existing `buildNotes.md` unless the user explicitly orders a one-time migration. The documented archive rotation is the approved migration when the line threshold is exceeded.
+- NO EM DASHES (U+2014) anywhere. Use `-` or `:`.
+- Do not edit `buildNotes.txt` from agent sessions; paste release notes in chat for the user.
+- Do not create `.md/buildNotes.md`, `.md/.buildNotes.md`, or `.md/buildNotes.txt`. Agent history and user release notes are root `buildNotes.md` and root `buildNotes.txt`.
+
+### Project invariants (do not regress)
+- Isolated upstream lives at `UPSTREAM\opencode`; custom source stays in the parent checkout. Port upstream fixes by hand per `UPSTREAM-SYNC.md`; no unrelated-history merge; do not commit/push unless asked.
+- Version SoT is `.version\version` (maintenance display only; do not bump OpenCode package version). Agents never edit `buildNotes.txt`.
+- Default branch is `main` (`v1` is the UPSTREAM checkout). Do not ship `opencode.exe` compiled with Bun 1.4.0 (`bun:ffi` TUI crash).
+- Do not treat empty tool lists as compaction. Protect local `.scripts`, `.version`, `AGENTS.md`, `SCRIPTS.md`, `buildNotes.md`, `UPSTREAM-SYNC.md`, `CONTEXT.md`, TUI display-version, and custom declaration fixes during upstream apply.
+- Installer may stop running `opencode` processes; do not kill them from other agent work. Live install often blocked while `C:\Users\user\Apps\opencode\opencode.exe` is in use.
+
+# Cumulative Summary
+
+## Agent
+- Kept histories verbatim: archive1 (2026-08-20 through 09-09), archive2 (09-09 through 09-15), archive3 (09-15 through 09-28), archive4 (1144 lines), archive5 (1019 lines through v0.2.65), archive6 (1127 lines through v0.2.87), archive7 (1176 lines, v0.2.88 through v0.2.120, committed e4d73d1), archive8 (1152 lines, v0.2.120 through v0.2.148), archive9 (1059 lines, v0.2.149 through v0.2.172; its summary was archive8's carried unchanged, so archive9 is first summarized here), archive10 (1122 lines, v0.2.173 through v0.2.202), archive11 (1008 lines, v0.2.203 through v0.2.224), archive12 (1009 lines, v0.2.225 through v0.2.246, equals commit 1b7aa56), archive13 (1074 lines, v0.2.247 through v0.2.276; its v0.2.276 entry was uncommitted at rotation), archive14 (1051 lines, v0.2.277 through v0.2.297; v0.2.297 entries uncommitted at rotation, last commit dca5d1b), archive15 (1006 lines, later v0.2.297 entries through v0.2.311, equals commit ab02606). Archive8 retains the previous cumulative summary plus complete later entries, earlier hashes, checks, and risks. Never edit archives.
+- Added PowerShell build/check/run/install/sync/update/push scripts; isolated upstream checkout; fail-closed content-level three-way apply; build/install split; installer stops managed processes before rebuilding/relinking. Parent source never receives upstream-only edits. Agents never run installers.
+- Moved Bun workspace into `src` v0.2.83; root keeps docs/config/scripts. Sync maps parent prefixes/root exceptions; native revive uses WORKSPACE. Run Bun from src/package dirs, not repo root. Maintenance version is `src/.version/version`; local runtime/provider version still uses incorporated upstream pkg.version, release builds Script.version.
+- Added v0.2.140 random two-word camelCase versionTag from `.res/yapBot.json`, cryptographic word selection through scriptHelper; bumpVersion increments patch and tag, `-RerollTag` tag only. Sync bumps also roll tag. Tag is scripts-only, not TUI; release titles/download asset names include tag, git release tag stays vX.Y.Z. Never hand-edit version/tag.
+- Added bootstrap, global session list, persistent model/agent overrides, complete/failed/in-progress marks, pinned/status filters, diamond gutters, wrapping action shortcuts; fixed static Ctrl+D hints. Legacy prompt auto-marks root sessions in progress; completion tool defaults deny and command turns explicitly allow it. Retained old permission schema keys for decoding after in-progress/reopen tools were removed.
+- Added native resident lifecycle/restart/auto-start, reconnect waits for disposal/replacement without replay, stale launcher records ignored. Start-at-sign-in config still has no reader registering startup. `oc single` replaces stable, shares sessions with no resident server, configurable launcher mode, portable DB and explicit session/Home carry through revive. Single tab prefix is agent-colored circle instead of square.
+- Fixed single-mode cross-process lock defects to HTTP 409; launch palette respects single/portable; bootstrap parses last stdout line despite plugins. Worker drains SessionWork before disposal. Single revive never shutdownAll, leaves hosting shell/tab/resident untouched, installs with alias rollback, acknowledges cleanup before build, recovers prior runtime on failure. Windows leftovers require live CIM creation identities and exclude unrelated terminal/oc/helper subtrees; never PID-only/tree kills. Unknown ownership leaves processes alive. Shell submission still discards refusal response; console-X SIGHUP behavior unverified.
+- Added native revive supervisor/worker, pre-shutdown build, logs, rename-running-exe install/alias relink/rollback, old-runtime recovery, scoped terminal reopen. First use chooses source/download and debug; no automatic pulls later, no personal build scripts. WezTerm uses wezterm-gui to avoid persistent console. Trigger-time synthetic noReply marks preserve agent/model; newest unsent mark rewritten to returned version. Home/run_after_turn revives write none; older marker metadata.version can render undefined.
+- Fixed resident console flashes with hidden pwsh Start-Process hop, detached false (DETACHED_PROCESS blocks launch); dropping hop kills resident. Scoped TUI ledger avoids shutting other instances. PowerShell 7 required. Safe local builds never touch installed executables; build/install user driven.
+- Added ocdebug port 4097, production config/assets first-run seeding, separate bare-oc/relative-target folders, palette project picker, lazy startup, shared compact intro/overlay and Knight Rider scanner (`introCellsAt(tick)`, `OC_INTRO_FRAME` handoff). Intro animation ignores animations_enabled. Installed v0.2.87 intro transition confirmed seamless; apparent recurrence was old runtime.
+- Added Cursor native provider/proxy, lazy helper packaging, cancellation, SSRF/symlink/git credential protections, context tiers/pricing, Max long-context models; disabled Cursor plan mode. Removed browser UI/Electron/Poe and, v0.2.141, agentify ChatGPT Web/Claude Web plus helper packaging/tests; leftover installed helper/state left for user. Old web sessions report ModelNotFoundError. Windows children use hidden process-tree handling; avoid Bun 1.4.0 FFI.
+- Added model-glob instructionsByModel, plural agent folders, model CLI precedence/session override, disabled stock plan; Gemini thinking, Bedrock tool images, GPT-6 Codex allowlist, credential redaction retained. Claude Haiku 5.5 added; Sonnet 5 $2/$10, Sonnet 5.5 cache read 0.1. Config drops cost.tiers, so Haiku >100K usage under-reports 5x. Poe Luna failed; openai/gpt-6-luna works.
+- Kept SuperPlan read-only/exact absolute planPath, phased Go execution/plan_next_phase/plan_closeout, optional coordinator/subagents; archived Go-a/SuperPlan-a. Explicit return types prevent prompt/registry/plan-execute inference cycles. Paint debug remains frozen in its designated plan; do not resurrect probes.
+- Added command/skill fingerprint hot reload, serialized rebuild/per-file cache/last-good toasts; slash menu retains old data on failed refresh. Keep Command -> Skill lock direction. Source labels :(oc)/(command)/(mcp)/(skill) purple/yellow/teal/peach; commands win collisions. New config URLs/paths or skill permission changes may require restart.
+- Added slash favorites Ctrl+F, favorites-first for empty query, inline above-prompt menu (Yoga auto clears offsets), composed commands and shared slashTriggerIndex. Added default-off todos and oc toggles for bgRun, sidebar position WIP, keybind preset, Claude Code update via close. Keybind changes live re-register prompt inputs; documented keybinds checked by prePush.
+- Added command permissions through existing structured schema, ordered rules saved on user message for that turn only; propagated through subtasks/compaction/tools/markers/interpolation. Shared edit path checks cover Windows absolute/relative paths, junctions, alternate streams, prior approvals, patch rename destinations. `/spit` permits global-plan Markdown only and denies execution/delegation. Claude restricted turns use oc proxies; ordinary turns restore native tools. Subtask/compaction propagation traced, not independently exercised.
+- Added native command markers (default off) from global markers.json, inline/window/afterTurn, per-command Permission.ask, fence-aware and edit guard. Inline output enters reply (last 4000 chars); hyphenated names fail NAME regex. Background-marker experiment reverted (wake cache misses/no savings). Markers only npm/file plugin specs; plugin folders auto-discover and must never be listed as directory plugin specs. Do not fork poisoned palette-debug sessions.
+- Added native run_after_turn, visible consoles for .ps1, generic allow with user approval except revive commands; default Claude proxy list includes it, explicit proxyTools lists must include it. Added native time tool returning local YYYY-MM-DD Ddd HH:MM offset through DateTime; live clock omitted from system prompt to preserve cache, date unchanged. Explicit proxyTools must include time. Fake CLI scenario and user live check passed.
+- Fixed Claude Start-fresh question with turn cwd, per-instance pending map; other default getOpencodeClient callers still use last booted directory. Fresh catch-up leads with bounded resumeBlock/last exchange and session_read hint, never full history paste. Added unmapped provider tool events and Windows PowerShell display/read-only rules; DISABLE_AUTOUPDATER retained, DISABLE_NONESSENTIAL_TRAFFIC removed, host-gated desktop tools and strictMcpConfig retained.
+- Fixed Claude interrupt abandonment, hash-by-position rewind, message_delta usage, single error/refusal rendering, synthetic prompt_async autonomous wake with buffered init; next ordinary turn interrupts. Wake buffer has 500-line drop risk. Interim main-thread raw usage updates SessionProcessor tokens/footer/sidebar during turn; subagent usage excluded, cost only at finish. A pane check for live usage was not added.
+- Added Claude account pool (`accounts` config dirs, default ~/.claude), sticky account until limit, reset deadlines (1h when unknown), all-limited stays put with notice. Persisted account in process/session records. Cross-account sync retires old CLI conversation without Start-fresh question and uses resumeBlock. In-turn rejected limit waits for result, drops rejected output, spawns next with bounded reply/tool-log catch-up; marks each limit to bound switching. Native CLI env drops token vars when selecting account. Working memory beyond reply/tool log is lost, non-CLI proxy results only named; no real-limit acceptance check.
+- Added sidebar Usage menu with per-provider limits, full absolute/relative resets, inert stat rows, settings/sign-in; entire Usage block opens menu. One session-only used/remaining toggle. Claude pool shows per-account hour/week percents and hourly reset times, signed-out/expired reasons; live-source/newest fetch prevents one cached account dimming pool. All-unreadable pool still generic Unavailable. Labels trail percent (`%h`, `%w`, `%m`, `%api`); sub-day h omits hour count. Optional Claude OAuth meter/terms risk documented, removal user-owned.
+- Added sidebar Outline/Minimal live saved picker, shared HeaderButton, palette shortcuts, separate model/reasoning clicks. Final Minimal primary > and secondary >> inline; no brackets/label-column/selector variants. Outline square left-aligned. Minimal explicit empty borders preserve hover geometry; text/outline only hover, controls not selectable. Long model clips before reasoning. Name clips trailing ... and hover marquee; widths use .length, not display width. OpenTUI 0.5.14/Solid 1.9.12 word/line selection; clickable rows/user messages/actions are unselectable and left-click works despite other highlights.
+- Added terminal detector, Windows Terminal script placement, agent-colored tab title, OSC progress/WezTerm user var through renderer; cleanup on destroy, force kills cannot clear progress. Removed nearest-square emoji helper, retained renderer tests. Theme backgroundToast defaults panel; drac dusty purple #423B52, plugin/current/run-mode carry it.
+- Fixed question cancel/publish race, dialog key ownership, reconnect reload; server exit rejects pending asks. Restored questions use per-directory/revision guards, idle-only recovery, message+call dismissal and promptAsync answer format; parent excludes subagent/plugin questions, another TUI's answer may stay until reload. Home Ctrl+Enter sends while staying Home, in-session newline; WezTerm CSI-u required, <=120 sidebar hides. Session creation now ignores repeat Enter while bootstrap runs and retries after failure. Home palette entry/Ctrl+Shift+H replaces native New session label.
+- Added optional subagent terminal tabs v0.2.148: `subagent_tabs.click` inline|tab, auto_open false default; live saved oc palette `/subagentTabs`, session_child_tabs configurable binding, direct-child new-time guard, mark before spawn. WezTerm/WT attach uses correct launcher/cwd/session/server URL. Single runtime cannot attach, shows inline warning; on-demand HTTP server rejected because unauthenticated. Server password in process args, WT window 0 most-recent, parent server exit disconnects tabs; installed acceptance pending.
+- Added `/work` dirty-state copy and `/done` unstaged merge using temporary index/write-tree/commit-tree/base config; preserves parent real index/staged/unstaged/untracked, explicit-base merge-tree incl nested copies, committed edits and deletions. `ignore-space-at-eol` handles EOF/CRLF. Conflicts write markers only in copy, prompt agent with paths, stay there until `/done` repeated. Session project ID used, not launch project. Dispose before removal, dependency install process warnings. User live /done passed; Claude cwd after move, Windows locks, sidebar copied absolute roots remain risks.
+- Added sidebar plugin statuses GET /plugin/Plugin.Service.status. `FORK.md` living fork definition, README.OG native state, public README expanded 15-section guide/FAQ/writeup; preserved user TODOs and code count markers/link. CONTRIBUTING/SECURITY/issues/PR docs fork-aware; wiki and shorter README drafts in global plans pending user bootstrap, LICENSE/team/root-doc cleanup/screenshots deferred. Plan inventories record `/done` wording, POSIX login hint, unused oc.json keys.
+- Removed V2 execution engine v0.2.65: legacy SessionPrompt/Processor/RunState owns runtime. Keep SessionV2 reads/model-agent endpoints, SessionProjector, EventV2/Bridge, Work/Store, location services and TUI /api routes. Keep historical session.next schemas/projectors/input tables/cancel migrations for durable replay; no migration deletion, unknown EventV2 types kill replay. sdk/v2 means legacy SDK client, not engine.
+- Added DB unknown-migration refusal after stock 2.0.6 changed shared DB: identify incompatible build logs, restore backup, separate XDG_DATA_HOME. Local sqlite3 3.22 lacks DROP COLUMN. SessionWork admission/cancel gate and detached 30s shutdown retained; removed timing probes/safeShutdown/compiled revive wrappers. Empty BUN_INSTALL cleanup avoids install hangs.
+- Added `.scripts/test.ps1` user-driven selections/list/dry-run/options validation/generated guards, runner PowerShell tests. Removed all workflows v0.2.88 after private Actions billing. prePush typechecks/count/keybind docs, no lint; code-count README single scc link/markers. Push subject explicit/new buildNotes.txt only; unchanged prompts. agentPush -Context validates version+tag, runs prePush/push in process, output on failure; only explicit agent-push permits publish/message write. Real-model script requires typed yes before token read/spend incl CheckOnly, no bypass; agents never set OC_REAL_MODEL or read saved DPAPI token.
+- Added TestLLMServer Anthropic SSE/fake Claude CLI scenarios and opt-in headless WezTerm panes, flow reports; no real tokens. Use chat-fixture claudeEnv/initRepo/outsideProfile/expectIsolated, CLAUDE_CODE_DISABLE_CLAUDE_MDS, isolated OPENCODE_DB plus XDG dirs; Windows HKCU OPENCODE_DB overlays panes so test config must set isolation. hostEnv strips inherited CLAUDE*/ANTHROPIC* and extendEnv false. About 71 old leaked real-DB sessions user-deferred. Pane cleanup compares CIM to CIM and creation-ordered verified descendants; --no-auto-start and explicit socket required.
+- Fixed Windows logon temp leak v0.2.148: 1162 opencode-test folders/~548k entries made ProfSvc temp walk take 80-120s; user-approved cleanup completed. `OPENCODE_DISABLE_CONFIG_INSTALL` test preload flag blocks detached plugin npm installs recreating deleted dirs; fixture clean retries for 10s and throws on leak. Three scoped files 153 pass, no new folders. Preload data cleanup still gives up silently after 30 EBUSY retries on win32; revisit if test-data dirs recur.
+- Verification baseline: archive6 records v0.2.63 thirteen fixed failures, v0.2.65 six package typechecks/234 tests/202 route coverage with five missing pre-existing, v0.2.79 27 typechecks and scoped tests/codegen/207 auth coverage. Windows Effect HTTP POST /pty and /api/pty fail; Linux Cursor state.vscdb and PTY replay baseline remain. v0.2.122 push passed 27 typechecks. v0.2.133 middleware optional success response typing fixed in v0.2.142 (5 tests/typecheck). v0.2.147 retained-sidebar plugin expectation and h labels fixed (79 tests). Older subagent-hint extra time tool and task descriptions timeout baseline remain archive8. Do not rerun unrelated checks/relist old failures.
+- MISTAKE: shell Python/heredoc edits mangled CRLF/backslashes/ESC; use file tools. PowerShell HOME readonly, use testHome. Never reconstruct plan paths, overwrite unread tests, stash shared user work, or remove unknown config.json test artifacts. SDK request throwOnError must be declared per call for required data inference. Expose directly yielded test services in node roots. Fake final reply requires stop(), Bun.file exists() caches per object, use fresh BunFile for changing state. Test fixture home bun cache slows Git; initRepo project subdir.
+- MISTAKE: denied task/empty proxy lists still need Claude native-subagent/oc-skill hint. Claude under oc uses native task, not shell opencode run or desktop oc-subagent. Bad unquoted YAML colon silently dropped entire general agent family; fixed user config/debug, restart required. Start-Job dies with shell; use harness background tool (unavailable in some sessions, record fallback). Installer kills opencode-run subagents. Never bypass real-spend guard through fresh env. Fork copies poisoned toast history. Read list identity before screenshot-driven edits; escape marker mentions. Re-run affected checks after final edits.
+- Changed usage sidebar v0.2.150-165 (archive9): `formatUsagePercent` adaptive decimals, trailing zeros stripped; `formatUsageRows` aligns each value to its own reset clock digit, `usageColumns` shares slot widths (layout runs twice). Claude rows per account `Claude:`, `Claude2:`; active account marked `«` (`sdk.claudeAccount.onChange` -> `usageScheduler.request()`); idle 5h shows `-` (reset placeholders stay 1-2 chars so pooled rows never wrap). Claude windows parse independently; `projectClaudeUsage` expires deadlines on the local minute clock; per-window `_fetchedAt` in cache. `usageSpacing` user-level; label dims only when stale/old. Section collapse kv `sidebar_open_<section>`. Sidebar rows reconcile snapshots to keep clipping stable; `clipEnd` renders empty when unmeasured.
+- Added Claude pool persistence `account-pool.json` + usage-cache seed + text-limit failover (v0.2.153); palette Switch Claude account (`GET/PUT /session/claude-account`, v0.2.161); auto-resume scheduler `scheduledResume.ts` (default off, 5-fire cap, lockfile, retries) v0.2.159; `/compact` reports `post_tokens`; warm-up schedule `warmup.ts` + `/global/claude/warmup` (v0.2.172).
+- Fixed context-limit handoff v0.2.154: `isTitleRequest` keys on naming agents; tool-less session-agent turns share the chat's `tools::` CLI key (`continuesChat`) so a deny-all summary does not hang in `askFreshConversation`; child kickoff carries command-turn permission. Compaction-only config PATCH no longer disposes instances (v0.2.163).
+- Added WezTerm multi-tab revive (`oc revive-tabs`, ledger `sessionID`/`directory`) v0.2.152. Split binaries v0.2.157: `Global.native` (`OPENCODE_FLAVOR`, `OC_FLAVOR`), `oc.exe` resident vs native `opencode.exe`; removed `oc single`/`--portable`/`mode`; build/install `-Oc`/`-Native`; `oc launch --palette` spawns native.
+- Changed slash commands v0.2.153: single-command header `[/<name> is active: ... replace any earlier slash command's persona ...]`; `withoutCommandHeader` for naming. Titles favor concrete subject via `ocCommandArguments` (v0.2.149).
+- Fixed fork-wide review v0.2.162: Claude failover only on error results, Cursor relay token/abort/containment, scheduled resume backoff, identity-gated launcher kills, palette hotkeys validation, top/bottom sidebar finished, desktop updater runner (`OCERR:`), installer backup/restore; prettier + 174 fork files renamed camelCase; removed oc.json `reasoningEffort`. Risk open: claude-code `persistSessions`/`persistPool` last-writer-wins across oc + native.
+- Added palette group headings (Defaults, Layout, Folders, Tools, Server, Third party harness management) v0.2.165; harness updaters v0.2.161. WezTerm Ctrl+V via `oc_tui` user var + native clipboard read; pasted images saved to `attachment.image.save_dir` (default `%LOCALAPPDATA%\oc\images`) with path text, whitelisted dir, `Clear saved images` (v0.2.166). Intro: first pwsh spawn blocks ~0.42 s, so process listing runs in `spawnWorker.ts`; `introPace`; `INTRO_TICK_MS` 40 (v0.2.167).
+- Removed command markers v0.2.168 and `/work`/`/done` v0.2.171 (`SessionWork` kept; stale `ocWorkHandoff` metadata/copy dirs left). README is pitch; wiki (`oc.wiki`) is source of truth for user behavior (v0.2.168).
+- Removed ui/session-ui/docs packages; added SCOPE.md, docs/dev; ported v1 fixes (v0.2.173-174). Added `/update` from oc releases, removed stock `checkUpgrade` (v0.2.175); live usage observations mid-turn (v0.2.176); Stage 6 queue (`session_queue`), `/btw`, `/reload`, built-in background shell (`bgStatus`/`bgKill`), task `model`, `inputRepair` (v0.2.177); `SessionWork` keyed per directory, explicit model on `UserMessage.model.explicit`, `killTree` identity checks (v0.2.178); deps + 3 ports, instance-store boot interrupt fix, httpapi scenarios for 14 routes (v0.2.179).
+- Added agent markdown hot reload (`Config.agents()`, fingerprint, per-file last-good), plugin override snapshot, `/addSub` `/rmSub` `/viewSub`, `POST/DELETE /agent/sub` (v0.2.180-181). Added `/revive-single` (native-only build in a new tab); retired ocdebug (v0.2.181).
+- Moved repo public as GitHub fork (filter-repo, scrubbed paths; scan before every push; record upstream via `git merge -s ours`) and build notes to `docs/buildNotes/` (v0.2.183). Added sticky tool titles (v0.2.184). Added Claude mid-turn steering (`--replay-user-messages`, QUEUED/SENT, retraction, revert whole turn), `cliExecutable` native shim so kills reach real Claude (v0.2.185-186). Fixed ledger PID reuse skip, launcher first-prompt `pendingUser`, `PSModulePath` dropped for powershell 5.1 updates, palette Update all (v0.2.186).
+- Added agent-push tag pick (`-Tags`/`-SetTag`), pinned-chat failover (`failoverAccount`), bumpVersion without countdown (v0.2.187-189). Command turns spawn `--tools ToolSearch` (no false "disconnected" notice); `Patch.usesApplyPatch` shared by registry and system prompt; apply_patch Add File documents overwrite (v0.2.190). About dialog + baked `InstallationVersionTag` (v0.2.191). `dialog.replace(..., { back })`: Esc goes back in drill-ins; tuiDiag writes removed (v0.2.192).
+- Added per-tool `toolHost` (`auto`/`oc`/`harness`) and `commandToolPlan`; `CLAUDE_HARNESS_ONLY_TOOLS` keeps/denies WebSearch; `harnessToolsDenied` (v0.2.193-194). `noReply` user messages skipped by `pendingUser` (v0.2.195). Question tool consistent on every Claude turn; Home new session bootstraps in-process (`ocNewSession.ts`) (v0.2.196).
+- Added `claude.autoResume` on/off dialog (v0.2.197-199); agent-push title `<folder> - agent-push:#<hash>` after `HEAD == @{u}` (v0.2.198); bundled `drac`, `theme` vs `theme_native` kv keys, kv `set` merges under lock (v0.2.200); `readmeVersion.ps1` in prePush (v0.2.201); `DialogSessionCleanup` palette (v0.2.201); `agentPushAutoDelete` + `session_complete autoDelete` (v0.2.202).
+- Verification baseline update: v0.2.179 all suites green (opencode 4861 pass, tui 535, httpapi 221 x3 modes); earlier `prompt.test.ts` known failures resolved. `steering.test.ts` flakes when run in one `bun test` call with `fakeModel.test.ts`; passes alone.
+- MISTAKE: palette entries in `Session` category are hidden from the oc palette; use `oc`. `git rev-parse --short` takes one revision. Subagents leave LF/mixed EOL and edit glyphs inside literals: check EOL and diff scope; glyph cleanup touches comments only, never upstream files. Check file mtimes before editing when a handoff may be live. Close each chunk's notes independently. Rotate buildNotes before inserting the new entry.
+- Added usage calendar (archive11, v0.2.203): `usageCalendarEvents`/`nextRenewal`/strip, user-level `usageSubscriptions` (free-text labels, renew day or end date), rows read inside the dialog so readings update live; Usage menu and calendar list actions first.
+- Moved large fork files into topic files v0.2.204 (C0-C9; exact line-range moves, no logic edits, no barrels or shims): tui `usage/`, `claude-code/warmup/`, `config/oc.ts` -> `resident.ts`/`reviveHost.ts`/`wezterm.ts`, `app.tsx` -> `ocSettings`/`ocCommands`/`reviveCommands`/`harnessUpdate`/`crow`, `sidebarTools` -> `sidebarUsage`/`rootPicker`/`scriptSettingsMenu`, sidebar `helpers.ts` -> `settings`/`cursorToken`/`roots`/`scripts`, cursor `protocol/tools.ts` split, cursor `pump.ts` `CursorPump` + `execRecovery.ts`, claude `turnStream` -> `streamWriter`/`todoMirror`/`steering`, `session/titleGen.ts`, `session/sideQuestion.ts`, `handlers/sessionOc.ts`, `ocSessionCommands.ts`, `claudeCommands.tsx`. TODO: cursor `startSession` still one long function.
+- Fixed v0.2.205: sidebar plugins root `<Show>` on an async resource remounted ~1,700/s and leaked OpenTUI text buffers until the 65,535-handle table filled (freeze on "esc interrupt"); root `<box>` always renders. User `info` no longer writes `permission: undefined`. Cursor Windows soft-timeout shell runs in the foreground with `timeout`.
+- Fixed v0.2.206: warm-up test allows CLI `safeguards` (`dangerous_tool_use`); default Claude account dir is `CLAUDE_CONFIG_DIR || ~/.claude`.
+- Added v0.2.207-212: single auto-resume toggle; Third party harness updates heading; `subagent_tabs.return_to_parent` (default true); favorite model categories (`favoriteCategories`, colors, `DialogFavoriteCategory`, cross-category moves via `moveModelFavorite`, `nested`/`hasHeading` in `dialog-select.tsx`) v0.2.208/214; scheduled prompts (`session_queue.run_at`/`target`/`message_id` migrations, `queue.due`/`fireDue`/`dispatchDetached`, Alt+S, `scheduleClock.ts` segmented clock, fresh message ids at send, Flock lease on claims) v0.2.210; footer schedule/oc palette hints v0.2.211; unified `time.clock`/`time.timezone` (`applyTimeZone` sets process `TZ`, `Locale.setTimeSettings`, palette Time) v0.2.212.
+- Added v0.2.213: `CLAUDE_UNSUPPORTED_TOOLS` (worktree, cron, wakeup tools) always disallowed; `Workflow` off with task tools; oc `schedule_prompt`/`schedule_list`/`schedule_cancel` + `schedule` proxy entry (in default proxy list); provider option `claudeSettings` merged into `--settings`; `accountSettingsDrift` startup warning.
+- Changed v0.2.215-216: removed manual handoff command; Subagents dialog grouped by provider/model with effort on the right, Ctrl+A add, inline double-press delete. Layout uses structured `agent.model`/`agent.variant` only.
+- Changed v0.2.217-219: `getUnbumpedCodeChanges` gate kept in `agentPush.ps1` only (prePush gate removed); build-notes skill runs `bumpVersion.ps1`. Claude provider warn/error surface as TUI toasts (60 s dedupe), file line written first. "view subagents" hint only while a task runs. History rewrite: 27 commit messages corrected, same version+tag commits squashed; backup branch `backup/pre-rewrite` + bundle `ocPreRewrite-2026-10-16.bundle`.
+- Fixed v0.2.220: unbound `tui.showToast` threw in every provider warn (zombie Esc turns, hung proxy calls); `ActiveProcess.releaseTurn`; aborted grace not reset by later lines. Claude preempt: unmergeable messages end the turn after the current tool result (`maybePreempt`/`endPreempted`).
+- Merged perf review Waves 0-1 v0.2.221: probe kit `test/perf` (`OC_PERF_PROBE=1`); TUI handler isolation, `forgetSession`, reconnect resync, stale hydration dropped; `scheduledDelivery.ts` durable claims; processor F1/F2, shell metadata coalescing, retry cap; Claude single-flight spawn; Cursor unknown interaction rejection; core `notify` isolates listeners. F8 history recheck only on clean exits. Known failure: `prompt.test.ts` queue contention (F5) needs rewrite against durable claims (TODO).
+- Fixed v0.2.222-224: agent-push auto-delete only for sessions started with `/agent-push` (`ocPushSession`, `isRealUserMessage` skips the synthetic init message); `openInOtherTabs` counts only live `<pid>.json` ledgers.
+- Verification baseline (archive11): `steering.test.ts` receipt-save test flaky; steering pane test intermittent; `accountPool.test.ts` needs `CLAUDE_CONFIG_DIR` unset; `prompt.test.ts` F5 queue contention fails (known).
+- MISTAKE (archive11): never derive layout from free text when structured fields exist. `sed -i` in Git Bash strips CRLF. Removing inserted lines with Edit can join neighbors: match the whole line with its newline, then diff vs HEAD. Slice moved blocks by their own closing line. Expand shared subagent prompt placeholders before dispatch. Read the mechanism a test contends on before changing its timing. Build test sessions the way real callers do (synthetic init message). Count buildNotes lines before inserting.
+- Fixed memory leaks ML-1 to ML-4 v0.2.225 (archive12): Cursor no-tool Runs keep blob/checkpoint per Run unless bound (title retries no longer reset the chat binding), bounded global SSE queues (overflow fails the stream), TUI keeps only open session trees, Claude exchanges released. Risk: sidebar usage refresh no longer sees busy sessions in other windows.
+- Added stream smoothness v0.2.226: `bun patch` for `@opentui/core@0.5.14` (`CodeRenderable._shownContent`, `parseMarkdownIncremental` drops `max(1, trailingUnstable)` tokens) and `opentui-spinner@0.0.7` (phase-locked due times); reasoning renders as streaming markdown; Claude logger batches (100 ms timer, 64K, sync on warn/error/exit); Beta `smooth_streaming` (tui.json, default off, palette group "Beta"). Risk: both vendor patches need refresh on OpenTUI/spinner upgrades.
+- Added `GET /provider/summary` (`Provider.SummaryResult`, shared `selectProviders`) v0.2.227; TUI bootstrap uses it instead of the 8.3 MB `/provider`. Fixed perf probe proxy teardown (502 on late upstream failure).
+- Added v0.2.228 `/update` SHA-256 check (`OcRelease.Asset.sha256` from API `digest`; refuses missing or mismatched before write). Fixed v0.2.229 cmd injection in `launchDetached` `.ps1` path (`cmd /d /v:on ... !OC_LAUNCH_ARGV!`, `consoleTitle` strips `" % ! ^`; `DetachedCommand` return type v0.2.231). Risk open: `revive.ts` `consoleStart` `/v:off` `%VAR%` pattern, and `.bat`/`.cmd` via `Start-Process` re-parsed by cmd. Fixed Cursor `env.shell` (was `/bin/bash` on Windows; now configured shell).
+- Added v0.2.230: `dialog.close` keybind (`ctrl+c` stock, `none` in oc preset) and rename-dialog copy (`DialogPrompt` `actions`); removed `/thinking` slash; exact slash match ranks first (`withExactSlashFirst`); Cursor exec fixes (negative read offset via `fileLineCount`, grep `(?i)`, native Glob/Grep forward-slash paths, `ls_result` `<entries>` parse); Prettier runs in `prePush.ps1` on changed files (batches of 200 since v0.2.231), `format.ts` honors root gitignore.
+- Changed v0.2.231 agent noise: `setDefaultTimeout(30000)` in opencode test preload (Bun ignores bunfig timeout; CLI `--timeout` has no effect); AGENTS.md: working-tree EOL irrelevant (`eol=crlf`, prePush restores), local `core.safecrlf=false`, Known failures list (prompt.test.ts F5, subagentDialog 2, test:httpapi missing `/agent/sub` x3, steering flaky). Repaired user Effect reference cache (stale `index.lock`, then `reset --hard origin/main`); deleted `~\.claude\skills\.trash` duplicates.
+- Added v0.2.232-233: Subagents dialog Enter on native general/explore picks model (`persistAgentModel`) then Reasoning ("Auto" = `variant: ""` removed by `writableGlobal`); dialog refetches on `sync.configReloadEpoch`. Notices: `ToastContext.notices` (100, per run), palette `/notices`; provider-neutral "Question waiting" reminder after 5 min in `feature-plugins/system/notifications.ts`; Claude `logger.ts` warn/error go to opencode.log (`channel=claude-code`), not toasts; proxy broker stall lines NOTICE only.
+- Fixed v0.2.234-235 paste then Enter: `trackPaste`/`await pasting` in submit/queue; `pasteGrace` (300 ms) maps rolled-over Ctrl+Enter to submit after Ctrl+V.
+- Added v0.2.236-238: per-session subagent off switch (`session.metadata.disabledSubagents` -> task deny rules in `turnPermission`, `describeTask` filters by session/turn permission, `DialogSessionSubagents`, `/sessionSub`, sidebar button); subagent context % in prompt bar (`contextUsage`, `subagentLabel`, `/subagentUsage`); live subagent cards in `Task` (`subagentFeed`, kv `subagent_card_rows` 0/3/4/6 default 4, `/subagentRows`). Risk: metadata PATCH read-modify-write races.
+- Added v0.2.239-241: click-to-open chat links (`openClickedLink`: left down+up same cell; opentui marks every mouseup on selectable text as dragging), `/linkClick`, `/linkBrowser` (registry scan, `openUrl(input, app)`; missing exe rejects with toast v0.2.244); collapsed slash-command user messages (`ocCommands` names on template parts, `promptFromParts`, `typedText`); slash composition fixes (pasted text never runs commands via `typedSlashCommands`, Alt+Enter refuses command drafts, editor selection sent with command turns, `Command.Event.Executed` per name, `Command.COMPOSED_PREAMBLE` shared); paste summary off by default (kv `PASTE_SUMMARY_KEY`, `/pasteSummary`).
+- Added v0.2.242 native Jev tools (`tool/jev.ts`, `tool/jevClient.ts`, listed only with `TYPESAFE_API_KEY`; key read at process start, restart for a new key); jev MCP removed from user config; missing-key toast v0.2.246.
+- Fixed v0.2.243 stale wake silencing a Claude chat: `isWakeTurn(prompt)` checks only the newest message; wake marker parts dropped. Fixed v0.2.245 failed revive orphaning the resident server: `prepareStop` (secret + creation-time liveness, no executable-vs-caller gate) runs before any TUI kill. Added v0.2.246 `prePush.ps1` regenerates `packages/sdk/openapi.json` (was stale since v0.2.172).
+- Verification baseline (archive12): pre-existing `subagentDialog.test.tsx` 2 failures and `test:httpapi` missing `/agent/sub` scenarios x3 (see AGENTS.md Known failures).
+- MISTAKE (archive12): before adding a user-facing notice in a provider, check `feature-plugins/system/notifications.ts` and keep notices provider-neutral. Read opentui event flow before trusting event flags (`isDragging`). Verify fail-on-old-code in a temp copy, never by overwriting working files. Confirm a regression test fails on old code. After a one-time repair, confirm the next real run succeeds before calling it fixed. `as const` on literal `type` in decode tests.
+- Added v0.2.247-252 (archive13): oc palette Font (`/font`, WezTerm `oc_font` user-var handler in `docs/wezterm.md`, reapplied at start, Up/Down 1 pt in 4-48); named warm-up schedule presets; Show usage in oc palette namespace; Esc-back restores selection, search, and scroll in every drill-in menu (`DialogSelect` focus sync).
+- Added v0.2.253-255: forked Claude chats keep their Claude conversation (rewind to fork point, fresh with last exchange when too far back); steered messages keep `read mid-turn` label (`isSteered`, persisted `metadata.steered`); `/revive-single` closes the WezTerm pane it ran from once native runs (asks first mid-reply).
+- Added v0.2.256-259: Update PowerShell palette entry (admin prompt, never closes open pwsh); `/killall` + `/procReport` + `killai` (`tui/src/killall.ps1`, reports in `%LOCALAPPDATA%\oc\killall`, memory split, CPU top 10, identity-checked stops); third-party update progress toast (fixed width, wrapped rows, only results kept in Notices) and `/autoConfirmUpdates` (default off); lone-subagent prompt-bar detail line.
+- Added v0.2.260-263: Beta daily theme (shared daily pick, off restores chosen theme); Jev skill hint for new subagents (task text sent to TypeSafe when `TYPESAFE_API_KEY` set); agent `claudeAccount` preferred login and Subagents dialog account pick; agent-push renames only sessions it opened; `/stopSub` and Esc cascade stop subagents without deleting sessions; auto-resume off cancels queued wakes.
+- Synced upstream OpenCode v1.19.3 v0.2.264-271 (stages 1-9, `plans/upstream119`): share removed, `reasoning_options`, dependency pins, core tools/shell/search/config/snapshot fixes, provider/session/server ports, TUI fixes and features (`oc update`, `oc plug`, `oc debug profile`, unseen-session dot, `/copy-all`, `alt+up/down`, transcript views, `ctrl+b` shell to background, diag toasts), output-limit continue, `compatibility` options, question dismiss `m`, web search providers, MCP reconnect. `alt+return` only queues now. SCOPE.md records later items.
+- Fixed v0.2.272-275: oc `task` no longer reports a subagent failed after a recovered tool error; core provider plugin import cycle broken; Bun pinned 1.4.2, FFF 0.10.5 for bun-types 1.4; streamed OpenAI refusals render as text; image paste preview off by default (`/imagePreview`, chip click opens it).
+- Fixed v0.2.276: Claude steering compares a message's settings by difference (undefined inherits the running turn), so plain messages and background notices (`SESSION_NOTICE_KEY`) join command turns instead of preempting them; `retireStaleProcess` keeps the CLI for a wake attaching to `autonomousTurn`; errored subagents pass their last reply.
+- Risk (archive13): `!` shell commands no longer load `.bashrc`/`.zshrc` (upstream `01edae4a7f`); every oc process watches `<state>/diag`; legacy PTY-ticket check still URL regex; Codex OAuth callback listens on all interfaces; non-streamed refusals dropped (AI SDK); plain mid-turn message cannot lift a command's restrictions; `shortModelName` `.$1.$2` bug in `dialog-subagents.tsx`; daily theme reshuffles when built-ins change.
+- ERROR (archive13): `steering.test.ts` "permission-bearing command ends the running turn at its next tool boundary" fails at `names[1]).not.toContain("Write")`, pre-existing, not investigated (TODO). Core `provider-google-vertex.test.ts` import-order failure was fixed in v0.2.273. prePush once failed TS2307 on `killall.ps1` text import (fixed v0.2.262).
+- MISTAKE (archive13): a user "stop at repo root" decision applies to every live config path (reverted core config walk). New network calls reachable from shared paths need their env key cleared in `test/preload.ts` (Jev test hit TypeSafe live). Shared `DialogSelect` timing changes need `local.test.ts`, `subagentDialog`, `commandPalette`. Check command namespace and palette filters before calling an entry reachable. Use absolute paths in background runs. Rotate buildNotes before inserting.
+- Added v0.2.277-279 (archive14): Claude mid-turn read splits the reply at the steered message (footer time still whole turn); commit subjects `v<ver> <tag> [<label> > <summary>]` validated by `assertCommitSubject` before slow checks (label list and rules in AGENTS.md).
+- Changed v0.2.280-282: oc layout Tab types a tab, Shift+Tab next agent (`agent_cycle_reverse` unbound); `/tabKey` setting (text, agent, effort, favorite model); Tab still completes `@`/`/` lists. Removed SuperPlan/SuperGo (sp, go, spa, goa) and plan tools; do not resurrect. Prompt bar shows only running subagents.
+- Added v0.2.283-290: Claude failover ranks accounts by most 5-hour usage left (sidebar cached reading; skips full 5h/week); "Claude account failover" Auto|Ask question; numbered same-name subagent labels; `/subagentRows` list (off, 2-10); revive commands inside slash chains (`/pass /revive /agent-push`: later steps sent after revive, failure/Esc puts the rest in the prompt; quoted or fenced commands never run); custom sidebar buttons from either palette (alt+p, `sidebar_buttons` in tui.jsonc, `/sidebarReset`).
+- Added v0.2.291-292: feature request issue form (Area mirrors FORK.md sections); palette Claude account switch waits for a chat's running turn/background jobs (sidebar marks the account in use). Risk: long `Monitor` watches hold the switch.
+- Added v0.2.293-297 Windows setup: Inno Setup `.installer/oc.installer.iss` installs to `%LOCALAPPDATA%\Programs\oc` with PATH, one self-contained setup exe; WPF companion `.installer/ocSetup` ("oc dependencies", engine `oc oc deps` JSON/NDJSON) with Required/Default tags, completion view, WezTerm-targeted shortcuts, prefetched downloads plus a parallel non-PATH lane, desktop shortcut column, software rendering (VM glyph corruption), icon header and tag dots. `.runCompanion.ps1 -Fake`/`--dev` loop never writes shortcuts or starts oc. `install.ps1` and revive scripts install to the oc on PATH. Removed ocdebug script vestiges and Debug agents (FORK.md TODO).
+- ERROR (archive14): ProgressBar `Value` binds TwoWay by default; bind read-only VM props `Mode=OneWay`. Codex desktop feed version mismatch and Claude desktop 0x80073D28 (needs admin) fixed in v0.2.295. Bun 1.4.2 Windows: two concurrent `fs.rename` of one source both fulfil; use exclusive `wx` create as a lock.
+- Risk (archive14): ISCC/VM first-install checks pending for `DefaultAppDir`, compression dictionary, Inno uninstall of retargeted `.lnk`; Everything `/S` defaults unverified; failover ranking uses stale readings for unpolled accounts.
+- MISTAKE (archive14): `sed -i` and inline python on project files (use Edit/Write). Adding a `keybind.ts` Definition needs `keybindDocs.ts` regen. Copying into a moved test folder created a file: `Test-Path -PathType Container` first.
+- Changed v0.2.297-299 ocSetup (archive15): Lucide header icons, rounded buttons, fast tooltips; streamed list with per-row checks and animated "Checking" dots; PATH read without pwsh; all downloads up front with lock-based install scheduling (admin prompts serialized); Claude Code CLI via npm; Codex desktop elevated; download retry; stuck temp cleanup retried in background; ChatGPT latest = direct MSIX; Update all no wait after Appx installs, PowerShell MSI no longer kills oc. VM runs 6-7 confirmed; temp debug logging removed.
+- Fixed v0.2.300-301: context-limit handoff opens a top-level session. Added `task_cancel` tool and Esc/Stop in a child view to stop one subagent; main Esc Esc stops the main turn first, then subagents (no parent notice).
+- Changed v0.2.302-303 ocSetup: per-section Select all, collapsible sections (all open), dev/coding rows (Bun, .NET 10 SDK, Inno Setup 6, gh, scc, Notepad++, GitHub Desktop, VS Code, .NET 8/10 Desktop Runtime), flat scroll bar, finishing screen, renamed "oc Dependency Installer".
+- Added v0.2.304-306: shared TUI pane fixture for verify probes (probe-first, known-failure rules); four drac surface variants; safe editor launch with Notepad fallback (`&` injection fixed, quoted editor paths); `alt+q` queue/Home send and one-time terminal key notice; own session DB `oc.db`; dev/stable server refusal naming the other install; `docs/dev/vmAcceptance.md`.
+- Fixed v0.2.307: endless reply loop after manual compaction. Added v0.2.308 native cua-driver tools replacing the MCP server (one shared process, 10-min idle stop, per-chat sessions, permission prompts, `cua_takeover`; visibility follows `cua` permission).
+- Changed v0.2.309-311: release pipeline (zip step, notes from commits, release-build guard), clean launcher refusals, sidebar state moved to oc state folder (`.config/openSidebar.json` read only), `--shutdown-all` closes WezTerm panes from outside WezTerm; copy slash-command messages as typed; queue accepts slash commands (`commands?: string[]` payload, `sendQueued`).
+- ERROR (archive15): Bun 1.4.2 `spawn(..., { detached: true })` of powershell/pwsh exits 0 without running (use the Start-Process launcher). pwsh 7.6.9 `SetEnvironmentVariable(name, $null, 'User')` leaves empty `REG_SZ` (use `Remove-ItemProperty` + `WM_SETTINGCHANGE`). tuiPane API-error and warm-up schedule cases fail (baseline, not investigated). VM share locks setup exe copies.
+- Risk (archive15): crash-retried queued command claim reruns pre-prompt side effects; first upgrade from a build without the WezTerm socket can fail `--shutdown-all` with old tabs open; two source checkouts as `bun.exe` share a server; dev build at a released version gets one update offer per release; cua "Allow always" lasts until restart.
+- MISTAKE (archive15): `sed -i` on project files again turned CRLF into LF (use Edit). WPF controls that keep default styles need explicit Foreground in ocSetup. Border takes one child; build XAML before handoff. Trace cancel paths through `cancelBackgroundJobs` before promising notice behavior.
+
+## User
+- oc has resident and single-window modes, separate debug settings, safe revive/recovery, portable sessions, model choices, session filtering/marks, and compatible-database protection. A message marks work in progress; implementation and successful agent-push turns can mark it complete.
+- Sessions name themselves once from the first real prompt alongside the reply; manual names survive, failed naming leaves `/rename` available, forks drop the pending marker. `/rename` identifies its winning model. Home Ctrl+Enter sends while staying Home; Home shortcut is Ctrl+Shift+H.
+- Commands and skills reload automatically, slash menu stays above the prompt with favorites/composition, permissions apply only to the command turn, and preset command markers support inline output, windows, or after-turn execution.
+- Cursor models include Max long-context options. ChatGPT Web/Claude Web are removed. Claude Code supports fresh catch-up, native subagents/oc skills, interrupt/undo, live context counts, account failover, and native PowerShell/proxy tools; cost updates at turn end.
+- Usage menu shows limits and full reset dates, separate Claude accounts and login reasons, with a used/remaining toggle. Sidebar controls have Outline/Minimal styles, palette buttons, clipped names and inline reasoning. Clickable chat items do not text-select; ordinary text does.
+- Subagents can open in WezTerm or Windows Terminal tabs through saved palette settings; this requires the resident server. Plugin statuses, theme-aware toasts, startup scanner, agent-colored tabs, and progress indicators are available.
+- `/work` copies current staged, unstaged, and untracked work without changing the parent; `/done` brings changes back unstaged. Whitespace differences merge; real conflicts stay in the copy for the agent to resolve, including nested copies.
+- README/CONTRIBUTING/SECURITY describe this fork; wiki drafts await bootstrap. Version bumps generate a random two-word release/commit name. Builds and installs remain user-driven; local checks are selectable, cloud workflows removed, and real Claude checks always ask before spending.
+- Fake-model and pane checks isolate user data and do not spend model usage. Tests no longer download plugins or leave hundreds of thousands of temp files slowing Windows logon; cleanup failures now fail visibly.
+- Since then: oc ships as two programs (`oc` with the background server, `opencode` in its own window); `oc single`, ocdebug, command markers, and `/work`/`/done` are gone. `/revive-single` test-builds native opencode, `/update` installs oc releases, and `/revive` restores WezTerm tabs.
+- The sidebar usage block aligns percentages with reset times, lists each Claude account, marks the active one, shows `-` for idle 5-hour windows, and updates mid-turn. Claude accounts persist across restarts, can be switched from the palette, fail over even when a chat is pinned, can auto-resume after a reset, and can be warmed up on a schedule.
+- Claude Code turns support mid-turn steering, commands keep Claude's own tools unless they limit them (`toolHost`), and web search follows agent rules. Queued prompts, `/btw`, `/reload`, built-in background shell, and per-task models are available.
+- Agent files hot reload, and `/addSub`, `/rmSub`, `/viewSub` manage subagents. The palette is grouped under headings, has About, Update all harnesses, Clean up completed sessions, and themes are separate for oc and opencode.
+- oc is public as a GitHub fork; the README is a short pitch and the wiki holds the user docs. agent-push titles sessions with the pushed commit hash and can delete them after you leave.
+- The Usage menu has a usage calendar of upcoming resets and your own subscription dates. Prompts can be scheduled for later (Alt+S) in this session, a fork, or a new session, and agents can schedule prompts too. A Time palette entry sets the 12/24-hour clock and time zone for all of oc.
+- Favorite models can be grouped into colored categories, the Subagents dialog is grouped by provider and model, and oc returns to the parent session when a watched subagent finishes.
+- Claude Code warnings show as toasts, Esc no longer leaves old Claude turns running in the background, a message Claude cannot merge into its turn runs right after the current tool, and Claude's own worktree, cron and wakeup tools are off under oc.
+- The chat no longer freezes on "esc interrupt" from a sidebar leak, Cursor shell commands work on Windows on the first try, and agent-push auto-delete only removes sessions that started with `/agent-push`.
+- Since v0.2.225: memory leaks fixed, streaming text and code render smoother, startup loads less data, `/update` verifies downloads, and script launches can no longer run injected commands. Cursor reads, searches, and folder listings behave like oc's own tools.
+- Ctrl+C no longer closes dialogs in the oc layout and copies the name in the rename dialog. A Notices list keeps every popup, a question reminder works for every provider, and Claude internals log quietly instead of popping up.
+- Fast paste-then-Enter sends with the image. Subagents can be switched off per chat, show their context use in the prompt bar, and show live cards while they run; the Subagents menu sets general/explore model and reasoning.
+- Chat links open on click in a chosen browser; slash-command messages show just the command names and your request; pasted text never runs commands; paste summary is off by default.
+- Jev tools are built in, a stale wake-up no longer leaves a Claude chat giving blank replies, and a failed revive no longer leaves a hidden server running.
+- The oc palette can set the WezTerm font, save warm-up schedule presets, and Esc goes back to where you were in every menu.
+- Forked Claude chats keep their conversation, `/revive-single` closes the tab it ran from, and `/killall` stops every AI process with a report.
+- Third-party updates show live progress and can auto-confirm, PowerShell can be updated from the palette, and a Beta daily theme rotates built-in themes.
+- Agents can prefer a Claude login, `/stopSub` and Esc stop subagents without deleting them, and agent-push keeps titles of sessions it did not open.
+- oc is synced through OpenCode v1.19.3: sharing is gone, `alt+return` only queues, and many CLI, TUI, tool, and MCP improvements arrived (see SCOPE.md for what was left for later).
+- Subagents that recover from a tool error are no longer reported failed, OpenAI refusals show as text, image paste preview is off by default, and messages sent during a Claude command join its turn.
+- When Claude reads a message mid-turn the reply splits there. In the oc layout Tab types a tab and Shift+Tab switches agents, or pick what Tab does with `/tabKey`. SuperPlan/SuperGo are gone.
+- Claude failover picks the account with the most 5-hour usage left, can ask which account to use, and a manual account switch waits for running work. `/revive` can sit inside a chain of slash commands. Any palette entry can become a sidebar button (alt+p).
+- oc has a Windows setup exe and an "oc dependencies" window that installs PowerShell 7, Git, Node.js, Everything, WezTerm, and the Codex, Claude, and Cursor apps, with optional desktop shortcuts.
+- The oc Dependency Installer shows its list right away, downloads everything up front, runs non-conflicting installs together, groups rows into sections with Select all, offers optional dev and coding tools, ends on a finishing screen, and cleans up large downloads.
+- Esc stops the main turn first and then its subagents, a single subagent can be stopped from its own view or by the agent, and context-limit handoffs open a normal session.
+- Sessions live in oc's own `oc.db`, dev and stable installs refuse to share a server, clicking a file path is safe and falls back to Notepad, and four new drac theme variants are available.
+- Agents can drive Windows apps through built-in cua tools with permission prompts, and a manual /compact no longer loops.
+- Releases build and carry notes, `--shutdown-all` works from outside WezTerm, oc no longer writes sidebar state into projects, and copying or queueing a slash-command message keeps the command you typed.
+
+# Historical entries (newest first)
+
+---
+
+## 2026-11-09 (~15:12) - v0.2.344 matttterFascists - Claude Fable 5.2 and Mythos 5.2 in the Claude Code list - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation (/spit then /imp); completed
+- Version: 0.2.344 matttterFascists
+- Fable 5.2 needs no code: the live catalog (models.opencode.ai, models.dev PRs #13204/#13205/#13206) already has `anthropic/claude-fable-5-2` with fast mode ($8/$40, fast $16/$80), and `claudeCodeModels` registers it plus `claude-fable-5-2-fast` on the next 5-minute `ModelsDev.refresh`.
+- Added `"claude-mythos-5-2": "claude-fable-5-2"` to `CATALOG_TWINS` in `provider/claude-code/models.ts`. models.dev PR #13207 (Mythos 5.2) was closed unmerged, so the twin builds it; `-fast` comes from the copied `experimental.modes.fast`, and the no-access note names Fable 5.2.
+- Added a `configModels.test.ts` case with an in-test Fable 5.2 (fast mode included) that pins Mythos 5.2, its Fast twin, `catalogTwin` with `-fast`, and `modelName`; it reseeds the shared fixture in `finally`. The shared fixture is unchanged.
+- Thinking binding needs no change: `anthropicBindsThinking` already binds Fable 5.2 and Mythos 5.2, and `transform.test.ts` already lists `claude-mythos-5-2`.
+- Not done: the Mythos 5.1 binding exemption in `transform.ts` looks stale (the current thinking docs say Mythos 5.1 runs the prefix check), but that needs its own fix. Cursor `MODEL_IDS` waits until Cursor's pricing doc lists Fable 5.2.
+- Note: 5.2 thinking blocks are tied to the account that produced them. After a claude-code account failover the API drops them silently (`organization_binding_mismatch`) instead of returning a 400, so there is nothing to handle.
+- Verification: `bun test test/provider/claude-code/configModels.test.ts` 8 pass. Probe: `claudeCodeModels` on the live models.opencode.ai anthropic entry returned `claude-fable-5-2` "Claude Fable 5.2 (8×)", `-fast` "(16×)", `claude-mythos-5-2` "(8×)", `-fast` "(16×)", effort low..max, and `catalogTwin("claude-mythos-5-2-fast")` = `claude-fable-5-2-fast`. `claude -p --model claude-fable-5-2` on CLI 2.1.319 answered.
+- ERROR: CLI 2.1.319 logs `[claude-code:unrecognized_model] {"model":"claude-fable-5-2"}` and may use generic limits or effort for the id. 2.1.321 (released 2026-11-09) is the Fable 5.2 release; update the CLI.
+
+### User
+Claude Code models
+- Claude Fable 5.2, Fable 5.2 Fast, Mythos 5.2, and Mythos 5.2 Fast now appear in the Claude Code model list, with Fable 5.2 priced at 8× (Fast 16×).
+- Without Mythos access, a Mythos 5.2 turn tells you to pick Claude Fable 5.2 instead.
+- Run `claude update` to get Claude Code 2.1.321 or later, which knows Fable 5.2.
+
+---
+
+## 2026-11-09 (~14:42) - v0.2.343 outgoingStallion - /revive builds with the window open and compiles once - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation (/imp of `docs/dev/reviveFasterPlan.md`, Chunks 0-6 in one tree); completed, no live /revive check yet
+- Version: 0.2.343 outgoingStallion (not bumped: already changed since the last commit; same tree as the previous entry)
+- Added `ReviveHost.prepare` + `oc oc --revive-prepare` (`Revive.PrepareRequest`, `decodePrepare`): source choice, skip-build check, `bun install` + build into `<cache>/oc-revive-build/<stamp>` under `oc-revive/build.lock`, or release download; writes `{ output }` to a result file in `oc-revive/`
+- Changed `ReviveContext`: removed `update` mode, `release`, `source`, `sourceDir`; added `output` (required for `install`, absolute, inside `Global.Path.cache`); pipeline only swaps (no build steps)
+- Changed TUI `useRevive` (`reviveCommands.tsx`): `prepare` spawns the helper with output to `log/revive-build.log`, toast while building, error toast with log tail; `swap` (was `revive`) waits for this session's reply to finish; `/update` = prepare(release) + swap; `idle` moved here from `reviveChain.tsx`
+- Changed `build.ts`: one compile per target, native = `copyFile(..., COPYFILE_FICLONE)` of `oc`; `--outdir`; phase timings; `--version` check on the compiled file only; removed `OPENCODE_FLAVOR` define
+- Changed `Global.native` (`core/src/global.ts`): from the executable name (`opencode` native, `oc`/`occ` oc, anything else reads `OC_FLAVOR`)
+- Changed `Revive.buildSteps(build, { variant?, outdir? })`: adds `--skip-install`
+- Changed `generate.ts`: non-release builds read `~/.cache/opencode/models.json` when present; fetch has a 30 s timeout
+- Added `warmLaunch` (`reviveHost.ts`): macOS runs `occ`/`opencode --version` after install, alongside the server start
+- Changed `wezterm.ts` `oldPanes`: a vanished socket returns no panes; the restarter logs `No old panes left to close` instead of failing
+- Added `src/bun.lock text eol=lf` to `.gitattributes`: `bun install` rewrites the lockfile with LF on every OS
+- Note: macOS scans each new executable path on first launch (~1.6 s; per path: moves, clones, and hard links are all rescanned). This is most of the 2.3 s server start; plain `oc serve` answers in 0.26 s. Findings in the plan file
+- Risk: the native file must be named `opencode`; a renamed copy runs as oc (FORK.md documents it)
+- Verification: typecheck passes in core, opencode, tui. `bun test test/config/revive.test.ts`: 19 pass / 11 skip / 0 fail. Real build to a temp outdir: compile 3.5 s, clone 0 ms, `cmp` identical, oc vs native behavior confirmed. `--revive-prepare` run from source end to end: 5.6 s, result file correct; bad requests exit 1. `git status` stays clean for `bun.lock`/`package.json` after `bun install`
+- ERROR: `test/config/tui.test.ts` "resolves keybind lookup from canonical keybinds" fails (`session.new` keybind). Unrelated (no keybind/config change; `Global.native` unchanged under bun); not in the macos.md known list
+- TODO: Windows-only `revive.test.ts` cases not run; user live checks in the plan (Chunk 3 checks 1-7, Chunk 4 Mac and Windows checks)
+
+### User
+Revive
+- `/revive` now builds oc in the background while you keep working, and the window closes only for the few-second swap.
+- A failed build shows the last lines of the build log in an error notice, and your window stays open.
+- If you start a reply while the build runs, the restart waits for that reply to finish.
+- `/update` downloads the new release while you keep working, the same way.
+- The build compiles oc once and copies it for `opencode`, so a `/revive` build takes about half as long.
+- Builds use oc's saved copy of the model list, so `/revive` works offline.
+- After a revive, the reopened window and the first native `opencode` window open about 1.5 seconds faster on macOS.
+- `bun.lock` and `package.json` no longer show as modified in git after a revive.
+
+---
+
+## 2026-11-09 (~14:11) - v0.2.343 contactOz - /revive skips the build when the source is unchanged - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation (/think plans, then /imp of `docs/dev/reviveSkipBuildPlan.md`); completed, no live /revive check yet
+- Version: 0.2.343 contactOz (already bumped before this session; the uncommitted `sidebarUsage.tsx` change in the tree is not from this session)
+- Added `core/src/util/sourceTree.ts` `sourceTree(dir)`: git tree hash of the working tree (tracked + untracked, .gitignore respected) through a temporary `GIT_INDEX_FILE` seeded from the real index; returns "" on any failure. 83 ms on this repo.
+- `opencode/script/build.ts` bakes it as `OPENCODE_SOURCE_TREE`; `core/src/installation/version.ts` exports `InstallationSourceTree` ("" in dev and in older builds).
+- `opencode/src/config/reviveHost.ts` `revivePipeline`: when mode is install and the baked hash equals `sourceTree(revive.build.source)`, `build` becomes undefined, so the existing no-install path runs (stop, start server, reopen tabs, settle chain) and the log says "Source unchanged ... skipping build". The pipeline always runs as a fresh process of the installed oc (`cli/cmd/oc.ts` `runNative`, or the TUI helper), so the constant always describes the installed file; no stamp file.
+- Removed `revive.path`: `tui/src/ocSettings.ts` field, the custom-script branch in `reviveCommands.tsx` `start()`, `.scripts/revive.ps1`, `.scripts/reviveAndInstall.ps1`, `.scripts/setReviveConsolePosition.ps1`, `startOcWindow` and `$occShortcut` in `scriptHelper.ps1`; comments in `reviveResume.ts` and `reviveChain.tsx`; SCRIPTS.md rows, FORK.md, publicReadiness.md, v0.3.0.md notes. A leftover `revive.path` key is ignored and `/revive-no-install` runs the built-in restart.
+- Removed the legacy `shell` revive tab kind (not produced since v0.2.174): `Revive.Tab` is only the oc shape (the `kind` field stays so an old binary's restart context still decodes), `tab()` rejects shell, `revive-tabs` and `spawnTab` in `cli/cmd/oc.ts` lost the shell branches, `ownedPanes` and `keepPanes` lost their kind checks.
+- Docs: README `/revive` line, AGENTS.md debug bullet, FORK.md revive row.
+- Deviation: the plan said staging a change alters the fingerprint; it does not (content-only tree hash, which is right). The test asserts that.
+- Verification: `core` `test/util/sourceTree.test.ts` 4 pass (stable, subfolder = root, edits/untracked change it, ignored and revert do not, real index and status untouched, non-repo ""); `opencode` `test/config/revive.test.ts` 17 pass, 11 skip (Windows-only); typecheck clean in core, opencode, tui. Real `build.ts --single` (dist only, not installed): both `dist/.../bin/oc` and `.../opencode` contain tree `3dc2319f`, the probe value from before the build and a valid tree object in the repo. The live skip needs the user's /revive.
+- MISTAKE: the first Python edits wrote `version.ts`, `build.ts`, `reviveHost.ts` and the two new files with LF; this repo's working copy is CRLF (`eol=crlf`). Fixed before verification. Prevention: open files with `newline=''` and keep their existing line endings.
+
+### User
+Revive
+- `/revive` now rebuilds oc only when the source folder changed since the installed build; otherwise it just restarts and reopens your tabs, much faster.
+- The first `/revive` after this update still builds once, because the oc running now has no fingerprint.
+- `/revive-no-install` is unchanged.
+- The old `revive.path` custom script setting and the `.scripts` revive scripts are gone; the built-in restart does the same job.
+
+---
+
+## 2026-11-09 (~00:03) - v0.2.342 willAragorns - Mac Cmd+Option+Q queues prompts - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation (/spit then /imp); completed
+- Version: 0.2.342 willAragorns
+- Added `super+alt+q` to `prompt_queue` and `prompt_submit_background` in the `mac` preset (`tui/src/config/keybindPreset.ts`); the preset is now the ctrl->super map spread plus those two overrides. Bare Cmd+Q is left alone because WezTerm owns it (QuitApplication). Option+Q stays.
+- WezTerm needs no change: Cmd+Option+Q is unbound there and reaches oc as kitty `\x1b[113;11u` with `enable_kitty_keyboard`; left Option is Alt by default (right Option composes).
+- Added two assertions to the macOS preset test in `tui/test/config.test.tsx`. Wiki: `Keybinds.md` macOS section and `Sessions.md` queued prompts mention `cmd+alt+q`. `keybindDocs.ts` only renders the oc preset, so `docs/keybinds.md` is unchanged.
+- Verification: probe in `tui/test/tmp/verify` fed raw `\x1b[113;11u` into a kitty test renderer with the mac preset and it fired `prompt.queue`; Option+Q also fired, bare Cmd+Q did not (1 pass, probe deleted). `bun test test/config.test.tsx` 20 pass; tui `bun run typecheck` clean. Not run on a real Mac WezTerm window.
+
+### User
+Keys
+- On a Mac, Cmd+Option+Q queues a prompt while the session is busy, and on Home it sends the prompt and stays there.
+- Option+Q still works; plain Cmd+Q still quits the terminal.
+
+---
+
+## 2026-11-08 (~23:51) - v0.2.341 pesciManaging - faster Mac paste and Claude turn start - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation (/imp of plan `docs/dev/macPerfPlan.md`); completed, no live check (needs `/revive`)
+- Version: 0.2.341 pesciManaging
+- Changed `tui/src/clipboard.ts` `read()`: darwin now runs the OpenTUI native read (`readHost`) first, like win32. `osascript` (`as "PNGf"`) is only the fallback (TIFF-only clipboards) and goes through `run`, so tests can see it. Removed the unused `execFile`/`promisify` imports.
+- Measured on the Mac, 749,354-byte PNG on the clipboard: `osascript` script 0.80-0.84 s; real `read()` after the change 37 ms cold (dynamic import), then 1.6-3.4 ms, same bytes. A text paste no longer pays the failing `osascript` (40 ms floor) first.
+- Note: a clipboard holding TIFF plus text (cells copied from Numbers or Excel) now pastes as text instead of an image converted by `osascript`.
+- Changed `provider/claude-code/turnStream.ts` `setup()`: a reused process takes its own `cliArgs`, with no `planSpawn` call. Before, every reused turn planned a spawn before sending the message (`GET /experimental/tool`, `GET /skill`, MCP config reads, `ensureSkillPlugin`) and threw the result away: `respawnActiveProcess` uses `old.cliArgs ?? cliArgs`, and `spawnClaudeProcess` always sets `cliArgs`.
+- `spawnPlanning.ts` `planSpawn`: removed the `reusing` and `proxyServer` inputs; it always plans a new process. `planSpawnFor()` has no parameter and now serves `spawnFresh` and `switchAccount`.
+- Probe: a live `claude` 2.1.319 with `--plugin-dir` did not list a skill added to that plugin between turns (second `init` showed the turn-1 list). So the per-turn `ensureSkillPlugin` refresh had no effect on live processes and was dropped, not moved to the background.
+- Measured (fake-model `fakeModel.test.ts`, provider debug log, time from `doStream starting` to `sent user message` on reused turns): before 0-6 ms, median 5; after 0-1 ms, median 0. Real setups with many MCP tools and skills spend more on the registry fetch, which is not measured.
+- Plan step 3 (start the MCP status call earlier) skipped: the pre-send path is already about 0 ms.
+- Deviation: no new test asserting that `/experimental/tool` is not called on reuse. The fake-model run cannot see server routes without a mock; the timing above covers it.
+- Tests: `tui` `clipboard.test.ts` 10 pass (2 new darwin cases: native content skips `osascript`; empty native read falls back to `osascript`). opencode `test/provider/claude-code/` 691 pass, 10 fail: the 3 known Mac `fakeModel.test.ts` failures plus 6 in `steering.test.ts` and 1 in `commandPermissions.test.ts`. Those 7 fail the same way on the unchanged provider files; added to AGENTS.md known failures. Typecheck clean in tui and opencode.
+
+### User
+Mac paste
+- Pasting with Cmd+V on the Mac is faster: an image pastes in a few milliseconds instead of almost a second, and text no longer waits on an image check first. A clipboard that holds both a picture and text (for example cells copied from Numbers) now pastes as text.
+
+Claude chats
+- After the first message in a chat, oc sends each message to Claude Code right away instead of first looking up tools and skills it did not use.
+
+---
+
+## 2026-11-08 (~23:35) - v0.2.340 valveProstate - Mac revive reopens the window in place and in front - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation (/imp of plan `~/.config/opencode/plans/macReviveWindow.md`); completed, live `/revive` checked
+- Version: 0.2.340 valveProstate
+- New `core/src/util/weztermWindow.ts`. `capture(paneID)` finds the GUI pid by walking parents to `wezterm-gui`, falling back to the `gui-sock-<pid>` name. It reads that pid's frontmost window bounds and the screens through JXA `CGWindowListCopyWindowInfo` (no permission prompt), and reads cols/rows from `wezterm cli list` (`tabSize`, with splits). `placement` converts points to the containing screen's pixels, and treats a window that covers its whole display as `{ fullScreen: true }`.
+- `tui/src/reviveCommands.tsx`: `revive()` captures the window before exiting, because on macOS the window closes with the TUI. That is why `revive.log` always showed "Recording the old panes: failed".
+- `config/revive.ts`: `window` on `ReviveContext`/`RestartContext`, validated by `placement`. `reopenCommand(restart, platform)`: on darwin, WezTerm opens with `open -n -b com.github.wez.wezterm --args [--config initial_cols/rows] start --always-new-process [--position x,y] --cwd ~ -- ...`, plus env `OC_REVIVE_FULLSCREEN` set to `1` or `0`. `reviveHost.ts` passes `window` along on both reopen paths. `resident.ts` `awaitLaunch` gets an `{ exit }` option, so a failed `open` is reported.
+- Probe findings: `open` passes the caller's env on, and LaunchServices brings the window to the front. `--config` after `start` makes `open` exit 0 with no window. `--position` is in pixels (100,200 landed at 50,100 points at 2x).
+- wezFig `gui-startup` toggles full screen when `OC_REVIVE_FULLSCREEN=1` (separate repo, own note). Wiki `Launching.md` documents the snippet for other configs. `FORK.md` revive row and `docs/dev/macos.md` updated.
+- Tests: `revive.test.ts` adds a darwin reopen/parse case and pins the existing WezTerm cases to `"win32"`. New `core/test/util/weztermWindow.test.ts` covers placement and tabSize.
+- Verification: a probe in `test/tmp/verify` ran the real `reopenCommand` + `awaitLaunch` with `sleep` in place of oc. The window opened at exactly 120,90 and was frontmost. With full screen, the bounds equaled the display and `placement` read them back as full screen. `capture()` on the live window gave `{x:0,y:76,cols:214,rows:77}`; reopening with that came back 3 px shorter (cell rounding). Probe folder deleted. `revive.test.ts` 17 pass, core test 2 pass; typecheck clean in core, opencode, and tui.
+- Live: after the install revive, a second real `/revive` reopened the window at 0,38 1728x1076, the size `capture()` measured (3 px short of the old window), and `open` returned in 0.1 s (`revive.log`).
+- /pass: `capture` and `tabSize` now treat unreadable JSON as "no placement" instead of throwing, so `/revive` can't fail on it.
+- Not done: Windows and Terminal.app windows still open at their default spot. `buildNotes.md` archive rotation is still due.
+
+### User
+Revive
+- On the Mac in WezTerm, `/revive` reopens the window in front of other apps, at the same position and size it had. A full-screen window comes back full screen when your WezTerm config has the small `gui-startup` snippet from the wiki (your wezFig config already does).
+
+---
+
+## 2026-11-08 (~23:18) - v0.2.339 pagedRepublished - clear note when a Claude account cannot use a model (Mythos) - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation (/imp of plan `docs/dev/mythosAccessPlan.md`); completed
+- Version: 0.2.339 pagedRepublished
+- Added `isModelNotFound` and `formatModelAccessNote` in `provider/claude-code/cliEvents.ts`. The CLI tags its 404 reply ("There's an issue with the selected model ... Run --model") with `error: "model_not_found"`. The note reuses `ACCOUNT_BLOCK_MARKER`, names the pool account and model, and points at the Fable twin when there is one.
+- Added `catalogTwin` (Mythos to Fable, keeps `-fast`, `Object.hasOwn` guard) and `modelName` (registered display names without `(N×)`, filled in `claudeCodeModels`) to `models.ts`.
+- `turnStream.ts`: `modelNotFound` is set in `handleMessage` next to `accountBlock`. In `onResult` it writes the note and sets `resultFailure = "model_not_found"`, so the turn finishes as an error instead of `stop`. The note is not gated on `is_error`: the flag only comes from that CLI error.
+- Tests: unit cases in `cliEvents.test.ts` and `configModels.test.ts`, plus a fake-model scenario "a model the account cannot use fails the turn with a note naming its twin" in `fakeModel.test.ts`. CLI 2.1.319 retries a streaming 404 once without streaming, so the scenario queues the 404 twice.
+- Wiki `Troubleshooting.md`: new error entry. AGENTS.md: recorded 3 macOS fakeModel failures that also fail on clean `main`.
+- Verification: `cliEvents` + `configModels` 22/22 pass; the new scenario passes; full `fakeModel.test.ts` + both unit files 47 pass / 3 fail, and those same 3 fail on stashed clean `main`; `bun run typecheck` in `packages/opencode` is clean.
+- ERROR: fakeModel "claudeTestFlow steps 1-2" (`/var` vs `/private/var` working dir), "step 4" (4 requests instead of 3), and "an API error the CLI reports twice shows once" fail on macOS without this change.
+- Not done: `buildNotes.md` is past 1000 lines (1141); archive rotation is due.
+
+### User
+Claude Code
+- When your Claude account can't use the chosen model (for example Claude Mythos 5.1, which is invite-only), the chat now names the account and tells you to pick Claude Fable 5.1, and the turn shows as failed instead of as a normal reply.
+
+---
+
+## 2026-11-08 (~23:05) - v0.2.338 dalkErdtree - PowerShell updates on macOS - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation (/imp of plan `~/.config/opencode/plans/pwshUpdateMac.md`); completed
+- Version: 0.2.338 (not bumped: the concurrent 22:57 session already bumped it since the last commit)
+- Added `tui/src/pwshUpdateMac.ts`: detects how the first `pwsh` on PATH was installed (real path + `pkgutil --pkg-info com.microsoft.powershell`) and updates it that way. pkg = GitHub `.pkg` download (final host allowlist, OCSTEP/OCPROGRESS lines), `pkgutil --check-signature` must show Developer ID + notarized + exact signer `Developer ID Installer: Microsoft Corporation (UBF8T346G9)`, then `osascript ... installer -pkg ... with administrator privileges` (-128 = cancelled). brew formula = `brew update` + `brew outdated --json=v2` check, `brew upgrade powershell`. dotnet tool = NuGet flat-container latest stable, `dotnet tool update --global PowerShell`. tar.gz archive / unknown path = check only, new `manual` result.
+- Note: Homebrew cask `powershell` no longer exists (formula only, no sudo); old cask installs carry the pkg receipt, so they take the pkg path.
+- Changed `desktopUpdate.ts` `DesktopCheckResult`: optional `note` (confirm text per check) and `manual` failure flag.
+- Changed `harnessUpdate.ts`: `POWERSHELL_MAC` harness, Update all includes it on darwin, `manual` status ("Update by hand" summary group, info toast), confirm uses `pending.closes` (check note or harness text). `updateProgress.ts`: phase "update by hand".
+- Changed `ocCommands.tsx`: darwin-only "Update PowerShell" entry; Update all desc says "and PowerShell" on Mac.
+- Deviation from plan: Mac module has its own inflight set (did not export desktopUpdate's); install re-detects the method instead of carrying it from the check (expected-version guard still applies).
+- Verification: `bun run typecheck` (tui) clean; `test/pwshUpdateMac.test.ts` (real captured `pkgutil --check-signature` of the 7.6.9 pkg, brew JSON) plus pwshUpdate/updateProgress: 20 pass; live probe `checkPowershellMac()` on this Mac returned pkg install, 7.6.5 -> 7.6.9 (probe deleted). Full tui suite: 801 pass, 3 fail (dependencies "finds Git Bash from git's cmd folder only" also fails without this change; watcher burst and sessionTab launcher tests do not touch these files). Download/signature/install path not run end to end: needs the user's password prompt.
+- MISTAKE: used `git stash` / `stash pop` to confirm a pre-existing failure while another session had uncommitted work in the tree; it popped back cleanly, but AGENTS.md forbids re-proving with stash. Rule: never stash in this repo; judge failures by whether the failing test touches changed files.
+
+### User
+Third party updates
+- On macOS, "Update all" now also updates PowerShell 7, and a new "Update PowerShell" palette entry does it alone.
+- oc updates PowerShell the same way it was installed: Microsoft's installer (asks for your Mac password), Homebrew, or the .NET tool.
+- PowerShell installed from a tar.gz archive or an unknown place is checked but not touched; the summary lists it under "Update by hand".
+
+---
+
+## 2026-11-08 (~22:57) - v0.2.338 dalkErdtree - paste into dialogs and the palette - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation (spitball plan then /imp); completed
+- Version: 0.2.338 dalkErdtree (bumped earlier this session, not again)
+- Fixed: ctrl+v (and Cmd+V on macOS, which wezFig sends to oc panes as ctrl+v) pasted nothing in the palette filter, `DialogPrompt`, and question/permission text boxes. `input_paste` was bound only on the main prompt's input target (`component/prompt/index.tsx` `prompt.paste`), so other editors got a bare control byte. Likely the same on Windows WezTerm.
+- Added `tui/src/editorPaste.ts` `useEditorPaste()`, called from `app.tsx`: a global layer on the `prompt.paste` keys, enabled while `renderer.currentFocusedEditor` is a `TextareaRenderable`, reads `useClipboard().read()` and `insertText`s `text/plain` (InputRenderable strips newlines; DialogSelect `onInput` fires so the list filters). `priority: -1`: a probe showed that at equal priority the global layer beat the prompt's targeted layer (image paste would break).
+- Added a ctrl+v case to `test/cli/tui/dialog-prompt.test.tsx` (fake `ClipboardProvider`); confirmed it fails without the hook.
+- Verification: probes (since deleted) for the DialogSelect filter (filters to the pasted text) and targeted-layer precedence passed; tui `bun run typecheck` clean; `bun test test/cli/tui test/keymap* test/component`: 231 pass, 2 skip. Not run live.
+
+### User
+Paste
+- Ctrl+V (Cmd+V on Mac) now pastes text into the command palette search, dialog text boxes, and question and permission replies.
+
+---
+
+## 2026-11-08 (~22:52) - v0.2.338 dalkErdtree - Jev key palette entry, no missing-key toast - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation (spitball plan then /imp); completed
+- Version: 0.2.338 dalkErdtree
+- Added auth.json fallback to `apiKey()` in `opencode/src/tool/jevClient.ts`: `TYPESAFE_API_KEY` wins, else `typesafe` api entry from `Global.Path.data/auth.json`, read sync and cached by mtime (registry filter calls it per tool listing, so a saved key applies without restart). Missing-key error text points at the palette entry.
+- Replaced the "Jev key missing" toast in `provider/claude-code/proxyToolSelection.ts` with `log.info` (same as cua driverless).
+- Added oc palette entry `oc.jev_key` ("Jev key", group "Tools", `/jevKey`) in `tui/src/ocCommands.tsx`: desc set/not set via `storedJevKey()` (reads auth.json, never shows the key); saves with `sdk.client.auth.set({ providerID: "typesafe" })`, Replace/Clear via `auth.remove`. No `instance.dispose()` (not needed since the key is read live). `typesafe` in auth.json is ignored by the provider loader (`mergeProvider` returns when models.dev has no such id).
+- Added `opencode/test/tool/jevClient.test.ts` (env precedence, fallback, mtime refresh, malformed file); updated `proxyOpencodeTools.test.ts` to expect no Jev toast.
+- Updated wiki `Agents-and-Skills.md` and `FORK.md` Jev rows.
+- Verification: `bun test` jevClient, skillHint, proxyOpencodeTools: 9 pass. `bun run typecheck` in opencode and tui: clean. Palette entry not checked live (needs a build).
+
+### User
+Jev
+- New oc palette entry "Jev key" (also `/jevKey`) saves, replaces, or clears your TypeSafe key, and the jev tools turn on without restarting oc.
+- A missing Jev key no longer shows a warning toast when Claude Code lists jev tools.
+
+---
+
+## 2026-11-08 (~22:04) - v0.2.337 blechNeeed - usage sidebar on macOS - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation (plan `docs/dev/usageSidebarMac.md`); completed
+- Version: 0.2.337 blechNeeed
+- Fixed Claude usage on macOS (`usage/claude.ts`): `readClaudeOauth` reads the login Keychain via `security find-generic-password -a <user> -s <service> -w` first, then `.credentials.json`. `claudeKeychainService`: bare `Claude Code-credentials` for the default dir (no `CLAUDE_CONFIG_DIR`), else `-<sha256(dir).hex[:8]>` (matches the stored `~/.claude2` item `4de14e5d`). Moved the default-dir rule to `isDefaultClaudeDir` (shared with `plans.ts` `claudeProfilePath`). Pool reports `signed-out` when every account is. Test seams `platform`/`claudeKeychain` on `UsageOptions`.
+- Added `reason: "no-credentials"` to OpenAI, OpenCode Go, OpenRouter, and Cursor probes, decided before any request. Cursor: an expired desktop `cursorAuth/accessToken` JWT counts as no credentials (on this Mac the desktop token and its refresh token expired 2026-10-15; `oauth/token` answered `shouldLogout`).
+- Changed `SidebarSettings.usageProviders` to optional: unset means auto (every provider probed; shown when its last probe found a login, `logins` kept in `keptUsage`). Removed `DEFAULT_USAGE_PROVIDERS`; `saveUserUsageProviders(home, undefined)` drops the key. Provider dialog gained **Show connected providers**.
+- Collapsed two-line `unavailable` fallbacks to one line (`fallbackRow`), with `not connected` / `run /connect` / `run claude auth login` / `sign in` wording; plan line hidden when the provider has no data and no date.
+- `resolveAuthPath` now always uses xdg data (`~/.local/share/opencode/auth.json`, as `Global.Path.data`); dropped the wrong win32/darwin branches and the fallback list.
+- Verification: `bun run typecheck` in `packages/tui` clean; `bun test test/feature-plugins/openSidebar.test.ts` 79 pass, `bun test test/cli/tui` 166 pass (new: Keychain service names, Keychain-before-file on darwin, expired Cursor desktop JWT, auto default). Live probes on this Mac: openai ok, go/openrouter/cursor `no-credentials`, claude2 ok live from Keychain. Not seen in a running TUI yet (needs `/revive`).
+
+### User
+Usage sidebar
+- On macOS, Claude usage now works: oc reads the Claude login from the Keychain, where Claude Code keeps it.
+- Until you pick providers, the sidebar shows only the ones you are signed in to; picking any saves your own list, and **Show connected providers** in the provider picker goes back.
+- A provider without a login now takes one line (`not connected`, `run /connect`, `sign in`) instead of repeating `unavailable`.
+- An expired Cursor desktop login shows as signed out without a wasted request.
+
+---
+
+## 2026-11-08 (~21:30) - v0.2.336 girlcockCloseted - macOS oc keys on cmd - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation; completed (live cmd-key check needs a Mac build)
+- Version: 0.2.336 girlcockCloseted
+- Added `TuiKeybindPreset.mac` (`tui/src/config/keybindPreset.ts`): on top of the oc preset, every binding containing `ctrl+` becomes `super+`, except `macKeepsCtrl` (leader, app_exit, terminal_suspend, dialog.close, rename copy, dialog/autocomplete prev/next) and names starting `input_`, `messages_`, `which_key_`. Derived from `Definitions`, so new app shortcuts default to cmd on Mac.
+- Added optional `macKeys` to `TuiConfig.ResolveOptions`; `resolveKeybinds` layers `mac` only for the `oc` preset. Callers pass `process.platform === "darwin"` (`opencode/src/config/tui.ts`, `cli/cmd/run/runtime.boot.ts`). Tests omit it, so existing ctrl expectations hold. User `keybinds` still win.
+- Hints show `cmd` on darwin (`modifierAliases.super` in `tui/src/keymap.tsx`); Keybind layout description and root picker favorite interceptor/footer (`rootPicker.tsx`) use cmd+ on darwin.
+- The one-time Keyboard notice (`app.tsx`, no kitty protocol) names the Cmd keys on darwin instead of Ctrl+M/Ctrl+Shift+H.
+- `super` reaches oc only through the kitty keyboard protocol. WezTerm 20240203 `SendKey` drops SUPER (captured: forwarded cmd+n arrived as plain `n`), so the forwarding snippet sends `\x1b[<code>;9u` with `SendString`; confirmed in a raw key capture tab (`ESC[114;9u` for cmd+r). WezTerm macOS defaults own cmd+m/n/t/r/h/k/f; `docs/wezterm.md` "macOS cmd keys" forwards them to panes with `oc_tui=1`.
+- Outside the repo: made the user's wezFig config (Windows `C:\Users\Foster\Documents\GitHub\wezFig`, uncommitted) cross-platform (`mac` via `wezterm.target_triple`, pwsh/node full paths, cmd+c/v and cmd forwarding, wezCord unix socket + pgrep watcher); Mac wezFig clone reset to origin/main (old state in branch `mac-old` + stash) with those files copied; Mac `~/.config/wezterm/wezterm.lua` and `~/.wezterm.lua` now dofile it (old files `*.mac-old`). Wiki `Keybinds.md` gained a macOS section (Windows clone, uncommitted).
+- Fixed: push from macOS failed in the husky pre-push hook (`set: -\r: invalid option`). `.gitattributes` pins `.husky/*` and shebang scripts to LF, but `setCrlf` (`scriptHelper.ps1`) converted every changed file to CRLF regardless, and 11 LF-pinned files sat with CRLF on disk in both checkouts (git calls them unmodified when only line endings differ; the Mac copy came from an rsync). Renamed it `setLineEndings`: modified and untracked files whose `check-attr eol` is `lf`, plus tracked `w/crlf attr/text eol=lf` files from `ls-files --eol`, go to LF; the rest to CRLF as before. New `.scripts/tests/lineEndings.tests.ps1` (throwaway repo; fails on the old function). Fixed the 11 files in the Windows checkout directly.
+- Installed `scc` on the Mac (Homebrew); `prePush.ps1` `countCode.ps1` needs it.
+- ERROR: first `agentPush.ps1` run on macOS: line 1 over 72 chars, then `scc is not on PATH`, then the husky CRLF failure above; the unpushed local commit 488dd2e453 was soft-reset and redone with the fix.
+- Verification: `pwsh .scripts/tests/lineEndings.tests.ps1` passes on macOS; tui `bun run typecheck` and opencode `bun run typecheck` pass; `test/config.test.tsx` (new macOS case), `hotkeyValidate`, `keymap` tests pass (40); `keybindDocs.ts --check` passes; `wezterm show-keys` loads the new config with the 9 SUPER callbacks; `node --check` on wezCord. Not run: real cmd keypresses into an oc build.
+
+### User
+macOS
+- On a Mac, oc shortcuts use Cmd instead of Ctrl: Cmd+O oc commands, Cmd+P all commands, Cmd+M models, Cmd+S sessions, and the same for list and dialog keys.
+- Typing and terminal keys stay on Ctrl (the Ctrl+X leader, Ctrl+C, prompt editing, Ctrl+P/Ctrl+N in lists), and key hints show "cmd".
+
+---
+
+## 2026-11-08 (~21:35) - v0.2.335 dmcInvested - no cua warning without cua-driver - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation; completed
+- Version: 0.2.335 dmcInvested
+- Fixed: every new Claude session on macOS toasted "Config entry ignored ... proxyOpencodeTools lists tools oc does not have: cua_windows, ...". The registry hides `cua_*` until cua-driver is installed (`CuaDriver.driverPath()`), and the shared `opencode.jsonc` lists them. `resolveProxyOpencodeToolDefs` (`provider/claude-code/proxyToolSelection.ts`) now skips `cua_*` entries with only an info log when no driver is found, like the jev keyless case.
+- Verification: `bun run typecheck` in `packages/opencode` passed; `proxyOpencodeTools.test.ts` (new case, skipped where cua-driver is installed) and `proxyMcp.test.ts` pass.
+
+### User
+Claude sessions
+- No more "Config entry ignored" notice about cua tools on machines without cua-driver (macOS).
+
+---
+
+## 2026-11-08 (~21:20) - v0.2.334 forgivingMoister - oc folder setting renamed User folder - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation; completed
+- Version: 0.2.334 forgivingMoister
+- Renamed the `oc.oc_dir` palette entry title "oc folder" and its prompt dialog title "oc directory" to "User folder" (`tui/src/ocCommands.tsx`). Command name, `/ocDir` slash name, and the `ocDir` config key are unchanged.
+- Verification: string-only change; no tests reference either title. Wiki clone (`../oc.wiki`) not present on this machine, so wiki not checked.
+
+### User
+oc settings
+- The "oc folder" setting in the oc palette is now called "User folder".
+
+---
+
+## 2026-11-08 (~21:10) - v0.2.333 bongarinoFroggy - oc settings save without executable key; macOS revive ledger - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation; completed
+- Version: 0.2.333 bongarinoFroggy
+- Fixed: `persistOcConfig` (`tui/src/ocSettings.ts`) toasted "OpenCode executable is not configured" and saved nothing whenever `oc.json` had no `executable`, which nothing in the repo or installer writes (fresh macOS install). Every oc palette setting (session model/agent, home dir, home dir sort, oc dir, start at login) and Claude failover were broken.
+- Now `executable` is an optional override; the fallback is `Global.resolveExecutablePath()` in the oc binary. In native `opencode` the fallback is the sibling `oc` binary, because native rejects `oc` commands (`opencode/src/index.ts:175`). Under `bun dev` it reruns `process.argv[1]`. The child gets `OC_FLAVOR=oc`, so a native `bun dev` run is not rejected; compiled builds ignore it.
+- Verification: `bun run typecheck` in `packages/tui` passed. With temp `XDG_*` and `OPENCODE_DB`: `oc config set` succeeded and wrote `oc.json` from installed `~/.local/bin/oc` and from `bun run src/index.ts` with `OC_FLAVOR=oc`. Installed `opencode oc config set` exits 1 with the native rejection, which is why native uses the sibling `oc`. The TUI path was not run live.
+- Fixed: macOS `/revive` failed with "TUI ledger identity unavailable or changed: <pid>.json". `cli/tui/layer.ts` wrote `<pid>.identity.json` (`TuiLedger.register`) only on win32, but since v0.2.332 `TuiLedger.read` (revive, resident stop) reads ledgers on darwin through `ProcessDarwin.list`. Now it registers on darwin too.
+- Wrote identity files once via `TuiLedger.register` for the user's two live oc tabs (pids 69157, 70443, old build), so the next `/revive` can pass. Checked in a bun probe: `sameIdentity` and `sameExecutable` hold for both (live exe is the `occ` hard link, which resolves to `oc`). `opencode` typecheck passed.
+- ERROR: `/revive` at v0.2.332 failed on macOS with the error above.
+
+### User
+oc settings
+- Changing oc settings from the palette (home dir, sort, oc dir, session model/agent, start at login, Claude failover) works again instead of showing "OpenCode executable is not configured".
+
+revive
+- `/revive` on macOS no longer fails with "TUI ledger identity unavailable or changed".
+
+---
+
+## 2026-11-08 (~20:58) - v0.2.332 earthquakeScience - PDFs stored as binary - Claude Opus 5.5, low effort; Agent
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Agent; completed
+- Version: 0.2.332 earthquakeScience (`.gitattributes` and docs only, no bump)
+- Fixed: `.gitattributes` `*.pdf binary`. `claude-agent/fixtures/marker.pdf` (1369 B, no NUL) was guessed text by `* text=auto eol=crlf`; fresh checkouts (Mac clone) CRLF-converted it, shifting its byte offsets, and every rsync from the PC (LF copy) showed it modified. Only tracked binary-type file `git ls-files --eol` reported as text.
+- Removed the `git checkout --` workaround note from `docs/dev/macos.md`.
+- Verification: PC and Mac `git ls-files --eol` show `attr/-text`; Mac worktree hash equals blob `a06d95a8`, 0 CR bytes, `%PDF-1.3\n` header; after `git add` refreshed the stale index stat, Mac status shows only the three edited files.
+
+### User
+Repository
+- Test PDFs no longer get their line endings converted on checkout, so the Mac copy stays clean after syncs; no UI change.
+
+---
+
+## 2026-11-08 (~20:53) - v0.2.332 earthquakeScience - Mac build copy moved to Documents - Claude Opus 5.5, low effort; Agent
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Agent; completed
+- Version: 0.2.332 earthquakeScience (docs-only in repo, no bump)
+- Moved: Mac build mirror is now `~/Documents/GitHub/oc` (GitHub clone, `bun install` done there). Rsynced from `/Volumes/C`; deleted `~/dev` (`oc` 5.4G, plus `ocAfter`, `ocBase`, `ocBaseline` test-run leftovers from the macOS-support session) and this session's `.bak-ocpath` backups.
+- Fixed: `docs/dev/macos.md` sync command uses `rsync -rlt`, not `-a`: the SMB share reports every file `rwx------`, so `-a` flagged 2972 mode changes (repaired from the git index). macOS openrsync has no `--chmod`.
+- Risk: every sync flips `src/packages/opencode/test/plugin/provider/claude-agent/fixtures/marker.pdf` (Windows working copy is eol-converted); noted in `macos.md` with the `git checkout --` fix. A `*.pdf binary` gitattributes rule would remove it; not done.
+- Updated `~/dev/oc` references: PC `principles.md`, `skills/foster/ssh/SKILL.md`, `plans/macosSupport.md`; Mac `principles.md`, `plans/macosSupport.md`, `opencode.jsonc` (revive script permission paths).
+- Verification: Mac clone `git status` after resync shows only the two docs files; no `dev/oc` refs left in Mac config; deleted paths confirmed gone.
+
+### User
+macOS dev setup
+- The Mac now builds oc from `~/Documents/GitHub/oc`, and the old `~/dev` copies are gone; no UI change.
+
+---
+
+## 2026-11-08 (~20:45) - v0.2.332 earthquakeScience - Mac pwsh PATH for builds - Claude Opus 5.5, low effort; Agent
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Agent; completed
+- Version: 0.2.332 earthquakeScience (docs-only in repo, no bump)
+- ERROR: `build.ps1` in Mac WezTerm failed "The term 'bun' is not recognized". WezTerm `default_prog` runs pwsh directly, so PATH is launchd's bare default; the `.zshenv` block from the previous entry never applies.
+- Fixed: Mac `~/.config/powershell/Microsoft.PowerShell_profile.ps1` line 337 (was `~/.local/bin` prepend) now prepends `~/.bun/bin`, `~/.local/bin`, `/opt/homebrew/{bin,sbin}`, `/usr/local/bin`, deduped. Backup `.bak-ocpath` beside it.
+- Updated `docs/dev/macos.md` dev-loop bullet with the pwsh profile.
+- Verification: pwsh started with `env -i` and the bare launchd PATH resolves bun 1.4.2+744846f84, git, node, brew, pwsh, tar. User has not rerun the build yet.
+
+### User
+macOS dev setup
+- PowerShell windows on the Mac now find Bun and the Homebrew tools, so the build script can start; no UI change.
+
+---
+
+## 2026-11-08 (~20:40) - v0.2.332 earthquakeScience - Mac build toolchain and ssh PATH - Claude Opus 5.5, low effort; Agent
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Agent; completed
+- Version: 0.2.332 earthquakeScience (docs-only in repo, no bump; tag rerolled at push)
+- Kept: Mac already had Bun 1.4.2+744846f84 (arm64, matches `src/package.json` pin), pwsh 7.6.5, git 2.55, node 26 (brew), Xcode, rsync, tar, wezterm. No installs needed.
+- Synced `~/dev/oc` mirror (rsync, no `--delete`); `bun install --frozen-lockfile` there: no changes.
+- Added block to Mac `~/.zshenv` (backup `~/.zshenv.bak-ocpath`), gated on non-interactive and `~/.bun/bin` missing from PATH: prepends `~/.bun/bin`, `~/.local/bin`, `/opt/homebrew/{bin,sbin}`, `/usr/local/bin`. Plain `ssh mac cmd` previously had only cargo + system paths.
+- Fixed in pass: first version gated only on non-interactive, so zsh scripts started from a terminal re-prepended Homebrew and swapped nvm node 22 for brew node 26. Inherited PATHs are now untouched.
+- Updated `docs/dev/macos.md` dev-loop bullet: manual PATH export no longer needed; listed build toolchain.
+- Verification: plain ssh `command -v` resolves bun/pwsh/git/node/brew/wezterm/rsync/tar; pwsh sees bun; `zsh -lic` still resolves the same bun/pwsh/git. No build run.
+
+### User
+macOS dev setup
+- The Mac has the pinned Bun 1.4.2 and the other build tools, and they are now on PATH for one-off ssh commands too, so no manual PATH export is needed; no UI change.
+
+---
+
+## 2026-11-08 (~20:28) - v0.2.332 elantraHomiez - pass on macOS support: non-blocking Mac browser scan - Claude Opus 5.5, low effort; Pass
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Pass (/pass + /agent-push); completed
+- Version: 0.2.332 elantraHomiez
+- Fixed `tui/src/util/browser.ts` `scanMacBrowsers`: one `Bun.spawnSync` plutil per .app blocked the TUI thread ~0.6 s when the Link browser picker opened; now async `Bun.spawn` + `Promise.all`, dedupe by bundle id after (first sorted path wins).
+- Kept: stale-reference search clean (only intended `startOnWindowsUserStart` fallback remains); new tests `killall.test.ts` (safety contract) and darwin revive/startup tests meet the keep bar.
+- Risk: `sessionTab.ts` Terminal.app attach script (0600, per-user tmp, holds the server password) is left behind if osascript fails before the script runs.
+- Verification: tui typecheck exit 0; Mac probe `scanBrowsers()` 134 ms (was ~611 ms), same 4 browsers (Firefox, Hammerspoon, iTerm2, Safari). Spawning ~100 plutil processes still holds the event loop briefly.
+
+### User
+macOS
+- Opening the link browser picker on a Mac no longer freezes the TUI while it looks for installed browsers.
+
+---
+
+## 2026-11-08 (~20:01) - v0.2.332 elantraHomiez - first macOS build and install - Claude Opus 5.5, low effort; Agent
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Agent (user asked for build/install + light tests over ssh); completed
+- Version: 0.2.332 elantraHomiez
+- ERROR: `build.ps1` on the Mac mirror failed: `packages/script/src/index.ts` runs `git branch --show-current`; rsync mirror had no `.git`. Fixed by cloning `.git` from the share (`git clone --no-checkout`, move `.git`, `git reset`). Documented in `docs/dev/macos.md`.
+- Built `~/dev/oc` on Mac: `opencode-darwin-arm64/bin/oc` and native `opencode` pass `--version` (0.2.332-main-202611090059). Installed with `install.ps1 -NoBuild` to `~/.local/bin`: `occ` hard link (same inode), `codesign --verify` ok for both, `cursor-runtime` copied.
+- Verified on Mac: `oc` resolves from `/tmp` in zsh login and pwsh with profile (WezTerm `default_prog` = pwsh); `oc oc server start` healthy on 4096, state has libproc `created`, secret `-rw-------`, lsof shows the server pid; second start reuses pid; `oc oc killall --dry-run` targets only the server, keeps own shell chain; `oc --kill-server` stops it and clears state; `oc` in a `script` pty starts the server, attaches, renders Home (Ask anything, Build), no error text.
+- Note: Mac WezTerm config has no `enable_kitty_keyboard`; the keyboard notice will show once.
+- Not checked: interactive TUI use in WezTerm, `/revive`, subagent tabs, sign-in startup, Terminal.app windows.
+
+### User
+macOS
+- oc is built and installed on the Mac in `~/.local/bin`; typing `oc` in any WezTerm tab starts it.
+
+---
+
+## 2026-11-08 (~19:51) - v0.2.332 elantraHomiez - macOS (Apple Silicon) support alongside Windows - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation (after /spit plan `~/.config/opencode/plans/macosSupport.md`); 3 Opus subagents (.claude1/.claude3: scripts, feature rows, killall); completed, not built or installed
+- Version: 0.2.332 elantraHomiez
+- Added `core/src/util/processDarwin.ts`: libproc via `bun:ffi` (`proc_listallpids`, `proc_pidinfo` PROC_PIDTBSDINFO, `proc_pidpath`), lazy dlopen; `created` = FILETIME ticks so identity math matches CIM. `ps comm` is argv[0] (`zsh`), unusable for identity.
+- Changed `ProcessTree`: `identitySupported` (win32/darwin), exported `snapshot`, darwin `processIdentity`, TS `stopTreeDarwin` (verify all, then per item re-read, SIGKILL, wait 5 s; created changed = already exited; exe changed = refuse).
+- Changed callers from `platform === "win32"` to `identitySupported`: `tuiLedger.ts`, `resident.ts` (state identity, startup lock, `forceKill`), `oc.ts` shellIdentity, `shellJobs.ts`, `scheduledDelivery.ts`; `descendants.ts` darwin capture (name rule + `ps command` for `--revive`).
+- Added `resident.ts` `parseLsofListeners` + darwin `lsof` port owner; secret file `0600` on POSIX.
+- Added terminal kind `terminal-app` (`TERM_PROGRAM=Apple_Terminal`), `terminalAppScript`/`shellQuote` in `core/util/terminal.ts`. revive generic/terminal-app on darwin = osascript new window (flavor on command line); `closeWindow` reads shell tty, kills shell, closes single-tab Terminal window; `isShell` ignores `.exe`; `resolveLauncher` keeps the exe's extension; `/usr/bin/tar` for release unpack and `build.ts` release zips.
+- Added Terminal.app subagent tabs (`sessionTab.ts`; attach password goes through a self-deleting 0600 script, never the typed line); script runner native launch on darwin = Terminal.app window; `scriptTerminals`/`resolveScriptTerminal` treat terminal-app like generic.
+- Added subagent work: `.scripts` pwsh on Mac (`$exeSuffix`, darwin dist paths, `~/.local/bin`, codesign verify then ad-hoc sign, darwin zips optional in pushRelease); clipboard dedupe (`scriptRunner` uses `clipboard.ts`); editor fallback `open -t`; `/Applications` browser scan (needs http/https scheme + public.html); LaunchAgent startup (+ enabling shell PATH); setting rename `server.startAtLogin` / `serverStartAtLogin` (old key read, dropped on save); es.exe hint Windows-only.
+- Replaced `tui/src/killall.ps1` with hidden `oc oc killall [--report] [--dry-run] [--yes] [--pause]` (`opencode/src/cli/killall.ts`, test `test/cli/killall.test.ts`); removed `script.d.ts` (tui, opencode).
+- Added `.gitattributes` `eol=lf` for shebang scripts (husky, install, bin/opencode, release scripts, `*.sh`).
+- Docs: `docs/dev/macos.md` (dev loop, Mac test baseline), FORK.md (intro, sign-in, killall, new macOS row; counts 34 medium / 119), SCOPE.md (4 macOS rows), wiki Configuration/FAQ/Home/Launching/Troubleshooting.
+- Verification: typecheck core/opencode/tui exit 0. Windows covering tests pass (core 19, opencode 75, tui 86 + 2 skip, revive 26). Mac probes: identity, async ledger, tampered identity refused, tree stopped children first, `captureDescendants`, lsof parse, osascript output compiles (`osacompile`). Mac full suites: core 4 fail = pre-change baseline; opencode 24 fail on clean HEAD f822a27, none new after changes (list in `docs/dev/macos.md`). Killall dry-run on both OSes (agent). Not run: any build, install, LaunchAgent registration, real kill, Terminal.app/WezTerm window launch.
+- Test changes: `sessionTab.test.ts` (intended: terminal-app available, wording-free), `openSidebar.test.ts` (intended: darwin native launch = osascript; clip.exe test removed with code), `revive.test.ts`/`startup.test.ts` Windows-path tests now `skipIf(!win32)` (they failed on Mac at HEAD), new darwin revive test, `oc.test.ts`/`editor.test.ts` (intended).
+- MISTAKE: first subagent dispatch used Haiku/Sonnet; user wants Opus only and on Claude accounts other than the main agent's (.claude2). Rule: subagents = `general-opus.5.5-claude1-*` / `claude3-*` when the main agent runs on .claude2.
+- MISTAKE: first AppleScript for closing Terminal windows used `tell ... to` around a multi-line repeat; fixed to a tell block and compile-checked. Rule: compile every generated AppleScript with `osacompile` on the Mac.
+- ERROR: Git Bash ssh lacks the Mac key (`Permission denied (publickey)`); use the PowerShell tool for ssh.
+- Risk: PowerShell profile `killai` still runs the removed `killall.ps1`.
+- TODO: user builds/installs on Mac (`build.ps1`, `install.ps1 -NoBuild`) and live-checks launch, attach, `/revive` (WezTerm + Terminal.app), subagent tabs, killall dry run, sign-in startup; rebuild/install on Windows.
+
+### User
+macOS support
+- oc now builds and runs on Apple Silicon Macs from the same source as Windows; it has passed tests on a Mac but has not been built or installed there yet.
+- On a Mac, revive, `/revive-single`, subagent tabs, and sidebar scripts open WezTerm or a new Terminal.app window.
+- `.scripts/build.ps1` and `install.ps1` run under PowerShell 7 on a Mac and install to `~/.local/bin`.
+
+Settings
+- "Start server at sign-in" works on Windows and macOS (macOS uses a LaunchAgent); the setting is now `server.startAtLogin` and the old name still works until the next save.
+- The link browser picker lists browsers installed in `/Applications` on a Mac.
+
+Processes
+- Kill all AI processes and the process report are now built into oc (`oc oc killall`) on Windows and macOS, with a `--dry-run` option; the PowerShell script is gone.
+
+---
+
+## 2026-11-02 (~21:37) - v0.2.331 teresaCold - built-in /prompt handoff command with auto-copy - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation (after /spit plan `~/.config/opencode/plans/2026-11-02-native-prompt-command.md`); completed
+- Version: 0.2.331 teresaCold
+- Added built-in `/prompt` (`Command.Default.PROMPT` in `opencode/src/command/index.ts`, template `command/template/prompt.txt`): self-contained handoff prompt in one four-backtick `text` block, `$ARGUMENTS` focus, turn `permission: { edit: "deny" }` (covers edit/write/apply_patch)
+- Added `tui/src/routes/session/handoffCopy.ts`: `handoffTurn` (newest finished turn whose user text part has `ocCommands` incl. `prompt`, joins all assistant steps with that parentID; skips aborted/error/`tool-calls`/unfinished) and `handoffText` (CommonMark fence scan, last top-level `text` block else last block, unclosed = nothing)
+- Changed session route (`routes/session/index.tsx`): `copyHandoff` deduped by assistant id; called on `session.status` idle after busy/retry for the shown session (blurred too) and from the unread-acknowledge effect. Ack effect now also waits for `synced()` so first-view copy has messages
+- Added `tui/test/routes/handoffCopy.test.ts` (guards nested-fence extraction and turn matching)
+- Removed user's `~/.opencode/commands/prompt.md` (user-approved; it shadowed the built-in, seen in the probe)
+- Docs: wiki `Agents-and-Skills.md` `/prompt` bullet (dropped "oc ships no workflow commands"); `FORK.md` row
+- Verification: `bun test test/routes/handoffCopy.test.ts` 6 pass; `bun run typecheck` in tui and opencode exit 0; scratch fake-model probe (copy of `test/session/prompt.test.ts` harness): `Command.get("prompt")` has `$ARGUMENTS` hint and edit deny, `SessionPrompt.command` stamps `ocCommands:["prompt"]` + arguments, edit/write tools absent from the request, assistant `finish:"stop"` with parentID = user message. Probe deleted. Live TUI copy not run (pane test would write the real clipboard)
+- Risk: unrelated `src/bun.lock` and `packages/opencode/package.json` changes were already in the tree; left untouched
+
+### User
+Commands
+- New built-in `/prompt` writes a prompt you can paste into a new session to continue this session's work, and `/prompt <focus>` limits it to one part.
+- When it finishes, oc copies just the prompt to the clipboard and shows "Prompt copied to clipboard", either right away if the tab shows that session or the first time you open it.
+- Code blocks inside the prompt no longer cut it short, and the `/prompt` turn cannot edit files.
+
+---
+
+## 2026-11-02 (~20:31) - v0.2.330 gggggWings - nativeTest restores shared state; model list, dialog title, sidebar usage fixes; agentTester basics locked - Claude Opus 5.5, high effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; high effort; Implementation (handoff `~/.config/opencode/plans/agentTestBasics.md`); completed
+- Version: 0.2.330 gggggWings
+- Added `.scripts\nativeTest.ps1` state snapshot: `-Start` copies `model.json`, `kv.json`, `agent.json`, `frecency.jsonl`, `tui.json`, `claude-code\account-pool.json` + hashes into `C:\ocTestTmp\agentTest\state` (run record `state`, JSON depth 3); `-Stop` restores changed files, verifies hash, lists them; dead-run cleanup drops stale copies. Not covered: `prompt-history.jsonl`, `claude-code\sessions.json`.
+- Changed AGENTS.md `## Agent test`: state restore, no native "Reload oc config", "Allow always" persists per project, new `ocTui` steps `pick`/`reply`, no colors in screen text, recipe file path.
+- Outside repo (see `C:\Users\Foster\buildNotes.md`): `ocTui.ts` fixes + `pick`/`reply`/` ... ` wildcard, recipes `~/.config/opencode/agentTest/ocTuiRecipes.md`, `agentTester.md`, `agentTest.md`.
+- Result: Terra fast low passes every basic action 3/3 first try (groups A-E + regression), 0 false PASS. Action 7 untestable (`plan` disabled). Full log in the plan.
+- Fixed `tui/src/ui/dialog-select.tsx` header: `esc` hint `flexShrink={0}`, row `gap={2}`. A wrapping title ("Switch Claude account (this session)") squeezed the hint and painted over its `e` (`...applies after itssc`).
+- Fixed `tui/src/component/dialog-model.tsx`: new `providerRows` memo (query-independent) + `favorites` memo; `options` only filters/sections them. Cause: every keystroke rebuilt every provider's rows from the sync store (~165 ms/key vs palette ~80). Rows keep identity, so the list also keeps its row views.
+- Fixed `tui/src/routes/session/sidebar-tools/sidebarUsage.tsx`: `keptUsageSignal` keeps the last snapshot per provider in a module `Map`. Cause: hiding the sidebar unmounts the section; a remount started every provider at `{ ok: false }` = "unavailable" until the next fetch (Claude rows hid it via cached observations).
+- Verification: `-Start`/`-Stop` ran 8 times; each `-Stop` restored and hash-checked the changed files. tui `bun run typecheck` clean; tui tests `model-options`, `dialog-select`, `dialogSelectSessionMarkerActions`, `claudeWarmupRendered`, `openSidebar`, `usageFreshness`: 142 pass, 2 skip, 0 fail. Rebuilt native (`nativeTest.ps1 -Start -Build`): model list per key 165 -> 85 ms (palette 81, the polling floor); account dialog title wraps with `esc` intact; sidebar re-show shows Codex values at once; favorites tag + sections unchanged.
+
+### User
+Agent testing
+- `nativeTest.ps1 -Stop` now puts back your model pick, theme and kv settings, current agent, and Claude account pool if a test window changed them, and lists what it restored.
+- `/agentTest` testers now handle every basic oc action (new chat, sending and judging replies, interrupting, queueing, switching model and variant, dialogs, question forms, permission prompts, sidebar, scrolling, toasts, Claude account per chat) right on the first try.
+
+Model list
+- Typing in the model list keeps up with your keys (about twice as fast per key as before).
+
+Dialogs and sidebar
+- A list dialog with a long title, such as "Switch Claude account (this session)", no longer garbles its `esc` hint.
+- Hiding and showing the sidebar keeps the usage numbers on screen instead of flashing "unavailable".
+
+---
+
+## 2026-11-02 (~19:06) - v0.2.329 textrCards - wake turns keep command rules; shared Claude state files reload across processes - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation (plan `~/.config/opencode/plans/ocCloseOutAccountHandoff.md`); completed
+- Version: 0.2.329 textrCards
+- Fixed `session/prompt.ts`: added exported `continuedTurnRules(user, timeline)`; the loop's `lastUser` is now that. A user message whose parts are all synthetic text and that has no `permission`/`toolHost` runs under the previous user message's rules (recursive through chained wakes). Cause: `/agentTest` (`ocTui: allow`) -> background build -> Claude wake prompt (`requestWakeTurn`, `prompt_async`, no rules) -> `prepared.tools` built from global `ocTui: deny` -> `llm.ts:187` "Unknown tool: ocTui". Seen in DB: command msg `msg_19e954574...` had `permission`, wake msg `msg_19e969229...` none.
+- Deviation from plan: plan copied rules at `createUserMessage` with a `findMessage` read; changed to loop-time derivation from already-loaded `timeline` (pure, no DB read, nothing stored, every `lastUser` consumer covered incl. command tool plan `user: lastUser`).
+- Fixed `accounts.ts` + `sessionManager.ts` last-writer-wins: exported `fileStamp(file)` (`mtimeMs:size`); `ensureLoaded`/`loadedSessions` reload (clear + refill) when the stamp changed, `persistPool`/`persistSessions` record the stamp after writing. Removed `loaded`/`claudeSessionsLoaded`. Risk: two same-size writes inside one file-time tick (~16 ms) look alike.
+- Changed `~/.opencode/commands/agentTest.md` step 3 and `agents/sub/agentTester.md` evidence line: end each case on the judged state, save before closing dialogs (v0.2.328 evidence screens lacked the marker).
+- Changed `~/Documents/PowerShell/profile.ps1`: `$_CLAUDE_SHARED` + `projects`, `tasks`; comment updated. Parse-checked (0 errors).
+- Docs: FORK.md Claude Code row (wake rule), pool row (shared-file reload replaces the last-writer-wins risk); AGENTS.md known failures: steering "cancel retires written unread input after visible content" is shell-dependent.
+- Tests: `prompt.test.ts` "an oc-posted synthetic prompt runs under the command rules of the turn it continues" (chained wakes inherit, typed message ends rules); `accountPool.test.ts` cross-process pool and sessions file tests (`utimesSync` models a later write).
+- Verification (all from PowerShell): `test/provider/claude-code` 696 pass 0 fail (716 tests, 62 files); `test/session/prompt.test.ts` 72 pass; `bun run typecheck` clean.
+- MISTAKE: bisected the steering failure with Bash-run "mine" vs PowerShell-run "baseline"; the shell, not the code, decided (v0.2.327 code also fails 3/3 from Bash). Rule: run both sides of a bisect from the same shell. Spent two needless rewrites of the inheritance before finding it.
+- ERROR: `steering.test.ts` "cancel retires written unread input after visible content" fails from the Claude Code Bash tool on any code; recorded in AGENTS.md.
+
+### User
+Claude chats
+- A turn Claude starts by itself after a background task (for example a build finishing during `/agentTest`) now keeps the slash command's tool permissions, so tools the command allows no longer fail with "Unknown tool".
+- oc, native opencode, and test windows now see each other's Claude account picks and conversation records instead of overwriting them, so a revive no longer brings back an account another window replaced.
+
+Agent testing
+- `/agentTest` saved screens now show the state each case judged.
+
+Shell
+- `newClaudeAccount` in the PowerShell profile links the shared `projects` and `tasks` folders like the other shared items.
+
+---
+
+## 2026-11-02 (~18:24) - v0.2.328 cuffsShake - Claude account pick survives revive; conversations follow a chat across accounts - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation (from /spit plan `~/.config/opencode/plans/ocClaudeAccountHandoff.md`); completed
+- Version: 0.2.328 cuffsShake
+- Fixed `accounts.ts`: removed startup `seedFromCaches` (+ `seeded`, `ensureLoaded(ids)` arg). Cause (2026-11-02 22:56Z revive, chat `ses_e64b23961ffeG5cfW5kaQYvkS0`): `.claude3` usage cache read `seven_day` 100%, seed marked it limited, `nextUsableAccount` moved + persisted `currentAccount` to `default` with no CLI rejection logged; `.claude3` had answered at 22:54Z. Now only `markAccountLimited` (rejection) or `setCurrentAccount` moves it; `rankUsable` still reads caches live at failover. Renamed `seedCachePath` -> `usageCachePath`.
+- Added `accounts.ts` `sharesTranscripts(a, b)`: `realpathSync.native` of both `<configDir>/projects` equal (default = `CLAUDE_CONFIG_DIR || ~/.claude`).
+- Added `sessionManager.ts` `moveClaudeSessionAccount(key, account)`: mutates the record's `account` in place (keeps `forked`/`movedTo`/anchors), persists. `retireOtherAccount` uses it before `deleteClaudeSessionId`; `cliArgs.ts` then adds `--resume <same id>`. Fixes A -> B -> A starting fresh on A.
+- Changed `turnStream.ts` `switchAccount`: shared transcripts keep the session id and send `CONTINUE_AFTER_SWITCH_MESSAGE` instead of `catchUpMessage(progress)`; note reads "continuing the same Claude conversation on X". Unshared pool: unchanged.
+- Changed `accountManage.ts` `SHARED`: + `projects`, `tasks` (new accounts link them when they exist in `~/.claude`).
+- Added `.scripts/shareClaudeProjects.ps1`: dry run default, `-Apply` merges each `~/.claudeN\projects|tasks` into `~/.claude` (no overwrite; an item with collisions is skipped and listed), removes the emptied folder, creates a junction, checks `LinkType`; creates `~/.claude\tasks` if missing; refuses `-Apply` while a `claude` process runs.
+- Docs: FORK.md pool row, wiki `Claude-Code.md` "Several Claude accounts".
+- Verification: `bun test test/provider/claude-code/accountPool.test.ts` 26 pass (rewrote the two seed tests as intended changes: restart keeps a 100%-cache current account, rejection moves it; hashed/legacy cache identity now via `failoverCandidates`; added shared-projects failover scenario asserting `--resume fake-session` + continue message, and A -> B -> A / unshared retire test). `failoverQuestion`, `silentTurn`, `warmup` tests 54 pass. `bun run typecheck` in `packages/opencode` clean. Script: real dry run on the user's profile (3 accounts, 689 files, 0 collisions); `-Apply` probed on a temp home copy (moves, junctions, collision skip, idempotent rerun), temp removed.
+- Risk: cross-login `--resume` unproven live (thinking-block signatures, CLI limit-error entry in transcript); on failure the existing "Claude session lost" question takes over. Needs one real usage switch.
+- TODO: user profile `~/Documents/PowerShell/profile.ps1` `$_CLAUDE_SHARED` still lacks `projects`, `tasks` (user file, not edited). Live `account-pool.json` still has `currentAccount: default` and the seeded `.claude3` mark until 01:00Z; a palette pick clears it.
+
+### User
+Claude accounts
+- A `/revive` or restart no longer switches your Claude account on its own; only an actual usage-limit rejection or your own pick changes it.
+- When your Claude logins share one `projects` folder, a chat that moves to another login keeps its Claude Code conversation and full memory, including when it moves back later.
+- A mid-turn usage switch then continues the same conversation with a one-line "continue" instead of a catch-up summary.
+- New `.scripts\shareClaudeProjects.ps1` moves existing logins to the shared folder (dry run first, `-Apply` to move); new accounts made in Claude accounts get the shared folders automatically.
+
+---
+
+## 2026-11-02 (~18:00) - v0.2.327 penguinSoulmate - ocTui drives oc TUI tests through the pty; tester bake-off picks Terra fast low - Claude Opus 5.5, effort not recorded; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; effort not recorded; Implementation (/imp of plan `~/.config/opencode/plans/agentTestBakeoff.md`); completed
+- Version: 0.2.327 penguinSoulmate
+- Added user-level tool `~/.config/opencode/tool/ocTui.ts` (outside repo; see `C:\Users\Foster\buildNotes.md`): JSON steps sent to the `nativeTest.ps1` run's pane via `wezterm cli send-text --no-paste` on its own socket; returns the trimmed screen. Legacy VT only: one win32-input-mode sequence through ConPTY left bare Esc unable to close dialogs until restart; win32 and kitty `ctrl+m` never opened the model list.
+- Changed `.scripts\nativeTest.ps1` `-Screen`: TrimEnd per line, trailing blank lines dropped.
+- Changed AGENTS.md `## Agent test`: input/reads through `ocTui` (no takeover), legacy-VT rule, rejected chords, shared-state rules for cases, server restart needed for a new tool (Reload oc config reloads only the tab's launch folder).
+- Bake-off (8 fixed cases incl. 2 traps, shared PC level, fresh window per run): terra-fast low 8/8 twice (68 s, 71 s, 13 turns); luna-fast low 8/8 twice (55 s, 53 s); haiku-5.5 low 8/8 (69 s, 13 `ocTui` calls). 0 false PASS, 0 failed tool calls, shared state hashes before = after. Baseline before the tool: terra high, 5 cases, 75 turns, 4.5 min. Coding task: all three 5/7 (hidden 2 and 4 grade beyond the brief).
+- Decided (user): tester default `openai/gpt-6.1-terra-fast` low; Claude models get `ocTui` via `proxyOpencodeTools` like `cua_*`.
+- Verification: Phase 1 gate (8 cases x 3 rounds + 1 fresh window, identical results); UI runs above; tool loads from the user-level path after a server restart.
+- MISTAKE: one manual win32 key probe left an `m` entry in the shared `prompt-history.jsonl`; no session created. Rule: probes that may type into the prompt use legacy VT through `ocTui` only.
+- ERROR: first Terra and Haiku dispatches BLOCKED (tool missing): the repo-level tool was not in the oc repo instance until a server restart, and Claude sessions only get tools in `proxyOpencodeTools`.
+- TODO: "Reload oc config" reloads the TUI launch directory instance, not the open chat's (`app.tsx:908` -> `handlers/instance.ts:44`).
+
+### User
+Agent testing
+- `/agentTest` on oc's own TUI no longer needs you to leave the PC: the tester types and clicks straight into the test window, so it runs while you keep working.
+- A test run that took 4.5 minutes now takes about a minute, and the default tester is now the faster, cheaper GPT-6.1 Terra fast at low effort.
+- Claude models can run these tests too.
+- `nativeTest.ps1 -Screen` output no longer carries trailing blank padding.
+
+---
+
+## 2026-11-02 (~02:59) - v0.2.326 turboCannabis - Palette search ranks titles first; nativeTest cleans up its project - Claude Opus 5.5, high effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; high effort; Implementation (/think plan then /imp); completed
+- Version: 0.2.326 (already bumped since last commit; not bumped again)
+- Fixed `tui/src/ui/dialog-select.tsx` `filtered`: was `fuzzysort.go(keys: [title, category], scoreFn: title*2 + category)`; multi-word queries split words across keys, so "switch theme" scored "Switch Claude account" 2.024 (title "switch" 0.870 + "theme" scattered in category "oc Third party harness management" 0.283) over exact "Switch theme" 2.000, and Enter opened the wrong command (/agentTest case 4). Now: title-only pass (all words must match the title), then category-only pass for the remaining rows with `threshold: _CATEGORY_MATCH_THRESHOLD` (0.5; real category hits measured 0.77-1, scattered 0.26). Fixes every non-`search` DialogSelect.
+- Added test `test/cli/tui/dialog-select.test.tsx` "filter ranks title matches first and ignores scattered category matches": `switch theme` + Enter selects Switch theme; `theme` hides Switch Claude account; `harness` still finds it by category.
+- Changed `.scripts\nativeTest.ps1`: `current.json` records `ownsProject`; `-Stop` deletes a project `-Start` created (Remove-Item + Test-Path), keeps `-Project` folders; `-Start` over a dead earlier run also deletes that run's owned project (pass fix; probed with a fake dead record). AGENTS.md `## Agent test`: same, plus brief tips (exact palette titles; ctrl+o/ctrl+p; `/agentTest ... model=` swap).
+- Verified live: `/agentTest takeover` (tester `openai/gpt-6.1-terra-fast` high) on a fresh native build: `switch theme` + Enter opens Themes, `theme` shows no Claude rows, `harness` finds them, `switch` and oc-palette `Daily theme` regressions all PASS (evidence `%TEMP%\agentTest\20261102-0302`).
+- Outside repo (also in `C:\Users\Foster\buildNotes.md`): `agentTester.md` interim default `openai/gpt-6.1-terra-fast`/`high`; `agentTest.md` `model=` per-run override. Agent `.md` frontmatter beats `opencode.jsonc` `agent.<name>.model` (`config.ts:496-563`), so the per-call `task` `model` is the swap point (verified: tester session ran gpt-6.1-terra-fast high).
+- Verification: `dialog-select.test.tsx` 24 pass; new test fails on HEAD's filter ("Timed out waiting for frame predicate") and passes on the fix; tui `bun run typecheck` exit 0. `nativeTest.ps1` probes: `-Start`/`-Stop` deleted the owned project; `-Project C:\ocTestTmp\keepProbe` kept; no processes left; probe folders removed.
+- Not run: tester model bake-off (plan `paletteSearchRanking.md`, needs user takeover).
+- Kept: `dialog-model.tsx:170` and `prompt/autocomplete.tsx:556` own fuzzysort calls unchanged (no reported symptom).
+
+### User
+Command palette
+- Searching the palette (and every other list dialog) now lists title matches first, so typing "Switch theme" and pressing Enter opens Switch theme instead of Switch Claude account.
+- Searches no longer pull in unrelated rows just because their group name happens to contain the letters, while searching by a group name like "harness" still works.
+
+Agent testing
+- `nativeTest.ps1 -Stop` now deletes the throwaway project folder it made; folders you pass with `-Project` stay.
+
+---
+
+## 2026-11-02 (~02:41) - v0.2.326 turboCannabis - Agents test oc TUI changes on native opencode.exe; theming fully per binary - Claude Opus 5.5, high effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; high effort; Implementation (/spit then /imp); completed
+- Version: 0.2.326 (already bumped since last commit; not bumped again)
+- Probed: dist `oc.exe` on the real profile exits 1 "background server is running from another oc install" (`config/resident.ts` refuse-other-build), so it cannot be the test vehicle. Dist native `opencode.exe` runs beside the installed oc in its own `wezterm-gui start --always-new-process` (own pid, wezFig config, `gui-sock-<pid>`); `wezterm cli get-text` on that socket returns exact screen text; cua sees the window (UIA tree has title bar only) and screenshots it.
+- Added `.scripts\nativeTest.ps1`: `-Start [-Build] [-Project] [-Exe]` (build `--single --native-only`, throwaway git project in `C:\ocTestTmp\agentTest\<stamp>`, strips agent-shell `OPENCODE*`/`OC_*`/`CLAUDE*`/`WEZTERM_*`/`AGENT` env, records `current.json` before waiting), `-Screen`, `-Stop` (CIM identity tree stop, leaves first, removes stale socket file).
+- Fixed in-session: pane id 0 read as "no pane" (`$null -eq` check).
+- Changed theming to fully per binary: `binaryKey` in `tui/src/context/theme.tsx` suffixes `theme_mode`/`theme_mode_lock` with `_native` in native (theme already was); `DAILY_THEME_KEY` in `tui/src/config/index.tsx` + new `daily_theme_native` tui key, used by `ocCommands.tsx` and `dialog-theme-list.tsx`; `persistTuiSetting` key union extended. `system_theme_palette` and `tui.json` `theme` stay shared.
+- Docs: AGENTS.md settings rule (line 9) + new `## Agent test`; FORK.md native row. Outside repo: `agents/sub/agentTester.md` (oc TUI briefs, bash allowed only for exact `nativeTest.ps1 -Screen`), `~/.opencode/commands/agentTest.md` (ban replaced, always `-Stop`), plans `agentTestOcTui.md`, `claudeCodeCompactionStatus.md`, `cuaDriverGuidance.md`.
+- Verification: tui `bun run typecheck` passed; `test/context/themeKv.test.tsx` + `test/dailyTheme.test.ts` 5 pass. Throwaway probe (deleted) with `OC_FLAVOR=native`: ignored oc `theme`/`theme_mode_lock`/`daily_theme`, wrote only `_native` keys; as oc, unchanged. `nativeTest.ps1` live: `-Start -Build` built 0.2.326 native, `-Start`/`-Screen` (both slash forms)/`-Stop` worked, no processes left, probe projects removed.
+- Not run: a full `/agentTest takeover` session driven by `agentTester`, and the side-by-side oc vs native parity pass.
+- ERROR: first `-Start -Build` threw "never listed a pane" (pane id 0 bug above); `-Stop` cleaned it up.
+- Risk: real-profile runs write sessions to `oc.db` and spend real model usage. A running test locks the dist exe, so stop it before rebuilding.
+
+### User
+Agent testing
+- `/agentTest` can now test oc's own TUI: it builds the native `opencode.exe`, opens it in a separate WezTerm window, and the tester types into it and reads the screen.
+- `.scripts\nativeTest.ps1 -Start -Build` lets you run your latest changes the same way, without installing anything, and `-Stop` closes it.
+
+Themes
+- The native `opencode` window now keeps its own dark/light lock and daily-theme setting, separate from oc, like its theme pick already was. All other settings stay shared.
+
+---
+
+## 2026-11-02 (~02:07) - v0.2.326 vicesConfused - Live compaction divider, clean Claude Code summary - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation (/imp of `~/.config/opencode/plans/claudeCodeCompactionStatus.md`); completed
+- Version: 0.2.326 (already bumped in the working tree by an earlier session; not bumped again)
+- Found: Claude Code CLI 2.1.309 `/compact` emits no `stream_event` text; only `system/status compacting` (re-sent ~30 s), `compact_boundary`, then the whole summary as one user message. `oc.db`: 16/16 claude-code compactions write first text at ~98% of a 27-78 s run. Other providers stream. Real streaming would need oc-run summary + reseeded CLI session; rejected.
+- Fixed `tui/src/routes/session/index.tsx` `UserMessage` compaction divider: summary reply is published before the model runs (`compaction.ts:435`), so the old title read `Compacted . model` for the whole run and also for aborted runs. Now `reply`/`busy`/`compacting` memos + `compactionTitle`: ` Compacting . model . Ns ` (1 s interval only while pending; timer hidden under 1 s), ` Compacted . model ` on `time.completed`, ` Compaction stopped ` for `MessageAbortedError` or unfinished reply on an idle session, ` Compaction failed ` for other errors.
+- Fixed `claude-code/turnStream.ts` compact_boundary: in compaction mode the boundary note is no longer written as text (it was stored as part of the summary via `summaryText()`); `reportCompactBoundary` still logs and `compactedTokens` still feeds usage. Mid-turn auto-compaction keeps the note.
+- Added assertion in `fundamentalTools.test.ts` compaction test: compaction text has no `context compacted` note (guards summary content).
+- Verification: tui + opencode typecheck clean; `fundamentalTools`, `cliEventsStream`, `cliEvents` 42/42; pane probe (OC_TUI_PANE, fake LLM held reply) saw `Compacting . claude-sonnet-4-5`, then `... 3.0s`, then `Compacted . claude-sonnet-4-5`, then Esc on a hung compaction -> `Compaction stopped`; probe deleted; existing pane test `/compact shows the Compacted divider` passes. Not run: real-model compaction.
+- ERROR: `fundamentalTools.test.ts` already fails `prettier --check` at HEAD (8 lines); left as is.
+
+### User
+Compaction
+- While a chat compacts, the divider now says "Compacting" with the model and a running timer instead of claiming it is already compacted.
+- A compaction you stop or that fails now says so instead of "Compacted".
+- Claude Code's "context compacted" notice no longer gets saved inside the compaction summary.
+
+---
+
+## 2026-10-30 (~22:39) - v0.2.326 vicesConfused - Port upstream Claude Agent provider - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation (/imp of docs/dev/claudeAgentPortPlan.md); completed
+- Version: 0.2.326 (already bumped in the working tree by the sidebar session; not bumped again)
+- Added `provider/claude-agent/upstream/`: upstream OpenCode 2 `packages/core/src/plugin/provider/claude-agent` at `173f6c6`, near-verbatim; `// oc` edits only in `claude/io.ts` (Bun.which + cliCommand), `claude/probe.ts` (`Schema.TaggedErrorClass`), `claude/session.ts` (AsyncIterable cast), `Provider` imports -> `id.ts`. README.md lists edits, V2-hook mapping, and re-sync steps.
+- Added adapter: `id.ts`, `storage.ts` (JSON files under `<data>/claude-agent/`: `models`, `sessions/<id>`, `forks/<id>`), `catalog.ts` (saved model list -> v1 `Provider.Info`, price source, effort variants), `runtime.ts` (process-wide `ClaudeSessions.registry()`, per-directory attach, model factory, idle, `/connect` probe with retry).
+- Added `plugin/claude-agent.ts`: auto OAuth method that waits for `claude auth login`, saves models, stores dummy oauth auth (Azure pattern). Registered in `plugin/index.ts`.
+- Changed `provider/provider.ts`: catalog injection, `claude-agent` custom loader (active on auth or config entry; attaches runtime; getModel builds the model), bundled stub for `@opencode-ai/claude-agent`, `CustomLoader` now has `Scope` in R, config-model npm fallback for `claude-agent`.
+- Changed `handlers/provider.ts`: Claude Agent listed in `/provider` and `/provider/summary` before login; `default` skips providers without models (empty catalog 500'd `defaultModelIDs`).
+- Changed session loop, all gated on `claude-agent`: `prompt.ts`/`sideQuestion.ts` drop oc environment and base prompt, pass fork source; `llm/request.ts` request-kind and fork headers, agent prompt + instructions options, output limit undefined unless configured (compaction keeps oc budget); `llm.ts` StreamInput `generate`/`forkSourceID`; `message-v2.ts` marks stopped tool results `toolAborted`; `retry.ts` never retries; `status.ts` idle -> `ClaudeAgentRuntime.idle`; `session.ts` fork records lineage via `ClaudeAgentStorage.recordFork`.
+- Added deps `@anthropic-ai/claude-agent-sdk@0.3.301`, `@modelcontextprotocol/server@2.3.1`; package.json import `#claude-agent-sdk`.
+- Added tests: upstream's 12 test files + fixtures in `test/plugin/provider/claude-agent/` (imports rewritten during copy, `plugin.test.ts` left out); `test/provider/claude-agent/fakeModel.test.ts` (connect, tool round trip, model-switch checkpoint, fork lineage).
+- Docs: FORK.md row, UPSTREAM-SYNC.md exception, plan status, wiki `Claude-Agent.md` + `_Sidebar.md` (not pushed).
+- Verification: opencode typecheck clean; upstream tests 61/61; Claude Agent scenarios 4/4 (real claude 2.1.309 vs TestLLMServer); claude-code fakeModel 27/27; message-v2, retry, llm, provider, prompt, httpapi-provider, session, autoRename, session-actions suites pass. Not run: real login, compiled build/installer bundling of the SDK.
+- MISTAKE: first put fork lineage in session metadata; broke 3 fork-metadata tests (metadata is public API). Rule: never add internal keys to user metadata; keep provider state in provider storage.
+- ERROR: Claude Code 2.1.309 sends a tool-less session-naming Haiku request on a chat's first turn (Claude Code behavior, not disabled upstream); scenarios match turn requests by tools.
+- Risk: a model list change after connect applies on next provider load, not live (upstream reloads live).
+
+### User
+Models
+- New **Claude Agent** provider: OpenCode's official way to use Claude through your Claude Code login, with oc's tools, permissions and history.
+- `/connect` lists **Claude Agent**; it waits until `claude auth login` is done, then shows Claude's models with effort levels.
+- You can switch between Claude Agent and other models in one chat, and Claude catches up on what it missed.
+- The existing Claude Code provider and its accounts, usage and warm-up work as before.
+
+---
+
+## 2026-10-30 (~22:10) - v0.2.326 vicesConfused - Sidebar visibility and width settings in the oc palette - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation (/spit then /imp); completed
+- Version: 0.2.326 vicesConfused
+- Added `tui/src/sidebarWidth.ts`: kv key `sidebar_width` (default 42, clamp 30..80), `clampSidebarWidth`, `fitSidebarWidth` (caps docked width at terminal width - 60).
+- Added `tui/src/ui/dialog-stepper.tsx` `DialogStepper`: `- value +` parts, Left/Right move, Enter steps 1 on -/+, digits + Backspace edit the value part and Enter applies (clamped). Uses `useKeyboard` like `dialog-workspace-file-changes.tsx`; value is a live prop so the sidebar resizes behind the dialog.
+- Added palette entries `oc.sidebar_mode` (`/sidebarVisibility`, kv `sidebar_mode` auto|always) and `oc.sidebar_width` (`/sidebarWidth`) in `ocCommands.tsx` Layout group after `oc.sidebar_position`.
+- Changed `routes/session/index.tsx`: `wide()` replaced by `docked()` (width > 120 or mode always) for leading/visible/overlay switch; `contentWidth` and all `<Sidebar>` uses take `sidebarWidth()`. Hide/Show toggle still uses kv `sidebar` auto|hide, so it returns to the chosen mode.
+- Changed `routes/session/sidebar.tsx`: required `width` prop replaces hardcoded 42.
+- Changed `feature-plugins/sidebar/subagents.tsx`: title truncation follows stored width - 6 instead of fixed 36 (ignores the narrow-terminal cap; long titles may wrap there).
+- Verification: `bun run typecheck` in tui exit 0. Throwaway testRender probe (deleted) pressed keys through the real keymap/dialog stack: 42 -> minus x2 = 40, plus = 41, typed 55, backspace+7 Enter = 57, 999 -> 99 clamped to 80, 60x minus clamps at 30; fit/clamp helpers checked. `openSidebar.test.ts`, `config.test.tsx`, `sidebarSubagents.test.ts`: 99 pass, 2 skip, 0 fail. Not run in the real TUI.
+
+### User
+Sidebar
+- New oc palette entry "Sidebar visibility": "auto" keeps today's behavior, "always" keeps the sidebar docked even on terminals 120 columns or narrower.
+- New oc palette entry "Sidebar width" opens a `- 42 +` control: arrow to - or + and press Enter to shrink or grow by one column, or arrow to the number, type a width, and press Enter.
+- Width ranges from 30 to 80 columns and is cut back on narrow terminals so the chat keeps at least 60 columns.
+- Width has no effect when the sidebar is at the top or bottom; the palette entry says so.
+
+---
+
+## 2026-10-30 (~15:44) - v0.2.325 aldritchGenitals - Queued prompts no longer rebuild the prompt box in a loop - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation (/debug -> /think -> /imp; debug notes `~/.config/opencode/plans/2026-10-30-debug-alt-q-queue-lag.md`, plan `~/.config/opencode/plans/2026-10-30-alt-q-prompt-remount.md`); completed
+- Version: 0.2.325 aldritchGenitals
+- Fixed Prompt remount loop (real bug since v0.2.314 `QueueStrip`): `Prompt` returned a fragment and sits as the fallback of `pluginRuntime.Slot mode="replace"` (session and Home routes). opentui 0.5.14 `Slot` resolves fallback children with `children()` inside its own memo, so the strip's `<Show>` toggling re-ran that memo and built a new `Prompt`; its fresh `createQueueSnapshot` started `EMPTY`, hid the strip, refetched, and the strip showing again remounted it. Looped once per queue GET while anything was queued (real app: ~30-45 GETs/s, 598 TUI stalls of 120-1284 ms; textarea, keymap layers and commands rebuilt each time)
+- Changed `tui/src/component/prompt/index.tsx` root fragment to one `<box width="100%" flexShrink={0}>` with a comment on why. Autocomplete absolute position stays consistent (computed against `anchor.parent`, now the same wrapper)
+- Added keeper `tui/test/promptQueueLoop.test.ts`: full app on a session, slots set up with no plugin, one pending queue entry; strip shows and queue GETs grow by at most 1 over 1 s
+- Measured (debug, instrumentation now removed): queue path itself was fast (press to server-accepted 41-76 ms, server handlers 1-3 ms, lock waits 0 ms); not the cause. Each Alt+Q while busy forks one `state.completion` waiter in `prompt.ts` `dispatchHead` (harmless, left)
+- Verification: keeper fails with the fragment (106 queue GETs in 10 s, strip never stable) and passes 3/3 with the box. Pane probe before/after: 637 remounts in ~8 s after one Alt+Q -> 0; refreshes back to the 2 s poll. tui typecheck exit 0; promptQueueLoop, slashMenuLayout, queue, promptBackground, slots, keymap, app-lifecycle 20 pass 0 fail; `OC_TUI_PANE=1` tuiPane "queues three Alt+Q presses" pass. No visual check of the absolute `@`/`/` menu in the real app
+- Removed all DEBUG-TEMP instrumentation (`core/util/debugQueue.ts`, logging in queue.ts, prompt.ts, sessionOc.ts, dialogQueue.tsx, prompt/index.tsx) and both probe tests; `git grep` clean. `src/bun.lock` and `opencode/package.json` show modified with no content diff; not from this session, left alone
+- Risk: any other replace-slot fallback given a fragment root with toggling parts will remount the same way (opentui behavior); worth an upstream opentui issue
+
+### User
+Queued prompts
+- Queueing prompts with Alt+Q while an agent works no longer makes oc lag or stop accepting input: the prompt box was being rebuilt about 30 times a second while anything was queued.
+- The QUEUED strip above the prompt now stays steady instead of flickering.
+
+---
+
+## 2026-10-29 (~23:32) - v0.2.324 twigWhistlin - Command palette keeps a stable order and cursor - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation (imp from plan `~/.config/opencode/plans/paletteStableOrder.md`, debug notes `2026-10-29-debug-palette-reorder.md`); completed
+- Version: v0.2.324 twigWhistlin
+- Fixed `tui/src/component/command-palette.tsx` `orderPaletteEntries`: one stateless sort (`PALETTE_CATEGORY_ORDER` rank, unlisted categories A-Z, ungrouped then groups, `command_palette.order`, title, name). Root cause: palette order was keymap layer order (newest first), so any re-registration reshuffled rows. Layer order untouched (it is key-dispatch priority). Palette now passes `preserveSelection`.
+- Fixed `tui/src/ui/dialog-select.tsx`: `findSelection` matches value + category + subcategory before value only; `active`, hover and mousedown resolve by row object, so Suggested copies (and model dialog Favorites/Recent) no longer highlight or jump to the first copy. `current` stays value based.
+- Fixed `tui/src/claudeWarmup.tsx`: warm-up signal uses `equals: isDeepEqual`, so the refresh on every palette open no longer rebuilds `appCommands`.
+- Fixed `tui/src/routes/session/sidebar-tools/sidebarTools.tsx`: removed the `refreshCommands()` call from `refresh()` (fired on every `message.updated` and file watcher event); layer now registered via `useBindings`; `refreshCommands` is a version-signal bump read in `sidebarCommands`. Removes the dispose-then-register gap that dropped rows for a frame.
+- Blocked plan step 5 (ellipsis): OpenTUI `truncate` ellipsizes the middle of the row and hid the title; reverted.
+- Updated tests: `commandPalette.test.ts` rewritten (input order irrelevant, category rank, groups after ungrouped, configured-first) - intended change; `dialog-select.test.tsx` adds repeated-value hover + reorder test.
+- Updated wiki `oc.wiki/Configuration.md` `command_palette.order` row (not pushed).
+- Removed all DEBUG-TEMP instrumentation, `util/debugPalette.ts`, probes and `%TEMP%\debug\20261029-palette\`.
+- Verification: real-app log before/after (6 opens incl. busy turn): order changes 27 -> 0, wrong-command selections 8 -> 0. Tests: commandPalette, dialog-select, claudeWarmupRendered, todos, claudeWarmup, dialogSelectSessionMarkerActions 55 pass 0 fail. tui typecheck passed.
+- Kept slash autocomplete as is: `useCommandSlashes` reads layer order, but `prompt/autocomplete.tsx:519` sorts results A-Z, so re-registration cannot reshuffle it.
+
+### User
+Command palette
+- Ctrl+P and Ctrl+O list commands in the same order every time, and rows no longer reshuffle while a reply streams.
+- Categories always appear in a fixed order (Session, Prompt, Agent, Provider, Workspace, VCS, oc, System), with commands sorted A-Z inside each.
+- The highlighted command stays the one you picked when the list updates, so Enter runs what you see.
+- Hovering a Suggested copy highlights only that row.
+
+---
+
+## 2026-10-29 (~21:09) - v0.2.323 reubenPregante - Claude accounts manager in the TUI - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation (imp from plan `~/.config/opencode/plans/2026-10-29-claude-account-manager.md`); completed, manual TUI sign-in not run
+- Version: 0.2.323 reubenPregante
+- Added `provider/claude-code/accountManage.ts`: `nextAccountEntry` (lowest free `~/.claude`, `~/.claude2`, ...; reuses an unpooled folder), `createAccountDir` (junctions for dirs, file symlinks for `CLAUDE.md`/`settings.json` to `~/.claude`; EPERM names Developer Mode), `authStatus` (`claude auth status --json` -> loggedIn/email/plan; default account keeps inherited env, never `CLAUDE_CONFIG_DIR=~/.claude`), `signOut`.
+- Added `accounts.ts` names: oc.json `claudeAccountNames` keyed by `accounts` entry as written, resolved by canonical dir (case-insensitive on Windows). `setAccountName` writes via `OcConfig`, drops other spellings of the same dir. `poolAccountLabel` = name, else `claude1` (`~/.claude`) / `claudeN`. `forgetAccount` clears limit mark, pins, current pick, usage cache (hashed + proven legacy).
+- Added `GET`/`POST /global/claude/accounts` (`groups/global.ts`, `handlers/global.ts`): list with auth status, `configDir`, resolved `login` command (`cliCommand`); actions add/rename/remove/signedIn/signOut. Add/remove write `provider.claude-code.options.accounts` via `Config.updateGlobal` + `disposeAllInstancesAndEmitGlobalDisposed` (same as config PATCH). Remove refuses the last account; keeps folder and login. `warmup/inventory.ts` `forgetInventory`.
+- Added TUI palette `claude.accounts` / `/claude-accounts` (`claudeCommands.tsx`), always visible. Sign-in runs the server-resolved `claude auth login` via new `editor.ts` `runSuspended` (extracted from `openEditor`), env without API/OAuth keys, `CLAUDE_CONFIG_DIR` set or deleted.
+- Changed sidebar names: `usage/claude.ts` `claudeAccountName` (same rule as server), used by `probeClaudeCodePool`, `claudeSeed`, `resolveUsagePlans`; names signal rereads on `claudeAccount.onChange`. `dialog-subagents.tsx` slugs account labels in agent names.
+- Regenerated `sdk/js/src/v2/gen` (only the two new routes). `sdk/openapi.json` left to prePush.
+- Updated tests for intended label change `.claude`/`.claudeN` -> `claude1`/`claudeN`: `failoverQuestion.test.ts`, `warmup.test.ts`, `cliEvents.test.ts`. Added httpapi-exercise entries for both routes.
+- Docs: `FORK.md` Claude account pool row, wiki `Claude-Code.md` "Several Claude accounts".
+- Verification: `tsgo` clean in opencode and tui. `test/provider/claude-code` + warmup listener: 692 pass, 2 fail -> cliEvents label (fixed, 14/14 pass) and `steering.test.ts` "cancel retires written unread input" (known flaky, unrelated). TUI usage/editor/sidebar/subagent tests 178 pass. `httpapi-exercise --mode coverage` 229 pass, 0 missing. Probes (temp HOME/XDG): dir picking, 5 links + idempotent re-run, labels, names round-trip, `forgetAccount`; real `auth status` for all 4 local accounts.
+- Risk: add/remove dispose every instance like an agent model change; not probed whether that interrupts a running turn. `claude auth login` under `runSuspended` not run (opens a browser).
+
+### User
+Claude accounts
+- New palette entry **Claude accounts** (`/claude-accounts`) lists every Claude login with its email, plan, and usage limit.
+- You can add an account (it makes the next `~/.claudeN` folder, links your shared Claude files, and signs it in), rename it, sign it in again, sign it out, or remove it from the pool.
+- Accounts without a name now show as `claude1`, `claude2`, ... everywhere instead of `.claude`, `.claude2`.
+- Adding or removing an account reloads oc's config, the same as changing an agent's model.
+
+---
+
+## 2026-10-28 (~21:24) - v0.2.322 selvesChapo - /debugInfo rename, /debug runs through /revive - Claude Opus 5.5, default effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; default effort; Implementation (imp from plan `~/.config/opencode/plans/2026-10-28-debug-command-revive.md`); completed
+- Version: 0.2.322 selvesChapo
+- Changed `tui/src/app.tsx` `opencode.debug` slashName `debug` -> `debugInfo`. Command id and `debug_view` keybind kept. No `debug` alias (would collide with the user command again).
+- Changed global `~/.opencode/commands/debug.md`: runtime defers to the project's `AGENTS.md` debug-run rule (no rule = old build-and-run-dev, never install); step 3 runs agent-runnable evidence first and ends the turn with the exact command when the run needs the user; new step 4 "Resume" checks the version marker before measuring; report states when the installed build still has `DEBUG-TEMP` code.
+- Added `AGENTS.md` "Debug runs" bullet: instrument, typecheck the package, user runs `/revive` (or `/debug <topic> /revive /debug measure`), check revive mark version vs `src/.version/version`, `/revive-single` only on request, cleanup `/revive` after `/imp`, prefer fake-model/pane/perf probes.
+- Replaced `FORK.md` "Debug and Luna routing" TODO about removed `Debug`/`Debug-a` agents with the `/debug` + `/revive` description.
+- Kept other sessions' uncommitted work (v0.2.321 changes) untouched.
+- Verification: `bun run typecheck` in `packages/tui` exit 0; grep shows `slashName: "debugInfo"` and `"debug-logging"`, no tests reference `/debug`. Optional pane probe skipped (rename follows ~30 existing camelCase slash names). Live check pending the user's next `/revive`.
+
+### User
+Slash commands
+- The built-in "View debug info" dialog is now `/debugInfo`, so `/debug` always starts the debug command.
+- `/debug` in oc now adds temporary logging, then asks you to run `/revive` and measures in the rebuilt app; `/revive-single` is used only when you ask.
+- Until `/imp` removes that logging and you `/revive` again, your installed oc contains the temporary logging.
+
+---
+
+## 2026-10-28 (~16:26) - v0.2.321 freddieWinklevoss - Agent shells keep gh login, no server password - Claude Opus 5.5, default effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; default effort; Implementation (started from an FTB session: gh "not logged in" in agent shells); completed, not built
+- Version: 0.2.321 freddieWinklevoss
+- ERROR: in agent shells `gh auth status` said "not logged in" though the user is logged in. Cause: the sign-in launcher (`config/startup.ts` `plan`) always set `XDG_CONFIG_HOME/STATE/DATA/CACHE`; every process the resident server starts inherits them, and gh prefers `XDG_CONFIG_HOME` over `%APPDATA%`, so it read the missing `~\.config\gh\hosts.yml`. With `GH_CONFIG_DIR=%APPDATA%\GitHub CLI` it reported "Logged in ... (keyring)". git push still worked (Credential Manager). The FTB v0.0.21/v0.0.22 release failures blamed on gh login were this.
+- Fixed `startup.ts`: new `movedXdgDirs` writes an XDG var only when its dir differs (case-insensitive) from xdg-basedir's default under `home` (new `context().home`). A default instance's launcher sets none.
+- Fixed credential leak: agent shells and the `claude` child inherited the resident's `OPENCODE_SERVER_PASSWORD`, `OPENCODE_SERVER_USERNAME`, `OC_RESIDENT`. New `util/agent-env.ts` `AgentEnv.inherited()` drops them; used by `tool/shell.ts` `shellEnv` and `provider/claude-code/spawnEnv.ts` `claudeSpawnEnv`. Checked readers first: only the server (`server/auth.ts`, `packages/server/src/auth.ts`, `serve.ts`) and the TUI launcher path (`cli/cmd/oc.ts`, `tui/util/sessionTab.ts`) read them; proxy MCP uses its own bearer token. Kept `OPENCODE_DB` (not secret; `oc` CLI calls from shells should hit the same DB).
+- Not covered: MCP local servers (`mcp/index.ts:365`) and LSP spawns still get the full env; same credential exposure to third-party processes. TODO if wanted.
+- Risk: the user's registered launcher (`~\.local\state\opencode\startup\oc-opencode-46cabf423e5654c2-2e54aab633a1688e.ps1`, 2026-10-12) is stale: sets `OPENCODE_INSTANCE`, all four XDG vars, and `OPENCODE_DB=...\opencode.db` (AGENTS.md says oc uses `oc.db`). It only regenerates when `serverStartOnWindowsUserStart` is saved again, and `plan` forwards the saving shell's `OPENCODE_DB`.
+- Added tests: `test/config/startup.test.ts` "startup sets only the XDG dirs moved off their defaults" (guards the gh bug); `test/util/agent-env.test.ts` (guards the credential strip).
+- Verification: `bun test` on agent-env, startup, oc, spawnEnv, cliArgs, shell tests: all pass except shell.test.ts flakes under combined load (run 1: 3 fails incl. "parses PowerShell conditionals" pattern split; run 2: "basic [bash]" 5 s timeout); `test/tool/shell.test.ts` alone 96/96 twice. `tsgo --noEmit` exit 0. Probe (plain `bun run`, removed): real context -> launcher sets only `OPENCODE_DB`; XDG unset -> same; `XDG_CACHE_HOME` moved -> only that one set. MISTAKE: first probe ran under the test preload (temp XDG dirs) and showed 4 XDG lines; probes of `Global.Path` must run outside `bun test`.
+
+### User
+Agent shells
+- Tools like the GitHub CLI work in agent shells again: oc no longer points them at the wrong config folder, so `gh` sees your login.
+- Agent commands can no longer read oc's resident server password from their environment.
+- To pick this up after installing, turn "start on Windows sign-in" off and on again (or save it again), then restart the resident server.
+
+---
+
+## 2026-10-28 (~00:00) - v0.2.320 yeetTuning - Every oc palette command shows a description - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation (/think -> /imp, plan `docs/dev/commandDescriptionsPlan.md`); completed
+- Version: 0.2.320 (uncommitted; no second bump, same as the previous entry)
+- Added static `desc` to 22 blank oc-category action entries: `ocCommands.tsx` (New session, Model, Agent, Subagents, Notices, Clean up completed sessions, About, all 8 update rows, Shut down, Restart), `claudeCommands.tsx` (both account switchers), `savedImages.ts`, `claudeWarmup.tsx` `warmupCommands` (every per-account row), `sidebarTools.tsx` `USAGE_MENU_COMMAND`
+- Added value `get desc()` to settings Home folder (`readOcConfig().homeDir`), oc folder (`ocDir`), Subagent tabs (`subagent_tabs.click` -> "opens in tab"/"opens inline")
+- Fixed Subagent model / Subagent agent getters returning undefined when unset: `?? "not set"`
+- Kept: `Model`/`Agent` use a sentence, not the value: `readOcConfig()` does not expose `sessionModel`/`sessionAgent` (they feed `--model`/`--agent` in `opencode/src/cli/cmd/oc.ts:50-51`). TODO if wanted: add both to `readOcConfig` and switch to value getters
+- Verification: tui `tsgo --noEmit` clean; `claudeWarmup.test.ts` + `usagePalette.test.ts` 24 pass / 0 fail. Throwaway awk scan for oc-category entries without `desc`: 13 hits on HEAD `ocCommands.tsx`, 0 across all 8 files now (update rows checked by hand since their category comes from `.map`). No visual check of the palette
+
+### User
+Command palette
+- Every command in the oc section of the palette now shows a short description or its current value.
+- Slash commands like `/about` and `/notices` now show a real description instead of repeating their title.
+- Home folder, oc folder, and Subagent tabs show their current setting, and Subagent model/agent show "not set" instead of nothing.
+
+---
+
+## 2026-10-27 (~23:43) - v0.2.320 yeetTuning - Alt+Q keeps every press; slash menu stops fetching command bodies - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation (/think -> /imp, plan `~/.config/opencode/plans/2026-10-27-alt-q-queue-presses.md`); completed
+- Version: 0.2.320 (uncommitted; no second bump)
+- Fixed Alt+Q dropping presses (real bug): `tui/src/component/prompt/index.tsx` `queuePrompt` returned early on a `queueing` flag while the previous `session.queue.update` was in flight, and that add's late clear also wiped the newer draft. Now `takeQueued` validates and clears the draft synchronously at the press and returns a send thunk; sends run in order on a `queueSends` promise chain. A failed add shows the toast and restores the draft (`ref.set`) only if the prompt is still empty and on the same session
+- Added `syncDraft()` (shared with `submitInner`, replaces its inline IME sync): reads `input.plainText` before a take, since `onContentChange` is async. The old queue path read a stale `store.prompt.input`
+- Changed `queuePrompt` to await `pasting` only while a paste is reading (`pastesReading` counter in `trackPaste`), so the take stays synchronous and keys typed right after a press cannot join that draft
+- Changed `dialogQueue.tsx` `createQueueSnapshot.refresh` to return its promise; `unqueueLast` awaits `queueSends` and the send awaits `queue.refresh()`, so "Edit last queued prompt" right after a press sees the new entry
+- Fixed `GET /command` sending every command's `template` (real cost): encoding `Command.Info` read each getter, so every slash-menu open (`autocomplete.tsx` `show("/")` -> `sync.refreshCommands`) shipped every SKILL.md body (~1.1 MB here, 108 files) and fired one `mcp.getPrompt` per MCP prompt (log: 27 "failed to getPrompt" for `avalonia-docs/recreate-ui`). `handlers/instance.ts` `getCommand` now picks fields by name (no spread: that reads the getter); `command/index.ts` `Info.template` is `Schema.optional`. Legacy SDK regenerated (`types.gen.ts` `template?: string`). `packages/client` generate produced only line-ending churn (its command type is the V2 endpoint); restored
+- Added keeper pane test `tuiPane.test.ts` "queues three Alt+Q presses sent back to back, in order" (one burst `/init`, Alt+Q, `/review`, Alt+Q, text, Alt+Q during a held turn; reads `session_queue` pending rows in id order)
+- Verification: tui + opencode typecheck pass; tui suite 793 pass / 0 fail. New pane test passed twice with the fix; failed on HEAD `prompt/index.tsx` (temporary log showed 0 entries queued). Pane test "a tui.json save reloads..." still passes. Probe (deleted): `GET /command` in a minimal fixture 27,536 -> 944 bytes, no `template`, other fields unchanged (`agent`/`model`/`subtask` were already `null`). Stall probe (deleted): 50 ms event-loop watchdog in the prompt during the pane test logged no stall over 150 ms; the fixture has few skills, so the slash-menu cost was not reproduced there
+- Risk: queueing is optimistic: the prompt clears before the server accepts; a failure restores the draft and it stays in history
+- TODO: submit's command error path (`submitInner`, `const draft = unwrap(store.prompt)`) may restore an empty draft, since the later `setStore("prompt", {...})` merges into that same raw object. Unverified; the queue path uses a copy
+- TODO: user-reported lag not re-measured on the real profile; `Command.list` still globs and stats every skill file per call (server worker)
+
+### User
+Queue
+- Pressing Alt+Q several times in a row now queues each draft as its own entry, in order: `/pass`, then `/agent-push`, then `/revive` run one after another.
+- The prompt clears as soon as you press Alt+Q; if the server rejects the entry, your text comes back with an error.
+- Typing `/` no longer downloads every skill's full text, which made the slash menu and queueing slower.
+- `/pass /push` in a single message still runs as one combined turn; queue them separately for separate turns.
+
+---
+
+## 2026-10-27 (~22:28) - v0.2.320 yeetTuning - Reading tui.json no longer reloads every TUI - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation (/think -> /imp after revive, plan `~/.config/opencode/plans/2026-10-27-tui-config-watch-reads.md`); completed
+- Version: 0.2.320 (already bumped this session, not yet committed; no second bump)
+- Found the reload storm's first trigger: on this machine a read of a file whose last-access time is over about an hour old fires Bun's `fs.watch` `change` (NTFS last-access update), even though `fsutil behavior query disablelastaccess` says `2 (System Managed, Disabled)`. Probe: read `base/LICENSE` fired `change LICENSE`; a second read 1 s later fired nothing. A new TUI's startup read of a long-idle `tui.json` reloaded every open TUI; on v0.2.319 that reload started the endless rewrite loop
+- Changed `tui/src/config/live.ts` `watchConfigFiles`: stamps each file (`mtimeMs:size`, `undefined` when missing) at start and, when the 150 ms debounce fires, calls `onChange` only if a stamp moved. Name filter and debounce kept
+- Added keeper test `tui/test/configLive.test.ts` "reading a watched file does not fire" (access time set 2 h back before watching, read -> 0 calls, write -> 1)
+- Verification: new test failed on the old `live.ts` (Expected 0, Received 1), passes after; `configLive.test.ts` 3 pass; tui typecheck pass. Probe: rename-over save and delete each fired once (probe deleted). Pane test "a tui.json save reloads without the TUI rewriting the file" passed again
+
+### User
+Performance
+- Opening a new oc window, or anything reading the TUI settings file, no longer makes every open window reload its settings.
+
+---
+
+## 2026-10-27 (~22:03) - v0.2.320 yeetTuning - Stop the TUI config reload storm that lagged every window - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation (/spit -> /think -> /imp, plan `~/.config/opencode/plans/2026-10-27-tui-config-reload-storm.md`); completed
+- Version: 0.2.320
+- Fixed reload storm (real bug): the `app.tsx` effect saved `palette_keys` whenever `tuiConfig.palette_keys` changed. Each `liveConfig.replace` produced a new `{}`, so every reload rewrote `tui.json`, the watcher (`config/live.ts` `watchConfigFiles`) reloaded every TUI again, forever. Logs showed ~2,100 "tui config" lines/min while idle and the global `tui.json` mtime advancing several times a second. Each reload rebuilt keybinds and re-registered every keymap layer; `useCommandSlashes` rebuilt the slash autocomplete each time, which is why alt+q with `/pass /push` lagged most
+- Removed the effect; palette keys now save at their user call sites: `dialogHotkey.tsx` (set and clear) and the startup invalid-hotkey cleanup in `app.tsx` (only when a key was dropped, the same behavior as before)
+- Changed `ocSettings.ts` `persistTuiSetting`: skips the write when the edited text equals the file
+- Changed `dialogQueue.tsx` `createQueueSnapshot`: signal uses JSON equality, so the 2 s poll no longer notifies readers when nothing changed. `prompt/index.tsx` `hasPending` memo feeds the "Edit last queued prompt" `enabled`, so `promptCommands` re-registers only when it flips
+- Added keeper pane test `tuiPane.test.ts` "a tui.json save reloads without the TUI rewriting the file" (writes the fixture's global `tui.json`, asserts the mtime holds for 3 s)
+- Verification: tui typecheck pass; tui `queue.test.tsx` + `configLive.test.ts` 4 pass. Probe: watcher + `persistTuiSetting` reacting to its own reload ran 1 reload in 2 s; unconditional rewrite ran 13 (old loop). New pane test passed with the fix, failed with the old effect and unconditional write temporarily restored (mtime moved), passed again after restoring the fix. Probes deleted
+- TODO: the first write that starts a storm on TUI launch is unidentified; after this fix it costs one reload
+- Risk: running TUIs from older builds keep storming until oc restarts on a rebuilt build
+
+### User
+Performance
+- The TUI no longer lags all the time: a settings file was being rewritten and reloaded many times a second in every open window, which made typing, alt+q queueing, and slash commands slow.
+- Needs a rebuild; windows already open keep lagging until oc restarts.
+
+---
+
+## 2026-10-27 (~18:41) - v0.2.319 chipmunkChop - Test suites green, dead tests trimmed, queue dialog crash fixed - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; /spit plan then /imp with 3 subagents (haiku-5.5-high, gpt-6.1-sol-low x2); completed
+- Version: 0.2.319 chipmunkChop
+- Plan: `C:\Users\Foster\.config\opencode\plans\ocTestCleanup.md` (baseline table, classification, steps)
+- Baseline 2026-10-27 v0.2.318 HEAD: opencode 32 fail (18 known + 14 new), tui 5, schema 1, `.scripts/tests` 1, `test:httpapi` 3 missing; typecheck clean
+- Fixed queue dialog crash (real bug since v0.2.313 `09aa853`): `tui/src/app.tsx` mounted `PromptRefProvider` inside `DialogProvider`; dialog content renders under `DialogProvider`'s owner, so `DialogQueue` -> `useReviveChain` -> `usePromptRef` threw. Moved `PromptRefProvider` above `DialogProvider`. Probe: `queue.test.tsx` harness in app order failed on HEAD, passes after. Resolves the line-311 TODO (was a prod bug, not only a harness gap)
+- Added `/agent/sub` GET/POST/DELETE scenarios in `test/server/httpapi-exercise/index.ts`; seed throws if `SubagentFile.defaultFile()` resolves outside `exerciseGlobalRoot` (real `~/.config/opencode/agents/sub/general.md` checked untouched)
+- Fixed intended-change tests: handoff now a linked root session (`prompt.test.ts` x2, `fakeModel.test.ts` x2 via `ocHandoffFrom`, v0.2.300); Claude logger warns to opencode.log not stderr (`cliEvents`, `sessionManager`, v0.2.233); warmup claims pass `now` (8-day retention aged the fixed date); pagination fixture sets `time.completed` with `finish`; autoRename metadata `objectContaining`; attention drops title literal; recorded cassettes pin `limit.output` 32k (`recordedOutputCap`); subagentDialog efforts/inline Ctrl+D; fakeModel live context reads `message.updated` events; tool-search scenarios set `ENABLE_TOOL_SEARCH: "false"`; steering asserts rejected Write + no file instead of schema absence
+- Rewrote `prompt.test.ts` F5 queue contention against durable claims (two queue services, live claim blocks competitors, one delivery after settle)
+- Rewrote change detectors: event-manifest counts (schema + opencode); `testRunner.tests.ps1` counts now derived from dry runs plus "every package test folder belongs to a suite"
+- Removed: `reviveCleanup.tests.ps1` (ocdebug guards); `opencode/test/filesystem/filesystem.test.ts` (dup of core FSUtil tests); attach/thread source-text tests; 16 tool-parameter JSON Schema snapshots + `.snap`; footer "recreates the frame" (internal renderable identity); `instruction.test.ts` empty todo
+- Re-enabled skips: footer.view 4 (no Bun crash in full `test/cli/run`, 194 pass), session-message-updater 3 (2 assertions updated to upstream behavior), diff-viewer-file-tree 1
+- Moved tui `wait` helper into `test/fixture/fixture.ts` (10 s bound, polls 10 ms); 5 duplicate copies replaced; fixes local.test favorite-categories 2 s timeout under full-suite load
+- Docs: `UPSTREAM-SYNC.md` no-CI wording; AGENTS.md Known failures reduced to pane entries; comments in `cliEvents.ts`, `proxyToolSelection.ts` (warn goes to opencode.log)
+- Verification: final run opencode 5087 pass/0 fail, tui 792/0, schema 15/0, typecheck 16/16; earlier same session cli/client/codemode/core/llm/http-recorder/httpapi-codegen/protocol/sdk/effect-drizzle-sqlite/cursor-runtime all pass, `.scripts/tests` 5/5, `test:httpapi` 227 pass x3 modes, 0 missing. NOT RUN: `OC_TUI_PANE=1` tuiPane (baseline run killed twice by session restarts). NOT RUN: real queue dialog in a rebuilt oc
+- TODO: `POST /agent/sub` bad Claude account or invalid/duplicate name returns 500 (`Effect.die` / `Effect.promise` in `handlers/instance.ts`); a 400 needs a typed endpoint error + client regenerate
+- TODO: some opencode test rewrites tracked `src/packages/opencode/config.json` (same content, LF) during the full run; find the test writing into the package dir
+- TODO: tuiPane "API error twice" likely needs `ENABLE_TOOL_SEARCH: "false"` like its fakeModel twin; unverified
+- Kept: help-snapshots (33 whole-output snapshots, passing; delete only on user decision); platform `skipIf` and env opt-ins
+- MISTAKE: Edit tool trims a trailing space at the end of `new_string`; `replace_all` on `test.skip("direct ` produced `test("directfooter`. Rule: never end an Edit replacement in whitespace; include the next word
+- MISTAKE: a scratch shell rewrite (`python` replace) of a CRLF test file half-applied (LF-only match). Rule: edit project files with Edit only, per principles
+
+### User
+Tests
+- Every automated test suite passes again, and `test:httpapi` now covers the subagent routes so it no longer exits with an error.
+- Removed tests that only checked wording, counted items, or read source code, plus one duplicate file; re-enabled skipped tests that work again.
+
+Queue
+- Opening the queue list (Alt+Q list or clicking the queue strip) no longer crashes since the revive-chain change; needs a rebuild to see.
+
+---
+
+## 2026-10-27 (~17:01) - v0.2.318 landsSchwangin - Claude shell runs show output blocks - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation (/spit -> /think -> /imp, plan `~/.config/opencode/plans/claudeShellRows.md`); completed
+- Version: 0.2.318 landsSchwangin
+- Fixed Claude CLI-run `Bash`/`PowerShell` rows rendering as one-line `$ command`: `turnStream.ts` `readToolResults` sent `metadata: {}`, and TUI `Shell` (`index.tsx:2624`) draws the block only when `metadata.output` is a string.
+- Added `toolMapping.ts` `cliResultMeta(name, text, isError)`: for `bash` sets `metadata.output`; an `is_error` result headed `Exit code N` becomes a completed result with `{ output: <rest>, exit: N }` (native shell parity, Full output dialog shows `Exited · code N`); other errors (denials, interrupts) stay `{ error: true }`. Non-bash tools unchanged. `output` still carries the full CLI text.
+- Kept running Claude shell rows one-line: CLI sends no partial output, so no fake running block.
+- TODO: `backgroundable` (`tui/src/routes/session/index.tsx:3391`) treats any running `bash` part as movable, including CLI-run ones Ctrl+B cannot move.
+- Verification: throwaway fake-CLI probe (deleted) emitted Bash success `{output:"shell-ok"}`, `Exit code 2\ncore` -> `{output:"core",exit:2}` no isError, denial -> isError `{error:true}`, PowerShell `Exit code 1\r\nboom` -> `{output:"boom",exit:1}`, Read `{}`. `tsgo --noEmit` clean. 19 claude-code test files touching tool results: 316 pass / 4 fail, all 4 on the AGENTS.md known-failures list (sessionManager x2, warmup claims x2). No visual check.
+
+### User
+Claude
+- Shell commands run by Claude models now show their output in the chat, with Expand and Full output, like other models.
+- A Claude command that exits with an error code now shows its output and exit code instead of a red error line.
+
+---
+
+## 2026-10-27 (~16:15) - v0.2.317 espionageCapella - Claude models from the models.dev catalog - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation (/spit -> /think -> /imp, plan `~/.config/opencode/plans/claudeCodeModelsFromCatalog.md`); completed
+- Version: 0.2.317 espionageCapella
+- Replaced the hard-coded `defaultModels` table in `provider/claude-code/models.ts` with `claudeCodeModels(anthropic, providerID, declared)`: builds claude-code models from models.dev `anthropic` (prices, limits, dates, family), skips `-YYYYMMDD` aliases and deprecated, adds `-fast` twins from `experimental.modes.fast.cost`, Mythos 5/5.1 from their Fable twins (catalog entry wins), effort variants from `reasoning_options` type `effort` (none -> `reasoning: false`), keeps temperature/PDF off, name suffix `(N×)` = `cost.input`. Also adds `passthroughModel` for declared unknown ids and sets the `knownModel` set.
+- `parseModelId` and `agentModels.qualifyModelName` use `knownModel` instead of `defaultModels`.
+- `provider.ts` config-provider loop: for `claude-code`, `parsed.models` is seeded from `claudeCodeModels(modelsDev.anthropic, ...)`; config entries overlay field by field as for any catalog provider.
+- `claude-code/index.ts`: `configModelsForProvider(models)` now passes the operator's entries through (flattens only runtime-shaped ones); removed `defaultModelsForProvider`, `registeredModel`, `completeUserModel`, the unused `modelSuffix` path, and the `provider.models` hook (never ran: `provider.ts` skips providers missing from `database`).
+- Behavior diffs vs old table (real catalog): Sonnet 4.5 is budget-only in models.dev so it loses effort variants (old ones were no-ops: CLI ignores `CLAUDE_CODE_EFFORT_LEVEL` there); Opus 4.5 gets low/medium/high, Opus/Sonnet 4.6 no xhigh; families are `claude-opus` etc.; release dates follow the catalog. Prices, limits, fast set unchanged.
+- Tests: added `test/provider/claude-code/catalogFixture.ts` (seeds from the preload fixture); rewrote `configModels.test.ts` (old table pins were change detectors); seeded `agentModels`, `cliArgs`, `taskModelOverride`; `cliArgs` unregistered-fast case now `claude-sonnet-5-fast` (fixture still has stale 4-6/4-7 fast modes); `indexHooks` expects no provider hook; `bridge` uses `passthroughModel`; new provider-state test in `provider.test.ts` (catalog seed + partial overlay + unknown id). Added Opus 5, Opus 5.5, Sonnet 5.5, Haiku 5.5, Fable 5.1 to `test/tool/fixtures/models-api.json` anthropic (copied from the live catalog).
+- Verification: `tsgo --noEmit` clean; probe on `~/.cache/opencode/models.json` reproduced the old ids/prices/limits/fast set; `bun test test/provider test/tool/models.test.ts test/agent` 1654 pass / 14 fail; the same 14 fail on a HEAD copy (recorded in AGENTS.md known failures; probe copy deleted).
+- Risk: with `OPENCODE_DISABLE_MODELS_FETCH` and no cache or snapshot, claude-code has no built-in models. Catalog price errors now show in oc.
+- Updated AGENTS.md known failures with the 14 pre-existing claude-code test failures.
+- Cleanup (/pass): one provider id constant, `shared.ts` `CLAUDE_CODE_PROVIDER_ID`. Removed `accounts.ts` `BASE_PROVIDER_ID` and the new `models.ts` `PROVIDER_ID`; `index.ts`, `turnStream.ts`, `models.ts`, `provider.ts` import it from `shared.ts` (type-only imports, so no heavy dependency chain). `tsgo` clean; configModels/cliArgs/agentModels/accountPool/indexHooks 86 pass; provider seed test pass.
+- Fixed alias to an unknown id (`"my-alias": { id: "claude-x" }`) also registering `claude-x`: `claudeCodeModels` no longer takes `declared`; `provider.ts` overlay lookup falls back to `claudeCodeTemplate(id)` (`passthroughModel`) for claude-code, so templates are lookup-only and never registered. Provider seed test covers the alias. `tsgo` clean; provider.test 106 pass; configModels/agentModels/cliArgs 59 pass.
+- Added palette entry `oc.update_models` "Update model list" (`/updateModels`, oc > Third party updates, `tui/src/ocCommands.tsx`): runs `instance.reload` (rebuilds provider state from the in-memory models.dev catalog, which the server refetches every 5 min; server refuses with 409 while session work runs). Extracted `reloadInstance(success)` in `app.tsx`, shared with `/reload`. User asked for manual only; no automatic rebuild on catalog refresh. Verification: tui `tsgo` clean; palette not exercised (no pane probe).
+
+### User
+Claude models
+- Claude models in the picker now come from the same public model list oc uses for other providers, so new Claude models appear without an oc update.
+- Prices, context sizes, fast versions, and Mythos are unchanged; a few older models show only the effort levels they actually support.
+- New "Update model list" command (`/updateModels`) in the oc palette's updates group reloads the model list from the latest catalog; it refuses while a session is running.
+
+---
+
+## 2026-10-27 (~02:53) - v0.2.316 tpainThething - Usage plan renewal lines - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation (/spit -> /think -> /imp, plan `~/.config/opencode/plans/usagePlanRows.md`, mockup `plans/mockups/usagePlanRows.html` option A); completed
+- Version: 0.2.316 tpainThething
+- Added `Auth.Oauth.subscriptionStart`/`subscriptionUntil` (epoch ms, `opencode/src/auth/index.ts`); required because `Auth.all()` decodes through the schema and would drop unknown keys on the next write. Plugin OAuth success types (`plugin/src/index.ts`) and regenerated `sdk/js/src/v2/gen/types.gen.ts` (`build.ts --generate-only`) carry them.
+- Added `extractSubscription` (`plugin/openai/codex.ts`): reads undocumented id_token claims `chatgpt_subscription_active_start/_until` (ISO) under `https://api.openai.com/auth`; saved on both login paths and on refresh, where a refresh id_token without them keeps the stored dates. oc's `openai.access` token lacks these claims (checked locally); `~/.codex/auth.json` is a separate, stale login and is not read.
+- Added `tui/.../usage/plans.ts`: `readUsagePlanFacts` (oc auth.json openai dates + `chatgpt_plan_type` from the access JWT; per Claude account `.claude.json` `oauthAccount.subscriptionCreatedAt`/`organizationType`), pure `resolveUsagePlans` (Codex exact `until`, else projected monthly/yearly from start; Claude signup day `~`; Cursor `monthly.resetMs`; tagged `UsageSubscription` overrides), `usagePlanLine`, `usagePlanLabel`, `usagePlanEvents`.
+- Claude profile file mirrors Claude Code: `~/.claude.json` for the default `~/.claude` account when `CLAUDE_CONFIG_DIR` is unset (oc spawns it with inherited env, `poolAccountIds`), else `<dir>/.claude.json`. No fallback between the two.
+- Added `UsageSubscription.provider`/`account` (`usage/calendar.ts`), `planEvents` input on `usageCalendarEvents` (automatic Codex/Claude only; manual tags already come from subscriptions, Cursor from its window), exported `startOfDay`. `USAGE_PLAN_PROVIDERS`, names, and billing URLs in `usage/providers.ts`.
+- Sidebar (`sidebarUsage.tsx`): `planFacts` reloads at the start of `refreshUsage` for openai/claude-code (no new timers); `usagePlans` memo; `planLine` stops `over` propagation so the Usage box hover does not replace it, and stops `mouseUp` so the menu does not open. Pooled Claude rows carry `account` (`format.ts`) and `aligned` adds the line after each account's last row. Usage menu: `Plan:` row per provider/account (joins pooled account groups by category) -> submenu Open billing page / Set or Change renewal date / Clear renewal date; `promptSubscriptionDate(label, plan)` replaces that plan's tagged entry.
+- Updated wiki `oc.wiki/Sidebar.md` (Plan renewal lines section, calendar, `usageSubscriptions` key) and `FORK.md` Usage row.
+- Verification: `tsc --noEmit` clean in tui and opencode; `test/plugin/codex.test.ts` 52 pass (kept 2 new `extractSubscription` tests: persisted auth contract); existing tui usage tests 49 pass; probes (deleted): plans resolution/line/file pick (5 pass), read-only run on real files (Claude `Pro renews ~11/14`, `~11/10` for claude2; Codex unknown until next refresh), Codex refresh keeps/replaces dates, Auth schema keeps fields, `OC_TUI_PANE=1` pane probe (sidebar `Max renews ~10/29 (2d)` and `Renewal date unknown`, menu `Plan:` rows with source detail, submenu). Not verified: billing URLs land on the right pages (ChatGPT `#settings/Subscription` and Cursor `?tab=billing` deep links unconfirmed), and that a refresh-grant id_token carries the subscription claims.
+- Pane fixture pins `OPENCODE_AUTH_CONTENT={}` (`isolatedEnv`), so pane tests cannot show Codex auth-file data.
+
+### User
+Sidebar usage
+- Codex, each Claude account, and Cursor show a plan line such as `Pro renews ~11/14 (18d)` under their usage rows, yellow at 3 days or less.
+- Clicking a plan line opens that provider's billing page.
+- Claude dates are estimated from your signup day (`~`), Codex dates come from your ChatGPT login after the next sign-in or refresh, and Cursor uses its billing cycle.
+- The Usage menu has a Plan row per provider to open billing, set your own renewal or end date, or clear it, and the usage calendar lists Codex and Claude renewals.
+
+---
+
+## 2026-10-27 (~01:37) - v0.2.315 bustingDrs - Slash pick keeps the next command - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation (/spit -> /think -> /imp, plan `~/.config/opencode/plans/slashInsertKeepsNext.md`); completed
+- Version: 0.2.315 bustingDrs
+- Fixed: picking a command in `/x|/command` deleted `/command`; `insertSlash` (`component/prompt/autocomplete.tsx`) ended the replaced token with `^\S*`, which ran through the next `/command`
+- Added `slashTokenEnd` in `prompt/slash.ts` beside `slashTriggerIndex`: token end stops at whitespace or `/` (same `[^\s/]` rule as token start); `insertSlash` uses it. Result `/foo /command`, cursor before `/command`; mid-word `/com|mand` still replaced whole
+- Removed now-unused `promptOffsetWidth` import from `autocomplete.tsx`
+- Added test `slash pick replaces the edited word but keeps a following command` in `test/prompt/slash.test.ts` (guards this bug)
+- Verification: `bun test test/prompt/slash.test.ts` 6 pass 0 fail; `bunx tsc --noEmit -p .` in `packages/tui` exit 0. TUI behavior not driven (textarea has no unit harness); user check pending
+
+### User
+Prompt
+- Picking a slash command typed in front of another command now inserts it to the left with a space, instead of replacing the command to its right.
+
+---
+
+## 2026-10-27 (~01:12) - v0.2.314 bustingRamps - Show queued prompts above the prompt - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation (/spit -> /think -> /imp, plan `~/.config/opencode/plans/2026-10-27-queue-strip-indicator.md`, mockup `plans/mockups/queueIndicator.html`); completed
+- Version: 0.2.314 bustingRamps
+- Fixed: alt+q during a busy turn showed nothing; `queueLabel` sits behind the footer's `status !== "idle"` Match, so it only rendered when idle
+- Added `component/prompt/queueStrip.tsx` `QueueStrip`: pending entries without `runAt` (dispatching and scheduled hidden), ` QUEUED ` badge in `highlight()` color, width-truncated title, max 3 rows + `+N more`, left click opens `DialogQueue`. Rendered in `Prompt` before the anchor box so autocomplete stays above the input
+- Added `dialogQueue.tsx` `QueueEntry` type and `queueEntryTitle` (shared with `DialogQueue`)
+- Changed `prompt/index.tsx`: queue refreshes on every `status().type` change (was idle only) so a row leaves when its turn starts; 600 ms `theme.accent` border flash after a non-scheduled queue add (`flashQueued`, skipped when animations are off)
+- Updated wiki `Sessions.md` Queued prompts
+- Fixed revive chain loop in `reviveChain.tsx` `resume`: it called `run(sessionID, body, body)`, and the revive step's `ReviveResume.write({ ...body, request, queued, ...target })` spread the old claimed body last, so its `steps`/`done`/`at`/`writerPid` replaced the new ones. Any chain with a second revive re-sent the step after the first revive forever (seen live: `/imp /revive /pass /agentTest /revive /agent-push` delivered step 3 four times). Now passes only `{ agent, model, variant }`. Predates v0.2.313
+- Changed (/pass) `QueueStrip` rows from `For` to `Index`: each 2 s poll returns new entry objects, so `For` rebuilt every row per poll
+- Verification: `tsgo --noEmit` (tui) passed; throwaway `testRender` probes of `QueueStrip` (removed) showed rows, filtering of dispatching/scheduled, `(attachments only)`, `+2 more`, truncation at width 40, and rows updating then clearing as entries change. Border flash and the real busy-to-idle flow not observed: /agentTest does not drive oc's own TUI (input can land in the agent's terminal), so a manual look is needed. Chain loop fix: typecheck passed, and observed live: after the fixed build (oc.exe 01:22:32) took over, the same chain sent step 3 once more (the old build's bad resume file), then its revive advanced to step 5 `/agent-push`. TODO: test guarding the resume body (no `reviveChain` tests exist)
+- ERROR: `test/component/queue.test.tsx` fails both tests at HEAD (v0.2.313): `DialogQueue` now calls `useReviveChain`, which needs `PromptRef` and `Local` providers the harness lacks. Not caused by this change; harness needs those providers (TODO)
+
+### User
+Queued prompts
+- Prompts you queue with alt+q now show above the prompt box with a QUEUED badge until they are sent.
+- The prompt border flashes briefly when a prompt is queued, so you can tell the key worked.
+- Clicking the queued rows opens Queued prompts.
+
+Revive chains
+- A chain with two revives (for example `/imp /revive /pass /revive /agent-push`) no longer repeats the step after the first revive forever.
+
+---
+
+## 2026-10-27 (~01:05) - v0.2.313 pepsimanInflated - Queue revive chains with Alt+Enter - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation (/spit -> /think -> /imp, plan `~/.config/opencode/plans/queueReviveChains.md`); completed
+- Version: 0.2.313 pepsimanInflated
+- Added queue `Payload.chain` (`ChainStep` schema), `Entry.chain`, pause reason `"chain"` in `session/queue.ts`; core `sql.ts` payload type gains `chain`; `add` keeps a `"chain"` pause; `edit` takes `chain` like `commands` (absent keeps, `[]` clears)
+- Added drain hand-off in `session/prompt.ts`: `dispatchHead` passes a claimed chain row to `handOff`; first live `takeChain` waiter gets the payload, queue pauses `"chain"`, row receipted; no waiter -> `settle` back to pending (barrier). `takeChain` long-polls (returns at once with no chain queued, 5 min timeout settles the same Deferred so a racing hand-off is not lost); cancel/edit and a hand-off release waiters when no chain is left
+- Added `POST /session/:id/queue/take` (`session.queue.take`), chain validation on add (needs agent+model, no `runAt`) and edit; SDK regenerated; httpapi-exercise scenario added
+- Moved `label`/`chainText`/`REVIVE_NAMES` from `tui/reviveChain.tsx` to core `util/reviveResume.ts` (+ `ReadonlyStep`, `Body.queued`); server uses `chainText` for entry text
+- Added `reviveChain.watchQueued` (module-level dedupe; loops take -> `run` with `queued`); `run` returns true when a revive started and calls queue `resume` after the last step of a queued chain; a queued chain always writes a ReviveResume file so the post-revive TUI resumes the queue
+- Changed TUI: `queueInner` queues chains (schedule refused: "Revive chains cannot be scheduled"), session open starts `watchQueued`, queue dialog edits into/out of chains, pause label "Paused by a revive chain"
+- Added keeper test `queue.test.ts` "a queued revive chain holds the queue until one waiting TUI takes it and resumes"
+- Fixed (pass): queue edit refused when it turns a scheduled entry into a chain (`sessionOc.ts`); before, a scheduled fork/new entry edited into a chain would send as a plain prompt. Typecheck + `httpapi-exercise --mode effect --include session.queue` 3 pass after the fix
+- Verification: typecheck core/opencode/tui pass; `test/session/queue.test.ts` 20 pass; tui `slash`/`part`/`reviveChainLine` 17 pass; `httpapi-exercise --include session.queue` coverage + effect 3 pass (3 pre-existing missing `/agent/sub` scenarios); prettier clean. NOT RUN: real TUI flow with a revive (needs user)
+- Risk: no TUI on the session -> chain waits at the head and holds the queue; a TUI closing right as it receives a chain loses it and leaves "Paused by a revive chain" (Resume queue fixes)
+
+### User
+Queued prompts
+- Alt+Enter now queues revive chains such as `/verify /revive /pass /agent-push`; the chain waits its turn, runs from your oc window, and prompts queued behind it run after it finishes, even across the revive.
+- Queued chains show in Queued prompts and can be edited or cancelled; while one runs the queue reads "Paused by a revive chain".
+- Scheduling a revive chain (alt+s) is refused with "Revive chains cannot be scheduled".
+
+---
+
+## 2026-10-27 (~00:45) - v0.2.312 sauronPermarolling - Verify and pass: new session picker in the real TUI - Claude Opus 5.5, low effort; Verify
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Verify + Pass (/verify /agentTest, then /pass); completed, probe run cut short by /revive
+- Version: 0.2.312 sauronPermarolling
+- Verification: throwaway `OC_TUI_PANE=1` probe (`openPane`, oc.json `homeDir` = fixture root with `alpha`, `work`, `zeta`): Home Ctrl+N shows no `●` row PASS; Enter shows `New oc session ⠙ Creating session in alpha` PASS; Ctrl+N from the alpha session shows `● alpha` PASS. Filter-then-Enter and Esc cases NOT RUN (revive killed the run). Evidence `%TEMP%\verify\20261027-0044`
+- Skipped /agentTest GUI driving: oc's own TUI is out of scope for cua (input can land in this terminal)
+- Fixed own leftovers: revive orphaned the probe's mux server tree (identity-checked stop of 3 processes), removed `C:\ocTestTmp\oc-b2aiLY`, fixture home, and `test/tmp/verify`
+- Pass: no changes; diff stays `ocCommands.tsx` only, no tests added
+
+### User
+New session (Ctrl+N)
+- Checked in a real oc window: the spinner shows while the session is created, and the list starts on the current session's folder.
+
+---
+
+## 2026-10-27 (~00:38) - v0.2.312 sauronPermarolling - New session picker shows a spinner and starts on the current folder - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation (/imp from plan `~/.config/opencode/plans/ocNewSessionSpeed.md`); completed
+- Version: 0.2.312 sauronPermarolling
+- Added Ctrl+N New oc session spinner (`ocCommands.tsx` `newSession.run`): `creating` signal holds the picked folder name and drives `titleView` `Spinner` "Creating session in <folder>" plus `locked`; `locked` replaces the manual repeat-Enter guard (`DialogSelect.submit` returns when locked). Same pattern as `dialog-move-session.tsx`
+- Added preselect: on a session route, `current` = home folder containing `sync.session.get(id).directory` via `FSUtil.contains` (case-insensitive on win32; subfolders map to their home folder; outside folders select nothing). Typing a filter still jumps to the top match (`dialog-select.tsx` filter effect)
+- Kept title lookup `experimental.session.list({ roots: true, limit: 500 })`: probe against the resident server median 12 ms (500 rows, 394 KB); `search: "oc"` 11 ms / 479 rows (SQL LIKE substring). Plan step 2 (`search`) dropped: no gain
+- Note: remaining ~2 s is the server cold boot of the picked folder: `session.create` ~1.0 s (fromDirectory 0.2 s, config + `plugin.init` 0.8 s), then the noReply prompt inits agents/skills/provider (opencode.log 2026-10-27T04:05:37). OpenCode provider 401 config fetch is forked (`core/src/plugin/provider/opencode.ts:198`), not blocking. Faster creation needs a boot investigation (TODO if wanted)
+- Updated wiki `Keybinds.md` ctrl+n row (starts on the session's folder). Wiki not pushed
+- Verification: tui `bunx tsc --noEmit` exit 0; `bun test test/ocNewSession.test.ts` 2 pass; throwaway probe of the preselect match (backslash, forward slash, other case, subfolder -> `oc`; `C:\Users\Foster` and a missing folder -> none), probe removed. Spinner and preselect not seen live (needs a rebuilt TUI)
+- Note: rotated buildNotes (1006 lines) to `buildNotes.archive15.md`
+
+### User
+New session (Ctrl+N)
+- After you pick a folder, the dialog title shows a spinner with "Creating session in <folder>" until the session opens, and the list ignores keys meanwhile.
+- Opening Ctrl+N from a session starts the list on that session's folder; typing still jumps to the best match.
+- Creating a session in a folder oc has not opened since it started still takes about 2 seconds while the server loads that project.

@@ -248,6 +248,22 @@ test("even one character of text is an answer", async () => {
   assert.equal(bodyOf(parts).includes(SILENT_TURN_MARKER), false)
 })
 
+// A resumed conversation first reports each background task its old process left unfinished, as a
+// turn of its own with no model call, then reads the message (CLI 2.1.321, 2026-11-10).
+test("a background task notice ahead of the message is not taken for its reply", async () => {
+  const parts = await streamParts([
+    init,
+    { ...successResult, num_turns: 0, result: "", origin: { kind: "task-notification" } },
+    init,
+    text("the real answer"),
+    endTurn,
+    successResult,
+  ])
+  assert.equal(bodyOf(parts).includes(SILENT_TURN_MARKER), false)
+  assert.match(bodyOf(parts), /the real answer/)
+  assert.equal(parts.filter((part) => part.type === "finish").length, 1)
+})
+
 test("a turn that called a CLI tool and then said nothing gets no note", async () => {
   const parts = await streamParts([
     init,

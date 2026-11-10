@@ -72,6 +72,26 @@ test("a Mythos model names its Fable twin for the no-access note", () => {
   }
 })
 
+test("Mythos 5.2 and its fast twin come from a catalog Fable 5.2 with a fast mode", () => {
+  const fable = {
+    ...anthropicCatalog.models["claude-fable-5-1"],
+    id: "claude-fable-5-2",
+    name: "Claude Fable 5.2",
+    cost: { input: 8, output: 40, cache_read: 0.2, cache_write: 10 },
+    experimental: { modes: { fast: { cost: { input: 16, output: 80, cache_read: 0.4, cache_write: 20 } } } },
+  }
+  const catalog = { ...anthropicCatalog, models: { ...anthropicCatalog.models, "claude-fable-5-2": fable } }
+  try {
+    const models = claudeCodeModels(catalog, "claude-code")
+    assert.equal(models["claude-mythos-5-2"].name, "Claude Mythos 5.2 (8×)")
+    assert.equal(models["claude-mythos-5-2-fast"].name, "Claude Mythos 5.2 Fast (16×)")
+    assert.equal(catalogTwin("claude-mythos-5-2-fast"), "claude-fable-5-2-fast")
+    assert.equal(modelName("claude-mythos-5-2"), "Claude Mythos 5.2")
+  } finally {
+    claudeCodeModels(anthropicCatalog, "claude-code")
+  }
+})
+
 test("claudeCodeModels registers exactly the ids knownModel accepts", () => {
   const models = claudeCodeModels(anthropicCatalog, "claude-code")
   assert.ok(models["claude-opus-5-fast"])

@@ -59,6 +59,26 @@ describe.skipIf(!cliPath)("Claude Code CLI against TestLLMServer", () => {
     90_000,
   )
 
+  // A resumed CLI reports the task its old process left unfinished as a turn of its own, ahead of
+  // the message. That turn's empty result once ended the oc turn with a false "no reply" note.
+  cliIt.live(
+    "a restart that stops a background task says so and still answers the message",
+    (fixture) =>
+      Effect.gen(function* () {
+        yield* fixture.llm.tool("Bash", { command: "sleep 60", run_in_background: true, description: "wait" })
+        yield* fixture.llm.text("TASK-STARTED")
+        const chat = yield* openChat(fixture)
+        yield* chat.prompt("Start it.")
+        yield* fixture.llm.text("ANSWER-AFTER-RESTART")
+        // Another model needs another process.
+        yield* chat.prompt("Next message.", { modelID: "claude-haiku-4-5" })
+        const texts = (yield* chat.parts).flatMap((part) => (part.type === "text" ? [part.text] : []))
+        expect(texts.slice(-2)).toEqual([expect.stringContaining("stopped 1 background task"), "ANSWER-AFTER-RESTART"])
+        expect(texts.join("\n")).not.toContain("no reply")
+      }),
+    90_000,
+  )
+
   cliIt.live(
     "oc automatic rename uses a separate model alongside the first Claude turn and survives restart",
     (fixture) =>

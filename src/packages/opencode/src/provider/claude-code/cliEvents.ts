@@ -568,6 +568,25 @@ export function formatSilentTurnNote(hadReasoning: boolean): string {
 }
 
 // ---------------------------------------------------------------------------
+// background tasks that ended with the process that ran them
+// ---------------------------------------------------------------------------
+
+export const TASKS_STOPPED_MARKER = "▌ **background tasks:**"
+
+/**
+ * oc replaced the Claude Code process before this turn (a slash command's own
+ * tools, a new model, agent or effort) while it still ran background commands.
+ * They die with it, and without this note the only trace is a `[killed]` output.
+ */
+export function formatTasksStoppedNote(count: number, why: string): string {
+  const what = count === 1 ? "1 background task" : `${count} background tasks`
+  return (
+    `\n${TASKS_STOPPED_MARKER} Claude Code restarted for this message because ${why}, ` +
+    `which stopped ${what} it was still running. Run again whatever is still needed.\n`
+  )
+}
+
+// ---------------------------------------------------------------------------
 // account-level CLI failures (login, billing). Switching is not offered.
 // ---------------------------------------------------------------------------
 
