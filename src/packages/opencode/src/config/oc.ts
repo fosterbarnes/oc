@@ -12,6 +12,8 @@ export const keys = [
   "serverStartAtLogin",
   // `ask`: a Claude turn that hits a usage limit asks which account to continue on. Unset = `auto`.
   "claudeFailover",
+  // With claude-code `apiAccount` set and every account limited: `ask` (unset), `always`, or `off`.
+  "claudeApiRollover",
 ] as const
 
 export type Key = (typeof keys)[number]
@@ -75,6 +77,9 @@ export async function update(key: Key, value: string, startup?: Parameters<typeo
   }
   if (key === "claudeFailover" && parsed !== "auto" && parsed !== "ask") {
     throw new Error("claudeFailover must be auto or ask")
+  }
+  if (key === "claudeApiRollover" && parsed !== "ask" && parsed !== "always" && parsed !== "off") {
+    throw new Error("claudeApiRollover must be ask, always or off")
   }
   const settings = await read()
   return write({ ...settings, [key]: parsed })

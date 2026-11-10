@@ -33,6 +33,8 @@ export function readOcConfig(): {
   reviveBuild: boolean
   // `ask`: a Claude usage limit mid-turn asks which account to continue on (opencode `turnStream`).
   claudeFailover: "auto" | "ask"
+  // With claude-code `apiAccount` set and every account limited: use API credits (opencode `turnStream`).
+  claudeApiRollover: "ask" | "always" | "off"
   // Claude account names keyed by the `accounts` entry as written (opencode accounts.ts).
   claudeAccountNames: Record<string, string>
 } {
@@ -49,6 +51,7 @@ export function readOcConfig(): {
         server?: { startAtLogin?: unknown; startOnWindowsUserStart?: unknown }
         revive?: { build?: unknown }
         claudeFailover?: unknown
+        claudeApiRollover?: unknown
         claudeAccountNames?: unknown
       }
     }
@@ -66,6 +69,8 @@ export function readOcConfig(): {
     const reviveSourceChosen = merged.revive?.build !== undefined
     const reviveBuild = typeof merged.revive?.build === "object" && merged.revive.build !== null
     const claudeFailover = merged.claudeFailover === "ask" ? "ask" : "auto"
+    const claudeApiRollover =
+      merged.claudeApiRollover === "always" || merged.claudeApiRollover === "off" ? merged.claudeApiRollover : "ask"
     const names = merged.claudeAccountNames
     const claudeAccountNames =
       names && typeof names === "object"
@@ -82,6 +87,7 @@ export function readOcConfig(): {
       reviveSourceChosen,
       reviveBuild,
       claudeFailover,
+      claudeApiRollover,
       claudeAccountNames,
     }
   } catch {
@@ -94,13 +100,22 @@ export function readOcConfig(): {
       reviveSourceChosen: false,
       reviveBuild: false,
       claudeFailover: "auto",
+      claudeApiRollover: "ask",
       claudeAccountNames: {},
     }
   }
 }
 
 export function persistOcConfig(
-  key: "ocDir" | "homeDir" | "homeDirSort" | "sessionModel" | "sessionAgent" | "serverStartAtLogin" | "claudeFailover",
+  key:
+    | "ocDir"
+    | "homeDir"
+    | "homeDirSort"
+    | "sessionModel"
+    | "sessionAgent"
+    | "serverStartAtLogin"
+    | "claudeFailover"
+    | "claudeApiRollover",
   value: string,
   toast: ToastContext,
 ) {

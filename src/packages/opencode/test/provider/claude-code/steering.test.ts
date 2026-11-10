@@ -182,6 +182,50 @@ describe.skipIf(!cliPath)("Claude mid-turn steering", () => {
     120_000,
   )
 
+  // The QUEUED Edit/Delete bug: a steer sent while Claude thinks was written to stdin at once and
+  // could no longer be taken back, though Claude would not read it before its next tool call.
+  cliIt.live(
+    "a steer sent while Claude thinks stays deletable until its next tool call",
+    (fixture) =>
+      Effect.gen(function* () {
+        const config = chatConfig(fixture.llm.url)
+        const logDir = path.join(fixture.home, "thinkLog")
+        const chat = yield* openChat(fixture, {
+          config: {
+            provider: {
+              ...config.provider,
+              "claude-code": {
+                options: { ...config.provider["claude-code"].options, logging: { file: true, dir: logDir } },
+              },
+            },
+          },
+        })
+        const release = Promise.withResolvers<void>()
+        yield* Effect.addFinalizer(() => Effect.sync(() => release.resolve()))
+        yield* fixture.llm.push(reply().wait(release.promise).tool("Bash", { command: "echo one", description: "one" }))
+        yield* fixture.llm.text("THINK-DONE")
+        const turn = yield* chat.prompt("THINK-TURN").pipe(Effect.forkScoped)
+        yield* fixture.llm.wait(1)
+        const steer = yield* chat.prompt("THINK-DELETE").pipe(Effect.forkScoped)
+        const queued = yield* waitMessage(chat, "THINK-DELETE")
+        yield* waitAccepted(logDir, queued.info.id)
+        expect(
+          (yield* Effect.promise(() =>
+            chat.sdk.session.deleteMessage({ sessionID: chat.sessionID, messageID: queued.info.id }),
+          )).error,
+        ).toBeUndefined()
+        release.resolve()
+        yield* Effect.forEach([turn, steer], Fiber.join, { discard: true })
+        const inputs = yield* fixture.llm.inputs
+        expect(inputs).toHaveLength(2)
+        expect(JSON.stringify(inputs)).not.toContain("THINK-DELETE")
+        const log = yield* Effect.promise(() => Bun.file(path.join(logDir, "plugin.log")).text())
+        expect(log).not.toContain("steered user message into running turn")
+        expectIsolated(inputs)
+      }),
+    120_000,
+  )
+
   for (const mode of ["held", "written", "streamed"] as const)
     cliIt.live(
       mode === "held"
@@ -215,15 +259,21 @@ describe.skipIf(!cliPath)("Claude mid-turn steering", () => {
           yield* Effect.addFinalizer(() => Effect.sync(() => release.resolve()))
           const timeline: { event: string; at: number }[] = []
           let cancelling = true
+          // The Read call writes the steer to stdin; the held question beside it keeps the CLI from
+          // reaching the tool boundary where it would read it.
+          const read = { file_path: path.join(chat.project, "cancel.txt") }
           if (written) {
             yield* fixture.llm.pushMatch(
               () => {
                 timeline.push({ event: "initial request", at: Date.now() })
                 return true
               },
-              mode === "streamed"
-                ? reply().text("CANCEL-STARTED").hang()
-                : reply().wait(release.promise).text("CANCEL-STARTED").stop(),
+              (mode === "streamed"
+                ? reply().wait(release.promise).text("CANCEL-STARTED")
+                : reply().wait(release.promise)
+              )
+                .tool("Read", read)
+                .tool("mcp__opencode_proxy__question", heldQuestion),
             )
             yield* fixture.llm.pushMatch(() => {
               if (!cancelling) return false
@@ -234,6 +284,13 @@ describe.skipIf(!cliPath)("Claude mid-turn steering", () => {
           if (!written) yield* fixture.llm.tool("mcp__opencode_proxy__question", heldQuestion)
           const turn = yield* chat.prompt("CANCEL-TURN").pipe(Effect.forkScoped)
           yield* fixture.llm.wait(written ? 2 : 1)
+          if (!written) yield* waitQuestion(chat)
+          const steer = yield* chat.prompt("CANCEL-STEER").pipe(Effect.forkScoped)
+          const queued = yield* waitMessage(chat, "CANCEL-STEER")
+          if (written) {
+            yield* waitAccepted(logDir, queued.info.id)
+            release.resolve()
+          }
           if (mode === "streamed")
             yield* pollWithTimeout(
               Effect.promise(() => Bun.file(path.join(logDir, "plugin.log")).text()).pipe(
@@ -244,9 +301,6 @@ describe.skipIf(!cliPath)("Claude mid-turn steering", () => {
               "visible content never streamed",
               "30 seconds",
             )
-          if (!written) yield* waitQuestion(chat)
-          const steer = yield* chat.prompt("CANCEL-STEER").pipe(Effect.forkScoped)
-          yield* waitMessage(chat, "CANCEL-STEER")
           if (written)
             yield* pollWithTimeout(
               Effect.promise(() => Bun.file(path.join(logDir, "plugin.log")).text()).pipe(

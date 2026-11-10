@@ -123,6 +123,55 @@ Budget (AGENTS.md "Build notes"): at most 80 lines and 12 KB. Current invariants
 
 ---
 
+## 2026-11-10 (~04:36) - v0.2.348 choccieJiminy - Claude API credit rollover when every login is limited - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation (/imp of `docs/dev/claudeApiRolloverPlan.md`); completed
+- Version: 0.2.348 choccieJiminy
+- Phase 0 probe (user approved, ~$0.005 real spend): `claude --print` with `ANTHROPIC_API_KEY` in an empty `CLAUDE_CONFIG_DIR` and Agent SDK `query()` both succeeded and the user confirmed the Team plan's Promotional credits dropped. So the plain CLI path (option A) draws the credit; no SDK transport or entrypoint relabel needed.
+- Added `accounts.ts` "API-credit rollover": `configureApiAccount` (from `createClaudeCode`, provider option `apiAccount { apiKey, dir? }`, default `~/.claudeApi`, blank key = off), `apiAccountId`, `apiAccountKey`, `apiRolloverCandidate`, `pinApiRollover`, private `apiRolloverTurn` (first step of `turnAccount`: keeps a pinned chat on the key while all pool ids are limited, else clears the pin). The API id is never in `poolAccountIds`, so ranking, sidebar, account manager, and warm-up never see it. `applyFailoverChoice` pins per chat for the API id; `poolAccountLabel` returns `API credits`.
+- Added `claudeSpawnEnv` `apiKey`, set after the configDir credential strip; `spawnClaudeProcess` passes `apiAccountKey(account)` (respawn reuses `old.account`).
+- Changed `turnStream.ts`: `queueAccountSwitch` offers `[{ id: api }]` when `failoverCandidates` is empty; `pickAccount` follows oc.json `claudeApiRollover` (`off`/`always`/unset=`ask`) for it, and an agent without `question` never spends; `switchAccount` runs `createAccountDir` for the API dir so `projects` is shared and the conversation resumes; `onResult` treats `billing_error` or "credit balance too low" on the API account as exhausted (marked limited until `earliestLimitedUntil(pool)`, note, `allLimited` for auto-resume).
+- Changed `failoverQuestion.ts`: a lone API candidate asks consent (`API_ROLLOVER_LABEL` / Stop). `reportSystemInit` takes `apiKeyExpected` to skip the pay-as-you-go warning on that account. `claudeCodeLanguageModel` keeps a working API process (`keepWorking`).
+- Added oc.json key `claudeApiRollover` (`config/oc.ts` validation, `tui/ocSettings.ts`) and palette entry **Claude API credit rollover** in `claudeCommands.tsx` (shown only with `apiAccount`).
+- Added `apiAccount` to the user's `~/.config/opencode/opencode.jsonc`, first as `{env:CLAUDE_CREDIT_API_KEY}`, then `{file:~/.config/opencode/secrets/claudeCredit.key}`. Config updates patch raw jsonc, so the reference is never replaced by the key.
+- ERROR: after `/revive` the log said "apiAccount has no apiKey": the resident server (started by revive) kept the environment from before the User env var was set. Fixed by the `{file:}` key; wiki and `types.ts` now recommend it.
+- Pass: `apiCreditsExhausted` reads the streamed reply only when the result has no text (same rule as `beginTextAccountSwitch`); dropped a label-list assertion from the consent-question test.
+- Docs: wiki `Claude-Code.md` "API credit rollover", FORK.md account pool row, plan file status.
+- Verification: `tsgo --noEmit` clean in `packages/opencode` and `packages/tui`; `bun test` accountPool + spawnEnv + failoverQuestion 43 pass (3 new pool tests, 1 spawnEnv test: billing safety contract), cliEvents 15 pass. Not run: a live rollover turn in oc (needs a restart so the env var is in the server process, and every login limited).
+- ERROR: first `bun test` run including `cliEvents.test.ts` crashed with "Bun has run out of memory"; immediate rerun passed. Not caused by this change.
+- Risk: sidebar does not show the API account; a chat on credits shows its pool's account row. The "credit balance too low" text match is from Anthropic docs, not observed live.
+
+### User
+Claude accounts
+- A Claude Console API key (for example the Team plan's monthly API credit) can now act as a last resort when every Claude login hits its usage limit.
+- oc asks "Continue on API credits?" in that turn, and a yes keeps that chat on the key until any login resets.
+- The new palette entry **Claude API credit rollover** switches between Ask, Always, and Off.
+- When the credit runs out, the turn ends with "API credits used up" and waits for a login to reset.
+
+---
+
+## 2026-11-10 (~02:17) - v0.2.347 gregAngelmaker - Queued Claude messages stay editable until the next tool call - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation (/think plan then /imp); completed
+- Version: 0.2.347 gregAngelmaker
+- Fixed: Edit/Delete on a QUEUED message mid Claude turn failed "Session is busy". `Steering.admit` wrote every steer to stdin at once unless a proxied tool ran, so `retract` refused it (`writtenIds`) while Claude was still thinking or running a CLI tool.
+- Changed `steering.ts`: `admit` always holds; removed `SteeringHost.busy`. `turnStream.ts` `completeToolUse` flushes held steers at a CLI-run (non-proxy) `tool_use` when `inStreamCalls === 0`; proxied result flush and `completeResult` flush kept.
+- Changed `tui/.../dialog-message.tsx`: a `SessionBusyError` refusal toasts "Too late to take back: the model already has this message"; other errors show "Not deleted: <error>".
+- Changed `steering.test.ts`: new guard "a steer sent while Claude thinks stays deletable until its next tool call"; "written"/"streamed" cancel cases now reach the written state via a Read call next to a held proxied question (the test fixture rejects native Bash, so a slow Bash returns instantly).
+- Added plan `docs/dev/plans/queuedEditPlan.md`. Updated wiki `Sessions.md` (QUEUED Edit/Delete paragraph) and `docs/dev/testing.md` (Windows fakeModel known failures).
+- Risk: a ms-fast CLI tool can finish before the flushed steer lands; then it is read one boundary later or runs as the next turn (`completeResult` path). Not lost.
+- TODO: non-Claude providers have no steer sink, so QUEUED Edit/Delete always fails while busy but is still offered. Undecided (hide vs make native-loop deletion safe).
+- Verification: tsc clean for touched files in tui and opencode. `steering.test.ts` 16/16 pass. `fakeModel.test.ts` 27 pass, 2 fail ("claudeTestFlow step 4", "an API error the CLI reports twice shows once"), same symptoms as known failures, no steering involved.
+
+### User
+Claude Code sessions
+- Clicking a QUEUED message and choosing Edit or Delete now works while Claude is thinking or running its own tools, up to its next tool call.
+- When it really is too late, the notice says so plainly instead of showing a raw "Session is busy" error.
+
+---
+
 ## 2026-11-10 (~01:31) - v0.2.346 ggBigspin - LF working tree, README no longer stamped at push, smaller AGENTS.md and notes summary - Claude Fable 5.2, low effort; Implementation
 
 ### Agent

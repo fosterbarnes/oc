@@ -44,6 +44,17 @@ test("claudeSpawnEnv strips API key/token when ignoreAnthropicApiKey is true", (
   })
 })
 
+test("the API rollover account bills only its own key, never an inherited credential", () => {
+  withEnv({ ANTHROPIC_API_KEY: "sk-shell", ANTHROPIC_AUTH_TOKEN: "tok", CLAUDE_CODE_OAUTH_TOKEN: "oauth" }, () => {
+    const env = claudeSpawnEnv({ configDir: "C:/x/.claudeApi", apiKey: "sk-credit" })
+    assert.equal(env.ANTHROPIC_API_KEY, "sk-credit")
+    assert.equal("ANTHROPIC_AUTH_TOKEN" in env, false)
+    assert.equal("CLAUDE_CODE_OAUTH_TOKEN" in env, false)
+    // A subscription pool account still gets no key at all.
+    assert.equal("ANTHROPIC_API_KEY" in claudeSpawnEnv({ configDir: "C:/x/.claude2" }), false)
+  })
+})
+
 test("claudeSpawnEnv with ignore flag leaves other env vars intact", () => {
   // Not PATH: Windows spreads it as `Path`, so `env.PATH` would read undefined.
   withEnv({ ANTHROPIC_API_KEY: "sk-test", OC_SPAWN_ENV_KEPT: "kept" }, () => {

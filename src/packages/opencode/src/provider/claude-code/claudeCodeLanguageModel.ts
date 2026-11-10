@@ -17,7 +17,7 @@ import {
   retireOtherAccount,
   workingAccount,
 } from "./sessionManager.js"
-import { poolAccountIds, poolAccountLabel, turnAccount } from "./accounts.js"
+import { apiAccountId, poolAccountIds, poolAccountLabel, turnAccount } from "./accounts.js"
 import { log } from "./logger.js"
 import { detectCliVersion } from "./cliVersion.js"
 import { setProxyDeadlineGuard } from "./proxyDeadline.js"
@@ -141,7 +141,7 @@ export class ClaudeCodeLanguageModel implements LanguageModelV3 {
     const accountIds = poolAccountIds(this.config.accounts)
     // Running work (turn or CLI tasks) finishes on its account; a palette switch applies after it.
     const working = workingAccount(turn.sessionKey)
-    const keepWorking = working !== undefined && accountIds.includes(working)
+    const keepWorking = working !== undefined && (accountIds.includes(working) || working === apiAccountId())
     const account = keepWorking ? working : turnAccount(turn.affinity, turn.agentAccount, accountIds)
     const accountSwitched = keepWorking ? false : await retireOtherAccount(turn.sessionKey, account)
     const hasActiveProcess = !!getActiveProcess(turn.sessionKey)

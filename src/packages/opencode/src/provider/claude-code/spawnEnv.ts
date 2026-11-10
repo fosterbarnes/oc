@@ -35,6 +35,8 @@ export function claudeSpawnEnv(opts?: {
   effort?: ReasoningEffort
   /** Pool account config dir (accounts.ts); undefined keeps the inherited one. */
   configDir?: string
+  /** The rollover API account's key (accounts.ts `apiAccountKey`); set only with its `configDir`. */
+  apiKey?: string
 }): Record<string, string | undefined> {
   const env: Record<string, string | undefined> = {
     ...AgentEnv.inherited(),
@@ -71,6 +73,9 @@ export function claudeSpawnEnv(opts?: {
     delete env.ANTHROPIC_AUTH_TOKEN
     delete env.CLAUDE_CODE_OAUTH_TOKEN
   }
+
+  // After the strip above, so the rollover account bills only its own key.
+  if (opts?.apiKey) env.ANTHROPIC_API_KEY = opts.apiKey
 
   // Default-on thinking summaries for opus-4-7 (which omits thinking by
   // default on the CLI side). Any var the user has explicitly set in their

@@ -33,8 +33,12 @@ export function DialogMessage(props: {
     const draft = edit ? promptInfo(msg.id) : undefined
     const result = await sdk.client.session.deleteMessage({ sessionID: props.sessionID, messageID: msg.id })
     if (result.error) {
+      // Busy means the model already has it; anything else is a real failure.
+      const busy = "_tag" in result.error && result.error._tag === "SessionBusyError"
       toast.show({
-        message: `Not deleted, the model already has this message: ${errorMessage(result.error)}`,
+        message: busy
+          ? "Too late to take back: the model already has this message"
+          : `Not deleted: ${errorMessage(result.error)}`,
         variant: "error",
       })
       return

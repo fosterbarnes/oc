@@ -97,6 +97,15 @@ export interface ClaudeCodeProviderSettings {
    */
   accounts?: string[]
   /**
+   * A Claude Console API key as a last resort once every `accounts` entry is
+   * usage-limited: `{ apiKey: "{file:~/.config/opencode/secrets/claudeCredit.key}", dir?: "~/.claudeApi" }`.
+   * A `{file:...}` key beats `{env:...}`: revive and the resident server keep their old environment.
+   * Same CLI, tools and settings as the pool; only the auth differs. A chat
+   * moves onto it only when oc.json `claudeApiRollover` allows (default `ask`).
+   * See "API-credit rollover" in accounts.ts.
+   */
+  apiAccount?: { apiKey?: string; dir?: string }
+  /**
    * Model that subagents run on when their own definition pins nothing.
    * Unset means no implicit override at all, so an agent keeps inheriting the
    * caller's model exactly as opencode intends. See `src/agentModels.ts`.

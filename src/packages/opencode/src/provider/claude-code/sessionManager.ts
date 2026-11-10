@@ -14,7 +14,14 @@ import { getPendingProxyCalls, rejectAllPendingProxyCallsForSession } from "./pr
 import type { ReasoningEffort } from "./types.js"
 import { claudeSpawnEnv } from "./spawnEnv.js"
 import { cliCommand } from "./cliExecutable.js"
-import { DEFAULT_ACCOUNT, fileStamp, forgetSessionPin, poolConfigDir, sharesTranscripts } from "./accounts.js"
+import {
+  DEFAULT_ACCOUNT,
+  apiAccountKey,
+  fileStamp,
+  forgetSessionPin,
+  poolConfigDir,
+  sharesTranscripts,
+} from "./accounts.js"
 
 export interface ActiveProcess {
   proc: ChildProcess
@@ -1005,7 +1012,12 @@ export function spawnClaudeProcess(
   const proc = launch(command.command, command.args, {
     cwd,
     stdio: ["pipe", "pipe", "pipe"],
-    env: claudeSpawnEnv({ ignoreAnthropicApiKey, effort, configDir: account && poolConfigDir(account) }),
+    env: claudeSpawnEnv({
+      ignoreAnthropicApiKey,
+      effort,
+      configDir: account && poolConfigDir(account),
+      apiKey: apiAccountKey(account),
+    }),
     windowsHide: true,
   })
 

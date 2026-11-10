@@ -43,7 +43,10 @@ import {
   toQuotaWindows,
   type AccountBlockKind,
 } from "./cliEvents.js"
+import { createAccountDir } from "./accountManage.js"
 import {
+  apiAccountId,
+  apiRolloverCandidate,
   applyFailoverChoice,
   canonicalAccountId,
   earliestLimitedUntil,
@@ -300,7 +303,6 @@ class ClaudeTurn {
       closed: () => this.closed,
       stopped: () => this.closed || this.cancelled || !!this.autoContinue.aborted || this.toolDenied,
       switching: () => !!this.switchTo,
-      busy: () => this.inStreamCalls > 0,
       activeProcess: () => this.activeProcess,
       write: (line) => this.proc.stdin?.write(line),
       read: (messageID) => {
@@ -523,10 +525,24 @@ class ClaudeTurn {
     return this.queueAccountSwitch(undefined, "text")
   }
 
+  /**
+   * The API's "Credit balance is too low" reply, as a billing block or only as text. Like
+   * `beginTextAccountSwitch`, the streamed reply counts only when the result has no text, so a
+   * reply that merely quotes the phrase is not mistaken for it.
+   */
+  private apiCreditsExhausted(msg: ClaudeStreamMessage) {
+    if (this.accountBlock === "billing_error") return true
+    const text = typeof msg.result === "string" ? msg.result : this.out.shown
+    return /credit balance (is )?too low/i.test(text)
+  }
+
   private queueAccountSwitch(resetsAtMs: number | undefined, rateLimitType: string | undefined): boolean {
     markAccountLimited(this.account, resetsAtMs)
     if (this.turn.compactionMode) return false
-    const choices = this.failoverDeclined ? [] : failoverCandidates(this.account, poolAccountIds(this.config.accounts))
+    const pool = this.failoverDeclined ? [] : failoverCandidates(this.account, poolAccountIds(this.config.accounts))
+    // Every pool account limited: API credits are the last resort, offered in `pickAccount`.
+    const api = pool.length || this.failoverDeclined ? undefined : apiRolloverCandidate()
+    const choices = api && api !== this.account ? [{ id: api }] : pool
     if (!choices.length) {
       this.allLimited = true
       return false
@@ -580,6 +596,8 @@ class ClaudeTurn {
       if (this.activeProcess) this.attach(this.activeProcess)
       return resume()
     }
+    // The API account's folder shares `projects` with the pool, so the conversation follows it.
+    if (next === apiAccountId()) createAccountDir(next)
     applyFailoverChoice(this.turn.affinity, next, poolAccountIds(this.config.accounts))
     this.allLimited = false
     const progress = this.progressSummary()
@@ -618,21 +636,28 @@ class ClaudeTurn {
     return [text && `Your reply so far:\n${text}`, tools].filter(Boolean).join("\n\n")
   }
 
-  /** The account to fail over to: the best-ranked one, or the operator's pick when `claudeFailover` is `ask`. */
+  /**
+   * The account to fail over to: the best-ranked one, or the operator's pick when `claudeFailover` is
+   * `ask`. API credits follow `claudeApiRollover` instead (unset = `ask`).
+   */
   private async pickAccount(choices: FailoverCandidate[]): Promise<string | undefined> {
     const best = choices[0]!.id
-    const mode = await OcConfig.read().then(
-      (settings) => settings.claudeFailover,
-      (error) => {
-        log.warn("cannot read oc.json; Claude failover stays automatic", { error: String(error) })
-        return undefined
-      },
-    )
-    if (mode !== "ask") return best
-    // Subagents and agents without `question` cannot ask; they switch automatically.
+    const settings = await OcConfig.read().catch((error) => {
+      log.warn("cannot read oc.json; Claude failover stays automatic, API rollover asks", { error: String(error) })
+      return undefined
+    })
     const execute = hostToolExecutors.get(this.turn.affinity)
-    if (!execute?.tools?.has("question")) return best
-    return this.askFailover(execute, choices)
+    const canAsk = !!execute?.tools?.has("question")
+    if (best === apiAccountId()) {
+      if (settings?.claudeApiRollover === "off") return undefined
+      if (settings?.claudeApiRollover === "always") return best
+      // Spending needs a yes: subagents and agents without `question` stay put.
+      return canAsk ? this.askFailover(execute!, choices) : undefined
+    }
+    if (settings?.claudeFailover !== "ask") return best
+    // Subagents and agents without `question` cannot ask; they switch automatically.
+    if (!canAsk) return best
+    return this.askFailover(execute!, choices)
   }
 
   /**
@@ -927,7 +952,10 @@ class ClaudeTurn {
         setClaudeSessionId(this.sk, msg.session_id, this.account)
         log.info("session initialized", { claudeSessionId: msg.session_id })
       }
-      reportSystemInit(msg, { ignoreAnthropicApiKey: this.config.ignoreAnthropicApiKey })
+      reportSystemInit(msg, {
+        ignoreAnthropicApiKey: this.config.ignoreAnthropicApiKey,
+        apiKeyExpected: this.account === apiAccountId(),
+      })
       return
     }
     // Compacting can run for minutes with no model output; neither watchdog
@@ -1134,6 +1162,9 @@ class ClaudeTurn {
    * broker; everything else becomes an opencode tool call.
    */
   private completeToolUse(id: string, name: string, input: Record<string, unknown>, emitStart: boolean) {
+    // The CLI reads held steers at this call's result. While oc runs a proxied
+    // call they stay held (deletable) until that call's result instead.
+    if (!name.startsWith(PROXY_TOOL_PREFIX) && this.inStreamCalls === 0) this.steering.flush()
     this.toolLog.push(`${name} ${JSON.stringify(input).slice(0, 300)}`)
     if (isAskUserQuestionTool(name)) {
       // Latch: the model handed control to the operator, so no auto-continue
@@ -1269,7 +1300,14 @@ class ClaudeTurn {
     // Name the account and what to run; the CLI's own message names neither.
     // The CLI labels this result `success` with `is_error: true`, so this is
     // also what marks the turn failed.
-    if (this.accountBlock && msg.is_error) {
+    // API credits used up: sit the API account out until a pool account resets, which takes the chat back.
+    if (msg.is_error && this.account === apiAccountId() && this.apiCreditsExhausted(msg)) {
+      markAccountLimited(this.account, earliestLimitedUntil(poolAccountIds(this.config.accounts)))
+      this.resultFailure ??= "billing_error"
+      this.allLimited = true
+      this.out.note("\n> **API credits used up:** waiting for a Claude account to reset.\n")
+      log.warn("claude API credits exhausted", { sessionKey: this.sk })
+    } else if (this.accountBlock && msg.is_error) {
       const configDir = poolConfigDir(this.account)
       const account = poolAccountLabel(this.account)
       this.resultFailure ??= this.accountBlock

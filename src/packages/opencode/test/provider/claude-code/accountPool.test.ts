@@ -39,6 +39,13 @@ import {
   setCurrentAccount,
   turnAccount,
 } from "@/provider/claude-code/accounts.js"
+import {
+  apiAccountId,
+  apiAccountKey,
+  apiRolloverCandidate,
+  configureApiAccount,
+} from "@/provider/claude-code/accounts.js"
+import { API_ROLLOVER_LABEL, failoverQuestion } from "@/provider/claude-code/failoverQuestion.js"
 import { _resetRateLimitReports } from "@/provider/claude-code/cliEvents.js"
 import { createClaudeCode } from "@/provider/claude-code/index.js"
 import {
@@ -74,6 +81,50 @@ function withConfigDir(value: string | undefined, fn: () => void) {
     else process.env.CLAUDE_CONFIG_DIR = previous
   }
 }
+
+test("API rollover: offered only once every pool account is limited, never as a pool member", () => {
+  const ids = ["C:/acct/a", "C:/acct/b"]
+  const now = 1_000_000
+  configureApiAccount({ apiKey: "sk-credit", dir: "C:/acct/api" })
+  const api = apiAccountId()!
+  expect(apiAccountKey(api)).toBe("sk-credit")
+  expect(apiAccountKey(ids[0])).toBeUndefined()
+  // A limited account fails over to the other pool account, never to the API one.
+  markAccountLimited(ids[0]!, now + 60_000, now)
+  expect(failoverCandidates(ids[0]!, ids, now).map((c) => c.id)).toEqual([ids[1]])
+  markAccountLimited(ids[1]!, now + 120_000, now)
+  expect(failoverCandidates(ids[1]!, ids, now)).toEqual([])
+  expect(apiRolloverCandidate(now)).toBe(api)
+  // A blank key (unset env var) turns rollover off.
+  configureApiAccount({ apiKey: "" })
+  expect(apiRolloverCandidate(now)).toBeUndefined()
+  expect(apiAccountKey(api)).toBeUndefined()
+})
+
+test("API rollover: a chat stays on credits while the pool is limited, then returns to the pool", () => {
+  const ids = ["C:/acct/a", "C:/acct/b"]
+  const now = 1_000_000
+  configureApiAccount({ apiKey: "sk-credit", dir: "C:/acct/api" })
+  const api = apiAccountId()!
+  markAccountLimited(ids[0]!, now + 60_000, now)
+  markAccountLimited(ids[1]!, now + 120_000, now)
+  applyFailoverChoice("ses_1", api, ids, now)
+  expect(turnAccount("ses_1", undefined, ids, now + 1)).toBe(api)
+  // Other chats are not moved: credits are per chat, never the global current account.
+  expect(turnAccount("ses_2", undefined, ids, now + 1)).not.toBe(api)
+  // Once the first account resets, the chat goes back to it and its pin clears.
+  expect(turnAccount("ses_1", undefined, ids, now + 60_001)).toBe(ids[0])
+  expect(turnAccount("ses_1", undefined, ids, now + 60_002)).toBe(ids[0])
+})
+
+test("API rollover: the ask is consent to spend, and only its yes label picks the API account", () => {
+  configureApiAccount({ apiKey: "sk-credit", dir: "C:/acct/api" })
+  const api = apiAccountId()!
+  const question = failoverQuestion("claude2", [{ id: api }])
+  expect(question.pick(API_ROLLOVER_LABEL)).toBe(api)
+  expect(question.pick("Stop")).toBeUndefined()
+  expect(question.pick("API credits")).toBeUndefined()
+})
 
 test("pool ids: with no inherited config dir, ~/.claude is default and no option means one default account", () => {
   withConfigDir(undefined, () => {

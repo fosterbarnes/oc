@@ -22,6 +22,7 @@ export function createClaudeAccountCommands() {
   const renderer = useRenderer()
   const [resumeEnabled, setResumeEnabled] = createSignal(false)
   const [failoverMode, setFailoverMode] = createSignal(readOcConfig().claudeFailover)
+  const [rolloverMode, setRolloverMode] = createSignal(readOcConfig().claudeApiRollover)
 
   onMount(() => {
     void sdk.resume
@@ -299,6 +300,49 @@ export function createClaudeAccountCommands() {
     },
   }
 
+  const apiRollover = {
+    name: "claude.apiRollover",
+    title: "Claude API credit rollover",
+    category: "oc",
+    group: "Third party harness management",
+    get desc() {
+      return rolloverMode()
+    },
+    run: () => {
+      const choose = (mode: "ask" | "always" | "off") => {
+        dialog.clear()
+        if (mode === rolloverMode()) return
+        void persistOcConfig("claudeApiRollover", mode, toast).then((saved) => saved && setRolloverMode(mode))
+      }
+      dialog.replace(() => (
+        <DialogSelect
+          title="Claude API credit rollover"
+          current={rolloverMode()}
+          options={[
+            {
+              title: "Ask",
+              description: "ask before a chat continues on API credits",
+              value: "ask",
+              onSelect: () => choose("ask"),
+            },
+            {
+              title: "Always",
+              description: "continue on API credits without asking",
+              value: "always",
+              onSelect: () => choose("always"),
+            },
+            {
+              title: "Off",
+              description: "never use API credits; wait for the reset",
+              value: "off",
+              onSelect: () => choose("off"),
+            },
+          ]}
+        />
+      ))
+    },
+  }
+
   const autoResume = {
     name: "claude.autoResume",
     title: "Claude auto-resume",
@@ -344,15 +388,17 @@ export function createClaudeAccountCommands() {
     },
   }
 
-  // Reactive: account entries appear only with 2+ configured accounts, the session one only in a session.
+  // Reactive: account entries appear only with 2+ configured accounts, the session one only in a session,
+  // the rollover one only with an `apiAccount`.
   return () => {
-    const multi =
-      ((sync.data.config.provider?.["claude-code"]?.options?.accounts as unknown[] | undefined)?.length ?? 0) > 1
+    const options = sync.data.config.provider?.["claude-code"]?.options
+    const multi = ((options?.accounts as unknown[] | undefined)?.length ?? 0) > 1
     return [
       manageAccounts,
       ...(multi ? [switchAccount] : []),
       ...(multi && route.data.type === "session" ? [switchSessionAccount] : []),
       ...(multi ? [failover] : []),
+      ...(options?.apiAccount ? [apiRollover] : []),
       autoResume,
     ]
   }

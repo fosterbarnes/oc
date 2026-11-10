@@ -331,7 +331,11 @@ export function _resetSystemInitReports(): void {
  * billed, and an MCP server that did not come up (the model simply will not
  * have those tools, with no other sign of it).
  */
-export function reportSystemInit(msg: ClaudeStreamMessage, options: { ignoreAnthropicApiKey?: boolean } = {}): void {
+export function reportSystemInit(
+  msg: ClaudeStreamMessage,
+  // `apiKeyExpected`: the API-credit rollover account, which bills its key on purpose.
+  options: { ignoreAnthropicApiKey?: boolean; apiKeyExpected?: boolean } = {},
+): void {
   const info = parseSystemInit(msg)
   if (!info) return
   log.info("claude session init", {
@@ -367,6 +371,7 @@ export function reportSystemInit(msg: ClaudeStreamMessage, options: { ignoreAnth
     log.warn(message, { server: server.name, status: server.status })
   }
 
+  if (options.apiKeyExpected) return
   const apiKeyMessage = apiKeySourceWarning(info.apiKeySource, options.ignoreAnthropicApiKey)
   if (!apiKeyMessage) return
   const key = `${info.apiKeySource}:${options.ignoreAnthropicApiKey ? "ignored" : "passed"}`

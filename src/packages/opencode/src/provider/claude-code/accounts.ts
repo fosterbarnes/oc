@@ -282,6 +282,8 @@ export function turnAccount(
   ids: string[],
   now = Date.now(),
 ): string {
+  const rollover = apiRolloverTurn(sessionID, ids, now)
+  if (rollover) return rollover
   const pin = sessionPin(sessionID, ids, now)
   if (pin) return pin
   const preferred =
@@ -299,6 +301,8 @@ export function failoverCandidates(from: string, ids: string[], now = Date.now()
 
 /** Move a failed-over turn's chat to `id`: a pinned chat's pin moves, otherwise the global current account. */
 export function applyFailoverChoice(sessionID: string | undefined, id: string, ids: string[], now = Date.now()) {
+  // API credits are per chat: never the global current account.
+  if (id === apiAccount?.id) return pinApiRollover(sessionID, now)
   if (sessionPin(sessionID, ids, now)) pinSessionAccount(sessionID!, id, ids, now)
   else setCurrentAccount(id, ids, now)
 }
@@ -406,6 +410,66 @@ export function earliestLimitedUntil(ids?: string[], now = Date.now()): number |
 }
 
 // ---------------------------------------------------------------------------
+// API-credit rollover
+//
+// The `apiAccount` provider option (`{ dir, apiKey }`) adds a Console API key as a last resort.
+// It is not a pool member: rotation, failover ranking, the sidebar and the account manager never
+// see it. A chat moves onto it only once every pool account is limited and the operator agrees
+// (turnStream.ts), stays pinned there while they are, and returns to the pool once one is usable.
+// ---------------------------------------------------------------------------
+
+const API_ACCOUNT_DIR = "~/.claudeApi"
+let apiAccount: { id: string; apiKey: string } | undefined
+let warnedApiKeyMissing = false
+
+/** Set from the provider options. A blank key (an unset `{env:...}` resolves to "") leaves rollover off. */
+export function configureApiAccount(option: { dir?: unknown; apiKey?: unknown } | undefined): void {
+  const key = typeof option?.apiKey === "string" ? option.apiKey.trim() : ""
+  if (option && !key && !warnedApiKeyMissing) {
+    warnedApiKeyMissing = true
+    log.warn("claude-code apiAccount has no apiKey (is its env var set for this process?); API rollover is off")
+  }
+  const dir = typeof option?.dir === "string" && option.dir.trim() ? option.dir.trim() : API_ACCOUNT_DIR
+  apiAccount = key ? { id: path.resolve(expandHome(dir)), apiKey: key } : undefined
+}
+
+export function apiAccountId(): string | undefined {
+  return apiAccount?.id
+}
+
+/** The API key a spawn on `id` authenticates with; undefined for every pool account. */
+export function apiAccountKey(id: string | undefined): string | undefined {
+  return apiAccount && id === apiAccount.id ? apiAccount.apiKey : undefined
+}
+
+/** The API account when it can take a chat whose pool accounts are all limited. */
+export function apiRolloverCandidate(now = Date.now()): string | undefined {
+  if (!apiAccount) return undefined
+  ensureLoaded(now)
+  return (limitedUntil.get(apiAccount.id) ?? 0) <= now ? apiAccount.id : undefined
+}
+
+/** Keep a chat on API credits for its next turns; `apiRolloverTurn` lets it go. */
+export function pinApiRollover(sessionID: string | undefined, now = Date.now()): void {
+  if (!apiAccount || !sessionID || sessionID === "default") return
+  ensureLoaded(now)
+  sessionAccounts.set(sessionID, apiAccount.id)
+  persistPool(now)
+}
+
+/** A chat pinned to API credits stays while every pool account is limited; otherwise its pin clears. */
+function apiRolloverTurn(sessionID: string | undefined, ids: string[], now: number): string | undefined {
+  if (!apiAccount || !sessionID || sessionID === "default") return undefined
+  ensureLoaded(now)
+  if (sessionAccounts.get(sessionID) !== apiAccount.id) return undefined
+  const usable = (id: string) => (limitedUntil.get(id) ?? 0) <= now
+  if (usable(apiAccount.id) && !ids.some(usable)) return apiAccount.id
+  sessionAccounts.delete(sessionID)
+  persistPool(now)
+  return undefined
+}
+
+// ---------------------------------------------------------------------------
 // Display names
 //
 // oc.json `claudeAccountNames` maps an `accounts` entry as written
@@ -470,6 +534,7 @@ export async function setAccountName(entry: string, name: string | undefined): P
 
 /** The account's name, else its shell launcher name: `~/.claude` is `claude1`, `~/.claudeN` is `claudeN`. */
 export function poolAccountLabel(id: string): string {
+  if (id === apiAccount?.id) return "API credits"
   const name = accountName(id)
   if (name) return name
   const base = id === DEFAULT_ACCOUNT ? ".claude" : path.basename(id)
@@ -507,6 +572,7 @@ export function _resetAccountPool(): void {
   poolStamp = undefined
   poolFile = null
   cacheDir = null
+  apiAccount = undefined
 }
 
 /** Test-only. */

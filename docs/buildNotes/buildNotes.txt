@@ -1,12 +1,9 @@
-v0.2.346 ggBigspin [scripts > LF line endings and no README stamping]
+v0.2.348 choccieJiminy [feat. > API credit rollover; fix > queued edit]
 
-line endings:
-Files in the repo now use LF line endings on every OS. The push step no longer converts files to CRLF, and the shell scripts and git hooks that broke on the Mac when they had CRLF now work everywhere without a list of exceptions.
+claude accounts:
+A Claude Console API key, such as the monthly API credit included with Max, Ultra, and Team plans, can now be a last resort for when every Claude login is at its usage limit. Add `apiAccount` to the claude-code provider options with the key in its own file (`{file:...}`). When a turn hits the limit and every login is limited, oc asks "Continue on API credits?" in that turn. A yes keeps that chat on the key, running the same Claude Code with the same tools, settings, and skills, until any login resets; then the chat goes back to it. Subagents never spend the key on their own. The new palette entry Claude API credit rollover switches between Ask, Always, and Off. When the credit runs out, the turn ends with "API credits used up" and waits for a login to reset.
 
-README:
-A push no longer rewrites the README. The line-count table and scc.txt are gone, and the version line is now a fixed link to the latest release. Pushing no longer needs scc installed, and the oc Dependency Installer no longer offers it.
+queued messages:
+Clicking a QUEUED message and choosing Edit or Delete now works while Claude is thinking or running its own tools, up to its next tool call. When it really is too late, the notice says so plainly instead of showing a raw "Session is busy" error.
 
-agent docs:
-AGENTS.md is about half its size. The commit-message, testing, agent-test, and debug rules moved unchanged into docs/dev (commitMessage.md, testing.md, agentTest.md, debugRuns.md) and are read only when that work comes up. The build notes summary is about a sixth of its size and now has a size budget; the full old text stays in git history and the archives.
-
-Under the hood: removed setLineEndings, countCode.ps1, readmeVersion.ps1, and the lineEndings script test; agentPush -Context points at docs/dev/commitMessage.md. Checks: no file reports CRLF after the one-time conversion, every moved AGENTS.md line matched HEAD byte for byte, commitSubject and testRunner script tests passed, push.ps1 -DryRun and agentPush.ps1 -Context printed correctly, tui typecheck was clean, and tui dependencies.test.ts passed 18. Known Mac-only failures on unchanged code: buildNotesChanged and installDir script tests and the dependencies.test.ts "finds Git Bash" case.
+Under the hood: a probe with real API credit (about half a cent) showed the plain claude CLI with ANTHROPIC_API_KEY draws the Team plan's promotional credits, so the API account is a pool-adjacent config dir (~/.claudeApi) that sets the key after the usual credential strip; it never joins pool ranking, the sidebar, the account manager, or warm-up. New oc.json key claudeApiRollover. Steers are now always held until Claude's next CLI tool call, a proxied tool's result, or the turn's result. Checks: tsgo clean in packages/opencode and packages/tui; accountPool, spawnEnv, failoverQuestion, and steering tests 59 pass after the cleanup pass; cliEvents 15 pass (one earlier run crashed with a Bun out-of-memory error, the rerun passed). fakeModel.test.ts had 2 known failures ("claudeTestFlow step 4", "an API error the CLI reports twice shows once"). Not run: a live rollover turn in oc.

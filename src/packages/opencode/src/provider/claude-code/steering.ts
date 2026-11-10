@@ -1,7 +1,8 @@
 /**
  * Messages the operator sends while a Claude turn runs (steers). The turn's
- * sink admits them, they are held while oc runs a proxied tool, written to the
- * CLI's stdin at the next tool boundary, and acknowledged once Claude reads them.
+ * sink admits them and holds them (still retractable) until Claude's next tool
+ * call, writes them to the CLI's stdin then, and acknowledges them once Claude
+ * reads them.
  */
 import { randomUUID } from "node:crypto"
 import type { ClaudeStreamMessage } from "./types.js"
@@ -17,8 +18,6 @@ export type SteeringHost = {
   stopped: () => boolean
   /** An account switch is pending; the rejected turn's tail takes no steers. */
   switching: () => boolean
-  /** oc is running a proxied tool, so new steers are held until its result. */
-  busy: () => boolean
   activeProcess: () => ActiveProcess | undefined
   write: (line: string) => void
   /** Claude read a steer and its delivery receipt is saved. */
@@ -28,7 +27,7 @@ export type SteeringHost = {
 }
 
 export class Steering {
-  /** Steers held while oc runs a proxied tool; still retractable. Written just before its result. */
+  /** Steers not yet written to stdin; still retractable. */
   private held: ClaudeSteer[] = []
   /** Messages the operator sent mid-turn, written to stdin and not yet echoed back as read. */
   private readonly written: (ClaudeSteer & { uuid: string; read: boolean })[] = []
@@ -76,12 +75,11 @@ export class Steering {
   }
 
   /**
-   * A message the operator sent while this turn runs. Written to stdin, the
-   * CLI hands it to Claude at the next tool boundary, or runs it as its next
-   * turn when it arrives after the last tool call (`completeResult` waits).
-   * While oc runs a proxied tool (a subagent batch can take many minutes) it
-   * is held instead, so it can still be deleted, and written just before
-   * that tool's result.
+   * A message the operator sent while this turn runs. The CLI only hands
+   * stdin messages to Claude at a tool boundary, so it is held until there
+   * is one: written when Claude calls a CLI-run tool, just before a proxied
+   * tool's result, or at the turn's `result`, where the CLI runs it as its
+   * next turn (`completeResult` waits). Until then it can still be deleted.
    */
   private admit(steer: ClaudeSteer) {
     if (this.host.stopped() || this.host.switching()) return false
@@ -89,15 +87,14 @@ export class Steering {
     // Never overtake a message waiting to run as its own step.
     if (this.preempts.length > 0) return false
     this.held.push(steer)
-    log.info("accepted steered message", { messageID: steer.messageID, held: this.host.busy() })
-    if (!this.host.busy()) this.flush()
+    log.info("accepted steered message", { messageID: steer.messageID })
     return true
   }
 
   private preempt(messageID: string) {
     if (this.host.stopped() || this.host.switching()) return false
     this.preempts.push(messageID)
-    log.info("accepted preempting message", { messageID, busy: this.host.busy() })
+    log.info("accepted preempting message", { messageID })
     return true
   }
 
