@@ -9,14 +9,13 @@ Project automation lives in `.scripts/`. Scripts target PowerShell 7 and fail on
 | `.scripts/scriptHelper.ps1` | Shared repository paths, maintenance version validation, and native-command checks. |
 | `.scripts/build.ps1` | Build of the current-platform `oc` and native `opencode` executables (`-Oc`/`-Native` for one flavor). `-Release` builds release executables and archives through the existing Bun build script. `-SkipInstall` passes `--skip-install` to the Bun build script. It never touches the installed runtime. |
 | `.scripts/buildInstaller.ps1` | Builds the Inno Setup installer `oc_v<version>_windows-x64-setup.exe` into `.installer/Output`. Publishes the `ocSetup` companion self-contained (bundles .NET) with `dotnet publish` first. Needs Inno Setup 6.7+ and the dist binaries from `build.ps1 -Release`. |
-| `.scripts/prePush.ps1` | Runs Turbo typecheck and the TUI keybind docs `--check`, then refreshes the README code count and `scc.txt`. It does not commit or push. |
+| `.scripts/prePush.ps1` | Runs Turbo typecheck and the TUI keybind docs `--check`, regenerates `packages/sdk/openapi.json`, and formats changed files under `src` with Prettier. It does not commit or push. |
 | `.scripts/test.ps1` | Runs local package tests, HttpApi gates, typechecking, or generated-file checks. Supports package, file, test-name, category, and all-check selection. |
-| `.scripts/countCode.ps1` | Uses `scc` on PATH to refresh the README code count and root `scc.txt` language report. Runnable independently. |
 | `.scripts/updateUpstream.ps1` | Fetches and fast-forwards the separate `UPSTREAM\opencode` checkout without modifying this customized parent checkout. |
 | `.scripts/push.ps1` | Commits parent changes with a supplied subject, else the message in `docs/buildNotes/buildNotes.txt` (line 1 subject, blank line, body) when it changed since the last commit, else a prompted subject, then pushes the current branch. It does not rewrite `.version/version` or `versionTag` and does not stage `UPSTREAM/`. `-DryRun` prints the commands only; `-Force` is explicit. |
 | `.scripts/pushRelease.ps1` | Tags and publishes archives from `src/packages/opencode/dist` to `fosterbarnes/oc` using the `.version/version` maintenance version and the `.version/versionTag` tag. The release title is `opencode v<version> <tag>`; uploaded copies are renamed to `opencode-v<version>-<tag>-<rest>.<ext>`. Existing tags are not force-moved. `-DryRun` prints the title and renames only. |
 | `.scripts/bumpVersion.ps1` | Bumps the `.version/version` patch and rolls a new random tag into `.version/versionTag`. `-RerollTag` regenerates only the tag. |
-| `.scripts/agentPush.ps1` | Non-interactive push for the agent-push skill. `-Context` prints branch, version, status, new `docs/buildNotes/buildNotes.md` lines, and recent subjects (what the agent needs to write `buildNotes.txt`); the default mode refuses code changes without a version bump, validates the message (line 1 classifier rules in `AGENTS.md`, checked by `.scripts/tests/commitSubject.tests.ps1`), runs `prePush.ps1` and `push.ps1` in-process, then reports. |
+| `.scripts/agentPush.ps1` | Non-interactive push for the agent-push skill. `-Context` prints branch, version, status, new `docs/buildNotes/buildNotes.md` lines, and recent subjects (what the agent needs to write `buildNotes.txt`); the default mode refuses code changes without a version bump, validates the message (line 1 classifier rules in `docs/dev/commitMessage.md`, checked by `.scripts/tests/commitSubject.tests.ps1`), runs `prePush.ps1` and `push.ps1` in-process, then reports. |
 | `.scripts/claudeRealFlow.ps1` | Runs the Claude provider flow against the real model, spending Claude plan usage (default steps 0-8 about $0.20-1.00, `-Step7` about $0.05-0.15, `-CheckOnly` one Haiku reply). It always asks for a typed `yes` first, so agents never run it unasked. `-NewToken` ignores the saved copy, `-Forget` deletes it. |
 | `.scripts/install.ps1` | User-only build-and-install of `oc.exe` (+ `occ.exe` hard link) and native `opencode.exe`. `-Oc` or `-Native` installs one flavor. `-NoBuild`/`-nb` installs existing artifacts. `-SkipBunInstall` skips `bun install` during the compile while still copying to `$installDir`: the PATH folder holding `oc.exe` + `occ.exe` (the install `oc` launches, wherever setup or an older install put it), else `%LOCALAPPDATA%\Programs\oc` (setup default). Before replacing binaries it copies the current install to a timestamped `backup-*` folder next to them (newest 3 kept) and restores from it on failure. It stops OpenCode processes and must not run from an agent. |
 | `.scripts/.run.ps1` | `bun dev` run. No arguments opens `oc launch` (resident); `-Native`/`-n` runs the native flavor (`OC_FLAVOR=native`). |
@@ -118,21 +117,7 @@ The standalone build is the repository's `packages/opencode/script/build.ts --si
 
 `.version\version` is a maintenance-only semantic version for these local scripts, and `.version\versionTag` is the random camelCase two-word tag rolled on every bump. They are intentionally separate from OpenCode's package version. The agent runs `.scripts\bumpVersion.ps1` once per code-changing session, including one that hand-ports upstream changes (`0.0.8` -> `0.0.9`); `-RerollTag` regenerates only the tag (see `AGENTS.md` Revision). `pushRelease.ps1` titles the release `opencode v<maintenance-version> <tag>`, keeps the git tag at `v<maintenance-version>`, and uploads copies of the archives under `packages/opencode/dist` renamed to `opencode-v<ver>-<tag>-<rest>.<ext>`; `-DryRun` prints the title and renames without tagging or uploading. It does not force-move an existing tag. `push.ps1` does not rewrite these files. GitHub computes a SHA-256 for every uploaded asset and shows it on the release page; `/update` refuses a zip that does not match it, and users can compare by hand with `Get-FileHash <zip> -Algorithm SHA256`. Enable "Release immutability" in the repository settings so published assets cannot be replaced.
 
-Do not run `push.ps1` or `pushRelease.ps1` during ordinary validation. They create commits, push branches or tags, and publish GitHub releases. `push.ps1` reads `docs/buildNotes/buildNotes.txt` for the commit message (see `AGENTS.md`); it never modifies it.
-
-## Code count
-
-Run `.\.scripts\countCode.ps1` to refresh just the count, or `.\.scripts\prePush.ps1`
-to refresh it after the existing checks pass. Requires `scc` on PATH.
-The README uses the report's **Code** total, excluding blank and comment lines,
-and displays a language table with all six report columns. The script changes only
-the number in the `[number](scc.txt)` link and the table between
-`<!-- code-count:start -->` and `<!-- code-count:end -->`.
-Keep the link and markers; surrounding wording and placement can be edited freely.
-Counts maintained source, tests, and scripts across this checkout, including inherited
-OpenCode source. Includes TS/TSX, JS/MJS/CJS, CSS, HTML, Astro, SQL, PowerShell, shell,
-Go, and Nix. Honors ignore files and excludes `UPSTREAM`, dependencies, build output,
-and generated client directories (`gen`, `generated`, `generated-effect`).
+Do not run `push.ps1` or `pushRelease.ps1` during ordinary validation. They create commits, push branches or tags, and publish GitHub releases. `push.ps1` reads `docs/buildNotes/buildNotes.txt` for the commit message (see `docs/dev/commitMessage.md`); it never modifies it.
 
 ## Excluded base scripts
 

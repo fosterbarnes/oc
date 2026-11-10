@@ -41,21 +41,6 @@ helpers with a `win32` and a `darwin` branch; callers stay platform-neutral. Pla
   `--config` is a global WezTerm option and must come before `start`, or the GUI never starts and `open`
   still exits 0. `--position` is in pixels (points x backing scale); window list bounds are points.
 
-## Known Mac test failures (record once; report only new ones)
+## Known Mac test failures
 
-Baseline 2026-11-08, before the macOS changes, core suite: 4 fail / 1048 pass.
-- `detachedCommand ps1 > keeps caller text off the cmd command line`, `... drops cmd-active characters`:
-  Windows-only behavior tested on every OS.
-- `pty > does not duplicate replay when data arrives before activate`, `pty > does not deliver stale output
-  after detach`: also fail on Linux (`docs/dev/v0.3.0.md`).
-
-opencode suite on clean HEAD f822a27 (2026-11-08): 24 fail / 5035 pass. After the macOS changes: no new
-failures. The revive and startup tests that assume Windows paths now skip off Windows. Still failing on Mac
-at HEAD and after (pre-existing, not investigated):
-- Claude warm-up: `global HttpApi > returns warm-up state ...`, `... persists warm-up schedules ...`, six
-  `tick: ...` tests, `sender recheck: ...`, `cli gate: 2.1.293 floor ...`.
-- `cancel finalizes interrupted bash tool output ...`, `cancel interrupts loop queued behind shell`.
-- `describeSpawnCwd reports which branch ...`, `describeSpawnCwd never disagrees ...` (also Linux).
-- `command path rules persist on messages ...`, `session bootstrap > creates a session without model
-  execution`, `opencode agent validate > multiple-invalid ...`, `agentUrl: invalidateAgentUrl > memoized
-  resolve ...`.
+Listed with the other known failures in `docs/dev/testing.md`.

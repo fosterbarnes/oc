@@ -8,6 +8,8 @@ Each run's `TESTING.md` in `D:\VirtualBox VMs\Shared Folder\ocInstallerTest` nam
 run. Full run on the first edition; later editions repeat sections 1, 2, 5, and 6 plus anything that
 failed. Edition-sensitive rows: default terminal, Store and MSIX installs, admin prompts.
 
+- Installer VM test package: when the user asks for one, put the setup exes (`.installer\Output\*.exe`) and a `TESTING.md` checklist in `D:\VirtualBox VMs\Shared Folder\ocInstallerTest` (VirtualBox shared folder), not the Desktop. Check it is a folder before copying into it (`Test-Path -PathType Container`).
+
 IDs refer to the inventory in the fresh-machine parity plan (I = data and install, E = env vars,
 C = config, X = commands and accounts, K = keys). `-` means no inventory row yet: a failing `-` row
 gets an ID. Dev and stable side by side is a check on the dev PC, not a VM row.

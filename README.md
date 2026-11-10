@@ -4,7 +4,7 @@ Custom fork of opencode that focuses on building on existing features simply and
 
 Not ready for widespread use until 0.3.0, especially on Linux and macOS. As of current date, testing and feature work is being done on Windows 10 LTSC IoT (i know lol). Linux and macOS feature parity is planned for v0.3.0.
 
-Current version: [v0.2.345](https://github.com/fosterbarnes/oc/commits/main)
+Latest release: [releases](https://github.com/fosterbarnes/oc/releases/latest)
 
 ## Standout features
 
@@ -141,27 +141,6 @@ How everything works is in the [wiki](https://github.com/fosterbarnes/oc/wiki):
 - [Troubleshooting](https://github.com/fosterbarnes/oc/wiki/Troubleshooting) and [FAQ](https://github.com/fosterbarnes/oc/wiki/FAQ)
 - [Companion Tools](https://github.com/fosterbarnes/oc/wiki/Companion-Tools)
 - [Developing](https://github.com/fosterbarnes/oc/wiki/Developing): building from source. Repo docs: [FORK.md](FORK.md), [SCOPE.md](SCOPE.md), [SCRIPTS.md](SCRIPTS.md), [UPSTREAM-SYNC.md](UPSTREAM-SYNC.md)
-
-## Progress
-
-[420,225](scc.txt) lines of code and counting...
-
-<!-- code-count:start -->
-
-| Language | Files | Lines | Blanks | Comments | Code |
-|---|---:|---:|---:|---:|---:|
-| Go | 5 | 917 | 55 | 5 | 857 |
-| HTML | 1 | 1,161 | 79 | 0 | 1,082 |
-| JavaScript | 9 | 1,454 | 129 | 53 | 1,272 |
-| Nix | 3 | 258 | 23 | 26 | 209 |
-| Powershell | 29 | 2,050 | 132 | 154 | 1,764 |
-| Qt Translation Source | 1 | 262 | 15 | 0 | 247 |
-| SQL | 2 | 5 | 0 | 0 | 5 |
-| Shell | 1 | 120 | 17 | 17 | 86 |
-| TypeScript | 2,335 | 471,517 | 39,098 | 17,716 | 414,703 |
-| **Total** | **2,386** | **477,744** | **39,548** | **17,971** | **420,225** |
-
-<!-- code-count:end -->
 
 ## Why I made oc
 

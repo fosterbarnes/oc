@@ -39,10 +39,9 @@ $versionFolder = Join-Path $srcRoot '.version'
 $version = Join-Path $versionFolder 'version'
 $versionTag = Join-Path $versionFolder 'versionTag'
 $yapWords = Join-Path $repoRoot '.res' 'yapBot.json'
-$readme = Join-Path $repoRoot 'README.md'
 $buildNotes = Join-Path $repoRoot 'docs' 'buildNotes' 'buildNotes.txt'
 $ghRepo = 'fosterbarnes/oc'
-# Commit subject labels in decision order; AGENTS.md (buildNotes.txt section) defines each.
+# Commit subject labels in decision order; docs/dev/commitMessage.md defines each.
 $commitLabels = 'sync', 'fix', 'feat.', 'patch', 'perf.', 'deps.', 'scripts', 'cleanup', 'docs', 'misc.'
 
 function runNativeCommand {
@@ -67,42 +66,6 @@ function testBuildNotesChanged {
         1 { return $true }
         default { throw "git diff failed (exit $LASTEXITCODE)." }
     }
-}
-
-# Converts bare LF to CRLF in modified and untracked files, and CRLF to LF in files `.gitattributes` pins to
-# LF (hooks, shebang scripts): with CRLF, macOS sh fails on them (`set: -\r: invalid option`). git calls a
-# tracked file unmodified when only its line endings differ, so `ls-files --eol` finds those. Binary and
-# non-UTF-8 files are left alone.
-function setLineEndings {
-    $paths = @(git -C $repoRoot ls-files -m -o --exclude-standard)
-    if ($LASTEXITCODE) { throw "git ls-files failed (exit $LASTEXITCODE)." }
-    $lfPaths = @(@($paths | git -C $repoRoot check-attr --stdin eol) -match ': eol: lf$' -replace ': eol: lf$', '')
-    if ($LASTEXITCODE) { throw "git check-attr failed (exit $LASTEXITCODE)." }
-    $lfPaths += @(@(git -C $repoRoot ls-files --eol) -match '\sw/crlf\s+attr/text eol=lf\s' | ForEach-Object { ($_ -split "`t", 2)[1] })
-    if ($LASTEXITCODE) { throw "git ls-files failed (exit $LASTEXITCODE)." }
-    $strictUtf8 = [Text.UTF8Encoding]::new($false, $true)
-    $count = 0
-    foreach ($path in @($paths + $lfPaths | Select-Object -Unique)) {
-        $full = Join-Path $repoRoot $path
-        if (-not (Test-Path -LiteralPath $full -PathType Leaf)) { continue }
-        $bytes = [IO.File]::ReadAllBytes($full)
-        if ([Array]::IndexOf($bytes, [byte]0) -ge 0) { continue }
-        $bom = [byte[]]@()
-        if ($bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF) {
-            $bom = [byte[]](0xEF, 0xBB, 0xBF)
-        }
-        try {
-            $text = $strictUtf8.GetString($bytes, $bom.Length, $bytes.Length - $bom.Length)
-        } catch {
-            continue
-        }
-        $fixed = $lfPaths -contains $path ? $text.Replace("`r`n", "`n") : [regex]::Replace($text, '(?<!\r)\n', "`r`n")
-        if ($fixed -ceq $text) { continue }
-        $body = [Text.UTF8Encoding]::new($false).GetBytes($fixed)
-        [IO.File]::WriteAllBytes($full, [byte[]]($bom + $body))
-        $count++
-    }
-    if ($count) { Write-Host "Fixed line endings in $count file(s)." }
 }
 
 function getBunVersion {
@@ -222,7 +185,7 @@ function getUnbumpedCodeChanges {
     if ($LASTEXITCODE) { throw "git diff failed (exit $LASTEXITCODE)." }
     $changed += @(& git -C $repoRoot ls-files -o --exclude-standard)
     if ($LASTEXITCODE) { throw "git ls-files failed (exit $LASTEXITCODE)." }
-    @($changed | Where-Object { $_ -notmatch '(^docs/|\.md$|^scc\.txt$|^UPSTREAM|^src/\.version/)' })
+    @($changed | Where-Object { $_ -notmatch '(^docs/|\.md$|^UPSTREAM|^src/\.version/)' })
 }
 
 function newVersionTag { setVersionTag (getVersionTags 1) }

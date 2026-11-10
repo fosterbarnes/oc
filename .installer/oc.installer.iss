@@ -90,6 +90,7 @@ Type: files; Name: "{autoprograms}\oc dependencies.lnk"
 [UninstallDelete]
 Type: files; Name: "{app}\occ.exe"
 Type: files; Name: "{app}\es.exe"
+; scc.exe: installs before v0.2.346 could add it.
 Type: files; Name: "{app}\scc.exe"
 
 [Code]

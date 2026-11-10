@@ -387,23 +387,6 @@ export const DEPENDENCIES: Dependency[] = [
     })),
   },
   {
-    id: "scc",
-    label: "scc",
-    section: DEV,
-    defaultSelected: false,
-    needs: [],
-    // scc.exe goes next to oc.exe like es.exe: that folder is already on the user PATH.
-    locks: [],
-    detect: (env) => detectCli(which("scc", env), env),
-    prepare: prepared(async () => ({
-      label: "scc",
-      ...(await githubAsset("boyter/scc", /^scc_Windows_x86_64\.zip$/)),
-      kind: "zip",
-      zipEntry: "scc.exe",
-      zipDest: ocInstallDir("scc"),
-    })),
-  },
-  {
     id: "notepadPlusPlus",
     label: "Notepad++",
     section: CODING,
@@ -758,7 +741,7 @@ function everythingExe(env: Env) {
 }
 
 // The installed oc.exe's folder: the oc installer put it on the user PATH and removes the tools
-// placed there (es.exe, scc.exe) on uninstall.
+// placed there (es.exe) on uninstall.
 function ocInstallDir(tool: string) {
   if (!/^(oc|occ|opencode)\.exe$/i.test(path.basename(process.execPath))) {
     throw new Error(`${tool} install needs the installed oc.exe`)

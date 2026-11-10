@@ -1,0 +1,5 @@
+# Debug runs
+
+Read before `/debug`.
+
+- Debug runs (`/debug`): instrument the source, typecheck the touched package (`bun run typecheck` in it), then ask the user to run `/revive` (or chain `/debug <topic> /revive /debug measure`). `/revive` builds this repo and installs `oc.exe` and `opencode.exe` (it builds while the window stays open, skips the build when the source is unchanged since the installed build, and closes the window only to swap the binaries; a failed build shows its log tail in a toast), so the instrumented build becomes the production install and shares production data; a build that compiles but crashes on startup cannot roll back. Confirm the revive mark's version matches `src/.version/version` before measuring. Use `/revive-single` (native `opencode.exe` only, other windows keep running) only when the user asks. Logs: `opencode debug paths`; `DEBUG-TEMP` file output goes under `<data>\log\debug\`. After `/imp` removes the instrumentation, the user runs `/revive` again so the install is clean. Prefer fake-model, pane (`OC_TUI_PANE=1`), and perf probes when they reproduce the bug: agents run those without a revive.

@@ -1,11 +1,12 @@
-v0.2.345 poopingPerms [fix > Claude no-reply note; feat. > Fable 5.2]
+v0.2.346 ggBigspin [scripts > LF line endings and no README stamping]
 
-claude chats:
-Sending a message right after oc or Claude Code restarted, while a Claude background command was still running, no longer shows a false "no reply" note before the real answer. Claude Code reports the stopped command as a turn of its own before it reads your message, and oc took that empty turn for the reply.
+line endings:
+Files in the repo now use LF line endings on every OS. The push step no longer converts files to CRLF, and the shell scripts and git hooks that broke on the Mac when they had CRLF now work everywhere without a list of exceptions.
 
-When a slash command or a model, agent, or effort change restarts Claude Code and that stops background commands it was running, the reply now starts with a note saying how many were stopped and why. The restart itself is unchanged, so slash commands keep their tool restrictions.
+README:
+A push no longer rewrites the README. The line-count table and scc.txt are gone, and the version line is now a fixed link to the latest release. Pushing no longer needs scc installed, and the oc Dependency Installer no longer offers it.
 
-claude models:
-Claude Fable 5.2, Fable 5.2 Fast, Mythos 5.2, and Mythos 5.2 Fast appear in the Claude Code model list, with Fable 5.2 priced at 8x (Fast 16x). Without Mythos access, a Mythos 5.2 turn tells you to pick Claude Fable 5.2 instead. Run claude update to get Claude Code 2.1.321 or later, which knows Fable 5.2.
+agent docs:
+AGENTS.md is about half its size. The commit-message, testing, agent-test, and debug rules moved unchanged into docs/dev (commitMessage.md, testing.md, agentTest.md, debugRuns.md) and are read only when that work comes up. The build notes summary is about a sixth of its size and now has a size budget; the full old text stays in git history and the archives.
 
-Under the hood: a result whose origin is a task notification is skipped unless the turn attached to a turn the CLI started on its own. Mythos 5.2 is built as a twin of Fable 5.2 because the catalog does not list it. buildNotes.md was rotated to buildNotes.archive16.md. New tests: a silentTurn case, a fake-model scenario for a restart with a running background task, and a configModels case for the 5.2 models. Checks: probes on Claude Code 2.1.321 against the fake model reproduced the false note and showed it gone; silentTurn, autonomousTurn, respawn, cliEvents, and sessionManager tests pass (74); configModels passes (8); typecheck is clean. fakeModel.test.ts has its 3 known macOS failures.
+Under the hood: removed setLineEndings, countCode.ps1, readmeVersion.ps1, and the lineEndings script test; agentPush -Context points at docs/dev/commitMessage.md. Checks: no file reports CRLF after the one-time conversion, every moved AGENTS.md line matched HEAD byte for byte, commitSubject and testRunner script tests passed, push.ps1 -DryRun and agentPush.ps1 -Context printed correctly, tui typecheck was clean, and tui dependencies.test.ts passed 18. Known Mac-only failures on unchanged code: buildNotesChanged and installDir script tests and the dependencies.test.ts "finds Git Bash" case.

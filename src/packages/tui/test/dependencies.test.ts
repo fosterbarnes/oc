@@ -81,7 +81,6 @@ test("each row installs one way and holds the locks for what its installer touch
     dotnetRuntime10: ["admin"],
     innoSetup: ["admin"],
     ghCli: ["admin"],
-    scc: [],
     notepadPlusPlus: ["admin"],
     githubDesktop: ["userPath"],
     vscode: ["userPath"],
@@ -103,7 +102,6 @@ test("rows with no app, or whose installer makes its own, have no shortcut; Appx
     "dotnetRuntime10",
     "innoSetup",
     "ghCli",
-    "scc",
     "githubDesktop",
   ])
   const appId = (id: string) => DEPENDENCIES.find((dep) => dep.id === id)!.shortcut!.find({}, { status: "found" }).appId
