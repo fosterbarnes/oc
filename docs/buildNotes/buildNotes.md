@@ -123,6 +123,45 @@ Budget (AGENTS.md "Build notes"): at most 80 lines and 12 KB. Current invariants
 
 ---
 
+## 2026-11-11 (~01:37) - v0.2.360 shaprioBenis - Sync exclusions both ways, permanent deletes, all-or-nothing writes - Claude Opus 5.5, medium effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; medium effort; Implementation (/imp of the four-item plan from the pass); completed
+- Version: 0.2.360 shaprioBenis (unchanged: already bumped since the last commit)
+- Changed core `OcSync.manifest`/`items`: filter out ids this machine excludes (`OcItems.excluded` with state tags), so an excluded item is neither pulled nor offered; a missing entry is "nothing to do" on the puller, never a delete.
+- Removed `_TOMBSTONE_DAYS`: `rescan` keeps tombstones forever, so an old copy from a long-offline peer loses to the delete.
+- Changed core `OcItems.apply` to all or nothing: backup (now inside the try), stage every write as `<real>.tmp-<pid>`, then rename/rm each with `retryBusy` (EPERM/EBUSY/EACCES, 5 x 100 ms). On failure: remove temps, `restore` only the targets already changed, delete the backup folder, rethrow. `undo` shares the new `restore` helper (also uses `retryBusy`).
+- Added `.bak`, `.bak-<stamp>`, `.orig`, `*~` to `_SKIP_NAME`.
+- Updated wiki `Configuration.md` (exclusion both ways, permanent deletes, all-or-nothing, skipped backup copies) and `docs/dev/syncPlan.md`.
+- MISTAKE: removed the five `.bak` ids from both machines' `sync.exclude` while both still ran builds without the `.bak` skip; within one tick the Mac pulled the PC's five `.bak` files. Fixed: re-added the five ids on both machines (31 excludes each), deleted the five Mac copies (sync backup record showed `existed: false` for all) and that backup folder; PC copies confirmed present. Rule: change exclusions only after the build that makes them unnecessary runs on every machine.
+- Deviation: no new kept tests. Core tests run against the real `Global.Path` config (preload sets no temp home), and the rollback check relies on macOS `chflags`; probes cover both.
+- Verification: probes (separate processes, temp homes): A's excluded skill absent from A's manifest and refused by `items`, B never receives it even after A edits it; B's tombstone set 100 days old still beats A's 200-day-old copy; staging failure (read-only folder) and placement failure (immutable target, after one file was placed) both leave original content, no temp files, no backup folder, and report the error; the next apply succeeds with one backup; `.bak`/`.bak-<stamp>`/`~` files are not collected. Core `tsgo` 0 errors; ocItems/ocSync tests 11 pass. Probes deleted.
+
+### User
+Settings sync
+- An item you exclude in Sync settings now stays on that machine: it is no longer sent to your other machines either, even when you edit it.
+- Deleted items stay deleted, even when a machine that was offline for months comes back with an old copy.
+- A sync change is written whole or not at all; if Windows has a file busy, oc retries briefly and otherwise puts everything back and tries again later.
+- Backup copies (`.bak`, `.orig`, `~` files) are no longer synced, exported, or imported.
+
+---
+
+## 2026-11-11 (~01:29) - v0.2.360 shaprioBenis - Sync keeps symlinked config files linked - Claude Opus 5.5, medium effort; Pass
+
+### Agent
+- Meta: Claude Opus 5.5; medium effort; Pass (review of the v0.2.359 sync work after enabling it on Mac + goonstation); completed
+- Version: 0.2.360 shaprioBenis
+- Fixed core `OcItems.apply`: temp+rename at `fs.realpath(target)`, so a symlinked item file keeps its link (goonstation `~/.opencode/commands/agent-push.md` -> `~/.claude/skills/agent-push/SKILL.md` would have become a plain copy on the next synced change). `undo` copies to the real path too.
+- Added `.tmp-<pid>` to `_SKIP_NAME` so an interrupted write is never collected or synced as part of an item.
+- Kept (not changed): exclusion only stops pulling here, an excluded item edited here still reaches peers (documented as per machine); a tombstone expires after 90 days, so an item deleted here but kept on a peer that excludes it can come back; Windows `rename` can fail (EPERM) on a file another program holds open, leaving a partial apply that the next tick retries; `.bak` files under item folders count as items.
+- Verification: probe (tmp HOME, symlinked legacy command): apply writes through the link and leaves no temp file; undo restores old content and the link stays. Core `tsgo` 0 errors; ocItems/ocSync tests 11 pass. Probe deleted.
+
+### User
+Settings sync
+- Synced or imported changes to a config file that is a shortcut (symlink) to another file now update that file instead of replacing the shortcut.
+
+---
+
 ## 2026-11-11 (~01:07) - v0.2.359 backhandDoordasher - Settings export/import by file and tailnet sync - Claude Opus 5.5, medium effort; Implementation
 
 ### Agent

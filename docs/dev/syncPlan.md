@@ -43,12 +43,17 @@ State per item (`state/sync/state.json`):
   a restored old file beats the tombstone it replaces. Deletes take the detection time.
 - `base`: last hash seen equal on a peer; `hash !== base` = unsynced local edit (conflict if a newer
   remote overwrites it).
-- `deleted`: tombstone, kept 90 days.
+- `deleted`: tombstone, kept forever (v0.2.360; was 90 days): a long-offline peer, or one that
+  excluded the item meanwhile, must not bring a deleted item back. About 100 bytes each.
 
 Scan never tombstones items of an unread source: a missing/unreadable root, or a settings file that
 fails to read or parse (`collect().unread`).
 
 ## Decide (pull side, `OcSync.decide`)
+
+Exclusion works both ways (v0.2.360): `manifest` and `items` leave out what this machine excludes,
+so an excluded item stays on this machine even when edited here; a peer reads a missing entry as
+"nothing to do", never as a delete.
 
 Excluded (by remote or local tags, or key) -> skip. Same hash -> same (sets `base`). Missing locally ->
 take (tombstone -> skip). Otherwise the newer `at` wins, equal `at` tie-breaks on hash string; a newer
@@ -65,6 +70,10 @@ remote over an unsynced local edit is a conflict (applied, reported).
   state lock against a fresh scan. Files a peer's item no longer has are removed.
 - After applies, `disposeAllInstancesAndEmitGlobalDisposed` runs once no `session.status` busy event is
   open (busy entries older than 2 h are ignored).
+- `OcItems.apply` is all or nothing: back up, stage every write in a `.tmp-<pid>` file (at the
+  symlink's real path), then rename each into place with `retryBusy` (EPERM/EBUSY/EACCES, 5 x 100 ms).
+  A failure removes the temp files, restores only the targets already changed, and deletes the
+  backup folder; state is not updated, so the next tick retries cleanly.
 - `state/sync/status.json`: peers, last error, overwritten edits (`backup` folder). The `/sync` dialog
   reads it and lists conflicts whose backup still exists; restore = `OcItems.undo(backup)`.
 

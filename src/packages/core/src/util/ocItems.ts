@@ -76,7 +76,9 @@ const _FILE_DIRS: [string, Category][] = [
 const _SPLIT_KEYS = new Set(["agent", "command", "mcp", "provider"])
 // oc.json keys that describe this machine, not a preference. `sync` is per machine too.
 const _MACHINE_OC_KEYS = new Set(["executable", "ocDir", "homeDir", "server", "revive", "allowImport", "sync"])
-const _SKIP_NAME = /^(node_modules|\.git|\.DS_Store|auth\.json|\.env.*|.*\.(pem|key))$/i
+// `.tmp-<pid>`: a write `apply` did not finish. `.bak`, `.bak-<stamp>`, `.orig`, `~`: backup copies.
+const _SKIP_NAME =
+  /^(node_modules|\.git|\.DS_Store|auth\.json|\.env.*|.*\.(pem|key)|.*\.tmp-\d+|.*\.bak(-.*)?|.*\.orig|.*~)$/i
 const _SECRET_KEY = /api[-_]?key|token|secret|password|authorization/i
 const _SCRIPT_FILE = /\.(ps1|sh|bash|zsh|py|js|mjs|cjs|ts|exe|bat|cmd)$/i
 const _WINDOWS_FILE = /\.(ps1|psm1|bat|cmd|exe)$/i
@@ -552,30 +554,66 @@ export async function apply(
 
   const backupRoot = options.backupRoot ?? importBackupRoot()
   const dir = path.join(backupRoot, new Date().toISOString().replace(/[:.]/g, "-"))
-  await fs.mkdir(path.join(dir, "files"), { recursive: true })
   const record: BackupRecord = { files: [] }
-  for (const [index, target] of [...writes.keys()].entries()) {
-    const existed = existsSync(target)
-    if (existed) await fs.copyFile(target, path.join(dir, "files", String(index)))
-    record.files.push({ target, existed })
-  }
-  await fs.writeFile(path.join(dir, "record.json"), JSON.stringify(record, null, 2))
-
-  for (const [target, data] of writes) {
-    const content = await data()
-    if (content === undefined) {
-      await fs.rm(target, { force: true })
-      // Only succeeds on an empty folder, so a removed skill does not leave its folder behind.
-      await fs.rmdir(path.dirname(target)).catch(() => undefined)
-      continue
+  // All or nothing: back up, write every new file to a temp file, then put each in place. A failure
+  // removes the temp files, restores the files already changed, and deletes this backup, so a retry
+  // starts clean and failed attempts leave no backups behind.
+  const staged: { target: string; real: string; temporary?: string }[] = []
+  const changed = new Set<string>()
+  try {
+    await fs.mkdir(path.join(dir, "files"), { recursive: true })
+    for (const [index, target] of [...writes.keys()].entries()) {
+      const existed = existsSync(target)
+      if (existed) await fs.copyFile(target, path.join(dir, "files", String(index)))
+      record.files.push({ target, existed })
     }
-    await fs.mkdir(path.dirname(target), { recursive: true })
-    const temporary = `${target}.tmp-${process.pid}`
-    await fs.writeFile(temporary, content)
-    await fs.rename(temporary, target)
+    await fs.writeFile(path.join(dir, "record.json"), JSON.stringify(record, null, 2))
+    for (const [target, data] of writes) {
+      const content = await data()
+      if (content === undefined) {
+        staged.push({ target, real: target })
+        continue
+      }
+      // A symlinked file (a command linked to a Claude skill) is written at its real path, so the
+      // rename replaces the content and the link survives.
+      const real = await fs.realpath(target).catch(() => target)
+      await fs.mkdir(path.dirname(real), { recursive: true })
+      const temporary = `${real}.tmp-${process.pid}`
+      staged.push({ target, real, temporary })
+      await fs.writeFile(temporary, content)
+    }
+    for (const entry of staged) {
+      const temporary = entry.temporary
+      if (temporary) {
+        await retryBusy(() => fs.rename(temporary, entry.real))
+        changed.add(entry.target)
+        continue
+      }
+      await retryBusy(() => fs.rm(entry.target, { force: true }))
+      changed.add(entry.target)
+      // Only succeeds on an empty folder, so a removed skill does not leave its folder behind.
+      await fs.rmdir(path.dirname(entry.target)).catch(() => undefined)
+    }
+  } catch (error) {
+    await Promise.all(staged.flatMap((entry) => (entry.temporary ? [fs.rm(entry.temporary, { force: true })] : [])))
+    await restore(dir, record, changed)
+    await fs.rm(dir, { recursive: true, force: true })
+    throw error
   }
   await pruneBackups(backupRoot, options.keep ?? _KEEP_BACKUPS)
   return { backup: dir, files: writes.size }
+}
+
+const _BUSY = new Set(["EPERM", "EBUSY", "EACCES"])
+
+// Windows reports a file another program holds open (antivirus, indexer, editor) as busy for a
+// moment; retry briefly before giving up.
+async function retryBusy<T>(run: () => Promise<T>, attempt = 0): Promise<T> {
+  return run().catch(async (error: NodeJS.ErrnoException) => {
+    if (attempt >= 5 || !_BUSY.has(error.code ?? "")) throw error
+    await Bun.sleep(100)
+    return retryBusy(run, attempt + 1)
+  })
 }
 
 // Items come from files and other machines: nothing may write outside its root or touch
@@ -613,16 +651,23 @@ export async function undo(dir?: string) {
   const target = dir ?? (await lastBackup())
   if (!target || !existsSync(path.join(target, "record.json"))) return undefined
   const record = JSON.parse(await fs.readFile(path.join(target, "record.json"), "utf8")) as BackupRecord
-  for (const [index, file] of record.files.entries()) {
-    if (!file.existed) {
-      await fs.rm(file.target, { force: true })
-      continue
-    }
-    await fs.mkdir(path.dirname(file.target), { recursive: true })
-    await fs.copyFile(path.join(target, "files", String(index)), file.target)
-  }
+  await restore(target, record)
   await fs.rm(target, { recursive: true, force: true })
   return record.files.length
+}
+
+// Puts backed-up files back (all, or only the targets in `only`); files that did not exist go away.
+async function restore(dir: string, record: BackupRecord, only?: ReadonlySet<string>) {
+  for (const [index, file] of record.files.entries()) {
+    if (only && !only.has(file.target)) continue
+    if (!file.existed) {
+      await retryBusy(() => fs.rm(file.target, { force: true }))
+      continue
+    }
+    const real = await fs.realpath(file.target).catch(() => file.target)
+    await fs.mkdir(path.dirname(real), { recursive: true })
+    await retryBusy(() => fs.copyFile(path.join(dir, "files", String(index)), real))
+  }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

@@ -33,7 +33,6 @@ type State = Record<string, StateEntry>
 type Scan = { state: State; raw: Map<string, OcItems.Item>; wire: Map<string, OcItems.Item> }
 
 const _SCAN_REUSE = 2_000
-const _TOMBSTONE_DAYS = 90
 const _KEEP_BACKUPS = 200
 const _KEEP_CONFLICTS = 50
 const _MAX_RESPONSE = 20 * 1024 * 1024
@@ -121,12 +120,10 @@ async function rescan(): Promise<Scan> {
   }
   for (const [id, previous] of Object.entries(state)) {
     if (next[id]) continue
-    if (previous.deleted) {
-      if (now - previous.at < _TOMBSTONE_DAYS * 86_400_000) next[id] = previous
-      continue
-    }
-    // An unreadable root or a half-saved settings file keeps its items as they were.
-    if (collected.unread.has(OcItems.sourceOf(id))) {
+    // Tombstones never expire (about 100 bytes each): a peer that was offline for months, or one
+    // that excluded the item meanwhile, must not bring a deleted item back. An unreadable root or a
+    // half-saved settings file keeps its items as they were.
+    if (previous.deleted || collected.unread.has(OcItems.sourceOf(id))) {
       next[id] = previous
       continue
     }
@@ -140,9 +137,13 @@ async function rescan(): Promise<Scan> {
 
 // --- Serving side ---
 
+// Items this machine excludes stay on this machine: they are neither pulled here nor offered to
+// peers. A peer reads a missing entry as "nothing to do", never as a delete.
 export async function manifest(): Promise<Manifest> {
   const result = await scan()
+  const exclude = settings().exclude
   const entries = Object.entries(result.state)
+    .filter(([id, entry]) => !OcItems.excluded(id, entry.tags, exclude))
     .map(([id, entry]): ManifestEntry => {
       const base = { id, hash: entry.hash, at: entry.at, tags: entry.tags }
       return entry.deleted ? { ...base, deleted: true } : base
@@ -157,9 +158,10 @@ export function etag(value: Manifest) {
 
 export async function items(ids: readonly string[]) {
   const result = await scan()
+  const exclude = settings().exclude
   const found = ids.flatMap((id) => {
     const item = result.wire.get(id)
-    return item ? [item] : []
+    return item && !OcItems.excluded(id, result.state[id]?.tags ?? [], exclude) ? [item] : []
   })
   if (JSON.stringify(found).length > _MAX_RESPONSE) throw new Error("Requested items exceed 20 MB")
   return found
