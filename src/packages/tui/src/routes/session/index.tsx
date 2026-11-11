@@ -93,6 +93,7 @@ import { smoothText } from "./smoothText"
 import { useTuiConfig } from "../../config"
 import { useArgs } from "../../context/args"
 import { useClipboard } from "../../context/clipboard"
+import { writeOsc52 } from "../../clipboard"
 import { nextThinkingMode, reasoningSummary, useThinkingMode, type ThinkingMode } from "../../context/thinking"
 import { getScrollAcceleration } from "../../util/scroll"
 import { collapseShellOutput, collapseToolOutput } from "../../util/collapse-tool-output"
@@ -448,11 +449,24 @@ export function Session() {
   })
 
   let lastSwitch: string | undefined = undefined
+  const copied = new Set<string>()
   event.on("message.part.updated", (evt) => {
     const part = evt.properties.part
     if (part.type !== "tool") return
     if (part.sessionID !== route.sessionID) return
     if (part.state.status !== "completed") return
+    // The `clipboard` tool already copied on the server's machine. OSC 52 also reaches this
+    // terminal when oc runs over SSH. Fresh completions only: compaction re-emits finished parts,
+    // and a remounted route can see old ones.
+    if (part.tool === "clipboard") {
+      const text = stringValue(part.state.metadata?.text)
+      const stale = part.state.time.compacted || Date.now() - part.state.time.end > 15_000
+      if (!text || stale || copied.has(part.id)) return
+      copied.add(part.id)
+      writeOsc52(text)
+      toast.show({ message: "Copied to clipboard", variant: "success" })
+      return
+    }
     if (part.id === lastSwitch) return
 
     if (part.tool === "plan_exit") {
@@ -2268,6 +2282,8 @@ function ToolPart(props: { last: boolean; part: ToolPart; message: AssistantMess
   // Hide tool if showDetails is false and tool completed successfully
   const shouldHide = createMemo(() => {
     if (ctx.showDetails()) return false
+    // Its row is the only way to copy the text again.
+    if (props.part.tool === "clipboard") return false
     if (props.part.state.status !== "completed") return false
     return true
   })
@@ -2349,6 +2365,9 @@ function ToolPart(props: { last: boolean; part: ToolPart; message: AssistantMess
         </Match>
         <Match when={display() === "skill"}>
           <Skill {...toolprops} />
+        </Match>
+        <Match when={display() === "clipboard"}>
+          <Clipboard {...toolprops} />
         </Match>
         <Match when={true}>
           <GenericTool {...toolprops} />
@@ -3408,6 +3427,34 @@ function Skill(props: ToolProps) {
   )
 }
 
+// The tool copies; Session's `message.part.updated` listener adds OSC 52. A click copies again.
+function Clipboard(props: ToolProps) {
+  const clipboard = useClipboard()
+  const toast = useToast()
+  const text = createMemo(() => stringValue(props.metadata.text) ?? stringValue(props.input.text) ?? "")
+  const preview = createMemo(() => {
+    const lines = text().trimEnd().split("\n")
+    const first = lines[0]?.trim() ?? ""
+    const clipped = first.length > 60 ? first.slice(0, 59) + "…" : first
+    return lines.length > 1 ? `${clipped} (+${lines.length - 1} lines)` : clipped
+  })
+  const copy = () =>
+    void clipboard.write?.(text()).then(() => toast.show({ message: "Copied to clipboard", variant: "success" }))
+
+  return (
+    <InlineTool
+      icon="⧉"
+      pending="Copying to clipboard…"
+      failure="Copy to clipboard failed"
+      complete={props.part.state.status === "completed"}
+      part={props.part}
+      onClick={props.part.state.status === "completed" ? copy : undefined}
+    >
+      Copied {preview()}
+    </InlineTool>
+  )
+}
+
 function Diagnostics(props: { diagnostics: unknown; filePath: string }) {
   const { theme } = useTheme()
   const terminalEnvironment = useTuiTerminalEnvironment()
@@ -3484,6 +3531,7 @@ const toolDisplays = new Set([
   "question",
   "skill",
   "execute",
+  "clipboard",
 ])
 
 export function toolDisplay(tool: string) {

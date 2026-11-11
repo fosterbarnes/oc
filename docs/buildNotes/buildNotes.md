@@ -123,6 +123,89 @@ Budget (AGENTS.md "Build notes"): at most 80 lines and 12 KB. Current invariants
 
 ---
 
+## 2026-11-11 (~00:16) - v0.2.357 wallabySpasm - Import config from another oc over Tailscale - Claude Opus 5.5, medium effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; medium effort; Implementation (/imp of `docs/dev/importPlan.md` phases 1-3); completed
+- Version: 0.2.357 wallabySpasm
+- Added core `util/ocImport.ts`: `collect` (config + `~/.opencode` roots; skills per SKILL.md folder, commands/agents `.md`, themes `.json`, prompts, root `.md`, code dirs; opencode.jsonc keys split for agent/command/mcp/provider; tui.json keys; oc.json minus `_MACHINE_OC_KEYS`), `bundle` (redacted, 20 MB cap, 2 MB per file), `scan`/`tailscaleStatus`/`fetchBundle`, `compare` (rewrite + `restoreRedacted` before hashing), `apply` (backup to `state/import/<ts>`, keep 10, jsonc `modify`), `undo`.
+- Added opencode `server/importPeer.ts`: Bun.serve on Tailscale IPv4:4097, GET `/oc-import/hello|bundle`, 403 unless caller IP is a same-`UserID` peer (status cached 30 s); follows oc.json `allowImport` via `fs.watch(Global.Path.config)`. Started from `cli/cmd/serve.ts` for the resident server only.
+- Added `allowImport` to `OcConfig.keys` (boolean check) and `readOcConfig`/`persistOcConfig` in tui `ocSettings.ts`.
+- Added tui `component/dialog-import.tsx` (peer list, ctrl+r rescan; picker with enter toggle, ctrl+a/ctrl+u/ctrl+s, confirm listing code and missing paths; `global.dispose` after apply/undo; toast Undo action) and palette entries `oc.import` (`/import`), `oc.allow_import` (`/allowImport`), `oc.import_undo` in Tools; ranked in `_COMMAND_RANK`.
+- Kept `core/test/util/ocImport.test.ts`: redaction, restore, and the home-prefix boundary (guards a real bug the probe found).
+- Deviations from plan (recorded in importPlan.md Status): one bundle route instead of manifest/bundle + loopback routes; items keep their root; no diff view.
+- Updated FORK.md (new medium row, counts 121) and wiki `Configuration.md` (`allowImport` row, Importing section).
+- Verification: core/opencode/tui `tsgo --noEmit` exit 0. Probe with two fake machines (Windows home -> Mac): redaction, rewrite, missing paths, comment-kept merge, re-compare empty, undo restore. Live listener probe from goonstation over ssh: own IP 403, peer hello 200, bundle served, POST 405, allowImport false -> refused, true -> 200 without restart. Real config collect: 143 items, 1.27 MB. tui findPaletteEntry, commandPalette, slash tests pass. Not run: scan/import between two installed builds, the dialog UI, Windows serving side.
+- MISTAKE: first listener probe used `Bun.spawnSync` for ssh in the same process as the server, blocking its event loop and looking like a hang. Use async spawn when a probe calls back into its own server.
+- ERROR: `rewriteHome` matched `C:\Users\FosterX` as `C:\Users\Foster`; fixed with a `(?![\w.-])` boundary.
+
+### User
+Import from another oc (beta)
+- New palette entry **Import from another oc** (`/import`) finds oc on your other Tailscale machines and lets you pick which skills, commands, agents, themes, and settings to copy.
+- New palette toggle **Allow import from this machine** makes this machine available to your own Tailscale account only; it is off by default.
+- Paths under the other machine's home folder are rewritten to yours, and API keys, sign-ins, and machine-only settings are never copied.
+- Every import is backed up first; **Undo last import** (or the toast's Undo) restores it.
+
+---
+
+## 2026-11-10 (~23:53) - v0.2.356 smoteRiddle - Clipboard tool copies on the server and reports failures - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation (follow-up to the entry below, same session, no extra bump); completed
+- Version: 0.2.356 smoteRiddle
+- MISTAKE: first version copied only in the TUI viewing the session, so headless runs or another open session copied nothing while the model was told it copied. Rule: a tool that claims a side effect must perform it and report the real result.
+- Moved `copyCommand` + native write from `tui/src/clipboard.ts` to new `core/src/util/clipboard.ts` (`writeNative`, throws with stderr / "no clipboard command found"). TUI `write` = OSC 52 + `writeNative`, clipboardy on failure; exported `writeOsc52`. `tui/test/clipboard.test.ts` imports `copyCommand` from core (moved, same assertions).
+- Changed `tool/clipboard.ts`: copies via `writeNative`, failure fails the call; strips a whole-text code fence and trailing newlines (`clean`); returns cleaned text in `metadata.text`.
+- Changed TUI listener: OSC 52 (`writeOsc52`) + toast only, from `metadata.text`; row preview/click use `metadata.text`.
+- Verification: tsgo core/tui/opencode exit 0; `tui/test/clipboard.test.ts` 10 pass. Probes (deleted, folder confirmed gone): tool with no TUI copied fenced input to `pbpaste` as cleaned text, `"echo hi\n\n"` -> `echo hi`; `writeNative` with empty PATH -> "no clipboard command found"; `OC_TUI_PANE=1` Claude Code proxy run: row, toast, auto copy, click re-copy all matched. User clipboard restored. Windows not checked.
+
+### User
+Agents
+- The clipboard tool now copies even when no oc window is showing the session, and the agent is told if the copy failed.
+- A code fence around the copied text and trailing newlines are removed, so a pasted command does not run on its own.
+
+---
+
+## 2026-11-10 (~23:49) - v0.2.356 smoteRiddle - Agents can put text on your clipboard - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation (/spit -> /think -> /imp); completed
+- Version: 0.2.356 smoteRiddle
+- Added `opencode/src/tool/clipboard.ts` `ClipboardTool` (`clipboard`, param `text`): rejects empty and >64 KB (OSC 52 limit), `ctx.ask` permission `clipboard` (default allow via `"*"`; no config schema change, `StructWithRest`), no I/O. Registered in `tool/registry.ts` next to `sessionRename`.
+- Added TUI copy in `tui/src/routes/session/index.tsx` Session `message.part.updated` listener (same spot as `plan_exit`): route session only, skips `time.compacted`, `time.end` older than 15 s, and repeat part ids (`copied` Set); `clipboard.write` + toast. Copy lives in the TUI because the resident server has no terminal (no OSC 52) and may be remote.
+- Added `Clipboard` renderer (`⧉ Copied <first line> (+N lines)`, click copies again) in `toolDisplays`/`ToolPart`; exempt from `shouldHide` so it shows with tool details off.
+- Added `clipboard` to user `~/.config/opencode/opencode.jsonc` `proxyOpencodeTools` (Mac only; that file is not mirrored). FORK.md row (high, counts 62/120); wiki `Agents-and-Skills.md` bullet.
+- Kept: no server-side copy fallback; headless/other-session runs copy nothing while the model is told it copied.
+- Verification: tsgo typecheck tui + opencode exit 0. Probes (deleted, `Test-Path` equivalent confirmed): tool execute (output, ask call, empty/64 KB errors); registry lists it, default allow, `deny` hides, `ask` asks; `OC_TUI_PANE=1` pane run through Claude Code proxy (`proxyOpencodeTools: ["clipboard"]` in a scratch fixture copy): row + toast shown, real `pbpaste` matched multiline Unicode/quote/backslash text, click re-copied after clipboard was overwritten; user clipboard restored. Not probed: reopen-session no-recopy (guarded by design), Windows.
+
+### User
+Agents
+- Agents can now put text on your clipboard when you ask them to copy something, instead of telling you to copy it yourself.
+- The copy happens the moment the agent's call finishes and shows a "Copied to clipboard" notice.
+- A "⧉ Copied ..." line stays in the chat; click it to copy the text again.
+- Set the `clipboard` permission to `ask` or `deny` to confirm or block it.
+
+---
+
+## 2026-11-10 (~17:43) - v0.2.355 timberlakeSegways - Plan lines read Renews; usage values share one column - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation; completed
+- Version: 0.2.355 timberlakeSegways
+- Changed `usagePlanLine` (`usage/plans.ts`): text leads with the verb only (`Renews ~11/16 (6d)`), no plan name. `usagePlanLabel` (calendar) unchanged.
+- Added `lead` to `formatUsageRows` (`usage/format.ts`): each row reports its first value column (wrapped continuation rows report 0); `usageColumns` returns the max; position 0 start honors `lead - offset`. Fixes varied pooled-name label widths and clockless `-` first resets (value sat right after the label). `formatClaudeUsageRows` takes `lead` as a new last param; `sidebarUsage.tsx` passes `shared?.lead` to both.
+- Kept `Codex :` label as is.
+- Rerolled tag: first roll was an offensive word.
+- Updated wiki `Sidebar.md` example to `Renews ~11/14 (18d)`.
+- Verification: probe of the screenshot's pool (Pro, Team1, idle Team2, Codex) with shared columns put every first value at col 10 and the `-` under it; weekly values share col 19. `usageFreshness` + `usageLive` 39 pass; tui `tsc --noEmit` clean. Not checked live.
+
+### User
+Sidebar
+- Plan lines now read just `Renews ~11/16 (6d)` instead of `Pro renews` or `Team renews`.
+- Usage percentages line up in one column across accounts and providers, including an idle Claude account whose hour window shows `-`.
+
+---
+
 ## 2026-11-10 (~17:37) - v0.2.354 darknessGibbons - Sidebar plan lines stop warning early; Claude rows use account names - Claude Opus 5.5, low effort; Implementation
 
 ### Agent

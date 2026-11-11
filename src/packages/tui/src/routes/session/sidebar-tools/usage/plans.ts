@@ -103,7 +103,7 @@ export function usagePlanLabel(plan: UsagePlan) {
     .join(" ")
 }
 
-/** Sidebar text such as `Pro renews ~11/14 (18d)`; `~` marks an estimate. Urgent only once ended. */
+/** Sidebar text such as `Renews ~11/14 (18d)`; `~` marks an estimate. Urgent only once ended. */
 export function usagePlanLine(plan: UsagePlan, nowMs: number) {
   if (plan.atMs === undefined) return { text: "Renewal date unknown", urgent: false }
   const date = new Date(plan.atMs)
@@ -111,9 +111,8 @@ export function usagePlanLine(plan: UsagePlan, nowMs: number) {
   const days = Math.round((startOfDay(plan.atMs) - startOfDay(nowMs)) / DAY_MS)
   const year = date.getFullYear() === new Date(nowMs).getFullYear() ? "" : `/${String(date.getFullYear()).slice(2)}`
   const left = days > 0 ? ` (${days}d)` : days === 0 ? " (today)" : ""
-  const lead = plan.plan ? `${capitalize(plan.plan)} ${plan.verb}` : capitalize(plan.verb)
   return {
-    text: `${lead} ${plan.source === "estimate" ? "~" : ""}${date.getMonth() + 1}/${date.getDate()}${year}${left}`,
+    text: `${capitalize(plan.verb)} ${plan.source === "estimate" ? "~" : ""}${date.getMonth() + 1}/${date.getDate()}${year}${left}`,
     urgent: plan.verb === "ended",
   }
 }

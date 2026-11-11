@@ -12,7 +12,8 @@ export function formatUsagePercent(used: number | null | undefined, remaining = 
  * Both rows share an origin; each value starts at its reset's first clock digit. `columns[i]` is the minimum date
  * start of the i-th window in a row; `starts` reports each row's actual date starts so callers can share columns.
  * `clocks`/`days` report each row's flipped clock/day widths so callers can share those too; the shared maxima
- * come back in as options to right-align later-slot dates.
+ * come back in as options to right-align later-slot dates. `lead` is the shared column of each row's first value,
+ * so rows with different label widths or a clockless first reset (`-`) still line up.
  */
 export function formatUsageRows(options: {
   label: string
@@ -22,8 +23,9 @@ export function formatUsageRows(options: {
   columns?: number[]
   clocks?: number[]
   days?: number[]
+  lead?: number
 }) {
-  const rows: { usage: string; reset: string; starts: number[]; clocks: number[]; days: number[] }[] = []
+  const rows: { usage: string; reset: string; starts: number[]; clocks: number[]; days: number[]; lead: number }[] = []
   // Later windows flip `M/D/YY ~time` to `~time M/D/YY` so the value sits under the clock digit.
   const dates = options.windows.map((window, index) => {
     const raw = window.resetAt ?? "reset unavailable"
@@ -44,6 +46,8 @@ export function formatUsageRows(options: {
   let starts: number[] = []
   let clocks: number[] = []
   let days: number[] = []
+  // Only a row's own first slot reports its value column; wrapped continuation rows report 0.
+  let lead = 0
   options.windows.forEach((window, index) => {
     const date = dates[index]
     const emptyDate = date === ""
@@ -62,15 +66,17 @@ export function formatUsageRows(options: {
     const start = Math.max(
       position ? reset.length + 2 : 0,
       base.length + 1 - offset,
-      position ? (options.columns?.[position] ?? 0) : 0,
+      position ? (options.columns?.[position] ?? 0) : (options.lead ?? 0) - offset,
     )
     const column = start + offset
+    if (!position && !rows.length) lead = column
     const gap = column - base.length
     const candidate = base + " ".repeat(gap) + value
     const prefix = position && reset.length ? `${reset}, ` : reset
     const nextReset = emptyDate ? reset : prefix.padEnd(start) + display
     if (position && Math.max(candidate.length, nextReset.length) > (options.width || Infinity)) {
-      rows.push({ usage, reset, starts, clocks, days })
+      rows.push({ usage, reset, starts, clocks, days, lead })
+      lead = 0
       const localStart = Math.max(0, options.label.length + 1 - offset)
       usage = options.label + " ".repeat(localStart + offset - options.label.length) + value
       reset = emptyDate ? "" : " ".repeat(localStart) + date
@@ -85,18 +91,23 @@ export function formatUsageRows(options: {
     clocks = [...clocks, part ? part.clock.length : 0]
     days = [...days, part ? part.day.length : 0]
   })
-  if (usage) rows.push({ usage, reset, starts, clocks, days })
+  if (usage) rows.push({ usage, reset, starts, clocks, days, lead })
   return rows
 }
 
 /** Shared per-slot widths: the widest date start, flipped clock, and flipped day of each window slot across rows. */
-export function usageColumns(rows: { starts: number[]; clocks?: number[]; days?: number[] }[]) {
+export function usageColumns(rows: { starts: number[]; clocks?: number[]; days?: number[]; lead?: number }[]) {
   const widest = (pick: (row: (typeof rows)[number]) => number[] | undefined) =>
     rows.reduce<number[]>((shared, row) => {
       const widths = pick(row) ?? []
       return widths.map((width, index) => Math.max(width, shared[index] ?? 0)).concat(shared.slice(widths.length))
     }, [])
-  return { starts: widest((row) => row.starts), clocks: widest((row) => row.clocks), days: widest((row) => row.days) }
+  return {
+    starts: widest((row) => row.starts),
+    clocks: widest((row) => row.clocks),
+    days: widest((row) => row.days),
+    lead: Math.max(0, ...rows.map((row) => row.lead ?? 0)),
+  }
 }
 
 export function formatClaudeUsageRows(
@@ -109,6 +120,7 @@ export function formatClaudeUsageRows(
   /** Canonical account identity; old callers without account IDs can still supply the name. */
   active?: string,
   nowMs?: number,
+  lead?: number,
 ) {
   const accounts = usage.accounts?.flatMap((account) =>
     account.usage.ok ? [{ id: account.id, name: account.name, usage: account.usage }] : [],
@@ -136,6 +148,7 @@ export function formatClaudeUsageRows(
       columns,
       clocks,
       days,
+      lead,
       windows: [cell(account.fiveHour, "h", account), cell(account.weekly, "w", account)],
     }).map((row, rowIndex) => ({ ...row, label, account: id, snapshot: account, spaced: index > 0 && rowIndex === 0 }))
   })

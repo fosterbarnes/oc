@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test"
-import { copyCommand, read } from "../src/clipboard"
+import { copyCommand } from "@opencode-ai/core/util/clipboard"
+import { read } from "../src/clipboard"
 import { existsSync } from "node:fs"
 import { rm, writeFile } from "node:fs/promises"
 import path from "node:path"

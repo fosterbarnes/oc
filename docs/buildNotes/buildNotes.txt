@@ -1,8 +1,16 @@
-v0.2.354 darknessGibbons [patch > sidebar renewal and Claude names]
+v0.2.357 wallabySpasm [feat. > Tailscale import and clipboard tool]
+
+import:
+New palette entry Import from another oc (/import) finds oc on your other machines signed in to the same Tailscale account and lets you pick which skills, commands, agents, themes, prompts, instructions, tools, and settings to copy. Each item shows whether it is new or changed, whether it runs code, and how many of its paths do not exist on this machine.
+
+New palette toggle Allow import from this machine (oc.json allowImport, off by default) makes this machine answer imports on its Tailscale address only, and only for your own Tailscale account. It turns on and off without a restart.
+
+Paths under the other machine's home folder are rewritten to yours. Sign-ins, sessions, machine-only oc.json settings, .env/.pem/.key files, and inline API keys or tokens are never sent; your own value for a hidden key is kept. Comments in your config files are kept. Import never deletes anything, backs up every file it changes, and Undo last import (or the toast's Undo) restores it.
+
+agents:
+Agents can put text on your clipboard with the new clipboard tool when you ask them to copy something. The copy happens on the server even when no oc window shows the session, and the agent is told if it failed. A code fence around the text and trailing newlines are removed. A "Copied" line stays in the chat; click it to copy again. Set the clipboard permission to ask or deny to confirm or block it.
 
 sidebar:
-Plan renewal lines no longer turn yellow when a renewal is close. A line only turns yellow once the plan has ended.
+Plan lines now read just Renews ~11/16 (6d), and usage percentages line up in one column across accounts and providers, including an idle Claude account whose hour window shows -.
 
-Claude usage rows now show each account's name from the oc palette's Claude accounts menu instead of Claude, Claude2, Claude3. An unnamed account shows its default name (claude1, claude2, and so on), the same as the palette. With a single account the row still reads Claude.
-
-Under the hood: usagePlanLine only flags ended plans; formatClaudeUsageRows labels pooled rows with the account name from claudeAccountName. usageFreshness and usageLive tests now expect the named labels. The wiki Sidebar page describes both changes. Checks: usageFreshness and usageLive tests 39 pass; tui typecheck clean. Not checked live in the TUI.
+Under the hood: import logic lives in core util/ocImport.ts, the listener in opencode server/importPeer.ts (resident server, port 4097, 403 unless the caller is a same-account Tailscale peer), the dialog in tui component/dialog-import.tsx. New core test covers secret redaction and the home-path boundary. Clipboard copy moved to core util/clipboard.ts. Checks: core, opencode, and tui typechecks clean; import probes with two fake machines and a live listener probe from the Windows PC; clipboard tests 10 pass and pane probes; usageFreshness and usageLive 39 pass; palette and slash tests pass. Not checked: import between two installed builds, the import dialog live, Windows serving side, clipboard on Windows.

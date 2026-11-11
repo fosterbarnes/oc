@@ -6,6 +6,7 @@ import { Global } from "@opencode-ai/core/global"
 import { SYSTEM_TIME_ZONE } from "@opencode-ai/core/util/timeZone"
 import { DialogAbout } from "./component/dialog-about"
 import { DialogAgent } from "./component/dialog-agent"
+import { DialogImport, undoImport } from "./component/dialog-import"
 import { DialogModel } from "./component/dialog-model"
 import { DialogSessionCleanup } from "./component/dialog-session-cleanup"
 import { DialogSessionSubagents } from "./component/dialog-session-subagents"
@@ -1224,6 +1225,48 @@ export function createOcCommands(input: {
             />
           ))
         },
+      },
+      {
+        name: "oc.import",
+        title: "Import from another oc",
+        desc: "Copy skills, commands, agents, themes, and settings from an oc on your tailnet",
+        category: "oc",
+        group: "Tools",
+        slashName: "import",
+        run: () => dialog.replace(() => <DialogImport />),
+      },
+      {
+        name: "oc.allow_import",
+        title: "Allow import from this machine",
+        category: "oc",
+        group: "Tools",
+        get desc() {
+          return readOcConfig().allowImport ? "on" : "off"
+        },
+        slashName: "allowImport",
+        run: () => {
+          const current = readOcConfig().allowImport
+          dialog.replace(() => (
+            <DialogSelect
+              title="Allow import from this machine"
+              current={current ? "true" : "false"}
+              options={[
+                { value: "true", title: "on", description: "your other machines on Tailscale can read this config" },
+                { value: "false", title: "off" },
+              ]}
+              onSelect={async (option) => {
+                if (await persistOcConfig("allowImport", option.value, toast)) dialog.clear()
+              }}
+            />
+          ))
+        },
+      },
+      {
+        name: "oc.import_undo",
+        title: "Undo last import",
+        category: "oc",
+        group: "Tools",
+        run: () => void undoImport(toast, sdk.client),
       },
       {
         name: "oc.jev_key",

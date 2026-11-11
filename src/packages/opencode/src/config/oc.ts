@@ -14,6 +14,8 @@ export const keys = [
   "claudeFailover",
   // With claude-code `apiAccount` set and every account limited: `ask` (unset), `always`, or `off`.
   "claudeApiRollover",
+  // true: serve this machine's config to the same Tailscale account's oc Import (server/importPeer.ts).
+  "allowImport",
 ] as const
 
 export type Key = (typeof keys)[number]
@@ -75,6 +77,7 @@ export async function update(key: Key, value: string, startup?: Parameters<typeo
       startup,
     )
   }
+  if (key === "allowImport" && typeof parsed !== "boolean") throw new Error("allowImport must be true or false")
   if (key === "claudeFailover" && parsed !== "auto" && parsed !== "ask") {
     throw new Error("claudeFailover must be auto or ask")
   }

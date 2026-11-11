@@ -477,7 +477,10 @@ export function createSidebarUsage(input: {
     const layout = (shared?: ReturnType<typeof usageColumns>) => {
       const rows = (
         show: unknown,
-        options: Omit<Parameters<typeof formatUsageRows>[0], "remaining" | "width" | "columns" | "clocks" | "days">,
+        options: Omit<
+          Parameters<typeof formatUsageRows>[0],
+          "remaining" | "width" | "columns" | "clocks" | "days" | "lead"
+        >,
       ) =>
         show
           ? formatUsageRows({
@@ -487,6 +490,7 @@ export function createSidebarUsage(input: {
               columns: shared?.starts,
               clocks: shared?.clocks,
               days: shared?.days,
+              lead: shared?.lead,
             })
           : []
       return {
@@ -505,6 +509,7 @@ export function createSidebarUsage(input: {
                 shared?.days,
                 activeClaudeAccount(),
                 usageNow(),
+                shared?.lead,
               )
             : [],
         cursor: rows(providers.includes("cursor") && cursorOk, {

@@ -121,6 +121,8 @@ export const ServeCommand = effectCmd({
           executable: Global.resolveExecutablePath(),
         }),
       )
+      const { ImportPeer } = yield* Effect.promise(() => import("../../server/importPeer"))
+      ImportPeer.start()
     }
 
     yield* Effect.never

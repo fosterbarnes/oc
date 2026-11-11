@@ -27,7 +27,8 @@ function command(command: string, args: string[] = [], input?: string) {
   })
 }
 
-function writeOsc52(text: string) {
+// Reaches the terminal the user sits at, including over SSH, where a native copy cannot.
+export function writeOsc52(text: string) {
   if (!process.stdout.isTTY) return
   const sequence = `\x1b]52;c;${Buffer.from(text).toString("base64")}\x07`
   const passthrough = `\x1bPtmux;\x1b${sequence}\x1b\\`
@@ -154,52 +155,11 @@ async function readImageFile(file: string) {
   return { data: bytes.toString("base64"), mime }
 }
 
-export function copyCommand(
-  os: NodeJS.Platform,
-  wayland: boolean,
-  has: (name: string) => boolean,
-): string[] | undefined {
-  if (os === "darwin" && has("osascript")) return ["osascript"]
-  if (os === "linux" && wayland && has("wl-copy")) return ["wl-copy"]
-  if (os === "linux" && has("xclip")) return ["xclip", "-selection", "clipboard"]
-  if (os === "linux" && has("xsel")) return ["xsel", "--clipboard", "--input"]
-  if (os === "win32" && has("powershell.exe")) {
-    return [
-      "powershell.exe",
-      "-NonInteractive",
-      "-NoProfile",
-      "-Command",
-      "[Console]::InputEncoding = [System.Text.Encoding]::UTF8; Set-Clipboard -Value ([Console]::In.ReadToEnd())",
-    ]
-  }
-}
-
-let copyMethod: Promise<(text: string) => Promise<void>> | undefined
-
-function getCopyMethod() {
-  return (copyMethod ??= (async () => {
-    const { which } = await import("@opencode-ai/core/util/which")
-    const native = copyCommand(platform(), Boolean(process.env.WAYLAND_DISPLAY), (name) => Boolean(which(name)))
-    if (native?.[0] === "osascript") {
-      return async (text: string) => {
-        const escaped = text.replace(/\\/g, "\\\\").replace(/"/g, '\\"')
-        await command("osascript", ["-e", `set the clipboard to "${escaped}"`]).catch(() => undefined)
-      }
-    }
-    if (native) {
-      return async (text: string) => {
-        await command(native[0], native.slice(1), text).catch(() => undefined)
-      }
-    }
-    return async (text: string) => {
-      const { default: clipboardy } = await import("clipboardy")
-      await clipboardy.write(text).catch(() => undefined)
-    }
-  })())
-}
-
 export async function write(text: string) {
   writeOsc52(text)
-  const method = await getCopyMethod()
-  await method(text)
+  const { writeNative } = await import("@opencode-ai/core/util/clipboard")
+  await writeNative(text).catch(async () => {
+    const { default: clipboardy } = await import("clipboardy")
+    await clipboardy.write(text).catch(() => undefined)
+  })
 }

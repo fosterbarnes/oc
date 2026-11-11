@@ -39,6 +39,8 @@ export function readOcConfig(): {
   claudeApiRollover: "ask" | "always" | "off"
   // Claude account names keyed by the `accounts` entry as written (opencode accounts.ts).
   claudeAccountNames: Record<string, string>
+  // Serve this machine's config to oc Import on the same Tailscale account (opencode server/importPeer.ts).
+  allowImport: boolean
 } {
   const fallbackDir = os.homedir()
   const fallbackSort = "name"
@@ -55,6 +57,7 @@ export function readOcConfig(): {
         claudeFailover?: unknown
         claudeApiRollover?: unknown
         claudeAccountNames?: unknown
+        allowImport?: unknown
       }
     }
     const parsed = parse(ocConfigPath())
@@ -94,6 +97,7 @@ export function readOcConfig(): {
       claudeFailover,
       claudeApiRollover,
       claudeAccountNames,
+      allowImport: merged.allowImport === true,
     }
   } catch {
     return {
@@ -108,6 +112,7 @@ export function readOcConfig(): {
       claudeFailover: "auto",
       claudeApiRollover: "ask",
       claudeAccountNames: {},
+      allowImport: false,
     }
   }
 }
@@ -121,7 +126,8 @@ export function persistOcConfig(
     | "sessionAgent"
     | "serverStartAtLogin"
     | "claudeFailover"
-    | "claudeApiRollover",
+    | "claudeApiRollover"
+    | "allowImport",
   value: string,
   toast: ToastContext,
 ) {

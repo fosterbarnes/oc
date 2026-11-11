@@ -6,6 +6,7 @@ import { SessionCompleteTool } from "./sessionComplete"
 import { SessionFailedTool } from "./sessionFailed"
 import { SessionTailTool } from "./sessionTail"
 import { SessionRenameTool } from "./sessionRename"
+import { ClipboardTool } from "./clipboard"
 import { ModelsTool } from "./models"
 import { RunAfterTurnTool } from "./runAfterTurn"
 import { TimeTool } from "./time"
@@ -144,6 +145,7 @@ const layer = Layer.effect(
     const sessionFailed = yield* SessionFailedTool
     const sessionTail = yield* SessionTailTool
     const sessionRename = yield* SessionRenameTool
+    const clipboard = yield* ClipboardTool
     const models = yield* ModelsTool
     const runAfterTurn = yield* RunAfterTurnTool
     const time = yield* TimeTool
@@ -304,6 +306,7 @@ const layer = Layer.effect(
           sessionFailed: Tool.init(sessionFailed),
           sessionTail: Tool.init(sessionTail),
           sessionRename: Tool.init(sessionRename),
+          clipboard: Tool.init(clipboard),
           models: Tool.init(models),
           runAfterTurn: Tool.init(runAfterTurn),
           time: Tool.init(time),
@@ -333,6 +336,7 @@ const layer = Layer.effect(
             tool.sessionFailed,
             tool.sessionTail,
             tool.sessionRename,
+            tool.clipboard,
             tool.runAfterTurn,
             tool.time,
             tool.schedulePrompt,
