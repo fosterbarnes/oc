@@ -123,6 +123,48 @@ Budget (AGENTS.md "Build notes"): at most 80 lines and 12 KB. Current invariants
 
 ---
 
+## 2026-11-11 (~01:07) - v0.2.359 backhandDoordasher - Settings export/import by file and tailnet sync - Claude Opus 5.5, medium effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; medium effort; Implementation (/imp of `~/.config/opencode/plans/2026-11-11-export-import-sync.md`); completed
+- Version: 0.2.359 backhandDoordasher
+- Moved core `util/ocImport.ts` -> `util/ocItems.ts` (`OcItems`): added stat-cached `collect` (`mtimes`, `unread` sources: missing root or jsonc parse errors), `toWire`/`fromWire` (`{{OC_HOME}}` token on string leaves + `redact`), `hash`, `tags` (windows/posix/localMcp), `tree`, `excluded`/`excludeNode`/`includeNode`, `compare(wireItems)`, `apply(items, { remove, backupRoot, keep })` with temp+rename writes and `assertSafe` (path must stay in root, no machine oc.json keys), `undo(dir?)`. `_MACHINE_OC_KEYS` gained `sync`.
+- Added core `util/ocPack.ts` (`.ocpack` = `Bun.Archive` gzip tar, `manifest.json` + `files/<root>/<path>`, unpack in memory) and `util/ocSync.ts` (settings, state.json with `hash`/`local`/`at`/`base`/`deleted`, locked scan with 2 s reuse, tombstones 90 days skipped for unread sources, manifest + ETag, `items`, `decide`, `pull` (re-decides under lock on a fresh scan, removes stale skill files), status.json, Tailscale helpers moved from import).
+- Moved opencode `server/importPeer.ts` -> `server/syncPeer.ts`: 20 s loop, listener on Tailscale IPv4:4097 (GET manifest, POST items, same-UserID 403 check kept), peer backoff 5 min, reload via `disposeAllInstancesAndEmitGlobalDisposed` only when no `session.status` busy is open (GlobalBus). `serve.ts` starts `SyncPeer`.
+- Removed `allowImport` (OcConfig keys/check, tui `readOcConfig`/`persistOcConfig`, palette `oc.allow_import`); added `OcConfig.Settings.sync` and tui `persistOcSync` (jsonc modify of oc.json).
+- Added tui `component/itemTree.ts`, rewrote `dialog-import.tsx` (file prompt with quote/escape/`~` cleanup, tree picker, `DialogExport`, `undoImport`), added `dialog-sync.tsx` (toggle, peers, overwritten-edit restore, exclude tree). Palette `oc.sync` (`/sync`), `oc.import`, `oc.export` (`/exportSettings`: `/export` is the session transcript); `_COMMAND_RANK` updated.
+- Fixed `includeNode` (found by probe): re-including a leaf under an excluded category re-included its whole branch; now siblings are excluded at every level below the exploded ancestor.
+- Added `docs/dev/syncPlan.md`; marked `importPlan.md` superseded; FORK.md row replaced (count unchanged); wiki `Configuration.md` new "Moving settings between machines" section and `sync.*` rows.
+- Kept tests: `core/test/util/ocItems.test.ts` (renamed; + exclude-tree bug and key-prefix cases), new `ocSync.test.ts` (decide rules).
+- Verification: core/opencode/tui `tsgo --noEmit` 0 errors; kept tests 11 pass; tui findPaletteEntry/commandPalette/slashMenuLayout/slash 16 pass. Probe: two fake machines as separate processes over 127.0.0.1:4097 (8 steps: path rewrite, secret kept, binary, 150-char name, prefix exclude, no echo back, delete propagation + backup, edit back with comments, broken jsonc guard, restore, pack across homes) pass; real config 143 items, pack 16 ms/419 KB, round trip 0 diffs, cached collect 3 ms. Probes deleted. Not run: syncPeer inside a resident server on the real tailnet, the three dialogs, idle-gated reload, Windows.
+- Fixed (pass): `OcSync.readStatus` returns an empty status on a damaged `status.json` instead of throwing, which would have kept `SyncPeer.start` from ever starting the loop. Rechecked core `tsgo` 0 errors, kept tests 11 pass.
+- Risk: `walk` depth limit 8 still applies (deeper files are not items); tags are heuristic (extensions/paths).
+
+### User
+Moving settings between machines
+- Import no longer uses Tailscale: **Export oc settings** saves picked skills, commands, agents, themes, and settings to an `.ocpack` file, and **Import oc settings** reads one back.
+- New **Sync settings** (`/sync`) keeps settings the same on all your machines on the same Tailscale account, checking every 20 seconds.
+- Everything syncs by default; you can leave out a whole type, folder, single item, or a Windows-only / Mac/Linux-only / local MCP tag on each machine.
+- When two machines change the same item, the later change wins and the overwritten version is listed so you can restore it.
+- **Allow import from this machine** is gone.
+
+---
+
+## 2026-11-11 (~00:39) - v0.2.358 yoursPercs - New session picker highlights current project again - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation (/spit then /imp); completed
+- Version: 0.2.358 yoursPercs
+- Fixed tui `ocNewSession.ts` `listHomeDirs`: resolves `homeDir` with `fs.realpathSync.native` before listing, so `fullPath` uses on-disk casing. Cause: oc.json `homeDir` `/Users/Foster/...` vs session dir `/Users/foster/...`; `FSUtil.contains` (`path.relative`) is case-sensitive on darwin, so `current` in `ocCommands.tsx` newSession never matched.
+- Kept `FSUtil.contains` unchanged (shared core path checks).
+- Verification: throwaway probe in tui `test/tmp/verify`: `listHomeDirs("/Users/Foster/Documents/GitHub")` returns `oc` with lowercase fullPath and `contains` matches the session dir; missing homeDir returns []. Probe deleted. Live cmd+n not checked (needs /revive).
+
+### User
+New session
+- The New oc session list (cmd+n) starts on the project you are in again, even when the home folder setting is spelled with different capital letters than the real folder.
+
+---
+
 ## 2026-11-11 (~00:16) - v0.2.357 wallabySpasm - Import config from another oc over Tailscale - Claude Opus 5.5, medium effort; Implementation
 
 ### Agent

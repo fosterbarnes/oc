@@ -83,7 +83,7 @@ const _COMMAND_RANK = rankOf(
     ],
     ["oc.home_dir", "oc.home_dir_sort", "oc.oc_dir"],
     ["server.restart", "server.shutdown", "oc.server_startup", "oc.killall", "oc.process_report"],
-    ["oc.import", "oc.allow_import", "oc.import_undo", "oc.jev_key", "oc.bgrun"],
+    ["oc.sync", "oc.import", "oc.export", "oc.import_undo", "oc.jev_key", "oc.bgrun"],
     ["oc.about"],
   ].flat(),
 )

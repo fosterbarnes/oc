@@ -1,5 +1,9 @@
 # Import plan
 
+> Superseded (2026-11-11) by `docs/dev/syncPlan.md`: import is now file-based (`.ocpack`), Tailscale is
+> used only for sync, `allowImport` and `server/importPeer.ts` are gone, and `util/ocImport.ts` became
+> `util/ocItems.ts`. Kept as the record of the first design.
+
 Palette **oc > Import** (`/import`): scan on demand for other live oc instances, pick one, and pull some or
 all of its skills, commands, agents, config, themes, and settings into this machine.
 

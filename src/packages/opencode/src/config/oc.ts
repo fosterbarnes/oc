@@ -14,8 +14,6 @@ export const keys = [
   "claudeFailover",
   // With claude-code `apiAccount` set and every account limited: `ask` (unset), `always`, or `off`.
   "claudeApiRollover",
-  // true: serve this machine's config to the same Tailscale account's oc Import (server/importPeer.ts).
-  "allowImport",
 ] as const
 
 export type Key = (typeof keys)[number]
@@ -30,6 +28,9 @@ export type Settings = Partial<Record<Key, Value>> & {
   intro?: { background?: "terminal" | "black" }
   // Claude account labels keyed by the `accounts` entry as written (`"~/.claude2": "Pro"`); accounts.ts.
   claudeAccountNames?: Record<string, string>
+  // Tailnet config sync for this machine (server/syncPeer.ts, core util/ocSync.ts). `exclude`: picker
+  // tree keys (id prefixes, item ids, `tag:<name>`). Written by the TUI `/sync` dialog.
+  sync?: { enabled?: boolean; exclude?: string[] }
 }
 
 export function defaultServerPort() {
@@ -77,7 +78,6 @@ export async function update(key: Key, value: string, startup?: Parameters<typeo
       startup,
     )
   }
-  if (key === "allowImport" && typeof parsed !== "boolean") throw new Error("allowImport must be true or false")
   if (key === "claudeFailover" && parsed !== "auto" && parsed !== "ask") {
     throw new Error("claudeFailover must be auto or ask")
   }

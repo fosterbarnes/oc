@@ -4,17 +4,20 @@ import type { OpencodeClient } from "@opencode-ai/sdk/v2"
 import { nextProjectTitle } from "@opencode-ai/core/util/ocSession"
 
 // Folders under the oc home dir for the New session picker. Name sort skips per-folder stats.
+// The configured path is resolved to its on-disk spelling: case-insensitive disks accept
+// `/Users/Foster` for `/Users/foster`, but session directories (and path.relative) use the real one.
 export function listHomeDirs(homeDir: string, sort: string) {
-  const entries = (() => {
+  const listing = (() => {
     try {
-      return fs.readdirSync(homeDir, { withFileTypes: true })
+      const root = fs.realpathSync.native(homeDir)
+      return { root, entries: fs.readdirSync(root, { withFileTypes: true }) }
     } catch {
-      return []
+      return { root: homeDir, entries: [] }
     }
   })()
-  const dirs = entries
+  const dirs = listing.entries
     .filter((entry) => entry.isDirectory())
-    .map((entry) => ({ name: entry.name, fullPath: path.join(homeDir, entry.name) }))
+    .map((entry) => ({ name: entry.name, fullPath: path.join(listing.root, entry.name) }))
   if (sort !== "modified") return dirs.toSorted((a, b) => a.name.localeCompare(b.name))
   return dirs
     .map((dir) => ({ ...dir, mtimeMs: mtime(dir.fullPath) }))
