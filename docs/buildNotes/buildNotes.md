@@ -123,6 +123,33 @@ Budget (AGENTS.md "Build notes"): at most 80 lines and 12 KB. Current invariants
 
 ---
 
+## 2026-11-11 (~21:18) - v0.2.361 jakeTimtam - Claude warm-up error messages, corrupt store recovery, small cleanups - Claude Opus 5.5, effort not reported; Fixup
+
+### Agent
+- Meta: Claude Opus 5.5; effort not reported; Fixup (/fixup after resetting the user's warm-up data); completed
+- Version: 0.2.361 jakeTimtam (first bumped locally to 0.2.360 dancinHoooooooo, which collided with origin's 0.2.360 shaprioBenis; reconciled by fast-forward + re-bump)
+- Context: user asked to reset warm-up settings; deleted `~/.local/share/opencode/claude-code/warmup.json` and `~/.local/state/opencode/claudeWarmupPresets.json` (backups in `%TEMP%`). Missing store = no schedules; TUI re-fetches on palette open, so no restart needed.
+- Fixed tui `claudeWarmup.tsx` `conciseError`: typed server errors (`{ name, data: { message } }`: WarmupStoreError, WarmupScheduleError, NotFoundError) toasted "Warm-up inventory unavailable" instead of their message.
+- Fixed `mergeAccount`: save response is built without clash context (`accountView` default `clashes: false`), so a saved account lost its disambiguated label; now keeps the inventory label.
+- Cleaned tui: `parseTimes` limit message uses `MAX_TIMES`; `clockReset` uses `RESET_MS`, single modulo; `loadPreset` sorts once instead of in render.
+- Fixed `warmup/index.ts` `tickOnce`: CLI-unavailable `skipped` counted all enabled accounts, now only due ones. Folded the three `recordAttempt` copies into a local `record(outcome, attemptedAt)` and `late()`.
+- Added `claudeCodeOptions(global)` in `handlers/global.ts`; handlers and the warm-up loop shared copy-pasted options cast + cliPath fallback (3 places).
+- Cleaned `warmup/store.ts`: `isRecordValue` no longer normalizes the schedule twice (readStore does) and drops the always-true `typeof key` check; `writeStoreAtomic` removes its tmp file when write/rename fails.
+- Fixed stale test `httpapi-global.test.ts` (intended change, not regression): expected `path.basename` label, but `poolAccountLabel` drops the leading dot since the Claude names change; now expects `poolAccountLabel(id)`.
+- Fixed corrupt warm-up store dead end (was: any bad entry or bad JSON -> GET listed no accounts, PUT threw, only fix was deleting the file by hand). `store.ts` `StoreRead` gained `unreadable` (I/O error, file never touched) vs `malformed` (bad JSON / no `accounts`). Bad entries go to `WarmupFile.invalid` (raw), skipped by the scheduler, written back unchanged by `writeStoreAtomic`; saving that account drops it. `setAccountSchedule` on `malformed` renames the file to `badStoreFile()` (`warmup.json.bad`) and starts fresh. Added `storeProblem(read, file)` for the user message; `claudeWarmup` handler now lists accounts with that error instead of returning none. `tickOnce` treats any non-ok read as stop + warn.
+- Changed test `warmup.test.ts` store contract (intended): was "reject malformed, never reset"; now bad entry skipped but kept, corrupt file untouched by reads and replaced only by a save with a `.bad` copy. `httpapi-global` 500 test now uses a directory at the store path (real I/O failure) instead of `not json`.
+- Updated wiki `Claude-Code.md`: "If the schedule file is damaged" section; palette example labels `claude1`/`claude2` (dot dropped).
+- MISTAKE: started the session without fetching origin; another machine had pushed 0.2.360, so the local bump reused the number. Rule: `git fetch` and check `main...origin/main` before bumping.
+- Verification: `tsgo --noEmit` 0 errors in opencode and tui. opencode warmup, warmupFakeModel, httpapi-warmup-listener, httpapi-global 58 pass (1 stale-label fail before the test fix). tui claudeWarmup + claudeWarmupRendered 28 pass. Probes (deleted): fake client returning `WarmupStoreError` yields its message; merged label kept; `clockReset` wrap unchanged; real handler: corrupt file -> GET 1 account + `.bad` message, PUT 200 with `.bad` holding old bytes, GET clean after, one bad entry -> GET names `.claude9` while the good account stays enabled. Not run: live TUI dialog.
+
+### User
+Claude warm-up
+- Save errors in the warm-up dialog now show the real reason instead of "Warm-up inventory unavailable".
+- Saving a schedule no longer shortens an account's name in the palette when two accounts share a folder name.
+- A damaged warm-up schedule file no longer hides every account: one bad entry only affects that account, and if the whole file is unreadable, saving a schedule starts a new one and keeps the old file as `warmup.json.bad`.
+
+---
+
 ## 2026-11-11 (~01:37) - v0.2.360 shaprioBenis - Sync exclusions both ways, permanent deletes, all-or-nothing writes - Claude Opus 5.5, medium effort; Implementation
 
 ### Agent

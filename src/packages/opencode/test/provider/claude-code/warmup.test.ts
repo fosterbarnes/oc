@@ -37,6 +37,7 @@ import {
   type DueOccurrence,
 } from "@/provider/claude-code/warmup/schedule"
 import {
+  badStoreFile,
   claimDueOccurrences,
   readStore,
   recordAttempt,
@@ -186,17 +187,22 @@ test("save: malformed clock values and unknown shapes are rejected before any wr
   expect(readStore(storeFile).status).toBe("missing")
 })
 
-test("store: survives a fresh read and rejects malformed state instead of resetting it", async () => {
+test("store: a bad entry is skipped but kept; a corrupt file is replaced only by a save, keeping a .bad copy", async () => {
   await setAccountSchedule({ file: storeFile, accountID: "a", enabled: true, schedule: daily(["07:00"]) })
-  const reread = readStore(storeFile)
-  expect(reread.status).toBe("ok")
-  writeFileSync(storeFile, JSON.stringify({ accounts: { a: { enabled: "yes" } } }), "utf8")
-  const bad = readStore(storeFile)
-  expect(bad.status).toBe("malformed")
-  await expect(
-    setAccountSchedule({ file: storeFile, accountID: "a", enabled: true, schedule: daily(["08:00"]) }),
-  ).rejects.toThrow()
-  expect(JSON.parse(await Bun.file(storeFile).text()).accounts.a.enabled).toBe("yes")
+  const good = JSON.parse(await Bun.file(storeFile).text()).accounts.a
+  writeFileSync(storeFile, JSON.stringify({ accounts: { a: good, b: { enabled: "yes" } } }), "utf8")
+  const partial = readStore(storeFile)
+  expect(partial.status === "ok" && Object.keys(partial.state.accounts)).toEqual(["a"])
+  await setAccountSchedule({ file: storeFile, accountID: "a", enabled: true, schedule: daily(["08:00"]) })
+  expect(JSON.parse(await Bun.file(storeFile).text()).accounts.b).toEqual({ enabled: "yes" })
+
+  writeFileSync(storeFile, "not json", "utf8")
+  expect(readStore(storeFile).status).toBe("malformed")
+  expect(await Bun.file(storeFile).text()).toBe("not json")
+  await setAccountSchedule({ file: storeFile, accountID: "a", enabled: true, schedule: daily(["09:00"]) })
+  expect(await Bun.file(badStoreFile(storeFile)).text()).toBe("not json")
+  const fresh = readStore(storeFile)
+  expect(fresh.status === "ok" && fresh.state.accounts["a"]?.schedule).toEqual({ mode: "daily", times: ["09:00"] })
 })
 
 test("claims: a normal tick fires once and a repeated poll cannot resubmit", async () => {

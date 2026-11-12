@@ -198,7 +198,7 @@ export function parseTimes(input: string): { ok: true; times: string[] } | { ok:
     if (!times.includes(parsed)) times.push(parsed)
   }
   times.sort()
-  if (times.length > MAX_TIMES) return { ok: false, error: "At most 4 distinct times per day" }
+  if (times.length > MAX_TIMES) return { ok: false, error: `At most ${MAX_TIMES} distinct times per day` }
   return { ok: true, times }
 }
 
@@ -297,9 +297,9 @@ export function clockReset(time: string) {
   if (!parsed) return
   const hours = Number(parsed.slice(0, 2))
   const minutes = Number(parsed.slice(3, 5))
-  const total = hours * 60 + minutes + 5 * 60
+  const total = hours * 60 + minutes + RESET_MS / 60_000
   const nextDay = total >= 24 * 60
-  const wrapped = ((total % (24 * 60)) + 24 * 60) % (24 * 60)
+  const wrapped = total % (24 * 60)
   return {
     time: formatClock(Math.floor(wrapped / 60), wrapped % 60),
     nextDay,
@@ -376,8 +376,9 @@ export function readWarmupState(
 }
 
 export function mergeAccount(state: ClaudeWarmupState, account: ClaudeWarmupSet): ClaudeWarmupState {
+  // The save response labels without clash context, so keep the inventory label.
   const accounts = state.accounts.some((item) => item.accountID === account.accountID)
-    ? state.accounts.map((item) => (item.accountID === account.accountID ? account : item))
+    ? state.accounts.map((item) => (item.accountID === account.accountID ? { ...account, label: item.label } : item))
     : [...state.accounts, account]
   return { ...state, accounts, error: undefined }
 }
@@ -715,23 +716,21 @@ export function createClaudeWarmupCommands() {
       const gen = generation
       setBusy(true)
       try {
-        const presets = await readWarmupPresets(file)
+        const presets = (await readWarmupPresets(file)).sort((a, b) => a.name.localeCompare(b.name))
         if (gen !== generation) return
         replace(
           () => (
             <DialogSelect
               title="Load preset"
               emptyView={<text>No saved presets</text>}
-              options={presets
-                .sort((a, b) => a.name.localeCompare(b.name))
-                .map((preset) => ({
-                  value: preset.name,
-                  title: preset.name,
-                  onSelect: () => {
-                    setDraft(draftFromSchedule(preset.schedule))
-                    show()
-                  },
-                }))}
+              options={presets.map((preset) => ({
+                value: preset.name,
+                title: preset.name,
+                onSelect: () => {
+                  setDraft(draftFromSchedule(preset.schedule))
+                  show()
+                },
+              }))}
             />
           ),
           show,
@@ -828,8 +827,8 @@ function unique(times: string[]) {
 function conciseError(error: unknown) {
   if (error instanceof Error) return error.message
   if (typeof error === "string") return error
-  if (error && typeof error === "object" && "message" in error && typeof error.message === "string") {
-    return error.message
-  }
+  if (isRecord(error) && typeof error.message === "string") return error.message
+  // Typed server errors (WarmupStoreError, WarmupScheduleError, NotFoundError) arrive as { name, data: { message } }.
+  if (isRecord(error) && isRecord(error.data) && typeof error.data.message === "string") return error.data.message
   return "Warm-up inventory unavailable"
 }

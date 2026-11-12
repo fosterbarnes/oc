@@ -189,7 +189,7 @@ export async function tickOnce(input: {
   if (input.nowMs <= input.prevMs || input.nowMs - input.prevMs > FIRE_ALLOWANCE_MS) return zero
   const stored = readStore(input.file)
   if (stored.status === "missing") return zero
-  if (stored.status === "malformed") {
+  if (stored.status !== "ok") {
     log.warn("claude warm-up store unreadable; sends stopped", { error: stored.error })
     return zero
   }
@@ -210,7 +210,7 @@ export async function tickOnce(input: {
   const cli = await checkWarmupCli(input.cliPath)
   if (!cli.available) {
     log.warn("claude warm-up CLI unavailable; sends skipped", { error: cli.error })
-    return { ...zero, skipped: enabledIds.length }
+    return { ...zero, skipped: dueIds.length }
   }
   const inventory = await listConnected({
     cliPath: input.cliPath,
@@ -242,15 +242,17 @@ export async function tickOnce(input: {
       result.skipped += 1
       return
     }
-    const queuedMs = wall() - occurrence.at
     const attemptBase = { scheduledAt: occurrence.at, attemptedAt: wall() }
-    if (queuedMs > FIRE_ALLOWANCE_MS) {
-      await recordAttempt({
+    const record = (outcome: AttemptOutcome, attemptedAt = attemptBase.attemptedAt) =>
+      recordAttempt({
         file: input.file,
         lockDir: input.lockDir,
         accountID,
-        attempt: { ...attemptBase, outcome: "missed" },
+        attempt: { ...attemptBase, attemptedAt, outcome },
       }).catch((error) => log.warn("claude warm-up outcome write failed", { accountID, error: String(error) }))
+    const late = () => wall() - occurrence.at > FIRE_ALLOWANCE_MS
+    if (late()) {
+      await record("missed")
       result.missed += 1
       return
     }
@@ -270,13 +272,8 @@ export async function tickOnce(input: {
       result.skipped += 1
       return
     }
-    if (wall() - occurrence.at > FIRE_ALLOWANCE_MS) {
-      await recordAttempt({
-        file: input.file,
-        lockDir: input.lockDir,
-        accountID,
-        attempt: { ...attemptBase, outcome: "missed" },
-      }).catch((error) => log.warn("claude warm-up outcome write failed", { accountID, error: String(error) }))
+    if (late()) {
+      await record("missed")
       result.missed += 1
       return
     }
@@ -292,12 +289,7 @@ export async function tickOnce(input: {
       result.skipped += 1
       return
     }
-    await recordAttempt({
-      file: input.file,
-      lockDir: input.lockDir,
-      accountID,
-      attempt: { ...attemptBase, attemptedAt: wall(), outcome: send.outcome },
-    }).catch((error) => log.warn("claude warm-up outcome write failed", { accountID, error: String(error) }))
+    await record(send.outcome, wall())
     // Delivery success is observable only; a new window requires reading
     // Claude's real reset time, so say Prompt sent, never Window started.
     if (send.outcome === "sent") log.info("claude warm-up prompt sent", { accountID })

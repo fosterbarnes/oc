@@ -26,6 +26,7 @@ import {
   ScheduleValidationError,
   setAccountSchedule,
   storeFile,
+  storeProblem,
   WarmupStoreError,
 } from "@/provider/claude-code/warmup/store"
 import { disposeAllInstancesAndEmitGlobalDisposed } from "@/server/global-lifecycle"
@@ -58,6 +59,18 @@ function eventData(data: unknown): Sse.Event {
 }
 
 const subscriberCapacity = 2048
+
+// Claude pool options as the warm-up handlers and scheduler loop read them from global config.
+function claudeCodeOptions(global: { provider?: Record<string, { options?: unknown } | undefined> }) {
+  const options = global.provider?.["claude-code"]?.options as { accounts?: unknown; cliPath?: unknown } | undefined
+  return {
+    accounts: options?.accounts,
+    cliPath:
+      typeof options?.cliPath === "string" && options.cliPath
+        ? options.cliPath
+        : (process.env.CLAUDE_CLI_PATH ?? "claude"),
+  }
+}
 
 /** Every GlobalBus event. A reader that falls `capacity` events behind fails with
  *  SubscriberOverflowError, which ends its SSE response so the client reconnects and resyncs. */
@@ -206,15 +219,7 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
     })
 
     const claudeOptions = Effect.fnUntraced(function* () {
-      const global = yield* config.getGlobal()
-      const options = global.provider?.["claude-code"]?.options as { accounts?: unknown; cliPath?: unknown } | undefined
-      return {
-        accounts: options?.accounts,
-        cliPath:
-          typeof options?.cliPath === "string" && options.cliPath
-            ? options.cliPath
-            : (process.env.CLAUDE_CLI_PATH ?? "claude"),
-      }
+      return claudeCodeOptions(yield* config.getGlobal())
     })
 
     const warmupPool = Effect.fnUntraced(function* () {
@@ -312,16 +317,11 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
       const cli = yield* Effect.tryPromise(() => checkWarmupCli(pool.cliPath)).pipe(
         Effect.orElseSucceed(() => ({ available: false as const, error: "Claude CLI check failed" })),
       )
-      const store = readStore(storeFile())
-      if (store.status === "malformed") {
-        return stateView({
-          poolIds: pool.poolIds,
-          connectedIds: [],
-          store,
-          available: cli.available,
-          error: store.error,
-        })
-      }
+      const file = storeFile()
+      const store = readStore(file)
+      // A store problem still lists accounts: saving a schedule is how the user recovers.
+      const problem = storeProblem(store, file)
+      const errors = (...parts: (string | undefined)[]) => parts.filter(Boolean).join("; ") || undefined
       // Without a supported CLI there is nothing to probe with; report the
       // update requirement instead of spawning a binary that cannot serve it.
       if (!cli.available) {
@@ -330,7 +330,7 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
           connectedIds: [],
           store,
           available: false,
-          error: cli.error,
+          error: errors(cli.error, problem),
         })
       }
       const inventory = yield* Effect.tryPromise(() =>
@@ -343,7 +343,7 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
         connectedIds: inventory.connectedIds,
         store,
         available: true,
-        error: inventory.error,
+        error: errors(problem, inventory.error),
       })
     })
 
@@ -430,30 +430,21 @@ export const makeWarmupLoop = (pollMs: number, clock?: WarmupLoopClock) =>
           Effect.andThen(
             Effect.gen(function* () {
               const now = nowMs()
-              const global = yield* config.getGlobal()
-              const options = global.provider?.["claude-code"]?.options as
-                | { accounts?: unknown; cliPath?: unknown }
-                | undefined
+              const options = claudeCodeOptions(yield* config.getGlobal())
               yield* Effect.tryPromise((interrupt) =>
                 tickOnce({
                   file: storeFile(),
                   prevMs: prev,
                   nowMs: now,
-                  poolIds: poolIdsForConfig(options?.accounts),
-                  cliPath:
-                    typeof options?.cliPath === "string" && options.cliPath
-                      ? options.cliPath
-                      : (process.env.CLAUDE_CLI_PATH ?? "claude"),
+                  poolIds: poolIdsForConfig(options.accounts),
+                  cliPath: options.cliPath,
                   signal: tickAbortSignal(controller, interrupt),
                   tracker: owned,
                   clock: nowMs,
                   // Current membership reread at the send boundary, not the
                   // tick's snapshot: a removed account stops immediately.
                   getPoolIds: async () => {
-                    const fresh = await Effect.runPromise(config.getGlobal())
-                    return poolIdsForConfig(
-                      (fresh.provider?.["claude-code"]?.options as { accounts?: unknown } | undefined)?.accounts,
-                    )
+                    return poolIdsForConfig(claudeCodeOptions(await Effect.runPromise(config.getGlobal())).accounts)
                   },
                 }),
               ).pipe(

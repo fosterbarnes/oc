@@ -1,6 +1,6 @@
 import { NodeHttpServer } from "@effect/platform-node"
 import { describe, expect } from "bun:test"
-import { mkdtemp, rm, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import { Context, Deferred, Effect, Fiber, Layer, Option } from "effect"
@@ -13,6 +13,7 @@ import { Auth } from "../../src/auth"
 import { Config } from "../../src/config/config"
 import { Installation } from "../../src/installation"
 import { MoveSession } from "@opencode-ai/core/control-plane/move-session"
+import { poolAccountLabel } from "../../src/provider/claude-code/accounts"
 import { materializePoolIds } from "../../src/provider/claude-code/warmup/identity"
 import { _resetInventoryForTests, _setInventoryProbe } from "../../src/provider/claude-code/warmup/inventory"
 import { _setStoreFile, readStore, setAccountSchedule } from "../../src/provider/claude-code/warmup/store"
@@ -55,10 +56,11 @@ const apiLayer = HttpRouter.serve(
     }),
   ),
   Layer.provide(ServerAuth.Config.configLayer({ password: Option.none(), username: "opencode" })),
-  Layer.provideMerge(AppNodeBuilder.build(
-    LayerNode.group([SessionWork.node, InstanceStore.node]),
-    [[InstanceStore.node, testInstanceStoreLayer]],
-  )),
+  Layer.provideMerge(
+    AppNodeBuilder.build(LayerNode.group([SessionWork.node, InstanceStore.node]), [
+      [InstanceStore.node, testInstanceStoreLayer],
+    ]),
+  ),
 )
 const it = testEffect(apiLayer)
 
@@ -70,16 +72,27 @@ describe("global HttpApi", () => {
       const cleaned = yield* Deferred.make<void>()
       const scheduled = yield* Deferred.make<void>()
       yield* Effect.acquireRelease(
-        Effect.sync(() => ServerLifecycle.setController({
-          shutdown: () => { Deferred.doneUnsafe(scheduled, Effect.void) },
-          restart: () => { throw new Error("Unexpected restart") },
-        })),
+        Effect.sync(() =>
+          ServerLifecycle.setController({
+            shutdown: () => {
+              Deferred.doneUnsafe(scheduled, Effect.void)
+            },
+            restart: () => {
+              throw new Error("Unexpected restart")
+            },
+          }),
+        ),
         (clear) => Effect.sync(clear),
       )
-      const active = yield* work.run("global", Deferred.succeed(started, undefined).pipe(
-        Effect.andThen(Effect.never),
-        Effect.ensuring(Deferred.succeed(cleaned, undefined)),
-      )).pipe(Effect.forkChild)
+      const active = yield* work
+        .run(
+          "global",
+          Deferred.succeed(started, undefined).pipe(
+            Effect.andThen(Effect.never),
+            Effect.ensuring(Deferred.succeed(cleaned, undefined)),
+          ),
+        )
+        .pipe(Effect.forkChild)
       yield* Deferred.await(started)
       const response = yield* HttpClientRequest.post(GlobalPaths.shutdown).pipe(HttpClient.execute)
       expect(response.status).toBe(200)
@@ -162,7 +175,7 @@ describe("global HttpApi", () => {
       expect(body.accounts).toEqual([
         {
           accountID: warmupDefaultId(),
-          label: path.basename(warmupDefaultId()),
+          label: poolAccountLabel(warmupDefaultId()),
           enabled: false,
           schedule: { mode: "daily", times: [] },
         },
@@ -237,7 +250,12 @@ describe("global HttpApi", () => {
         HttpClient.execute,
       )
       expect(response.status).toBe(200)
-      const updated = (yield* response.json) as { accountID: string; enabled: boolean; schedule: unknown; nextAt?: number }
+      const updated = (yield* response.json) as {
+        accountID: string
+        enabled: boolean
+        schedule: unknown
+        nextAt?: number
+      }
       expect(updated.accountID).toBe(warmupDefaultId())
       expect(updated.enabled).toBe(true)
       expect(updated.schedule).toEqual({ mode: "daily", times: ["07:00", "12:00"] })
@@ -259,7 +277,11 @@ describe("global HttpApi", () => {
       const file = yield* warmupTempFile()
       yield* warmupSeams(file, [warmupDefaultId()])
       const response = yield* HttpClientRequest.put(GlobalPaths.warmup).pipe(
-        HttpClientRequest.bodyJsonUnsafe({ accountID: warmupDefaultId(), enabled: true, schedule: { mode: "daily", times: [] } }),
+        HttpClientRequest.bodyJsonUnsafe({
+          accountID: warmupDefaultId(),
+          enabled: true,
+          schedule: { mode: "daily", times: [] },
+        }),
         HttpClient.execute,
       )
 
@@ -272,7 +294,8 @@ describe("global HttpApi", () => {
     Effect.gen(function* () {
       const file = yield* warmupTempFile()
       yield* warmupSeams(file, [warmupDefaultId()])
-      yield* Effect.promise(() => writeFile(file, "not json", "utf8"))
+      // A directory at the store path is an I/O failure; a corrupt file is recoverable by a save instead.
+      yield* Effect.promise(() => mkdir(file))
       const response = yield* HttpClientRequest.put(GlobalPaths.warmup).pipe(
         HttpClientRequest.bodyJsonUnsafe({
           accountID: warmupDefaultId(),
