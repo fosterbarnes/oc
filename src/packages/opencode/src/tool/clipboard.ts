@@ -43,8 +43,10 @@ export const ClipboardTool = Tool.define(
 )
 
 // A whole-text code fence would paste the backticks. A trailing newline makes a pasted command run
-// at once in shells without bracketed paste.
+// at once in shells without bracketed paste. Text with more than one block keeps its fences:
+// unwrapping the outer pair would leave the inner ones half-open.
 function clean(text: string) {
   const fenced = /^\s*```[^\n]*\n([\s\S]*?)\n?```\s*$/.exec(text)
-  return (fenced ? fenced[1] : text).replace(/[\r\n]+$/, "")
+  const inner = fenced && !/^\s*```/m.test(fenced[1]) ? fenced[1] : text
+  return inner.replace(/[\r\n]+$/, "")
 }

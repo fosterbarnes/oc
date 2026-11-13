@@ -3439,7 +3439,10 @@ function Clipboard(props: ToolProps) {
     return lines.length > 1 ? `${clipped} (+${lines.length - 1} lines)` : clipped
   })
   const copy = () =>
-    void clipboard.write?.(text()).then(() => toast.show({ message: "Copied to clipboard", variant: "success" }))
+    void clipboard
+      .write?.(text())
+      .then(() => toast.show({ message: "Copied to clipboard", variant: "success" }))
+      .catch(() => toast.show({ message: "Failed to copy to clipboard", variant: "error" }))
 
   return (
     <InlineTool

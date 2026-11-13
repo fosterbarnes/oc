@@ -10,6 +10,7 @@ import { SessionShare } from "@/share/session"
 import { Session } from "@/session/session"
 import { SessionCompaction } from "@/session/compaction"
 import { SessionHandoff } from "@/session/handoff"
+import { SessionIntake } from "@/session/intake"
 import { MessageV2 } from "@/session/message-v2"
 import { EffectBridge } from "@/effect/bridge"
 import { SessionPrompt } from "@/session/prompt"
@@ -510,8 +511,9 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       return true
     })
 
-    // A user message the running turn has not started on and Claude has not read can be deleted while
-    // busy: nothing answers it yet. A steer still held by the Claude turn is taken back here.
+    // A user message the running turn has not started on and the model has not read can be deleted while
+    // busy: nothing answers it yet. A running Claude turn decides through its steer intake; otherwise oc's
+    // own loop does, by whether any step has read the message yet (`SessionIntake`).
     const unsendable = Effect.fn("SessionHttpApi.unsendable")(function* (params: {
       sessionID: SessionID
       messageID: MessageID
@@ -521,10 +523,9 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       if (message?.info.role !== "user") return false
       if (msgs.some((msg) => msg.info.role === "assistant" && msg.info.parentID === params.messageID)) return false
       if (message.parts.some((part) => part.type === "text" && part.metadata?.[STEERED_METADATA_KEY])) return false
-      // The snapshot may predate the CLI receipt. Only its live held-message owner can
-      // authorize busy deletion; unknown messages might already be entering another step.
+      // The snapshot may predate the CLI receipt, so a live Claude turn's held-message owner decides.
       const sink = claudeSteerSinks.get(params.sessionID)
-      if (!sink) return false
+      if (!sink) return yield* SessionIntake.takeBack(params.sessionID, params.messageID, session.removeMessage(params))
       const bridge = yield* EffectBridge.make()
       return yield* Effect.promise(() =>
         sink.retract(params.messageID, () => bridge.promise(session.removeMessage(params).pipe(Effect.asVoid))),

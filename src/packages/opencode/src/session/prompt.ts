@@ -60,6 +60,7 @@ import { SESSION_NOTICE_KEY, TaskTool, type TaskPromptOps } from "@/tool/task"
 import { agentPushTitle, PUSH_SESSION_KEY } from "@/tool/sessionComplete"
 import { SessionRunState } from "./run-state"
 import { SessionQueue } from "./queue"
+import { SessionIntake } from "./intake"
 import { ScheduledDelivery } from "./scheduledDelivery"
 import { ScheduledResume } from "./scheduledResume"
 import { RuntimeFlags } from "@/effect/runtime-flags"
@@ -1350,8 +1351,10 @@ const layer = Layer.effect(
           yield* status.set(sessionID, { type: "busy" })
           yield* Effect.logInfo("loop", { "session.id": sessionID, step })
 
-          let msgs = yield* MessageV2.filterCompactedEffect(sessionID).pipe(
-            Effect.provideService(Database.Service, database),
+          // The step's only read of the session: every request below is built from `msgs`.
+          let msgs = yield* SessionIntake.read(
+            sessionID,
+            MessageV2.filterCompactedEffect(sessionID).pipe(Effect.provideService(Database.Service, database)),
           )
 
           const latest = MessageV2.latest(msgs)
@@ -1386,6 +1389,7 @@ const layer = Layer.effect(
 
           if (!pickedUser) throw new Error("No user message found in stream. This should never happen.")
           const lastUser = continuedTurnRules(pickedUser, timeline)
+          SessionIntake.classify(sessionID, !isClaudeCodeProvider(lastUser.model.providerID))
           if (pendingUser) msgs = msgs.filter((msg) => msg.info.role !== "user" || msg.info.id <= lastUser.id)
           if (pendingUser && lastAssistant && lastUser.id < lastAssistant.id) {
             // Saved during the previous step, but not executed there: send it after that reply.
@@ -1779,6 +1783,7 @@ const layer = Layer.effect(
       // Only a run that ends on its own marks the session unread; a cancel or shutdown interrupts it first.
       const work = runLoop(input.sessionID).pipe(
         Effect.tap(() => sessions.setIdle(input.sessionID).pipe(Effect.ignore)),
+        Effect.ensuring(SessionIntake.end(input.sessionID)),
       )
       return yield* state.ensureRunning(input.sessionID, lastAssistant(input.sessionID), work)
     })

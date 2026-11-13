@@ -85,3 +85,7 @@ Non-Claude providers have no steer sink, so `unsendable` always returns false an
 QUEUED message always fails while busy. The TUI still offers both. Either hide them when the session
 model is not Claude Code, or make native-loop deletion safe (the loop reads queued user messages at
 each step start). Decide before touching it.
+
+Resolved in v0.2.363: native-loop deletion made safe (`session/intake.ts`). The step's single read
+and a take-back share a per-session lock; a message newer than the latest read is in no request
+and can be removed while the step behind that read runs on oc's own loop.

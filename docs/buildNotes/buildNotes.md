@@ -123,6 +123,35 @@ Budget (AGENTS.md "Build notes"): at most 80 lines and 12 KB. Current invariants
 
 ---
 
+## 2026-11-12 (~22:06) - v0.2.363 eloteLem - Loose ends from the last 5 oc sessions per machine - Claude Opus 5.5, medium effort; Agent
+
+### Agent
+- Meta: Claude Opus 5.5; medium effort; Agent (audit of the 5 latest oc sessions on Mac and goonstation, then the fixes the user picked); completed
+- Version: 0.2.363 eloteLem
+- Audit: read-only digests of `oc.db` (`bun:sqlite`, readonly) on both machines. All code from those sessions is on `origin/main`. Open items found: PC `proxyOpencodeTools` lacked `clipboard`; the 5 `oc/` skills never joined sync (PC session step 3); clipboard tool's `/pass` crashed (`error_during_execution`) and never re-ran; queued Edit/Delete for non-Claude still a TODO (v0.2.347 entry, user undecided); sidebar Keychain test.
+- Fixed `tool/clipboard.ts` `clean`: text made of two or more fenced blocks lost only its outer fences (inner ones left half-open); it now unwraps only when the inner text has no fence line.
+- Fixed tui `Clipboard` row click: `clipboard.write` rejection had no `.catch` (unhandled, no toast); now shows "Failed to copy to clipboard" like the file's other copy actions.
+- Fixed `openSidebar.test.ts` "a Claude pool with one live account...": passes `claudeKeychain: async () => undefined`. `~/.claude` under the fake home maps to the bare Keychain service, so on macOS it read the real user's login (expired at the test's `nowMs`) and failed.
+- Added `session/intake.ts` (`SessionIntake`), resolving the v0.2.347 TODO (user chose "make them work"): Edit/Delete on a QUEUED message now works on oc's own loop (non-Claude models). Every model request of a step comes from one read (`prompt.ts` loop, `MessageV2.filterCompactedEffect`); `SessionIntake.read` wraps it in a per-session `Semaphore` and records the newest id read; `classify` marks the step native after `lastUser` is picked (unset in between, so refuse); `takeBack` removes a user message only if newer than that read and the step is native, under the same lock; `end` (loop `ensuring`) clears the entry under the lock. `unsendable` in `handlers/session.ts` still asks the Claude steer sink first; with no sink it calls `takeBack`. Claude Code behavior unchanged (its steps classify non-native).
+- Added kept test `httpapi-sdk.test.ts` "deletes a queued message on oc's own loop only until a step reads it": fake model held on step 1, DROP-ME deleted (true) and never sent; KEEP-A/KEEP-B read by step 2, then deleting KEEP-A (no reply of its own) is refused 409. Fails on the old route (stashed only `handlers/session.ts`), passes now.
+- Updated wiki `Sessions.md` (Steering: other models), `FORK.md` steering row, `docs/dev/plans/queuedEditPlan.md` (resolved).
+- goonstation oc clone: discarded its uncommitted `docs/dev/macos.md` (carried by v0.2.362), fast-forwarded to `78992d8`, clean.
+- Config details in `~/buildNotes.md` (PC clipboard proxy, `oc/` skills synced, dead `.bak` exclusions dropped, `tui-mockup` macOS self-check).
+- Verification: probe through the real `ClipboardTool.execute` with `writeNative` captured (one block unwrapped, two-block text kept, trailing newlines trimmed, inline triple backticks kept); probe deleted. openSidebar 79 pass with `CLAUDE_CONFIG_DIR` unset and the Keychain entry present. `tsgo --noEmit` clean in opencode and tui (rerun clean after the intake change). httpapi-sdk 19 pass, httpapi-session 22 pass, promptCacheDiagnostics 5 pass; steering 11 pass 5 fail and prompt.test 84 pass 1 fail (`cancel finalizes interrupted bash tool output ...`), all on the known macOS list in `docs/dev/testing.md`.
+
+### User
+Messages sent while the agent works
+- On models other than Claude Code, Edit and Delete on a `QUEUED` message now work until the model's next call picks the message up; before, they always failed while the agent was busy.
+
+Clipboard tool
+- Asking an agent to copy two separate code blocks no longer pastes half-broken fences; a single fenced block is still copied without its backticks.
+- If clicking a "Copied" row fails to copy, oc now says so instead of failing silently.
+
+Developer tooling
+- The sidebar tests no longer fail on a Mac that is signed in to Claude Code.
+
+---
+
 ## 2026-11-12 (~20:45) - v0.2.362 songyBird - Mac clone caught up with goonstation; version collision renumbered - Claude Opus 5.5, medium effort; Agent
 
 ### Agent

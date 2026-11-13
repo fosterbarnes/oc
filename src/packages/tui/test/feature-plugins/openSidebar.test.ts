@@ -1279,6 +1279,8 @@ test("a Claude pool with one live account reads as live even when another is cac
       homeDir: root,
       nowMs,
       fetchImpl: async () => Response.json(body),
+      // `~/.claude` maps to the bare Keychain service, which on macOS is the real user's login.
+      claudeKeychain: async () => undefined,
     })
     assert.equal(result.ok && result.source, "live")
     assert.equal(result.ok && result.fetchedAt, nowMs)

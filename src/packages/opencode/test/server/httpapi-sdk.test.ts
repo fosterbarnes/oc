@@ -20,7 +20,7 @@ import { MessageV2 } from "../../src/session/message-v2"
 import type { Config } from "@/config/config"
 import { Session as SessionNs } from "@/session/session"
 import { errorMessage } from "../../src/util/error"
-import { TestLLMServer } from "../lib/llm-server"
+import { reply, TestLLMServer } from "../lib/llm-server"
 import path from "path"
 import { resetDatabase } from "../fixture/db"
 import { disposeAllInstances, TestInstance, tmpdirScoped } from "../fixture/fixture"
@@ -834,6 +834,71 @@ describe("HttpApi SDK", () => {
         expect(session.status).toBe(200)
         expect(prompt.status).toBe(200)
         expect(JSON.stringify(inputs[0])).toContain("project-rest-skill")
+      }),
+    ),
+  )
+
+  // oc's own loop (non-Claude models): a message queued during a step can be deleted until the next
+  // step reads it, and never after, even when the model answers a later message first.
+  httpapi(
+    "deletes a queued message on oc's own loop only until a step reads it",
+    withFakeLlm("default", ({ sdk, llm }) =>
+      Effect.gen(function* () {
+        const first = Promise.withResolvers<void>()
+        const second = Promise.withResolvers<void>()
+        yield* Effect.addFinalizer(() => Effect.sync(() => (first.resolve(), second.resolve())))
+        yield* llm.push(reply().wait(first.promise).text("FIRST-DONE").stop())
+        yield* llm.push(reply().wait(second.promise).text("SECOND-DONE").stop())
+        const session = yield* capture(() =>
+          sdk.session.create({
+            title: "queued take-back",
+            permission: [{ permission: "*", pattern: "*", action: "allow" }],
+          }),
+        )
+        const sessionID = String(record(session.data).id)
+        const messages = call(() => sdk.session.messages({ sessionID })).pipe(Effect.map((result) => result.data ?? []))
+        const send = (text: string) =>
+          call(() =>
+            sdk.session.promptAsync({
+              sessionID,
+              agent: "build",
+              model: { providerID: "test", modelID: "test-model" },
+              parts: [{ type: "text", text }],
+            }),
+          )
+        const stored = (text: string) =>
+          pollWithTimeout(
+            messages.pipe(
+              Effect.map(
+                (all) =>
+                  all.find((message) => message.parts.some((part) => part.type === "text" && part.text === text))?.info
+                    .id,
+              ),
+            ),
+            `"${text}" was never stored`,
+            "10 seconds",
+          )
+        const remove = (messageID: string) => capture(() => sdk.session.deleteMessage({ sessionID, messageID }))
+
+        yield* send("START")
+        yield* llm.wait(1)
+        yield* send("DROP-ME")
+        expect((yield* remove(yield* stored("DROP-ME"))).data).toBe(true)
+        yield* send("KEEP-A")
+        yield* send("KEEP-B")
+        const keepA = yield* stored("KEEP-A")
+        yield* stored("KEEP-B")
+        first.resolve()
+        yield* llm.wait(2)
+        // The second step read both; its reply answers KEEP-B, but the model already has KEEP-A.
+        expect((yield* remove(keepA)).status).toBe(409)
+        second.resolve()
+        yield* stored("SECOND-DONE")
+
+        const inputs = JSON.stringify(yield* llm.inputs)
+        expect(inputs).not.toContain("DROP-ME")
+        expect(inputs).toContain("KEEP-A")
+        expect(JSON.stringify(yield* messages)).not.toContain("DROP-ME")
       }),
     ),
   )
