@@ -6,8 +6,8 @@ helpers with a `win32` and a `darwin` branch; callers stay platform-neutral. Pla
 
 ## Dev loop (Windows VM + Mac host)
 
-- Mac: `ssh foster@macbook.sawfish-boga.ts.net` (PowerShell profile `sshMac`; key `~/.ssh/macbook_ed25519`).
-  Use the PowerShell tool for ssh: Git Bash's ssh does not read that key. Non-interactive ssh reads only
+- Mac: `ssh mac` (alias in `~/.ssh/config`, key `~/.ssh/id_ed25519`; any shell; `ssh` skill). The Mac
+  reaches this PC as `ssh goon`. Non-interactive ssh reads only
   `~/.zshenv`, whose non-interactive block puts `~/.bun/bin`, `~/.local/bin`, Homebrew, and `/usr/local/bin`
   (pwsh) on PATH. WezTerm starts pwsh directly (launchd's bare PATH, no zsh files), so the Mac pwsh
   profile (`~/.config/powershell/Microsoft.PowerShell_profile.ps1`) prepends the same folders. Build
@@ -15,8 +15,9 @@ helpers with a `win32` and a `darwin` branch; callers stay platform-neutral. Pla
 - Windows and the Mac are both full dev machines: each has its own git clone of GitHub `origin`
   (Mac: `~/Documents/GitHub/oc`) with its own `node_modules`. Changes move between them only through
   git (commit, push, pull); `/update` resets a machine's revive source to `origin/main` and rebuilds.
-  The old rsync mirror from `/Volumes/C` is retired.
-  Never `bun install` or build on the SMB share (`node_modules` holds per-OS native packages).
+  The old rsync mirror from `/Volumes/C` is retired, and goonstation has no file shares since
+  2026-11-12: read or copy its files over SSH (`ssh goon`, `scp`). Never `bun install` or build on the
+  PC from the Mac (`node_modules` holds per-OS native packages).
 - Build and install on the Mac: `pwsh -NoProfile -File ./.scripts/build.ps1`, then
   `pwsh -NoProfile -File ./.scripts/install.ps1 -NoBuild` (installs to `~/.local/bin`).
 - macOS has no `timeout`; long ssh runs go in the background tool instead. A probe that leaves child

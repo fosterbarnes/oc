@@ -353,13 +353,15 @@ const ask = Effect.fn("ShellTool.ask")(function* (
   })
 })
 
+// pwsh always gets -NoProfile: the `shell` option below runs `pwsh -c`, which loads the user profile
+// (~160 ms per call on macOS, and profile functions such as `kill` shadow real commands).
 function cmd(shell: string, command: string, cwd: string, env: NodeJS.ProcessEnv) {
-  if (process.platform === "win32" && Shell.ps(shell)) {
+  if (Shell.ps(shell)) {
     return ChildProcess.make(shell, ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", command], {
       cwd,
       env,
       stdin: "ignore",
-      detached: false,
+      detached: process.platform !== "win32",
     })
   }
 

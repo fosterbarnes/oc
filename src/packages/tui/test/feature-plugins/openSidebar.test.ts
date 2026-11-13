@@ -471,8 +471,15 @@ test("maps WezTerm terminal choices to CLI placement arguments", () => {
   ])
 })
 
-test("uses the WezTerm CLI executable when Windows provides the GUI executable", () => {
-  if (process.platform !== "win32") return
+test("uses the WezTerm CLI executable when WezTerm provides the GUI executable", () => {
+  // macOS: WezTerm sets WEZTERM_EXECUTABLE to wezterm-gui, whose `cli` exits 2, so sidebar panes failed.
+  if (process.platform !== "win32") {
+    assert.equal(
+      weztermExecutable("/Applications/WezTerm.app/Contents/MacOS/wezterm-gui"),
+      "/Applications/WezTerm.app/Contents/MacOS/wezterm",
+    )
+    return
+  }
   assert.equal(
     weztermExecutable("C:\\Users\\test\\Apps\\wezterm\\wezterm-gui.exe"),
     path.join("C:\\Users\\test\\Apps\\wezterm", "wezterm.exe"),

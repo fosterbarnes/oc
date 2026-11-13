@@ -123,6 +123,145 @@ Budget (AGENTS.md "Build notes"): at most 80 lines and 12 KB. Current invariants
 
 ---
 
+## 2026-11-12 (~20:45) - v0.2.362 songyBird - Mac clone caught up with goonstation; version collision renumbered - Claude Opus 5.5, medium effort; Agent
+
+### Agent
+- Meta: Claude Opus 5.5; medium effort; Agent (/think plan `~/.config/opencode/plans/2026-11-12-mac-win-merge.md`, user approved running all of it); completed
+- Version: 0.2.362 songyBird
+- Fast-forwarded Mac `main` to `f3fa1b8` (v0.2.361 jakeTimtam) around the uncommitted Mac work: stashed only `src/.version/*` + this file, `pull --ff-only`, popped. Mac had bumped to 0.2.361 loopholeDrive (collision): took origin's version, ran `bumpVersion.ps1` once, renamed the 6 Mac entries' `0.2.361 loopholeDrive` to `0.2.362 songyBird`. Mac entries sit above the jakeTimtam entry (version order, not clock order).
+- Updated `docs/dev/macos.md`: took goonstation's uncommitted Mac ssh line (`ssh mac`, `id_ed25519`) verbatim; the SMB share note now says goonstation has no shares since 2026-11-12 (SSH/scp only). goonstation still has that edit uncommitted: after this push run `git checkout -- docs/dev/macos.md; git pull --ff-only` there.
+- Fast-forwarded Mac `oc.wiki` to `c77772d` (Claude-Code.md); local `Sidebar.md` edit kept.
+- Config (`/sync` on both, peers ok): all synced items already equal. Copied Mac `skills/oc/tui-mockup` (ask-first rule) and `plans/cloneCommands.md` to goonstation; goonstation `plans/macosSupport.md` and `agents/sub/free.md` (crouton-alpha-free gone; longcat/minimax lists, all present in Mac `oc models opencode`) to the Mac. Fixed goonstation's per-host `skills/foster/ssh` (winserver row, `/Volumes/C` note). Backups of every overwritten file in `/tmp/ocMerge/` (`winOrig/`, `*.mac.bak.md`).
+- ERROR: tui `openSidebar.test.ts` "a Claude pool with one live account reads as live even when another is cached" fails on this Mac (`'cache' !== 'live'`): `readClaudeOauth` reads the real Keychain `Claude Code-credentials` (present here) because the test passes no `claudeKeychain`/`platform`, and that token is expired at the test's `nowMs`. Passes 79/79 with `CLAUDE_CONFIG_DIR` set. Not caused by the merge (neither side touched it). TODO: stub `claudeKeychain` in that test.
+- ERROR: `ssh administrator@winserver` from goonstation (`BatchMode`, `ConnectTimeout=6`) hung past the timeout; stopped it and its leftover `ssh.exe` there. goonstation-to-winserver login is unverified.
+- Verification: `git diff origin/main` on this file = 119 added, 0 removed lines, equal to the Mac's original block with the rename; `git status` paths same as before; `git log -1` = `f3fa1b8`. Copies byte-compared after scp; goonstation originals hashed equal to the scan before overwrite.
+
+### User
+Mac and Windows in step
+- The Mac's oc clone now includes the latest Windows commit, and the Mac's unpushed work is renumbered to v0.2.362 so the two machines no longer share a version number.
+- A few files that oc sync skips on purpose now match on both machines where they should (mockup skill, free model list, two plans); no UI change.
+
+---
+
+## 2026-11-11 (~22:43) - v0.2.362 songyBird - /cloneLocal works on macOS; /clone scripts ported to POSIX for shellbench - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation (shellBenchPlan backlog item 2); completed
+- Version: 0.2.362 songyBird (unchanged: no commit since the bump)
+- Fixed global `~/.config/opencode/scripts/cloneProject.ps1`: `invokeRobocopy` replaced by `copyTree` (robocopy on Windows with the same flags and excludes; `rsync -a --exclude-from` with `/`-anchored ignored paths plus `index.lock` elsewhere). `/cloneLocal` failed on macOS with "robocopy is not recognized".
+- Fixed `cloneHelper.ps1` `newSnapshot`: index path via `Join-Path` (was `"$GitDir\index"`, never found on macOS, so the index was never reused; Windows unchanged).
+- Added `~/.config/opencode/scripts/posix/cloneHelper.sh`, `cloneProject.sh`, `openCloneTab.sh` (same args, JSON key order, messages; EXIT trap removes a half-made clone; newest live `wezterm-gui` by socket mtime). The ps1 scripts stay what `/clone` runs (`prompts/clone.md` unchanged).
+- Added shellbench `clone` (scratch fixtures with `GIT_CONFIG_GLOBAL=/dev/null`; parity on JSON minus seconds, file list with types/hashes/link targets, branch, status, base and HEAD trees, `ocClone.source`, pushurl); `Case.warmup`, `Case.pathPrefix`. Updated README, ANALYSIS, plan, report, and `~/.config/opencode/plans/cloneCommands.md`.
+- Results: 7/7 same, also with pwsh off PATH; Local git 651 vs 142 ms, Remote 828 vs 177 ms, errors ~300 vs 12-36 ms.
+- Verification: reproduced the robocopy failure, then the fixed ps1 cloned a scratch repo correctly (ignored paths out, symlink kept, untracked and modified files in, clean status on the clone branch, base ref). `mergeClone.ps1` brought a clone's edit and new file back into the source after the helper change. Full `clone` and `clone --no-pwsh` runs: no parity flags; temp folders removed.
+
+### User
+Clone commands
+- `/cloneLocal` now works on macOS; before, it failed because it relied on a Windows-only copy tool.
+
+---
+
+## 2026-11-11 (~22:13) - v0.2.362 songyBird - Sidebar WezTerm scripts work on macOS in pwsh and zsh panes - Claude Opus 5.5, low effort; Go
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Go (shellBenchPlan backlog item 1); completed
+- Version: 0.2.362 songyBird (unchanged: no commit since the bump)
+- Fixed `weztermExecutable` in `tui/src/routes/session/sidebar-tools/scriptRunner.ts`: maps `wezterm-gui` to `wezterm` on every OS (was win32 only). WezTerm sets `WEZTERM_EXECUTABLE` to the GUI binary, whose `cli` exits 2 on macOS, so sidebar WezTerm script runs always failed on the Mac ("WezTerm exited with code 2").
+- Added `preparePane` (non-win32): reads the pane's tty from `wezterm cli list --format json`, waits until `stty -a` (stdin = the tty) shows `-icanon` for 4 polls in a row (pwsh flips it off ~25 ms, back on ~35 ms, then off at the prompt; an Enter typed earlier is lost), up to 5 s, then picks syntax from the tty's session leader (`ps -o stat=,comm= -t`). Windows and uninspectable panes keep pwsh syntax.
+- Added `SYNTAX` table: pwsh (`$env:SCRIPT_OWN_PANE='1'; `, `''` quoting) and posix (`export SCRIPT_OWN_PANE=1; `, `'\''` quoting). `scriptCommand` and `weztermSendArgs` take an optional syntax, default pwsh (clipboard, paste, and Windows Terminal unchanged).
+- Added the macOS case to openSidebar test "uses the WezTerm CLI executable when WezTerm provides the GUI executable" (fails on the old code: confirmed by running it with the change stashed).
+- Updated wiki `Sidebar.md` (default shell, prompt wait) and the plan's backlog.
+- Verification: live probes through the real `runScript` (kind wezterm, `.sh` script in a folder named `it's here`): 8/8 pwsh panes and 3/3 zsh panes (zsh via a `WEZTERM_EXECUTABLE` wrapper adding `-- /bin/zsh`) ran with `SCRIPT_OWN_PANE=1`; before the 4-poll hold 1 of 5 pwsh runs lost its Enter. POSIX `closeOut` closed both a pwsh and a zsh pane. openSidebar 79 pass; tui `tsgo` clean. Probe folder and panes removed.
+
+### User
+Sidebar scripts
+- On macOS, scripts set to open in a WezTerm tab, window, or split now start; before, they failed with "WezTerm exited with code 2".
+- Scripts work whether WezTerm's default shell is PowerShell or zsh: oc waits for the new pane's prompt and types the command for that shell.
+
+---
+
+## 2026-11-11 (~21:55) - v0.2.362 songyBird - shellbench Test 1b run and final report - Claude Opus 5.5, low effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low effort; Implementation (user asked to run all remaining tests without asking, then write up); completed
+- Version: 0.2.362 songyBird (unchanged: no commit since the bump)
+- Ran Test 1b (user-authorized model spend): 4 `opencode run` runs, GPT-6 Luna medium, shell set per run by `OPENCODE_CONFIG_CONTENT`; log confirms pwsh, pwsh, zsh, zsh. All same correct answer, 1 shell call each, 0 syntax errors, 11-14 s, 40-42k tokens.
+- ERROR: first attempt hung 10 min: `opencode run` reads a non-TTY stdin until EOF (`cli/cmd/run.ts` `Bun.stdin.text()`), and the background shell's stdin stayed open. Killed both runs, deleted the empty logs; `modelCommands` now appends `< /dev/null`.
+- Added `docs/dev/shellBenchReport.md` (summary, changes, all test tables, findings, recommendations); plan status and Results updated.
+- Verification: `model --read` table and per-run tool calls read from the JSON logs; shell per run checked in `opencode.log`; no `opencode run` processes left.
+
+### User
+Developer tooling
+- The pwsh vs Mac shell comparison is finished; `docs/dev/shellBenchReport.md` has the results and recommendations. No UI change.
+
+---
+
+## 2026-11-11 (~21:26) - v0.2.362 songyBird - shellbench Test 3: POSIX test runner port and results - Claude Opus 5.5, medium effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; medium effort; Implementation (shellBenchPlan Test 3, after the user's `/revive`); completed, Test 1b still waits on the user
+- Version: 0.2.362 songyBird (unchanged: no commit since the bump)
+- Verified the revive: `opencode.log` shows `shell tool using shell` `/usr/local/bin/pwsh` before and `/bin/zsh` after 02:19Z.
+- Added `.scripts/posix/test.sh`: single-package path of `test.ps1` with the same flag names (`-Package`, `-File`, `-Name`, `-DryRun`), same messages, lexical `-File` resolution in awk (`GetFullPath` semantics), env vars set for bun only, provider packages refused. Added POSIX `closeOut` (kill the sidebar-made pane) to `.scripts/posix/scriptHelper.sh`; marked `.scripts/posix/*.sh` executable.
+- Added shellbench `test` cases (fast and slower file with bare `bun test` as arm C, name filter, dry run, failing run, three input errors); `Case.runs` per-case run count; shared `plain()` message cleanup (also used by `bump`); `render` handles cases with different arms; runs clear `SCRIPT_OWN_PANE`.
+- Results: 8/8 same, also with pwsh off PATH; wrapper overhead over bare bun ~270 ms pwsh vs ~10 ms sh. Overall table for Tests 1-3 in `.scripts/shellbench/ANALYSIS.md`; plan status and Results updated.
+- Known failure, already listed in `docs/dev/testing.md`: core `launchDetached.test.ts` 0 pass 2 fail on macOS (it is the Test 1b task's file, so 1b answers report it).
+- MISTAKE: appended the Test 3 section of `ANALYSIS.md` with a shell heredoc instead of Edit. Content checked intact (no CR, no mangled text). Rule: project files only through Edit/Write.
+- Verification: `test.sh` probed by hand (usage, dry runs incl. `..` and absolute `-File`, outside/missing file, unknown and provider package, missing flag value, failing and passing runs); the pwsh `-DryRun` line printed identical text. Full `test` run n=10 and `--no-pwsh`: no parity or stability flags. `bump` rerun after the `plain()` refactor: 7/7 same. No `shellbench-*` temp folders left.
+
+### User
+Developer tooling
+- `.scripts/posix/test.sh -Package <name> -File <test>` runs one package's tests like `test.ps1` does, with the same messages, and adds about 10 ms instead of about 270 ms.
+- The PowerShell scripts are still the ones to use; the plain-shell copies exist to compare the two.
+
+---
+
+## 2026-11-11 (~18:24) - v0.2.362 songyBird - pwsh agent commands skip the profile, Mac agent shell is zsh, bumpVersion POSIX port - Claude Opus 5.5, medium effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; medium effort; Implementation (user picked all four Test 1 options in `docs/dev/shellBenchPlan.md`); completed, Test 1b waits on the user
+- Version: 0.2.362 songyBird (unchanged: already bumped this session)
+- Fixed `cmd()` in `packages/opencode/src/tool/shell.ts`: pwsh always gets `-NoLogo -NoProfile -NonInteractive -Command` (was win32 only; darwin ran `pwsh -c` through the `shell` option and loaded the user profile). `detached` stays `process.platform !== "win32"` so POSIX process-group kill still works.
+- Changed shared `~/.config/opencode/opencode.jsonc`: removed `"shell": "pwsh"` (comment in its place), so each machine uses `$SHELL`: Mac `/bin/zsh`; Windows `SHELL` is `pwsh.exe` and has no zsh (checked over ssh), so Windows stays on pwsh. Shared `~/.config/opencode/AGENTS.md` Environment and Mac `principles.md` now say pwsh on Windows, zsh on macOS; `.ps1` scripts via `pwsh -NoProfile -File`.
+- Claude Code under oc already used zsh on the Mac: its own Bash tool uses `$SHELL`; oc sets `CLAUDE_CODE_USE_POWERSHELL_TOOL=1` only on win32 (`provider/claude-code/spawnEnv.ts`).
+- Added `.scripts/posix/bumpVersion.sh` + `scriptHelper.sh` (POSIX sh, stock macOS `jq`/`awk`/`od`, `LC_ALL=C`), side by side with the ps1, which stays the source of truth.
+- Added shellbench `bump` test (throwaway repo copies; `reset` before each run; `check` compares version/tag files, BOM, LF, and the error message with pwsh's error gutter stripped) and `model` (prints `opencode run` commands for Test 1b with `OPENCODE_CONFIG_CONTENT` setting the shell per run; `--read` summarizes the JSON logs). `.gitignore` now ignores `.scripts/shellbench/shellbench-*`.
+- Results: bump 631 ms pwsh vs 138 ms sh (sh mostly `jq` on the 44,356-word list); 7/7 cases same, also with pwsh off PATH. Recorded in `.scripts/shellbench/ANALYSIS.md` and the plan's Results.
+- Deviation: Test 1b runs in the real repo (read-only task) with the shell set by env, not a scratch `/clone`.
+- Verification: probe test through the real ShellTool with SHELL=pwsh and `XDG_CONFIG_HOME` unset (the test preload sets it, which hides the profile): `PROFILE LOADED` before, `NO PROFILE` after, `bun` resolves the same; probe deleted. Shell tool suites (`shell`, `backgroundShell`, `shellMetadata`): zsh 44 pass 0 fail; pwsh 44 pass 2 fail, and both failures (`captures stderr in output`, `reports a command killed by an external signal`) fail the same way with the change reverted (POSIX-only commands in a non-win32 block), so not regressions. Config parses with opencode's JSONC rules (trailing commas allowed) and resolves the agent shell to `/bin/zsh`. Printed Test 1b command parses in zsh into the intended argv; `--read` checked against a synthetic log (deleted).
+
+### User
+Agent shell on macOS
+- oc's agents now run their commands in zsh, the Mac's own shell, instead of PowerShell; on Windows they still use PowerShell.
+- When an agent does run PowerShell commands, oc no longer loads your PowerShell profile for each one, which makes each command about 0.15 s faster and stops profile functions (such as a custom `kill`) from changing what commands do.
+- Restart oc (`/revive`) to pick up both changes.
+
+Developer tooling
+- `.scripts/posix/bumpVersion.sh` is a plain-shell version of `bumpVersion.ps1` for comparison; it gives identical results about 4x faster. The PowerShell scripts are still the ones to use.
+
+---
+
+## 2026-11-11 (~18:12) - v0.2.362 songyBird - shellbench: pwsh vs zsh timing harness and agent shell results - Claude Opus 5.5, medium effort; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; medium effort; Implementation (/imp of `docs/dev/shellBenchPlan.md`, Chunk 0 + Test 1); completed, Test 1 decision pending with the user
+- Version: 0.2.362 songyBird
+- Added `docs/dev/shellBenchPlan.md`: A/B of pwsh vs stock macOS shell on three workloads (agent shell calls, `bumpVersion`, `test.ps1 -Package -File`), side-by-side POSIX scripts in `.scripts/posix/`, one chunk per session with a decision gate.
+- Added `.scripts/shellbench/` (`shellbench.ts`, `README.md`, `ANALYSIS.md`), modeled on grepbench: `spawn` and `agent` tests, interleaved arms, median/p90/min, parity vs first arm, `--no-pwsh` (shadows PATH folders holding pwsh with link folders, fails if pwsh still resolves). Reports `shellbench-*.json`/`.md` gitignored in `.gitignore`.
+- Found: on macOS the shell tool runs pwsh without `-NoProfile` (`cmd()` in `packages/opencode/src/tool/shell.ts` passes it only on win32; darwin spawns `pwsh -c` through the `shell` option), so every agent pwsh call loads the user profile (~160 ms; profile `kill` shadows `/bin/kill`). Not changed yet: waiting on the user's decision.
+- Found: 2,077 of 2,105 shell calls in the Mac `oc.db` come from claude-code sessions, which use Claude Code's own zsh Bash tool; only non-Claude providers reach oc's pwsh shell tool.
+- Results (median ms per agent call): A0 pwsh today 295-389, A1 pwsh -NoProfile 122-203, B zsh 4-58; 14/14 output parity on all arms, also with pwsh off PATH.
+- Deviation: arms are argv only (no `reset` until Test 2); the plan's `session` row is the sum of medians; reports are per test.
+- Verification: `spawn` run reproduced the plan's baseline probes (4.1 / 44.4 / 116.3 / 309.1 / 192.6 ms); `agent` and `agent --no-pwsh` runs n=10 completed with no parity or stability flags; unknown test name prints usage and exits 1; no `shellbench-nopwsh-*` temp folders left; `git status -uall` shows reports ignored.
+
+### User
+Developer tooling
+- New benchmark `bun .scripts/shellbench/shellbench.ts <spawn|agent>` times oc agent commands on pwsh vs the Mac's built-in zsh. No UI change.
+- On this Mac an agent command run through pwsh takes about 0.3 s, about 0.15 s without the PowerShell profile, and about 0.01 s on zsh, with identical results.
+- Claude sessions already run their commands on zsh; only other models go through pwsh.
+
+---
+
 ## 2026-11-11 (~21:18) - v0.2.361 jakeTimtam - Claude warm-up error messages, corrupt store recovery, small cleanups - Claude Opus 5.5, effort not reported; Fixup
 
 ### Agent
