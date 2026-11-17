@@ -272,6 +272,57 @@ test("closed command turns keep ToolSearch plus planned built-ins and leave prox
   }
 }, 20_000)
 
+test("a command's edit denials reach Claude as deny rules while its Edit and Write stay on", async () => {
+  await using directory = await tmpdir()
+  const session = randomUUID()
+  const key = sessionKey(directory.path, `tools::${session}::context=["claude-code"]`)
+  hostToolExecutors.set(session, async (name) => ({ output: name, title: name, metadata: {} }))
+  const model = new ClaudeCodeLanguageModel(`deny-${randomUUID()}`, {
+    provider: "claude-code",
+    cliPath: await fakeCli(directory.path),
+    cwd: directory.path,
+    autoContinueIncompleteTurns: false,
+  })
+  try {
+    await drain(
+      (
+        await model.doStream({
+          prompt: [{ role: "user", content: [{ type: "text", text: "Edit files." }] }],
+          tools: ["read", "edit", "write", "bash"].map((name) => ({
+            type: "function" as const,
+            name,
+            description: name,
+            inputSchema: { type: "object", properties: {} },
+          })),
+          providerOptions: {
+            "claude-code": {
+              opencodeSessionID: session,
+              opencodeAgent: "build",
+              opencodeCommandPermission: JSON.stringify({
+                native: ["read", "edit", "write", "bash"],
+                closed: false,
+                deny: ["Edit(//home/u/mockups/**)"],
+              }),
+            },
+          },
+        })
+      ).stream,
+    )
+    const args = getActiveProcess(key)?.cliArgs ?? []
+    const disallowed = args.slice(args.indexOf("--disallowedTools") + 1)
+    expect(disallowed).toContain("Edit(//home/u/mockups/**)")
+    expect(disallowed).not.toContain("Edit")
+    expect(disallowed).not.toContain("Write")
+    const prompt = await readFile(args[args.indexOf("--append-system-prompt-file") + 1], "utf8")
+    expect(prompt).not.toContain("This command limits")
+    expect(prompt).toContain("The active command denies edits to `/home/u/mockups/**`")
+  } finally {
+    hostToolExecutors.delete(session)
+    await deleteActiveProcessAndWait(key)
+    deleteClaudeSessionId(key)
+  }
+}, 20_000)
+
 test("oc-only proxies execute once, refresh between turns, and leave native tools on", async () => {
   await using directory = await tmpdir()
   const session = randomUUID()

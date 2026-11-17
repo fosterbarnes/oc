@@ -131,3 +131,172 @@ Budget (AGENTS.md "Build notes"): at most 80 lines and 12 KB. Current invariants
 
 ---
 
+## 2026-11-17 (~18:24) - v0.2.376 parentalJimmie - Sidebar WezTerm runs start pwsh with the command instead of typing it - Claude Opus 5.5, low; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5 (Claude Code in oc); low; Implementation (/spit plan, /second-opinion Sol/Terra/DeepSeek, /imp); completed, live WezTerm check pending
+- Version: 0.2.376 parentalJimmie (version already changed since last commit; no bump)
+- Fixed sidebar script runs in WezTerm (`scriptRunner.ts` `runWezterm`): with `submit`, the pane now starts as `wezterm cli split-pane|spawn ... -- <abs pwsh> -NoLogo -NoExit -EncodedCommand`, with no `preparePane` or `send-text`. Cause (ghostwriterpp session): PSReadLine's cursor-position reply `ESC[2;50R` interleaved with typed text, so `2;50R` ended up in the script's arguments.
+- Added `weztermScriptArgs` and shared `pwshScriptArgs` (also used by `windowsTerminalScriptArgs`). The encoded command puts oc's `PATH` first, because a pane started with a program gets the mux's launchd PATH; that PATH matters for the script's tools and for closeOut's `Get-Command wezterm`.
+- Added `resolveExecutable` (`which`/`where.exe`, first existing absolute line). If pwsh is not found, runs fall back to the typed path. `placeScript` still types, so the DSR race remains for placing (noted in the `preparePane` comment).
+- Added `spawnWezterm`, `resolveExecutable`, and `preparePane` hooks to `RunnerOptions`. `weztermSendArgs` keeps `submit`, because the missing-pwsh fallback still submits (this differs from the second-opinion suggestion to drop it).
+- Verification: `bun test test/feature-plugins/sidebarTools.test.ts` 75/75, including a new test covering both cases (pwsh found: one spawn, nothing typed; pwsh missing: typed with `\r`). tui `typecheck` and prettier are clean. The live pane probe was not run, because this process was outside WezTerm (stale gui socket).
+
+### User
+Sidebar scripts
+- Running a script in a WezTerm pane no longer types the command into the new shell, so it can't get garbled by the shell's startup.
+- Placing a script without running it still types it into the pane.
+
+---
+
+## 2026-11-17 (~20:05) - v0.2.376 parentalJimmie - Warm-up palette pane test fixed (stale navigation) - Claude Opus 5.5, low; Debug
+
+### Agent
+- Meta: Claude Opus 5.5 (Claude Code desktop); low; Debug; completed
+- Version: 0.2.376 parentalJimmie (same session; no bump)
+- Fixed tuiPane "claude warm-up palette opens the schedule dialog": not a product bug. Debug logs (removed) showed the palette ran `oc.claude_warmup.<id>`, `openAccount` found the account and the dialog opened; the test's two Downs (written for a removed "Time format" row) landed on Save, which saved and closed it. Now one Down to Times, Enter on the mode row, 7 Downs to Sunday.
+- Fixed same test: after Esc from the Times prompt it pressed Cmd+O over the open schedule dialog and waited for "Search", which the dialog's own search box matched; typed text went into the dialog filter. Now Esc, Esc back to the prompt, then the palette key and wait for "Commands". Also waits for the prompt to close before the next key (a lone ESC byte before `ESC[111;9u` reads as one key).
+- MISTAKE: previous entry blamed `keymap.dispatchCommand`; logging disproved it. Corrected in `docs/dev/testing.md`.
+- Note: Cmd+O does not open the oc palette over an open dialog on macOS; Ctrl+O did on Windows. Not investigated.
+- Verification: `OC_TUI_PANE=1` tuiPane 16/16; no tui source changed (debug code reverted, `git diff` clean there).
+
+### User
+Tests
+- All TUI pane tests pass on macOS.
+
+---
+
+## 2026-11-17 (~19:40) - v0.2.376 parentalJimmie - Pane usage test rewrite; Keychain stub for test runs - Claude Opus 5.5, low; Debug
+
+### Agent
+- Meta: Claude Opus 5.5 (Claude Code desktop); low; Debug; completed except the warm-up palette bug (TODO)
+- Version: 0.2.376 parentalJimmie (same session; no bump)
+- Fixed tuiPane "fractional usage": grouped layout (default since v0.2.372) rounds in the sidebar (`5h 13%`, `wk 8%`, then `5h 19%`); fractions checked in the Usage menu (`5-hour: 12.5% used`).
+- Added `keychainStubEnv(home)` in `test/lib/cli-process.ts`, used by `withCliFixture` and `paneFixture`: on macOS a failing `security` stub first on PATH (drains `-i` stdin, logs to `<home>/security.log`). User saw "Keychain Not Found ... store foster" during test runs: `claude` saves logins with `security add-generic-password -U` (Keychain first, `.credentials.json` fallback) and the temp HOME has no keychain. Warm-up pane run with the stub logged only `find-generic-password` reads, so the storing run was another temp-HOME test; all now stubbed.
+- Found: warm-up palette pane test fails on every OS; the account is found, palette shows the entry, but Enter never runs `oc.claude_warmup.<accountID>` (palette clears, no dialog). Not a race (3 s wait), not Keychain.
+- Verification: `test/provider/claude-code/` 713 pass 0 fail with the stub; tuiPane fractional usage pass; typecheck clean.
+- TODO: trace why `keymap.dispatchCommand` misses the warm-up command (`command-palette.tsx` onSelect, `claudeWarmup.tsx` `warmupCommands`, `app.tsx` appCommands).
+- MISTAKE: two probes writing a fake login and running `claude auth status` directly were denied; asked the user before running the equivalent through the pane test.
+
+### User
+Tests
+- Test runs on macOS can no longer pop up "Keychain Not Found" or touch your real Keychain.
+- The Usage sidebar pane test now matches the default grouped layout.
+
+---
+
+## 2026-11-17 (~02:59) - v0.2.376 parentalJimmie - Mac Claude test failures root-caused; steer fence; spawn env scrub - Claude Opus 5.5, low; Debug
+
+### Agent
+- Meta: Claude Opus 5.5 (Claude Code desktop); low; Debug; completed except 2 pane tests (below)
+- Version: 0.2.376 parentalJimmie (same session as the entry below; no second bump)
+- Fixed product `turnStream.ts`: held steers written just before a proxy result were missed when written in the same tick (CLI handles the MCP reply first; bare-CLI probe 3/3 miss). Added `stdinFence`: after `steering.flush()` returns true, write `control_request` `mcp_status` and wait for its `control_response` (handled first in `handleMessage`; ~5 ms; probe 3/3 hit) before `resolvePendingProxyCallById`; `cleanup` releases waiters. `Steering.flush` returns whether it wrote; `ClaudeStreamMessage.response` typed.
+- Fixed product `spawnEnv.ts`: `HOST_SESSION_ENV` + `CLAUDE_CODE_DESKTOP_*` stripped from inherited env. `CLAUDE_CODE_ENTRYPOINT=claude-desktop` alone added a status-summary model call per CLI run (warm-ups doubled); session ids, messaging socket and host login identity also leaked. Guard test in `spawnEnv.test.ts`.
+- Fixed tests: `cli-process.ts` realpaths the fixture home; `/compact` fakes (fakeModel, tuiPane) reply with `<summary>` tags (CLI re-asks without); new `TestLLMServer.errorEvery(match, status, body)` (entry stays queued) + `chatFixture.turnHas` replace per-retry error queueing (CLI 2.1.322 retries a 400 as-is and without `thinking.display`); steering log reads poll past the 100 ms flush; "identical steer text" now expects one split carrying both held steers (2 requests); tuiPane steering command drops PowerShell `&` off Windows; tuiPane palette key is `ESC[111;9u` (Cmd+O, kitty) on macOS.
+- Verification: `test/provider/claude-code/` 713 pass 0 fail; steering 16/16 x3; tuiPane 14/16; typecheck clean; bare-CLI probes (scratch, deleted).
+- TODO: tuiPane "claude warm-up palette opens the schedule dialog" on macOS (likely Keychain auth; my credentials probe was denied); tuiPane "fractional usage" stale after the v0.2.372 grouped layout default. Both in `docs/dev/testing.md`.
+- MISTAKE: same as below, used inline Python/perl for some test edits and probes; probes fine, edits should use Edit.
+
+### User
+Claude Code
+- Messages you send while Claude waits on an oc tool (like a question) now reach Claude with that tool's result, instead of becoming an extra turn afterwards.
+- Running oc from inside a Claude Code session no longer makes every Claude run send an extra background request or carry that session's identity.
+
+Tests
+- The Claude provider tests that always failed on macOS now pass; two opt-in pane tests remain and are documented.
+
+---
+
+## 2026-11-17 (~01:53) - v0.2.376 parentalJimmie - Claude keeps Edit/Write on commands with a path deny - Claude Opus 5.5, low; Debug
+
+### Agent
+- Meta: Claude Opus 5.5 (Claude Code desktop); low; Debug; completed
+- Version: 0.2.376 parentalJimmie
+- Diagnosed (session `ses_e17ecfac9ffeuPql0Wa5PiS0Bh`): `/imp` edit rules `{"*": allow, ".../plans/mockups/**": deny}` counted as "limited" in `commandToolPlan`, so every imp turn proxied Edit/Write (deferred `mcp__opencode_proxy__edit`); Claude found no Edit and first edited through Python in Bash.
+- Added `claudeEditDenies` (`session/llm/request.ts`): edit rules where every rule after the first path rule is a deny, POSIX absolute, wildcard only trailing `/*`|`/**`, no `[]()!#`, comma or space, become `Edit(//path)` rules in `CommandToolPlan.deny`; edit/write then stay native. Any `ask`, later allow, relative, mid-path wildcard or Windows path keeps the proxy.
+- Added `deny` to `CommandToolPlan` (`shared.ts`), validated in `callOptions.ts isPlan`; `assembleProxyTools` adds it to `--disallowedTools` (open and closed turns).
+- Added `editDenied` to `buildToolEnvironmentNote`: names denied paths and points at `mode_switch`, since Claude's own denial lacks oc's `DeniedError.hint`. The proxied-tools line now names each `mcp__opencode_proxy__<tool>`, gives the `select:` query, and forbids shell workarounds.
+- Fixed `commandPermissions.test.ts`: stale since active commands (v0.2.372); the plain prompt inherited `/spit` rules. It now clears with `metadata: { ocActive: null }`, and its `imp` carries a mockups deny proving native Write plus Claude-enforced deny with the real CLI. Removed it from `docs/dev/testing.md` known failures.
+- Verification: real CLI 2.1.322 probe (`--dangerously-skip-permissions --disallowedTools "Edit(//.../mockups/**)"`, haiku, `~/.claude3`) refused Write/Edit inside, allowed outside; plan built from the stored imp rules gives native edit/write plus that deny; new unit tests in `commandToolPlan.test.ts`, spawn-args test in `fundamentalTools.test.ts`; `test/provider/claude-code/` 702 pass, 9 fail (all the recorded Mac `fakeModel`/`steering`/warm-up entries); typecheck clean.
+- TODO: user says expected failures mean broken tests; the 9 remaining Mac failures (`fakeModel.test.ts` x3, `steering.test.ts` x5, warm-up sender) need root-causing, not a list.
+- MISTAKE: edited the test with an inline Python script; use Edit per `principles.md`.
+
+### User
+Claude Code
+- Commands that allow editing everywhere except a few folders (like `/imp` blocking mockups) now let Claude use its own Edit and Write tools, and Claude Code itself refuses edits in the blocked folders.
+- When a command does route edits through oc, Claude is told the exact tool names to load, so it stops hunting for an edit tool or editing through scripts.
+
+---
+
+## 2026-11-17 (~01:35) - v0.2.375 dogingConducting - macOS revive window that never opened; exact frame; app focus diagnosis - Claude Opus 5.5, low; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low; Implementation (imp from `~/.config/opencode/plans/macWeztermFocusRevive.md`); completed
+- Version: 0.2.375
+- Fixed: macOS revive "old window gone, new one never opens". `reopenCommand` (`config/revive.ts`) passed `--position`, `x,y` as two args; a negative coordinate (display left of/above main) parsed as a flag ("unexpected argument '-1'"), wezterm-gui exited with no window, and `open` had already exited 0. Now `--position=x,y`.
+- Added: `restartTerminal` default launch (`config/reviveHost.ts`) snapshots `wezterm-gui` pids (`ProcessDarwin.list`) before `open`, then `confirmWeztermWindow` requires a new one alive after `REPLACEMENT_SETTLE_MS`, else the step throws "New WezTerm window did not open" with a hand-run command and old panes stay. Logs new pid + frontmost pid (`lsappinfo`), placement, and window tab count. User decision: fail loudly, no relaunch.
+- Added: `Placement` (`core/util/weztermWindow.ts`) gets pixel `width`/`height` (optional: restart contexts from an older oc lack them); `reopenCommand` always sets `OC_REVIVE_WINDOW` (`x,y,w,h` or ""), applied by wezFig `gui-startup` (`set_position`/`set_inner_size`). cols/rows kept for other configs.
+- Fixed: `oc revive-tabs` (`cli/cmd/oc.ts`) tab spawn failures went to `console.error` in pane 0 and were wiped by the TUI; now `ReviveHost.reviveLog().step` per tab (`reviveLog` exported).
+- Fixed: `windowTabs` and `shutdownAll` keepPanes match `weztermSocket` too; pane ids restart at 0 per GUI process.
+- Fixed: resident server spawn (`startServerUnlocked`) drops `WEZTERM_UNIX_SOCKET`/`WEZTERM_PANE`; the server outlived the window that started it, and `wezterm cli` on the dead socket started a stray `wezterm-mux-server --daemonize`. `windowTabsSnapshot` list uses `--no-auto-start`.
+- Kept: scriptRunner `wezterm cli` calls unchanged (TUI socket is always its live GUI); plan step 3 narrowed.
+- Diagnosis (no oc change): sidebar split-run apps opening behind WezTerm. A bundled app started by its executable stays behind in WezTerm split, tab, and Terminal.app alike; `NSRunningApplication.activate` from the pane does not help; `open -a <app>` after `lsappinfo find pid=` is non-empty brings it forward (before check-in it starts a second instance). Fixed in flashCK `.run.ps1` only (user: other projects later). Details `docs/dev/macos.md`.
+- Docs: wiki `Launching.md` (snippet + failure line), `FORK.md` revive row, `docs/dev/macos.md`.
+- Verification: `bun test test/config/revive.test.ts` 19 pass/11 skip/0 fail (updated position expectation: intended; added negative-x and other-GUI socket cases, both fail on old code); core `weztermWindow.test.ts` 2/0; `tsgo --noEmit` clean in opencode and core. Probes: old-form `open ... --position -1728,76` exit 0 with no surviving wezterm-gui; `wezterm-gui start --position=-100,50 --help` parses; `wezterm cli` without socket env finds the GUI; real reopen command with `OC_REVIVE_WINDOW=200,200,1600,1000` gave bounds 100,100 800x500 pt; flashCK split runs before/after fix (behind -> front, 1 instance, x2). Not run: a real `/revive` with these changes (needs `/revive`).
+- MISTAKE: ran `wezterm cli list` without `--no-auto-start` from an agent shell with a stale socket; it started a stray mux server (killed). Always pass `--no-auto-start` in probes.
+- MISTAKE: first focus probe used TextEdit's executable; sandboxed apps crash when exec'd directly ("TextEdit quit unexpectedly" alert on the user's screen). Use an unsandboxed control.
+
+### User
+Revive
+- On a Mac, `/revive` no longer loses the window when it sat on a display left of or above the main one.
+- If the new window still fails to open, oc leaves the other old tabs open and `revive.log` says so, with a command to reopen by hand.
+- With the wezterm.lua snippet from the wiki, a revived window comes back at its exact size and spot, so Rectangle snaps survive.
+- Tabs that fail to reopen are now listed in `revive.log` instead of disappearing silently.
+
+Scripts
+- On macOS, an app that a run script starts directly opens behind the terminal in any terminal, not because of oc; running `open -a <app>` after it starts brings it forward (done for flashCK).
+
+---
+
+## 2026-11-17 (~01:17) - v0.2.374 forksFootjob - shell permission holes and deny-only spit - Claude Opus 5.5, high; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; high; Implementation; completed
+- Version: 0.2.374 forksFootjob
+- Found: spit session `ses_e17ecfac9ffeuPql0Wa5PiS0Bh` prompted 7 of 9 bash calls (incl. `kill`), from `bash "*": ask` in personal `~/.opencode/commands/spit.md`/`spitS.md`. Personal config changed to `"*": deny`, all `ask` exceptions to deny, removed `sed -n *` (GNU `e`/`w` run/write), added denies for `rg --pre`, `git grep -O`, `tree -o`, `file -C`, `sort --compress-program`; mockups in spit write HTML only.
+- Fixed `tool/shell.ts` `collect`: new `unchecked(root, ps)` adds whole-statement patterns for `redirected_statement` whose body is not a `command` (`{ ls; } > f`, `(ls) > f`, loops, `ls | head > f`), PowerShell `invokation_expression` (`[IO.File]::WriteAllText(...)`, `$f.Delete()`; before, a line with no command ran with no ask at all), and any tree with `hasError` (zsh `*.json(N)` parses as one ERROR node hiding inner commands). Always-patterns for these are the exact text.
+- Kept: "always" approvals are in-memory per instance (`permission/index.ts` `approved`), shared across modes until restart; configured deny still wins over them.
+- Added `test/tool/shell.test.ts` regression tests: group redirect / pipeline redirect / zsh-only input (non-PS shells), PowerShell method call (PS shells; Windows only, `ps` list is empty on macOS).
+- Verification: probe (`test/tmp/verify`, deleted) ran the real ShellTool against the parsed `spit.md` ruleset: all holes now deny, plain reads allow. New test fails with the fix disabled, passes with it. `bun test` tool/shell, backgroundShell, parameters, shellMetadata 82+5 pass; `tsc --noEmit` clean. PS test not run on Mac (probe covered pwsh parsing).
+- Risk: modes with `ask` defaults may show one extra pattern for these statement forms; build-mode `bash: allow` unaffected. Needs `/revive` to take effect.
+
+### User
+Permissions
+- Shell rules can no longer be bypassed by redirecting a group, loop, or pipeline into a file, by PowerShell .NET method calls, or by shell syntax oc cannot parse.
+- In the author's own spitball command, shell commands outside the read-only list are now refused outright instead of asking, so other work needs a mode switch.
+
+---
+
+## 2026-11-17 (~00:53) - v0.2.373 fostahhhTnt - stop calling the permission.ask plugin hook - Claude Opus 5.5, high; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; high; Debug then Implementation (after /spit plan); completed
+- Version: 0.2.373 fostahhhTnt
+- ERROR: Claude session hung on a proxied bash call with no TUI prompt. `opencode.log`: `evaluated ... action=ask`, then nothing; `~/.opencode-notify.log`: opencode-notify@0.3.1 `permission.ask` hook waiting on an actionable macOS popup (shown only when WezTerm unfocused, no timeout). `Permission.ask` awaited the hook before publishing `Event.Asked` (added v0.2.269).
+- Removed the hook call from `Permission.ask` (`opencode/src/permission/index.ts`), plus `Plugin` import and `Plugin.node` dep. File matches pre-v0.2.269 apart from later unrelated changes.
+- Why removal: upstream 1.x dropped the call in `38e0dc9` (2026-03) and never restored it (PRs #7077, #12742, #47675 closed unmerged); anomalyco/opencode#7006 closed because v2 replaced it with `permission.evaluate` (#45003). opencode-notify's `event` handler for `permission.asked` replies through `POST /session/:id/permissions/:permissionID`, the correct path.
+- Removed plugin-hook section from `test/permission/next.test.ts`. Added `@deprecated` JSDoc on `permission.ask` in `plugin/src/index.ts` (type kept so plugins compile).
+- Docs: `FORK.md` "Plugin permission decisions" row removed; `SCOPE.md` Retired row (hook decisions) and Planned-for-later row (port v2 `permission.evaluate`); wiki `Configuration.md` section now "Plugins and permission prompts" (event + reply example; v1 SDK `Event` type lacks `permission.asked`).
+- Risk: answering in the TUI leaves opencode-notify's popup up; clicking it later gets a 404 its log records.
+- Verification: probe (`test/tmp/verify`, deleted) on real HTTP routes: `permission.asked` id -> POST reply "once" -> 200, `ask` fiber Success. `bun test` permission/next, commandPermissions, plugin/hookIsolation, acp/permission 98/0; typecheck clean in opencode and plugin. No live check with opencode-notify (needs `/revive` and macOS focus).
+- MISTAKE: first fix raced the hook against the prompt (symptom patch, user rejected). Before relying on an upstream-declared hook, check whether upstream still calls it and why it was dropped.
+- ERROR: mid-session the oc worktree was reset to HEAD by something outside this agent (no stash or reflog entry; likely an oc revert or another session); oc.wiki edit survived. Work re-applied from HEAD with user approval.
+
+### User
+Permissions
+- A permission prompt now always shows in oc right away; a plugin can no longer hold it back.
+- opencode-notify's desktop popup still works as a second way to answer the same prompt.
+- Plugins can no longer silently auto-approve or deny prompts; they answer the open prompt through oc's API instead (see the wiki Configuration page).
+
+---
+

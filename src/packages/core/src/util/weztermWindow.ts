@@ -4,8 +4,14 @@
 import path from "path"
 import { ProcessDarwin } from "./processDarwin"
 
-/** `x`/`y` are in pixels: `wezterm start --position` takes pixels, the window list reports points. */
-export type Placement = { fullScreen: true } | { x: number; y: number; cols: number; rows: number }
+/**
+ * `x`/`y`/`width`/`height` are in pixels: `wezterm start --position` and the GUI window's Lua size
+ * calls take pixels, the window list reports points. `cols`/`rows` reopen the size in any config;
+ * `width`/`height` restore the exact frame (a Rectangle snap) where wezterm.lua applies them.
+ */
+export type Placement =
+  | { fullScreen: true }
+  | { x: number; y: number; cols: number; rows: number; width?: number; height?: number }
 type Rect = { x: number; y: number; width: number; height: number }
 export type Screen = Rect & { scale: number }
 
@@ -54,7 +60,14 @@ export function placement(
   )
     return { fullScreen: true }
   if (!size) return undefined
-  return { x: Math.round(window.x * screen.scale), y: Math.round(window.y * screen.scale), ...size }
+  const pixels = (value: number) => Math.round(value * screen.scale)
+  return {
+    x: pixels(window.x),
+    y: pixels(window.y),
+    ...size,
+    width: pixels(window.width),
+    height: pixels(window.height),
+  }
 }
 
 /** The terminal size of the tab holding `paneID`: split panes add up, dividers included. */

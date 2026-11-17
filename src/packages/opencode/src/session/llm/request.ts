@@ -359,6 +359,8 @@ const UNLISTED_PERMISSION = "\u0000unlisted"
  * Which tools a command turn hands to Claude Code's own built-ins. Per oc tool id (or "*"),
  * `toolHost` picks "oc" (always the proxy), "harness" (always Claude's own), or "auto": Claude's
  * own unless the command's rules limit the tool (a pattern or `ask`), which only oc can enforce.
+ * Edit denials Claude Code can enforce itself (`claudeEditDenies`) do not count as a limit: they
+ * go to Claude as `Edit(...)` deny rules in `deny`, so a command like `imp` keeps Edit and Write.
  * A denied tool stays off whatever the choice. Only the command's own rules count, so a command
  * turn starts from the same Claude tools as an ordinary turn.
  */
@@ -366,8 +368,13 @@ export function commandToolPlan(user: SessionV1.User): CommandToolPlan | undefin
   if (user.permission === undefined && user.toolHost === undefined) return undefined
   const rules = user.permission ?? []
   const host = (tool: string) => user.toolHost?.[tool] ?? user.toolHost?.["*"] ?? "auto"
+  const deny = claudeEditDenies(rules)
   const limited = (tool: string) => {
-    const keys = [tool === "write" ? "edit" : tool, ...(FILE_TOOLS.has(tool) ? ["external_directory"] : [])]
+    const permission = tool === "write" ? "edit" : tool
+    const keys = [
+      ...(permission === "edit" && deny ? [] : [permission]),
+      ...(FILE_TOOLS.has(tool) ? ["external_directory"] : []),
+    ]
     return rules.some(
       (rule) =>
         keys.some((key) => Wildcard.match(key, rule.permission)) && (rule.pattern !== "*" || rule.action === "ask"),
@@ -385,7 +392,33 @@ export function commandToolPlan(user: SessionV1.User): CommandToolPlan | undefin
       ...harnessOnly,
     ],
     closed: host("*") === "oc" || Permission.disabled([UNLISTED_PERMISSION], rules).size > 0,
+    ...(deny?.length ? { deny } : {}),
   }
+}
+
+/**
+ * The command's edit rules as Claude Code `Edit(...)` deny rules, or undefined when only oc can
+ * enforce them. Claude applies these to Edit and Write even with `--dangerously-skip-permissions`
+ * (checked on CLI 2.1.322), but a Claude deny always wins while oc's last matching rule wins, so
+ * this holds only when every edit rule after the first path rule is a deny. Paths must be POSIX
+ * absolute (`~` is already expanded) with no wildcard but a trailing `/*` or `/**`: oc's `*` crosses
+ * `/`, so both mean the whole tree, which Claude spells `/**`. Characters Claude's rule or argument
+ * parsing treats specially (brackets, parentheses, `!`, `#`, commas, spaces) leave it to oc.
+ */
+function claudeEditDenies(rules: PermissionV1.Ruleset) {
+  const edit = rules.filter((rule) => Wildcard.match("edit", rule.permission))
+  if (edit.some((rule) => rule.action === "ask")) return undefined
+  const first = edit.findIndex((rule) => rule.pattern !== "*")
+  if (first < 0) return []
+  const paths = edit.slice(first).flatMap((rule) => {
+    if (rule.pattern === "*" && rule.action === "deny") return []
+    const base = rule.pattern.replace(/\/\*\*?$/, "")
+    if (rule.action !== "deny" || !base.startsWith("/") || /[*?[\]()\\!#, ]/.test(base)) return [undefined]
+    return [base === rule.pattern ? base : `${base}/**`]
+  })
+  if (paths.some((item) => item === undefined)) return undefined
+  // Claude marks an absolute path with a leading `//`.
+  return paths.map((item) => `Edit(/${item})`)
 }
 
 export function hasToolCalls(messages: ModelMessage[]): boolean {

@@ -20,8 +20,15 @@ import { testProviderConfig } from "../../lib/test-provider"
 // with the shell's CLAUDE_CODE_OAUTH_TOKEN instead of the fixture's fake.
 export const openChat = Effect.fnUntraced(function* (
   fixture: CliFixture,
-  options: { resume?: string; root?: string; real?: boolean; modelID?: string; turnStats?: boolean;
-    config?: Record<string, unknown>; env?: Record<string, string> } = {},
+  options: {
+    resume?: string
+    root?: string
+    real?: boolean
+    modelID?: string
+    turnStats?: boolean
+    config?: Record<string, unknown>
+    env?: Record<string, string>
+  } = {},
 ) {
   const root = options.root ?? fixture.home
   const project = path.join(root, "work")
@@ -33,9 +40,10 @@ export const openChat = Effect.fnUntraced(function* (
       ...options.env,
       // The test preload's in-memory database would not survive a restart.
       OPENCODE_DB: path.join(fixture.home, "opencode.db"),
-      OPENCODE_CONFIG_CONTENT: JSON.stringify(
-        { ...chatConfig(fixture.llm.url, { turnStats: options.turnStats ?? options.real }), ...options.config },
-      ),
+      OPENCODE_CONFIG_CONTENT: JSON.stringify({
+        ...chatConfig(fixture.llm.url, { turnStats: options.turnStats ?? options.real }),
+        ...options.config,
+      }),
     },
   })
   const sdk = createOpencodeClient({ baseUrl: server.url, directory: project })
@@ -131,4 +139,14 @@ export function expectIsolated(inputs: readonly unknown[]) {
     .filter((dir) => existsSync(dir))
     .flatMap((dir) => Array.from(new Bun.Glob("*/SKILL.md").scanSync({ cwd: dir })))
   expect(skills.map((skill) => `oc:${path.dirname(skill)}:`).filter((name) => sent.includes(name))).toEqual([])
+}
+
+// Matches model requests whose current turn (messages after the last assistant reply) contains
+// `text`, so a later turn that only carries it as history does not match.
+export const turnHas = (text: string) => (hit: { body: Record<string, unknown> }) => {
+  const messages: unknown[] = Array.isArray(hit.body.messages) ? hit.body.messages : []
+  const last = messages.findLastIndex(
+    (message) => typeof message === "object" && message !== null && "role" in message && message.role === "assistant",
+  )
+  return JSON.stringify(messages.slice(last + 1)).includes(text)
 }

@@ -67,6 +67,7 @@ import {
   scriptCommand,
   weztermArgs,
   weztermExecutable,
+  weztermScriptArgs,
   weztermSendArgs,
   windowsTerminalArgs,
   windowsTerminalScriptArgs,
@@ -556,6 +557,64 @@ test("runs the WezTerm command in Windows Terminal from the script directory", (
     "-EncodedCommand",
   ])
   assert.equal(Buffer.from(args.at(-1)!, "base64").toString("utf16le"), weztermSendArgs(script, "7", false).at(-1))
+})
+
+// Typing into a starting pwsh once mixed PSReadLine's cursor-position reply into the command, so a
+// WezTerm run starts the pane with the command attached and types nothing.
+test("runs a WezTerm script by starting pwsh with the command, typing only when pwsh is missing", async () => {
+  const script = {
+    name: "build",
+    command: "npm run build",
+    terminal: "wezterm-horizontal" as const,
+    launcher: { executable: "pwsh", args: [] },
+    weztermSize: { Percent: 30 },
+  }
+  const args = weztermScriptArgs(script, "/work", "wezterm-horizontal", "/usr/local/bin/pwsh", "/a b:/c'd")
+  assert.deepEqual(args.slice(0, -1), [
+    "cli",
+    "split-pane",
+    "--horizontal",
+    "--percent",
+    "30",
+    "--cwd",
+    "/work",
+    "--",
+    "/usr/local/bin/pwsh",
+    "-NoLogo",
+    "-NoExit",
+    "-EncodedCommand",
+  ])
+  assert.equal(
+    Buffer.from(args.at(-1)!, "base64").toString("utf16le"),
+    "$env:PATH = '/a b:/c''d' + [IO.Path]::PathSeparator + $env:PATH; $env:SCRIPT_OWN_PANE='1'; npm run build",
+  )
+
+  const run = async (pwsh: string | undefined) => {
+    const spawned: string[][] = []
+    const typed: string[][] = []
+    const result = await runScript(script, "/work", {
+      kind: "wezterm",
+      available: async () => true,
+      resolveExecutable: async () => pwsh,
+      spawnWezterm: async (commandArgs) => {
+        spawned.push(commandArgs)
+        return { paneID: "7" }
+      },
+      preparePane: async () => "pwsh",
+      runCommand: async (_command, commandArgs) => {
+        typed.push(commandArgs)
+        return { target: "wezterm" }
+      },
+    })
+    assert.equal(result.error, undefined)
+    return { spawned, typed }
+  }
+  const direct = await run("/usr/local/bin/pwsh")
+  assert.deepEqual(direct.spawned, [weztermScriptArgs(script, "/work", "wezterm-horizontal", "/usr/local/bin/pwsh")])
+  assert.deepEqual(direct.typed, [])
+  const typed = await run(undefined)
+  assert.deepEqual(typed.spawned, [weztermArgs("wezterm-horizontal", "/work", { Percent: 30 })])
+  assert.deepEqual(typed.typed, [weztermSendArgs(script, "7", true)])
 })
 
 test("falls back to native when wt.exe is unavailable without changing the saved target", async () => {

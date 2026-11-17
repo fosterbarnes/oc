@@ -122,6 +122,7 @@ import {
 } from "./autoContinue.js"
 import { formatAskUserQuestion, isAskUserQuestionTool } from "./askUserQuestion.js"
 import { handleControlRequest } from "./controlRequest.js"
+import { randomUUID } from "node:crypto"
 import { effectiveMcpConfig, planSpawn, type LiveToolInfo } from "./spawnPlanning.js"
 import { claudePromptTokens, contextUsage, toFinishReason, toUsage } from "./usage.js"
 
@@ -240,6 +241,8 @@ class ClaudeTurn {
   private hasReceivedProgress = false
   /** Proxied tool calls this stream is running; the CLI is silent by design meanwhile. */
   private inStreamCalls = 0
+  /** `stdinFence` waiters by control request id. */
+  private readonly fences = new Map<string, () => void>()
   private toolDenied = false
   /** Ended at a tool boundary for a queued message; the interrupted CLI tail is ignored. */
   private preempted = false
@@ -836,6 +839,7 @@ class ClaudeTurn {
     // same content_block_* / message_* shape.
     const msg: ClaudeStreamMessage =
       outer.type === "stream_event" && outer.event ? { ...outer.event, session_id: outer.session_id } : outer
+    if (msg.type === "control_response") return this.fences.get(msg.response?.request_id ?? "")?.()
     // Keep the originating account's quota even while its rejected reply is suppressed for failover.
     if (msg.type === "rate_limit_event") {
       const windows = toQuotaWindows(parseRateLimitEvent(msg))
@@ -1620,8 +1624,9 @@ class ClaudeTurn {
               ),
             )
           : await runOne(call.toolCallId, call.toolName, call.input)
-      // Before the result, so Claude reads held steers at this tool boundary.
-      this.steering.flush()
+      // Before the result, so Claude reads held steers at this tool boundary. The CLI handles an
+      // MCP reply before stdin lines written in the same tick, so wait until it has parsed them.
+      if (this.steering.flush()) await this.stdinFence()
       resolvePendingProxyCallById(call.toolCallId, result)
     } finally {
       // A failed call is rejected by the caller after this.
@@ -1634,6 +1639,25 @@ class ClaudeTurn {
     if (denied && !this.denialTimer && !this.closed) {
       this.denialTimer = setTimeout(() => this.endDeniedTurn(), DENIAL_BACKSTOP_MS)
     }
+  }
+
+  /**
+   * Resolves once the CLI has parsed every stdin line written before it: it reads stdin in order
+   * and answers this control request after them (about 5 ms on CLI 2.1.322). Teardown releases it.
+   */
+  private stdinFence() {
+    if (this.cleanedUp) return Promise.resolve()
+    const id = randomUUID()
+    const parsed = new Promise<void>((resolve) =>
+      this.fences.set(id, () => {
+        this.fences.delete(id)
+        resolve()
+      }),
+    )
+    this.proc.stdin?.write(
+      JSON.stringify({ type: "control_request", request_id: id, request: { subtype: "mcp_status" } }) + "\n",
+    )
+    return parsed
   }
 
   private async executeProxyTool(
@@ -1870,6 +1894,7 @@ class ClaudeTurn {
     if (this.activeProcess?.releaseTurn === this.release) this.activeProcess.releaseTurn = undefined
     if (claudeSteerSinks.get(this.turn.affinity) === this.steering.sink) claudeSteerSinks.delete(this.turn.affinity)
     this.proc.off("error", this.onProcError)
+    for (const release of [...this.fences.values()]) release()
     rejectAllPendingProxyCallsForSession(this.sk, new Error("Provider stream closed before proxy calls completed"))
   }
 

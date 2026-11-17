@@ -28,6 +28,33 @@ function withEnv<T>(vars: Record<string, string | undefined>, fn: () => T): T {
   }
 }
 
+// oc run from a Claude Code session (2026-11-17): the inherited entrypoint made every child run an
+// extra status-summary model call, and the host's socket and login identity reached oc's children.
+test("claudeSpawnEnv drops a parent Claude Code session's identity and keeps user settings", () => {
+  withEnv(
+    {
+      CLAUDECODE: "1",
+      CLAUDE_CODE_ENTRYPOINT: "claude-desktop",
+      CLAUDE_CODE_MESSAGING_SOCKET: "/tmp/cc.sock",
+      CLAUDE_CODE_USER_EMAIL: "a@b.c",
+      CLAUDE_CODE_DESKTOP_APP_VERSION: "5",
+      CLAUDE_CODE_DISABLE_THINKING: "1",
+    },
+    () => {
+      const env = claudeSpawnEnv()
+      for (const key of [
+        "CLAUDECODE",
+        "CLAUDE_CODE_ENTRYPOINT",
+        "CLAUDE_CODE_MESSAGING_SOCKET",
+        "CLAUDE_CODE_USER_EMAIL",
+        "CLAUDE_CODE_DESKTOP_APP_VERSION",
+      ])
+        assert.equal(env[key], undefined, key)
+      assert.equal(env.CLAUDE_CODE_DISABLE_THINKING, "1")
+    },
+  )
+})
+
 test("claudeSpawnEnv passes ANTHROPIC_API_KEY through by default", () => {
   withEnv({ ANTHROPIC_API_KEY: "sk-test", ANTHROPIC_AUTH_TOKEN: "tok-test" }, () => {
     const env = claudeSpawnEnv()

@@ -8,7 +8,7 @@ import { Database } from "bun:sqlite"
 import { mkdir } from "node:fs/promises"
 import path from "node:path"
 import { Effect } from "effect"
-import { hostEnv, isolatedEnv, type CliFixture } from "../../lib/cli-process"
+import { hostEnv, isolatedEnv, keychainStubEnv, type CliFixture } from "../../lib/cli-process"
 import { pollWithTimeout } from "../../lib/effect"
 import { chatConfig, claudeEnv, initRepo, outsideProfile } from "./chatFixture"
 import { installQuotaFakeCli, quotaChatConfig, quotaReleasePath } from "./quotaFixture"
@@ -82,6 +82,7 @@ export const openPane = Effect.fnUntraced(function* (
   const db = path.join(fixture.home, "opencode.db")
   const paneEnv = {
     ...isolatedEnv(fixture.home, JSON.stringify(config)),
+    ...keychainStubEnv(fixture.home),
     ...claudeEnv(root, fixture.llm.url),
     // Sidebar reads os.homedir and desktop app-data paths, not only Global.Path.home.
     USERPROFILE: fixture.home,

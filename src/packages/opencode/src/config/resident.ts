@@ -310,7 +310,12 @@ async function startServerUnlocked(replacement = false) {
   await spawnResident(executable, command, {
     cwd: os.homedir(),
     env: {
-      ...process.env,
+      // The server outlives the window that started it (a revive starts it from the old window), so
+      // that window's pane and mux socket would go stale in every shell the server runs; a `wezterm
+      // cli` there would start a stray mux server. Without them `wezterm cli` finds the running GUI.
+      ...Object.fromEntries(
+        Object.entries(process.env).filter(([key]) => key !== "WEZTERM_UNIX_SOCKET" && key !== "WEZTERM_PANE"),
+      ),
       [RESIDENT_ENV]: "1",
       OPENCODE_SERVER_PASSWORD: secret,
       OPENCODE_SERVER_USERNAME: "opencode",
@@ -639,6 +644,7 @@ export async function stopServer(
 
 /** Closes this instance's oc terminals, then stops its resident server gracefully. */
 // `keepPanes`: WezTerm panes a revive moves to its new window; the restarter closes them after the launch.
+// They belong to this process's mux (WEZTERM_UNIX_SOCKET); the same id in another GUI is a different pane.
 export async function shutdownAll(
   opts: { directory?: string; listProcesses?: () => TuiLedger.Process[]; keepPanes?: string[] } = {},
 ) {
@@ -651,7 +657,9 @@ export async function shutdownAll(
     processes === null ? [] : TuiLedger.select(records, processes, Global.Path.app, executablePath(), process.pid)
   const owned = records.filter((record) => pids.includes(record.pid))
   for (const record of owned) {
-    if (!record.paneID || opts.keepPanes?.includes(record.paneID)) continue
+    if (!record.paneID) continue
+    const sameMux = !record.weztermSocket || record.weztermSocket === process.env.WEZTERM_UNIX_SOCKET
+    if (sameMux && opts.keepPanes?.includes(record.paneID)) continue
     killPane(record.paneID, record.weztermSocket)
   }
   // TUIs have nothing to save; killing them up front avoids the "Unable to connect" screen while servers stop.

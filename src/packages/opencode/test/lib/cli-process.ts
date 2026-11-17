@@ -26,6 +26,7 @@ import { Deferred, Duration, Effect, Layer, Queue, Schedule, Scope, Stream } fro
 import { FetchHttpClient, HttpClient } from "effect/unstable/http"
 import { ChildProcess } from "effect/unstable/process"
 import path from "node:path"
+import { mkdirSync, writeFileSync } from "node:fs"
 import { TestLLMServer } from "./llm-server"
 import { testProviderConfig } from "./test-provider"
 import { it } from "./effect"
@@ -64,8 +65,29 @@ function forkStderrDrain(stream: ReadableStream<Uint8Array>, into: string[]) {
 // it sends (the desktop entrypoint adds a background status request). The real-model token stays.
 export function hostEnv() {
   return Object.fromEntries(
-    Object.entries(process.env).filter(([key]) => key === "CLAUDE_CODE_OAUTH_TOKEN" || !/^(CLAUDE|ANTHROPIC)/.test(key)),
+    Object.entries(process.env).filter(
+      ([key]) => key === "CLAUDE_CODE_OAUTH_TOKEN" || !/^(CLAUDE|ANTHROPIC)/.test(key),
+    ),
   )
+}
+
+/**
+ * Tests run under a temp HOME with no keychain. On macOS a `claude` that saves a login there makes
+ * the system ask the user to create one ("Keychain Not Found"), and a real `security` call could
+ * reach the user's own Keychain. This stub, first on PATH, fails every call so the CLI falls back to
+ * `.credentials.json` and oc's usage reader to the file; calls land in `<home>/security.log`.
+ */
+export function keychainStubEnv(home: string): Record<string, string> {
+  if (process.platform !== "darwin") return {}
+  const bin = path.join(home, "keychainStub")
+  mkdirSync(bin, { recursive: true })
+  writeFileSync(
+    path.join(bin, "security"),
+    // `security -i` reads its command from stdin; drain it so the writer gets no EPIPE.
+    `#!/bin/sh\necho "security $*" >> "${path.join(home, "security.log")}"\n[ "$1" = "-i" ] && cat > /dev/null\nexit 1\n`,
+    { mode: 0o755 },
+  )
+  return { PATH: `${bin}:${process.env.PATH ?? ""}` }
 }
 
 export function isolatedEnv(home: string, configJson: string): Record<string, string> {
@@ -205,7 +227,8 @@ export function withCliFixture<A, E>(
     const fs = yield* FSUtil.Service
     const appProc = yield* AppProcess.Service
 
-    const home = yield* fs.makeTempDirectory({ prefix: "oc-cli-" })
+    // Resolved, as the processes under test see it: macOS temp dirs sit under the /var -> /private/var link.
+    const home = yield* fs.realPath(yield* fs.makeTempDirectory({ prefix: "oc-cli-" }))
     yield* Effect.addFinalizer(() =>
       fs
         .remove(home, { recursive: true })
@@ -213,7 +236,7 @@ export function withCliFixture<A, E>(
     )
 
     const configJson = JSON.stringify(testProviderConfig(llm.url))
-    const env = isolatedEnv(home, configJson)
+    const env = { ...isolatedEnv(home, configJson), ...keychainStubEnv(home) }
 
     const spawn = Effect.fn("opencode.spawn")(function* (args: string[], opts?: SpawnOpts) {
       const start = Date.now()

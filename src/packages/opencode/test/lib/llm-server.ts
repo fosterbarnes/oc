@@ -25,6 +25,8 @@ type Match = (hit: Hit) => boolean
 type Queue = {
   item: Item
   match?: Match
+  // Answers every matching request and never leaves the queue, as a real API repeats a rejection.
+  every?: boolean
 }
 
 type Wait = {
@@ -722,6 +724,8 @@ namespace TestLLMServer {
     readonly reason: (value: string, opts?: { text?: string; usage?: Usage }) => Effect.Effect<void>
     readonly fail: (message?: unknown) => Effect.Effect<void>
     readonly error: (status: number, body: unknown) => Effect.Effect<void>
+    // The CLI retries a rejected request in ways that vary by version; this fails each retry.
+    readonly errorEvery: (match: Match, status: number, body: unknown) => Effect.Effect<void>
     readonly hang: Effect.Effect<void>
     readonly hold: (value: string, wait: PromiseLike<unknown>) => Effect.Effect<void>
     readonly reset: Effect.Effect<void>
@@ -767,7 +771,7 @@ export class TestLLMServer extends Context.Service<TestLLMServer, TestLLMServer.
         const index = list.findIndex((entry) => !entry.match || entry.match(hit))
         if (index === -1) return
         const first = list[index]
-        list = [...list.slice(0, index), ...list.slice(index + 1)]
+        if (!first.every) list = [...list.slice(0, index), ...list.slice(index + 1)]
         return first.item
       }
 
@@ -866,6 +870,9 @@ export class TestLLMServer extends Context.Service<TestLLMServer, TestLLMServer.
         }),
         error: Effect.fn("TestLLMServer.error")(function* (status: number, body: unknown) {
           queue(httpError(status, body))
+        }),
+        errorEvery: Effect.fn("TestLLMServer.errorEvery")(function* (match: Match, status: number, body: unknown) {
+          list = [...list, { item: httpError(status, body), match, every: true }]
         }),
         hang: Effect.gen(function* () {
           queue(reply().hang().item())

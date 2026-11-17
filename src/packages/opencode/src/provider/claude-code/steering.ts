@@ -122,8 +122,10 @@ export class Steering {
     return true
   }
 
+  /** Writes held steers to stdin; true when it wrote any. */
   flush() {
-    if (this.host.stopped() || this.host.switching()) return
+    if (this.host.stopped() || this.host.switching()) return false
+    const wrote = this.held.length > 0
     for (const steer of this.held) {
       const uuid = randomUUID()
       this.writtenIds.add(steer.messageID)
@@ -141,6 +143,7 @@ export class Steering {
       })
     }
     this.held = []
+    return wrote
   }
 
   /** The CLI read a stdin message. Other echoes (this turn's own envelope, nudges) need nothing. */

@@ -316,7 +316,8 @@ export async function planSpawn(input: {
 }) {
   const config = input.config
   const turn = input.turn
-  const commandPermission = commandToolPlan(input.options.providerOptions, config.provider) !== undefined
+  const commandPlan = commandToolPlan(input.options.providerOptions, config.provider)
+  const commandPermission = commandPlan !== undefined
   const spawnModel = parseModelId(turn.effectiveModelId)
   const systemPrompt = (toolEnvironment?: string) =>
     buildAppendedSystemPrompt({
@@ -361,6 +362,7 @@ export async function planSpawn(input: {
       tools.combined.map((t) => t.name),
       tools.replaced,
       skillOn,
+      (commandPlan?.deny ?? []).map((rule) => `\`${rule.slice("Edit(/".length, -1)}\``),
     ),
   )
   return {
@@ -437,11 +439,17 @@ async function assembleProxyTools(input: Parameters<typeof planSpawn>[0]) {
             ),
           ]
         : undefined,
+      // `deny` holds the command's edit denials for Claude's own Edit and Write.
       disallowed: commandPlan.closed
-        ? (config.extraDisallowedTools ?? [])
+        ? [...(commandPlan.deny ?? []), ...(config.extraDisallowedTools ?? [])]
         : resolveDisallowedTools({
             proxyTools: input.proxyTools,
-            extraDisallowedTools: [...split.off, ...harnessDenied, ...(config.extraDisallowedTools ?? [])],
+            extraDisallowedTools: [
+              ...split.off,
+              ...(commandPlan.deny ?? []),
+              ...harnessDenied,
+              ...(config.extraDisallowedTools ?? []),
+            ],
             disableWebSearch: config.webSearch === "disabled",
           }),
     }

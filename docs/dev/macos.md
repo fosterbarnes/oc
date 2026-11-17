@@ -37,6 +37,15 @@ helpers with a `win32` and a `darwin` branch; callers stay platform-neutral.
   uses `open -n -b com.github.wez.wezterm` (LaunchServices activates it; the caller's env is passed on).
   `--config` is a global WezTerm option and must come before `start`, or the GUI never starts and `open`
   still exits 0. `--position` is in pixels (points x backing scale); window list bounds are points.
+  Pass it as `--position=x,y`: a separate `-1728,76` is parsed as a flag and the GUI exits with no
+  window, again after `open` exited 0. The restarter therefore checks for a new live `wezterm-gui`.
+- A bundled app started by its executable (`<app>/Contents/MacOS/<name>`, e.g. a `.run.ps1`
+  `Start-Process`) opens behind the terminal: measured 2026-11-17 for WezTerm split, tab, and
+  Terminal.app alike, so not oc's split code. `NSRunningApplication.activate` from the pane does not
+  help; `open -a <app>` after the process checked in with LaunchServices (`lsappinfo find pid=<pid>`
+  non-empty) brings that instance forward. Before check-in, `open -a` starts a second instance.
+- The resident server drops `WEZTERM_UNIX_SOCKET`/`WEZTERM_PANE` from its environment: it outlives the
+  window that started it, and a `wezterm cli` call on a dead socket starts a stray mux server.
 
 ## Known Mac test failures
 

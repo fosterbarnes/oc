@@ -85,7 +85,14 @@ const steerScenario = (late: boolean) =>
         // The split reply is still one Claude exchange: the next prompt resumes without a rewind.
         yield* llm.text("AFTER-STEER-DONE")
         yield* chat.prompt("AFTER-STEER")
-        const log = yield* Effect.promise(() => Bun.file(path.join(logDir, "plugin.log")).text())
+        // The server process flushes plugin.log in 100 ms batches, so the second turn's line can land
+        // after its reply.
+        const log = yield* pollWithTimeout(
+          Effect.promise(() => Bun.file(path.join(logDir, "plugin.log")).text()).pipe(
+            Effect.map((text) => (text.split("doStream starting").length >= 3 ? text : undefined)),
+          ),
+          "the second turn never logged doStream starting",
+        )
         expect(log).not.toContain("opencode history differs from the claude conversation")
         expect(log).not.toContain("rewinding claude conversation")
         expect(log.split("doStream starting")).toHaveLength(3)
@@ -364,7 +371,6 @@ describe.skipIf(!cliPath)("Claude mid-turn steering", () => {
         const chat = yield* openChat(fixture)
         yield* fixture.llm.tool("mcp__opencode_proxy__question", heldQuestion)
         yield* fixture.llm.text("REPEATED-DONE")
-        yield* fixture.llm.text("REPEATED-LATE-DONE")
         const turn = yield* chat.prompt("REPEATED-TEXT").pipe(Effect.forkScoped)
         const question = yield* waitQuestion(chat)
         const first = yield* chat.prompt("REPEATED-TEXT").pipe(Effect.forkScoped)
@@ -382,13 +388,17 @@ describe.skipIf(!cliPath)("Claude mid-turn steering", () => {
           expect(metadata?.steered).toBeNumber()
           expect(metadata?.steeredParentID).toBe(users[0].info.id)
         }
-        // Claude read them on separate calls (one with the tool result, one after its reply), so each starts a reply.
+        // Both were held when the question was answered, so Claude read them together with its result:
+        // one split, and the reply answers the newer one. Before the stdin fence the CLI missed them there
+        // and ran them as an extra turn.
         const replies = all.filter((msg) => msg.info.role === "assistant")
-        expect(replies.map((msg) => msg.info.role === "assistant" && msg.info.parentID)).toEqual(
-          users.map((msg) => msg.info.id),
-        )
+        expect(replies.map((msg) => msg.info.role === "assistant" && msg.info.parentID)).toEqual([
+          users[0].info.id,
+          users[2].info.id,
+        ])
         const inputs = yield* fixture.llm.inputs
-        expect(inputs).toHaveLength(3)
+        expect(inputs).toHaveLength(2)
+        expect(JSON.stringify(inputs[1].messages).split("REPEATED-TEXT")).toHaveLength(4)
         expectIsolated(inputs)
       }),
     120_000,
@@ -428,8 +438,13 @@ describe.skipIf(!cliPath)("Claude mid-turn steering", () => {
         yield* Effect.promise(() => chat.sdk.question.reply({ requestID: question.id, answers: [["Continue"]] }))
         const result = yield* Fiber.join(turn)
         yield* Fiber.join(steer)
-        const receiptLog = yield* Effect.promise(() => Bun.file(path.join(logDir, "plugin.log")).text())
-        expect(receiptLog).toContain("claude consumed steered message")
+        // plugin.log flushes in 100 ms batches, so the line can land after the turn ends.
+        yield* pollWithTimeout(
+          Effect.promise(() => Bun.file(path.join(logDir, "plugin.log")).text()).pipe(
+            Effect.map((text) => (text.includes("claude consumed steered message") ? text : undefined)),
+          ),
+          "Claude never consumed the steer",
+        )
         expect(
           JSON.stringify(result.data?.info.role === "assistant" ? result.data.info.error : "no assistant"),
         ).toContain("saving its delivery receipt failed")

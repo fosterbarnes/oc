@@ -9,7 +9,7 @@ import { tmpdir } from "../../fixture/fixture"
 import { cliIt } from "../../lib/cli-process"
 import { pollWithTimeout } from "../../lib/effect"
 import { reply, TestLLMServer } from "../../lib/llm-server"
-import { chatConfig, claudeEnv, expectIsolated, initRepo, openChat, outsideProfile } from "./chatFixture"
+import { chatConfig, claudeEnv, expectIsolated, initRepo, turnHas, openChat, outsideProfile } from "./chatFixture"
 import { openGlobalEventStream, readGlobalEvent, runQuotaStreamIntegration } from "./quotaFixture"
 import { flowReport, stepRunner } from "./flowReport"
 
@@ -497,7 +497,8 @@ describe.skipIf(!cliPath)("Claude Code CLI against TestLLMServer", () => {
         const llm = fixture.llm
         const chat = yield* openChat(fixture)
         yield* llm.text("noted")
-        yield* llm.text("SUMMARY-77: the codeword is PELICAN-77")
+        // Tagged like a real summary: Claude Code 2.1.322 asks again when the reply has no <summary>.
+        yield* llm.text("<summary>SUMMARY-77: the codeword is PELICAN-77</summary>")
         yield* llm.text("the codeword is PELICAN-77")
 
         yield* chat.prompt("Remember for later: the codeword is PELICAN-77.")
@@ -1110,7 +1111,8 @@ describe.skipIf(!cliPath)("Claude Code CLI against TestLLMServer", () => {
         const llm = fixture.llm
         // A tool-search 400 triggers the CLI's schema fallback and retries the request.
         const chat = yield* openChat(fixture, { env: { ENABLE_TOOL_SEARCH: "false" } })
-        yield* llm.error(400, {
+        // The CLI retries a 400 (2.1.322: once as is, once without `thinking.display`); a real API fails each.
+        yield* llm.errorEvery(turnHas("Codeword?"), 400, {
           type: "error",
           error: { type: "invalid_request_error", message: "FAKE-BAD-REQUEST-81" },
         })
@@ -1135,10 +1137,11 @@ describe.skipIf(!cliPath)("Claude Code CLI against TestLLMServer", () => {
       Effect.gen(function* () {
         const llm = fixture.llm
         const chat = yield* openChat(fixture, { modelID: "claude-mythos-5-1", env: { ENABLE_TOOL_SEARCH: "false" } })
-        // The CLI retries a streaming 404 once without streaming; both must miss.
-        const notFound = { type: "error", error: { type: "not_found_error", message: "model: claude-mythos-5-1" } }
-        yield* llm.error(404, notFound)
-        yield* llm.error(404, notFound)
+        // The CLI retries a 404; a real API misses each time.
+        yield* llm.errorEvery(turnHas("Codeword?"), 404, {
+          type: "error",
+          error: { type: "not_found_error", message: "model: claude-mythos-5-1" },
+        })
 
         yield* chat.prompt("Codeword?")
 

@@ -58,7 +58,7 @@ export type PaneSyntax = "pwsh" | "posix"
 
 // Text typed into a pane is read by the pane's own shell (paneSyntax). `ownPane` marks a pane the
 // sidebar made for this script: `closeOut` in a repo's .scripts/scriptHelper.ps1 (or posix/scriptHelper.sh)
-// kills the pane on success. The Windows Terminal path starts pwsh explicitly.
+// kills the pane on success. Windows Terminal, and WezTerm runs when pwsh is found, start pwsh explicitly.
 const SYNTAX = {
   pwsh: { ownPane: "$env:SCRIPT_OWN_PANE='1'; ", quote: quoteCommandArg },
   posix: { ownPane: "export SCRIPT_OWN_PANE=1; ", quote: (value: string) => `'${value.replaceAll("'", "'\\''")}'` },
@@ -143,13 +143,37 @@ export function windowsTerminalArgs(
   ]
 }
 
+function pwshScriptArgs(script: Script, pwsh: string, prefix = ""): string[] {
+  return [pwsh, ...shellArgs(`${prefix}${SYNTAX.pwsh.ownPane}${scriptCommand(script)}`)]
+}
+
 export function windowsTerminalScriptArgs(script: Script, cwd: string): string[] {
   if (script.terminal === "native") return []
   return [
     ...windowsTerminalArgs(script.terminal, script.filePath ? path.dirname(script.filePath) : cwd, script.weztermSize),
-    "pwsh",
-    ...shellArgs(`${SYNTAX.pwsh.ownPane}${scriptCommand(script)}`),
+    ...pwshScriptArgs(script, "pwsh"),
   ]
+}
+
+// A pane started with a program gets the WezTerm mux's environment (launchd's bare PATH on macOS),
+// not the user's shell's, so oc's PATH goes first: the script's tools and closeOut's `wezterm` resolve.
+export function weztermScriptArgs(
+  script: Script,
+  cwd: string,
+  terminal: Exclude<ScriptTerminal, "native">,
+  pwsh: string,
+  envPath = process.env.PATH,
+): string[] {
+  const prefix = envPath ? `$env:PATH = ${quoteCommandArg(envPath)} + [IO.Path]::PathSeparator + $env:PATH; ` : ""
+  return [...weztermArgs(terminal, cwd, script.weztermSize), "--", ...pwshScriptArgs(script, pwsh, prefix)]
+}
+
+// First existing absolute path `which`/`where.exe` prints; where.exe can list several, CRLF-separated.
+async function resolveExecutable(command: string): Promise<string | undefined> {
+  return (await output(process.platform === "win32" ? "where.exe" : "which", [command]))
+    ?.split(/\r?\n/)
+    .map((line) => line.trim())
+    .find((line) => path.isAbsolute(line) && existsSync(line))
 }
 
 // WezTerm sets WEZTERM_EXECUTABLE to its GUI binary, which has no `cli` (exit 2 on macOS too);
@@ -203,11 +227,13 @@ export function weztermSendArgs(
   ]
 }
 
-// A new pane runs WezTerm's default program, which oc does not choose (pwsh or zsh on the Mac).
+// Only for typed commands: placing one, or running one when pwsh is not found. Such a pane runs
+// WezTerm's default program, which oc does not choose (pwsh or zsh on the Mac).
 // macOS/Linux: that program is the session leader on the pane's tty. Its line editor (PSReadLine,
 // zle, readline) turns canonical mode off while it waits at a prompt; an Enter typed before then is
 // lost (pwsh with a profile takes ~250 ms), so this waits for that, up to 5 s. Windows has no tty to
 // read and its panes run pwsh, so it keeps PowerShell syntax, as do panes that cannot be inspected.
+// Known gap: PSReadLine's cursor-position reply (ESC[row;colR) can still land inside typed text.
 async function preparePane(paneID: string): Promise<PaneSyntax> {
   if (process.platform === "win32") return "pwsh"
   const panes: unknown = JSON.parse((await output(weztermCommand(), ["cli", "list", "--format", "json"])) || "[]")
@@ -251,12 +277,27 @@ async function runWezterm(
   cwd: string,
   terminal: Exclude<ScriptTerminal, "native">,
   submit: boolean,
+  options: RunnerOptions,
 ): Promise<RunResult> {
-  if (!(await available(weztermCommand()))) return { target: "WezTerm", error: "Executable not found: wezterm" }
-  const pane = await spawnWezterm(weztermArgs(terminal, cwd, script.weztermSize), cwd)
-  if (!pane.paneID) return { target: "WezTerm", error: pane.error || "Could not create a WezTerm pane." }
-  const syntax = await preparePane(pane.paneID)
-  const sent = await runCommand(weztermCommand(), weztermSendArgs(script, pane.paneID, submit, syntax), cwd)
+  if (!(await (options.available ?? available)(weztermCommand())))
+    return { target: "WezTerm", error: "Executable not found: wezterm" }
+  const spawnPane = options.spawnWezterm ?? spawnWezterm
+  const failed = (error?: string) => ({ target: "WezTerm", error: error || "Could not create a WezTerm pane." })
+  // Running starts the pane with pwsh and the command attached, so nothing is typed into a shell
+  // that is still starting (PSReadLine's cursor-position reply once landed inside the typed command).
+  const pwsh = submit ? await (options.resolveExecutable ?? resolveExecutable)("pwsh") : undefined
+  if (pwsh) {
+    const pane = await spawnPane(weztermScriptArgs(script, cwd, terminal, pwsh), cwd)
+    return pane.paneID ? { target: "WezTerm" } : failed(pane.error)
+  }
+  const pane = await spawnPane(weztermArgs(terminal, cwd, script.weztermSize), cwd)
+  if (!pane.paneID) return failed(pane.error)
+  const syntax = await (options.preparePane ?? preparePane)(pane.paneID)
+  const sent = await (options.runCommand ?? runCommand)(
+    weztermCommand(),
+    weztermSendArgs(script, pane.paneID, submit, syntax),
+    cwd,
+  )
   return sent.error ? { target: "WezTerm", error: sent.error } : { target: "WezTerm" }
 }
 
@@ -265,6 +306,9 @@ type RunnerOptions = {
   available?: typeof available
   spawnCommand?: typeof spawnCommand
   runCommand?: typeof runCommand
+  spawnWezterm?: typeof spawnWezterm
+  resolveExecutable?: typeof resolveExecutable
+  preparePane?: typeof preparePane
 }
 
 export async function runScript(script: Script, cwd: string, options: RunnerOptions = {}): Promise<RunResult> {
@@ -272,7 +316,7 @@ export async function runScript(script: Script, cwd: string, options: RunnerOpti
   const probe = options.available ?? available
   const terminal = resolveScriptTerminal(script.terminal, kind)
   if (terminal !== "native") {
-    if (kind === "wezterm") return runWezterm(script, cwd, terminal, true)
+    if (kind === "wezterm") return runWezterm(script, cwd, terminal, true, options)
     if (await probe("wt.exe"))
       return (options.runCommand ?? runCommand)("wt.exe", windowsTerminalScriptArgs(script, cwd), cwd)
   }
@@ -299,7 +343,7 @@ export async function placeScript(script: Script, cwd: string, options: RunnerOp
   const terminal = resolveScriptTerminal(script.terminal, kind)
   if (terminal === "native" || kind === "windows-terminal")
     return runScript({ ...script, terminal: "native" }, cwd, options)
-  return runWezterm(script, cwd, terminal, false)
+  return runWezterm(script, cwd, terminal, false, options)
 }
 
 export function commandArgs(command: string): string[] {

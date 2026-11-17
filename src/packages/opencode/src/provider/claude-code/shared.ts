@@ -56,9 +56,10 @@ export const CLAUDE_UNSUPPORTED_TOOLS = [
  * How a command turn splits tools between Claude Code and oc. `native`: oc tool ids (keys of
  * `CLAUDE_NATIVE_TOOLS` or `CLAUDE_HARNESS_ONLY_TOOLS`) Claude runs itself when the turn allows
  * them; the rest go through the proxy. `closed`: other Claude built-ins stay off, because the
- * command's rules deny unlisted tools or the command forces oc tools.
+ * command's rules deny unlisted tools or the command forces oc tools. `deny`: Claude Code
+ * permission rules (`Edit(//path/**)`) that carry the command's edit denials to Claude's own tools.
  */
-export type CommandToolPlan = { native: string[]; closed: boolean }
+export type CommandToolPlan = { native: string[]; closed: boolean; deny?: string[] }
 // Comma-separated `CLAUDE_HARNESS_ONLY_TOOLS` built-ins the agent or session permissions deny.
 export const CLAUDE_CODE_HARNESS_DENIED_OPTION = "opencodeHarnessDenied"
 // Set when the turn's user message names its model explicitly; agent model overrides then keep it.

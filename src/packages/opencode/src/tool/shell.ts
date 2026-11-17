@@ -129,6 +129,17 @@ function commands(node: Node) {
   return node.descendantsOfType("command").filter((child): child is Node => Boolean(child))
 }
 
+// Code that runs or writes files without a command node carrying its text, so per-command patterns
+// never see it: a redirect on a group, loop, or pipeline, a PowerShell method call, or input the
+// parser cannot read (zsh-only syntax hides every command inside it). Checked as whole statements.
+function unchecked(root: Node, ps: boolean) {
+  if (root.hasError) return [root]
+  if (ps) return root.descendantsOfType("invokation_expression").filter((node): node is Node => Boolean(node))
+  return root
+    .descendantsOfType("redirected_statement")
+    .filter((node): node is Node => node !== null && node.childForFieldName("body")?.type !== "command")
+}
+
 function unquote(text: string) {
   if (text.length < 2) return text
   const first = text[0]
@@ -462,6 +473,11 @@ export const ShellTool = Tool.define(
           scan.patterns.add(source(node))
           scan.always.add(BashArity.prefix(tokens).join(" ") + " *")
         }
+      }
+
+      for (const node of unchecked(root, ps)) {
+        scan.patterns.add(node.text.trim())
+        scan.always.add(node.text.trim())
       }
 
       return scan

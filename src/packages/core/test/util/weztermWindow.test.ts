@@ -12,11 +12,15 @@ test("placement converts points to the containing screen's pixels and spots full
     x: 0,
     y: 76,
     ...size,
+    width: 3456,
+    height: 2158,
   })
   expect(WeztermWindow.placement({ x: 1800, y: 0, width: 800, height: 600 }, screens, size)).toEqual({
     x: 1800,
     y: 0,
     ...size,
+    width: 800,
+    height: 600,
   })
   expect(WeztermWindow.placement({ x: 0, y: 0, width: 1728, height: 1117 }, screens, undefined)).toEqual({
     fullScreen: true,

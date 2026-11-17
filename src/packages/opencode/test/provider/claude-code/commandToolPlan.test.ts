@@ -63,6 +63,38 @@ test("auto keeps Claude's own tools unless the command limits them", () => {
   ])
 })
 
+// The real imp command (2026-11-17): one carved-out deny proxied Edit and Write on every imp turn,
+// so Claude hunted for an edit tool and fell back to editing through Python in Bash.
+test("edit denials Claude can enforce keep its Edit and Write and reach it as deny rules", () => {
+  const carved = { ...imp, edit: { "*": "allow", "/home/u/plans/mockups/**": "deny", "/home/u/x.md": "deny" } } as const
+  expect(commandToolPlan(user(carved))).toEqual({
+    native: ALL_NATIVE,
+    closed: false,
+    deny: ["Edit(//home/u/plans/mockups/**)", "Edit(//home/u/x.md)"],
+  })
+  // oc's `*` crosses `/`, so a trailing `/*` denies the whole tree.
+  expect(commandToolPlan(user({ edit: { "*": "allow", "/a/*": "deny" } }))!.deny).toEqual(["Edit(//a/**)"])
+
+  // Only oc can enforce these: a later allow overrides the deny, relative or mid-path wildcards,
+  // `ask`, and Windows paths.
+  const cases: Record<string, "allow" | "ask" | "deny">[] = [
+    { "*": "allow", "/a/**": "deny", "/a/b/**": "allow" },
+    { "*": "allow", "plans/**": "deny" },
+    { "*": "allow", "/a/*.md": "deny" },
+    { "*": "allow", "/a/b c/**": "deny" },
+    { "*": "allow", "/a/**": "ask" },
+    { "*": "allow", "C:/a/**": "deny" },
+  ]
+  for (const edit of cases) {
+    const plan = commandToolPlan(user({ ...imp, edit }))!
+    expect(plan.native).not.toContain("edit")
+    expect(plan.native).not.toContain("write")
+    expect(plan.deny).toBeUndefined()
+  }
+  // A limited external_directory still sends file tools through oc.
+  expect(commandToolPlan(user({ ...carved, external_directory: "ask" }))!.native).not.toContain("edit")
+})
+
 test("WebSearch has no oc version, so the command's rules alone decide it", () => {
   const { websearch: _, ...noSearch } = spit
   expect(commandToolPlan(user(noSearch))!.native).not.toContain("websearch")

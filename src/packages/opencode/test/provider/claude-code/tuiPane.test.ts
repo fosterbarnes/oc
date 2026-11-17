@@ -8,9 +8,13 @@ import { Effect } from "effect"
 import { cliIt } from "../../lib/cli-process"
 import { pollWithTimeout } from "../../lib/effect"
 import { reply } from "../../lib/llm-server"
-import { expectIsolated } from "./chatFixture"
+import { expectIsolated, turnHas } from "./chatFixture"
 import { openPane, paneReady, powershell, stopPaneChild } from "./paneFixture"
 import { QUOTA_MENU_HOURLY_UPDATED } from "./quotaFixture"
+
+// The oc palette key: Ctrl+O, or Cmd+O in the macOS preset, which WezTerm sends as a kitty keyboard
+// sequence (codepoint 111, modifier 1 + super 8).
+const OC_PALETTE_KEY = process.platform === "darwin" ? "\x1b[111;9u" : "\x0f"
 
 describe.skipIf(!paneReady)("oc TUI in a WezTerm pane", () => {
   cliIt.live(
@@ -24,7 +28,8 @@ describe.skipIf(!paneReady)("oc TUI in a WezTerm pane", () => {
         yield* Effect.addFinalizer(() => Effect.sync(() => final.resolve()))
         const project = pane.project.replaceAll("\\", "/")
         yield* fixture.llm.tool("mcp__opencode_proxy__bash", {
-          command: `& "${process.execPath}" -e "await Bun.write('${project}/steeringReady', 'ready'); await new Promise(resolve => { const watcher = require('fs').watch('${project}', (_, name) => { if (name === 'steeringRelease') { watcher.close(); resolve(); } }); });"`,
+          // PowerShell needs `&` to run a quoted path; POSIX shells reject it.
+          command: `${process.platform === "win32" ? "& " : ""}"${process.execPath}" -e "await Bun.write('${project}/steeringReady', 'ready'); await new Promise(resolve => { const watcher = require('fs').watch('${project}', (_, name) => { if (name === 'steeringRelease') { watcher.close(); resolve(); } }); });"`,
           description: "Hold steering tool",
         })
         yield* fixture.llm.push(reply().wait(final.promise).text("STEERING-PANE-DONE").stop())
@@ -342,7 +347,8 @@ describe.skipIf(!paneReady)("oc TUI in a WezTerm pane", () => {
       Effect.gen(function* () {
         const pane = yield* openPane(fixture)
         yield* fixture.llm.text("NOTED-77")
-        yield* fixture.llm.text("SUMMARY-77: the codeword is PELICAN-77")
+        // Tagged like a real summary: Claude Code 2.1.322 asks again when the reply has no <summary>.
+        yield* fixture.llm.text("<summary>SUMMARY-77: the codeword is PELICAN-77</summary>")
         yield* fixture.llm.text("AFTER-COMPACT: PELICAN-77")
         yield* pane.waitFor("Ask anything")
         yield* pane.type("remember PELICAN-77\r")
@@ -362,7 +368,9 @@ describe.skipIf(!paneReady)("oc TUI in a WezTerm pane", () => {
     (fixture) =>
       Effect.gen(function* () {
         const pane = yield* openPane(fixture)
-        yield* fixture.llm.error(400, {
+        // The CLI retries a 400 (2.1.322: once as is, once without `thinking.display`); a real API fails each.
+        // The failed turn leaves no assistant reply, so "again" still carries "codeword?" in its turn.
+        yield* fixture.llm.errorEvery((hit) => turnHas("codeword?")(hit) && !turnHas("again")(hit), 400, {
           type: "error",
           error: { type: "invalid_request_error", message: "FAKE-BAD-REQUEST-81" },
         })
@@ -385,14 +393,13 @@ describe.skipIf(!paneReady)("oc TUI in a WezTerm pane", () => {
         const pane = yield* openPane(fixture, { warmupAuth: true })
         const store = path.join(fixture.home, ".local", "share", "opencode", "claude-code", "warmup.json")
         yield* pane.waitFor("Ask anything")
-        yield* pane.type("\x0f")
+        yield* pane.type(OC_PALETTE_KEY)
         yield* pane.waitFor("Commands")
         yield* pane.type("Schedule Claude warm-up")
         yield* pane.waitFor("Schedule Claude warm-up:")
         yield* pane.type("\r")
         yield* pane.waitFor("Times: (none)")
-        // Selection starts on "Time format", above the mode and Times rows.
-        yield* pane.type("\x1b[B")
+        // Selection starts on the mode row ("Every day"); State, zone, Next and last attempt are inert.
         yield* pane.type("\x1b[B")
         yield* pane.type("\r")
         yield* pane.waitFor("Times")
@@ -409,17 +416,25 @@ describe.skipIf(!paneReady)("oc TUI in a WezTerm pane", () => {
         // valid "Send at 07:00" row, so count rows instead.)
         expect(dailyPreview.split("Send at")).toHaveLength(4)
         yield* pane.type("\x1b")
+        // Esc goes back to the schedule dialog. Wait for it: an ESC byte right before the macOS
+        // palette key's escape sequence would be read with it as one key.
+        yield* pane.waitFor("Every day", (shown) => !shown.includes("Send at"))
         expect(yield* Effect.promise(() => Bun.file(store).exists())).toBe(false)
-        yield* pane.type("\x0f")
-        yield* pane.waitFor("Search")
+        // Back out to the prompt (schedule dialog, then palette): the dialog has its own "Search" box,
+        // and Cmd+O does not open the palette over it.
+        yield* pane.type("\x1b")
+        yield* pane.waitFor("Commands", (shown) => !shown.includes("Every day"))
+        yield* pane.type("\x1b")
+        yield* pane.waitFor("Ask anything", (shown) => !shown.includes("Commands"))
+        yield* pane.type(OC_PALETTE_KEY)
+        yield* pane.waitFor("Commands")
         yield* pane.type("Schedule Claude warm-up\r")
         yield* pane.waitFor("Every day")
-        yield* pane.type("\x1b[B")
         yield* pane.type("\r")
         const weekday = yield* pane.waitFor("By weekday")
         expect(weekday).toContain("Sunday:")
-        // The redraw puts the selection back on "Time format": mode, then Monday..Sunday.
-        for (const _ of Array.from({ length: 8 })) yield* pane.type("\x1b[B")
+        // The redraw keeps the selection on the mode row, above Monday..Sunday.
+        for (const _ of Array.from({ length: 7 })) yield* pane.type("\x1b[B")
         yield* pane.type("\r")
         yield* pane.type("22:00")
         const sunday = yield* pane.waitFor("Est. reset Monday 03:00")
@@ -438,15 +453,14 @@ describe.skipIf(!paneReady)("oc TUI in a WezTerm pane", () => {
         const releasePath = pane.releasePath!
         yield* pane.waitFor("Ask anything")
         yield* pane.type("check quota mid-turn\r")
-        const mid = yield* pane.waitFor("12.5%h")
-        expect(sidebarColumn(mid)).toContain("8.25%w")
+        // The grouped layout (default) rounds in the sidebar; the Usage menu keeps the fractions.
+        yield* pane.waitFor("5h", (shown) => /5h\s+13%[\s\S]*wk\s+8%/.test(sidebarColumn(shown)))
         yield* pane.click("Usage:")
-        yield* pane.waitFor("5-hour")
+        yield* pane.waitFor("5-hour: 12.5% used")
         yield* Effect.promise(() => Bun.write(releasePath, "go"))
         yield* pane.waitFor(QUOTA_MENU_HOURLY_UPDATED)
         yield* pane.type("\x1b")
-        const sidebar = yield* pane.waitFor("18.5%h", (shown) => sidebarColumn(shown).includes("18.5%h"))
-        expect(sidebarColumn(sidebar)).toContain("18.5%h")
+        yield* pane.waitFor("5h", (shown) => /5h\s+19%/.test(sidebarColumn(shown)))
         const transcript = yield* pane.waitFor("QUOTA-DONE")
         expect(transcript).toContain("QUOTA-DONE")
         expect((yield* fixture.llm.inputs).length).toBe(0)
@@ -483,7 +497,7 @@ describe.skipIf(!paneReady)("oc TUI in a WezTerm pane", () => {
         yield* closes("Add subscription date...")
         // Esc in the calendar goes back to the Usage menu.
         yield* closes("Usage calendar")
-        yield* pane.type("\x0f")
+        yield* pane.type(OC_PALETTE_KEY)
         yield* pane.waitFor("Commands")
         yield* pane.type("Home sort order")
         const listed = yield* pane.waitFor("Folders")

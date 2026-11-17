@@ -407,6 +407,9 @@ export interface ClaudeStreamMessage {
   // The inner event mirrors the same shape (content_block_*, message_*, etc).
   event?: ClaudeStreamMessage
 
+  /** On a `control_response`: the answer to a control request oc wrote. */
+  response?: { subtype?: string; request_id?: string }
+
   request?: {
     subtype?: string
     tool_name?: string

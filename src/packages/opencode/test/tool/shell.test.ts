@@ -265,6 +265,43 @@ describe("tool.shell permissions", () => {
     }),
   )
 
+  // These ran with only their inner commands checked, so "*>*" or a deny default never saw them.
+  for (const item of shells.filter((item) => !PS.has(item.label) && item.label !== "cmd")) {
+    it.live(`checks group redirects and unparsable input as whole statements [${item.label}]`, () =>
+      withShell(
+        item,
+        runIn(
+          projectRoot,
+          Effect.gen(function* () {
+            for (const command of ["{ ls; } > out.txt", "ls | head > out.txt", "for f in *.json(N); do cat $f; done"]) {
+              const requests: Array<Omit<PermissionV1.Request, "id" | "sessionID" | "tool">> = []
+              yield* fail({ command }, capture(requests, new Error("stop")))
+              expect(requests.find((r) => r.permission === "bash")?.patterns).toContain(command)
+            }
+          }),
+        ),
+      ),
+    )
+  }
+
+  for (const item of ps) {
+    it.live(`checks PowerShell method calls [${item.label}]`, () =>
+      withShell(
+        item,
+        runIn(
+          projectRoot,
+          Effect.gen(function* () {
+            const requests: Array<Omit<PermissionV1.Request, "id" | "sessionID" | "tool">> = []
+            yield* fail({ command: "[IO.File]::WriteAllText('x','y')" }, capture(requests, new Error("stop")))
+            expect(requests.find((r) => r.permission === "bash")?.patterns).toContain(
+              "[IO.File]::WriteAllText('x','y')",
+            )
+          }),
+        ),
+      ),
+    )
+  }
+
   for (const item of ps) {
     it.live(`parses PowerShell conditionals for permission prompts [${item.label}]`, () =>
       withShell(

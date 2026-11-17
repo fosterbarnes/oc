@@ -5,6 +5,7 @@ import { Global } from "@opencode-ai/core/global"
 import { InstallationSourceTree } from "@opencode-ai/core/installation/version"
 import { launchDetached } from "@opencode-ai/core/util/launchDetached"
 import { OcSource } from "@opencode-ai/core/util/ocSource"
+import { ProcessDarwin } from "@opencode-ai/core/util/processDarwin"
 import { ReviveResume } from "@opencode-ai/core/util/reviveResume"
 import { sourceTree } from "@opencode-ai/core/util/sourceTree"
 import { TuiLedger } from "./tuiLedger"
@@ -281,7 +282,11 @@ export async function openReviveTab(command: ReturnType<typeof Revive.openTabCom
 
 async function windowTabsSnapshot(paneID: string, self: Pick<Revive.ReviveContext, "directory" | "sessionID">) {
   try {
-    const list = Bun.spawnSync(["wezterm", "cli", "list", "--format", "json"], { stdout: "pipe", stderr: "pipe" })
+    // `--no-auto-start`: a dead socket must fail here, not start a stray mux server.
+    const list = Bun.spawnSync(["wezterm", "cli", "--no-auto-start", "list", "--format", "json"], {
+      stdout: "pipe",
+      stderr: "pipe",
+    })
     if (list.exitCode !== 0) throw new Error(`wezterm cli list failed: ${list.stderr.toString().trim()}`)
     const processes = listOcProcesses()
     const records = processes === null ? [] : await TuiLedger.read(serverStateDirectory(), processes)
@@ -289,11 +294,14 @@ async function windowTabsSnapshot(paneID: string, self: Pick<Revive.ReviveContex
       processes === null ? [] : TuiLedger.select(records, processes, Global.Path.app, executablePath(), process.pid)
     // A hosted revive's TUI has already exited, so its ledger record is gone; its pane comes from the context.
     const owned = records.filter((record) => pids.includes(record.pid))
-    return Revive.windowTabs(
+    const tabs = Revive.windowTabs(
       list.stdout.toString(),
       [{ paneID, directory: self.directory, sessionID: self.sessionID }, ...owned],
       paneID,
+      process.env.WEZTERM_UNIX_SOCKET,
     )
+    await reviveLog().write(`Window tabs: ${tabs.length}`)
+    return tabs
   } catch (error) {
     await reviveLog().write(`Window tabs not restored: ${error instanceof Error ? error.message : String(error)}`)
   }
@@ -338,8 +346,9 @@ async function runVisible(command: string[], cwd?: string, env?: NodeJS.ProcessE
 /** Terminal restarter (worker 2). Detached, so it outlives the window it closes. Output goes to revive.log. */
 export async function restartTerminal(
   restart: Revive.RestartContext,
-  launch: (command: ReturnType<typeof Revive.reopenCommand>) => Promise<void> = (command) =>
-    awaitLaunch(
+  launch: (command: ReturnType<typeof Revive.reopenCommand>) => Promise<void> = async (command) => {
+    const before = command.file === "open" ? weztermGuis() : undefined
+    await awaitLaunch(
       launchDetached(command.file, command.args, {
         cwd: os.homedir(),
         env: command.env,
@@ -349,7 +358,9 @@ export async function restartTerminal(
       }),
       // `open` exits once LaunchServices started the app; a nonzero exit means nothing opened.
       { exit: command.file === "open" },
-    ),
+    )
+    if (before) await confirmWeztermWindow(before, command)
+  },
 ) {
   const log = reviveLog()
   if (restart.waitPid && !(await waitForExit(restart.waitPid, 10_000)))
@@ -367,6 +378,7 @@ export async function restartTerminal(
       : undefined
   if (old && !old.panes.length) await log.write("No old panes left to close")
   const command = Revive.reopenCommand(restart)
+  if (restart.window) await log.write(`Window placement: ${JSON.stringify(restart.window)}`)
   await log.step(`Opening ${restart.terminal} with ${restart.launcher}`, () => launch(command))
   if (old?.panes.length)
     await log.step("Closing this instance's old panes", () => closeOwnedPanes(old)).catch(() => undefined)
@@ -386,6 +398,38 @@ export async function restartTerminal(
 
 // Acknowledgement is "the terminal process started and did not fail within this window", not a usable TUI.
 const REPLACEMENT_SETTLE_MS = 1500
+
+function weztermGuis() {
+  return new Set(
+    ProcessDarwin.list()
+      .filter((item) => path.basename(item.executable) === "wezterm-gui")
+      .map((item) => item.pid),
+  )
+}
+
+// `open` exits 0 as soon as LaunchServices accepts the request, before wezterm-gui parses its
+// arguments; a GUI that rejects them exits at once with no window. So a new wezterm-gui must still
+// be alive after the settle window, or the step fails and the old panes stay open. The frontmost
+// app is logged because a window that opened behind another app looks like one that never opened.
+async function confirmWeztermWindow(before: Set<number>, command: ReturnType<typeof Revive.reopenCommand>) {
+  await Bun.sleep(REPLACEMENT_SETTLE_MS)
+  const opened = [...weztermGuis()].filter((pid) => !before.has(pid))
+  if (!opened.length) {
+    const env = Object.entries(command.env).map(([key, value]) => `${key}=${shellQuote(value)}`)
+    throw new Error(
+      `New WezTerm window did not open. To reopen by hand: ${[...env, command.file, ...command.args.map(shellQuote)].join(" ")}`,
+    )
+  }
+  const front = Bun.spawnSync(["lsappinfo", "front"], { stdout: "pipe" }).stdout.toString().trim()
+  const frontPid = /"pid"=(\d+)/.exec(
+    Bun.spawnSync(["lsappinfo", "info", "-only", "pid", front], { stdout: "pipe" }).stdout.toString(),
+  )?.[1]
+  await reviveLog().write(`New WezTerm pid ${opened.join(", ")}; frontmost pid ${frontPid ?? "unknown"}`)
+}
+
+function shellQuote(value: string) {
+  return `'${value.replaceAll("'", "'\\''")}'`
+}
 
 // Held from install through server readiness; a second revive fails fast instead of waiting minutes.
 function withInstallLock<T>(installDir: string | undefined, action: () => Promise<T>) {
@@ -441,7 +485,7 @@ function closeTerminalAppWindow(tty: string) {
   if (result.exitCode !== 0) throw new Error(`Closing the Terminal window failed: ${result.stderr.toString().trim()}`)
 }
 
-function reviveLog() {
+export function reviveLog() {
   const file = path.join(Global.Path.log, "revive.log")
   const write = async (line: string) => {
     console.log(`revive: ${line}`)

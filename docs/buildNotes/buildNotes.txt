@@ -1,26 +1,22 @@
-v0.2.372 goombaUterus [feat. > active commands; patch > Usage layouts]
+v0.2.376 parentalJimmie [fix > permission hangs and shell holes]
 
-commands:
-The last command you send now stays active: plain messages keep its rules, the prompt bar shows it, and the model knows it is still active. The model can ask to switch commands (for example from /spit to /imp), but nothing switches unless you pick Switch in the form, and it only proposes commands marked "suggest: true".
+permissions:
+A permission prompt now always shows in oc right away; a plugin can no longer hold it back or silently approve or deny it. opencode-notify's desktop popup still works as a second way to answer the same prompt, and plugins now answer the open prompt through oc's API (see the wiki Configuration page).
 
-Several commands in one message now run in order, one turn each, instead of being merged. A later command with no text asks for a prompt when its turn comes, unless it is marked "whenBlank: send". Multi-step submissions queue all at once and keep Enter and Alt+Enter in press order, and editing or cancelling a blank queued command closes its question and lets the queue continue.
-
-sidebar:
-The Usage block has two layouts, switched with Layout in the Usage menu: grouped (default) shows each account's renewal on its name line and one bar line per window; table shows one line per account under 5h / week / renew columns. Usage turns yellow at 80% and red at 95%, renewals turn yellow within 3 days, and stale numbers are dimmed instead of marked with "*". Sidebar settings now live in sidebar.json in oc's config folder (old openSidebar settings are copied over once), a project's own .config/openSidebar.json no longer overrides them, and Reset global script settings really restores the defaults.
+Shell rules can no longer be bypassed by redirecting a group, loop, or pipeline into a file, by PowerShell .NET method calls, or by shell syntax oc cannot parse.
 
 Claude Code:
-Skills now load in commands that limit tools, such as /spit. An agent or command that denies skills or the shell also turns off Claude Code's own Skill, Monitor, and TaskStop, and tool-limited commands that allow the shell let Claude watch and stop its background jobs. Warm-ups now list and send for the main ~/.claude login on the Mac, and the Times dialog accepts up to 24 times per day instead of 4.
+Commands that allow editing everywhere except a few folders (like /imp blocking mockups) now let Claude use its own Edit and Write tools, and Claude Code itself refuses edits in the blocked folders. When a command does route edits through oc, Claude is told the exact tool names to load, so it stops hunting for an edit tool or editing through scripts.
 
-push commands:
-A commit-and-push command can set "pushSession: true" in its frontmatter; oc no longer looks for a command named agent-push. The palette entry is now Push session auto-delete (/pushAutoDelete) and keeps your saved choice.
+Messages you send while Claude waits on an oc tool (like a question) now reach Claude with that tool's result instead of becoming an extra turn afterwards. Running oc from inside a Claude Code session no longer makes every Claude run send an extra background request or carry that session's identity.
 
 revive:
-Restarting after a rebuild is about 2 seconds faster again on macOS: oc no longer pre-launches occ and native opencode while the server starts.
+On a Mac, /revive no longer loses the window when it sat on a display left of or above the main one. If the new window still fails to open, oc leaves the other old tabs open and revive.log says so, with a command to reopen by hand. With the wezterm.lua snippet from the wiki, a revived window comes back at its exact size and spot, so Rectangle snaps survive. Tabs that fail to reopen are now listed in revive.log instead of disappearing silently.
 
-background shell:
-The bgRun entry is gone from the oc menu; background commands use the same approval as any other shell command.
+sidebar scripts:
+Running a script in a WezTerm pane no longer types the command into the new shell, so the shell's startup can't garble it. Placing a script without running it still types it into the pane. On macOS, an app that a run script starts directly opens behind the terminal in any terminal, not because of oc; running open -a <app> after it starts brings it forward (documented in docs/dev/macos.md).
 
-docs:
-The README, wiki, and repo docs were checked against the current code, finished plan files were removed, and the docs now say oc runs on Windows and Apple Silicon Macs. The key list has a macOS column, and wiki key tables link to it.
+tests:
+The Claude provider tests that always failed on macOS now pass, as do all TUI pane tests, and test runs on macOS can no longer pop up "Keychain Not Found" or touch your real Keychain.
 
-Under the hood: new session/activeCommand.ts and the mode_switch tool; SessionQueue.add takes ordered batches in one transaction with an HTTP batch field; warm-up uses the inherited env for the default macOS account; usage layout split into usage/layout.ts; new src/script/docLinks.ts, run by prePush, fails on broken links or headings in repo docs and the wiki; leftover upstream GitHub tooling and translation files removed; build notes rotated to archive17. Checks: queue 30 pass, HTTP queue 2 pass, TUI prompt 39 pass; feature tests 16 pass, proxy selection 92 pass, subagent and CLI proxy 71 pass, a 5-file session run 130 pass with 2 known macOS failures; tui slash/part/queue/chain 21 pass; warm-up 41 and 46 pass, tui warm-up 28 pass; tui sidebar and usage 225 pass; task 45, oc config 30, revive 30, background shell 13 pass; Claude provider and llm tests showed only the known 11 failures; opencode, tui, and core typecheck clean; keybindDocs and docLinks checks pass. Not checked: live TUI runs of the new layouts and commands.
+Under the hood: Permission.ask no longer calls the permission.ask plugin hook (upstream dropped it too; the type stays, marked deprecated); shell.ts checks whole statements for non-command redirects, PowerShell method calls, and parse errors; edit rules that are an allow plus path denies become Claude Edit(//path) denies in --disallowedTools; turnStream fences held steers with an mcp_status control request before resolving a proxy result; spawnEnv strips the host Claude desktop session env; revive passes --position=x,y, sets OC_REVIVE_WINDOW, and confirms a new wezterm-gui process, and the resident server no longer inherits the WezTerm socket; scriptRunner starts pwsh with -EncodedCommand through wezterm cli split-pane/spawn; test helpers get a macOS Keychain stub, TestLLMServer.errorEvery, and fixed pane navigation. Checks: permission, plugin, and ACP permission tests 98 pass; shell tool tests 82+5 pass; revive 19 pass 11 skip; core weztermWindow 2 pass; Claude provider tests 713 pass 0 fail; steering 16/16 three times; TUI pane tests 16/16; tui sidebarTools 75/75; typecheck clean in opencode, core, plugin, and tui; prePush checks pass. Not checked: a live /revive with these changes, a live WezTerm sidebar run, and a live opencode-notify prompt.

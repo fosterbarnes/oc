@@ -75,7 +75,12 @@ Each user message names the active slash command. Call \`mcp__opencode_proxy__mo
  * note names the proxy replacements (`replaced`: proxied oc tools whose Claude
  * Code built-ins are off this turn).
  */
-export function buildToolEnvironmentNote(proxyTools: string[], replaced: string[] = [], skills = true): string {
+export function buildToolEnvironmentNote(
+  proxyTools: string[],
+  replaced: string[] = [],
+  skills = true,
+  editDenied: string[] = [],
+): string {
   return [
     "## OpenCode tools",
     "",
@@ -88,6 +93,12 @@ export function buildToolEnvironmentNote(proxyTools: string[], replaced: string[
       : []),
     "- Never start an OpenCode subagent through a shell (`opencode run`, `opencode.exe`): it bypasses the TUI and the native subagent lifecycle.",
     "- Background Bash jobs and `Monitor` watches live only as long as this Claude process: an OpenCode restart, a usage-limit account failover or `/reload` ends them.",
+    // Claude's own denial has no pointer to mode_switch, unlike oc's (PermissionV1.DeniedError.hint).
+    ...(editDenied.length > 0
+      ? [
+          `- The active command denies edits to ${editDenied.join(", ")}; Edit and Write refuse them. Never write there another way (shell, Python)${proxyTools.includes("mode_switch") ? "; if the request needs it, call `mcp__opencode_proxy__mode_switch`" : ""}.`,
+        ]
+      : []),
     ...(proxyTools.includes("schedule_prompt")
       ? [
           "- To do something later, use `mcp__opencode_proxy__schedule_prompt`; OpenCode keeps it across restarts. Claude Code's own cron and wakeup tools are off.",
@@ -99,7 +110,7 @@ export function buildToolEnvironmentNote(proxyTools: string[], replaced: string[
           "OpenCode-only tools are MCP tools named `mcp__opencode_proxy__<name>`. Load one with ToolSearch (`select:mcp__opencode_proxy__<name>`) if it is deferred, and always call it by its full name.",
           ...(replaced.length > 0
             ? [
-                `This command limits ${replaced.join(", ")}, so Claude Code's own versions are off this turn; use \`mcp__opencode_proxy__<name>\` for those.`,
+                `This command limits ${replaced.join(", ")}, so Claude Code's own versions are off this turn and these replace them: ${replaced.map((name) => `\`mcp__opencode_proxy__${name}\``).join(", ")}. Load them up front with ToolSearch \`select:${replaced.map((name) => `mcp__opencode_proxy__${name}`).join(",")}\`. Do not do their job through a shell (Python, sed, heredocs): that skips the command's rules.`,
               ]
             : []),
         ]

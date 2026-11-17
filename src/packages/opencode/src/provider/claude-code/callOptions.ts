@@ -31,7 +31,10 @@ function isPlan(value: unknown): value is CommandToolPlan {
   if (typeof value !== "object" || value === null) return false
   const plan = value as Record<string, unknown>
   return (
-    Array.isArray(plan.native) && plan.native.every((id) => typeof id === "string") && typeof plan.closed === "boolean"
+    Array.isArray(plan.native) &&
+    plan.native.every((id) => typeof id === "string") &&
+    typeof plan.closed === "boolean" &&
+    (plan.deny === undefined || (Array.isArray(plan.deny) && plan.deny.every((rule) => typeof rule === "string")))
   )
 }
 

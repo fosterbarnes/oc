@@ -197,11 +197,14 @@ export function decodeTabs(encoded: string) {
  * The oc panes this instance owns in the window that holds `paneID`, in `wezterm cli list` (tab) order.
  * Revive moves only these to the new window and closes only these; shells, native, and other
  * instances' panes are not in `records`, so they stay running in the old window.
+ * Pane ids restart at 0 in every WezTerm GUI process, so a record from another GUI (`weztermSocket`
+ * other than `socket`, the mux `listJson` came from) never matches.
  */
 export function windowTabs(
   listJson: string,
-  records: Pick<TuiLedger.Record, "paneID" | "directory" | "sessionID">[],
+  records: Pick<TuiLedger.Record, "paneID" | "directory" | "sessionID" | "weztermSocket">[],
   paneID: string,
+  socket?: string,
 ): Tab[] {
   const panes = JSON.parse(listJson) as Array<{ window_id: number; pane_id: number }>
   const window = panes.find((pane) => String(pane.pane_id) === paneID)?.window_id
@@ -209,7 +212,12 @@ export function windowTabs(
   return panes
     .filter((pane) => pane.window_id === window)
     .flatMap((pane): Tab[] => {
-      const record = records.find((item) => item.paneID === String(pane.pane_id) && item.directory !== undefined)
+      const record = records.find(
+        (item) =>
+          item.paneID === String(pane.pane_id) &&
+          item.directory !== undefined &&
+          (!socket || !item.weztermSocket || item.weztermSocket === socket),
+      )
       if (!record?.directory) return []
       return [
         {
@@ -377,9 +385,11 @@ export function reopenCommand(restart: RestartContext, platform = process.platfo
   if (restart.terminal === "wezterm" && platform === "darwin") {
     // Through LaunchServices, which brings the new window to the front; a GUI spawned by this detached
     // helper would open behind the active app. `open` passes this environment on. `--config` is a
-    // global option and must come before `start`. OC_REVIVE_FULLSCREEN is always set, so a value
-    // inherited from an earlier revived window never leaks into this one; wezterm.lua's gui-startup
-    // reads it.
+    // global option and must come before `start`. `--position=` keeps a negative coordinate (a display
+    // left of or above the main one) from parsing as a flag, which makes the GUI exit with no window.
+    // OC_REVIVE_FULLSCREEN and OC_REVIVE_WINDOW (pixel frame, "" when unknown) are always set, so a
+    // value inherited from an earlier revived window never leaks into this one; wezterm.lua's
+    // gui-startup reads them.
     const window = restart.window
     const place = window && !("fullScreen" in window) ? window : undefined
     return {
@@ -392,13 +402,17 @@ export function reopenCommand(restart: RestartContext, platform = process.platfo
         ...(place ? ["--config", `initial_cols=${place.cols}`, "--config", `initial_rows=${place.rows}`] : []),
         "start",
         "--always-new-process",
-        ...(place ? ["--position", `${place.x},${place.y}`] : []),
+        ...(place ? [`--position=${place.x},${place.y}`] : []),
         "--cwd",
         os.homedir(),
         "--",
         ...command,
       ],
-      env: { ...flavor, OC_REVIVE_FULLSCREEN: window && "fullScreen" in window ? "1" : "0" },
+      env: {
+        ...flavor,
+        OC_REVIVE_FULLSCREEN: window && "fullScreen" in window ? "1" : "0",
+        OC_REVIVE_WINDOW: place?.width ? `${place.x},${place.y},${place.width},${place.height}` : "",
+      },
       windowsVerbatimArguments: false,
     }
   }
@@ -638,7 +652,15 @@ function placement(value: unknown) {
   const item = value as Record<string, unknown>
   if (item.fullScreen === true) return true
   return (
-    Number.isInteger(item.x) && Number.isInteger(item.y) && pid(item.cols) && pid(item.rows) && !("fullScreen" in item)
+    Number.isInteger(item.x) &&
+    Number.isInteger(item.y) &&
+    pid(item.cols) &&
+    pid(item.rows) &&
+    // A window captured by an older oc has no pixel size; both or neither.
+    (item.width === undefined) === (item.height === undefined) &&
+    optional(item.width, pid) &&
+    optional(item.height, pid) &&
+    !("fullScreen" in item)
   )
 }
 

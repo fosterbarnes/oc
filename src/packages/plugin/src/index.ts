@@ -264,6 +264,10 @@ export interface Hooks {
     input: { sessionID: string; agent: string; model: Model; provider: ProviderContext; message: UserMessage },
     output: { headers: Record<string, string> },
   ) => Promise<void>
+  /**
+   * @deprecated Never called (same as upstream 1.x). To act on a prompt, handle the
+   * `permission.asked` event and answer with `POST /session/:sessionID/permissions/:permissionID`.
+   */
   "permission.ask"?: (input: Permission, output: { status: "ask" | "deny" | "allow" }) => Promise<void>
   "command.execute.before"?: (
     input: { command: string; sessionID: string; arguments: string },

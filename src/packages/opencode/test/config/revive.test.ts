@@ -423,6 +423,13 @@ test("windowTabs moves only owned oc panes of the trigger's window, in list orde
   ])
   expect(Revive.windowTabs(windowList, ledgerRecords, "99")).toEqual([])
   expect(Revive.windowTabs(windowList, [], "1")).toEqual([])
+  // Pane ids restart in every WezTerm GUI: a record from another GUI's mux is not this window's tab.
+  const otherGui = ledgerRecords.map((record) =>
+    record.paneID === "5"
+      ? { ...record, weztermSocket: "/tmp/gui-sock-2" }
+      : { ...record, weztermSocket: "/tmp/gui-sock-1" },
+  )
+  expect(Revive.windowTabs(windowList, otherGui, "1", "/tmp/gui-sock-1").map((tab) => tab.paneID)).toEqual(["1", "4"])
 })
 
 test("ownedPanes closes only the trigger and moved panes that still exist", () => {
@@ -472,8 +479,7 @@ test("macOS WezTerm reopens through LaunchServices at the captured place, or ful
     "initial_rows=22",
     "start",
     "--always-new-process",
-    "--position",
-    "240,180",
+    "--position=240,180",
     "--cwd",
     os.homedir(),
     "--",
@@ -482,9 +488,18 @@ test("macOS WezTerm reopens through LaunchServices at the captured place, or ful
     "--session",
     "ses_1",
   ])
-  expect(placed.env).toEqual({ OC_FLAVOR: "native", OC_REVIVE_FULLSCREEN: "0" })
+  expect(placed.env).toEqual({ OC_FLAVOR: "native", OC_REVIVE_FULLSCREEN: "0", OC_REVIVE_WINDOW: "" })
+  // A display left of the main one gives a negative x; as a separate argument WezTerm parses "-1728,76"
+  // as a flag and exits without a window.
+  const left = Revive.reopenCommand(
+    { ...native, window: { x: -1728, y: 76, cols: 90, rows: 22, width: 1600, height: 900 } },
+    "darwin",
+  )
+  expect(left.args).toContain("--position=-1728,76")
+  expect(left.env.OC_REVIVE_WINDOW).toBe("-1728,76,1600,900")
   const full = Revive.reopenCommand({ ...native, window: { fullScreen: true } }, "darwin")
-  expect(full.args).not.toContain("--position")
+  expect(full.args.some((arg) => arg.startsWith("--position"))).toBe(false)
+  expect(full.env.OC_REVIVE_WINDOW).toBe("")
   expect(full.args).not.toContain("--config")
   expect(full.env.OC_REVIVE_FULLSCREEN).toBe("1")
   expect(Revive.reopenCommand(native, "darwin").env.OC_REVIVE_FULLSCREEN).toBe("0")

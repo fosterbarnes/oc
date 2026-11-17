@@ -63,6 +63,7 @@ loop; the OpenCode 2 execution engine itself is not brought back.
 | MCP Code Mode expansion | v0.2.174 | Tied to the OpenCode 2 agent runtime. |
 | Skill `disable-model-invocation` frontmatter | v0.2.174 | Claude Code already honors it; oc's own skill list does not yet. |
 | Repeating scheduled prompts | v0.2.213 | A repeat interval on `session_queue` rows (schema change and migration). Until then a scheduled prompt re-arms itself. |
+| Plugin permission policy (upstream OpenCode 2 `permission.evaluate` hook, #45003) | v0.2.373 | A plugin that must auto-approve or deny prompts. Prompts never wait on a plugin until then. |
 | Native-runtime provider features (Bedrock Mantle Messages, Anthropic `between_tools`, cache kept across effort switches, Responses WebSocket, Google Interactions, provider-side compaction, tool namespaces, request tuning) | v0.2.271 | Upstream builds them in its native `ai` runtime; oc runs the AI SDK path. Revisit per feature when a model needs it. |
 | ACP updates (compaction reports, model/agent sync, ACP on OpenCode 2) | v0.2.271 | ACP is not an oc focus; revisit on demand. |
 | More plugin hooks and plugin storage (model request, prompt interception, title/compaction, shell create, session retry, durable storage, live package updates, git packages) | v0.2.271 | A plugin that needs them; oc's v1 hooks cover current use. |
@@ -98,4 +99,5 @@ loop; the OpenCode 2 execution engine itself is not brought back.
 | OpenTUI raw-mode resume patch | v0.1.4 | Stock OpenTUI resume |
 | bgShell plugin (`bgRun`, `bgStatus`, `bgKill` sibling plugin) | v0.2.177 | Built-in background shell: `bash` with `background: true`. Migration: `bgRun` becomes `bash` with `background: true`; `bgStatus` and `bgKill` keep their names. |
 | `/bgRun` palette toggle and `bgRun` permission | v0.2.364 | Normal `bash` permission for background runs |
+| Plugin `permission.ask` hook decisions (v0.2.269) | v0.2.373 | Not called, same as upstream 1.x: a hook waiting on the user hid the prompt. Plugins handle the `permission.asked` event and answer through `POST /session/:sessionID/permissions/:permissionID`. |
 | `~/.config/openSidebar` folder and project `.config/openSidebar.json` override | v0.2.364 | `~/.config/opencode/sidebar.json` and per-project state (one-time copy, old files left in place) |

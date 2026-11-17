@@ -35,7 +35,12 @@ describe.skipIf(!cliPath)("Claude command-turn permission enforcement", () => {
                 },
                 imp: {
                   template: "Implement",
-                  permission: { read: "allow", edit: "allow", bash: "allow" },
+                  // A path deny Claude enforces itself (`Edit(//...)`) keeps its own Edit and Write.
+                  permission: {
+                    read: "allow",
+                    bash: "allow",
+                    edit: { "*": "allow", [`${plans.replaceAll("\\", "/")}/mockups/**`]: "deny" },
+                  },
                 },
               },
             }),
@@ -90,7 +95,8 @@ describe.skipIf(!cliPath)("Claude command-turn permission enforcement", () => {
           sdk.session.prompt({
             sessionID,
             model: { providerID: "claude-code", modelID: "claude-sonnet-4-5" },
-            parts: [{ type: "text", text: "Implement now" }],
+            // The TUI's "no command" choice; a plain message would keep spit's rules active.
+            parts: [{ type: "text", text: "Implement now", metadata: { ocActive: null } }],
           }),
         )
         expect(yield* Effect.promise(() => Bun.file(forbidden).text())).toBe("next turn")
@@ -99,7 +105,11 @@ describe.skipIf(!cliPath)("Claude command-turn permission enforcement", () => {
         expect((nextInputs.at(-2)!.tools as { name: string }[]).map((tool) => tool.name)).toContain("Write")
         expect((yield* Effect.promise(() => sdk.session.get({ sessionID }))).data!.permission ?? []).toEqual([])
 
-        // A command whose rules limit nothing keeps Claude's own tools.
+        // A command whose rules Claude can enforce keeps Claude's own tools.
+        const mockup = path.join(plans, "mockups", "a.html")
+        const planNote = path.join(plans, "imp.md")
+        yield* fixture.llm.tool("Write", { file_path: mockup, content: "denied" })
+        yield* fixture.llm.tool("Write", { file_path: planNote, content: "native" })
         yield* fixture.llm.text("imp done")
         yield* Effect.promise(() =>
           sdk.session.command({ sessionID, command: "imp", arguments: "", model: "claude-code/claude-sonnet-4-5" }),
@@ -110,6 +120,8 @@ describe.skipIf(!cliPath)("Claude command-turn permission enforcement", () => {
         for (const tool of ["Bash", "Read", "Edit", "Write"]) expect(impNames).toContain(tool)
         for (const tool of ["bash", "read", "edit", "write", "bgStatus"])
           expect(impNames).not.toContain(`mcp__opencode_proxy__${tool}`)
+        expect(yield* Effect.promise(() => Bun.file(mockup).exists())).toBe(false)
+        expect(yield* Effect.promise(() => Bun.file(planNote).text())).toBe("native")
       }),
     120_000,
   )

@@ -288,14 +288,17 @@ const ReviveTabsCommand = cmd({
   builder: (yargs: Argv) => yargs.positional("tabs", { type: "string", demandOption: true }),
   handler: async (args) => {
     const { Revive } = await import("@/config/revive")
+    const { ReviveHost } = await import("@/config/reviveHost")
     const tabs = Revive.decodeTabs(args.tabs)
     const pane = process.env.WEZTERM_PANE
     if (!pane) throw new Error("oc revive-tabs must run in a WezTerm pane")
-    // Each spawn appends a tab; waiting preserves the saved order.
+    // Each spawn appends a tab; waiting preserves the saved order. Failures go to revive.log: this
+    // pane's TUI starts right after and clears anything printed here.
+    const log = ReviveHost.reviveLog()
     for (const tab of tabs.slice(1)) {
-      await spawnTab(pane, tab).catch((error: unknown) =>
-        console.error(`Tab not restored: ${error instanceof Error ? error.message : String(error)}`),
-      )
+      await log
+        .step(`Reopening tab ${tab.directory}${tab.sessionID ? ` (${tab.sessionID})` : ""}`, () => spawnTab(pane, tab))
+        .catch(() => undefined)
     }
     const [first] = tabs
     await launchProject(first.directory, { session: first.sessionID })

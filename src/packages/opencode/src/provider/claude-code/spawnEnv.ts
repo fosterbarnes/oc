@@ -29,6 +29,29 @@ export function cliEffortLevel(effort: ReasoningEffort): string {
   return effort === "minimal" ? "low" : effort
 }
 
+/**
+ * What a Claude Code host (desktop app, CLI, SDK) sets to describe its own session. oc started from
+ * one (its terminal, or an agent running oc's tests) would hand them to every child, which then acts
+ * as that host's child session: `CLAUDE_CODE_ENTRYPOINT=claude-desktop` alone adds a status-summary
+ * model call to each run (CLI 2.1.322), and the messaging socket, session ids and login identity
+ * point at a session that is not oc's.
+ */
+const HOST_SESSION_ENV = [
+  "CLAUDECODE",
+  "CLAUDE_PID",
+  "CLAUDE_CODE_ENTRYPOINT",
+  "CLAUDE_CODE_EXECPATH",
+  "CLAUDE_CODE_SESSION_ID",
+  "CLAUDE_CODE_HOST_SESSION_ID",
+  "CLAUDE_CODE_CHILD_SESSION",
+  "CLAUDE_CODE_SESSION_ATTENDED",
+  "CLAUDE_CODE_MESSAGING_SOCKET",
+  "CLAUDE_CODE_MESSAGING_TOKEN",
+  "CLAUDE_CODE_USER_EMAIL",
+  "CLAUDE_CODE_ACCOUNT_UUID",
+  "CLAUDE_CODE_ORGANIZATION_UUID",
+]
+
 export function claudeSpawnEnv(opts?: {
   ignoreAnthropicApiKey?: boolean
   /** Reasoning effort for this spawn; wins over a shell-level override. */
@@ -39,7 +62,11 @@ export function claudeSpawnEnv(opts?: {
   apiKey?: string
 }): Record<string, string | undefined> {
   const env: Record<string, string | undefined> = {
-    ...AgentEnv.inherited(),
+    ...Object.fromEntries(
+      Object.entries(AgentEnv.inherited()).filter(
+        ([key]) => !HOST_SESSION_ENV.includes(key) && !key.startsWith("CLAUDE_CODE_DESKTOP_"),
+      ),
+    ),
     TERM: "xterm-256color",
     // Pin the child to the binary whose version we detected, and keep it off
     // non-essential network calls. Fills gaps only, so an explicit shell value
